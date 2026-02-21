@@ -15,7 +15,8 @@ on:
 jobs:
   live-testnet-e2e:
     runs-on: ubuntu-latest
-    if: ${{ secrets.TESTNET_WALLET_MNEMONIC != '' }}
+    env:
+      TESTNET_WALLET_MNEMONIC: ${{ secrets.TESTNET_WALLET_MNEMONIC }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,8 +30,10 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Validate config and run one daemon cycle
-        env:
-          TESTNET_WALLET_MNEMONIC: ${{ secrets.TESTNET_WALLET_MNEMONIC }}
         run: |
+          if [ -z "${TESTNET_WALLET_MNEMONIC:-}" ]; then
+            echo "TESTNET_WALLET_MNEMONIC is not set; skipping optional live testnet workflow."
+            exit 0
+          fi
           greenfloor-manager config-validate --program-config config/program.yaml --markets-config config/markets.yaml
           greenfloord --program-config config/program.yaml --markets-config config/markets.yaml --once
