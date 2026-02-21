@@ -1,0 +1,346 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from greenfloor.cli.manager import (
+    _build_and_post_offer,
+    _resolve_dexie_base_url,
+    _resolve_offer_publish_settings,
+    _resolve_splash_base_url,
+)
+
+
+def test_resolve_dexie_base_url_by_network() -> None:
+    assert _resolve_dexie_base_url("mainnet", None) == "https://api.dexie.space"
+    assert _resolve_dexie_base_url("testnet11", None) == "https://api-testnet.dexie.space"
+    assert _resolve_dexie_base_url("testnet", None) == "https://api-testnet.dexie.space"
+
+
+def test_resolve_splash_base_url_defaults_when_not_explicit() -> None:
+    assert _resolve_splash_base_url(None) == "http://john-deere.hoffmang.com:4000"
+
+
+def _write_program(path: Path, *, provider: str = "dexie") -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "app:",
+                '  network: "mainnet"',
+                '  home_dir: "~/.greenfloor"',
+                "runtime:",
+                "  loop_interval_seconds: 30",
+                "chain_signals:",
+                "  tx_block_trigger:",
+                "    webhook_enabled: true",
+                '    webhook_listen_addr: "127.0.0.1:8787"',
+                "dev:",
+                "  python:",
+                '    min_version: "3.11"',
+                "notifications:",
+                "  low_inventory_alerts:",
+                "    enabled: true",
+                '    threshold_mode: "absolute_base_units"',
+                "    default_threshold_base_units: 0",
+                "    dedup_cooldown_seconds: 60",
+                "    clear_hysteresis_percent: 10",
+                "  providers:",
+                "    - type: pushover",
+                "      enabled: true",
+                '      user_key_env: "PUSHOVER_USER_KEY"',
+                '      app_token_env: "PUSHOVER_APP_TOKEN"',
+                '      recipient_key_env: "PUSHOVER_RECIPIENT_KEY"',
+                "venues:",
+                "  dexie:",
+                '    api_base: "https://api.dexie.space"',
+                "  splash:",
+                '    api_base: "http://localhost:4000"',
+                "  offer_publish:",
+                f'    provider: "{provider}"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_resolve_offer_publish_settings_from_program(tmp_path: Path) -> None:
+    program = tmp_path / "program.yaml"
+    _write_program(program, provider="splash")
+    venue, dexie_base, splash_base = _resolve_offer_publish_settings(
+        program_path=program,
+        network="mainnet",
+        venue_override=None,
+        dexie_base_url=None,
+        splash_base_url=None,
+    )
+    assert venue == "splash"
+    assert dexie_base == "https://api.dexie.space"
+    assert splash_base == "http://localhost:4000"
+
+
+def _write_markets(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "markets:",
+                "  - id: m1",
+                "    enabled: true",
+                '    base_asset: "a1"',
+                '    base_symbol: "A1"',
+                '    quote_asset: "xch"',
+                '    quote_asset_type: "unstable"',
+                '    signer_key_id: "k1"',
+                '    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"',
+                '    mode: "sell_only"',
+                "    inventory:",
+                "      low_watermark_base_units: 10",
+                "    pricing:",
+                "      min_price_quote_per_base: 0.0031",
+                "      max_price_quote_per_base: 0.0038",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_markets_with_duplicate_pair(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "markets:",
+                "  - id: m1",
+                "    enabled: true",
+                '    base_asset: "a1"',
+                '    base_symbol: "A1"',
+                '    quote_asset: "xch"',
+                '    quote_asset_type: "unstable"',
+                '    signer_key_id: "k1"',
+                '    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"',
+                '    mode: "sell_only"',
+                "    inventory:",
+                "      low_watermark_base_units: 10",
+                "    pricing:",
+                "      min_price_quote_per_base: 0.0031",
+                "      max_price_quote_per_base: 0.0038",
+                "  - id: m2",
+                "    enabled: true",
+                '    base_asset: "a1"',
+                '    base_symbol: "A1"',
+                '    quote_asset: "xch"',
+                '    quote_asset_type: "unstable"',
+                '    signer_key_id: "k1"',
+                '    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"',
+                '    mode: "sell_only"',
+                "    inventory:",
+                "      low_watermark_base_units: 10",
+                "    pricing:",
+                "      min_price_quote_per_base: 0.0031",
+                "      max_price_quote_per_base: 0.0038",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, capsys) -> None:
+    markets = tmp_path / "markets.yaml"
+    _write_markets(markets)
+    captured: dict = {}
+
+    class _FakeDexie:
+        def __init__(self, base_url: str) -> None:
+            captured["base_url"] = base_url
+
+        def post_offer(self, offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            captured["offer"] = offer
+            captured["drop_only"] = drop_only
+            captured["claim_rewards"] = claim_rewards
+            return {"success": True, "id": "offer-123"}
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda _payload: "offer1abc",
+    )
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+
+    code = _build_and_post_offer(
+        markets_path=markets,
+        market_id="m1",
+        pair=None,
+        size_base_units=10,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 0
+    assert captured["base_url"] == "https://api.dexie.space"
+    assert captured["offer"] == "offer1abc"
+    assert captured["drop_only"] is True
+    assert captured["claim_rewards"] is False
+
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["results"][0]["venue"] == "dexie"
+    assert payload["results"][0]["result"]["id"] == "offer-123"
+
+
+def test_build_and_post_offer_dry_run_builds_but_does_not_post(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    markets = tmp_path / "markets.yaml"
+    _write_markets(markets)
+
+    class _FailDexie:
+        def __init__(self, _base_url: str) -> None:
+            raise AssertionError("DexieAdapter should not be constructed in dry_run")
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda _payload: "offer1dryrun",
+    )
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FailDexie)
+
+    code = _build_and_post_offer(
+        markets_path=markets,
+        market_id="m1",
+        pair=None,
+        size_base_units=1,
+        repeat=2,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=True,
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["dry_run"] is True
+    assert len(payload["built_offers_preview"]) == 2
+    assert payload["results"] == []
+
+
+def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Path, capsys) -> None:
+    markets = tmp_path / "markets.yaml"
+    _write_markets(markets)
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+        def post_offer(self, offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = offer, drop_only, claim_rewards
+            return {"success": True, "id": "offer-xyz"}
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda _payload: "offer1pair",
+    )
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+
+    code = _build_and_post_offer(
+        markets_path=markets,
+        market_id=None,
+        pair="A1:xch",
+        size_base_units=10,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["market_id"] == "m1"
+    assert payload["results"][0]["venue"] == "dexie"
+    assert payload["results"][0]["result"]["id"] == "offer-xyz"
+
+
+def test_build_and_post_offer_pair_ambiguous_requires_market_id(
+    monkeypatch, tmp_path: Path
+) -> None:
+    markets = tmp_path / "markets.yaml"
+    _write_markets_with_duplicate_pair(markets)
+    try:
+        _build_and_post_offer(
+            markets_path=markets,
+            market_id=None,
+            pair="a1:xch",
+            size_base_units=10,
+            repeat=1,
+            publish_venue="dexie",
+            dexie_base_url="https://api.dexie.space",
+            splash_base_url="http://localhost:4000",
+            drop_only=True,
+            claim_rewards=False,
+            dry_run=False,
+        )
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "ambiguous" in str(exc)
+
+
+def test_build_and_post_offer_rejects_unknown_market(monkeypatch, tmp_path: Path) -> None:
+    markets = tmp_path / "markets.yaml"
+    _write_markets(markets)
+    try:
+        _build_and_post_offer(
+            markets_path=markets,
+            market_id="missing",
+            pair=None,
+            size_base_units=10,
+            repeat=1,
+            publish_venue="dexie",
+            dexie_base_url="https://api.dexie.space",
+            splash_base_url="http://localhost:4000",
+            drop_only=True,
+            claim_rewards=False,
+            dry_run=False,
+        )
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "market_id not found" in str(exc)
+
+
+def test_build_and_post_offer_posts_to_splash_when_selected(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    markets = tmp_path / "markets.yaml"
+    _write_markets(markets)
+
+    class _FakeSplash:
+        def __init__(self, base_url: str) -> None:
+            self.base_url = base_url
+
+        def post_offer(self, offer: str):
+            _ = offer
+            return {"success": True, "id": "splash-1"}
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda _payload: "offer1pair",
+    )
+    monkeypatch.setattr("greenfloor.cli.manager.SplashAdapter", _FakeSplash)
+
+    code = _build_and_post_offer(
+        markets_path=markets,
+        market_id="m1",
+        pair=None,
+        size_base_units=1,
+        repeat=1,
+        publish_venue="splash",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["results"][0]["venue"] == "splash"
+    assert payload["results"][0]["result"]["id"] == "splash-1"

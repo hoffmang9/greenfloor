@@ -1,0 +1,379 @@
+from __future__ import annotations
+
+import asyncio
+import importlib
+import json
+import os
+import shlex
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+from greenfloor.core.coin_ops import CoinOpPlan
+from greenfloor.keys.onboarding import load_key_onboarding_selection
+
+
+@dataclass(frozen=True, slots=True)
+class CoinOpExecutionItem:
+    op_type: str
+    size_base_units: int
+    op_count: int
+    status: str
+    reason: str
+    operation_id: str | None
+
+
+class WalletAdapter:
+    """Execution adapter boundary for coin split/combine actions.
+
+    V1 implementation is intentionally stubbed while wallet-sdk integration is in progress.
+    """
+
+    def execute_coin_ops(
+        self,
+        *,
+        plans: list[CoinOpPlan],
+        dry_run: bool,
+        key_id: str,
+        network: str,
+        market_id: str | None = None,
+        asset_id: str | None = None,
+        receive_address: str | None = None,
+        onboarding_selection_path: Path | None = None,
+        signer_fingerprint: int | None = None,
+    ) -> dict:
+        selection_path = (
+            onboarding_selection_path
+            if onboarding_selection_path is not None
+            else Path(".greenfloor/state/key_onboarding.json")
+        )
+        selection = load_key_onboarding_selection(selection_path)
+
+        fail_ops = {
+            s.strip()
+            for s in os.getenv("GREENFLOOR_FAKE_COIN_OP_FAIL_TYPES", "").split(",")
+            if s.strip()
+        }
+        items: list[CoinOpExecutionItem] = []
+        executed = 0
+        for idx, plan in enumerate(plans):
+            if plan.op_type in fail_ops:
+                items.append(
+                    CoinOpExecutionItem(
+                        op_type=plan.op_type,
+                        size_base_units=plan.size_base_units,
+                        op_count=plan.op_count,
+                        status="skipped",
+                        reason="simulated_failure",
+                        operation_id=None,
+                    )
+                )
+                continue
+            if dry_run:
+                items.append(
+                    CoinOpExecutionItem(
+                        op_type=plan.op_type,
+                        size_base_units=plan.size_base_units,
+                        op_count=plan.op_count,
+                        status="planned",
+                        reason=(
+                            f"dry_run:{selection.selected_source}"
+                            if selection is not None
+                            else "dry_run:no_signer_selection"
+                        ),
+                        operation_id=f"dryrun-{idx}",
+                    )
+                )
+                continue
+
+            if selection is None:
+                items.append(
+                    CoinOpExecutionItem(
+                        op_type=plan.op_type,
+                        size_base_units=plan.size_base_units,
+                        op_count=plan.op_count,
+                        status="skipped",
+                        reason="missing_signer_selection",
+                        operation_id=None,
+                    )
+                )
+                continue
+            if selection.key_id != key_id:
+                items.append(
+                    CoinOpExecutionItem(
+                        op_type=plan.op_type,
+                        size_base_units=plan.size_base_units,
+                        op_count=plan.op_count,
+                        status="skipped",
+                        reason="signer_key_mismatch",
+                        operation_id=None,
+                    )
+                )
+                continue
+            if selection.network != network:
+                items.append(
+                    CoinOpExecutionItem(
+                        op_type=plan.op_type,
+                        size_base_units=plan.size_base_units,
+                        op_count=plan.op_count,
+                        status="skipped",
+                        reason="signer_network_mismatch",
+                        operation_id=None,
+                    )
+                )
+                continue
+
+            execution_item = self._execute_plan_with_external_executor(
+                plan=plan,
+                selection=selection,
+                key_id=key_id,
+                network=network,
+                market_id=market_id,
+                asset_id=asset_id,
+                receive_address=receive_address,
+                signer_fingerprint=signer_fingerprint,
+            )
+            if execution_item.status == "executed":
+                executed += 1
+            items.append(execution_item)
+        return {
+            "dry_run": dry_run,
+            "planned_count": len(plans),
+            "executed_count": executed,
+            "status": "planned_only" if dry_run else "signer_routed",
+            "signer_selection": {
+                "selected_source": selection.selected_source,
+                "key_id": selection.key_id,
+                "network": selection.network,
+            }
+            if selection is not None
+            else None,
+            "items": [
+                {
+                    "op_type": i.op_type,
+                    "size_base_units": i.size_base_units,
+                    "op_count": i.op_count,
+                    "status": i.status,
+                    "reason": i.reason,
+                    "operation_id": i.operation_id,
+                }
+                for i in items
+            ],
+        }
+
+    def _execute_plan_with_external_executor(
+        self,
+        *,
+        plan: CoinOpPlan,
+        selection,
+        key_id: str,
+        network: str,
+        market_id: str | None,
+        asset_id: str | None,
+        receive_address: str | None,
+        signer_fingerprint: int | None,
+    ) -> CoinOpExecutionItem:
+        cmd_raw = os.getenv("GREENFLOOR_WALLET_EXECUTOR_CMD", "").strip()
+        if not cmd_raw:
+            cmd_raw = f"{sys.executable} -m greenfloor.cli.wallet_executor"
+
+        payload = {
+            "selected_source": selection.selected_source,
+            "key_id": key_id,
+            "network": network,
+            "signer_selection": {
+                "selected_source": selection.selected_source,
+                "key_id": selection.key_id,
+                "network": selection.network,
+                "chia_keys_dir": selection.chia_keys_dir,
+                "keyring_yaml_path": selection.keyring_yaml_path,
+                "mnemonic_word_count": selection.mnemonic_word_count,
+            },
+            "market_id": market_id,
+            "asset_id": asset_id,
+            "receive_address": receive_address,
+            "plan": {
+                "op_type": plan.op_type,
+                "size_base_units": plan.size_base_units,
+                "op_count": plan.op_count,
+                "reason": plan.reason,
+            },
+        }
+        child_env = None
+        if signer_fingerprint is not None:
+            child_env = dict(os.environ)
+            try:
+                existing = json.loads(child_env.get("GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON", "{}"))
+            except json.JSONDecodeError:
+                existing = {}
+            if not isinstance(existing, dict):
+                existing = {}
+            existing[str(key_id)] = str(int(signer_fingerprint))
+            child_env["GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON"] = json.dumps(
+                existing, separators=(",", ":")
+            )
+
+        try:
+            completed = subprocess.run(
+                shlex.split(cmd_raw),
+                input=json.dumps(payload),
+                capture_output=True,
+                check=False,
+                text=True,
+                timeout=120,
+                env=child_env,
+            )
+        except Exception as exc:
+            return CoinOpExecutionItem(
+                op_type=plan.op_type,
+                size_base_units=plan.size_base_units,
+                op_count=plan.op_count,
+                status="skipped",
+                reason=f"executor_spawn_error:{exc}",
+                operation_id=None,
+            )
+
+        if completed.returncode != 0:
+            err = completed.stderr.strip() or completed.stdout.strip() or "unknown_error"
+            return CoinOpExecutionItem(
+                op_type=plan.op_type,
+                size_base_units=plan.size_base_units,
+                op_count=plan.op_count,
+                status="skipped",
+                reason=f"executor_failed:{err}",
+                operation_id=None,
+            )
+
+        try:
+            body = json.loads(completed.stdout.strip() or "{}")
+        except json.JSONDecodeError:
+            return CoinOpExecutionItem(
+                op_type=plan.op_type,
+                size_base_units=plan.size_base_units,
+                op_count=plan.op_count,
+                status="skipped",
+                reason="executor_invalid_json",
+                operation_id=None,
+            )
+
+        status = str(body.get("status", "executed")).strip()
+        reason = str(body.get("reason", "executor_success")).strip()
+        operation_id = body.get("operation_id")
+        return CoinOpExecutionItem(
+            op_type=plan.op_type,
+            size_base_units=plan.size_base_units,
+            op_count=plan.op_count,
+            status=status if status in {"executed", "skipped"} else "executed",
+            reason=reason,
+            operation_id=str(operation_id) if operation_id is not None else None,
+        )
+
+    def list_asset_coins_base_units(
+        self,
+        *,
+        asset_id: str,
+        key_id: str,
+        receive_address: str,
+        network: str,
+    ) -> list[int]:
+        """Return available coin amounts in base units for asset/key.
+
+        Stubbed via env for deterministic local testing:
+        GREENFLOOR_FAKE_COINS_JSON='{"<asset_id>":[1,1,10,100]}'
+        """
+        _ = key_id
+        raw = os.getenv("GREENFLOOR_FAKE_COINS_JSON", "").strip()
+        if raw:
+            fake = self._list_fake_coin_amounts(raw=raw, asset_id=asset_id)
+            if fake:
+                return fake
+
+        # For CAT assets, avoid returning unfiltered receive-address coins by default.
+        # This prevents mixing unrelated assets until full CAT-aware parsing is wired.
+        if not self._is_xch_asset(asset_id):
+            cat_raw = os.getenv("GREENFLOOR_FAKE_CAT_COINS_JSON", "").strip()
+            if cat_raw:
+                return self._list_fake_coin_amounts(raw=cat_raw, asset_id=asset_id)
+            return []
+
+        return self._list_coin_amounts_via_wallet_sdk(
+            asset_id=asset_id,
+            receive_address=receive_address,
+            network=network,
+        )
+
+    @staticmethod
+    def _is_xch_asset(asset_id: str) -> bool:
+        lowered = asset_id.strip().lower()
+        return lowered in {"xch", "1", ""}
+
+    def _list_fake_coin_amounts(self, *, raw: str, asset_id: str) -> list[int]:
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+        if not isinstance(data, dict):
+            return []
+        values = data.get(asset_id, [])
+        if not isinstance(values, list):
+            return []
+        out: list[int] = []
+        for value in values:
+            try:
+                out.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def _list_coin_amounts_via_wallet_sdk(
+        self,
+        *,
+        asset_id: str,
+        receive_address: str,
+        network: str,
+    ) -> list[int]:
+        _ = asset_id
+        try:
+            sdk = importlib.import_module("chia_wallet_sdk")
+        except Exception:
+            return []
+
+        async def _fetch() -> list[int]:
+            try:
+                if hasattr(sdk, "Address"):
+                    address = sdk.Address.decode(receive_address)
+                    puzzle_hash = address.puzzle_hash
+                else:
+                    return []
+
+                custom_url = os.getenv("GREENFLOOR_WALLET_SDK_COINSET_URL", "").strip()
+                if custom_url:
+                    client = sdk.RpcClient(custom_url)
+                elif network == "testnet11":
+                    client = sdk.RpcClient.testnet11()
+                else:
+                    client = sdk.RpcClient.mainnet()
+
+                response = await client.get_coin_records_by_puzzle_hash(
+                    puzzle_hash,
+                    includeSpentCoins=False,
+                )
+                if not getattr(response, "success", False):
+                    return []
+                records = getattr(response, "coin_records", None) or []
+                out: list[int] = []
+                for record in records:
+                    coin = getattr(record, "coin", None)
+                    amount = getattr(coin, "amount", None)
+                    if amount is None:
+                        continue
+                    out.append(int(amount))
+                return out
+            except Exception:
+                return []
+
+        try:
+            return asyncio.run(_fetch())
+        except RuntimeError:
+            return []

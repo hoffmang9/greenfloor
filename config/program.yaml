@@ -1,0 +1,76 @@
+app:
+  network: mainnet
+  home_dir: "~/.greenfloor"
+  log_level: INFO
+  run_mode: daemon
+
+keys:
+  registry:
+    - key_id: "key-main-1"
+      fingerprint: 123456789
+      network: "mainnet"
+      keyring_yaml_path: "~/.chia_keys/keyring.yaml"
+    - key_id: "key-main-2"
+      fingerprint: 987654321
+      network: "mainnet"
+      keyring_yaml_path: "~/.chia_keys/keyring.yaml"
+
+runtime:
+  loop_interval_seconds: 30
+  dry_run: false
+
+coin_ops:
+  max_operations_per_run: 20
+  max_daily_fee_budget_mojos: 0
+  split_fee_mojos: 0
+  combine_fee_mojos: 0
+
+venues:
+  dexie:
+    api_base: "https://api.dexie.space"
+  splash:
+    api_base: "http://john-deere.hoffmang.com:4000"
+  offer_publish:
+    provider: "dexie"
+
+dev:
+  python:
+    min_version: "3.11"
+    manager: uv
+    venv_path: ".venv"
+  lint:
+    tool: ruff
+  typing:
+    tool: pyright
+
+notifications:
+  low_inventory_alerts:
+    enabled: true
+    send_for_assets_in_sell_markets_only: true
+    threshold_mode: "absolute_base_units"
+    default_threshold_base_units: 0
+    default_threshold_percent: null
+    dedup_cooldown_seconds: 21600
+    clear_hysteresis_percent: 10
+    include_receive_address: true
+    include_remaining_balance: true
+  providers:
+    - type: pushover
+      enabled: true
+      user_key_env: "PUSHOVER_USER_KEY"
+      app_token_env: "PUSHOVER_APP_TOKEN"
+      recipient_mode: "user_or_group"
+      recipient_key_env: "PUSHOVER_RECIPIENT_KEY"
+
+chain_signals:
+  mempool_monitor:
+    enabled: true
+    source: "coinset"
+    poll_interval_seconds: 20
+  tx_block_trigger:
+    mode: "webhook_or_poll"
+    source: "coinset"
+    webhook_enabled: true
+    webhook_listen_addr: "127.0.0.1:8787"
+    fallback_poll_interval_seconds: 60
+

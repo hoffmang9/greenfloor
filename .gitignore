@@ -1,0 +1,27 @@
+.venv/
+.venv.*/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+dist/
+build/
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+
+# Runtime/state artifacts
+.greenfloor/
+logs/
+db/
+state/
+
+# Local env files
+.env
+.env.*

@@ -1,0 +1,4 @@
+# Requirements for Chia Carbon Market Making Scripts
+aiohttp>=3.8.0
+click>=8.0.0
+

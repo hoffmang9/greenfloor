@@ -1,0 +1,202 @@
+supported_assets_example:
+  # Source: old/common.py CARBON_CREDIT_PRICES + Dexie token/ticker snapshots.
+  - name: "Chia"
+    base_symbol: "XCH"
+    asset_id: "xch"
+    legacy_usd_price_per_credit: null
+    dexie:
+      ticker_id: null
+      pool_id: null
+      last_price_xch: "1"
+  - name: "Base warp.green USDC"
+    base_symbol: "wUSDC.b"
+    asset_id: "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d"
+    legacy_usd_price_per_credit: null
+    dexie:
+      ticker_id: "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d_xch"
+      pool_id: "8cb4ea71bf7fd2ba293553c2d185d0173de806f6d679767c0070f2a92860d4cf"
+      last_price_xch: "0.367746423043"
+  - name: "Bytecash"
+    base_symbol: "BYC"
+    asset_id: "ae1536f56760e471ad85ead45f00d680ff9cca73b8cc3407be778f1c0c606eac"
+    legacy_usd_price_per_credit: null
+    dexie:
+      ticker_id: "ae1536f56760e471ad85ead45f00d680ff9cca73b8cc3407be778f1c0c606eac_xch"
+      pool_id: "f5cb8ea654d60e2c0ff0b227874c490e51318eb6b05933ef3c20ede1c9d2d230"
+      last_price_xch: "0.382035306334"
+  - name: "Marmot Coin"
+    base_symbol: "MRMT"
+    asset_id: "8ebf855de6eb146db5602f0456d2f0cbe750d57f821b6f91a8592ee9f1d4cf31"
+    legacy_usd_price_per_credit: null
+    dexie:
+      ticker_id: "8ebf855de6eb146db5602f0456d2f0cbe750d57f821b6f91a8592ee9f1d4cf31_xch"
+      pool_id: "be4b112c49d6984ca7460fc92536ead5962fde2864a1b8b93dd9497e704b846a"
+      last_price_xch: "430"
+  - name: "Spacebucks"
+    base_symbol: "SBX"
+    asset_id: "a628c1c2c6fcb74d53746157e438e108eab5c0bb3e5c80ff9b1910b3e4832913"
+    legacy_usd_price_per_credit: null
+    dexie:
+      ticker_id: "a628c1c2c6fcb74d53746157e438e108eab5c0bb3e5c80ff9b1910b3e4832913_xch"
+      pool_id: "4f9a97f49484770233676451d806dd085fc8d8524284b957ee89592126850237"
+      last_price_xch: "0.000075297843"
+  - name: "Ethereum warp.green milliETH"
+    base_symbol: "wmilliETH"
+    asset_id: "4cb15a8ecc85068fb1f98c09a5e489d1ad61b2af79690ce00f9fc4803c8b597f"
+    legacy_usd_price_per_credit: null
+    dexie:
+      ticker_id: "4cb15a8ecc85068fb1f98c09a5e489d1ad61b2af79690ce00f9fc4803c8b597f_xch"
+      pool_id: "da979045954fdfa8d2f6837eaa153e5c3c62fd4f703b55dfce1f82612504e87e"
+      last_price_xch: "0.655387042578"
+  - name: "Agricultural Reforestation Project 2022"
+    base_symbol: "ECO.181.2022"
+    asset_id: "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
+    legacy_usd_price_per_credit: 7.75
+    dexie:
+      ticker_id: "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7_xch"
+      pool_id: "835a8e9cb51297e04a4eee97c8779a9f9994e87441426dafbc8450a651f53319"
+      last_price_xch: "1.628494874185"
+  - name: "Agricultural Reforestation Project 2020"
+    base_symbol: "ECO.181.2020"
+    asset_id: "e257aca547a83020e537e87f8c83e9332d2c3adb729c052e6f04971317084327"
+    legacy_usd_price_per_credit: 7.5
+    dexie:
+      ticker_id: "e257aca547a83020e537e87f8c83e9332d2c3adb729c052e6f04971317084327_xch"
+      pool_id: "07bbac96e02ced11d029ce10a64106fca59f5ec94876b6d26367ade4998cea49"
+      last_price_xch: "0.55"
+  - name: "Antioquia and Caldas Reforestation 2022"
+    base_symbol: "ECO.49.2022"
+    asset_id: "9720fcb8333984c72f914fc5090509ae9f7b1ff72eff2ed6825d944d7a571066"
+    legacy_usd_price_per_credit: 6.75
+    dexie:
+      ticker_id: "9720fcb8333984c72f914fc5090509ae9f7b1ff72eff2ed6825d944d7a571066_xch"
+      pool_id: "da7ec22c6e3b7c17fa114527ce7edb18bff6b4f7abff78ff01e407e6f2a5deed"
+      last_price_xch: "0.53"
+  - name: "Smallholder Reforestation Project 2022"
+    base_symbol: "ECO.29.2022"
+    asset_id: "9d9264c542c2a3108c7b8f74cad82b60dcbb6e50b328e9cdbaa7acb468a5707f"
+    legacy_usd_price_per_credit: 6.75
+    dexie:
+      ticker_id: "9d9264c542c2a3108c7b8f74cad82b60dcbb6e50b328e9cdbaa7acb468a5707f_xch"
+      pool_id: "7c3e7a96bb7d5bf2245bdd104634d334f0f43a42ee02ccf2f84a490d575b65ce"
+      last_price_xch: "0.528"
+  - name: "Smallholder Reforestation Project 2021"
+    base_symbol: "ECO.29.2021"
+    asset_id: "5af8db0b15e0de99ad1eff02486bb1998602053c56dfb22dc04e0f5e17ccec8d"
+    legacy_usd_price_per_credit: 6.5
+    dexie:
+      ticker_id: "5af8db0b15e0de99ad1eff02486bb1998602053c56dfb22dc04e0f5e17ccec8d_xch"
+      pool_id: "af7c7cf81886b155dc1c278909d6f7218c767c795537c02b42a3de9633d6abab"
+      last_price_xch: "0.31"
+
+markets:
+  - id: carbon_2022_xch_sell
+    enabled: true
+    mode: sell_only
+    base_asset: "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
+    base_symbol: "CARBON22"
+    quote_asset: "xch"
+    quote_asset_type: unstable
+    signer_key_id: "key-main-1"
+    receive_address: "xch1replace-with-your-receive-address"
+    pricing:
+      reference_source: "coingecko"
+      reference_pair: "xch_usd"
+      side: "sell"
+      min_price_quote_per_base: 0.0031
+      max_price_quote_per_base: 0.0038
+      slippage_bps: 100
+      strategy_target_spread_bps: 140
+      strategy_min_xch_price_usd: 20.0
+      strategy_max_xch_price_usd: 60.0
+      cancel_policy_stable_vs_unstable: true
+    inventory:
+      low_watermark_base_units: 500
+      low_inventory_alert_threshold_base_units: null
+      current_available_base_units: 500
+      bucket_counts:
+        1: 2
+        10: 1
+        100: 0
+    ladders:
+      sell:
+        - size_base_units: 1
+          target_count: 5
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+        - size_base_units: 10
+          target_count: 2
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+        - size_base_units: 100
+          target_count: 1
+          split_buffer_count: 0
+          combine_when_excess_factor: 2.0
+
+  - id: carbon_2022_wusdc_sell
+    enabled: true
+    mode: sell_only
+    base_asset: "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
+    base_symbol: "CARBON22"
+    quote_asset: "wUSDC.b"
+    quote_asset_type: stable
+    signer_key_id: "key-main-1"
+    receive_address: "xch1replace-with-your-receive-address"
+    pricing:
+      side: "sell"
+      fixed_quote_per_base: 7.75
+      slippage_bps: 25
+    inventory:
+      low_watermark_base_units: 500
+      low_inventory_alert_threshold_base_units: null
+      current_available_base_units: 500
+      bucket_counts:
+        1: 3
+        10: 1
+        100: 0
+    ladders:
+      sell:
+        - size_base_units: 1
+          target_count: 5
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+        - size_base_units: 10
+          target_count: 2
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+        - size_base_units: 100
+          target_count: 1
+          split_buffer_count: 0
+          combine_when_excess_factor: 2.0
+
+  - id: byc_wusdc_mm
+    enabled: false
+    mode: two_sided
+    base_asset: "BYC"
+    base_symbol: "BYC"
+    quote_asset: "wUSDC.b"
+    quote_asset_type: stable
+    signer_key_id: "key-main-2"
+    receive_address: "xch1replace-with-your-receive-address"
+    pricing:
+      buy_min_quote_per_base: 0.99
+      sell_max_quote_per_base: 1.01
+      slippage_bps: 50
+    inventory:
+      low_watermark_base_units: 200
+      low_inventory_alert_threshold_base_units: 200
+      current_available_base_units: 0
+      bucket_counts:
+        10: 0
+    ladders:
+      buy:
+        - size_base_units: 10
+          target_count: 8
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+      sell:
+        - size_base_units: 10
+          target_count: 8
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+
