@@ -43,6 +43,7 @@ def test_build_signed_spend_bundle_unsupported_asset() -> None:
             "receive_address": "xch1abc",
             "keyring_yaml_path": "/tmp/k.yaml",
             "asset_id": "cat_unsupported",
+            "plan": {"op_type": "split", "size_base_units": 10, "op_count": 1},
         }
     )
     assert result["status"] == "skipped"
@@ -98,6 +99,53 @@ def test_build_signed_spend_bundle_no_coins(monkeypatch) -> None:
     )
     assert result["status"] == "skipped"
     assert result["reason"] == "no_unspent_xch_coins"
+
+
+def test_build_signed_spend_bundle_offer_missing_request_asset_id() -> None:
+    monkeypatch_result = signing_mod.build_signed_spend_bundle(
+        {
+            "key_id": "k1",
+            "network": "mainnet",
+            "receive_address": "xch1abc",
+            "keyring_yaml_path": "/tmp/k.yaml",
+            "asset_id": "xch",
+            "plan": {
+                "op_type": "offer",
+                "offer_asset_id": "xch",
+                "offer_amount": 10,
+                "request_amount": 1,
+            },
+        }
+    )
+    assert monkeypatch_result["status"] == "skipped"
+    assert monkeypatch_result["reason"] == "missing_request_asset_id"
+
+
+def test_build_signed_spend_bundle_offer_delegates_to_offer_builder(monkeypatch) -> None:
+    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: object())
+    monkeypatch.setattr(
+        signing_mod,
+        "_build_offer_spend_bundle",
+        lambda **_kw: ("aabb", None),
+    )
+    result = signing_mod.build_signed_spend_bundle(
+        {
+            "key_id": "k1",
+            "network": "testnet11",
+            "receive_address": "xch1abc",
+            "keyring_yaml_path": "/tmp/k.yaml",
+            "asset_id": "xch",
+            "plan": {
+                "op_type": "offer",
+                "offer_asset_id": "xch",
+                "offer_amount": 10,
+                "request_asset_id": "xch",
+                "request_amount": 2,
+            },
+        }
+    )
+    assert result["status"] == "executed"
+    assert result["spend_bundle_hex"] == "aabb"
 
 
 def test_sign_and_broadcast_propagates_signing_failure(monkeypatch) -> None:
@@ -193,3 +241,53 @@ def test_parse_fingerprint_prefix() -> None:
 
 def test_parse_fingerprint_unknown_returns_none() -> None:
     assert signing_mod._parse_fingerprint("unknown_key") is None
+
+
+def test_signing_uses_testnet11_coinset_adapter_network(monkeypatch) -> None:
+    captured = {}
+
+    class _FakeAdapter:
+        def __init__(self, base_url=None, *, network="mainnet", require_testnet11=False) -> None:
+            captured["base_url"] = base_url
+            captured["network"] = network
+            captured["require_testnet11"] = require_testnet11
+
+        def get_coin_records_by_puzzle_hash(
+            self, *, puzzle_hash_hex: str, include_spent_coins: bool
+        ):
+            _ = puzzle_hash_hex
+            _ = include_spent_coins
+            return []
+
+    class _FakeAddressObj:
+        def __init__(self) -> None:
+            self.puzzle_hash = b"\x11" * 32
+
+    class _FakeAddress:
+        @staticmethod
+        def decode(value: str):
+            _ = value
+            return _FakeAddressObj()
+
+    class _FakeSdk:
+        Address = _FakeAddress
+
+    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: _FakeSdk)
+    monkeypatch.setattr(signing_mod, "CoinsetAdapter", _FakeAdapter)
+    monkeypatch.delenv("GREENFLOOR_COINSET_BASE_URL", raising=False)
+
+    result = signing_mod.build_signed_spend_bundle(
+        {
+            "key_id": "k1",
+            "network": "testnet11",
+            "receive_address": "xch1abc",
+            "keyring_yaml_path": "/tmp/k.yaml",
+            "asset_id": "xch",
+            "plan": {"op_type": "split", "size_base_units": 10, "op_count": 1},
+        }
+    )
+    assert result["status"] == "skipped"
+    assert result["reason"] == "no_unspent_xch_coins"
+    assert captured["network"] == "testnet11"
+    assert captured["base_url"] is None
+    assert captured["require_testnet11"] is False

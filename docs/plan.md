@@ -28,6 +28,8 @@ Seven commands in scope. Do not add commands without explicit need tied to testn
 ## Signing Architecture
 
 - All signing logic lives in `greenfloor/signing.py` — a single module handling coin discovery, coin selection, additions planning, spend-bundle construction, AGG_SIG signing, and broadcast.
+- Coin discovery, chain-history reads (CAT parent lineage), and `push_tx` broadcast use `greenfloor/adapters/coinset.py` (`CoinsetAdapter`) as the side-effect boundary.
+- `CoinsetAdapter` defaults to mainnet endpoints and routes to testnet11 endpoints when `network=testnet11`; optional override: `GREENFLOOR_COINSET_BASE_URL`.
 - `WalletAdapter` (daemon coin-op path) calls `signing.sign_and_broadcast()` directly.
 - `offer_builder_sdk` (manager offer-build path) calls `signing.build_signed_spend_bundle()` directly.
 - One env-var escape hatch each: `GREENFLOOR_WALLET_EXECUTOR_CMD` (WalletAdapter), `GREENFLOOR_OFFER_BUILDER_CMD` (manager).
@@ -74,6 +76,9 @@ Seven commands in scope. Do not add commands without explicit need tied to testn
 These are the only priorities. Do not start new feature work until G1-G3 are complete.
 
 - [ ] G1: Replace deterministic/synthetic manager offer build output with coin-backed `chia-wallet-sdk` offer construction that passes venue validation on `testnet11`.
+  - Status update (2026-02-22): in-process offer-plan signing path is implemented in `greenfloor/signing.py` (including CAT lineage reconstruction and mixed-asset action building), and manager offer-builder now emits offer-plan payloads.
+  - Current blocker: live `testnet11` proof command fails with `signing_failed:no_unspent_offer_cat_coins` because configured receive address inventory is empty on `testnet11` (zero XCH, zero CAT in scanned supported assets).
+  - Remaining work: fund/bootstrap testnet inventory and rerun venue-validation proof, then capture operator evidence.
 - [ ] G2: Add operator helper workflow for `testnet11` asset discovery + inventory bootstrap (Dexie testnet liquidity discovery + market snippet generation).
 - [ ] G3: Run and document an end-to-end `testnet11` proof (build -> post -> status -> reconcile) using a live test asset pair.
 

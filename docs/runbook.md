@@ -85,6 +85,9 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - `GREENFLOOR_OFFER_CANCEL_COOLDOWN_SECONDS` (default: `30`, min `0`)
 - Offer-builder override command:
   - `GREENFLOOR_OFFER_BUILDER_CMD`
+- Coinset endpoint override (coin reads + chain history + tx submit):
+  - `GREENFLOOR_COINSET_BASE_URL`
+  - Default behavior: mainnet endpoint when unset; testnet11 endpoint when market/network is `testnet11`.
 - Strategy execution dry-run:
   - set `runtime.dry_run` in `~/.greenfloor/config/program.yaml`
 - Validate config + override sanity before deploy:

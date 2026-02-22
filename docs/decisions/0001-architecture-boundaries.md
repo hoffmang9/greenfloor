@@ -19,3 +19,4 @@ This supports maintainability, clear testing boundaries, and eventual Rust porta
 
 - Core modules remain fast and easy to test with deterministic fixtures.
 - IO-heavy integrations can be replaced without rewriting policy logic.
+- Blockchain side effects are expected to sit behind adapter boundaries (for example, Coinset HTTP calls in `greenfloor/adapters/coinset.py`).
