@@ -32,13 +32,14 @@ jobs:
 
       - name: Install package + dev dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev]"
 
       - name: Install formatting tools
         run: |
           npm install --global prettier@4.0.0-alpha.8
-          python -m pip install yamllint==1.35.1
+          .venv/bin/python -m pip install yamllint==1.35.1
 
       - name: Install Rust toolchain (sim harness)
         if: matrix.os == 'ubuntu-latest'
@@ -49,23 +50,23 @@ jobs:
           "$HOME/.cargo/bin/cargo" --version
 
       - name: Ruff lint
-        run: ruff check .
+        run: .venv/bin/ruff check .
 
       - name: Ruff format check
-        run: ruff format --check .
+        run: .venv/bin/ruff format --check .
 
       - name: Prettier check
         run: prettier --check "**/*.{md,json,yml,yaml}" --ignore-path .prettierignore
 
       - name: Yamllint
-        run: yamllint .
+        run: .venv/bin/yamllint .
 
       - name: Pyright
-        run: pyright
+        run: .venv/bin/pyright
 
       - name: Pytest
-        run: pytest -q --ignore=tests/test_chia_wallet_sdk_simulator_harness.py
+        run: .venv/bin/pytest -q --ignore=tests/test_chia_wallet_sdk_simulator_harness.py
 
       - name: Pytest (chia-wallet-sdk simulator harness on Ubuntu)
         if: matrix.os == 'ubuntu-latest'
-        run: pytest -q tests/test_chia_wallet_sdk_simulator_harness.py
+        run: .venv/bin/pytest -q tests/test_chia_wallet_sdk_simulator_harness.py
