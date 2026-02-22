@@ -6,7 +6,6 @@ import json
 import os
 import shlex
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,11 +24,6 @@ class CoinOpExecutionItem:
 
 
 class WalletAdapter:
-    """Execution adapter boundary for coin split/combine actions.
-
-    V1 implementation is intentionally stubbed while wallet-sdk integration is in progress.
-    """
-
     def execute_coin_ops(
         self,
         *,
@@ -124,7 +118,7 @@ class WalletAdapter:
                 )
                 continue
 
-            execution_item = self._execute_plan_with_external_executor(
+            execution_item = self._execute_plan(
                 plan=plan,
                 selection=selection,
                 key_id=key_id,
@@ -162,7 +156,7 @@ class WalletAdapter:
             ],
         }
 
-    def _execute_plan_with_external_executor(
+    def _execute_plan(
         self,
         *,
         plan: CoinOpPlan,
@@ -174,25 +168,12 @@ class WalletAdapter:
         receive_address: str | None,
         signer_fingerprint: int | None,
     ) -> CoinOpExecutionItem:
-        cmd_raw = os.getenv("GREENFLOOR_WALLET_EXECUTOR_CMD", "").strip()
-        if not cmd_raw:
-            cmd_raw = f"{sys.executable} -m greenfloor.cli.wallet_executor"
-
         payload = {
-            "selected_source": selection.selected_source,
             "key_id": key_id,
             "network": network,
-            "signer_selection": {
-                "selected_source": selection.selected_source,
-                "key_id": selection.key_id,
-                "network": selection.network,
-                "chia_keys_dir": selection.chia_keys_dir,
-                "keyring_yaml_path": selection.keyring_yaml_path,
-                "mnemonic_word_count": selection.mnemonic_word_count,
-            },
-            "market_id": market_id,
-            "asset_id": asset_id,
             "receive_address": receive_address,
+            "keyring_yaml_path": selection.keyring_yaml_path,
+            "asset_id": asset_id,
             "plan": {
                 "op_type": plan.op_type,
                 "size_base_units": plan.size_base_units,
@@ -200,19 +181,51 @@ class WalletAdapter:
                 "reason": plan.reason,
             },
         }
-        child_env = None
+
         if signer_fingerprint is not None:
-            child_env = dict(os.environ)
+            existing: dict = {}
             try:
-                existing = json.loads(child_env.get("GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON", "{}"))
+                existing = json.loads(
+                    os.environ.get("GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON", "{}")
+                )
             except json.JSONDecodeError:
-                existing = {}
+                pass
             if not isinstance(existing, dict):
                 existing = {}
             existing[str(key_id)] = str(int(signer_fingerprint))
-            child_env["GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON"] = json.dumps(
+            os.environ["GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON"] = json.dumps(
                 existing, separators=(",", ":")
             )
+
+        # External executor override (subprocess escape hatch for operators)
+        cmd_raw = os.getenv("GREENFLOOR_WALLET_EXECUTOR_CMD", "").strip()
+        if cmd_raw:
+            return self._execute_via_subprocess(cmd_raw, payload, plan, signer_fingerprint)
+
+        # Default: direct in-process signing + broadcast
+        from greenfloor.signing import sign_and_broadcast
+
+        result = sign_and_broadcast(payload)
+        status = str(result.get("status", "skipped")).strip()
+        return CoinOpExecutionItem(
+            op_type=plan.op_type,
+            size_base_units=plan.size_base_units,
+            op_count=plan.op_count,
+            status=status if status in {"executed", "skipped"} else "executed",
+            reason=str(result.get("reason", "unknown")),
+            operation_id=result.get("operation_id"),
+        )
+
+    def _execute_via_subprocess(
+        self,
+        cmd_raw: str,
+        payload: dict,
+        plan: CoinOpPlan,
+        signer_fingerprint: int | None,
+    ) -> CoinOpExecutionItem:
+        child_env = None
+        if signer_fingerprint is not None:
+            child_env = dict(os.environ)
 
         try:
             completed = subprocess.run(
@@ -277,11 +290,6 @@ class WalletAdapter:
         receive_address: str,
         network: str,
     ) -> list[int]:
-        """Return available coin amounts in base units for asset/key.
-
-        Stubbed via env for deterministic local testing:
-        GREENFLOOR_FAKE_COINS_JSON='{"<asset_id>":[1,1,10,100]}'
-        """
         _ = key_id
         raw = os.getenv("GREENFLOOR_FAKE_COINS_JSON", "").strip()
         if raw:
@@ -289,8 +297,6 @@ class WalletAdapter:
             if fake:
                 return fake
 
-        # For CAT assets, avoid returning unfiltered receive-address coins by default.
-        # This prevents mixing unrelated assets until full CAT-aware parsing is wired.
         if not self._is_xch_asset(asset_id):
             cat_raw = os.getenv("GREENFLOOR_FAKE_CAT_COINS_JSON", "").strip()
             if cat_raw:

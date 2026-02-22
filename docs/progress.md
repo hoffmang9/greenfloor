@@ -1,5 +1,40 @@
 # Progress Log
 
+## 2026-02-21
+
+### Architecture simplification
+
+Major codebase simplification targeting three areas of accidental complexity introduced by prior implementation rounds.
+
+**Signing chain collapse (13 files -> 1 file):**
+- Deleted 13 CLI modules that formed a deep subprocess chain (`wallet_executor` -> `chia_keys_executor` -> `chia_keys_signer_backend` -> `chia_keys_raw_engine_sign_impl_sdk_submit`, plus 9 legacy intermediaries: `passthrough`, `worker`, `signer`, `builder`, `bundle_signer`, `bundle_signer_raw`, `raw_engine`, `raw_engine_sign`, `raw_engine_sign_impl`).
+- Created `greenfloor/signing.py` — a single module with direct function calls for coin discovery, coin selection, additions planning, spend-bundle construction + AGG_SIG signing, and broadcast.
+- `WalletAdapter` now calls `signing.sign_and_broadcast()` directly instead of spawning subprocesses. External executor override preserved via `GREENFLOOR_WALLET_EXECUTOR_CMD`.
+
+**Manager CLI stripped to 7 core commands (1,593 -> 897 lines):**
+- Kept: `bootstrap-home`, `config-validate`, `doctor`, `keys-onboard`, `build-and-post-offer`, `offers-status`, `offers-reconcile`.
+- Removed 14 commands that were premature before testnet proof: `keys-list`, `keys-test-sign`, `reload-config`, `register-coinset-webhook`, `set-low-watermark`, `consolidate`, `set-price-policy`, `coin-op-budget-report`, `metrics-export`, `list-supported-assets`, `config-history-list`, `config-history-revert`, `set-ladder-entry`, `set-bucket-count`.
+- Removed commands are tracked in plan.md deferred backlog for re-addition after G1-G3.
+
+**Offer builder subprocess boundary eliminated:**
+- `_build_offer_text_for_request()` now calls `offer_builder_sdk.build_offer()` as a direct Python function. External override preserved via `GREENFLOOR_OFFER_BUILDER_CMD`.
+
+**Test consolidation:**
+- Deleted 22 test files (~2,000 lines) for removed code.
+- Added `tests/test_signing.py` (15 tests) covering input validation, error propagation, additions planning, fingerprint parsing, and mock-based signing + broadcast flow.
+- Updated `test_wallet_adapter.py` with new test for direct signing path (no subprocess).
+- Updated `test_offer_builder_sdk.py` with tests for `build_offer()` public API and signing module delegation.
+- Updated `test_manager_post_offer.py` with test for direct `_build_offer_text_for_request` call path.
+- All 120 tests pass in 3.9s. All quality gates pass: `ruff check`, `ruff format`, `pyright`, `pytest`.
+
+**Entrypoints cleaned up:**
+- `pyproject.toml` reduced from 15 script entrypoints to 2 (`greenfloor-manager`, `greenfloord`).
+
+**Governance updates:**
+- Updated `AGENTS.md` with new "Simplicity and Design Discipline" section: rules for preferring direct calls over subprocess chains, not building features ahead of the critical path, keeping file count proportional to responsibilities, limiting indirection layers, and manager CLI surface discipline.
+- Updated `docs/plan.md` to reflect simplified signing architecture, corrected TODO state, added explicit deferred backlog section, and added emphasis that G1-G3 are the only priorities.
+- Updated `README.md` to reflect current 7-command CLI surface and simplified env-var contract.
+
 ## 2026-02-20
 
 - Added explicit v1 plan doc (`docs/plan.md`) and clarified that `chia-wallet-sdk` submodule is the default syncing/signing library.
@@ -39,6 +74,7 @@
 - Aligned cancel-policy execution with plan semantics by requiring explicit stable-vs-unstable market eligibility (`pricing.cancel_policy_stable_vs_unstable: true`) in addition to unstable-leg gating; added deterministic tests and runbook guidance plus a golden-path smoke-test checklist for operator user testing.
 - Reaffirmed manager offer-builder on `chia-wallet-sdk` path (`greenfloor/cli/offer_builder_sdk.py`) with deterministic unit coverage and runbook updates for `testnet11` on-chain asset bring-up planning.
 - Reviewed plan/progress for current-state accuracy and captured remaining pre-upstream gaps explicitly: coin-backed SDK offer construction for venue-valid posting, `testnet11` asset bootstrap helper workflow, and first documented live `testnet11` proof path.
+- Added an explicit upstreaming checklist section to `docs/plan.md` covering GitHub repo creation, remote push, branch protection, required checks, Actions/secret hygiene, and first PR verification flow.
 
 ## 2026-02-19
 
