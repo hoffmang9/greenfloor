@@ -55,10 +55,18 @@ jobs:
         run: ruff format --check .
 
       - name: Prettier check
-        run: prettier --check "**/*.{md,json,yml,yaml}"
+        run: |
+          mapfile -t prettier_files < <(git ls-files '*.md' '*.json' '*.yml' '*.yaml')
+          if [ "${#prettier_files[@]}" -gt 0 ]; then
+            prettier --check "${prettier_files[@]}"
+          fi
 
       - name: Yamllint
-        run: yamllint .
+        run: |
+          mapfile -t yaml_files < <(git ls-files '*.yml' '*.yaml')
+          if [ "${#yaml_files[@]}" -gt 0 ]; then
+            yamllint "${yaml_files[@]}"
+          fi
 
       - name: Pyright
         run: pyright
