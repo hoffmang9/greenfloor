@@ -43,9 +43,10 @@ jobs:
               keys-onboard \
               --key-id key-main-1 \
               --state-dir ./.tmp-state
-          greenfloor-manager config-validate \
+          greenfloor-manager \
             --program-config config/program.yaml \
-            --markets-config config/markets.yaml
+            --markets-config config/markets.yaml \
+            config-validate
           greenfloord \
             --program-config config/program.yaml \
             --markets-config config/markets.yaml \
