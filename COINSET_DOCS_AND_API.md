@@ -91,49 +91,49 @@ Use this as a quick "minimum payload" guide when wiring clients.
 
 ### Blocks
 
-| Endpoint | Required body fields |
-| --- | --- |
-| `POST /get_additions_and_removals` | `header_hash` |
-| `POST /get_block` | `header_hash` |
-| `POST /get_block_count_metrics` | none (`{}`) |
-| `POST /get_block_record` | `header_hash` |
-| `POST /get_block_record_by_height` | `height` |
-| `POST /get_block_records` | `start`, `end` |
-| `POST /get_block_spends` | `header_hash` |
-| `POST /get_block_spends_with_conditions` | `header_hash` |
-| `POST /get_blocks` | `start`, `end` |
-| `POST /get_unfinished_block_headers` | none (`{}`) |
+| Endpoint                                 | Required body fields |
+| ---------------------------------------- | -------------------- |
+| `POST /get_additions_and_removals`       | `header_hash`        |
+| `POST /get_block`                        | `header_hash`        |
+| `POST /get_block_count_metrics`          | none (`{}`)          |
+| `POST /get_block_record`                 | `header_hash`        |
+| `POST /get_block_record_by_height`       | `height`             |
+| `POST /get_block_records`                | `start`, `end`       |
+| `POST /get_block_spends`                 | `header_hash`        |
+| `POST /get_block_spends_with_conditions` | `header_hash`        |
+| `POST /get_blocks`                       | `start`, `end`       |
+| `POST /get_unfinished_block_headers`     | none (`{}`)          |
 
 ### Coins
 
-| Endpoint | Required body fields |
-| --- | --- |
-| `POST /get_coin_record_by_name` | `name` |
-| `POST /get_coin_records_by_hint` | `hint` |
-| `POST /get_coin_records_by_hints` | `hints` |
-| `POST /get_coin_records_by_names` | `names` |
-| `POST /get_coin_records_by_parent_ids` | `parent_ids` |
-| `POST /get_coin_records_by_puzzle_hash` | `puzzle_hash` |
-| `POST /get_coin_records_by_puzzle_hashes` | `puzzle_hashes` |
-| `POST /get_memos_by_coin_name` | `name` |
-| `POST /get_puzzle_and_solution` | `coin_id` |
-| `POST /get_puzzle_and_solution_with_conditions` | `coin_id` |
-| `POST /push_tx` | `spend_bundle` |
+| Endpoint                                        | Required body fields |
+| ----------------------------------------------- | -------------------- |
+| `POST /get_coin_record_by_name`                 | `name`               |
+| `POST /get_coin_records_by_hint`                | `hint`               |
+| `POST /get_coin_records_by_hints`               | `hints`              |
+| `POST /get_coin_records_by_names`               | `names`              |
+| `POST /get_coin_records_by_parent_ids`          | `parent_ids`         |
+| `POST /get_coin_records_by_puzzle_hash`         | `puzzle_hash`        |
+| `POST /get_coin_records_by_puzzle_hashes`       | `puzzle_hashes`      |
+| `POST /get_memos_by_coin_name`                  | `name`               |
+| `POST /get_puzzle_and_solution`                 | `coin_id`            |
+| `POST /get_puzzle_and_solution_with_conditions` | `coin_id`            |
+| `POST /push_tx`                                 | `spend_bundle`       |
 
 ### Fees / Full Node / Mempool / WebSocket
 
-| Endpoint | Required body fields |
-| --- | --- |
-| `POST /get_fee_estimate` | `spend_bundle` |
-| `POST /get_aggsig_additional_data` | none (`{}`) |
-| `POST /get_network_info` | none (`{}`) |
-| `POST /get_blockchain_state` | none (`{}`) |
-| `POST /get_network_space` | `newer_block_header_hash`, `older_block_header_hash` |
-| `POST /get_all_mempool_items` | none (`{}`) |
-| `POST /get_all_mempool_tx_ids` | none (`{}`) |
-| `POST /get_mempool_item_by_tx_id` | `tx_id` |
-| `POST /get_mempool_items_by_coin_name` | `coin_name` |
-| `GET /ws` | none (upgrade to WebSocket) |
+| Endpoint                               | Required body fields                                 |
+| -------------------------------------- | ---------------------------------------------------- |
+| `POST /get_fee_estimate`               | `spend_bundle`                                       |
+| `POST /get_aggsig_additional_data`     | none (`{}`)                                          |
+| `POST /get_network_info`               | none (`{}`)                                          |
+| `POST /get_blockchain_state`           | none (`{}`)                                          |
+| `POST /get_network_space`              | `newer_block_header_hash`, `older_block_header_hash` |
+| `POST /get_all_mempool_items`          | none (`{}`)                                          |
+| `POST /get_all_mempool_tx_ids`         | none (`{}`)                                          |
+| `POST /get_mempool_item_by_tx_id`      | `tx_id`                                              |
+| `POST /get_mempool_items_by_coin_name` | `coin_name`                                          |
+| `GET /ws`                              | none (upgrade to WebSocket)                          |
 
 ## Common Pitfalls
 

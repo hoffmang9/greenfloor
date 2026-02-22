@@ -62,30 +62,30 @@ This file summarizes the public API docs at `https://dexie.space/api` and relate
 
 ### Offers
 
-| Endpoint | Required input |
-| --- | --- |
-| `POST /v1/offers` | `offer` |
-| `GET /v1/offers` | none |
-| `GET /v1/offers/:id` | `id` path param |
-| `POST /v1/rewards/check` | see docs (body schema not fully captured in fetched content) |
-| `POST /v1/rewards/claim` | see docs (body schema not fully captured in fetched content) |
-| `wss://api.dexie.space/v1/stream` | websocket connect/subscribe flow |
+| Endpoint                          | Required input                                               |
+| --------------------------------- | ------------------------------------------------------------ |
+| `POST /v1/offers`                 | `offer`                                                      |
+| `GET /v1/offers`                  | none                                                         |
+| `GET /v1/offers/:id`              | `id` path param                                              |
+| `POST /v1/rewards/check`          | see docs (body schema not fully captured in fetched content) |
+| `POST /v1/rewards/claim`          | see docs (body schema not fully captured in fetched content) |
+| `wss://api.dexie.space/v1/stream` | websocket connect/subscribe flow                             |
 
 ### Swap
 
-| Endpoint | Required input |
-| --- | --- |
-| `GET /v1/swap/quote` | `from`, `to`, and one of `from_amount` or `to_amount` |
-| `POST /v1/swap` | `offer` |
-| `GET /v1/swap/tokens` | none |
+| Endpoint              | Required input                                        |
+| --------------------- | ----------------------------------------------------- |
+| `GET /v1/swap/quote`  | `from`, `to`, and one of `from_amount` or `to_amount` |
+| `POST /v1/swap`       | `offer`                                               |
+| `GET /v1/swap/tokens` | none                                                  |
 
 ### Prices
 
-| Endpoint | Required input |
-| --- | --- |
-| `GET /v3/prices/pairs` | none |
-| `GET /v3/prices/tickers` | none (`ticker_id` optional) |
-| `GET /v3/prices/orderbook` | `ticker_id` (`depth` optional) |
+| Endpoint                           | Required input                                                   |
+| ---------------------------------- | ---------------------------------------------------------------- |
+| `GET /v3/prices/pairs`             | none                                                             |
+| `GET /v3/prices/tickers`           | none (`ticker_id` optional)                                      |
+| `GET /v3/prices/orderbook`         | `ticker_id` (`depth` optional)                                   |
 | `GET /v3/prices/historical_trades` | `ticker_id` (`type`, `limit`, `start_time`, `end_time` optional) |
 
 ## Key Request/Response Notes
@@ -147,7 +147,9 @@ type OffersResponse = {
   offers: Array<{ id: string; status: number }>;
 };
 
-const offers = await getJson<OffersResponse>("https://api.dexie.space/v1/offers");
+const offers = await getJson<OffersResponse>(
+  "https://api.dexie.space/v1/offers",
+);
 console.log("offers:", offers.offers.length);
 ```
 
@@ -166,9 +168,9 @@ type SwapQuoteResponse = {
   };
 };
 
-const toAssetId = "db1a9020d48d9d4ad22631b66ab4b9ebd3637ef7758ad38881348c5d24c38f20";
-const quoteUrl =
-  `${DEXIE_API}/v1/swap/quote?from=xch&to=${toAssetId}&to_amount=1000`;
+const toAssetId =
+  "db1a9020d48d9d4ad22631b66ab4b9ebd3637ef7758ad38881348c5d24c38f20";
+const quoteUrl = `${DEXIE_API}/v1/swap/quote?from=xch&to=${toAssetId}&to_amount=1000`;
 
 const quote = await getJson<SwapQuoteResponse>(quoteUrl);
 console.log("required from_amount:", quote.quote.from_amount);
@@ -189,7 +191,9 @@ type TickersResponse = {
   }>;
 };
 
-const tickers = await getJson<TickersResponse>("https://api.dexie.space/v3/prices/tickers");
+const tickers = await getJson<TickersResponse>(
+  "https://api.dexie.space/v3/prices/tickers",
+);
 console.log("tickers:", tickers.tickers.length);
 ```
 
@@ -208,7 +212,9 @@ type PostOfferResponse = {
   error?: string;
 };
 
-async function postOffer(payload: PostOfferRequest): Promise<PostOfferResponse> {
+async function postOffer(
+  payload: PostOfferRequest,
+): Promise<PostOfferResponse> {
   const res = await fetch(`${DEXIE_API}/v1/offers`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -239,7 +245,9 @@ type ExecuteSwapResponse = {
   error?: string;
 };
 
-async function executeSwap(payload: ExecuteSwapRequest): Promise<ExecuteSwapResponse> {
+async function executeSwap(
+  payload: ExecuteSwapRequest,
+): Promise<ExecuteSwapResponse> {
   const res = await fetch(`${DEXIE_API}/v1/swap`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

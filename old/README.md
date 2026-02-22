@@ -11,6 +11,7 @@ The system consists of three main components:
 3. **Common Module** (`common.py`) - Shared functionality across all scripts
 
 ### Legacy Scripts (Deprecated)
+
 - `make_offer_for_xch.py` - XCH-specific offer creator (use `make_offer.py --pair xch` instead)
 - `make_offer_for_b_usdc.py` - USDC-specific offer creator (use `make_offer.py --pair usdc` instead)
 
@@ -35,22 +36,26 @@ The system consists of three main components:
 ## Installation
 
 1. Clone the repository:
+
 ```bash
 git clone <repository-url>
 cd chia-carbon-market-maker
 ```
 
 2. Install dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
 
 3. Update the `CHIA_BIN_PATH` in `common.py` to match your Chia installation:
+
 ```python
 CHIA_BIN_PATH = "/your/path/to/chia"
 ```
 
 4. Make scripts executable:
+
 ```bash
 chmod +x *.py
 ```
@@ -58,11 +63,12 @@ chmod +x *.py
 ## Quick Start
 
 ### Basic Market Making
+
 ```bash
 # XCH pair with default settings
 python splash_carbon_market_maker_xch.py
 
-# USDC pair 
+# USDC pair
 python splash_carbon_market_maker_xch.py --pair usdc
 
 # Preview actions without executing
@@ -70,6 +76,7 @@ python splash_carbon_market_maker_xch.py --dry-run
 ```
 
 ### Manual Offer Creation
+
 ```bash
 # Create XCH offers
 python make_offer.py --offer-wallet <CAT_ID> --pair xch --count 10 --repeat 5
@@ -103,10 +110,11 @@ python splash_carbon_market_maker_xch.py \
 ```
 
 **Market Maker Options:**
+
 - `--cat`: Asset ID of the CAT being market made
 - `--pair`: Trading pair (`xch` or `usdc`)
 - `--ones-target`: Target number of 1-unit offers (default: 5)
-- `--tens-target`: Target number of 10-unit offers (default: 2) 
+- `--tens-target`: Target number of 10-unit offers (default: 2)
 - `--hundreds-target`: Target number of 100-unit offers (default: 1)
 - `--dry-run`: Preview actions without creating offers
 - `--make-offer-path`: Path to make_offer.py script
@@ -135,12 +143,13 @@ python make_offer.py \
 ```
 
 **Unified Offer Options:**
+
 - `--offer-wallet`: Asset ID of the CAT being offered (required)
 - `--pair`: Trading pair (`xch` or `usdc`, default: `xch`)
 - `--accept-wallet`: Override default accept wallet (auto-detected)
 - `--count`: Number of CATs to offer (default: 1)
 - `--expiry-minutes`: Expire in minutes (overrides --expiry-hours)
-- `--expiry-hours`: Expire in hours 
+- `--expiry-hours`: Expire in hours
 - `--repeat`: Create multiple identical offers (default: 1)
 - `--cancel-after-create`: Cancel offer after creation (for market making)
 
@@ -154,7 +163,7 @@ Update the `CARBON_CREDIT_PRICES` dictionary in `common.py`:
 CARBON_CREDIT_PRICES = {
     # Agricultural Reforestation Project 2022
     "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7": 7.75,
-    # Agricultural Reforestation Project 2020  
+    # Agricultural Reforestation Project 2020
     "e257aca547a83020e537e87f8c83e9332d2c3adb729c052e6f04971317084327": 7.50,
     # Add your carbon credit projects here
     "your_cat_id_here": 8.00,
@@ -168,7 +177,7 @@ Modify targets in the market maker script or use command-line options:
 ```python
 # Default targets
 ONES_TARGET = 5      # 1-unit offers
-TENS_TARGET = 2      # 10-unit offers  
+TENS_TARGET = 2      # 10-unit offers
 HUNDREDS_TARGET = 1  # 100-unit offers
 ```
 
@@ -225,11 +234,13 @@ WantedBy=multi-user.target
 The code follows Python best practices and passes common linting tools:
 
 ### Install Development Tools
+
 ```bash
 pip install black isort flake8 mypy pylint
 ```
 
 ### Run Quality Checks
+
 ```bash
 # Format and check code
 black *.py
@@ -240,6 +251,7 @@ pylint *.py
 ```
 
 ### Pre-commit Setup
+
 ```bash
 # Install pre-commit
 pip install pre-commit
@@ -251,7 +263,9 @@ pre-commit install
 ## Architecture
 
 ### Common Module (`common.py`)
+
 Provides shared functionality:
+
 - Chia RPC communication and offer creation
 - Price fetching (XCH rates and carbon credit pricing)
 - API communication with Splash platform
@@ -259,6 +273,7 @@ Provides shared functionality:
 - Currency conversion and formatting
 
 ### Market Maker (`splash_carbon_market_maker_xch.py`)
+
 1. Fetches current market depth from Dexie API
 2. Compares against configurable target thresholds
 3. Creates missing offers using the unified offer script
@@ -266,8 +281,9 @@ Provides shared functionality:
 5. Supports both XCH and USDC pairs
 
 ### Unified Offer Creator (`make_offer.py`)
+
 1. Supports both XCH and USDC trading pairs
-2. Calculates pricing (dynamic for XCH, fixed for USDC)  
+2. Calculates pricing (dynamic for XCH, fixed for USDC)
 3. Creates Chia blockchain offers via RPC
 4. Optionally cancels offers (for market making strategies)
 5. Posts offers to Splash platform
@@ -275,6 +291,7 @@ Provides shared functionality:
 ## Monitoring and Logging
 
 ### Log Analysis
+
 ```bash
 # Monitor market maker activity
 tail -f market_maker.log
@@ -287,7 +304,9 @@ grep -i "offer created" *.log
 ```
 
 ### Status Monitoring
+
 The market maker provides detailed status output:
+
 ```
 Market Making Status for XCH Pair
 ============================================
@@ -306,6 +325,7 @@ Market Depth Analysis:
 ### Common Issues
 
 **Chia Node Connection:**
+
 ```bash
 # Check if Chia is running
 chia show -s
@@ -315,6 +335,7 @@ chia rpc wallet get_wallets
 ```
 
 **API Connectivity:**
+
 ```bash
 # Test Dexie API
 curl "https://api.dexie.space/v1/offers?offered=CAT_ID&requested=xch"
@@ -324,6 +345,7 @@ curl -X POST http://your-splash-server:4000 -d '{"test": "connection"}'
 ```
 
 **Permission Issues:**
+
 ```bash
 # Make scripts executable
 chmod +x *.py
@@ -335,6 +357,7 @@ ls -la *.py
 ### Debug Mode
 
 Enable verbose output for debugging:
+
 ```bash
 # Run with debug output
 python -v splash_carbon_market_maker_xch.py --dry-run
@@ -348,15 +371,17 @@ python make_offer.py --offer-wallet CAT_ID --pair xch --count 1 --dry-run
 If you're upgrading from the original scripts:
 
 ### From `make_offer_for_xch.py`:
+
 ```bash
 # Old way
 python make_offer_for_xch.py --offer-wallet CAT_ID --count 10
 
-# New way  
+# New way
 python make_offer.py --offer-wallet CAT_ID --pair xch --count 10
 ```
 
 ### From `make_offer_for_b.usdc.py`:
+
 ```bash
 # Old way
 python make_offer_for_b.usdc.py --offer-wallet CAT_ID --count 1
@@ -366,6 +391,7 @@ python make_offer.py --offer-wallet CAT_ID --pair usdc --count 1
 ```
 
 ### Market Maker Updates:
+
 - Now supports both XCH and USDC pairs
 - Enhanced status display and dry-run mode
 - Configurable targets via command line
@@ -410,14 +436,15 @@ For issues or questions:
 ## Changelog
 
 ### v2.0.0 (Latest)
+
 - ✨ Unified offer creation script supporting both XCH and USDC
-- 🎯 Enhanced market maker with configurable targets and dry-run mode  
+- 🎯 Enhanced market maker with configurable targets and dry-run mode
 - 📊 Improved status display with visual indicators
 - 🔧 Better error handling and validation
 - 📚 Comprehensive documentation and examples
 
 ### v1.0.0 (Legacy)
+
 - Basic market making for XCH pairs
 - Separate scripts for XCH and USDC offers
 - Core functionality for carbon credit trading
-

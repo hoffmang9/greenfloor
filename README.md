@@ -71,6 +71,17 @@ Run the daemon:
 greenfloord --program-config config/program.yaml --markets-config config/markets.yaml --once
 ```
 
+## Developer Checks
+
+Install dev dependencies (includes `pre-commit`), then run local checks:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+pre-commit run --all-files
+```
+
 ## Environment Variables
 
 Operator overrides (all optional):
@@ -82,6 +93,7 @@ Operator overrides (all optional):
 - `GREENFLOOR_COINSET_BASE_URL` — custom Coinset API base URL for coin queries and `push_tx`; when unset, `CoinsetAdapter` defaults to mainnet and can be forced to testnet11 by network selection.
 
 Signer key resolution contract is repo-managed through `program.yaml`:
+
 - `keys.registry[].key_id` must match market `signer_key_id`
 - `keys.registry[].fingerprint` is required for deterministic signer mapping
 - optional `keys.registry[].network` is validated against `app.network`

@@ -1,6 +1,7 @@
+---
 name: CI
 
-on:
+"on":
   pull_request:
   push:
     branches:
@@ -24,10 +25,22 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install package + dev dependencies
+      # Node is required to install and run the explicit Prettier check in CI.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+
+      - name: Create venv and install dev dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m venv .venv
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev]"
+
+      - name: Install formatting tools
+        run: |
+          npm install --global prettier@4.0.0-alpha.8
+          .venv/bin/python -m pip install yamllint==1.35.1
 
       - name: Install Rust toolchain (sim harness)
         if: matrix.os == 'ubuntu-latest'
@@ -43,12 +56,18 @@ jobs:
       - name: Ruff format check
         run: ruff format --check .
 
+      - name: Prettier check
+        run: prettier --check "**/*.{md,json,yml,yaml}" --ignore-path .prettierignore
+
+      - name: Yamllint
+        run: yamllint .
+
       - name: Pyright
         run: pyright
 
       - name: Pytest
         run: pytest -q --ignore=tests/test_chia_wallet_sdk_simulator_harness.py
 
-      - name: Pytest (chia-wallet-sdk simulator harness)
+      - name: Pytest (chia-wallet-sdk simulator harness on Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: pytest -q tests/test_chia_wallet_sdk_simulator_harness.py
