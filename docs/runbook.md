@@ -9,7 +9,7 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
 2. Bootstrap runtime home:
    - `greenfloor-manager bootstrap-home`
 3. Validate seeded configs:
-   - `greenfloor-manager config-validate --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml`
+   - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml config-validate`
 4. Onboard signer selection:
    - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml keys-onboard --key-id key-main-1 --state-dir ~/.greenfloor/state`
 5. Run readiness checks:
@@ -117,6 +117,8 @@ Optional CI workflow secret contract (`.github/workflows/live-testnet-e2e.yml`):
 - Configure `TESTNET_WALLET_MNEMONIC` as an importable mnemonic phrase.
 - Expected format is plain whitespace-delimited `12` or `24` words.
 - Current testnet receive address: `txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k`.
+- For `greenfloor-manager`, global flags (like `--program-config` and `--markets-config`) must be passed before the command name.
+- CI now runs the full simulator harness variant on `ubuntu-latest` with `GREENFLOOR_RUN_SDK_SIM_TESTS_FULL=1`.
 
 1. Start with known testnet11 CAT assets that already trade on Dexie testnet.
 2. Fund a testnet11 `TXCH` account (faucet) for fees and initial taker actions.

@@ -2,6 +2,13 @@
 
 ## 2026-02-22
 
+- Updated CI and live testnet workflows after operator validation:
+  - CI `pytest` steps no longer use `-q`, so logs show full test output in Actions.
+  - Ubuntu simulator harness CI step now enables extended tests with `GREENFLOOR_RUN_SDK_SIM_TESTS_FULL=1`.
+  - Optional `live-testnet-e2e` workflow now uses `TESTNET_WALLET_MNEMONIC` for onboarding import path.
+  - Fixed `live-testnet-e2e` manager command ordering so global flags are passed before `config-validate`.
+  - Confirmed manual workflow-dispatch run succeeded after command-order fix.
+
 - Refreshed current repository quality-gate status after pre-commit workflow alignment:
   - Added `pre-commit` to dev dependencies and updated docs to use `pre-commit run --all-files` as the primary local gate command.
   - Expanded pre-commit local hooks to include both `pyright` and `pytest` (in addition to `ruff`, `ruff-format`, `prettier`, `yamllint`).
