@@ -15,7 +15,9 @@ def _copy_program_config(tmp_path: Path) -> Path:
     return program
 
 
-def test_keys_onboard_import_words_accepts_24_word_secret(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_keys_onboard_import_words_accepts_24_word_secret(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
     program = _copy_program_config(tmp_path)
     state_dir = tmp_path / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -39,7 +41,9 @@ def test_keys_onboard_import_words_accepts_24_word_secret(monkeypatch, tmp_path:
     assert (state_dir / "key_onboarding.json").exists()
 
 
-def test_keys_onboard_import_words_rejects_non_12_or_24_word_secret(monkeypatch, tmp_path: Path) -> None:
+def test_keys_onboard_import_words_rejects_non_12_or_24_word_secret(
+    monkeypatch, tmp_path: Path
+) -> None:
     program = _copy_program_config(tmp_path)
     state_dir = tmp_path / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
