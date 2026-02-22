@@ -1,6 +1,7 @@
 # 0001 - Architecture Boundaries
 
 ## Status
+
 Accepted
 
 ## Decision

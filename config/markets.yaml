@@ -1,3 +1,4 @@
+---
 supported_assets_example:
   # Source: old/common.py CARBON_CREDIT_PRICES + Dexie token/ticker snapshots.
   - name: "Chia"
@@ -199,4 +200,3 @@ markets:
           target_count: 8
           split_buffer_count: 1
           combine_when_excess_factor: 2.0
-
