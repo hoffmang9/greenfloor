@@ -54,6 +54,7 @@ Seven commands in scope. Do not add commands without explicit need tied to testn
 - Python 3.11+.
 - Deterministic test suite (`pytest`) should stay under 10 minutes wall clock (prefer under 5).
 - Required checks: `ruff check`, `ruff format --check`, `pyright`, `pytest`.
+- Local convenience gate: `pre-commit run --all-files` (configured to run `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, and `pytest`).
 
 ## Plan TODOs (Current State)
 

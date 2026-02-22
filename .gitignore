@@ -1,7 +1,11 @@
 .venv/
 .venv.*/
+venv/
+venv.*/
+node_modules/
 __pycache__/
 .pytest_cache/
+.pytest_tmp/
 .ruff_cache/
 .mypy_cache/
 .pyright/

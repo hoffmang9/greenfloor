@@ -1,6 +1,7 @@
 # 0002 - Signing Pipeline Consolidation
 
 ## Status
+
 Accepted
 
 ## Decision

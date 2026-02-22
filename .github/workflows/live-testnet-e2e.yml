@@ -1,6 +1,7 @@
+---
 name: Live Testnet E2E (Optional)
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       network_profile:
@@ -32,8 +33,14 @@ jobs:
       - name: Validate config and run one daemon cycle
         run: |
           if [ -z "${TESTNET_WALLET_MNEMONIC:-}" ]; then
-            echo "TESTNET_WALLET_MNEMONIC is not set; skipping optional live testnet workflow."
+            echo "TESTNET_WALLET_MNEMONIC is not set; skipping optional live \
+            testnet workflow."
             exit 0
           fi
-          greenfloor-manager config-validate --program-config config/program.yaml --markets-config config/markets.yaml
-          greenfloord --program-config config/program.yaml --markets-config config/markets.yaml --once
+          greenfloor-manager config-validate \
+            --program-config config/program.yaml \
+            --markets-config config/markets.yaml
+          greenfloord \
+            --program-config config/program.yaml \
+            --markets-config config/markets.yaml \
+            --once
