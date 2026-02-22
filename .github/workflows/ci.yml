@@ -66,8 +66,8 @@ jobs:
         run: pyright
 
       - name: Pytest
-        run: pytest -q --ignore=tests/test_chia_wallet_sdk_simulator_harness.py
+        run: pytest --ignore=tests/test_chia_wallet_sdk_simulator_harness.py
 
       - name: Pytest (chia-wallet-sdk simulator harness on Ubuntu)
         if: matrix.os == 'ubuntu-latest'
-        run: pytest -q tests/test_chia_wallet_sdk_simulator_harness.py
+        run: GREENFLOOR_RUN_SDK_SIM_TESTS_FULL=1 pytest -vv -s tests/test_chia_wallet_sdk_simulator_harness.py
