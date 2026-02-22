@@ -139,8 +139,13 @@ def test_coin_backed_signing_uses_signing_module(monkeypatch) -> None:
             "keyring_yaml_path": "/tmp/k.yaml",
             "size_base_units": 10,
             "asset_id": "xch",
+            "quote_asset": "xch",
+            "quote_price_quote_per_base": 0.5,
+            "base_unit_mojo_multiplier": 1000,
+            "quote_unit_mojo_multiplier": 1000,
         }
     )
     assert result == "deadbeef"
     assert captured["payload"]["key_id"] == "k1"
-    assert captured["payload"]["plan"]["op_type"] == "split"
+    assert captured["payload"]["plan"]["op_type"] == "offer"
+    assert captured["payload"]["plan"]["offer_amount"] == 10000

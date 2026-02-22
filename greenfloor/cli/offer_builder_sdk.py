@@ -19,6 +19,9 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
     network = str(payload.get("network", "")).strip()
     keyring_yaml_path = str(payload.get("keyring_yaml_path", "")).strip()
     size_base_units = int(payload.get("size_base_units", 0))
+    quote_price_quote_per_base = float(payload.get("quote_price_quote_per_base", 0.0))
+    base_unit_mojo_multiplier = int(payload.get("base_unit_mojo_multiplier", 0))
+    quote_unit_mojo_multiplier = int(payload.get("quote_unit_mojo_multiplier", 0))
     if not receive_address:
         raise ValueError("missing_receive_address")
     if size_base_units <= 0:
@@ -29,10 +32,34 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
         raise ValueError("missing_network")
     if not keyring_yaml_path:
         raise ValueError("missing_keyring_yaml_path")
+    if quote_price_quote_per_base <= 0:
+        raise ValueError("invalid_quote_price_quote_per_base")
+    if base_unit_mojo_multiplier <= 0:
+        raise ValueError("invalid_base_unit_mojo_multiplier")
+    if quote_unit_mojo_multiplier <= 0:
+        raise ValueError("invalid_quote_unit_mojo_multiplier")
 
     asset_id = str(payload.get("asset_id", "xch")).strip().lower() or "xch"
-    if asset_id not in {"xch", "1"}:
-        raise ValueError("asset_not_supported_yet")
+    quote_asset = str(payload.get("quote_asset", "xch")).strip().lower() or "xch"
+    if quote_asset in {"xch", "1"}:
+        request_asset_id = "xch"
+    else:
+        if len(quote_asset) != 64:
+            raise ValueError("invalid_quote_asset_id")
+        request_asset_id = quote_asset
+
+    offer_amount = int(size_base_units) * int(base_unit_mojo_multiplier)
+    request_amount = int(
+        round(
+            float(size_base_units)
+            * float(quote_price_quote_per_base)
+            * float(quote_unit_mojo_multiplier)
+        )
+    )
+    if offer_amount <= 0:
+        raise ValueError("invalid_offer_amount")
+    if request_amount <= 0:
+        raise ValueError("invalid_request_amount")
 
     result = build_signed_spend_bundle(
         {
@@ -40,12 +67,13 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
             "network": network,
             "receive_address": receive_address,
             "keyring_yaml_path": keyring_yaml_path,
-            "asset_id": "xch",
+            "asset_id": asset_id,
             "plan": {
-                "op_type": "split",
-                "size_base_units": size_base_units,
-                "op_count": 1,
-                "target_total_base_units": size_base_units,
+                "op_type": "offer",
+                "offer_asset_id": asset_id,
+                "offer_amount": offer_amount,
+                "request_asset_id": request_asset_id,
+                "request_amount": request_amount,
             },
         }
     )
