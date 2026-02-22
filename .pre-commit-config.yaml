@@ -25,7 +25,7 @@ repos:
         name: pyright
         entry: pyright
         language: system
-        pass_filenames: false
+        types: [python]
 
       - id: pytest
         name: pytest
