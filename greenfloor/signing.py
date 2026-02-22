@@ -716,11 +716,6 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         return {"status": "skipped", "reason": "missing_plan"}
     op_type = str(plan.get("op_type", "")).strip()
 
-    try:
-        sdk = _import_sdk()
-    except Exception as exc:
-        return {"status": "skipped", "reason": f"wallet_sdk_import_error:{exc}"}
-
     if op_type == "offer":
         offer_asset_id = str(plan.get("offer_asset_id", asset_id)).strip().lower()
         request_asset_id = str(plan.get("request_asset_id", "")).strip().lower()
@@ -728,6 +723,10 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         request_amount = int(plan.get("request_amount", 0))
         if not request_asset_id:
             return {"status": "skipped", "reason": "missing_request_asset_id"}
+        try:
+            sdk = _import_sdk()
+        except Exception as exc:
+            return {"status": "skipped", "reason": f"wallet_sdk_import_error:{exc}"}
         spend_bundle_hex, error = _build_offer_spend_bundle(
             sdk=sdk,
             keyring_yaml_path=keyring_yaml_path,
@@ -759,6 +758,11 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         plan["target_total_base_units"] = target_total
     if op_type not in {"split", "combine"} or target_total <= 0:
         return {"status": "skipped", "reason": "invalid_plan"}
+
+    try:
+        sdk = _import_sdk()
+    except Exception as exc:
+        return {"status": "skipped", "reason": f"wallet_sdk_import_error:{exc}"}
 
     coins = _list_unspent_xch_coins(sdk=sdk, receive_address=receive_address, network=network)
     if not coins:

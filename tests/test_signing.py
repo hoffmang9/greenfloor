@@ -252,7 +252,9 @@ def test_signing_uses_testnet11_coinset_adapter_network(monkeypatch) -> None:
             captured["network"] = network
             captured["require_testnet11"] = require_testnet11
 
-        def get_coin_records_by_puzzle_hash(self, *, puzzle_hash_hex: str, include_spent_coins: bool):
+        def get_coin_records_by_puzzle_hash(
+            self, *, puzzle_hash_hex: str, include_spent_coins: bool
+        ):
             _ = puzzle_hash_hex
             _ = include_spent_coins
             return []

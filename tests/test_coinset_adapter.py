@@ -68,7 +68,9 @@ def test_coinset_adapter_get_coin_records_by_puzzle_hash_filters_non_dicts(monke
 
     monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
     adapter = CoinsetAdapter()
-    records = adapter.get_coin_records_by_puzzle_hash(puzzle_hash_hex="0x11", include_spent_coins=False)
+    records = adapter.get_coin_records_by_puzzle_hash(
+        puzzle_hash_hex="0x11", include_spent_coins=False
+    )
     assert records == [{"coin": {"amount": 1}}]
 
 
@@ -94,7 +96,9 @@ def test_coinset_adapter_get_puzzle_and_solution_adds_height_when_provided(monke
     def _fake_urlopen(req, timeout=None):
         _ = timeout
         captured_bodies.append(json.loads(req.data.decode("utf-8")))
-        return _FakeResponse({"success": True, "coin_solution": {"puzzle_reveal": "80", "solution": "80"}})
+        return _FakeResponse(
+            {"success": True, "coin_solution": {"puzzle_reveal": "80", "solution": "80"}}
+        )
 
     monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
     adapter = CoinsetAdapter()
@@ -109,7 +113,9 @@ def test_coinset_adapter_get_puzzle_and_solution_omits_non_positive_height(monke
     def _fake_urlopen(req, timeout=None):
         _ = timeout
         captured_bodies.append(json.loads(req.data.decode("utf-8")))
-        return _FakeResponse({"success": True, "coin_solution": {"puzzle_reveal": "80", "solution": "80"}})
+        return _FakeResponse(
+            {"success": True, "coin_solution": {"puzzle_reveal": "80", "solution": "80"}}
+        )
 
     monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
     adapter = CoinsetAdapter()
@@ -127,4 +133,3 @@ def test_coinset_adapter_push_tx_returns_payload_dict(monkeypatch) -> None:
     result = adapter.push_tx(spend_bundle_hex="0xdeadbeef")
     assert result["success"] is True
     assert result["status"] == "submitted"
-
