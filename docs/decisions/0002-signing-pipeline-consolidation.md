@@ -26,3 +26,4 @@ Older intermediate wrappers remain in-repo for compatibility and migration safet
 - Default signer execution is easier to test and reason about.
 - Fewer environment-variable override points are required for normal operation.
 - Future signing work should extend existing layers instead of adding new default chain stages without a new architecture decision.
+- Coin lookup, chain-history reads, and transaction submission are handled via the Coinset adapter boundary (`greenfloor/adapters/coinset.py`) rather than direct SDK RPC client calls in signing/wallet paths.

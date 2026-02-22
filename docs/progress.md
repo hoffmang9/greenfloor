@@ -1,5 +1,38 @@
 # Progress Log
 
+## 2026-02-22
+
+- Replaced SDK RPC client usage in active signing/wallet coin paths with `CoinsetAdapter`:
+  - `greenfloor/signing.py` coin discovery + CAT parent lineage reads + `push_tx` now call Coinset HTTP endpoints through `greenfloor/adapters/coinset.py`.
+  - `greenfloor/adapters/wallet.py` XCH inventory reads now use `CoinsetAdapter` coin-record queries.
+  - Removed legacy `GREENFLOOR_WALLET_SDK_COINSET_URL`; active Coinset override is `GREENFLOOR_COINSET_BASE_URL`.
+  - Added deterministic adapter coverage in `tests/test_coinset_adapter.py` (network routing defaults, endpoint request/response handling) plus signing test coverage asserting testnet11 adapter routing.
+- Verified quality gates after Coinset adapter migration:
+  - `ruff check`
+  - `pytest` full suite (`132 passed, 2 skipped`)
+
+- Implemented in-process SDK offer-signing path for manager offer builds:
+  - `greenfloor/signing.py` now supports `plan.op_type: "offer"` with direct spend construction/signing in-process.
+  - Added CAT coin discovery path for selected receive-address puzzle hash + asset id, including parent-spend lineage reconstruction via Coinset `get_coin_record_by_name` and `get_puzzle_and_solution`.
+  - Added mixed-asset offer action building (`Action.send`) with explicit requested-asset output and offered-asset change handling.
+  - Preserved existing split/combine signing path for daemon coin-op execution.
+- Updated manager offer builder contract:
+  - `greenfloor/cli/offer_builder_sdk.py` now builds offer-plan payloads (`offer_asset_id`, `offer_amount`, `request_asset_id`, `request_amount`) instead of split-plan payloads.
+  - Added quote/base multiplier and quote-price validation guards in coin-backed builder path.
+- Added deterministic test coverage for offer-plan delegation and manager builder contract updates:
+  - `tests/test_signing.py` adds offer-plan branch tests.
+  - `tests/test_offer_builder_sdk.py` updated for offer-plan payload assertions.
+- Ran live manager proof commands on `testnet11`:
+  - `build-and-post-offer --pair CARBON22:xch --size-base-units 1 --network testnet11 --dry-run`
+  - `build-and-post-offer --pair CARBON22:xch --size-base-units 1 --network testnet11`
+  - Both currently fail with `signing_failed:no_unspent_offer_cat_coins`.
+  - Verified configured receive address has zero XCH and zero CAT balances on `testnet11` across the seeded supported-asset list.
+- Verified quality gates after implementation:
+  - `ruff check`
+  - `ruff format --check`
+  - `pyright`
+  - `pytest` (`122 passed, 2 skipped`)
+
 ## 2026-02-21
 
 ### Architecture simplification

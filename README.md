@@ -79,7 +79,7 @@ Operator overrides (all optional):
 - `GREENFLOOR_OFFER_BUILDER_CMD` — override the default in-process offer builder with an external subprocess for manager offer construction.
 - `GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON` — JSON map for key ID -> fingerprint; normally injected from `program.yaml` signer key registry by daemon path.
 - `GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT` — integer derivation depth scan limit for matching selected coin puzzle hashes (default `200`).
-- `GREENFLOOR_WALLET_SDK_COINSET_URL` — custom coinset RPC URL (overrides mainnet/testnet defaults).
+- `GREENFLOOR_COINSET_BASE_URL` — custom Coinset API base URL for coin queries and `push_tx`; when unset, `CoinsetAdapter` defaults to mainnet and can be forced to testnet11 by network selection.
 
 Signer key resolution contract is repo-managed through `program.yaml`:
 - `keys.registry[].key_id` must match market `signer_key_id`

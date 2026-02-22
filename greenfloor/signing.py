@@ -7,12 +7,13 @@ WalletAdapter) and the manager (offer building via offer_builder_sdk).
 
 from __future__ import annotations
 
-import asyncio
 import importlib
 import json
 import os
 from pathlib import Path
 from typing import Any
+
+from greenfloor.adapters.coinset import CoinsetAdapter
 
 _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK: dict[str, bytes] = {
     "mainnet": bytes.fromhex("37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"),
@@ -54,34 +55,163 @@ def _import_sdk() -> Any:
     return importlib.import_module("chia_wallet_sdk")
 
 
+def _coinset_base_url(*, network: str) -> str:
+    _ = network
+    return os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip()
+
+
+def _coinset_adapter(*, network: str) -> CoinsetAdapter:
+    base_url = _coinset_base_url(network=network)
+    return CoinsetAdapter(base_url or None, network=network)
+
+
+def _to_coinset_hex(value: bytes) -> str:
+    return f"0x{value.hex()}"
+
+
+def _coin_from_record(*, sdk: Any, record: dict[str, Any]) -> Any | None:
+    coin_data = record.get("coin")
+    if not isinstance(coin_data, dict):
+        return None
+    parent_hex = str(coin_data.get("parent_coin_info", "")).strip()
+    puzzle_hex = str(coin_data.get("puzzle_hash", "")).strip()
+    amount_raw = coin_data.get("amount", 0)
+    if not parent_hex or not puzzle_hex:
+        return None
+    try:
+        return sdk.Coin(
+            _hex_to_bytes(parent_hex),
+            _hex_to_bytes(puzzle_hex),
+            int(amount_raw),
+        )
+    except Exception:
+        return None
+
+
+def _spent_height_from_record(record: dict[str, Any]) -> int:
+    spent_raw = record.get("spent_block_index", record.get("spent_height", 0))
+    try:
+        return int(spent_raw or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+class _CoinSolutionView:
+    def __init__(self, *, puzzle_reveal: bytes, solution: bytes) -> None:
+        self.puzzle_reveal = puzzle_reveal
+        self.solution = solution
+
+
 # ---------------------------------------------------------------------------
 # Coin discovery
 # ---------------------------------------------------------------------------
 
 
 def _list_unspent_xch_coins(*, sdk: Any, receive_address: str, network: str) -> list[Any]:
-    async def _fetch() -> list[Any]:
+    try:
         address = sdk.Address.decode(receive_address)
         puzzle_hash = address.puzzle_hash
-        custom_url = os.getenv("GREENFLOOR_WALLET_SDK_COINSET_URL", "").strip()
-        if custom_url:
-            client = sdk.RpcClient(custom_url)
-        elif network == "testnet11":
-            client = sdk.RpcClient.testnet11()
-        else:
-            client = sdk.RpcClient.mainnet()
-        response = await client.get_coin_records_by_puzzle_hash(
-            puzzle_hash, includeSpentCoins=False
+        records = _coinset_adapter(network=network).get_coin_records_by_puzzle_hash(
+            puzzle_hash_hex=_to_coinset_hex(puzzle_hash),
+            include_spent_coins=False,
         )
-        if not getattr(response, "success", False):
-            return []
-        records = getattr(response, "coin_records", None) or []
-        return [r.coin for r in records if getattr(r, "coin", None) is not None]
-
-    try:
-        return asyncio.run(_fetch())
+        coins: list[Any] = []
+        for record in records:
+            coin = _coin_from_record(sdk=sdk, record=record)
+            if coin is not None:
+                coins.append(coin)
+        return coins
     except Exception:
         return []
+
+
+def _list_unspent_cat_coins(
+    *,
+    sdk: Any,
+    receive_address: str,
+    network: str,
+    asset_id: str,
+) -> list[Any]:
+    try:
+        address = sdk.Address.decode(receive_address)
+        inner_puzzle_hash = address.puzzle_hash
+        asset_id_bytes = _hex_to_bytes(asset_id)
+        cat_puzzle_hash = sdk.cat_puzzle_hash(asset_id_bytes, inner_puzzle_hash)
+        coinset = _coinset_adapter(network=network)
+        records = coinset.get_coin_records_by_puzzle_hash(
+            puzzle_hash_hex=_to_coinset_hex(cat_puzzle_hash),
+            include_spent_coins=False,
+        )
+        if not records:
+            return []
+
+        clvm = sdk.Clvm()
+        cats: list[Any] = []
+        for record in records:
+            coin = _coin_from_record(sdk=sdk, record=record)
+            if coin is None:
+                continue
+
+            parent_record = coinset.get_coin_record_by_name(
+                coin_name_hex=_to_coinset_hex(coin.parent_coin_info)
+            )
+            if parent_record is None:
+                continue
+            parent_coin = _coin_from_record(sdk=sdk, record=parent_record)
+            if parent_coin is None:
+                continue
+            parent_spent_height = _spent_height_from_record(parent_record)
+            if parent_spent_height <= 0:
+                continue
+
+            parent_solution_record = coinset.get_puzzle_and_solution(
+                coin_id_hex=_to_coinset_hex(parent_coin.coin_id()),
+                height=parent_spent_height,
+            )
+            if parent_solution_record is None:
+                continue
+            puzzle_reveal_hex = str(parent_solution_record.get("puzzle_reveal", "")).strip()
+            solution_hex = str(parent_solution_record.get("solution", "")).strip()
+            if not puzzle_reveal_hex or not solution_hex:
+                continue
+
+            try:
+                parent_coin_spend = _CoinSolutionView(
+                    puzzle_reveal=_hex_to_bytes(puzzle_reveal_hex),
+                    solution=_hex_to_bytes(solution_hex),
+                )
+                parent_puzzle = clvm.deserialize(parent_coin_spend.puzzle_reveal)
+                parent_solution = clvm.deserialize(parent_coin_spend.solution)
+            except Exception:
+                continue
+            try:
+                parsed_children = parent_puzzle.parse_child_cats(parent_coin, parent_solution)
+            except Exception:
+                parsed_children = None
+            if not parsed_children:
+                continue
+            for cat in parsed_children:
+                child_coin = getattr(cat, "coin", None)
+                if child_coin is None:
+                    continue
+                if sdk.to_hex(child_coin.coin_id()) == sdk.to_hex(coin.coin_id()):
+                    cats.append(cat)
+                    break
+        return cats
+    except Exception:
+        return []
+
+
+def _select_cats(cats: list[Any], target_total: int) -> list[Any]:
+    sorted_cats = sorted(cats, key=lambda c: int(c.coin.amount))
+    selected: list[Any] = []
+    running = 0
+    for cat in sorted_cats:
+        selected.append(cat)
+        running += int(cat.coin.amount)
+        if running >= target_total:
+            return selected
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +326,11 @@ def _build_spend_bundle(
     selected_coin_puzzle_hashes: set[bytes] = set()
     for item in payload.get("selected_coins", []):
         try:
-            selected_coin_puzzle_hashes.add(_hex_to_bytes(str(item["puzzle_hash"])))
+            p2_puzzle_hash_hex = str(item.get("p2_puzzle_hash", "")).strip()
+            if p2_puzzle_hash_hex:
+                selected_coin_puzzle_hashes.add(_hex_to_bytes(p2_puzzle_hash_hex))
+            else:
+                selected_coin_puzzle_hashes.add(_hex_to_bytes(str(item["puzzle_hash"])))
         except Exception as exc:
             return None, f"invalid_selected_coin_puzzle_hash:{exc}"
 
@@ -298,6 +432,219 @@ def _build_spend_bundle(
         return None, f"sign_spend_bundle_error:{exc}"
 
 
+def _asset_id_to_sdk_id(*, sdk: Any, asset_id: str) -> Any:
+    raw = asset_id.strip().lower()
+    if raw in {"", "xch", "1"}:
+        return sdk.Id.xch()
+    return sdk.Id.existing(_hex_to_bytes(raw))
+
+
+def _build_offer_spend_bundle(
+    *,
+    sdk: Any,
+    keyring_yaml_path: str,
+    key_id: str,
+    network: str,
+    receive_address: str,
+    offer_asset_id: str,
+    offer_amount: int,
+    request_asset_id: str,
+    request_amount: int,
+) -> tuple[str | None, str | None]:
+    if offer_amount <= 0 or request_amount <= 0:
+        return None, "invalid_offer_or_request_amount"
+
+    receive_puzzle_hash = sdk.Address.decode(receive_address).puzzle_hash
+    offer_asset = offer_asset_id.strip().lower()
+    offered_selected_xch: list[Any] = []
+    offered_selected_cats: list[Any] = []
+
+    if offer_asset in {"", "xch", "1"}:
+        xch_coins = _list_unspent_xch_coins(
+            sdk=sdk,
+            receive_address=receive_address,
+            network=network,
+        )
+        if not xch_coins:
+            return None, "no_unspent_offer_xch_coins"
+        try:
+            offered_selected_xch = sdk.select_coins(xch_coins, offer_amount)
+        except Exception as exc:
+            return None, f"offer_coin_selection_failed:{exc}"
+    else:
+        cat_coins = _list_unspent_cat_coins(
+            sdk=sdk,
+            receive_address=receive_address,
+            network=network,
+            asset_id=offer_asset,
+        )
+        if not cat_coins:
+            return None, "no_unspent_offer_cat_coins"
+        offered_selected_cats = _select_cats(cat_coins, offer_amount)
+        if not offered_selected_cats:
+            return None, "insufficient_offer_cat_coins"
+
+    offered_total = 0
+    selected_coin_entries: list[dict[str, Any]] = []
+    for coin in offered_selected_xch:
+        amount = int(coin.amount)
+        offered_total += amount
+        selected_coin_entries.append(
+            {
+                "coin_id": sdk.to_hex(coin.coin_id()),
+                "parent_coin_info": sdk.to_hex(coin.parent_coin_info),
+                "puzzle_hash": sdk.to_hex(coin.puzzle_hash),
+                "amount": amount,
+                "p2_puzzle_hash": sdk.to_hex(coin.puzzle_hash),
+            }
+        )
+    for cat in offered_selected_cats:
+        amount = int(cat.coin.amount)
+        offered_total += amount
+        selected_coin_entries.append(
+            {
+                "coin_id": sdk.to_hex(cat.coin.coin_id()),
+                "parent_coin_info": sdk.to_hex(cat.coin.parent_coin_info),
+                "puzzle_hash": sdk.to_hex(cat.coin.puzzle_hash),
+                "amount": amount,
+                "p2_puzzle_hash": sdk.to_hex(cat.info.p2_puzzle_hash),
+            }
+        )
+    if offered_total < offer_amount:
+        return None, "insufficient_offer_coin_total"
+
+    master_private_key, key_error = _load_master_private_key(keyring_yaml_path, key_id)
+    if key_error:
+        return None, key_error
+    if master_private_key is None:
+        return None, "key_secrets_unavailable"
+
+    additional_data = _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK.get(network)
+    if additional_data is None:
+        return None, "unsupported_network_for_signing"
+
+    try:
+        conditions_mod = importlib.import_module("chia.consensus.condition_tools")
+        default_constants = importlib.import_module("chia.consensus.default_constants")
+        serialized_program = importlib.import_module(
+            "chia.types.blockchain_format.serialized_program"
+        )
+        chia_rs = importlib.import_module("chia_rs")
+    except Exception as exc:
+        return None, f"chia_signing_import_error:{exc}"
+
+    try:
+        master_sk = sdk.SecretKey.from_bytes(bytes(master_private_key))
+    except Exception as exc:
+        return None, f"master_key_conversion_error:{exc}"
+
+    derivation_scan_limit = int(os.getenv("GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT", "200"))
+    selected_coin_puzzle_hashes = {
+        _hex_to_bytes(str(item["p2_puzzle_hash"])) for item in selected_coin_entries
+    }
+    synthetic_sk_by_puzzle_hash: dict[bytes, Any] = {}
+    for index in range(derivation_scan_limit):
+        for derive_fn in (
+            master_sk.derive_unhardened_path,
+            master_sk.derive_hardened_path,
+        ):
+            try:
+                child_sk = derive_fn([12381, 8444, 2, index])
+                synthetic_sk = child_sk.derive_synthetic()
+                puzzle_hash = sdk.standard_puzzle_hash(synthetic_sk.public_key())
+            except Exception:
+                continue
+            if (
+                puzzle_hash in selected_coin_puzzle_hashes
+                and puzzle_hash not in synthetic_sk_by_puzzle_hash
+            ):
+                synthetic_sk_by_puzzle_hash[puzzle_hash] = synthetic_sk
+        if len(synthetic_sk_by_puzzle_hash) == len(selected_coin_puzzle_hashes):
+            break
+    if len(synthetic_sk_by_puzzle_hash) != len(selected_coin_puzzle_hashes):
+        return None, "derivation_scan_failed_for_selected_coin"
+
+    try:
+        clvm = sdk.Clvm()
+        spends = sdk.Spends(clvm, receive_puzzle_hash)
+        for coin in offered_selected_xch:
+            spends.add_xch(coin)
+        for cat in offered_selected_cats:
+            spends.add_cat(cat)
+
+        actions: list[Any] = [
+            sdk.Action.send(
+                _asset_id_to_sdk_id(sdk=sdk, asset_id=request_asset_id),
+                receive_puzzle_hash,
+                request_amount,
+            )
+        ]
+        offer_change = offered_total - offer_amount
+        if offer_change > 0:
+            actions.append(
+                sdk.Action.send(
+                    _asset_id_to_sdk_id(sdk=sdk, asset_id=offer_asset_id),
+                    receive_puzzle_hash,
+                    offer_change,
+                )
+            )
+        deltas = spends.apply(actions)
+        finished = spends.prepare(deltas)
+        for pending_spend in finished.pending_spends():
+            coin = pending_spend.coin()
+            try:
+                signing_puzzle_hash = pending_spend.p2_puzzle_hash()
+            except Exception:
+                signing_puzzle_hash = coin.puzzle_hash
+            synthetic_sk = synthetic_sk_by_puzzle_hash.get(signing_puzzle_hash)
+            if synthetic_sk is None:
+                return None, "missing_signing_key_for_pending_spend"
+            delegated = clvm.delegated_spend(pending_spend.conditions())
+            clvm.spend_standard_coin(coin, synthetic_sk.public_key(), delegated)
+        coin_spends = clvm.coin_spends()
+    except Exception as exc:
+        return None, f"build_offer_spend_bundle_error:{exc}"
+
+    try:
+        signatures = []
+        sk_by_pk_bytes: dict[bytes, Any] = {}
+        for synthetic_sk in synthetic_sk_by_puzzle_hash.values():
+            sk_by_pk_bytes[synthetic_sk.public_key().to_bytes()] = synthetic_sk
+        for coin_spend in coin_spends:
+            puzzle_reveal = serialized_program.SerializedProgram.from_bytes(
+                coin_spend.puzzle_reveal
+            )
+            solution = serialized_program.SerializedProgram.from_bytes(coin_spend.solution)
+            conditions_dict = conditions_mod.conditions_dict_for_solution(
+                puzzle_reveal,
+                solution,
+                default_constants.DEFAULT_CONSTANTS.MAX_BLOCK_COST_CLVM,
+            )
+            coin_for_pkm = chia_rs.Coin(
+                coin_spend.coin.parent_coin_info,
+                coin_spend.coin.puzzle_hash,
+                coin_spend.coin.amount,
+            )
+            for public_key, message in conditions_mod.pkm_pairs_for_conditions_dict(
+                conditions_dict,
+                coin_for_pkm,
+                additional_data,
+            ):
+                sk = sk_by_pk_bytes.get(bytes(public_key))
+                if sk is None:
+                    return None, "missing_private_key_for_agg_sig_target"
+                synthetic_sk_chia = chia_rs.PrivateKey.from_bytes(sk.to_bytes())
+                signatures.append(chia_rs.AugSchemeMPL.sign(synthetic_sk_chia, message))
+        if not signatures:
+            return None, "no_agg_sig_targets_found"
+        aggregate_sig = chia_rs.AugSchemeMPL.aggregate(signatures)
+        sdk_signature = sdk.Signature.from_bytes(bytes(aggregate_sig))
+        spend_bundle = sdk.SpendBundle(coin_spends, sdk_signature)
+        return sdk.to_hex(spend_bundle.to_bytes()), None
+    except Exception as exc:
+        return None, f"sign_spend_bundle_error:{exc}"
+
+
 # ---------------------------------------------------------------------------
 # Broadcast
 # ---------------------------------------------------------------------------
@@ -325,40 +672,23 @@ def _broadcast_spend_bundle(*, sdk: Any, spend_bundle_hex: str, network: str) ->
             "operation_id": None,
         }
 
-    async def _push() -> dict[str, Any]:
-        try:
-            custom_url = os.getenv("GREENFLOOR_WALLET_SDK_COINSET_URL", "").strip()
-            if custom_url:
-                client = sdk.RpcClient(custom_url)
-            elif network == "testnet11":
-                client = sdk.RpcClient.testnet11()
-            else:
-                client = sdk.RpcClient.mainnet()
-            response = await client.push_tx(spend_bundle)
-        except Exception as exc:
-            return {
-                "status": "skipped",
-                "reason": f"push_tx_error:{exc}",
-                "operation_id": None,
-            }
-        if not getattr(response, "success", False):
-            err = getattr(response, "error", None) or "push_tx_rejected"
-            return {"status": "skipped", "reason": str(err), "operation_id": None}
-        tx_id = sdk.to_hex(spend_bundle.hash())
-        return {
-            "status": "executed",
-            "reason": str(getattr(response, "status", "submitted")),
-            "operation_id": tx_id,
-        }
-
     try:
-        return asyncio.run(_push())
-    except RuntimeError as exc:
+        response = _coinset_adapter(network=network).push_tx(spend_bundle_hex=spend_bundle_hex)
+    except Exception as exc:
         return {
             "status": "skipped",
-            "reason": f"push_tx_runtime_error:{exc}",
+            "reason": f"push_tx_error:{exc}",
             "operation_id": None,
         }
+    if not bool(response.get("success", False)):
+        err = response.get("error") or "push_tx_rejected"
+        return {"status": "skipped", "reason": str(err), "operation_id": None}
+    tx_id = sdk.to_hex(spend_bundle.hash())
+    return {
+        "status": "executed",
+        "reason": str(response.get("status", "submitted")),
+        "operation_id": tx_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -381,13 +711,45 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         return {"status": "skipped", "reason": "missing_key_or_network_or_address"}
     if not keyring_yaml_path:
         return {"status": "skipped", "reason": "missing_keyring_yaml_path"}
-    if asset_id not in {"xch", "1", ""}:
-        return {"status": "skipped", "reason": "asset_not_supported_yet"}
-
     plan = payload.get("plan") or {}
     if not isinstance(plan, dict):
         return {"status": "skipped", "reason": "missing_plan"}
     op_type = str(plan.get("op_type", "")).strip()
+
+    try:
+        sdk = _import_sdk()
+    except Exception as exc:
+        return {"status": "skipped", "reason": f"wallet_sdk_import_error:{exc}"}
+
+    if op_type == "offer":
+        offer_asset_id = str(plan.get("offer_asset_id", asset_id)).strip().lower()
+        request_asset_id = str(plan.get("request_asset_id", "")).strip().lower()
+        offer_amount = int(plan.get("offer_amount", 0))
+        request_amount = int(plan.get("request_amount", 0))
+        if not request_asset_id:
+            return {"status": "skipped", "reason": "missing_request_asset_id"}
+        spend_bundle_hex, error = _build_offer_spend_bundle(
+            sdk=sdk,
+            keyring_yaml_path=keyring_yaml_path,
+            key_id=key_id,
+            network=network,
+            receive_address=receive_address,
+            offer_asset_id=offer_asset_id,
+            offer_amount=offer_amount,
+            request_asset_id=request_asset_id,
+            request_amount=request_amount,
+        )
+        if spend_bundle_hex is None:
+            return {"status": "skipped", "reason": f"signing_failed:{error}"}
+        return {
+            "status": "executed",
+            "reason": "signing_success",
+            "spend_bundle_hex": spend_bundle_hex,
+        }
+
+    if asset_id not in {"xch", "1", ""}:
+        return {"status": "skipped", "reason": "asset_not_supported_yet"}
+
     size_base_units = int(plan.get("size_base_units", 0))
     op_count = int(plan.get("op_count", 0))
     target_total = int(plan.get("target_total_base_units", 0))
@@ -397,11 +759,6 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
         plan["target_total_base_units"] = target_total
     if op_type not in {"split", "combine"} or target_total <= 0:
         return {"status": "skipped", "reason": "invalid_plan"}
-
-    try:
-        sdk = _import_sdk()
-    except Exception as exc:
-        return {"status": "skipped", "reason": f"wallet_sdk_import_error:{exc}"}
 
     coins = _list_unspent_xch_coins(sdk=sdk, receive_address=receive_address, network=network)
     if not coins:

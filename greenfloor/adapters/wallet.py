@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import importlib
 import json
 import os
@@ -9,6 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.core.coin_ops import CoinOpPlan
 from greenfloor.keys.onboarding import load_key_onboarding_selection
 
@@ -345,41 +345,26 @@ class WalletAdapter:
         except Exception:
             return []
 
-        async def _fetch() -> list[int]:
-            try:
-                if hasattr(sdk, "Address"):
-                    address = sdk.Address.decode(receive_address)
-                    puzzle_hash = address.puzzle_hash
-                else:
-                    return []
-
-                custom_url = os.getenv("GREENFLOOR_WALLET_SDK_COINSET_URL", "").strip()
-                if custom_url:
-                    client = sdk.RpcClient(custom_url)
-                elif network == "testnet11":
-                    client = sdk.RpcClient.testnet11()
-                else:
-                    client = sdk.RpcClient.mainnet()
-
-                response = await client.get_coin_records_by_puzzle_hash(
-                    puzzle_hash,
-                    includeSpentCoins=False,
-                )
-                if not getattr(response, "success", False):
-                    return []
-                records = getattr(response, "coin_records", None) or []
-                out: list[int] = []
-                for record in records:
-                    coin = getattr(record, "coin", None)
-                    amount = getattr(coin, "amount", None)
-                    if amount is None:
-                        continue
-                    out.append(int(amount))
-                return out
-            except Exception:
-                return []
-
         try:
-            return asyncio.run(_fetch())
-        except RuntimeError:
+            if not hasattr(sdk, "Address"):
+                return []
+            address = sdk.Address.decode(receive_address)
+            puzzle_hash = address.puzzle_hash
+            base_url = os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip()
+            coinset = CoinsetAdapter(base_url or None, network=network)
+            records = coinset.get_coin_records_by_puzzle_hash(
+                puzzle_hash_hex=f"0x{bytes(puzzle_hash).hex()}",
+                include_spent_coins=False,
+            )
+            out: list[int] = []
+            for record in records:
+                coin_data = record.get("coin")
+                if not isinstance(coin_data, dict):
+                    continue
+                amount = coin_data.get("amount")
+                if amount is None:
+                    continue
+                out.append(int(amount))
+            return out
+        except Exception:
             return []
