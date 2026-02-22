@@ -37,6 +37,12 @@ jobs:
             testnet workflow."
             exit 0
           fi
+          printf "1\n%s\n" "${TESTNET_WALLET_MNEMONIC}" | \
+            greenfloor-manager \
+              --program-config config/program.yaml \
+              keys-onboard \
+              --key-id key-main-1 \
+              --state-dir ./.tmp-state
           greenfloor-manager config-validate \
             --program-config config/program.yaml \
             --markets-config config/markets.yaml

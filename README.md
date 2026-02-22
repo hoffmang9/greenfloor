@@ -58,6 +58,8 @@ greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1 
 greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1
 ```
 
+On `testnet11`, the native coin is commonly called `TXCH`. Pair/input syntax still uses `xch` in CLI arguments (for example `CARBON22:xch`) across networks.
+
 Check offer status and reconcile:
 
 ```bash
@@ -91,6 +93,12 @@ Operator overrides (all optional):
 - `GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON` — JSON map for key ID -> fingerprint; normally injected from `program.yaml` signer key registry by daemon path.
 - `GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT` — integer derivation depth scan limit for matching selected coin puzzle hashes (default `200`).
 - `GREENFLOOR_COINSET_BASE_URL` — custom Coinset API base URL for coin queries and `push_tx`; when unset, `CoinsetAdapter` defaults to mainnet and can be forced to testnet11 by network selection.
+
+CI secret for optional live testnet workflow:
+
+- `TESTNET_WALLET_MNEMONIC` — importable wallet mnemonic used by `.github/workflows/live-testnet-e2e.yml` for `keys-onboard` mnemonic import.
+- Format: whitespace-delimited `12` or `24` words (plain text mnemonic).
+- Testnet receive-address example for this wallet: `txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k`.
 
 Signer key resolution contract is repo-managed through `program.yaml`:
 
