@@ -34,13 +34,13 @@ jobs:
         run: |
           python -m venv .venv
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev]"
 
       - name: Install formatting tools
         run: |
           npm install --global prettier@4.0.0-alpha.8
-          python -m pip install yamllint==1.35.1
+          .venv/bin/python -m pip install yamllint==1.35.1
 
       - name: Install Rust toolchain (sim harness)
         if: matrix.os == 'ubuntu-latest'
