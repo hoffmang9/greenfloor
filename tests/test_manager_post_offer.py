@@ -143,7 +143,9 @@ def _write_markets_with_duplicate_pair(path: Path) -> None:
 
 
 def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, capsys) -> None:
+    program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
+    _write_program(program)
     _write_markets(markets)
     captured: dict = {}
 
@@ -164,7 +166,9 @@ def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, c
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
 
     code = _build_and_post_offer(
+        program_path=program,
         markets_path=markets,
+        network="mainnet",
         market_id="m1",
         pair=None,
         size_base_units=10,
@@ -190,7 +194,9 @@ def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, c
 def test_build_and_post_offer_dry_run_builds_but_does_not_post(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
+    program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
+    _write_program(program)
     _write_markets(markets)
 
     class _FailDexie:
@@ -204,7 +210,9 @@ def test_build_and_post_offer_dry_run_builds_but_does_not_post(
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FailDexie)
 
     code = _build_and_post_offer(
+        program_path=program,
         markets_path=markets,
+        network="mainnet",
         market_id="m1",
         pair=None,
         size_base_units=1,
@@ -224,7 +232,9 @@ def test_build_and_post_offer_dry_run_builds_but_does_not_post(
 
 
 def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Path, capsys) -> None:
+    program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
+    _write_program(program)
     _write_markets(markets)
 
     class _FakeDexie:
@@ -242,7 +252,9 @@ def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Pat
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
 
     code = _build_and_post_offer(
+        program_path=program,
         markets_path=markets,
+        network="mainnet",
         market_id=None,
         pair="A1:xch",
         size_base_units=10,
@@ -264,11 +276,15 @@ def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Pat
 def test_build_and_post_offer_pair_ambiguous_requires_market_id(
     monkeypatch, tmp_path: Path
 ) -> None:
+    program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
+    _write_program(program)
     _write_markets_with_duplicate_pair(markets)
     try:
         _build_and_post_offer(
+            program_path=program,
             markets_path=markets,
+            network="mainnet",
             market_id=None,
             pair="a1:xch",
             size_base_units=10,
@@ -286,11 +302,15 @@ def test_build_and_post_offer_pair_ambiguous_requires_market_id(
 
 
 def test_build_and_post_offer_rejects_unknown_market(monkeypatch, tmp_path: Path) -> None:
+    program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
+    _write_program(program)
     _write_markets(markets)
     try:
         _build_and_post_offer(
+            program_path=program,
             markets_path=markets,
+            network="mainnet",
             market_id="missing",
             pair=None,
             size_base_units=10,
@@ -310,7 +330,9 @@ def test_build_and_post_offer_rejects_unknown_market(monkeypatch, tmp_path: Path
 def test_build_and_post_offer_posts_to_splash_when_selected(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
+    program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
+    _write_program(program)
     _write_markets(markets)
 
     class _FakeSplash:
@@ -328,7 +350,9 @@ def test_build_and_post_offer_posts_to_splash_when_selected(
     monkeypatch.setattr("greenfloor.cli.manager.SplashAdapter", _FakeSplash)
 
     code = _build_and_post_offer(
+        program_path=program,
         markets_path=markets,
+        network="mainnet",
         market_id="m1",
         pair=None,
         size_base_units=1,
@@ -344,3 +368,16 @@ def test_build_and_post_offer_posts_to_splash_when_selected(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["results"][0]["venue"] == "splash"
     assert payload["results"][0]["result"]["id"] == "splash-1"
+
+
+def test_build_offer_text_for_request_direct_call(monkeypatch) -> None:
+    """Verify that _build_offer_text_for_request calls offer_builder_sdk.build_offer directly."""
+    from greenfloor.cli import manager
+
+    monkeypatch.delenv("GREENFLOOR_OFFER_BUILDER_CMD", raising=False)
+    monkeypatch.setattr(
+        "greenfloor.cli.offer_builder_sdk.build_offer",
+        lambda _payload: "offer1direct",
+    )
+    result = manager._build_offer_text_for_request({"test": True})
+    assert result == "offer1direct"

@@ -19,19 +19,6 @@ dev = [
 [project.scripts]
 greenfloor-manager = "greenfloor.cli.manager:main"
 greenfloord = "greenfloor.daemon.main:main"
-greenfloor-wallet-executor = "greenfloor.cli.wallet_executor:main"
-greenfloor-chia-keys-executor = "greenfloor.cli.chia_keys_executor:main"
-greenfloor-chia-keys-passthrough = "greenfloor.cli.chia_keys_passthrough:main"
-greenfloor-chia-keys-worker = "greenfloor.cli.chia_keys_worker:main"
-greenfloor-chia-keys-signer = "greenfloor.cli.chia_keys_signer:main"
-greenfloor-chia-keys-signer-backend = "greenfloor.cli.chia_keys_signer_backend:main"
-greenfloor-chia-keys-builder = "greenfloor.cli.chia_keys_builder:main"
-greenfloor-chia-keys-bundle-signer = "greenfloor.cli.chia_keys_bundle_signer:main"
-greenfloor-chia-keys-bundle-signer-raw = "greenfloor.cli.chia_keys_bundle_signer_raw:main"
-greenfloor-chia-keys-raw-engine = "greenfloor.cli.chia_keys_raw_engine:main"
-greenfloor-chia-keys-raw-engine-sign = "greenfloor.cli.chia_keys_raw_engine_sign:main"
-greenfloor-chia-keys-raw-engine-sign-impl = "greenfloor.cli.chia_keys_raw_engine_sign_impl:main"
-greenfloor-chia-keys-raw-engine-sign-impl-sdk-submit = "greenfloor.cli.chia_keys_raw_engine_sign_impl_sdk_submit:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

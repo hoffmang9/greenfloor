@@ -14,6 +14,43 @@ This file defines implementation conventions for coding agents and contributors.
   - `greenfloor/core`: deterministic policy logic only (no IO).
   - `greenfloor/config`: parse/validate configuration.
   - `greenfloor/* adapters`: side effects (network, filesystem, wallet, notifications).
+  - `greenfloor/signing.py`: unified signing module (coin discovery, spend-bundle construction, broadcast).
+  - `greenfloor/cli/manager.py`: operator CLI commands.
+  - `greenfloor/cli/offer_builder_sdk.py`: offer text construction.
+
+## Simplicity and Design Discipline
+
+These rules exist because earlier implementation rounds introduced unnecessary complexity that had to be removed. Follow them strictly.
+
+### Prefer direct function calls over subprocess chains
+
+- Within the same Python package, always use direct function calls.
+- Never spawn a subprocess to call another module in the same virtualenv unless there is an explicit isolation or security requirement documented in a decision note.
+- One env-var escape hatch per boundary is acceptable for operator overrides (e.g. `GREENFLOOR_WALLET_EXECUTOR_CMD`, `GREENFLOOR_OFFER_BUILDER_CMD`). Do not add more than one override per call site.
+
+### Do not build features ahead of the critical path
+
+- The critical path is: configure market -> build real offer -> post to venue -> verify on-chain.
+- Do not add CLI commands, metrics, observability, or operational tooling until the critical path works end-to-end on testnet.
+- When in doubt, ask: "Does this help us post a real offer on testnet11?" If no, defer it.
+
+### Keep file count proportional to distinct responsibilities
+
+- Each source file should own a distinct, non-trivial responsibility.
+- Never create a file whose only job is to validate inputs, marshal a payload, and forward to the next file. That is a function, not a module.
+- If two files have the same structure (read JSON, validate, call next layer, return JSON), they should be one file with two functions.
+
+### Limit indirection layers
+
+- The signing/execution path must stay at 2 layers max: the adapter (WalletAdapter or offer_builder_sdk) calls `greenfloor/signing.py`. That's it.
+- Do not introduce intermediate "executor", "passthrough", "worker", "signer", "builder", "engine" layers.
+- If a new layer is genuinely needed, write a decision note in `docs/decisions/` explaining why.
+
+### Manager CLI surface discipline
+
+- The manager currently has 7 commands: `bootstrap-home`, `config-validate`, `doctor`, `keys-onboard`, `build-and-post-offer`, `offers-status`, `offers-reconcile`.
+- Do not add new commands without explicit user request or a documented need tied to G1-G3 testnet proof.
+- Each new command must have a test that exercises it end-to-end with deterministic fixtures.
 
 ## Required Pre-Implementation Review
 

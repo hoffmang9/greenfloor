@@ -4,8 +4,8 @@ GreenFloor is a long-running Python application for Chia CAT market making.
 
 ## Components
 
-- `greenfloor-manager`: manager CLI for config validation, key checks, and reload control.
-- `greenfloord`: daemon process that evaluates configured markets and emits low-inventory alerts.
+- `greenfloor-manager`: manager CLI for config validation, key onboarding, offer building/posting, and operational checks.
+- `greenfloord`: daemon process that evaluates configured markets, executes offers, and emits low-inventory alerts.
 
 ## V1 Plan
 
@@ -32,29 +32,24 @@ GreenFloor is a long-running Python application for Chia CAT market making.
 Bootstrap home directory first (required for real deployment):
 
 ```bash
+python -m pip install -e ".[dev]"
 greenfloor-manager bootstrap-home
 ```
 
-Then run setup/validation and daemon commands:
+Validate config and check readiness:
 
 ```bash
-python -m pip install -e ".[dev]"
-greenfloor-manager --program-config config/program.yaml --markets-config config/markets.yaml config-validate
-greenfloor-manager --program-config config/program.yaml --markets-config config/markets.yaml set-price-policy --market-id carbon_2022_xch_sell --set slippage_bps=90 --set min_price_quote_per_base=0.0030
-greenfloor-manager --markets-config config/markets.yaml set-ladder-entry --market-id carbon_2022_xch_sell --side sell --size-base-units 10 --target-count 6 --split-buffer-count 2 --combine-when-excess-factor 2.2 --reload
-greenfloor-manager --markets-config config/markets.yaml set-bucket-count --market-id carbon_2022_xch_sell --size-base-units 10 --count 4 --reload
-greenfloor-manager set-low-watermark --markets-config config/markets.yaml --market-id carbon_2022_xch_sell --value 750
-greenfloor-manager consolidate --markets-config config/markets.yaml --asset CARBON22 --output-count 2 --dry-run --yes
-greenfloor-manager --program-config config/program.yaml coin-op-budget-report
-greenfloor-manager config-history-list --config-path config/markets.yaml
-# Use a backup path returned in history list:
-greenfloor-manager --program-config config/program.yaml config-history-revert --config-path config/markets.yaml --backup-path config/.history/markets.yaml.<timestamp>.bak.yaml --reload --yes
-# Or revert latest snapshot directly:
-greenfloor-manager --program-config config/program.yaml config-history-revert --config-path config/markets.yaml --latest --reload --yes
-greenfloord --program-config config/program.yaml --markets-config config/markets.yaml --once
+greenfloor-manager config-validate
+greenfloor-manager doctor
 ```
 
-Primary operator posting flow:
+Onboard signing keys:
+
+```bash
+greenfloor-manager keys-onboard --key-id <your-key-id>
+```
+
+Build and post offers:
 
 ```bash
 # Dry-run preflight
@@ -63,14 +58,28 @@ greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1 
 greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1
 ```
 
-For signer-routed coin-op execution, GreenFloor uses:
-- `GREENFLOOR_WALLET_EXECUTOR_CMD` (global override executor command)
-- `GREENFLOOR_CHIA_KEYS_EXECUTOR_CMD` (source-specific override for `chia_keys`)
-- `GREENFLOOR_CHIA_KEYS_SIGNER_BACKEND_CMD` (signer backend command; defaults to `greenfloor-chia-keys-signer-backend`)
-- `GREENFLOOR_CHIA_KEYS_SIGNER_BACKEND_SIGN_CMD` (signing command used by signer backend; defaults to `greenfloor-chia-keys-raw-engine-sign-impl-sdk-submit`)
-- `GREENFLOOR_CHIA_KEYS_RAW_ENGINE_SIGN_IMPL_SDK_SUBMIT_CMD` (sdk submit implementation override command used by signer backend sign step)
-- `GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON` (optional override JSON map for key ID -> fingerprint; normally injected from `program.yaml` signer key registry by daemon path)
-- `GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT` (optional integer derivation depth scan limit used to match selected coin puzzle hashes; default `200`)
+Check offer status and reconcile:
+
+```bash
+greenfloor-manager offers-status
+greenfloor-manager offers-reconcile
+```
+
+Run the daemon:
+
+```bash
+greenfloord --program-config config/program.yaml --markets-config config/markets.yaml --once
+```
+
+## Environment Variables
+
+Operator overrides (all optional):
+
+- `GREENFLOOR_WALLET_EXECUTOR_CMD` — override the default in-process signing path with an external executor subprocess for daemon coin-op execution.
+- `GREENFLOOR_OFFER_BUILDER_CMD` — override the default in-process offer builder with an external subprocess for manager offer construction.
+- `GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON` — JSON map for key ID -> fingerprint; normally injected from `program.yaml` signer key registry by daemon path.
+- `GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT` — integer derivation depth scan limit for matching selected coin puzzle hashes (default `200`).
+- `GREENFLOOR_WALLET_SDK_COINSET_URL` — custom coinset RPC URL (overrides mainnet/testnet defaults).
 
 Signer key resolution contract is repo-managed through `program.yaml`:
 - `keys.registry[].key_id` must match market `signer_key_id`

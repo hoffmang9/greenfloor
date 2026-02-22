@@ -43,6 +43,13 @@ class _FakeSpendBundle:
         self.coin_spends = coin_spends
         self.aggregated_signature = aggregated_signature
 
+    @staticmethod
+    def from_bytes(value: bytes) -> _FakeSpendBundle:
+        if value != b"\xaa":
+            raise ValueError("bad_spend_bundle_bytes")
+        coin = _FakeCoin(b"\x01" * 32, b"\x02" * 32, 10)
+        return _FakeSpendBundle([_FakeCoinSpend(coin, b"\x80", b"\x80")], "sig")
+
 
 class _FakeSdk:
     Address = _FakeAddress
@@ -52,6 +59,12 @@ class _FakeSdk:
     SpendBundle = _FakeSpendBundle
 
     @staticmethod
+    def from_hex(value: str) -> bytes:
+        if value != "aa":
+            raise ValueError("bad_hex")
+        return b"\xaa"
+
+    @staticmethod
     def encode_offer(spend_bundle: _FakeSpendBundle) -> str:
         assert len(spend_bundle.coin_spends) == 1
         assert spend_bundle.coin_spends[0].coin.amount == 10
@@ -59,18 +72,11 @@ class _FakeSdk:
 
 
 def test_build_offer_success_with_wallet_sdk_types() -> None:
-    offer = offer_builder_sdk._build_offer(
-        {
-            "receive_address": "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
-            "size_base_units": 10,
-            "pair": "xch",
-        },
-        _FakeSdk,
-    )
+    offer = offer_builder_sdk._build_offer({"spend_bundle_hex": "aa"}, _FakeSdk)
     assert offer == "offer1fake"
 
 
-def test_build_offer_rejects_missing_address() -> None:
+def test_build_offer_rejects_missing_coin_backed_inputs() -> None:
     try:
         offer_builder_sdk._build_offer({"size_base_units": 10}, _FakeSdk)
         raise AssertionError("expected ValueError")
@@ -78,8 +84,22 @@ def test_build_offer_rejects_missing_address() -> None:
         assert str(exc) == "missing_receive_address"
 
 
+def test_build_offer_calls_coin_backed_signing(monkeypatch) -> None:
+    monkeypatch.setattr(offer_builder_sdk, "_build_coin_backed_spend_bundle_hex", lambda _: "aa")
+    offer = offer_builder_sdk._build_offer({"size_base_units": 10}, _FakeSdk)
+    assert offer == "offer1fake"
+
+
+def test_build_offer_public_api(monkeypatch) -> None:
+    monkeypatch.setattr(offer_builder_sdk, "_import_sdk", lambda: _FakeSdk)
+    monkeypatch.setattr(offer_builder_sdk, "_build_coin_backed_spend_bundle_hex", lambda _: "aa")
+    offer = offer_builder_sdk.build_offer({"size_base_units": 10})
+    assert offer == "offer1fake"
+
+
 def test_main_outputs_executed_json(monkeypatch, capsys) -> None:
     monkeypatch.setattr(offer_builder_sdk, "_import_sdk", lambda: _FakeSdk)
+    monkeypatch.setattr(offer_builder_sdk, "_build_coin_backed_spend_bundle_hex", lambda _: "aa")
     monkeypatch.setattr(
         offer_builder_sdk.sys,
         "stdin",
@@ -94,3 +114,33 @@ def test_main_outputs_executed_json(monkeypatch, capsys) -> None:
     out = json.loads(capsys.readouterr().out.strip())
     assert out["status"] == "executed"
     assert out["offer"] == "offer1fake"
+
+
+def test_coin_backed_signing_uses_signing_module(monkeypatch) -> None:
+    """Verify _build_coin_backed_spend_bundle_hex delegates to signing.build_signed_spend_bundle."""
+    import greenfloor.signing as signing_mod
+
+    captured = {}
+
+    def _fake_build(payload):
+        captured["payload"] = payload
+        return {
+            "status": "executed",
+            "reason": "ok",
+            "spend_bundle_hex": "deadbeef",
+        }
+
+    monkeypatch.setattr(signing_mod, "build_signed_spend_bundle", _fake_build)
+    result = offer_builder_sdk._build_coin_backed_spend_bundle_hex(
+        {
+            "receive_address": "xch1abc",
+            "key_id": "k1",
+            "network": "mainnet",
+            "keyring_yaml_path": "/tmp/k.yaml",
+            "size_base_units": 10,
+            "asset_id": "xch",
+        }
+    )
+    assert result == "deadbeef"
+    assert captured["payload"]["key_id"] == "k1"
+    assert captured["payload"]["plan"]["op_type"] == "split"

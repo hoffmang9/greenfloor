@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 from pathlib import Path
@@ -146,10 +145,8 @@ def test_wallet_adapter_non_dry_run_uses_external_executor(tmp_path: Path) -> No
             os.environ["GREENFLOOR_WALLET_EXECUTOR_CMD"] = old_cmd
 
 
-def test_wallet_adapter_non_dry_run_injects_fingerprint_env_map(
-    tmp_path: Path, monkeypatch
-) -> None:
-    import greenfloor.adapters.wallet as wallet_mod
+def test_wallet_adapter_non_dry_run_direct_signing(tmp_path: Path, monkeypatch) -> None:
+    """When no GREENFLOOR_WALLET_EXECUTOR_CMD is set, uses signing.sign_and_broadcast directly."""
     from greenfloor.core.coin_ops import CoinOpPlan
     from greenfloor.keys.onboarding import KeyOnboardingSelection, save_key_onboarding_selection
 
@@ -165,29 +162,24 @@ def test_wallet_adapter_non_dry_run_injects_fingerprint_env_map(
         ),
     )
 
-    captured_env = {}
+    monkeypatch.delenv("GREENFLOOR_WALLET_EXECUTOR_CMD", raising=False)
 
-    class _Result:
-        returncode = 0
-        stdout = '{"status":"executed","reason":"ok","operation_id":"tx-1"}'
-        stderr = ""
+    import greenfloor.signing as signing_mod
 
-    def _fake_run(*_args, **kwargs):
-        nonlocal captured_env
-        captured_env = dict(kwargs.get("env") or {})
-        return _Result()
+    monkeypatch.setattr(
+        signing_mod,
+        "sign_and_broadcast",
+        lambda _p: {"status": "executed", "reason": "ok", "operation_id": "tx-direct"},
+    )
 
-    monkeypatch.setattr(wallet_mod.subprocess, "run", _fake_run)
     adapter = WalletAdapter()
     result = adapter.execute_coin_ops(
-        plans=[CoinOpPlan(op_type="combine", size_base_units=50, op_count=1, reason="r")],
+        plans=[CoinOpPlan(op_type="split", size_base_units=10, op_count=1, reason="r")],
         dry_run=False,
         key_id="fingerprint:123456789",
         network="testnet11",
         onboarding_selection_path=onboarding_path,
-        signer_fingerprint=112233,
     )
     assert result["executed_count"] == 1
-    mapping_raw = captured_env.get("GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON", "{}")
-    mapping = json.loads(mapping_raw)
-    assert mapping["fingerprint:123456789"] == "112233"
+    assert result["items"][0]["status"] == "executed"
+    assert result["items"][0]["operation_id"] == "tx-direct"
