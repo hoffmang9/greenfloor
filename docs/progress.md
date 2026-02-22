@@ -2,6 +2,12 @@
 
 ## 2026-02-22
 
+- Refreshed current repository quality-gate status after pre-commit workflow alignment:
+  - Added `pre-commit` to dev dependencies and updated docs to use `pre-commit run --all-files` as the primary local gate command.
+  - Expanded pre-commit local hooks to include both `pyright` and `pytest` (in addition to `ruff`, `ruff-format`, `prettier`, `yamllint`).
+  - Latest full-suite test result: `133 passed, 2 skipped`.
+  - Latest full pre-commit result: all hooks passed (`ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`).
+
 - Replaced SDK RPC client usage in active signing/wallet coin paths with `CoinsetAdapter`:
   - `greenfloor/signing.py` coin discovery + CAT parent lineage reads + `push_tx` now call Coinset HTTP endpoints through `greenfloor/adapters/coinset.py`.
   - `greenfloor/adapters/wallet.py` XCH inventory reads now use `CoinsetAdapter` coin-record queries.

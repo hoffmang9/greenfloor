@@ -18,3 +18,17 @@ repos:
     hooks:
       - id: yamllint
         files: "\\.(ya?ml)$"
+
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright
+        entry: pyright
+        language: system
+        pass_filenames: false
+
+      - id: pytest
+        name: pytest
+        entry: pytest -q
+        language: system
+        pass_filenames: false

@@ -76,12 +76,10 @@ greenfloord --program-config config/program.yaml --markets-config config/markets
 Install dev dependencies (includes `pre-commit`), then run local checks:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 python -m pip install -e ".[dev]"
 pre-commit run --all-files
-ruff check .
-ruff format --check .
-pyright
-pytest -q
 ```
 
 ## Environment Variables
