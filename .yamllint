@@ -3,6 +3,8 @@ extends: default
 
 ignore: |
   chia-wallet-sdk/**
+  .venv/**
+  venv/**
 
 rules:
   line-length:
