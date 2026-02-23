@@ -54,21 +54,23 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ./.cache/wheelhouse/greenfloor-native
-          key: greenfloor-native-${{ runner.os }}-py311-${{ hashFiles('greenfloor-native/Cargo.toml', 'greenfloor-native/Cargo.lock', 'greenfloor-native/src/lib.rs') }}
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('greenfloor-native/**') }}
 
       - name: Build greenfloor-native wheel (cache miss)
         if: steps.cache-native-wheel.outputs.cache-hit != 'true'
         run: |
           mkdir -p ./.cache/wheelhouse/greenfloor-native
           .venv/bin/python -m pip install maturin
-          .venv/bin/python -m maturin build --manifest-path greenfloor-native/Cargo.toml --out ./.cache/wheelhouse/greenfloor-native
+          .venv/bin/python -m maturin build \
+            --manifest-path greenfloor-native/Cargo.toml \
+            --out ./.cache/wheelhouse/greenfloor-native
 
       - name: Save greenfloor-native wheel cache
         if: steps.cache-native-wheel.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ./.cache/wheelhouse/greenfloor-native
-          key: greenfloor-native-${{ runner.os }}-py311-${{ hashFiles('greenfloor-native/Cargo.toml', 'greenfloor-native/Cargo.lock', 'greenfloor-native/src/lib.rs') }}
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('greenfloor-native/**') }}
 
       - name: Install greenfloor-native wheel
         run: |
