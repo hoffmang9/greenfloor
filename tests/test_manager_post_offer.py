@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from greenfloor.cli.manager import (
@@ -8,6 +9,7 @@ from greenfloor.cli.manager import (
     _resolve_dexie_base_url,
     _resolve_offer_publish_settings,
     _resolve_splash_base_url,
+    _verify_offer_text_for_dexie,
 )
 
 
@@ -463,3 +465,24 @@ def test_build_offer_text_for_request_direct_call(monkeypatch) -> None:
     )
     result = manager._build_offer_text_for_request({"test": True})
     assert result == "offer1direct"
+
+
+def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypatch) -> None:
+    class _Sdk:
+        @staticmethod
+        def validate_offer(offer: str) -> None:
+            assert offer == "offer1ok"
+
+    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+    assert _verify_offer_text_for_dexie("offer1ok") is None
+
+
+def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> None:
+    class _Sdk:
+        @staticmethod
+        def verify_offer(offer: str) -> bool:
+            return offer == "offer1ok"
+
+    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+    assert _verify_offer_text_for_dexie("offer1ok") is None
+    assert _verify_offer_text_for_dexie("offer1bad") == "wallet_sdk_offer_verify_false"

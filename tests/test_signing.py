@@ -291,3 +291,54 @@ def test_signing_uses_testnet11_coinset_adapter_network(monkeypatch) -> None:
     assert captured["network"] == "testnet11"
     assert captured["base_url"] is None
     assert captured["require_testnet11"] is True
+
+
+def test_from_input_spend_bundle_xch_prefers_new_binding() -> None:
+    calls = {}
+
+    class _Sdk:
+        @staticmethod
+        def from_input_spend_bundle_xch(bundle, requested):
+            calls["new"] = (bundle, requested)
+            return "new-path"
+
+    result = signing_mod._from_input_spend_bundle_xch(
+        sdk=_Sdk,
+        input_spend_bundle="bundle",
+        requested_payments_xch=["np"],
+    )
+    assert result == "new-path"
+    assert calls["new"] == ("bundle", ["np"])
+
+
+def test_from_input_spend_bundle_xch_falls_back_to_legacy_binding() -> None:
+    calls = {}
+
+    class _Sdk:
+        @staticmethod
+        def from_input_spend_bundle(bundle, requested):
+            calls["legacy"] = (bundle, requested)
+            return "legacy-path"
+
+    result = signing_mod._from_input_spend_bundle_xch(
+        sdk=_Sdk,
+        input_spend_bundle="bundle",
+        requested_payments_xch=["np"],
+    )
+    assert result == "legacy-path"
+    assert calls["legacy"] == ("bundle", ["np"])
+
+
+def test_from_input_spend_bundle_xch_requires_supported_binding() -> None:
+    class _Sdk:
+        pass
+
+    try:
+        signing_mod._from_input_spend_bundle_xch(
+            sdk=_Sdk,
+            input_spend_bundle="bundle",
+            requested_payments_xch=["np"],
+        )
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert str(exc) == "wallet_sdk_from_input_spend_bundle_xch_unavailable"

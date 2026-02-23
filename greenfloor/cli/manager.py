@@ -31,13 +31,19 @@ def _verify_offer_text_for_dexie(offer_text: str) -> str | None:
     except Exception as exc:
         return f"wallet_sdk_import_error:{exc}"
     try:
+        validate_offer = getattr(sdk, "validate_offer", None)
+        if callable(validate_offer):
+            validate_offer(offer_text)
+            return None
+
+        # Backward-compatible fallback for older binding name.
         verify_offer = getattr(sdk, "verify_offer", None)
         if not callable(verify_offer):
-            return "wallet_sdk_verify_offer_unavailable"
+            return "wallet_sdk_validate_offer_unavailable"
         if not bool(verify_offer(offer_text)):
             return "wallet_sdk_offer_verify_false"
     except Exception as exc:
-        return f"wallet_sdk_offer_verify_failed:{exc}"
+        return f"wallet_sdk_offer_validate_failed:{exc}"
     return None
 
 

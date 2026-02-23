@@ -505,6 +505,24 @@ def _asset_id_to_sdk_id(*, sdk: Any, asset_id: str) -> Any:
     return sdk.Id.existing(_hex_to_bytes(raw))
 
 
+def _from_input_spend_bundle_xch(
+    *,
+    sdk: Any,
+    input_spend_bundle: Any,
+    requested_payments_xch: list[Any],
+) -> Any:
+    from_input_spend_bundle_xch = getattr(sdk, "from_input_spend_bundle_xch", None)
+    if callable(from_input_spend_bundle_xch):
+        return from_input_spend_bundle_xch(input_spend_bundle, requested_payments_xch)
+
+    # Backward-compatible fallback for older binding name.
+    from_input_spend_bundle = getattr(sdk, "from_input_spend_bundle", None)
+    if callable(from_input_spend_bundle):
+        return from_input_spend_bundle(input_spend_bundle, requested_payments_xch)
+
+    raise RuntimeError("wallet_sdk_from_input_spend_bundle_xch_unavailable")
+
+
 def _scan_synthetic_keys_for_puzzle_hashes(
     *,
     sdk: Any,
@@ -738,7 +756,11 @@ def _build_offer_spend_bundle(
         else:
             aggregate_sig = sdk.Signature.aggregate(signatures)
         input_spend_bundle = sdk.SpendBundle(coin_spends, aggregate_sig)
-        spend_bundle = sdk.from_input_spend_bundle(input_spend_bundle, [notarized_payment])
+        spend_bundle = _from_input_spend_bundle_xch(
+            sdk=sdk,
+            input_spend_bundle=input_spend_bundle,
+            requested_payments_xch=[notarized_payment],
+        )
         return sdk.to_hex(spend_bundle.to_bytes()), None
     except Exception as exc:
         return None, f"sign_spend_bundle_error:{exc}"
