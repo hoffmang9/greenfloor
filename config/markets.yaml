@@ -1,6 +1,6 @@
 ---
 supported_assets_example:
-  # Source: old/common.py CARBON_CREDIT_PRICES + Dexie token/ticker snapshots.
+  # Source: old/common.py CARBON_CREDIT_PRICES + Dexie token snapshots.
   - name: "Chia"
     base_symbol: "XCH"
     asset_id: "xch"
@@ -9,6 +9,30 @@ supported_assets_example:
       ticker_id: null
       pool_id: null
       last_price_xch: "1"
+  - name: "Testnet Chia"
+    base_symbol: "TXCH"
+    asset_id: "xch"
+    legacy_usd_price_per_credit: null
+    dexie:
+      ticker_id: null
+      pool_id: null
+      last_price_xch: null
+  - name: "dexie bucks"
+    base_symbol: "DBX"
+    asset_id: "db1a9020d48d9d4ad22631b66ab4b9ebd3637ef7758ad38881348c5d24c38f20"
+    legacy_usd_price_per_credit: null
+    dexie:
+      ticker_id: "db1a9020d48d9d4ad22631b66ab4b9ebd3637ef7758ad38881348c5d24c38f20_xch"
+      pool_id: null
+      last_price_xch: null
+  - name: "Testnet dexie bucks"
+    base_symbol: "TDBX"
+    asset_id: "d82dd03f8a9ad2f84353cd953c4de6b21dbaaf7de3ba3f4ddd9abe31ecba80ad"
+    legacy_usd_price_per_credit: null
+    dexie:
+      ticker_id: "d82dd03f8a9ad2f84353cd953c4de6b21dbaaf7de3ba3f4ddd9abe31ecba80ad_xch"
+      pool_id: null
+      last_price_xch: "0.004119292414047852"
   - name: "Base warp.green USDC"
     base_symbol: "wUSDC.b"
     asset_id: "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d"
@@ -91,6 +115,49 @@ supported_assets_example:
       last_price_xch: "0.31"
 
 markets:
+  - id: tdbx_txch_sell
+    enabled: true
+    mode: sell_only
+    base_asset: "d82dd03f8a9ad2f84353cd953c4de6b21dbaaf7de3ba3f4ddd9abe31ecba80ad"
+    base_symbol: "TDBX"
+    quote_asset: "txch"
+    quote_asset_type: unstable
+    signer_key_id: "key-main-1"
+    receive_address: "txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k"
+    pricing:
+      reference_source: "coingecko"
+      reference_pair: "txch_usd"
+      side: "sell"
+      fixed_quote_per_base: 0.004714285714285714
+      quote_unit_mojo_multiplier: 1000000000000
+      slippage_bps: 100
+      strategy_target_spread_bps: 140
+      strategy_min_xch_price_usd: 20.0
+      strategy_max_xch_price_usd: 60.0
+      cancel_policy_stable_vs_unstable: true
+    inventory:
+      low_watermark_base_units: 500
+      low_inventory_alert_threshold_base_units: null
+      current_available_base_units: 500
+      bucket_counts:
+        1: 2
+        10: 1
+        100: 0
+    ladders:
+      sell:
+        - size_base_units: 1
+          target_count: 5
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+        - size_base_units: 10
+          target_count: 2
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+        - size_base_units: 100
+          target_count: 1
+          split_buffer_count: 0
+          combine_when_excess_factor: 2.0
+
   - id: carbon_2022_xch_sell
     enabled: true
     mode: sell_only
@@ -99,7 +166,7 @@ markets:
     quote_asset: "xch"
     quote_asset_type: unstable
     signer_key_id: "key-main-1"
-    receive_address: "xch1replace-with-your-receive-address"
+    receive_address: "txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k"
     pricing:
       reference_source: "coingecko"
       reference_pair: "xch_usd"
@@ -142,7 +209,7 @@ markets:
     quote_asset: "wUSDC.b"
     quote_asset_type: stable
     signer_key_id: "key-main-1"
-    receive_address: "xch1replace-with-your-receive-address"
+    receive_address: "txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k"
     pricing:
       side: "sell"
       fixed_quote_per_base: 7.75
@@ -178,7 +245,7 @@ markets:
     quote_asset: "wUSDC.b"
     quote_asset_type: stable
     signer_key_id: "key-main-2"
-    receive_address: "xch1replace-with-your-receive-address"
+    receive_address: "txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k"
     pricing:
       buy_min_quote_per_base: 0.99
       sell_max_quote_per_base: 1.01

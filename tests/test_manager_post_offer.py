@@ -164,6 +164,10 @@ def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, c
         lambda _payload: "offer1abc",
     )
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        lambda _offer: None,
+    )
 
     code = _build_and_post_offer(
         program_path=program,
@@ -250,6 +254,10 @@ def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Pat
         lambda _payload: "offer1pair",
     )
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        lambda _offer: None,
+    )
 
     code = _build_and_post_offer(
         program_path=program,
@@ -271,6 +279,80 @@ def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Pat
     assert payload["market_id"] == "m1"
     assert payload["results"][0]["venue"] == "dexie"
     assert payload["results"][0]["result"]["id"] == "offer-xyz"
+
+
+def test_build_and_post_offer_accepts_txch_pair_on_testnet11(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+        def post_offer(self, offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = offer, drop_only, claim_rewards
+            return {"success": True, "id": "offer-txch"}
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda _payload: "offer1pair",
+    )
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        lambda _offer: None,
+    )
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="testnet11",
+        market_id=None,
+        pair="A1:txch",
+        size_base_units=10,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api-testnet.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["market_id"] == "m1"
+    assert payload["results"][0]["result"]["id"] == "offer-txch"
+
+
+def test_build_and_post_offer_rejects_txch_pair_on_mainnet(tmp_path: Path) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+
+    try:
+        _build_and_post_offer(
+            program_path=program,
+            markets_path=markets,
+            network="mainnet",
+            market_id=None,
+            pair="A1:txch",
+            size_base_units=10,
+            repeat=1,
+            publish_venue="dexie",
+            dexie_base_url="https://api.dexie.space",
+            splash_base_url="http://localhost:4000",
+            drop_only=True,
+            claim_rewards=False,
+            dry_run=False,
+        )
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "no enabled market found for pair" in str(exc)
 
 
 def test_build_and_post_offer_pair_ambiguous_requires_market_id(

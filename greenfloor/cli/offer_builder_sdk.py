@@ -41,8 +41,8 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
 
     asset_id = str(payload.get("asset_id", "xch")).strip().lower() or "xch"
     quote_asset = str(payload.get("quote_asset", "xch")).strip().lower() or "xch"
-    if quote_asset in {"xch", "1"}:
-        request_asset_id = "xch"
+    if quote_asset in {"xch", "txch", "1"}:
+        request_asset_id = quote_asset
     else:
         if len(quote_asset) != 64:
             raise ValueError("invalid_quote_asset_id")
@@ -68,6 +68,7 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
             "receive_address": receive_address,
             "keyring_yaml_path": keyring_yaml_path,
             "asset_id": asset_id,
+            "dry_run": bool(payload.get("dry_run", False)),
             "plan": {
                 "op_type": "offer",
                 "offer_asset_id": asset_id,

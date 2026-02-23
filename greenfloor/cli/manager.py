@@ -25,6 +25,22 @@ from greenfloor.keys.router import resolve_market_key
 from greenfloor.storage.sqlite import SqliteStore
 
 
+def _verify_offer_text_for_dexie(offer_text: str) -> str | None:
+    try:
+        import chia_wallet_sdk as sdk  # type: ignore
+    except Exception as exc:
+        return f"wallet_sdk_import_error:{exc}"
+    try:
+        verify_offer = getattr(sdk, "verify_offer", None)
+        if not callable(verify_offer):
+            return "wallet_sdk_verify_offer_unavailable"
+        if not bool(verify_offer(offer_text)):
+            return "wallet_sdk_offer_verify_false"
+    except Exception as exc:
+        return f"wallet_sdk_offer_verify_failed:{exc}"
+    return None
+
+
 def _default_program_config_path() -> str:
     home_default = Path("~/.greenfloor/config/program.yaml").expanduser()
     if home_default.exists():
@@ -295,7 +311,12 @@ def _build_and_post_offer(
 
     program = load_program_config(program_path)
     markets = load_markets_config(markets_path)
-    market = _resolve_market_for_build(markets, market_id=market_id, pair=pair)
+    market = _resolve_market_for_build(
+        markets,
+        market_id=market_id,
+        pair=pair,
+        network=network,
+    )
     signer_key = program.signer_key_registry.get(market.signer_key_id)
     keyring_yaml_path = signer_key.keyring_yaml_path if signer_key is not None else ""
     pricing = dict(getattr(market, "pricing", {}) or {})
@@ -352,6 +373,15 @@ def _build_and_post_offer(
         else:
             if publish_venue == "dexie":
                 assert dexie is not None
+                verify_error = _verify_offer_text_for_dexie(offer_text)
+                if verify_error:
+                    post_results.append(
+                        {
+                            "venue": "dexie",
+                            "result": {"success": False, "error": verify_error},
+                        }
+                    )
+                    continue
                 result = dexie.post_offer(
                     offer_text,
                     drop_only=drop_only,
@@ -385,7 +415,13 @@ def _build_and_post_offer(
     return 0
 
 
-def _resolve_market_for_build(markets, *, market_id: str | None, pair: str | None):
+def _resolve_market_for_build(
+    markets,
+    *,
+    market_id: str | None,
+    pair: str | None,
+    network: str,
+):
     if bool(market_id) == bool(pair):
         raise ValueError("provide exactly one of --market-id or --pair")
     if market_id:
@@ -402,6 +438,7 @@ def _resolve_market_for_build(markets, *, market_id: str | None, pair: str | Non
     base_raw, quote_raw = [p.strip().lower() for p in raw.split(sep, 1)]
     if not base_raw or not quote_raw:
         raise ValueError("pair base and quote must be non-empty")
+    network_l = network.strip().lower()
     candidates = []
     for market in markets.markets:
         if not market.enabled:
@@ -411,7 +448,13 @@ def _resolve_market_for_build(markets, *, market_id: str | None, pair: str | Non
             str(market.base_symbol).strip().lower(),
         }
         quote_match = str(market.quote_asset).strip().lower()
-        if base_raw in base_matches and quote_raw == quote_match:
+        quote_matches = {quote_match}
+        if network_l in {"testnet", "testnet11"}:
+            if quote_match == "xch":
+                quote_matches.add("txch")
+            elif quote_match == "txch":
+                quote_matches.add("xch")
+        if base_raw in base_matches and quote_raw in quote_matches:
             candidates.append(market)
     if not candidates:
         raise ValueError(f"no enabled market found for pair: {pair}")
