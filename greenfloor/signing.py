@@ -751,9 +751,8 @@ def _build_offer_spend_bundle(
                     return None, "missing_private_key_for_agg_sig_target"
                 signatures.append(sk.sign(message))
         if not signatures:
-            aggregate_sig = sdk.Signature.aggregate([])
-        else:
-            aggregate_sig = sdk.Signature.aggregate(signatures)
+            return None, "no_agg_sig_targets_found"
+        aggregate_sig = sdk.Signature.aggregate(signatures)
         input_spend_bundle = sdk.SpendBundle(coin_spends, aggregate_sig)
         spend_bundle = _from_input_spend_bundle_xch(
             sdk=sdk,

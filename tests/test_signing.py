@@ -157,6 +157,33 @@ def test_build_signed_spend_bundle_offer_delegates_to_offer_builder(monkeypatch)
     assert result["spend_bundle_hex"] == "aabb"
 
 
+def test_build_signed_spend_bundle_offer_propagates_missing_agg_sig_targets(monkeypatch) -> None:
+    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: object())
+    monkeypatch.setattr(
+        signing_mod,
+        "_build_offer_spend_bundle",
+        lambda **_kw: (None, "no_agg_sig_targets_found"),
+    )
+    result = signing_mod.build_signed_spend_bundle(
+        {
+            "key_id": "k1",
+            "network": "testnet11",
+            "receive_address": "xch1abc",
+            "keyring_yaml_path": "/tmp/k.yaml",
+            "asset_id": "xch",
+            "plan": {
+                "op_type": "offer",
+                "offer_asset_id": "xch",
+                "offer_amount": 10,
+                "request_asset_id": "xch",
+                "request_amount": 2,
+            },
+        }
+    )
+    assert result["status"] == "skipped"
+    assert result["reason"] == "signing_failed:no_agg_sig_targets_found"
+
+
 def test_sign_and_broadcast_propagates_signing_failure(monkeypatch) -> None:
     monkeypatch.setattr(
         signing_mod,
