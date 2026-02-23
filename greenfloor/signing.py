@@ -140,11 +140,6 @@ def _coinset_base_url(*, network: str) -> str:
     network_l = network.strip().lower()
     if network_l in {"testnet", "testnet11"}:
         allow_mainnet = os.getenv("GREENFLOOR_ALLOW_MAINNET_COINSET_FOR_TESTNET11", "").strip()
-        guard_triggered = (
-            "coinset.org" in base
-            and "testnet11.api.coinset.org" not in base
-            and allow_mainnet != "1"
-        )
         if (
             "coinset.org" in base
             and "testnet11.api.coinset.org" not in base
