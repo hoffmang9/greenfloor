@@ -114,6 +114,12 @@ Live `testnet11` proof workflow (CI-only mnemonic path):
 - The workflow always runs `doctor` + dry-run `build-and-post-offer`; when `dry_run=false` it additionally runs live `build-and-post-offer`, `offers-status`, and `offers-reconcile`.
 - Logs are uploaded as artifact `live-testnet-e2e-artifacts`.
 
+Testnet11 asset bootstrap helper workflow (G2):
+
+- Dispatch `.github/workflows/testnet11-asset-bootstrap-helper.yml`.
+- It discovers Dexie testnet CAT candidates and uploads `g2-testnet-asset-bootstrap-artifacts`.
+- Use `markets-snippet.yaml` from the artifact as a starter config snippet for `supported_assets_example` and `markets` stanzas.
+
 Signer key resolution contract is repo-managed through `program.yaml`:
 
 - `keys.registry[].key_id` must match market `signer_key_id`

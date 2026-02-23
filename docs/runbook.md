@@ -116,6 +116,14 @@ Optional CI workflow secret contract (`.github/workflows/live-testnet-e2e.yml`):
 - Workflow sets `GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT=1000` by default to reduce missed funded keys at deeper derivation indices.
 - Workflow uploads `live-testnet-e2e-artifacts` containing dry-run/live/status/reconcile/daemon logs.
 
+G2 helper workflow for market bootstrap snippet generation (`.github/workflows/testnet11-asset-bootstrap-helper.yml`):
+
+- Dispatch `Testnet11 Asset Bootstrap Helper (G2)` from Actions.
+- Use defaults unless you need custom Dexie endpoint, signer key id, or receive address.
+- Download `g2-testnet-asset-bootstrap-artifacts` and use:
+  - `selected-assets.json` for candidate review,
+  - `markets-snippet.yaml` for copy/paste bootstrap stanzas into `~/.greenfloor/config/markets.yaml`.
+
 CI-only proof sequence (no local mnemonic required):
 
 1. Open GitHub Actions and dispatch `Live Testnet E2E (Optional)`.

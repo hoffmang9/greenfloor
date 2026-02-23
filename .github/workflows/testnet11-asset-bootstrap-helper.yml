@@ -1,0 +1,349 @@
+---
+name: Testnet11 Asset Bootstrap Helper (G2)
+
+"on":
+  workflow_dispatch:
+    inputs:
+      network_profile:
+        description: "Network profile (G2 baseline expects testnet11)"
+        default: "testnet11"
+        required: true
+      dexie_base_url:
+        description: "Dexie API base URL"
+        default: "https://api-testnet.dexie.space"
+        required: true
+      quote_symbol:
+        description: "Quote symbol for generated market snippets"
+        default: "txch"
+        required: true
+      top_n_assets:
+        description: "How many discovered assets to include"
+        default: "8"
+        required: true
+      signer_key_id:
+        description: "Signer key id to use in generated market stanzas"
+        default: "key-main-1"
+        required: true
+      receive_address:
+        description: "Receive address for generated market stanzas"
+        default: "txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k"
+        required: true
+      include_asset_ids_csv:
+        description: "Optional comma-separated asset ids to force-include"
+        default: ""
+        required: false
+
+jobs:
+  g2-discover-and-snippet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Discover Dexie testnet assets and generate bootstrap snippets
+        shell: bash
+        env:
+          INPUT_NETWORK_PROFILE: ${{ inputs.network_profile }}
+          INPUT_DEXIE_BASE_URL: ${{ inputs.dexie_base_url }}
+          INPUT_QUOTE_SYMBOL: ${{ inputs.quote_symbol }}
+          INPUT_TOP_N_ASSETS: ${{ inputs.top_n_assets }}
+          INPUT_SIGNER_KEY_ID: ${{ inputs.signer_key_id }}
+          INPUT_RECEIVE_ADDRESS: ${{ inputs.receive_address }}
+          INPUT_INCLUDE_ASSET_IDS_CSV: ${{ inputs.include_asset_ids_csv }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.request
+          from pathlib import Path
+          from typing import Any
+
+          artifacts_dir = Path("artifacts/g2-testnet-asset-bootstrap")
+          artifacts_dir.mkdir(parents=True, exist_ok=True)
+
+          network_profile = os.environ["INPUT_NETWORK_PROFILE"].strip()
+          dexie_base = os.environ["INPUT_DEXIE_BASE_URL"].strip().rstrip("/")
+          quote_symbol = os.environ["INPUT_QUOTE_SYMBOL"].strip()
+          top_n_assets_raw = os.environ["INPUT_TOP_N_ASSETS"].strip()
+          signer_key_id = os.environ["INPUT_SIGNER_KEY_ID"].strip()
+          receive_address = os.environ["INPUT_RECEIVE_ADDRESS"].strip()
+          include_asset_ids_csv = os.environ["INPUT_INCLUDE_ASSET_IDS_CSV"].strip()
+
+          if network_profile != "testnet11":
+              raise SystemExit(
+                  f"network_profile must be testnet11 for this helper, got: {network_profile}"
+              )
+          if quote_symbol.lower() != "txch":
+              raise SystemExit(
+                  f"quote_symbol must be txch on testnet11, got: {quote_symbol}"
+              )
+
+          try:
+              top_n_assets = max(1, int(top_n_assets_raw))
+          except ValueError as exc:
+              raise SystemExit(f"top_n_assets must be an integer, got: {top_n_assets_raw}") from exc
+
+          include_asset_ids = {
+              token.strip().lower()
+              for token in include_asset_ids_csv.split(",")
+              if token.strip()
+          }
+
+          def to_float(value: Any) -> float | None:
+              if value is None:
+                  return None
+              if isinstance(value, (int, float)):
+                  return float(value)
+              if isinstance(value, str):
+                  text = value.strip()
+                  if not text:
+                      return None
+                  try:
+                      return float(text)
+                  except ValueError:
+                      return None
+              return None
+
+          def first_nonempty(token: dict[str, Any], *keys: str) -> Any:
+              for key in keys:
+                  value = token.get(key)
+                  if value is None:
+                      continue
+                  if isinstance(value, str) and not value.strip():
+                      continue
+                  return value
+              return None
+
+          def is_hex_asset_id(value: str) -> bool:
+              text = value.strip().lower()
+              return bool(re.fullmatch(r"[0-9a-f]{64}", text))
+
+          def symbol_slug(symbol: str) -> str:
+              cleaned = re.sub(r"[^a-z0-9]+", "_", symbol.lower())
+              cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+              return cleaned or "asset"
+
+          def yaml_quote(text: str) -> str:
+              escaped = text.replace("\\", "\\\\").replace('"', '\\"')
+              return f'"{escaped}"'
+
+          def fmt_number(value: float | None, fallback: float) -> str:
+              use_value = fallback if value is None else value
+              if use_value.is_integer():
+                  return str(int(use_value))
+              rendered = f"{use_value:.12f}".rstrip("0").rstrip(".")
+              return rendered or "0"
+
+          tokens_url = f"{dexie_base}/v1/swap/tokens"
+          with urllib.request.urlopen(tokens_url, timeout=20) as resp:
+              payload = json.loads(resp.read().decode("utf-8"))
+
+          raw_tokens = payload.get("tokens", payload)
+          if not isinstance(raw_tokens, list):
+              raise SystemExit("Dexie /v1/swap/tokens did not return a token list")
+
+          (artifacts_dir / "raw-tokens.json").write_text(
+              json.dumps(raw_tokens, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+
+          normalized: list[dict[str, Any]] = []
+          for token in raw_tokens:
+              if not isinstance(token, dict):
+                  continue
+              asset_id_raw = first_nonempty(
+                  token,
+                  "asset_id",
+                  "assetId",
+                  "id",
+                  "token_id",
+                  "tokenId",
+                  "cat_id",
+                  "catId",
+              )
+              if asset_id_raw is None:
+                  continue
+              asset_id = str(asset_id_raw).strip().lower()
+              if not is_hex_asset_id(asset_id):
+                  continue
+
+              symbol = first_nonempty(token, "code", "symbol", "ticker", "name")
+              symbol_text = str(symbol).strip() if symbol is not None else asset_id[:8].upper()
+
+              name = first_nonempty(token, "name", "display_name", "displayName")
+              name_text = str(name).strip() if name is not None else symbol_text
+
+              ticker_id = first_nonempty(token, "ticker_id", "tickerId", "pair")
+              pool_id = first_nonempty(token, "pool_id", "poolId")
+
+              last_price_xch = to_float(
+                  first_nonempty(token, "last_price_xch", "lastPriceXch", "price_xch")
+              )
+
+              liquidity_score = 0.0
+              for field in (
+                  "liquidity",
+                  "liquidity_xch",
+                  "liquidityXch",
+                  "volume",
+                  "volume_24h",
+                  "volume24h",
+                  "tvl",
+              ):
+                  value = to_float(token.get(field))
+                  if value is not None and value > 0:
+                      liquidity_score += value
+              if last_price_xch is not None and last_price_xch > 0:
+                  liquidity_score += 0.000001
+
+              normalized.append(
+                  {
+                      "asset_id": asset_id,
+                      "symbol": symbol_text,
+                      "name": name_text,
+                      "ticker_id": None if ticker_id is None else str(ticker_id),
+                      "pool_id": None if pool_id is None else str(pool_id),
+                      "last_price_xch": last_price_xch,
+                      "liquidity_score": liquidity_score,
+                  }
+              )
+
+          by_asset_id: dict[str, dict[str, Any]] = {}
+          for row in normalized:
+              existing = by_asset_id.get(row["asset_id"])
+              if existing is None or row["liquidity_score"] > existing["liquidity_score"]:
+                  by_asset_id[row["asset_id"]] = row
+
+          deduped = list(by_asset_id.values())
+          deduped.sort(key=lambda row: (row["liquidity_score"], row["symbol"]), reverse=True)
+
+          selected: list[dict[str, Any]] = deduped[:top_n_assets]
+          if include_asset_ids:
+              selected_by_id = {row["asset_id"]: row for row in selected}
+              for row in deduped:
+                  if row["asset_id"] in include_asset_ids and row["asset_id"] not in selected_by_id:
+                      selected.append(row)
+                      selected_by_id[row["asset_id"]] = row
+
+          (artifacts_dir / "normalized-tokens.json").write_text(
+              json.dumps(deduped, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          (artifacts_dir / "selected-assets.json").write_text(
+              json.dumps(selected, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+
+          snippet_lines: list[str] = []
+          snippet_lines.append("---")
+          snippet_lines.append("# Generated by G2 Testnet11 Asset Bootstrap Helper workflow.")
+          snippet_lines.append("# Copy relevant sections into your markets config.")
+          snippet_lines.append("")
+          snippet_lines.append("supported_assets_example:")
+          for row in selected:
+              snippet_lines.append(f"- name: {yaml_quote(row['name'])}")
+              snippet_lines.append(f"  base_symbol: {yaml_quote(row['symbol'])}")
+              snippet_lines.append(f"  asset_id: {yaml_quote(row['asset_id'])}")
+              snippet_lines.append("  legacy_usd_price_per_credit: null")
+              snippet_lines.append("  dexie:")
+              ticker_id = "null" if row["ticker_id"] is None else yaml_quote(row["ticker_id"])
+              pool_id = "null" if row["pool_id"] is None else yaml_quote(row["pool_id"])
+              snippet_lines.append(f"    ticker_id: {ticker_id}")
+              snippet_lines.append(f"    pool_id: {pool_id}")
+              if row["last_price_xch"] is None:
+                  snippet_lines.append("    last_price_xch: null")
+              else:
+                  snippet_lines.append(
+                      f"    last_price_xch: {yaml_quote(fmt_number(row['last_price_xch'], 0.0))}"
+                  )
+
+          snippet_lines.append("")
+          snippet_lines.append("markets:")
+          for row in selected:
+              market_id = f"{symbol_slug(row['symbol'])}_{quote_symbol.lower()}_sell"
+              fixed_quote_per_base = fmt_number(row["last_price_xch"], 1.0)
+              snippet_lines.append(f"- id: {market_id}")
+              snippet_lines.append("  enabled: false")
+              snippet_lines.append("  mode: sell_only")
+              snippet_lines.append(f"  base_asset: {yaml_quote(row['asset_id'])}")
+              snippet_lines.append(f"  base_symbol: {yaml_quote(row['symbol'])}")
+              snippet_lines.append(f"  quote_asset: {yaml_quote(quote_symbol.lower())}")
+              snippet_lines.append("  quote_asset_type: unstable")
+              snippet_lines.append(f"  signer_key_id: {yaml_quote(signer_key_id)}")
+              snippet_lines.append(f"  receive_address: {yaml_quote(receive_address)}")
+              snippet_lines.append("  pricing:")
+              snippet_lines.append('    reference_source: "coingecko"')
+              snippet_lines.append('    reference_pair: "txch_usd"')
+              snippet_lines.append('    side: "sell"')
+              snippet_lines.append(f"    fixed_quote_per_base: {fixed_quote_per_base}")
+              snippet_lines.append("    quote_unit_mojo_multiplier: 1000000000000")
+              snippet_lines.append("    slippage_bps: 100")
+              snippet_lines.append("    strategy_target_spread_bps: 140")
+              snippet_lines.append("    strategy_min_xch_price_usd: 20.0")
+              snippet_lines.append("    strategy_max_xch_price_usd: 60.0")
+              snippet_lines.append("    cancel_policy_stable_vs_unstable: true")
+              snippet_lines.append("  inventory:")
+              snippet_lines.append("    low_watermark_base_units: 0")
+              snippet_lines.append("    low_inventory_alert_threshold_base_units: null")
+              snippet_lines.append("    current_available_base_units: 0")
+              snippet_lines.append("    bucket_counts:")
+              snippet_lines.append("      1: 0")
+              snippet_lines.append("      10: 0")
+              snippet_lines.append("      100: 0")
+              snippet_lines.append("  ladders:")
+              snippet_lines.append("    sell:")
+              snippet_lines.append("      - size_base_units: 1")
+              snippet_lines.append("        target_count: 3")
+              snippet_lines.append("        split_buffer_count: 1")
+              snippet_lines.append("        combine_when_excess_factor: 2.0")
+              snippet_lines.append("      - size_base_units: 10")
+              snippet_lines.append("        target_count: 1")
+              snippet_lines.append("        split_buffer_count: 0")
+              snippet_lines.append("        combine_when_excess_factor: 2.0")
+
+          snippet_text = "\n".join(snippet_lines) + "\n"
+          (artifacts_dir / "markets-snippet.yaml").write_text(snippet_text, encoding="utf-8")
+
+          summary_lines = [
+              "# G2 testnet11 discovery summary",
+              "",
+              f"- network_profile: `{network_profile}`",
+              f"- dexie_base_url: `{dexie_base}`",
+              f"- quote_symbol: `{quote_symbol.lower()}`",
+              f"- discovered_token_count: `{len(raw_tokens)}`",
+              f"- normalized_token_count: `{len(deduped)}`",
+              f"- selected_asset_count: `{len(selected)}`",
+              "",
+              "## Selected assets",
+              "",
+          ]
+          for row in selected:
+              lp = "null" if row["last_price_xch"] is None else fmt_number(row["last_price_xch"], 0.0)
+              summary_lines.append(
+                  f"- `{row['symbol']}` asset_id=`{row['asset_id']}` "
+                  f"liquidity_score=`{fmt_number(row['liquidity_score'], 0.0)}` "
+                  f"last_price_xch=`{lp}`"
+              )
+          summary_lines.append("")
+          summary_lines.append("See `markets-snippet.yaml` for copy/paste bootstrap stanzas.")
+          (artifacts_dir / "summary.md").write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+
+          print("Generated artifacts:")
+          print(f"- {artifacts_dir / 'raw-tokens.json'}")
+          print(f"- {artifacts_dir / 'normalized-tokens.json'}")
+          print(f"- {artifacts_dir / 'selected-assets.json'}")
+          print(f"- {artifacts_dir / 'markets-snippet.yaml'}")
+          print(f"- {artifacts_dir / 'summary.md'}")
+          PY
+
+      - name: Upload G2 bootstrap artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: g2-testnet-asset-bootstrap-artifacts
+          path: artifacts/g2-testnet-asset-bootstrap/

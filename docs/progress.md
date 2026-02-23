@@ -1,5 +1,24 @@
 # Progress Log
 
+## 2026-02-23 (G2 testnet bootstrap helper workflow)
+
+- Implemented minimal operator helper workflow for G2: `.github/workflows/testnet11-asset-bootstrap-helper.yml`.
+- Added explicit workflow-dispatch inputs for the G2 shape:
+  - `network_profile` (must be `testnet11`),
+  - `dexie_base_url`,
+  - `quote_symbol` (must be `txch`),
+  - `top_n_assets`,
+  - `signer_key_id`,
+  - `receive_address`,
+  - optional `include_asset_ids_csv`.
+- Added a deterministic discovery/artifact contract under `artifacts/g2-testnet-asset-bootstrap/`:
+  - `raw-tokens.json`: raw Dexie `/v1/swap/tokens` payload capture,
+  - `normalized-tokens.json`: normalized+ranked CAT candidates,
+  - `selected-assets.json`: selected candidate set for bootstrap,
+  - `markets-snippet.yaml`: copy/paste starter snippet for `supported_assets_example` and disabled `markets` stanzas,
+  - `summary.md`: run summary with selected-asset quick view.
+- Added artifact upload for easy operator download: `g2-testnet-asset-bootstrap-artifacts`.
+
 ## 2026-02-23 (workflow install-path alignment)
 
 - Audited all repository workflows for `chia-wallet-sdk` install strategy (`.github/workflows/ci.yml`, `.github/workflows/live-testnet-e2e.yml`).
