@@ -17,6 +17,7 @@ GreenFloor is a long-running Python application for Chia CAT market making.
 
 - Offer files are plaintext Bech32m payloads with prefix `offer1...`.
 - In `chia-wallet-sdk`, offer text is an encoded/compressed `SpendBundle` (`encode_offer` / `decode_offer`).
+- Manager offer publishing validates offer text with `chia-wallet-sdk` parse semantics (`Offer::from_spend_bundle`) before Dexie submission.
 - Venue submission (`DexieAdapter.post_offer`) sends that exact offer text string as the `offer` field to `POST /v1/offers`.
 
 ## Offer Management Policy

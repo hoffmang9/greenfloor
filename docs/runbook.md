@@ -29,6 +29,7 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
   - Publish venue is selected by `venues.offer_publish.provider` in `~/.greenfloor/config/program.yaml` (`dexie` or `splash`).
     - Optional one-off override: `--venue dexie` or `--venue splash`
     - Optional URL overrides: `--dexie-base-url ...` and `--splash-base-url ...`
+  - Dexie path validates offer text with `chia-wallet-sdk` before submission; if validation fails, manager blocks submit and returns a `wallet_sdk_offer_verify_*` error.
 - Trigger daemon reload after config edits:
   - `greenfloor-manager reload-config --state-dir ~/.greenfloor/state`
 - Tune ladder/inventory safely with manager commands:

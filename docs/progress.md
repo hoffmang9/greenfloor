@@ -13,6 +13,14 @@
     - `size_base_units=1`
     - `dry_run=false`
   - Confirmed workflow run success (`run_id=22288977570`) and artifact upload (`live-testnet-e2e-artifacts`).
+- Added first-class offer verification through `chia-wallet-sdk` and enforced it before Dexie submission:
+  - Added `verify_offer` binding in forked `chia-wallet-sdk` (`offer` decode + `Offer::from_spend_bundle` validation path), then bumped submodule pointer in GreenFloor.
+  - Updated manager offer post flow to validate offer text with wallet-sdk before calling Dexie; invalid offers are now blocked pre-submit with explicit error reasons.
+  - Added/updated deterministic tests for manager Dexie post flow to account for pre-submit validation behavior.
+- Cleaned branch history for reviewer readability and revalidated CI health after force-push:
+  - Rewrote branch into a logical two-commit stack focused on (1) signing/diagnostics path and (2) txch discipline + pre-Dexie verification.
+  - Manually dispatched live workflow after rewrite and confirmed success (`run_id=22294247395`) on `ci-live-testnet-proof-flow`.
+  - Previous successful verification run remains available (`run_id=22294007396`) for comparison.
 
 ## 2026-02-22
 
