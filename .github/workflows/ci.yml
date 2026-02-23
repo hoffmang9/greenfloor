@@ -42,13 +42,39 @@ jobs:
           npm install --global prettier@4.0.0-alpha.8
           .venv/bin/python -m pip install yamllint==1.35.1
 
-      - name: Install Rust toolchain (sim harness)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Install Rust toolchain
         run: |
           curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           "$HOME/.cargo/bin/rustc" --version
           "$HOME/.cargo/bin/cargo" --version
+
+      - name: Restore greenfloor-native wheel cache
+        id: cache-native-wheel
+        uses: actions/cache/restore@v4
+        with:
+          path: ./.cache/wheelhouse/greenfloor-native
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('greenfloor-native/**') }}
+
+      - name: Build greenfloor-native wheel (cache miss)
+        if: steps.cache-native-wheel.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ./.cache/wheelhouse/greenfloor-native
+          .venv/bin/python -m pip install maturin
+          .venv/bin/python -m maturin build \
+            --manifest-path greenfloor-native/Cargo.toml \
+            --out ./.cache/wheelhouse/greenfloor-native
+
+      - name: Save greenfloor-native wheel cache
+        if: steps.cache-native-wheel.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ./.cache/wheelhouse/greenfloor-native
+          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('greenfloor-native/**') }}
+
+      - name: Install greenfloor-native wheel
+        run: |
+          .venv/bin/python -m pip install ./.cache/wheelhouse/greenfloor-native/*.whl
 
       - name: Ruff lint
         run: ruff check .
@@ -67,6 +93,43 @@ jobs:
 
       - name: Pytest
         run: pytest --ignore=tests/test_chia_wallet_sdk_simulator_harness.py
+
+      - name: Resolve chia-wallet-sdk pinned commit
+        if: matrix.os == 'ubuntu-latest'
+        id: sdk
+        run: |
+          echo "sha=$(git rev-parse HEAD:chia-wallet-sdk)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore chia-wallet-sdk wheel cache
+        if: matrix.os == 'ubuntu-latest'
+        id: cache-sdk-wheel
+        uses: actions/cache/restore@v4
+        with:
+          path: ./.cache/wheelhouse/chia-wallet-sdk
+          key: sdk-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.sha }}
+
+      - name: Build chia-wallet-sdk wheel (cache miss)
+        if: matrix.os == 'ubuntu-latest' && steps.cache-sdk-wheel.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ./.cache/wheelhouse/chia-wallet-sdk
+          .venv/bin/python -m pip wheel \
+            --wheel-dir ./.cache/wheelhouse/chia-wallet-sdk \
+            ./chia-wallet-sdk/pyo3
+
+      - name: Save chia-wallet-sdk wheel cache
+        if: matrix.os == 'ubuntu-latest' && steps.cache-sdk-wheel.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ./.cache/wheelhouse/chia-wallet-sdk
+          key: sdk-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.sha }}
+
+      - name: Install chia-wallet-sdk for native integration tests
+        if: matrix.os == 'ubuntu-latest'
+        run: .venv/bin/python -m pip install ./.cache/wheelhouse/chia-wallet-sdk/*.whl
+
+      - name: Pytest (greenfloor-native integration on Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: GREENFLOOR_RUN_NATIVE_INTEGRATION_TESTS=1 pytest -vv -s tests/test_greenfloor_native_integration.py
 
       - name: Pytest (chia-wallet-sdk simulator harness on Ubuntu)
         if: matrix.os == 'ubuntu-latest'

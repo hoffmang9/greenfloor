@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import urllib.error
@@ -26,6 +27,17 @@ from greenfloor.storage.sqlite import SqliteStore
 
 def _verify_offer_text_for_dexie(offer_text: str) -> str | None:
     try:
+        native = importlib.import_module("greenfloor_native")
+    except Exception:
+        native = None
+    else:
+        try:
+            native.validate_offer(offer_text)
+            return None
+        except Exception as exc:
+            return f"wallet_sdk_offer_validate_failed:{exc}"
+
+    try:
         import chia_wallet_sdk as sdk  # type: ignore
     except Exception as exc:
         return f"wallet_sdk_import_error:{exc}"
@@ -35,7 +47,6 @@ def _verify_offer_text_for_dexie(offer_text: str) -> str | None:
             validate_offer(offer_text)
             return None
 
-        # Temporary SDK-rename compatibility shim; remove after baseline pin is stable.
         verify_offer = getattr(sdk, "verify_offer", None)
         if not callable(verify_offer):
             return "wallet_sdk_validate_offer_unavailable"

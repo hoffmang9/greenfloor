@@ -1,5 +1,27 @@
 # Progress Log
 
+## 2026-02-23 (native-sdk migration prep)
+
+- Implemented regression guardrails for moving off the forked `chia-wallet-sdk` bindings:
+  - Added `tests/test_greenfloor_native_contract.py` to pin manager/signing behavior for native offer validation and offer spend-bundle construction contracts.
+  - Added optional `tests/test_greenfloor_native_integration.py` (gated by `GREENFLOOR_RUN_NATIVE_INTEGRATION_TESTS=1`) to exercise real compiled native bindings.
+- Added in-repo Rust extension crate `greenfloor-native/` (maturin+pyo3) exposing:
+  - `validate_offer(offer_text)` (decode + driver parse validation),
+  - `from_input_spend_bundle_xch(spend_bundle_bytes, requested_payments_xch)` (bytes-in/bytes-out constructor path).
+- Switched Python call paths to use in-repo native bindings:
+  - `greenfloor/signing.py` now constructs requested-payment tuples and calls `greenfloor_native.from_input_spend_bundle_xch`, then rebuilds `sdk.SpendBundle` from returned bytes.
+  - `greenfloor/cli/manager.py` now prefers `greenfloor_native.validate_offer` before SDK-level fallback checks.
+- Updated CI/workflows for native build path:
+  - `.github/workflows/ci.yml` now installs Rust on all matrix runners, builds/installs `greenfloor-native`, and adds an Ubuntu native integration test step.
+  - `.github/workflows/live-testnet-e2e.yml` now installs upstream `chia-wallet-sdk` from PyPI and builds `greenfloor-native` in-repo instead of building a forked SDK wheel.
+- Repointed submodule metadata back to upstream:
+  - `.gitmodules` now references `git@github.com:xch-dev/chia-wallet-sdk.git`.
+  - Submodule pointer moved from fork commit `5a87495f` to upstream baseline `b3158279`.
+- Validation status:
+  - `cargo check --manifest-path greenfloor-native/Cargo.toml` passes (with `clvmr` pinned to `0.16.2` for dependency compatibility).
+  - `pytest` passes locally (`151 passed, 5 skipped`), `ruff check` and `ruff format --check` pass, and `pyright` passes.
+  - Local network SSL trust prevented PyPI install for running native integration tests in this environment (`SSLCertVerificationError`); CI path is in place to execute them.
+
 ## 2026-02-23 (simplification pass)
 
 - Identified and fixed three simplification opportunities in the codebase:
