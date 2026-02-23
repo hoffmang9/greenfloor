@@ -77,17 +77,17 @@ Seven commands in scope. Do not add commands without explicit need tied to testn
 
 These are the only priorities. Do not start new feature work until G1-G3 are complete.
 
-- [ ] G1: Replace deterministic/synthetic manager offer build output with coin-backed `chia-wallet-sdk` offer construction that passes venue validation on `testnet11`.
+- [x] G1: Replace deterministic/synthetic manager offer build output with coin-backed `chia-wallet-sdk` offer construction that passes venue validation on `testnet11`.
   - Status update (2026-02-22): in-process offer-plan signing path is implemented in `greenfloor/signing.py` (including CAT lineage reconstruction and mixed-asset action building), and manager offer-builder now emits offer-plan payloads.
   - Current blocker: production-like proof depends on funded inventory for the exact signer/address context used by the execution environment. Local runs may fail if mnemonic/key material is CI-only.
   - Mitigation in place: `.github/workflows/live-testnet-e2e.yml` now supports a CI-only manager proof path (`pair`, `size_base_units`, `dry_run`) using `TESTNET_WALLET_MNEMONIC` and uploads proof logs as artifacts.
-  - Latest status (2026-02-23): manual dispatches on branch `ci-live-testnet-proof-flow` completed successfully in GitHub Actions (`run_id=22294007396`, `run_id=22294247395`), with proof logs uploaded via `live-testnet-e2e-artifacts`.
+  - Latest status (2026-02-23): branch `feat/greenfloor-native-upstream-migration` completed repeated live workflow proofs on the current head (`run_id=22325031449`, `run_id=22325053517`), including successful `dry_run=false` Dexie posts with offer IDs and uploaded artifacts.
   - Verification hardening in place: manager now validates offers via wallet-sdk before Dexie post to catch malformed offers on the primary path.
-  - Remaining work: keep iterating pair/size/inventory until evidence consistently shows venue-valid live post outcomes (offer id + reconcile evidence) across repeated runs.
+  - Closure evidence: repeated `dry_run=false` runs now show venue-valid post outcomes on `testnet11` with offer IDs in workflow logs/artifacts.
 - [ ] G2: Add operator helper workflow for `testnet11` asset discovery + inventory bootstrap (Dexie testnet liquidity discovery + market snippet generation).
-- [ ] G3: Run and document an end-to-end `testnet11` proof (build -> post -> status -> reconcile) using a live test asset pair.
+- [x] G3: Run and document an end-to-end `testnet11` proof (build -> post -> status -> reconcile) using a live test asset pair.
   - CI path now executes this sequence when `dry_run=false` in `live-testnet-e2e`.
-  - Latest status (2026-02-23): multiple manual CI dispatches completed with workflow success and artifacts (`run_id=22288977570`, `run_id=22294007396`, `run_id=22294247395`); continue collecting stable repeated-run evidence for closure.
+  - Latest status (2026-02-23): current native-migration branch runs (`run_id=22325031449`, `run_id=22325053517`) executed the full manager proof sequence successfully with artifacts, including live Dexie post (`dry_run=false`) and reconcile output.
 
 ## Deferred Backlog (Post-Testnet Proof)
 

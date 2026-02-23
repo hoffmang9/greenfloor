@@ -1,5 +1,26 @@
 # Progress Log
 
+## 2026-02-23 (workflow install-path alignment)
+
+- Audited all repository workflows for `chia-wallet-sdk` install strategy (`.github/workflows/ci.yml`, `.github/workflows/live-testnet-e2e.yml`).
+- Confirmed both workflows are now aligned on the same efficient pattern:
+  - resolve pinned submodule commit SHA (`git rev-parse HEAD:chia-wallet-sdk`),
+  - restore cache for `./.cache/wheelhouse/chia-wallet-sdk` keyed by `{os, arch, sha}`,
+  - build wheel from `./chia-wallet-sdk/pyo3` only on cache miss,
+  - install from cached wheelhouse artifact.
+- Applied consistency cleanup in CI workflow:
+  - renamed cache step labels/IDs and key prefix to `sdk-wheelhouse-*` so CI and live workflow conventions match exactly.
+
+## 2026-02-23 (native branch live-proof refresh)
+
+- Re-validated live `testnet11` manager proof on current native-migration head (`cb41976`) using GitHub Actions:
+  - Workflow: `Live Testnet E2E (Optional)` (`run_id=22325053517`), `workflow_dispatch`, branch `feat/greenfloor-native-upstream-migration`.
+  - Inputs: `pair=TDBX:txch`, `size_base_units=1`, `dry_run=false`.
+  - Evidence from logs: dry-run offer built (`offer1...`, length `1056`), live Dexie post succeeded (`publish_failures=0`), returned offer id `TiwFMao5DuDDoyLQzi5PSSqLMY7bweRGcNDwKzRM8xy`, reconcile command executed without errors.
+- Follow-up planning update:
+  - Marked `docs/plan.md` G1 and G3 as complete based on repeated successful `dry_run=false` evidence on current native branch head (`run_id=22325031449`, `run_id=22325053517`).
+  - Kept G2 open as the highest-priority remaining gap.
+
 ## 2026-02-23 (native-sdk migration prep)
 
 - Implemented regression guardrails for moving off the forked `chia-wallet-sdk` bindings:
@@ -13,7 +34,7 @@
   - `greenfloor/cli/manager.py` now prefers `greenfloor_native.validate_offer` before SDK-level fallback checks.
 - Updated CI/workflows for native build path:
   - `.github/workflows/ci.yml` now installs Rust on all matrix runners, builds/installs `greenfloor-native`, and adds an Ubuntu native integration test step.
-  - `.github/workflows/live-testnet-e2e.yml` now installs upstream `chia-wallet-sdk` from PyPI and builds `greenfloor-native` in-repo instead of building a forked SDK wheel.
+  - `.github/workflows/live-testnet-e2e.yml` now builds and installs `chia-wallet-sdk` from the pinned in-repo submodule wheel and builds `greenfloor-native` in-repo (no forked SDK wheel path).
 - Repointed submodule metadata back to upstream:
   - `.gitmodules` now references `git@github.com:xch-dev/chia-wallet-sdk.git`.
   - Submodule pointer moved from fork commit `5a87495f` to upstream baseline `b3158279`.
