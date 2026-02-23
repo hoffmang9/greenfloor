@@ -9,7 +9,9 @@
   - Added `.tmp-artifacts/` to `.gitignore`.
   - All 151 tests pass; `ruff check`, `ruff format`, `pyright` clean.
   - Committed `3f53d72` (SSH-signed), pushed branch, manually dispatched `live-testnet-e2e.yml` (run `22321746028`).
-  - Run `22321746028` completed successfully in 30s: dry-run produced valid offer `offer1qqr83wcuu2rykcmqvp` (1054 chars). Live post not yet dispatched (workflow defaulted to `dry_run=true`).
+  - Run `22321746028` (dry-run): completed successfully in 45s; produced valid offer `offer1qqr83wcuu2rykcmqvp` (1054 chars).
+  - Run `22321996901` (live, `dry_run=false`): completed successfully in 54s; offer posted to Dexie testnet with zero failures — Dexie offer ID `2HU1urTFmbKRVbtVsNnShFE3D7BXSVQBoeCB7aGzGUXa`. G1 proof achieved on `fix/proof-gating-and-doc-alignment`.
+  - Full pre-commit suite passes: `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest` (151 passed, 3 skipped).
 
 ## 2026-02-23 (earlier)
 
