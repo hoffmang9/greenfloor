@@ -84,7 +84,9 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
   - Latest status (2026-02-23): branch `feat/greenfloor-native-upstream-migration` completed repeated live workflow proofs on the current head (`run_id=22325031449`, `run_id=22325053517`), including successful `dry_run=false` Dexie posts with offer IDs and uploaded artifacts.
   - Verification hardening in place: manager now validates offers via wallet-sdk before Dexie post to catch malformed offers on the primary path.
   - Closure evidence: repeated `dry_run=false` runs now show venue-valid post outcomes on `testnet11` with offer IDs in workflow logs/artifacts.
-- [ ] G2: Add operator helper workflow for `testnet11` asset discovery + inventory bootstrap (Dexie testnet liquidity discovery + market snippet generation).
+- [x] G2: Add operator helper workflow for `testnet11` asset discovery + inventory bootstrap (Dexie testnet liquidity discovery + market snippet generation).
+  - Implemented minimal manual workflow: `.github/workflows/testnet11-asset-bootstrap-helper.yml`.
+  - Workflow contract: discover Dexie testnet tokens, normalize/rank candidates, and upload bootstrap artifacts (`raw-tokens.json`, `normalized-tokens.json`, `selected-assets.json`, `markets-snippet.yaml`, `summary.md`).
 - [x] G3: Run and document an end-to-end `testnet11` proof (build -> post -> status -> reconcile) using a live test asset pair.
   - CI path now executes this sequence when `dry_run=false` in `live-testnet-e2e`.
   - Latest status (2026-02-23): current native-migration branch runs (`run_id=22325031449`, `run_id=22325053517`) executed the full manager proof sequence successfully with artifacts, including live Dexie post (`dry_run=false`) and reconcile output.
