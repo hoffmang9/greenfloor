@@ -147,6 +147,28 @@ def _import_sdk() -> Any:
     return importlib.import_module("chia_wallet_sdk")
 
 
+def _import_greenfloor_native() -> Any:
+    return importlib.import_module("greenfloor_native")
+
+
+def _as_bytes(value: Any) -> bytes:
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value)
+    to_bytes = getattr(value, "to_bytes", None)
+    if callable(to_bytes):
+        raw = to_bytes()
+        if isinstance(raw, (bytes, bytearray, memoryview)):
+            return bytes(raw)
+        raise TypeError("to_bytes did not return bytes-compatible data")
+    to_dunder_bytes = getattr(value, "__bytes__", None)
+    if callable(to_dunder_bytes):
+        raw = to_dunder_bytes()
+        if isinstance(raw, (bytes, bytearray, memoryview)):
+            return bytes(raw)
+        raise TypeError("__bytes__ did not return bytes-compatible data")
+    raise TypeError("value cannot be converted to bytes")
+
+
 def _coinset_base_url(*, network: str) -> str:
     base = os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip()
     if not base:
@@ -525,10 +547,18 @@ def _from_input_spend_bundle_xch(
     input_spend_bundle: Any,
     requested_payments_xch: list[Any],
 ) -> Any:
-    fn = getattr(sdk, "from_input_spend_bundle_xch", None)
-    if callable(fn):
-        return fn(input_spend_bundle, requested_payments_xch)
-    raise RuntimeError("wallet_sdk_from_input_spend_bundle_xch_unavailable")
+    native = _import_greenfloor_native()
+    requested: list[tuple[bytes, list[tuple[bytes, int]]]] = []
+    for notarized_payment in requested_payments_xch:
+        payments: list[tuple[bytes, int]] = []
+        for payment in notarized_payment.payments:
+            payments.append((_as_bytes(payment.puzzle_hash), int(payment.amount)))
+        requested.append((_as_bytes(notarized_payment.nonce), payments))
+    spend_bundle_bytes = native.from_input_spend_bundle_xch(
+        input_spend_bundle.to_bytes(),
+        requested,
+    )
+    return sdk.SpendBundle.from_bytes(spend_bundle_bytes)
 
 
 def _scan_synthetic_keys_for_puzzle_hashes(

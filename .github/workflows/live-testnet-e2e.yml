@@ -37,43 +37,40 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Rust toolchain (chia-wallet-sdk pyo3 build)
+      - name: Install Rust toolchain (native extensions)
         run: |
           curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           "$HOME/.cargo/bin/rustc" --version
           "$HOME/.cargo/bin/cargo" --version
 
-      - name: Resolve chia-wallet-sdk pinned commit
-        id: sdk
-        run: |
-          echo "sha=$(git rev-parse HEAD:chia-wallet-sdk)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore chia-wallet-sdk wheelhouse cache
-        id: cache-sdk-wheelhouse
+      - name: Restore greenfloor-native wheelhouse cache
+        id: cache-native-wheelhouse
         uses: actions/cache/restore@v4
         with:
-          path: ./.cache/wheelhouse/chia-wallet-sdk
-          key: sdk-wheelhouse-${{ runner.os }}-py311-${{ steps.sdk.outputs.sha }}
+          path: ./.cache/wheelhouse/greenfloor-native
+          key: greenfloor-native-wheelhouse-${{ runner.os }}-py311-${{ hashFiles('greenfloor-native/Cargo.toml', 'greenfloor-native/Cargo.lock', 'greenfloor-native/src/lib.rs') }}
 
-      - name: Build chia-wallet-sdk wheel (cache miss)
-        if: steps.cache-sdk-wheelhouse.outputs.cache-hit != 'true'
+      - name: Build greenfloor-native wheel (cache miss)
+        if: steps.cache-native-wheelhouse.outputs.cache-hit != 'true'
         run: |
-          mkdir -p ./.cache/wheelhouse/chia-wallet-sdk
-          python -m pip wheel --wheel-dir ./.cache/wheelhouse/chia-wallet-sdk ./chia-wallet-sdk/pyo3
+          mkdir -p ./.cache/wheelhouse/greenfloor-native
+          python -m pip install maturin
+          python -m maturin build --manifest-path greenfloor-native/Cargo.toml --out ./.cache/wheelhouse/greenfloor-native
 
-      - name: Save chia-wallet-sdk wheelhouse cache
-        if: steps.cache-sdk-wheelhouse.outputs.cache-hit != 'true'
+      - name: Save greenfloor-native wheelhouse cache
+        if: steps.cache-native-wheelhouse.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ./.cache/wheelhouse/chia-wallet-sdk
-          key: sdk-wheelhouse-${{ runner.os }}-py311-${{ steps.sdk.outputs.sha }}
+          path: ./.cache/wheelhouse/greenfloor-native
+          key: greenfloor-native-wheelhouse-${{ runner.os }}-py311-${{ hashFiles('greenfloor-native/Cargo.toml', 'greenfloor-native/Cargo.lock', 'greenfloor-native/src/lib.rs') }}
 
       - name: Install package
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-          python -m pip install ./.cache/wheelhouse/chia-wallet-sdk/*.whl
+          python -m pip install chia-wallet-sdk==0.33.0
+          python -m pip install ./.cache/wheelhouse/greenfloor-native/*.whl
 
       - name: Validate config and run manager proof flow
         shell: bash

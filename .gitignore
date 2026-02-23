@@ -9,6 +9,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .pyright/
+.cache/
 *.pyc
 *.pyo
 *.pyd
@@ -16,6 +17,7 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+greenfloor-native/target/
 .coverage
 .coverage.*
 htmlcov/

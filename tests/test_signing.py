@@ -366,58 +366,128 @@ def test_signing_uses_testnet11_coinset_adapter_network(monkeypatch) -> None:
     assert captured["require_testnet11"] is True
 
 
-def test_from_input_spend_bundle_xch_uses_current_binding_when_both_present() -> None:
+def test_from_input_spend_bundle_xch_calls_greenfloor_native(monkeypatch) -> None:
     calls = {}
 
-    class _Sdk:
+    class _InputSpendBundle:
         @staticmethod
-        def from_input_spend_bundle(bundle, requested):
-            calls["legacy"] = (bundle, requested)
-            return "legacy-path"
+        def to_bytes() -> bytes:
+            return b"input-bytes"
 
+    class _Native:
         @staticmethod
-        def from_input_spend_bundle_xch(bundle, requested):
-            calls["new"] = (bundle, requested)
-            return "new-path"
+        def from_input_spend_bundle_xch(spend_bundle_bytes, requested):
+            calls["native"] = (spend_bundle_bytes, requested)
+            return b"result-bytes"
+
+    class _SpendBundleType:
+        @staticmethod
+        def from_bytes(value: bytes):
+            calls["from_bytes"] = value
+            return "rebuilt-spend-bundle"
+
+    class _Sdk:
+        SpendBundle = _SpendBundleType
+
+    class _Payment:
+        puzzle_hash = b"\x11" * 32
+        amount = 42
+
+    class _NotarizedPayment:
+        nonce = b"\x22" * 32
+        payments = [_Payment()]
+
+    monkeypatch.setattr(signing_mod, "_import_greenfloor_native", lambda: _Native)
 
     result = signing_mod._from_input_spend_bundle_xch(
         sdk=_Sdk,
-        input_spend_bundle="bundle",
-        requested_payments_xch=["np"],
+        input_spend_bundle=_InputSpendBundle(),
+        requested_payments_xch=[_NotarizedPayment()],
     )
-    assert result == "new-path"
-    assert calls["new"] == ("bundle", ["np"])
-    assert "legacy" not in calls
+    assert result == "rebuilt-spend-bundle"
+    assert calls["native"] == (b"input-bytes", [(b"\x22" * 32, [(b"\x11" * 32, 42)])])
+    assert calls["from_bytes"] == b"result-bytes"
 
 
-def test_from_input_spend_bundle_xch_uses_new_binding_when_legacy_missing() -> None:
-    calls = {}
+def test_from_input_spend_bundle_xch_supports_sdk_byte_wrapper_types(monkeypatch) -> None:
+    class _ByteWrapper:
+        def __init__(self, value: bytes) -> None:
+            self._value = value
+
+        def to_bytes(self) -> bytes:
+            return self._value
+
+    class _InputSpendBundle:
+        @staticmethod
+        def to_bytes() -> bytes:
+            return b"input-bytes"
+
+    class _Native:
+        @staticmethod
+        def from_input_spend_bundle_xch(_spend_bundle_bytes, requested):
+            assert requested == [(b"\xaa" * 32, [(b"\xbb" * 32, 9)])]
+            return b"result-bytes"
+
+    class _SpendBundleType:
+        @staticmethod
+        def from_bytes(value: bytes):
+            assert value == b"result-bytes"
+            return "rebuilt-spend-bundle"
 
     class _Sdk:
-        @staticmethod
-        def from_input_spend_bundle_xch(bundle, requested):
-            calls["new"] = (bundle, requested)
-            return "new-path"
+        SpendBundle = _SpendBundleType
+
+    class _Payment:
+        puzzle_hash = _ByteWrapper(b"\xbb" * 32)
+        amount = 9
+
+    class _NotarizedPayment:
+        nonce = _ByteWrapper(b"\xaa" * 32)
+        payments = [_Payment()]
+
+    monkeypatch.setattr(signing_mod, "_import_greenfloor_native", lambda: _Native)
 
     result = signing_mod._from_input_spend_bundle_xch(
         sdk=_Sdk,
-        input_spend_bundle="bundle",
-        requested_payments_xch=["np"],
+        input_spend_bundle=_InputSpendBundle(),
+        requested_payments_xch=[_NotarizedPayment()],
     )
-    assert result == "new-path"
-    assert calls["new"] == ("bundle", ["np"])
+    assert result == "rebuilt-spend-bundle"
 
 
-def test_from_input_spend_bundle_xch_requires_supported_binding() -> None:
+def test_from_input_spend_bundle_xch_propagates_native_errors(monkeypatch) -> None:
+    class _InputSpendBundle:
+        @staticmethod
+        def to_bytes() -> bytes:
+            return b"input-bytes"
+
+    class _Native:
+        @staticmethod
+        def from_input_spend_bundle_xch(_spend_bundle_bytes, _requested):
+            raise RuntimeError("native_failure")
+
     class _Sdk:
-        pass
+        class SpendBundle:
+            @staticmethod
+            def from_bytes(_value):
+                raise AssertionError("should not be called")
+
+    class _Payment:
+        puzzle_hash = b"\x11" * 32
+        amount = 42
+
+    class _NotarizedPayment:
+        nonce = b"\x22" * 32
+        payments = [_Payment()]
+
+    monkeypatch.setattr(signing_mod, "_import_greenfloor_native", lambda: _Native)
 
     try:
         signing_mod._from_input_spend_bundle_xch(
             sdk=_Sdk,
-            input_spend_bundle="bundle",
-            requested_payments_xch=["np"],
+            input_spend_bundle=_InputSpendBundle(),
+            requested_payments_xch=[_NotarizedPayment()],
         )
         raise AssertionError("expected RuntimeError")
     except RuntimeError as exc:
-        assert str(exc) == "wallet_sdk_from_input_spend_bundle_xch_unavailable"
+        assert str(exc) == "native_failure"

@@ -634,6 +634,13 @@ def test_build_offer_text_for_request_direct_call(monkeypatch) -> None:
 
 
 def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypatch) -> None:
+    def _import_module(name: str):
+        if name == "greenfloor_native":
+            raise ImportError("disable native path for this test")
+        return __import__(name)
+
+    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+
     class _Sdk:
         @staticmethod
         def validate_offer(offer: str) -> None:
@@ -644,6 +651,13 @@ def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypa
 
 
 def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> None:
+    def _import_module(name: str):
+        if name == "greenfloor_native":
+            raise ImportError("disable native path for this test")
+        return __import__(name)
+
+    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+
     class _Sdk:
         @staticmethod
         def verify_offer(offer: str) -> bool:
@@ -652,3 +666,35 @@ def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> 
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
     assert _verify_offer_text_for_dexie("offer1ok") is None
     assert _verify_offer_text_for_dexie("offer1bad") == "wallet_sdk_offer_verify_false"
+
+
+def test_verify_offer_text_for_dexie_uses_greenfloor_native_before_sdk(monkeypatch) -> None:
+    calls = {}
+
+    class _Native:
+        @staticmethod
+        def validate_offer(offer: str) -> None:
+            calls["offer"] = offer
+
+    class _Sdk:
+        @staticmethod
+        def validate_offer(_offer: str) -> None:
+            raise AssertionError("sdk path should not run when native is available")
+
+    monkeypatch.setitem(sys.modules, "greenfloor_native", _Native)
+    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+
+    assert _verify_offer_text_for_dexie("offer1native") is None
+    assert calls["offer"] == "offer1native"
+
+
+def test_verify_offer_text_for_dexie_returns_native_validation_error(monkeypatch) -> None:
+    class _Native:
+        @staticmethod
+        def validate_offer(_offer: str) -> None:
+            raise ValueError("native_invalid_offer")
+
+    monkeypatch.setitem(sys.modules, "greenfloor_native", _Native)
+    assert _verify_offer_text_for_dexie("offer1bad") == (
+        "wallet_sdk_offer_validate_failed:native_invalid_offer"
+    )
