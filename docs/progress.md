@@ -1,5 +1,33 @@
 # Progress Log
 
+## 2026-02-23 (simplification pass)
+
+- Identified and fixed three simplification opportunities in the codebase:
+
+**Dead `if dry_run` branch removed (`manager.py`):**
+- `_build_and_post_offer` had two identical `return 0 if publish_failures == 0 else 2` statements
+  guarded by `if dry_run:` / `else`. Both branches returned the same expression. Collapsed to one line.
+
+**Duplicated subprocess-vs-direct offer-builder logic consolidated:**
+- `manager.py` had `_build_offer_text_for_request` + `_build_offer_text_via_subprocess` (40 lines).
+- `daemon/main.py` had `_build_offer_for_action` (65 lines) reimplementing the same subprocess/direct
+  branching independently — any change to the subprocess contract required two edits.
+- Moved the single canonical implementation to `offer_builder_sdk.build_offer_text(payload)`:
+  checks `GREENFLOOR_OFFER_BUILDER_CMD`, spawns the subprocess if set, otherwise calls `build_offer()`
+  directly. Raises `RuntimeError` on any failure.
+- `_build_offer_text_for_request` in `manager.py` is now a one-line delegate to `build_offer_text`.
+- `_build_offer_for_action` in `daemon/main.py` is now a try/except wrapper around `build_offer_text`.
+- Removed `import shlex` and `import subprocess` from both `manager.py` and `daemon/main.py`.
+
+**`config/editor.py` deleted (no production caller):**
+- `greenfloor/config/editor.py` (128 lines) and `tests/test_config_editor.py` (96 lines) deleted.
+- The module supported `config-history-list` and `config-history-revert` commands removed in the
+  2026-02-21 simplification pass (CLI 21 → 7 commands). No production code imported it.
+- Per AGENTS.md: "Do not build features ahead of the critical path."
+
+- All 146 tests pass (3 skipped); full pre-commit suite passes: `ruff`, `ruff-format`, `prettier`,
+  `yamllint`, `pyright`, `pytest`.
+
 ## 2026-02-23
 
 - Fixed "Invalid Offer" rejection from Dexie (400 response) on branch `fix/proof-gating-and-doc-alignment`:

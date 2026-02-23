@@ -4,8 +4,6 @@ import argparse
 import asyncio
 import json
 import os
-import shlex
-import subprocess
 import time
 from pathlib import Path
 from typing import Any
@@ -208,7 +206,8 @@ def _build_offer_for_action(
     action,
     xch_price_usd: float | None,
 ) -> dict[str, Any]:
-    cmd_raw = os.getenv("GREENFLOOR_OFFER_BUILDER_CMD", "").strip()
+    from greenfloor.cli.offer_builder_sdk import build_offer_text
+
     payload = {
         "market_id": market.market_id,
         "base_asset": market.base_asset,
@@ -224,50 +223,11 @@ def _build_offer_for_action(
         "expiry_unit": action.expiry_unit,
         "expiry_value": int(action.expiry_value),
     }
-    if not cmd_raw:
-        from greenfloor.cli.offer_builder_sdk import build_offer
-
-        try:
-            offer = build_offer(payload)
-        except Exception as exc:
-            return {"status": "skipped", "reason": f"offer_builder_failed:{exc}", "offer": None}
-        if not str(offer).strip():
-            return {"status": "skipped", "reason": "offer_builder_missing_offer", "offer": None}
-        return {
-            "status": "executed",
-            "reason": "offer_builder_success",
-            "offer": str(offer).strip(),
-        }
-
     try:
-        completed = subprocess.run(
-            shlex.split(cmd_raw),
-            input=json.dumps(payload),
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=120,
-        )
+        offer = build_offer_text(payload)
     except Exception as exc:
-        return {"status": "skipped", "reason": f"offer_builder_spawn_error:{exc}", "offer": None}
-
-    if completed.returncode != 0:
-        err = completed.stderr.strip() or completed.stdout.strip() or "unknown_error"
-        return {"status": "skipped", "reason": f"offer_builder_failed:{err}", "offer": None}
-
-    try:
-        body = json.loads(completed.stdout.strip() or "{}")
-    except json.JSONDecodeError:
-        return {"status": "skipped", "reason": "offer_builder_invalid_json", "offer": None}
-
-    offer = str(body.get("offer", "")).strip()
-    if not offer:
-        return {"status": "skipped", "reason": "offer_builder_missing_offer", "offer": None}
-    return {
-        "status": str(body.get("status", "executed")),
-        "reason": str(body.get("reason", "offer_builder_success")),
-        "offer": offer,
-    }
+        return {"status": "skipped", "reason": f"offer_builder_failed:{exc}", "offer": None}
+    return {"status": "executed", "reason": "offer_builder_success", "offer": offer}
 
 
 def _execute_strategy_actions(

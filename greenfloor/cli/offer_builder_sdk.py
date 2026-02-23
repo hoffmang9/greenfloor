@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import shlex
+import subprocess
 import sys
 from typing import Any
 
@@ -98,6 +101,51 @@ def build_offer(payload: dict[str, Any]) -> str:
     """Build an offer text string from payload. Raises on failure."""
     sdk = _import_sdk()
     return _build_offer(payload, sdk)
+
+
+def build_offer_text(payload: dict[str, Any]) -> str:
+    """Build an offer1... string, dispatching via GREENFLOOR_OFFER_BUILDER_CMD if set.
+
+    When the env var is absent, calls build_offer() directly (no subprocess).
+    When the env var is present, spawns the external command, feeds payload as
+    JSON on stdin, and parses the {"status","offer"} JSON response from stdout.
+    Raises RuntimeError on any failure so callers can handle a single exception type.
+    """
+    cmd_raw = os.getenv("GREENFLOOR_OFFER_BUILDER_CMD", "").strip()
+    if not cmd_raw:
+        return build_offer(payload)
+
+    try:
+        completed = subprocess.run(
+            shlex.split(cmd_raw),
+            input=json.dumps(payload),
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=120,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"offer_builder_spawn_error:{exc}") from exc
+
+    if completed.returncode != 0:
+        err = completed.stderr.strip() or completed.stdout.strip() or "unknown_error"
+        raise RuntimeError(f"offer_builder_failed:{err}")
+
+    try:
+        body = json.loads(completed.stdout.strip() or "{}")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("offer_builder_invalid_json") from exc
+
+    status = str(body.get("status", "skipped"))
+    if status != "executed":
+        raise RuntimeError(str(body.get("reason", "offer_builder_skipped")))
+
+    offer = str(body.get("offer", "")).strip()
+    if not offer:
+        raise RuntimeError("offer_builder_missing_offer")
+    if not offer.startswith("offer1"):
+        raise RuntimeError("offer_builder_invalid_offer_prefix")
+    return offer
 
 
 def main() -> None:

@@ -3,8 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shlex
-import subprocess
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -13,6 +11,7 @@ import yaml
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
+from greenfloor.cli.offer_builder_sdk import build_offer_text
 from greenfloor.config.io import load_markets_config, load_program_config, load_yaml
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
 from greenfloor.keys.onboarding import (
@@ -251,47 +250,7 @@ def _resolve_offer_publish_settings(
 
 
 def _build_offer_text_for_request(payload: dict) -> str:
-    cmd_raw = os.getenv("GREENFLOOR_OFFER_BUILDER_CMD", "").strip()
-    if cmd_raw:
-        return _build_offer_text_via_subprocess(cmd_raw, payload)
-
-    from greenfloor.cli.offer_builder_sdk import build_offer
-
-    return build_offer(payload)
-
-
-def _build_offer_text_via_subprocess(cmd_raw: str, payload: dict) -> str:
-    try:
-        completed = subprocess.run(
-            shlex.split(cmd_raw),
-            input=json.dumps(payload),
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=120,
-        )
-    except Exception as exc:
-        raise RuntimeError(f"offer_builder_spawn_error:{exc}") from exc
-
-    if completed.returncode != 0:
-        err = completed.stderr.strip() or completed.stdout.strip() or "unknown_error"
-        raise RuntimeError(f"offer_builder_failed:{err}")
-
-    try:
-        body = json.loads(completed.stdout.strip() or "{}")
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("offer_builder_invalid_json") from exc
-
-    status = str(body.get("status", "skipped"))
-    if status != "executed":
-        raise RuntimeError(str(body.get("reason", "offer_builder_skipped")))
-
-    offer = str(body.get("offer", "")).strip()
-    if not offer:
-        raise RuntimeError("offer_builder_missing_offer")
-    if not offer.startswith("offer1"):
-        raise RuntimeError("offer_builder_invalid_offer_prefix")
-    return offer
+    return build_offer_text(payload)
 
 
 def _build_and_post_offer(
@@ -456,8 +415,6 @@ def _build_and_post_offer(
             }
         )
     )
-    if dry_run:
-        return 0 if publish_failures == 0 else 2
     return 0 if publish_failures == 0 else 2
 
 
