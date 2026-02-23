@@ -366,7 +366,7 @@ def test_signing_uses_testnet11_coinset_adapter_network(monkeypatch) -> None:
     assert captured["require_testnet11"] is True
 
 
-def test_from_input_spend_bundle_xch_prefers_legacy_binding_when_available() -> None:
+def test_from_input_spend_bundle_xch_uses_current_binding_when_both_present() -> None:
     calls = {}
 
     class _Sdk:
@@ -385,9 +385,9 @@ def test_from_input_spend_bundle_xch_prefers_legacy_binding_when_available() -> 
         input_spend_bundle="bundle",
         requested_payments_xch=["np"],
     )
-    assert result == "legacy-path"
-    assert calls["legacy"] == ("bundle", ["np"])
-    assert "new" not in calls
+    assert result == "new-path"
+    assert calls["new"] == ("bundle", ["np"])
+    assert "legacy" not in calls
 
 
 def test_from_input_spend_bundle_xch_uses_new_binding_when_legacy_missing() -> None:

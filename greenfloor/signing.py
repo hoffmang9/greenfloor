@@ -525,16 +525,9 @@ def _from_input_spend_bundle_xch(
     input_spend_bundle: Any,
     requested_payments_xch: list[Any],
 ) -> Any:
-    # Prefer legacy binding path while the renamed binding's offer output
-    # compatibility is being validated against Dexie testnet acceptance.
-    from_input_spend_bundle = getattr(sdk, "from_input_spend_bundle", None)
-    if callable(from_input_spend_bundle):
-        return from_input_spend_bundle(input_spend_bundle, requested_payments_xch)
-
-    from_input_spend_bundle_xch = getattr(sdk, "from_input_spend_bundle_xch", None)
-    if callable(from_input_spend_bundle_xch):
-        return from_input_spend_bundle_xch(input_spend_bundle, requested_payments_xch)
-
+    fn = getattr(sdk, "from_input_spend_bundle_xch", None)
+    if callable(fn):
+        return fn(input_spend_bundle, requested_payments_xch)
     raise RuntimeError("wallet_sdk_from_input_spend_bundle_xch_unavailable")
 
 
@@ -720,6 +713,16 @@ def _build_offer_spend_bundle(
         # Dexie expects requested payments to include an explicit memos list, even when empty.
         requested_payment = sdk.Payment(receive_puzzle_hash, request_amount, clvm.list([]))
         notarized_payment = sdk.NotarizedPayment(offer_nonce, [requested_payment])
+
+        # The maker's offered coins must assert the puzzle announcement that the
+        # settlement coin creates for this notarized payment. Without this assertion
+        # the offer is not atomically linked and is rejected by Dexie as invalid.
+        notarized_payment_hash = clvm.alloc(notarized_payment).tree_hash()
+        spends.add_required_condition(
+            clvm.assert_puzzle_announcement(
+                hashlib.sha256(settlement_puzzle_hash + notarized_payment_hash).digest()
+            )
+        )
 
         deltas = spends.apply(actions)
         finished = spends.prepare(deltas)
