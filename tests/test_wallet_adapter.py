@@ -192,7 +192,5 @@ def test_wallet_adapter_non_dry_run_direct_signing(tmp_path: Path, monkeypatch) 
     assert result["executed_count"] == 1
     assert result["items"][0]["status"] == "executed"
     assert result["items"][0]["operation_id"] == "tx-direct"
-    assert captured["payload"]["key_id_fingerprint_map"] == {
-        "fingerprint:123456789": "123456789"
-    }
+    assert captured["payload"]["key_id_fingerprint_map"] == {"fingerprint:123456789": "123456789"}
     assert os.getenv("GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON") == "{}"
