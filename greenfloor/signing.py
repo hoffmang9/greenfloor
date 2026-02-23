@@ -716,8 +716,8 @@ def _build_offer_spend_bundle(
         )
         nonce_program = clvm.list([clvm.atom(coin_id) for coin_id in offered_coin_ids])
         offer_nonce = nonce_program.tree_hash()
-        # Keep requested-payment memos unset to match the SDK's canonical offer examples.
-        requested_payment = sdk.Payment(receive_puzzle_hash, request_amount, None)
+        # Dexie expects requested payments to include an explicit memos list, even when empty.
+        requested_payment = sdk.Payment(receive_puzzle_hash, request_amount, clvm.list([]))
         notarized_payment = sdk.NotarizedPayment(offer_nonce, [requested_payment])
 
         deltas = spends.apply(actions)
