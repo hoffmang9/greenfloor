@@ -94,9 +94,38 @@ jobs:
       - name: Pytest
         run: pytest --ignore=tests/test_chia_wallet_sdk_simulator_harness.py
 
+      - name: Resolve chia-wallet-sdk pinned commit
+        if: matrix.os == 'ubuntu-latest'
+        id: sdk
+        run: |
+          echo "sha=$(git rev-parse HEAD:chia-wallet-sdk)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore chia-wallet-sdk wheel cache
+        if: matrix.os == 'ubuntu-latest'
+        id: cache-sdk-wheel
+        uses: actions/cache/restore@v4
+        with:
+          path: ./.cache/wheelhouse/chia-wallet-sdk
+          key: sdk-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.sha }}
+
+      - name: Build chia-wallet-sdk wheel (cache miss)
+        if: matrix.os == 'ubuntu-latest' && steps.cache-sdk-wheel.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ./.cache/wheelhouse/chia-wallet-sdk
+          .venv/bin/python -m pip wheel \
+            --wheel-dir ./.cache/wheelhouse/chia-wallet-sdk \
+            ./chia-wallet-sdk/pyo3
+
+      - name: Save chia-wallet-sdk wheel cache
+        if: matrix.os == 'ubuntu-latest' && steps.cache-sdk-wheel.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ./.cache/wheelhouse/chia-wallet-sdk
+          key: sdk-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.sha }}
+
       - name: Install chia-wallet-sdk for native integration tests
         if: matrix.os == 'ubuntu-latest'
-        run: .venv/bin/python -m pip install chia-wallet-sdk==0.33.0
+        run: .venv/bin/python -m pip install ./.cache/wheelhouse/chia-wallet-sdk/*.whl
 
       - name: Pytest (greenfloor-native integration on Ubuntu)
         if: matrix.os == 'ubuntu-latest'
