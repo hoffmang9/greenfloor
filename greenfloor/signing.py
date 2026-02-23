@@ -16,8 +16,9 @@ from typing import Any
 from greenfloor.adapters.coinset import CoinsetAdapter
 
 _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK: dict[str, bytes] = {
-    "mainnet": bytes.fromhex("37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"),
-    "testnet11": bytes.fromhex("b0a306abe27407130586c8e13d06dc057d4538c201dbd36c8f8c481f5e51af5c"),
+    # Match chia-wallet-sdk consensus constants for AGG_SIG_ME domain separation.
+    "mainnet": bytes.fromhex("ccd5bb71183532bff220ba46c268991a3ff07eb358e8255a65c30a2dce0e5fbb"),
+    "testnet11": bytes.fromhex("37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"),
 }
 
 
@@ -64,6 +65,19 @@ def _extract_required_bls_targets_for_coin_spend(
     conditions = output.value.to_list() or []
 
     coin = coin_spend.coin
+    return _extract_required_bls_targets_for_conditions(
+        conditions=conditions,
+        coin=coin,
+        agg_sig_me_additional_data=agg_sig_me_additional_data,
+    )
+
+
+def _extract_required_bls_targets_for_conditions(
+    *,
+    conditions: list[Any],
+    coin: Any,
+    agg_sig_me_additional_data: bytes,
+) -> list[tuple[bytes, bytes]]:
     parent = bytes(coin.parent_coin_info)
     puzzle_hash = bytes(coin.puzzle_hash)
     amount = _int_to_clvm_bytes(int(coin.amount))
@@ -511,15 +525,9 @@ def _from_input_spend_bundle_xch(
     input_spend_bundle: Any,
     requested_payments_xch: list[Any],
 ) -> Any:
-    from_input_spend_bundle_xch = getattr(sdk, "from_input_spend_bundle_xch", None)
-    if callable(from_input_spend_bundle_xch):
-        return from_input_spend_bundle_xch(input_spend_bundle, requested_payments_xch)
-
-    # Backward-compatible fallback for older binding name.
-    from_input_spend_bundle = getattr(sdk, "from_input_spend_bundle", None)
-    if callable(from_input_spend_bundle):
-        return from_input_spend_bundle(input_spend_bundle, requested_payments_xch)
-
+    fn = getattr(sdk, "from_input_spend_bundle_xch", None)
+    if callable(fn):
+        return fn(input_spend_bundle, requested_payments_xch)
     raise RuntimeError("wallet_sdk_from_input_spend_bundle_xch_unavailable")
 
 
@@ -702,11 +710,19 @@ def _build_offer_spend_bundle(
         )
         nonce_program = clvm.list([clvm.atom(coin_id) for coin_id in offered_coin_ids])
         offer_nonce = nonce_program.tree_hash()
-        requested_payment_memos = clvm.list([clvm.atom(receive_puzzle_hash)])
-        requested_payment = sdk.Payment(
-            receive_puzzle_hash, request_amount, requested_payment_memos
-        )
+        # Dexie expects requested payments to include an explicit memos list, even when empty.
+        requested_payment = sdk.Payment(receive_puzzle_hash, request_amount, clvm.list([]))
         notarized_payment = sdk.NotarizedPayment(offer_nonce, [requested_payment])
+
+        # The maker's offered coins must assert the puzzle announcement that the
+        # settlement coin creates for this notarized payment. Without this assertion
+        # the offer is not atomically linked and is rejected by Dexie as invalid.
+        notarized_payment_hash = clvm.alloc(notarized_payment).tree_hash()
+        spends.add_required_condition(
+            clvm.assert_puzzle_announcement(
+                hashlib.sha256(settlement_puzzle_hash + notarized_payment_hash).digest()
+            )
+        )
 
         deltas = spends.apply(actions)
         finished = spends.prepare(deltas)
@@ -720,7 +736,17 @@ def _build_offer_spend_bundle(
                 pending_cat = None
             delegated = clvm.delegated_spend(pending_spend.conditions())
             if pending_cat is not None:
-                pending_cat_spends.append(sdk.CatSpend(pending_cat, delegated))
+                try:
+                    signing_puzzle_hash = pending_spend.p2_puzzle_hash()
+                except Exception:
+                    signing_puzzle_hash = getattr(
+                        pending_cat.info, "p2_puzzle_hash", coin.puzzle_hash
+                    )
+                synthetic_sk = synthetic_sk_by_puzzle_hash.get(signing_puzzle_hash)
+                if synthetic_sk is None:
+                    return None, "missing_signing_key_for_pending_spend"
+                cat_inner_spend = clvm.standard_spend(synthetic_sk.public_key(), delegated)
+                pending_cat_spends.append(sdk.CatSpend(pending_cat, cat_inner_spend))
                 continue
             try:
                 signing_puzzle_hash = pending_spend.p2_puzzle_hash()
@@ -752,9 +778,8 @@ def _build_offer_spend_bundle(
                     return None, "missing_private_key_for_agg_sig_target"
                 signatures.append(sk.sign(message))
         if not signatures:
-            aggregate_sig = sdk.Signature.aggregate([])
-        else:
-            aggregate_sig = sdk.Signature.aggregate(signatures)
+            return None, "no_agg_sig_targets_found"
+        aggregate_sig = sdk.Signature.aggregate(signatures)
         input_spend_bundle = sdk.SpendBundle(coin_spends, aggregate_sig)
         spend_bundle = _from_input_spend_bundle_xch(
             sdk=sdk,

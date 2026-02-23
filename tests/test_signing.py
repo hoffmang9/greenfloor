@@ -3,6 +3,52 @@ from __future__ import annotations
 import greenfloor.signing as signing_mod
 
 
+def test_extract_required_bls_targets_for_conditions_agg_sig_me() -> None:
+    class _Pk:
+        def to_bytes(self) -> bytes:
+            return b"\x11" * 48
+
+    class _Parsed:
+        public_key = _Pk()
+        message = b"\xaa\xbb"
+
+    class _Condition:
+        @staticmethod
+        def parse_agg_sig_me():
+            return _Parsed()
+
+    class _Coin:
+        parent_coin_info = b"\x01" * 32
+        puzzle_hash = b"\x02" * 32
+        amount = 7
+
+        @staticmethod
+        def coin_id() -> bytes:
+            return b"\x03" * 32
+
+    additional_data = bytes.fromhex(
+        "37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"
+    )
+    targets = signing_mod._extract_required_bls_targets_for_conditions(
+        conditions=[_Condition()],
+        coin=_Coin(),
+        agg_sig_me_additional_data=additional_data,
+    )
+    assert len(targets) == 1
+    pk, message = targets[0]
+    assert pk == b"\x11" * 48
+    assert message == b"\xaa\xbb" + (b"\x03" * 32) + additional_data
+
+
+def test_agg_sig_additional_data_matches_chia_network_constants() -> None:
+    assert signing_mod._AGG_SIG_ADDITIONAL_DATA_BY_NETWORK["mainnet"] == bytes.fromhex(
+        "ccd5bb71183532bff220ba46c268991a3ff07eb358e8255a65c30a2dce0e5fbb"
+    )
+    assert signing_mod._AGG_SIG_ADDITIONAL_DATA_BY_NETWORK["testnet11"] == bytes.fromhex(
+        "37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"
+    )
+
+
 def test_build_signed_spend_bundle_missing_key_id() -> None:
     result = signing_mod.build_signed_spend_bundle(
         {"network": "mainnet", "receive_address": "xch1abc", "keyring_yaml_path": "/tmp/k.yaml"}
@@ -146,6 +192,33 @@ def test_build_signed_spend_bundle_offer_delegates_to_offer_builder(monkeypatch)
     )
     assert result["status"] == "executed"
     assert result["spend_bundle_hex"] == "aabb"
+
+
+def test_build_signed_spend_bundle_offer_propagates_missing_agg_sig_targets(monkeypatch) -> None:
+    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: object())
+    monkeypatch.setattr(
+        signing_mod,
+        "_build_offer_spend_bundle",
+        lambda **_kw: (None, "no_agg_sig_targets_found"),
+    )
+    result = signing_mod.build_signed_spend_bundle(
+        {
+            "key_id": "k1",
+            "network": "testnet11",
+            "receive_address": "xch1abc",
+            "keyring_yaml_path": "/tmp/k.yaml",
+            "asset_id": "xch",
+            "plan": {
+                "op_type": "offer",
+                "offer_asset_id": "xch",
+                "offer_amount": 10,
+                "request_asset_id": "xch",
+                "request_amount": 2,
+            },
+        }
+    )
+    assert result["status"] == "skipped"
+    assert result["reason"] == "signing_failed:no_agg_sig_targets_found"
 
 
 def test_sign_and_broadcast_propagates_signing_failure(monkeypatch) -> None:
@@ -293,7 +366,31 @@ def test_signing_uses_testnet11_coinset_adapter_network(monkeypatch) -> None:
     assert captured["require_testnet11"] is True
 
 
-def test_from_input_spend_bundle_xch_prefers_new_binding() -> None:
+def test_from_input_spend_bundle_xch_uses_current_binding_when_both_present() -> None:
+    calls = {}
+
+    class _Sdk:
+        @staticmethod
+        def from_input_spend_bundle(bundle, requested):
+            calls["legacy"] = (bundle, requested)
+            return "legacy-path"
+
+        @staticmethod
+        def from_input_spend_bundle_xch(bundle, requested):
+            calls["new"] = (bundle, requested)
+            return "new-path"
+
+    result = signing_mod._from_input_spend_bundle_xch(
+        sdk=_Sdk,
+        input_spend_bundle="bundle",
+        requested_payments_xch=["np"],
+    )
+    assert result == "new-path"
+    assert calls["new"] == ("bundle", ["np"])
+    assert "legacy" not in calls
+
+
+def test_from_input_spend_bundle_xch_uses_new_binding_when_legacy_missing() -> None:
     calls = {}
 
     class _Sdk:
@@ -309,24 +406,6 @@ def test_from_input_spend_bundle_xch_prefers_new_binding() -> None:
     )
     assert result == "new-path"
     assert calls["new"] == ("bundle", ["np"])
-
-
-def test_from_input_spend_bundle_xch_falls_back_to_legacy_binding() -> None:
-    calls = {}
-
-    class _Sdk:
-        @staticmethod
-        def from_input_spend_bundle(bundle, requested):
-            calls["legacy"] = (bundle, requested)
-            return "legacy-path"
-
-    result = signing_mod._from_input_spend_bundle_xch(
-        sdk=_Sdk,
-        input_spend_bundle="bundle",
-        requested_payments_xch=["np"],
-    )
-    assert result == "legacy-path"
-    assert calls["legacy"] == ("bundle", ["np"])
 
 
 def test_from_input_spend_bundle_xch_requires_supported_binding() -> None:

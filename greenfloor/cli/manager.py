@@ -36,7 +36,7 @@ def _verify_offer_text_for_dexie(offer_text: str) -> str | None:
             validate_offer(offer_text)
             return None
 
-        # Backward-compatible fallback for older binding name.
+        # Temporary SDK-rename compatibility shim; remove after baseline pin is stable.
         verify_offer = getattr(sdk, "verify_offer", None)
         if not callable(verify_offer):
             return "wallet_sdk_validate_offer_unavailable"
@@ -341,11 +341,23 @@ def _build_and_post_offer(
             "market pricing must define fixed_quote_per_base or min/max_price_quote_per_base for offer build"
         )
 
+    debug_dry_run_offer_capture_dir = os.getenv(
+        "GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", ""
+    ).strip()
+    capture_dir_path = (
+        Path(debug_dry_run_offer_capture_dir).expanduser()
+        if debug_dry_run_offer_capture_dir
+        else None
+    )
+    if dry_run and capture_dir_path is not None:
+        capture_dir_path.mkdir(parents=True, exist_ok=True)
+
     post_results: list[dict] = []
     built_offers_preview: list[dict[str, str]] = []
     dexie = DexieAdapter(dexie_base_url) if (not dry_run and publish_venue == "dexie") else None
     splash = SplashAdapter(splash_base_url) if (not dry_run and publish_venue == "splash") else None
-    for _ in range(repeat):
+    publish_failures = 0
+    for index in range(repeat):
         payload = {
             "market_id": market.market_id,
             "base_asset": market.base_asset,
@@ -368,19 +380,36 @@ def _build_and_post_offer(
             "network": network,
             "asset_id": market.base_asset,
         }
-        offer_text = _build_offer_text_for_request(payload)
-        if dry_run:
-            built_offers_preview.append(
+        try:
+            offer_text = _build_offer_text_for_request(payload)
+        except Exception as exc:
+            publish_failures += 1
+            post_results.append(
                 {
-                    "offer_prefix": offer_text[:24],
-                    "offer_length": str(len(offer_text)),
+                    "venue": publish_venue,
+                    "result": {
+                        "success": False,
+                        "error": f"offer_builder_failed:{exc}",
+                    },
                 }
             )
+            continue
+        if dry_run:
+            preview_item: dict[str, str] = {
+                "offer_prefix": offer_text[:24],
+                "offer_length": str(len(offer_text)),
+            }
+            if capture_dir_path is not None:
+                capture_file = capture_dir_path / f"{market.market_id}-dry-run-{index + 1}.offer"
+                capture_file.write_text(offer_text, encoding="utf-8")
+                preview_item["offer_capture_path"] = str(capture_file)
+            built_offers_preview.append(preview_item)
         else:
             if publish_venue == "dexie":
                 assert dexie is not None
                 verify_error = _verify_offer_text_for_dexie(offer_text)
                 if verify_error:
+                    publish_failures += 1
                     post_results.append(
                         {
                             "venue": "dexie",
@@ -393,12 +422,19 @@ def _build_and_post_offer(
                     drop_only=drop_only,
                     claim_rewards=claim_rewards,
                 )
+                success_value = result.get("success")
+                if success_value is False:
+                    publish_failures += 1
                 post_results.append({"venue": "dexie", "result": result})
             else:
                 assert splash is not None
                 result = splash.post_offer(offer_text)
+                success_value = result.get("success")
+                if success_value is False:
+                    publish_failures += 1
                 post_results.append({"venue": "splash", "result": result})
 
+    publish_attempts = len(post_results)
     print(
         json.dumps(
             {
@@ -413,12 +449,16 @@ def _build_and_post_offer(
                 "drop_only": drop_only,
                 "claim_rewards": claim_rewards,
                 "dry_run": dry_run,
+                "publish_attempts": publish_attempts,
+                "publish_failures": publish_failures,
                 "built_offers_preview": built_offers_preview,
                 "results": post_results,
             }
         )
     )
-    return 0
+    if dry_run:
+        return 0 if publish_failures == 0 else 2
+    return 0 if publish_failures == 0 else 2
 
 
 def _resolve_market_for_build(

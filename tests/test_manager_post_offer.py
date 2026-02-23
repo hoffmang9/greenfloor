@@ -237,6 +237,46 @@ def test_build_and_post_offer_dry_run_builds_but_does_not_post(
     assert payload["results"] == []
 
 
+def test_build_and_post_offer_dry_run_can_capture_full_offer_text(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+    capture_dir = tmp_path / "offer-capture"
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda _payload: "offer1captureme",
+    )
+    monkeypatch.setenv("GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", str(capture_dir))
+    try:
+        code = _build_and_post_offer(
+            program_path=program,
+            markets_path=markets,
+            network="mainnet",
+            market_id="m1",
+            pair=None,
+            size_base_units=1,
+            repeat=1,
+            publish_venue="dexie",
+            dexie_base_url="https://api.dexie.space",
+            splash_base_url="http://localhost:4000",
+            drop_only=True,
+            claim_rewards=False,
+            dry_run=True,
+        )
+    finally:
+        monkeypatch.delenv("GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", raising=False)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    capture_path = Path(payload["built_offers_preview"][0]["offer_capture_path"])
+    assert capture_path.exists()
+    assert capture_path.read_text(encoding="utf-8") == "offer1captureme"
+
+
 def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
@@ -452,6 +492,132 @@ def test_build_and_post_offer_posts_to_splash_when_selected(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["results"][0]["venue"] == "splash"
     assert payload["results"][0]["result"]["id"] == "splash-1"
+
+
+def test_build_and_post_offer_returns_nonzero_when_offer_verification_fails(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda _payload: "offer1bad",
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        lambda _offer: "wallet_sdk_offer_verify_false",
+    )
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        size_base_units=1,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["publish_attempts"] == 1
+    assert payload["publish_failures"] == 1
+    assert payload["results"][0]["result"]["success"] is False
+
+
+def test_build_and_post_offer_returns_nonzero_when_publish_fails(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+        def post_offer(self, offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = offer, drop_only, claim_rewards
+            return {"success": False, "error": "dexie_http_error:500"}
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda _payload: "offer1abc",
+    )
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        lambda _offer: None,
+    )
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        size_base_units=1,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["publish_attempts"] == 1
+    assert payload["publish_failures"] == 1
+    assert payload["results"][0]["result"]["success"] is False
+
+
+def test_build_and_post_offer_dry_run_returns_nonzero_when_build_fails(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+
+    def _raise_build_error(_payload):
+        raise RuntimeError("signing_failed:no_agg_sig_targets_found")
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        _raise_build_error,
+    )
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="testnet11",
+        market_id="m1",
+        pair=None,
+        size_base_units=1,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api-testnet.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=True,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["publish_attempts"] == 1
+    assert payload["publish_failures"] == 1
+    assert payload["results"][0]["result"]["success"] is False
+    assert payload["results"][0]["result"]["error"].startswith("offer_builder_failed:")
 
 
 def test_build_offer_text_for_request_direct_call(monkeypatch) -> None:

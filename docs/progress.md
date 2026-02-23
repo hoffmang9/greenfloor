@@ -2,9 +2,22 @@
 
 ## 2026-02-23
 
+- Fixed "Invalid Offer" rejection from Dexie (400 response) on branch `fix/proof-gating-and-doc-alignment`:
+  - Root cause: maker's offered coin spends were missing the `ASSERT_PUZZLE_ANNOUNCEMENT` condition required to atomically link them to the settlement coin. The SDK's `Spends` auto-assertion mechanism only fires for `SpendKind::Settlement` coins; regular CAT/XCH offered coins are `SpendKind::Conditions` and receive no assertion automatically.
+  - Fix: compute announcement ID as `sha256(settlement_puzzle_hash + tree_hash(notarized_payment))` using `clvm.alloc(notarized_payment).tree_hash()` and call `spends.add_required_condition(clvm.assert_puzzle_announcement(announcement_id))` before `spends.prepare(deltas)` in `greenfloor/signing.py`.
+  - Removed dead `from_input_spend_bundle` legacy fallback from `_from_input_spend_bundle_xch` (the binding no longer exists in the pinned SDK; only `from_input_spend_bundle_xch` remains). Updated stale test that expected legacy-path preference.
+  - Added `.tmp-artifacts/` to `.gitignore`.
+  - All 151 tests pass; `ruff check`, `ruff format`, `pyright` clean.
+  - Committed `3f53d72` (SSH-signed), pushed branch, manually dispatched `live-testnet-e2e.yml` (run `22321746028`).
+  - Run `22321746028` (dry-run): completed successfully in 45s; produced valid offer `offer1qqr83wcuu2rykcmqvp` (1054 chars).
+  - Run `22321996901` (live, `dry_run=false`): completed successfully in 54s; offer posted to Dexie testnet with zero failures — Dexie offer ID `2HU1urTFmbKRVbtVsNnShFE3D7BXSVQBoeCB7aGzGUXa`. G1 proof achieved on `fix/proof-gating-and-doc-alignment`.
+  - Full pre-commit suite passes: `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest` (151 passed, 3 skipped).
+
+## 2026-02-23 (earlier)
+
 - Updated GreenFloor for the latest `chia-wallet-sdk` fork API rename set and submodule tip:
   - Bumped `chia-wallet-sdk` submodule to `hoffmang9/greenfloor-from-input-spend-bundle` (`5a87495f`).
-  - Switched active call paths to prefer `validate_offer` and `from_input_spend_bundle_xch`, with backward-compatible fallbacks to legacy binding names.
+  - Switched active call paths to prefer `validate_offer` and `from_input_spend_bundle_xch`, with temporary compatibility shims to legacy binding names during the SDK rename window.
   - Added deterministic unit coverage for both new-name and fallback paths in manager offer validation and signing offer construction.
 - Completed CI-only proof-path delivery and validation for live testnet workflow:
   - Updated `README.md`, `docs/runbook.md`, `docs/plan.md`, and `docs/progress.md` to document the CI-only mnemonic execution path and proof artifact expectations.

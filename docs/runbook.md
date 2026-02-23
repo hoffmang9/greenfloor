@@ -30,30 +30,23 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
     - Optional one-off override: `--venue dexie` or `--venue splash`
     - Optional URL overrides: `--dexie-base-url ...` and `--splash-base-url ...`
   - Dexie path validates offer text with `chia-wallet-sdk` before submission; if validation fails, manager blocks submit and returns a `wallet_sdk_offer_verify_*` error.
-- Trigger daemon reload after config edits:
-  - `greenfloor-manager reload-config --state-dir ~/.greenfloor/state`
-- Tune ladder/inventory safely with manager commands:
-  - `set-ladder-entry`, `set-bucket-count`, `set-price-policy`
-- List default supported-asset examples:
-  - `greenfloor-manager --markets-config ~/.greenfloor/config/markets.yaml list-supported-assets`
 - Reconcile posted offers and flag orphan/unknown entries:
   - `greenfloor-manager offers-reconcile --limit 200`
   - Optional scope: `--market-id <id>`
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
-- Export compact runtime metrics (daemon latency + offer/cancel/error rates):
-  - `greenfloor-manager metrics-export --limit 500`
-- Review fee budget usage:
-  - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml coin-op-budget-report`
+- Note: manager CLI v1 surface is intentionally limited to seven commands. Tuning/history/metrics helpers are deferred until after G1-G3 testnet proof.
 
-## 3) Recovery and Rollback
+## 3) Recovery and Revalidation
 
-- List config history snapshots:
-  - `greenfloor-manager config-history-list --config-path ~/.greenfloor/config/markets.yaml`
-- Revert to latest snapshot:
-  - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml config-history-revert --config-path ~/.greenfloor/config/markets.yaml --latest --reload --state-dir ~/.greenfloor/state --yes`
-- Revert to explicit snapshot:
-  - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml config-history-revert --config-path ~/.greenfloor/config/markets.yaml --backup-path ~/.greenfloor/config/.history/markets.yaml.<timestamp>.bak.yaml --reload --state-dir ~/.greenfloor/state --yes`
+- Re-seed home config from repo templates (if needed):
+  - `greenfloor-manager bootstrap-home --force`
+- Re-run deterministic preflight checks:
+  - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml config-validate`
+  - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml doctor`
+- Re-check persisted offer state after incident:
+  - `greenfloor-manager offers-status --limit 50 --events-limit 30`
+  - `greenfloor-manager offers-reconcile --limit 200`
 
 ## 4) Expected Audit Signals
 
@@ -107,7 +100,6 @@ Run this sequence for first operator user testing:
 6. `greenfloor-manager build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11`
 7. `greenfloor-manager offers-status --limit 50 --events-limit 30`
 8. `greenfloor-manager offers-reconcile --limit 200`
-9. `greenfloor-manager metrics-export --limit 500`
 
 ## 8) Testnet11 Asset Bring-Up (On-Chain Testing)
 
@@ -119,7 +111,7 @@ Optional CI workflow secret contract (`.github/workflows/live-testnet-e2e.yml`):
 - Expected format is plain whitespace-delimited `12` or `24` words.
 - Current testnet receive address: `txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k`.
 - For `greenfloor-manager`, global flags (like `--program-config` and `--markets-config`) must be passed before the command name.
-- CI now runs the full simulator harness variant on `ubuntu-latest` with `GREENFLOOR_RUN_SDK_SIM_TESTS_FULL=1`.
+- This live workflow does not run pytest/simulator harness steps; it runs manager/daemon proof commands and uploads their logs.
 - Live workflow now supports manager-proof inputs: `network_profile`, `pair`, `size_base_units`, and `dry_run`.
 - Workflow sets `GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT=1000` by default to reduce missed funded keys at deeper derivation indices.
 - Workflow uploads `live-testnet-e2e-artifacts` containing dry-run/live/status/reconcile/daemon logs.

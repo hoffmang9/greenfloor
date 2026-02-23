@@ -9,6 +9,7 @@ This file defines implementation conventions for coding agents and contributors.
 - Treat `chia-wallet-sdk` (repo submodule) as the default library for blockchain syncing, spend-bundle signing, and offer-file generation in GreenFloor.
 - Treat offer files as `offer1...` Bech32m strings produced/consumed via `chia-wallet-sdk` offer encode/decode contracts.
 - Do not introduce fallback execution paths to mask primary-path correctness gaps; debug and fix the primary path directly.
+- Narrow exception: temporary symbol-rename compatibility shims for upstream `chia-wallet-sdk` bindings are allowed only during explicit migration windows (for example `validate_offer` -> `verify_offer`, `from_input_spend_bundle_xch` -> `from_input_spend_bundle`). Treat these as short-lived and remove them once the pinned submodule baseline is stable.
 - Network symbol discipline is mandatory: mainnet pairs use `xch`, testnet11 pairs use `txch`. Do not use `xch` in testnet11 pair examples, defaults, runbooks, workflows, or operator commands.
 - Treat offer cancellation as exceptional: only for stable-vs-unstable pairs, only on strong unstable-side price moves, and not as routine lifecycle management.
 - Ensure all posted offers have expiry; stable-vs-unstable pair offers should use shorter expiries.

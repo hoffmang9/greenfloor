@@ -26,6 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TESTNET_WALLET_MNEMONIC: ${{ secrets.TESTNET_WALLET_MNEMONIC }}
+      GREENFLOOR_WALLET_MNEMONIC: ${{ secrets.TESTNET_WALLET_MNEMONIC }}
       GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT: "1000"
     steps:
       - uses: actions/checkout@v4
@@ -48,9 +49,9 @@ jobs:
         run: |
           echo "sha=$(git rev-parse HEAD:chia-wallet-sdk)" >> "$GITHUB_OUTPUT"
 
-      - name: Cache chia-wallet-sdk wheelhouse
+      - name: Restore chia-wallet-sdk wheelhouse cache
         id: cache-sdk-wheelhouse
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ./.cache/wheelhouse/chia-wallet-sdk
           key: sdk-wheelhouse-${{ runner.os }}-py311-${{ steps.sdk.outputs.sha }}
@@ -60,6 +61,13 @@ jobs:
         run: |
           mkdir -p ./.cache/wheelhouse/chia-wallet-sdk
           python -m pip wheel --wheel-dir ./.cache/wheelhouse/chia-wallet-sdk ./chia-wallet-sdk/pyo3
+
+      - name: Save chia-wallet-sdk wheelhouse cache
+        if: steps.cache-sdk-wheelhouse.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ./.cache/wheelhouse/chia-wallet-sdk
+          key: sdk-wheelhouse-${{ runner.os }}-py311-${{ steps.sdk.outputs.sha }}
 
       - name: Install package
         run: |
@@ -73,11 +81,14 @@ jobs:
           set -euo pipefail
           export GREENFLOOR_SIGNING_DEBUG=1
           export GREENFLOOR_CAT_PARSE_CAPTURE_DIR=./artifacts/cat-parse-cases
+          export GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR=./artifacts/dry-run-offers
+          # Use the CI secret mnemonic directly for signing key derivation.
+          export GREENFLOOR_WALLET_MNEMONIC="${TESTNET_WALLET_MNEMONIC}"
           if [ -z "${TESTNET_WALLET_MNEMONIC:-}" ]; then
             echo "::error::TESTNET_WALLET_MNEMONIC is not set; cannot run live testnet proof workflow."
             exit 1
           fi
-          mkdir -p ./.tmp-state ./artifacts ./artifacts/cat-parse-cases
+          mkdir -p ./.tmp-state ./artifacts ./artifacts/cat-parse-cases ./artifacts/dry-run-offers
           printf "1\n%s\n" "${TESTNET_WALLET_MNEMONIC}" | \
             greenfloor-manager \
               --program-config config/program.yaml \
