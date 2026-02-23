@@ -20,7 +20,6 @@
 - Follow-up planning update:
   - Marked `docs/plan.md` G1 and G3 as complete based on repeated successful `dry_run=false` evidence on current native branch head (`run_id=22325031449`, `run_id=22325053517`).
   - Kept G2 open as the highest-priority remaining gap.
-
 ## 2026-02-23 (native-sdk migration prep)
 
 - Implemented regression guardrails for moving off the forked `chia-wallet-sdk` bindings:
