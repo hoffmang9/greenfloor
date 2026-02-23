@@ -723,16 +723,8 @@ def _build_offer_spend_bundle(
         deltas = spends.apply(actions)
         finished = spends.prepare(deltas)
         pending_cat_spends: list[Any] = []
-        required_targets: list[tuple[bytes, bytes]] = []
         for pending_spend in finished.pending_spends():
             coin = pending_spend.coin()
-            required_targets.extend(
-                _extract_required_bls_targets_for_conditions(
-                    conditions=pending_spend.conditions(),
-                    coin=coin,
-                    agg_sig_me_additional_data=additional_data,
-                )
-            )
             pending_cat = None
             try:
                 pending_cat = pending_spend.as_cat()
@@ -740,7 +732,17 @@ def _build_offer_spend_bundle(
                 pending_cat = None
             delegated = clvm.delegated_spend(pending_spend.conditions())
             if pending_cat is not None:
-                pending_cat_spends.append(sdk.CatSpend(pending_cat, delegated))
+                try:
+                    signing_puzzle_hash = pending_spend.p2_puzzle_hash()
+                except Exception:
+                    signing_puzzle_hash = getattr(
+                        pending_cat.info, "p2_puzzle_hash", coin.puzzle_hash
+                    )
+                synthetic_sk = synthetic_sk_by_puzzle_hash.get(signing_puzzle_hash)
+                if synthetic_sk is None:
+                    return None, "missing_signing_key_for_pending_spend"
+                cat_inner_spend = clvm.standard_spend(synthetic_sk.public_key(), delegated)
+                pending_cat_spends.append(sdk.CatSpend(pending_cat, cat_inner_spend))
                 continue
             try:
                 signing_puzzle_hash = pending_spend.p2_puzzle_hash()
@@ -761,11 +763,16 @@ def _build_offer_spend_bundle(
         sk_by_pk_bytes: dict[bytes, Any] = {}
         for synthetic_sk in synthetic_sk_by_puzzle_hash.values():
             sk_by_pk_bytes[synthetic_sk.public_key().to_bytes()] = synthetic_sk
-        for public_key, message in required_targets:
-            sk = sk_by_pk_bytes.get(public_key)
-            if sk is None:
-                return None, "missing_private_key_for_agg_sig_target"
-            signatures.append(sk.sign(message))
+        for coin_spend in coin_spends:
+            for public_key, message in _extract_required_bls_targets_for_coin_spend(
+                sdk=sdk,
+                coin_spend=coin_spend,
+                agg_sig_me_additional_data=additional_data,
+            ):
+                sk = sk_by_pk_bytes.get(public_key)
+                if sk is None:
+                    return None, "missing_private_key_for_agg_sig_target"
+                signatures.append(sk.sign(message))
         if not signatures:
             return None, "no_agg_sig_targets_found"
         aggregate_sig = sdk.Signature.aggregate(signatures)
