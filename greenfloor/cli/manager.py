@@ -36,7 +36,7 @@ def _verify_offer_text_for_dexie(offer_text: str) -> str | None:
             validate_offer(offer_text)
             return None
 
-        # Backward-compatible fallback for older binding name.
+        # Temporary SDK-rename compatibility shim; remove after baseline pin is stable.
         verify_offer = getattr(sdk, "verify_offer", None)
         if not callable(verify_offer):
             return "wallet_sdk_validate_offer_unavailable"
@@ -345,6 +345,7 @@ def _build_and_post_offer(
     built_offers_preview: list[dict[str, str]] = []
     dexie = DexieAdapter(dexie_base_url) if (not dry_run and publish_venue == "dexie") else None
     splash = SplashAdapter(splash_base_url) if (not dry_run and publish_venue == "splash") else None
+    publish_failures = 0
     for _ in range(repeat):
         payload = {
             "market_id": market.market_id,
@@ -381,6 +382,7 @@ def _build_and_post_offer(
                 assert dexie is not None
                 verify_error = _verify_offer_text_for_dexie(offer_text)
                 if verify_error:
+                    publish_failures += 1
                     post_results.append(
                         {
                             "venue": "dexie",
@@ -393,12 +395,19 @@ def _build_and_post_offer(
                     drop_only=drop_only,
                     claim_rewards=claim_rewards,
                 )
+                success_value = result.get("success")
+                if success_value is False:
+                    publish_failures += 1
                 post_results.append({"venue": "dexie", "result": result})
             else:
                 assert splash is not None
                 result = splash.post_offer(offer_text)
+                success_value = result.get("success")
+                if success_value is False:
+                    publish_failures += 1
                 post_results.append({"venue": "splash", "result": result})
 
+    publish_attempts = len(post_results)
     print(
         json.dumps(
             {
@@ -413,12 +422,16 @@ def _build_and_post_offer(
                 "drop_only": drop_only,
                 "claim_rewards": claim_rewards,
                 "dry_run": dry_run,
+                "publish_attempts": publish_attempts,
+                "publish_failures": publish_failures,
                 "built_offers_preview": built_offers_preview,
                 "results": post_results,
             }
         )
     )
-    return 0
+    if dry_run:
+        return 0
+    return 0 if publish_failures == 0 else 2
 
 
 def _resolve_market_for_build(

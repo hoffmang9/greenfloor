@@ -515,7 +515,7 @@ def _from_input_spend_bundle_xch(
     if callable(from_input_spend_bundle_xch):
         return from_input_spend_bundle_xch(input_spend_bundle, requested_payments_xch)
 
-    # Backward-compatible fallback for older binding name.
+    # Temporary SDK-rename compatibility shim; remove after baseline pin is stable.
     from_input_spend_bundle = getattr(sdk, "from_input_spend_bundle", None)
     if callable(from_input_spend_bundle):
         return from_input_spend_bundle(input_spend_bundle, requested_payments_xch)

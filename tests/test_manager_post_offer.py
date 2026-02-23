@@ -454,6 +454,93 @@ def test_build_and_post_offer_posts_to_splash_when_selected(
     assert payload["results"][0]["result"]["id"] == "splash-1"
 
 
+def test_build_and_post_offer_returns_nonzero_when_offer_verification_fails(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda _payload: "offer1bad",
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        lambda _offer: "wallet_sdk_offer_verify_false",
+    )
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        size_base_units=1,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["publish_attempts"] == 1
+    assert payload["publish_failures"] == 1
+    assert payload["results"][0]["result"]["success"] is False
+
+
+def test_build_and_post_offer_returns_nonzero_when_publish_fails(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+        def post_offer(self, offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = offer, drop_only, claim_rewards
+            return {"success": False, "error": "dexie_http_error:500"}
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda _payload: "offer1abc",
+    )
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        lambda _offer: None,
+    )
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        size_base_units=1,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["publish_attempts"] == 1
+    assert payload["publish_failures"] == 1
+    assert payload["results"][0]["result"]["success"] is False
+
+
 def test_build_offer_text_for_request_direct_call(monkeypatch) -> None:
     """Verify that _build_offer_text_for_request calls offer_builder_sdk.build_offer directly."""
     from greenfloor.cli import manager

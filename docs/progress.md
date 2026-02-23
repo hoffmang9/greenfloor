@@ -4,7 +4,7 @@
 
 - Updated GreenFloor for the latest `chia-wallet-sdk` fork API rename set and submodule tip:
   - Bumped `chia-wallet-sdk` submodule to `hoffmang9/greenfloor-from-input-spend-bundle` (`5a87495f`).
-  - Switched active call paths to prefer `validate_offer` and `from_input_spend_bundle_xch`, with backward-compatible fallbacks to legacy binding names.
+  - Switched active call paths to prefer `validate_offer` and `from_input_spend_bundle_xch`, with temporary compatibility shims to legacy binding names during the SDK rename window.
   - Added deterministic unit coverage for both new-name and fallback paths in manager offer validation and signing offer construction.
 - Completed CI-only proof-path delivery and validation for live testnet workflow:
   - Updated `README.md`, `docs/runbook.md`, `docs/plan.md`, and `docs/progress.md` to document the CI-only mnemonic execution path and proof artifact expectations.
