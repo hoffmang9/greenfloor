@@ -6,7 +6,6 @@ import json
 import os
 import shlex
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -210,9 +209,6 @@ def _build_offer_for_action(
     xch_price_usd: float | None,
 ) -> dict[str, Any]:
     cmd_raw = os.getenv("GREENFLOOR_OFFER_BUILDER_CMD", "").strip()
-    if not cmd_raw:
-        cmd_raw = f"{sys.executable} -m greenfloor.cli.offer_builder_sdk"
-
     payload = {
         "market_id": market.market_id,
         "base_asset": market.base_asset,
@@ -228,6 +224,21 @@ def _build_offer_for_action(
         "expiry_unit": action.expiry_unit,
         "expiry_value": int(action.expiry_value),
     }
+    if not cmd_raw:
+        from greenfloor.cli.offer_builder_sdk import build_offer
+
+        try:
+            offer = build_offer(payload)
+        except Exception as exc:
+            return {"status": "skipped", "reason": f"offer_builder_failed:{exc}", "offer": None}
+        if not str(offer).strip():
+            return {"status": "skipped", "reason": "offer_builder_missing_offer", "offer": None}
+        return {
+            "status": "executed",
+            "reason": "offer_builder_success",
+            "offer": str(offer).strip(),
+        }
+
     try:
         completed = subprocess.run(
             shlex.split(cmd_raw),
