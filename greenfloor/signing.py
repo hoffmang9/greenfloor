@@ -16,8 +16,9 @@ from typing import Any
 from greenfloor.adapters.coinset import CoinsetAdapter
 
 _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK: dict[str, bytes] = {
-    "mainnet": bytes.fromhex("37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"),
-    "testnet11": bytes.fromhex("b0a306abe27407130586c8e13d06dc057d4538c201dbd36c8f8c481f5e51af5c"),
+    # Match chia-wallet-sdk consensus constants for AGG_SIG_ME domain separation.
+    "mainnet": bytes.fromhex("ccd5bb71183532bff220ba46c268991a3ff07eb358e8255a65c30a2dce0e5fbb"),
+    "testnet11": bytes.fromhex("37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"),
 }
 
 

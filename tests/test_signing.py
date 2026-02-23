@@ -3,6 +3,15 @@ from __future__ import annotations
 import greenfloor.signing as signing_mod
 
 
+def test_agg_sig_additional_data_matches_chia_network_constants() -> None:
+    assert signing_mod._AGG_SIG_ADDITIONAL_DATA_BY_NETWORK["mainnet"] == bytes.fromhex(
+        "ccd5bb71183532bff220ba46c268991a3ff07eb358e8255a65c30a2dce0e5fbb"
+    )
+    assert signing_mod._AGG_SIG_ADDITIONAL_DATA_BY_NETWORK["testnet11"] == bytes.fromhex(
+        "37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"
+    )
+
+
 def test_build_signed_spend_bundle_missing_key_id() -> None:
     result = signing_mod.build_signed_spend_bundle(
         {"network": "mainnet", "receive_address": "xch1abc", "keyring_yaml_path": "/tmp/k.yaml"}
