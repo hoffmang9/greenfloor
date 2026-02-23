@@ -54,11 +54,13 @@ Build and post offers:
 ```bash
 # Dry-run preflight
 greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1 --dry-run
-# Publish (mainnet default; use --network testnet11 for testnet)
+# Publish (mainnet default)
 greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1
+# Publish on testnet11
+greenfloor-manager build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11
 ```
 
-On `testnet11`, the native coin is commonly called `TXCH`. Pair/input syntax still uses `xch` in CLI arguments (for example `CARBON22:xch`) across networks.
+On `testnet11`, use `txch` as the quote symbol in pair arguments (for example `CARBON22:txch`).
 
 Check offer status and reconcile:
 
@@ -99,6 +101,17 @@ CI secret for optional live testnet workflow:
 - `TESTNET_WALLET_MNEMONIC` — importable wallet mnemonic used by `.github/workflows/live-testnet-e2e.yml` for `keys-onboard` mnemonic import.
 - Format: whitespace-delimited `12` or `24` words (plain text mnemonic).
 - Testnet receive-address example for this wallet: `txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k`.
+
+Live `testnet11` proof workflow (CI-only mnemonic path):
+
+- Dispatch `.github/workflows/live-testnet-e2e.yml` from GitHub Actions.
+- Inputs:
+  - `network_profile` (default: `testnet11`)
+  - `pair` (default: `TDBX:txch`)
+  - `size_base_units` (default: `1`)
+  - `dry_run` (`false` to run live post/status/reconcile evidence path)
+- The workflow always runs `doctor` + dry-run `build-and-post-offer`; when `dry_run=false` it additionally runs live `build-and-post-offer`, `offers-status`, and `offers-reconcile`.
+- Logs are uploaded as artifact `live-testnet-e2e-artifacts`.
 
 Signer key resolution contract is repo-managed through `program.yaml`:
 

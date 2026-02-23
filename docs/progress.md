@@ -1,5 +1,19 @@
 # Progress Log
 
+## 2026-02-23
+
+- Completed CI-only proof-path delivery and validation for live testnet workflow:
+  - Updated `README.md`, `docs/runbook.md`, `docs/plan.md`, and `docs/progress.md` to document the CI-only mnemonic execution path and proof artifact expectations.
+  - Ran local quality gate successfully with virtualenv PATH pinned:
+    - `PATH="/Users/hoffmang/src/greenfloor/.venv/bin:$PATH" .venv/bin/pre-commit run --all-files`
+  - Created signed commit (`d09637e`) on branch `ci-live-testnet-proof-flow`, pushed branch, and opened PR `#9`.
+  - Manually dispatched `.github/workflows/live-testnet-e2e.yml` with:
+    - `network_profile=testnet11`
+    - `pair=TDBX:txch`
+    - `size_base_units=1`
+    - `dry_run=false`
+  - Confirmed workflow run success (`run_id=22288977570`) and artifact upload (`live-testnet-e2e-artifacts`).
+
 ## 2026-02-22
 
 - Updated CI and live testnet workflows after operator validation:
@@ -8,6 +22,11 @@
   - Optional `live-testnet-e2e` workflow now uses `TESTNET_WALLET_MNEMONIC` for onboarding import path.
   - Fixed `live-testnet-e2e` manager command ordering so global flags are passed before `config-validate`.
   - Confirmed manual workflow-dispatch run succeeded after command-order fix.
+  - Extended `live-testnet-e2e` into a CI-only manager proof path for G1/G3 evidence:
+    - New workflow-dispatch inputs: `pair` (default `TDBX:txch`) and `size_base_units` (default `1`).
+    - Workflow now runs manager golden-path commands in order: `doctor`, dry-run `build-and-post-offer`, live `build-and-post-offer` (when `dry_run=false`), `offers-status`, `offers-reconcile`.
+    - Added artifact upload (`live-testnet-e2e-artifacts`) for command logs and daemon-cycle output.
+    - Enabled a higher default derivation scan limit in workflow env (`GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT=1000`) to reduce false negatives for funded CI wallet keys.
 
 - Refreshed current repository quality-gate status after pre-commit workflow alignment:
   - Added `pre-commit` to dev dependencies and updated docs to use `pre-commit run --all-files` as the primary local gate command.
@@ -36,8 +55,8 @@
   - `tests/test_signing.py` adds offer-plan branch tests.
   - `tests/test_offer_builder_sdk.py` updated for offer-plan payload assertions.
 - Ran live manager proof commands on `testnet11`:
-  - `build-and-post-offer --pair CARBON22:xch --size-base-units 1 --network testnet11 --dry-run`
-  - `build-and-post-offer --pair CARBON22:xch --size-base-units 1 --network testnet11`
+  - `build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11 --dry-run`
+  - `build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11`
   - Both currently fail with `signing_failed:no_unspent_offer_cat_coins`.
   - Verified configured receive address has zero XCH and zero CAT balances on `testnet11` across the seeded supported-asset list.
 - Verified quality gates after implementation:

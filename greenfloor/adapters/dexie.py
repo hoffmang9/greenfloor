@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
@@ -59,8 +60,18 @@ class DexieAdapter:
             method="POST",
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace").strip()
+            snippet = raw[:500] if raw else ""
+            error = f"dexie_http_error:{exc.code}"
+            if snippet:
+                error = f"{error}:{snippet}"
+            return {"success": False, "error": error}
+        except urllib.error.URLError as exc:
+            return {"success": False, "error": f"dexie_network_error:{exc.reason}"}
         if isinstance(result, dict):
             return result
         return {"success": False, "error": "invalid_response_format"}

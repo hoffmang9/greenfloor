@@ -1,6 +1,6 @@
 ---
 app:
-  network: mainnet
+  network: testnet11
   home_dir: "~/.greenfloor"
   log_level: INFO
   run_mode: daemon
@@ -9,11 +9,11 @@ keys:
   registry:
     - key_id: "key-main-1"
       fingerprint: 123456789
-      network: "mainnet"
+      network: "testnet11"
       keyring_yaml_path: "~/.chia_keys/keyring.yaml"
     - key_id: "key-main-2"
       fingerprint: 987654321
-      network: "mainnet"
+      network: "testnet11"
       keyring_yaml_path: "~/.chia_keys/keyring.yaml"
 
 runtime:
@@ -28,7 +28,7 @@ coin_ops:
 
 venues:
   dexie:
-    api_base: "https://api.dexie.space"
+    api_base: "https://api-testnet.dexie.space"
   splash:
     api_base: "http://john-deere.hoffmang.com:4000"
   offer_publish:

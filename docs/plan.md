@@ -78,10 +78,14 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
 
 - [ ] G1: Replace deterministic/synthetic manager offer build output with coin-backed `chia-wallet-sdk` offer construction that passes venue validation on `testnet11`.
   - Status update (2026-02-22): in-process offer-plan signing path is implemented in `greenfloor/signing.py` (including CAT lineage reconstruction and mixed-asset action building), and manager offer-builder now emits offer-plan payloads.
-  - Current blocker: live `testnet11` proof command fails with `signing_failed:no_unspent_offer_cat_coins` because configured receive address inventory is empty on `testnet11` (zero XCH, zero CAT in scanned supported assets).
-  - Remaining work: fund/bootstrap testnet inventory and rerun venue-validation proof, then capture operator evidence.
+  - Current blocker: production-like proof depends on funded inventory for the exact signer/address context used by the execution environment. Local runs may fail if mnemonic/key material is CI-only.
+  - Mitigation in place: `.github/workflows/live-testnet-e2e.yml` now supports a CI-only manager proof path (`pair`, `size_base_units`, `dry_run`) using `TESTNET_WALLET_MNEMONIC` and uploads proof logs as artifacts.
+  - Latest status (2026-02-23): manual dispatch on branch `ci-live-testnet-proof-flow` completed successfully in GitHub Actions (`run_id=22288977570`), with proof logs uploaded via `live-testnet-e2e-artifacts`.
+  - Remaining work: keep iterating pair/size/inventory until evidence consistently shows venue-valid live post outcomes (offer id + reconcile evidence) across repeated runs.
 - [ ] G2: Add operator helper workflow for `testnet11` asset discovery + inventory bootstrap (Dexie testnet liquidity discovery + market snippet generation).
 - [ ] G3: Run and document an end-to-end `testnet11` proof (build -> post -> status -> reconcile) using a live test asset pair.
+  - CI path now executes this sequence when `dry_run=false` in `live-testnet-e2e`.
+  - Latest status (2026-02-23): first manual CI dispatch completed with workflow success and artifacts; continue collecting stable repeated-run evidence for closure.
 
 ## Deferred Backlog (Post-Testnet Proof)
 

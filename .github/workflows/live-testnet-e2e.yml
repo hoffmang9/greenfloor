@@ -8,6 +8,14 @@ name: Live Testnet E2E (Optional)
         description: "Network profile to use (example: testnet11)"
         default: "testnet11"
         required: true
+      pair:
+        description: "Asset pair for manager proof (example: TDBX:txch)"
+        default: "TDBX:txch"
+        required: true
+      size_base_units:
+        description: "Offer size in base units"
+        default: "1"
+        required: true
       dry_run:
         description: "Run in dry-run mode where possible"
         default: "true"
@@ -18,25 +26,58 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TESTNET_WALLET_MNEMONIC: ${{ secrets.TESTNET_WALLET_MNEMONIC }}
+      GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT: "1000"
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      - name: Install Rust toolchain (chia-wallet-sdk pyo3 build)
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustc" --version
+          "$HOME/.cargo/bin/cargo" --version
+
+      - name: Resolve chia-wallet-sdk pinned commit
+        id: sdk
+        run: |
+          echo "sha=$(git rev-parse HEAD:chia-wallet-sdk)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache chia-wallet-sdk wheelhouse
+        id: cache-sdk-wheelhouse
+        uses: actions/cache@v4
+        with:
+          path: ./.cache/wheelhouse/chia-wallet-sdk
+          key: sdk-wheelhouse-${{ runner.os }}-py311-${{ steps.sdk.outputs.sha }}
+
+      - name: Build chia-wallet-sdk wheel (cache miss)
+        if: steps.cache-sdk-wheelhouse.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ./.cache/wheelhouse/chia-wallet-sdk
+          python -m pip wheel --wheel-dir ./.cache/wheelhouse/chia-wallet-sdk ./chia-wallet-sdk/pyo3
+
       - name: Install package
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+          python -m pip install ./.cache/wheelhouse/chia-wallet-sdk/*.whl
 
-      - name: Validate config and run one daemon cycle
+      - name: Validate config and run manager proof flow
+        shell: bash
         run: |
+          set -euo pipefail
+          export GREENFLOOR_SIGNING_DEBUG=1
+          export GREENFLOOR_CAT_PARSE_CAPTURE_DIR=./artifacts/cat-parse-cases
           if [ -z "${TESTNET_WALLET_MNEMONIC:-}" ]; then
-            echo "TESTNET_WALLET_MNEMONIC is not set; skipping optional live \
-            testnet workflow."
-            exit 0
+            echo "::error::TESTNET_WALLET_MNEMONIC is not set; cannot run live testnet proof workflow."
+            exit 1
           fi
+          mkdir -p ./.tmp-state ./artifacts ./artifacts/cat-parse-cases
           printf "1\n%s\n" "${TESTNET_WALLET_MNEMONIC}" | \
             greenfloor-manager \
               --program-config config/program.yaml \
@@ -47,7 +88,50 @@ jobs:
             --program-config config/program.yaml \
             --markets-config config/markets.yaml \
             config-validate
+          greenfloor-manager \
+            --program-config config/program.yaml \
+            --markets-config config/markets.yaml \
+            doctor
+          greenfloor-manager \
+            --program-config config/program.yaml \
+            --markets-config config/markets.yaml \
+            build-and-post-offer \
+            --pair "${{ inputs.pair }}" \
+            --size-base-units "${{ inputs.size_base_units }}" \
+            --network "${{ inputs.network_profile }}" \
+            --dry-run | tee ./artifacts/build-and-post-offer.dry-run.log
+          if [ "${{ inputs.dry_run }}" = "false" ]; then
+            greenfloor-manager \
+              --program-config config/program.yaml \
+              --markets-config config/markets.yaml \
+              build-and-post-offer \
+              --pair "${{ inputs.pair }}" \
+              --size-base-units "${{ inputs.size_base_units }}" \
+              --network "${{ inputs.network_profile }}" \
+              | tee ./artifacts/build-and-post-offer.live.log
+            greenfloor-manager \
+              --program-config config/program.yaml \
+              --markets-config config/markets.yaml \
+              offers-status \
+              --limit 50 \
+              --events-limit 30 \
+              | tee ./artifacts/offers-status.log
+            greenfloor-manager \
+              --program-config config/program.yaml \
+              --markets-config config/markets.yaml \
+              offers-reconcile \
+              --limit 200 \
+              | tee ./artifacts/offers-reconcile.log
+          fi
           greenfloord \
             --program-config config/program.yaml \
             --markets-config config/markets.yaml \
-            --once
+            --state-dir ./.tmp-state \
+            --once | tee ./artifacts/greenfloord-once.log
+
+      - name: Upload proof artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-testnet-e2e-artifacts
+          path: artifacts/

@@ -290,4 +290,4 @@ def test_signing_uses_testnet11_coinset_adapter_network(monkeypatch) -> None:
     assert result["reason"] == "no_unspent_xch_coins"
     assert captured["network"] == "testnet11"
     assert captured["base_url"] is None
-    assert captured["require_testnet11"] is False
+    assert captured["require_testnet11"] is True

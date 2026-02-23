@@ -7,9 +7,21 @@ This file summarizes the public docs currently available from `https://www.coins
 ## Overview
 
 - Coinset positions itself as a free, fast, reliable Chia blockchain API service.
-- Main API base URL in examples: `https://api.coinset.org`.
+- Mainnet base URL: `https://coinset.org`.
+- Testnet11 base URL: `https://testnet11.api.coinset.org`.
 - Most documented endpoints use `POST` + JSON body.
-- Real-time updates are documented via WebSocket at `wss://api.coinset.org/ws`.
+- Real-time updates are documented via WebSocket at `wss://coinset.org/ws`.
+
+### Network Routing (Explicit)
+
+Use these exact hosts:
+
+```bash
+# For mainnet
+curl https://coinset.org
+# For testnet
+curl https://testnet11.api.coinset.org
+```
 
 ## Docs Structure (Observed)
 
@@ -146,13 +158,13 @@ Use this as a quick "minimum payload" guide when wiring clients.
 ## Quick Request Patterns
 
 ```bash
-curl -X POST "https://api.coinset.org/<endpoint>" \
+curl -X POST "https://coinset.org/<endpoint>" \
   -H "Content-Type: application/json" \
   -d '<json body>'
 ```
 
 ```bash
-wscat -c wss://api.coinset.org/ws
+wscat -c wss://coinset.org/ws
 ```
 
 ## Notes

@@ -21,8 +21,8 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
 
 - Post a real offer file directly (fast path to running state):
   - Mainnet (default, pair-based): `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1`
-  - Testnet: `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1 --network testnet11`
-  - On `testnet11`, native XCH is commonly referred to as `TXCH`; CLI pair syntax remains `...:xch`.
+  - Testnet: `greenfloor-manager build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11`
+  - On `testnet11`, use `txch` in pair syntax.
   - Safe preflight (build only, no publish): `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1 --dry-run`
   - If multiple markets share the same pair, rerun with explicit `--market-id`.
   - Use `--markets-config` only when overriding the default config path.
@@ -102,8 +102,8 @@ Run this sequence for first operator user testing:
 2. `greenfloor-manager config-validate`
 3. `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml doctor`
 4. Replace placeholder `receive_address` values in `~/.greenfloor/config/markets.yaml` with a valid network address (`xch1...` on mainnet, `txch1...` on `testnet11`).
-5. `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1 --dry-run`
-6. `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1`
+5. `greenfloor-manager build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11 --dry-run`
+6. `greenfloor-manager build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11`
 7. `greenfloor-manager offers-status --limit 50 --events-limit 30`
 8. `greenfloor-manager offers-reconcile --limit 200`
 9. `greenfloor-manager metrics-export --limit 500`
@@ -119,15 +119,29 @@ Optional CI workflow secret contract (`.github/workflows/live-testnet-e2e.yml`):
 - Current testnet receive address: `txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k`.
 - For `greenfloor-manager`, global flags (like `--program-config` and `--markets-config`) must be passed before the command name.
 - CI now runs the full simulator harness variant on `ubuntu-latest` with `GREENFLOOR_RUN_SDK_SIM_TESTS_FULL=1`.
+- Live workflow now supports manager-proof inputs: `network_profile`, `pair`, `size_base_units`, and `dry_run`.
+- Workflow sets `GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT=1000` by default to reduce missed funded keys at deeper derivation indices.
+- Workflow uploads `live-testnet-e2e-artifacts` containing dry-run/live/status/reconcile/daemon logs.
 
-1. Start with known testnet11 CAT assets that already trade on Dexie testnet.
-2. Fund a testnet11 `TXCH` account (faucet) for fees and initial taker actions.
-3. Acquire small test inventory in the target CAT by taking existing testnet offers.
-4. Add those asset IDs to `~/.greenfloor/config/markets.yaml` as enabled test markets.
-5. Run manager preflight and dry-run offer builds:
+CI-only proof sequence (no local mnemonic required):
+
+1. Open GitHub Actions and dispatch `Live Testnet E2E (Optional)`.
+2. Use `network_profile=testnet11`, `pair=TDBX:txch`, `size_base_units=1`.
+3. Set `dry_run=false` to execute full G1/G3 evidence path.
+4. Download `live-testnet-e2e-artifacts` and confirm:
+   - dry-run build succeeds,
+   - live build/post returns an offer id,
+   - `offers-status` shows posted lifecycle data,
+   - `offers-reconcile` completes without hard errors.
+
+5. Start with known testnet11 CAT assets that already trade on Dexie testnet.
+6. Fund a testnet11 `TXCH` account (faucet) for fees and initial taker actions.
+7. Acquire small test inventory in the target CAT by taking existing testnet offers.
+8. Add those asset IDs to `~/.greenfloor/config/markets.yaml` as enabled test markets.
+9. Run manager preflight and dry-run offer builds:
    - `greenfloor-manager config-validate`
-   - `greenfloor-manager build-and-post-offer --pair <TESTCAT>:xch --size-base-units 1 --network testnet11 --dry-run`
-6. Publish small-size offers and reconcile:
-   - `greenfloor-manager build-and-post-offer --pair <TESTCAT>:xch --size-base-units 1 --network testnet11`
-   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
-   - `greenfloor-manager offers-reconcile --limit 200`
+   - `greenfloor-manager build-and-post-offer --pair <TESTCAT>:txch --size-base-units 1 --network testnet11 --dry-run`
+10. Publish small-size offers and reconcile:
+    - `greenfloor-manager build-and-post-offer --pair <TESTCAT>:txch --size-base-units 1 --network testnet11`
+    - `greenfloor-manager offers-status --limit 50 --events-limit 30`
+    - `greenfloor-manager offers-reconcile --limit 200`

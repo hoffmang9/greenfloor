@@ -51,10 +51,10 @@ def test_coinset_adapter_get_all_mempool_tx_ids_uses_post_json(monkeypatch) -> N
         return _FakeResponse({"success": True, "mempool_tx_ids": ["0xabc", "0xdef"]})
 
     monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
-    adapter = CoinsetAdapter("https://api.coinset.org")
+    adapter = CoinsetAdapter("https://coinset.org")
     tx_ids = adapter.get_all_mempool_tx_ids()
     assert tx_ids == ["0xabc", "0xdef"]
-    assert captured["url"] == "https://api.coinset.org/get_all_mempool_tx_ids"
+    assert captured["url"] == "https://coinset.org/get_all_mempool_tx_ids"
     assert captured["method"] == "POST"
     assert captured["timeout"] == 15
     assert captured["content_type"] == "application/json"

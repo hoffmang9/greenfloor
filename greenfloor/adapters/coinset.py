@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
 
 
 class CoinsetAdapter:
-    MAINNET_BASE_URL = "https://api.coinset.org"
-    TESTNET11_BASE_URL = "https://api-testnet11.coinset.org"
+    MAINNET_BASE_URL = "https://coinset.org"
+    TESTNET11_BASE_URL = "https://testnet11.api.coinset.org"
 
     def __init__(
         self,
@@ -20,6 +21,7 @@ class CoinsetAdapter:
         selected_network = "testnet11" if require_testnet11 else network.strip().lower()
         if selected_network not in {"mainnet", "testnet11"}:
             selected_network = "mainnet"
+        self.network = selected_network
         resolved_base_url = base_url.strip() if isinstance(base_url, str) else ""
         if not resolved_base_url:
             if selected_network == "testnet11":
@@ -28,20 +30,43 @@ class CoinsetAdapter:
                 resolved_base_url = self.MAINNET_BASE_URL
         self.base_url = resolved_base_url.rstrip("/")
 
-    def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
-        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+    def _post_json_once(
+        self, endpoint: str, body: dict[str, Any], *, base_url: str
+    ) -> dict[str, Any]:
+        url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
         data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             url,
             data=data,
             method="POST",
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "greenfloor/0.1 (+https://github.com/hoffmang/greenfloor)",
+            },
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace").strip()
+            snippet = raw[:160] if raw else ""
+            message = f"coinset_http_error:{exc.code}"
+            if snippet:
+                message = f"{message}:{snippet}"
+            raise RuntimeError(message) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"coinset_network_error:{exc.reason}") from exc
         if isinstance(payload, dict):
             return payload
-        return {}
+        raise RuntimeError("coinset_invalid_response_payload")
+
+    def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
+        request_body = dict(body)
+        if self.network == "testnet11":
+            # Force testnet selection for shared/multiplexed Coinset backends.
+            request_body.setdefault("network", "testnet11")
+        return self._post_json_once(endpoint, request_body, base_url=self.base_url)
 
     def get_all_mempool_tx_ids(self) -> list[str]:
         payload = self._post_json("get_all_mempool_tx_ids", {})

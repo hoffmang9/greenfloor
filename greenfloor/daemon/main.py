@@ -997,7 +997,7 @@ def main() -> None:
     parser.add_argument("--state-db", default="", help="Optional explicit SQLite state DB path")
     parser.add_argument(
         "--coinset-base-url",
-        default="https://api.coinset.org",
+        default="https://coinset.org",
         help="Coinset API base URL",
     )
     parser.add_argument(
