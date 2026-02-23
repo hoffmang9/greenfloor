@@ -166,11 +166,19 @@ def test_wallet_adapter_non_dry_run_direct_signing(tmp_path: Path, monkeypatch) 
 
     import greenfloor.signing as signing_mod
 
+    captured: dict = {}
+
+    def _fake_sign_and_broadcast(payload):
+        captured["payload"] = payload
+        return {"status": "executed", "reason": "ok", "operation_id": "tx-direct"}
+
     monkeypatch.setattr(
         signing_mod,
         "sign_and_broadcast",
-        lambda _p: {"status": "executed", "reason": "ok", "operation_id": "tx-direct"},
+        _fake_sign_and_broadcast,
     )
+
+    monkeypatch.setenv("GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON", "{}")
 
     adapter = WalletAdapter()
     result = adapter.execute_coin_ops(
@@ -179,7 +187,12 @@ def test_wallet_adapter_non_dry_run_direct_signing(tmp_path: Path, monkeypatch) 
         key_id="fingerprint:123456789",
         network="testnet11",
         onboarding_selection_path=onboarding_path,
+        signer_fingerprint=123456789,
     )
     assert result["executed_count"] == 1
     assert result["items"][0]["status"] == "executed"
     assert result["items"][0]["operation_id"] == "tx-direct"
+    assert captured["payload"]["key_id_fingerprint_map"] == {
+        "fingerprint:123456789": "123456789"
+    }
+    assert os.getenv("GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON") == "{}"

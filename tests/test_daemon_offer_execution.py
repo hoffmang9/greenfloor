@@ -4,6 +4,7 @@ from typing import Any, cast
 
 from greenfloor.config.models import MarketConfig, MarketInventoryConfig
 from greenfloor.core.strategy import PlannedAction
+from greenfloor.daemon import main as daemon_main
 from greenfloor.daemon.main import _execute_strategy_actions
 
 
@@ -255,3 +256,30 @@ def test_execute_strategy_actions_applies_post_cooldown_after_retry_exhaust(monk
     assert dexie.calls == 2
     assert result["items"][0]["reason"].startswith("dexie_post_retry_exhausted:")
     assert result["items"][1]["reason"].startswith("post_cooldown_active:")
+
+
+def test_build_offer_for_action_direct_builder_call(monkeypatch) -> None:
+    monkeypatch.delenv("GREENFLOOR_OFFER_BUILDER_CMD", raising=False)
+    monkeypatch.setattr(
+        "greenfloor.cli.offer_builder_sdk.build_offer",
+        lambda payload: f"offer1direct-{payload['size_base_units']}",
+    )
+    action = PlannedAction(
+        size=10,
+        repeat=1,
+        pair="xch",
+        expiry_unit="minutes",
+        expiry_value=65,
+        cancel_after_create=True,
+        reason="below_target",
+    )
+
+    built = daemon_main._build_offer_for_action(
+        market=_market(),
+        action=action,
+        xch_price_usd=31.5,
+    )
+
+    assert built["status"] == "executed"
+    assert built["reason"] == "offer_builder_success"
+    assert built["offer"] == "offer1direct-10"

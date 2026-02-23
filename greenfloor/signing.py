@@ -11,9 +11,6 @@ import hashlib
 import importlib
 import json
 import os
-import sys
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from greenfloor.adapters.coinset import CoinsetAdapter
@@ -22,63 +19,6 @@ _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK: dict[str, bytes] = {
     "mainnet": bytes.fromhex("37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"),
     "testnet11": bytes.fromhex("b0a306abe27407130586c8e13d06dc057d4538c201dbd36c8f8c481f5e51af5c"),
 }
-
-
-def _is_signing_debug_enabled() -> bool:
-    return os.getenv("GREENFLOOR_SIGNING_DEBUG", "").strip() == "1"
-
-
-def _redact_address(value: str) -> str:
-    raw = value.strip()
-    if len(raw) <= 14:
-        return raw
-    return f"{raw[:8]}...{raw[-6:]}"
-
-
-def _redact_hex(value: str) -> str:
-    raw = value.strip().lower()
-    if raw.startswith("0x"):
-        raw = raw[2:]
-    if len(raw) <= 16:
-        return raw
-    return f"{raw[:8]}...{raw[-8:]}"
-
-
-def _debug_signing(event: str, **payload: Any) -> None:
-    if not _is_signing_debug_enabled():
-        return
-    message = {"component": "signing", "event": event, **payload}
-    try:
-        sys.stderr.write(f"{json.dumps(message, sort_keys=True)}\n")
-    except Exception:
-        # Debug logging must never interfere with signing flow.
-        pass
-
-
-def _capture_cat_parse_case(case: dict[str, Any]) -> None:
-    target_dir = os.getenv("GREENFLOOR_CAT_PARSE_CAPTURE_DIR", "").strip()
-    if not target_dir:
-        return
-    try:
-        output_dir = Path(target_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        case_id = str(case.get("case_id", "")).strip() or "unknown"
-        safe_case_id = "".join(ch for ch in case_id if ch.isalnum() or ch in {"-", "_"})
-        if not safe_case_id:
-            safe_case_id = "unknown"
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
-        out_path = output_dir / f"{timestamp}-{safe_case_id}.json"
-        out_path.write_text(json.dumps(case, sort_keys=True, indent=2), encoding="utf-8")
-        _debug_signing(
-            "cat_coin_parse_case_captured",
-            capture_path=str(out_path),
-            case_id=safe_case_id,
-        )
-    except Exception as exc:
-        _debug_signing(
-            "cat_coin_parse_case_capture_error",
-            error=str(exc),
-        )
 
 
 def _int_to_clvm_bytes(value: int) -> bytes:
@@ -159,78 +99,6 @@ def _extract_required_bls_targets_for_coin_spend(
     return targets
 
 
-def _debug_probe_parent_create_coin_outputs(
-    *,
-    sdk: Any,
-    parent_coin_spend: _CoinSolutionView,
-    parent_coin: Any,
-    child_coin: Any,
-    network: str,
-    asset_id: str,
-    record_index: int,
-) -> None:
-    if not _is_signing_debug_enabled():
-        return
-    try:
-        clvm = sdk.Clvm()
-        parent_puzzle = clvm.deserialize(parent_coin_spend.puzzle_reveal)
-        parent_solution = clvm.deserialize(parent_coin_spend.solution)
-        output = parent_puzzle.run(parent_solution, 11_000_000_000, False)
-        conditions = output.value.to_list() or []
-        outputs: list[tuple[bytes, int]] = []
-        for condition in conditions:
-            try:
-                create_coin = condition.parse_create_coin()
-            except Exception:
-                create_coin = None
-            if create_coin is None:
-                continue
-            outputs.append((bytes(create_coin.puzzle_hash), int(create_coin.amount)))
-        target_child_coin_id = sdk.to_hex(child_coin.coin_id())
-        target_child_puzzle_hash = sdk.to_hex(child_coin.puzzle_hash)
-        target_child_amount = int(child_coin.amount)
-        matched_by_coin_id = False
-        matched_by_fields = False
-        samples: list[dict[str, Any]] = []
-        for idx, (puzzle_hash, amount) in enumerate(outputs):
-            created_coin = sdk.Coin(parent_coin.coin_id(), puzzle_hash, amount)
-            created_coin_id = sdk.to_hex(created_coin.coin_id())
-            created_puzzle_hash = sdk.to_hex(puzzle_hash)
-            if created_coin_id == target_child_coin_id:
-                matched_by_coin_id = True
-            if created_puzzle_hash == target_child_puzzle_hash and amount == target_child_amount:
-                matched_by_fields = True
-            if idx < 5:
-                samples.append(
-                    {
-                        "created_coin_id": _redact_hex(created_coin_id),
-                        "created_puzzle_hash": _redact_hex(created_puzzle_hash),
-                        "created_amount": int(amount),
-                    }
-                )
-        _debug_signing(
-            "cat_coin_parent_create_coin_probe",
-            network=network,
-            asset_id=asset_id,
-            record_index=record_index,
-            target_coin_id=_redact_hex(target_child_coin_id),
-            target_puzzle_hash=_redact_hex(target_child_puzzle_hash),
-            target_amount=target_child_amount,
-            create_coin_count=len(outputs),
-            matched_by_coin_id=matched_by_coin_id,
-            matched_by_fields=matched_by_fields,
-            sample_create_coin_outputs=samples,
-        )
-    except Exception as exc:
-        _debug_signing(
-            "cat_coin_parent_create_coin_probe_error",
-            network=network,
-            asset_id=asset_id,
-            record_index=record_index,
-            error=str(exc),
-        )
-
-
 def _hex_to_bytes(value: str) -> bytes:
     raw = value.strip().lower()
     if raw.startswith("0x"):
@@ -268,13 +136,6 @@ def _import_sdk() -> Any:
 def _coinset_base_url(*, network: str) -> str:
     base = os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip()
     if not base:
-        _debug_signing(
-            "coinset_base_url_resolved",
-            network=network,
-            base_url="",
-            source="default",
-            guard_triggered=False,
-        )
         return ""
     network_l = network.strip().lower()
     if network_l in {"testnet", "testnet11"}:
@@ -284,28 +145,12 @@ def _coinset_base_url(*, network: str) -> str:
             and "testnet11.api.coinset.org" not in base
             and allow_mainnet != "1"
         )
-        _debug_signing(
-            "coinset_base_url_resolved",
-            network=network,
-            base_url=base,
-            source="env",
-            allow_mainnet_coinset_for_testnet11=allow_mainnet == "1",
-            guard_triggered=guard_triggered,
-        )
         if (
             "coinset.org" in base
             and "testnet11.api.coinset.org" not in base
             and allow_mainnet != "1"
         ):
             raise RuntimeError("coinset_base_url_mainnet_not_allowed_for_testnet11")
-    else:
-        _debug_signing(
-            "coinset_base_url_resolved",
-            network=network,
-            base_url=base,
-            source="env",
-            guard_triggered=False,
-        )
     return base
 
 
@@ -346,12 +191,6 @@ def _spent_height_from_record(record: dict[str, Any]) -> int:
         return 0
 
 
-class _CoinSolutionView:
-    def __init__(self, *, puzzle_reveal: bytes, solution: bytes) -> None:
-        self.puzzle_reveal = puzzle_reveal
-        self.solution = solution
-
-
 # ---------------------------------------------------------------------------
 # Coin discovery
 # ---------------------------------------------------------------------------
@@ -389,169 +228,53 @@ def _list_unspent_cat_coins(
         cat_puzzle_hash = sdk.cat_puzzle_hash(asset_id_bytes, inner_puzzle_hash)
         coinset = _coinset_adapter(network=network)
         cat_puzzle_hash_hex = _to_coinset_hex(cat_puzzle_hash)
-        _debug_signing(
-            "cat_coin_discovery_start",
-            network=network,
-            receive_address=_redact_address(receive_address),
-            asset_id=asset_id,
-            cat_puzzle_hash=cat_puzzle_hash_hex,
-        )
         records = coinset.get_coin_records_by_puzzle_hash(
             puzzle_hash_hex=cat_puzzle_hash_hex,
             include_spent_coins=False,
-        )
-        _debug_signing(
-            "cat_coin_records_fetched",
-            network=network,
-            asset_id=asset_id,
-            records_count=len(records),
         )
         if not records:
             return []
 
         clvm = sdk.Clvm()
         cats: list[Any] = []
-        skipped_invalid_coin = 0
-        skipped_missing_parent = 0
-        skipped_invalid_parent_coin = 0
-        skipped_unspent_parent = 0
-        skipped_missing_parent_solution = 0
-        skipped_missing_parent_solution_fields = 0
-        skipped_parent_deserialize_error = 0
-        skipped_parse_child_cats_empty = 0
-        skipped_child_match_missing = 0
-        for idx, record in enumerate(records):
+        for record in records:
             coin = _coin_from_record(sdk=sdk, record=record)
             if coin is None:
-                skipped_invalid_coin += 1
                 continue
-            coin_id_hex = sdk.to_hex(coin.coin_id())
-            parent_coin_id_hex = sdk.to_hex(coin.parent_coin_info)
 
             parent_record = coinset.get_coin_record_by_name(
                 coin_name_hex=_to_coinset_hex(coin.parent_coin_info)
             )
             if parent_record is None:
-                skipped_missing_parent += 1
                 continue
             parent_coin = _coin_from_record(sdk=sdk, record=parent_record)
             if parent_coin is None:
-                skipped_invalid_parent_coin += 1
                 continue
             parent_spent_height = _spent_height_from_record(parent_record)
             if parent_spent_height <= 0:
-                skipped_unspent_parent += 1
                 continue
 
-            _debug_signing(
-                "cat_coin_record_parent_lookup",
-                network=network,
-                asset_id=asset_id,
-                record_index=idx,
-                coin_id=_redact_hex(coin_id_hex),
-                parent_coin_id=_redact_hex(parent_coin_id_hex),
-                coin_amount=int(coin.amount),
-                parent_spent_height=parent_spent_height,
-            )
             parent_solution_record = coinset.get_puzzle_and_solution(
                 coin_id_hex=_to_coinset_hex(parent_coin.coin_id()),
                 height=parent_spent_height,
             )
             if parent_solution_record is None:
-                skipped_missing_parent_solution += 1
                 continue
             puzzle_reveal_hex = str(parent_solution_record.get("puzzle_reveal", "")).strip()
             solution_hex = str(parent_solution_record.get("solution", "")).strip()
             if not puzzle_reveal_hex or not solution_hex:
-                skipped_missing_parent_solution_fields += 1
                 continue
-            _debug_signing(
-                "cat_coin_parent_solution_loaded",
-                network=network,
-                asset_id=asset_id,
-                record_index=idx,
-                coin_id=_redact_hex(coin_id_hex),
-                parent_coin_id=_redact_hex(parent_coin_id_hex),
-                puzzle_reveal_hex_len=len(puzzle_reveal_hex),
-                solution_hex_len=len(solution_hex),
-            )
-
             try:
-                parent_coin_spend = _CoinSolutionView(
-                    puzzle_reveal=_hex_to_bytes(puzzle_reveal_hex),
-                    solution=_hex_to_bytes(solution_hex),
-                )
-                parent_puzzle_program = clvm.deserialize(parent_coin_spend.puzzle_reveal)
-                parent_solution = clvm.deserialize(parent_coin_spend.solution)
+                parent_puzzle_program = clvm.deserialize(_hex_to_bytes(puzzle_reveal_hex))
+                parent_solution = clvm.deserialize(_hex_to_bytes(solution_hex))
                 parent_puzzle = parent_puzzle_program.puzzle()
             except Exception:
-                skipped_parent_deserialize_error += 1
                 continue
-            parse_mode = "non_empty"
-            parse_error = ""
             try:
                 parsed_children = parent_puzzle.parse_child_cats(parent_coin, parent_solution)
-            except Exception as exc:
+            except Exception:
                 parsed_children = None
-                parse_mode = "exception"
-                parse_error = f"{type(exc).__name__}:{exc}"
-            parsed_children_count = len(parsed_children) if parsed_children else 0
-            if parse_mode == "non_empty" and parsed_children_count == 0:
-                parse_mode = "empty"
-            _debug_signing(
-                "cat_coin_parse_child_cats_result",
-                network=network,
-                asset_id=asset_id,
-                record_index=idx,
-                coin_id=_redact_hex(coin_id_hex),
-                parent_coin_id=_redact_hex(parent_coin_id_hex),
-                parsed_children_count=parsed_children_count,
-                parse_mode=parse_mode,
-                parse_error=parse_error,
-            )
-            if parse_mode == "exception":
-                _debug_signing(
-                    "cat_coin_parse_child_cats_error",
-                    network=network,
-                    asset_id=asset_id,
-                    record_index=idx,
-                    coin_id=_redact_hex(coin_id_hex),
-                    parent_coin_id=_redact_hex(parent_coin_id_hex),
-                    parse_error=parse_error,
-                )
-            _debug_probe_parent_create_coin_outputs(
-                sdk=sdk,
-                parent_coin_spend=parent_coin_spend,
-                parent_coin=parent_coin,
-                child_coin=coin,
-                network=network,
-                asset_id=asset_id,
-                record_index=idx,
-            )
             if not parsed_children:
-                _capture_cat_parse_case(
-                    {
-                        "case_id": f"{network}-{asset_id[:12]}-{coin_id_hex[:12]}-idx{idx}",
-                        "capture_reason": f"parse_child_cats_{parse_mode}",
-                        "network": network,
-                        "asset_id": asset_id,
-                        "record_index": idx,
-                        "coin_id": coin_id_hex,
-                        "coin_parent_coin_id": parent_coin_id_hex,
-                        "coin_amount": int(coin.amount),
-                        "coin_puzzle_hash": sdk.to_hex(coin.puzzle_hash),
-                        "parent_coin_id": sdk.to_hex(parent_coin.coin_id()),
-                        "parent_coin_parent_coin_id": sdk.to_hex(parent_coin.parent_coin_info),
-                        "parent_coin_amount": int(parent_coin.amount),
-                        "parent_coin_puzzle_hash": sdk.to_hex(parent_coin.puzzle_hash),
-                        "parent_spent_height": parent_spent_height,
-                        "puzzle_reveal": puzzle_reveal_hex,
-                        "solution": solution_hex,
-                        "parse_mode": parse_mode,
-                        "parse_error": parse_error,
-                    }
-                )
-                skipped_parse_child_cats_empty += 1
                 continue
             matched_child = False
             for cat in parsed_children:
@@ -563,23 +286,7 @@ def _list_unspent_cat_coins(
                     matched_child = True
                     break
             if not matched_child:
-                skipped_child_match_missing += 1
-        _debug_signing(
-            "cat_coin_discovery_result",
-            network=network,
-            asset_id=asset_id,
-            records_count=len(records),
-            discovered_cats=len(cats),
-            skipped_invalid_coin=skipped_invalid_coin,
-            skipped_missing_parent=skipped_missing_parent,
-            skipped_invalid_parent_coin=skipped_invalid_parent_coin,
-            skipped_unspent_parent=skipped_unspent_parent,
-            skipped_missing_parent_solution=skipped_missing_parent_solution,
-            skipped_missing_parent_solution_fields=skipped_missing_parent_solution_fields,
-            skipped_parent_deserialize_error=skipped_parent_deserialize_error,
-            skipped_parse_child_cats_empty=skipped_parse_child_cats_empty,
-            skipped_child_match_missing=skipped_child_match_missing,
-        )
+                continue
         return cats
     except Exception as exc:
         raise RuntimeError(f"cat_coin_discovery_failed:{exc}") from exc
@@ -718,7 +425,6 @@ def _build_spend_bundle(
     except Exception as exc:
         return None, f"master_key_conversion_error:{exc}"
 
-    derivation_scan_limit = int(os.getenv("GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT", "200"))
     selected_coin_puzzle_hashes: set[bytes] = set()
     for item in payload.get("selected_coins", []):
         try:
@@ -730,27 +436,12 @@ def _build_spend_bundle(
         except Exception as exc:
             return None, f"invalid_selected_coin_puzzle_hash:{exc}"
 
-    synthetic_sk_by_puzzle_hash: dict[bytes, Any] = {}
-    for index in range(derivation_scan_limit):
-        for derive_fn in (
-            master_sk.derive_unhardened_path,
-            master_sk.derive_hardened_path,
-        ):
-            try:
-                child_sk = derive_fn([12381, 8444, 2, index])
-                synthetic_sk = child_sk.derive_synthetic()
-                puzzle_hash = sdk.standard_puzzle_hash(synthetic_sk.public_key())
-            except Exception:
-                continue
-            if (
-                puzzle_hash in selected_coin_puzzle_hashes
-                and puzzle_hash not in synthetic_sk_by_puzzle_hash
-            ):
-                synthetic_sk_by_puzzle_hash[puzzle_hash] = synthetic_sk
-        if len(synthetic_sk_by_puzzle_hash) == len(selected_coin_puzzle_hashes):
-            break
-
-    if len(synthetic_sk_by_puzzle_hash) != len(selected_coin_puzzle_hashes):
+    synthetic_sk_by_puzzle_hash = _scan_synthetic_keys_for_puzzle_hashes(
+        sdk=sdk,
+        master_sk=master_sk,
+        selected_coin_puzzle_hashes=selected_coin_puzzle_hashes,
+    )
+    if synthetic_sk_by_puzzle_hash is None:
         return None, "derivation_scan_failed_for_selected_coin"
 
     try:
@@ -819,6 +510,37 @@ def _asset_id_to_sdk_id(*, sdk: Any, asset_id: str) -> Any:
     return sdk.Id.existing(_hex_to_bytes(raw))
 
 
+def _scan_synthetic_keys_for_puzzle_hashes(
+    *,
+    sdk: Any,
+    master_sk: Any,
+    selected_coin_puzzle_hashes: set[bytes],
+) -> dict[bytes, Any] | None:
+    derivation_scan_limit = int(os.getenv("GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT", "200"))
+    synthetic_sk_by_puzzle_hash: dict[bytes, Any] = {}
+    for index in range(derivation_scan_limit):
+        for derive_fn in (
+            master_sk.derive_unhardened_path,
+            master_sk.derive_hardened_path,
+        ):
+            try:
+                child_sk = derive_fn([12381, 8444, 2, index])
+                synthetic_sk = child_sk.derive_synthetic()
+                puzzle_hash = sdk.standard_puzzle_hash(synthetic_sk.public_key())
+            except Exception:
+                continue
+            if (
+                puzzle_hash in selected_coin_puzzle_hashes
+                and puzzle_hash not in synthetic_sk_by_puzzle_hash
+            ):
+                synthetic_sk_by_puzzle_hash[puzzle_hash] = synthetic_sk
+        if len(synthetic_sk_by_puzzle_hash) == len(selected_coin_puzzle_hashes):
+            return synthetic_sk_by_puzzle_hash
+    if not selected_coin_puzzle_hashes:
+        return synthetic_sk_by_puzzle_hash
+    return None
+
+
 def _build_offer_spend_bundle(
     *,
     sdk: Any,
@@ -841,16 +563,6 @@ def _build_offer_spend_bundle(
     offered_selected_cats: list[Any] = []
 
     if offer_asset in {"", "xch", "txch", "1"}:
-        _debug_signing(
-            "offer_coin_selection_mode",
-            mode="xch",
-            network=network,
-            receive_address=_redact_address(receive_address),
-            offer_asset_id=offer_asset_id,
-            offer_amount=offer_amount,
-            request_asset_id=request_asset_id,
-            request_amount=request_amount,
-        )
         try:
             xch_coins = _list_unspent_xch_coins(
                 sdk=sdk,
@@ -866,16 +578,6 @@ def _build_offer_spend_bundle(
         except Exception as exc:
             return None, f"offer_coin_selection_failed:{exc}"
     else:
-        _debug_signing(
-            "offer_coin_selection_mode",
-            mode="cat",
-            network=network,
-            receive_address=_redact_address(receive_address),
-            offer_asset_id=offer_asset_id,
-            offer_amount=offer_amount,
-            request_asset_id=request_asset_id,
-            request_amount=request_amount,
-        )
         try:
             cat_coins = _list_unspent_cat_coins(
                 sdk=sdk,
@@ -885,24 +587,9 @@ def _build_offer_spend_bundle(
             )
         except Exception as exc:
             return None, str(exc)
-        _debug_signing(
-            "offer_cat_coins_discovered",
-            network=network,
-            offer_asset_id=offer_asset_id,
-            discovered_count=len(cat_coins),
-            discovered_total_amount=sum(int(c.coin.amount) for c in cat_coins),
-        )
         if not cat_coins:
             return None, "no_unspent_offer_cat_coins"
         offered_selected_cats = _select_cats(cat_coins, offer_amount)
-        _debug_signing(
-            "offer_cat_coins_selected",
-            network=network,
-            offer_asset_id=offer_asset_id,
-            selected_count=len(offered_selected_cats),
-            selected_total_amount=sum(int(c.coin.amount) for c in offered_selected_cats),
-            target_offer_amount=offer_amount,
-        )
         if not offered_selected_cats:
             return None, "insufficient_offer_cat_coins"
 
@@ -950,30 +637,15 @@ def _build_offer_spend_bundle(
     except Exception as exc:
         return None, f"master_key_conversion_error:{exc}"
 
-    derivation_scan_limit = int(os.getenv("GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT", "200"))
     selected_coin_puzzle_hashes = {
         _hex_to_bytes(str(item["p2_puzzle_hash"])) for item in selected_coin_entries
     }
-    synthetic_sk_by_puzzle_hash: dict[bytes, Any] = {}
-    for index in range(derivation_scan_limit):
-        for derive_fn in (
-            master_sk.derive_unhardened_path,
-            master_sk.derive_hardened_path,
-        ):
-            try:
-                child_sk = derive_fn([12381, 8444, 2, index])
-                synthetic_sk = child_sk.derive_synthetic()
-                puzzle_hash = sdk.standard_puzzle_hash(synthetic_sk.public_key())
-            except Exception:
-                continue
-            if (
-                puzzle_hash in selected_coin_puzzle_hashes
-                and puzzle_hash not in synthetic_sk_by_puzzle_hash
-            ):
-                synthetic_sk_by_puzzle_hash[puzzle_hash] = synthetic_sk
-        if len(synthetic_sk_by_puzzle_hash) == len(selected_coin_puzzle_hashes):
-            break
-    if len(synthetic_sk_by_puzzle_hash) != len(selected_coin_puzzle_hashes):
+    synthetic_sk_by_puzzle_hash = _scan_synthetic_keys_for_puzzle_hashes(
+        sdk=sdk,
+        master_sk=master_sk,
+        selected_coin_puzzle_hashes=selected_coin_puzzle_hashes,
+    )
+    if synthetic_sk_by_puzzle_hash is None:
         return None, "derivation_scan_failed_for_selected_coin"
 
     try:
@@ -1022,17 +694,6 @@ def _build_offer_spend_bundle(
             receive_puzzle_hash, request_amount, requested_payment_memos
         )
         notarized_payment = sdk.NotarizedPayment(offer_nonce, [requested_payment])
-        _debug_signing(
-            "offer_primary_path_input_actions_built",
-            network=network,
-            offer_asset_id=offer_asset_id,
-            request_asset_id=request_asset_id,
-            dry_run=bool(dry_run),
-            offer_amount=offer_amount,
-            request_amount=request_amount,
-            offered_total=offered_total,
-            settlement_puzzle_hash=_redact_hex(sdk.to_hex(settlement_puzzle_hash)),
-        )
 
         deltas = spends.apply(actions)
         finished = spends.prepare(deltas)
@@ -1059,29 +720,6 @@ def _build_offer_spend_bundle(
         if pending_cat_spends:
             clvm.spend_cats(pending_cat_spends)
         coin_spends = clvm.coin_spends()
-        sample_coin_spends: list[dict[str, Any]] = []
-        for idx, coin_spend in enumerate(coin_spends):
-            coin = coin_spend.coin
-            parent_hex = sdk.to_hex(coin.parent_coin_info)
-            puzzle_hash_hex = sdk.to_hex(coin.puzzle_hash)
-            if idx < 6:
-                sample_coin_spends.append(
-                    {
-                        "coin_id": _redact_hex(sdk.to_hex(coin.coin_id())),
-                        "parent_coin_id": _redact_hex(parent_hex),
-                        "puzzle_hash": _redact_hex(puzzle_hash_hex),
-                        "amount": int(coin.amount),
-                    }
-                )
-        _debug_signing(
-            "offer_spend_bundle_shape",
-            network=network,
-            offer_asset_id=offer_asset_id,
-            request_asset_id=request_asset_id,
-            dry_run=bool(dry_run),
-            coin_spends_count=len(coin_spends),
-            sample_coin_spends=sample_coin_spends,
-        )
     except Exception as exc:
         return None, f"build_offer_spend_bundle_error:{exc}"
 
@@ -1101,44 +739,11 @@ def _build_offer_spend_bundle(
                     return None, "missing_private_key_for_agg_sig_target"
                 signatures.append(sk.sign(message))
         if not signatures:
-            _debug_signing(
-                "offer_no_agg_sig_targets_using_identity_signature",
-                network=network,
-                offer_asset_id=offer_asset_id,
-                request_asset_id=request_asset_id,
-                dry_run=bool(dry_run),
-                coin_spends_count=len(coin_spends),
-            )
             aggregate_sig = sdk.Signature.aggregate([])
         else:
             aggregate_sig = sdk.Signature.aggregate(signatures)
         input_spend_bundle = sdk.SpendBundle(coin_spends, aggregate_sig)
         spend_bundle = sdk.from_input_spend_bundle(input_spend_bundle, [notarized_payment])
-        if _is_signing_debug_enabled():
-            parse_probe_error = ""
-            parse_probe_ok = False
-            offered_settlement_cats_count: int | None = None
-            try:
-                probe_clvm = sdk.Clvm()
-                offer_asset = offer_asset_id.strip().lower()
-                if offer_asset not in {"", "xch", "txch", "1"}:
-                    offered_settlement_cats_count = len(
-                        probe_clvm.offer_settlement_cats(spend_bundle, _hex_to_bytes(offer_asset))
-                    )
-                # If this returns without exception, Offer::from_spend_bundle parsed successfully.
-                parse_probe_ok = True
-            except Exception as exc:
-                parse_probe_error = f"{type(exc).__name__}:{exc}"
-            _debug_signing(
-                "offer_sdk_parse_probe",
-                network=network,
-                offer_asset_id=offer_asset_id,
-                request_asset_id=request_asset_id,
-                dry_run=bool(dry_run),
-                parse_probe_ok=parse_probe_ok,
-                parse_probe_error=parse_probe_error,
-                offered_settlement_cats_count=offered_settlement_cats_count,
-            )
         return sdk.to_hex(spend_bundle.to_bytes()), None
     except Exception as exc:
         return None, f"sign_spend_bundle_error:{exc}"

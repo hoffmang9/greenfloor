@@ -183,24 +183,12 @@ class WalletAdapter:
         }
 
         if signer_fingerprint is not None:
-            existing: dict = {}
-            try:
-                existing = json.loads(
-                    os.environ.get("GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON", "{}")
-                )
-            except json.JSONDecodeError:
-                pass
-            if not isinstance(existing, dict):
-                existing = {}
-            existing[str(key_id)] = str(int(signer_fingerprint))
-            os.environ["GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON"] = json.dumps(
-                existing, separators=(",", ":")
-            )
+            payload["key_id_fingerprint_map"] = {str(key_id): str(int(signer_fingerprint))}
 
         # External executor override (subprocess escape hatch for operators)
         cmd_raw = os.getenv("GREENFLOOR_WALLET_EXECUTOR_CMD", "").strip()
         if cmd_raw:
-            return self._execute_via_subprocess(cmd_raw, payload, plan, signer_fingerprint)
+            return self._execute_via_subprocess(cmd_raw, payload, plan)
 
         # Default: direct in-process signing + broadcast
         from greenfloor.signing import sign_and_broadcast
@@ -221,12 +209,7 @@ class WalletAdapter:
         cmd_raw: str,
         payload: dict,
         plan: CoinOpPlan,
-        signer_fingerprint: int | None,
     ) -> CoinOpExecutionItem:
-        child_env = None
-        if signer_fingerprint is not None:
-            child_env = dict(os.environ)
-
         try:
             completed = subprocess.run(
                 shlex.split(cmd_raw),
@@ -235,7 +218,6 @@ class WalletAdapter:
                 check=False,
                 text=True,
                 timeout=120,
-                env=child_env,
             )
         except Exception as exc:
             return CoinOpExecutionItem(
