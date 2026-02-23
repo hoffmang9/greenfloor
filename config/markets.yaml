@@ -210,7 +210,7 @@ markets:
           combine_when_excess_factor: 2.0
 
   - id: byc04_txch_sell
-    enabled: false
+    enabled: true
     mode: sell_only
     base_asset: "4eadfa450c19fa51df65eb7fbf5b61077ec80ec799a7652bb187b705bff19a90"
     base_symbol: "BYC04"
