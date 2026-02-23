@@ -3,6 +3,43 @@ from __future__ import annotations
 import greenfloor.signing as signing_mod
 
 
+def test_extract_required_bls_targets_for_conditions_agg_sig_me() -> None:
+    class _Pk:
+        def to_bytes(self) -> bytes:
+            return b"\x11" * 48
+
+    class _Parsed:
+        public_key = _Pk()
+        message = b"\xaa\xbb"
+
+    class _Condition:
+        @staticmethod
+        def parse_agg_sig_me():
+            return _Parsed()
+
+    class _Coin:
+        parent_coin_info = b"\x01" * 32
+        puzzle_hash = b"\x02" * 32
+        amount = 7
+
+        @staticmethod
+        def coin_id() -> bytes:
+            return b"\x03" * 32
+
+    additional_data = bytes.fromhex(
+        "37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"
+    )
+    targets = signing_mod._extract_required_bls_targets_for_conditions(
+        conditions=[_Condition()],
+        coin=_Coin(),
+        agg_sig_me_additional_data=additional_data,
+    )
+    assert len(targets) == 1
+    pk, message = targets[0]
+    assert pk == b"\x11" * 48
+    assert message == b"\xaa\xbb" + (b"\x03" * 32) + additional_data
+
+
 def test_agg_sig_additional_data_matches_chia_network_constants() -> None:
     assert signing_mod._AGG_SIG_ADDITIONAL_DATA_BY_NETWORK["mainnet"] == bytes.fromhex(
         "ccd5bb71183532bff220ba46c268991a3ff07eb358e8255a65c30a2dce0e5fbb"
