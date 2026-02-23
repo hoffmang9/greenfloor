@@ -380,7 +380,20 @@ def _build_and_post_offer(
             "network": network,
             "asset_id": market.base_asset,
         }
-        offer_text = _build_offer_text_for_request(payload)
+        try:
+            offer_text = _build_offer_text_for_request(payload)
+        except Exception as exc:
+            publish_failures += 1
+            post_results.append(
+                {
+                    "venue": publish_venue,
+                    "result": {
+                        "success": False,
+                        "error": f"offer_builder_failed:{exc}",
+                    },
+                }
+            )
+            continue
         if dry_run:
             preview_item: dict[str, str] = {
                 "offer_prefix": offer_text[:24],
@@ -444,7 +457,7 @@ def _build_and_post_offer(
         )
     )
     if dry_run:
-        return 0
+        return 0 if publish_failures == 0 else 2
     return 0 if publish_failures == 0 else 2
 
 

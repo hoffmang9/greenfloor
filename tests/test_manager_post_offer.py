@@ -581,6 +581,45 @@ def test_build_and_post_offer_returns_nonzero_when_publish_fails(
     assert payload["results"][0]["result"]["success"] is False
 
 
+def test_build_and_post_offer_dry_run_returns_nonzero_when_build_fails(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+
+    def _raise_build_error(_payload):
+        raise RuntimeError("signing_failed:no_agg_sig_targets_found")
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        _raise_build_error,
+    )
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="testnet11",
+        market_id="m1",
+        pair=None,
+        size_base_units=1,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api-testnet.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=True,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["publish_attempts"] == 1
+    assert payload["publish_failures"] == 1
+    assert payload["results"][0]["result"]["success"] is False
+    assert payload["results"][0]["result"]["error"].startswith("offer_builder_failed:")
+
+
 def test_build_offer_text_for_request_direct_call(monkeypatch) -> None:
     """Verify that _build_offer_text_for_request calls offer_builder_sdk.build_offer directly."""
     from greenfloor.cli import manager
