@@ -2,6 +2,17 @@
 
 ## 2026-02-23
 
+- Fixed "Invalid Offer" rejection from Dexie (400 response) on branch `fix/proof-gating-and-doc-alignment`:
+  - Root cause: maker's offered coin spends were missing the `ASSERT_PUZZLE_ANNOUNCEMENT` condition required to atomically link them to the settlement coin. The SDK's `Spends` auto-assertion mechanism only fires for `SpendKind::Settlement` coins; regular CAT/XCH offered coins are `SpendKind::Conditions` and receive no assertion automatically.
+  - Fix: compute announcement ID as `sha256(settlement_puzzle_hash + tree_hash(notarized_payment))` using `clvm.alloc(notarized_payment).tree_hash()` and call `spends.add_required_condition(clvm.assert_puzzle_announcement(announcement_id))` before `spends.prepare(deltas)` in `greenfloor/signing.py`.
+  - Removed dead `from_input_spend_bundle` legacy fallback from `_from_input_spend_bundle_xch` (the binding no longer exists in the pinned SDK; only `from_input_spend_bundle_xch` remains). Updated stale test that expected legacy-path preference.
+  - Added `.tmp-artifacts/` to `.gitignore`.
+  - All 151 tests pass; `ruff check`, `ruff format`, `pyright` clean.
+  - Committed `3f53d72` (SSH-signed), pushed branch, manually dispatched `live-testnet-e2e.yml` (run `22321746028`).
+  - Run `22321746028` completed successfully in 30s: dry-run produced valid offer `offer1qqr83wcuu2rykcmqvp` (1054 chars). Live post not yet dispatched (workflow defaulted to `dry_run=true`).
+
+## 2026-02-23 (earlier)
+
 - Updated GreenFloor for the latest `chia-wallet-sdk` fork API rename set and submodule tip:
   - Bumped `chia-wallet-sdk` submodule to `hoffmang9/greenfloor-from-input-spend-bundle` (`5a87495f`).
   - Switched active call paths to prefer `validate_offer` and `from_input_spend_bundle_xch`, with temporary compatibility shims to legacy binding names during the SDK rename window.
