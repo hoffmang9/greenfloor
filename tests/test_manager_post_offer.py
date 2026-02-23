@@ -237,6 +237,46 @@ def test_build_and_post_offer_dry_run_builds_but_does_not_post(
     assert payload["results"] == []
 
 
+def test_build_and_post_offer_dry_run_can_capture_full_offer_text(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+    capture_dir = tmp_path / "offer-capture"
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda _payload: "offer1captureme",
+    )
+    monkeypatch.setenv("GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", str(capture_dir))
+    try:
+        code = _build_and_post_offer(
+            program_path=program,
+            markets_path=markets,
+            network="mainnet",
+            market_id="m1",
+            pair=None,
+            size_base_units=1,
+            repeat=1,
+            publish_venue="dexie",
+            dexie_base_url="https://api.dexie.space",
+            splash_base_url="http://localhost:4000",
+            drop_only=True,
+            claim_rewards=False,
+            dry_run=True,
+        )
+    finally:
+        monkeypatch.delenv("GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", raising=False)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    capture_path = Path(payload["built_offers_preview"][0]["offer_capture_path"])
+    assert capture_path.exists()
+    assert capture_path.read_text(encoding="utf-8") == "offer1captureme"
+
+
 def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"

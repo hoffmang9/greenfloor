@@ -341,12 +341,23 @@ def _build_and_post_offer(
             "market pricing must define fixed_quote_per_base or min/max_price_quote_per_base for offer build"
         )
 
+    debug_dry_run_offer_capture_dir = os.getenv(
+        "GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", ""
+    ).strip()
+    capture_dir_path = (
+        Path(debug_dry_run_offer_capture_dir).expanduser()
+        if debug_dry_run_offer_capture_dir
+        else None
+    )
+    if dry_run and capture_dir_path is not None:
+        capture_dir_path.mkdir(parents=True, exist_ok=True)
+
     post_results: list[dict] = []
     built_offers_preview: list[dict[str, str]] = []
     dexie = DexieAdapter(dexie_base_url) if (not dry_run and publish_venue == "dexie") else None
     splash = SplashAdapter(splash_base_url) if (not dry_run and publish_venue == "splash") else None
     publish_failures = 0
-    for _ in range(repeat):
+    for index in range(repeat):
         payload = {
             "market_id": market.market_id,
             "base_asset": market.base_asset,
@@ -371,12 +382,15 @@ def _build_and_post_offer(
         }
         offer_text = _build_offer_text_for_request(payload)
         if dry_run:
-            built_offers_preview.append(
-                {
-                    "offer_prefix": offer_text[:24],
-                    "offer_length": str(len(offer_text)),
-                }
-            )
+            preview_item: dict[str, str] = {
+                "offer_prefix": offer_text[:24],
+                "offer_length": str(len(offer_text)),
+            }
+            if capture_dir_path is not None:
+                capture_file = capture_dir_path / f"{market.market_id}-dry-run-{index + 1}.offer"
+                capture_file.write_text(offer_text, encoding="utf-8")
+                preview_item["offer_capture_path"] = str(capture_file)
+            built_offers_preview.append(preview_item)
         else:
             if publish_venue == "dexie":
                 assert dexie is not None
