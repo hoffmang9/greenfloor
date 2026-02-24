@@ -58,10 +58,10 @@ greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1 
 # Publish (mainnet default)
 greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1
 # Publish on testnet11
-greenfloor-manager build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11
+greenfloor-manager build-and-post-offer --pair TDBX:txch --size-base-units 1 --network testnet11
 ```
 
-On `testnet11`, use `txch` as the quote symbol in pair arguments (for example `CARBON22:txch`).
+On `testnet11`, use `txch` as the quote symbol in pair arguments (for example `TDBX:txch`).
 
 Check offer status and reconcile:
 

@@ -21,7 +21,7 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
 
 - Post a real offer file directly (fast path to running state):
   - Mainnet (default, pair-based): `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1`
-  - Testnet: `greenfloor-manager build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11`
+  - Testnet (active proof pair): `greenfloor-manager build-and-post-offer --pair TDBX:txch --size-base-units 1 --network testnet11`
   - On `testnet11`, use `txch` in pair syntax.
   - Safe preflight (build only, no publish): `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1 --dry-run`
   - If multiple markets share the same pair, rerun with explicit `--market-id`.
@@ -96,8 +96,8 @@ Run this sequence for first operator user testing:
 2. `greenfloor-manager config-validate`
 3. `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml doctor`
 4. Replace placeholder `receive_address` values in `~/.greenfloor/config/markets.yaml` with a valid network address (`xch1...` on mainnet, `txch1...` on `testnet11`).
-5. `greenfloor-manager build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11 --dry-run`
-6. `greenfloor-manager build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11`
+5. `greenfloor-manager build-and-post-offer --pair TDBX:txch --size-base-units 1 --network testnet11 --dry-run`
+6. `greenfloor-manager build-and-post-offer --pair TDBX:txch --size-base-units 1 --network testnet11`
 7. `greenfloor-manager offers-status --limit 50 --events-limit 30`
 8. `greenfloor-manager offers-reconcile --limit 200`
 
