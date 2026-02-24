@@ -345,21 +345,8 @@ query getWallet($walletId: ID) {
         }
 
     def _sign_canonical(self, canonical: str) -> str:
-        # Prefer cryptography; fallback to openssl CLI if unavailable.
-        try:
-            from cryptography.hazmat.primitives import hashes, serialization
-            from cryptography.hazmat.primitives.asymmetric import padding
-        except Exception:
-            return self._sign_canonical_with_openssl(canonical)
-        private_key = serialization.load_pem_private_key(
-            self._private_key_pem.encode("utf-8"), password=None
-        )
-        signature_raw = private_key.sign(
-            canonical.encode("utf-8"),
-            padding.PKCS1v15(),
-            hashes.SHA256(),
-        )
-        return base64.b64encode(signature_raw).decode("ascii")
+        # Keep runtime dependencies minimal and deterministic for CI.
+        return self._sign_canonical_with_openssl(canonical)
 
     def _sign_canonical_with_openssl(self, canonical: str) -> str:
         import subprocess

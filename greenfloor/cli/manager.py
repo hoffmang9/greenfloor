@@ -850,7 +850,10 @@ def _coins_list(
         coin_state = str(coin.get("state", "")).strip().upper()
         pending = coin_state in {"PENDING", "MEMPOOL"}
         spendable = coin_state not in {"SPENT"} and not pending
-        asset_payload = coin.get("asset") if isinstance(coin.get("asset"), dict) else {}
+        asset_raw = coin.get("asset")
+        asset_id = "xch"
+        if isinstance(asset_raw, dict):
+            asset_id = str(asset_raw.get("id", "xch")).strip()
         items.append(
             {
                 "coin_id": str(coin.get("name", coin.get("id", ""))).strip(),
@@ -858,7 +861,7 @@ def _coins_list(
                 "state": coin_state or "UNKNOWN",
                 "pending": pending,
                 "spendable": spendable,
-                "asset": str(asset_payload.get("id", "xch")).strip(),
+                "asset": asset_id,
             }
         )
     print(

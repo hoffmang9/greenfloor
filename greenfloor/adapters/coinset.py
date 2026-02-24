@@ -154,6 +154,8 @@ class CoinsetAdapter:
             if valid:
                 return max(valid)
         fee = payload.get("fee_estimate")
+        if fee is None:
+            return None
         try:
             parsed_fee = int(fee)
         except (TypeError, ValueError):
