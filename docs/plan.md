@@ -90,6 +90,7 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
 - [x] G3: Run and document an end-to-end `testnet11` proof (build -> post -> status -> reconcile) using a live test asset pair.
   - CI path now executes this sequence when `dry_run=false` in `live-testnet-e2e`.
   - Latest status (2026-02-23): current native-migration branch runs (`run_id=22325031449`, `run_id=22325053517`) executed the full manager proof sequence successfully with artifacts, including live Dexie post (`dry_run=false`) and reconcile output.
+  - Active operator proof pair for `testnet11` is `TDBX:txch` (TXCH<->TDBX). BYC04 is not the primary proof target.
 
 ## Deferred Backlog (Post-Testnet Proof)
 

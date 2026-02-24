@@ -1,5 +1,14 @@
 # Progress Log
 
+## 2026-02-24 (testnet pair pivot to TDBX)
+
+- Updated active `testnet11` proof target to `TDBX:txch` (TXCH<->TDBX) for workflow-driven validation.
+- Reverted BYC04 test market activation in `config/markets.yaml` (`byc04_txch_sell` back to `enabled: false`) so unsupported-liquidity pairs are not selected as active proof markets.
+- Refreshed operator-facing examples to align on the canonical testnet proof pair:
+  - `README.md` testnet publish example now uses `TDBX:txch`.
+  - `docs/runbook.md` steady-state and golden-path testnet commands now use `TDBX:txch`.
+- Updated `docs/plan.md` G3 note to explicitly record `TDBX:txch` as the active `testnet11` operator proof pair.
+
 ## 2026-02-23 (G2 testnet bootstrap helper workflow)
 
 - Implemented minimal operator helper workflow for G2: `.github/workflows/testnet11-asset-bootstrap-helper.yml`.
