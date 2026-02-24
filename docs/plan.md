@@ -40,6 +40,7 @@ Seven commands in scope. Do not add commands without explicit need tied to testn
 - Offer files are text files containing a Bech32m offer string (prefix `offer1...`), not JSON.
 - Per `chia-wallet-sdk`, offer text is an encoded/compressed `SpendBundle` (`encode_offer` / `decode_offer`).
 - Before Dexie submission, GreenFloor validates offer text through `chia-wallet-sdk` parse semantics (`Offer::from_spend_bundle`) and blocks submission on verification failure.
+- Before Dexie submission, GreenFloor rejects offers that do not include at least one `ASSERT_BEFORE_*` expiration condition (time or block-height).
 - Adapter/test paths should treat offer files as opaque serialized artifacts: read file text, submit text to venue API, and persist IDs/status separately.
 
 ## Offer Lifecycle Strategy

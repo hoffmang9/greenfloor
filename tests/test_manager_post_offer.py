@@ -533,6 +533,96 @@ def test_build_and_post_offer_returns_nonzero_when_offer_verification_fails(
     assert payload["results"][0]["result"]["success"] is False
 
 
+def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+    called: dict[str, bool] = {"post_offer_called": False}
+
+    class _ConditionNoExpiry:
+        @staticmethod
+        def parse_assert_before_seconds_relative():
+            return None
+
+        @staticmethod
+        def parse_assert_before_seconds_absolute():
+            return None
+
+        @staticmethod
+        def parse_assert_before_height_relative():
+            return None
+
+        @staticmethod
+        def parse_assert_before_height_absolute():
+            return None
+
+    class _CoinSpendNoExpiry:
+        @staticmethod
+        def conditions():
+            return [_ConditionNoExpiry()]
+
+    class _SpendBundleNoExpiry:
+        coin_spends = [_CoinSpendNoExpiry()]
+
+    class _Sdk:
+        @staticmethod
+        def validate_offer(_offer: str) -> None:
+            return None
+
+        @staticmethod
+        def decode_offer(_offer: str):
+            return _SpendBundleNoExpiry()
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+        def post_offer(self, offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = offer, drop_only, claim_rewards
+            called["post_offer_called"] = True
+            return {"success": True, "id": "should-not-post"}
+
+    def _import_module(name: str):
+        if name == "greenfloor_native":
+            raise ImportError("disable native path for this test")
+        return __import__(name)
+
+    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda _payload: "offer1noexpiry",
+    )
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        size_base_units=1,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["publish_attempts"] == 1
+    assert payload["publish_failures"] == 1
+    assert payload["results"][0]["result"]["success"] is False
+    assert payload["results"][0]["result"]["error"] == "wallet_sdk_offer_missing_expiration"
+    assert called["post_offer_called"] is False
+
+
 def test_build_and_post_offer_returns_nonzero_when_publish_fails(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
@@ -641,10 +731,27 @@ def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypa
 
     monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
 
+    class _ConditionWithExpiry:
+        @staticmethod
+        def parse_assert_before_seconds_relative():
+            return object()
+
+    class _CoinSpendWithExpiry:
+        @staticmethod
+        def conditions():
+            return [_ConditionWithExpiry()]
+
+    class _SpendBundleWithExpiry:
+        coin_spends = [_CoinSpendWithExpiry()]
+
     class _Sdk:
         @staticmethod
         def validate_offer(offer: str) -> None:
             assert offer == "offer1ok"
+
+        @staticmethod
+        def decode_offer(_offer: str):
+            return _SpendBundleWithExpiry()
 
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
     assert _verify_offer_text_for_dexie("offer1ok") is None
@@ -658,14 +765,79 @@ def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> 
 
     monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
 
+    class _ConditionWithExpiry:
+        @staticmethod
+        def parse_assert_before_height_absolute():
+            return object()
+
+    class _CoinSpendWithExpiry:
+        @staticmethod
+        def conditions():
+            return [_ConditionWithExpiry()]
+
+    class _SpendBundleWithExpiry:
+        coin_spends = [_CoinSpendWithExpiry()]
+
     class _Sdk:
         @staticmethod
         def verify_offer(offer: str) -> bool:
             return offer == "offer1ok"
 
+        @staticmethod
+        def decode_offer(_offer: str):
+            return _SpendBundleWithExpiry()
+
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
     assert _verify_offer_text_for_dexie("offer1ok") is None
     assert _verify_offer_text_for_dexie("offer1bad") == "wallet_sdk_offer_verify_false"
+
+
+def test_verify_offer_text_for_dexie_rejects_offer_without_expiration_condition(
+    monkeypatch,
+) -> None:
+    def _import_module(name: str):
+        if name == "greenfloor_native":
+            raise ImportError("disable native path for this test")
+        return __import__(name)
+
+    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+
+    class _ConditionNoExpiry:
+        @staticmethod
+        def parse_assert_before_seconds_relative():
+            return None
+
+        @staticmethod
+        def parse_assert_before_seconds_absolute():
+            return None
+
+        @staticmethod
+        def parse_assert_before_height_relative():
+            return None
+
+        @staticmethod
+        def parse_assert_before_height_absolute():
+            return None
+
+    class _CoinSpendNoExpiry:
+        @staticmethod
+        def conditions():
+            return [_ConditionNoExpiry()]
+
+    class _SpendBundleNoExpiry:
+        coin_spends = [_CoinSpendNoExpiry()]
+
+    class _Sdk:
+        @staticmethod
+        def validate_offer(_offer: str) -> None:
+            return None
+
+        @staticmethod
+        def decode_offer(_offer: str):
+            return _SpendBundleNoExpiry()
+
+    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+    assert _verify_offer_text_for_dexie("offer1noexpiry") == "wallet_sdk_offer_missing_expiration"
 
 
 def test_verify_offer_text_for_dexie_uses_greenfloor_native_before_sdk(monkeypatch) -> None:

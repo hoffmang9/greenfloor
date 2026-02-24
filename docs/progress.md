@@ -9,6 +9,14 @@
   - `docs/runbook.md` steady-state and golden-path testnet commands now use `TDBX:txch`.
 - Updated `docs/plan.md` G3 note to explicitly record `TDBX:txch` as the active `testnet11` operator proof pair.
 
+## 2026-02-24 (offer expiry enforcement)
+
+- Added Dexie pre-submit verification enforcement in `greenfloor/cli/manager.py` to reject offers that do not contain at least one `ASSERT_BEFORE_*` expiration condition (time or block-height).
+- Added regression coverage in `tests/test_manager_post_offer.py` for:
+  - offer verification failure when decoded offer conditions include no expiration assertion,
+  - end-to-end `build-and-post-offer` behavior that blocks publish and returns a non-zero code when the offer has no expiry, treating that block as expected/successful test behavior.
+- Updated `docs/plan.md` Offer File Contract to state the enforced expiration requirement explicitly.
+
 ## 2026-02-23 (G2 testnet bootstrap helper workflow)
 
 - Implemented minimal operator helper workflow for G2: `.github/workflows/testnet11-asset-bootstrap-helper.yml`.

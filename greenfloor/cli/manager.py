@@ -25,6 +25,44 @@ from greenfloor.keys.router import resolve_market_key
 from greenfloor.storage.sqlite import SqliteStore
 
 
+def _condition_has_offer_expiration(condition: object) -> bool:
+    parse_names = (
+        "parse_assert_before_seconds_relative",
+        "parse_assert_before_seconds_absolute",
+        "parse_assert_before_height_relative",
+        "parse_assert_before_height_absolute",
+    )
+    for parse_name in parse_names:
+        parse_fn = getattr(condition, parse_name, None)
+        if not callable(parse_fn):
+            continue
+        try:
+            if parse_fn() is not None:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _offer_has_expiration_condition(sdk: object, offer_text: str) -> bool:
+    decode_offer = getattr(sdk, "decode_offer", None)
+    if not callable(decode_offer):
+        return False
+    spend_bundle = decode_offer(offer_text)
+    coin_spends = getattr(spend_bundle, "coin_spends", None) or []
+    for coin_spend in coin_spends:
+        conditions_fn = getattr(coin_spend, "conditions", None)
+        if not callable(conditions_fn):
+            continue
+        conditions = conditions_fn() or []
+        if not isinstance(conditions, list):
+            continue
+        for condition in conditions:
+            if _condition_has_offer_expiration(condition):
+                return True
+    return False
+
+
 def _verify_offer_text_for_dexie(offer_text: str) -> str | None:
     try:
         native = importlib.import_module("greenfloor_native")
@@ -45,13 +83,15 @@ def _verify_offer_text_for_dexie(offer_text: str) -> str | None:
         validate_offer = getattr(sdk, "validate_offer", None)
         if callable(validate_offer):
             validate_offer(offer_text)
-            return None
+        else:
+            verify_offer = getattr(sdk, "verify_offer", None)
+            if not callable(verify_offer):
+                return "wallet_sdk_validate_offer_unavailable"
+            if not bool(verify_offer(offer_text)):
+                return "wallet_sdk_offer_verify_false"
 
-        verify_offer = getattr(sdk, "verify_offer", None)
-        if not callable(verify_offer):
-            return "wallet_sdk_validate_offer_unavailable"
-        if not bool(verify_offer(offer_text)):
-            return "wallet_sdk_offer_verify_false"
+        if not _offer_has_expiration_condition(sdk, offer_text):
+            return "wallet_sdk_offer_missing_expiration"
     except Exception as exc:
         return f"wallet_sdk_offer_validate_failed:{exc}"
     return None
