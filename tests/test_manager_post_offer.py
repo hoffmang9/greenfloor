@@ -6,6 +6,9 @@ from pathlib import Path
 
 from greenfloor.cli.manager import (
     _build_and_post_offer,
+    _coin_combine,
+    _coin_split,
+    _coins_list,
     _resolve_dexie_base_url,
     _resolve_offer_publish_settings,
     _resolve_splash_base_url,
@@ -32,6 +35,11 @@ def _write_program(path: Path, *, provider: str = "dexie") -> None:
                 '  home_dir: "~/.greenfloor"',
                 "runtime:",
                 "  loop_interval_seconds: 30",
+                "cloud_wallet:",
+                '  base_url: ""',
+                '  user_key_id: ""',
+                '  private_key_pem_path: ""',
+                '  vault_id: ""',
                 "chain_signals:",
                 "  tx_block_trigger:",
                 "    webhook_enabled: true",
@@ -870,3 +878,148 @@ def test_verify_offer_text_for_dexie_returns_native_validation_error(monkeypatch
     assert _verify_offer_text_for_dexie("offer1bad") == (
         "wallet_sdk_offer_validate_failed:native_invalid_offer"
     )
+
+
+def test_coins_list_returns_minimal_fields(monkeypatch, tmp_path: Path, capsys) -> None:
+    program = tmp_path / "program.yaml"
+    _write_program(program)
+    text = program.read_text(encoding="utf-8")
+    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
+    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
+    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
+    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
+    program.write_text(text, encoding="utf-8")
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, asset_id=None, include_pending=True):
+            _ = asset_id, include_pending
+            return [
+                {
+                    "id": "coin-1",
+                    "name": "coin-1",
+                    "amount": 123,
+                    "state": "PENDING",
+                    "asset": {"id": "xch"},
+                }
+            ]
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    code = _coins_list(program_path=program, asset=None, vault_id=None)
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["count"] == 1
+    assert payload["items"][0]["coin_id"] == "coin-1"
+    assert payload["items"][0]["pending"] is True
+    assert payload["items"][0]["spendable"] is False
+
+
+def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+    text = program.read_text(encoding="utf-8")
+    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
+    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
+    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
+    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
+    program.write_text(text, encoding="utf-8")
+
+    calls = {}
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending, asset_id
+            return []
+
+        @staticmethod
+        def split_coins(*, coin_ids, amount_per_coin, number_of_coins, fee):
+            calls["split"] = (coin_ids, amount_per_coin, number_of_coins, fee)
+            return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network: (42, "coinset_conservative"),
+    )
+    code = _coin_split(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        coin_ids=["coin-1"],
+        amount_per_coin=10,
+        number_of_coins=2,
+        no_wait=True,
+    )
+    assert code == 0
+    assert calls["split"] == (["coin-1"], 10, 2, 42)
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["waited"] is False
+    assert payload["fee_mojos"] == 42
+
+
+def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+    text = program.read_text(encoding="utf-8")
+    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
+    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
+    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
+    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
+    program.write_text(text, encoding="utf-8")
+
+    calls = {}
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending, asset_id
+            return []
+
+        @staticmethod
+        def combine_coins(*, number_of_coins, fee, largest_first, asset_id):
+            calls["combine"] = (number_of_coins, fee, largest_first, asset_id)
+            return {"signature_request_id": "sr-2", "status": "UNSIGNED"}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network: (77, "coinset_conservative"),
+    )
+    code = _coin_combine(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        number_of_coins=3,
+        asset_id="xch",
+        no_wait=True,
+    )
+    assert code == 0
+    assert calls["combine"] == (3, 77, True, "xch")
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["waited"] is False
+    assert payload["fee_mojos"] == 77

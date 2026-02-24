@@ -128,6 +128,38 @@ class CoinsetAdapter:
             return {"success": False, "error": "invalid_response_payload"}
         return payload
 
+    def get_fee_estimate(self, *, target_times: list[int] | None = None) -> dict[str, Any]:
+        payload = self._post_json(
+            "get_fee_estimate",
+            {"target_times": target_times or [60, 300, 600], "cost": 1_000_000},
+        )
+        if not isinstance(payload, dict):
+            return {"success": False, "error": "invalid_response_payload"}
+        return payload
+
+    def get_conservative_fee_estimate(self) -> int | None:
+        payload = self.get_fee_estimate(target_times=[300, 600, 1200])
+        if not payload.get("success", False):
+            return None
+        estimates = payload.get("estimates")
+        if isinstance(estimates, list) and estimates:
+            valid = []
+            for value in estimates:
+                try:
+                    parsed = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if parsed >= 0:
+                    valid.append(parsed)
+            if valid:
+                return max(valid)
+        fee = payload.get("fee_estimate")
+        try:
+            parsed_fee = int(fee)
+        except (TypeError, ValueError):
+            return None
+        return parsed_fee if parsed_fee >= 0 else None
+
 
 def build_webhook_callback_url(listen_addr: str, path: str = "/coinset/tx-block") -> str:
     host, _, port = listen_addr.partition(":")

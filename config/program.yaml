@@ -20,6 +20,12 @@ runtime:
   loop_interval_seconds: 30
   dry_run: false
 
+cloud_wallet:
+  base_url: ""
+  user_key_id: ""
+  private_key_pem_path: ""
+  vault_id: ""
+
 coin_ops:
   max_operations_per_run: 20
   max_daily_fee_budget_mojos: 0
