@@ -9,7 +9,7 @@ name: Live Testnet E2E (Optional)
         default: "testnet11"
         required: true
       pair:
-        description: "Asset pair for manager proof (example: TDBX:txch)"
+        description: "Asset pair for manager proof (examples: TDBX:txch, TBYC:txch)"
         default: "TDBX:txch"
         required: true
       size_base_units:

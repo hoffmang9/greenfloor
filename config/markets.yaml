@@ -34,11 +34,11 @@ supported_assets_example:
       pool_id: null
       last_price_xch: "0.004119292414047852"
   - name: "Testnet Bytecash"
-    base_symbol: "BYC04"
-    asset_id: "4eadfa450c19fa51df65eb7fbf5b61077ec80ec799a7652bb187b705bff19a90"
+    base_symbol: "TBYC"
+    asset_id: "4d81e31c9dd9663220b9384693f6ea036b9e372ecf94f0f38b5767b54cd96d05"
     legacy_usd_price_per_credit: null
     dexie:
-      ticker_id: "4eadfa450c19fa51df65eb7fbf5b61077ec80ec799a7652bb187b705bff19a90_xch"
+      ticker_id: "4d81e31c9dd9663220b9384693f6ea036b9e372ecf94f0f38b5767b54cd96d05_xch"
       pool_id: "138c27101b3ac5b48d3530729d401d95c723d9b954d346ea982793ca22b1b27c"
       last_price_xch: "0.002420604183"
   - name: "Base warp.green USDC"
@@ -209,11 +209,11 @@ markets:
           split_buffer_count: 0
           combine_when_excess_factor: 2.0
 
-  - id: byc04_txch_sell
+  - id: tbyc_txch_sell
     enabled: false
     mode: sell_only
-    base_asset: "4eadfa450c19fa51df65eb7fbf5b61077ec80ec799a7652bb187b705bff19a90"
-    base_symbol: "BYC04"
+    base_asset: "4d81e31c9dd9663220b9384693f6ea036b9e372ecf94f0f38b5767b54cd96d05"
+    base_symbol: "TBYC"
     quote_asset: "txch"
     quote_asset_type: unstable
     signer_key_id: "key-main-1"

@@ -152,18 +152,18 @@ def _import_greenfloor_native() -> Any:
 
 
 def _as_bytes(value: Any) -> bytes:
-    if isinstance(value, (bytes, bytearray, memoryview)):
+    if isinstance(value, bytes | bytearray | memoryview):
         return bytes(value)
     to_bytes = getattr(value, "to_bytes", None)
     if callable(to_bytes):
         raw = to_bytes()
-        if isinstance(raw, (bytes, bytearray, memoryview)):
+        if isinstance(raw, bytes | bytearray | memoryview):
             return bytes(raw)
         raise TypeError("to_bytes did not return bytes-compatible data")
     to_dunder_bytes = getattr(value, "__bytes__", None)
     if callable(to_dunder_bytes):
         raw = to_dunder_bytes()
-        if isinstance(raw, (bytes, bytearray, memoryview)):
+        if isinstance(raw, bytes | bytearray | memoryview):
             return bytes(raw)
         raise TypeError("__bytes__ did not return bytes-compatible data")
     raise TypeError("value cannot be converted to bytes")
