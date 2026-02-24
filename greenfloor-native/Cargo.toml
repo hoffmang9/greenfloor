@@ -13,4 +13,4 @@ chia-puzzle-types = "0.36.1"
 chia-sdk-driver = { version = "0.33.0", features = ["offer-compression"] }
 chia-traits = "0.36.1"
 clvmr = "=0.16.2"
-pyo3 = { version = "0.23.5", features = ["extension-module"] }
+pyo3 = { version = "0.28.2", features = ["extension-module"] }
