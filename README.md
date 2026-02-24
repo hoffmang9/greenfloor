@@ -4,7 +4,7 @@ GreenFloor is a long-running Python application for Chia CAT market making.
 
 ## Components
 
-- `greenfloor-manager`: manager CLI for config validation, key onboarding, offer building/posting, and operational checks.
+- `greenfloor-manager`: manager CLI for config validation, key onboarding, cloud-wallet coin inventory/reshaping, offer building/posting, and operational checks.
 - `greenfloord`: daemon process that evaluates configured markets, executes offers, and emits low-inventory alerts.
 
 ## V1 Plan
@@ -61,6 +61,19 @@ greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1
 greenfloor-manager build-and-post-offer --pair TDBX:txch --size-base-units 1 --network testnet11
 ```
 
+Cloud Wallet vault operations:
+
+```bash
+# List vault inventory (XCH + CAT)
+greenfloor-manager coins-list
+
+# Split one coin into target denominations (waits through signature + confirmation)
+greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10
+
+# Combine small coins into one larger coin (waits through signature + confirmation)
+greenfloor-manager coin-combine --pair TDBX:txch --number-of-coins 10 --asset-id xch
+```
+
 On `testnet11`, use `txch` as the quote symbol in pair arguments (for example `TDBX:txch`).
 
 Check offer status and reconcile:
@@ -96,6 +109,14 @@ Operator overrides (all optional):
 - `GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON` — JSON map for key ID -> fingerprint; normally injected from `program.yaml` signer key registry by daemon path.
 - `GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT` — integer derivation depth scan limit for matching selected coin puzzle hashes (default `200`).
 - `GREENFLOOR_COINSET_BASE_URL` — custom Coinset API base URL for coin queries and `push_tx`; when unset, `CoinsetAdapter` defaults to mainnet and can be forced to testnet11 by network selection.
+- `GREENFLOOR_COINSET_ADVISED_FEE_MOJOS` — explicit fee override for coin operations when Coinset advice is unavailable.
+
+Cloud Wallet program config contract (`program.yaml`):
+
+- `cloud_wallet.base_url` — GraphQL API root URL.
+- `cloud_wallet.user_key_id` — user auth key id used in `chia-user-key-id`.
+- `cloud_wallet.private_key_pem_path` — PEM private key path for RSA-SHA256 header signatures.
+- `cloud_wallet.vault_id` — target wallet/vault ID for coin and offer operations.
 
 CI secret for optional live testnet workflow:
 

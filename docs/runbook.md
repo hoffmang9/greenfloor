@@ -19,6 +19,15 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
 
 ## 2) Steady-State Operations
 
+- Cloud Wallet config prerequisite (required for vault-first paths):
+  - Set `cloud_wallet.base_url`, `cloud_wallet.user_key_id`, `cloud_wallet.private_key_pem_path`, and `cloud_wallet.vault_id` in `~/.greenfloor/config/program.yaml`.
+- Review vault coin inventory before shaping or posting:
+  - `greenfloor-manager coins-list`
+  - Optional asset scope: `greenfloor-manager coins-list --asset <asset-id|xch>`
+- Shape denominations for the selected market context:
+  - Split: `greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10`
+  - Combine: `greenfloor-manager coin-combine --pair TDBX:txch --number-of-coins 10 --asset-id xch`
+  - Defaults wait through signature + mempool + confirmation; use `--no-wait` for async mode.
 - Post a real offer file directly (fast path to running state):
   - Mainnet (default, pair-based): `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1`
   - Testnet (active proof pair): `greenfloor-manager build-and-post-offer --pair TDBX:txch --size-base-units 1 --network testnet11`
