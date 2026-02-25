@@ -166,6 +166,17 @@ def _write_markets_with_ladder(path: Path) -> None:
     )
 
 
+def _write_program_with_cloud_wallet(path: Path, *, provider: str = "dexie") -> None:
+    """Write a program.yaml with valid Cloud Wallet credentials populated."""
+    _write_program(path, provider=provider)
+    text = path.read_text(encoding="utf-8")
+    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
+    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
+    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
+    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
+    path.write_text(text, encoding="utf-8")
+
+
 def _write_markets_with_duplicate_pair(path: Path) -> None:
     path.write_text(
         "\n".join(
@@ -935,13 +946,7 @@ def test_verify_offer_text_for_dexie_returns_native_validation_error(monkeypatch
 
 def test_coins_list_returns_minimal_fields(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
-    _write_program(program)
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
+    _write_program_with_cloud_wallet(program)
 
     class _FakeWallet:
         vault_id = "wallet-1"
@@ -976,14 +981,8 @@ def test_coins_list_returns_minimal_fields(monkeypatch, tmp_path: Path, capsys) 
 def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program)
+    _write_program_with_cloud_wallet(program)
     _write_markets(markets)
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
 
     calls = {}
 
@@ -1031,14 +1030,8 @@ def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys
 def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program)
+    _write_program_with_cloud_wallet(program)
     _write_markets(markets)
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
 
     calls = {}
 
@@ -1088,14 +1081,8 @@ def test_coin_split_returns_structured_error_when_fee_resolution_fails(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program)
+    _write_program_with_cloud_wallet(program)
     _write_markets(markets)
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
 
     class _FakeWallet:
         vault_id = "wallet-1"
@@ -1136,14 +1123,8 @@ def test_coin_combine_returns_structured_error_when_fee_resolution_fails(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program)
+    _write_program_with_cloud_wallet(program)
     _write_markets(markets)
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
 
     class _FakeWallet:
         vault_id = "wallet-1"
@@ -1184,14 +1165,8 @@ def test_coin_split_returns_structured_error_when_coin_id_not_found(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program)
+    _write_program_with_cloud_wallet(program)
     _write_markets(markets)
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
 
     class _FakeWallet:
         vault_id = "wallet-1"
@@ -1232,14 +1207,8 @@ def test_coin_combine_with_coin_ids_resolves_to_global_ids(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program)
+    _write_program_with_cloud_wallet(program)
     _write_markets(markets)
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
 
     calls = {}
 
@@ -1289,14 +1258,8 @@ def test_coin_combine_returns_structured_error_when_coin_id_not_found(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program)
+    _write_program_with_cloud_wallet(program)
     _write_markets(markets)
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
 
     class _FakeWallet:
         vault_id = "wallet-1"
@@ -1337,14 +1300,8 @@ def test_coin_split_uses_market_ladder_target_when_size_is_provided(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, provider="splash")
+    _write_program_with_cloud_wallet(program, provider="splash")
     _write_markets_with_ladder(markets)
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
     calls = {}
 
     class _FakeWallet:
@@ -1393,14 +1350,8 @@ def test_coin_combine_uses_market_ladder_threshold_when_size_is_provided(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, provider="splash")
+    _write_program_with_cloud_wallet(program, provider="splash")
     _write_markets_with_ladder(markets)
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
     calls = {}
 
     class _FakeWallet:
@@ -1447,7 +1398,7 @@ def test_coin_combine_uses_market_ladder_threshold_when_size_is_provided(
 def test_coin_combine_ladder_threshold_uses_ceil(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, provider="dexie")
+    _write_program_with_cloud_wallet(program, provider="dexie")
     markets.write_text(
         "\n".join(
             [
@@ -1476,12 +1427,6 @@ def test_coin_combine_ladder_threshold_uses_ceil(monkeypatch, tmp_path: Path, ca
         ),
         encoding="utf-8",
     )
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
     calls = {}
 
     class _FakeWallet:
@@ -1526,14 +1471,8 @@ def test_coin_split_until_ready_ignores_unknown_states_and_string_asset(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, provider="dexie")
+    _write_program_with_cloud_wallet(program, provider="dexie")
     _write_markets_with_ladder(markets)
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
 
     class _FakeWallet:
         vault_id = "wallet-1"
@@ -1651,14 +1590,8 @@ def test_coin_split_until_ready_disallows_no_wait(tmp_path: Path) -> None:
 def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, provider="dexie")
+    _write_program_with_cloud_wallet(program, provider="dexie")
     _write_markets_with_ladder(markets)
-    text = program.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    program.write_text(text, encoding="utf-8")
 
     class _FakeWallet:
         vault_id = "wallet-1"
