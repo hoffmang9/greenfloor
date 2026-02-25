@@ -162,6 +162,17 @@ class CoinsetAdapter:
             return None
         return parsed_fee if parsed_fee >= 0 else None
 
+    def get_blockchain_state(self) -> dict[str, Any] | None:
+        payload = self._post_json("get_blockchain_state", {})
+        if not payload.get("success", False):
+            return None
+        blockchain_state = payload.get("blockchain_state")
+        if isinstance(blockchain_state, dict):
+            return blockchain_state
+        if isinstance(payload, dict):
+            return payload
+        return None
+
 
 def build_webhook_callback_url(listen_addr: str, path: str = "/coinset/tx-block") -> str:
     host, _, port = listen_addr.partition(":")

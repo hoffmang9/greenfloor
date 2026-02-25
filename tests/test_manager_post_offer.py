@@ -1980,6 +1980,68 @@ def test_poll_signature_request_raises_on_timeout(monkeypatch) -> None:
         )
 
 
+def test_poll_signature_request_emits_escalation_on_repeated_warnings(monkeypatch) -> None:
+    import time as time_module
+
+    from greenfloor.cli.manager import _poll_signature_request_until_not_unsigned
+
+    call_count = [0]
+
+    class _FakeWallet:
+        @staticmethod
+        def get_signature_request(*, signature_request_id):
+            _ = signature_request_id
+            call_count[0] += 1
+            if call_count[0] < 3:
+                return {"status": "UNSIGNED"}
+            return {"status": "SUBMITTED"}
+
+    elapsed_seq = iter([0.0, 601.0, 1201.0, 1201.0])
+    monkeypatch.setattr(time_module, "sleep", lambda _: None)
+    monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+
+    _status, events = _poll_signature_request_until_not_unsigned(
+        wallet=_FakeWallet(),  # type: ignore[arg-type]
+        signature_request_id="sr-1",
+        timeout_seconds=1800,
+        warning_interval_seconds=600,
+    )
+    escalations = [e for e in events if e["event"] == "signature_wait_escalation"]
+    assert len(escalations) == 1
+    assert escalations[0]["warning_count"] == "2"
+
+
+def test_poll_signature_request_retries_transient_errors(monkeypatch) -> None:
+    import time as time_module
+
+    from greenfloor.cli.manager import _poll_signature_request_until_not_unsigned
+
+    call_count = [0]
+
+    class _FakeWallet:
+        @staticmethod
+        def get_signature_request(*, signature_request_id):
+            _ = signature_request_id
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise RuntimeError("temporary")
+            return {"status": "SUBMITTED"}
+
+    elapsed_seq = iter([0.0, 0.0])
+    monkeypatch.setattr(time_module, "sleep", lambda _: None)
+    monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+
+    _status, events = _poll_signature_request_until_not_unsigned(
+        wallet=_FakeWallet(),  # type: ignore[arg-type]
+        signature_request_id="sr-1",
+        timeout_seconds=900,
+        warning_interval_seconds=600,
+    )
+    retries = [e for e in events if e["event"] == "poll_retry"]
+    assert len(retries) == 1
+    assert retries[0]["action"] == "wallet_get_signature_request"
+
+
 # ---------------------------------------------------------------------------
 # _wait_for_mempool_then_confirmation tests
 # ---------------------------------------------------------------------------
@@ -2003,9 +2065,18 @@ def test_wait_for_mempool_emits_in_mempool_event_with_coinset_url(monkeypatch) -
     elapsed_seq = iter([0.0, 0.0, 0.0])
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._coinset_reconcile_coin_state",
+        lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._watch_reorg_risk_with_coinset",
+        lambda **kwargs: [{"event": "reorg_watch_complete"}],
+    )
 
     events = _wait_for_mempool_then_confirmation(
         wallet=_FakeWallet(),  # type: ignore[arg-type]
+        network="mainnet",
         initial_coin_ids=set(),
         mempool_warning_seconds=300,
         confirmation_warning_seconds=900,
@@ -2028,9 +2099,18 @@ def test_wait_for_mempool_returns_when_confirmed_coin_appears(monkeypatch) -> No
     elapsed_seq = iter([0.0, 0.0])
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._coinset_reconcile_coin_state",
+        lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._watch_reorg_risk_with_coinset",
+        lambda **kwargs: [{"event": "reorg_watch_complete"}],
+    )
 
     events = _wait_for_mempool_then_confirmation(
         wallet=_FakeWallet(),  # type: ignore[arg-type]
+        network="mainnet",
         initial_coin_ids=set(),
         mempool_warning_seconds=300,
         confirmation_warning_seconds=900,
@@ -2058,9 +2138,18 @@ def test_wait_for_mempool_emits_warning_when_no_mempool_entry(monkeypatch) -> No
     elapsed_seq = iter([0.0, 300.0, 300.0])
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._coinset_reconcile_coin_state",
+        lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._watch_reorg_risk_with_coinset",
+        lambda **kwargs: [{"event": "reorg_watch_complete"}],
+    )
 
     events = _wait_for_mempool_then_confirmation(
         wallet=_FakeWallet(),  # type: ignore[arg-type]
+        network="mainnet",
         initial_coin_ids=set(),
         mempool_warning_seconds=300,
         confirmation_warning_seconds=900,
@@ -2091,15 +2180,47 @@ def test_wait_for_mempool_ignores_coins_in_initial_set(monkeypatch) -> None:
     elapsed_seq = iter([0.0, 0.0, 0.0])
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._coinset_reconcile_coin_state",
+        lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._watch_reorg_risk_with_coinset",
+        lambda **kwargs: [{"event": "reorg_watch_complete"}],
+    )
 
     _wait_for_mempool_then_confirmation(
         wallet=_FakeWallet(),  # type: ignore[arg-type]
+        network="mainnet",
         initial_coin_ids={"old-id"},
         mempool_warning_seconds=300,
         confirmation_warning_seconds=900,
     )
     # Returns because new-id appeared in confirmed, but old-id was ignored
     assert lc_call[0] == 2
+
+
+def test_watch_reorg_risk_waits_until_additional_blocks(monkeypatch) -> None:
+    import time as time_module
+
+    from greenfloor.cli.manager import _watch_reorg_risk_with_coinset
+
+    peak_seq = iter([100, 102, 106])
+    elapsed_seq = iter([0.0, 0.0, 10.0, 20.0])
+    monkeypatch.setattr(time_module, "sleep", lambda _: None)
+    monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._coinset_peak_height", lambda **kwargs: next(peak_seq)
+    )
+
+    events = _watch_reorg_risk_with_coinset(
+        network="mainnet",
+        confirmed_block_index=100,
+        additional_blocks=6,
+        warning_interval_seconds=300,
+    )
+    assert events[0]["event"] == "reorg_watch_started"
+    assert events[-1]["event"] == "reorg_watch_complete"
 
 
 # ---------------------------------------------------------------------------
@@ -2405,7 +2526,7 @@ def test_poll_offer_artifact_until_available_returns_new_offer(monkeypatch) -> N
             ]
         },
     ]
-    monotonic_values = iter([0.0, 1.0])
+    monotonic_values = iter([0.0, 1.0, 1.0])
 
     class _FakeWallet:
         @staticmethod
