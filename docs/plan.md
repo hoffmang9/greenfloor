@@ -25,6 +25,11 @@ Seven commands in scope. Do not add commands without explicit need tied to testn
 6. `offers-status` — compact view of current offer states and recent events.
 7. `offers-reconcile` — refresh offer states from venue API and flag orphaned/unknown.
 
+Operator output/coin-op behavior updates on current delivery path:
+
+- Manager JSON responses are pretty-formatted by default; use global `--json` for compact single-line output.
+- `coin-combine` now supports repeatable `--coin-id` for deterministic exact-coin targeting (with `coins-list` hex-name to `Coin_*` resolution).
+
 ## Signing Architecture
 
 - All signing logic lives in `greenfloor/signing.py` — a single module handling coin discovery, coin selection, additions planning, spend-bundle construction, AGG_SIG signing, and broadcast.

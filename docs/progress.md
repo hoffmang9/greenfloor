@@ -14,6 +14,14 @@
 - Mainnet smoke validation succeeded after patch:
   - `coin-split --no-wait` produced a valid `signature_request_id` and returned `UNSIGNED` as expected for async mode.
   - Operator confirmed Chia Signer prompt/approval path completed successfully with `fee_source: "env_override"` and `fee_mojos: 0`.
+- Improved manager JSON output ergonomics in `greenfloor/cli/manager.py`:
+  - Default JSON command output is now pretty-formatted for operator readability.
+  - Added global `--json` flag for compact single-line JSON output in script/automation workflows.
+- Added exact-coin targeting support to `coin-combine`:
+  - New repeatable `--coin-id` argument resolves `coins-list` hex names to Cloud Wallet `Coin_*` IDs and submits targeted combine requests.
+  - Added deterministic regression tests for successful ID resolution and structured unknown-ID error responses.
+- Mainnet exact-coin combine validation succeeded:
+  - Operator combined three specified micro-coins into a single resulting coin `83a4841f6b7992f20876f10ff92b0cab69a5f3f988cd1e7918a4d41ca11f1b12` with signer approval.
 
 ## 2026-02-24 (cloud wallet vault-first migration pass)
 
