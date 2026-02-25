@@ -116,6 +116,13 @@ def _default_markets_config_path() -> str:
 
 
 _FEE_ADVICE_CACHE: dict[str, int | float] = {}
+_JSON_OUTPUT_COMPACT = False
+
+
+def _format_json_output(payload: object) -> str:
+    if _JSON_OUTPUT_COMPACT:
+        return json.dumps(payload, separators=(",", ":"))
+    return json.dumps(payload, indent=2)
 
 
 def _require_cloud_wallet_config(program) -> CloudWalletConfig:
@@ -330,7 +337,7 @@ def _keys_onboard(
             selection,
         )
         print(
-            json.dumps(
+            _format_json_output(
                 {
                     "selected_source": "chia_keys",
                     "key_id": key_id,
@@ -374,7 +381,7 @@ def _keys_onboard(
             selection,
         )
         print(
-            json.dumps(
+            _format_json_output(
                 {
                     "selected_source": "mnemonic_import",
                     "key_id": key_id,
@@ -397,7 +404,7 @@ def _keys_onboard(
         selection,
     )
     print(
-        json.dumps(
+        _format_json_output(
             {
                 "selected_source": "generate_new_key",
                 "key_id": key_id,
@@ -570,7 +577,7 @@ def _build_and_post_offer_cloud_wallet(
         )
 
     print(
-        json.dumps(
+        _format_json_output(
             {
                 "market_id": market.market_id,
                 "pair": f"{market.base_asset}:{market.quote_asset}",
@@ -757,7 +764,7 @@ def _build_and_post_offer(
 
     publish_attempts = len(post_results)
     print(
-        json.dumps(
+        _format_json_output(
             {
                 "market_id": market.market_id,
                 "pair": f"{market.base_asset}:{market.quote_asset}",
@@ -865,7 +872,7 @@ def _coins_list(
             }
         )
     print(
-        json.dumps(
+        _format_json_output(
             {
                 "vault_id": wallet.vault_id,
                 "network": wallet.network,
@@ -929,7 +936,7 @@ def _coin_split(
         unresolved_coin_ids.append(token)
     if unresolved_coin_ids:
         print(
-            json.dumps(
+            _format_json_output(
                 {
                     "market_id": market.market_id,
                     "pair": f"{market.base_symbol}:{market.quote_asset}",
@@ -950,7 +957,7 @@ def _coin_split(
         fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
     except Exception as exc:
         print(
-            json.dumps(
+            _format_json_output(
                 {
                     "market_id": market.market_id,
                     "pair": f"{market.base_symbol}:{market.quote_asset}",
@@ -995,7 +1002,7 @@ def _coin_split(
             )
         )
     print(
-        json.dumps(
+        _format_json_output(
             {
                 "market_id": market.market_id,
                 "pair": f"{market.base_symbol}:{market.quote_asset}",
@@ -1021,6 +1028,7 @@ def _coin_combine(
     pair: str | None,
     number_of_coins: int,
     asset_id: str | None,
+    coin_ids: list[str],
     no_wait: bool,
 ) -> int:
     if number_of_coins <= 1:
@@ -1034,14 +1042,59 @@ def _coin_combine(
         network=network,
     )
     wallet = _new_cloud_wallet_adapter(program)
-    existing_coin_ids = {
-        str(c.get("id", "")).strip() for c in wallet.list_coins(include_pending=True)
-    }
+    wallet_coins = wallet.list_coins(include_pending=True)
+    existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
+    resolved_input_coin_ids: list[str] | None = None
+    if coin_ids:
+        coin_identifier_to_global_id: dict[str, str] = {}
+        for coin in wallet_coins:
+            global_id = str(coin.get("id", "")).strip()
+            name = str(coin.get("name", "")).strip()
+            if global_id:
+                coin_identifier_to_global_id[global_id] = global_id
+            if name and global_id:
+                coin_identifier_to_global_id[name] = global_id
+        resolved_coin_ids: list[str] = []
+        unresolved_coin_ids: list[str] = []
+        for raw_coin_id in coin_ids:
+            token = str(raw_coin_id).strip()
+            mapped = coin_identifier_to_global_id.get(token)
+            if mapped:
+                resolved_coin_ids.append(mapped)
+                continue
+            if token.startswith("Coin_"):
+                resolved_coin_ids.append(token)
+                continue
+            unresolved_coin_ids.append(token)
+        if unresolved_coin_ids:
+            print(
+                _format_json_output(
+                    {
+                        "market_id": market.market_id,
+                        "pair": f"{market.base_symbol}:{market.quote_asset}",
+                        "vault_id": wallet.vault_id,
+                        "waited": False,
+                        "success": False,
+                        "error": "coin_id_resolution_failed",
+                        "unknown_coin_ids": unresolved_coin_ids,
+                        "operator_guidance": (
+                            "run greenfloor-manager coins-list and pass coin_id values from output; "
+                            "manager accepts hex coin names and resolves them to Cloud Wallet Coin_* ids"
+                        ),
+                    }
+                )
+            )
+            return 2
+        if number_of_coins != len(resolved_coin_ids):
+            raise ValueError(
+                "when --coin-id is provided, --number-of-coins must match the number of --coin-id values"
+            )
+        resolved_input_coin_ids = resolved_coin_ids
     try:
         fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
     except Exception as exc:
         print(
-            json.dumps(
+            _format_json_output(
                 {
                     "market_id": market.market_id,
                     "pair": f"{market.base_symbol}:{market.quote_asset}",
@@ -1062,6 +1115,7 @@ def _coin_combine(
         fee=fee_mojos,
         asset_id=asset_id,
         largest_first=True,
+        input_coin_ids=resolved_input_coin_ids,
     )
     signature_request_id = combine_result["signature_request_id"]
     if not signature_request_id:
@@ -1086,7 +1140,7 @@ def _coin_combine(
             )
         )
     print(
-        json.dumps(
+        _format_json_output(
             {
                 "market_id": market.market_id,
                 "pair": f"{market.base_symbol}:{market.quote_asset}",
@@ -1166,7 +1220,7 @@ def _bootstrap_home(
         store.close()
 
     print(
-        json.dumps(
+        _format_json_output(
             {
                 "bootstrapped": True,
                 "home_dir": str(home),
@@ -1267,7 +1321,7 @@ def _doctor(program_path: Path, markets_path: Path, state_db: str | None) -> int
         "warnings": warnings,
         "problems": problems,
     }
-    print(json.dumps(result))
+    print(_format_json_output(result))
     return 0 if not problems else 2
 
 
@@ -1394,7 +1448,7 @@ def _offers_reconcile(
                 }
             )
         print(
-            json.dumps(
+            _format_json_output(
                 {
                     "state_db": str(db_path),
                     "venue": target_venue,
@@ -1439,7 +1493,7 @@ def _offers_status(
     for row in offers:
         by_state[row["state"]] = by_state.get(row["state"], 0) + 1
     print(
-        json.dumps(
+        _format_json_output(
             {
                 "state_db": str(db_path),
                 "market_id": market_id,
@@ -1463,6 +1517,11 @@ def main() -> None:
     parser.add_argument("--program-config", default=_default_program_config_path())
     parser.add_argument("--markets-config", default=_default_markets_config_path())
     parser.add_argument("--state-db", default="")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit compact single-line JSON output (default: pretty JSON).",
+    )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -1540,9 +1599,12 @@ def main() -> None:
     )
     p_coin_combine.add_argument("--number-of-coins", required=True, type=int)
     p_coin_combine.add_argument("--asset-id", default="")
+    p_coin_combine.add_argument("--coin-id", action="append", default=[])
     p_coin_combine.add_argument("--no-wait", action="store_true")
 
     args = parser.parse_args()
+    global _JSON_OUTPUT_COMPACT
+    _JSON_OUTPUT_COMPACT = bool(args.json)
     if args.command == "config-validate":
         code = _validate(Path(args.program_config), Path(args.markets_config))
     elif args.command == "keys-onboard":
@@ -1633,6 +1695,7 @@ def main() -> None:
             pair=args.pair or None,
             number_of_coins=int(args.number_of_coins),
             asset_id=args.asset_id or None,
+            coin_ids=[str(value) for value in args.coin_id],
             no_wait=bool(args.no_wait),
         )
     else:

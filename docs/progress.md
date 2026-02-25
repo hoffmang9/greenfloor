@@ -1,5 +1,20 @@
 # Progress Log
 
+## 2026-02-24 (cloud wallet mainnet operator hardening)
+
+- Improved Cloud Wallet config discoverability in operator docs/templates:
+  - Added explicit source hints in `docs/runbook.md` for `cloud_wallet.base_url`, `cloud_wallet.user_key_id`, `cloud_wallet.private_key_pem_path`, and `cloud_wallet.vault_id`.
+  - Added inline comments in `config/program.yaml` showing where to fetch each value and common pitfalls (origin-only `base_url`, PEM format, `Wallet_...` vs launcher id).
+- Hardened coin-operation fee-advice failure behavior in `greenfloor/cli/manager.py`:
+  - `coin-split` and `coin-combine` now return structured JSON failure payloads with operator guidance instead of uncaught tracebacks when fee resolution fails.
+  - Added deterministic regression tests in `tests/test_manager_post_offer.py` for both commands.
+- Fixed Cloud Wallet split ID mismatch in `greenfloor/cli/manager.py`:
+  - `coin-split` now resolves operator-provided coin ids from `coins-list` output (hex coin names) to required GraphQL `Coin_*` global IDs before mutation submission.
+  - Added structured `coin_id_resolution_failed` response when requested ids are not present in vault inventory, plus deterministic test coverage.
+- Mainnet smoke validation succeeded after patch:
+  - `coin-split --no-wait` produced a valid `signature_request_id` and returned `UNSIGNED` as expected for async mode.
+  - Operator confirmed Chia Signer prompt/approval path completed successfully with `fee_source: "env_override"` and `fee_mojos: 0`.
+
 ## 2026-02-24 (cloud wallet vault-first migration pass)
 
 - Added Cloud Wallet adapter boundary in `greenfloor/adapters/cloud_wallet.py`:

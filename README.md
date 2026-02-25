@@ -42,6 +42,8 @@ Validate config and check readiness:
 ```bash
 greenfloor-manager config-validate
 greenfloor-manager doctor
+# Script-friendly compact JSON (default output is pretty JSON):
+greenfloor-manager --json doctor
 ```
 
 Onboard signing keys:
