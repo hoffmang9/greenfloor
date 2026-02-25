@@ -68,7 +68,14 @@ def test_cloud_wallet_list_coins_paginates_and_accumulates(monkeypatch, tmp_path
                 "coins": {
                     "pageInfo": {"hasNextPage": False, "endCursor": ""},
                     "edges": [
-                        {"node": {"id": "Coin_2", "name": "22", "amount": 20, "state": "CONFIRMED"}},
+                        {
+                            "node": {
+                                "id": "Coin_2",
+                                "name": "22",
+                                "amount": 20,
+                                "state": "CONFIRMED",
+                            }
+                        },
                         {"node": "not-a-dict"},
                     ],
                 }
@@ -110,7 +117,9 @@ def test_cloud_wallet_list_coins_stops_on_missing_end_cursor(monkeypatch, tmp_pa
     assert calls["n"] == 1
 
 
-def test_cloud_wallet_graphql_http_error_contains_status_and_snippet(monkeypatch, tmp_path: Path) -> None:
+def test_cloud_wallet_graphql_http_error_contains_status_and_snippet(
+    monkeypatch, tmp_path: Path
+) -> None:
     adapter = _build_adapter(tmp_path)
     monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
 
