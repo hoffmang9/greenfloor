@@ -1,5 +1,13 @@
 # Progress Log
 
+## 2026-02-24 (step 2 closure: readiness loop + boundary alignment)
+
+- Closed remaining Step 2 gaps for Vault-first coin prep:
+  - Added readiness-loop mode for `coin-split` and `coin-combine` in `greenfloor/cli/manager.py` with `--until-ready` and bounded retries via `--max-iterations`.
+  - Loop mode evaluates denomination readiness from live vault inventory after each operation and returns explicit stop reasons (`ready`, `max_iterations_reached`, `requires_new_coin_selection`).
+  - Kept and documented direct boundary for coin prep operations: `manager.py` calls `greenfloor/adapters/cloud_wallet.py` directly for split/combine.
+- Added deterministic manager tests for readiness-loop validation and not-ready loop behavior in `tests/test_manager_post_offer.py`.
+
 ## 2026-02-24 (live testing retarget to mainnet CARBON22)
 
 - Retargeted active live testing from `testnet11` proof pair context to mainnet `CARBON22:xch`.

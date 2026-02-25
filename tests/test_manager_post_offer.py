@@ -1438,3 +1438,130 @@ def test_coin_combine_uses_market_ladder_threshold_when_size_is_provided(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["venue"] == "splash"
     assert payload["denomination_target"]["combine_threshold_count"] == 6
+
+
+def test_coin_split_until_ready_requires_size_base_units(tmp_path: Path) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+    try:
+        _coin_split(
+            program_path=program,
+            markets_path=markets,
+            network="mainnet",
+            market_id="m1",
+            pair=None,
+            coin_ids=[],
+            amount_per_coin=10,
+            number_of_coins=2,
+            no_wait=False,
+            until_ready=True,
+            size_base_units=None,
+        )
+    except ValueError as exc:
+        assert "--size-base-units" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_coin_split_until_ready_disallows_no_wait(tmp_path: Path) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets_with_ladder(markets)
+    try:
+        _coin_split(
+            program_path=program,
+            markets_path=markets,
+            network="mainnet",
+            market_id="m1",
+            pair=None,
+            coin_ids=[],
+            amount_per_coin=10,
+            number_of_coins=4,
+            no_wait=True,
+            until_ready=True,
+            size_base_units=10,
+        )
+    except ValueError as exc:
+        assert "requires wait mode" in str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, capsys) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program, provider="dexie")
+    _write_markets_with_ladder(markets)
+    text = program.read_text(encoding="utf-8")
+    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
+    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
+    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
+    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
+    program.write_text(text, encoding="utf-8")
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        _calls = 0
+
+        def __init__(self, _config):
+            pass
+
+        @classmethod
+        def list_coins(cls, *, include_pending=True, asset_id=None):
+            _ = include_pending, asset_id
+            cls._calls += 1
+            # Never reaches target 4 coins of size 10.
+            return [
+                {
+                    "id": "Coin_a",
+                    "name": "coin-a",
+                    "amount": 10,
+                    "state": "CONFIRMED",
+                    "asset": {"id": "a1"},
+                }
+            ]
+
+        @staticmethod
+        def split_coins(*, coin_ids, amount_per_coin, number_of_coins, fee):
+            _ = coin_ids, amount_per_coin, number_of_coins, fee
+            return {"signature_request_id": "sr-1", "status": "SIGNED"}
+
+        @staticmethod
+        def get_signature_request(signature_request_id):
+            _ = signature_request_id
+            return {"status": "SIGNED"}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network: (42, "coinset_conservative"),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
+        lambda **kwargs: [],
+    )
+
+    code = _coin_split(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        coin_ids=[],
+        amount_per_coin=0,
+        number_of_coins=0,
+        no_wait=False,
+        venue="dexie",
+        size_base_units=10,
+        until_ready=True,
+        max_iterations=2,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["until_ready"] is True
+    assert payload["stop_reason"] == "max_iterations_reached"
+    assert payload["denomination_readiness"]["ready"] is False
+    assert len(payload["operations"]) == 2
