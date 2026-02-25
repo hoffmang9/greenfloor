@@ -2387,7 +2387,9 @@ def test_watch_reorg_risk_times_out_when_chain_stalls(monkeypatch) -> None:
     elapsed_seq = iter([0.0, 0.0, 61.0])
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
-    monkeypatch.setattr("greenfloor.cli.manager._coinset_peak_height", lambda **kwargs: 100)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._coinset_peak_height", lambda **kwargs: 100
+    )
 
     events = _watch_reorg_risk_with_coinset(
         network="mainnet",
