@@ -902,9 +902,50 @@ def _coin_split(
         network=network,
     )
     wallet = _new_cloud_wallet_adapter(program)
-    existing_coin_ids = {
-        str(c.get("id", "")).strip() for c in wallet.list_coins(include_pending=True)
-    }
+    wallet_coins = wallet.list_coins(include_pending=True)
+    existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
+    # Operators usually copy coin hex names from `coins-list`; Cloud Wallet mutations
+    # require GraphQL coin global IDs, so resolve name -> id before mutation.
+    coin_identifier_to_global_id: dict[str, str] = {}
+    for coin in wallet_coins:
+        global_id = str(coin.get("id", "")).strip()
+        name = str(coin.get("name", "")).strip()
+        if global_id:
+            coin_identifier_to_global_id[global_id] = global_id
+        if name and global_id:
+            coin_identifier_to_global_id[name] = global_id
+    resolved_coin_ids: list[str] = []
+    unresolved_coin_ids: list[str] = []
+    for raw_coin_id in coin_ids:
+        token = str(raw_coin_id).strip()
+        mapped = coin_identifier_to_global_id.get(token)
+        if mapped:
+            resolved_coin_ids.append(mapped)
+            continue
+        # Allow direct GraphQL IDs for power users.
+        if token.startswith("Coin_"):
+            resolved_coin_ids.append(token)
+            continue
+        unresolved_coin_ids.append(token)
+    if unresolved_coin_ids:
+        print(
+            json.dumps(
+                {
+                    "market_id": market.market_id,
+                    "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "vault_id": wallet.vault_id,
+                    "waited": False,
+                    "success": False,
+                    "error": "coin_id_resolution_failed",
+                    "unknown_coin_ids": unresolved_coin_ids,
+                    "operator_guidance": (
+                        "run greenfloor-manager coins-list and pass coin_id values from output; "
+                        "manager accepts hex coin names and resolves them to Cloud Wallet Coin_* ids"
+                    ),
+                }
+            )
+        )
+        return 2
     try:
         fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
     except Exception as exc:
@@ -926,7 +967,7 @@ def _coin_split(
         )
         return 2
     split_result = wallet.split_coins(
-        coin_ids=coin_ids,
+        coin_ids=resolved_coin_ids,
         amount_per_coin=amount_per_coin,
         number_of_coins=number_of_coins,
         fee=fee_mojos,

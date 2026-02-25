@@ -943,7 +943,7 @@ def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys
         @staticmethod
         def list_coins(*, include_pending=True, asset_id=None):
             _ = include_pending, asset_id
-            return []
+            return [{"id": "Coin_abc123", "name": "coin-1"}]
 
         @staticmethod
         def split_coins(*, coin_ids, amount_per_coin, number_of_coins, fee):
@@ -967,7 +967,7 @@ def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys
         no_wait=True,
     )
     assert code == 0
-    assert calls["split"] == (["coin-1"], 10, 2, 42)
+    assert calls["split"] == (["Coin_abc123"], 10, 2, 42)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["waited"] is False
     assert payload["fee_mojos"] == 42
@@ -996,7 +996,7 @@ def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, caps
         @staticmethod
         def list_coins(*, include_pending=True, asset_id=None):
             _ = include_pending, asset_id
-            return []
+            return [{"id": "Coin_abc123", "name": "coin-1"}]
 
         @staticmethod
         def combine_coins(*, number_of_coins, fee, largest_first, asset_id):
@@ -1048,7 +1048,7 @@ def test_coin_split_returns_structured_error_when_fee_resolution_fails(
         @staticmethod
         def list_coins(*, include_pending=True, asset_id=None):
             _ = include_pending, asset_id
-            return []
+            return [{"id": "Coin_abc123", "name": "coin-1"}]
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
@@ -1118,3 +1118,51 @@ def test_coin_combine_returns_structured_error_when_fee_resolution_fails(
     assert payload["success"] is False
     assert payload["error"].startswith("fee_resolution_failed:")
     assert "GREENFLOOR_COINSET_ADVISED_FEE_MOJOS" in payload["operator_guidance"]
+
+
+def test_coin_split_returns_structured_error_when_coin_id_not_found(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+    text = program.read_text(encoding="utf-8")
+    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
+    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
+    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
+    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
+    program.write_text(text, encoding="utf-8")
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending, asset_id
+            return [{"id": "Coin_known", "name": "known-coin-name"}]
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network: (0, "env_override"),
+    )
+    code = _coin_split(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        coin_ids=["missing-coin-name"],
+        amount_per_coin=10,
+        number_of_coins=2,
+        no_wait=True,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["success"] is False
+    assert payload["error"] == "coin_id_resolution_failed"
+    assert payload["unknown_coin_ids"] == ["missing-coin-name"]
