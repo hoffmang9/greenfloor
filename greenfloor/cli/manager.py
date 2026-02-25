@@ -237,6 +237,8 @@ def _wait_for_mempool_then_confirmation(
     seen_pending = False
     next_heartbeat = 5
     sleep_seconds = 2.0
+    next_mempool_warning = mempool_warning_seconds
+    next_confirmation_warning = confirmation_warning_seconds
     while True:
         coins = wallet.list_coins(include_pending=True)
         pending = [
@@ -275,22 +277,22 @@ def _wait_for_mempool_then_confirmation(
         if elapsed >= next_heartbeat:
             print(".", end="", file=sys.stderr, flush=True)
             next_heartbeat += 5
-        if not seen_pending and elapsed >= mempool_warning_seconds:
+        if not seen_pending and elapsed >= next_mempool_warning:
             events.append(
                 {
                     "event": "mempool_wait_warning",
                     "elapsed_seconds": str(elapsed),
                 }
             )
-            mempool_warning_seconds += mempool_warning_seconds
-        if seen_pending and elapsed >= confirmation_warning_seconds:
+            next_mempool_warning += mempool_warning_seconds
+        if seen_pending and elapsed >= next_confirmation_warning:
             events.append(
                 {
                     "event": "confirmation_wait_warning",
                     "elapsed_seconds": str(elapsed),
                 }
             )
-            confirmation_warning_seconds += confirmation_warning_seconds
+            next_confirmation_warning += confirmation_warning_seconds
         time.sleep(sleep_seconds)
         sleep_seconds = min(20.0, sleep_seconds * 1.5)
 
