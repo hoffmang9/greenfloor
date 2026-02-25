@@ -98,7 +98,7 @@ class CoinsetWebsocketClient:
         while not self._stop_event.is_set():
             try:
                 msg = await ws.receive(timeout=1.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             if msg.type == aiohttp.WSMsgType.TEXT:
                 self._handle_text_message(msg.data)
@@ -168,10 +168,12 @@ def capture_coinset_websocket_once(
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.ws_connect(ws_url, heartbeat=30) as ws:
                         on_audit_event("coinset_ws_once_connected", {"ws_url": ws_url})
-                        while asyncio.get_running_loop().time() < deadline and not stop_event.is_set():
+                        while (
+                            asyncio.get_running_loop().time() < deadline and not stop_event.is_set()
+                        ):
                             try:
                                 msg = await ws.receive(timeout=1.0)
-                            except asyncio.TimeoutError:
+                            except TimeoutError:
                                 continue
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 client._handle_text_message(msg.data)

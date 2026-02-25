@@ -2399,6 +2399,8 @@ def test_watch_reorg_risk_times_out_when_chain_stalls(monkeypatch) -> None:
     assert events[0]["event"] == "reorg_watch_started"
     assert events[-1]["event"] == "reorg_watch_timeout"
     assert events[-1]["remaining_blocks"] == "6"
+
+
 # ---------------------------------------------------------------------------
 # _build_and_post_offer cloud wallet dispatch gate
 # ---------------------------------------------------------------------------
