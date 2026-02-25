@@ -1820,3 +1820,212 @@ def test_evaluate_denomination_readiness_asset_id_match_is_case_insensitive() ->
     )
     assert result["current_count"] == 1
     assert result["ready"] is True
+
+
+# ---------------------------------------------------------------------------
+# _poll_signature_request_until_not_unsigned tests
+# ---------------------------------------------------------------------------
+
+
+def test_poll_signature_request_returns_immediately_when_already_signed(monkeypatch) -> None:
+    import time as time_module
+
+    from greenfloor.cli.manager import _poll_signature_request_until_not_unsigned
+
+    class _FakeWallet:
+        @staticmethod
+        def get_signature_request(*, signature_request_id):
+            _ = signature_request_id
+            return {"status": "SUBMITTED"}
+
+    monkeypatch.setattr(time_module, "sleep", lambda _: None)
+    monkeypatch.setattr(time_module, "monotonic", lambda: 0.0)
+
+    status, events = _poll_signature_request_until_not_unsigned(
+        wallet=_FakeWallet(),
+        signature_request_id="sr-1",
+        timeout_seconds=900,
+        warning_interval_seconds=600,
+    )
+    assert status == "SUBMITTED"
+    assert events == []
+
+
+def test_poll_signature_request_emits_warning_event_after_interval(monkeypatch) -> None:
+    import time as time_module
+
+    from greenfloor.cli.manager import _poll_signature_request_until_not_unsigned
+
+    call_count = [0]
+
+    class _FakeWallet:
+        @staticmethod
+        def get_signature_request(*, signature_request_id):
+            _ = signature_request_id
+            call_count[0] += 1
+            return {"status": "UNSIGNED" if call_count[0] < 2 else "SUBMITTED"}
+
+    # monotonic: start=0, then elapsed=601 (triggers warning), then not called again
+    elapsed_seq = iter([0.0, 601.0, 601.0])
+    monkeypatch.setattr(time_module, "sleep", lambda _: None)
+    monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+
+    status, events = _poll_signature_request_until_not_unsigned(
+        wallet=_FakeWallet(),
+        signature_request_id="sr-1",
+        timeout_seconds=900,
+        warning_interval_seconds=600,
+    )
+    assert status == "SUBMITTED"
+    warning_events = [e for e in events if e["event"] == "signature_wait_warning"]
+    assert len(warning_events) == 1
+    assert warning_events[0]["message"] == "still_waiting_on_user_signature"
+
+
+def test_poll_signature_request_raises_on_timeout(monkeypatch) -> None:
+    import time as time_module
+
+    import pytest
+
+    from greenfloor.cli.manager import _poll_signature_request_until_not_unsigned
+
+    class _FakeWallet:
+        @staticmethod
+        def get_signature_request(*, signature_request_id):
+            _ = signature_request_id
+            return {"status": "UNSIGNED"}
+
+    # start=0, then elapsed=901 immediately exceeds timeout=900
+    elapsed_seq = iter([0.0, 901.0])
+    monkeypatch.setattr(time_module, "sleep", lambda _: None)
+    monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+
+    with pytest.raises(RuntimeError, match="signature_request_timeout"):
+        _poll_signature_request_until_not_unsigned(
+            wallet=_FakeWallet(),
+            signature_request_id="sr-1",
+            timeout_seconds=900,
+            warning_interval_seconds=600,
+        )
+
+
+# ---------------------------------------------------------------------------
+# _wait_for_mempool_then_confirmation tests
+# ---------------------------------------------------------------------------
+
+
+def test_wait_for_mempool_emits_in_mempool_event_with_coinset_url(monkeypatch) -> None:
+    import time as time_module
+
+    from greenfloor.cli.manager import _wait_for_mempool_then_confirmation
+
+    lc_call = [0]
+
+    class _FakeWallet:
+        @staticmethod
+        def list_coins(*, include_pending=True):
+            lc_call[0] += 1
+            if lc_call[0] == 1:
+                return [{"id": "new-id", "name": "abc123hex", "state": "PENDING"}]
+            return [{"id": "new-id", "name": "abc123hex", "state": "CONFIRMED"}]
+
+    elapsed_seq = iter([0.0, 0.0, 0.0])
+    monkeypatch.setattr(time_module, "sleep", lambda _: None)
+    monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+
+    events = _wait_for_mempool_then_confirmation(
+        wallet=_FakeWallet(),
+        initial_coin_ids=set(),
+        mempool_warning_seconds=300,
+        confirmation_warning_seconds=900,
+    )
+    in_mempool = [e for e in events if e["event"] == "in_mempool"]
+    assert len(in_mempool) == 1
+    assert in_mempool[0]["coinset_url"] == "https://coinset.org/coin/abc123hex"
+
+
+def test_wait_for_mempool_returns_when_confirmed_coin_appears(monkeypatch) -> None:
+    import time as time_module
+
+    from greenfloor.cli.manager import _wait_for_mempool_then_confirmation
+
+    class _FakeWallet:
+        @staticmethod
+        def list_coins(*, include_pending=True):
+            return [{"id": "new-id", "name": "confirmed-hex", "state": "CONFIRMED"}]
+
+    elapsed_seq = iter([0.0, 0.0])
+    monkeypatch.setattr(time_module, "sleep", lambda _: None)
+    monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+
+    events = _wait_for_mempool_then_confirmation(
+        wallet=_FakeWallet(),
+        initial_coin_ids=set(),
+        mempool_warning_seconds=300,
+        confirmation_warning_seconds=900,
+    )
+    # Returns successfully (no in_mempool event since we went straight to confirmed)
+    assert all(e["event"] != "in_mempool" for e in events)
+
+
+def test_wait_for_mempool_emits_warning_when_no_mempool_entry(monkeypatch) -> None:
+    import time as time_module
+
+    from greenfloor.cli.manager import _wait_for_mempool_then_confirmation
+
+    lc_call = [0]
+
+    class _FakeWallet:
+        @staticmethod
+        def list_coins(*, include_pending=True):
+            lc_call[0] += 1
+            if lc_call[0] == 1:
+                return []  # no new coins yet
+            return [{"id": "new-id", "state": "CONFIRMED"}]
+
+    # start=0, iteration-1 elapsed=300 (triggers mempool warning), iteration-2 returns
+    elapsed_seq = iter([0.0, 300.0, 300.0])
+    monkeypatch.setattr(time_module, "sleep", lambda _: None)
+    monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+
+    events = _wait_for_mempool_then_confirmation(
+        wallet=_FakeWallet(),
+        initial_coin_ids=set(),
+        mempool_warning_seconds=300,
+        confirmation_warning_seconds=900,
+    )
+    warning_events = [e for e in events if e["event"] == "mempool_wait_warning"]
+    assert len(warning_events) == 1
+
+
+def test_wait_for_mempool_ignores_coins_in_initial_set(monkeypatch) -> None:
+    import time as time_module
+
+    from greenfloor.cli.manager import _wait_for_mempool_then_confirmation
+
+    lc_call = [0]
+
+    class _FakeWallet:
+        @staticmethod
+        def list_coins(*, include_pending=True):
+            lc_call[0] += 1
+            if lc_call[0] == 1:
+                # only known initial coins — should not trigger pending or confirmed
+                return [{"id": "old-id", "state": "CONFIRMED"}]
+            return [
+                {"id": "old-id", "state": "CONFIRMED"},
+                {"id": "new-id", "state": "CONFIRMED"},
+            ]
+
+    elapsed_seq = iter([0.0, 0.0, 0.0])
+    monkeypatch.setattr(time_module, "sleep", lambda _: None)
+    monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+
+    events = _wait_for_mempool_then_confirmation(
+        wallet=_FakeWallet(),
+        initial_coin_ids={"old-id"},
+        mempool_warning_seconds=300,
+        confirmation_warning_seconds=900,
+    )
+    # Returns because new-id appeared in confirmed, but old-id was ignored
+    assert lc_call[0] == 2
