@@ -49,12 +49,17 @@ jobs:
           "$HOME/.cargo/bin/rustc" --version
           "$HOME/.cargo/bin/cargo" --version
 
+      - name: Resolve greenfloor-native tree hash
+        id: native
+        run: |
+          echo "sha=$(git rev-parse HEAD:greenfloor-native)" >> "$GITHUB_OUTPUT"
+
       - name: Restore greenfloor-native wheel cache
         id: cache-native-wheel
         uses: actions/cache/restore@v4
         with:
           path: ./.cache/wheelhouse/greenfloor-native
-          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('greenfloor-native/**') }}
+          key: native-wheelhouse-${{ runner.os }}-${{ runner.arch }}-${{ steps.native.outputs.sha }}
 
       - name: Build greenfloor-native wheel (cache miss)
         if: steps.cache-native-wheel.outputs.cache-hit != 'true'
@@ -70,7 +75,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ./.cache/wheelhouse/greenfloor-native
-          key: native-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('greenfloor-native/**') }}
+          key: native-wheelhouse-${{ runner.os }}-${{ runner.arch }}-${{ steps.native.outputs.sha }}
 
       - name: Install greenfloor-native wheel
         run: |
