@@ -459,6 +459,28 @@ def _resolve_offer_publish_settings(
     return venue, dexie_base, splash_base
 
 
+def _resolve_venue_for_coin_prep(*, program, venue_override: str | None) -> str:
+    venue = (venue_override or program.offer_publish_venue).strip().lower()
+    if venue not in {"dexie", "splash"}:
+        raise ValueError("offer publish venue must be dexie or splash")
+    return venue
+
+
+def _resolve_market_denomination_entry(market, *, size_base_units: int):
+    ladder = market.ladders.get("sell") or []
+    if not ladder:
+        raise ValueError(
+            f"market {market.market_id} has no sell ladder; cannot resolve denomination target"
+        )
+    for entry in ladder:
+        if int(entry.size_base_units) == int(size_base_units):
+            return entry
+    allowed = ", ".join(str(int(row.size_base_units)) for row in ladder)
+    raise ValueError(
+        f"size_base_units not configured for market sell ladder; use one of: {allowed}"
+    )
+
+
 def _build_offer_text_for_request(payload: dict) -> str:
     return build_offer_text(payload)
 
@@ -895,12 +917,11 @@ def _coin_split(
     amount_per_coin: int,
     number_of_coins: int,
     no_wait: bool,
+    venue: str | None = None,
+    size_base_units: int | None = None,
 ) -> int:
-    if amount_per_coin <= 0:
-        raise ValueError("amount_per_coin must be positive")
-    if number_of_coins <= 0:
-        raise ValueError("number_of_coins must be positive")
     program = load_program_config(program_path)
+    selected_venue = _resolve_venue_for_coin_prep(program=program, venue_override=venue)
     markets = load_markets_config(markets_path)
     market = _resolve_market_for_build(
         markets,
@@ -908,6 +929,32 @@ def _coin_split(
         pair=pair,
         network=network,
     )
+    denomination_target = None
+    if size_base_units is not None and int(size_base_units) > 0:
+        entry = _resolve_market_denomination_entry(market, size_base_units=int(size_base_units))
+        required_count = int(entry.target_count) + int(entry.split_buffer_count)
+        if amount_per_coin <= 0:
+            amount_per_coin = int(entry.size_base_units)
+        elif amount_per_coin != int(entry.size_base_units):
+            raise ValueError(
+                "amount_per_coin must match market ladder size when --size-base-units is set"
+            )
+        if number_of_coins <= 0:
+            number_of_coins = required_count
+        elif number_of_coins != required_count:
+            raise ValueError(
+                "number_of_coins must match market ladder target+buffer when --size-base-units is set"
+            )
+        denomination_target = {
+            "size_base_units": int(entry.size_base_units),
+            "target_count": int(entry.target_count),
+            "split_buffer_count": int(entry.split_buffer_count),
+            "required_count": required_count,
+        }
+    if amount_per_coin <= 0:
+        raise ValueError("amount_per_coin must be positive")
+    if number_of_coins <= 0:
+        raise ValueError("number_of_coins must be positive")
     wallet = _new_cloud_wallet_adapter(program)
     wallet_coins = wallet.list_coins(include_pending=True)
     existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
@@ -940,6 +987,7 @@ def _coin_split(
                 {
                     "market_id": market.market_id,
                     "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "venue": selected_venue,
                     "vault_id": wallet.vault_id,
                     "waited": False,
                     "success": False,
@@ -961,6 +1009,7 @@ def _coin_split(
                 {
                     "market_id": market.market_id,
                     "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "venue": selected_venue,
                     "vault_id": wallet.vault_id,
                     "waited": False,
                     "success": False,
@@ -1006,7 +1055,11 @@ def _coin_split(
             {
                 "market_id": market.market_id,
                 "pair": f"{market.base_symbol}:{market.quote_asset}",
+                "venue": selected_venue,
                 "vault_id": wallet.vault_id,
+                "amount_per_coin": amount_per_coin,
+                "number_of_coins": number_of_coins,
+                "denomination_target": denomination_target,
                 "signature_request_id": signature_request_id,
                 "signature_state": final_signature_state,
                 "waited": not no_wait,
@@ -1030,10 +1083,11 @@ def _coin_combine(
     asset_id: str | None,
     coin_ids: list[str],
     no_wait: bool,
+    venue: str | None = None,
+    size_base_units: int | None = None,
 ) -> int:
-    if number_of_coins <= 1:
-        raise ValueError("number_of_coins must be > 1")
     program = load_program_config(program_path)
+    selected_venue = _resolve_venue_for_coin_prep(program=program, venue_override=venue)
     markets = load_markets_config(markets_path)
     market = _resolve_market_for_build(
         markets,
@@ -1041,6 +1095,26 @@ def _coin_combine(
         pair=pair,
         network=network,
     )
+    denomination_target = None
+    if size_base_units is not None and int(size_base_units) > 0:
+        entry = _resolve_market_denomination_entry(market, size_base_units=int(size_base_units))
+        threshold = max(2, int(int(entry.target_count) * float(entry.combine_when_excess_factor)))
+        if number_of_coins <= 0:
+            number_of_coins = threshold
+        elif number_of_coins != threshold:
+            raise ValueError(
+                "number_of_coins must match market ladder combine threshold when --size-base-units is set"
+            )
+        if not asset_id:
+            asset_id = str(market.base_asset).strip()
+        denomination_target = {
+            "size_base_units": int(entry.size_base_units),
+            "target_count": int(entry.target_count),
+            "combine_when_excess_factor": float(entry.combine_when_excess_factor),
+            "combine_threshold_count": threshold,
+        }
+    if number_of_coins <= 1:
+        raise ValueError("number_of_coins must be > 1")
     wallet = _new_cloud_wallet_adapter(program)
     wallet_coins = wallet.list_coins(include_pending=True)
     existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
@@ -1072,6 +1146,7 @@ def _coin_combine(
                     {
                         "market_id": market.market_id,
                         "pair": f"{market.base_symbol}:{market.quote_asset}",
+                        "venue": selected_venue,
                         "vault_id": wallet.vault_id,
                         "waited": False,
                         "success": False,
@@ -1098,6 +1173,7 @@ def _coin_combine(
                 {
                     "market_id": market.market_id,
                     "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "venue": selected_venue,
                     "vault_id": wallet.vault_id,
                     "waited": False,
                     "success": False,
@@ -1144,7 +1220,11 @@ def _coin_combine(
             {
                 "market_id": market.market_id,
                 "pair": f"{market.base_symbol}:{market.quote_asset}",
+                "venue": selected_venue,
                 "vault_id": wallet.vault_id,
+                "asset_id": asset_id,
+                "number_of_coins": number_of_coins,
+                "denomination_target": denomination_target,
                 "signature_request_id": signature_request_id,
                 "signature_state": final_signature_state,
                 "waited": not no_wait,
@@ -1586,8 +1666,10 @@ def main() -> None:
         "--network", default="mainnet", choices=["mainnet", "testnet", "testnet11"]
     )
     p_coin_split.add_argument("--coin-id", action="append", default=[])
-    p_coin_split.add_argument("--amount-per-coin", required=True, type=int)
-    p_coin_split.add_argument("--number-of-coins", required=True, type=int)
+    p_coin_split.add_argument("--amount-per-coin", default=0, type=int)
+    p_coin_split.add_argument("--number-of-coins", default=0, type=int)
+    p_coin_split.add_argument("--size-base-units", default=0, type=int)
+    p_coin_split.add_argument("--venue", choices=["dexie", "splash"], default=None)
     p_coin_split.add_argument("--no-wait", action="store_true")
 
     p_coin_combine = sub.add_parser("coin-combine")
@@ -1597,9 +1679,11 @@ def main() -> None:
     p_coin_combine.add_argument(
         "--network", default="mainnet", choices=["mainnet", "testnet", "testnet11"]
     )
-    p_coin_combine.add_argument("--number-of-coins", required=True, type=int)
+    p_coin_combine.add_argument("--number-of-coins", default=0, type=int)
     p_coin_combine.add_argument("--asset-id", default="")
     p_coin_combine.add_argument("--coin-id", action="append", default=[])
+    p_coin_combine.add_argument("--size-base-units", default=0, type=int)
+    p_coin_combine.add_argument("--venue", choices=["dexie", "splash"], default=None)
     p_coin_combine.add_argument("--no-wait", action="store_true")
 
     args = parser.parse_args()
@@ -1685,6 +1769,8 @@ def main() -> None:
             amount_per_coin=int(args.amount_per_coin),
             number_of_coins=int(args.number_of_coins),
             no_wait=bool(args.no_wait),
+            venue=args.venue,
+            size_base_units=int(args.size_base_units) or None,
         )
     elif args.command == "coin-combine":
         code = _coin_combine(
@@ -1697,6 +1783,8 @@ def main() -> None:
             asset_id=args.asset_id or None,
             coin_ids=[str(value) for value in args.coin_id],
             no_wait=bool(args.no_wait),
+            venue=args.venue,
+            size_base_units=int(args.size_base_units) or None,
         )
     else:
         raise ValueError(f"unsupported command: {args.command}")
