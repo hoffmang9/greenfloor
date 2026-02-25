@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import greenfloor.signing as signing_mod
 
 
@@ -491,3 +493,144 @@ def test_from_input_spend_bundle_xch_propagates_native_errors(monkeypatch) -> No
         raise AssertionError("expected RuntimeError")
     except RuntimeError as exc:
         assert str(exc) == "native_failure"
+
+
+def test_domain_bytes_for_agg_sig_kind_variants() -> None:
+    additional = bytes.fromhex("37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615")
+    assert signing_mod._domain_bytes_for_agg_sig_kind("unsafe", additional) is None
+    assert signing_mod._domain_bytes_for_agg_sig_kind("me", additional) == additional
+    expected_parent = hashlib.sha256(additional + bytes([43])).digest()
+    assert signing_mod._domain_bytes_for_agg_sig_kind("parent", additional) == expected_parent
+    assert signing_mod._domain_bytes_for_agg_sig_kind("unknown_kind", additional) is None
+
+
+def test_extract_required_bls_targets_for_conditions_agg_sig_unsafe() -> None:
+    class _Pk:
+        def to_bytes(self) -> bytes:
+            return b"\x12" * 48
+
+    class _Parsed:
+        public_key = _Pk()
+        message = b"\xfe\xed"
+
+    class _Condition:
+        @staticmethod
+        def parse_agg_sig_unsafe():
+            return _Parsed()
+
+    class _Coin:
+        parent_coin_info = b"\x01" * 32
+        puzzle_hash = b"\x02" * 32
+        amount = 7
+
+        @staticmethod
+        def coin_id() -> bytes:
+            return b"\x03" * 32
+
+    targets = signing_mod._extract_required_bls_targets_for_conditions(
+        conditions=[_Condition()],
+        coin=_Coin(),
+        agg_sig_me_additional_data=b"\xaa" * 32,
+    )
+    assert len(targets) == 1
+    pk, message = targets[0]
+    assert pk == b"\x12" * 48
+    # unsafe kind does not append coin info or domain bytes
+    assert message == b"\xfe\xed"
+
+
+def test_broadcast_spend_bundle_invalid_hex_returns_skipped() -> None:
+    class _Sdk:
+        class SpendBundle:
+            @staticmethod
+            def from_bytes(_value):
+                raise AssertionError("from_bytes should not be called")
+
+    result = signing_mod._broadcast_spend_bundle(
+        sdk=_Sdk,
+        spend_bundle_hex="zz-not-hex",
+        network="mainnet",
+    )
+    assert result["status"] == "skipped"
+    assert result["reason"] == "invalid_spend_bundle_hex"
+    assert result["operation_id"] is None
+
+
+def test_broadcast_spend_bundle_decode_error_returns_skipped() -> None:
+    class _Sdk:
+        class SpendBundle:
+            @staticmethod
+            def from_bytes(_value):
+                raise RuntimeError("decode_failed")
+
+    result = signing_mod._broadcast_spend_bundle(
+        sdk=_Sdk,
+        spend_bundle_hex="aabb",
+        network="mainnet",
+    )
+    assert result["status"] == "skipped"
+    assert result["reason"] == "spend_bundle_decode_error:decode_failed"
+    assert result["operation_id"] is None
+
+
+def test_broadcast_spend_bundle_push_tx_error_returns_skipped(monkeypatch) -> None:
+    class _SpendBundleObj:
+        @staticmethod
+        def hash() -> bytes:
+            return b"\x00" * 32
+
+    class _Sdk:
+        class SpendBundle:
+            @staticmethod
+            def from_bytes(_value):
+                return _SpendBundleObj()
+
+    class _FailingAdapter:
+        def push_tx(self, *, spend_bundle_hex: str):
+            _ = spend_bundle_hex
+            raise RuntimeError("coinset_down")
+
+    monkeypatch.setattr(signing_mod, "_coinset_adapter", lambda *, network: _FailingAdapter())
+    result = signing_mod._broadcast_spend_bundle(
+        sdk=_Sdk,
+        spend_bundle_hex="aabb",
+        network="mainnet",
+    )
+    assert result["status"] == "skipped"
+    assert result["reason"] == "push_tx_error:coinset_down"
+    assert result["operation_id"] is None
+
+
+def test_broadcast_spend_bundle_success_returns_operation_id(monkeypatch) -> None:
+    captured: dict[str, str] = {}
+
+    class _SpendBundleObj:
+        @staticmethod
+        def hash() -> bytes:
+            return b"\x99" * 32
+
+    class _Sdk:
+        @staticmethod
+        def to_hex(value: bytes) -> str:
+            return value.hex()
+
+        class SpendBundle:
+            @staticmethod
+            def from_bytes(_value):
+                return _SpendBundleObj()
+
+    class _Adapter:
+        def push_tx(self, *, spend_bundle_hex: str):
+            captured["hex"] = spend_bundle_hex
+            return {"success": True, "status": "submitted"}
+
+    monkeypatch.setattr(signing_mod, "_coinset_adapter", lambda *, network: _Adapter())
+    result = signing_mod._broadcast_spend_bundle(
+        sdk=_Sdk,
+        spend_bundle_hex="aabb",
+        network="mainnet",
+    )
+    assert captured["hex"] == "aabb"
+    assert result["status"] == "executed"
+    assert result["reason"] == "submitted"
+    assert result["operation_id"] == ("99" * 32)
