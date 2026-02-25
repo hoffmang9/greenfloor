@@ -1005,7 +1005,7 @@ def _coins_list(
     for coin in coins:
         coin_state = str(coin.get("state", "")).strip().upper()
         pending = coin_state in {"PENDING", "MEMPOOL"}
-        spendable = coin_state not in {"SPENT"} and not pending
+        spendable = _is_spendable_coin(coin)
         asset_raw = coin.get("asset")
         asset_id = "xch"
         if isinstance(asset_raw, dict):
