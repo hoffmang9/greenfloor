@@ -1,5 +1,19 @@
 # Progress Log
 
+## 2026-02-24 (pr24 review follow-up hardening)
+
+- Applied post-review hardening updates for PR #24:
+  - Coin-prep venue is now optional metadata (`--venue` validates only when explicitly provided); split/combine no longer depend on `offer_publish_venue`.
+  - Readiness classification is now conservative: only known spendable states count toward readiness, and unknown/transitional states are treated as not spendable.
+  - Readiness asset parsing now supports both `asset: {id: ...}` and `asset: "<id>"` payload forms.
+  - Ladder combine threshold now uses `ceil(target_count * combine_when_excess_factor)` (minimum 2) instead of truncation.
+  - Coin-prep output now includes `coin_selection_mode` so operator intent is explicit (`explicit` vs adapter-managed auto-select).
+- Added deterministic tests covering:
+  - optional venue behavior on coin-prep output,
+  - ceil-based combine threshold derivation,
+  - readiness filtering for unknown states and string-form asset IDs.
+- Updated runbook notes for readiness-loop usage and explicit `--coin-id` interaction in `--until-ready` mode.
+
 ## 2026-02-24 (step 2 closure: readiness loop + boundary alignment)
 
 - Closed remaining Step 2 gaps for Vault-first coin prep:

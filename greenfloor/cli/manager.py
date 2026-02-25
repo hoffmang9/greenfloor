@@ -4,6 +4,7 @@ import argparse
 import datetime as dt
 import importlib
 import json
+import math
 import os
 import time
 import urllib.error
@@ -272,14 +273,27 @@ def _wait_for_mempool_then_confirmation(
 
 def _is_spendable_coin(coin: dict) -> bool:
     coin_state = str(coin.get("state", "")).strip().upper()
-    pending = coin_state in {"PENDING", "MEMPOOL"}
-    return coin_state not in {"SPENT"} and not pending
+    if not coin_state:
+        return False
+    if coin_state in {
+        "PENDING",
+        "MEMPOOL",
+        "SPENT",
+        "SPENDING",
+        "LOCKED",
+        "RESERVED",
+        "UNCONFIRMED",
+    }:
+        return False
+    return coin_state in {"CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE"}
 
 
 def _coin_asset_id(coin: dict) -> str:
     asset_raw = coin.get("asset")
     if isinstance(asset_raw, dict):
         return str(asset_raw.get("id", "xch")).strip() or "xch"
+    if isinstance(asset_raw, str):
+        return asset_raw.strip() or "xch"
     return "xch"
 
 
@@ -515,10 +529,12 @@ def _resolve_offer_publish_settings(
     return venue, dexie_base, splash_base
 
 
-def _resolve_venue_for_coin_prep(*, program, venue_override: str | None) -> str:
-    venue = (venue_override or program.offer_publish_venue).strip().lower()
+def _resolve_venue_for_coin_prep(*, venue_override: str | None) -> str | None:
+    if venue_override is None or not venue_override.strip():
+        return None
+    venue = venue_override.strip().lower()
     if venue not in {"dexie", "splash"}:
-        raise ValueError("offer publish venue must be dexie or splash")
+        raise ValueError("coin-prep venue must be dexie or splash when provided")
     return venue
 
 
@@ -979,7 +995,7 @@ def _coin_split(
     max_iterations: int = 3,
 ) -> int:
     program = load_program_config(program_path)
-    selected_venue = _resolve_venue_for_coin_prep(program=program, venue_override=venue)
+    selected_venue = _resolve_venue_for_coin_prep(venue_override=venue)
     markets = load_markets_config(markets_path)
     market = _resolve_market_for_build(
         markets,
@@ -1161,6 +1177,7 @@ def _coin_split(
                 "vault_id": wallet.vault_id,
                 "amount_per_coin": amount_per_coin,
                 "number_of_coins": number_of_coins,
+                "coin_selection_mode": "explicit" if coin_ids else "adapter_auto_select",
                 "denomination_target": denomination_target,
                 "until_ready": until_ready,
                 "max_iterations": max_iterations,
@@ -1206,7 +1223,7 @@ def _coin_combine(
     max_iterations: int = 3,
 ) -> int:
     program = load_program_config(program_path)
-    selected_venue = _resolve_venue_for_coin_prep(program=program, venue_override=venue)
+    selected_venue = _resolve_venue_for_coin_prep(venue_override=venue)
     markets = load_markets_config(markets_path)
     market = _resolve_market_for_build(
         markets,
@@ -1217,7 +1234,10 @@ def _coin_combine(
     denomination_target = None
     if size_base_units is not None and int(size_base_units) > 0:
         entry = _resolve_market_denomination_entry(market, size_base_units=int(size_base_units))
-        threshold = max(2, int(int(entry.target_count) * float(entry.combine_when_excess_factor)))
+        threshold = max(
+            2,
+            int(math.ceil(int(entry.target_count) * float(entry.combine_when_excess_factor))),
+        )
         if number_of_coins <= 0:
             number_of_coins = threshold
         elif number_of_coins != threshold:
@@ -1386,6 +1406,7 @@ def _coin_combine(
                 "vault_id": wallet.vault_id,
                 "asset_id": asset_id,
                 "number_of_coins": number_of_coins,
+                "coin_selection_mode": "explicit" if coin_ids else "adapter_auto_select",
                 "denomination_target": denomination_target,
                 "until_ready": until_ready,
                 "max_iterations": max_iterations,
