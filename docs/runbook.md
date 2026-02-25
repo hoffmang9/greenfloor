@@ -33,6 +33,9 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
 - Shape denominations for the selected market context:
   - Split: `greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10`
   - Combine: `greenfloor-manager coin-combine --pair TDBX:txch --number-of-coins 10 --asset-id xch`
+  - Config-driven shaping (from market `ladders.sell`): `greenfloor-manager coin-split --pair TDBX:txch --size-base-units 10`
+  - Config-driven combine threshold (from market `ladders.sell`): `greenfloor-manager coin-combine --pair TDBX:txch --size-base-units 10`
+  - Optional venue context binding for prep commands: add `--venue dexie` or `--venue splash`.
   - Defaults wait through signature + mempool + confirmation; use `--no-wait` for async mode.
 - Post a real offer file directly (fast path to running state):
   - Mainnet (default, pair-based): `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1`

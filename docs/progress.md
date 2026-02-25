@@ -1,5 +1,16 @@
 # Progress Log
 
+## 2026-02-24 (cloud wallet vault-first step 2 completion)
+
+- Completed Step 2 alignment for Vault-first coin preparation in `greenfloor/cli/manager.py`:
+  - `coin-split` and `coin-combine` now accept `--venue` so coin-prep runs are explicitly bound to the selected downstream posting venue context (`dexie` or `splash`).
+  - Added config-driven denomination mode for both commands via `--size-base-units`, sourced from the selected market `ladders.sell` entry.
+  - In config-driven split mode, manager derives/enforces `amount_per_coin` and `number_of_coins` from ladder `size_base_units` + `target_count` + `split_buffer_count`.
+  - In config-driven combine mode, manager derives/enforces `number_of_coins` from ladder `target_count * combine_when_excess_factor` (minimum 2) and defaults `asset_id` to the market base asset.
+  - Command JSON output now includes resolved venue and resolved denomination target metadata to make prep decisions explicit and auditable.
+- Added deterministic coverage in `tests/test_manager_post_offer.py` for config-driven split/combine behavior and venue binding output.
+- Updated operator docs in `docs/runbook.md` with config-driven coin-shaping examples.
+
 ## 2026-02-24 (cloud wallet mainnet operator hardening)
 
 - Improved Cloud Wallet config discoverability in operator docs/templates:
