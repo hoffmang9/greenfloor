@@ -10,7 +10,6 @@
   - `PATH="/Users/hoffmang/src/greenfloor/.venv/bin:$PATH" .venv/bin/pre-commit run --all-files` -> all hooks passed (`ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`).
 - Upstreaming intent:
   - prepared `feat/step4-monitoring-reliability` for PR into `main` with these follow-up reliability/CI fixes included.
-
 ## 2026-02-25 (testing hardening: reliability + adapter contracts)
 
 - Added broad deterministic testing hardening focused on runtime reliability boundaries and error-contract stability:
