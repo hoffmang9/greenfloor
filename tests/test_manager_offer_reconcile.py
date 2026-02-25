@@ -55,6 +55,7 @@ def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path,
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
     _write_program(program)
+    confirmed_tx_id = "a" * 64
     store = SqliteStore(db_path)
     try:
         store.upsert_offer_state(
@@ -69,6 +70,8 @@ def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path,
             state="open",
             last_seen_status=0,
         )
+        assert store.observe_mempool_tx_ids([confirmed_tx_id]) == 1
+        assert store.confirm_tx_ids([confirmed_tx_id]) == 1
     finally:
         store.close()
 
@@ -78,7 +81,7 @@ def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path,
 
         def get_offer(self, offer_id: str) -> dict:
             if offer_id == "offer-ok":
-                return {"id": "offer-ok", "status": 4}
+                return {"id": "offer-ok", "status": 4, "tx_id": confirmed_tx_id}
             raise urllib.error.HTTPError(
                 url=f"https://api.dexie.space/v1/offers/{offer_id}",
                 code=404,
@@ -101,8 +104,9 @@ def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path,
     assert payload["reconciled_count"] == 2
     assert payload["changed_count"] == 2
     taker_items = [row for row in payload["items"] if row["offer_id"] == "offer-ok"]
-    assert taker_items[0]["taker_signal"] == "canonical_offer_state_transition"
-    assert taker_items[0]["taker_diagnostic"] == "dexie_status_pattern"
+    assert taker_items[0]["taker_signal"] == "coinset_tx_block_webhook"
+    assert taker_items[0]["taker_diagnostic"] == "coinset_tx_block_confirmed"
+    assert taker_items[0]["signal_source"] == "coinset_webhook"
 
     store = SqliteStore(db_path)
     try:
@@ -114,7 +118,7 @@ def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path,
     assert rows["offer-ok"]["last_seen_status"] == 4
     assert rows["offer-missing"]["state"] == "unknown_orphaned"
     assert len(events) == 1
-    assert events[0]["payload"]["signal"] == "canonical_offer_state_transition"
+    assert events[0]["payload"]["signal"] == "coinset_tx_block_webhook"
 
 
 def test_offers_status_reports_compact_summary(tmp_path: Path, capsys) -> None:

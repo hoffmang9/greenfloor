@@ -205,6 +205,44 @@ class SqliteStore:
         self.conn.commit()
         return updated
 
+    def get_tx_signal_state(self, tx_ids: list[str]) -> dict[str, dict[str, str | None]]:
+        if not tx_ids:
+            return {}
+        unique_ids: list[str] = []
+        for tx_id in tx_ids:
+            normalized = str(tx_id).strip()
+            if not normalized:
+                continue
+            if normalized not in unique_ids:
+                unique_ids.append(normalized)
+        if not unique_ids:
+            return {}
+        placeholders = ",".join("?" for _ in unique_ids)
+        rows = self.conn.execute(
+            f"""
+            SELECT tx_id, mempool_observed_at, tx_block_confirmed_at
+            FROM tx_signal_state
+            WHERE tx_id IN ({placeholders})
+            """,
+            unique_ids,
+        ).fetchall()
+        state_by_tx_id: dict[str, dict[str, str | None]] = {}
+        for row in rows:
+            key = str(row["tx_id"])
+            state_by_tx_id[key] = {
+                "mempool_observed_at": (
+                    str(row["mempool_observed_at"])
+                    if row["mempool_observed_at"] is not None
+                    else None
+                ),
+                "tx_block_confirmed_at": (
+                    str(row["tx_block_confirmed_at"])
+                    if row["tx_block_confirmed_at"] is not None
+                    else None
+                ),
+            }
+        return state_by_tx_id
+
     def upsert_offer_state(
         self,
         *,

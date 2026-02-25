@@ -136,6 +136,7 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
 
     class _FakeDexieAdapter:
         offers: dict[str, dict] = {}
+        take_tx_id = "b" * 64
 
         def __init__(self, _base_url: str) -> None:
             pass
@@ -150,7 +151,7 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
             return dict(row)
 
         def post_offer(self, _offer: str) -> dict:
-            self.offers["offer-1"] = {"id": "offer-1", "status": 0}
+            self.offers["offer-1"] = {"id": "offer-1", "status": 0, "tx_id": self.take_tx_id}
             return {"success": True, "id": "offer-1"}
 
         def cancel_offer(self, offer_id: str) -> dict:
@@ -206,6 +207,12 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
         )
         == 0
     )
+    interim_store = SqliteStore(db_path)
+    try:
+        assert interim_store.observe_mempool_tx_ids([_FakeDexieAdapter.take_tx_id]) == 1
+        assert interim_store.confirm_tx_ids([_FakeDexieAdapter.take_tx_id]) == 1
+    finally:
+        interim_store.close()
     assert (
         run_once(
             program_path=program,
@@ -240,6 +247,7 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
                 "strategy_offer_execution",
                 "offer_cancel_policy",
                 "offer_reconciliation",
+                "offer_lifecycle_transition",
                 "daemon_cycle_summary",
             ],
             limit=30,
@@ -264,6 +272,11 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
     assert any(
         e["payload"].get("new_state") == "cancelled"
         for e in by_type.get("offer_reconciliation", [])
+        if isinstance(e["payload"], dict)
+    )
+    assert any(
+        e["payload"].get("signal_source") == "coinset_webhook"
+        for e in by_type.get("offer_lifecycle_transition", [])
         if isinstance(e["payload"], dict)
     )
     assert len(by_type.get("daemon_cycle_summary", [])) >= 1

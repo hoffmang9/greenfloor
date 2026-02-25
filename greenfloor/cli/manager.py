@@ -17,7 +17,7 @@ from typing import Any
 import yaml
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
-from greenfloor.adapters.coinset import CoinsetAdapter
+from greenfloor.adapters.coinset import CoinsetAdapter, extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.cli.offer_builder_sdk import build_offer_text
@@ -2347,6 +2347,10 @@ def _offers_reconcile(
             current_state = str(row["state"])
             taker_signal = "none"
             taker_diagnostic = "none"
+            signal_source = "none"
+            coinset_tx_ids: list[str] = []
+            coinset_confirmed_tx_ids: list[str] = []
+            coinset_mempool_tx_ids: list[str] = []
             if target_venue != "dexie":
                 next_state = "reconcile_unsupported_venue"
                 reason = f"unsupported_venue:{target_venue}"
@@ -2360,14 +2364,53 @@ def _offers_reconcile(
                     payload = adapter.get_offer(offer_id)
                     raw_status = payload.get("status")
                     status = int(raw_status) if raw_status is not None else None
-                    if status is None:
-                        next_state = "unknown_orphaned"
-                        reason = "missing_status"
-                    else:
-                        next_state = _reconciled_state_from_dexie_status(
-                            status=status,
-                            current_state=current_state,
+                    coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(payload)
+                    if coinset_tx_ids:
+                        signal_by_tx_id = store.get_tx_signal_state(coinset_tx_ids)
+                        for tx_id in coinset_tx_ids:
+                            signal = signal_by_tx_id.get(tx_id, {})
+                            if signal.get("tx_block_confirmed_at"):
+                                coinset_confirmed_tx_ids.append(tx_id)
+                                continue
+                            if signal.get("mempool_observed_at"):
+                                coinset_mempool_tx_ids.append(tx_id)
+                    if coinset_confirmed_tx_ids and status != 3 and current_state != "cancelled":
+                        transition = apply_offer_signal(
+                            OfferLifecycleState.OPEN,
+                            OfferSignal.TX_CONFIRMED,
                         )
+                        next_state = transition.new_state.value
+                        reason = "coinset_tx_block_webhook_confirmed"
+                        signal_source = "coinset_webhook"
+                    elif coinset_mempool_tx_ids:
+                        if current_state in {
+                            OfferLifecycleState.TX_BLOCK_CONFIRMED.value,
+                            OfferLifecycleState.EXPIRED.value,
+                            "cancelled",
+                        }:
+                            next_state = current_state
+                        else:
+                            transition = apply_offer_signal(
+                                OfferLifecycleState.OPEN,
+                                OfferSignal.MEMPOOL_SEEN,
+                            )
+                            next_state = transition.new_state.value
+                        reason = "coinset_mempool_observed"
+                        signal_source = "coinset_mempool"
+                    if status is None:
+                        if not coinset_tx_ids:
+                            next_state = "unknown_orphaned"
+                            reason = "missing_status"
+                        elif signal_source == "none":
+                            next_state = current_state
+                            reason = "coinset_signal_unavailable_for_offer"
+                    else:
+                        if signal_source == "none":
+                            next_state = _reconciled_state_from_dexie_status(
+                                status=status,
+                                current_state=current_state,
+                            )
+                            signal_source = "dexie_status_fallback"
                 except urllib.error.HTTPError as exc:
                     status = None
                     if int(getattr(exc, "code", 0)) == 404:
@@ -2381,14 +2424,18 @@ def _offers_reconcile(
                     next_state = current_state
                     reason = f"dexie_lookup_error:{exc}"
                 changed_flag = next_state != current_state
-            if status in {4, 5}:
-                taker_diagnostic = "dexie_status_pattern"
-            taker_states = {
-                OfferLifecycleState.MEMPOOL_OBSERVED.value,
-                OfferLifecycleState.TX_BLOCK_CONFIRMED.value,
-            }
-            if current_state not in taker_states and next_state in taker_states:
-                taker_signal = "canonical_offer_state_transition"
+            if (
+                coinset_confirmed_tx_ids
+                and status != 3
+                and current_state != "cancelled"
+                and next_state == OfferLifecycleState.TX_BLOCK_CONFIRMED.value
+            ):
+                taker_signal = "coinset_tx_block_webhook"
+                taker_diagnostic = "coinset_tx_block_confirmed"
+            elif coinset_mempool_tx_ids:
+                taker_diagnostic = "coinset_mempool_observed"
+            elif status in {4, 5}:
+                taker_diagnostic = "dexie_status_pattern_fallback"
             store.upsert_offer_state(
                 offer_id=offer_id,
                 market_id=market_value,
@@ -2408,6 +2455,10 @@ def _offers_reconcile(
                     "reason": reason,
                     "taker_signal": taker_signal,
                     "taker_diagnostic": taker_diagnostic,
+                    "signal_source": signal_source,
+                    "coinset_tx_ids": coinset_tx_ids,
+                    "coinset_confirmed_tx_ids": coinset_confirmed_tx_ids,
+                    "coinset_mempool_tx_ids": coinset_mempool_tx_ids,
                 },
                 market_id=market_value,
             )
@@ -2423,6 +2474,8 @@ def _offers_reconcile(
                         "old_state": current_state,
                         "new_state": next_state,
                         "last_seen_status": status,
+                        "signal_source": signal_source,
+                        "coinset_confirmed_tx_ids": coinset_confirmed_tx_ids,
                     },
                     market_id=market_value,
                 )
@@ -2439,6 +2492,10 @@ def _offers_reconcile(
                     "reason": reason,
                     "taker_signal": taker_signal,
                     "taker_diagnostic": taker_diagnostic,
+                    "signal_source": signal_source,
+                    "coinset_tx_ids": coinset_tx_ids,
+                    "coinset_confirmed_tx_ids": coinset_confirmed_tx_ids,
+                    "coinset_mempool_tx_ids": coinset_mempool_tx_ids,
                 }
             )
         print(

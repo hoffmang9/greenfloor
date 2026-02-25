@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from greenfloor.adapters.coinset import CoinsetAdapter
+from greenfloor.adapters.coinset import CoinsetAdapter, extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.price import PriceAdapter
 from greenfloor.adapters.splash import SplashAdapter
@@ -575,7 +575,30 @@ def run_once(
                 if not offer_id:
                     continue
                 status = int(offer.get("status", -1))
-                if status == 4:
+                coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer)
+                signal_source = "dexie_status_fallback"
+                coinset_confirmed_tx_ids: list[str] = []
+                coinset_mempool_tx_ids: list[str] = []
+                if coinset_tx_ids:
+                    tx_signal_state = store.get_tx_signal_state(coinset_tx_ids)
+                    for tx_id in coinset_tx_ids:
+                        signal = tx_signal_state.get(tx_id, {})
+                        if signal.get("tx_block_confirmed_at"):
+                            coinset_confirmed_tx_ids.append(tx_id)
+                            continue
+                        if signal.get("mempool_observed_at"):
+                            coinset_mempool_tx_ids.append(tx_id)
+                if coinset_confirmed_tx_ids and status != 3:
+                    transition = apply_offer_signal(
+                        OfferLifecycleState.OPEN, OfferSignal.TX_CONFIRMED
+                    )
+                    signal_source = "coinset_webhook"
+                elif coinset_mempool_tx_ids:
+                    transition = apply_offer_signal(
+                        OfferLifecycleState.OPEN, OfferSignal.MEMPOOL_SEEN
+                    )
+                    signal_source = "coinset_mempool"
+                elif status == 4:
                     transition = apply_offer_signal(
                         OfferLifecycleState.OPEN, OfferSignal.TX_CONFIRMED
                     )
@@ -602,6 +625,10 @@ def run_once(
                         "action": transition.action,
                         "reason": transition.reason,
                         "dexie_status": status,
+                        "signal_source": signal_source,
+                        "coinset_tx_ids": coinset_tx_ids,
+                        "coinset_confirmed_tx_ids": coinset_confirmed_tx_ids,
+                        "coinset_mempool_tx_ids": coinset_mempool_tx_ids,
                     },
                     market_id=market.market_id,
                 )
