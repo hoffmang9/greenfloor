@@ -157,6 +157,46 @@ def _canonical_is_cloud_global_id(asset_id: str) -> bool:
     return asset_id.strip().startswith("Asset_")
 
 
+def _dexie_lookup_token_for_cat_id(*, canonical_cat_id_hex: str, network: str) -> dict | None:
+    base_url = _resolve_dexie_base_url(network, None)
+    req = urllib.request.Request(
+        f"{base_url}/v1/swap/tokens",
+        method="GET",
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "greenfloor/0.1",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+    rows: list[dict] = []
+    if isinstance(payload, list):
+        rows = [row for row in payload if isinstance(row, dict)]
+    elif isinstance(payload, dict):
+        tokens = payload.get("tokens")
+        if isinstance(tokens, list):
+            rows = [row for row in tokens if isinstance(row, dict)]
+
+    target = canonical_cat_id_hex.strip().lower()
+    if not target:
+        return None
+    for row in rows:
+        candidates = {
+            str(row.get("assetId", "")).strip().lower(),
+            str(row.get("asset_id", "")).strip().lower(),
+            str(row.get("id", "")).strip().lower(),
+            str(row.get("tokenId", "")).strip().lower(),
+            str(row.get("token_id", "")).strip().lower(),
+        }
+        if target in candidates:
+            return row
+    return None
+
+
 def _resolve_cloud_wallet_asset_id(
     *,
     wallet: CloudWalletAdapter,
@@ -218,7 +258,18 @@ query resolveWalletAssets($walletId: ID!) {
             f"cloud_wallet_asset_resolution_failed:unsupported_canonical_asset_id:{raw}"
         )
 
-    # Temporary deterministic fallback until wallet APIs expose canonical CAT-tail metadata.
+    dexie_token = _dexie_lookup_token_for_cat_id(
+        canonical_cat_id_hex=canonical_hex,
+        network=wallet.network,
+    )
+    if dexie_token is None:
+        raise RuntimeError(
+            f"cloud_wallet_asset_resolution_failed:dexie_cat_metadata_not_found_for:{raw}"
+        )
+
+    # Dexie is currently the primary CAT metadata source; Cloud Wallet-side
+    # deterministic ranking remains a temporary fallback until explicit canonical
+    # CAT-tail metadata is exposed by wallet APIs.
     ranked: list[tuple[int, int, str]] = []
     for asset_global_id in cat_asset_ids:
         coins = wallet.list_coins(asset_id=asset_global_id, include_pending=True)

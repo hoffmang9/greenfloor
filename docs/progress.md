@@ -4,6 +4,7 @@
 
 - Closed the canonical pair mapping gap for manager Cloud Wallet posting in `greenfloor/cli/manager.py`:
   - `build-and-post-offer --pair CARBON22:xch` now resolves canonical market asset IDs (`CAT` hex tail and `xch`) to Cloud Wallet global asset IDs (`Asset_...`) before `createOffer`.
+  - CAT metadata validation now uses Dexie token metadata as the primary source; Cloud Wallet in-vault candidate ranking remains a temporary fallback selector until wallet APIs expose canonical CAT-tail metadata directly.
   - Added explicit result metadata (`resolved_base_asset_id`, `resolved_quote_asset_id`) to manager output and strategy-offer audit events.
   - Added direct state persistence in cloud-wallet manager post path (`offer_state` upsert + `strategy_offer_execution` audit event) so follow-up `offers-status` / `offers-reconcile` can observe posted offers.
 - Live canonical proof (remote host `John-Deere`) succeeded:
