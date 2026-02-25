@@ -37,6 +37,10 @@ class ProgramConfig:
     pushover_user_key_env: str
     pushover_app_token_env: str
     pushover_recipient_key_env: str
+    cloud_wallet_base_url: str = ""
+    cloud_wallet_user_key_id: str = ""
+    cloud_wallet_private_key_pem_path: str = ""
+    cloud_wallet_vault_id: str = ""
     signer_key_registry: dict[str, SignerKeyConfig] = field(default_factory=dict)
 
 
@@ -174,6 +178,12 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
     if offer_publish_venue not in {"dexie", "splash"}:
         raise ValueError("venues.offer_publish.provider must be one of: dexie, splash")
 
+    cloud_wallet = raw.get("cloud_wallet", {})
+    if cloud_wallet is None:
+        cloud_wallet = {}
+    if not isinstance(cloud_wallet, dict):
+        raise ValueError("cloud_wallet must be a mapping")
+
     return ProgramConfig(
         app_network=str(_req(app, "network")),
         home_dir=str(_req(app, "home_dir")),
@@ -198,6 +208,10 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         pushover_user_key_env=str(_req(pushover, "user_key_env")),
         pushover_app_token_env=str(_req(pushover, "app_token_env")),
         pushover_recipient_key_env=str(_req(pushover, "recipient_key_env")),
+        cloud_wallet_base_url=str(cloud_wallet.get("base_url", "")).strip(),
+        cloud_wallet_user_key_id=str(cloud_wallet.get("user_key_id", "")).strip(),
+        cloud_wallet_private_key_pem_path=str(cloud_wallet.get("private_key_pem_path", "")).strip(),
+        cloud_wallet_vault_id=str(cloud_wallet.get("vault_id", "")).strip(),
         signer_key_registry=key_registry,
     )
 

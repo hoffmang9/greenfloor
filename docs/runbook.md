@@ -19,6 +19,21 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
 
 ## 2) Steady-State Operations
 
+- Cloud Wallet config prerequisite (required for vault-first paths):
+  - Set `cloud_wallet.base_url`, `cloud_wallet.user_key_id`, `cloud_wallet.private_key_pem_path`, and `cloud_wallet.vault_id` in `~/.greenfloor/config/program.yaml`.
+  - Where to find each value:
+    - `cloud_wallet.base_url`: open `https://vault.chia.net/settings.json`, read `GRAPHQL_URI`, and keep the origin only (for example `https://api.vault.chia.net`, not `/graphql`).
+    - `cloud_wallet.user_key_id`: in Cloud Wallet UI, go to **Settings -> API Keys** (`/settings/api-keys`), create/select a key, copy **Key Id**.
+    - `cloud_wallet.private_key_pem_path`: from the **API Key Created** modal, click **Download Key** and save the PEM file (recommended: `~/.greenfloor/keys/cloud-wallet-user-auth-key.pem`).
+      The file must contain full PEM text (`-----BEGIN PRIVATE KEY-----` ... `-----END PRIVATE KEY-----`), not base64-only text.
+    - `cloud_wallet.vault_id`: open the target vault and copy the URL segment in `.../wallet/<ID>/...`; use the `Wallet_...` value, not `vaultLauncherId`.
+- Review vault coin inventory before shaping or posting:
+  - `greenfloor-manager coins-list`
+  - Optional asset scope: `greenfloor-manager coins-list --asset <asset-id|xch>`
+- Shape denominations for the selected market context:
+  - Split: `greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10`
+  - Combine: `greenfloor-manager coin-combine --pair TDBX:txch --number-of-coins 10 --asset-id xch`
+  - Defaults wait through signature + mempool + confirmation; use `--no-wait` for async mode.
 - Post a real offer file directly (fast path to running state):
   - Mainnet (default, pair-based): `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1`
   - Testnet (active proof pair): `greenfloor-manager build-and-post-offer --pair TDBX:txch --size-base-units 1 --network testnet11`

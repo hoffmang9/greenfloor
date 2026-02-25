@@ -1,5 +1,52 @@
 # Progress Log
 
+## 2026-02-24 (cloud wallet mainnet operator hardening)
+
+- Improved Cloud Wallet config discoverability in operator docs/templates:
+  - Added explicit source hints in `docs/runbook.md` for `cloud_wallet.base_url`, `cloud_wallet.user_key_id`, `cloud_wallet.private_key_pem_path`, and `cloud_wallet.vault_id`.
+  - Added inline comments in `config/program.yaml` showing where to fetch each value and common pitfalls (origin-only `base_url`, PEM format, `Wallet_...` vs launcher id).
+- Hardened coin-operation fee-advice failure behavior in `greenfloor/cli/manager.py`:
+  - `coin-split` and `coin-combine` now return structured JSON failure payloads with operator guidance instead of uncaught tracebacks when fee resolution fails.
+  - Added deterministic regression tests in `tests/test_manager_post_offer.py` for both commands.
+- Fixed Cloud Wallet split ID mismatch in `greenfloor/cli/manager.py`:
+  - `coin-split` now resolves operator-provided coin ids from `coins-list` output (hex coin names) to required GraphQL `Coin_*` global IDs before mutation submission.
+  - Added structured `coin_id_resolution_failed` response when requested ids are not present in vault inventory, plus deterministic test coverage.
+- Mainnet smoke validation succeeded after patch:
+  - `coin-split --no-wait` produced a valid `signature_request_id` and returned `UNSIGNED` as expected for async mode.
+  - Operator confirmed Chia Signer prompt/approval path completed successfully with `fee_source: "env_override"` and `fee_mojos: 0`.
+- Improved manager JSON output ergonomics in `greenfloor/cli/manager.py`:
+  - Default JSON command output is now pretty-formatted for operator readability.
+  - Added global `--json` flag for compact single-line JSON output in script/automation workflows.
+- Added exact-coin targeting support to `coin-combine`:
+  - New repeatable `--coin-id` argument resolves `coins-list` hex names to Cloud Wallet `Coin_*` IDs and submits targeted combine requests.
+  - Added deterministic regression tests for successful ID resolution and structured unknown-ID error responses.
+- Mainnet exact-coin combine validation succeeded:
+  - Operator combined three specified micro-coins into a single resulting coin `83a4841f6b7992f20876f10ff92b0cab69a5f3f988cd1e7918a4d41ca11f1b12` with signer approval.
+
+## 2026-02-24 (cloud wallet vault-first migration pass)
+
+- Added Cloud Wallet adapter boundary in `greenfloor/adapters/cloud_wallet.py`:
+  - GraphQL request transport with user-key RSA-SHA256 auth headers (`chia-user-key-id`, `chia-signature`, `chia-nonce`, `chia-timestamp`).
+  - Vault coin listing, split/combine mutation calls, offer creation, signature-request polling, and wallet-offer retrieval.
+- Extended program config model with Cloud Wallet fields:
+  - `cloud_wallet.base_url`
+  - `cloud_wallet.user_key_id`
+  - `cloud_wallet.private_key_pem_path`
+  - `cloud_wallet.vault_id`
+- Added manager vault-first commands:
+  - `coins-list` (operator-minimal coin fields: coin id, amount, state, pending, spendable, asset),
+  - `coin-split` (default wait through signature + mempool + confirmation, `--no-wait` override),
+  - `coin-combine` (default wait through signature + mempool + confirmation, `--no-wait` override).
+- Added Coinset conservative fee-advice contract for mempool-bound coin operations:
+  - retry with moderate exponential backoff,
+  - cache last-good fee with TTL fallback,
+  - actionable failure if no fee advice is available.
+- Switched manager offer-post default path to Cloud Wallet when cloud-wallet config is present:
+  - maker fee forced to `0`,
+  - signature-request wait handling with periodic warnings,
+  - local offer verification retained before venue post.
+- Added/updated deterministic tests in `tests/test_manager_post_offer.py` for the new cloud-wallet command behavior and fee wiring.
+
 ## 2026-02-24 (testnet pair pivot to TDBX)
 
 - Updated active `testnet11` proof target to `TDBX:txch` (TXCH<->TDBX) for workflow-driven validation.

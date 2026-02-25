@@ -25,6 +25,11 @@ Seven commands in scope. Do not add commands without explicit need tied to testn
 6. `offers-status` — compact view of current offer states and recent events.
 7. `offers-reconcile` — refresh offer states from venue API and flag orphaned/unknown.
 
+Operator output/coin-op behavior updates on current delivery path:
+
+- Manager JSON responses are pretty-formatted by default; use global `--json` for compact single-line output.
+- `coin-combine` now supports repeatable `--coin-id` for deterministic exact-coin targeting (with `coins-list` hex-name to `Coin_*` resolution).
+
 ## Signing Architecture
 
 - All signing logic lives in `greenfloor/signing.py` — a single module handling coin discovery, coin selection, additions planning, spend-bundle construction, AGG_SIG signing, and broadcast.
@@ -92,6 +97,14 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
   - CI path now executes this sequence when `dry_run=false` in `live-testnet-e2e`.
   - Latest status (2026-02-23): current native-migration branch runs (`run_id=22325031449`, `run_id=22325053517`) executed the full manager proof sequence successfully with artifacts, including live Dexie post (`dry_run=false`) and reconcile output.
   - Active operator proof pair for `testnet11` is `TDBX:txch` (TXCH<->TDBX). BYC04 is not the primary proof target.
+
+## Operational Hardening Follow-up
+
+- [ ] H1: Add explicit Coinset fee-lookup diagnostics and endpoint validation for coin operations.
+  - Scope: `coin-split` / `coin-combine` fee lookups (including conservative fee-advice path), not only generic Coinset connectivity.
+  - Add a deterministic preflight check that validates fee lookup behavior against the configured/default Coinset endpoint before live coin-op submission.
+  - Ensure failure output clearly distinguishes endpoint routing/configuration issues from temporary fee-advice unavailability.
+  - Document operator debug steps for fee lookups (endpoint verification, override behavior, expected JSON failure contracts).
 
 ## Deferred Backlog (Post-Testnet Proof)
 

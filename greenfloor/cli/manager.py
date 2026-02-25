@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import importlib
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 import yaml
 
+from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
+from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.cli.offer_builder_sdk import build_offer_text
@@ -111,6 +115,161 @@ def _default_markets_config_path() -> str:
     return "config/markets.yaml"
 
 
+_FEE_ADVICE_CACHE: dict[str, int | float] = {}
+_JSON_OUTPUT_COMPACT = False
+
+
+def _format_json_output(payload: object) -> str:
+    if _JSON_OUTPUT_COMPACT:
+        return json.dumps(payload, separators=(",", ":"))
+    return json.dumps(payload, indent=2)
+
+
+def _require_cloud_wallet_config(program) -> CloudWalletConfig:
+    if not program.cloud_wallet_base_url:
+        raise ValueError("cloud_wallet.base_url is required")
+    if not program.cloud_wallet_user_key_id:
+        raise ValueError("cloud_wallet.user_key_id is required")
+    if not program.cloud_wallet_private_key_pem_path:
+        raise ValueError("cloud_wallet.private_key_pem_path is required")
+    if not program.cloud_wallet_vault_id:
+        raise ValueError("cloud_wallet.vault_id is required")
+    return CloudWalletConfig(
+        base_url=program.cloud_wallet_base_url,
+        user_key_id=program.cloud_wallet_user_key_id,
+        private_key_pem_path=program.cloud_wallet_private_key_pem_path,
+        vault_id=program.cloud_wallet_vault_id,
+        network=program.app_network,
+    )
+
+
+def _new_cloud_wallet_adapter(program) -> CloudWalletAdapter:
+    return CloudWalletAdapter(_require_cloud_wallet_config(program))
+
+
+def _resolve_taker_or_coin_operation_fee(*, network: str) -> tuple[int, str]:
+    if os.getenv("GREENFLOOR_COINSET_ADVISED_FEE_MOJOS", "").strip():
+        value = int(os.getenv("GREENFLOOR_COINSET_ADVISED_FEE_MOJOS", "0").strip())
+        return value, "env_override"
+    now = time.time()
+    ttl_seconds = int(os.getenv("GREENFLOOR_COINSET_FEE_CACHE_TTL_SECONDS", "600"))
+    cached_value = _FEE_ADVICE_CACHE.get("fee_mojos")
+    cached_at = _FEE_ADVICE_CACHE.get("cached_at_epoch")
+    if isinstance(cached_value, int) and isinstance(cached_at, float):
+        if now - cached_at <= max(1, ttl_seconds):
+            return cached_value, "cached_last_good"
+
+    max_attempts = int(os.getenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "4"))
+    coinset = CoinsetAdapter(None, network=network)
+    for attempt in range(max_attempts):
+        advised = coinset.get_conservative_fee_estimate()
+        if advised is not None:
+            _FEE_ADVICE_CACHE["fee_mojos"] = advised
+            _FEE_ADVICE_CACHE["cached_at_epoch"] = now
+            return advised, "coinset_conservative"
+        if attempt < max_attempts - 1:
+            sleep_seconds = min(8.0, 0.5 * (2**attempt))
+            time.sleep(sleep_seconds)
+
+    if isinstance(cached_value, int):
+        return cached_value, "cached_last_good_stale"
+    raise RuntimeError(
+        "fee_advice_unavailable:coinset unavailable; retry later or set GREENFLOOR_COINSET_ADVISED_FEE_MOJOS"
+    )
+
+
+def _poll_signature_request_until_not_unsigned(
+    *,
+    wallet: CloudWalletAdapter,
+    signature_request_id: str,
+    timeout_seconds: int,
+    warning_interval_seconds: int,
+) -> tuple[str, list[dict[str, str]]]:
+    events: list[dict[str, str]] = []
+    start = time.monotonic()
+    next_warning = warning_interval_seconds
+    sleep_seconds = 2.0
+    while True:
+        status_payload = wallet.get_signature_request(signature_request_id=signature_request_id)
+        status = str(status_payload.get("status", "")).strip().upper()
+        if status and status != "UNSIGNED":
+            return status, events
+
+        elapsed = int(time.monotonic() - start)
+        if elapsed >= timeout_seconds:
+            raise RuntimeError("signature_request_timeout_waiting_for_signature")
+        if elapsed >= next_warning:
+            events.append(
+                {
+                    "event": "signature_wait_warning",
+                    "elapsed_seconds": str(elapsed),
+                    "message": "still_waiting_on_user_signature",
+                }
+            )
+            next_warning += warning_interval_seconds
+        time.sleep(sleep_seconds)
+        sleep_seconds = min(20.0, sleep_seconds * 1.5)
+
+
+def _wait_for_mempool_then_confirmation(
+    *,
+    wallet: CloudWalletAdapter,
+    initial_coin_ids: set[str],
+    mempool_warning_seconds: int,
+    confirmation_warning_seconds: int,
+) -> list[dict[str, str]]:
+    events: list[dict[str, str]] = []
+    start = time.monotonic()
+    seen_pending = False
+    sleep_seconds = 2.0
+    while True:
+        coins = wallet.list_coins(include_pending=True)
+        pending = [
+            c
+            for c in coins
+            if str(c.get("state", "")).strip().upper() in {"PENDING", "MEMPOOL"}
+            and str(c.get("id", "")).strip() not in initial_coin_ids
+        ]
+        confirmed = [
+            c
+            for c in coins
+            if str(c.get("state", "")).strip().upper() not in {"PENDING", "MEMPOOL"}
+            and str(c.get("id", "")).strip() not in initial_coin_ids
+        ]
+        elapsed = int(time.monotonic() - start)
+        if pending and not seen_pending:
+            seen_pending = True
+            sample = str(pending[0].get("name", pending[0].get("id", ""))).strip()
+            events.append(
+                {
+                    "event": "in_mempool",
+                    "coinset_url": f"https://coinset.org/coin/{sample}",
+                    "elapsed_seconds": str(elapsed),
+                }
+            )
+        if confirmed:
+            return events
+
+        if not seen_pending and elapsed >= mempool_warning_seconds:
+            events.append(
+                {
+                    "event": "mempool_wait_warning",
+                    "elapsed_seconds": str(elapsed),
+                }
+            )
+            mempool_warning_seconds += mempool_warning_seconds
+        if seen_pending and elapsed >= confirmation_warning_seconds:
+            events.append(
+                {
+                    "event": "confirmation_wait_warning",
+                    "elapsed_seconds": str(elapsed),
+                }
+            )
+            confirmation_warning_seconds += confirmation_warning_seconds
+        time.sleep(sleep_seconds)
+        sleep_seconds = min(20.0, sleep_seconds * 1.5)
+
+
 # ---------------------------------------------------------------------------
 # Core commands
 # ---------------------------------------------------------------------------
@@ -178,7 +337,7 @@ def _keys_onboard(
             selection,
         )
         print(
-            json.dumps(
+            _format_json_output(
                 {
                     "selected_source": "chia_keys",
                     "key_id": key_id,
@@ -222,7 +381,7 @@ def _keys_onboard(
             selection,
         )
         print(
-            json.dumps(
+            _format_json_output(
                 {
                     "selected_source": "mnemonic_import",
                     "key_id": key_id,
@@ -245,7 +404,7 @@ def _keys_onboard(
         selection,
     )
     print(
-        json.dumps(
+        _format_json_output(
             {
                 "selected_source": "generate_new_key",
                 "key_id": key_id,
@@ -304,6 +463,144 @@ def _build_offer_text_for_request(payload: dict) -> str:
     return build_offer_text(payload)
 
 
+def _build_and_post_offer_cloud_wallet(
+    *,
+    program,
+    market,
+    size_base_units: int,
+    repeat: int,
+    publish_venue: str,
+    dexie_base_url: str,
+    splash_base_url: str,
+    drop_only: bool,
+    claim_rewards: bool,
+    quote_price: float,
+) -> int:
+    wallet = _new_cloud_wallet_adapter(program)
+    post_results: list[dict] = []
+    publish_failures = 0
+    dexie = DexieAdapter(dexie_base_url) if publish_venue == "dexie" else None
+    splash = SplashAdapter(splash_base_url) if publish_venue == "splash" else None
+
+    for _ in range(repeat):
+        offer_amount = int(
+            size_base_units * int((market.pricing or {}).get("base_unit_mojo_multiplier", 1000))
+        )
+        request_amount = int(
+            round(
+                float(size_base_units)
+                * float(quote_price)
+                * int((market.pricing or {}).get("quote_unit_mojo_multiplier", 1000))
+            )
+        )
+        if request_amount <= 0:
+            raise ValueError("request_amount must be positive")
+
+        offered = [{"assetId": str(market.base_asset), "amount": offer_amount}]
+        requested = [{"assetId": str(market.quote_asset), "amount": request_amount}]
+        expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(minutes=65)).isoformat()
+        create_result = wallet.create_offer(
+            offered=offered,
+            requested=requested,
+            fee=0,
+            expires_at_iso=expires_at,
+        )
+        signature_request_id = str(create_result.get("signature_request_id", "")).strip()
+        wait_events: list[dict[str, str]] = []
+        signature_state = str(create_result.get("status", "UNKNOWN")).strip()
+        if signature_request_id:
+            signature_state, signature_wait_events = _poll_signature_request_until_not_unsigned(
+                wallet=wallet,
+                signature_request_id=signature_request_id,
+                timeout_seconds=15 * 60,
+                warning_interval_seconds=10 * 60,
+            )
+            wait_events.extend(signature_wait_events)
+
+        wallet_payload = wallet.get_wallet()
+        offers = wallet_payload.get("offers", [])
+        offer_text = ""
+        for offer in offers:
+            bech32 = str(offer.get("bech32", "")).strip()
+            if bech32.startswith("offer1"):
+                offer_text = bech32
+                break
+        if not offer_text:
+            publish_failures += 1
+            post_results.append(
+                {
+                    "venue": publish_venue,
+                    "result": {
+                        "success": False,
+                        "error": "cloud_wallet_offer_artifact_unavailable",
+                        "signature_request_id": signature_request_id,
+                        "signature_state": signature_state,
+                        "wait_events": wait_events,
+                    },
+                }
+            )
+            continue
+
+        verify_error = _verify_offer_text_for_dexie(offer_text)
+        if verify_error:
+            publish_failures += 1
+            post_results.append(
+                {
+                    "venue": publish_venue,
+                    "result": {"success": False, "error": verify_error},
+                }
+            )
+            continue
+
+        if publish_venue == "dexie":
+            assert dexie is not None
+            result = dexie.post_offer(
+                offer_text,
+                drop_only=drop_only,
+                claim_rewards=claim_rewards,
+            )
+        else:
+            assert splash is not None
+            result = splash.post_offer(offer_text)
+        if result.get("success") is False:
+            publish_failures += 1
+        post_results.append(
+            {
+                "venue": publish_venue,
+                "result": {
+                    **result,
+                    "signature_request_id": signature_request_id,
+                    "signature_state": signature_state,
+                    "wait_events": wait_events,
+                },
+            }
+        )
+
+    print(
+        _format_json_output(
+            {
+                "market_id": market.market_id,
+                "pair": f"{market.base_asset}:{market.quote_asset}",
+                "network": program.app_network,
+                "size_base_units": size_base_units,
+                "repeat": repeat,
+                "publish_venue": publish_venue,
+                "dexie_base_url": dexie_base_url,
+                "splash_base_url": splash_base_url if publish_venue == "splash" else None,
+                "drop_only": drop_only,
+                "claim_rewards": claim_rewards,
+                "dry_run": False,
+                "publish_attempts": len(post_results),
+                "publish_failures": publish_failures,
+                "built_offers_preview": [],
+                "results": post_results,
+                "offer_fee_mojos": 0,
+            }
+        )
+    )
+    return 0 if publish_failures == 0 else 2
+
+
 def _build_and_post_offer(
     *,
     program_path: Path,
@@ -351,6 +648,26 @@ def _build_and_post_offer(
             "market pricing must define fixed_quote_per_base or min/max_price_quote_per_base for offer build"
         )
 
+    cloud_wallet_configured = (
+        bool(program.cloud_wallet_base_url)
+        and bool(program.cloud_wallet_user_key_id)
+        and bool(program.cloud_wallet_private_key_pem_path)
+        and bool(program.cloud_wallet_vault_id)
+    )
+    if cloud_wallet_configured and not dry_run:
+        return _build_and_post_offer_cloud_wallet(
+            program=program,
+            market=market,
+            size_base_units=size_base_units,
+            repeat=repeat,
+            publish_venue=publish_venue,
+            dexie_base_url=dexie_base_url,
+            splash_base_url=splash_base_url,
+            drop_only=drop_only,
+            claim_rewards=claim_rewards,
+            quote_price=float(quote_price),
+        )
+
     debug_dry_run_offer_capture_dir = os.getenv(
         "GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", ""
     ).strip()
@@ -384,6 +701,7 @@ def _build_and_post_offer(
             "quote_price_quote_per_base": float(quote_price),
             "base_unit_mojo_multiplier": int(pricing.get("base_unit_mojo_multiplier", 1000)),
             "quote_unit_mojo_multiplier": int(pricing.get("quote_unit_mojo_multiplier", 1000)),
+            "fee_mojos": 0,
             "dry_run": bool(dry_run),
             "key_id": market.signer_key_id,
             "keyring_yaml_path": keyring_yaml_path,
@@ -446,7 +764,7 @@ def _build_and_post_offer(
 
     publish_attempts = len(post_results)
     print(
-        json.dumps(
+        _format_json_output(
             {
                 "market_id": market.market_id,
                 "pair": f"{market.base_asset}:{market.quote_asset}",
@@ -518,6 +836,327 @@ def _resolve_market_for_build(
     return candidates[0]
 
 
+def _coins_list(
+    *,
+    program_path: Path,
+    asset: str | None,
+    vault_id: str | None,
+) -> int:
+    program = load_program_config(program_path)
+    wallet = _new_cloud_wallet_adapter(program)
+    if vault_id and vault_id.strip() and vault_id.strip() != wallet.vault_id:
+        raise ValueError(
+            "vault_id override is not supported with current cloud_wallet config; update program cloud_wallet.vault_id"
+        )
+    asset_filter = asset.strip() if asset else ""
+    if asset_filter.lower() in {"xch", "txch"}:
+        asset_filter = None
+    coins = wallet.list_coins(asset_id=asset_filter or None, include_pending=True)
+    items = []
+    for coin in coins:
+        coin_state = str(coin.get("state", "")).strip().upper()
+        pending = coin_state in {"PENDING", "MEMPOOL"}
+        spendable = coin_state not in {"SPENT"} and not pending
+        asset_raw = coin.get("asset")
+        asset_id = "xch"
+        if isinstance(asset_raw, dict):
+            asset_id = str(asset_raw.get("id", "xch")).strip()
+        items.append(
+            {
+                "coin_id": str(coin.get("name", coin.get("id", ""))).strip(),
+                "amount": int(coin.get("amount", 0)),
+                "state": coin_state or "UNKNOWN",
+                "pending": pending,
+                "spendable": spendable,
+                "asset": asset_id,
+            }
+        )
+    print(
+        _format_json_output(
+            {
+                "vault_id": wallet.vault_id,
+                "network": wallet.network,
+                "count": len(items),
+                "items": items,
+            }
+        )
+    )
+    return 0
+
+
+def _coin_split(
+    *,
+    program_path: Path,
+    markets_path: Path,
+    network: str,
+    market_id: str | None,
+    pair: str | None,
+    coin_ids: list[str],
+    amount_per_coin: int,
+    number_of_coins: int,
+    no_wait: bool,
+) -> int:
+    if amount_per_coin <= 0:
+        raise ValueError("amount_per_coin must be positive")
+    if number_of_coins <= 0:
+        raise ValueError("number_of_coins must be positive")
+    program = load_program_config(program_path)
+    markets = load_markets_config(markets_path)
+    market = _resolve_market_for_build(
+        markets,
+        market_id=market_id,
+        pair=pair,
+        network=network,
+    )
+    wallet = _new_cloud_wallet_adapter(program)
+    wallet_coins = wallet.list_coins(include_pending=True)
+    existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
+    # Operators usually copy coin hex names from `coins-list`; Cloud Wallet mutations
+    # require GraphQL coin global IDs, so resolve name -> id before mutation.
+    coin_identifier_to_global_id: dict[str, str] = {}
+    for coin in wallet_coins:
+        global_id = str(coin.get("id", "")).strip()
+        name = str(coin.get("name", "")).strip()
+        if global_id:
+            coin_identifier_to_global_id[global_id] = global_id
+        if name and global_id:
+            coin_identifier_to_global_id[name] = global_id
+    resolved_coin_ids: list[str] = []
+    unresolved_coin_ids: list[str] = []
+    for raw_coin_id in coin_ids:
+        token = str(raw_coin_id).strip()
+        mapped = coin_identifier_to_global_id.get(token)
+        if mapped:
+            resolved_coin_ids.append(mapped)
+            continue
+        # Allow direct GraphQL IDs for power users.
+        if token.startswith("Coin_"):
+            resolved_coin_ids.append(token)
+            continue
+        unresolved_coin_ids.append(token)
+    if unresolved_coin_ids:
+        print(
+            _format_json_output(
+                {
+                    "market_id": market.market_id,
+                    "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "vault_id": wallet.vault_id,
+                    "waited": False,
+                    "success": False,
+                    "error": "coin_id_resolution_failed",
+                    "unknown_coin_ids": unresolved_coin_ids,
+                    "operator_guidance": (
+                        "run greenfloor-manager coins-list and pass coin_id values from output; "
+                        "manager accepts hex coin names and resolves them to Cloud Wallet Coin_* ids"
+                    ),
+                }
+            )
+        )
+        return 2
+    try:
+        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
+    except Exception as exc:
+        print(
+            _format_json_output(
+                {
+                    "market_id": market.market_id,
+                    "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "vault_id": wallet.vault_id,
+                    "waited": False,
+                    "success": False,
+                    "error": f"fee_resolution_failed:{exc}",
+                    "operator_guidance": (
+                        "set GREENFLOOR_COINSET_ADVISED_FEE_MOJOS to an explicit integer fee "
+                        "or fix GREENFLOOR_COINSET_BASE_URL to a valid Coinset API endpoint"
+                    ),
+                }
+            )
+        )
+        return 2
+    split_result = wallet.split_coins(
+        coin_ids=resolved_coin_ids,
+        amount_per_coin=amount_per_coin,
+        number_of_coins=number_of_coins,
+        fee=fee_mojos,
+    )
+    signature_request_id = split_result["signature_request_id"]
+    if not signature_request_id:
+        raise RuntimeError("coin_split_failed:missing_signature_request_id")
+
+    wait_events: list[dict[str, str]] = []
+    final_signature_state = split_result.get("status", "UNKNOWN")
+    if not no_wait:
+        final_signature_state, signature_events = _poll_signature_request_until_not_unsigned(
+            wallet=wallet,
+            signature_request_id=signature_request_id,
+            timeout_seconds=15 * 60,
+            warning_interval_seconds=10 * 60,
+        )
+        wait_events.extend(signature_events)
+        wait_events.extend(
+            _wait_for_mempool_then_confirmation(
+                wallet=wallet,
+                initial_coin_ids=existing_coin_ids,
+                mempool_warning_seconds=5 * 60,
+                confirmation_warning_seconds=15 * 60,
+            )
+        )
+    print(
+        _format_json_output(
+            {
+                "market_id": market.market_id,
+                "pair": f"{market.base_symbol}:{market.quote_asset}",
+                "vault_id": wallet.vault_id,
+                "signature_request_id": signature_request_id,
+                "signature_state": final_signature_state,
+                "waited": not no_wait,
+                "wait_events": wait_events,
+                "fee_mojos": fee_mojos,
+                "fee_source": fee_source,
+            }
+        )
+    )
+    return 0
+
+
+def _coin_combine(
+    *,
+    program_path: Path,
+    markets_path: Path,
+    network: str,
+    market_id: str | None,
+    pair: str | None,
+    number_of_coins: int,
+    asset_id: str | None,
+    coin_ids: list[str],
+    no_wait: bool,
+) -> int:
+    if number_of_coins <= 1:
+        raise ValueError("number_of_coins must be > 1")
+    program = load_program_config(program_path)
+    markets = load_markets_config(markets_path)
+    market = _resolve_market_for_build(
+        markets,
+        market_id=market_id,
+        pair=pair,
+        network=network,
+    )
+    wallet = _new_cloud_wallet_adapter(program)
+    wallet_coins = wallet.list_coins(include_pending=True)
+    existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
+    resolved_input_coin_ids: list[str] | None = None
+    if coin_ids:
+        coin_identifier_to_global_id: dict[str, str] = {}
+        for coin in wallet_coins:
+            global_id = str(coin.get("id", "")).strip()
+            name = str(coin.get("name", "")).strip()
+            if global_id:
+                coin_identifier_to_global_id[global_id] = global_id
+            if name and global_id:
+                coin_identifier_to_global_id[name] = global_id
+        resolved_coin_ids: list[str] = []
+        unresolved_coin_ids: list[str] = []
+        for raw_coin_id in coin_ids:
+            token = str(raw_coin_id).strip()
+            mapped = coin_identifier_to_global_id.get(token)
+            if mapped:
+                resolved_coin_ids.append(mapped)
+                continue
+            if token.startswith("Coin_"):
+                resolved_coin_ids.append(token)
+                continue
+            unresolved_coin_ids.append(token)
+        if unresolved_coin_ids:
+            print(
+                _format_json_output(
+                    {
+                        "market_id": market.market_id,
+                        "pair": f"{market.base_symbol}:{market.quote_asset}",
+                        "vault_id": wallet.vault_id,
+                        "waited": False,
+                        "success": False,
+                        "error": "coin_id_resolution_failed",
+                        "unknown_coin_ids": unresolved_coin_ids,
+                        "operator_guidance": (
+                            "run greenfloor-manager coins-list and pass coin_id values from output; "
+                            "manager accepts hex coin names and resolves them to Cloud Wallet Coin_* ids"
+                        ),
+                    }
+                )
+            )
+            return 2
+        if number_of_coins != len(resolved_coin_ids):
+            raise ValueError(
+                "when --coin-id is provided, --number-of-coins must match the number of --coin-id values"
+            )
+        resolved_input_coin_ids = resolved_coin_ids
+    try:
+        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
+    except Exception as exc:
+        print(
+            _format_json_output(
+                {
+                    "market_id": market.market_id,
+                    "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "vault_id": wallet.vault_id,
+                    "waited": False,
+                    "success": False,
+                    "error": f"fee_resolution_failed:{exc}",
+                    "operator_guidance": (
+                        "set GREENFLOOR_COINSET_ADVISED_FEE_MOJOS to an explicit integer fee "
+                        "or fix GREENFLOOR_COINSET_BASE_URL to a valid Coinset API endpoint"
+                    ),
+                }
+            )
+        )
+        return 2
+    combine_result = wallet.combine_coins(
+        number_of_coins=number_of_coins,
+        fee=fee_mojos,
+        asset_id=asset_id,
+        largest_first=True,
+        input_coin_ids=resolved_input_coin_ids,
+    )
+    signature_request_id = combine_result["signature_request_id"]
+    if not signature_request_id:
+        raise RuntimeError("coin_combine_failed:missing_signature_request_id")
+
+    wait_events: list[dict[str, str]] = []
+    final_signature_state = combine_result.get("status", "UNKNOWN")
+    if not no_wait:
+        final_signature_state, signature_events = _poll_signature_request_until_not_unsigned(
+            wallet=wallet,
+            signature_request_id=signature_request_id,
+            timeout_seconds=15 * 60,
+            warning_interval_seconds=10 * 60,
+        )
+        wait_events.extend(signature_events)
+        wait_events.extend(
+            _wait_for_mempool_then_confirmation(
+                wallet=wallet,
+                initial_coin_ids=existing_coin_ids,
+                mempool_warning_seconds=5 * 60,
+                confirmation_warning_seconds=15 * 60,
+            )
+        )
+    print(
+        _format_json_output(
+            {
+                "market_id": market.market_id,
+                "pair": f"{market.base_symbol}:{market.quote_asset}",
+                "vault_id": wallet.vault_id,
+                "signature_request_id": signature_request_id,
+                "signature_state": final_signature_state,
+                "waited": not no_wait,
+                "wait_events": wait_events,
+                "fee_mojos": fee_mojos,
+                "fee_source": fee_source,
+            }
+        )
+    )
+    return 0
+
+
 def _resolve_db_path(program_config_path: Path, explicit_db_path: str | None) -> Path:
     if explicit_db_path:
         return Path(explicit_db_path).expanduser()
@@ -581,7 +1220,7 @@ def _bootstrap_home(
         store.close()
 
     print(
-        json.dumps(
+        _format_json_output(
             {
                 "bootstrapped": True,
                 "home_dir": str(home),
@@ -663,6 +1302,15 @@ def _doctor(program_path: Path, markets_path: Path, state_db: str | None) -> int
     _warn_if_invalid_int_env("GREENFLOOR_OFFER_CANCEL_BACKOFF_MS", minimum=0)
     _warn_if_invalid_int_env("GREENFLOOR_OFFER_CANCEL_COOLDOWN_SECONDS", minimum=0)
 
+    if not program.cloud_wallet_base_url:
+        warnings.append("cloud_wallet_not_configured:base_url")
+    if not program.cloud_wallet_user_key_id:
+        warnings.append("cloud_wallet_not_configured:user_key_id")
+    if not program.cloud_wallet_private_key_pem_path:
+        warnings.append("cloud_wallet_not_configured:private_key_pem_path")
+    if not program.cloud_wallet_vault_id:
+        warnings.append("cloud_wallet_not_configured:vault_id")
+
     result = {
         "ok": len(problems) == 0,
         "program_config": str(program_path),
@@ -673,7 +1321,7 @@ def _doctor(program_path: Path, markets_path: Path, state_db: str | None) -> int
         "warnings": warnings,
         "problems": problems,
     }
-    print(json.dumps(result))
+    print(_format_json_output(result))
     return 0 if not problems else 2
 
 
@@ -800,7 +1448,7 @@ def _offers_reconcile(
                 }
             )
         print(
-            json.dumps(
+            _format_json_output(
                 {
                     "state_db": str(db_path),
                     "venue": target_venue,
@@ -845,7 +1493,7 @@ def _offers_status(
     for row in offers:
         by_state[row["state"]] = by_state.get(row["state"], 0) + 1
     print(
-        json.dumps(
+        _format_json_output(
             {
                 "state_db": str(db_path),
                 "market_id": market_id,
@@ -869,6 +1517,11 @@ def main() -> None:
     parser.add_argument("--program-config", default=_default_program_config_path())
     parser.add_argument("--markets-config", default=_default_markets_config_path())
     parser.add_argument("--state-db", default="")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit compact single-line JSON output (default: pretty JSON).",
+    )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -921,7 +1574,37 @@ def main() -> None:
     p_bootstrap.add_argument("--markets-template", default="config/markets.yaml")
     p_bootstrap.add_argument("--force", action="store_true")
 
+    p_coins_list = sub.add_parser("coins-list")
+    p_coins_list.add_argument("--asset", default="")
+    p_coins_list.add_argument("--vault-id", default="")
+
+    p_coin_split = sub.add_parser("coin-split")
+    split_market_group = p_coin_split.add_mutually_exclusive_group(required=True)
+    split_market_group.add_argument("--market-id", default="")
+    split_market_group.add_argument("--pair", default="")
+    p_coin_split.add_argument(
+        "--network", default="mainnet", choices=["mainnet", "testnet", "testnet11"]
+    )
+    p_coin_split.add_argument("--coin-id", action="append", default=[])
+    p_coin_split.add_argument("--amount-per-coin", required=True, type=int)
+    p_coin_split.add_argument("--number-of-coins", required=True, type=int)
+    p_coin_split.add_argument("--no-wait", action="store_true")
+
+    p_coin_combine = sub.add_parser("coin-combine")
+    combine_market_group = p_coin_combine.add_mutually_exclusive_group(required=True)
+    combine_market_group.add_argument("--market-id", default="")
+    combine_market_group.add_argument("--pair", default="")
+    p_coin_combine.add_argument(
+        "--network", default="mainnet", choices=["mainnet", "testnet", "testnet11"]
+    )
+    p_coin_combine.add_argument("--number-of-coins", required=True, type=int)
+    p_coin_combine.add_argument("--asset-id", default="")
+    p_coin_combine.add_argument("--coin-id", action="append", default=[])
+    p_coin_combine.add_argument("--no-wait", action="store_true")
+
     args = parser.parse_args()
+    global _JSON_OUTPUT_COMPACT
+    _JSON_OUTPUT_COMPACT = bool(args.json)
     if args.command == "config-validate":
         code = _validate(Path(args.program_config), Path(args.markets_config))
     elif args.command == "keys-onboard":
@@ -984,6 +1667,36 @@ def main() -> None:
             program_template=Path(args.program_template),
             markets_template=Path(args.markets_template),
             force=bool(args.force),
+        )
+    elif args.command == "coins-list":
+        code = _coins_list(
+            program_path=Path(args.program_config),
+            asset=args.asset or None,
+            vault_id=args.vault_id or None,
+        )
+    elif args.command == "coin-split":
+        code = _coin_split(
+            program_path=Path(args.program_config),
+            markets_path=Path(args.markets_config),
+            network=args.network,
+            market_id=args.market_id or None,
+            pair=args.pair or None,
+            coin_ids=[str(value) for value in args.coin_id],
+            amount_per_coin=int(args.amount_per_coin),
+            number_of_coins=int(args.number_of_coins),
+            no_wait=bool(args.no_wait),
+        )
+    elif args.command == "coin-combine":
+        code = _coin_combine(
+            program_path=Path(args.program_config),
+            markets_path=Path(args.markets_config),
+            network=args.network,
+            market_id=args.market_id or None,
+            pair=args.pair or None,
+            number_of_coins=int(args.number_of_coins),
+            asset_id=args.asset_id or None,
+            coin_ids=[str(value) for value in args.coin_id],
+            no_wait=bool(args.no_wait),
         )
     else:
         raise ValueError(f"unsupported command: {args.command}")

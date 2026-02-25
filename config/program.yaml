@@ -20,6 +20,21 @@ runtime:
   loop_interval_seconds: 30
   dry_run: false
 
+cloud_wallet:
+  # Cloud Wallet GraphQL API origin only (manager appends /graphql).
+  # Example: https://api.vault.chia.net
+  # Source: https://vault.chia.net/settings.json -> GRAPHQL_URI
+  base_url: ""
+  # Settings -> API Keys -> Key Id (route: /settings/api-keys)
+  user_key_id: ""
+  # Local path to downloaded API private key PEM.
+  # Keep full PEM text in file (BEGIN/END PRIVATE KEY), not base64-only text.
+  # Recommended path: ~/.greenfloor/keys/cloud-wallet-user-auth-key.pem
+  private_key_pem_path: ""
+  # Wallet GraphQL ID from target vault URL segment .../wallet/<ID>/...
+  # Must be Wallet_... (do not use vaultLauncherId)
+  vault_id: ""
+
 coin_ops:
   max_operations_per_run: 20
   max_daily_fee_budget_mojos: 0
