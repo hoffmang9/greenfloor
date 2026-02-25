@@ -34,8 +34,8 @@ These rules exist because earlier implementation rounds introduced unnecessary c
 ### Do not build features ahead of the critical path
 
 - The critical path is: configure market -> build real offer -> post to venue -> verify on-chain.
-- Do not add CLI commands, metrics, observability, or operational tooling until the critical path works end-to-end on testnet.
-- When in doubt, ask: "Does this help us post a real offer on testnet11?" If no, defer it.
+- Do not add CLI commands, metrics, observability, or operational tooling until there is a verified proof on the active live target (currently mainnet `CARBON22:xch`).
+- When in doubt, ask: "Does this help us post and manage a real offer on mainnet?" If no, defer it.
 
 ### Keep file count proportional to distinct responsibilities
 
@@ -52,7 +52,7 @@ These rules exist because earlier implementation rounds introduced unnecessary c
 ### Manager CLI surface discipline
 
 - The manager currently has 10 commands: `bootstrap-home`, `config-validate`, `doctor`, `keys-onboard`, `build-and-post-offer`, `offers-status`, `offers-reconcile`, `coins-list`, `coin-split`, `coin-combine`.
-- Do not add new commands without explicit user request or a documented need tied to G1-G3 testnet proof.
+- Do not add new commands without explicit user request or a documented need tied to mainnet proof.
 - Each new command must have a test that exercises it end-to-end with deterministic fixtures.
 
 ### No verbatim duplication within a file

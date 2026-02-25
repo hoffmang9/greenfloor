@@ -15,7 +15,7 @@
 
 ## Manager CLI Commands (V1 Core)
 
-Ten commands in scope. Do not add commands without explicit need tied to testnet proof.
+Ten commands in scope. Do not add commands without explicit need tied to mainnet proof.
 
 1. `bootstrap-home` — create `~/.greenfloor` runtime layout, seed config, initialize state DB.
 2. `config-validate` — validate program + markets config and key routing.
