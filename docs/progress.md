@@ -1,5 +1,11 @@
 # Progress Log
 
+## 2026-02-24 (live testing retarget to mainnet CARBON22)
+
+- Retargeted active live testing from `testnet11` proof pair context to mainnet `CARBON22:xch`.
+- Confirmed `CARBON22` CAT ID from repo config (`config/markets.yaml`): `4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7`.
+- Updated planning docs to reflect current live target while preserving prior `testnet11` proof artifacts as historical evidence.
+
 ## 2026-02-24 (cloud wallet vault-first step 2 completion)
 
 - Completed Step 2 alignment for Vault-first coin preparation in `greenfloor/cli/manager.py`:
