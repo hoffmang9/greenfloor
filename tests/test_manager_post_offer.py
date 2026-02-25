@@ -1656,3 +1656,167 @@ def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, c
     assert payload["stop_reason"] == "max_iterations_reached"
     assert payload["denomination_readiness"]["ready"] is False
     assert len(payload["operations"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# _is_spendable_coin unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_is_spendable_coin_allowlist_states_are_spendable() -> None:
+    from greenfloor.cli.manager import _is_spendable_coin
+
+    for state in ("CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE"):
+        assert _is_spendable_coin({"state": state}) is True, state
+
+
+def test_is_spendable_coin_known_non_spendable_states() -> None:
+    from greenfloor.cli.manager import _is_spendable_coin
+
+    for state in ("PENDING", "MEMPOOL", "SPENT", "SPENDING", "LOCKED", "RESERVED", "UNCONFIRMED"):
+        assert _is_spendable_coin({"state": state}) is False, state
+
+
+def test_is_spendable_coin_unknown_state_is_not_spendable() -> None:
+    from greenfloor.cli.manager import _is_spendable_coin
+
+    assert _is_spendable_coin({"state": "MYSTERY"}) is False
+    assert _is_spendable_coin({"state": "TRANSITIONING"}) is False
+
+
+def test_is_spendable_coin_missing_state_is_not_spendable() -> None:
+    from greenfloor.cli.manager import _is_spendable_coin
+
+    assert _is_spendable_coin({}) is False
+    assert _is_spendable_coin({"state": ""}) is False
+
+
+# ---------------------------------------------------------------------------
+# _resolve_coin_global_ids unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_coin_global_ids_maps_name_to_global_id() -> None:
+    from greenfloor.cli.manager import _resolve_coin_global_ids
+
+    wallet_coins = [{"id": "Coin_abc", "name": "hexname123"}]
+    resolved, unresolved = _resolve_coin_global_ids(wallet_coins, ["hexname123"])
+    assert resolved == ["Coin_abc"]
+    assert unresolved == []
+
+
+def test_resolve_coin_global_ids_passes_through_coin_prefix_ids() -> None:
+    from greenfloor.cli.manager import _resolve_coin_global_ids
+
+    resolved, unresolved = _resolve_coin_global_ids([], ["Coin_direct"])
+    assert resolved == ["Coin_direct"]
+    assert unresolved == []
+
+
+def test_resolve_coin_global_ids_reports_unresolved_names() -> None:
+    from greenfloor.cli.manager import _resolve_coin_global_ids
+
+    wallet_coins = [{"id": "Coin_known", "name": "known"}]
+    resolved, unresolved = _resolve_coin_global_ids(wallet_coins, ["known", "unknown"])
+    assert resolved == ["Coin_known"]
+    assert unresolved == ["unknown"]
+
+
+def test_resolve_coin_global_ids_empty_inputs() -> None:
+    from greenfloor.cli.manager import _resolve_coin_global_ids
+
+    resolved, unresolved = _resolve_coin_global_ids([], [])
+    assert resolved == []
+    assert unresolved == []
+
+
+# ---------------------------------------------------------------------------
+# _evaluate_denomination_readiness unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_evaluate_denomination_readiness_counts_only_spendable_matching_coins() -> None:
+    from greenfloor.cli.manager import _evaluate_denomination_readiness
+
+    class _FakeWallet:
+        @staticmethod
+        def list_coins(*, include_pending=True):
+            return [
+                # ✓ spendable, right asset, right amount
+                {"id": "c1", "state": "CONFIRMED", "amount": 10, "asset": {"id": "a1"}},
+                # ✗ not spendable
+                {"id": "c2", "state": "PENDING", "amount": 10, "asset": {"id": "a1"}},
+                # ✗ wrong asset
+                {"id": "c3", "state": "CONFIRMED", "amount": 10, "asset": {"id": "other"}},
+                # ✗ wrong amount
+                {"id": "c4", "state": "CONFIRMED", "amount": 20, "asset": {"id": "a1"}},
+                # ✓ string-form asset id
+                {"id": "c5", "state": "CONFIRMED", "amount": 10, "asset": "a1"},
+            ]
+
+    result = _evaluate_denomination_readiness(
+        wallet=_FakeWallet(),
+        asset_id="a1",
+        size_base_units=10,
+        required_min_count=2,
+    )
+    assert result["current_count"] == 2
+    assert result["ready"] is True
+
+
+def test_evaluate_denomination_readiness_returns_not_ready_below_min() -> None:
+    from greenfloor.cli.manager import _evaluate_denomination_readiness
+
+    class _FakeWallet:
+        @staticmethod
+        def list_coins(*, include_pending=True):
+            return [{"id": "c1", "state": "CONFIRMED", "amount": 10, "asset": {"id": "a1"}}]
+
+    result = _evaluate_denomination_readiness(
+        wallet=_FakeWallet(),
+        asset_id="a1",
+        size_base_units=10,
+        required_min_count=3,
+    )
+    assert result["current_count"] == 1
+    assert result["ready"] is False
+
+
+def test_evaluate_denomination_readiness_max_allowed_count() -> None:
+    from greenfloor.cli.manager import _evaluate_denomination_readiness
+
+    class _FakeWallet:
+        @staticmethod
+        def list_coins(*, include_pending=True):
+            return [
+                {"id": f"c{i}", "state": "CONFIRMED", "amount": 10, "asset": {"id": "a1"}}
+                for i in range(8)
+            ]
+
+    # 8 coins > max_allowed_count of 6 → not ready
+    result = _evaluate_denomination_readiness(
+        wallet=_FakeWallet(),
+        asset_id="a1",
+        size_base_units=10,
+        max_allowed_count=6,
+    )
+    assert result["current_count"] == 8
+    assert result["ready"] is False
+
+
+def test_evaluate_denomination_readiness_asset_id_match_is_case_insensitive() -> None:
+    from greenfloor.cli.manager import _evaluate_denomination_readiness
+
+    class _FakeWallet:
+        @staticmethod
+        def list_coins(*, include_pending=True):
+            return [{"id": "c1", "state": "CONFIRMED", "amount": 5, "asset": {"id": "A1"}}]
+
+    result = _evaluate_denomination_readiness(
+        wallet=_FakeWallet(),
+        asset_id="a1",
+        size_base_units=5,
+        required_min_count=1,
+    )
+    assert result["current_count"] == 1
+    assert result["ready"] is True
