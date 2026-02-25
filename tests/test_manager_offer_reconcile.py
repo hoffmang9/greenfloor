@@ -160,3 +160,131 @@ def test_offers_status_reports_compact_summary(tmp_path: Path, capsys) -> None:
     assert payload["by_state"]["open"] == 1
     assert payload["by_state"]["tx_block_confirmed"] == 1
     assert len(payload["recent_events"]) == 1
+
+
+def test_offers_reconcile_coinset_signal_matrix(monkeypatch, tmp_path: Path, capsys) -> None:
+    program = tmp_path / "program.yaml"
+    db_path = tmp_path / "state.sqlite"
+    _write_program(program)
+    tx_confirmed = "c" * 64
+    tx_mempool = "d" * 64
+    tx_no_signal = "e" * 64
+    store = SqliteStore(db_path)
+    try:
+        for offer_id in [
+            "offer-confirmed",
+            "offer-mempool",
+            "offer-no-signal",
+            "offer-missing-status",
+        ]:
+            store.upsert_offer_state(
+                offer_id=offer_id,
+                market_id="m1",
+                state="open",
+                last_seen_status=0,
+            )
+        assert store.observe_mempool_tx_ids([tx_confirmed, tx_mempool]) == 2
+        assert store.confirm_tx_ids([tx_confirmed]) == 1
+    finally:
+        store.close()
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+        def get_offer(self, offer_id: str) -> dict:
+            if offer_id == "offer-confirmed":
+                return {"id": offer_id, "status": 0, "tx_id": tx_confirmed}
+            if offer_id == "offer-mempool":
+                return {"id": offer_id, "status": 0, "tx_id": tx_mempool}
+            if offer_id == "offer-no-signal":
+                return {"id": offer_id, "status": 0, "tx_id": tx_no_signal}
+            if offer_id == "offer-missing-status":
+                return {"id": offer_id}
+            raise RuntimeError("unexpected_offer_id")
+
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    code = _offers_reconcile(
+        program_path=program,
+        state_db=str(db_path),
+        market_id=None,
+        limit=20,
+        venue="dexie",
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    by_offer = {row["offer_id"]: row for row in payload["items"]}
+
+    assert by_offer["offer-confirmed"]["new_state"] == "tx_block_confirmed"
+    assert by_offer["offer-confirmed"]["reason"] == "coinset_tx_block_webhook_confirmed"
+    assert by_offer["offer-confirmed"]["signal_source"] == "coinset_webhook"
+    assert by_offer["offer-confirmed"]["taker_signal"] == "coinset_tx_block_webhook"
+
+    assert by_offer["offer-mempool"]["new_state"] == "mempool_observed"
+    assert by_offer["offer-mempool"]["reason"] == "coinset_mempool_observed"
+    assert by_offer["offer-mempool"]["signal_source"] == "coinset_mempool"
+    assert by_offer["offer-mempool"]["taker_diagnostic"] == "coinset_mempool_observed"
+
+    assert by_offer["offer-no-signal"]["new_state"] == "mempool_observed"
+    assert by_offer["offer-no-signal"]["signal_source"] == "dexie_status_fallback"
+    assert by_offer["offer-no-signal"]["taker_diagnostic"] == "none"
+
+    assert by_offer["offer-missing-status"]["new_state"] == "unknown_orphaned"
+    assert by_offer["offer-missing-status"]["reason"] == "missing_status"
+    assert by_offer["offer-missing-status"]["signal_source"] == "none"
+
+
+def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    db_path = tmp_path / "state.sqlite"
+    _write_program(program)
+    store = SqliteStore(db_path)
+    try:
+        store.upsert_offer_state(
+            offer_id="offer-status-confirmed",
+            market_id="m1",
+            state="open",
+            last_seen_status=0,
+        )
+        store.upsert_offer_state(
+            offer_id="offer-status-cancelled",
+            market_id="m1",
+            state="open",
+            last_seen_status=0,
+        )
+    finally:
+        store.close()
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+        def get_offer(self, offer_id: str) -> dict:
+            if offer_id == "offer-status-confirmed":
+                return {"id": offer_id, "status": 4}
+            if offer_id == "offer-status-cancelled":
+                return {"id": offer_id, "status": 3}
+            raise RuntimeError("unexpected_offer_id")
+
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    code = _offers_reconcile(
+        program_path=program,
+        state_db=str(db_path),
+        market_id=None,
+        limit=20,
+        venue="dexie",
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    by_offer = {row["offer_id"]: row for row in payload["items"]}
+
+    assert by_offer["offer-status-confirmed"]["new_state"] == "tx_block_confirmed"
+    assert by_offer["offer-status-confirmed"]["signal_source"] == "dexie_status_fallback"
+    assert by_offer["offer-status-confirmed"]["taker_signal"] == "none"
+    assert by_offer["offer-status-confirmed"]["taker_diagnostic"] == "dexie_status_pattern_fallback"
+
+    assert by_offer["offer-status-cancelled"]["new_state"] == "cancelled"
+    assert by_offer["offer-status-cancelled"]["signal_source"] == "dexie_status_fallback"
+    assert by_offer["offer-status-cancelled"]["taker_signal"] == "none"

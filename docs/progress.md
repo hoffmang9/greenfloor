@@ -1,5 +1,27 @@
 # Progress Log
 
+## 2026-02-25 (testing hardening: reliability + adapter contracts)
+
+- Added broad deterministic testing hardening focused on runtime reliability boundaries and error-contract stability:
+  - Added `tests/test_cloud_wallet_adapter.py` with direct `CloudWalletAdapter` coverage for GraphQL pagination, response-shape validation, HTTP/network error classification, and signature-request fallback behavior.
+  - Expanded `tests/test_manager_offer_reconcile.py` with a Coinset-first reconciliation matrix covering confirmed vs mempool vs no-signal states, missing-status behavior, and Dexie-status fallback transitions.
+  - Expanded `tests/test_coinset_ws.py` for websocket robustness paths: parse errors, ignored non-dict payloads, recovery-poll success/error audit emissions, and stop-aware sleep behavior.
+  - Expanded venue adapter test contracts:
+    - `tests/test_dexie_adapter.py`: HTTP/network failures, invalid response formats, and input validation.
+    - `tests/test_splash_adapter.py`: invalid response formats and HTTP-error propagation contract.
+  - Expanded signing/store regression hardening:
+    - `tests/test_signing.py`: AGG_SIG domain/unsafe parsing and broadcast failure/success contracts.
+    - `tests/test_sqlite_store.py`: `get_tx_signal_state` dedupe/normalization behavior and audit-event filter/limit contracts.
+- Validation snapshots:
+  - `.venv/bin/python -m pytest tests/test_cloud_wallet_adapter.py tests/test_manager_offer_reconcile.py` -> `11 passed`
+  - `.venv/bin/python -m pytest tests/test_coinset_ws.py tests/test_dexie_adapter.py tests/test_splash_adapter.py` -> `17 passed`
+  - `.venv/bin/python -m pytest tests/test_signing.py tests/test_signing_cat_parse_regression.py` -> `31 passed`
+  - `.venv/bin/python -m pytest tests/test_sqlite_store.py tests/test_tx_signal_state.py` -> `9 passed`
+  - `PATH="/Users/hoffmang/src/greenfloor/.venv/bin:$PATH" .venv/bin/pre-commit run --all-files` -> all hooks passed (`ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`)
+- Branch/PR status:
+  - Branch `test/enhance-reliability-coverage` pushed to origin.
+  - Opened PR `#30` (`test/enhance-reliability-coverage` -> `feat/step4-monitoring-reliability`).
+
 ## 2026-02-25 (coinset websocket-only daemon signal ingestion)
 
 - Migrated daemon signal ingestion from webhook-startup + cycle polling to websocket-only runtime:
