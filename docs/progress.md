@@ -1,5 +1,46 @@
 # Progress Log
 
+## 2026-02-24 (step 3 fee-path simplification follow-up)
+
+- Simplified coin-operation fee policy to remove env/cache fallback complexity:
+  - `greenfloor/cli/manager.py` now takes fee advice only from Coinset conservative estimates, with bounded retries/backoff.
+  - If Coinset advice is unavailable, fallback is now only `coin_ops.minimum_fee_mojos` from program config (supports `0`).
+  - If Coinset returns a fee lower than configured minimum, manager applies the minimum floor.
+  - Removed legacy `GREENFLOOR_COINSET_ADVISED_FEE_MOJOS` and in-memory last-good cache fallback behavior from the active path.
+- Added config model/schema support:
+  - `greenfloor/config/models.py` now parses `coin_ops.minimum_fee_mojos` into `ProgramConfig.coin_ops_minimum_fee_mojos` with validation (`>= 0`).
+  - `config/program.yaml` now includes `coin_ops.minimum_fee_mojos: 0` in the default template.
+- Updated tests/docs to match the simplified contract:
+  - `tests/test_manager_post_offer.py` now covers coinset-success, minimum-floor, and config-minimum fallback cases.
+  - Error guidance for fee-resolution failures now references `coin_ops.minimum_fee_mojos` instead of env overrides.
+  - `tests/test_low_inventory_alerts.py` updated for the extended `ProgramConfig` shape.
+  - `README.md` operator override note updated to document config-based minimum fallback.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_manager_post_offer.py tests/test_low_inventory_alerts.py` -> `74 passed`
+  - `.venv/bin/python -m ruff check greenfloor/cli/manager.py greenfloor/config/models.py tests/test_manager_post_offer.py tests/test_low_inventory_alerts.py` -> pass
+  - `.venv/bin/python -m ruff format --check greenfloor/cli/manager.py greenfloor/config/models.py tests/test_manager_post_offer.py tests/test_low_inventory_alerts.py` -> pass
+
+## 2026-02-24 (cloud wallet vault-first step 3 implementation)
+
+- Note: fee fallback details in this entry were superseded by the follow-up entry `2026-02-24 (step 3 fee-path simplification follow-up)`.
+
+- Implemented Step 3 offer-post hardening in `greenfloor/cli/manager.py`:
+  - Added artifact polling loop (`_poll_offer_artifact_until_available`) with timeout and moderate exponential backoff so Cloud Wallet maker flow waits for a newly produced signed `offer1...` artifact instead of taking a single wallet snapshot.
+  - Artifact selection now excludes pre-existing offers by tracking pre-create offer markers (`offerId`/`bech32`) and selecting newly materialized artifacts only.
+  - Added shared fee resolver contract (`_resolve_operation_fee`) and role wrappers:
+    - maker create-offer path resolves to explicit zero fee (`maker_default_zero`),
+    - taker/coin operations keep Coinset conservative advice with retries and TTL-bounded last-good fallback.
+  - Tightened fee fallback semantics to match plan contract: retry Coinset advice first, then fallback only when cached advice is still within TTL; stale cache now fails with actionable operator guidance.
+  - Cloud-wallet build/post output now includes `offer_fee_source` alongside `offer_fee_mojos`.
+- Added deterministic test coverage in `tests/test_manager_post_offer.py`:
+  - new artifact polling success and timeout tests (mocked `time.sleep` + `time.monotonic`),
+  - fee resolver tests for retry-then-cache fallback and stale-cache rejection,
+  - cloud-wallet build/post tests updated to stub artifact polling helper and assert timeout error contract.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_manager_post_offer.py` -> `70 passed`
+  - `.venv/bin/python -m ruff check greenfloor/cli/manager.py tests/test_manager_post_offer.py` -> pass
+  - `.venv/bin/python -m ruff format --check greenfloor/cli/manager.py tests/test_manager_post_offer.py` -> pass
+
 ## 2026-02-25 (Step 2 simplification pass: PR #25)
 
 Reviewed commit `a7614875` (Step 2 closure) and identified six categories of issues;

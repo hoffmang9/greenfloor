@@ -117,7 +117,6 @@ def _default_markets_config_path() -> str:
     return "config/markets.yaml"
 
 
-_FEE_ADVICE_CACHE: dict[str, int | float] = {}
 _JSON_OUTPUT_COMPACT = False
 
 
@@ -149,35 +148,120 @@ def _new_cloud_wallet_adapter(program) -> CloudWalletAdapter:
     return CloudWalletAdapter(_require_cloud_wallet_config(program))
 
 
-def _resolve_taker_or_coin_operation_fee(*, network: str) -> tuple[int, str]:
-    if os.getenv("GREENFLOOR_COINSET_ADVISED_FEE_MOJOS", "").strip():
-        value = int(os.getenv("GREENFLOOR_COINSET_ADVISED_FEE_MOJOS", "0").strip())
-        return value, "env_override"
-    now = time.time()
-    ttl_seconds = int(os.getenv("GREENFLOOR_COINSET_FEE_CACHE_TTL_SECONDS", "600"))
-    cached_value = _FEE_ADVICE_CACHE.get("fee_mojos")
-    cached_at = _FEE_ADVICE_CACHE.get("cached_at_epoch")
-    if isinstance(cached_value, int) and isinstance(cached_at, float):
-        if now - cached_at <= max(1, ttl_seconds):
-            return cached_value, "cached_last_good"
+def _parse_iso8601(value: str) -> dt.datetime | None:
+    raw = value.strip()
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        parsed = dt.datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.UTC)
+    return parsed.astimezone(dt.UTC)
 
+
+def _offer_markers(offers: list[dict]) -> set[str]:
+    markers: set[str] = set()
+    for offer in offers:
+        offer_id = str(offer.get("offerId", "")).strip()
+        if offer_id:
+            markers.add(f"id:{offer_id}")
+        bech32 = str(offer.get("bech32", "")).strip()
+        if bech32:
+            markers.add(f"bech32:{bech32}")
+    return markers
+
+
+def _pick_new_offer_artifact(*, offers: list[dict], known_markers: set[str]) -> str:
+    candidates: list[tuple[dt.datetime, str]] = []
+    for offer in offers:
+        bech32 = str(offer.get("bech32", "")).strip()
+        if not bech32.startswith("offer1"):
+            continue
+        offer_id = str(offer.get("offerId", "")).strip()
+        markers = {f"bech32:{bech32}"}
+        if offer_id:
+            markers.add(f"id:{offer_id}")
+        if markers.issubset(known_markers):
+            continue
+        expires_at = _parse_iso8601(str(offer.get("expiresAt", "")).strip())
+        candidates.append((expires_at or dt.datetime.min.replace(tzinfo=dt.UTC), bech32))
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda row: row[0], reverse=True)
+    return candidates[0][1]
+
+
+def _poll_offer_artifact_until_available(
+    *,
+    wallet: CloudWalletAdapter,
+    known_markers: set[str],
+    timeout_seconds: int,
+) -> str:
+    start = time.monotonic()
+    sleep_seconds = 2.0
+    while True:
+        wallet_payload = wallet.get_wallet()
+        offers = wallet_payload.get("offers", [])
+        if isinstance(offers, list):
+            offer_text = _pick_new_offer_artifact(offers=offers, known_markers=known_markers)
+            if offer_text:
+                return offer_text
+        elapsed = int(time.monotonic() - start)
+        if elapsed >= timeout_seconds:
+            raise RuntimeError("cloud_wallet_offer_artifact_timeout")
+        time.sleep(sleep_seconds)
+        sleep_seconds = min(20.0, sleep_seconds * 1.5)
+
+
+def _resolve_operation_fee(
+    *,
+    role: str,
+    network: str,
+    minimum_fee_mojos: int = 0,
+) -> tuple[int, str]:
+    if role == "maker_create_offer":
+        return 0, "maker_default_zero"
+    if role != "taker_or_coin_operation":
+        raise ValueError(f"unsupported fee role: {role}")
+    if int(minimum_fee_mojos) < 0:
+        raise ValueError("minimum_fee_mojos must be >= 0")
+
+    minimum_fee = int(minimum_fee_mojos)
     max_attempts = int(os.getenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "4"))
     coinset = CoinsetAdapter(None, network=network)
     for attempt in range(max_attempts):
-        advised = coinset.get_conservative_fee_estimate()
+        advised = None
+        try:
+            advised = coinset.get_conservative_fee_estimate()
+        except Exception:
+            advised = None
         if advised is not None:
-            _FEE_ADVICE_CACHE["fee_mojos"] = advised
-            _FEE_ADVICE_CACHE["cached_at_epoch"] = now
-            return advised, "coinset_conservative"
+            advised_fee = int(advised)
+            if advised_fee < minimum_fee:
+                return minimum_fee, "coinset_conservative_minimum_floor"
+            return advised_fee, "coinset_conservative"
         if attempt < max_attempts - 1:
             sleep_seconds = min(8.0, 0.5 * (2**attempt))
             time.sleep(sleep_seconds)
 
-    if isinstance(cached_value, int):
-        return cached_value, "cached_last_good_stale"
-    raise RuntimeError(
-        "fee_advice_unavailable:coinset unavailable; retry later or set GREENFLOOR_COINSET_ADVISED_FEE_MOJOS"
+    return minimum_fee, "config_minimum_fee_fallback"
+
+
+def _resolve_taker_or_coin_operation_fee(
+    *, network: str, minimum_fee_mojos: int = 0
+) -> tuple[int, str]:
+    return _resolve_operation_fee(
+        role="taker_or_coin_operation",
+        network=network,
+        minimum_fee_mojos=minimum_fee_mojos,
     )
+
+
+def _resolve_maker_offer_fee(*, network: str) -> tuple[int, str]:
+    return _resolve_operation_fee(role="maker_create_offer", network=network)
 
 
 def _poll_signature_request_until_not_unsigned(
@@ -630,10 +714,14 @@ def _build_and_post_offer_cloud_wallet(
     wallet = _new_cloud_wallet_adapter(program)
     post_results: list[dict] = []
     publish_failures = 0
+    offer_fee_mojos, offer_fee_source = _resolve_maker_offer_fee(network=program.app_network)
     dexie = DexieAdapter(dexie_base_url) if publish_venue == "dexie" else None
     splash = SplashAdapter(splash_base_url) if publish_venue == "splash" else None
 
     for _ in range(repeat):
+        prior_wallet_payload = wallet.get_wallet()
+        prior_offers = prior_wallet_payload.get("offers", [])
+        known_offer_markers = _offer_markers(prior_offers if isinstance(prior_offers, list) else [])
         offer_amount = int(
             size_base_units * int((market.pricing or {}).get("base_unit_mojo_multiplier", 1000))
         )
@@ -653,7 +741,7 @@ def _build_and_post_offer_cloud_wallet(
         create_result = wallet.create_offer(
             offered=offered,
             requested=requested,
-            fee=0,
+            fee=offer_fee_mojos,
             expires_at_iso=expires_at,
         )
         signature_request_id = str(create_result.get("signature_request_id", "")).strip()
@@ -668,14 +756,28 @@ def _build_and_post_offer_cloud_wallet(
             )
             wait_events.extend(signature_wait_events)
 
-        wallet_payload = wallet.get_wallet()
-        offers = wallet_payload.get("offers", [])
         offer_text = ""
-        for offer in offers:
-            bech32 = str(offer.get("bech32", "")).strip()
-            if bech32.startswith("offer1"):
-                offer_text = bech32
-                break
+        try:
+            offer_text = _poll_offer_artifact_until_available(
+                wallet=wallet,
+                known_markers=known_offer_markers,
+                timeout_seconds=15 * 60,
+            )
+        except RuntimeError as exc:
+            post_results.append(
+                {
+                    "venue": publish_venue,
+                    "result": {
+                        "success": False,
+                        "error": str(exc),
+                        "signature_request_id": signature_request_id,
+                        "signature_state": signature_state,
+                        "wait_events": wait_events,
+                    },
+                }
+            )
+            publish_failures += 1
+            continue
         if not offer_text:
             publish_failures += 1
             post_results.append(
@@ -745,7 +847,8 @@ def _build_and_post_offer_cloud_wallet(
                 "publish_failures": publish_failures,
                 "built_offers_preview": [],
                 "results": post_results,
-                "offer_fee_mojos": 0,
+                "offer_fee_mojos": offer_fee_mojos,
+                "offer_fee_source": offer_fee_source,
             }
         )
     )
@@ -1094,7 +1197,10 @@ def _coin_split(
         raise ValueError("max_iterations must be positive")
     wallet = _new_cloud_wallet_adapter(program)
     try:
-        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
+        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(
+            network=network,
+            minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
+        )
     except Exception as exc:
         print(
             _format_json_output(
@@ -1107,7 +1213,7 @@ def _coin_split(
                     "success": False,
                     "error": f"fee_resolution_failed:{exc}",
                     "operator_guidance": (
-                        "set GREENFLOOR_COINSET_ADVISED_FEE_MOJOS to an explicit integer fee "
+                        "set coin_ops.minimum_fee_mojos in program config (can be 0) "
                         "or fix GREENFLOOR_COINSET_BASE_URL to a valid Coinset API endpoint"
                     ),
                 }
@@ -1297,7 +1403,10 @@ def _coin_combine(
         raise ValueError("max_iterations must be positive")
     wallet = _new_cloud_wallet_adapter(program)
     try:
-        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
+        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(
+            network=network,
+            minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
+        )
     except Exception as exc:
         print(
             _format_json_output(
@@ -1310,7 +1419,7 @@ def _coin_combine(
                     "success": False,
                     "error": f"fee_resolution_failed:{exc}",
                     "operator_guidance": (
-                        "set GREENFLOOR_COINSET_ADVISED_FEE_MOJOS to an explicit integer fee "
+                        "set coin_ops.minimum_fee_mojos in program config (can be 0) "
                         "or fix GREENFLOOR_COINSET_BASE_URL to a valid Coinset API endpoint"
                     ),
                 }
