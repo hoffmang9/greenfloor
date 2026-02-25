@@ -43,6 +43,17 @@ addressed all of them in branch `simplify/step2-coin-prep-cleanup` (PR #25).
 
 Validation snapshot: `196 passed, 5 skipped`; pre-commit all hooks pass.
 
+**Simulator harness removed (`tests/test_chia_wallet_sdk_simulator_harness.py`, `ci.yml`):**
+
+- Deleted `tests/test_chia_wallet_sdk_simulator_harness.py` (122 lines): all six tests ran
+  `cargo test` on `chia-sdk-driver` Rust internals (CAT issuance, CAT send, CAT catalog,
+  managed reward distributor, spend_simulator example) and tested no GreenFloor code. The SDK
+  has its own CI.
+- Removed the corresponding Ubuntu-only CI step from `.github/workflows/ci.yml`.
+- Retained `test_greenfloor_native_integration.py` (validates `validate_offer` +
+  `from_input_spend_bundle_xch` round-trip via `greenfloor-native`), which is the correct
+  boundary test for SDK surface GreenFloor actually uses.
+
 ## 2026-02-24 (mainnet Step 2 operator proof: CARBON22:xch)
 
 - Executed end-to-end Step 2 coin-prep proof on mainnet pair `CARBON22:xch` using Cloud Wallet vault `Wallet_le99o1k4jfsof9mp817gxpi3`.

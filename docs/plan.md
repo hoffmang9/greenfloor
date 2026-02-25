@@ -117,6 +117,13 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
   - Ensure failure output clearly distinguishes endpoint routing/configuration issues from temporary fee-advice unavailability.
   - Document operator debug steps for fee lookups (endpoint verification, override behavior, expected JSON failure contracts).
 
+## CI Notes
+
+- `tests/test_chia_wallet_sdk_simulator_harness.py` was deleted (2026-02-25): all six tests
+  ran `cargo test` on `chia-sdk-driver` Rust internals (CAT issuance, catalog, reward distributor)
+  and tested no GreenFloor code. SDK has its own CI. `test_greenfloor_native_integration.py`
+  covers the SDK surface GreenFloor actually uses.
+
 ## Deferred Backlog (Post-Testnet Proof)
 
 These items were implemented previously but removed during simplification. Re-add only after G1-G3 are proven.
