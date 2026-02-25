@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import cast
 
 import greenfloor.cli.manager as manager_mod
+from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
 from greenfloor.cli.manager import (
     _build_and_post_offer,
     _coin_combine,
@@ -978,6 +980,71 @@ def test_coins_list_returns_minimal_fields(monkeypatch, tmp_path: Path, capsys) 
     assert payload["items"][0]["spendable"] is False
 
 
+def test_resolve_taker_or_coin_operation_fee_uses_coinset_value(monkeypatch) -> None:
+    class _FakeCoinset:
+        def __init__(self, _arg, *, network: str):
+            self._network = network
+
+        @staticmethod
+        def get_conservative_fee_estimate():
+            return 15
+
+    monkeypatch.setattr("greenfloor.cli.manager.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "1")
+    fee, source = manager_mod._resolve_taker_or_coin_operation_fee(
+        network="mainnet",
+        minimum_fee_mojos=0,
+    )
+    assert fee == 15
+    assert source == "coinset_conservative"
+
+
+def test_resolve_taker_or_coin_operation_fee_applies_minimum_floor(monkeypatch) -> None:
+    class _FakeCoinset:
+        def __init__(self, _arg, *, network: str):
+            self._network = network
+
+        @staticmethod
+        def get_conservative_fee_estimate():
+            return 2
+
+    monkeypatch.setattr("greenfloor.cli.manager.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "1")
+    fee, source = manager_mod._resolve_taker_or_coin_operation_fee(
+        network="mainnet",
+        minimum_fee_mojos=5,
+    )
+    assert fee == 5
+    assert source == "coinset_conservative_minimum_floor"
+
+
+def test_resolve_taker_or_coin_operation_fee_falls_back_to_config_minimum(monkeypatch) -> None:
+    class _FakeCoinset:
+        def __init__(self, _arg, *, network: str):
+            self._network = network
+
+        @staticmethod
+        def get_conservative_fee_estimate():
+            return None
+
+    monkeypatch.setattr("greenfloor.cli.manager.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "1")
+    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
+
+    fee, source = manager_mod._resolve_taker_or_coin_operation_fee(
+        network="mainnet",
+        minimum_fee_mojos=0,
+    )
+    assert fee == 0
+    assert source == "config_minimum_fee_fallback"
+
+
+def test_resolve_maker_offer_fee_is_zero() -> None:
+    fee, source = manager_mod._resolve_maker_offer_fee(network="mainnet")
+    assert fee == 0
+    assert source == "maker_default_zero"
+
+
 def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
@@ -1005,7 +1072,7 @@ def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (42, "coinset_conservative"),
+        lambda *, network, minimum_fee_mojos=0: (42, "coinset_conservative"),
     )
     code = _coin_split(
         program_path=program,
@@ -1054,7 +1121,7 @@ def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, caps
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (77, "coinset_conservative"),
+        lambda *, network, minimum_fee_mojos=0: (77, "coinset_conservative"),
     )
     code = _coin_combine(
         program_path=program,
@@ -1098,7 +1165,9 @@ def test_coin_split_returns_structured_error_when_fee_resolution_fails(
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (_ for _ in ()).throw(RuntimeError("coinset_unavailable")),
+        lambda *, network, minimum_fee_mojos=0: (_ for _ in ()).throw(
+            RuntimeError("coinset_unavailable")
+        ),
     )
     code = _coin_split(
         program_path=program,
@@ -1115,7 +1184,7 @@ def test_coin_split_returns_structured_error_when_fee_resolution_fails(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["success"] is False
     assert payload["error"].startswith("fee_resolution_failed:")
-    assert "GREENFLOOR_COINSET_ADVISED_FEE_MOJOS" in payload["operator_guidance"]
+    assert "coin_ops.minimum_fee_mojos" in payload["operator_guidance"]
 
 
 def test_coin_combine_returns_structured_error_when_fee_resolution_fails(
@@ -1140,7 +1209,9 @@ def test_coin_combine_returns_structured_error_when_fee_resolution_fails(
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (_ for _ in ()).throw(RuntimeError("coinset_unavailable")),
+        lambda *, network, minimum_fee_mojos=0: (_ for _ in ()).throw(
+            RuntimeError("coinset_unavailable")
+        ),
     )
     code = _coin_combine(
         program_path=program,
@@ -1157,7 +1228,7 @@ def test_coin_combine_returns_structured_error_when_fee_resolution_fails(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["success"] is False
     assert payload["error"].startswith("fee_resolution_failed:")
-    assert "GREENFLOOR_COINSET_ADVISED_FEE_MOJOS" in payload["operator_guidance"]
+    assert "coin_ops.minimum_fee_mojos" in payload["operator_guidance"]
 
 
 def test_coin_split_returns_structured_error_when_coin_id_not_found(
@@ -1182,7 +1253,7 @@ def test_coin_split_returns_structured_error_when_coin_id_not_found(
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (0, "env_override"),
+        lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
     )
     code = _coin_split(
         program_path=program,
@@ -1234,7 +1305,7 @@ def test_coin_combine_with_coin_ids_resolves_to_global_ids(
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (7, "coinset_conservative"),
+        lambda *, network, minimum_fee_mojos=0: (7, "coinset_conservative"),
     )
     code = _coin_combine(
         program_path=program,
@@ -1275,7 +1346,7 @@ def test_coin_combine_returns_structured_error_when_coin_id_not_found(
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (0, "env_override"),
+        lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
     )
     code = _coin_combine(
         program_path=program,
@@ -1323,7 +1394,7 @@ def test_coin_split_uses_market_ladder_target_when_size_is_provided(
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (42, "coinset_conservative"),
+        lambda *, network, minimum_fee_mojos=0: (42, "coinset_conservative"),
     )
     code = _coin_split(
         program_path=program,
@@ -1373,7 +1444,7 @@ def test_coin_combine_uses_market_ladder_threshold_when_size_is_provided(
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (77, "coinset_conservative"),
+        lambda *, network, minimum_fee_mojos=0: (77, "coinset_conservative"),
     )
     code = _coin_combine(
         program_path=program,
@@ -1448,7 +1519,7 @@ def test_coin_combine_ladder_threshold_uses_ceil(monkeypatch, tmp_path: Path, ca
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (77, "coinset_conservative"),
+        lambda *, network, minimum_fee_mojos=0: (77, "coinset_conservative"),
     )
     code = _coin_combine(
         program_path=program,
@@ -1509,7 +1580,7 @@ def test_coin_split_until_ready_ignores_unknown_states_and_string_asset(
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (42, "coinset_conservative"),
+        lambda *, network, minimum_fee_mojos=0: (42, "coinset_conservative"),
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
@@ -1628,7 +1699,7 @@ def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, c
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (42, "coinset_conservative"),
+        lambda *, network, minimum_fee_mojos=0: (42, "coinset_conservative"),
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
@@ -2169,6 +2240,10 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
         lambda **kwargs: ("SUBMITTED", []),
     )
     monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        lambda **kwargs: "offer1testartifact",
+    )
+    monkeypatch.setattr(
         "greenfloor.cli.manager._verify_offer_text_for_dexie",
         lambda _offer: None,
     )
@@ -2225,6 +2300,10 @@ def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
         "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SUBMITTED", []),
     )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("cloud_wallet_offer_artifact_timeout")),
+    )
 
     code = _build_and_post_offer_cloud_wallet(
         program=prog,
@@ -2241,7 +2320,7 @@ def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
     assert code == 2
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["publish_failures"] == 1
-    assert payload["results"][0]["result"]["error"] == "cloud_wallet_offer_artifact_unavailable"
+    assert payload["results"][0]["result"]["error"] == "cloud_wallet_offer_artifact_timeout"
 
 
 def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
@@ -2286,6 +2365,10 @@ def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
         lambda **kwargs: ("SUBMITTED", []),
     )
     monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        lambda **kwargs: "offer1badoffer",
+    )
+    monkeypatch.setattr(
         "greenfloor.cli.manager._verify_offer_text_for_dexie",
         lambda _offer: "wallet_sdk_offer_missing_expiration",
     )
@@ -2307,6 +2390,62 @@ def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
     assert post_called[0] is False
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["results"][0]["result"]["error"] == "wallet_sdk_offer_missing_expiration"
+
+
+def test_poll_offer_artifact_until_available_returns_new_offer(monkeypatch) -> None:
+    wallets = [
+        {
+            "offers": [
+                {"offerId": "old-1", "bech32": "offer1old", "expiresAt": "2026-01-01T00:00:00Z"}
+            ]
+        },
+        {
+            "offers": [
+                {"offerId": "new-1", "bech32": "offer1new", "expiresAt": "2026-01-02T00:00:00Z"}
+            ]
+        },
+    ]
+    monotonic_values = iter([0.0, 1.0])
+
+    class _FakeWallet:
+        @staticmethod
+        def get_wallet():
+            if wallets:
+                return wallets.pop(0)
+            return {"offers": []}
+
+    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("greenfloor.cli.manager.time.monotonic", lambda: next(monotonic_values))
+
+    offer = manager_mod._poll_offer_artifact_until_available(
+        wallet=cast(CloudWalletAdapter, _FakeWallet()),
+        known_markers={"id:old-1", "bech32:offer1old"},
+        timeout_seconds=10,
+    )
+    assert offer == "offer1new"
+
+
+def test_poll_offer_artifact_until_available_times_out(monkeypatch) -> None:
+    monotonic_values = iter([0.0, 5.0, 11.0])
+
+    class _FakeWallet:
+        @staticmethod
+        def get_wallet():
+            return {"offers": []}
+
+    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("greenfloor.cli.manager.time.monotonic", lambda: next(monotonic_values))
+
+    try:
+        manager_mod._poll_offer_artifact_until_available(
+            wallet=cast(CloudWalletAdapter, _FakeWallet()),
+            known_markers=set(),
+            timeout_seconds=10,
+        )
+    except RuntimeError as exc:
+        assert str(exc) == "cloud_wallet_offer_artifact_timeout"
+    else:
+        raise AssertionError("expected cloud_wallet_offer_artifact_timeout")
 
 
 # ---------------------------------------------------------------------------
@@ -2349,7 +2488,7 @@ def test_coin_split_until_ready_succeeds_when_denominations_met(
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (0, "env_override"),
+        lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
@@ -2420,7 +2559,7 @@ def test_coin_combine_until_ready_with_coin_ids_stops_with_requires_new_coin_sel
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
-        lambda *, network: (0, "env_override"),
+        lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",

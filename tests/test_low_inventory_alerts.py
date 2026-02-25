@@ -17,6 +17,7 @@ def _program() -> ProgramConfig:
         offer_publish_venue="dexie",
         coin_ops_max_operations_per_run=20,
         coin_ops_max_daily_fee_budget_mojos=0,
+        coin_ops_minimum_fee_mojos=0,
         coin_ops_split_fee_mojos=0,
         coin_ops_combine_fee_mojos=0,
         python_min_version="3.11",

@@ -25,6 +25,7 @@ class ProgramConfig:
     offer_publish_venue: str
     coin_ops_max_operations_per_run: int
     coin_ops_max_daily_fee_budget_mojos: int
+    coin_ops_minimum_fee_mojos: int
     coin_ops_split_fee_mojos: int
     coin_ops_combine_fee_mojos: int
     python_min_version: str
@@ -184,6 +185,10 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
     if not isinstance(cloud_wallet, dict):
         raise ValueError("cloud_wallet must be a mapping")
 
+    coin_ops_minimum_fee_mojos = int(coin_ops.get("minimum_fee_mojos", 0))
+    if coin_ops_minimum_fee_mojos < 0:
+        raise ValueError("coin_ops.minimum_fee_mojos must be >= 0")
+
     return ProgramConfig(
         app_network=str(_req(app, "network")),
         home_dir=str(_req(app, "home_dir")),
@@ -196,6 +201,7 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         offer_publish_venue=offer_publish_venue,
         coin_ops_max_operations_per_run=int(coin_ops.get("max_operations_per_run", 20)),
         coin_ops_max_daily_fee_budget_mojos=int(coin_ops.get("max_daily_fee_budget_mojos", 0)),
+        coin_ops_minimum_fee_mojos=coin_ops_minimum_fee_mojos,
         coin_ops_split_fee_mojos=int(coin_ops.get("split_fee_mojos", 0)),
         coin_ops_combine_fee_mojos=int(coin_ops.get("combine_fee_mojos", 0)),
         python_min_version=str(_req(dev["python"], "min_version")),

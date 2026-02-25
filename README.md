@@ -111,7 +111,7 @@ Operator overrides (all optional):
 - `GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON` — JSON map for key ID -> fingerprint; normally injected from `program.yaml` signer key registry by daemon path.
 - `GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT` — integer derivation depth scan limit for matching selected coin puzzle hashes (default `200`).
 - `GREENFLOOR_COINSET_BASE_URL` — custom Coinset API base URL for coin queries and `push_tx`; when unset, `CoinsetAdapter` defaults to mainnet and can be forced to testnet11 by network selection.
-- `GREENFLOOR_COINSET_ADVISED_FEE_MOJOS` — explicit fee override for coin operations when Coinset advice is unavailable.
+- `coin_ops.minimum_fee_mojos` (in program config) — fallback minimum fee for coin operations when Coinset advice is unavailable (can be `0`).
 
 Cloud Wallet program config contract (`program.yaml`):
 

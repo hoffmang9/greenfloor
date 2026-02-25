@@ -38,6 +38,7 @@ cloud_wallet:
 coin_ops:
   max_operations_per_run: 20
   max_daily_fee_budget_mojos: 0
+  minimum_fee_mojos: 0
   split_fee_mojos: 0
   combine_fee_mojos: 0
 
