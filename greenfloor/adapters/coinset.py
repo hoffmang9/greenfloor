@@ -6,6 +6,48 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+_COINSET_TX_ID_KEYS = (
+    "tx_id",
+    "txId",
+    "take_tx_id",
+    "takeTxId",
+    "settlement_tx_id",
+    "settlementTxId",
+    "coinset_tx_id",
+    "coinsetTxId",
+    "block_tx_id",
+    "blockTxId",
+    "mempool_tx_ids",
+    "mempoolTxIds",
+    "confirmed_tx_ids",
+    "confirmedTxIds",
+)
+
+
+def _looks_like_tx_id(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    normalized = value.strip().lower()
+    return len(normalized) == 64 and all(ch in "0123456789abcdef" for ch in normalized)
+
+
+def extract_coinset_tx_ids_from_offer_payload(payload: dict[str, Any]) -> list[str]:
+    tx_ids: list[str] = []
+
+    def _add_candidate(candidate: object) -> None:
+        if isinstance(candidate, str):
+            normalized = candidate.strip().lower()
+            if _looks_like_tx_id(normalized) and normalized not in tx_ids:
+                tx_ids.append(normalized)
+        elif isinstance(candidate, list):
+            for item in candidate:
+                _add_candidate(item)
+
+    for key in _COINSET_TX_ID_KEYS:
+        if key in payload:
+            _add_candidate(payload.get(key))
+    return tx_ids
+
 
 class CoinsetAdapter:
     MAINNET_BASE_URL = "https://coinset.org"

@@ -18,6 +18,10 @@ class ProgramConfig:
     home_dir: str
     runtime_loop_interval_seconds: int
     runtime_dry_run: bool
+    tx_block_trigger_mode: str
+    tx_block_websocket_url: str
+    tx_block_websocket_reconnect_interval_seconds: int
+    tx_block_fallback_poll_interval_seconds: int
     tx_block_webhook_enabled: bool
     tx_block_webhook_listen_addr: str
     dexie_api_base: str
@@ -188,14 +192,42 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
     coin_ops_minimum_fee_mojos = int(coin_ops.get("minimum_fee_mojos", 10_000_000))
     if coin_ops_minimum_fee_mojos < 0:
         raise ValueError("coin_ops.minimum_fee_mojos must be >= 0")
+    tx_block_trigger_mode = str(tx_trigger.get("mode", "websocket")).strip().lower()
+    if tx_block_trigger_mode != "websocket":
+        raise ValueError("chain_signals.tx_block_trigger.mode must be websocket")
+    tx_block_websocket_url = str(tx_trigger.get("websocket_url", "")).strip()
+    if not tx_block_websocket_url:
+        app_network = str(_req(app, "network")).strip().lower()
+        if app_network in {"testnet", "testnet11"}:
+            tx_block_websocket_url = "wss://testnet11.api.coinset.org/ws"
+        else:
+            tx_block_websocket_url = "wss://coinset.org/ws"
+    tx_block_websocket_reconnect_interval_seconds = int(
+        tx_trigger.get("websocket_reconnect_interval_seconds", 30)
+    )
+    if tx_block_websocket_reconnect_interval_seconds < 1:
+        raise ValueError(
+            "chain_signals.tx_block_trigger.websocket_reconnect_interval_seconds must be >= 1"
+        )
+    tx_block_fallback_poll_interval_seconds = int(
+        tx_trigger.get("fallback_poll_interval_seconds", 60)
+    )
+    if tx_block_fallback_poll_interval_seconds < 0:
+        raise ValueError(
+            "chain_signals.tx_block_trigger.fallback_poll_interval_seconds must be >= 0"
+        )
 
     return ProgramConfig(
         app_network=str(_req(app, "network")),
         home_dir=str(_req(app, "home_dir")),
         runtime_loop_interval_seconds=int(_req(runtime, "loop_interval_seconds")),
         runtime_dry_run=bool(runtime.get("dry_run", False)),
-        tx_block_webhook_enabled=bool(_req(tx_trigger, "webhook_enabled")),
-        tx_block_webhook_listen_addr=str(_req(tx_trigger, "webhook_listen_addr")),
+        tx_block_trigger_mode=tx_block_trigger_mode,
+        tx_block_websocket_url=tx_block_websocket_url,
+        tx_block_websocket_reconnect_interval_seconds=tx_block_websocket_reconnect_interval_seconds,
+        tx_block_fallback_poll_interval_seconds=tx_block_fallback_poll_interval_seconds,
+        tx_block_webhook_enabled=bool(tx_trigger.get("webhook_enabled", False)),
+        tx_block_webhook_listen_addr=str(tx_trigger.get("webhook_listen_addr", "127.0.0.1:8787")),
         dexie_api_base=str(dexie.get("api_base", "https://api.dexie.space")),
         splash_api_base=str(splash.get("api_base", "http://john-deere.hoffmang.com:4000")),
         offer_publish_venue=offer_publish_venue,

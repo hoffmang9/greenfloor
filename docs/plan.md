@@ -23,7 +23,7 @@ Ten commands in scope. Do not add commands without explicit need tied to mainnet
 4. `keys-onboard` — interactive key selection and onboarding persistence.
 5. `build-and-post-offer` — build offer via Cloud Wallet or local `chia-wallet-sdk` and post to venue (Dexie or Splash).
 6. `offers-status` — compact view of current offer states and recent events.
-7. `offers-reconcile` — refresh offer states from venue API and flag orphaned/unknown.
+7. `offers-reconcile` — refresh offer states using venue payloads plus Coinset tx-signal state (websocket/mempool) and flag orphaned/unknown.
 8. `coins-list` — list Vault coin inventory with spendability/lock state (Cloud Wallet).
 9. `coin-split` — split a Vault coin into target denominations; default waits through signature + mempool + 1-block confirmation.
 10. `coin-combine` — combine Vault coins into fewer coins; default waits through signature + mempool + 1-block confirmation.
@@ -60,6 +60,13 @@ Operator output/coin-op behavior notes:
 - Offer cancellation is intentionally rare and should not be a routine refresh mechanism.
 - Cancellation applies only to stable-vs-unstable pairs, and only when there is strong price movement on the unstable side.
 - In normal conditions, expiry-based replacement is preferred over explicit cancellation.
+
+## Offer Reconciliation Signal Policy
+
+- Offer-taken and lifecycle reconciliation should prefer Coinset tx-signal evidence (`tx_signal_state`) over venue-status heuristics whenever tx ids are available.
+- `offers-reconcile` derives taker confirmation from Coinset websocket/mempool tx-signal state first, and uses venue status as fallback context when Coinset evidence is unavailable.
+- Daemon `offer_lifecycle_transition` follows the same Coinset-first policy for consistency between continuous operation and manager reconciliation.
+- Reconciliation payloads should continue to expose `signal_source` and Coinset evidence fields (`coinset_tx_ids`, `coinset_confirmed_tx_ids`, `coinset_mempool_tx_ids`) for operator/debug traceability.
 
 ## Delivery Constraints
 
@@ -116,6 +123,10 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
   - Added deterministic preflight validation against the configured/default Coinset endpoint before coin-op submission.
   - Failure contracts now distinguish endpoint routing/configuration failures from temporary fee-advice unavailability.
   - Operator debug steps and JSON failure contracts documented in `docs/runbook.md`.
+- [x] H2: Move offer lifecycle/taker reconciliation to Coinset websocket-first signal routing.
+  - Daemon now runs a long-lived Coinset websocket client with reconnect/recovery and writes tx signals into `tx_signal_state`.
+  - `offers-reconcile` and daemon lifecycle transitions consume `tx_signal_state` first and treat venue status as fallback diagnostics.
+  - Taker detection continues to emit `coinset_tx_block_webhook` on Coinset-confirmed transitions and includes `signal_source` + Coinset tx-id evidence in reconciliation/audit payloads.
 
 ## CI Notes
 

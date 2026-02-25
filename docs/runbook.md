@@ -59,8 +59,8 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
   - `greenfloor-manager offers-reconcile --limit 200`
   - Optional scope: `--market-id <id>`
   - Reconcile output includes:
-    - `taker_signal`: canonical offer-state transition signal (`none` or `canonical_offer_state_transition`).
-    - `taker_diagnostic`: advisory status-pattern diagnostics from venue status snapshots.
+    - `taker_signal`: Coinset-confirmed taker signal (`none` or `coinset_tx_block_webhook`).
+    - `taker_diagnostic`: advisory diagnostics (`coinset_tx_block_confirmed`, `coinset_mempool_observed`, or Dexie fallback patterns).
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
 - Note: manager CLI v1 surface is intentionally limited to seven commands. Tuning/history/metrics helpers are deferred until after G1-G3 testnet proof.
@@ -98,6 +98,7 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - `error: "coinset_fee_preflight_failed:endpoint_validation_failed"` means endpoint routing/configuration failure (invalid/misrouted `GREENFLOOR_COINSET_BASE_URL`, wrong-network endpoint, DNS/TLS/connectivity issues).
   - `error: "coinset_fee_preflight_failed:temporary_fee_advice_unavailable"` means Coinset endpoint is reachable but currently not returning usable fee advice.
   - `coinset_fee_lookup.coinset_base_url` + `coinset_fee_lookup.coinset_network` report exactly which endpoint/network pair was validated.
+- **Websocket signal ingestion issues:** inspect daemon audit events `coinset_ws_*` (`coinset_ws_connecting`, `coinset_ws_connected`, `coinset_ws_disconnected`, `coinset_ws_recovery_poll*`) and validate `chain_signals.tx_block_trigger.websocket_url` + network endpoint routing.
 - **Cancel policy not triggering:** verify market `quote_asset_type` is `unstable`, `pricing.cancel_policy_stable_vs_unstable: true`, and compare `move_bps` vs `threshold_bps` in `offer_cancel_policy`.
 
 ## 6) Runtime Controls
@@ -118,6 +119,11 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - `GREENFLOOR_COINSET_BASE_URL`
   - Default behavior: mainnet endpoint when unset; testnet11 endpoint when market/network is `testnet11`.
   - For `testnet11`, do not route to mainnet Coinset endpoint unless you explicitly set `GREENFLOOR_ALLOW_MAINNET_COINSET_FOR_TESTNET11=1` for temporary debugging.
+- Daemon tx-signal ingestion controls (`~/.greenfloor/config/program.yaml` -> `chain_signals.tx_block_trigger`):
+  - `mode`: must be `websocket`
+  - `websocket_url`: Coinset websocket endpoint (defaults by network when blank)
+  - `websocket_reconnect_interval_seconds`: reconnect cadence after disconnect/error (must be `>= 1`)
+  - `fallback_poll_interval_seconds`: recovery snapshot window used by websocket reconnect and `greenfloord --once` bounded capture
 - Strategy execution dry-run:
   - set `runtime.dry_run` in `~/.greenfloor/config/program.yaml`
 - Validate config + override sanity before deploy:

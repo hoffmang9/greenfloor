@@ -5,10 +5,11 @@ import asyncio
 import json
 import os
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
-from greenfloor.adapters.coinset import CoinsetAdapter
+from greenfloor.adapters.coinset import CoinsetAdapter, extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.price import PriceAdapter
 from greenfloor.adapters.splash import SplashAdapter
@@ -20,8 +21,8 @@ from greenfloor.core.inventory import compute_bucket_counts_from_coins
 from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert, utcnow
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
 from greenfloor.core.strategy import MarketState, StrategyConfig, evaluate_market
+from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient, capture_coinset_websocket_once
 from greenfloor.daemon.reload import consume_reload_marker
-from greenfloor.daemon.webhook import start_coinset_webhook_server
 from greenfloor.keys.router import resolve_market_key
 from greenfloor.notify.pushover import send_pushover_alert
 from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
@@ -228,6 +229,79 @@ def _build_offer_for_action(
     except Exception as exc:
         return {"status": "skipped", "reason": f"offer_builder_failed:{exc}", "offer": None}
     return {"status": "executed", "reason": "offer_builder_success", "offer": offer}
+
+
+def _resolve_coinset_ws_url(*, program, coinset_base_url: str) -> str:
+    configured = str(getattr(program, "tx_block_websocket_url", "")).strip()
+    if configured:
+        return configured
+    base_url = coinset_base_url.strip()
+    if not base_url:
+        if program.app_network.strip().lower() in {"testnet", "testnet11"}:
+            return "wss://testnet11.api.coinset.org/ws"
+        return "wss://coinset.org/ws"
+    parsed = urllib.parse.urlparse(base_url)
+    scheme = "wss" if parsed.scheme == "https" else "ws"
+    host = parsed.netloc or parsed.path
+    if not host:
+        return "wss://coinset.org/ws"
+    return f"{scheme}://{host}/ws"
+
+
+def _build_coinset_adapter(*, program, coinset_base_url: str) -> CoinsetAdapter:
+    base_url = coinset_base_url.strip() or None
+    try:
+        return CoinsetAdapter(base_url, network=program.app_network)
+    except TypeError as exc:
+        if "network" not in str(exc):
+            raise
+        return CoinsetAdapter(base_url)
+
+
+def _run_coinset_signal_capture_once(
+    *,
+    program,
+    coinset_base_url: str,
+    store: SqliteStore,
+) -> None:
+    coinset = _build_coinset_adapter(program=program, coinset_base_url=coinset_base_url)
+    ws_url = _resolve_coinset_ws_url(program=program, coinset_base_url=coinset_base_url)
+
+    def _on_mempool_tx_ids(tx_ids: list[str]) -> None:
+        if not tx_ids:
+            return
+        new_count = store.observe_mempool_tx_ids(tx_ids)
+        if new_count:
+            store.add_audit_event(
+                "mempool_observed",
+                {"new_tx_ids": new_count, "source": "coinset_websocket"},
+            )
+
+    def _on_confirmed_tx_ids(tx_ids: list[str]) -> None:
+        if not tx_ids:
+            return
+        confirmed = store.confirm_tx_ids(tx_ids)
+        store.add_audit_event(
+            "tx_block_confirmed",
+            {
+                "tx_ids": tx_ids,
+                "confirmed_count": confirmed,
+                "source": "coinset_websocket",
+            },
+        )
+
+    def _on_audit_event(event_type: str, payload: dict[str, Any]) -> None:
+        store.add_audit_event(event_type, payload)
+
+    capture_coinset_websocket_once(
+        ws_url=ws_url,
+        reconnect_interval_seconds=program.tx_block_websocket_reconnect_interval_seconds,
+        capture_window_seconds=max(1, program.tx_block_fallback_poll_interval_seconds),
+        on_mempool_tx_ids=_on_mempool_tx_ids,
+        on_confirmed_tx_ids=_on_confirmed_tx_ids,
+        on_audit_event=_on_audit_event,
+        recovery_poll=coinset.get_all_mempool_tx_ids,
+    )
 
 
 def _execute_strategy_actions(
@@ -470,6 +544,8 @@ def run_once(
     db_path_override: str | None,
     coinset_base_url: str,
     state_dir: Path,
+    poll_coinset_mempool: bool = True,
+    use_websocket_capture: bool = False,
 ) -> int:
     program = load_program_config(program_path)
     markets = load_markets_config(markets_path)
@@ -497,16 +573,27 @@ def run_once(
         except Exception as exc:  # pragma: no cover - network dependent
             cycle_error_count += 1
             store.add_audit_event("xch_price_error", {"error": str(exc)})
-        try:
-            coinset = CoinsetAdapter(coinset_base_url)
-            tx_ids = coinset.get_all_mempool_tx_ids()
-            new_count = store.observe_mempool_tx_ids(tx_ids)
-            store.add_audit_event("coinset_mempool_snapshot", {"count": len(tx_ids)})
-            if new_count:
-                store.add_audit_event("mempool_observed", {"new_tx_ids": new_count})
-        except Exception as exc:  # pragma: no cover - network dependent
-            cycle_error_count += 1
-            store.add_audit_event("coinset_mempool_error", {"error": str(exc)})
+        if use_websocket_capture:
+            try:
+                _run_coinset_signal_capture_once(
+                    program=program,
+                    coinset_base_url=coinset_base_url,
+                    store=store,
+                )
+            except Exception as exc:  # pragma: no cover - network dependent
+                cycle_error_count += 1
+                store.add_audit_event("coinset_ws_once_error", {"error": str(exc)})
+        elif poll_coinset_mempool:
+            try:
+                coinset = _build_coinset_adapter(program=program, coinset_base_url=coinset_base_url)
+                tx_ids = coinset.get_all_mempool_tx_ids()
+                new_count = store.observe_mempool_tx_ids(tx_ids)
+                store.add_audit_event("coinset_mempool_snapshot", {"count": len(tx_ids)})
+                if new_count:
+                    store.add_audit_event("mempool_observed", {"new_tx_ids": new_count})
+            except Exception as exc:  # pragma: no cover - network dependent
+                cycle_error_count += 1
+                store.add_audit_event("coinset_mempool_error", {"error": str(exc)})
 
         now = utcnow()
         for market in markets.markets:
@@ -575,7 +662,30 @@ def run_once(
                 if not offer_id:
                     continue
                 status = int(offer.get("status", -1))
-                if status == 4:
+                coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer)
+                signal_source = "dexie_status_fallback"
+                coinset_confirmed_tx_ids: list[str] = []
+                coinset_mempool_tx_ids: list[str] = []
+                if coinset_tx_ids:
+                    tx_signal_state = store.get_tx_signal_state(coinset_tx_ids)
+                    for tx_id in coinset_tx_ids:
+                        signal = tx_signal_state.get(tx_id, {})
+                        if signal.get("tx_block_confirmed_at"):
+                            coinset_confirmed_tx_ids.append(tx_id)
+                            continue
+                        if signal.get("mempool_observed_at"):
+                            coinset_mempool_tx_ids.append(tx_id)
+                if coinset_confirmed_tx_ids and status != 3:
+                    transition = apply_offer_signal(
+                        OfferLifecycleState.OPEN, OfferSignal.TX_CONFIRMED
+                    )
+                    signal_source = "coinset_webhook"
+                elif coinset_mempool_tx_ids:
+                    transition = apply_offer_signal(
+                        OfferLifecycleState.OPEN, OfferSignal.MEMPOOL_SEEN
+                    )
+                    signal_source = "coinset_mempool"
+                elif status == 4:
                     transition = apply_offer_signal(
                         OfferLifecycleState.OPEN, OfferSignal.TX_CONFIRMED
                     )
@@ -602,6 +712,10 @@ def run_once(
                         "action": transition.action,
                         "reason": transition.reason,
                         "dexie_status": status,
+                        "signal_source": signal_source,
+                        "coinset_tx_ids": coinset_tx_ids,
+                        "coinset_confirmed_tx_ids": coinset_confirmed_tx_ids,
+                        "coinset_mempool_tx_ids": coinset_mempool_tx_ids,
                     },
                     market_id=market.market_id,
                 )
@@ -892,33 +1006,46 @@ def _run_loop(
     state_dir: Path,
 ) -> int:
     program = load_program_config(program_path)
-    webhook_server = None
-    store_for_hook: SqliteStore | None = None
-    if program.tx_block_webhook_enabled:
-        db_path = _resolve_db_path(program.home_dir, db_path_override)
-        store_for_hook = SqliteStore(db_path)
+    db_path = _resolve_db_path(program.home_dir, db_path_override)
+    store_for_ws = SqliteStore(db_path)
+    coinset = _build_coinset_adapter(program=program, coinset_base_url=coinset_base_url)
+    ws_url = _resolve_coinset_ws_url(program=program, coinset_base_url=coinset_base_url)
 
-        def _extract_tx_ids(payload: dict) -> list[str]:
-            if "tx_ids" in payload and isinstance(payload["tx_ids"], list):
-                return [str(x) for x in payload["tx_ids"]]
-            if "tx_id" in payload:
-                return [str(payload["tx_id"])]
-            return []
+    def _on_mempool_tx_ids(tx_ids: list[str]) -> None:
+        if not tx_ids:
+            return
+        new_count = store_for_ws.observe_mempool_tx_ids(tx_ids)
+        if new_count:
+            store_for_ws.add_audit_event(
+                "mempool_observed",
+                {"new_tx_ids": new_count, "source": "coinset_websocket"},
+            )
 
-        def _on_webhook_event(payload: dict) -> None:
-            store_for_hook.add_audit_event("coinset_tx_block_webhook", payload)
-            tx_ids = _extract_tx_ids(payload)
-            if tx_ids:
-                confirmed = store_for_hook.confirm_tx_ids(tx_ids)
-                store_for_hook.add_audit_event(
-                    "tx_block_confirmed",
-                    {"tx_ids": tx_ids, "confirmed_count": confirmed},
-                )
-
-        webhook_server, _thread = start_coinset_webhook_server(
-            program.tx_block_webhook_listen_addr,
-            _on_webhook_event,
+    def _on_confirmed_tx_ids(tx_ids: list[str]) -> None:
+        if not tx_ids:
+            return
+        confirmed = store_for_ws.confirm_tx_ids(tx_ids)
+        store_for_ws.add_audit_event(
+            "tx_block_confirmed",
+            {
+                "tx_ids": tx_ids,
+                "confirmed_count": confirmed,
+                "source": "coinset_websocket",
+            },
         )
+
+    def _on_audit_event(event_type: str, payload: dict[str, Any]) -> None:
+        store_for_ws.add_audit_event(event_type, payload)
+
+    ws_client = CoinsetWebsocketClient(
+        ws_url=ws_url,
+        reconnect_interval_seconds=program.tx_block_websocket_reconnect_interval_seconds,
+        on_mempool_tx_ids=_on_mempool_tx_ids,
+        on_confirmed_tx_ids=_on_confirmed_tx_ids,
+        on_audit_event=_on_audit_event,
+        recovery_poll=coinset.get_all_mempool_tx_ids,
+    )
+    ws_client.start()
 
     try:
         while True:
@@ -929,6 +1056,7 @@ def _run_loop(
                 db_path_override=db_path_override,
                 coinset_base_url=coinset_base_url,
                 state_dir=state_dir,
+                poll_coinset_mempool=False,
             )
             if consume_reload_marker(state_dir):
                 print(json.dumps({"event": "config_reloaded"}))
@@ -936,11 +1064,8 @@ def _run_loop(
     except KeyboardInterrupt:
         return 0
     finally:
-        if webhook_server is not None:
-            webhook_server.shutdown()
-            webhook_server.server_close()
-        if store_for_hook is not None:
-            store_for_hook.close()
+        ws_client.stop()
+        store_for_ws.close()
 
 
 def main() -> None:
@@ -980,6 +1105,7 @@ def main() -> None:
 
     allowed_keys = {k.strip() for k in args.key_ids.split(",") if k.strip()} or None
     if args.once:
+        program = load_program_config(Path(args.program_config))
         exit_code = run_once(
             Path(args.program_config),
             Path(args.markets_config),
@@ -987,6 +1113,8 @@ def main() -> None:
             args.state_db or None,
             args.coinset_base_url,
             Path(args.state_dir),
+            poll_coinset_mempool=False,
+            use_websocket_capture=program.tx_block_trigger_mode == "websocket",
         )
     else:
         exit_code = _run_loop(

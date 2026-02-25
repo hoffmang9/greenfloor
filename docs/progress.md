@@ -1,5 +1,42 @@
 # Progress Log
 
+## 2026-02-25 (coinset websocket-only daemon signal ingestion)
+
+- Migrated daemon signal ingestion from webhook-startup + cycle polling to websocket-only runtime:
+  - Added `greenfloor/daemon/coinset_ws.py` with long-lived Coinset websocket client behavior (reconnect loop, payload normalization, tx-id routing, and recovery-poll hooks).
+  - `greenfloor/daemon/main.py` now starts/stops the websocket client in `_run_loop` and writes tx signals to `tx_signal_state` through the same SQLite persistence paths used by reconciliation.
+  - Removed daemon webhook server startup from active runtime path; websocket is the primary tx signal source.
+- Added bounded websocket capture for `greenfloord --once`:
+  - `run_once` now supports websocket capture mode with recovery snapshot before continuing through normal cycle execution.
+- Extended config model/defaults for websocket controls:
+  - `chain_signals.tx_block_trigger.mode` now enforces `websocket` in parser,
+  - added `websocket_url`, `websocket_reconnect_interval_seconds`, and `fallback_poll_interval_seconds` handling.
+- Added deterministic tests:
+  - `tests/test_coinset_ws.py` for payload classification/callback routing.
+  - `tests/test_daemon_websocket_runtime.py` for websocket client startup/shutdown wiring and `run_once` websocket capture path.
+  - Updated `tests/test_config_load.py` and `tests/test_low_inventory_alerts.py` for new `ProgramConfig` fields.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_config_load.py tests/test_coinset_ws.py tests/test_daemon_websocket_runtime.py tests/test_manager_offer_reconcile.py tests/test_daemon_multi_cycle_integration.py tests/test_low_inventory_alerts.py` -> `13 passed`
+
+## 2026-02-25 (coinset webhook-first offer-taken reconciliation)
+
+- Refactored offer lifecycle/taker detection to prefer Coinset tx signals (webhook + mempool state) over Dexie status heuristics:
+  - `greenfloor/cli/manager.py` `offers-reconcile` now extracts tx ids from venue payloads and checks `tx_signal_state` first.
+  - Canonical taker signal now emits from Coinset confirmation evidence (`taker_signal: "coinset_tx_block_webhook"`), with Dexie status retained as fallback diagnostics only.
+  - Reconcile/audit payloads now include signal-source metadata and Coinset tx-id evidence (`signal_source`, `coinset_*_tx_ids`).
+- Extended daemon lifecycle reconciliation to apply the same Coinset-first transition policy:
+  - `greenfloor/daemon/main.py` now derives `offer_lifecycle_transition` primarily from Coinset tx signal state when tx ids are available, then falls back to Dexie status mapping.
+- Added storage support for tx-signal lookups by tx id:
+  - `greenfloor/storage/sqlite.py` now exposes `get_tx_signal_state(tx_ids)` for deterministic Coinset-backed offer-state transitions.
+- Simplification follow-up:
+  - Centralized tx-id extraction helpers into `greenfloor/adapters/coinset.py` (`extract_coinset_tx_ids_from_offer_payload`) so manager and daemon use one shared implementation.
+- Added/updated deterministic tests:
+  - `tests/test_manager_offer_reconcile.py` now asserts Coinset webhook-based taker signal emission.
+  - `tests/test_daemon_multi_cycle_integration.py` now seeds tx-signal confirmation and asserts daemon lifecycle events mark `signal_source: "coinset_webhook"`.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_manager_offer_reconcile.py tests/test_daemon_multi_cycle_integration.py` -> `3 passed`
+  - `PATH="/Users/hoffmang/src/greenfloor/.venv/bin:$PATH" .venv/bin/pre-commit run --all-files` -> all hooks passed (`ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`)
+
 ## 2026-02-25 (H1 coinset fee preflight diagnostics closure)
 
 - Closed plan item H1 in `greenfloor/cli/manager.py` for coin-op fee lookup hardening:
@@ -30,7 +67,7 @@
 - Added Coinset adapter support for reorg watch peak-height reads:
   - `greenfloor/adapters/coinset.py` now exposes `get_blockchain_state()` for read-only chain-height reconciliation.
 - Added canonical taker detection instrumentation during offer reconciliation:
-  - `offers-reconcile` now emits `taker_signal` based on canonical offer-state transitions and `taker_diagnostic` based on advisory status patterns.
+  - `offers-reconcile` now emits `taker_signal` and `taker_diagnostic` fields; this initial Dexie-pattern implementation was later superseded by the `2026-02-25 (coinset webhook-first offer-taken reconciliation)` update at the top of this log.
   - Added `taker_detection` audit events and included them in `offers-status` recent event output.
 - Added deterministic tests:
   - `tests/test_manager_post_offer.py` now covers signature escalation/retry behavior, mempool wait diagnostics with reorg-watch stubs, and reorg-watch depth waiting logic.

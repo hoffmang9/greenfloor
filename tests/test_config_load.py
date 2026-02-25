@@ -7,6 +7,8 @@ def test_load_program_config() -> None:
     cfg = load_program_config(Path("config/program.yaml"))
     assert cfg.python_min_version == "3.11"
     assert cfg.low_inventory_enabled is True
+    assert cfg.tx_block_trigger_mode == "websocket"
+    assert cfg.tx_block_websocket_url.startswith("wss://")
     assert "key-main-1" in cfg.signer_key_registry
     assert cfg.signer_key_registry["key-main-1"].fingerprint == 123456789
 
