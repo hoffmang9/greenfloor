@@ -111,11 +111,11 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
 
 ## Operational Hardening Follow-up
 
-- [ ] H1: Add explicit Coinset fee-lookup diagnostics and endpoint validation for coin operations.
-  - Scope: `coin-split` / `coin-combine` fee lookups (including conservative fee-advice path), not only generic Coinset connectivity.
-  - Add a deterministic preflight check that validates fee lookup behavior against the configured/default Coinset endpoint before live coin-op submission.
-  - Ensure failure output clearly distinguishes endpoint routing/configuration issues from temporary fee-advice unavailability.
-  - Document operator debug steps for fee lookups (endpoint verification, override behavior, expected JSON failure contracts).
+- [x] H1: Add explicit Coinset fee-lookup diagnostics and endpoint validation for coin operations.
+  - Scope covered: `coin-split` / `coin-combine` fee lookups (including conservative fee-advice path), not only generic Coinset connectivity.
+  - Added deterministic preflight validation against the configured/default Coinset endpoint before coin-op submission.
+  - Failure contracts now distinguish endpoint routing/configuration failures from temporary fee-advice unavailability.
+  - Operator debug steps and JSON failure contracts documented in `docs/runbook.md`.
 
 ## CI Notes
 

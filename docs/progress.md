@@ -1,5 +1,45 @@
 # Progress Log
 
+## 2026-02-25 (H1 coinset fee preflight diagnostics closure)
+
+- Closed plan item H1 in `greenfloor/cli/manager.py` for coin-op fee lookup hardening:
+  - Added deterministic Coinset fee preflight (`_coinset_fee_lookup_preflight`) before taker/coin-op fee resolution.
+  - Preflight validates endpoint/network routing and usable fee-advice response before `coin-split` / `coin-combine` submission.
+  - Added explicit failure classification via structured error contracts:
+    - `coinset_fee_preflight_failed:endpoint_validation_failed`
+    - `coinset_fee_preflight_failed:temporary_fee_advice_unavailable`
+  - Failure payloads now include `coinset_fee_lookup` diagnostics (`coinset_base_url`, `coinset_network`, failure detail).
+- Added deterministic tests in `tests/test_manager_post_offer.py`:
+  - resolver preflight failure classification tests,
+  - coin-op JSON failure contract tests for both endpoint-validation and temporary-advice-unavailable paths.
+- Updated operator docs:
+  - `docs/runbook.md` now documents fee-preflight behavior, endpoint override/debug steps, and expected JSON failure contracts.
+  - `docs/plan.md` marks H1 complete.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_manager_post_offer.py` -> `79 passed`
+  - `PATH="/Users/hoffmang/src/greenfloor/.venv/bin:$PATH" .venv/bin/pre-commit run --all-files` -> all hooks passed (`ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`)
+
+## 2026-02-25 (step 4 monitoring, reliability, tests, runbooks)
+
+- Implemented Step 4 monitoring/reliability hardening in `greenfloor/cli/manager.py`:
+  - Added moderate retry/backoff handling for transient poll failures in signature status checks, wallet-offer artifact polling, and coin-list polling loops.
+  - Extended signature wait diagnostics with additive soft-timeout escalation events (`signature_wait_warning`, `signature_wait_escalation`) while continuing to wait on user signing.
+  - Extended mempool/confirmation diagnostics to emit richer wait metadata (`wait_reason`, coin ids/names) and include Coinset links on `in_mempool` user events.
+  - Added read-only Coinset reconciliation metadata on mempool/confirmation events (`confirmed_block_index`, `spent_block_index` when available).
+  - Added post-confirmation reorg-risk monitoring (`reorg_watch_*`) that watches six additional blocks before declaring coin-op wait completion.
+- Added Coinset adapter support for reorg watch peak-height reads:
+  - `greenfloor/adapters/coinset.py` now exposes `get_blockchain_state()` for read-only chain-height reconciliation.
+- Added canonical taker detection instrumentation during offer reconciliation:
+  - `offers-reconcile` now emits `taker_signal` based on canonical offer-state transitions and `taker_diagnostic` based on advisory status patterns.
+  - Added `taker_detection` audit events and included them in `offers-status` recent event output.
+- Added deterministic tests:
+  - `tests/test_manager_post_offer.py` now covers signature escalation/retry behavior, mempool wait diagnostics with reorg-watch stubs, and reorg-watch depth waiting logic.
+  - `tests/test_manager_offer_reconcile.py` now validates taker-signal fields and `taker_detection` audit event emission.
+- Updated operator docs:
+  - `README.md` and `docs/runbook.md` now document new wait/retry/reorg/taker diagnostics and expected event contracts.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_manager_post_offer.py tests/test_manager_offer_reconcile.py` -> `76 passed`
+
 ## 2026-02-25 (step 3 strict-close canonical pair proof)
 
 - Closed the canonical pair mapping gap for manager Cloud Wallet posting in `greenfloor/cli/manager.py`:

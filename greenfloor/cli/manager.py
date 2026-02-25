@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import collections.abc
 import datetime as dt
 import importlib
 import json
@@ -11,6 +12,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -124,6 +126,20 @@ def _format_json_output(payload: object) -> str:
     if _JSON_OUTPUT_COMPACT:
         return json.dumps(payload, separators=(",", ":"))
     return json.dumps(payload, indent=2)
+
+
+class _CoinsetFeeLookupPreflightError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        failure_kind: str,
+        detail: str,
+        diagnostics: dict[str, str],
+    ) -> None:
+        self.failure_kind = failure_kind
+        self.detail = detail
+        self.diagnostics = diagnostics
+        super().__init__(f"{failure_kind}:{detail}")
 
 
 def _require_cloud_wallet_config(program) -> CloudWalletConfig:
@@ -348,6 +364,166 @@ def _pick_new_offer_artifact(*, offers: list[dict], known_markers: set[str]) -> 
     return candidates[0][1]
 
 
+def _safe_int(value: object) -> int | None:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _call_with_moderate_retry(
+    *,
+    action: str,
+    call: collections.abc.Callable[[], Any],
+    elapsed_seconds: int = 0,
+    events: list[dict[str, str]] | None = None,
+    max_attempts: int = 4,
+):
+    attempt = 0
+    sleep_seconds = 0.5
+    while True:
+        try:
+            return call()
+        except Exception as exc:
+            attempt += 1
+            if attempt >= max_attempts:
+                raise RuntimeError(f"{action}_retry_exhausted:{exc}") from exc
+            if events is not None:
+                events.append(
+                    {
+                        "event": "poll_retry",
+                        "action": action,
+                        "attempt": str(attempt),
+                        "elapsed_seconds": str(elapsed_seconds),
+                        "wait_reason": "transient_poll_failure",
+                        "error": str(exc),
+                    }
+                )
+            time.sleep(sleep_seconds)
+            sleep_seconds = min(8.0, sleep_seconds * 2.0)
+
+
+def _coinset_coin_url(*, coin_name: str, network: str = "mainnet") -> str:
+    base = (
+        "https://testnet11.coinset.org"
+        if network.strip().lower() in {"testnet", "testnet11"}
+        else "https://coinset.org"
+    )
+    return f"{base}/coin/{coin_name.strip()}"
+
+
+def _coinset_reconcile_coin_state(*, network: str, coin_name: str) -> dict[str, str]:
+    adapter = CoinsetAdapter(None, network=network)
+    try:
+        record = _call_with_moderate_retry(
+            action="coinset_get_coin_record_by_name",
+            call=lambda: adapter.get_coin_record_by_name(coin_name_hex=coin_name),
+        )
+    except Exception as exc:
+        return {"reconcile": "error", "error": str(exc)}
+    if not isinstance(record, dict):
+        return {"reconcile": "not_found"}
+    confirmed_height = _safe_int(record.get("confirmed_block_index"))
+    spent_height = _safe_int(record.get("spent_block_index"))
+    return {
+        "reconcile": "ok",
+        "confirmed_block_index": str(confirmed_height if confirmed_height is not None else -1),
+        "spent_block_index": str(spent_height if spent_height is not None else -1),
+        "coinbase": str(bool(record.get("coinbase", False))).lower(),
+    }
+
+
+def _coinset_peak_height(*, network: str) -> int | None:
+    adapter = CoinsetAdapter(None, network=network)
+    state = _call_with_moderate_retry(
+        action="coinset_get_blockchain_state",
+        call=adapter.get_blockchain_state,
+    )
+    if not isinstance(state, dict):
+        return None
+    candidates = [
+        state.get("peak_height"),
+        state.get("peakHeight"),
+    ]
+    peak = state.get("peak")
+    if isinstance(peak, dict):
+        candidates.extend([peak.get("height"), peak.get("peak_height")])
+    for candidate in candidates:
+        parsed = _safe_int(candidate)
+        if parsed is not None and parsed >= 0:
+            return parsed
+    return None
+
+
+def _watch_reorg_risk_with_coinset(
+    *,
+    network: str,
+    confirmed_block_index: int,
+    additional_blocks: int,
+    warning_interval_seconds: int,
+    timeout_seconds: int = 60 * 60,
+) -> list[dict[str, str]]:
+    events: list[dict[str, str]] = []
+    target_height = int(confirmed_block_index) + int(additional_blocks)
+    events.append(
+        {
+            "event": "reorg_watch_started",
+            "confirmed_block_index": str(confirmed_block_index),
+            "target_height": str(target_height),
+        }
+    )
+    start = time.monotonic()
+    next_warning = warning_interval_seconds
+    sleep_seconds = 8.0
+    while True:
+        elapsed = int(time.monotonic() - start)
+        peak_height = _coinset_peak_height(network=network)
+        if peak_height is None:
+            events.append(
+                {
+                    "event": "reorg_watch_skipped",
+                    "reason": "coinset_peak_height_unavailable",
+                    "elapsed_seconds": str(elapsed),
+                }
+            )
+            return events
+        remaining = target_height - peak_height
+        if remaining <= 0:
+            events.append(
+                {
+                    "event": "reorg_watch_complete",
+                    "peak_height": str(peak_height),
+                    "target_height": str(target_height),
+                    "elapsed_seconds": str(elapsed),
+                }
+            )
+            return events
+        if elapsed >= timeout_seconds:
+            events.append(
+                {
+                    "event": "reorg_watch_timeout",
+                    "peak_height": str(peak_height),
+                    "target_height": str(target_height),
+                    "remaining_blocks": str(remaining),
+                    "elapsed_seconds": str(elapsed),
+                }
+            )
+            return events
+        if elapsed >= next_warning:
+            events.append(
+                {
+                    "event": "reorg_watch_warning",
+                    "peak_height": str(peak_height),
+                    "target_height": str(target_height),
+                    "remaining_blocks": str(remaining),
+                    "elapsed_seconds": str(elapsed),
+                }
+            )
+            next_warning += warning_interval_seconds
+        time.sleep(sleep_seconds)
+        sleep_seconds = min(20.0, sleep_seconds * 1.5)
+
+
 def _poll_offer_artifact_until_available(
     *,
     wallet: CloudWalletAdapter,
@@ -357,17 +533,102 @@ def _poll_offer_artifact_until_available(
     start = time.monotonic()
     sleep_seconds = 2.0
     while True:
-        wallet_payload = wallet.get_wallet()
+        elapsed = int(time.monotonic() - start)
+        wallet_payload = _call_with_moderate_retry(
+            action="wallet_get_wallet",
+            call=wallet.get_wallet,
+            elapsed_seconds=elapsed,
+        )
         offers = wallet_payload.get("offers", [])
         if isinstance(offers, list):
             offer_text = _pick_new_offer_artifact(offers=offers, known_markers=known_markers)
             if offer_text:
                 return offer_text
-        elapsed = int(time.monotonic() - start)
         if elapsed >= timeout_seconds:
             raise RuntimeError("cloud_wallet_offer_artifact_timeout")
         time.sleep(sleep_seconds)
         sleep_seconds = min(20.0, sleep_seconds * 1.5)
+
+
+def _coinset_base_url(*, network: str) -> str:
+    base = os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip()
+    if not base:
+        return ""
+    network_l = network.strip().lower()
+    if network_l in {"testnet", "testnet11"}:
+        allow_mainnet = os.getenv("GREENFLOOR_ALLOW_MAINNET_COINSET_FOR_TESTNET11", "").strip()
+        if (
+            "coinset.org" in base
+            and "testnet11.api.coinset.org" not in base
+            and allow_mainnet != "1"
+        ):
+            raise RuntimeError("coinset_base_url_mainnet_not_allowed_for_testnet11")
+    return base
+
+
+def _coinset_adapter(*, network: str) -> CoinsetAdapter:
+    base_url = _coinset_base_url(network=network)
+    require_testnet11 = network.strip().lower() in {"testnet", "testnet11"}
+    try:
+        return CoinsetAdapter(
+            base_url or None, network=network, require_testnet11=require_testnet11
+        )
+    except TypeError as exc:
+        # Test doubles in deterministic unit tests may not accept the newer kwarg.
+        if "require_testnet11" not in str(exc):
+            raise
+        return CoinsetAdapter(base_url or None, network=network)
+
+
+def _coinset_fee_lookup_preflight(*, network: str) -> dict[str, str]:
+    try:
+        coinset = _coinset_adapter(network=network)
+    except Exception as exc:
+        raise _CoinsetFeeLookupPreflightError(
+            failure_kind="endpoint_validation_failed",
+            detail=str(exc),
+            diagnostics={
+                "coinset_network": network.strip().lower(),
+                "coinset_base_url": os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip(),
+            },
+        ) from exc
+    diagnostics = {
+        "coinset_network": str(getattr(coinset, "network", network.strip().lower())),
+        "coinset_base_url": str(
+            getattr(coinset, "base_url", os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip())
+        ),
+    }
+    try:
+        payload = coinset.get_fee_estimate(target_times=[300, 600, 1200])
+    except Exception as exc:
+        raise _CoinsetFeeLookupPreflightError(
+            failure_kind="endpoint_validation_failed",
+            detail=str(exc),
+            diagnostics=diagnostics,
+        ) from exc
+
+    if not bool(payload.get("success", False)):
+        detail = str(
+            payload.get("error")
+            or payload.get("message")
+            or payload.get("reason")
+            or "coinset_fee_estimate_unsuccessful"
+        )
+        raise _CoinsetFeeLookupPreflightError(
+            failure_kind="temporary_fee_advice_unavailable",
+            detail=detail,
+            diagnostics=diagnostics,
+        )
+
+    recommended = coinset.get_conservative_fee_estimate()
+    if recommended is None:
+        raise _CoinsetFeeLookupPreflightError(
+            failure_kind="temporary_fee_advice_unavailable",
+            detail="coinset_conservative_fee_unavailable",
+            diagnostics=diagnostics,
+        )
+    diagnostics["recommended_fee_mojos"] = str(int(recommended))
+    return diagnostics
 
 
 def _resolve_operation_fee(
@@ -385,7 +646,7 @@ def _resolve_operation_fee(
 
     minimum_fee = int(minimum_fee_mojos)
     max_attempts = int(os.getenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "4"))
-    coinset = CoinsetAdapter(None, network=network)
+    coinset = _coinset_adapter(network=network)
     for attempt in range(max_attempts):
         advised = None
         try:
@@ -407,6 +668,7 @@ def _resolve_operation_fee(
 def _resolve_taker_or_coin_operation_fee(
     *, network: str, minimum_fee_mojos: int = 0
 ) -> tuple[int, str]:
+    _coinset_fee_lookup_preflight(network=network)
     return _resolve_operation_fee(
         role="taker_or_coin_operation",
         network=network,
@@ -428,10 +690,17 @@ def _poll_signature_request_until_not_unsigned(
     events: list[dict[str, str]] = []
     start = time.monotonic()
     next_warning = warning_interval_seconds
+    warning_count = 0
     next_heartbeat = 5
     sleep_seconds = 2.0
     while True:
-        status_payload = wallet.get_signature_request(signature_request_id=signature_request_id)
+        elapsed = int(time.monotonic() - start)
+        status_payload = _call_with_moderate_retry(
+            action="wallet_get_signature_request",
+            call=lambda: wallet.get_signature_request(signature_request_id=signature_request_id),
+            elapsed_seconds=elapsed,
+            events=events,
+        )
         status = str(status_payload.get("status", "")).strip().upper()
         if status and status != "UNSIGNED":
             # Keep terminal output readable when heartbeat dots were emitted.
@@ -444,20 +713,33 @@ def _poll_signature_request_until_not_unsigned(
             )
             return status, events
 
-        elapsed = int(time.monotonic() - start)
         if elapsed >= next_heartbeat:
             print(".", end="", file=sys.stderr, flush=True)
             next_heartbeat += 5
         if elapsed >= timeout_seconds:
             raise RuntimeError("signature_request_timeout_waiting_for_signature")
         if elapsed >= next_warning:
+            warning_count += 1
             events.append(
                 {
                     "event": "signature_wait_warning",
                     "elapsed_seconds": str(elapsed),
+                    "signing_state_age_seconds": str(elapsed),
                     "message": "still_waiting_on_user_signature",
+                    "wait_reason": "waiting_on_user_signature",
+                    "warning_count": str(warning_count),
                 }
             )
+            if warning_count >= 2:
+                events.append(
+                    {
+                        "event": "signature_wait_escalation",
+                        "elapsed_seconds": str(elapsed),
+                        "message": "extended_user_signature_delay",
+                        "wait_reason": "waiting_on_user_signature",
+                        "warning_count": str(warning_count),
+                    }
+                )
             next_warning += warning_interval_seconds
         time.sleep(sleep_seconds)
         sleep_seconds = min(20.0, sleep_seconds * 1.5)
@@ -466,6 +748,7 @@ def _poll_signature_request_until_not_unsigned(
 def _wait_for_mempool_then_confirmation(
     *,
     wallet: CloudWalletAdapter,
+    network: str,
     initial_coin_ids: set[str],
     mempool_warning_seconds: int,
     confirmation_warning_seconds: int,
@@ -478,7 +761,13 @@ def _wait_for_mempool_then_confirmation(
     next_mempool_warning = mempool_warning_seconds
     next_confirmation_warning = confirmation_warning_seconds
     while True:
-        coins = wallet.list_coins(include_pending=True)
+        elapsed = int(time.monotonic() - start)
+        coins = _call_with_moderate_retry(
+            action="wallet_list_coins",
+            call=lambda: wallet.list_coins(include_pending=True),
+            elapsed_seconds=elapsed,
+            events=events,
+        )
         pending = [
             c
             for c in coins
@@ -491,16 +780,21 @@ def _wait_for_mempool_then_confirmation(
             if str(c.get("state", "")).strip().upper() not in {"PENDING", "MEMPOOL"}
             and str(c.get("id", "")).strip() not in initial_coin_ids
         ]
-        elapsed = int(time.monotonic() - start)
         if pending and not seen_pending:
             seen_pending = True
             sample = str(pending[0].get("name", pending[0].get("id", ""))).strip()
-            coinset_url = f"https://coinset.org/coin/{sample}"
+            sample_id = str(pending[0].get("id", "")).strip()
+            coinset_url = _coinset_coin_url(coin_name=sample, network=network)
+            reconcile = _coinset_reconcile_coin_state(network=network, coin_name=sample)
             events.append(
                 {
                     "event": "in_mempool",
+                    "coin_id": sample_id,
+                    "coin_name": sample,
                     "coinset_url": coinset_url,
                     "elapsed_seconds": str(elapsed),
+                    "wait_reason": "waiting_for_mempool_admission",
+                    **reconcile,
                 }
             )
             # Keep terminal output readable when heartbeat dots were emitted.
@@ -508,6 +802,30 @@ def _wait_for_mempool_then_confirmation(
                 print("", file=sys.stderr, flush=True)
             print(f"in mempool: {coinset_url}", file=sys.stderr, flush=True)
         if confirmed:
+            sample_confirmed = str(confirmed[0].get("name", confirmed[0].get("id", ""))).strip()
+            confirmation_reconcile = _coinset_reconcile_coin_state(
+                network=network, coin_name=sample_confirmed
+            )
+            confirmed_height = _safe_int(confirmation_reconcile.get("confirmed_block_index"))
+            events.append(
+                {
+                    "event": "confirmed",
+                    "coin_name": sample_confirmed,
+                    "coinset_url": _coinset_coin_url(coin_name=sample_confirmed, network=network),
+                    "elapsed_seconds": str(elapsed),
+                    "wait_reason": "waiting_for_confirmation",
+                    **confirmation_reconcile,
+                }
+            )
+            if confirmed_height is not None and confirmed_height >= 0:
+                events.extend(
+                    _watch_reorg_risk_with_coinset(
+                        network=network,
+                        confirmed_block_index=confirmed_height,
+                        additional_blocks=6,
+                        warning_interval_seconds=15 * 60,
+                    )
+                )
             if next_heartbeat > 5:
                 print("", file=sys.stderr, flush=True)
             return events
@@ -1386,6 +1704,34 @@ def _coin_split(
             network=network,
             minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
         )
+    except _CoinsetFeeLookupPreflightError as exc:
+        operator_guidance = (
+            "verify Coinset endpoint routing: unset GREENFLOOR_COINSET_BASE_URL to use "
+            "network defaults, or set it to a valid endpoint for the active network"
+            if exc.failure_kind == "endpoint_validation_failed"
+            else "coinset fee advice is temporarily unavailable; retry shortly and verify Coinset fee endpoint health before resubmitting"
+        )
+        print(
+            _format_json_output(
+                {
+                    "market_id": market.market_id,
+                    "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "venue": selected_venue,
+                    "vault_id": wallet.vault_id,
+                    "waited": False,
+                    "success": False,
+                    "error": f"coinset_fee_preflight_failed:{exc.failure_kind}",
+                    "coinset_fee_lookup": {
+                        "status": "failed",
+                        "failure_kind": exc.failure_kind,
+                        "detail": exc.detail,
+                        **exc.diagnostics,
+                    },
+                    "operator_guidance": operator_guidance,
+                }
+            )
+        )
+        return 2
     except Exception as exc:
         print(
             _format_json_output(
@@ -1441,6 +1787,7 @@ def _coin_split(
             wait_events.extend(
                 _wait_for_mempool_then_confirmation(
                     wallet=wallet,
+                    network=network,
                     initial_coin_ids=existing_coin_ids,
                     mempool_warning_seconds=5 * 60,
                     confirmation_warning_seconds=15 * 60,
@@ -1592,6 +1939,34 @@ def _coin_combine(
             network=network,
             minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
         )
+    except _CoinsetFeeLookupPreflightError as exc:
+        operator_guidance = (
+            "verify Coinset endpoint routing: unset GREENFLOOR_COINSET_BASE_URL to use "
+            "network defaults, or set it to a valid endpoint for the active network"
+            if exc.failure_kind == "endpoint_validation_failed"
+            else "coinset fee advice is temporarily unavailable; retry shortly and verify Coinset fee endpoint health before resubmitting"
+        )
+        print(
+            _format_json_output(
+                {
+                    "market_id": market.market_id,
+                    "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "venue": selected_venue,
+                    "vault_id": wallet.vault_id,
+                    "waited": False,
+                    "success": False,
+                    "error": f"coinset_fee_preflight_failed:{exc.failure_kind}",
+                    "coinset_fee_lookup": {
+                        "status": "failed",
+                        "failure_kind": exc.failure_kind,
+                        "detail": exc.detail,
+                        **exc.diagnostics,
+                    },
+                    "operator_guidance": operator_guidance,
+                }
+            )
+        )
+        return 2
     except Exception as exc:
         print(
             _format_json_output(
@@ -1655,6 +2030,7 @@ def _coin_combine(
             wait_events.extend(
                 _wait_for_mempool_then_confirmation(
                     wallet=wallet,
+                    network=network,
                     initial_coin_ids=existing_coin_ids,
                     mempool_warning_seconds=5 * 60,
                     confirmation_warning_seconds=15 * 60,
@@ -1969,6 +2345,8 @@ def _offers_reconcile(
             offer_id = str(row["offer_id"])
             market_value = str(row["market_id"])
             current_state = str(row["state"])
+            taker_signal = "none"
+            taker_diagnostic = "none"
             if target_venue != "dexie":
                 next_state = "reconcile_unsupported_venue"
                 reason = f"unsupported_venue:{target_venue}"
@@ -2003,6 +2381,14 @@ def _offers_reconcile(
                     next_state = current_state
                     reason = f"dexie_lookup_error:{exc}"
                 changed_flag = next_state != current_state
+            if status in {4, 5}:
+                taker_diagnostic = "dexie_status_pattern"
+            taker_states = {
+                OfferLifecycleState.MEMPOOL_OBSERVED.value,
+                OfferLifecycleState.TX_BLOCK_CONFIRMED.value,
+            }
+            if current_state not in taker_states and next_state in taker_states:
+                taker_signal = "canonical_offer_state_transition"
             store.upsert_offer_state(
                 offer_id=offer_id,
                 market_id=market_value,
@@ -2020,9 +2406,26 @@ def _offers_reconcile(
                     "changed": changed_flag,
                     "last_seen_status": status,
                     "reason": reason,
+                    "taker_signal": taker_signal,
+                    "taker_diagnostic": taker_diagnostic,
                 },
                 market_id=market_value,
             )
+            if taker_signal != "none":
+                store.add_audit_event(
+                    "taker_detection",
+                    {
+                        "offer_id": offer_id,
+                        "market_id": market_value,
+                        "venue": target_venue,
+                        "signal": taker_signal,
+                        "advisory_diagnostic": taker_diagnostic,
+                        "old_state": current_state,
+                        "new_state": next_state,
+                        "last_seen_status": status,
+                    },
+                    market_id=market_value,
+                )
             reconciled += 1
             changed += int(changed_flag)
             items.append(
@@ -2034,6 +2437,8 @@ def _offers_reconcile(
                     "changed": changed_flag,
                     "last_seen_status": status,
                     "reason": reason,
+                    "taker_signal": taker_signal,
+                    "taker_diagnostic": taker_diagnostic,
                 }
             )
         print(
@@ -2071,6 +2476,7 @@ def _offers_status(
                 "offer_cancel_policy",
                 "offer_lifecycle_transition",
                 "offer_reconciliation",
+                "taker_detection",
                 "dexie_offers_error",
             ],
             market_id=market_id,

@@ -100,15 +100,21 @@ def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path,
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["reconciled_count"] == 2
     assert payload["changed_count"] == 2
+    taker_items = [row for row in payload["items"] if row["offer_id"] == "offer-ok"]
+    assert taker_items[0]["taker_signal"] == "canonical_offer_state_transition"
+    assert taker_items[0]["taker_diagnostic"] == "dexie_status_pattern"
 
     store = SqliteStore(db_path)
     try:
         rows = {r["offer_id"]: r for r in store.list_offer_states(limit=20)}
+        events = store.list_recent_audit_events(event_types=["taker_detection"], limit=20)
     finally:
         store.close()
     assert rows["offer-ok"]["state"] == "tx_block_confirmed"
     assert rows["offer-ok"]["last_seen_status"] == 4
     assert rows["offer-missing"]["state"] == "unknown_orphaned"
+    assert len(events) == 1
+    assert events[0]["payload"]["signal"] == "canonical_offer_state_transition"
 
 
 def test_offers_status_reports_compact_summary(tmp_path: Path, capsys) -> None:
