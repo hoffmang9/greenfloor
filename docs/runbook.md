@@ -40,6 +40,9 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
   - `coin-split` with no `--coin-id` uses adapter-managed coin selection (`coin_selection_mode: "adapter_auto_select"` in JSON output).
   - When `--coin-id` is provided with `--until-ready`, loop retries may stop early with `stop_reason: "requires_new_coin_selection"` after the selected inputs are consumed.
   - Defaults wait through signature + mempool + confirmation; use `--no-wait` for async mode.
+  - Wait mode now includes `reorg_watch_*` events after first confirmation: manager monitors six additional blocks before returning success.
+  - Every `in_mempool` wait event includes a `coinset_url` and read-only Coinset reconciliation metadata (`confirmed_block_index`, `spent_block_index` when available).
+  - Signature waits emit periodic `signature_wait_warning` and additive `signature_wait_escalation` events (soft-timeout behavior; manager continues waiting unless operator aborts the command).
 - Post a real offer file directly (fast path to running state):
   - Mainnet (default, pair-based): `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1`
   - Testnet (active proof pair): `greenfloor-manager build-and-post-offer --pair TDBX:txch --size-base-units 1 --network testnet11`
@@ -54,6 +57,9 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
 - Reconcile posted offers and flag orphan/unknown entries:
   - `greenfloor-manager offers-reconcile --limit 200`
   - Optional scope: `--market-id <id>`
+  - Reconcile output includes:
+    - `taker_signal`: canonical offer-state transition signal (`none` or `canonical_offer_state_transition`).
+    - `taker_diagnostic`: advisory status-pattern diagnostics from venue status snapshots.
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
 - Note: manager CLI v1 surface is intentionally limited to seven commands. Tuning/history/metrics helpers are deferred until after G1-G3 testnet proof.
@@ -79,12 +85,14 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 - `offer_cancel_policy`: cancel eligibility and triggered/non-triggered reasons.
 - `offer_lifecycle_transition`: offer state transitions from Dexie status.
 - `coin_ops_plan` and `coin_op_*`: split/combine planning and execution outcomes.
+- `taker_detection`: canonical taker transition events produced by `offers-reconcile`.
 
 ## 5) Incident Triage
 
 - **Price unavailable:** look for `xch_price_error`; XCH planning is price-gated and may produce no actions.
 - **Offer builder failures:** check `strategy_offer_execution.items[].reason` for `offer_builder_*`.
 - **Dexie post/cancel issues:** look for `dexie_offers_error`, `strategy_offer_execution` skip reasons, and `offer_cancel_policy` skip reasons.
+- **Extended waits on coin operations:** inspect `wait_events` for `poll_retry`, `signature_wait_*`, `in_mempool`, `confirmed`, and `reorg_watch_*` events to determine whether delay is signer-side, mempool-side, Coinset API-side, or chain-depth-side.
 - **Cancel policy not triggering:** verify market `quote_asset_type` is `unstable`, `pricing.cancel_policy_stable_vs_unstable: true`, and compare `move_bps` vs `threshold_bps` in `offer_cancel_policy`.
 
 ## 6) Runtime Controls

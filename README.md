@@ -69,12 +69,19 @@ Cloud Wallet vault operations:
 # List vault inventory (XCH + CAT)
 greenfloor-manager coins-list
 
-# Split one coin into target denominations (waits through signature + confirmation)
+# Split one coin into target denominations (waits through signature + mempool + confirmation + reorg watch)
 greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10
 
-# Combine small coins into one larger coin (waits through signature + confirmation)
+# Combine small coins into one larger coin (waits through signature + mempool + confirmation + reorg watch)
 greenfloor-manager coin-combine --pair TDBX:txch --number-of-coins 10 --asset-id xch
 ```
+
+Coin-op wait diagnostics include:
+
+- `signature_wait_warning` and `signature_wait_escalation` (soft-timeout style, manager keeps waiting).
+- `in_mempool` with a `coinset_url` on every mempool user event.
+- `confirmed` plus read-only Coinset reconciliation metadata.
+- `reorg_watch_*` events while waiting for six additional blocks after first confirmation.
 
 On `testnet11`, use `txch` as the quote symbol in pair arguments (for example `TDBX:txch`).
 
@@ -84,6 +91,8 @@ Check offer status and reconcile:
 greenfloor-manager offers-status
 greenfloor-manager offers-reconcile
 ```
+
+`offers-reconcile` now emits canonical taker-detection signals from offer-state transitions (`taker_signal`) and keeps mempool/chain status pattern checks as advisory diagnostics (`taker_diagnostic`).
 
 Run the daemon:
 
