@@ -1,5 +1,46 @@
 # Progress Log
 
+## 2026-02-25 (step 3 strict-close canonical pair proof)
+
+- Closed the canonical pair mapping gap for manager Cloud Wallet posting in `greenfloor/cli/manager.py`:
+  - `build-and-post-offer --pair CARBON22:xch` now resolves canonical market asset IDs (`CAT` hex tail and `xch`) to Cloud Wallet global asset IDs (`Asset_...`) before `createOffer`.
+  - Added explicit result metadata (`resolved_base_asset_id`, `resolved_quote_asset_id`) to manager output and strategy-offer audit events.
+  - Added direct state persistence in cloud-wallet manager post path (`offer_state` upsert + `strategy_offer_execution` audit event) so follow-up `offers-status` / `offers-reconcile` can observe posted offers.
+- Live canonical proof (remote host `John-Deere`) succeeded:
+  - command: `GREENFLOOR_COINSET_BASE_URL=\"https://api.coinset.org\" greenfloor-manager ... build-and-post-offer --pair CARBON22:xch --size-base-units 1`
+  - `signature_request_id`: `SignatureRequest_gqxapuzsb1yectpxnyblci28`
+  - venue post success on Dexie with offer id `EEn9gzNvg6a34jCsRhJZpJifW3FGXFy15VXkw6tzg48s`
+  - `publish_failures: 0`
+  - maker fee contract held: `offer_fee_mojos: 0`, `offer_fee_source: "maker_default_zero"`
+  - canonical request pair remained `CARBON22:xch` while resolved IDs were emitted in output.
+- Lifecycle visibility now works after direct manager post:
+  - `offers-status` showed persisted rows including `EEn9gzNvg6a34jCsRhJZpJifW3FGXFy15VXkw6tzg48s` and `strategy_offer_execution` audit payload with resolved asset IDs.
+  - `offers-reconcile` reconciled persisted rows (`reconciled_count: 2`) and transitioned state based on current Dexie lookup responses.
+
+## 2026-02-25 (step 3 live proof: cloud wallet maker offer posted)
+
+- Executed live Step 3 proof for Cloud Wallet maker flow on mainnet market `carbon_2022_xch_sell`.
+- Environment and config fixes applied before proof:
+  - initialized `chia-wallet-sdk` submodule and installed SDK Python binding into project venv,
+  - installed `greenfloor-native` after upgrading Rust toolchain (to satisfy Cargo lockfile v4),
+  - switched Dexie endpoint to mainnet (`https://api.dexie.space`),
+  - used explicit Coinset API host override for this run: `GREENFLOOR_COINSET_BASE_URL=https://api.coinset.org`,
+  - updated market receive address to a valid lowercase mainnet bech32 address.
+- Cloud Wallet asset-ID compatibility update used for this proof run:
+  - `base_asset` changed to Cloud Wallet global ID `Asset_vznqpopp6sp3s0qwkuvua3dp`,
+  - `quote_asset` changed to Cloud Wallet global ID `Asset_huun64oh7dbt9f1f9ie8khuw`.
+- Successful live command:
+  - `GREENFLOOR_COINSET_BASE_URL="https://api.coinset.org" greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml build-and-post-offer --pair CARBON22:Asset_huun64oh7dbt9f1f9ie8khuw --size-base-units 1`
+- Proof result:
+  - `signature_request_id`: `SignatureRequest_mpve6gp6gw87oa4pshpntste`
+  - `signature_state`: `SUBMITTED`
+  - venue post: success on Dexie, offer id `EU6M6FcwF279prpvkXcNYgdFJv7fmyLujg9FDMxVqVyp`
+  - `publish_failures`: `0`
+  - maker fee contract verified: `offer_fee_mojos: 0`, `offer_fee_source: "maker_default_zero"`
+  - local verification path passed (publish reached venue and returned success).
+- Post-run manager views:
+  - `offers-reconcile` and `offers-status` returned empty sets in this direct manager path run (`offer_count: 0`), indicating no persisted offer-state rows were available for reconciliation from this invocation.
+
 ## 2026-02-24 (step 3 fee-path simplification follow-up)
 
 - Simplified coin-operation fee policy to remove env/cache fallback complexity:

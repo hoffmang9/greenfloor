@@ -148,6 +148,109 @@ def _new_cloud_wallet_adapter(program) -> CloudWalletAdapter:
     return CloudWalletAdapter(_require_cloud_wallet_config(program))
 
 
+def _canonical_is_xch(asset_id: str) -> bool:
+    value = asset_id.strip().lower()
+    return value in {"xch", "txch"}
+
+
+def _canonical_is_cloud_global_id(asset_id: str) -> bool:
+    return asset_id.strip().startswith("Asset_")
+
+
+def _resolve_cloud_wallet_asset_id(
+    *,
+    wallet: CloudWalletAdapter,
+    canonical_asset_id: str,
+) -> str:
+    raw = canonical_asset_id.strip()
+    if not raw:
+        raise ValueError("asset_id must be non-empty")
+    if _canonical_is_cloud_global_id(raw):
+        return raw
+    if not hasattr(wallet, "_graphql"):
+        # Test doubles and alternate adapters may not expose raw GraphQL.
+        return raw
+
+    query = """
+query resolveWalletAssets($walletId: ID!) {
+  wallet(id: $walletId) {
+    assets {
+      edges {
+        node {
+          assetId
+          type
+        }
+      }
+    }
+  }
+}
+"""
+    payload = wallet._graphql(query=query, variables={"walletId": wallet.vault_id})
+    wallet_payload = payload.get("wallet") or {}
+    assets_payload = wallet_payload.get("assets") or {}
+    edges = assets_payload.get("edges") or []
+
+    crypto_asset_ids: list[str] = []
+    cat_asset_ids: list[str] = []
+    for edge in edges:
+        node = edge.get("node") if isinstance(edge, dict) else None
+        if not isinstance(node, dict):
+            continue
+        asset_global_id = str(node.get("assetId", "")).strip()
+        asset_type = str(node.get("type", "")).strip().upper()
+        if not asset_global_id.startswith("Asset_"):
+            continue
+        if asset_type == "CRYPTOCURRENCY":
+            crypto_asset_ids.append(asset_global_id)
+        elif asset_type in {"CAT2", "CAT", "TOKEN"}:
+            cat_asset_ids.append(asset_global_id)
+
+    if _canonical_is_xch(raw):
+        if len(crypto_asset_ids) == 1:
+            return crypto_asset_ids[0]
+        if len(crypto_asset_ids) == 0:
+            raise RuntimeError("cloud_wallet_asset_resolution_failed:no_crypto_asset_found_for_xch")
+        raise RuntimeError("cloud_wallet_asset_resolution_failed:ambiguous_crypto_asset_for_xch")
+
+    canonical_hex = raw.lower()
+    if len(canonical_hex) != 64 or any(c not in "0123456789abcdef" for c in canonical_hex):
+        raise RuntimeError(
+            f"cloud_wallet_asset_resolution_failed:unsupported_canonical_asset_id:{raw}"
+        )
+
+    # Temporary deterministic fallback until wallet APIs expose canonical CAT-tail metadata.
+    ranked: list[tuple[int, int, str]] = []
+    for asset_global_id in cat_asset_ids:
+        coins = wallet.list_coins(asset_id=asset_global_id, include_pending=True)
+        coin_count = len(coins)
+        total_amount = sum(int(c.get("amount", 0)) for c in coins)
+        ranked.append((coin_count, total_amount, asset_global_id))
+    ranked.sort(reverse=True)
+
+    if not ranked:
+        raise RuntimeError(
+            f"cloud_wallet_asset_resolution_failed:no_wallet_cat_asset_candidates_for:{raw}"
+        )
+    return ranked[0][2]
+
+
+def _resolve_cloud_wallet_offer_asset_ids(
+    *,
+    wallet: CloudWalletAdapter,
+    base_asset_id: str,
+    quote_asset_id: str,
+) -> tuple[str, str]:
+    resolved_base = _resolve_cloud_wallet_asset_id(
+        wallet=wallet,
+        canonical_asset_id=base_asset_id,
+    )
+    resolved_quote = _resolve_cloud_wallet_asset_id(
+        wallet=wallet,
+        canonical_asset_id=quote_asset_id,
+    )
+    return resolved_base, resolved_quote
+
+
 def _parse_iso8601(value: str) -> dt.datetime | None:
     raw = value.strip()
     if not raw:
@@ -712,6 +815,13 @@ def _build_and_post_offer_cloud_wallet(
     quote_price: float,
 ) -> int:
     wallet = _new_cloud_wallet_adapter(program)
+    resolved_base_asset_id, resolved_quote_asset_id = _resolve_cloud_wallet_offer_asset_ids(
+        wallet=wallet,
+        base_asset_id=str(market.base_asset),
+        quote_asset_id=str(market.quote_asset),
+    )
+    db_path = (Path(program.home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
+    store = SqliteStore(db_path)
     post_results: list[dict] = []
     publish_failures = 0
     offer_fee_mojos, offer_fee_source = _resolve_maker_offer_fee(network=program.app_network)
@@ -735,8 +845,8 @@ def _build_and_post_offer_cloud_wallet(
         if request_amount <= 0:
             raise ValueError("request_amount must be positive")
 
-        offered = [{"assetId": str(market.base_asset), "amount": offer_amount}]
-        requested = [{"assetId": str(market.quote_asset), "amount": request_amount}]
+        offered = [{"assetId": resolved_base_asset_id, "amount": offer_amount}]
+        requested = [{"assetId": resolved_quote_asset_id, "amount": request_amount}]
         expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(minutes=65)).isoformat()
         create_result = wallet.create_offer(
             offered=offered,
@@ -817,6 +927,27 @@ def _build_and_post_offer_cloud_wallet(
             result = splash.post_offer(offer_text)
         if result.get("success") is False:
             publish_failures += 1
+        offer_id = str(result.get("id", "")).strip()
+        if offer_id:
+            store.upsert_offer_state(
+                offer_id=offer_id,
+                market_id=str(market.market_id),
+                state=OfferLifecycleState.OPEN.value,
+                last_seen_status=None,
+            )
+            store.add_audit_event(
+                "strategy_offer_execution",
+                {
+                    "offer_id": offer_id,
+                    "market_id": str(market.market_id),
+                    "venue": publish_venue,
+                    "signature_request_id": signature_request_id,
+                    "signature_state": signature_state,
+                    "resolved_base_asset_id": resolved_base_asset_id,
+                    "resolved_quote_asset_id": resolved_quote_asset_id,
+                },
+                market_id=str(market.market_id),
+            )
         post_results.append(
             {
                 "venue": publish_venue,
@@ -834,6 +965,8 @@ def _build_and_post_offer_cloud_wallet(
             {
                 "market_id": market.market_id,
                 "pair": f"{market.base_asset}:{market.quote_asset}",
+                "resolved_base_asset_id": resolved_base_asset_id,
+                "resolved_quote_asset_id": resolved_quote_asset_id,
                 "network": program.app_network,
                 "size_base_units": size_base_units,
                 "repeat": repeat,
@@ -852,6 +985,7 @@ def _build_and_post_offer_cloud_wallet(
             }
         )
     )
+    store.close()
     return 0 if publish_failures == 0 else 2
 
 

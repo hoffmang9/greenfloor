@@ -185,7 +185,7 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
     if not isinstance(cloud_wallet, dict):
         raise ValueError("cloud_wallet must be a mapping")
 
-    coin_ops_minimum_fee_mojos = int(coin_ops.get("minimum_fee_mojos", 0))
+    coin_ops_minimum_fee_mojos = int(coin_ops.get("minimum_fee_mojos", 10_000_000))
     if coin_ops_minimum_fee_mojos < 0:
         raise ValueError("coin_ops.minimum_fee_mojos must be >= 0")
 
