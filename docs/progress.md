@@ -18,6 +18,7 @@
 - Validation snapshot:
   - `.venv/bin/python -m pytest tests/test_manager_post_offer.py` -> `79 passed`
   - `PATH="/Users/hoffmang/src/greenfloor/.venv/bin:$PATH" .venv/bin/pre-commit run --all-files` -> all hooks passed (`ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`)
+
 ## 2026-02-25 (step 4 monitoring, reliability, tests, runbooks)
 
 - Implemented Step 4 monitoring/reliability hardening in `greenfloor/cli/manager.py`:
