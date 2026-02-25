@@ -1,5 +1,23 @@
 # Progress Log
 
+## 2026-02-25 (coinset websocket-only daemon signal ingestion)
+
+- Migrated daemon signal ingestion from webhook-startup + cycle polling to websocket-only runtime:
+  - Added `greenfloor/daemon/coinset_ws.py` with long-lived Coinset websocket client behavior (reconnect loop, payload normalization, tx-id routing, and recovery-poll hooks).
+  - `greenfloor/daemon/main.py` now starts/stops the websocket client in `_run_loop` and writes tx signals to `tx_signal_state` through the same SQLite persistence paths used by reconciliation.
+  - Removed daemon webhook server startup from active runtime path; websocket is the primary tx signal source.
+- Added bounded websocket capture for `greenfloord --once`:
+  - `run_once` now supports websocket capture mode with recovery snapshot before continuing through normal cycle execution.
+- Extended config model/defaults for websocket controls:
+  - `chain_signals.tx_block_trigger.mode` now enforces `websocket` in parser,
+  - added `websocket_url`, `websocket_reconnect_interval_seconds`, and `fallback_poll_interval_seconds` handling.
+- Added deterministic tests:
+  - `tests/test_coinset_ws.py` for payload classification/callback routing.
+  - `tests/test_daemon_websocket_runtime.py` for websocket client startup/shutdown wiring and `run_once` websocket capture path.
+  - Updated `tests/test_config_load.py` and `tests/test_low_inventory_alerts.py` for new `ProgramConfig` fields.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_config_load.py tests/test_coinset_ws.py tests/test_daemon_websocket_runtime.py tests/test_manager_offer_reconcile.py tests/test_daemon_multi_cycle_integration.py tests/test_low_inventory_alerts.py` -> `13 passed`
+
 ## 2026-02-25 (coinset webhook-first offer-taken reconciliation)
 
 - Refactored offer lifecycle/taker detection to prefer Coinset tx signals (webhook + mempool state) over Dexie status heuristics:

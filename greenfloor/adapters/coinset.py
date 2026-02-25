@@ -17,6 +17,10 @@ _COINSET_TX_ID_KEYS = (
     "coinsetTxId",
     "block_tx_id",
     "blockTxId",
+    "mempool_tx_ids",
+    "mempoolTxIds",
+    "confirmed_tx_ids",
+    "confirmedTxIds",
 )
 
 

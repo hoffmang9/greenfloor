@@ -87,8 +87,14 @@ chain_signals:
     source: "coinset"
     poll_interval_seconds: 20
   tx_block_trigger:
-    mode: "webhook_or_poll"
+    mode: "websocket"
     source: "coinset"
-    webhook_enabled: true
-    webhook_listen_addr: "127.0.0.1:8787"
+    # Coinset websocket endpoint; when empty, defaults by network profile.
+    # mainnet: wss://coinset.org/ws
+    # testnet11: wss://testnet11.api.coinset.org/ws
+    websocket_url: ""
+    websocket_reconnect_interval_seconds: 30
+    webhook_enabled: false
+    webhook_listen_addr: "127.0.0.1:8787" # legacy field; websocket mode ignores this listener.
+    # Recovery poll cadence used by websocket mode to refresh mempool tx snapshots.
     fallback_poll_interval_seconds: 60
