@@ -11,7 +11,7 @@ addressed all of them in branch `simplify/step2-coin-prep-cleanup` (PR #25).
   eliminate a verbatim ~22-line coin name→`Coin_*` mapping block that was copy-pasted identically
   into both `_coin_split` and `_coin_combine`.
 - Fixed `_coins_list` spendability field: was using a blocklist (`not in {"SPENT", "PENDING",
-  "MEMPOOL"}`), marking unknown/transitional states as spendable. Switched to `_is_spendable_coin`
+"MEMPOOL"}`), marking unknown/transitional states as spendable. Switched to `_is_spendable_coin`
   (allowlist) to match what the denomination readiness evaluator counts.
 - Fixed `_wait_for_mempool_then_confirmation` re-warning intervals: the function was doubling its
   own warning threshold on each emission (`mempool_warning_seconds += mempool_warning_seconds`),
