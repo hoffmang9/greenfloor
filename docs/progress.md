@@ -1,5 +1,16 @@
 # Progress Log
 
+## 2026-02-25 (upstreaming follow-up: cache key + metadata + formatting)
+
+- Closed CI follow-up issues discovered after merging reliability test hardening:
+  - Fixed persistent `greenfloor-native` wheel cache misses in `.github/workflows/ci.yml` by replacing `hashFiles('greenfloor-native/**')` cache keys (which changed after build artifacts were produced) with a stable git tree hash resolved via `git rev-parse HEAD:greenfloor-native`.
+  - Added explicit `project.version = "0.1.0"` to `greenfloor-native/pyproject.toml` to satisfy PEP 621 metadata requirements and remove wheel-build warning noise.
+  - Resolved CI formatting parity issue by applying repository `prettier` output for `config/program.yaml` inline comment spacing.
+- Validation snapshot:
+  - `PATH="/Users/hoffmang/src/greenfloor/.venv/bin:$PATH" .venv/bin/pre-commit run --all-files` -> all hooks passed (`ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`).
+- Upstreaming intent:
+  - prepared `feat/step4-monitoring-reliability` for PR into `main` with these follow-up reliability/CI fixes included.
+
 ## 2026-02-25 (testing hardening: reliability + adapter contracts)
 
 - Added broad deterministic testing hardening focused on runtime reliability boundaries and error-contract stability:
