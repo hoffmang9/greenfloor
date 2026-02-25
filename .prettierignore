@@ -1,4 +1,5 @@
 chia-wallet-sdk/**
+old/**
 .venv/**
 venv/**
 greenfloor-native/target/**

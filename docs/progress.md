@@ -1,5 +1,70 @@
 # Progress Log
 
+## 2026-02-24 (mainnet Step 2 operator proof: CARBON22:xch)
+
+- Executed end-to-end Step 2 coin-prep proof on mainnet pair `CARBON22:xch` using Cloud Wallet vault `Wallet_le99o1k4jfsof9mp817gxpi3`.
+- Baseline inventory check (`coins-list`) confirmed live settled spendable inventory and coin-id visibility before prep actions.
+- Ran split prep with readiness mode:
+  - `greenfloor-manager coin-split --pair CARBON22:xch --coin-id 2f264eb91017f196596ee7a6635ff3d298a295226fbd1a57cb6b7493aefa3c34 --size-base-units 10 --until-ready --max-iterations 3`
+  - Result included `signature_state: "SUBMITTED"`, mempool signal, and coinset link:
+    - `https://coinset.org/coin/63f7016c704eb0d6cdaf6fec0a6d2189c2e363b3b19d87e623cc36029fa06bcd`
+  - Post-split inventory showed three new settled `amount=10` coins:
+    - `75f3f88bed96681808b71a9558f4fe29017ecb42e146d9fdba01804dfd9a3548`
+    - `1bcbf190fe928a4c6485b41cab0dc3c535be7a96bd89f8edfb54c34d61c002b3`
+    - `02ba4471f248875bdf314e4adb9eda683253848a1b6348a243b489a1033ee9c1`
+- Ran combine prep with explicit coin IDs:
+  - `greenfloor-manager coin-combine --pair CARBON22:xch --coin-id 75f3f88bed96681808b71a9558f4fe29017ecb42e146d9fdba01804dfd9a3548 --coin-id 1bcbf190fe928a4c6485b41cab0dc3c535be7a96bd89f8edfb54c34d61c002b3 --coin-id 02ba4471f248875bdf314e4adb9eda683253848a1b6348a243b489a1033ee9c1 --number-of-coins 3 --asset-id Asset_huun64oh7dbt9f1f9ie8khuw`
+  - Result included `signature_state: "SUBMITTED"`, mempool signal, and coinset link:
+    - `https://coinset.org/coin/76e4cd84f745abaa8f93fe5fbc10115d5a086dc95060c9ca1e08d320c20c3984`
+- Final inventory check confirmed combine settlement:
+  - prior three `amount=10` coins were consumed,
+  - new settled coin `76e4cd84f745abaa8f93fe5fbc10115d5a086dc95060c9ca1e08d320c20c3984` with `amount=30` present.
+- Fee contract behavior during proof:
+  - `fee_mojos: 0`
+  - `fee_source: "env_override"`
+
+## 2026-02-24 (pr24 review follow-up hardening)
+
+- Applied post-review hardening updates for PR #24:
+  - Coin-prep venue is now optional metadata (`--venue` validates only when explicitly provided); split/combine no longer depend on `offer_publish_venue`.
+  - Readiness classification is now conservative: only known spendable states count toward readiness, and unknown/transitional states are treated as not spendable.
+  - Readiness asset parsing now supports both `asset: {id: ...}` and `asset: "<id>"` payload forms.
+  - Ladder combine threshold now uses `ceil(target_count * combine_when_excess_factor)` (minimum 2) instead of truncation.
+  - Coin-prep output now includes `coin_selection_mode` so operator intent is explicit (`explicit` vs adapter-managed auto-select).
+- Added deterministic tests covering:
+  - optional venue behavior on coin-prep output,
+  - ceil-based combine threshold derivation,
+  - readiness filtering for unknown states and string-form asset IDs.
+- Updated runbook notes for readiness-loop usage and explicit `--coin-id` interaction in `--until-ready` mode.
+- Validation snapshot:
+  - `tests/test_manager_post_offer.py`: `39 passed`.
+  - `pre-commit`: all hooks pass except existing `pyright` failures in legacy `old/` scripts.
+
+## 2026-02-24 (step 2 closure: readiness loop + boundary alignment)
+
+- Closed remaining Step 2 gaps for Vault-first coin prep:
+  - Added readiness-loop mode for `coin-split` and `coin-combine` in `greenfloor/cli/manager.py` with `--until-ready` and bounded retries via `--max-iterations`.
+  - Loop mode evaluates denomination readiness from live vault inventory after each operation and returns explicit stop reasons (`ready`, `max_iterations_reached`, `requires_new_coin_selection`).
+  - Kept and documented direct boundary for coin prep operations: `manager.py` calls `greenfloor/adapters/cloud_wallet.py` directly for split/combine.
+- Added deterministic manager tests for readiness-loop validation and not-ready loop behavior in `tests/test_manager_post_offer.py`.
+
+## 2026-02-24 (live testing retarget to mainnet CARBON22)
+
+- Retargeted active live testing from `testnet11` proof pair context to mainnet `CARBON22:xch`.
+- Confirmed `CARBON22` CAT ID from repo config (`config/markets.yaml`): `4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7`.
+- Updated planning docs to reflect current live target while preserving prior `testnet11` proof artifacts as historical evidence.
+
+## 2026-02-24 (cloud wallet vault-first step 2 completion)
+
+- Completed Step 2 alignment for Vault-first coin preparation in `greenfloor/cli/manager.py`:
+  - `coin-split` and `coin-combine` now accept `--venue` so coin-prep runs are explicitly bound to the selected downstream posting venue context (`dexie` or `splash`).
+  - Added config-driven denomination mode for both commands via `--size-base-units`, sourced from the selected market `ladders.sell` entry.
+  - In config-driven split mode, manager derives/enforces `amount_per_coin` and `number_of_coins` from ladder `size_base_units` + `target_count` + `split_buffer_count`.
+  - In config-driven combine mode, manager derives/enforces `number_of_coins` from ladder `target_count * combine_when_excess_factor` (minimum 2) and defaults `asset_id` to the market base asset.
+  - Command JSON output now includes resolved venue and resolved denomination target metadata to make prep decisions explicit and auditable.
+- Added deterministic coverage in `tests/test_manager_post_offer.py` for config-driven split/combine behavior and venue binding output.
+- Updated operator docs in `docs/runbook.md` with config-driven coin-shaping examples.
+
 ## 2026-02-24 (cloud wallet mainnet operator hardening)
 
 - Improved Cloud Wallet config discoverability in operator docs/templates:

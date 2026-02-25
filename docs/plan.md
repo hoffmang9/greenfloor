@@ -96,7 +96,13 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
 - [x] G3: Run and document an end-to-end `testnet11` proof (build -> post -> status -> reconcile) using a live test asset pair.
   - CI path now executes this sequence when `dry_run=false` in `live-testnet-e2e`.
   - Latest status (2026-02-23): current native-migration branch runs (`run_id=22325031449`, `run_id=22325053517`) executed the full manager proof sequence successfully with artifacts, including live Dexie post (`dry_run=false`) and reconcile output.
-  - Active operator proof pair for `testnet11` is `TDBX:txch` (TXCH<->TDBX). BYC04 is not the primary proof target.
+  - Historical `testnet11` proof pair was `TDBX:txch` (TXCH<->TDBX); BYC04 was not the primary proof target.
+
+## Active Live Testing Target
+
+- Active live testing target is now mainnet `CARBON22:xch`.
+- `CARBON22` CAT ID: `4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7`.
+- Prior `testnet11` proof artifacts remain valid as historical closure evidence for G1-G3.
 
 ## Operational Hardening Follow-up
 

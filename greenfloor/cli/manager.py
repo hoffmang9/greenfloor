@@ -4,7 +4,9 @@ import argparse
 import datetime as dt
 import importlib
 import json
+import math
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -188,14 +190,26 @@ def _poll_signature_request_until_not_unsigned(
     events: list[dict[str, str]] = []
     start = time.monotonic()
     next_warning = warning_interval_seconds
+    next_heartbeat = 5
     sleep_seconds = 2.0
     while True:
         status_payload = wallet.get_signature_request(signature_request_id=signature_request_id)
         status = str(status_payload.get("status", "")).strip().upper()
         if status and status != "UNSIGNED":
+            # Keep terminal output readable when heartbeat dots were emitted.
+            if next_heartbeat > 5:
+                print("", file=sys.stderr, flush=True)
+            print(
+                f"signature submitted: {signature_request_id} status={status}",
+                file=sys.stderr,
+                flush=True,
+            )
             return status, events
 
         elapsed = int(time.monotonic() - start)
+        if elapsed >= next_heartbeat:
+            print(".", end="", file=sys.stderr, flush=True)
+            next_heartbeat += 5
         if elapsed >= timeout_seconds:
             raise RuntimeError("signature_request_timeout_waiting_for_signature")
         if elapsed >= next_warning:
@@ -221,6 +235,7 @@ def _wait_for_mempool_then_confirmation(
     events: list[dict[str, str]] = []
     start = time.monotonic()
     seen_pending = False
+    next_heartbeat = 5
     sleep_seconds = 2.0
     while True:
         coins = wallet.list_coins(include_pending=True)
@@ -240,16 +255,26 @@ def _wait_for_mempool_then_confirmation(
         if pending and not seen_pending:
             seen_pending = True
             sample = str(pending[0].get("name", pending[0].get("id", ""))).strip()
+            coinset_url = f"https://coinset.org/coin/{sample}"
             events.append(
                 {
                     "event": "in_mempool",
-                    "coinset_url": f"https://coinset.org/coin/{sample}",
+                    "coinset_url": coinset_url,
                     "elapsed_seconds": str(elapsed),
                 }
             )
+            # Keep terminal output readable when heartbeat dots were emitted.
+            if next_heartbeat > 5:
+                print("", file=sys.stderr, flush=True)
+            print(f"in mempool: {coinset_url}", file=sys.stderr, flush=True)
         if confirmed:
+            if next_heartbeat > 5:
+                print("", file=sys.stderr, flush=True)
             return events
 
+        if elapsed >= next_heartbeat:
+            print(".", end="", file=sys.stderr, flush=True)
+            next_heartbeat += 5
         if not seen_pending and elapsed >= mempool_warning_seconds:
             events.append(
                 {
@@ -268,6 +293,75 @@ def _wait_for_mempool_then_confirmation(
             confirmation_warning_seconds += confirmation_warning_seconds
         time.sleep(sleep_seconds)
         sleep_seconds = min(20.0, sleep_seconds * 1.5)
+
+
+def _is_spendable_coin(coin: dict) -> bool:
+    coin_state = str(coin.get("state", "")).strip().upper()
+    if not coin_state:
+        return False
+    if coin_state in {
+        "PENDING",
+        "MEMPOOL",
+        "SPENT",
+        "SPENDING",
+        "LOCKED",
+        "RESERVED",
+        "UNCONFIRMED",
+    }:
+        return False
+    return coin_state in {"CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE"}
+
+
+def _coin_asset_id(coin: dict) -> str:
+    asset_raw = coin.get("asset")
+    if isinstance(asset_raw, dict):
+        return str(asset_raw.get("id", "xch")).strip() or "xch"
+    if isinstance(asset_raw, str):
+        return asset_raw.strip() or "xch"
+    return "xch"
+
+
+def _evaluate_denomination_readiness(
+    *,
+    wallet: CloudWalletAdapter,
+    asset_id: str,
+    size_base_units: int,
+    required_min_count: int | None = None,
+    max_allowed_count: int | None = None,
+) -> dict[str, int | bool | str]:
+    coins = wallet.list_coins(include_pending=True)
+    spendable = [
+        c
+        for c in coins
+        if _is_spendable_coin(c)
+        and _coin_asset_id(c).lower() == asset_id.strip().lower()
+        and int(c.get("amount", 0)) == int(size_base_units)
+    ]
+    current_count = len(spendable)
+    ready = True
+    if required_min_count is not None:
+        ready = current_count >= int(required_min_count)
+    if max_allowed_count is not None:
+        ready = ready and current_count <= int(max_allowed_count)
+    return {
+        "asset_id": asset_id,
+        "size_base_units": int(size_base_units),
+        "current_count": current_count,
+        "required_min_count": int(required_min_count) if required_min_count is not None else -1,
+        "max_allowed_count": int(max_allowed_count) if max_allowed_count is not None else -1,
+        "ready": ready,
+    }
+
+
+def _as_wait_events(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    items: list[dict[str, str]] = []
+    for row in value:
+        if isinstance(row, dict):
+            event = {str(k): str(v) for k, v in row.items()}
+            items.append(event)
+    return items
 
 
 # ---------------------------------------------------------------------------
@@ -457,6 +551,30 @@ def _resolve_offer_publish_settings(
     else:
         splash_base = str(program.splash_api_base).strip().rstrip("/")
     return venue, dexie_base, splash_base
+
+
+def _resolve_venue_for_coin_prep(*, venue_override: str | None) -> str | None:
+    if venue_override is None or not venue_override.strip():
+        return None
+    venue = venue_override.strip().lower()
+    if venue not in {"dexie", "splash"}:
+        raise ValueError("coin-prep venue must be dexie or splash when provided")
+    return venue
+
+
+def _resolve_market_denomination_entry(market, *, size_base_units: int):
+    ladder = market.ladders.get("sell") or []
+    if not ladder:
+        raise ValueError(
+            f"market {market.market_id} has no sell ladder; cannot resolve denomination target"
+        )
+    for entry in ladder:
+        if int(entry.size_base_units) == int(size_base_units):
+            return entry
+    allowed = ", ".join(str(int(row.size_base_units)) for row in ladder)
+    raise ValueError(
+        f"size_base_units not configured for market sell ladder; use one of: {allowed}"
+    )
 
 
 def _build_offer_text_for_request(payload: dict) -> str:
@@ -895,12 +1013,13 @@ def _coin_split(
     amount_per_coin: int,
     number_of_coins: int,
     no_wait: bool,
+    venue: str | None = None,
+    size_base_units: int | None = None,
+    until_ready: bool = False,
+    max_iterations: int = 3,
 ) -> int:
-    if amount_per_coin <= 0:
-        raise ValueError("amount_per_coin must be positive")
-    if number_of_coins <= 0:
-        raise ValueError("number_of_coins must be positive")
     program = load_program_config(program_path)
+    selected_venue = _resolve_venue_for_coin_prep(venue_override=venue)
     markets = load_markets_config(markets_path)
     market = _resolve_market_for_build(
         markets,
@@ -908,38 +1027,158 @@ def _coin_split(
         pair=pair,
         network=network,
     )
+    denomination_target = None
+    if size_base_units is not None and int(size_base_units) > 0:
+        entry = _resolve_market_denomination_entry(market, size_base_units=int(size_base_units))
+        required_count = int(entry.target_count) + int(entry.split_buffer_count)
+        if amount_per_coin <= 0:
+            amount_per_coin = int(entry.size_base_units)
+        elif amount_per_coin != int(entry.size_base_units):
+            raise ValueError(
+                "amount_per_coin must match market ladder size when --size-base-units is set"
+            )
+        if number_of_coins <= 0:
+            number_of_coins = required_count
+        elif number_of_coins != required_count:
+            raise ValueError(
+                "number_of_coins must match market ladder target+buffer when --size-base-units is set"
+            )
+        denomination_target = {
+            "size_base_units": int(entry.size_base_units),
+            "target_count": int(entry.target_count),
+            "split_buffer_count": int(entry.split_buffer_count),
+            "required_count": required_count,
+        }
+    if amount_per_coin <= 0:
+        raise ValueError("amount_per_coin must be positive")
+    if number_of_coins <= 0:
+        raise ValueError("number_of_coins must be positive")
+    if until_ready and no_wait:
+        raise ValueError("until-ready mode requires wait mode (do not pass --no-wait)")
+    if until_ready and denomination_target is None:
+        raise ValueError("until-ready mode requires --size-base-units")
+    if max_iterations <= 0:
+        raise ValueError("max_iterations must be positive")
     wallet = _new_cloud_wallet_adapter(program)
-    wallet_coins = wallet.list_coins(include_pending=True)
-    existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
-    # Operators usually copy coin hex names from `coins-list`; Cloud Wallet mutations
-    # require GraphQL coin global IDs, so resolve name -> id before mutation.
-    coin_identifier_to_global_id: dict[str, str] = {}
-    for coin in wallet_coins:
-        global_id = str(coin.get("id", "")).strip()
-        name = str(coin.get("name", "")).strip()
-        if global_id:
-            coin_identifier_to_global_id[global_id] = global_id
-        if name and global_id:
-            coin_identifier_to_global_id[name] = global_id
-    resolved_coin_ids: list[str] = []
+    try:
+        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
+    except Exception as exc:
+        print(
+            _format_json_output(
+                {
+                    "market_id": market.market_id,
+                    "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "venue": selected_venue,
+                    "vault_id": wallet.vault_id,
+                    "waited": False,
+                    "success": False,
+                    "error": f"fee_resolution_failed:{exc}",
+                    "operator_guidance": (
+                        "set GREENFLOOR_COINSET_ADVISED_FEE_MOJOS to an explicit integer fee "
+                        "or fix GREENFLOOR_COINSET_BASE_URL to a valid Coinset API endpoint"
+                    ),
+                }
+            )
+        )
+        return 2
+
+    operations: list[dict[str, object]] = []
+    final_readiness: dict[str, int | bool | str] | None = None
+    stop_reason = "single_pass"
     unresolved_coin_ids: list[str] = []
-    for raw_coin_id in coin_ids:
-        token = str(raw_coin_id).strip()
-        mapped = coin_identifier_to_global_id.get(token)
-        if mapped:
-            resolved_coin_ids.append(mapped)
-            continue
-        # Allow direct GraphQL IDs for power users.
-        if token.startswith("Coin_"):
-            resolved_coin_ids.append(token)
-            continue
-        unresolved_coin_ids.append(token)
+
+    for iteration in range(1, max_iterations + 1):
+        wallet_coins = wallet.list_coins(include_pending=True)
+        existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
+        # Operators usually copy coin hex names from `coins-list`; Cloud Wallet mutations
+        # require GraphQL coin global IDs, so resolve name -> id before mutation.
+        coin_identifier_to_global_id: dict[str, str] = {}
+        for coin in wallet_coins:
+            global_id = str(coin.get("id", "")).strip()
+            name = str(coin.get("name", "")).strip()
+            if global_id:
+                coin_identifier_to_global_id[global_id] = global_id
+            if name and global_id:
+                coin_identifier_to_global_id[name] = global_id
+        resolved_coin_ids: list[str] = []
+        unresolved_coin_ids = []
+        for raw_coin_id in coin_ids:
+            token = str(raw_coin_id).strip()
+            mapped = coin_identifier_to_global_id.get(token)
+            if mapped:
+                resolved_coin_ids.append(mapped)
+                continue
+            # Allow direct GraphQL IDs for power users.
+            if token.startswith("Coin_"):
+                resolved_coin_ids.append(token)
+                continue
+            unresolved_coin_ids.append(token)
+        if unresolved_coin_ids:
+            break
+
+        split_result = wallet.split_coins(
+            coin_ids=resolved_coin_ids,
+            amount_per_coin=amount_per_coin,
+            number_of_coins=number_of_coins,
+            fee=fee_mojos,
+        )
+        signature_request_id = split_result["signature_request_id"]
+        if not signature_request_id:
+            raise RuntimeError("coin_split_failed:missing_signature_request_id")
+
+        wait_events: list[dict[str, str]] = []
+        final_signature_state = split_result.get("status", "UNKNOWN")
+        if not no_wait:
+            final_signature_state, signature_events = _poll_signature_request_until_not_unsigned(
+                wallet=wallet,
+                signature_request_id=signature_request_id,
+                timeout_seconds=15 * 60,
+                warning_interval_seconds=10 * 60,
+            )
+            wait_events.extend(signature_events)
+            wait_events.extend(
+                _wait_for_mempool_then_confirmation(
+                    wallet=wallet,
+                    initial_coin_ids=existing_coin_ids,
+                    mempool_warning_seconds=5 * 60,
+                    confirmation_warning_seconds=15 * 60,
+                )
+            )
+
+        iteration_payload: dict[str, object] = {
+            "iteration": iteration,
+            "signature_request_id": signature_request_id,
+            "signature_state": final_signature_state,
+            "waited": not no_wait,
+            "wait_events": wait_events,
+        }
+        if denomination_target is not None:
+            final_readiness = _evaluate_denomination_readiness(
+                wallet=wallet,
+                asset_id=str(market.base_asset),
+                size_base_units=int(denomination_target["size_base_units"]),
+                required_min_count=int(denomination_target["required_count"]),
+            )
+            iteration_payload["denomination_readiness"] = final_readiness
+        operations.append(iteration_payload)
+
+        if not until_ready or final_readiness is None or bool(final_readiness["ready"]):
+            stop_reason = "ready" if until_ready and final_readiness is not None else "single_pass"
+            break
+        if coin_ids:
+            stop_reason = "requires_new_coin_selection"
+            break
+        if iteration == max_iterations:
+            stop_reason = "max_iterations_reached"
+            break
+
     if unresolved_coin_ids:
         print(
             _format_json_output(
                 {
                     "market_id": market.market_id,
                     "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "venue": selected_venue,
                     "vault_id": wallet.vault_id,
                     "waited": False,
                     "success": False,
@@ -953,69 +1192,41 @@ def _coin_split(
             )
         )
         return 2
-    try:
-        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
-    except Exception as exc:
-        print(
-            _format_json_output(
-                {
-                    "market_id": market.market_id,
-                    "pair": f"{market.base_symbol}:{market.quote_asset}",
-                    "vault_id": wallet.vault_id,
-                    "waited": False,
-                    "success": False,
-                    "error": f"fee_resolution_failed:{exc}",
-                    "operator_guidance": (
-                        "set GREENFLOOR_COINSET_ADVISED_FEE_MOJOS to an explicit integer fee "
-                        "or fix GREENFLOOR_COINSET_BASE_URL to a valid Coinset API endpoint"
-                    ),
-                }
-            )
-        )
-        return 2
-    split_result = wallet.split_coins(
-        coin_ids=resolved_coin_ids,
-        amount_per_coin=amount_per_coin,
-        number_of_coins=number_of_coins,
-        fee=fee_mojos,
-    )
-    signature_request_id = split_result["signature_request_id"]
-    if not signature_request_id:
-        raise RuntimeError("coin_split_failed:missing_signature_request_id")
-
-    wait_events: list[dict[str, str]] = []
-    final_signature_state = split_result.get("status", "UNKNOWN")
-    if not no_wait:
-        final_signature_state, signature_events = _poll_signature_request_until_not_unsigned(
-            wallet=wallet,
-            signature_request_id=signature_request_id,
-            timeout_seconds=15 * 60,
-            warning_interval_seconds=10 * 60,
-        )
-        wait_events.extend(signature_events)
-        wait_events.extend(
-            _wait_for_mempool_then_confirmation(
-                wallet=wallet,
-                initial_coin_ids=existing_coin_ids,
-                mempool_warning_seconds=5 * 60,
-                confirmation_warning_seconds=15 * 60,
-            )
-        )
     print(
         _format_json_output(
             {
                 "market_id": market.market_id,
                 "pair": f"{market.base_symbol}:{market.quote_asset}",
+                "venue": selected_venue,
                 "vault_id": wallet.vault_id,
-                "signature_request_id": signature_request_id,
-                "signature_state": final_signature_state,
-                "waited": not no_wait,
-                "wait_events": wait_events,
+                "amount_per_coin": amount_per_coin,
+                "number_of_coins": number_of_coins,
+                "coin_selection_mode": "explicit" if coin_ids else "adapter_auto_select",
+                "denomination_target": denomination_target,
+                "until_ready": until_ready,
+                "max_iterations": max_iterations,
+                "stop_reason": stop_reason,
+                "denomination_readiness": final_readiness,
+                "operations": operations,
+                "signature_request_id": (
+                    str(operations[-1].get("signature_request_id", "")) if operations else ""
+                ),
+                "signature_state": (
+                    str(operations[-1].get("signature_state", "UNKNOWN"))
+                    if operations
+                    else "UNKNOWN"
+                ),
+                "waited": bool(operations[-1].get("waited", False)) if operations else False,
+                "wait_events": (
+                    _as_wait_events(operations[-1].get("wait_events", [])) if operations else []
+                ),
                 "fee_mojos": fee_mojos,
                 "fee_source": fee_source,
             }
         )
     )
+    if until_ready and final_readiness is not None and not bool(final_readiness["ready"]):
+        return 2
     return 0
 
 
@@ -1030,10 +1241,13 @@ def _coin_combine(
     asset_id: str | None,
     coin_ids: list[str],
     no_wait: bool,
+    venue: str | None = None,
+    size_base_units: int | None = None,
+    until_ready: bool = False,
+    max_iterations: int = 3,
 ) -> int:
-    if number_of_coins <= 1:
-        raise ValueError("number_of_coins must be > 1")
     program = load_program_config(program_path)
+    selected_venue = _resolve_venue_for_coin_prep(venue_override=venue)
     markets = load_markets_config(markets_path)
     market = _resolve_market_for_build(
         markets,
@@ -1041,55 +1255,36 @@ def _coin_combine(
         pair=pair,
         network=network,
     )
-    wallet = _new_cloud_wallet_adapter(program)
-    wallet_coins = wallet.list_coins(include_pending=True)
-    existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
-    resolved_input_coin_ids: list[str] | None = None
-    if coin_ids:
-        coin_identifier_to_global_id: dict[str, str] = {}
-        for coin in wallet_coins:
-            global_id = str(coin.get("id", "")).strip()
-            name = str(coin.get("name", "")).strip()
-            if global_id:
-                coin_identifier_to_global_id[global_id] = global_id
-            if name and global_id:
-                coin_identifier_to_global_id[name] = global_id
-        resolved_coin_ids: list[str] = []
-        unresolved_coin_ids: list[str] = []
-        for raw_coin_id in coin_ids:
-            token = str(raw_coin_id).strip()
-            mapped = coin_identifier_to_global_id.get(token)
-            if mapped:
-                resolved_coin_ids.append(mapped)
-                continue
-            if token.startswith("Coin_"):
-                resolved_coin_ids.append(token)
-                continue
-            unresolved_coin_ids.append(token)
-        if unresolved_coin_ids:
-            print(
-                _format_json_output(
-                    {
-                        "market_id": market.market_id,
-                        "pair": f"{market.base_symbol}:{market.quote_asset}",
-                        "vault_id": wallet.vault_id,
-                        "waited": False,
-                        "success": False,
-                        "error": "coin_id_resolution_failed",
-                        "unknown_coin_ids": unresolved_coin_ids,
-                        "operator_guidance": (
-                            "run greenfloor-manager coins-list and pass coin_id values from output; "
-                            "manager accepts hex coin names and resolves them to Cloud Wallet Coin_* ids"
-                        ),
-                    }
-                )
-            )
-            return 2
-        if number_of_coins != len(resolved_coin_ids):
+    denomination_target = None
+    if size_base_units is not None and int(size_base_units) > 0:
+        entry = _resolve_market_denomination_entry(market, size_base_units=int(size_base_units))
+        threshold = max(
+            2,
+            int(math.ceil(int(entry.target_count) * float(entry.combine_when_excess_factor))),
+        )
+        if number_of_coins <= 0:
+            number_of_coins = threshold
+        elif number_of_coins != threshold:
             raise ValueError(
-                "when --coin-id is provided, --number-of-coins must match the number of --coin-id values"
+                "number_of_coins must match market ladder combine threshold when --size-base-units is set"
             )
-        resolved_input_coin_ids = resolved_coin_ids
+        if not asset_id:
+            asset_id = str(market.base_asset).strip()
+        denomination_target = {
+            "size_base_units": int(entry.size_base_units),
+            "target_count": int(entry.target_count),
+            "combine_when_excess_factor": float(entry.combine_when_excess_factor),
+            "combine_threshold_count": threshold,
+        }
+    if number_of_coins <= 1:
+        raise ValueError("number_of_coins must be > 1")
+    if until_ready and no_wait:
+        raise ValueError("until-ready mode requires wait mode (do not pass --no-wait)")
+    if until_ready and denomination_target is None:
+        raise ValueError("until-ready mode requires --size-base-units")
+    if max_iterations <= 0:
+        raise ValueError("max_iterations must be positive")
+    wallet = _new_cloud_wallet_adapter(program)
     try:
         fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
     except Exception as exc:
@@ -1098,6 +1293,7 @@ def _coin_combine(
                 {
                     "market_id": market.market_id,
                     "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "venue": selected_venue,
                     "vault_id": wallet.vault_id,
                     "waited": False,
                     "success": False,
@@ -1110,50 +1306,156 @@ def _coin_combine(
             )
         )
         return 2
-    combine_result = wallet.combine_coins(
-        number_of_coins=number_of_coins,
-        fee=fee_mojos,
-        asset_id=asset_id,
-        largest_first=True,
-        input_coin_ids=resolved_input_coin_ids,
-    )
-    signature_request_id = combine_result["signature_request_id"]
-    if not signature_request_id:
-        raise RuntimeError("coin_combine_failed:missing_signature_request_id")
+    operations: list[dict[str, object]] = []
+    final_readiness: dict[str, int | bool | str] | None = None
+    stop_reason = "single_pass"
+    unresolved_coin_ids: list[str] = []
 
-    wait_events: list[dict[str, str]] = []
-    final_signature_state = combine_result.get("status", "UNKNOWN")
-    if not no_wait:
-        final_signature_state, signature_events = _poll_signature_request_until_not_unsigned(
-            wallet=wallet,
-            signature_request_id=signature_request_id,
-            timeout_seconds=15 * 60,
-            warning_interval_seconds=10 * 60,
+    for iteration in range(1, max_iterations + 1):
+        wallet_coins = wallet.list_coins(include_pending=True)
+        existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
+        resolved_input_coin_ids: list[str] | None = None
+        if coin_ids:
+            coin_identifier_to_global_id: dict[str, str] = {}
+            for coin in wallet_coins:
+                global_id = str(coin.get("id", "")).strip()
+                name = str(coin.get("name", "")).strip()
+                if global_id:
+                    coin_identifier_to_global_id[global_id] = global_id
+                if name and global_id:
+                    coin_identifier_to_global_id[name] = global_id
+            resolved_coin_ids: list[str] = []
+            unresolved_coin_ids = []
+            for raw_coin_id in coin_ids:
+                token = str(raw_coin_id).strip()
+                mapped = coin_identifier_to_global_id.get(token)
+                if mapped:
+                    resolved_coin_ids.append(mapped)
+                    continue
+                if token.startswith("Coin_"):
+                    resolved_coin_ids.append(token)
+                    continue
+                unresolved_coin_ids.append(token)
+            if unresolved_coin_ids:
+                break
+            if number_of_coins != len(resolved_coin_ids):
+                raise ValueError(
+                    "when --coin-id is provided, --number-of-coins must match the number of --coin-id values"
+                )
+            resolved_input_coin_ids = resolved_coin_ids
+
+        combine_result = wallet.combine_coins(
+            number_of_coins=number_of_coins,
+            fee=fee_mojos,
+            asset_id=asset_id,
+            largest_first=True,
+            input_coin_ids=resolved_input_coin_ids,
         )
-        wait_events.extend(signature_events)
-        wait_events.extend(
-            _wait_for_mempool_then_confirmation(
+        signature_request_id = combine_result["signature_request_id"]
+        if not signature_request_id:
+            raise RuntimeError("coin_combine_failed:missing_signature_request_id")
+
+        wait_events: list[dict[str, str]] = []
+        final_signature_state = combine_result.get("status", "UNKNOWN")
+        if not no_wait:
+            final_signature_state, signature_events = _poll_signature_request_until_not_unsigned(
                 wallet=wallet,
-                initial_coin_ids=existing_coin_ids,
-                mempool_warning_seconds=5 * 60,
-                confirmation_warning_seconds=15 * 60,
+                signature_request_id=signature_request_id,
+                timeout_seconds=15 * 60,
+                warning_interval_seconds=10 * 60,
+            )
+            wait_events.extend(signature_events)
+            wait_events.extend(
+                _wait_for_mempool_then_confirmation(
+                    wallet=wallet,
+                    initial_coin_ids=existing_coin_ids,
+                    mempool_warning_seconds=5 * 60,
+                    confirmation_warning_seconds=15 * 60,
+                )
+            )
+
+        iteration_payload: dict[str, object] = {
+            "iteration": iteration,
+            "signature_request_id": signature_request_id,
+            "signature_state": final_signature_state,
+            "waited": not no_wait,
+            "wait_events": wait_events,
+        }
+        if denomination_target is not None:
+            final_readiness = _evaluate_denomination_readiness(
+                wallet=wallet,
+                asset_id=str(asset_id or market.base_asset),
+                size_base_units=int(denomination_target["size_base_units"]),
+                max_allowed_count=int(denomination_target["combine_threshold_count"]),
+            )
+            iteration_payload["denomination_readiness"] = final_readiness
+        operations.append(iteration_payload)
+
+        if not until_ready or final_readiness is None or bool(final_readiness["ready"]):
+            stop_reason = "ready" if until_ready and final_readiness is not None else "single_pass"
+            break
+        if coin_ids:
+            stop_reason = "requires_new_coin_selection"
+            break
+        if iteration == max_iterations:
+            stop_reason = "max_iterations_reached"
+            break
+
+    if unresolved_coin_ids:
+        print(
+            _format_json_output(
+                {
+                    "market_id": market.market_id,
+                    "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "venue": selected_venue,
+                    "vault_id": wallet.vault_id,
+                    "waited": False,
+                    "success": False,
+                    "error": "coin_id_resolution_failed",
+                    "unknown_coin_ids": unresolved_coin_ids,
+                    "operator_guidance": (
+                        "run greenfloor-manager coins-list and pass coin_id values from output; "
+                        "manager accepts hex coin names and resolves them to Cloud Wallet Coin_* ids"
+                    ),
+                }
             )
         )
+        return 2
     print(
         _format_json_output(
             {
                 "market_id": market.market_id,
                 "pair": f"{market.base_symbol}:{market.quote_asset}",
+                "venue": selected_venue,
                 "vault_id": wallet.vault_id,
-                "signature_request_id": signature_request_id,
-                "signature_state": final_signature_state,
-                "waited": not no_wait,
-                "wait_events": wait_events,
+                "asset_id": asset_id,
+                "number_of_coins": number_of_coins,
+                "coin_selection_mode": "explicit" if coin_ids else "adapter_auto_select",
+                "denomination_target": denomination_target,
+                "until_ready": until_ready,
+                "max_iterations": max_iterations,
+                "stop_reason": stop_reason,
+                "denomination_readiness": final_readiness,
+                "operations": operations,
+                "signature_request_id": (
+                    str(operations[-1].get("signature_request_id", "")) if operations else ""
+                ),
+                "signature_state": (
+                    str(operations[-1].get("signature_state", "UNKNOWN"))
+                    if operations
+                    else "UNKNOWN"
+                ),
+                "waited": bool(operations[-1].get("waited", False)) if operations else False,
+                "wait_events": (
+                    _as_wait_events(operations[-1].get("wait_events", [])) if operations else []
+                ),
                 "fee_mojos": fee_mojos,
                 "fee_source": fee_source,
             }
         )
     )
+    if until_ready and final_readiness is not None and not bool(final_readiness["ready"]):
+        return 2
     return 0
 
 
@@ -1586,8 +1888,12 @@ def main() -> None:
         "--network", default="mainnet", choices=["mainnet", "testnet", "testnet11"]
     )
     p_coin_split.add_argument("--coin-id", action="append", default=[])
-    p_coin_split.add_argument("--amount-per-coin", required=True, type=int)
-    p_coin_split.add_argument("--number-of-coins", required=True, type=int)
+    p_coin_split.add_argument("--amount-per-coin", default=0, type=int)
+    p_coin_split.add_argument("--number-of-coins", default=0, type=int)
+    p_coin_split.add_argument("--size-base-units", default=0, type=int)
+    p_coin_split.add_argument("--venue", choices=["dexie", "splash"], default=None)
+    p_coin_split.add_argument("--until-ready", action="store_true")
+    p_coin_split.add_argument("--max-iterations", default=3, type=int)
     p_coin_split.add_argument("--no-wait", action="store_true")
 
     p_coin_combine = sub.add_parser("coin-combine")
@@ -1597,9 +1903,13 @@ def main() -> None:
     p_coin_combine.add_argument(
         "--network", default="mainnet", choices=["mainnet", "testnet", "testnet11"]
     )
-    p_coin_combine.add_argument("--number-of-coins", required=True, type=int)
+    p_coin_combine.add_argument("--number-of-coins", default=0, type=int)
     p_coin_combine.add_argument("--asset-id", default="")
     p_coin_combine.add_argument("--coin-id", action="append", default=[])
+    p_coin_combine.add_argument("--size-base-units", default=0, type=int)
+    p_coin_combine.add_argument("--venue", choices=["dexie", "splash"], default=None)
+    p_coin_combine.add_argument("--until-ready", action="store_true")
+    p_coin_combine.add_argument("--max-iterations", default=3, type=int)
     p_coin_combine.add_argument("--no-wait", action="store_true")
 
     args = parser.parse_args()
@@ -1685,6 +1995,10 @@ def main() -> None:
             amount_per_coin=int(args.amount_per_coin),
             number_of_coins=int(args.number_of_coins),
             no_wait=bool(args.no_wait),
+            venue=args.venue,
+            size_base_units=int(args.size_base_units) or None,
+            until_ready=bool(args.until_ready),
+            max_iterations=int(args.max_iterations),
         )
     elif args.command == "coin-combine":
         code = _coin_combine(
@@ -1697,6 +2011,10 @@ def main() -> None:
             asset_id=args.asset_id or None,
             coin_ids=[str(value) for value in args.coin_id],
             no_wait=bool(args.no_wait),
+            venue=args.venue,
+            size_base_units=int(args.size_base_units) or None,
+            until_ready=bool(args.until_ready),
+            max_iterations=int(args.max_iterations),
         )
     else:
         raise ValueError(f"unsupported command: {args.command}")
