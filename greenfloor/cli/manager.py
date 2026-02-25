@@ -905,7 +905,26 @@ def _coin_split(
     existing_coin_ids = {
         str(c.get("id", "")).strip() for c in wallet.list_coins(include_pending=True)
     }
-    fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
+    try:
+        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "market_id": market.market_id,
+                    "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "vault_id": wallet.vault_id,
+                    "waited": False,
+                    "success": False,
+                    "error": f"fee_resolution_failed:{exc}",
+                    "operator_guidance": (
+                        "set GREENFLOOR_COINSET_ADVISED_FEE_MOJOS to an explicit integer fee "
+                        "or fix GREENFLOOR_COINSET_BASE_URL to a valid Coinset API endpoint"
+                    ),
+                }
+            )
+        )
+        return 2
     split_result = wallet.split_coins(
         coin_ids=coin_ids,
         amount_per_coin=amount_per_coin,
@@ -977,7 +996,26 @@ def _coin_combine(
     existing_coin_ids = {
         str(c.get("id", "")).strip() for c in wallet.list_coins(include_pending=True)
     }
-    fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
+    try:
+        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(network=network)
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "market_id": market.market_id,
+                    "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "vault_id": wallet.vault_id,
+                    "waited": False,
+                    "success": False,
+                    "error": f"fee_resolution_failed:{exc}",
+                    "operator_guidance": (
+                        "set GREENFLOOR_COINSET_ADVISED_FEE_MOJOS to an explicit integer fee "
+                        "or fix GREENFLOOR_COINSET_BASE_URL to a valid Coinset API endpoint"
+                    ),
+                }
+            )
+        )
+        return 2
     combine_result = wallet.combine_coins(
         number_of_coins=number_of_coins,
         fee=fee_mojos,
