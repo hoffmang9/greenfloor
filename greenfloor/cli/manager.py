@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import collections.abc
 import datetime as dt
 import importlib
 import json
@@ -11,6 +12,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -358,8 +360,8 @@ def _safe_int(value: object) -> int | None:
 def _call_with_moderate_retry(
     *,
     action: str,
-    call,
-    elapsed_seconds: int,
+    call: collections.abc.Callable[[], Any],
+    elapsed_seconds: int = 0,
     events: list[dict[str, str]] | None = None,
     max_attempts: int = 4,
 ):
@@ -387,8 +389,13 @@ def _call_with_moderate_retry(
             sleep_seconds = min(8.0, sleep_seconds * 2.0)
 
 
-def _coinset_coin_url(*, coin_name: str) -> str:
-    return f"https://coinset.org/coin/{coin_name.strip()}"
+def _coinset_coin_url(*, coin_name: str, network: str = "mainnet") -> str:
+    base = (
+        "https://testnet11.coinset.org"
+        if network.strip().lower() in {"testnet", "testnet11"}
+        else "https://coinset.org"
+    )
+    return f"{base}/coin/{coin_name.strip()}"
 
 
 def _coinset_reconcile_coin_state(*, network: str, coin_name: str) -> dict[str, str]:
@@ -397,7 +404,6 @@ def _coinset_reconcile_coin_state(*, network: str, coin_name: str) -> dict[str, 
         record = _call_with_moderate_retry(
             action="coinset_get_coin_record_by_name",
             call=lambda: adapter.get_coin_record_by_name(coin_name_hex=coin_name),
-            elapsed_seconds=0,
         )
     except Exception as exc:
         return {"reconcile": "error", "error": str(exc)}
@@ -418,7 +424,6 @@ def _coinset_peak_height(*, network: str) -> int | None:
     state = _call_with_moderate_retry(
         action="coinset_get_blockchain_state",
         call=adapter.get_blockchain_state,
-        elapsed_seconds=0,
     )
     if not isinstance(state, dict):
         return None
@@ -442,6 +447,7 @@ def _watch_reorg_risk_with_coinset(
     confirmed_block_index: int,
     additional_blocks: int,
     warning_interval_seconds: int,
+    timeout_seconds: int = 60 * 60,
 ) -> list[dict[str, str]]:
     events: list[dict[str, str]] = []
     target_height = int(confirmed_block_index) + int(additional_blocks)
@@ -474,6 +480,17 @@ def _watch_reorg_risk_with_coinset(
                     "event": "reorg_watch_complete",
                     "peak_height": str(peak_height),
                     "target_height": str(target_height),
+                    "elapsed_seconds": str(elapsed),
+                }
+            )
+            return events
+        if elapsed >= timeout_seconds:
+            events.append(
+                {
+                    "event": "reorg_watch_timeout",
+                    "peak_height": str(peak_height),
+                    "target_height": str(target_height),
+                    "remaining_blocks": str(remaining),
                     "elapsed_seconds": str(elapsed),
                 }
             )
@@ -671,7 +688,7 @@ def _wait_for_mempool_then_confirmation(
             seen_pending = True
             sample = str(pending[0].get("name", pending[0].get("id", ""))).strip()
             sample_id = str(pending[0].get("id", "")).strip()
-            coinset_url = _coinset_coin_url(coin_name=sample)
+            coinset_url = _coinset_coin_url(coin_name=sample, network=network)
             reconcile = _coinset_reconcile_coin_state(network=network, coin_name=sample)
             events.append(
                 {
@@ -698,7 +715,7 @@ def _wait_for_mempool_then_confirmation(
                 {
                     "event": "confirmed",
                     "coin_name": sample_confirmed,
-                    "coinset_url": _coinset_coin_url(coin_name=sample_confirmed),
+                    "coinset_url": _coinset_coin_url(coin_name=sample_confirmed, network=network),
                     "elapsed_seconds": str(elapsed),
                     "wait_reason": "waiting_for_confirmation",
                     **confirmation_reconcile,
@@ -2212,7 +2229,7 @@ def _offers_reconcile(
                     next_state = current_state
                     reason = f"dexie_lookup_error:{exc}"
                 changed_flag = next_state != current_state
-            if status in {0, 1, 2, 4, 5}:
+            if status in {4, 5}:
                 taker_diagnostic = "dexie_status_pattern"
             taker_states = {
                 OfferLifecycleState.MEMPOOL_OBSERVED.value,

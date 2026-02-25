@@ -169,9 +169,7 @@ class CoinsetAdapter:
         blockchain_state = payload.get("blockchain_state")
         if isinstance(blockchain_state, dict):
             return blockchain_state
-        if isinstance(payload, dict):
-            return payload
-        return None
+        return payload
 
 
 def build_webhook_callback_url(listen_addr: str, path: str = "/coinset/tx-block") -> str:

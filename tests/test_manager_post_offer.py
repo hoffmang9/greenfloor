@@ -2223,6 +2223,30 @@ def test_watch_reorg_risk_waits_until_additional_blocks(monkeypatch) -> None:
     assert events[-1]["event"] == "reorg_watch_complete"
 
 
+def test_watch_reorg_risk_times_out_when_chain_stalls(monkeypatch) -> None:
+    import time as time_module
+
+    from greenfloor.cli.manager import _watch_reorg_risk_with_coinset
+
+    elapsed_seq = iter([0.0, 0.0, 61.0])
+    monkeypatch.setattr(time_module, "sleep", lambda _: None)
+    monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._coinset_peak_height", lambda **kwargs: 100
+    )
+
+    events = _watch_reorg_risk_with_coinset(
+        network="mainnet",
+        confirmed_block_index=100,
+        additional_blocks=6,
+        warning_interval_seconds=300,
+        timeout_seconds=60,
+    )
+    assert events[0]["event"] == "reorg_watch_started"
+    assert events[-1]["event"] == "reorg_watch_timeout"
+    assert events[-1]["remaining_blocks"] == "6"
+
+
 # ---------------------------------------------------------------------------
 # _build_and_post_offer cloud wallet dispatch gate
 # ---------------------------------------------------------------------------
