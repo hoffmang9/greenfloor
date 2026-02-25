@@ -127,10 +127,6 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: .venv/bin/python -m pip install ./.cache/wheelhouse/chia-wallet-sdk/*.whl
 
-      - name: Pytest (greenfloor-native integration on Ubuntu)
+      - name: Pytest (greenfloor-native + chia-wallet-sdk offer round-trip on Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: GREENFLOOR_RUN_NATIVE_INTEGRATION_TESTS=1 pytest -vv -s tests/test_greenfloor_native_integration.py
-
-      - name: Pytest (chia-wallet-sdk simulator harness on Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: GREENFLOOR_RUN_SDK_SIM_TESTS_FULL=1 pytest -vv -s tests/test_chia_wallet_sdk_simulator_harness.py
