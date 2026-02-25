@@ -6,6 +6,7 @@ import importlib
 import json
 import math
 import os
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -189,14 +190,26 @@ def _poll_signature_request_until_not_unsigned(
     events: list[dict[str, str]] = []
     start = time.monotonic()
     next_warning = warning_interval_seconds
+    next_heartbeat = 5
     sleep_seconds = 2.0
     while True:
         status_payload = wallet.get_signature_request(signature_request_id=signature_request_id)
         status = str(status_payload.get("status", "")).strip().upper()
         if status and status != "UNSIGNED":
+            # Keep terminal output readable when heartbeat dots were emitted.
+            if next_heartbeat > 5:
+                print("", file=sys.stderr, flush=True)
+            print(
+                f"signature submitted: {signature_request_id} status={status}",
+                file=sys.stderr,
+                flush=True,
+            )
             return status, events
 
         elapsed = int(time.monotonic() - start)
+        if elapsed >= next_heartbeat:
+            print(".", end="", file=sys.stderr, flush=True)
+            next_heartbeat += 5
         if elapsed >= timeout_seconds:
             raise RuntimeError("signature_request_timeout_waiting_for_signature")
         if elapsed >= next_warning:
@@ -222,6 +235,7 @@ def _wait_for_mempool_then_confirmation(
     events: list[dict[str, str]] = []
     start = time.monotonic()
     seen_pending = False
+    next_heartbeat = 5
     sleep_seconds = 2.0
     while True:
         coins = wallet.list_coins(include_pending=True)
@@ -241,16 +255,26 @@ def _wait_for_mempool_then_confirmation(
         if pending and not seen_pending:
             seen_pending = True
             sample = str(pending[0].get("name", pending[0].get("id", ""))).strip()
+            coinset_url = f"https://coinset.org/coin/{sample}"
             events.append(
                 {
                     "event": "in_mempool",
-                    "coinset_url": f"https://coinset.org/coin/{sample}",
+                    "coinset_url": coinset_url,
                     "elapsed_seconds": str(elapsed),
                 }
             )
+            # Keep terminal output readable when heartbeat dots were emitted.
+            if next_heartbeat > 5:
+                print("", file=sys.stderr, flush=True)
+            print(f"in mempool: {coinset_url}", file=sys.stderr, flush=True)
         if confirmed:
+            if next_heartbeat > 5:
+                print("", file=sys.stderr, flush=True)
             return events
 
+        if elapsed >= next_heartbeat:
+            print(".", end="", file=sys.stderr, flush=True)
+            next_heartbeat += 5
         if not seen_pending and elapsed >= mempool_warning_seconds:
             events.append(
                 {

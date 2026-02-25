@@ -1,4 +1,5 @@
 ---
+exclude: ^old/
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.10
@@ -26,6 +27,7 @@ repos:
         entry: pyright
         language: system
         types: [python]
+        pass_filenames: false
 
       - id: pytest
         name: pytest
