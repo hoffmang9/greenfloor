@@ -1,5 +1,24 @@
 # Progress Log
 
+## 2026-02-25 (H1 coinset fee preflight diagnostics closure)
+
+- Closed plan item H1 in `greenfloor/cli/manager.py` for coin-op fee lookup hardening:
+  - Added deterministic Coinset fee preflight (`_coinset_fee_lookup_preflight`) before taker/coin-op fee resolution.
+  - Preflight validates endpoint/network routing and usable fee-advice response before `coin-split` / `coin-combine` submission.
+  - Added explicit failure classification via structured error contracts:
+    - `coinset_fee_preflight_failed:endpoint_validation_failed`
+    - `coinset_fee_preflight_failed:temporary_fee_advice_unavailable`
+  - Failure payloads now include `coinset_fee_lookup` diagnostics (`coinset_base_url`, `coinset_network`, failure detail).
+- Added deterministic tests in `tests/test_manager_post_offer.py`:
+  - resolver preflight failure classification tests,
+  - coin-op JSON failure contract tests for both endpoint-validation and temporary-advice-unavailable paths.
+- Updated operator docs:
+  - `docs/runbook.md` now documents fee-preflight behavior, endpoint override/debug steps, and expected JSON failure contracts.
+  - `docs/plan.md` marks H1 complete.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_manager_post_offer.py` -> `79 passed`
+  - `PATH="/Users/hoffmang/src/greenfloor/.venv/bin:$PATH" .venv/bin/pre-commit run --all-files` -> all hooks passed (`ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`)
+
 ## 2026-02-25 (step 4 monitoring, reliability, tests, runbooks)
 
 - Implemented Step 4 monitoring/reliability hardening in `greenfloor/cli/manager.py`:

@@ -128,6 +128,20 @@ def _format_json_output(payload: object) -> str:
     return json.dumps(payload, indent=2)
 
 
+class _CoinsetFeeLookupPreflightError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        failure_kind: str,
+        detail: str,
+        diagnostics: dict[str, str],
+    ) -> None:
+        self.failure_kind = failure_kind
+        self.detail = detail
+        self.diagnostics = diagnostics
+        super().__init__(f"{failure_kind}:{detail}")
+
+
 def _require_cloud_wallet_config(program) -> CloudWalletConfig:
     if not program.cloud_wallet_base_url:
         raise ValueError("cloud_wallet.base_url is required")
@@ -536,6 +550,87 @@ def _poll_offer_artifact_until_available(
         sleep_seconds = min(20.0, sleep_seconds * 1.5)
 
 
+def _coinset_base_url(*, network: str) -> str:
+    base = os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip()
+    if not base:
+        return ""
+    network_l = network.strip().lower()
+    if network_l in {"testnet", "testnet11"}:
+        allow_mainnet = os.getenv("GREENFLOOR_ALLOW_MAINNET_COINSET_FOR_TESTNET11", "").strip()
+        if (
+            "coinset.org" in base
+            and "testnet11.api.coinset.org" not in base
+            and allow_mainnet != "1"
+        ):
+            raise RuntimeError("coinset_base_url_mainnet_not_allowed_for_testnet11")
+    return base
+
+
+def _coinset_adapter(*, network: str) -> CoinsetAdapter:
+    base_url = _coinset_base_url(network=network)
+    require_testnet11 = network.strip().lower() in {"testnet", "testnet11"}
+    try:
+        return CoinsetAdapter(
+            base_url or None, network=network, require_testnet11=require_testnet11
+        )
+    except TypeError as exc:
+        # Test doubles in deterministic unit tests may not accept the newer kwarg.
+        if "require_testnet11" not in str(exc):
+            raise
+        return CoinsetAdapter(base_url or None, network=network)
+
+
+def _coinset_fee_lookup_preflight(*, network: str) -> dict[str, str]:
+    try:
+        coinset = _coinset_adapter(network=network)
+    except Exception as exc:
+        raise _CoinsetFeeLookupPreflightError(
+            failure_kind="endpoint_validation_failed",
+            detail=str(exc),
+            diagnostics={
+                "coinset_network": network.strip().lower(),
+                "coinset_base_url": os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip(),
+            },
+        ) from exc
+    diagnostics = {
+        "coinset_network": str(getattr(coinset, "network", network.strip().lower())),
+        "coinset_base_url": str(
+            getattr(coinset, "base_url", os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip())
+        ),
+    }
+    try:
+        payload = coinset.get_fee_estimate(target_times=[300, 600, 1200])
+    except Exception as exc:
+        raise _CoinsetFeeLookupPreflightError(
+            failure_kind="endpoint_validation_failed",
+            detail=str(exc),
+            diagnostics=diagnostics,
+        ) from exc
+
+    if not bool(payload.get("success", False)):
+        detail = str(
+            payload.get("error")
+            or payload.get("message")
+            or payload.get("reason")
+            or "coinset_fee_estimate_unsuccessful"
+        )
+        raise _CoinsetFeeLookupPreflightError(
+            failure_kind="temporary_fee_advice_unavailable",
+            detail=detail,
+            diagnostics=diagnostics,
+        )
+
+    recommended = coinset.get_conservative_fee_estimate()
+    if recommended is None:
+        raise _CoinsetFeeLookupPreflightError(
+            failure_kind="temporary_fee_advice_unavailable",
+            detail="coinset_conservative_fee_unavailable",
+            diagnostics=diagnostics,
+        )
+    diagnostics["recommended_fee_mojos"] = str(int(recommended))
+    return diagnostics
+
+
 def _resolve_operation_fee(
     *,
     role: str,
@@ -551,7 +646,7 @@ def _resolve_operation_fee(
 
     minimum_fee = int(minimum_fee_mojos)
     max_attempts = int(os.getenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "4"))
-    coinset = CoinsetAdapter(None, network=network)
+    coinset = _coinset_adapter(network=network)
     for attempt in range(max_attempts):
         advised = None
         try:
@@ -573,6 +668,7 @@ def _resolve_operation_fee(
 def _resolve_taker_or_coin_operation_fee(
     *, network: str, minimum_fee_mojos: int = 0
 ) -> tuple[int, str]:
+    _coinset_fee_lookup_preflight(network=network)
     return _resolve_operation_fee(
         role="taker_or_coin_operation",
         network=network,
@@ -1608,6 +1704,34 @@ def _coin_split(
             network=network,
             minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
         )
+    except _CoinsetFeeLookupPreflightError as exc:
+        operator_guidance = (
+            "verify Coinset endpoint routing: unset GREENFLOOR_COINSET_BASE_URL to use "
+            "network defaults, or set it to a valid endpoint for the active network"
+            if exc.failure_kind == "endpoint_validation_failed"
+            else "coinset fee advice is temporarily unavailable; retry shortly and verify Coinset fee endpoint health before resubmitting"
+        )
+        print(
+            _format_json_output(
+                {
+                    "market_id": market.market_id,
+                    "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "venue": selected_venue,
+                    "vault_id": wallet.vault_id,
+                    "waited": False,
+                    "success": False,
+                    "error": f"coinset_fee_preflight_failed:{exc.failure_kind}",
+                    "coinset_fee_lookup": {
+                        "status": "failed",
+                        "failure_kind": exc.failure_kind,
+                        "detail": exc.detail,
+                        **exc.diagnostics,
+                    },
+                    "operator_guidance": operator_guidance,
+                }
+            )
+        )
+        return 2
     except Exception as exc:
         print(
             _format_json_output(
@@ -1815,6 +1939,34 @@ def _coin_combine(
             network=network,
             minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
         )
+    except _CoinsetFeeLookupPreflightError as exc:
+        operator_guidance = (
+            "verify Coinset endpoint routing: unset GREENFLOOR_COINSET_BASE_URL to use "
+            "network defaults, or set it to a valid endpoint for the active network"
+            if exc.failure_kind == "endpoint_validation_failed"
+            else "coinset fee advice is temporarily unavailable; retry shortly and verify Coinset fee endpoint health before resubmitting"
+        )
+        print(
+            _format_json_output(
+                {
+                    "market_id": market.market_id,
+                    "pair": f"{market.base_symbol}:{market.quote_asset}",
+                    "venue": selected_venue,
+                    "vault_id": wallet.vault_id,
+                    "waited": False,
+                    "success": False,
+                    "error": f"coinset_fee_preflight_failed:{exc.failure_kind}",
+                    "coinset_fee_lookup": {
+                        "status": "failed",
+                        "failure_kind": exc.failure_kind,
+                        "detail": exc.detail,
+                        **exc.diagnostics,
+                    },
+                    "operator_guidance": operator_guidance,
+                }
+            )
+        )
+        return 2
     except Exception as exc:
         print(
             _format_json_output(

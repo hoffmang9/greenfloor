@@ -986,6 +986,11 @@ def test_resolve_taker_or_coin_operation_fee_uses_coinset_value(monkeypatch) -> 
             self._network = network
 
         @staticmethod
+        def get_fee_estimate(*, target_times=None):
+            _ = target_times
+            return {"success": True, "estimates": [5, 15]}
+
+        @staticmethod
         def get_conservative_fee_estimate():
             return 15
 
@@ -1005,6 +1010,11 @@ def test_resolve_taker_or_coin_operation_fee_applies_minimum_floor(monkeypatch) 
             self._network = network
 
         @staticmethod
+        def get_fee_estimate(*, target_times=None):
+            _ = target_times
+            return {"success": True, "estimates": [2]}
+
+        @staticmethod
         def get_conservative_fee_estimate():
             return 2
 
@@ -1020,11 +1030,21 @@ def test_resolve_taker_or_coin_operation_fee_applies_minimum_floor(monkeypatch) 
 
 def test_resolve_taker_or_coin_operation_fee_falls_back_to_config_minimum(monkeypatch) -> None:
     class _FakeCoinset:
+        _calls = 0
+
         def __init__(self, _arg, *, network: str):
             self._network = network
 
         @staticmethod
-        def get_conservative_fee_estimate():
+        def get_fee_estimate(*, target_times=None):
+            _ = target_times
+            return {"success": True, "estimates": [0]}
+
+        @classmethod
+        def get_conservative_fee_estimate(cls):
+            cls._calls += 1
+            if cls._calls == 1:
+                return 1
             return None
 
     monkeypatch.setattr("greenfloor.cli.manager.CoinsetAdapter", _FakeCoinset)
@@ -1037,6 +1057,48 @@ def test_resolve_taker_or_coin_operation_fee_falls_back_to_config_minimum(monkey
     )
     assert fee == 0
     assert source == "config_minimum_fee_fallback"
+
+
+def test_resolve_taker_or_coin_operation_fee_fails_on_endpoint_preflight(monkeypatch) -> None:
+    class _FakeCoinset:
+        def __init__(self, _arg, *, network: str):
+            self._network = network
+
+        @staticmethod
+        def get_fee_estimate(*, target_times=None):
+            _ = target_times
+            raise RuntimeError("coinset_network_error:timed_out")
+
+    monkeypatch.setattr("greenfloor.cli.manager.CoinsetAdapter", _FakeCoinset)
+    try:
+        manager_mod._resolve_taker_or_coin_operation_fee(network="mainnet", minimum_fee_mojos=0)
+    except manager_mod._CoinsetFeeLookupPreflightError as exc:
+        assert exc.failure_kind == "endpoint_validation_failed"
+        assert "coinset_network_error" in exc.detail
+    else:
+        raise AssertionError("expected _CoinsetFeeLookupPreflightError")
+
+
+def test_resolve_taker_or_coin_operation_fee_fails_on_temporary_advice_unavailable(
+    monkeypatch,
+) -> None:
+    class _FakeCoinset:
+        def __init__(self, _arg, *, network: str):
+            self._network = network
+
+        @staticmethod
+        def get_fee_estimate(*, target_times=None):
+            _ = target_times
+            return {"success": False, "error": "backend_overloaded"}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CoinsetAdapter", _FakeCoinset)
+    try:
+        manager_mod._resolve_taker_or_coin_operation_fee(network="mainnet", minimum_fee_mojos=0)
+    except manager_mod._CoinsetFeeLookupPreflightError as exc:
+        assert exc.failure_kind == "temporary_fee_advice_unavailable"
+        assert "backend_overloaded" in exc.detail
+    else:
+        raise AssertionError("expected _CoinsetFeeLookupPreflightError")
 
 
 def test_resolve_maker_offer_fee_is_zero() -> None:
@@ -1229,6 +1291,100 @@ def test_coin_combine_returns_structured_error_when_fee_resolution_fails(
     assert payload["success"] is False
     assert payload["error"].startswith("fee_resolution_failed:")
     assert "coin_ops.minimum_fee_mojos" in payload["operator_guidance"]
+
+
+def test_coin_split_distinguishes_coinset_endpoint_preflight_failure(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program)
+    _write_markets(markets)
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        def __init__(self, _config):
+            pass
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network, minimum_fee_mojos=0: (_ for _ in ()).throw(
+            manager_mod._CoinsetFeeLookupPreflightError(
+                failure_kind="endpoint_validation_failed",
+                detail="coinset_network_error:timed_out",
+                diagnostics={
+                    "coinset_network": "mainnet",
+                    "coinset_base_url": "https://coinset.org",
+                },
+            )
+        ),
+    )
+    code = _coin_split(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        coin_ids=["coin-1"],
+        amount_per_coin=10,
+        number_of_coins=2,
+        no_wait=True,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["success"] is False
+    assert payload["error"] == "coinset_fee_preflight_failed:endpoint_validation_failed"
+    assert payload["coinset_fee_lookup"]["failure_kind"] == "endpoint_validation_failed"
+    assert "endpoint routing" in payload["operator_guidance"]
+
+
+def test_coin_combine_distinguishes_temporary_fee_advice_unavailability(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program)
+    _write_markets(markets)
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        def __init__(self, _config):
+            pass
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network, minimum_fee_mojos=0: (_ for _ in ()).throw(
+            manager_mod._CoinsetFeeLookupPreflightError(
+                failure_kind="temporary_fee_advice_unavailable",
+                detail="backend_overloaded",
+                diagnostics={
+                    "coinset_network": "mainnet",
+                    "coinset_base_url": "https://coinset.org",
+                },
+            )
+        ),
+    )
+    code = _coin_combine(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        number_of_coins=3,
+        asset_id="xch",
+        coin_ids=[],
+        no_wait=True,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["success"] is False
+    assert payload["error"] == "coinset_fee_preflight_failed:temporary_fee_advice_unavailable"
+    assert payload["coinset_fee_lookup"]["failure_kind"] == "temporary_fee_advice_unavailable"
+    assert "temporarily unavailable" in payload["operator_guidance"]
 
 
 def test_coin_split_returns_structured_error_when_coin_id_not_found(
@@ -2231,9 +2387,7 @@ def test_watch_reorg_risk_times_out_when_chain_stalls(monkeypatch) -> None:
     elapsed_seq = iter([0.0, 0.0, 61.0])
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
-    monkeypatch.setattr(
-        "greenfloor.cli.manager._coinset_peak_height", lambda **kwargs: 100
-    )
+    monkeypatch.setattr("greenfloor.cli.manager._coinset_peak_height", lambda **kwargs: 100)
 
     events = _watch_reorg_risk_with_coinset(
         network="mainnet",

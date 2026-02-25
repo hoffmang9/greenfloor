@@ -37,6 +37,7 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
   - Config-driven combine threshold (from market `ladders.sell`): `greenfloor-manager coin-combine --pair TDBX:txch --size-base-units 10`
   - Optional venue context annotation for prep commands: add `--venue dexie` or `--venue splash` (coin-prep works without it).
   - Optional readiness loop: add `--until-ready --max-iterations 3` to run bounded list/split-or-combine/wait/re-check cycles.
+  - Coin-op submission now runs Coinset fee-lookup preflight first; commands fail fast when fee endpoint routing is invalid or conservative fee advice is temporarily unavailable.
   - `coin-split` with no `--coin-id` uses adapter-managed coin selection (`coin_selection_mode: "adapter_auto_select"` in JSON output).
   - When `--coin-id` is provided with `--until-ready`, loop retries may stop early with `stop_reason: "requires_new_coin_selection"` after the selected inputs are consumed.
   - Defaults wait through signature + mempool + confirmation; use `--no-wait` for async mode.
@@ -93,6 +94,10 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 - **Offer builder failures:** check `strategy_offer_execution.items[].reason` for `offer_builder_*`.
 - **Dexie post/cancel issues:** look for `dexie_offers_error`, `strategy_offer_execution` skip reasons, and `offer_cancel_policy` skip reasons.
 - **Extended waits on coin operations:** inspect `wait_events` for `poll_retry`, `signature_wait_*`, `in_mempool`, `confirmed`, and `reorg_watch_*` events to determine whether delay is signer-side, mempool-side, Coinset API-side, or chain-depth-side.
+- **Coin-op fee preflight failures:** inspect JSON `error` and `coinset_fee_lookup`:
+  - `error: "coinset_fee_preflight_failed:endpoint_validation_failed"` means endpoint routing/configuration failure (invalid/misrouted `GREENFLOOR_COINSET_BASE_URL`, wrong-network endpoint, DNS/TLS/connectivity issues).
+  - `error: "coinset_fee_preflight_failed:temporary_fee_advice_unavailable"` means Coinset endpoint is reachable but currently not returning usable fee advice.
+  - `coinset_fee_lookup.coinset_base_url` + `coinset_fee_lookup.coinset_network` report exactly which endpoint/network pair was validated.
 - **Cancel policy not triggering:** verify market `quote_asset_type` is `unstable`, `pricing.cancel_policy_stable_vs_unstable: true`, and compare `move_bps` vs `threshold_bps` in `offer_cancel_policy`.
 
 ## 6) Runtime Controls
@@ -112,6 +117,7 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 - Coinset endpoint override (coin reads + chain history + tx submit):
   - `GREENFLOOR_COINSET_BASE_URL`
   - Default behavior: mainnet endpoint when unset; testnet11 endpoint when market/network is `testnet11`.
+  - For `testnet11`, do not route to mainnet Coinset endpoint unless you explicitly set `GREENFLOOR_ALLOW_MAINNET_COINSET_FOR_TESTNET11=1` for temporary debugging.
 - Strategy execution dry-run:
   - set `runtime.dry_run` in `~/.greenfloor/config/program.yaml`
 - Validate config + override sanity before deploy:
