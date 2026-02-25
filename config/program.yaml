@@ -95,6 +95,6 @@ chain_signals:
     websocket_url: ""
     websocket_reconnect_interval_seconds: 30
     webhook_enabled: false
-    webhook_listen_addr: "127.0.0.1:8787" # legacy field; websocket mode ignores this listener.
+    webhook_listen_addr: "127.0.0.1:8787"  # legacy field; websocket mode ignores this listener.
     # Recovery poll cadence used by websocket mode to refresh mempool tx snapshots.
     fallback_poll_interval_seconds: 60
