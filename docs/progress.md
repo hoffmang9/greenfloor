@@ -1,5 +1,48 @@
 # Progress Log
 
+## 2026-02-25 (Step 2 simplification pass: PR #25)
+
+Reviewed commit `a7614875` (Step 2 closure) and identified six categories of issues;
+addressed all of them in branch `simplify/step2-coin-prep-cleanup` (PR #25).
+
+**Code simplifications and correctness fixes (`manager.py`):**
+
+- Extracted `_resolve_coin_global_ids(wallet_coins, raw_ids) -> (resolved, unresolved)` helper to
+  eliminate a verbatim ~22-line coin name→`Coin_*` mapping block that was copy-pasted identically
+  into both `_coin_split` and `_coin_combine`.
+- Fixed `_coins_list` spendability field: was using a blocklist (`not in {"SPENT", "PENDING",
+  "MEMPOOL"}`), marking unknown/transitional states as spendable. Switched to `_is_spendable_coin`
+  (allowlist) to match what the denomination readiness evaluator counts.
+- Fixed `_wait_for_mempool_then_confirmation` re-warning intervals: the function was doubling its
+  own warning threshold on each emission (`mempool_warning_seconds += mempool_warning_seconds`),
+  making warnings exponentially rare (5min → 10min → 20min → ...). The signature poll loop uses
+  fixed-interval additive re-warning; aligned both loops with `next_mempool_warning` and
+  `next_confirmation_warning` accumulators that advance by the original interval.
+
+**Test infrastructure (`test_manager_post_offer.py`):**
+
+- Extracted `_write_program_with_cloud_wallet(path, *, provider)` helper, eliminating 13
+  identical 5-line inline cloud wallet credential patching blocks (~80 lines removed).
+
+**Missing test coverage added (26 new tests, 39→65 in this file):**
+
+- `_is_spendable_coin`: allowlist states, known non-spendable, unknown states, missing state.
+- `_resolve_coin_global_ids`: name→global-id mapping, `Coin_*` pass-through, unresolved reporting.
+- `_evaluate_denomination_readiness`: spendability+asset+amount filtering, min/max bounds,
+  case-insensitive asset matching.
+- `_poll_signature_request_until_not_unsigned`: immediate return, warning event emission, timeout.
+- `_wait_for_mempool_then_confirmation`: in_mempool event with coinset URL, confirmed return,
+  mempool warning event, initial-coin-id filtering.
+- Cloud wallet dispatch gate: dispatches when all four config fields present + not dry_run;
+  bypasses cloud wallet on dry_run even when configured.
+- `_build_and_post_offer_cloud_wallet` direct paths: happy path (poll→artifact→verify→post),
+  no-artifact error, verify-error blocks post.
+- `until_ready` success path: `stop_reason="ready"` with exit code 0.
+- `_coin_combine` `requires_new_coin_selection` stop reason with explicit `--coin-id` in
+  `--until-ready` mode.
+
+Validation snapshot: `196 passed, 5 skipped`; pre-commit all hooks pass.
+
 ## 2026-02-24 (mainnet Step 2 operator proof: CARBON22:xch)
 
 - Executed end-to-end Step 2 coin-prep proof on mainnet pair `CARBON22:xch` using Cloud Wallet vault `Wallet_le99o1k4jfsof9mp817gxpi3`.

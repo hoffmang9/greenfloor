@@ -51,9 +51,38 @@ These rules exist because earlier implementation rounds introduced unnecessary c
 
 ### Manager CLI surface discipline
 
-- The manager currently has 7 commands: `bootstrap-home`, `config-validate`, `doctor`, `keys-onboard`, `build-and-post-offer`, `offers-status`, `offers-reconcile`.
+- The manager currently has 10 commands: `bootstrap-home`, `config-validate`, `doctor`, `keys-onboard`, `build-and-post-offer`, `offers-status`, `offers-reconcile`, `coins-list`, `coin-split`, `coin-combine`.
 - Do not add new commands without explicit user request or a documented need tied to G1-G3 testnet proof.
 - Each new command must have a test that exercises it end-to-end with deterministic fixtures.
+
+### No verbatim duplication within a file
+
+- If the same logic block (more than ~10 lines) appears more than once anywhere in the same file, extract it to a named helper function before committing. Do not land a PR with copy-pasted blocks.
+- When implementing a second function whose core logic closely mirrors an existing one, read the existing function carefully before writing, extract the shared kernel first, and verify both callers use the extracted helper.
+
+### Allowlist over blocklist for state checks
+
+- When classifying entities by state (coin spendability, offer status, lock state), always write an explicit allowlist of valid states. Never negate a blocklist of known-bad states; unknown or transitional states are never implicitly safe.
+- If a helper function already encodes the allowlist (`_is_spendable_coin`, etc.), all callers in the same module must use that helper. Do not reimplement the same check inline.
+
+### Consistent accumulator patterns in polling loops
+
+- When adding a wait/poll loop that resembles another loop already in the same file, read the existing loop first and match its interval/accumulator pattern exactly.
+- Additive re-warning pattern required: `next_warning += warning_interval` (not `warning_interval += warning_interval`, which doubles geometrically). Verify by checking that the first warning fires at time T, the second at 2T, the third at 3T.
+
+### Every dispatch gate must have tests for all branches
+
+- When a function contains a conditional dispatch (e.g., `if cloud_wallet_configured and not dry_run`), each branch of the gate must have its own deterministic test: one that triggers the primary branch, one that falls through.
+- Gates controlled by configuration state are especially error-prone; test both the "configured + active" and "not configured / dry_run" paths explicitly.
+
+### Every wait loop must have a deterministic test
+
+- Every function containing `while True` with `time.sleep` must have at least one deterministic test. The test must mock `time.sleep` (to eliminate wall-clock cost) and `time.monotonic` (to exercise timeout and warning paths). Tests that rely on real elapsed time are not acceptable.
+
+### Extract test setup helpers at first duplication
+
+- If the same setup block (config file writing, credential patching, env variable setting) appears in more than two test functions, extract it to a named helper function in the test file before adding the third instance.
+- Named helpers are preferred over fixtures when the setup is a pure function of its arguments (no session/module scope needed). This keeps the extraction visible and avoids fixture magic.
 
 ## Required Pre-Implementation Review
 
