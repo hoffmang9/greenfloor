@@ -1097,7 +1097,7 @@ def _run_loop(
     *,
     program_path: Path,
     markets_path: Path,
-    testnet_markets_path: Path | None,
+    testnet_markets_path: Path | None = None,
     allowed_keys: set[str] | None,
     db_path_override: str | None,
     coinset_base_url: str,
