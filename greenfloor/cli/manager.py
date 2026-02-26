@@ -5,6 +5,7 @@ import collections.abc
 import datetime as dt
 import importlib
 import json
+import logging
 import math
 import os
 import sys
@@ -22,7 +23,7 @@ from greenfloor.adapters.coinset import CoinsetAdapter, extract_coinset_tx_ids_f
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.cli.offer_builder_sdk import build_offer_text
-from greenfloor.config.io import load_markets_config, load_program_config, load_yaml
+from greenfloor.config.io import load_markets_config, load_program_config, load_yaml, write_yaml
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
 from greenfloor.keys.onboarding import (
     KeyOnboardingSelection,
@@ -31,9 +32,39 @@ from greenfloor.keys.onboarding import (
     save_key_onboarding_selection,
 )
 from greenfloor.keys.router import resolve_market_key
+from greenfloor.logging_setup import (
+    ALLOWED_LOG_LEVELS,
+    apply_level_to_root,
+    coerce_log_level,
+    create_rotating_file_handler,
+    normalize_log_level_name,
+)
 from greenfloor.storage.sqlite import SqliteStore
 
 _TEST_PHASE_OFFER_EXPIRY_MINUTES = 10
+_MANAGER_SERVICE_NAME = "manager"
+_manager_file_logger_initialized = False
+_manager_logger = logging.getLogger("greenfloor.manager")
+
+
+def _initialize_manager_file_logging(home_dir: str, *, log_level: str | None) -> None:
+    global _manager_file_logger_initialized
+    if _manager_file_logger_initialized:
+        return
+    effective_level = coerce_log_level(log_level)
+    root_logger = logging.getLogger()
+    handler = create_rotating_file_handler(service_name=_MANAGER_SERVICE_NAME, home_dir=home_dir)
+    root_logger.addHandler(handler)
+    apply_level_to_root(effective_level=effective_level, logger=_manager_logger, handler=handler)
+    _manager_file_logger_initialized = True
+
+
+def _warn_if_log_level_auto_healed(*, program, program_path: Path) -> None:
+    if bool(getattr(program, "app_log_level_was_missing", False)):
+        _manager_logger.warning(
+            "program config missing app.log_level; wrote default INFO to %s",
+            os.fspath(program_path),
+        )
 
 
 def _condition_has_offer_expiration(condition: object) -> bool:
@@ -121,16 +152,14 @@ def _log_signed_offer_artifact(
 ) -> None:
     coin_id_hints = _extract_coin_id_hints_from_offer_text(offer_text)
     coin_id = coin_id_hints[0] if coin_id_hints else ""
-    print(f"signed_offer_file:{offer_text}", file=sys.stderr, flush=True)
-    print(
-        "signed_offer_metadata:"
-        f"ticker={ticker} "
-        f"coinid={coin_id} "
-        f"amount={amount} "
-        f"trading_pair={trading_pair} "
-        f"expiry={expiry}",
-        file=sys.stderr,
-        flush=True,
+    _manager_logger.info("signed_offer_file:%s", offer_text)
+    _manager_logger.info(
+        "signed_offer_metadata:ticker=%s coinid=%s amount=%s trading_pair=%s expiry=%s",
+        ticker,
+        coin_id,
+        amount,
+        trading_pair,
+        expiry,
     )
 
 
@@ -1474,6 +1503,33 @@ def _validate(program_path: Path, markets_path: Path) -> int:
     return 0
 
 
+def _set_log_level(*, program_path: Path, log_level: str) -> int:
+    level = normalize_log_level_name(log_level)
+    if level != str(log_level).strip().upper():
+        raise ValueError(f"log level must be one of: {', '.join(sorted(ALLOWED_LOG_LEVELS))}")
+    raw = load_yaml(program_path)
+    app = raw.get("app")
+    if app is None:
+        app = {}
+        raw["app"] = app
+    if not isinstance(app, dict):
+        raise ValueError("program config field 'app' must be a mapping")
+    prior_level = str(app.get("log_level", "")).strip().upper() or "INFO"
+    app["log_level"] = level
+    write_yaml(program_path, raw)
+    print(
+        _format_json_output(
+            {
+                "updated": True,
+                "program_config": str(program_path),
+                "previous_log_level": prior_level,
+                "log_level": level,
+            }
+        )
+    )
+    return 0
+
+
 def _keys_onboard(
     *,
     program_path: Path,
@@ -1684,6 +1740,9 @@ def _build_and_post_offer_cloud_wallet(
     quote_price: float,
     dry_run: bool,
 ) -> int:
+    _initialize_manager_file_logging(
+        program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
+    )
     wallet = _new_cloud_wallet_adapter(program)
     resolved_base_asset_id, resolved_quote_asset_id = _resolve_cloud_wallet_offer_asset_ids(
         wallet=wallet,
@@ -1935,6 +1994,8 @@ def _build_and_post_offer(
         and bool(program.cloud_wallet_vault_id)
     )
     if cloud_wallet_configured:
+        _initialize_manager_file_logging(program.home_dir, log_level=program.app_log_level)
+        _warn_if_log_level_auto_healed(program=program, program_path=program_path)
         return _build_and_post_offer_cloud_wallet(
             program=program,
             market=market,
@@ -3270,6 +3331,9 @@ def main() -> None:
     p_bootstrap.add_argument("--markets-template", default="config/markets.yaml")
     p_bootstrap.add_argument("--force", action="store_true")
 
+    p_set_log_level = sub.add_parser("set-log-level")
+    p_set_log_level.add_argument("--log-level", required=True)
+
     p_coins_list = sub.add_parser("coins-list")
     p_coins_list.add_argument("--asset", default="")
     p_coins_list.add_argument("--vault-id", default="")
@@ -3387,6 +3451,11 @@ def main() -> None:
             program_template=Path(args.program_template),
             markets_template=Path(args.markets_template),
             force=bool(args.force),
+        )
+    elif args.command == "set-log-level":
+        code = _set_log_level(
+            program_path=Path(args.program_config),
+            log_level=args.log_level,
         )
     elif args.command == "coins-list":
         code = _coins_list(

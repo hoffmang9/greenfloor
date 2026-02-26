@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient, _classify_payload_tx_ids
 
@@ -115,6 +116,20 @@ def test_run_recovery_poll_emits_error_event() -> None:
     assert audit_calls[-1][0] == "coinset_ws_recovery_poll_error"
     assert audit_calls[-1][1]["reason"] == "reconnect"
     assert "poll_down" in audit_calls[-1][1]["error"]
+
+
+def test_run_recovery_poll_logs_warning_on_failure(caplog) -> None:
+    client = CoinsetWebsocketClient(
+        ws_url="wss://coinset.org/ws",
+        reconnect_interval_seconds=1,
+        on_mempool_tx_ids=lambda _ids: None,
+        on_confirmed_tx_ids=lambda _tx_ids: None,
+        on_audit_event=lambda _event_type, _payload: None,
+        recovery_poll=lambda: (_ for _ in ()).throw(RuntimeError("poll_down")),
+    )
+    with caplog.at_level(logging.WARNING, logger="greenfloor.daemon.coinset_ws"):
+        asyncio.run(client._run_recovery_poll(reason="reconnect"))
+    assert "coinset websocket recovery poll failed: poll_down" in caplog.text
 
 
 def test_sleep_with_stop_returns_when_stop_set() -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from greenfloor.daemon.main import _run_loop, run_once
+from tests.logging_helpers import reset_concurrent_log_handlers
 
 
 def _write_program(path: Path, home_dir: Path) -> None:
@@ -12,6 +13,7 @@ def _write_program(path: Path, home_dir: Path) -> None:
                 "app:",
                 '  network: "mainnet"',
                 f'  home_dir: "{str(home_dir)}"',
+                "  log_level: INFO",
                 "runtime:",
                 "  loop_interval_seconds: 30",
                 "  dry_run: false",
@@ -61,6 +63,12 @@ def _write_program(path: Path, home_dir: Path) -> None:
     )
 
 
+def _write_program_without_log_level(path: Path, home_dir: Path) -> None:
+    _write_program(path, home_dir)
+    text = path.read_text(encoding="utf-8")
+    path.write_text(text.replace("  log_level: INFO\n", ""), encoding="utf-8")
+
+
 def _write_markets(path: Path) -> None:
     path.write_text(
         "\n".join(
@@ -92,12 +100,15 @@ def _write_markets(path: Path) -> None:
 
 
 def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path) -> None:
+    import greenfloor.daemon.main as daemon_mod
+
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
     _write_program(program, home)
     _write_markets(markets)
+    reset_concurrent_log_handlers(module=daemon_mod)
 
     calls: dict[str, int] = {"start": 0, "stop": 0, "run_once": 0}
     run_once_kwargs: dict[str, object] = {}
@@ -134,6 +145,9 @@ def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path) -
     assert calls["stop"] == 1
     assert calls["run_once"] == 1
     assert run_once_kwargs["poll_coinset_mempool"] is False
+    log_text = (home / "logs" / "debug.log").read_text(encoding="utf-8")
+    assert "daemon_starting mode=loop" in log_text
+    assert "daemon_stopped mode=loop" in log_text
 
 
 def test_run_once_uses_websocket_capture_when_enabled(monkeypatch, tmp_path: Path) -> None:
@@ -185,3 +199,97 @@ def test_run_once_uses_websocket_capture_when_enabled(monkeypatch, tmp_path: Pat
     )
     assert code == 0
     assert capture_calls["n"] == 1
+
+
+def test_run_loop_refreshes_log_level_without_restart(monkeypatch, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program, home)
+    _write_markets(markets)
+
+    calls: dict[str, int] = {"run_once": 0}
+    seen_levels: list[str] = []
+
+    class _FakeWsClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def start(self) -> None:
+            return
+
+        def stop(self, **_kwargs) -> None:
+            return
+
+    def _fake_initialize(home_dir: str, *, log_level: str | None) -> None:
+        _ = home_dir
+        seen_levels.append(str(log_level or ""))
+
+    def _fake_run_once(**_kwargs):
+        calls["run_once"] += 1
+        if calls["run_once"] == 1:
+            text = program.read_text(encoding="utf-8")
+            program.write_text(
+                text.replace("  log_level: INFO", "  log_level: WARNING"), encoding="utf-8"
+            )
+            return 0
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("greenfloor.daemon.main.CoinsetWebsocketClient", _FakeWsClient)
+    monkeypatch.setattr("greenfloor.daemon.main._initialize_daemon_file_logging", _fake_initialize)
+    monkeypatch.setattr("greenfloor.daemon.main.run_once", _fake_run_once)
+
+    code = _run_loop(
+        program_path=program,
+        markets_path=markets,
+        allowed_keys=None,
+        db_path_override=str(tmp_path / "state.sqlite"),
+        coinset_base_url="https://coinset.org",
+        state_dir=home / "state",
+    )
+
+    assert code == 0
+    assert calls["run_once"] == 2
+    assert seen_levels[:3] == ["INFO", "INFO", "WARNING"]
+
+
+def test_run_loop_logs_when_missing_log_level_is_auto_healed(monkeypatch, tmp_path: Path) -> None:
+    import greenfloor.daemon.main as daemon_mod
+
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_without_log_level(program, home)
+    _write_markets(markets)
+    reset_concurrent_log_handlers(module=daemon_mod)
+
+    class _FakeWsClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def start(self) -> None:
+            return
+
+        def stop(self, **_kwargs) -> None:
+            return
+
+    def _fake_run_once(**_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("greenfloor.daemon.main.CoinsetWebsocketClient", _FakeWsClient)
+    monkeypatch.setattr("greenfloor.daemon.main.run_once", _fake_run_once)
+
+    code = _run_loop(
+        program_path=program,
+        markets_path=markets,
+        allowed_keys=None,
+        db_path_override=str(tmp_path / "state.sqlite"),
+        coinset_base_url="https://coinset.org",
+        state_dir=home / "state",
+    )
+    assert code == 0
+    assert "log_level: INFO" in program.read_text(encoding="utf-8")
+    log_text = (home / "logs" / "debug.log").read_text(encoding="utf-8")
+    assert "program config missing app.log_level; wrote default INFO" in log_text

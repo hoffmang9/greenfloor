@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from greenfloor.logging_setup import normalize_log_level_name
+
 
 @dataclass(frozen=True, slots=True)
 class SignerKeyConfig:
@@ -46,6 +48,8 @@ class ProgramConfig:
     cloud_wallet_user_key_id: str = ""
     cloud_wallet_private_key_pem_path: str = ""
     cloud_wallet_vault_id: str = ""
+    app_log_level: str = "INFO"
+    app_log_level_was_missing: bool = False
     signer_key_registry: dict[str, SignerKeyConfig] = field(default_factory=dict)
 
 
@@ -216,6 +220,8 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         raise ValueError(
             "chain_signals.tx_block_trigger.fallback_poll_interval_seconds must be >= 0"
         )
+    app_log_level_was_missing = "log_level" not in app
+    app_log_level = normalize_log_level_name(app.get("log_level"))
 
     return ProgramConfig(
         app_network=str(_req(app, "network")),
@@ -250,6 +256,8 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         cloud_wallet_user_key_id=str(cloud_wallet.get("user_key_id", "")).strip(),
         cloud_wallet_private_key_pem_path=str(cloud_wallet.get("private_key_pem_path", "")).strip(),
         cloud_wallet_vault_id=str(cloud_wallet.get("vault_id", "")).strip(),
+        app_log_level=app_log_level,
+        app_log_level_was_missing=app_log_level_was_missing,
         signer_key_registry=key_registry,
     )
 

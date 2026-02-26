@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -9,6 +10,9 @@ from typing import Any
 import aiohttp
 
 from greenfloor.adapters.coinset import extract_coinset_tx_ids_from_offer_payload
+
+_ws_logger = logging.getLogger("greenfloor.daemon.coinset_ws")
+_ws_logger.addHandler(logging.NullHandler())
 
 
 def _classify_payload_tx_ids(payload: dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -73,6 +77,7 @@ class CoinsetWebsocketClient:
                         await self._run_recovery_poll(reason="connected")
                         await self._consume_messages(ws)
             except Exception as exc:
+                _ws_logger.warning("coinset websocket disconnected: %s", exc)
                 self._on_audit_event("coinset_ws_disconnected", {"error": str(exc)})
             if self._stop_event.is_set():
                 break
@@ -89,6 +94,7 @@ class CoinsetWebsocketClient:
                 {"reason": reason, "tx_id_count": len(tx_ids)},
             )
         except Exception as exc:
+            _ws_logger.warning("coinset websocket recovery poll failed: %s", exc)
             self._on_audit_event(
                 "coinset_ws_recovery_poll_error",
                 {"reason": reason, "error": str(exc)},
@@ -183,6 +189,7 @@ def capture_coinset_websocket_once(
                             if msg.type == aiohttp.WSMsgType.ERROR:
                                 raise RuntimeError(f"coinset_ws_once_error:{ws.exception()}")
             except Exception as exc:
+                _ws_logger.warning("coinset websocket once capture disconnected: %s", exc)
                 on_audit_event("coinset_ws_once_disconnected", {"error": str(exc)})
             if asyncio.get_running_loop().time() >= deadline:
                 break

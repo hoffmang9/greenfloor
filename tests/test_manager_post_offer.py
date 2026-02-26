@@ -18,6 +18,7 @@ from greenfloor.cli.manager import (
     _resolve_splash_base_url,
     _verify_offer_text_for_dexie,
 )
+from tests.logging_helpers import reset_concurrent_log_handlers
 
 
 def test_resolve_dexie_base_url_by_network() -> None:
@@ -267,6 +268,49 @@ def test_resolve_offer_publish_settings_from_program(tmp_path: Path) -> None:
     assert venue == "splash"
     assert dexie_base == "https://api.dexie.space"
     assert splash_base == "http://localhost:4000"
+
+
+def test_set_log_level_updates_program_yaml(tmp_path: Path, capsys) -> None:
+    program = tmp_path / "program.yaml"
+    _write_program(program)
+    code = manager_mod._set_log_level(program_path=program, log_level="warning")
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["updated"] is True
+    assert payload["previous_log_level"] == "INFO"
+    assert payload["log_level"] == "WARNING"
+    assert "log_level: WARNING" in program.read_text(encoding="utf-8")
+
+
+def test_main_dispatches_set_log_level_command(monkeypatch, tmp_path: Path) -> None:
+    import pytest
+
+    program = tmp_path / "program.yaml"
+    _write_program(program)
+    captured: dict[str, object] = {}
+
+    def _fake_set_log_level(*, program_path: Path, log_level: str) -> int:
+        captured["program_path"] = program_path
+        captured["log_level"] = log_level
+        return 0
+
+    monkeypatch.setattr("greenfloor.cli.manager._set_log_level", _fake_set_log_level)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "greenfloor-manager",
+            "--program-config",
+            str(program),
+            "set-log-level",
+            "--log-level",
+            "ERROR",
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        manager_mod.main()
+    assert exc.value.code == 0
+    assert captured["program_path"] == program
+    assert captured["log_level"] == "ERROR"
 
 
 def _write_markets(path: Path) -> None:
@@ -3022,6 +3066,8 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     _write_program_with_cloud_wallet(program_path)
     _write_markets_with_ladder(markets_path)
     prog, mkt = _load_program_and_market(program_path, markets_path)
+    prog.home_dir = str(tmp_path)
+    reset_concurrent_log_handlers(module=manager_mod)
 
     class _FakeWallet:
         vault_id = "wallet-1"
@@ -3083,10 +3129,12 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     assert payload["publish_failures"] == 0
     assert payload["results"][0]["result"]["id"] == "dexie-99"
     assert payload["offer_fee_mojos"] == 0
-    assert "signed_offer_file:offer1testartifact" in captured.err
-    assert "signed_offer_metadata:ticker=A1" in captured.err
-    assert "amount=10" in captured.err
-    assert "trading_pair=A1:xch" in captured.err
+    assert captured.err == ""
+    log_text = (tmp_path / "logs" / "debug.log").read_text(encoding="utf-8")
+    assert "signed_offer_file:offer1testartifact" in log_text
+    assert "signed_offer_metadata:ticker=A1" in log_text
+    assert "amount=10" in log_text
+    assert "trading_pair=A1:xch" in log_text
 
 
 def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
