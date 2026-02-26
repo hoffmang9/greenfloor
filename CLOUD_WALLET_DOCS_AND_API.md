@@ -127,28 +127,28 @@ Cloud Wallet is broad; below is the practical call map by feature family.
 
 Use this as a quick guide for commonly integrated operations.
 
-| Operation | Required input | Common optional input/options |
-| --- | --- | --- |
-| `logIn` | `input.email`, `input.password` | none |
-| `logOut` | `input` | `input.invalidateAllSessions` |
-| `userSignup` | `input` | OTP flow fields (`email`, `code`), profile fields (`name`, `organizationName`, `passkeyName`) |
-| `createWallet` | `input.custodyConfig` | `name`, `userId`, `networkId`, `keys`, `watchtower` |
-| `walletAction` | `input.walletId` | `vaultAction`, `fee`, `autoSubmit`, `requestId`, `networkId`, `userId` |
-| `restoreVaultFromConfig` | `input.configJson`, `input.name` | none |
-| `createTransaction` | `walletId`, `address`, `amount` | `assetId`, `fee`, `memos`, `autoSubmit`, `clawback` |
-| `finalizeTransaction` | `walletTransactionId` | `fee`, `autoSubmit` |
-| `clawBackTransaction` | `walletTransactionId` | `fee`, `autoSubmit` |
-| `createOffer` | `walletId`, `offered[]`, `requested[]` | `offeredNftIds`, `requestedNftIds`, `expiresAt`, `fee`, `autoSubmit`, `splitInputCoins`, `splitInputCoinsFee` |
-| `addOffer` | `walletId`, `offer` | none (`offer` is bech32m `offer1...`) |
-| `takeOffer` | `walletId`, `offerId` | `fee`, `autoSubmit` |
-| `cancelOffer` | `walletId`, `offerId` | `cancelOffChain`, `fee` (for on-chain cancel), `autoSubmit` |
-| `splitCoins` | `walletId`, `coinIds[]`, `numberOfCoins`, `amountPerCoin` | `fee` |
-| `combineCoins` | `walletId` | `inputCoinIds[]`, `assetId`, `numberOfCoins`, `largestFirst`, `targetAmount`, `maxNumberOfCoins`, `maxCoinAmount`, `fee` |
-| `quote` | `asset` | none |
-| `price` | `coin`, `currency` | none |
-| `createAndConfirmBuyOrder` | `fiatAmount`, `fiatCurrency`, `xchPricePerUnit`, `xchAmount`, `quoteId`, `address`, `confirmationTokenId`, `returnUrl` | none |
-| `cancelBuyOrder` | `buyOrderId`, `cancellationReason` | none |
-| `vaultConfigDownload` | `id` (wallet global ID) | none |
+| Operation                  | Required input                                                                                                         | Common optional input/options                                                                                            |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `logIn`                    | `input.email`, `input.password`                                                                                        | none                                                                                                                     |
+| `logOut`                   | `input`                                                                                                                | `input.invalidateAllSessions`                                                                                            |
+| `userSignup`               | `input`                                                                                                                | OTP flow fields (`email`, `code`), profile fields (`name`, `organizationName`, `passkeyName`)                            |
+| `createWallet`             | `input.custodyConfig`                                                                                                  | `name`, `userId`, `networkId`, `keys`, `watchtower`                                                                      |
+| `walletAction`             | `input.walletId`                                                                                                       | `vaultAction`, `fee`, `autoSubmit`, `requestId`, `networkId`, `userId`                                                   |
+| `restoreVaultFromConfig`   | `input.configJson`, `input.name`                                                                                       | none                                                                                                                     |
+| `createTransaction`        | `walletId`, `address`, `amount`                                                                                        | `assetId`, `fee`, `memos`, `autoSubmit`, `clawback`                                                                      |
+| `finalizeTransaction`      | `walletTransactionId`                                                                                                  | `fee`, `autoSubmit`                                                                                                      |
+| `clawBackTransaction`      | `walletTransactionId`                                                                                                  | `fee`, `autoSubmit`                                                                                                      |
+| `createOffer`              | `walletId`, `offered[]`, `requested[]`                                                                                 | `offeredNftIds`, `requestedNftIds`, `expiresAt`, `fee`, `autoSubmit`, `splitInputCoins`, `splitInputCoinsFee`            |
+| `addOffer`                 | `walletId`, `offer`                                                                                                    | none (`offer` is bech32m `offer1...`)                                                                                    |
+| `takeOffer`                | `walletId`, `offerId`                                                                                                  | `fee`, `autoSubmit`                                                                                                      |
+| `cancelOffer`              | `walletId`, `offerId`                                                                                                  | `cancelOffChain`, `fee` (for on-chain cancel), `autoSubmit`                                                              |
+| `splitCoins`               | `walletId`, `coinIds[]`, `numberOfCoins`, `amountPerCoin`                                                              | `fee`                                                                                                                    |
+| `combineCoins`             | `walletId`                                                                                                             | `inputCoinIds[]`, `assetId`, `numberOfCoins`, `largestFirst`, `targetAmount`, `maxNumberOfCoins`, `maxCoinAmount`, `fee` |
+| `quote`                    | `asset`                                                                                                                | none                                                                                                                     |
+| `price`                    | `coin`, `currency`                                                                                                     | none                                                                                                                     |
+| `createAndConfirmBuyOrder` | `fiatAmount`, `fiatCurrency`, `xchPricePerUnit`, `xchAmount`, `quoteId`, `address`, `confirmationTokenId`, `returnUrl` | none                                                                                                                     |
+| `cancelBuyOrder`           | `buyOrderId`, `cancellationReason`                                                                                     | none                                                                                                                     |
+| `vaultConfigDownload`      | `id` (wallet global ID)                                                                                                | none                                                                                                                     |
 
 ## `cancelOffer` Deep Dive
 
