@@ -37,11 +37,6 @@ jobs:
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -e ".[dev]"
 
-      - name: Install formatting tools
-        run: |
-          npm install --global prettier@4.0.0-alpha.8
-          .venv/bin/python -m pip install yamllint==1.35.1
-
       - name: Install Rust toolchain
         run: |
           curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
@@ -81,23 +76,8 @@ jobs:
         run: |
           .venv/bin/python -m pip install ./.cache/wheelhouse/greenfloor-native/*.whl
 
-      - name: Ruff lint
-        run: ruff check .
-
-      - name: Ruff format check
-        run: ruff format --check .
-
-      - name: Prettier check
-        run: prettier --check "**/*.{md,json,yml,yaml}" --ignore-path .prettierignore
-
-      - name: Yamllint
-        run: yamllint .
-
-      - name: Pyright
-        run: pyright
-
-      - name: Pytest
-        run: pytest --ignore=tests/test_chia_wallet_sdk_simulator_harness.py
+      - name: Pre-commit (all files, from .venv)
+        run: .venv/bin/pre-commit run --all-files
 
       - name: Resolve chia-wallet-sdk pinned commit
         if: matrix.os == 'ubuntu-latest'
