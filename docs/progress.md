@@ -1,5 +1,100 @@
 # Progress Log
 
+## 2026-02-26 (Coinset websocket default-path correction for daemon runtime)
+
+- Root cause for repeated websocket `404` disconnects (`https://www.coinset.org/ws`) identified:
+  - `greenfloor/config/models.py` populated `tx_block_websocket_url` with legacy mainnet default `wss://coinset.org/ws` when config left `websocket_url` blank.
+  - this model-level default overrode daemon CLI base-URL defaults and routed websocket attempts to a non-API host.
+- Implemented default-path correction:
+  - `greenfloor/config/models.py` now defaults mainnet websocket URL to `wss://api.coinset.org/ws`.
+  - `greenfloor/daemon/main.py` fallback websocket URL paths also use `wss://api.coinset.org/ws`.
+  - `config/program.yaml` inline websocket default comment updated to match.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_config_load.py tests/test_daemon_websocket_runtime.py` -> `11 passed`.
+- John-Deere rollout:
+  - synced `greenfloor/config/models.py` and `greenfloor/daemon/main.py`,
+  - restarted daemon,
+  - verified effective runtime resolution now reports:
+    - `program.tx_block_websocket_url = wss://api.coinset.org/ws`
+    - `_resolve_coinset_ws_url(...) = wss://api.coinset.org/ws`.
+
+## 2026-02-26 (websocket SQLite thread-safety fix + Coinset API default correction)
+
+- Fixed daemon websocket callback SQLite thread-safety in `greenfloor/daemon/main.py`:
+  - removed cross-thread reuse of one `SqliteStore` connection in `_run_loop` websocket callbacks.
+  - websocket callbacks now open/close callback-local `SqliteStore` connections before writing mempool/confirm/audit events.
+  - this removes the runtime crash seen on John-Deere:
+    - `sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same thread`.
+- Corrected mainnet Coinset API defaults to the API host:
+  - `greenfloor/adapters/coinset.py`: `CoinsetAdapter.MAINNET_BASE_URL` -> `https://api.coinset.org`.
+  - `greenfloor/daemon/main.py`: CLI default `--coinset-base-url` -> `https://api.coinset.org`.
+- Added deterministic regression coverage in `tests/test_daemon_websocket_runtime.py`:
+  - new test asserts websocket callbacks can run on a worker thread without cross-thread store usage.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_daemon_websocket_runtime.py tests/test_coinset_adapter.py` -> `15 passed`.
+- John-Deere deployment verification:
+  - synced patched files to `/home/hoffmang/greenfloor/greenfloor/{daemon/main.py,adapters/coinset.py}`,
+  - confirmed default adapter base URL resolves to `https://api.coinset.org`,
+  - restarted `greenfloord` without Coinset env override and verified fee-estimate API call succeeds using defaults.
+
+## 2026-02-26 (John-Deere mainnet cutover checklist execution for `carbon22_sell_wusdbc`)
+
+- Updated repo baseline `config/program.yaml` to mainnet defaults and synced it to John-Deere repo path:
+  - `app.network: mainnet`
+  - `keys.registry[*].network: mainnet`
+  - `venues.dexie.api_base: https://api.dexie.space`
+- Confirmed John-Deere runtime home config already had mainnet + Cloud Wallet credentials populated (`~/.greenfloor/config/program.yaml`).
+- Ran remote preflight successfully:
+  - `config-validate` -> `config validation ok`
+  - `doctor` -> `"ok": true` (warnings only for optional Pushover env vars).
+- Executed market shaping checklist commands for `carbon22_sell_wusdbc` (`size_base_units` 1, 10, 100) with `--until-ready`:
+  - all three returned `stop_reason: "ready"` and readiness targets met.
+  - operational requirement discovered: `GREENFLOOR_COINSET_BASE_URL=https://api.coinset.org` needed on John-Deere; default `https://coinset.org` caused fee-preflight and coin-record 404s.
+- Ran pre-daemon posting proof sequence successfully:
+  - `build-and-post-offer --market-id carbon22_sell_wusdbc --size-base-units 1` posted to Dexie mainnet (`offer_id: 9xwe1eFzaKDVfuxkwhndzaYTepCtJwgCFJpFTcL8Jj8R`, `publish_failures: 0`).
+  - `offers-status` showed persisted offer row and `strategy_offer_execution` evidence.
+  - `offers-reconcile` completed and transitioned state to `mempool_observed` (Dexie fallback signal path).
+- Started long-running daemon on John-Deere with Coinset override and ran canary status/reconcile checks.
+- New blocker identified for continuous websocket signal ingestion:
+  - `~/.greenfloor/logs/daemon-cutover.log` shows websocket thread crash:
+    - `sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same thread`
+  - Trace points to websocket audit callback path (`greenfloor/daemon/coinset_ws.py` -> `greenfloor/daemon/main.py` -> `greenfloor/storage/sqlite.py`).
+  - Current canary shows daemon cycle events continue, but websocket audit emission path is not thread-safe and needs remediation before declaring strict-close continuous-posting hardening complete.
+
+## 2026-02-26 (mainnet continuous-posting cutover checklist implementation)
+
+- Implemented an operator-ready cutover checklist in `docs/runbook.md` for promoting `carbon22_sell_wusdbc` from one-off manager proofs to continuous daemon posting.
+- Added explicit step-by-step commands for:
+  - mainnet runtime lock-in (`app.network`, `runtime.dry_run`, Dexie mainnet API, Cloud Wallet credentials),
+  - canary market isolation (`carbon22_sell_wusdbc` only),
+  - denomination shaping to target ladder buckets (`1:10`, `10:2`, `100:1`),
+  - pre-daemon single-cycle validation (`build-and-post-offer` -> `offers-status` -> `offers-reconcile`),
+  - long-running daemon startup (`greenfloord` without `--once`),
+  - periodic canary verification loop commands scoped by market id.
+- Added explicit canary pass criteria in runbook:
+  - repeated successful `strategy_offer_execution` events,
+  - maintained open-offer presence with only brief rollover gaps,
+  - no persistent post failures across consecutive daemon cycles,
+  - healthy websocket signal ingestion (`coinset_ws_*` without prolonged disconnect loops).
+
+## 2026-02-26 (CI pre-commit cache stabilization + pytest runtime speedup)
+
+- Fixed CI pre-commit cache path behavior in `.github/workflows/ci.yml`:
+  - switched to a single `actions/cache@v4` step for restore/save lifecycle,
+  - cache path now uses workspace-local `./.cache/pre-commit`,
+  - `PRE_COMMIT_HOME` now uses absolute workspace path (`${{ github.workspace }}/.cache/pre-commit`),
+  - added restore-key prefix fallback by `{os, arch, py311}` tuple.
+- Verified cache health on subsequent CI run:
+  - no path-validation warnings,
+  - pre-commit cache archives successfully saved for all matrix targets (`Linux/X64`, `Linux/ARM64`, `macOS/ARM64`),
+  - first run remained expected cold-start miss; next runs can hit saved keys.
+- Removed a 30-second wall-clock delay from daemon runtime test coverage:
+  - `tests/test_daemon_websocket_runtime.py::test_run_loop_refreshes_log_level_without_restart` now stubs `time.sleep` in loop mode,
+  - preserved existing behavior assertions while eliminating real interval wait in deterministic tests.
+- Validation snapshot after test-speed update:
+  - targeted test: `1 passed in 0.13s`,
+  - full suite: `278 passed, 3 skipped in 0.58s`.
+
 ## 2026-02-26 (post-output UX + market config normalization closeout)
 
 - Improved operator UX for `build-and-post-offer` Dexie publishes:

@@ -62,7 +62,7 @@ def extract_coinset_tx_ids_from_offer_payload(payload: dict[str, Any]) -> list[s
 
 
 class CoinsetAdapter:
-    MAINNET_BASE_URL = "https://coinset.org"
+    MAINNET_BASE_URL = "https://api.coinset.org"
     TESTNET11_BASE_URL = "https://testnet11.api.coinset.org"
 
     def __init__(

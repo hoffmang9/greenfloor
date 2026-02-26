@@ -205,7 +205,7 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         if app_network in {"testnet", "testnet11"}:
             tx_block_websocket_url = "wss://testnet11.api.coinset.org/ws"
         else:
-            tx_block_websocket_url = "wss://coinset.org/ws"
+            tx_block_websocket_url = "wss://api.coinset.org/ws"
     tx_block_websocket_reconnect_interval_seconds = int(
         tx_trigger.get("websocket_reconnect_interval_seconds", 30)
     )

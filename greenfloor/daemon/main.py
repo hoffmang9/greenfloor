@@ -7,6 +7,7 @@ import logging
 import os
 import time
 import urllib.parse
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -322,12 +323,12 @@ def _resolve_coinset_ws_url(*, program, coinset_base_url: str) -> str:
     if not base_url:
         if program.app_network.strip().lower() in {"testnet", "testnet11"}:
             return "wss://testnet11.api.coinset.org/ws"
-        return "wss://coinset.org/ws"
+        return "wss://api.coinset.org/ws"
     parsed = urllib.parse.urlparse(base_url)
     scheme = "wss" if parsed.scheme == "https" else "ws"
     host = parsed.netloc or parsed.path
     if not host:
-        return "wss://coinset.org/ws"
+        return "wss://api.coinset.org/ws"
     return f"{scheme}://{host}/ws"
 
 
@@ -1114,35 +1115,51 @@ def _run_loop(
         os.fspath(markets_path),
     )
     db_path = _resolve_db_path(current_program.home_dir, db_path_override)
-    store_for_ws = SqliteStore(db_path)
     coinset = _build_coinset_adapter(program=current_program, coinset_base_url=coinset_base_url)
     ws_url = _resolve_coinset_ws_url(program=current_program, coinset_base_url=coinset_base_url)
+
+    def _with_ws_store(callback: Callable[[SqliteStore], None]) -> None:
+        # Websocket callbacks may run on a worker thread, so open a
+        # callback-local SQLite connection instead of reusing a main-thread store.
+        store = SqliteStore(db_path)
+        try:
+            callback(store)
+        finally:
+            store.close()
 
     def _on_mempool_tx_ids(tx_ids: list[str]) -> None:
         if not tx_ids:
             return
-        new_count = store_for_ws.observe_mempool_tx_ids(tx_ids)
-        if new_count:
-            store_for_ws.add_audit_event(
-                "mempool_observed",
-                {"new_tx_ids": new_count, "source": "coinset_websocket"},
-            )
+
+        def _write(store: SqliteStore) -> None:
+            new_count = store.observe_mempool_tx_ids(tx_ids)
+            if new_count:
+                store.add_audit_event(
+                    "mempool_observed",
+                    {"new_tx_ids": new_count, "source": "coinset_websocket"},
+                )
+
+        _with_ws_store(_write)
 
     def _on_confirmed_tx_ids(tx_ids: list[str]) -> None:
         if not tx_ids:
             return
-        confirmed = store_for_ws.confirm_tx_ids(tx_ids)
-        store_for_ws.add_audit_event(
-            "tx_block_confirmed",
-            {
-                "tx_ids": tx_ids,
-                "confirmed_count": confirmed,
-                "source": "coinset_websocket",
-            },
-        )
+
+        def _write(store: SqliteStore) -> None:
+            confirmed = store.confirm_tx_ids(tx_ids)
+            store.add_audit_event(
+                "tx_block_confirmed",
+                {
+                    "tx_ids": tx_ids,
+                    "confirmed_count": confirmed,
+                    "source": "coinset_websocket",
+                },
+            )
+
+        _with_ws_store(_write)
 
     def _on_audit_event(event_type: str, payload: dict[str, Any]) -> None:
-        store_for_ws.add_audit_event(event_type, payload)
+        _with_ws_store(lambda store: store.add_audit_event(event_type, payload))
 
     ws_client = CoinsetWebsocketClient(
         ws_url=ws_url,
@@ -1180,7 +1197,6 @@ def _run_loop(
         return 0
     finally:
         ws_client.stop()
-        store_for_ws.close()
         _daemon_logger.info("daemon_stopped mode=loop")
 
 
@@ -1223,7 +1239,7 @@ def main() -> None:
     parser.add_argument("--state-db", default="", help="Optional explicit SQLite state DB path")
     parser.add_argument(
         "--coinset-base-url",
-        default="https://coinset.org",
+        default="https://api.coinset.org",
         help="Coinset API base URL",
     )
     parser.add_argument(

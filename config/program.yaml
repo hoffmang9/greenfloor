@@ -1,6 +1,6 @@
 ---
 app:
-  network: testnet11
+  network: mainnet
   home_dir: "~/.greenfloor"
   log_level: INFO
   run_mode: daemon
@@ -9,11 +9,11 @@ keys:
   registry:
     - key_id: "key-main-1"
       fingerprint: 123456789
-      network: "testnet11"
+      network: "mainnet"
       keyring_yaml_path: "~/.chia_keys/keyring.yaml"
     - key_id: "key-main-2"
       fingerprint: 987654321
-      network: "testnet11"
+      network: "mainnet"
       keyring_yaml_path: "~/.chia_keys/keyring.yaml"
 
 runtime:
@@ -46,7 +46,7 @@ coin_ops:
 
 venues:
   dexie:
-    api_base: "https://api-testnet.dexie.space"
+    api_base: "https://api.dexie.space"
   splash:
     api_base: "http://john-deere.hoffmang.com:4000"
   offer_publish:
@@ -90,7 +90,7 @@ chain_signals:
     mode: "websocket"
     source: "coinset"
     # Coinset websocket endpoint; when empty, defaults by network profile.
-    # mainnet: wss://coinset.org/ws
+    # mainnet: wss://api.coinset.org/ws
     # testnet11: wss://testnet11.api.coinset.org/ws
     websocket_url: ""
     websocket_reconnect_interval_seconds: 30
