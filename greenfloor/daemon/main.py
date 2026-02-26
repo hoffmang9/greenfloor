@@ -3,11 +3,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import time
 import urllib.parse
 from pathlib import Path
 from typing import Any
+
+from concurrent_log_handler import ConcurrentRotatingFileHandler
 
 from greenfloor.adapters.coinset import CoinsetAdapter, extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter
@@ -23,12 +26,45 @@ from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, ap
 from greenfloor.core.strategy import MarketState, StrategyConfig, evaluate_market
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient, capture_coinset_websocket_once
 from greenfloor.keys.router import resolve_market_key
+from greenfloor.logging_setup import (
+    apply_level_to_root,
+    coerce_log_level,
+    create_rotating_file_handler,
+)
 from greenfloor.notify.pushover import send_pushover_alert
 from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
 
 _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS = 500
 _POST_COOLDOWN_UNTIL: dict[str, float] = {}
 _CANCEL_COOLDOWN_UNTIL: dict[str, float] = {}
+_DAEMON_SERVICE_NAME = "daemon"
+_daemon_file_logger_initialized = False
+_daemon_file_log_handler: ConcurrentRotatingFileHandler | None = None
+_daemon_logger = logging.getLogger("greenfloor.daemon")
+
+
+def _initialize_daemon_file_logging(home_dir: str, *, log_level: str | None) -> None:
+    global _daemon_file_logger_initialized, _daemon_file_log_handler
+    root_logger = logging.getLogger()
+    effective_level = coerce_log_level(log_level)
+    if not _daemon_file_logger_initialized:
+        handler = create_rotating_file_handler(service_name=_DAEMON_SERVICE_NAME, home_dir=home_dir)
+        root_logger.addHandler(handler)
+        _daemon_file_log_handler = handler
+        _daemon_file_logger_initialized = True
+    apply_level_to_root(
+        effective_level=effective_level,
+        logger=_daemon_logger,
+        handler=_daemon_file_log_handler,
+    )
+
+
+def _warn_if_log_level_auto_healed(*, program, program_path: Path) -> None:
+    if bool(getattr(program, "app_log_level_was_missing", False)):
+        _daemon_logger.warning(
+            "program config missing app.log_level; wrote default INFO to %s",
+            os.fspath(program_path),
+        )
 
 
 def _consume_reload_marker(state_dir: Path) -> bool:
@@ -596,8 +632,10 @@ def run_once(
     state_dir: Path,
     poll_coinset_mempool: bool = True,
     use_websocket_capture: bool = False,
+    program=None,
 ) -> int:
-    program = load_program_config(program_path)
+    if program is None:
+        program = load_program_config(program_path)
     markets = load_markets_config(markets_path)
     db_path = _resolve_db_path(program.home_dir, db_path_override)
     store = SqliteStore(db_path)
@@ -1057,11 +1095,20 @@ def _run_loop(
     coinset_base_url: str,
     state_dir: Path,
 ) -> int:
-    program = load_program_config(program_path)
-    db_path = _resolve_db_path(program.home_dir, db_path_override)
+    current_program = load_program_config(program_path)
+    _initialize_daemon_file_logging(
+        current_program.home_dir, log_level=getattr(current_program, "app_log_level", "INFO")
+    )
+    _warn_if_log_level_auto_healed(program=current_program, program_path=program_path)
+    _daemon_logger.info(
+        "daemon_starting mode=loop program_config=%s markets_config=%s",
+        os.fspath(program_path),
+        os.fspath(markets_path),
+    )
+    db_path = _resolve_db_path(current_program.home_dir, db_path_override)
     store_for_ws = SqliteStore(db_path)
-    coinset = _build_coinset_adapter(program=program, coinset_base_url=coinset_base_url)
-    ws_url = _resolve_coinset_ws_url(program=program, coinset_base_url=coinset_base_url)
+    coinset = _build_coinset_adapter(program=current_program, coinset_base_url=coinset_base_url)
+    ws_url = _resolve_coinset_ws_url(program=current_program, coinset_base_url=coinset_base_url)
 
     def _on_mempool_tx_ids(tx_ids: list[str]) -> None:
         if not tx_ids:
@@ -1091,7 +1138,7 @@ def _run_loop(
 
     ws_client = CoinsetWebsocketClient(
         ws_url=ws_url,
-        reconnect_interval_seconds=program.tx_block_websocket_reconnect_interval_seconds,
+        reconnect_interval_seconds=current_program.tx_block_websocket_reconnect_interval_seconds,
         on_mempool_tx_ids=_on_mempool_tx_ids,
         on_confirmed_tx_ids=_on_confirmed_tx_ids,
         on_audit_event=_on_audit_event,
@@ -1101,6 +1148,11 @@ def _run_loop(
 
     try:
         while True:
+            _initialize_daemon_file_logging(
+                current_program.home_dir,
+                log_level=getattr(current_program, "app_log_level", "INFO"),
+            )
+            _warn_if_log_level_auto_healed(program=current_program, program_path=program_path)
             run_once(
                 program_path=program_path,
                 markets_path=markets_path,
@@ -1109,15 +1161,18 @@ def _run_loop(
                 coinset_base_url=coinset_base_url,
                 state_dir=state_dir,
                 poll_coinset_mempool=False,
+                program=current_program,
             )
             if _consume_reload_marker(state_dir):
                 print(json.dumps({"event": "config_reloaded"}))
-            time.sleep(max(1, program.runtime_loop_interval_seconds))
+            time.sleep(max(1, current_program.runtime_loop_interval_seconds))
+            current_program = load_program_config(program_path)
     except KeyboardInterrupt:
         return 0
     finally:
         ws_client.stop()
         store_for_ws.close()
+        _daemon_logger.info("daemon_stopped mode=loop")
 
 
 def main() -> None:
@@ -1158,6 +1213,15 @@ def main() -> None:
     allowed_keys = {k.strip() for k in args.key_ids.split(",") if k.strip()} or None
     if args.once:
         program = load_program_config(Path(args.program_config))
+        _initialize_daemon_file_logging(
+            program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
+        )
+        _warn_if_log_level_auto_healed(program=program, program_path=Path(args.program_config))
+        _daemon_logger.info(
+            "daemon_starting mode=once program_config=%s markets_config=%s",
+            args.program_config,
+            args.markets_config,
+        )
         exit_code = run_once(
             Path(args.program_config),
             Path(args.markets_config),
@@ -1168,6 +1232,7 @@ def main() -> None:
             poll_coinset_mempool=False,
             use_websocket_capture=program.tx_block_trigger_mode == "websocket",
         )
+        _daemon_logger.info("daemon_stopped mode=once exit_code=%s", exit_code)
     else:
         exit_code = _run_loop(
             program_path=Path(args.program_config),

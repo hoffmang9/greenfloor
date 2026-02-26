@@ -28,7 +28,14 @@ def write_yaml(path: Path, data: dict[str, Any]) -> None:
 
 
 def load_program_config(path: Path) -> ProgramConfig:
-    return parse_program_config(load_yaml(path))
+    raw = load_yaml(path)
+    config = parse_program_config(raw)
+    if config.app_log_level_was_missing:
+        app = raw.get("app")
+        if isinstance(app, dict):
+            app["log_level"] = config.app_log_level
+            write_yaml(path, raw)
+    return config
 
 
 def load_markets_config(path: Path) -> MarketsConfig:

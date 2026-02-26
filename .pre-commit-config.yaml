@@ -24,13 +24,13 @@ repos:
     hooks:
       - id: pyright
         name: pyright
-        entry: pyright
+        entry: .venv/bin/pyright
         language: system
         types: [python]
         pass_filenames: false
 
       - id: pytest
         name: pytest
-        entry: pytest -q
+        entry: .venv/bin/pytest -q
         language: system
         pass_filenames: false
