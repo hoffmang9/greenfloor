@@ -41,7 +41,7 @@ from greenfloor.logging_setup import (
 )
 from greenfloor.storage.sqlite import SqliteStore
 
-_TEST_PHASE_OFFER_EXPIRY_MINUTES = 10
+_TEST_PHASE_OFFER_EXPIRY_MINUTES = 5
 _MANAGER_SERVICE_NAME = "manager"
 _manager_file_logger_initialized = False
 _manager_logger = logging.getLogger("greenfloor.manager")
@@ -1443,6 +1443,35 @@ def _coin_op_unresolved_error(
     )
 
 
+def _coin_split_lockup_guardrail_error(
+    *,
+    market: Any,
+    selected_venue: str | None,
+    wallet: CloudWalletAdapter,
+    resolved_asset_id: str,
+    spendable_asset_coin_ids: set[str],
+    selected_coin_ids: list[str],
+) -> str:
+    selected_spendable_ids = sorted(set(selected_coin_ids) & spendable_asset_coin_ids)
+    return _format_json_output(
+        {
+            **_coin_op_base_payload(market, selected_venue, wallet),
+            "waited": False,
+            "success": False,
+            "error": "coin_split_guardrail_would_lock_all_spendable_coins",
+            "resolved_asset_id": resolved_asset_id,
+            "spendable_asset_coin_count": len(spendable_asset_coin_ids),
+            "selected_spendable_coin_count": len(selected_spendable_ids),
+            "selected_spendable_coin_ids": selected_spendable_ids,
+            "operator_guidance": (
+                "coin-split would consume all currently spendable coins for this asset; "
+                "leave at least one spendable coin free or pass --allow-lock-all-spendable "
+                "to override intentionally"
+            ),
+        }
+    )
+
+
 def _coin_op_result_payload(
     *,
     market: Any,
@@ -2246,6 +2275,7 @@ def _coin_split(
     size_base_units: int | None = None,
     until_ready: bool = False,
     max_iterations: int = 3,
+    allow_lock_all_spendable: bool = False,
 ) -> int:
     program = load_program_config(program_path)
     selected_venue = _resolve_venue_for_coin_prep(venue_override=venue)
@@ -2313,6 +2343,15 @@ def _coin_split(
     for iteration in range(1, max_iterations + 1):
         wallet_coins = wallet.list_coins(include_pending=True)
         existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
+        asset_scoped_coins = wallet.list_coins(
+            asset_id=resolved_split_asset_id,
+            include_pending=True,
+        )
+        spendable_asset_coin_ids = {
+            str(c.get("id", "")).strip()
+            for c in asset_scoped_coins
+            if _is_spendable_coin(c) and str(c.get("id", "")).strip()
+        }
         if coin_ids:
             resolved_coin_ids, unresolved_coin_ids = _resolve_coin_global_ids(
                 wallet_coins, coin_ids
@@ -2320,10 +2359,6 @@ def _coin_split(
             if unresolved_coin_ids:
                 break
         else:
-            asset_scoped_coins = wallet.list_coins(
-                asset_id=resolved_split_asset_id,
-                include_pending=True,
-            )
             spendable_asset_coins = [c for c in asset_scoped_coins if _is_spendable_coin(c)]
             if not spendable_asset_coins:
                 print(
@@ -2353,6 +2388,23 @@ def _coin_split(
                 raise RuntimeError("coin_split_failed:missing_selected_coin_id")
             resolved_coin_ids = [selected_coin_global_id]
             unresolved_coin_ids = []
+
+        if (
+            not allow_lock_all_spendable
+            and spendable_asset_coin_ids
+            and set(resolved_coin_ids) >= spendable_asset_coin_ids
+        ):
+            print(
+                _coin_split_lockup_guardrail_error(
+                    market=market,
+                    selected_venue=selected_venue,
+                    wallet=wallet,
+                    resolved_asset_id=resolved_split_asset_id,
+                    spendable_asset_coin_ids=spendable_asset_coin_ids,
+                    selected_coin_ids=resolved_coin_ids,
+                )
+            )
+            return 2
 
         split_result = wallet.split_coins(
             coin_ids=resolved_coin_ids,
@@ -3353,6 +3405,7 @@ def main() -> None:
     p_coin_split.add_argument("--until-ready", action="store_true")
     p_coin_split.add_argument("--max-iterations", default=3, type=int)
     p_coin_split.add_argument("--no-wait", action="store_true")
+    p_coin_split.add_argument("--allow-lock-all-spendable", action="store_true")
 
     p_coin_combine = sub.add_parser("coin-combine")
     combine_market_group = p_coin_combine.add_mutually_exclusive_group(required=True)
@@ -3478,6 +3531,7 @@ def main() -> None:
             size_base_units=int(args.size_base_units) or None,
             until_ready=bool(args.until_ready),
             max_iterations=int(args.max_iterations),
+            allow_lock_all_spendable=bool(args.allow_lock_all_spendable),
         )
     elif args.command == "coin-combine":
         code = _coin_combine(

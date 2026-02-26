@@ -1,5 +1,47 @@
 # Progress Log
 
+## 2026-02-26 (plan/progress clarification: dual Cloud Wallet cancel-mode support)
+
+- Clarified active cancellation policy in planning/progress docs:
+  - GreenFloor supports both Cloud Wallet cancellation modes:
+    - standard on-chain cancellation (`cancelOffChain: false`),
+    - off-chain cancellation (`cancelOffChain: true`) when org feature flag `OFFER_CANCEL_OFF_CHAIN` is enabled.
+  - Until production support for `OFFER_CANCEL_OFF_CHAIN` is available, operational workflows proceed using the standard on-chain cancellation API.
+- Updated `docs/plan.md` to document this dual-mode compatibility contract and explicit production-default behavior.
+
+## 2026-02-26 (logging stream alignment + runtime log-level controls + CI drift hardening)
+
+- Merged logging alignment and operator controls via PR `#37`:
+  - Added shared rotating file logging setup in `greenfloor/logging_setup.py` using `ConcurrentRotatingFileHandler`.
+  - Manager and daemon now log to `~/.greenfloor/logs/debug.log` with rotation policy:
+    - `maxBytes=25 MiB`
+    - `backupCount=4`
+  - Signed-offer artifact logs moved from stderr prints to structured INFO logs on the rotating file stream.
+- Added runtime-configurable log levels from `app.log_level` in `config/program.yaml`:
+  - Program config parsing now normalizes/validates level values (`CRITICAL|ERROR|WARNING|INFO|DEBUG|NOTSET`).
+  - Missing `app.log_level` is auto-healed to `INFO` in `program.yaml`.
+  - Added warning diagnostics when auto-heal occurs after logging initialization.
+  - Added manager command `set-log-level --log-level <LEVEL>` to update `program.yaml` safely.
+- Added daemon runtime log-level refresh without restart:
+  - daemon loop now reapplies configured log level each cycle so operator updates take effect live.
+- Added websocket failure diagnostics and guardrails:
+  - WARN-level websocket disconnect/recovery failure logs in `greenfloor/daemon/coinset_ws.py`.
+  - Added `NullHandler` on websocket module logger to avoid noisy fallback behavior outside daemon bootstrap.
+- CI/local tooling drift hardening:
+  - CI now runs `pre-commit run --all-files` from the project venv environment.
+  - Pinned dev tooling versions in `pyproject.toml` to match local pre-commit execution:
+    - `ruff==0.9.10`
+    - `pyright==1.1.408`
+    - `pytest==9.0.2`
+    - `pre-commit==4.5.1`
+  - Updated local pre-commit hook entries for pyright/pytest to call `.venv` binaries directly.
+- Added deterministic test coverage for:
+  - log-level defaulting/auto-heal,
+  - manager log-level CLI dispatch/update,
+  - daemon runtime log-level refresh,
+  - daemon startup/shutdown and auto-heal warning log emission,
+  - websocket WARN logging behavior.
+
 ## 2026-02-26 (course pivot: defer OFFER_CANCEL_OFF_CHAIN work; add signed-offer logging)
 
 - Course adjustment recorded:

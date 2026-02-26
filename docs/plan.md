@@ -31,6 +31,12 @@ Ten core commands are in scope. Do not add commands without explicit need tied t
 Cloud Wallet adjunct:
 
 - `offers-cancel` is available for Cloud Wallet offer cancellation workflows, but is not part of the v1 core command-count policy used for simplification scope control.
+- Cancellation mode compatibility policy:
+  - GreenFloor supports both Cloud Wallet cancellation APIs:
+    - standard on-chain cancellation (`cancelOffChain: false`),
+    - off-chain cancellation (`cancelOffChain: true`, requires org feature flag `OFFER_CANCEL_OFF_CHAIN`).
+  - Production/default operating path remains standard on-chain cancellation until `OFFER_CANCEL_OFF_CHAIN` is enabled in production.
+  - Off-chain cancellation support remains implemented and gated for activation once production feature-flag support is available.
 
 Operator output/coin-op behavior notes:
 
@@ -64,6 +70,7 @@ Operator output/coin-op behavior notes:
 - Offer cancellation is intentionally rare and should not be a routine refresh mechanism.
 - Cancellation applies only to stable-vs-unstable pairs, and only when there is strong price movement on the unstable side.
 - In normal conditions, expiry-based replacement is preferred over explicit cancellation.
+- When cancellation is required in Cloud Wallet contexts, use standard on-chain cancellation by default until production support for `OFFER_CANCEL_OFF_CHAIN` is available.
 
 ## Offer Reconciliation Signal Policy
 
