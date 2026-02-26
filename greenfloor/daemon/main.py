@@ -22,7 +22,6 @@ from greenfloor.core.notifications import AlertState, evaluate_low_inventory_ale
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
 from greenfloor.core.strategy import MarketState, StrategyConfig, evaluate_market
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient, capture_coinset_websocket_once
-from greenfloor.daemon.reload import consume_reload_marker
 from greenfloor.keys.router import resolve_market_key
 from greenfloor.notify.pushover import send_pushover_alert
 from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
@@ -30,6 +29,14 @@ from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
 _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS = 500
 _POST_COOLDOWN_UNTIL: dict[str, float] = {}
 _CANCEL_COOLDOWN_UNTIL: dict[str, float] = {}
+
+
+def _consume_reload_marker(state_dir: Path) -> bool:
+    marker = state_dir / "reload_request.json"
+    if not marker.exists():
+        return False
+    marker.unlink(missing_ok=True)
+    return True
 
 
 def _resolve_db_path(program_home_dir: str, explicit_db_path: str | None) -> Path:
@@ -1058,7 +1065,7 @@ def _run_loop(
                 state_dir=state_dir,
                 poll_coinset_mempool=False,
             )
-            if consume_reload_marker(state_dir):
+            if _consume_reload_marker(state_dir):
                 print(json.dumps({"event": "config_reloaded"}))
             time.sleep(max(1, program.runtime_loop_interval_seconds))
     except KeyboardInterrupt:

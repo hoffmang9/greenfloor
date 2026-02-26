@@ -5,7 +5,7 @@ import urllib.parse
 import urllib.request
 
 from greenfloor.config.models import ProgramConfig
-from greenfloor.core.types import AlertEvent
+from greenfloor.core.notifications import AlertEvent
 
 PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
 

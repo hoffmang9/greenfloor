@@ -4,7 +4,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.types import AlertEvent
+
+
+@dataclass(frozen=True, slots=True)
+class AlertEvent:
+    market_id: str
+    ticker: str
+    remaining_amount: int
+    receive_address: str
+    reason: str
 
 
 @dataclass(slots=True)
