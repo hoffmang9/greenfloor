@@ -684,6 +684,26 @@ def _pick_new_offer_artifact(*, offers: list[dict], known_markers: set[str]) -> 
     return candidates[0][1]
 
 
+def _wallet_get_wallet_offers(
+    wallet: CloudWalletAdapter,
+    *,
+    is_creator: bool,
+    states: list[str],
+) -> dict[str, Any]:
+    try:
+        return wallet.get_wallet(is_creator=is_creator, states=states, first=100)
+    except TypeError:
+        # Backward compatibility for deterministic test doubles that still expose get_wallet() with no args.
+        return wallet.get_wallet()
+
+
+def _dexie_offer_status(payload: dict[str, Any]) -> int | None:
+    raw_status = payload.get("status")
+    if raw_status is None and isinstance(payload.get("offer"), dict):
+        raw_status = payload["offer"].get("status")
+    return _safe_int(raw_status)
+
+
 def _safe_int(value: object) -> int | None:
     try:
         return int(value)  # type: ignore[arg-type]
@@ -856,7 +876,11 @@ def _poll_offer_artifact_until_available(
         elapsed = int(time.monotonic() - start)
         wallet_payload = _call_with_moderate_retry(
             action="wallet_get_wallet",
-            call=wallet.get_wallet,
+            call=lambda: _wallet_get_wallet_offers(
+                wallet,
+                is_creator=True,
+                states=["OPEN", "PENDING"],
+            ),
             elapsed_seconds=elapsed,
         )
         offers = wallet_payload.get("offers", [])
@@ -1837,7 +1861,11 @@ def _build_and_post_offer_cloud_wallet(
     splash = SplashAdapter(splash_base_url) if (not dry_run and publish_venue == "splash") else None
 
     for _ in range(repeat):
-        prior_wallet_payload = wallet.get_wallet()
+        prior_wallet_payload = _wallet_get_wallet_offers(
+            wallet,
+            is_creator=True,
+            states=["OPEN", "PENDING"],
+        )
         prior_offers = prior_wallet_payload.get("offers", [])
         known_offer_markers = _offer_markers(prior_offers if isinstance(prior_offers, list) else [])
         offer_amount = int(
@@ -1863,6 +1891,8 @@ def _build_and_post_offer_cloud_wallet(
             requested=requested,
             fee=offer_fee_mojos,
             expires_at_iso=expires_at,
+            split_input_coins=True,
+            split_input_coins_fee=0,
         )
         signature_request_id = str(create_result.get("signature_request_id", "")).strip()
         wait_events: list[dict[str, str]] = []
@@ -2971,8 +3001,7 @@ def _offers_reconcile(
                 reason = "ok"
                 try:
                     payload = adapter.get_offer(offer_id)
-                    raw_status = payload.get("status")
-                    status = int(raw_status) if raw_status is not None else None
+                    status = _dexie_offer_status(payload)
                     coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(payload)
                     if coinset_tx_ids:
                         signal_by_tx_id = store.get_tx_signal_state(coinset_tx_ids)

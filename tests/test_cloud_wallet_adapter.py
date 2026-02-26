@@ -238,3 +238,85 @@ def test_cloud_wallet_cancel_offer_off_chain_sets_flag(monkeypatch, tmp_path: Pa
     variables = captured["body"]["variables"]["input"]  # type: ignore[index]
     assert variables["offerId"] == "Offer_pending"  # type: ignore[index]
     assert variables["cancelOffChain"] is True  # type: ignore[index]
+
+
+def test_cloud_wallet_create_offer_includes_split_input_coin_options(
+    monkeypatch, tmp_path: Path
+) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _FakeHttpResponse(
+            {
+                "data": {
+                    "createOffer": {
+                        "signatureRequest": {
+                            "id": "SignatureRequest_create_1",
+                            "status": "SUBMITTED",
+                        }
+                    }
+                }
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    payload = adapter.create_offer(
+        offered=[{"assetId": "Asset_a", "amount": 1}],
+        requested=[{"assetId": "Asset_b", "amount": 2}],
+        fee=0,
+        expires_at_iso="2026-02-26T00:00:00+00:00",
+        split_input_coins=True,
+        split_input_coins_fee=0,
+    )
+    assert payload == {
+        "signature_request_id": "SignatureRequest_create_1",
+        "status": "SUBMITTED",
+    }
+    variables = captured["body"]["variables"]["input"]  # type: ignore[index]
+    assert variables["splitInputCoins"] is True  # type: ignore[index]
+    assert variables["splitInputCoinsFee"] == 0  # type: ignore[index]
+
+
+def test_cloud_wallet_get_wallet_passes_offer_filters(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _FakeHttpResponse(
+            {
+                "data": {
+                    "wallet": {
+                        "offers": {
+                            "edges": [
+                                {
+                                    "node": {
+                                        "id": "WalletOffer_1",
+                                        "offerId": "Offer_1",
+                                        "state": "OPEN",
+                                        "settlementType": "UNSIGNED",
+                                        "expiresAt": None,
+                                        "bech32": "offer1abc",
+                                        "createdAt": "2026-02-26T00:00:00+00:00",
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    payload = adapter.get_wallet(is_creator=True, states=["OPEN", "PENDING"], first=25)
+    assert len(payload["offers"]) == 1
+    variables = captured["body"]["variables"]  # type: ignore[index]
+    assert variables["isCreator"] is True  # type: ignore[index]
+    assert variables["states"] == ["OPEN", "PENDING"]  # type: ignore[index]
+    assert variables["first"] == 25  # type: ignore[index]

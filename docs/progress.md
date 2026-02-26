@@ -1,5 +1,26 @@
 # Progress Log
 
+## 2026-02-26 (offer status/reconcile hardening: Dexie shape + Cloud Wallet filters + split-input hints)
+
+- Fixed `offers-reconcile` Dexie status parsing to handle both response shapes:
+  - top-level `status`,
+  - nested `offer.status` (current live `/v1/offers/{id}` shape).
+- Hardened Coinset tx-id extraction in `greenfloor/adapters/coinset.py`:
+  - `extract_coinset_tx_ids_from_offer_payload` now recursively walks nested dict/list payloads instead of only top-level keys.
+  - This allows reconciliation to recover tx-id evidence from nested venue payloads.
+- Tightened Cloud Wallet offer artifact polling in `greenfloor/cli/manager.py`:
+  - wallet offer polling now requests creator-owned active offers (`is_creator=True`, `states=["OPEN","PENDING"]`, bounded page size) before selecting new artifacts.
+  - Added backward-compatible fallback for legacy test doubles that expose `get_wallet()` without filter args.
+- Extended Cloud Wallet offer creation contract in `greenfloor/adapters/cloud_wallet.py`:
+  - `create_offer` now passes `splitInputCoins` and `splitInputCoinsFee` through GraphQL input.
+  - Manager Cloud Wallet posting path now supplies split-input options explicitly.
+- Deterministic regression coverage added/updated:
+  - `tests/test_manager_offer_reconcile.py`: nested Dexie payload status handling.
+  - `tests/test_cloud_wallet_adapter.py`: create-offer split-input options + wallet-offer filter arguments.
+  - `tests/test_manager_post_offer.py`: artifact polling filter arguments and updated Cloud Wallet create-offer fake signatures.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_manager_offer_reconcile.py tests/test_cloud_wallet_adapter.py tests/test_manager_post_offer.py -k "nested_dexie_offer_payload_shape or cloud_wallet_create_offer_includes_split_input_coin_options or cloud_wallet_get_wallet_passes_offer_filters or poll_offer_artifact_until_available_requests_creator_open_pending or build_and_post_offer_cloud_wallet"` -> `8 passed`
+
 ## 2026-02-26 (plan/progress clarification: dual Cloud Wallet cancel-mode support)
 
 - Clarified active cancellation policy in planning/progress docs:

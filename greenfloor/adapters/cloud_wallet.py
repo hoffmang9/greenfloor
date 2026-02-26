@@ -213,6 +213,8 @@ mutation combineCoins(
         requested: list[dict[str, Any]],
         fee: int,
         expires_at_iso: str,
+        split_input_coins: bool = True,
+        split_input_coins_fee: int = 0,
     ) -> dict[str, Any]:
         mutation = """
 mutation createOffer($input: CreateOfferInput!) {
@@ -234,6 +236,8 @@ mutation createOffer($input: CreateOfferInput!) {
                     "fee": int(fee),
                     "autoSubmit": True,
                     "expiresAt": expires_at_iso,
+                    "splitInputCoins": bool(split_input_coins),
+                    "splitInputCoinsFee": int(split_input_coins_fee),
                 }
             },
         )
@@ -290,11 +294,17 @@ query getSignatureRequest($id: ID!) {
             return {"id": signature_request_id, "status": "UNKNOWN"}
         return signature_request
 
-    def get_wallet(self) -> dict[str, Any]:
+    def get_wallet(
+        self,
+        *,
+        is_creator: bool | None = None,
+        states: list[str] | None = None,
+        first: int = 100,
+    ) -> dict[str, Any]:
         query = """
-query getWallet($walletId: ID) {
+query getWallet($walletId: ID, $isCreator: Boolean, $states: [OfferState!], $first: Int) {
   wallet(id: $walletId) {
-    offers {
+    offers(isCreator: $isCreator, states: $states, first: $first) {
       edges {
         node {
               id
@@ -310,7 +320,15 @@ query getWallet($walletId: ID) {
   }
 }
 """
-        payload = self._graphql(query=query, variables={"walletId": self._vault_id})
+        payload = self._graphql(
+            query=query,
+            variables={
+                "walletId": self._vault_id,
+                "isCreator": is_creator,
+                "states": states,
+                "first": int(first),
+            },
+        )
         wallet = payload.get("wallet") or {}
         if not isinstance(wallet, dict):
             return {"offers": []}

@@ -3256,7 +3256,16 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
             pass
 
         @staticmethod
-        def create_offer(*, offered, requested, fee, expires_at_iso):
+        def create_offer(
+            *,
+            offered,
+            requested,
+            fee,
+            expires_at_iso,
+            split_input_coins=True,
+            split_input_coins_fee=0,
+        ):
+            _ = split_input_coins, split_input_coins_fee
             return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
 
         @staticmethod
@@ -3335,7 +3344,16 @@ def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
             pass
 
         @staticmethod
-        def create_offer(*, offered, requested, fee, expires_at_iso):
+        def create_offer(
+            *,
+            offered,
+            requested,
+            fee,
+            expires_at_iso,
+            split_input_coins=True,
+            split_input_coins_fee=0,
+        ):
+            _ = split_input_coins, split_input_coins_fee
             return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
 
         @staticmethod
@@ -3390,7 +3408,16 @@ def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
             pass
 
         @staticmethod
-        def create_offer(*, offered, requested, fee, expires_at_iso):
+        def create_offer(
+            *,
+            offered,
+            requested,
+            fee,
+            expires_at_iso,
+            split_input_coins=True,
+            split_input_coins_fee=0,
+        ):
+            _ = split_input_coins, split_input_coins_fee
             return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
 
         @staticmethod
@@ -3460,8 +3487,16 @@ def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
             pass
 
         @staticmethod
-        def create_offer(*, offered, requested, fee, expires_at_iso):
-            _ = offered, requested, fee, expires_at_iso
+        def create_offer(
+            *,
+            offered,
+            requested,
+            fee,
+            expires_at_iso,
+            split_input_coins=True,
+            split_input_coins_fee=0,
+        ):
+            _ = offered, requested, fee, expires_at_iso, split_input_coins, split_input_coins_fee
             return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
 
         @staticmethod
@@ -3563,6 +3598,34 @@ def test_poll_offer_artifact_until_available_times_out(monkeypatch) -> None:
         assert str(exc) == "cloud_wallet_offer_artifact_timeout"
     else:
         raise AssertionError("expected cloud_wallet_offer_artifact_timeout")
+
+
+def test_poll_offer_artifact_until_available_requests_creator_open_pending(monkeypatch) -> None:
+    calls: list[tuple[bool | None, list[str] | None, int]] = []
+    monotonic_values = iter([0.0, 0.5, 0.5])
+
+    class _FakeWallet:
+        @staticmethod
+        def get_wallet(*, is_creator=None, states=None, first=0):
+            calls.append((is_creator, states, first))
+            return {
+                "offers": [
+                    {"offerId": "new-1", "bech32": "offer1new", "expiresAt": "2026-01-02T00:00:00Z"}
+                ]
+            }
+
+    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("greenfloor.cli.manager.time.monotonic", lambda: next(monotonic_values))
+
+    offer = manager_mod._poll_offer_artifact_until_available(
+        wallet=cast(CloudWalletAdapter, _FakeWallet()),
+        known_markers=set(),
+        timeout_seconds=10,
+    )
+    assert offer == "offer1new"
+    assert calls
+    assert calls[0][0] is True
+    assert calls[0][1] == ["OPEN", "PENDING"]
 
 
 # ---------------------------------------------------------------------------

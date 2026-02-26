@@ -140,6 +140,9 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
   - Daemon now runs a long-lived Coinset websocket client with reconnect/recovery and writes tx signals into `tx_signal_state`.
   - `offers-reconcile` and daemon lifecycle transitions consume `tx_signal_state` first and treat venue status as fallback diagnostics.
   - Taker detection continues to emit `coinset_tx_block_webhook` on Coinset-confirmed transitions and includes `signal_source` + Coinset tx-id evidence in reconciliation/audit payloads.
+- [ ] H3: Evaluate replacing local pre-offer split orchestration with Cloud Wallet native offer split options (`splitInputCoins`, `splitInputCoinsFee`) where behavior is equivalent or better.
+  - Rationale: Cloud Wallet can split offer input coins as part of `createOffer`, which may reduce lockup risk and simplify manager-side split/control logic.
+  - Constraint: preserve deterministic guardrails and operator visibility (especially denomination readiness and reserve safety) before switching defaults.
 
 ## CI Notes
 

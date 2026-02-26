@@ -288,3 +288,53 @@ def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(
     assert by_offer["offer-status-cancelled"]["new_state"] == "cancelled"
     assert by_offer["offer-status-cancelled"]["signal_source"] == "dexie_status_fallback"
     assert by_offer["offer-status-cancelled"]["taker_signal"] == "none"
+
+
+def test_offers_reconcile_reads_nested_dexie_offer_payload_shape(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    db_path = tmp_path / "state.sqlite"
+    _write_program(program)
+    tx_id = "f" * 64
+    store = SqliteStore(db_path)
+    try:
+        store.upsert_offer_state(
+            offer_id="offer-nested",
+            market_id="m1",
+            state="open",
+            last_seen_status=0,
+        )
+    finally:
+        store.close()
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+        def get_offer(self, offer_id: str) -> dict:
+            if offer_id != "offer-nested":
+                raise RuntimeError("unexpected_offer_id")
+            return {
+                "success": True,
+                "offer": {
+                    "id": offer_id,
+                    "status": 4,
+                    "tx_id": tx_id,
+                },
+            }
+
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    code = _offers_reconcile(
+        program_path=program,
+        state_db=str(db_path),
+        market_id=None,
+        limit=20,
+        venue="dexie",
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    by_offer = {row["offer_id"]: row for row in payload["items"]}
+    assert by_offer["offer-nested"]["new_state"] == "tx_block_confirmed"
+    assert by_offer["offer-nested"]["last_seen_status"] == 4
+    assert by_offer["offer-nested"]["signal_source"] == "dexie_status_fallback"
