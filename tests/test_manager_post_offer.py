@@ -734,7 +734,11 @@ def test_offers_cancel_submit_onchain_requires_market_selection(
     monkeypatch.setattr("greenfloor.cli.manager.load_program_config", lambda _p: _Program())
     monkeypatch.setattr(
         "greenfloor.cli.manager._new_cloud_wallet_adapter",
-        lambda _p: type("_Wallet", (), {"vault_id": "wallet-1", "get_wallet": staticmethod(lambda: {"offers": []})})(),
+        lambda _p: type(
+            "_Wallet",
+            (),
+            {"vault_id": "wallet-1", "get_wallet": staticmethod(lambda: {"offers": []})},
+        )(),
     )
 
     try:

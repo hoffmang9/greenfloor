@@ -3108,9 +3108,7 @@ def _offers_cancel(
                         refresh_result.get("signature_request_id", "")
                     ).strip()
                     item["result"]["onchain_refresh"] = {
-                        "status": (
-                            "executed" if refresh_signature_request_id else "skipped"
-                        ),
+                        "status": ("executed" if refresh_signature_request_id else "skipped"),
                         "reason": (
                             "cloud_wallet_split_submitted"
                             if refresh_signature_request_id
