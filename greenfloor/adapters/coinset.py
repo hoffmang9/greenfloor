@@ -49,12 +49,12 @@ def extract_coinset_tx_ids_from_offer_payload(payload: dict[str, Any]) -> list[s
                 if key in _COINSET_TX_ID_KEYS:
                     _add_candidate(value)
                 # Some providers nest tx metadata under "offer"/"data"/etc.
-                if isinstance(value, (dict, list)):
+                if isinstance(value, dict | list):
                     _walk(value)
             return
         if isinstance(node, list):
             for item in node:
-                if isinstance(item, (dict, list)):
+                if isinstance(item, dict | list):
                     _walk(item)
 
     _walk(payload)

@@ -1233,9 +1233,7 @@ def main() -> None:
     )
     args = parser.parse_args()
     testnet_markets_path = (
-        Path(args.testnet_markets_config)
-        if str(args.testnet_markets_config).strip()
-        else None
+        Path(args.testnet_markets_config) if str(args.testnet_markets_config).strip() else None
     )
 
     allowed_keys = {k.strip() for k in args.key_ids.split(",") if k.strip()} or None

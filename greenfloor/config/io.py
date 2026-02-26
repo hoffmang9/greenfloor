@@ -79,9 +79,7 @@ def load_markets_config_with_optional_overlay(
             if not isinstance(base_markets, list):
                 raise ValueError(f"markets must be a list in base config: {path}")
             if not isinstance(overlay_markets, list):
-                raise ValueError(
-                    f"markets must be a list in overlay config: {resolved_overlay}"
-                )
+                raise ValueError(f"markets must be a list in overlay config: {resolved_overlay}")
             merged = dict(raw)
             merged["markets"] = [*base_markets, *overlay_markets]
             raw = merged

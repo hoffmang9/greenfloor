@@ -554,15 +554,18 @@ def _derive_cat_metadata_from_dexie_row(row: dict[str, Any]) -> dict[str, Any]:
         if _is_hex_asset_id(normalized):
             cat_id = normalized
             break
-    symbol = _coerce_optional_str(
-        row.get("code") or row.get("base_code") or row.get("symbol")
-    ) or ""
-    name = _coerce_optional_str(
-        row.get("name")
-        or row.get("base_name")
-        or row.get("display_name")
-        or row.get("displayName")
-    ) or ""
+    symbol = (
+        _coerce_optional_str(row.get("code") or row.get("base_code") or row.get("symbol")) or ""
+    )
+    name = (
+        _coerce_optional_str(
+            row.get("name")
+            or row.get("base_name")
+            or row.get("display_name")
+            or row.get("displayName")
+        )
+        or ""
+    )
     dexie_ticker_id = _coerce_optional_str(row.get("ticker_id") or row.get("tickerId"))
     dexie_pool_id = _coerce_optional_str(row.get("pool_id") or row.get("poolId"))
     dexie_last_price = _coerce_optional_str(
@@ -630,11 +633,7 @@ def _cats_add(
     dexie_meta = _derive_cat_metadata_from_dexie_row(dexie_row or {})
     resolved_asset_id = ref_cat_id or _normalize_hex_asset_id(str(dexie_meta.get("asset_id", "")))
     if not _is_hex_asset_id(resolved_asset_id):
-        print(
-            _format_json_output(
-                {"added": False, "error": "cat_id_required_and_must_be_64_hex"}
-            )
-        )
+        print(_format_json_output({"added": False, "error": "cat_id_required_and_must_be_64_hex"}))
         return 2
 
     resolved_symbol = (
@@ -649,17 +648,14 @@ def _cats_add(
     if not resolved_name:
         resolved_name = resolved_symbol
 
-    resolved_ticker_id = (
-        _coerce_optional_str(ticker_id)
-        or _coerce_optional_str((dexie_meta.get("dexie") or {}).get("ticker_id"))
+    resolved_ticker_id = _coerce_optional_str(ticker_id) or _coerce_optional_str(
+        (dexie_meta.get("dexie") or {}).get("ticker_id")
     )
-    resolved_pool_id = (
-        _coerce_optional_str(pool_id)
-        or _coerce_optional_str((dexie_meta.get("dexie") or {}).get("pool_id"))
+    resolved_pool_id = _coerce_optional_str(pool_id) or _coerce_optional_str(
+        (dexie_meta.get("dexie") or {}).get("pool_id")
     )
-    resolved_last_price_xch = (
-        _coerce_optional_str(last_price_xch)
-        or _coerce_optional_str((dexie_meta.get("dexie") or {}).get("last_price_xch"))
+    resolved_last_price_xch = _coerce_optional_str(last_price_xch) or _coerce_optional_str(
+        (dexie_meta.get("dexie") or {}).get("last_price_xch")
     )
 
     parsed_target_usd_per_unit: float | None
@@ -788,7 +784,9 @@ def _cats_delete(
                 continue
             row_symbol = str(row.get("base_symbol", "")).strip().lower()
             row_name = str(row.get("name", "")).strip().lower()
-            if normalized_ticker and (row_symbol == normalized_ticker or row_name == normalized_ticker):
+            if normalized_ticker and (
+                row_symbol == normalized_ticker or row_name == normalized_ticker
+            ):
                 ticker_matches.append(row)
         if len(ticker_matches) == 1:
             target_asset_id = _normalize_hex_asset_id(str(ticker_matches[0].get("asset_id", "")))
@@ -812,9 +810,7 @@ def _cats_delete(
 
     if not _is_hex_asset_id(target_asset_id):
         print(
-            _format_json_output(
-                {"deleted": False, "error": "cat_id_required_and_must_be_64_hex"}
-            )
+            _format_json_output({"deleted": False, "error": "cat_id_required_and_must_be_64_hex"})
         )
         return 2
 

@@ -28,9 +28,7 @@ def test_cats_add_manual_without_dexie_lookup(tmp_path: Path) -> None:
     row = rows[0]
     assert row["name"] == "Manual CAT"
     assert row["base_symbol"] == "MCAT"
-    assert row["asset_id"] == (
-        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-    )
+    assert row["asset_id"] == ("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
     assert row["dexie"]["ticker_id"] == "manualcat_xch"
     assert row["dexie"]["pool_id"] == "pool-manual"
     assert row["dexie"]["last_price_xch"] == "0.42"
