@@ -49,6 +49,11 @@ def _market() -> MarketConfig:
         mode="sell_only",
         signer_key_id="key-main-1",
         inventory=MarketInventoryConfig(low_watermark_base_units=100),
+        pricing={
+            "fixed_quote_per_base": 0.5,
+            "base_unit_mojo_multiplier": 1000,
+            "quote_unit_mojo_multiplier": 1000,
+        },
     )
 
 
@@ -260,9 +265,15 @@ def test_execute_strategy_actions_applies_post_cooldown_after_retry_exhaust(monk
 
 def test_build_offer_for_action_direct_builder_call(monkeypatch) -> None:
     monkeypatch.delenv("GREENFLOOR_OFFER_BUILDER_CMD", raising=False)
+    captured = {}
+
+    def _fake_build_offer(payload):
+        captured["payload"] = payload
+        return f"offer1direct-{payload['size_base_units']}"
+
     monkeypatch.setattr(
         "greenfloor.cli.offer_builder_sdk.build_offer",
-        lambda payload: f"offer1direct-{payload['size_base_units']}",
+        _fake_build_offer,
     )
     action = PlannedAction(
         size=10,
@@ -278,8 +289,16 @@ def test_build_offer_for_action_direct_builder_call(monkeypatch) -> None:
         market=_market(),
         action=action,
         xch_price_usd=31.5,
+        network="mainnet",
+        keyring_yaml_path="/tmp/keyring.yaml",
     )
 
     assert built["status"] == "executed"
     assert built["reason"] == "offer_builder_success"
     assert built["offer"] == "offer1direct-10"
+    assert captured["payload"]["quote_price_quote_per_base"] == 0.5
+    assert captured["payload"]["base_unit_mojo_multiplier"] == 1000
+    assert captured["payload"]["quote_unit_mojo_multiplier"] == 1000
+    assert captured["payload"]["key_id"] == "key-main-1"
+    assert captured["payload"]["network"] == "mainnet"
+    assert captured["payload"]["keyring_yaml_path"] == "/tmp/keyring.yaml"

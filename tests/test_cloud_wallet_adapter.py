@@ -193,9 +193,11 @@ def test_cloud_wallet_get_signature_request_handles_non_dict(monkeypatch, tmp_pa
 def test_cloud_wallet_cancel_offer_returns_signature_request(monkeypatch, tmp_path: Path) -> None:
     adapter = _build_adapter(tmp_path)
     monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    captured: dict[str, object] = {}
 
-    def _fake_urlopen(_req, timeout=0):
+    def _fake_urlopen(req, timeout=0):
         _ = timeout
+        captured["body"] = json.loads(req.data.decode("utf-8"))
         return _FakeHttpResponse(
             {
                 "data": {
@@ -215,3 +217,24 @@ def test_cloud_wallet_cancel_offer_returns_signature_request(monkeypatch, tmp_pa
         "signature_request_id": "SignatureRequest_cancel_1",
         "status": "SUBMITTED",
     }
+    variables = captured["body"]["variables"]["input"]  # type: ignore[index]
+    assert variables["offerId"] == "Offer_abc"  # type: ignore[index]
+    assert variables["cancelOffChain"] is False  # type: ignore[index]
+
+
+def test_cloud_wallet_cancel_offer_off_chain_sets_flag(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _FakeHttpResponse({"data": {"cancelOffer": {"signatureRequest": None}}})
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    payload = adapter.cancel_offer(offer_id="Offer_pending", cancel_off_chain=True)
+    assert payload == {"signature_request_id": "", "status": ""}
+    variables = captured["body"]["variables"]["input"]  # type: ignore[index]
+    assert variables["offerId"] == "Offer_pending"  # type: ignore[index]
+    assert variables["cancelOffChain"] is True  # type: ignore[index]

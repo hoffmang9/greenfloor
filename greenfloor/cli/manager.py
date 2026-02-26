@@ -2965,6 +2965,8 @@ def _offers_cancel(
     failures = 0
     for row in selected_offers:
         offer_id = row["offer_id"]
+        offer_state = str(row.get("state", "")).strip().upper()
+        cancel_off_chain = offer_state == "PENDING"
         wallet_offer_id = row.get("wallet_offer_id", "")
         ui_url = _cloud_wallet_offer_ui_url(
             cloud_wallet_base_url=str(program.cloud_wallet_base_url),
@@ -2972,12 +2974,15 @@ def _offers_cancel(
             wallet_offer_id=wallet_offer_id,
         )
         try:
-            cancel_result = wallet.cancel_offer(offer_id=offer_id)
+            cancel_result = wallet.cancel_offer(
+                offer_id=offer_id, cancel_off_chain=cancel_off_chain
+            )
             item = {
                 "offer_id": offer_id,
                 "wallet_offer_id": wallet_offer_id,
                 "state": row.get("state", ""),
                 "expires_at": row.get("expires_at", ""),
+                "cancel_off_chain": cancel_off_chain,
                 "url": ui_url,
                 "result": {
                     "success": True,
@@ -2987,10 +2992,13 @@ def _offers_cancel(
                     "signature_state": str(cancel_result.get("status", "")).strip(),
                 },
             }
-            if not item["result"]["signature_request_id"]:
+            missing_signature_request = not item["result"]["signature_request_id"]
+            if missing_signature_request and not cancel_off_chain:
                 failures += 1
                 item["result"]["success"] = False
                 item["result"]["error"] = "cancel_offer_missing_signature_request_id"
+            elif missing_signature_request and cancel_off_chain:
+                item["result"]["reason"] = "cancel_off_chain_requested"
             items.append(item)
         except Exception as exc:
             failures += 1

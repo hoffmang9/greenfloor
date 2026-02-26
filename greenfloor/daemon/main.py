@@ -208,14 +208,44 @@ def _strategy_state_from_bucket_counts(
     )
 
 
+def _resolve_quote_price_quote_per_base(market) -> float:
+    pricing = dict(getattr(market, "pricing", {}) or {})
+    quote_price = pricing.get("fixed_quote_per_base")
+    if quote_price is None:
+        min_q = pricing.get("min_price_quote_per_base")
+        max_q = pricing.get("max_price_quote_per_base")
+        if min_q is not None and max_q is not None:
+            quote_price = (float(min_q) + float(max_q)) / 2.0
+        elif min_q is not None:
+            quote_price = float(min_q)
+        elif max_q is not None:
+            quote_price = float(max_q)
+    if quote_price is None:
+        raise ValueError(
+            "market pricing must define fixed_quote_per_base or min/max_price_quote_per_base"
+        )
+    return float(quote_price)
+
+
 def _build_offer_for_action(
     *,
     market,
     action,
     xch_price_usd: float | None,
+    network: str,
+    keyring_yaml_path: str,
 ) -> dict[str, Any]:
     from greenfloor.cli.offer_builder_sdk import build_offer_text
 
+    pricing = dict(getattr(market, "pricing", {}) or {})
+    try:
+        quote_price = _resolve_quote_price_quote_per_base(market)
+    except Exception as exc:
+        return {
+            "status": "skipped",
+            "reason": f"offer_builder_failed:{exc}",
+            "offer": None,
+        }
     payload = {
         "market_id": market.market_id,
         "base_asset": market.base_asset,
@@ -230,6 +260,13 @@ def _build_offer_for_action(
         "target_spread_bps": action.target_spread_bps,
         "expiry_unit": action.expiry_unit,
         "expiry_value": int(action.expiry_value),
+        "quote_price_quote_per_base": quote_price,
+        "base_unit_mojo_multiplier": int(pricing.get("base_unit_mojo_multiplier", 1000)),
+        "quote_unit_mojo_multiplier": int(pricing.get("quote_unit_mojo_multiplier", 1000)),
+        "key_id": market.signer_key_id,
+        "keyring_yaml_path": keyring_yaml_path,
+        "network": network,
+        "asset_id": market.base_asset,
     }
     try:
         offer = build_offer_text(payload)
@@ -321,11 +358,15 @@ def _execute_strategy_actions(
     splash: SplashAdapter | None = None,
     publish_venue: str = "dexie",
     store: SqliteStore,
+    app_network: str = "mainnet",
+    signer_key_registry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     executed_count = 0
     _, _, cooldown_seconds = _post_retry_config()
     cooldown_key = f"{publish_venue}:{market.market_id}"
+    signer_key = (signer_key_registry or {}).get(market.signer_key_id)
+    keyring_yaml_path = str(getattr(signer_key, "keyring_yaml_path", "") or "")
     for action in strategy_actions:
         for _ in range(int(action.repeat)):
             if runtime_dry_run:
@@ -343,6 +384,8 @@ def _execute_strategy_actions(
                 market=market,
                 action=action,
                 xch_price_usd=xch_price_usd,
+                network=app_network,
+                keyring_yaml_path=keyring_yaml_path,
             )
             if built.get("status") != "executed":
                 items.append(
@@ -829,6 +872,8 @@ def run_once(
                 splash=splash,
                 publish_venue=program.offer_publish_venue,
                 store=store,
+                app_network=program.app_network,
+                signer_key_registry=program.signer_key_registry,
             )
             strategy_planned_total += int(offer_execution["planned_count"])
             strategy_executed_total += int(offer_execution["executed_count"])
