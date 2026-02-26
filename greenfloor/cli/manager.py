@@ -2193,6 +2193,21 @@ def _resolve_dexie_base_url(network: str, explicit_base_url: str | None) -> str:
     raise ValueError(f"unsupported network for dexie posting: {network}")
 
 
+def _dexie_offer_view_url(*, dexie_base_url: str, offer_id: str) -> str:
+    clean_offer_id = str(offer_id).strip()
+    if not clean_offer_id:
+        return ""
+    parsed = urllib.parse.urlparse(str(dexie_base_url).strip())
+    host = parsed.netloc.strip().lower()
+    if not host:
+        return ""
+    if host.startswith("api-testnet."):
+        host = host[len("api-") :]
+    elif host.startswith("api."):
+        host = host[len("api.") :]
+    return f"https://{host}/offers/{urllib.parse.quote(clean_offer_id)}"
+
+
 def _resolve_splash_base_url(explicit_base_url: str | None) -> str:
     if explicit_base_url and explicit_base_url.strip():
         return explicit_base_url.strip().rstrip("/")
@@ -2411,6 +2426,17 @@ def _build_and_post_offer_cloud_wallet(
         if result.get("success") is False:
             publish_failures += 1
         offer_id = str(result.get("id", "")).strip()
+        result_payload = {
+            **result,
+            "signature_request_id": signature_request_id,
+            "signature_state": signature_state,
+            "wait_events": wait_events,
+        }
+        if publish_venue == "dexie" and offer_id:
+            result_payload["offer_view_url"] = _dexie_offer_view_url(
+                dexie_base_url=dexie_base_url,
+                offer_id=offer_id,
+            )
         if offer_id:
             store.upsert_offer_state(
                 offer_id=offer_id,
@@ -2434,12 +2460,7 @@ def _build_and_post_offer_cloud_wallet(
         post_results.append(
             {
                 "venue": publish_venue,
-                "result": {
-                    **result,
-                    "signature_request_id": signature_request_id,
-                    "signature_state": signature_state,
-                    "wait_events": wait_events,
-                },
+                "result": result_payload,
             }
         )
 
@@ -2631,7 +2652,14 @@ def _build_and_post_offer(
                 success_value = result.get("success")
                 if success_value is False:
                     publish_failures += 1
-                post_results.append({"venue": "dexie", "result": result})
+                result_payload = dict(result)
+                offer_id = str(result_payload.get("id", "")).strip()
+                if offer_id:
+                    result_payload["offer_view_url"] = _dexie_offer_view_url(
+                        dexie_base_url=dexie_base_url,
+                        offer_id=offer_id,
+                    )
+                post_results.append({"venue": "dexie", "result": result_payload})
             else:
                 assert splash is not None
                 result = splash.post_offer(offer_text)

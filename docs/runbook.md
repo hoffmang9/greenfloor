@@ -11,6 +11,7 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
 3. Validate seeded configs:
    - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml config-validate`
    - Optional testnet overlay (only if file exists): add `--testnet-markets-config ~/.greenfloor/config/testnet-markets.yaml`
+   - Base `markets.yaml` must use mainnet `xch1...` receive addresses; `txch1...` addresses are rejected and belong in `testnet-markets.yaml`.
 4. Onboard signer selection:
    - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml keys-onboard --key-id key-main-1 --state-dir ~/.greenfloor/state`
 5. Run readiness checks:
@@ -64,6 +65,8 @@ Optional developer bootstrap for testnet markets:
     - Optional one-off override: `--venue dexie` or `--venue splash`
     - Optional URL overrides: `--dexie-base-url ...` and `--splash-base-url ...`
   - Dexie path validates offer text with `chia-wallet-sdk` before submission; if validation fails, manager blocks submit and returns a `wallet_sdk_offer_verify_*` error.
+  - On successful Dexie post, command JSON now includes a direct browser link:
+    - `results[].result.offer_view_url` (for example `https://dexie.space/offers/<offer_id>`).
 - Reconcile posted offers and flag orphan/unknown entries:
   - `greenfloor-manager offers-reconcile --limit 200`
   - Optional scope: `--market-id <id>`
@@ -72,7 +75,7 @@ Optional developer bootstrap for testnet markets:
     - `taker_diagnostic`: advisory diagnostics (`coinset_tx_block_confirmed`, `coinset_mempool_observed`, or Dexie fallback patterns).
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
-- Note: manager CLI v1 core surface remains focused on trading/runtime commands. `offers-cancel`, `cats-add`, and `cats-list` are adjunct operator commands tracked outside the core-count policy. Tuning/history/metrics helpers are deferred until after G1-G3 testnet proof.
+- Note: manager CLI v1 core surface remains focused on trading/runtime commands. `offers-cancel`, `cats-add`, `cats-list`, and `cats-delete` are adjunct operator commands tracked outside the core-count policy. Tuning/history/metrics helpers are deferred until after G1-G3 testnet proof.
 
 ## 3) Recovery and Revalidation
 

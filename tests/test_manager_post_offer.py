@@ -470,6 +470,7 @@ def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, c
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["results"][0]["venue"] == "dexie"
     assert payload["results"][0]["result"]["id"] == "offer-123"
+    assert payload["results"][0]["result"]["offer_view_url"] == "https://dexie.space/offers/offer-123"
 
 
 def test_build_and_post_offer_dry_run_builds_but_does_not_post(
@@ -891,6 +892,9 @@ def test_build_and_post_offer_accepts_txch_pair_on_testnet11(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["market_id"] == "m1"
     assert payload["results"][0]["result"]["id"] == "offer-txch"
+    assert payload["results"][0]["result"]["offer_view_url"] == (
+        "https://testnet.dexie.space/offers/offer-txch"
+    )
 
 
 def test_build_and_post_offer_rejects_txch_pair_on_mainnet(tmp_path: Path) -> None:
@@ -3316,6 +3320,7 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     payload = json.loads(captured.out.strip())
     assert payload["publish_failures"] == 0
     assert payload["results"][0]["result"]["id"] == "dexie-99"
+    assert payload["results"][0]["result"]["offer_view_url"] == "https://dexie.space/offers/dexie-99"
     assert payload["offer_fee_mojos"] == 0
     assert captured.err == ""
     log_text = (tmp_path / "logs" / "debug.log").read_text(encoding="utf-8")

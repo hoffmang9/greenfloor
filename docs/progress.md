@@ -1,5 +1,40 @@
 # Progress Log
 
+## 2026-02-26 (post-output UX + market config normalization closeout)
+
+- Improved operator UX for `build-and-post-offer` Dexie publishes:
+  - Manager output now includes `results[].result.offer_view_url` whenever Dexie returns an offer ID.
+  - URL is normalized from API base to browser host:
+    - mainnet: `https://dexie.space/offers/<id>`
+    - testnet: `https://testnet.dexie.space/offers/<id>`
+  - Added deterministic coverage for standard + Cloud Wallet posting paths in `tests/test_manager_post_offer.py`.
+- Finalized mainnet market config normalization:
+  - Market IDs now follow pair/mode naming style (`carbon22_sell_xch`, `carbon22_sell_wusdbc`, `byc_two_sided_wusdbc`).
+  - Mainnet receive addresses in base `config/markets.yaml` aligned to `xch1hpppalrmxk7x2vzvf5f5c4ylz6l9kwnjkanqtk3qszegrtkm2lvsr6h0df`.
+  - Updated `carbon22_sell_wusdbc` bucket targets to `1:10`, `10:2`, `100:1`.
+- Confirmed remote environment alignment on `John-Deere`:
+  - branch fast-forwarded to latest commits,
+  - runtime config files synced for `markets.yaml`, `cats.yaml`, and optional `testnet-markets.yaml`,
+  - manager `config-validate` + CAT catalog smoke commands passed.
+
+## 2026-02-26 (mainnet market config normalization + John-Deere sync)
+
+- Normalized active mainnet market IDs in `config/markets.yaml` to pair-first naming:
+  - `carbon22_sell_xch`
+  - `carbon22_sell_wusdbc`
+  - `byc_two_sided_wusdbc`
+- Updated mainnet `receive_address` values in base `markets.yaml` to:
+  - `xch1hpppalrmxk7x2vzvf5f5c4ylz6l9kwnjkanqtk3qszegrtkm2lvsr6h0df`
+- Updated `carbon22_sell_wusdbc` inventory bucket targets to:
+  - `1: 10`, `10: 2`, `100: 1`
+- Added strict base-config address guard in `greenfloor/config/io.py`:
+  - base `markets.yaml` now logs an error and fails validation when any market uses `txch1...` receive addresses,
+  - directs testnet address usage to `testnet-markets.yaml` only.
+- Synced remote `John-Deere` repo/config to current branch and config model:
+  - pulled latest branch,
+  - aligned `~/.greenfloor/config/{markets.yaml,cats.yaml,testnet-markets.yaml}` with repo,
+  - revalidated manager config load path and CAT catalog smoke commands.
+
 ## 2026-02-26 (optional testnet markets overlay split from mainnet markets config)
 
 - Split testnet market stanzas out of `config/markets.yaml` into new `config/testnet-markets.yaml`.
