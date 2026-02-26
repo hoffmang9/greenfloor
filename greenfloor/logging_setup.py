@@ -32,7 +32,9 @@ def cast_log_level(level_name: str) -> int:
     return level
 
 
-def create_rotating_file_handler(*, service_name: str, home_dir: str | Path) -> ConcurrentRotatingFileHandler:
+def create_rotating_file_handler(
+    *, service_name: str, home_dir: str | Path
+) -> ConcurrentRotatingFileHandler:
     log_path = (Path(home_dir).expanduser() / DEFAULT_LOG_FILE).resolve()
     log_path.parent.mkdir(parents=True, exist_ok=True)
     file_name_length = 33 - len(service_name)
@@ -54,7 +56,9 @@ def create_rotating_file_handler(*, service_name: str, home_dir: str | Path) -> 
     return handler
 
 
-def apply_level_to_root(*, effective_level: int, logger: logging.Logger, handler: logging.Handler | None) -> None:
+def apply_level_to_root(
+    *, effective_level: int, logger: logging.Logger, handler: logging.Handler | None
+) -> None:
     root_logger = logging.getLogger()
     if handler is not None:
         handler.setLevel(effective_level)
