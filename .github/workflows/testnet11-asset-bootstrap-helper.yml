@@ -249,7 +249,7 @@ jobs:
               snippet_lines.append(f"- name: {yaml_quote(row['name'])}")
               snippet_lines.append(f"  base_symbol: {yaml_quote(row['symbol'])}")
               snippet_lines.append(f"  asset_id: {yaml_quote(row['asset_id'])}")
-              snippet_lines.append("  legacy_usd_price_per_credit: null")
+              snippet_lines.append("  target_usd_per_unit: null")
               snippet_lines.append("  dexie:")
               ticker_id = "null" if row["ticker_id"] is None else yaml_quote(row["ticker_id"])
               pool_id = "null" if row["pool_id"] is None else yaml_quote(row["pool_id"])

@@ -1,5 +1,19 @@
 # Progress Log
 
+## 2026-02-26 (CAT catalog migration to config/cats.yaml + manager add/list commands)
+
+- Moved CAT metadata catalog out of `config/markets.yaml` into dedicated `config/cats.yaml` (`cats:` list with `name`, `base_symbol`, `asset_id`, optional legacy price, and Dexie metadata fields).
+- Added manager adjunct commands for CAT catalog operations:
+  - `cats-list`: prints all known CATs from `--cats-config` (default `~/.greenfloor/config/cats.yaml`, fallback repo `config/cats.yaml`).
+  - `cats-add`: adds or replaces CAT entries by `--cat-id` or `--ticker`, with Dexie-assisted lookup by default and full manual override fields (`--name`, `--base-symbol`, `--ticker-id`, `--pool-id`, `--last-price-xch`, `--target-usd-per-unit`).
+- Added `--cats-config` global manager flag and bootstrap seeding support:
+  - `bootstrap-home` now seeds `cats.yaml` via `--cats-template` (default `config/cats.yaml`) alongside `program.yaml` and `markets.yaml`.
+- Updated local CAT label hint resolution fallback used by Cloud Wallet asset resolution:
+  - Manager now reads hints from `config/cats.yaml` first, while retaining legacy market-based fallback behavior for compatibility.
+- Added deterministic tests for CAT catalog command behavior and bootstrap seeding:
+  - `tests/test_manager_cats.py` (manual add, Dexie-assisted add, replace guardrail).
+  - `tests/test_home_bootstrap.py` now validates `cats.yaml` seed/create/keep behavior.
+
 ## 2026-02-26 (offer status/reconcile hardening: Dexie shape + Cloud Wallet filters + split-input hints)
 
 - Fixed `offers-reconcile` Dexie status parsing to handle both response shapes:

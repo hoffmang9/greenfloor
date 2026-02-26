@@ -1,0 +1,114 @@
+---
+cats:
+  - name: "dexie bucks"
+    base_symbol: "DBX"
+    asset_id: "db1a9020d48d9d4ad22631b66ab4b9ebd3637ef7758ad38881348c5d24c38f20"
+    target_usd_per_unit: null
+    dexie:
+      ticker_id: "db1a9020d48d9d4ad22631b66ab4b9ebd3637ef7758ad38881348c5d24c38f20_xch"
+      pool_id: null
+      last_price_xch: null
+  - name: "Testnet dexie bucks"
+    base_symbol: "TDBX"
+    asset_id: "d82dd03f8a9ad2f84353cd953c4de6b21dbaaf7de3ba3f4ddd9abe31ecba80ad"
+    target_usd_per_unit: null
+    dexie:
+      ticker_id: "d82dd03f8a9ad2f84353cd953c4de6b21dbaaf7de3ba3f4ddd9abe31ecba80ad_xch"
+      pool_id: null
+      last_price_xch: "0.004119292414047852"
+  - name: "Testnet Bytecash"
+    base_symbol: "TBYC"
+    asset_id: "4d81e31c9dd9663220b9384693f6ea036b9e372ecf94f0f38b5767b54cd96d05"
+    target_usd_per_unit: null
+    dexie:
+      ticker_id: "4d81e31c9dd9663220b9384693f6ea036b9e372ecf94f0f38b5767b54cd96d05_xch"
+      pool_id: "138c27101b3ac5b48d3530729d401d95c723d9b954d346ea982793ca22b1b27c"
+      last_price_xch: "0.002420604183"
+  - name: "Base warp.green USDC"
+    base_symbol: "wUSDC.b"
+    asset_id: "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d"
+    target_usd_per_unit: null
+    dexie:
+      ticker_id: "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d_xch"
+      pool_id: "8cb4ea71bf7fd2ba293553c2d185d0173de806f6d679767c0070f2a92860d4cf"
+      last_price_xch: "0.367746423043"
+  - name: "Circuit DAO Token"
+    base_symbol: "CRT"
+    asset_id: "ea3ace5525d6aaf6d921b66052afc67da11c820b676de91d61ae1a766c8ce615"
+    target_usd_per_unit: null
+    dexie:
+      ticker_id: null
+      pool_id: null
+      last_price_xch: null
+  - name: "Bytecash"
+    base_symbol: "BYC"
+    asset_id: "ae1536f56760e471ad85ead45f00d680ff9cca73b8cc3407be778f1c0c606eac"
+    target_usd_per_unit: null
+    dexie:
+      ticker_id: "ae1536f56760e471ad85ead45f00d680ff9cca73b8cc3407be778f1c0c606eac_xch"
+      pool_id: "f5cb8ea654d60e2c0ff0b227874c490e51318eb6b05933ef3c20ede1c9d2d230"
+      last_price_xch: "0.382035306334"
+  - name: "Marmot Coin"
+    base_symbol: "MRMT"
+    asset_id: "8ebf855de6eb146db5602f0456d2f0cbe750d57f821b6f91a8592ee9f1d4cf31"
+    target_usd_per_unit: null
+    dexie:
+      ticker_id: "8ebf855de6eb146db5602f0456d2f0cbe750d57f821b6f91a8592ee9f1d4cf31_xch"
+      pool_id: "be4b112c49d6984ca7460fc92536ead5962fde2864a1b8b93dd9497e704b846a"
+      last_price_xch: "430"
+  - name: "Spacebucks"
+    base_symbol: "SBX"
+    asset_id: "a628c1c2c6fcb74d53746157e438e108eab5c0bb3e5c80ff9b1910b3e4832913"
+    target_usd_per_unit: null
+    dexie:
+      ticker_id: "a628c1c2c6fcb74d53746157e438e108eab5c0bb3e5c80ff9b1910b3e4832913_xch"
+      pool_id: "4f9a97f49484770233676451d806dd085fc8d8524284b957ee89592126850237"
+      last_price_xch: "0.000075297843"
+  - name: "Ethereum warp.green milliETH"
+    base_symbol: "wmilliETH"
+    asset_id: "4cb15a8ecc85068fb1f98c09a5e489d1ad61b2af79690ce00f9fc4803c8b597f"
+    target_usd_per_unit: null
+    dexie:
+      ticker_id: "4cb15a8ecc85068fb1f98c09a5e489d1ad61b2af79690ce00f9fc4803c8b597f_xch"
+      pool_id: "da979045954fdfa8d2f6837eaa153e5c3c62fd4f703b55dfce1f82612504e87e"
+      last_price_xch: "0.655387042578"
+  - name: "Agricultural Reforestation Project 2022"
+    base_symbol: "ECO.181.2022"
+    asset_id: "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
+    target_usd_per_unit: 7.75
+    dexie:
+      ticker_id: "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7_xch"
+      pool_id: "835a8e9cb51297e04a4eee97c8779a9f9994e87441426dafbc8450a651f53319"
+      last_price_xch: "1.628494874185"
+  - name: "Agricultural Reforestation Project 2020"
+    base_symbol: "ECO.181.2020"
+    asset_id: "e257aca547a83020e537e87f8c83e9332d2c3adb729c052e6f04971317084327"
+    target_usd_per_unit: 7.5
+    dexie:
+      ticker_id: "e257aca547a83020e537e87f8c83e9332d2c3adb729c052e6f04971317084327_xch"
+      pool_id: "07bbac96e02ced11d029ce10a64106fca59f5ec94876b6d26367ade4998cea49"
+      last_price_xch: "0.55"
+  - name: "Antioquia and Caldas Reforestation 2022"
+    base_symbol: "ECO.49.2022"
+    asset_id: "9720fcb8333984c72f914fc5090509ae9f7b1ff72eff2ed6825d944d7a571066"
+    target_usd_per_unit: 6.75
+    dexie:
+      ticker_id: "9720fcb8333984c72f914fc5090509ae9f7b1ff72eff2ed6825d944d7a571066_xch"
+      pool_id: "da7ec22c6e3b7c17fa114527ce7edb18bff6b4f7abff78ff01e407e6f2a5deed"
+      last_price_xch: "0.53"
+  - name: "Smallholder Reforestation Project 2022"
+    base_symbol: "ECO.29.2022"
+    asset_id: "9d9264c542c2a3108c7b8f74cad82b60dcbb6e50b328e9cdbaa7acb468a5707f"
+    target_usd_per_unit: 6.75
+    dexie:
+      ticker_id: "9d9264c542c2a3108c7b8f74cad82b60dcbb6e50b328e9cdbaa7acb468a5707f_xch"
+      pool_id: "7c3e7a96bb7d5bf2245bdd104634d334f0f43a42ee02ccf2f84a490d575b65ce"
+      last_price_xch: "0.528"
+  - name: "Smallholder Reforestation Project 2021"
+    base_symbol: "ECO.29.2021"
+    asset_id: "5af8db0b15e0de99ad1eff02486bb1998602053c56dfb22dc04e0f5e17ccec8d"
+    target_usd_per_unit: 6.5
+    dexie:
+      ticker_id: "5af8db0b15e0de99ad1eff02486bb1998602053c56dfb22dc04e0f5e17ccec8d_xch"
+      pool_id: "af7c7cf81886b155dc1c278909d6f7218c767c795537c02b42a3de9633d6abab"
+      last_price_xch: "0.31"

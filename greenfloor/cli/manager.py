@@ -211,6 +211,13 @@ def _default_markets_config_path() -> str:
     return "config/markets.yaml"
 
 
+def _default_cats_config_path() -> str:
+    home_default = Path("~/.greenfloor/config/cats.yaml").expanduser()
+    if home_default.exists():
+        return str(home_default)
+    return "config/cats.yaml"
+
+
 _JSON_OUTPUT_COMPACT = False
 
 
@@ -334,15 +341,27 @@ def _local_catalog_label_hints_for_asset_id(*, canonical_asset_id: str) -> list[
     if not canonical:
         return []
     repo_root = Path(__file__).resolve().parents[2]
+    cats_path = repo_root / "config" / "cats.yaml"
     markets_path = repo_root / "config" / "markets.yaml"
-    if not markets_path.exists():
-        return []
     try:
-        payload = load_yaml(markets_path)
+        cats_payload = load_yaml(cats_path) if cats_path.exists() else {}
+        markets_payload = load_yaml(markets_path) if markets_path.exists() else {}
     except Exception:
         return []
     hints: list[str] = []
-    assets_rows = payload.get("assets") if isinstance(payload, dict) else None
+    cats_rows = cats_payload.get("cats") if isinstance(cats_payload, dict) else None
+    if isinstance(cats_rows, list):
+        for row in cats_rows:
+            if not isinstance(row, dict):
+                continue
+            row_asset_id = str(row.get("asset_id", "")).strip().lower()
+            if row_asset_id != canonical:
+                continue
+            for key in ("base_symbol", "name"):
+                value = str(row.get(key, "")).strip()
+                if value:
+                    hints.append(value)
+    assets_rows = markets_payload.get("assets") if isinstance(markets_payload, dict) else None
     if isinstance(assets_rows, list):
         for row in assets_rows:
             if not isinstance(row, dict):
@@ -354,7 +373,7 @@ def _local_catalog_label_hints_for_asset_id(*, canonical_asset_id: str) -> list[
                 value = str(row.get(key, "")).strip()
                 if value:
                     hints.append(value)
-    markets_rows = payload.get("markets") if isinstance(payload, dict) else None
+    markets_rows = markets_payload.get("markets") if isinstance(markets_payload, dict) else None
     if isinstance(markets_rows, list):
         for row in markets_rows:
             if not isinstance(row, dict):
@@ -470,6 +489,396 @@ def _dexie_lookup_token_for_symbol(*, asset_ref: str, network: str) -> dict | No
         if _labels_match(str(row.get("id", "")), target):
             return row
     return None
+
+
+def _normalize_hex_asset_id(asset_id: str) -> str:
+    normalized = str(asset_id).strip().lower()
+    if normalized.startswith("0x"):
+        normalized = normalized[2:]
+    return normalized
+
+
+def _try_parse_optional_float(raw: str | None) -> float | None:
+    if raw is None:
+        return None
+    cleaned = str(raw).strip()
+    if not cleaned:
+        return None
+    return float(cleaned)
+
+
+def _coerce_optional_str(raw: object) -> str | None:
+    value = str(raw or "").strip()
+    if not value:
+        return None
+    return value
+
+
+def _load_cats_catalog(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"cats": []}
+    payload = load_yaml(path)
+    rows = payload.get("cats")
+    if rows is None:
+        payload["cats"] = []
+        return payload
+    if not isinstance(rows, list):
+        raise ValueError("cats config must contain cats as a list")
+    return payload
+
+
+def _derive_cat_metadata_from_dexie_row(row: dict[str, Any]) -> dict[str, Any]:
+    cat_id_candidates = [
+        row.get("id"),
+        row.get("assetId"),
+        row.get("asset_id"),
+        row.get("tokenId"),
+        row.get("token_id"),
+        row.get("base_currency"),
+    ]
+    cat_id = ""
+    for candidate in cat_id_candidates:
+        normalized = _normalize_hex_asset_id(str(candidate or ""))
+        if _is_hex_asset_id(normalized):
+            cat_id = normalized
+            break
+    symbol = _coerce_optional_str(
+        row.get("code") or row.get("base_code") or row.get("symbol")
+    ) or ""
+    name = _coerce_optional_str(
+        row.get("name")
+        or row.get("base_name")
+        or row.get("display_name")
+        or row.get("displayName")
+    ) or ""
+    dexie_ticker_id = _coerce_optional_str(row.get("ticker_id") or row.get("tickerId"))
+    dexie_pool_id = _coerce_optional_str(row.get("pool_id") or row.get("poolId"))
+    dexie_last_price = _coerce_optional_str(
+        row.get("last_price_xch") or row.get("lastPriceXch") or row.get("price_xch")
+    )
+    return {
+        "asset_id": cat_id,
+        "base_symbol": symbol,
+        "name": name,
+        "dexie": {
+            "ticker_id": dexie_ticker_id,
+            "pool_id": dexie_pool_id,
+            "last_price_xch": dexie_last_price,
+        },
+    }
+
+
+def _cats_add(
+    *,
+    cats_path: Path,
+    network: str,
+    cat_id: str | None,
+    ticker: str | None,
+    name: str | None,
+    base_symbol: str | None,
+    ticker_id: str | None,
+    pool_id: str | None,
+    last_price_xch: str | None,
+    target_usd_per_unit: str | None,
+    use_dexie_lookup: bool,
+    replace: bool,
+) -> int:
+    ref_cat_id = _normalize_hex_asset_id(str(cat_id or ""))
+    ref_ticker = str(ticker or "").strip()
+    if not ref_cat_id and not ref_ticker:
+        print(_format_json_output({"added": False, "error": "must_provide_cat_id_or_ticker"}))
+        return 2
+
+    dexie_row: dict[str, Any] | None = None
+    if use_dexie_lookup:
+        if ref_cat_id:
+            dexie_row = _dexie_lookup_token_for_cat_id(
+                canonical_cat_id_hex=ref_cat_id,
+                network=network,
+            )
+        if dexie_row is None and ref_ticker:
+            dexie_row = _dexie_lookup_token_for_symbol(asset_ref=ref_ticker, network=network)
+        if dexie_row is not None:
+            inferred = _derive_cat_metadata_from_dexie_row(dexie_row)
+            inferred_cat_id = _normalize_hex_asset_id(str(inferred.get("asset_id", "")))
+            if inferred_cat_id and _is_hex_asset_id(inferred_cat_id):
+                enriched = _dexie_lookup_token_for_cat_id(
+                    canonical_cat_id_hex=inferred_cat_id,
+                    network=network,
+                )
+                if enriched is not None:
+                    dexie_row = dict(enriched)
+                    if "code" not in dexie_row:
+                        dexie_row["code"] = inferred.get("base_symbol")
+                    if "name" not in dexie_row:
+                        dexie_row["name"] = inferred.get("name")
+                    if "id" not in dexie_row:
+                        dexie_row["id"] = inferred_cat_id
+
+    dexie_meta = _derive_cat_metadata_from_dexie_row(dexie_row or {})
+    resolved_asset_id = ref_cat_id or _normalize_hex_asset_id(str(dexie_meta.get("asset_id", "")))
+    if not _is_hex_asset_id(resolved_asset_id):
+        print(
+            _format_json_output(
+                {"added": False, "error": "cat_id_required_and_must_be_64_hex"}
+            )
+        )
+        return 2
+
+    resolved_symbol = (
+        str(base_symbol or "").strip()
+        or str(dexie_meta.get("base_symbol", "")).strip()
+        or ref_ticker.strip().upper()
+    )
+    if not resolved_symbol:
+        print(_format_json_output({"added": False, "error": "base_symbol_is_required"}))
+        return 2
+    resolved_name = str(name or "").strip() or str(dexie_meta.get("name", "")).strip()
+    if not resolved_name:
+        resolved_name = resolved_symbol
+
+    resolved_ticker_id = (
+        _coerce_optional_str(ticker_id)
+        or _coerce_optional_str((dexie_meta.get("dexie") or {}).get("ticker_id"))
+    )
+    resolved_pool_id = (
+        _coerce_optional_str(pool_id)
+        or _coerce_optional_str((dexie_meta.get("dexie") or {}).get("pool_id"))
+    )
+    resolved_last_price_xch = (
+        _coerce_optional_str(last_price_xch)
+        or _coerce_optional_str((dexie_meta.get("dexie") or {}).get("last_price_xch"))
+    )
+
+    parsed_target_usd_per_unit: float | None
+    try:
+        parsed_target_usd_per_unit = _try_parse_optional_float(target_usd_per_unit)
+    except ValueError:
+        print(
+            _format_json_output(
+                {
+                    "added": False,
+                    "error": "target_usd_per_unit_must_be_numeric_if_provided",
+                }
+            )
+        )
+        return 2
+
+    cats_payload = _load_cats_catalog(cats_path)
+    rows = cats_payload.get("cats")
+    if not isinstance(rows, list):
+        raise ValueError("cats config must contain cats as a list")
+
+    new_entry: dict[str, Any] = {
+        "name": resolved_name,
+        "base_symbol": resolved_symbol,
+        "asset_id": resolved_asset_id,
+        "target_usd_per_unit": parsed_target_usd_per_unit,
+        "dexie": {
+            "ticker_id": resolved_ticker_id,
+            "pool_id": resolved_pool_id,
+            "last_price_xch": resolved_last_price_xch,
+        },
+    }
+    existing_index = next(
+        (
+            idx
+            for idx, row in enumerate(rows)
+            if isinstance(row, dict)
+            and _normalize_hex_asset_id(str(row.get("asset_id", ""))) == resolved_asset_id
+        ),
+        None,
+    )
+    if existing_index is not None and not replace:
+        print(
+            _format_json_output(
+                {
+                    "added": False,
+                    "error": "cat_already_exists_use_replace",
+                    "asset_id": resolved_asset_id,
+                }
+            )
+        )
+        return 2
+    if existing_index is None:
+        rows.append(new_entry)
+    else:
+        rows[existing_index] = new_entry
+
+    rows.sort(
+        key=lambda row: (
+            str(row.get("base_symbol", "")).lower() if isinstance(row, dict) else "",
+            str(row.get("asset_id", "")).lower() if isinstance(row, dict) else "",
+        )
+    )
+    cats_payload["cats"] = rows
+    write_yaml(cats_path, cats_payload)
+
+    print(
+        _format_json_output(
+            {
+                "added": True,
+                "replaced_existing": existing_index is not None,
+                "cats_config": str(cats_path),
+                "cat": new_entry,
+                "dexie_lookup_used": bool(use_dexie_lookup),
+                "dexie_match_found": dexie_row is not None,
+            }
+        )
+    )
+    return 0
+
+
+def _cats_list(*, cats_path: Path) -> int:
+    cats_payload = _load_cats_catalog(cats_path)
+    rows = cats_payload.get("cats")
+    if not isinstance(rows, list):
+        raise ValueError("cats config must contain cats as a list")
+    print(
+        _format_json_output(
+            {
+                "cats_config": str(cats_path),
+                "count": len(rows),
+                "cats": rows,
+            }
+        )
+    )
+    return 0
+
+
+def _cats_delete(
+    *,
+    cats_path: Path,
+    network: str,
+    cat_id: str | None,
+    ticker: str | None,
+    use_dexie_lookup: bool,
+    confirm_delete: bool,
+    preflight_only: bool,
+) -> int:
+    ref_cat_id = _normalize_hex_asset_id(str(cat_id or ""))
+    ref_ticker = str(ticker or "").strip()
+    if not ref_cat_id and not ref_ticker:
+        print(_format_json_output({"deleted": False, "error": "must_provide_cat_id_or_ticker"}))
+        return 2
+
+    cats_payload = _load_cats_catalog(cats_path)
+    rows = cats_payload.get("cats")
+    if not isinstance(rows, list):
+        raise ValueError("cats config must contain cats as a list")
+
+    target_asset_id = ref_cat_id
+    if not target_asset_id:
+        ticker_matches: list[dict[str, Any]] = []
+        normalized_ticker = ref_ticker.lower()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            row_symbol = str(row.get("base_symbol", "")).strip().lower()
+            row_name = str(row.get("name", "")).strip().lower()
+            if normalized_ticker and (row_symbol == normalized_ticker or row_name == normalized_ticker):
+                ticker_matches.append(row)
+        if len(ticker_matches) == 1:
+            target_asset_id = _normalize_hex_asset_id(str(ticker_matches[0].get("asset_id", "")))
+        elif len(ticker_matches) > 1:
+            print(
+                _format_json_output(
+                    {
+                        "deleted": False,
+                        "error": "ambiguous_ticker_matches_multiple_cats",
+                        "ticker": ref_ticker,
+                    }
+                )
+            )
+            return 2
+
+    if not target_asset_id and use_dexie_lookup and ref_ticker:
+        dexie_row = _dexie_lookup_token_for_symbol(asset_ref=ref_ticker, network=network)
+        if dexie_row is not None:
+            inferred = _derive_cat_metadata_from_dexie_row(dexie_row)
+            target_asset_id = _normalize_hex_asset_id(str(inferred.get("asset_id", "")))
+
+    if not _is_hex_asset_id(target_asset_id):
+        print(
+            _format_json_output(
+                {"deleted": False, "error": "cat_id_required_and_must_be_64_hex"}
+            )
+        )
+        return 2
+
+    delete_index = next(
+        (
+            idx
+            for idx, row in enumerate(rows)
+            if isinstance(row, dict)
+            and _normalize_hex_asset_id(str(row.get("asset_id", ""))) == target_asset_id
+        ),
+        None,
+    )
+    if delete_index is None:
+        print(
+            _format_json_output(
+                {
+                    "deleted": False,
+                    "error": "cat_not_found",
+                    "asset_id": target_asset_id,
+                }
+            )
+        )
+        return 2
+
+    candidate_entry = rows[delete_index]
+    preflight_payload = {
+        "preflight": True,
+        "delete_requested": True,
+        "cats_config": str(cats_path),
+        "cat": candidate_entry,
+    }
+    print(_format_json_output(preflight_payload))
+    if preflight_only:
+        print(
+            _format_json_output(
+                {
+                    "deleted": False,
+                    "preflight_only": True,
+                    "cats_config": str(cats_path),
+                    "cat": candidate_entry,
+                }
+            )
+        )
+        return 0
+
+    if not confirm_delete:
+        confirmation_message = (
+            f"Delete CAT {str(candidate_entry.get('base_symbol', '')).strip() or target_asset_id} "
+            f"({target_asset_id}) from {cats_path}?"
+        )
+        if not _prompt_yes_no(confirmation_message, prompt_for_override=None):
+            print(
+                _format_json_output(
+                    {
+                        "deleted": False,
+                        "error": "delete_not_confirmed",
+                        "cats_config": str(cats_path),
+                        "cat": candidate_entry,
+                    }
+                )
+            )
+            return 2
+
+    deleted_entry = rows.pop(delete_index)
+    cats_payload["cats"] = rows
+    write_yaml(cats_path, cats_payload)
+    print(
+        _format_json_output(
+            {
+                "deleted": True,
+                "cats_config": str(cats_path),
+                "cat": deleted_entry,
+            }
+        )
+    )
+    return 0
 
 
 def _resolve_cloud_wallet_asset_id(
@@ -2773,6 +3182,7 @@ def _bootstrap_home(
     home_dir: Path,
     program_template: Path,
     markets_template: Path,
+    cats_template: Path | None,
     force: bool,
 ) -> int:
     home = home_dir.expanduser().resolve()
@@ -2786,6 +3196,7 @@ def _bootstrap_home(
 
     seeded_program = config_dir / "program.yaml"
     seeded_markets = config_dir / "markets.yaml"
+    seeded_cats = config_dir / "cats.yaml"
 
     wrote_program = False
     if force or not seeded_program.exists():
@@ -2808,6 +3219,15 @@ def _bootstrap_home(
         )
         wrote_markets = True
 
+    wrote_cats = False
+    if cats_template is not None and (force or not seeded_cats.exists()):
+        cats_data = load_yaml(cats_template)
+        seeded_cats.write_text(
+            yaml.safe_dump(cats_data, sort_keys=False),
+            encoding="utf-8",
+        )
+        wrote_cats = True
+
     db_path = (db_dir / "greenfloor.sqlite").resolve()
     store = SqliteStore(db_path)
     try:
@@ -2817,6 +3237,7 @@ def _bootstrap_home(
                 "home_dir": str(home),
                 "program_config": str(seeded_program),
                 "markets_config": str(seeded_markets),
+                "cats_config": str(seeded_cats),
                 "force": bool(force),
             },
         )
@@ -2830,11 +3251,13 @@ def _bootstrap_home(
                 "home_dir": str(home),
                 "program_config": str(seeded_program),
                 "markets_config": str(seeded_markets),
+                "cats_config": str(seeded_cats),
                 "state_db": str(db_path),
                 "state_dir": str(state_dir),
                 "logs_dir": str(logs_dir),
                 "wrote_program_config": wrote_program,
                 "wrote_markets_config": wrote_markets,
+                "wrote_cats_config": wrote_cats,
             }
         )
     )
@@ -3427,6 +3850,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="GreenFloor manager CLI")
     parser.add_argument("--program-config", default=_default_program_config_path())
     parser.add_argument("--markets-config", default=_default_markets_config_path())
+    parser.add_argument("--cats-config", default=_default_cats_config_path())
     parser.add_argument("--state-db", default="")
     parser.add_argument(
         "--json",
@@ -3490,7 +3914,35 @@ def main() -> None:
     p_bootstrap.add_argument("--home-dir", default="~/.greenfloor")
     p_bootstrap.add_argument("--program-template", default="config/program.yaml")
     p_bootstrap.add_argument("--markets-template", default="config/markets.yaml")
+    p_bootstrap.add_argument("--cats-template", default="config/cats.yaml")
     p_bootstrap.add_argument("--force", action="store_true")
+
+    p_cats_add = sub.add_parser("cats-add")
+    p_cats_add.add_argument(
+        "--network", default="mainnet", choices=["mainnet", "testnet", "testnet11"]
+    )
+    p_cats_add.add_argument("--cat-id", default="")
+    p_cats_add.add_argument("--ticker", default="")
+    p_cats_add.add_argument("--name", default="")
+    p_cats_add.add_argument("--base-symbol", default="")
+    p_cats_add.add_argument("--ticker-id", default="")
+    p_cats_add.add_argument("--pool-id", default="")
+    p_cats_add.add_argument("--last-price-xch", default="")
+    p_cats_add.add_argument("--target-usd-per-unit", default="")
+    p_cats_add.add_argument("--no-dexie-lookup", action="store_true")
+    p_cats_add.add_argument("--replace", action="store_true")
+
+    sub.add_parser("cats-list")
+
+    p_cats_delete = sub.add_parser("cats-delete")
+    p_cats_delete.add_argument(
+        "--network", default="mainnet", choices=["mainnet", "testnet", "testnet11"]
+    )
+    p_cats_delete.add_argument("--cat-id", default="")
+    p_cats_delete.add_argument("--ticker", default="")
+    p_cats_delete.add_argument("--no-dexie-lookup", action="store_true")
+    p_cats_delete.add_argument("--yes", action="store_true")
+    p_cats_delete.add_argument("--preflight-only", action="store_true")
 
     p_set_log_level = sub.add_parser("set-log-level")
     p_set_log_level.add_argument("--log-level", required=True)
@@ -3613,7 +4065,35 @@ def main() -> None:
             home_dir=Path(args.home_dir),
             program_template=Path(args.program_template),
             markets_template=Path(args.markets_template),
+            cats_template=Path(args.cats_template) if str(args.cats_template).strip() else None,
             force=bool(args.force),
+        )
+    elif args.command == "cats-add":
+        code = _cats_add(
+            cats_path=Path(args.cats_config),
+            network=args.network,
+            cat_id=args.cat_id or None,
+            ticker=args.ticker or None,
+            name=args.name or None,
+            base_symbol=args.base_symbol or None,
+            ticker_id=args.ticker_id or None,
+            pool_id=args.pool_id or None,
+            last_price_xch=args.last_price_xch or None,
+            target_usd_per_unit=args.target_usd_per_unit or None,
+            use_dexie_lookup=not bool(args.no_dexie_lookup),
+            replace=bool(args.replace),
+        )
+    elif args.command == "cats-list":
+        code = _cats_list(cats_path=Path(args.cats_config))
+    elif args.command == "cats-delete":
+        code = _cats_delete(
+            cats_path=Path(args.cats_config),
+            network=args.network,
+            cat_id=args.cat_id or None,
+            ticker=args.ticker or None,
+            use_dexie_lookup=not bool(args.no_dexie_lookup),
+            confirm_delete=bool(args.yes),
+            preflight_only=bool(args.preflight_only),
         )
     elif args.command == "set-log-level":
         code = _set_log_level(

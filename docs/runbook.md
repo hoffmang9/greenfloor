@@ -63,7 +63,7 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
     - `taker_diagnostic`: advisory diagnostics (`coinset_tx_block_confirmed`, `coinset_mempool_observed`, or Dexie fallback patterns).
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
-- Note: manager CLI v1 core surface remains 10 commands. `offers-cancel` is available as a Cloud Wallet adjunct command and is intentionally tracked outside the core-count policy. Tuning/history/metrics helpers are deferred until after G1-G3 testnet proof.
+- Note: manager CLI v1 core surface remains focused on trading/runtime commands. `offers-cancel`, `cats-add`, and `cats-list` are adjunct operator commands tracked outside the core-count policy. Tuning/history/metrics helpers are deferred until after G1-G3 testnet proof.
 
 ## 3) Recovery and Revalidation
 
