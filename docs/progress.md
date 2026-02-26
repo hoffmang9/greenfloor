@@ -1,5 +1,29 @@
 # Progress Log
 
+## 2026-02-26 (off-chain cancel follow-up with Cloud Wallet on-chain refresh request)
+
+- Implemented manager follow-up flow for Cloud Wallet cancellations in `greenfloor/cli/manager.py`:
+  - `offers-cancel` now supports optional flags:
+    - `--submit-onchain-after-offchain`
+    - `--onchain-market-id` / `--onchain-pair` (market context for refresh coin selection)
+  - When follow-up mode is enabled and the cancel succeeds, manager now:
+    - resolves the market asset in Cloud Wallet,
+    - selects a spendable coin (preferring coin-id hints derived from offer spend contents),
+    - resolves fee via the coin-op standard (`_resolve_taker_or_coin_operation_fee`),
+    - submits Cloud Wallet `splitCoins` (`numberOfCoins=1`, full amount) to produce an on-chain coin-name refresh request.
+  - Command output now includes structured `onchain_refresh` metadata with `signature_request_id`, `signature_state`, selected coin details, and fee source.
+- Added deterministic coverage in `tests/test_manager_post_offer.py` for:
+  - successful follow-up refresh request submission path,
+  - market-selection guardrail for follow-up mode.
+- Remote validation on `John-Deere` confirmed execution wiring and identified current blocker:
+  - off-chain cancellation attempt failed with `Organization does not have required feature flags: OFFER_CANCEL_OFF_CHAIN`.
+  - this blocks collecting a live `onchain_refresh.signature_request_id` until the org flag is enabled.
+- Governance/update note:
+  - Updated `AGENTS.md` PR gate policy so required PR checks now use `pre-commit run --all-files` as the single required check.
+- Branch/PR status:
+  - Branch: `feat/cloud-wallet-onchain-refresh-followup`
+  - Draft PR: `#36` (`WIP: Cloud Wallet off-chain cancel with on-chain refresh follow-up`)
+
 ## 2026-02-26 (remote CARBON22 split + live offer proof; resolver hardening)
 
 - Completed remote Cloud Wallet execution on host `John-Deere` for current mainnet `CARBON22:wUSDC.b` workstream:

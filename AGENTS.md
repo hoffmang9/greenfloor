@@ -95,10 +95,7 @@ These rules exist because earlier implementation rounds introduced unnecessary c
 - For Python-related commands in this repo, use the project virtual environment binaries (for example `.venv/bin/python -m pytest`, `.venv/bin/python -m ruff`, `.venv/bin/python -m pyright`).
 - PR-required deterministic test harness must complete under 10 minutes wall clock (prefer under 5).
 - Required PR checks:
-  - `ruff check`
-  - `ruff format --check`
-  - `pyright`
-  - deterministic tests (`pytest`)
+  - `pre-commit run --all-files`
 
 ## Notifications (V1 Scope)
 
