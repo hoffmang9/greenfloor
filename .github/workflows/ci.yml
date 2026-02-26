@@ -76,22 +76,18 @@ jobs:
         run: |
           .venv/bin/python -m pip install ./.cache/wheelhouse/greenfloor-native/*.whl
 
-      - name: Restore pre-commit environment cache
-        uses: actions/cache/restore@v4
+      - name: Cache pre-commit environment
+        uses: actions/cache@v4
         with:
-          path: ~/.cache/pre-commit
+          path: ./.cache/pre-commit
           key: pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-
 
       - name: Pre-commit (all files, from .venv)
         env:
-          PRE_COMMIT_HOME: ~/.cache/pre-commit
+          PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
         run: pre-commit run --all-files
-
-      - name: Save pre-commit environment cache
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('.pre-commit-config.yaml') }}
 
       - name: Resolve chia-wallet-sdk pinned commit
         if: matrix.os == 'ubuntu-latest'
