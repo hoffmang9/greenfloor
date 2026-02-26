@@ -1472,6 +1472,53 @@ def _coin_split_lockup_guardrail_error(
     )
 
 
+def _should_prompt_for_override(prompt_for_override: bool | None) -> bool:
+    if prompt_for_override is not None:
+        return bool(prompt_for_override)
+    return bool(sys.stdin.isatty() and sys.stdout.isatty())
+
+
+def _prompt_yes_no(message: str, *, prompt_for_override: bool | None) -> bool:
+    if not _should_prompt_for_override(prompt_for_override):
+        return False
+    try:
+        answer = input(f"{message} [y/N]: ").strip().lower()
+    except EOFError:
+        return False
+    return answer in {"y", "yes"}
+
+
+def _evaluate_coin_split_gate(
+    *,
+    asset_scoped_coins: list[dict],
+    resolved_asset_id: str,
+    size_base_units: int,
+    required_count: int,
+) -> dict[str, int | bool | str]:
+    spendable_asset_coins = [coin for coin in asset_scoped_coins if _is_spendable_coin(coin)]
+    denom_coins = [
+        coin for coin in spendable_asset_coins if int(coin.get("amount", 0)) == int(size_base_units)
+    ]
+    larger_reserve_coins = [
+        coin for coin in spendable_asset_coins if int(coin.get("amount", 0)) > int(size_base_units)
+    ]
+    current_count = len(denom_coins)
+    extra_denom_count = max(0, current_count - int(required_count))
+    larger_reserve_count = len(larger_reserve_coins)
+    reserve_ready = larger_reserve_count >= 1 or extra_denom_count >= 1
+    ready = current_count >= int(required_count) and reserve_ready
+    return {
+        "asset_id": resolved_asset_id,
+        "size_base_units": int(size_base_units),
+        "required_min_count": int(required_count),
+        "current_count": current_count,
+        "larger_reserve_coin_count": larger_reserve_count,
+        "extra_denom_coin_count": extra_denom_count,
+        "reserve_ready": reserve_ready,
+        "ready": ready,
+    }
+
+
 def _coin_op_result_payload(
     *,
     market: Any,
@@ -2276,6 +2323,8 @@ def _coin_split(
     until_ready: bool = False,
     max_iterations: int = 3,
     allow_lock_all_spendable: bool = False,
+    force_split_when_ready: bool = False,
+    prompt_for_override: bool | None = None,
 ) -> int:
     program = load_program_config(program_path)
     selected_venue = _resolve_venue_for_coin_prep(venue_override=venue)
@@ -2337,6 +2386,7 @@ def _coin_split(
 
     operations: list[dict[str, object]] = []
     final_readiness: dict[str, int | bool | str] | None = None
+    split_gate: dict[str, int | bool | str] | None = None
     stop_reason = "single_pass"
     unresolved_coin_ids: list[str] = []
 
@@ -2352,6 +2402,26 @@ def _coin_split(
             for c in asset_scoped_coins
             if _is_spendable_coin(c) and str(c.get("id", "")).strip()
         }
+        if denomination_target is not None:
+            split_gate = _evaluate_coin_split_gate(
+                asset_scoped_coins=asset_scoped_coins,
+                resolved_asset_id=resolved_split_asset_id,
+                size_base_units=int(denomination_target["size_base_units"]),
+                required_count=int(denomination_target["required_count"]),
+            )
+            final_readiness = split_gate
+            if bool(split_gate["ready"]) and not force_split_when_ready:
+                if _prompt_yes_no(
+                    (
+                        "split gate is already satisfied "
+                        "(target+buffer met and reserve available). Force another split anyway?"
+                    ),
+                    prompt_for_override=prompt_for_override,
+                ):
+                    pass
+                else:
+                    stop_reason = "ready"
+                    break
         if coin_ids:
             resolved_coin_ids, unresolved_coin_ids = _resolve_coin_global_ids(
                 wallet_coins, coin_ids
@@ -2394,17 +2464,26 @@ def _coin_split(
             and spendable_asset_coin_ids
             and set(resolved_coin_ids) >= spendable_asset_coin_ids
         ):
-            print(
-                _coin_split_lockup_guardrail_error(
-                    market=market,
-                    selected_venue=selected_venue,
-                    wallet=wallet,
-                    resolved_asset_id=resolved_split_asset_id,
-                    spendable_asset_coin_ids=spendable_asset_coin_ids,
-                    selected_coin_ids=resolved_coin_ids,
+            if _prompt_yes_no(
+                (
+                    "coin-split would lock all currently spendable coins for this asset. "
+                    "Override and continue?"
+                ),
+                prompt_for_override=prompt_for_override,
+            ):
+                pass
+            else:
+                print(
+                    _coin_split_lockup_guardrail_error(
+                        market=market,
+                        selected_venue=selected_venue,
+                        wallet=wallet,
+                        resolved_asset_id=resolved_split_asset_id,
+                        spendable_asset_coin_ids=spendable_asset_coin_ids,
+                        selected_coin_ids=resolved_coin_ids,
+                    )
                 )
-            )
-            return 2
+                return 2
 
         split_result = wallet.split_coins(
             coin_ids=resolved_coin_ids,
@@ -2474,6 +2553,7 @@ def _coin_split(
                 "amount_per_coin": amount_per_coin,
                 "number_of_coins": number_of_coins,
                 "resolved_asset_id": resolved_split_asset_id,
+                "split_gate": split_gate,
             }
         )
     )
@@ -3406,6 +3486,7 @@ def main() -> None:
     p_coin_split.add_argument("--max-iterations", default=3, type=int)
     p_coin_split.add_argument("--no-wait", action="store_true")
     p_coin_split.add_argument("--allow-lock-all-spendable", action="store_true")
+    p_coin_split.add_argument("--force-split-when-ready", action="store_true")
 
     p_coin_combine = sub.add_parser("coin-combine")
     combine_market_group = p_coin_combine.add_mutually_exclusive_group(required=True)
@@ -3532,6 +3613,7 @@ def main() -> None:
             until_ready=bool(args.until_ready),
             max_iterations=int(args.max_iterations),
             allow_lock_all_spendable=bool(args.allow_lock_all_spendable),
+            force_split_when_ready=bool(args.force_split_when_ready),
         )
     elif args.command == "coin-combine":
         code = _coin_combine(

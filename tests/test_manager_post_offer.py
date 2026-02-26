@@ -1818,6 +1818,63 @@ def test_coin_split_guardrail_override_allows_lock_all_spendable(
     assert payload["resolved_asset_id"] == "Asset_split_base"
 
 
+def test_coin_split_guardrail_prompt_override_allows_continue(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program)
+    _write_markets(markets)
+
+    calls: dict[str, tuple[list[str], int, int, int] | None] = {"split": None}
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending
+            if asset_id == "Asset_split_base":
+                return [{"id": "Coin_only", "name": "only", "amount": 500, "state": "SETTLED"}]
+            return [{"id": "Coin_old", "name": "old", "amount": 1, "state": "SETTLED"}]
+
+        @staticmethod
+        def split_coins(*, coin_ids, amount_per_coin, number_of_coins, fee):
+            calls["split"] = (coin_ids, amount_per_coin, number_of_coins, fee)
+            return {"signature_request_id": "sr-prompt", "status": "UNSIGNED"}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        lambda *, wallet, canonical_asset_id, symbol_hint=None: "Asset_split_base",
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network, minimum_fee_mojos=0: (42, "coinset_conservative"),
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+
+    code = _coin_split(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        coin_ids=[],
+        amount_per_coin=10,
+        number_of_coins=10,
+        no_wait=True,
+        prompt_for_override=True,
+    )
+    assert code == 0
+    assert calls["split"] == (["Coin_only"], 10, 10, 42)
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["resolved_asset_id"] == "Asset_split_base"
+
+
 def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
@@ -2506,7 +2563,14 @@ def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, c
                     "amount": 10,
                     "state": "CONFIRMED",
                     "asset": {"id": "a1"},
-                }
+                },
+                {
+                    "id": "Coin_b",
+                    "name": "coin-b",
+                    "amount": 9,
+                    "state": "CONFIRMED",
+                    "asset": {"id": "a1"},
+                },
             ]
 
         @staticmethod
@@ -3522,8 +3586,8 @@ def test_coin_split_until_ready_succeeds_when_denominations_met(
 
         @staticmethod
         def list_coins(*, include_pending=True, asset_id=None):
-            # 4 confirmed coins of size 10 for asset a1 → meets required_count=4
-            return [
+            # 4 confirmed coins of size 10 + one larger reserve coin for asset a1.
+            rows = [
                 {
                     "id": f"Coin_{i}",
                     "name": f"coin-{i}",
@@ -3533,6 +3597,16 @@ def test_coin_split_until_ready_succeeds_when_denominations_met(
                 }
                 for i in range(4)
             ]
+            rows.append(
+                {
+                    "id": "Coin_reserve",
+                    "name": "coin-reserve",
+                    "amount": 20,
+                    "state": "CONFIRMED",
+                    "asset": {"id": "a1"},
+                }
+            )
+            return rows
 
         @staticmethod
         def split_coins(*, coin_ids, amount_per_coin, number_of_coins, fee):
@@ -3570,6 +3644,79 @@ def test_coin_split_until_ready_succeeds_when_denominations_met(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["stop_reason"] == "ready"
     assert payload["denomination_readiness"]["ready"] is True
+    assert payload["split_gate"]["reserve_ready"] is True
+
+
+def test_coin_split_gate_ready_skips_split_in_non_interactive_mode(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program, provider="dexie")
+    _write_markets_with_ladder(markets)
+
+    split_called = [False]
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending, asset_id
+            return [
+                {
+                    "id": f"Coin_{i}",
+                    "name": f"coin-{i}",
+                    "amount": 10,
+                    "state": "CONFIRMED",
+                    "asset": {"id": "a1"},
+                }
+                for i in range(4)
+            ] + [
+                {
+                    "id": "Coin_reserve",
+                    "name": "coin-reserve",
+                    "amount": 50,
+                    "state": "CONFIRMED",
+                    "asset": {"id": "a1"},
+                }
+            ]
+
+        @staticmethod
+        def split_coins(*, coin_ids, amount_per_coin, number_of_coins, fee):
+            _ = coin_ids, amount_per_coin, number_of_coins, fee
+            split_called[0] = True
+            return {"signature_request_id": "sr-should-not-run", "status": "UNSIGNED"}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
+    )
+
+    code = _coin_split(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        coin_ids=[],
+        amount_per_coin=0,
+        number_of_coins=0,
+        no_wait=True,
+        size_base_units=10,
+        until_ready=False,
+        max_iterations=1,
+        prompt_for_override=False,
+    )
+    assert code == 0
+    assert split_called[0] is False
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["stop_reason"] == "ready"
+    assert payload["split_gate"]["ready"] is True
 
 
 # ---------------------------------------------------------------------------
