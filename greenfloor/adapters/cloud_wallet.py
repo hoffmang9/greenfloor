@@ -244,7 +244,7 @@ mutation createOffer($input: CreateOfferInput!) {
             "status": str(signature_request.get("status", "")).strip(),
         }
 
-    def cancel_offer(self, *, offer_id: str) -> dict[str, Any]:
+    def cancel_offer(self, *, offer_id: str, cancel_off_chain: bool = False) -> dict[str, Any]:
         clean_offer_id = str(offer_id).strip()
         if not clean_offer_id:
             raise ValueError("offer_id is required")
@@ -264,6 +264,7 @@ mutation cancelOffer($input: CancelOfferInput!) {
                 "input": {
                     "walletId": self._vault_id,
                     "offerId": clean_offer_id,
+                    "cancelOffChain": bool(cancel_off_chain),
                 }
             },
         )

@@ -512,7 +512,7 @@ def test_offers_cancel_cancel_open_uses_cloud_wallet(monkeypatch, tmp_path: Path
     program = tmp_path / "program.yaml"
     _write_program_with_cloud_wallet(program)
 
-    cancelled: list[str] = []
+    cancelled: list[tuple[str, bool]] = []
 
     class _FakeWallet:
         vault_id = "wallet-1"
@@ -537,8 +537,8 @@ def test_offers_cancel_cancel_open_uses_cloud_wallet(monkeypatch, tmp_path: Path
             }
 
         @staticmethod
-        def cancel_offer(*, offer_id: str):
-            cancelled.append(offer_id)
+        def cancel_offer(*, offer_id: str, cancel_off_chain: bool = False):
+            cancelled.append((offer_id, cancel_off_chain))
             return {"signature_request_id": f"SignatureRequest_{offer_id}", "status": "SUBMITTED"}
 
     monkeypatch.setattr(
@@ -551,7 +551,7 @@ def test_offers_cancel_cancel_open_uses_cloud_wallet(monkeypatch, tmp_path: Path
         cancel_open=True,
     )
     assert code == 0
-    assert cancelled == ["Offer_1"]
+    assert cancelled == [("Offer_1", False)]
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["selected_count"] == 1
     assert payload["cancelled_count"] == 1
@@ -560,6 +560,56 @@ def test_offers_cancel_cancel_open_uses_cloud_wallet(monkeypatch, tmp_path: Path
         payload["items"][0]["url"]
         == "https://wallet.example.com/wallet/wallet-1/offers/WalletOffer_1"
     )
+
+
+def test_offers_cancel_pending_offer_uses_off_chain_cancel(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    _write_program_with_cloud_wallet(program)
+
+    cancelled: list[tuple[str, bool]] = []
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        @staticmethod
+        def get_wallet():
+            return {
+                "offers": [
+                    {
+                        "id": "WalletOffer_pending",
+                        "offerId": "Offer_pending",
+                        "state": "PENDING",
+                        "expiresAt": "2026-02-26T01:13:22.000Z",
+                    }
+                ]
+            }
+
+        @staticmethod
+        def cancel_offer(*, offer_id: str, cancel_off_chain: bool = False):
+            cancelled.append((offer_id, cancel_off_chain))
+            # Off-chain cancel may not return a signature request.
+            return {"signature_request_id": "", "status": ""}
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._new_cloud_wallet_adapter", lambda _p: _FakeWallet()
+    )
+
+    code = _offers_cancel(
+        program_path=program,
+        offer_ids=["Offer_pending"],
+        cancel_open=False,
+    )
+    assert code == 0
+    assert cancelled == [("Offer_pending", True)]
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["selected_count"] == 1
+    assert payload["cancelled_count"] == 1
+    assert payload["failed_count"] == 0
+    assert payload["items"][0]["cancel_off_chain"] is True
+    assert payload["items"][0]["result"]["success"] is True
+    assert payload["items"][0]["result"]["reason"] == "cancel_off_chain_requested"
 
 
 def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Path, capsys) -> None:

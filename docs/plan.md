@@ -15,7 +15,7 @@
 
 ## Manager CLI Commands (V1 Core)
 
-Ten commands in scope. Do not add commands without explicit need tied to mainnet proof.
+Ten core commands are in scope. Do not add commands without explicit need tied to mainnet proof.
 
 1. `bootstrap-home` — create `~/.greenfloor` runtime layout, seed config, initialize state DB.
 2. `config-validate` — validate program + markets config and key routing.
@@ -27,6 +27,10 @@ Ten commands in scope. Do not add commands without explicit need tied to mainnet
 8. `coins-list` — list Vault coin inventory with spendability/lock state (Cloud Wallet).
 9. `coin-split` — split a Vault coin into target denominations; default waits through signature + mempool + 1-block confirmation.
 10. `coin-combine` — combine Vault coins into fewer coins; default waits through signature + mempool + 1-block confirmation.
+
+Cloud Wallet adjunct:
+
+- `offers-cancel` is available for Cloud Wallet offer cancellation workflows, but is not part of the v1 core command-count policy used for simplification scope control.
 
 Operator output/coin-op behavior notes:
 
@@ -115,7 +119,7 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
 - Active live testing target is now mainnet `CARBON22:wUSDC.b` (primary), with `CARBON22:xch` as a completed supporting proof path.
 - `CARBON22` CAT ID: `4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7`.
 - `wUSDC.b` CAT ID: `fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d`.
-- Next strict-close proof objective: one successful end-to-end manager sequence on mainnet for `carbon_2022_wusdc_sell` (`build-and-post-offer` -> `offers-status` -> `offers-reconcile`) with persisted lifecycle evidence.
+- Strict-close objective status: completed manager lifecycle evidence for `carbon_2022_wusdc_sell` is logged in `docs/progress.md` (2026-02-26 remote split + `build-and-post-offer` + `offers-status` evidence on mainnet).
 - Prior `testnet11` proof artifacts remain valid as historical closure evidence for G1-G3.
 
 ## Operational Hardening Follow-up
