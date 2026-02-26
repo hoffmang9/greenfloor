@@ -41,7 +41,7 @@ def test_evaluate_market_plans_missing_sizes_in_old_script_order() -> None:
             repeat=2,
             pair="xch",
             expiry_unit="minutes",
-            expiry_value=65,
+            expiry_value=10,
             cancel_after_create=True,
             reason="below_target",
         ),
@@ -50,7 +50,7 @@ def test_evaluate_market_plans_missing_sizes_in_old_script_order() -> None:
             repeat=1,
             pair="xch",
             expiry_unit="minutes",
-            expiry_value=65,
+            expiry_value=10,
             cancel_after_create=True,
             reason="below_target",
         ),
@@ -59,7 +59,7 @@ def test_evaluate_market_plans_missing_sizes_in_old_script_order() -> None:
             repeat=1,
             pair="xch",
             expiry_unit="minutes",
-            expiry_value=65,
+            expiry_value=10,
             cancel_after_create=True,
             reason="below_target",
         ),
@@ -77,8 +77,8 @@ def test_evaluate_market_uses_usdc_expiry_profile() -> None:
             size=1,
             repeat=1,
             pair="usdc",
-            expiry_unit="hours",
-            expiry_value=24,
+            expiry_unit="minutes",
+            expiry_value=10,
             cancel_after_create=True,
             reason="below_target",
         )
@@ -92,7 +92,7 @@ def test_evaluate_market_falls_back_to_xch_expiry_for_unknown_pair() -> None:
     actions = evaluate_market(state=state, config=config, clock=_clock())
 
     assert actions[0].expiry_unit == "minutes"
-    assert actions[0].expiry_value == 65
+    assert actions[0].expiry_value == 10
 
 
 def test_evaluate_market_xch_requires_price_before_planning() -> None:

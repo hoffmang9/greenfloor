@@ -73,7 +73,7 @@ greenfloor-manager coins-list
 greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10
 
 # Combine small coins into one larger coin (waits through signature + mempool + confirmation + reorg watch)
-greenfloor-manager coin-combine --pair TDBX:txch --number-of-coins 10 --asset-id xch
+greenfloor-manager coin-combine --pair TDBX:txch --input-coin-count 10 --asset-id xch
 ```
 
 Coin-op wait diagnostics include:

@@ -12,6 +12,7 @@ from greenfloor.cli.manager import (
     _coin_combine,
     _coin_split,
     _coins_list,
+    _offers_cancel,
     _resolve_dexie_base_url,
     _resolve_offer_publish_settings,
     _resolve_splash_base_url,
@@ -27,6 +28,162 @@ def test_resolve_dexie_base_url_by_network() -> None:
 
 def test_resolve_splash_base_url_defaults_when_not_explicit() -> None:
     assert _resolve_splash_base_url(None) == "http://john-deere.hoffmang.com:4000"
+
+
+def test_dexie_lookup_token_for_cat_id_falls_back_to_v3_tickers(monkeypatch) -> None:
+    target = "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
+    calls: list[str] = []
+
+    class _Resp:
+        def __init__(self, payload: object):
+            self._payload = payload
+
+        def read(self) -> bytes:
+            return json.dumps(self._payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            _ = exc_type, exc, tb
+            return False
+
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        url = req.full_url if hasattr(req, "full_url") else str(req)
+        calls.append(url)
+        if url.endswith("/v1/swap/tokens"):
+            return _Resp({"tokens": [{"id": "fa4a...a99d", "code": "wUSDC.b"}]})
+        if url.endswith("/v3/prices/tickers"):
+            return _Resp({"tickers": [{"ticker_id": f"{target}_xch", "base_currency": target}]})
+        raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr("greenfloor.cli.manager.urllib.request.urlopen", _fake_urlopen)
+    row = manager_mod._dexie_lookup_token_for_cat_id(
+        canonical_cat_id_hex=target,
+        network="mainnet",
+    )
+    assert row is not None
+    assert str(row.get("ticker_id", "")).startswith(target)
+    assert any(url.endswith("/v1/swap/tokens") for url in calls)
+    assert any(url.endswith("/v3/prices/tickers") for url in calls)
+
+
+def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypatch) -> None:
+    base_cat = "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
+    quote_cat = "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d"
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        @staticmethod
+        def _graphql(*, query: str, variables: dict):
+            _ = query, variables
+            return {
+                "wallet": {
+                    "assets": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "assetId": "Asset_carbon",
+                                    "type": "CAT2",
+                                    "displayName": "CARBON22",
+                                    "symbol": "",
+                                }
+                            },
+                            {
+                                "node": {
+                                    "assetId": "Asset_wusdc",
+                                    "type": "CAT2",
+                                    "displayName": "Base Warped USDC",
+                                    "symbol": "",
+                                }
+                            },
+                        ]
+                    }
+                }
+            }
+
+    def _fake_lookup_by_cat(*, canonical_cat_id_hex: str, network: str):
+        _ = network
+        if canonical_cat_id_hex == base_cat:
+            return {"ticker_id": f"{base_cat}_xch", "base_code": "ECO.181.2022"}
+        if canonical_cat_id_hex == quote_cat:
+            return {"id": quote_cat, "code": "wUSDC.b", "name": "Base warp.green USDC"}
+        return None
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._dexie_lookup_token_for_cat_id", _fake_lookup_by_cat
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._dexie_lookup_token_for_symbol",
+        lambda *, asset_ref, network: (
+            {"id": quote_cat, "code": "wUSDC.b"} if asset_ref == "wUSDC.b" else None
+        ),
+    )
+
+    base_asset, quote_asset = manager_mod._resolve_cloud_wallet_offer_asset_ids(
+        wallet=cast(CloudWalletAdapter, _FakeWallet()),
+        base_asset_id=base_cat,
+        quote_asset_id="wUSDC.b",
+        base_symbol_hint="CARBON22",
+        quote_symbol_hint="wUSDC.b",
+    )
+    assert base_asset == "Asset_carbon"
+    assert quote_asset == "Asset_wusdc"
+    assert base_asset != quote_asset
+
+
+def test_resolve_cloud_wallet_asset_id_uses_local_catalog_hints_when_dexie_missing(
+    monkeypatch,
+) -> None:
+    base_cat = "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        @staticmethod
+        def _graphql(*, query: str, variables: dict):
+            _ = query, variables
+            return {
+                "wallet": {
+                    "assets": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "assetId": "Asset_carbon",
+                                    "type": "CAT2",
+                                    "displayName": "CARBON22",
+                                    "symbol": "",
+                                }
+                            },
+                            {
+                                "node": {
+                                    "assetId": "Asset_other",
+                                    "type": "CAT2",
+                                    "displayName": "Unrelated Token",
+                                    "symbol": "",
+                                }
+                            },
+                        ]
+                    }
+                }
+            }
+
+    monkeypatch.setattr("greenfloor.cli.manager._dexie_lookup_token_for_cat_id", lambda **_: None)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._local_catalog_label_hints_for_asset_id",
+        lambda *, canonical_asset_id: ["CARBON22"] if canonical_asset_id == base_cat else [],
+    )
+
+    resolved = manager_mod._resolve_cloud_wallet_asset_id(
+        wallet=cast(CloudWalletAdapter, _FakeWallet()),
+        canonical_asset_id=base_cat,
+        symbol_hint=base_cat,
+    )
+    assert resolved == "Asset_carbon"
 
 
 def test_format_json_output_pretty_mode_has_indentation() -> None:
@@ -349,6 +506,60 @@ def test_build_and_post_offer_dry_run_can_capture_full_offer_text(
     capture_path = Path(payload["built_offers_preview"][0]["offer_capture_path"])
     assert capture_path.exists()
     assert capture_path.read_text(encoding="utf-8") == "offer1captureme"
+
+
+def test_offers_cancel_cancel_open_uses_cloud_wallet(monkeypatch, tmp_path: Path, capsys) -> None:
+    program = tmp_path / "program.yaml"
+    _write_program_with_cloud_wallet(program)
+
+    cancelled: list[str] = []
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        @staticmethod
+        def get_wallet():
+            return {
+                "offers": [
+                    {
+                        "id": "WalletOffer_1",
+                        "offerId": "Offer_1",
+                        "state": "OPEN",
+                        "expiresAt": "2026-02-26T01:13:22.000Z",
+                    },
+                    {
+                        "id": "WalletOffer_2",
+                        "offerId": "Offer_2",
+                        "state": "EXPIRED",
+                        "expiresAt": "2026-02-25T21:13:22.000Z",
+                    },
+                ]
+            }
+
+        @staticmethod
+        def cancel_offer(*, offer_id: str):
+            cancelled.append(offer_id)
+            return {"signature_request_id": f"SignatureRequest_{offer_id}", "status": "SUBMITTED"}
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._new_cloud_wallet_adapter", lambda _p: _FakeWallet()
+    )
+
+    code = _offers_cancel(
+        program_path=program,
+        offer_ids=[],
+        cancel_open=True,
+    )
+    assert code == 0
+    assert cancelled == ["Offer_1"]
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["selected_count"] == 1
+    assert payload["cancelled_count"] == 1
+    assert payload["items"][0]["offer_id"] == "Offer_1"
+    assert (
+        payload["items"][0]["url"]
+        == "https://wallet.example.com/wallet/wallet-1/offers/WalletOffer_1"
+    )
 
 
 def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -980,6 +1191,39 @@ def test_coins_list_returns_minimal_fields(monkeypatch, tmp_path: Path, capsys) 
     assert payload["items"][0]["spendable"] is False
 
 
+def test_coins_list_resolves_asset_filter_before_listing(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    _write_program_with_cloud_wallet(program)
+
+    calls = {"list_asset_id": None}
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, asset_id=None, include_pending=True):
+            _ = include_pending
+            calls["list_asset_id"] = asset_id
+            return []
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        lambda *, wallet, canonical_asset_id, symbol_hint=None: "Asset_resolved",
+    )
+    code = _coins_list(program_path=program, asset="BYC", vault_id=None)
+    assert code == 0
+    assert calls["list_asset_id"] == "Asset_resolved"
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["count"] == 0
+
+
 def test_resolve_taker_or_coin_operation_fee_uses_coinset_value(monkeypatch) -> None:
     class _FakeCoinset:
         def __init__(self, _arg, *, network: str):
@@ -1133,6 +1377,10 @@ def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        lambda *, wallet, canonical_asset_id, symbol_hint=None: "Asset_split_base",
+    )
+    monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (42, "coinset_conservative"),
     )
@@ -1154,6 +1402,67 @@ def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys
     assert payload["waited"] is False
     assert payload["fee_mojos"] == 42
     assert payload["coin_selection_mode"] == "explicit"
+    assert payload["resolved_asset_id"] == "Asset_split_base"
+
+
+def test_coin_split_auto_selects_largest_spendable_asset_coin(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program)
+    _write_markets(markets)
+
+    calls: dict[str, tuple[list[str], int, int, int] | None] = {"split": None}
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending
+            if asset_id == "Asset_split_base":
+                return [
+                    {"id": "Coin_small", "name": "small", "amount": 100, "state": "SETTLED"},
+                    {"id": "Coin_big", "name": "big", "amount": 500, "state": "SETTLED"},
+                    {"id": "Coin_pending", "name": "pending", "amount": 999, "state": "PENDING"},
+                ]
+            return [{"id": "Coin_old", "name": "old", "amount": 1, "state": "SETTLED"}]
+
+        @staticmethod
+        def split_coins(*, coin_ids, amount_per_coin, number_of_coins, fee):
+            calls["split"] = (coin_ids, amount_per_coin, number_of_coins, fee)
+            return {"signature_request_id": "sr-auto", "status": "UNSIGNED"}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        lambda *, wallet, canonical_asset_id, symbol_hint=None: "Asset_split_base",
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network, minimum_fee_mojos=0: (42, "coinset_conservative"),
+    )
+
+    code = _coin_split(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        coin_ids=[],
+        amount_per_coin=10,
+        number_of_coins=10,
+        no_wait=True,
+    )
+    assert code == 0
+    assert calls["split"] == (["Coin_big"], 10, 10, 42)
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["coin_selection_mode"] == "adapter_auto_select"
+    assert payload["resolved_asset_id"] == "Asset_split_base"
 
 
 def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys) -> None:
@@ -1182,6 +1491,10 @@ def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, caps
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        lambda *, wallet, canonical_asset_id, symbol_hint=None: "Asset_huun64oh7dbt9f1f9ie8khuw",
+    )
+    monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (77, "coinset_conservative"),
     )
@@ -1197,12 +1510,14 @@ def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, caps
         no_wait=True,
     )
     assert code == 0
-    assert calls["combine"] == (3, 77, True, "xch", None)
+    assert calls["combine"] == (3, 77, True, "Asset_huun64oh7dbt9f1f9ie8khuw", None)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["venue"] is None
     assert payload["waited"] is False
     assert payload["fee_mojos"] == 77
     assert payload["coin_selection_mode"] == "adapter_auto_select"
+    assert payload["asset_id"] == "xch"
+    assert payload["resolved_asset_id"] == "Asset_huun64oh7dbt9f1f9ie8khuw"
 
 
 def test_coin_split_returns_structured_error_when_fee_resolution_fails(
@@ -1759,9 +2074,8 @@ def test_coin_split_until_ready_ignores_unknown_states_and_string_asset(
     )
     assert code == 2
     payload = json.loads(capsys.readouterr().out.strip())
-    assert payload["coin_selection_mode"] == "adapter_auto_select"
-    assert payload["denomination_readiness"]["current_count"] == 0
-    assert payload["denomination_readiness"]["ready"] is False
+    assert payload["error"] == "no_spendable_split_coin_available"
+    assert payload["resolved_asset_id"] == "a1"
 
 
 def test_coin_split_until_ready_requires_size_base_units(tmp_path: Path) -> None:
@@ -1893,7 +2207,7 @@ def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, c
 def test_is_spendable_coin_allowlist_states_are_spendable() -> None:
     from greenfloor.cli.manager import _is_spendable_coin
 
-    for state in ("CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE"):
+    for state in ("CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE", "SETTLED"):
         assert _is_spendable_coin({"state": state}) is True, state
 
 
@@ -2415,9 +2729,11 @@ def test_build_and_post_offer_dispatches_to_cloud_wallet_when_configured(
     _write_markets(markets)
 
     dispatched = [False]
+    captured_dry_run: list[bool] = []
 
     def _fake_cloud_wallet(**kwargs):
         dispatched[0] = True
+        captured_dry_run.append(bool(kwargs["dry_run"]))
         return 0
 
     monkeypatch.setattr(
@@ -2442,9 +2758,10 @@ def test_build_and_post_offer_dispatches_to_cloud_wallet_when_configured(
     )
     assert code == 0
     assert dispatched[0] is True
+    assert captured_dry_run == [False]
 
 
-def test_build_and_post_offer_dry_run_bypasses_cloud_wallet_even_when_configured(
+def test_build_and_post_offer_dry_run_uses_cloud_wallet_when_configured(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
@@ -2452,16 +2769,18 @@ def test_build_and_post_offer_dry_run_bypasses_cloud_wallet_even_when_configured
     _write_program_with_cloud_wallet(program)
     _write_markets(markets)
 
-    def _fail_if_called(**kwargs):
-        raise AssertionError("cloud wallet path must not be called in dry_run")
+    dispatched = [False]
+    captured_dry_run: list[bool] = []
+
+    def _fake_cloud_wallet(**kwargs):
+        dispatched[0] = True
+        captured_dry_run.append(bool(kwargs["dry_run"]))
+        print(json.dumps({"dry_run": True, "results": [], "built_offers_preview": []}))
+        return 0
 
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_and_post_offer_cloud_wallet",
-        _fail_if_called,
-    )
-    monkeypatch.setattr(
-        "greenfloor.cli.manager._build_offer_text_for_request",
-        lambda _: "offer1dryrun",
+        _fake_cloud_wallet,
     )
 
     code = _build_and_post_offer(
@@ -2480,7 +2799,9 @@ def test_build_and_post_offer_dry_run_bypasses_cloud_wallet_even_when_configured
         dry_run=True,
     )
     assert code == 0
-    payload = json.loads(capsys.readouterr().out.strip())
+    assert dispatched[0] is True
+    assert captured_dry_run == [True]
+    payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert payload["dry_run"] is True
 
 
@@ -2559,6 +2880,7 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
         drop_only=True,
         claim_rewards=False,
         quote_price=0.003,
+        dry_run=False,
     )
     assert code == 0
     assert posted["offer"] == "offer1testartifact"
@@ -2615,6 +2937,7 @@ def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
         drop_only=True,
         claim_rewards=False,
         quote_price=0.003,
+        dry_run=False,
     )
     assert code == 2
     payload = json.loads(capsys.readouterr().out.strip())
@@ -2684,11 +3007,80 @@ def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
         drop_only=True,
         claim_rewards=False,
         quote_price=0.003,
+        dry_run=False,
     )
     assert code == 2
     assert post_called[0] is False
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["results"][0]["result"]["error"] == "wallet_sdk_offer_missing_expiration"
+
+
+def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
+
+    program_path = tmp_path / "program.yaml"
+    markets_path = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program_path)
+    _write_markets_with_ladder(markets_path)
+    prog, mkt = _load_program_and_market(program_path, markets_path)
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def create_offer(*, offered, requested, fee, expires_at_iso):
+            _ = offered, requested, fee, expires_at_iso
+            return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
+
+        @staticmethod
+        def get_wallet():
+            return {"offers": [{"bech32": "offer1dryruncloudwallet"}]}
+
+    class _FailDexie:
+        def __init__(self, _base_url: str):
+            raise AssertionError("DexieAdapter must not be constructed in dry_run")
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
+        lambda **kwargs: ("SUBMITTED", []),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        lambda **kwargs: "offer1dryruncloudwallet",
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        lambda _offer: None,
+    )
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FailDexie)
+
+    code = _build_and_post_offer_cloud_wallet(
+        program=prog,
+        market=mkt,
+        size_base_units=10,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        quote_price=0.003,
+        dry_run=True,
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["dry_run"] is True
+    assert payload["publish_attempts"] == 0
+    assert payload["publish_failures"] == 0
+    assert payload["results"] == []
+    assert len(payload["built_offers_preview"]) == 1
 
 
 def test_poll_offer_artifact_until_available_returns_new_offer(monkeypatch) -> None:

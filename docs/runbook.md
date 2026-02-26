@@ -29,10 +29,10 @@ This runbook covers first deployment and recovery workflows for GreenFloor v1.
     - `cloud_wallet.vault_id`: open the target vault and copy the URL segment in `.../wallet/<ID>/...`; use the `Wallet_...` value, not `vaultLauncherId`.
 - Review vault coin inventory before shaping or posting:
   - `greenfloor-manager coins-list`
-  - Optional asset scope: `greenfloor-manager coins-list --asset <asset-id|xch>`
+  - Optional asset scope: `greenfloor-manager coins-list --asset <ticker|CAT-id|Asset-id|xch>`
 - Shape denominations for the selected market context:
   - Split: `greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10`
-  - Combine: `greenfloor-manager coin-combine --pair TDBX:txch --number-of-coins 10 --asset-id xch`
+  - Combine: `greenfloor-manager coin-combine --pair TDBX:txch --input-coin-count 10 --asset-id xch`
   - Config-driven shaping (from market `ladders.sell`): `greenfloor-manager coin-split --pair TDBX:txch --size-base-units 10`
   - Config-driven combine threshold (from market `ladders.sell`): `greenfloor-manager coin-combine --pair TDBX:txch --size-base-units 10`
   - Optional venue context annotation for prep commands: add `--venue dexie` or `--venue splash` (coin-prep works without it).

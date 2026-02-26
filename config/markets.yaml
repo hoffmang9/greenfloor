@@ -49,6 +49,14 @@ supported_assets_example:
       ticker_id: "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d_xch"
       pool_id: "8cb4ea71bf7fd2ba293553c2d185d0173de806f6d679767c0070f2a92860d4cf"
       last_price_xch: "0.367746423043"
+  - name: "Circuit DAO Token"
+    base_symbol: "CRT"
+    asset_id: "ea3ace5525d6aaf6d921b66052afc67da11c820b676de91d61ae1a766c8ce615"
+    legacy_usd_price_per_credit: null
+    dexie:
+      ticker_id: null
+      pool_id: null
+      last_price_xch: null
   - name: "Bytecash"
     base_symbol: "BYC"
     asset_id: "ae1536f56760e471ad85ead45f00d680ff9cca73b8cc3407be778f1c0c606eac"

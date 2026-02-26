@@ -1,5 +1,22 @@
 # Progress Log
 
+## 2026-02-25 (mainnet target alignment: CARBON22:wUSDC.b strict-close)
+
+- Updated planning alignment for live target execution:
+  - `docs/plan.md` active target now treats `CARBON22:wUSDC.b` as the primary mainnet strict-close objective, with `CARBON22:xch` retained as completed supporting proof.
+  - Corrected stale historical wording that implied a 7-command current CLI core surface; current v1 core surface remains 10 commands.
+- Declared next execution evidence path:
+  - Run one end-to-end manager proof on mainnet market `carbon_2022_wusdc_sell` (`build-and-post-offer` -> `offers-status` -> `offers-reconcile`) and record persisted lifecycle output.
+- Operational preflight reminder for this proof:
+  - Ensure mainnet receive address format (`xch1...`) and mainnet endpoint routing are in place before execution.
+- Remote execution attempt on host `John-Deere`:
+  - Fixed remote preflight blocker in `~/.greenfloor/config/program.yaml` (`chain_signals.tx_block_trigger.mode` updated from `webhook_or_poll` to `websocket`) so `config-validate` and `doctor` could run.
+  - `config-validate` now passes and `doctor` reports `ok: true` (warnings only for missing optional Pushover env vars).
+  - Updated remote `carbon_2022_wusdc_sell` market stanza to use canonical `wUSDC.b` CAT tail (`fa4a...a99d`) and mainnet `xch1...` receive address.
+  - `build-and-post-offer --market-id carbon_2022_wusdc_sell --size-base-units 1 --dry-run` failed with `offer_builder_failed:signing_failed:missing_mnemonic_for_key_id` (dry-run uses local signing path, no mnemonic in shell env).
+  - Live `build-and-post-offer` failed before publish with `cloud_wallet_asset_resolution_failed:dexie_cat_metadata_not_found_for:4a1689...66e7`.
+  - `coins-list` on the target vault currently returns only `Asset_huun64oh7dbt9f1f9ie8khuw` coins, so no clear in-vault `CARBON22`/`wUSDC.b` inventory signal is visible yet.
+
 ## 2026-02-25 (upstreaming follow-up: cache key + metadata + formatting)
 
 - Closed CI follow-up issues discovered after merging reliability test hardening:

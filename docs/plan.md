@@ -88,7 +88,7 @@ Operator output/coin-op behavior notes:
 - [x] P1-followup: In-process `chia-wallet-sdk` offer construction via `greenfloor/cli/offer_builder_sdk.py`.
 - [x] P2: Policy-gated cancel execution for unstable-leg markets on strong price moves.
 - [x] P3: Runbook-level operator docs (`docs/runbook.md`).
-- [x] Manager CLI simplified from 21 commands to 7 core commands. Non-essential commands (metrics, config history, ladder/bucket tuning, etc.) deferred until after testnet proof.
+- [x] Manager CLI simplification pass completed (historical). Current v1 core CLI surface is 10 commands (`bootstrap-home`, `config-validate`, `doctor`, `keys-onboard`, `build-and-post-offer`, `offers-status`, `offers-reconcile`, `coins-list`, `coin-split`, `coin-combine`); non-essential commands (metrics, config history, ladder/bucket tuning, etc.) remain deferred until after live proof milestones.
 - [x] Offer builder subprocess boundary eliminated — manager calls `offer_builder_sdk.build_offer()` directly.
 
 ## Remaining Gaps Before First Production-Like User Test
@@ -112,8 +112,10 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
 
 ## Active Live Testing Target
 
-- Active live testing target is now mainnet `CARBON22:xch`.
+- Active live testing target is now mainnet `CARBON22:wUSDC.b` (primary), with `CARBON22:xch` as a completed supporting proof path.
 - `CARBON22` CAT ID: `4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7`.
+- `wUSDC.b` CAT ID: `fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d`.
+- Next strict-close proof objective: one successful end-to-end manager sequence on mainnet for `carbon_2022_wusdc_sell` (`build-and-post-offer` -> `offers-status` -> `offers-reconcile`) with persisted lifecycle evidence.
 - Prior `testnet11` proof artifacts remain valid as historical closure evidence for G1-G3.
 
 ## Operational Hardening Follow-up

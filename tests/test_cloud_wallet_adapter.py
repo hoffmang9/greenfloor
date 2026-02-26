@@ -188,3 +188,30 @@ def test_cloud_wallet_get_signature_request_handles_non_dict(monkeypatch, tmp_pa
     monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
     payload = adapter.get_signature_request(signature_request_id="SignatureRequest_1")
     assert payload == {"id": "SignatureRequest_1", "status": "UNKNOWN"}
+
+
+def test_cloud_wallet_cancel_offer_returns_signature_request(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+
+    def _fake_urlopen(_req, timeout=0):
+        _ = timeout
+        return _FakeHttpResponse(
+            {
+                "data": {
+                    "cancelOffer": {
+                        "signatureRequest": {
+                            "id": "SignatureRequest_cancel_1",
+                            "status": "SUBMITTED",
+                        }
+                    }
+                }
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    payload = adapter.cancel_offer(offer_id="Offer_abc")
+    assert payload == {
+        "signature_request_id": "SignatureRequest_cancel_1",
+        "status": "SUBMITTED",
+    }
