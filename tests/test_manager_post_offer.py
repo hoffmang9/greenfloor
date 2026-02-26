@@ -3078,10 +3078,15 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     )
     assert code == 0
     assert posted["offer"] == "offer1testartifact"
-    payload = json.loads(capsys.readouterr().out.strip())
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out.strip())
     assert payload["publish_failures"] == 0
     assert payload["results"][0]["result"]["id"] == "dexie-99"
     assert payload["offer_fee_mojos"] == 0
+    assert "signed_offer_file:offer1testartifact" in captured.err
+    assert "signed_offer_metadata:ticker=A1" in captured.err
+    assert "amount=10" in captured.err
+    assert "trading_pair=A1:xch" in captured.err
 
 
 def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(

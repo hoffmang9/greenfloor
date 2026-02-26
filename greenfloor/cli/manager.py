@@ -111,6 +111,29 @@ def _extract_coin_id_hints_from_offer_text(offer_text: str) -> list[str]:
     return list(dict.fromkeys(hints))
 
 
+def _log_signed_offer_artifact(
+    *,
+    offer_text: str,
+    ticker: str,
+    amount: int,
+    trading_pair: str,
+    expiry: str,
+) -> None:
+    coin_id_hints = _extract_coin_id_hints_from_offer_text(offer_text)
+    coin_id = coin_id_hints[0] if coin_id_hints else ""
+    print(f"signed_offer_file:{offer_text}", file=sys.stderr, flush=True)
+    print(
+        "signed_offer_metadata:"
+        f"ticker={ticker} "
+        f"coinid={coin_id} "
+        f"amount={amount} "
+        f"trading_pair={trading_pair} "
+        f"expiry={expiry}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def _verify_offer_text_for_dexie(offer_text: str) -> str | None:
     try:
         native = importlib.import_module("greenfloor_native")
@@ -1755,6 +1778,14 @@ def _build_and_post_offer_cloud_wallet(
                 }
             )
             continue
+
+        _log_signed_offer_artifact(
+            offer_text=offer_text,
+            ticker=str(market.base_symbol),
+            amount=int(size_base_units),
+            trading_pair=f"{market.base_symbol}:{market.quote_asset}",
+            expiry=str(expires_at),
+        )
 
         verify_error = _verify_offer_text_for_dexie(offer_text)
         if verify_error:

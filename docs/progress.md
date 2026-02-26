@@ -1,5 +1,16 @@
 # Progress Log
 
+## 2026-02-26 (course pivot: defer OFFER_CANCEL_OFF_CHAIN work; add signed-offer logging)
+
+- Course adjustment recorded:
+  - Off-chain cancel follow-up validation is deferred until Cloud Wallet org feature flag `OFFER_CANCEL_OFF_CHAIN` is restored.
+  - Current branch keeps notes and implementation context so work can resume quickly once the flag is available.
+- Added high-signal Cloud Wallet offer logging in the standard manager offer flow (`greenfloor/cli/manager.py`):
+  - When a signed offer artifact (`offer1...`) is retrieved after signature submission, manager now logs:
+    - full offer file text on one line (`signed_offer_file:...`),
+    - then a metadata line with `ticker`, `coinid`, `amount`, `trading_pair`, and `expiry`.
+- Added deterministic test coverage in `tests/test_manager_post_offer.py` to assert both log lines are emitted in the Cloud Wallet happy-path posting flow.
+
 ## 2026-02-26 (off-chain cancel follow-up with Cloud Wallet on-chain refresh request)
 
 - Implemented manager follow-up flow for Cloud Wallet cancellations in `greenfloor/cli/manager.py`:
