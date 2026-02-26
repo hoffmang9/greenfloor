@@ -17,7 +17,10 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.price import PriceAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
-from greenfloor.config.io import load_markets_config, load_program_config
+from greenfloor.config.io import (
+    load_markets_config_with_optional_overlay,
+    load_program_config,
+)
 from greenfloor.core.coin_ops import BucketSpec, plan_coin_ops
 from greenfloor.core.fee_budget import partition_plans_by_budget, projected_coin_ops_fee_mojos
 from greenfloor.core.inventory import compute_bucket_counts_from_coins
@@ -633,10 +636,14 @@ def run_once(
     poll_coinset_mempool: bool = True,
     use_websocket_capture: bool = False,
     program=None,
+    testnet_markets_path: Path | None = None,
 ) -> int:
     if program is None:
         program = load_program_config(program_path)
-    markets = load_markets_config(markets_path)
+    markets = load_markets_config_with_optional_overlay(
+        path=markets_path,
+        overlay_path=testnet_markets_path,
+    )
     db_path = _resolve_db_path(program.home_dir, db_path_override)
     store = SqliteStore(db_path)
     started_at = time.monotonic()
@@ -1090,6 +1097,7 @@ def _run_loop(
     *,
     program_path: Path,
     markets_path: Path,
+    testnet_markets_path: Path | None,
     allowed_keys: set[str] | None,
     db_path_override: str | None,
     coinset_base_url: str,
@@ -1156,6 +1164,7 @@ def _run_loop(
             run_once(
                 program_path=program_path,
                 markets_path=markets_path,
+                testnet_markets_path=testnet_markets_path,
                 allowed_keys=allowed_keys,
                 db_path_override=db_path_override,
                 coinset_base_url=coinset_base_url,
@@ -1176,6 +1185,12 @@ def _run_loop(
 
 
 def main() -> None:
+    def _default_testnet_markets_config_path() -> str:
+        candidate = Path("~/.greenfloor/config/testnet-markets.yaml").expanduser()
+        if candidate.exists():
+            return str(candidate)
+        return ""
+
     parser = argparse.ArgumentParser(description="Run GreenFloor daemon")
     parser.add_argument(
         "--program-config",
@@ -1186,6 +1201,14 @@ def main() -> None:
         "--markets-config",
         default="config/markets.yaml",
         help="Path to markets.yaml",
+    )
+    parser.add_argument(
+        "--testnet-markets-config",
+        default=_default_testnet_markets_config_path(),
+        help=(
+            "Optional path to testnet-markets.yaml overlay. "
+            "Ignored when unset or file does not exist."
+        ),
     )
     parser.add_argument(
         "--key-ids",
@@ -1209,6 +1232,11 @@ def main() -> None:
         help="State directory used for reload marker and daemon-local state",
     )
     args = parser.parse_args()
+    testnet_markets_path = (
+        Path(args.testnet_markets_config)
+        if str(args.testnet_markets_config).strip()
+        else None
+    )
 
     allowed_keys = {k.strip() for k in args.key_ids.split(",") if k.strip()} or None
     if args.once:
@@ -1231,12 +1259,14 @@ def main() -> None:
             Path(args.state_dir),
             poll_coinset_mempool=False,
             use_websocket_capture=program.tx_block_trigger_mode == "websocket",
+            testnet_markets_path=testnet_markets_path,
         )
         _daemon_logger.info("daemon_stopped mode=once exit_code=%s", exit_code)
     else:
         exit_code = _run_loop(
             program_path=Path(args.program_config),
             markets_path=Path(args.markets_config),
+            testnet_markets_path=testnet_markets_path,
             allowed_keys=allowed_keys,
             db_path_override=args.state_db or None,
             coinset_base_url=args.coinset_base_url,

@@ -1,5 +1,21 @@
 # Progress Log
 
+## 2026-02-26 (optional testnet markets overlay split from mainnet markets config)
+
+- Split testnet market stanzas out of `config/markets.yaml` into new `config/testnet-markets.yaml`.
+- Added optional markets-overlay loading in config layer:
+  - `greenfloor.config.io.load_markets_config_with_optional_overlay(path=..., overlay_path=...)`
+  - Manager and daemon now load overlay markets only when `--testnet-markets-config` is set (or auto-detected at `~/.greenfloor/config/testnet-markets.yaml`).
+- Added manager/daemon global CLI support for optional testnet market config:
+  - `greenfloor-manager --testnet-markets-config <path> ...`
+  - `greenfloord --testnet-markets-config <path> ...`
+- Added optional bootstrap seeding for developer testnet config:
+  - `greenfloor-manager bootstrap-home --seed-testnet-markets` (from `config/testnet-markets.yaml`).
+- Added deterministic tests:
+  - `tests/test_config_load.py` overlay merge test.
+  - `tests/test_home_bootstrap.py` optional testnet markets bootstrap seeding test.
+- Updated runbook docs for optional testnet-markets overlay usage and seeding.
+
 ## 2026-02-26 (CAT catalog migration to config/cats.yaml + manager add/list commands)
 
 - Moved CAT metadata catalog out of `config/markets.yaml` into dedicated `config/cats.yaml` (`cats:` list with `name`, `base_symbol`, `asset_id`, optional legacy price, and Dexie metadata fields).

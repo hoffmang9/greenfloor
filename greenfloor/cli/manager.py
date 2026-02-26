@@ -23,7 +23,12 @@ from greenfloor.adapters.coinset import CoinsetAdapter, extract_coinset_tx_ids_f
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.cli.offer_builder_sdk import build_offer_text
-from greenfloor.config.io import load_markets_config, load_program_config, load_yaml, write_yaml
+from greenfloor.config.io import (
+    load_markets_config_with_optional_overlay,
+    load_program_config,
+    load_yaml,
+    write_yaml,
+)
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
 from greenfloor.keys.onboarding import (
     KeyOnboardingSelection,
@@ -209,6 +214,13 @@ def _default_markets_config_path() -> str:
     if home_default.exists():
         return str(home_default)
     return "config/markets.yaml"
+
+
+def _default_testnet_markets_config_path() -> str:
+    home_default = Path("~/.greenfloor/config/testnet-markets.yaml").expanduser()
+    if home_default.exists():
+        return str(home_default)
+    return ""
 
 
 def _default_cats_config_path() -> str:
@@ -1996,9 +2008,14 @@ def _coin_op_result_payload(
 # ---------------------------------------------------------------------------
 
 
-def _validate(program_path: Path, markets_path: Path) -> int:
+def _validate(
+    program_path: Path, markets_path: Path, testnet_markets_path: Path | None = None
+) -> int:
     program = load_program_config(program_path)
-    markets = load_markets_config(markets_path)
+    markets = load_markets_config_with_optional_overlay(
+        path=markets_path,
+        overlay_path=testnet_markets_path,
+    )
     if program.python_min_version != "3.11":
         raise ValueError("program.yaml dev.python.min_version must be 3.11")
     for market in markets.markets:
@@ -2459,6 +2476,7 @@ def _build_and_post_offer(
     *,
     program_path: Path,
     markets_path: Path,
+    testnet_markets_path: Path | None = None,
     network: str,
     market_id: str | None,
     pair: str | None,
@@ -2477,7 +2495,10 @@ def _build_and_post_offer(
         raise ValueError("repeat must be positive")
 
     program = load_program_config(program_path)
-    markets = load_markets_config(markets_path)
+    markets = load_markets_config_with_optional_overlay(
+        path=markets_path,
+        overlay_path=testnet_markets_path,
+    )
     market = _resolve_market_for_build(
         markets,
         market_id=market_id,
@@ -2750,6 +2771,7 @@ def _coin_split(
     *,
     program_path: Path,
     markets_path: Path,
+    testnet_markets_path: Path | None = None,
     network: str,
     market_id: str | None,
     pair: str | None,
@@ -2767,7 +2789,10 @@ def _coin_split(
 ) -> int:
     program = load_program_config(program_path)
     selected_venue = _resolve_venue_for_coin_prep(venue_override=venue)
-    markets = load_markets_config(markets_path)
+    markets = load_markets_config_with_optional_overlay(
+        path=markets_path,
+        overlay_path=testnet_markets_path,
+    )
     market = _resolve_market_for_build(
         markets,
         market_id=market_id,
@@ -3005,6 +3030,7 @@ def _coin_combine(
     *,
     program_path: Path,
     markets_path: Path,
+    testnet_markets_path: Path | None = None,
     network: str,
     market_id: str | None,
     pair: str | None,
@@ -3019,7 +3045,10 @@ def _coin_combine(
 ) -> int:
     program = load_program_config(program_path)
     selected_venue = _resolve_venue_for_coin_prep(venue_override=venue)
-    markets = load_markets_config(markets_path)
+    markets = load_markets_config_with_optional_overlay(
+        path=markets_path,
+        overlay_path=testnet_markets_path,
+    )
     market = _resolve_market_for_build(
         markets,
         market_id=market_id,
@@ -3183,6 +3212,8 @@ def _bootstrap_home(
     program_template: Path,
     markets_template: Path,
     cats_template: Path | None,
+    testnet_markets_template: Path | None,
+    seed_testnet_markets: bool,
     force: bool,
 ) -> int:
     home = home_dir.expanduser().resolve()
@@ -3197,6 +3228,7 @@ def _bootstrap_home(
     seeded_program = config_dir / "program.yaml"
     seeded_markets = config_dir / "markets.yaml"
     seeded_cats = config_dir / "cats.yaml"
+    seeded_testnet_markets = config_dir / "testnet-markets.yaml"
 
     wrote_program = False
     if force or not seeded_program.exists():
@@ -3228,6 +3260,19 @@ def _bootstrap_home(
         )
         wrote_cats = True
 
+    wrote_testnet_markets = False
+    if (
+        seed_testnet_markets
+        and testnet_markets_template is not None
+        and (force or not seeded_testnet_markets.exists())
+    ):
+        testnet_markets_data = load_yaml(testnet_markets_template)
+        seeded_testnet_markets.write_text(
+            yaml.safe_dump(testnet_markets_data, sort_keys=False),
+            encoding="utf-8",
+        )
+        wrote_testnet_markets = True
+
     db_path = (db_dir / "greenfloor.sqlite").resolve()
     store = SqliteStore(db_path)
     try:
@@ -3238,6 +3283,7 @@ def _bootstrap_home(
                 "program_config": str(seeded_program),
                 "markets_config": str(seeded_markets),
                 "cats_config": str(seeded_cats),
+                "testnet_markets_config": str(seeded_testnet_markets),
                 "force": bool(force),
             },
         )
@@ -3252,21 +3298,33 @@ def _bootstrap_home(
                 "program_config": str(seeded_program),
                 "markets_config": str(seeded_markets),
                 "cats_config": str(seeded_cats),
+                "testnet_markets_config": (
+                    str(seeded_testnet_markets) if bool(seed_testnet_markets) else ""
+                ),
                 "state_db": str(db_path),
                 "state_dir": str(state_dir),
                 "logs_dir": str(logs_dir),
                 "wrote_program_config": wrote_program,
                 "wrote_markets_config": wrote_markets,
                 "wrote_cats_config": wrote_cats,
+                "wrote_testnet_markets_config": wrote_testnet_markets,
             }
         )
     )
     return 0
 
 
-def _doctor(program_path: Path, markets_path: Path, state_db: str | None) -> int:
+def _doctor(
+    program_path: Path,
+    markets_path: Path,
+    state_db: str | None,
+    testnet_markets_path: Path | None = None,
+) -> int:
     program = load_program_config(program_path)
-    markets = load_markets_config(markets_path)
+    markets = load_markets_config_with_optional_overlay(
+        path=markets_path,
+        overlay_path=testnet_markets_path,
+    )
 
     problems: list[str] = []
     warnings: list[str] = []
@@ -3646,6 +3704,7 @@ def _offers_cancel(
     offer_ids: list[str],
     cancel_open: bool,
     markets_path: Path | None = None,
+    testnet_markets_path: Path | None = None,
     submit_onchain_after_offchain: bool = False,
     onchain_market_id: str | None = None,
     onchain_pair: str | None = None,
@@ -3656,7 +3715,10 @@ def _offers_cancel(
     if submit_onchain_after_offchain:
         if markets_path is None:
             raise ValueError("markets_path is required for submit_onchain_after_offchain")
-        markets = load_markets_config(markets_path)
+        markets = load_markets_config_with_optional_overlay(
+            path=markets_path,
+            overlay_path=testnet_markets_path,
+        )
         onchain_market = _resolve_market_for_build(
             markets,
             market_id=onchain_market_id,
@@ -3850,6 +3912,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="GreenFloor manager CLI")
     parser.add_argument("--program-config", default=_default_program_config_path())
     parser.add_argument("--markets-config", default=_default_markets_config_path())
+    parser.add_argument("--testnet-markets-config", default=_default_testnet_markets_config_path())
     parser.add_argument("--cats-config", default=_default_cats_config_path())
     parser.add_argument("--state-db", default="")
     parser.add_argument(
@@ -3915,6 +3978,8 @@ def main() -> None:
     p_bootstrap.add_argument("--program-template", default="config/program.yaml")
     p_bootstrap.add_argument("--markets-template", default="config/markets.yaml")
     p_bootstrap.add_argument("--cats-template", default="config/cats.yaml")
+    p_bootstrap.add_argument("--testnet-markets-template", default="config/testnet-markets.yaml")
+    p_bootstrap.add_argument("--seed-testnet-markets", action="store_true")
     p_bootstrap.add_argument("--force", action="store_true")
 
     p_cats_add = sub.add_parser("cats-add")
@@ -3992,10 +4057,17 @@ def main() -> None:
     p_coin_combine.add_argument("--no-wait", action="store_true")
 
     args = parser.parse_args()
+    testnet_markets_path = (
+        Path(args.testnet_markets_config) if str(args.testnet_markets_config).strip() else None
+    )
     global _JSON_OUTPUT_COMPACT
     _JSON_OUTPUT_COMPACT = bool(args.json)
     if args.command == "config-validate":
-        code = _validate(Path(args.program_config), Path(args.markets_config))
+        code = _validate(
+            Path(args.program_config),
+            Path(args.markets_config),
+            testnet_markets_path,
+        )
     elif args.command == "keys-onboard":
         code = _keys_onboard(
             program_path=Path(args.program_config),
@@ -4016,6 +4088,7 @@ def main() -> None:
         code = _build_and_post_offer(
             program_path=Path(args.program_config),
             markets_path=Path(args.markets_config),
+            testnet_markets_path=testnet_markets_path,
             network=args.network,
             market_id=args.market_id or None,
             pair=args.pair or None,
@@ -4033,6 +4106,7 @@ def main() -> None:
             program_path=Path(args.program_config),
             markets_path=Path(args.markets_config),
             state_db=args.state_db or None,
+            testnet_markets_path=testnet_markets_path,
         )
     elif args.command == "offers-status":
         code = _offers_status(
@@ -4056,6 +4130,7 @@ def main() -> None:
             offer_ids=[str(value) for value in args.offer_id],
             cancel_open=bool(args.cancel_open),
             markets_path=Path(args.markets_config),
+            testnet_markets_path=testnet_markets_path,
             submit_onchain_after_offchain=bool(args.submit_onchain_after_offchain),
             onchain_market_id=args.onchain_market_id or None,
             onchain_pair=args.onchain_pair or None,
@@ -4066,6 +4141,12 @@ def main() -> None:
             program_template=Path(args.program_template),
             markets_template=Path(args.markets_template),
             cats_template=Path(args.cats_template) if str(args.cats_template).strip() else None,
+            testnet_markets_template=(
+                Path(args.testnet_markets_template)
+                if str(args.testnet_markets_template).strip()
+                else None
+            ),
+            seed_testnet_markets=bool(args.seed_testnet_markets),
             force=bool(args.force),
         )
     elif args.command == "cats-add":
@@ -4110,6 +4191,7 @@ def main() -> None:
         code = _coin_split(
             program_path=Path(args.program_config),
             markets_path=Path(args.markets_config),
+            testnet_markets_path=testnet_markets_path,
             network=args.network,
             market_id=args.market_id or None,
             pair=args.pair or None,
@@ -4128,6 +4210,7 @@ def main() -> None:
         code = _coin_combine(
             program_path=Path(args.program_config),
             markets_path=Path(args.markets_config),
+            testnet_markets_path=testnet_markets_path,
             network=args.network,
             market_id=args.market_id or None,
             pair=args.pair or None,

@@ -1,0 +1,83 @@
+---
+markets:
+  - id: tdbx_txch_sell
+    enabled: true
+    mode: sell_only
+    base_asset: "d82dd03f8a9ad2f84353cd953c4de6b21dbaaf7de3ba3f4ddd9abe31ecba80ad"
+    base_symbol: "TDBX"
+    quote_asset: "txch"
+    quote_asset_type: unstable
+    signer_key_id: "key-main-1"
+    receive_address: "txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k"
+    pricing:
+      reference_source: "coingecko"
+      reference_pair: "txch_usd"
+      side: "sell"
+      fixed_quote_per_base: 0.004714285714285714
+      quote_unit_mojo_multiplier: 1000000000000
+      slippage_bps: 100
+      strategy_target_spread_bps: 140
+      strategy_min_xch_price_usd: 20.0
+      strategy_max_xch_price_usd: 60.0
+      cancel_policy_stable_vs_unstable: true
+    inventory:
+      low_watermark_base_units: 500
+      low_inventory_alert_threshold_base_units: null
+      current_available_base_units: 500
+      bucket_counts:
+        1: 2
+        10: 1
+        100: 0
+    ladders:
+      sell:
+        - size_base_units: 1
+          target_count: 5
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+        - size_base_units: 10
+          target_count: 2
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+        - size_base_units: 100
+          target_count: 1
+          split_buffer_count: 0
+          combine_when_excess_factor: 2.0
+
+  - id: tbyc_txch_sell
+    enabled: false
+    mode: sell_only
+    base_asset: "4d81e31c9dd9663220b9384693f6ea036b9e372ecf94f0f38b5767b54cd96d05"
+    base_symbol: "TBYC"
+    quote_asset: "txch"
+    quote_asset_type: unstable
+    signer_key_id: "key-main-1"
+    receive_address: "txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k"
+    pricing:
+      reference_source: "coingecko"
+      reference_pair: "txch_usd"
+      side: "sell"
+      fixed_quote_per_base: 0.002420604183
+      quote_unit_mojo_multiplier: 1000000000000
+      slippage_bps: 100
+      strategy_target_spread_bps: 140
+      strategy_min_xch_price_usd: 20.0
+      strategy_max_xch_price_usd: 60.0
+      cancel_policy_stable_vs_unstable: true
+    inventory:
+      low_watermark_base_units: 0
+      low_inventory_alert_threshold_base_units: null
+      current_available_base_units: 0
+      bucket_counts:
+        1: 0
+        10: 0
+        100: 0
+    ladders:
+      sell:
+        - size_base_units: 1
+          target_count: 3
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+        - size_base_units: 10
+          target_count: 1
+          split_buffer_count: 0
+          combine_when_excess_factor: 2.0

@@ -126,7 +126,7 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
 - Active live testing target is now mainnet `CARBON22:wUSDC.b` (primary), with `CARBON22:xch` as a completed supporting proof path.
 - `CARBON22` CAT ID: `4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7`.
 - `wUSDC.b` CAT ID: `fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d`.
-- Strict-close objective status: completed manager lifecycle evidence for `carbon_2022_wusdc_sell` is logged in `docs/progress.md` (2026-02-26 remote split + `build-and-post-offer` + `offers-status` evidence on mainnet).
+- Strict-close objective status: completed manager lifecycle evidence for `carbon22_sell_wusdbc` is logged in `docs/progress.md` (2026-02-26 remote split + `build-and-post-offer` + `offers-status` evidence on mainnet).
 - Prior `testnet11` proof artifacts remain valid as historical closure evidence for G1-G3.
 
 ## Operational Hardening Follow-up
