@@ -239,6 +239,7 @@ def test_run_loop_refreshes_log_level_without_restart(monkeypatch, tmp_path: Pat
     monkeypatch.setattr("greenfloor.daemon.main.CoinsetWebsocketClient", _FakeWsClient)
     monkeypatch.setattr("greenfloor.daemon.main._initialize_daemon_file_logging", _fake_initialize)
     monkeypatch.setattr("greenfloor.daemon.main.run_once", _fake_run_once)
+    monkeypatch.setattr("greenfloor.daemon.main.time.sleep", lambda _seconds: None)
 
     code = _run_loop(
         program_path=program,
