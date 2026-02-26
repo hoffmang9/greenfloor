@@ -431,6 +431,33 @@ def _load_master_private_key(keyring_yaml_path: str, key_id: str) -> tuple[Any |
 # ---------------------------------------------------------------------------
 
 
+def _sign_and_aggregate(
+    *,
+    sdk: Any,
+    coin_spends: list[Any],
+    synthetic_sk_by_puzzle_hash: dict[bytes, Any],
+    additional_data: bytes,
+) -> tuple[Any | None, str | None]:
+    """Collect AGG_SIG targets from coin spends, sign, and aggregate."""
+    sk_by_pk_bytes: dict[bytes, Any] = {}
+    for synthetic_sk in synthetic_sk_by_puzzle_hash.values():
+        sk_by_pk_bytes[synthetic_sk.public_key().to_bytes()] = synthetic_sk
+    signatures = []
+    for coin_spend in coin_spends:
+        for public_key, message in _extract_required_bls_targets_for_coin_spend(
+            sdk=sdk,
+            coin_spend=coin_spend,
+            agg_sig_me_additional_data=additional_data,
+        ):
+            sk = sk_by_pk_bytes.get(public_key)
+            if sk is None:
+                return None, "missing_private_key_for_agg_sig_target"
+            signatures.append(sk.sign(message))
+    if not signatures:
+        return None, "no_agg_sig_targets_found"
+    return sdk.Signature.aggregate(signatures), None
+
+
 def _build_spend_bundle(
     *,
     sdk: Any,
@@ -511,23 +538,14 @@ def _build_spend_bundle(
         return None, f"build_spend_bundle_error:{exc}"
 
     try:
-        signatures = []
-        sk_by_pk_bytes: dict[bytes, Any] = {}
-        for synthetic_sk in synthetic_sk_by_puzzle_hash.values():
-            sk_by_pk_bytes[synthetic_sk.public_key().to_bytes()] = synthetic_sk
-        for coin_spend in coin_spends:
-            for public_key, message in _extract_required_bls_targets_for_coin_spend(
-                sdk=sdk,
-                coin_spend=coin_spend,
-                agg_sig_me_additional_data=additional_data,
-            ):
-                sk = sk_by_pk_bytes.get(public_key)
-                if sk is None:
-                    return None, "missing_private_key_for_agg_sig_target"
-                signatures.append(sk.sign(message))
-        if not signatures:
-            return None, "no_agg_sig_targets_found"
-        aggregate_sig = sdk.Signature.aggregate(signatures)
+        aggregate_sig, sign_err = _sign_and_aggregate(
+            sdk=sdk,
+            coin_spends=coin_spends,
+            synthetic_sk_by_puzzle_hash=synthetic_sk_by_puzzle_hash,
+            additional_data=additional_data,
+        )
+        if sign_err is not None:
+            return None, sign_err
         spend_bundle = sdk.SpendBundle(coin_spends, aggregate_sig)
         return sdk.to_hex(spend_bundle.to_bytes()), None
     except Exception as exc:
@@ -793,23 +811,14 @@ def _build_offer_spend_bundle(
         return None, f"build_offer_spend_bundle_error:{exc}"
 
     try:
-        signatures = []
-        sk_by_pk_bytes: dict[bytes, Any] = {}
-        for synthetic_sk in synthetic_sk_by_puzzle_hash.values():
-            sk_by_pk_bytes[synthetic_sk.public_key().to_bytes()] = synthetic_sk
-        for coin_spend in coin_spends:
-            for public_key, message in _extract_required_bls_targets_for_coin_spend(
-                sdk=sdk,
-                coin_spend=coin_spend,
-                agg_sig_me_additional_data=additional_data,
-            ):
-                sk = sk_by_pk_bytes.get(public_key)
-                if sk is None:
-                    return None, "missing_private_key_for_agg_sig_target"
-                signatures.append(sk.sign(message))
-        if not signatures:
-            return None, "no_agg_sig_targets_found"
-        aggregate_sig = sdk.Signature.aggregate(signatures)
+        aggregate_sig, sign_err = _sign_and_aggregate(
+            sdk=sdk,
+            coin_spends=coin_spends,
+            synthetic_sk_by_puzzle_hash=synthetic_sk_by_puzzle_hash,
+            additional_data=additional_data,
+        )
+        if sign_err is not None:
+            return None, sign_err
         input_spend_bundle = sdk.SpendBundle(coin_spends, aggregate_sig)
         spend_bundle = _from_input_spend_bundle_xch(
             sdk=sdk,
