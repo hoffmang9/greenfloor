@@ -36,8 +36,8 @@ class PlannedAction:
 
 
 _PAIR_EXPIRY_CONFIG: dict[str, tuple[str, int]] = {
-    "xch": ("minutes", 65),
-    "usdc": ("hours", 24),
+    "xch": ("minutes", 10),
+    "usdc": ("minutes", 10),
 }
 
 

@@ -1,5 +1,38 @@
 # Progress Log
 
+## 2026-02-26 (remote CARBON22 split + live offer proof; resolver hardening)
+
+- Completed remote Cloud Wallet execution on host `John-Deere` for current mainnet `CARBON22:wUSDC.b` workstream:
+  - Confirmed `CARBON22` wallet asset (`Asset_ymgm3ygl5om7ia4u9llk3iu7`) recovered to spendable state after self-transfer (`totalAmount: 200000`, `spendableAmount: 200000` at verification time).
+  - Submitted `coin-split` for `carbon_2022_wusdc_sell` with `amount_per_coin=10000` and `number_of_coins=10`; split request id `SignatureRequest_az9aoi4gxqlur4ccbfpsice8` moved to `SUBMITTED` and then into pending output state.
+  - Posted a live test offer after split using current spendable chunk:
+    - command: `build-and-post-offer --market-id carbon_2022_wusdc_sell --size-base-units 10`
+    - result: success; offer id `8UjTyuLpooC7GAwrTzni6QK13p6yQPTZaVmjRFtZssVk`
+    - signature request id `SignatureRequest_g3s0vutpbq25polq8am6ork9`, state `SUBMITTED`
+    - resolver output confirmed canonical mapping: base `Asset_ymgm3ygl5om7ia4u9llk3iu7` (CARBON22), quote `Asset_cxc7mql006dp2w3kigqlj58t` (wUSDC.b)
+  - `offers-status --market-id carbon_2022_wusdc_sell` now reports the new offer in `open` state with fresh `strategy_offer_execution` evidence.
+- Closed remote resolver drift for `coins-list --asset <CAT-hex>`:
+  - Root cause: CAT-hex resolution previously hard-failed when Dexie metadata for the CAT was missing/stale.
+  - Fix in `greenfloor/cli/manager.py`: added deterministic local catalog hint fallback (`config/markets.yaml` assets + markets `base_symbol`) and direct wallet-label matching while preserving strict ambiguity rejection.
+  - Verified remotely: `coins-list --asset 4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7` now resolves and lists `Asset_ymgm...` coins instead of raising `cloud_wallet_asset_resolution_failed:unmatched_wallet_cat_asset_for`.
+
+## 2026-02-25 (mainnet target alignment: CARBON22:wUSDC.b strict-close)
+
+- Updated planning alignment for live target execution:
+  - `docs/plan.md` active target now treats `CARBON22:wUSDC.b` as the primary mainnet strict-close objective, with `CARBON22:xch` retained as completed supporting proof.
+  - Corrected stale historical wording that implied a 7-command current CLI core surface; current v1 core surface remains 10 commands.
+- Declared next execution evidence path:
+  - Run one end-to-end manager proof on mainnet market `carbon_2022_wusdc_sell` (`build-and-post-offer` -> `offers-status` -> `offers-reconcile`) and record persisted lifecycle output.
+- Operational preflight reminder for this proof:
+  - Ensure mainnet receive address format (`xch1...`) and mainnet endpoint routing are in place before execution.
+- Remote execution attempt on host `John-Deere`:
+  - Fixed remote preflight blocker in `~/.greenfloor/config/program.yaml` (`chain_signals.tx_block_trigger.mode` updated from `webhook_or_poll` to `websocket`) so `config-validate` and `doctor` could run.
+  - `config-validate` now passes and `doctor` reports `ok: true` (warnings only for missing optional Pushover env vars).
+  - Updated remote `carbon_2022_wusdc_sell` market stanza to use canonical `wUSDC.b` CAT tail (`fa4a...a99d`) and mainnet `xch1...` receive address.
+  - `build-and-post-offer --market-id carbon_2022_wusdc_sell --size-base-units 1 --dry-run` failed with `offer_builder_failed:signing_failed:missing_mnemonic_for_key_id` (dry-run uses local signing path, no mnemonic in shell env).
+  - Live `build-and-post-offer` failed before publish with `cloud_wallet_asset_resolution_failed:dexie_cat_metadata_not_found_for:4a1689...66e7`.
+  - `coins-list` on the target vault currently returns only `Asset_huun64oh7dbt9f1f9ie8khuw` coins, so no clear in-vault `CARBON22`/`wUSDC.b` inventory signal is visible yet.
+
 ## 2026-02-25 (upstreaming follow-up: cache key + metadata + formatting)
 
 - Closed CI follow-up issues discovered after merging reliability test hardening:

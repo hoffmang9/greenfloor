@@ -244,6 +244,36 @@ mutation createOffer($input: CreateOfferInput!) {
             "status": str(signature_request.get("status", "")).strip(),
         }
 
+    def cancel_offer(self, *, offer_id: str) -> dict[str, Any]:
+        clean_offer_id = str(offer_id).strip()
+        if not clean_offer_id:
+            raise ValueError("offer_id is required")
+        mutation = """
+mutation cancelOffer($input: CancelOfferInput!) {
+  cancelOffer(input: $input) {
+    signatureRequest {
+      id
+      status
+    }
+  }
+}
+"""
+        response = self._graphql(
+            query=mutation,
+            variables={
+                "input": {
+                    "walletId": self._vault_id,
+                    "offerId": clean_offer_id,
+                }
+            },
+        )
+        cancel_payload = response.get("cancelOffer") or {}
+        signature_request = cancel_payload.get("signatureRequest") or {}
+        return {
+            "signature_request_id": str(signature_request.get("id", "")).strip(),
+            "status": str(signature_request.get("status", "")).strip(),
+        }
+
     def get_signature_request(self, *, signature_request_id: str) -> dict[str, Any]:
         query = """
 query getSignatureRequest($id: ID!) {
@@ -266,11 +296,13 @@ query getWallet($walletId: ID) {
     offers {
       edges {
         node {
+              id
           offerId
           state
           settlementType
           expiresAt
           bech32
+              createdAt
         }
       }
     }
