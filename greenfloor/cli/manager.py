@@ -74,6 +74,43 @@ def _offer_has_expiration_condition(sdk: object, offer_text: str) -> bool:
     return False
 
 
+def _extract_coin_id_hints_from_offer_text(offer_text: str) -> list[str]:
+    try:
+        sdk = importlib.import_module("chia_wallet_sdk")
+    except Exception:
+        return []
+    decode_offer = getattr(sdk, "decode_offer", None)
+    if not callable(decode_offer):
+        return []
+    try:
+        spend_bundle = decode_offer(offer_text)
+    except Exception:
+        return []
+    coin_spends = getattr(spend_bundle, "coin_spends", None) or []
+    hints: list[str] = []
+    for coin_spend in coin_spends:
+        coin = getattr(coin_spend, "coin", None)
+        if coin is None:
+            continue
+        coin_id_fn = getattr(coin, "coin_id", None)
+        if not callable(coin_id_fn):
+            continue
+        try:
+            coin_id_obj = coin_id_fn()
+            to_hex = getattr(sdk, "to_hex", None)
+            if not callable(to_hex):
+                continue
+            coin_id_hex = str(to_hex(coin_id_obj)).strip().lower()
+        except Exception:
+            continue
+        if coin_id_hex.startswith("0x"):
+            coin_id_hex = coin_id_hex[2:]
+        if len(coin_id_hex) == 64 and all(c in "0123456789abcdef" for c in coin_id_hex):
+            hints.append(coin_id_hex)
+    # Stable order, unique values.
+    return list(dict.fromkeys(hints))
+
+
 def _verify_offer_text_for_dexie(offer_text: str) -> str | None:
     try:
         native = importlib.import_module("greenfloor_native")
@@ -2932,9 +2969,24 @@ def _offers_cancel(
     program_path: Path,
     offer_ids: list[str],
     cancel_open: bool,
+    markets_path: Path | None = None,
+    submit_onchain_after_offchain: bool = False,
+    onchain_market_id: str | None = None,
+    onchain_pair: str | None = None,
 ) -> int:
     program = load_program_config(program_path)
     wallet = _new_cloud_wallet_adapter(program)
+    onchain_market = None
+    if submit_onchain_after_offchain:
+        if markets_path is None:
+            raise ValueError("markets_path is required for submit_onchain_after_offchain")
+        markets = load_markets_config(markets_path)
+        onchain_market = _resolve_market_for_build(
+            markets,
+            market_id=onchain_market_id,
+            pair=onchain_pair,
+            network=program.app_network,
+        )
     requested_ids = [str(value).strip() for value in offer_ids if str(value).strip()]
     selected_offers: list[dict[str, str]] = []
     wallet_payload = wallet.get_wallet()
@@ -2948,6 +3000,7 @@ def _offers_cancel(
                 "offer_id": str(row.get("offerId", "")).strip(),
                 "state": str(row.get("state", "")).strip(),
                 "expires_at": str(row.get("expiresAt", "")).strip(),
+                "bech32": str(row.get("bech32", "")).strip(),
             }
         )
     selected_offers = [row for row in selected_offers if row["offer_id"]]
@@ -2966,7 +3019,9 @@ def _offers_cancel(
     for row in selected_offers:
         offer_id = row["offer_id"]
         offer_state = str(row.get("state", "")).strip().upper()
-        cancel_off_chain = offer_state == "PENDING"
+        cancel_off_chain = offer_state == "PENDING" or (
+            submit_onchain_after_offchain and offer_state == "OPEN"
+        )
         wallet_offer_id = row.get("wallet_offer_id", "")
         ui_url = _cloud_wallet_offer_ui_url(
             cloud_wallet_base_url=str(program.cloud_wallet_base_url),
@@ -2999,6 +3054,83 @@ def _offers_cancel(
                 item["result"]["error"] = "cancel_offer_missing_signature_request_id"
             elif missing_signature_request and cancel_off_chain:
                 item["result"]["reason"] = "cancel_off_chain_requested"
+            if submit_onchain_after_offchain and item["result"]["success"]:
+                if not cancel_off_chain:
+                    item["result"]["onchain_refresh"] = {
+                        "status": "skipped",
+                        "reason": "requires_off_chain_cancel_state_pending",
+                        "signature_request_id": None,
+                        "signature_state": "",
+                    }
+                else:
+                    resolved_asset_id = _resolve_cloud_wallet_asset_id(
+                        wallet=wallet,
+                        canonical_asset_id=onchain_market.base_asset,  # type: ignore[union-attr]
+                        symbol_hint=onchain_market.base_symbol,  # type: ignore[union-attr]
+                    )
+                    market_coins = wallet.list_coins(
+                        asset_id=resolved_asset_id,
+                        include_pending=True,
+                    )
+                    spendable_market_coins = [
+                        coin for coin in market_coins if _is_spendable_coin(coin)
+                    ]
+                    if not spendable_market_coins:
+                        raise RuntimeError("no_spendable_market_coins_for_onchain_refresh")
+                    coin_id_hints = _extract_coin_id_hints_from_offer_text(
+                        str(row.get("bech32", "")).strip()
+                    )
+                    resolved_coin_ids, _ = _resolve_coin_global_ids(
+                        spendable_market_coins, coin_id_hints
+                    )
+                    target_coin: dict[str, Any] | None = None
+                    if resolved_coin_ids:
+                        for coin in spendable_market_coins:
+                            if str(coin.get("id", "")).strip() == resolved_coin_ids[0]:
+                                target_coin = coin
+                                break
+                    if target_coin is None:
+                        target_coin = sorted(
+                            spendable_market_coins,
+                            key=lambda c: int(c.get("amount", 0)),
+                        )[0]
+                    refresh_fee_mojos, refresh_fee_source = _resolve_taker_or_coin_operation_fee(
+                        network=program.app_network,
+                        minimum_fee_mojos=0,
+                    )
+                    refresh_result = wallet.split_coins(
+                        coin_ids=[str(target_coin.get("id", "")).strip()],
+                        amount_per_coin=int(target_coin.get("amount", 0)),
+                        number_of_coins=1,
+                        fee=int(refresh_fee_mojos),
+                    )
+                    refresh_signature_request_id = str(
+                        refresh_result.get("signature_request_id", "")
+                    ).strip()
+                    item["result"]["onchain_refresh"] = {
+                        "status": (
+                            "executed" if refresh_signature_request_id else "skipped"
+                        ),
+                        "reason": (
+                            "cloud_wallet_split_submitted"
+                            if refresh_signature_request_id
+                            else "missing_signature_request_id"
+                        ),
+                        "signature_request_id": refresh_signature_request_id or None,
+                        "signature_state": str(refresh_result.get("status", "")).strip(),
+                        "coin_id": str(target_coin.get("id", "")).strip(),
+                        "coin_name": str(target_coin.get("name", "")).strip(),
+                        "amount": int(target_coin.get("amount", 0)),
+                        "asset_id": resolved_asset_id,
+                        "fee_mojos": int(refresh_fee_mojos),
+                        "fee_source": refresh_fee_source,
+                    }
+                    if not refresh_signature_request_id:
+                        failures += 1
+                        item["result"]["success"] = False
+                        item["result"]["error"] = (
+                            "onchain_refresh_failed:missing_signature_request_id"
+                        )
             items.append(item)
         except Exception as exc:
             failures += 1
@@ -3021,6 +3153,10 @@ def _offers_cancel(
                 "vault_id": wallet.vault_id,
                 "cancel_open": bool(cancel_open),
                 "requested_offer_ids": requested_ids,
+                "submit_onchain_after_offchain": bool(submit_onchain_after_offchain),
+                "onchain_market_id": (
+                    onchain_market.market_id if onchain_market is not None else ""
+                ),
                 "selected_count": len(selected_offers),
                 "cancelled_count": len(selected_offers) - failures,
                 "failed_count": failures,
@@ -3095,6 +3231,9 @@ def main() -> None:
     p_offers_cancel = sub.add_parser("offers-cancel")
     p_offers_cancel.add_argument("--offer-id", action="append", default=[])
     p_offers_cancel.add_argument("--cancel-open", action="store_true")
+    p_offers_cancel.add_argument("--submit-onchain-after-offchain", action="store_true")
+    p_offers_cancel.add_argument("--onchain-market-id", default="")
+    p_offers_cancel.add_argument("--onchain-pair", default="")
 
     p_bootstrap = sub.add_parser("bootstrap-home")
     p_bootstrap.add_argument("--home-dir", default="~/.greenfloor")
@@ -3208,6 +3347,10 @@ def main() -> None:
             program_path=Path(args.program_config),
             offer_ids=[str(value) for value in args.offer_id],
             cancel_open=bool(args.cancel_open),
+            markets_path=Path(args.markets_config),
+            submit_onchain_after_offchain=bool(args.submit_onchain_after_offchain),
+            onchain_market_id=args.onchain_market_id or None,
+            onchain_pair=args.onchain_pair or None,
         )
     elif args.command == "bootstrap-home":
         code = _bootstrap_home(
