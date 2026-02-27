@@ -24,7 +24,7 @@ repos:
     hooks:
       - id: pyright
         name: pyright
-        entry: .venv/bin/pyright
+        entry: pyright
         language: system
         types: [python]
         pass_filenames: false

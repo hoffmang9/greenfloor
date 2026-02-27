@@ -33,9 +33,10 @@ jobs:
       - name: Create venv and install dev dependencies
         run: |
           python -m venv .venv
+          export PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH"
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
-          .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install -e ".[dev]"
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
 
       - name: Install Rust toolchain
         run: |
@@ -60,8 +61,8 @@ jobs:
         if: steps.cache-native-wheel.outputs.cache-hit != 'true'
         run: |
           mkdir -p ./.cache/wheelhouse/greenfloor-native
-          .venv/bin/python -m pip install maturin
-          .venv/bin/python -m maturin build \
+          python -m pip install maturin
+          python -m maturin build \
             --manifest-path greenfloor-native/Cargo.toml \
             --out ./.cache/wheelhouse/greenfloor-native
 
@@ -74,7 +75,7 @@ jobs:
 
       - name: Install greenfloor-native wheel
         run: |
-          .venv/bin/python -m pip install ./.cache/wheelhouse/greenfloor-native/*.whl
+          python -m pip install ./.cache/wheelhouse/greenfloor-native/*.whl
 
       - name: Cache pre-commit environment
         uses: actions/cache@v4
@@ -91,7 +92,7 @@ jobs:
         run: pre-commit run --all-files
 
       - name: "Test suite (pytest)"
-        run: .venv/bin/pytest -v --tb=short
+        run: pytest -v --tb=short
 
       - name: Resolve chia-wallet-sdk pinned commit
         if: matrix.os == 'ubuntu-latest'
@@ -111,7 +112,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && steps.cache-sdk-wheelhouse.outputs.cache-hit != 'true'
         run: |
           mkdir -p ./.cache/wheelhouse/chia-wallet-sdk
-          .venv/bin/python -m pip wheel \
+          python -m pip wheel \
             --wheel-dir ./.cache/wheelhouse/chia-wallet-sdk \
             ./chia-wallet-sdk/pyo3
 
@@ -124,7 +125,7 @@ jobs:
 
       - name: Install chia-wallet-sdk for native integration tests
         if: matrix.os == 'ubuntu-latest'
-        run: .venv/bin/python -m pip install ./.cache/wheelhouse/chia-wallet-sdk/*.whl
+        run: python -m pip install ./.cache/wheelhouse/chia-wallet-sdk/*.whl
 
       - name: Pytest (greenfloor-native + chia-wallet-sdk offer round-trip on Ubuntu)
         if: matrix.os == 'ubuntu-latest'
