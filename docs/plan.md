@@ -85,6 +85,7 @@ Operator output/coin-op behavior notes:
 - Deterministic test suite (`pytest`) should stay under 10 minutes wall clock (prefer under 5).
 - Required checks: `ruff check`, `ruff format --check`, `pyright`, `pytest`.
 - Local convenience gate: `pre-commit run --all-files` (configured to run `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, and `pytest`).
+- CI splits `pytest` into a dedicated step (with `-v --tb=short`) for clearer log navigation; `pre-commit` runs linting and type-checking only in CI via `SKIP: pytest`.
 
 ## Plan TODOs (Current State)
 
@@ -151,6 +152,10 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
   ran `cargo test` on `chia-sdk-driver` Rust internals (CAT issuance, catalog, reward distributor)
   and tested no GreenFloor code. SDK has its own CI. `test_greenfloor_native_integration.py`
   covers the SDK surface GreenFloor actually uses.
+- CI pytest runs as a standalone step (`"Test suite (pytest)"`) with `-v --tb=short`, giving each test its own line in logs and a dedicated collapsible section with pass/fail badge. The `pre-commit` step skips pytest via `SKIP: pytest` so lint/type-check and tests have independent status indicators. Locally, `pre-commit run --all-files` still runs pytest as part of the hook set.
+- Three tests are intentionally skipped in CI:
+  - `test_replay_captured_cat_parse_cases` — requires `GREENFLOOR_CAT_PARSE_REPLAY_CASES_DIR` (operator-provided fixture directory).
+  - `test_greenfloor_native_validate_offer_rejects_garbage` and `test_greenfloor_native_from_input_spend_bundle_xch_round_trip_offer` — require `GREENFLOOR_RUN_NATIVE_INTEGRATION_TESTS=1` (compiled Rust `chia-wallet-sdk` bindings).
 
 ## Deferred Backlog (Post-Testnet Proof)
 
