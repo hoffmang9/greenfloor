@@ -87,6 +87,7 @@ jobs:
       - name: Pre-commit (all files, from .venv)
         env:
           PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
+          PYTEST_ADDOPTS: "-v --tb=short"
         run: pre-commit run --all-files
 
       - name: Resolve chia-wallet-sdk pinned commit
