@@ -1,5 +1,45 @@
 # Progress Log
 
+## 2026-02-27 (codebase simplification round 2 + test coverage expansion)
+
+- Opened branch `simplify-and-test-coverage-round-2` targeting 12 identified simplification/coverage items (A–L).
+
+**Simplification (items A–F, K–L):**
+
+- Extracted `_coin_op_setup` helper + `_CoinOpSetup` dataclass in `greenfloor/cli/manager.py` to deduplicate shared initialization across `_coin_split` and `_coin_combine`.
+- Added `_is_testnet()` helper and `_TESTNET_NETWORKS` frozenset, replacing 6 scattered inline `network.strip().lower() in {"testnet", "testnet11"}` checks.
+- Moved Dexie token lookup logic (`_dexie_lookup_token_for_cat_id`, `_dexie_lookup_token_for_symbol`) from `manager.py` into `DexieAdapter.lookup_token_by_cat_id()` and `DexieAdapter.lookup_token_by_symbol()` methods in `greenfloor/adapters/dexie.py`.
+- Unified `_post_offer_with_retry` and `_cancel_offer_with_retry` in `greenfloor/daemon/main.py` via a generic `_retry_with_backoff()` function.
+- Extracted `_process_single_market()` + `_MarketCycleResult` dataclass from `run_once` in daemon, reducing the per-market loop body from ~493 lines to ~25 lines of delegation.
+- Extracted `_market_pricing()` helper replacing 4 duplicated `dict(getattr(market, "pricing", {}) or {})` expressions.
+- In `greenfloor/signing.py`:
+  - Deduplicated key-loading and synthetic-key derivation into `_load_signing_context` helper.
+  - Added `txch` to `_XCH_LIKE_ASSETS` frozenset, fixing a bug where testnet XCH was not recognized as XCH-like.
+  - Removed unused `dry_run` parameter from `_build_offer_spend_bundle`.
+
+**Test coverage expansion (62 new tests, 330→392 passing, 3 skipped):**
+
+- `tests/test_offer_lifecycle.py`: 8 new tests covering all previously untested `apply_offer_signal` state transitions and no-op/terminal scenarios.
+- `tests/test_cloud_wallet_adapter.py`: 3 new tests for `split_coins`/`combine_coins` GraphQL variable construction.
+- `tests/test_coinset_adapter.py`: 13 new tests for `extract_coinset_tx_ids_from_offer_payload`, `get_conservative_fee_estimate`, `get_blockchain_state`, and `build_webhook_callback_url`.
+- `tests/test_pushover.py`: new file with 4 tests for `render_low_inventory_message`, `send_pushover_alert` (skip conditions and API call verification).
+- `tests/test_logging_setup.py`: new file with 5 tests for `normalize_log_level_name`, `cast_log_level`, `coerce_log_level`, and `create_rotating_file_handler`.
+- `tests/test_daemon_helpers.py`: new file with 21 tests for `_env_int`, `_cooldown_remaining_ms`, `_set_cooldown`, `_retry_with_backoff`, `_post_retry_config`, `_cancel_retry_config`, `_abs_move_bps`, `_cloud_wallet_configured`, `_market_pricing`, and `_resolve_quote_asset_for_offer`.
+- `tests/test_config_models.py`: 28 new tests for `parse_program_config` covering happy paths and validation failures.
+- `tests/test_sqlite_store.py`: 14 new tests for `upsert_offer_state`, `list_offer_states`, `add_price_policy_snapshot`, `get_latest_xch_price_snapshot`, and `add_coin_op_ledger_entry`.
+
+**CI improvements:**
+
+- Separated `pytest` into its own dedicated CI step (`"Test suite (pytest)"`) with `-v --tb=short` for clear per-test log visibility.
+- Pre-commit step renamed to `"Lint + Type-check (pre-commit)"` and skips pytest via `SKIP: pytest` env var in CI, while local pre-commit still runs pytest normally.
+- CI run: 392 passed, 3 skipped (all skips are intentional env-gated integration tests).
+
+**Validation snapshot:**
+
+- `.venv/bin/python -m pytest` -> `392 passed, 3 skipped in ~4s`.
+- `pre-commit run --all-files` -> all hooks passed.
+- Branch pushed and PR opened.
+
 ## 2026-02-27 (ECO.181.2022 continuous-posting hardening: reseed window tuning + remote canary soak)
 
 - Hardened daemon reseed gating in `greenfloor/daemon/main.py`:

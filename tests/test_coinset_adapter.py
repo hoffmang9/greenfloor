@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 
-from greenfloor.adapters.coinset import CoinsetAdapter
+from greenfloor.adapters.coinset import (
+    CoinsetAdapter,
+    build_webhook_callback_url,
+    extract_coinset_tx_ids_from_offer_payload,
+)
 
 
 class _FakeResponse:
@@ -133,3 +137,136 @@ def test_coinset_adapter_push_tx_returns_payload_dict(monkeypatch) -> None:
     result = adapter.push_tx(spend_bundle_hex="0xdeadbeef")
     assert result["success"] is True
     assert result["status"] == "submitted"
+
+
+# ---------------------------------------------------------------------------
+# extract_coinset_tx_ids_from_offer_payload
+# ---------------------------------------------------------------------------
+
+
+def test_extract_tx_ids_from_flat_payload() -> None:
+    payload = {"tx_id": "a" * 64, "other": "ignored"}
+    assert extract_coinset_tx_ids_from_offer_payload(payload) == ["a" * 64]
+
+
+def test_extract_tx_ids_from_nested_payload() -> None:
+    payload = {"offer": {"data": {"takeTxId": "b" * 64}}}
+    assert extract_coinset_tx_ids_from_offer_payload(payload) == ["b" * 64]
+
+
+def test_extract_tx_ids_deduplicates() -> None:
+    tx = "c" * 64
+    payload = {"tx_id": tx, "nested": {"tx_id": tx}}
+    assert extract_coinset_tx_ids_from_offer_payload(payload) == [tx]
+
+
+def test_extract_tx_ids_handles_list_values() -> None:
+    tx1, tx2 = "d" * 64, "e" * 64
+    payload = {"mempool_tx_ids": [tx1, tx2]}
+    result = extract_coinset_tx_ids_from_offer_payload(payload)
+    assert result == [tx1, tx2]
+
+
+def test_extract_tx_ids_ignores_non_hex() -> None:
+    payload = {"tx_id": "not-a-valid-tx-id"}
+    assert extract_coinset_tx_ids_from_offer_payload(payload) == []
+
+
+def test_extract_tx_ids_ignores_wrong_length() -> None:
+    payload = {"tx_id": "abcd"}
+    assert extract_coinset_tx_ids_from_offer_payload(payload) == []
+
+
+def test_extract_tx_ids_empty_payload() -> None:
+    assert extract_coinset_tx_ids_from_offer_payload({}) == []
+
+
+# ---------------------------------------------------------------------------
+# get_conservative_fee_estimate
+# ---------------------------------------------------------------------------
+
+
+def test_conservative_fee_estimate_uses_max_of_estimates(monkeypatch) -> None:
+    def _fake_urlopen(_req, timeout=None):
+        _ = timeout
+        return _FakeResponse({"success": True, "estimates": [100, 500, 200]})
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    adapter = CoinsetAdapter()
+    assert adapter.get_conservative_fee_estimate() == 500
+
+
+def test_conservative_fee_estimate_falls_back_to_fee_estimate_field(monkeypatch) -> None:
+    def _fake_urlopen(_req, timeout=None):
+        _ = timeout
+        return _FakeResponse({"success": True, "fee_estimate": 42})
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    adapter = CoinsetAdapter()
+    assert adapter.get_conservative_fee_estimate() == 42
+
+
+def test_conservative_fee_estimate_returns_none_on_failure(monkeypatch) -> None:
+    def _fake_urlopen(_req, timeout=None):
+        _ = timeout
+        return _FakeResponse({"success": False})
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    adapter = CoinsetAdapter()
+    assert adapter.get_conservative_fee_estimate() is None
+
+
+def test_conservative_fee_estimate_skips_invalid_estimate_values(monkeypatch) -> None:
+    def _fake_urlopen(_req, timeout=None):
+        _ = timeout
+        return _FakeResponse({"success": True, "estimates": ["bad", -1, 300]})
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    adapter = CoinsetAdapter()
+    assert adapter.get_conservative_fee_estimate() == 300
+
+
+# ---------------------------------------------------------------------------
+# get_blockchain_state
+# ---------------------------------------------------------------------------
+
+
+def test_get_blockchain_state_success(monkeypatch) -> None:
+    def _fake_urlopen(_req, timeout=None):
+        _ = timeout
+        return _FakeResponse({"success": True, "blockchain_state": {"peak_height": 1234}})
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    adapter = CoinsetAdapter()
+    state = adapter.get_blockchain_state()
+    assert state == {"peak_height": 1234}
+
+
+def test_get_blockchain_state_returns_none_on_failure(monkeypatch) -> None:
+    def _fake_urlopen(_req, timeout=None):
+        _ = timeout
+        return _FakeResponse({"success": False})
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    adapter = CoinsetAdapter()
+    assert adapter.get_blockchain_state() is None
+
+
+# ---------------------------------------------------------------------------
+# build_webhook_callback_url
+# ---------------------------------------------------------------------------
+
+
+def test_build_webhook_callback_url_defaults() -> None:
+    url = build_webhook_callback_url("127.0.0.1:8787")
+    assert url == "http://127.0.0.1:8787/coinset/tx-block"
+
+
+def test_build_webhook_callback_url_missing_port() -> None:
+    url = build_webhook_callback_url("0.0.0.0")
+    assert url == "http://0.0.0.0:8787/coinset/tx-block"
+
+
+def test_build_webhook_callback_url_custom_path() -> None:
+    url = build_webhook_callback_url("localhost:9090", path="/custom")
+    assert url == "http://localhost:9090/custom"

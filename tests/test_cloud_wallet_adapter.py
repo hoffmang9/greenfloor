@@ -320,3 +320,104 @@ def test_cloud_wallet_get_wallet_passes_offer_filters(monkeypatch, tmp_path: Pat
     assert variables["isCreator"] is True  # type: ignore[index]
     assert variables["states"] == ["OPEN", "PENDING"]  # type: ignore[index]
     assert variables["first"] == 25  # type: ignore[index]
+
+
+# ---------------------------------------------------------------------------
+# split_coins / combine_coins
+# ---------------------------------------------------------------------------
+
+
+def test_cloud_wallet_split_coins_sends_correct_variables(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _FakeHttpResponse(
+            {
+                "data": {
+                    "splitCoins": {"signatureRequest": {"id": "SigReq_s1", "status": "UNSIGNED"}}
+                }
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    result = adapter.split_coins(
+        coin_ids=["Coin_a", "Coin_b"],
+        amount_per_coin=100,
+        number_of_coins=5,
+        fee=500,
+    )
+    assert result["signature_request_id"] == "SigReq_s1"
+    assert result["status"] == "UNSIGNED"
+    variables = captured["body"]["variables"]  # type: ignore[index]
+    assert variables["coinIds"] == ["Coin_a", "Coin_b"]
+    assert variables["amountPerCoin"] == 100
+    assert variables["numberOfCoins"] == 5
+    assert variables["fee"] == 500
+    assert variables["walletId"] == "Wallet_123"
+
+
+def test_cloud_wallet_combine_coins_sends_correct_variables(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _FakeHttpResponse(
+            {
+                "data": {
+                    "combineCoins": {"signatureRequest": {"id": "SigReq_c1", "status": "SUBMITTED"}}
+                }
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    result = adapter.combine_coins(
+        number_of_coins=3,
+        fee=1000,
+        largest_first=False,
+        asset_id="Asset_xyz",
+        input_coin_ids=["Coin_1", "Coin_2"],
+        target_amount=500,
+    )
+    assert result["signature_request_id"] == "SigReq_c1"
+    assert result["status"] == "SUBMITTED"
+    variables = captured["body"]["variables"]  # type: ignore[index]
+    assert variables["numberOfCoins"] == 3
+    assert variables["fee"] == 1000
+    assert variables["largestFirst"] is False
+    assert variables["assetId"] == "Asset_xyz"
+    assert variables["inputCoinIds"] == ["Coin_1", "Coin_2"]
+    assert variables["targetAmount"] == 500
+
+
+def test_cloud_wallet_combine_coins_optional_fields_default_none(
+    monkeypatch, tmp_path: Path
+) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _FakeHttpResponse(
+            {
+                "data": {
+                    "combineCoins": {"signatureRequest": {"id": "SigReq_c2", "status": "UNSIGNED"}}
+                }
+            }
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    result = adapter.combine_coins(number_of_coins=2, fee=0)
+    assert result["signature_request_id"] == "SigReq_c2"
+    variables = captured["body"]["variables"]  # type: ignore[index]
+    assert variables["targetAmount"] is None
+    assert variables["inputCoinIds"] is None
+    assert variables["assetId"] is None
