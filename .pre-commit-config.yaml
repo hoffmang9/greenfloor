@@ -34,3 +34,4 @@ repos:
         entry: .venv/bin/pytest -q
         language: system
         pass_filenames: false
+        verbose: true
