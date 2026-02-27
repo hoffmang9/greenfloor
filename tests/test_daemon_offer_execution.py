@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from greenfloor.config.models import MarketConfig, MarketInventoryConfig
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon import main as daemon_main
-from greenfloor.daemon.main import _execute_strategy_actions
+from greenfloor.daemon.main import (
+    _execute_strategy_actions,
+    _inject_reseed_action_if_no_active_offers,
+    _parse_last_json_object,
+    _strategy_config_from_market,
+)
 
 
 class _FakeDexie:
@@ -35,6 +41,10 @@ class _FakeStore:
                 "last_seen_status": last_seen_status,
             }
         )
+
+    def list_offer_states(self, *, market_id: str | None = None, limit: int = 200) -> list[dict]:
+        _ = market_id, limit
+        return list(self.offer_states)
 
 
 def _market() -> MarketConfig:
@@ -302,3 +312,176 @@ def test_build_offer_for_action_direct_builder_call(monkeypatch) -> None:
     assert captured["payload"]["key_id"] == "key-main-1"
     assert captured["payload"]["network"] == "mainnet"
     assert captured["payload"]["keyring_yaml_path"] == "/tmp/keyring.yaml"
+
+
+def test_inject_reseed_action_when_no_active_offers() -> None:
+    store = _FakeStore()
+    store.offer_states = [{"offer_id": "old-1", "market_id": "m1", "state": "expired"}]
+    market = _market()
+    strategy_config = _strategy_config_from_market(market)
+
+    actions = _inject_reseed_action_if_no_active_offers(
+        strategy_actions=[],
+        strategy_config=strategy_config,
+        market=market,
+        store=cast(Any, store),
+        xch_price_usd=30.0,
+        clock=datetime.now(UTC),
+    )
+
+    assert len(actions) == 1
+    assert actions[0].size == 1
+    assert actions[0].repeat == 1
+    assert actions[0].reason == "no_active_offer_reseed"
+
+
+def test_inject_reseed_action_skips_when_active_offer_exists() -> None:
+    store = _FakeStore()
+    store.offer_states = [{"offer_id": "live-1", "market_id": "m1", "state": "open"}]
+    market = _market()
+    strategy_config = _strategy_config_from_market(market)
+
+    actions = _inject_reseed_action_if_no_active_offers(
+        strategy_actions=[],
+        strategy_config=strategy_config,
+        market=market,
+        store=cast(Any, store),
+        xch_price_usd=30.0,
+        clock=datetime.now(UTC),
+    )
+
+    assert actions == []
+
+
+def test_inject_reseed_action_skips_when_mempool_offer_is_recent() -> None:
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.offer_states = [
+        {
+            "offer_id": "mempool-1",
+            "market_id": "m1",
+            "state": "mempool_observed",
+            "updated_at": now.isoformat(),
+        }
+    ]
+    market = _market()
+    strategy_config = _strategy_config_from_market(market)
+
+    actions = _inject_reseed_action_if_no_active_offers(
+        strategy_actions=[],
+        strategy_config=strategy_config,
+        market=market,
+        store=cast(Any, store),
+        xch_price_usd=30.0,
+        clock=now,
+    )
+
+    assert actions == []
+
+
+def test_inject_reseed_action_when_only_mempool_offer_is_stale() -> None:
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    stale = now - timedelta(minutes=31)
+    store.offer_states = [
+        {
+            "offer_id": "mempool-old-1",
+            "market_id": "m1",
+            "state": "mempool_observed",
+            "updated_at": stale.isoformat(),
+        }
+    ]
+    market = _market()
+    strategy_config = _strategy_config_from_market(market)
+
+    actions = _inject_reseed_action_if_no_active_offers(
+        strategy_actions=[],
+        strategy_config=strategy_config,
+        market=market,
+        store=cast(Any, store),
+        xch_price_usd=30.0,
+        clock=now,
+    )
+
+    assert len(actions) == 1
+    assert actions[0].reason == "no_active_offer_reseed"
+
+
+def test_resolve_quote_asset_for_offer_maps_symbol_from_cats(monkeypatch, tmp_path) -> None:
+    cats = tmp_path / "cats.yaml"
+    cats.write_text(
+        "\n".join(
+            [
+                "cats:",
+                "  - base_symbol: wUSDC.b",
+                "    asset_id: fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(daemon_main, "_default_cats_config_path", lambda: cats)
+
+    resolved = daemon_main._resolve_quote_asset_for_offer(
+        quote_asset="wUSDC.b",
+        network="mainnet",
+    )
+    assert resolved == "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d"
+
+
+def test_execute_strategy_actions_cloud_wallet_fallback_on_missing_mnemonic(monkeypatch) -> None:
+    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    monkeypatch.setattr(
+        daemon_main,
+        "_build_offer_for_action",
+        lambda **_kwargs: {
+            "status": "skipped",
+            "reason": "offer_builder_failed:signing_failed:missing_mnemonic_for_key_id",
+            "offer": None,
+        },
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_cloud_wallet_offer_post_fallback",
+        lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-1"},
+    )
+
+    class _Program:
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "UserAuthKey_abc"
+        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+
+    dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
+    store = _FakeStore()
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=1,
+            pair="usdc",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="no_active_offer_reseed",
+        )
+    ]
+
+    result = _execute_strategy_actions(
+        market=_market(),
+        strategy_actions=actions,
+        runtime_dry_run=False,
+        xch_price_usd=30.0,
+        dexie=cast(Any, dexie),
+        store=cast(Any, store),
+        publish_venue="dexie",
+        program=_Program(),
+    )
+
+    assert result["executed_count"] == 1
+    assert result["items"][0]["reason"] == "cloud_wallet_fallback_post_success"
+
+
+def test_parse_last_json_object_handles_noisy_output() -> None:
+    raw = '....\nsignature submitted: abc\n{\n  "publish_failures": 0,\n  "results": [{"result": {"success": true, "id": "o1"}}]\n}\n'
+    parsed = _parse_last_json_object(raw)
+    assert parsed is not None
+    assert int(parsed["publish_failures"]) == 0

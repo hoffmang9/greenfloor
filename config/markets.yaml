@@ -2,11 +2,11 @@
 # CAT metadata now lives in config/cats.yaml.
 
 markets:
-  - id: carbon22_sell_xch
+  - id: eco1812022_sell_xch
     enabled: true
     mode: sell_only
     base_asset: "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
-    base_symbol: "CARBON22"
+    base_symbol: "ECO.181.2022"
     quote_asset: "xch"
     quote_asset_type: unstable
     signer_key_id: "key-main-1"
@@ -45,11 +45,11 @@ markets:
           split_buffer_count: 0
           combine_when_excess_factor: 2.0
 
-  - id: carbon22_sell_wusdbc
+  - id: eco1812022_sell_wusdbc
     enabled: true
     mode: sell_only
     base_asset: "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
-    base_symbol: "CARBON22"
+    base_symbol: "ECO.181.2022"
     quote_asset: "wUSDC.b"
     quote_asset_type: stable
     signer_key_id: "key-main-1"

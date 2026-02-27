@@ -56,9 +56,9 @@ Build and post offers:
 
 ```bash
 # Dry-run preflight
-greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1 --dry-run
+greenfloor-manager build-and-post-offer --pair ECO.181.2022:xch --size-base-units 1 --dry-run
 # Publish (mainnet default)
-greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1
+greenfloor-manager build-and-post-offer --pair ECO.181.2022:xch --size-base-units 1
 # Publish on testnet11
 greenfloor-manager build-and-post-offer --pair TDBX:txch --size-base-units 1 --network testnet11
 ```

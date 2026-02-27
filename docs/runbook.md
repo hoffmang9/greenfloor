@@ -54,10 +54,10 @@ Optional developer bootstrap for testnet markets:
   - Every `in_mempool` wait event includes a `coinset_url` and read-only Coinset reconciliation metadata (`confirmed_block_index`, `spent_block_index` when available).
   - Signature waits emit periodic `signature_wait_warning` and additive `signature_wait_escalation` events (soft-timeout behavior; manager continues waiting unless operator aborts the command).
 - Post a real offer file directly (fast path to running state):
-  - Mainnet (default, pair-based): `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1`
+  - Mainnet (default, pair-based): `greenfloor-manager build-and-post-offer --pair ECO.181.2022:xch --size-base-units 1`
   - Testnet (active proof pair): `greenfloor-manager build-and-post-offer --pair TDBX:txch --size-base-units 1 --network testnet11`
   - On `testnet11`, use `txch` in pair syntax.
-  - Safe preflight (build only, no publish): `greenfloor-manager build-and-post-offer --pair CARBON22:xch --size-base-units 1 --dry-run`
+  - Safe preflight (build only, no publish): `greenfloor-manager build-and-post-offer --pair ECO.181.2022:xch --size-base-units 1 --dry-run`
   - If multiple markets share the same pair, rerun with explicit `--market-id`.
   - Use `--markets-config` only when overriding the default config path.
   - Use `--testnet-markets-config ~/.greenfloor/config/testnet-markets.yaml` only when you want to include optional testnet market stanzas.
@@ -76,6 +76,40 @@ Optional developer bootstrap for testnet markets:
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
 - Note: manager CLI v1 core surface remains focused on trading/runtime commands. `offers-cancel`, `cats-add`, `cats-list`, and `cats-delete` are adjunct operator commands tracked outside the core-count policy. Tuning/history/metrics helpers are deferred until after G1-G3 testnet proof.
+
+### Mainnet continuous-posting cutover (`eco1812022_sell_wusdbc`)
+
+Use this checklist when promoting from one-off manager proof runs to continuous daemon posting.
+
+1. Lock runtime config to mainnet values:
+   - `app.network: mainnet`
+   - `runtime.dry_run: false`
+   - `venues.dexie.api_base: "https://api.dexie.space"`
+   - populated `cloud_wallet.base_url`, `cloud_wallet.user_key_id`, `cloud_wallet.private_key_pem_path`, `cloud_wallet.vault_id`
+2. Isolate the canary market:
+   - keep `eco1812022_sell_wusdbc` enabled in `~/.greenfloor/config/markets.yaml`
+   - temporarily disable unrelated markets during initial canary
+3. Re-run preflight before go-live:
+   - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml config-validate`
+   - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml doctor`
+4. Shape ECO.181.2022 inventory to ladder targets (`1:10`, `10:2`, `100:1`):
+   - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml coin-split --market-id eco1812022_sell_wusdbc --size-base-units 1 --until-ready --max-iterations 5`
+   - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml coin-split --market-id eco1812022_sell_wusdbc --size-base-units 10 --until-ready --max-iterations 5`
+   - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml coin-split --market-id eco1812022_sell_wusdbc --size-base-units 100 --until-ready --max-iterations 3`
+5. Confirm one manager posting cycle works before daemon handoff:
+   - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml build-and-post-offer --market-id eco1812022_sell_wusdbc --size-base-units 1`
+   - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml offers-status --market-id eco1812022_sell_wusdbc --limit 20 --events-limit 20`
+   - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml offers-reconcile --market-id eco1812022_sell_wusdbc --limit 50`
+6. Start long-running daemon mode (no `--once`):
+   - `greenfloord --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml --state-dir ~/.greenfloor/state`
+7. Run canary verification loop every 2-5 minutes for at least 30 minutes:
+   - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml offers-status --market-id eco1812022_sell_wusdbc --limit 20 --events-limit 20`
+   - `greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml offers-reconcile --market-id eco1812022_sell_wusdbc --limit 50`
+8. Canary pass criteria:
+   - repeated successful `strategy_offer_execution` events for `eco1812022_sell_wusdbc`
+   - at least one open offer maintained except brief rollover windows
+   - no persistent post failures across consecutive daemon cycles
+   - websocket tx-signal events (`coinset_ws_*`) continue without prolonged disconnect loops
 
 ## 3) Recovery and Revalidation
 

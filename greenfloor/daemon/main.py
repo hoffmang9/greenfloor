@@ -7,9 +7,12 @@ import logging
 import os
 import time
 import urllib.parse
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import yaml
 from concurrent_log_handler import ConcurrentRotatingFileHandler
 
 from greenfloor.adapters.coinset import CoinsetAdapter, extract_coinset_tx_ids_from_offer_payload
@@ -26,7 +29,7 @@ from greenfloor.core.fee_budget import partition_plans_by_budget, projected_coin
 from greenfloor.core.inventory import compute_bucket_counts_from_coins
 from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert, utcnow
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
-from greenfloor.core.strategy import MarketState, StrategyConfig, evaluate_market
+from greenfloor.core.strategy import MarketState, PlannedAction, StrategyConfig, evaluate_market
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient, capture_coinset_websocket_once
 from greenfloor.keys.router import resolve_market_key
 from greenfloor.logging_setup import (
@@ -200,6 +203,54 @@ def _normalize_strategy_pair(quote_asset: str) -> str:
     return lowered
 
 
+def _is_hex_asset_id(value: str) -> bool:
+    normalized = value.strip().lower()
+    return len(normalized) == 64 and all(ch in "0123456789abcdef" for ch in normalized)
+
+
+def _default_cats_config_path() -> Path | None:
+    home_candidate = Path("~/.greenfloor/config/cats.yaml").expanduser()
+    if home_candidate.exists():
+        return home_candidate
+    repo_candidate = Path("config/cats.yaml")
+    if repo_candidate.exists():
+        return repo_candidate
+    return None
+
+
+def _resolve_quote_asset_for_offer(*, quote_asset: str, network: str) -> str:
+    normalized = quote_asset.strip().lower()
+    if normalized in {"xch", "txch", "1"}:
+        if network.strip().lower() in {"testnet", "testnet11"}:
+            return "txch"
+        return "xch"
+    if _is_hex_asset_id(normalized):
+        return normalized
+
+    cats_path = _default_cats_config_path()
+    if cats_path is None:
+        return quote_asset
+    try:
+        raw = yaml.safe_load(cats_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return quote_asset
+    if not isinstance(raw, dict):
+        return quote_asset
+    cats = raw.get("cats", [])
+    if not isinstance(cats, list):
+        return quote_asset
+    for item in cats:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("base_symbol", "")).strip().lower()
+        if symbol != normalized:
+            continue
+        asset_id = str(item.get("asset_id", "")).strip().lower()
+        if _is_hex_asset_id(asset_id):
+            return asset_id
+    return quote_asset
+
+
 def _strategy_config_from_market(market) -> StrategyConfig:
     sell_ladder = market.ladders.get("sell", [])
     targets_by_size = {int(e.size_base_units): int(e.target_count) for e in sell_ladder}
@@ -247,6 +298,113 @@ def _strategy_state_from_bucket_counts(
     )
 
 
+_ACTIVE_OFFER_STATES_FOR_RESEED = {
+    OfferLifecycleState.OPEN.value,
+    OfferLifecycleState.REFRESH_DUE.value,
+}
+_RESEED_MEMPOOL_MAX_AGE_SECONDS = 3 * 60
+
+
+def _is_recent_mempool_observed_offer_state(
+    *,
+    offer_state: dict[str, Any],
+    clock: datetime,
+    max_age_seconds: int = _RESEED_MEMPOOL_MAX_AGE_SECONDS,
+) -> bool:
+    state = str(offer_state.get("state", "")).strip().lower()
+    if state != OfferLifecycleState.MEMPOOL_OBSERVED.value:
+        return False
+    updated_at_raw = str(offer_state.get("updated_at", "")).strip()
+    if not updated_at_raw:
+        return False
+    normalized = updated_at_raw.replace("Z", "+00:00")
+    try:
+        updated_at = datetime.fromisoformat(normalized)
+    except ValueError:
+        return False
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=UTC)
+    age_seconds = (clock - updated_at).total_seconds()
+    return 0 <= age_seconds <= float(max_age_seconds)
+
+
+def _inject_reseed_action_if_no_active_offers(
+    *,
+    strategy_actions: list[PlannedAction],
+    strategy_config: StrategyConfig,
+    market,
+    store: SqliteStore,
+    xch_price_usd: float | None,
+    clock: datetime,
+) -> list[PlannedAction]:
+    if strategy_actions:
+        _daemon_logger.debug(
+            "reseed_skip market_id=%s reason=strategy_actions_present action_count=%s",
+            market.market_id,
+            len(strategy_actions),
+        )
+        return strategy_actions
+    offer_states = store.list_offer_states(market_id=market.market_id, limit=500)
+    state_counts: dict[str, int] = {}
+    for item in offer_states:
+        state = str(item.get("state", "")).strip().lower()
+        if not state:
+            continue
+        state_counts[state] = int(state_counts.get(state, 0)) + 1
+    has_active_offer = any(
+        str(item.get("state", "")).strip().lower() in _ACTIVE_OFFER_STATES_FOR_RESEED
+        or _is_recent_mempool_observed_offer_state(offer_state=item, clock=clock)
+        for item in offer_states
+    )
+    if has_active_offer:
+        _daemon_logger.debug(
+            (
+                "reseed_skip market_id=%s reason=active_offer_present "
+                "active_states=%s recent_mempool_window_seconds=%s state_counts=%s"
+            ),
+            market.market_id,
+            sorted(_ACTIVE_OFFER_STATES_FOR_RESEED),
+            _RESEED_MEMPOOL_MAX_AGE_SECONDS,
+            state_counts,
+        )
+        return strategy_actions
+
+    seed_candidates = evaluate_market(
+        state=MarketState(ones=0, tens=0, hundreds=0, xch_price_usd=xch_price_usd),
+        config=strategy_config,
+        clock=clock,
+    )
+    if not seed_candidates:
+        _daemon_logger.debug(
+            "reseed_skip market_id=%s reason=no_seed_candidates pair=%s xch_price_usd=%s",
+            market.market_id,
+            strategy_config.pair,
+            xch_price_usd,
+        )
+        return strategy_actions
+    smallest = min(seed_candidates, key=lambda action: int(action.size))
+    _daemon_logger.debug(
+        "reseed_injected market_id=%s size=%s pair=%s expiry=%s:%s reason=no_active_offer_reseed",
+        market.market_id,
+        int(smallest.size),
+        smallest.pair,
+        smallest.expiry_unit,
+        int(smallest.expiry_value),
+    )
+    return [
+        PlannedAction(
+            size=int(smallest.size),
+            repeat=1,
+            pair=smallest.pair,
+            expiry_unit=smallest.expiry_unit,
+            expiry_value=int(smallest.expiry_value),
+            cancel_after_create=smallest.cancel_after_create,
+            reason="no_active_offer_reseed",
+            target_spread_bps=smallest.target_spread_bps,
+        )
+    ]
+
+
 def _resolve_quote_price_quote_per_base(market) -> float:
     pricing = dict(getattr(market, "pricing", {}) or {})
     quote_price = pricing.get("fixed_quote_per_base")
@@ -289,7 +447,10 @@ def _build_offer_for_action(
         "market_id": market.market_id,
         "base_asset": market.base_asset,
         "base_symbol": market.base_symbol,
-        "quote_asset": market.quote_asset,
+        "quote_asset": _resolve_quote_asset_for_offer(
+            quote_asset=str(market.quote_asset),
+            network=network,
+        ),
         "quote_asset_type": market.quote_asset_type,
         "receive_address": market.receive_address,
         "size_base_units": int(action.size),
@@ -314,6 +475,89 @@ def _build_offer_for_action(
     return {"status": "executed", "reason": "offer_builder_success", "offer": offer}
 
 
+def _cloud_wallet_configured(program: Any) -> bool:
+    required = (
+        "cloud_wallet_base_url",
+        "cloud_wallet_user_key_id",
+        "cloud_wallet_private_key_pem_path",
+        "cloud_wallet_vault_id",
+    )
+    return all(str(getattr(program, key, "")).strip() for key in required)
+
+
+def _cloud_wallet_offer_post_fallback(
+    *,
+    program: Any,
+    market: Any,
+    size_base_units: int,
+    publish_venue: str,
+    runtime_dry_run: bool,
+) -> dict[str, Any]:
+    from contextlib import redirect_stdout
+    from io import StringIO
+
+    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
+
+    out = StringIO()
+    quote_price = _resolve_quote_price_quote_per_base(market)
+    with redirect_stdout(out):
+        exit_code = _build_and_post_offer_cloud_wallet(
+            program=program,
+            market=market,
+            size_base_units=size_base_units,
+            repeat=1,
+            publish_venue=publish_venue,
+            dexie_base_url=str(program.dexie_api_base),
+            splash_base_url=str(program.splash_api_base),
+            drop_only=True,
+            claim_rewards=False,
+            quote_price=quote_price,
+            dry_run=runtime_dry_run,
+        )
+    if exit_code != 0:
+        return {"success": False, "error": f"cloud_wallet_fallback_exit_code:{exit_code}"}
+    payload = _parse_last_json_object(out.getvalue())
+    if payload is None:
+        return {"success": False, "error": "cloud_wallet_fallback_invalid_json"}
+    results = payload.get("results", [])
+    if not isinstance(results, list) or not results:
+        return {"success": False, "error": "cloud_wallet_fallback_missing_results"}
+    result = results[0].get("result", {}) if isinstance(results[0], dict) else {}
+    if not isinstance(result, dict):
+        result = {}
+    success = bool(result.get("success", False)) and int(payload.get("publish_failures", 1)) == 0
+    return {
+        "success": success,
+        "offer_id": str(result.get("id", "")).strip() or None,
+        "error": str(result.get("error", "")).strip() if not success else "",
+    }
+
+
+def _parse_last_json_object(raw_text: str) -> dict[str, Any] | None:
+    text = str(raw_text or "")
+    end = text.rfind("}")
+    if end < 0:
+        return None
+    depth = 0
+    start = -1
+    for idx in range(end, -1, -1):
+        ch = text[idx]
+        if ch == "}":
+            depth += 1
+        elif ch == "{":
+            depth -= 1
+            if depth == 0:
+                start = idx
+                break
+    if start < 0:
+        return None
+    try:
+        parsed = json.loads(text[start : end + 1])
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def _resolve_coinset_ws_url(*, program, coinset_base_url: str) -> str:
     configured = str(getattr(program, "tx_block_websocket_url", "")).strip()
     if configured:
@@ -322,12 +566,12 @@ def _resolve_coinset_ws_url(*, program, coinset_base_url: str) -> str:
     if not base_url:
         if program.app_network.strip().lower() in {"testnet", "testnet11"}:
             return "wss://testnet11.api.coinset.org/ws"
-        return "wss://coinset.org/ws"
+        return "wss://api.coinset.org/ws"
     parsed = urllib.parse.urlparse(base_url)
     scheme = "wss" if parsed.scheme == "https" else "ws"
     host = parsed.netloc or parsed.path
     if not host:
-        return "wss://coinset.org/ws"
+        return "wss://api.coinset.org/ws"
     return f"{scheme}://{host}/ws"
 
 
@@ -399,6 +643,7 @@ def _execute_strategy_actions(
     store: SqliteStore,
     app_network: str = "mainnet",
     signer_key_registry: dict[str, Any] | None = None,
+    program: Any | None = None,
 ) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     executed_count = 0
@@ -427,11 +672,35 @@ def _execute_strategy_actions(
                 keyring_yaml_path=keyring_yaml_path,
             )
             if built.get("status") != "executed":
+                built_reason = str(built.get("reason", "offer_builder_skipped"))
+                if (
+                    "missing_mnemonic_for_key_id" in built_reason
+                    and program is not None
+                    and _cloud_wallet_configured(program)
+                ):
+                    fallback = _cloud_wallet_offer_post_fallback(
+                        program=program,
+                        market=market,
+                        size_base_units=int(action.size),
+                        publish_venue=publish_venue,
+                        runtime_dry_run=runtime_dry_run,
+                    )
+                    if bool(fallback.get("success", False)):
+                        executed_count += 1
+                        items.append(
+                            {
+                                "size": action.size,
+                                "status": "executed",
+                                "reason": "cloud_wallet_fallback_post_success",
+                                "offer_id": fallback.get("offer_id"),
+                            }
+                        )
+                        continue
                 items.append(
                     {
                         "size": action.size,
                         "status": "skipped",
-                        "reason": str(built.get("reason", "offer_builder_skipped")),
+                        "reason": built_reason,
                         "offer_id": None,
                     }
                 )
@@ -879,13 +1148,39 @@ def run_once(
                     },
                     market_id=market.market_id,
                 )
+            strategy_config = _strategy_config_from_market(market)
             strategy_actions = evaluate_market(
                 state=_strategy_state_from_bucket_counts(
                     bucket_counts,
                     xch_price_usd=xch_price_usd,
                 ),
-                config=_strategy_config_from_market(market),
+                config=strategy_config,
                 clock=now,
+            )
+            _daemon_logger.debug(
+                (
+                    "strategy_evaluated market_id=%s pair=%s bucket_counts=%s "
+                    "xch_price_usd=%s action_count=%s"
+                ),
+                market.market_id,
+                strategy_config.pair,
+                bucket_counts,
+                xch_price_usd,
+                len(strategy_actions),
+            )
+            strategy_actions = _inject_reseed_action_if_no_active_offers(
+                strategy_actions=strategy_actions,
+                strategy_config=strategy_config,
+                market=market,
+                store=store,
+                xch_price_usd=xch_price_usd,
+                clock=now,
+            )
+            _daemon_logger.debug(
+                "strategy_after_reseed market_id=%s action_count=%s reseed_injected=%s",
+                market.market_id,
+                len(strategy_actions),
+                any(str(action.reason) == "no_active_offer_reseed" for action in strategy_actions),
             )
             store.add_audit_event(
                 "strategy_actions_planned",
@@ -919,6 +1214,7 @@ def run_once(
                 store=store,
                 app_network=program.app_network,
                 signer_key_registry=program.signer_key_registry,
+                program=program,
             )
             strategy_planned_total += int(offer_execution["planned_count"])
             strategy_executed_total += int(offer_execution["executed_count"])
@@ -1114,35 +1410,51 @@ def _run_loop(
         os.fspath(markets_path),
     )
     db_path = _resolve_db_path(current_program.home_dir, db_path_override)
-    store_for_ws = SqliteStore(db_path)
     coinset = _build_coinset_adapter(program=current_program, coinset_base_url=coinset_base_url)
     ws_url = _resolve_coinset_ws_url(program=current_program, coinset_base_url=coinset_base_url)
+
+    def _with_ws_store(callback: Callable[[SqliteStore], None]) -> None:
+        # Websocket callbacks may run on a worker thread, so open a
+        # callback-local SQLite connection instead of reusing a main-thread store.
+        store = SqliteStore(db_path)
+        try:
+            callback(store)
+        finally:
+            store.close()
 
     def _on_mempool_tx_ids(tx_ids: list[str]) -> None:
         if not tx_ids:
             return
-        new_count = store_for_ws.observe_mempool_tx_ids(tx_ids)
-        if new_count:
-            store_for_ws.add_audit_event(
-                "mempool_observed",
-                {"new_tx_ids": new_count, "source": "coinset_websocket"},
-            )
+
+        def _write(store: SqliteStore) -> None:
+            new_count = store.observe_mempool_tx_ids(tx_ids)
+            if new_count:
+                store.add_audit_event(
+                    "mempool_observed",
+                    {"new_tx_ids": new_count, "source": "coinset_websocket"},
+                )
+
+        _with_ws_store(_write)
 
     def _on_confirmed_tx_ids(tx_ids: list[str]) -> None:
         if not tx_ids:
             return
-        confirmed = store_for_ws.confirm_tx_ids(tx_ids)
-        store_for_ws.add_audit_event(
-            "tx_block_confirmed",
-            {
-                "tx_ids": tx_ids,
-                "confirmed_count": confirmed,
-                "source": "coinset_websocket",
-            },
-        )
+
+        def _write(store: SqliteStore) -> None:
+            confirmed = store.confirm_tx_ids(tx_ids)
+            store.add_audit_event(
+                "tx_block_confirmed",
+                {
+                    "tx_ids": tx_ids,
+                    "confirmed_count": confirmed,
+                    "source": "coinset_websocket",
+                },
+            )
+
+        _with_ws_store(_write)
 
     def _on_audit_event(event_type: str, payload: dict[str, Any]) -> None:
-        store_for_ws.add_audit_event(event_type, payload)
+        _with_ws_store(lambda store: store.add_audit_event(event_type, payload))
 
     ws_client = CoinsetWebsocketClient(
         ws_url=ws_url,
@@ -1180,7 +1492,6 @@ def _run_loop(
         return 0
     finally:
         ws_client.stop()
-        store_for_ws.close()
         _daemon_logger.info("daemon_stopped mode=loop")
 
 
@@ -1223,7 +1534,7 @@ def main() -> None:
     parser.add_argument("--state-db", default="", help="Optional explicit SQLite state DB path")
     parser.add_argument(
         "--coinset-base-url",
-        default="https://coinset.org",
+        default="https://api.coinset.org",
         help="Coinset API base URL",
     )
     parser.add_argument(

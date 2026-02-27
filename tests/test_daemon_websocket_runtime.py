@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from greenfloor.daemon.main import _run_loop, run_once
@@ -294,3 +295,77 @@ def test_run_loop_logs_when_missing_log_level_is_auto_healed(monkeypatch, tmp_pa
     assert "log_level: INFO" in program.read_text(encoding="utf-8")
     log_text = (home / "logs" / "debug.log").read_text(encoding="utf-8")
     assert "program config missing app.log_level; wrote default INFO" in log_text
+
+
+def test_run_loop_websocket_callbacks_use_callback_thread_store(
+    monkeypatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program, home)
+    _write_markets(markets)
+
+    ws_errors: list[Exception] = []
+
+    class _ThreadBoundStore:
+        def __init__(self, _db_path: str) -> None:
+            self._thread_id = threading.get_ident()
+
+        def _assert_thread(self) -> None:
+            if threading.get_ident() != self._thread_id:
+                raise AssertionError("cross_thread_store_use")
+
+        def observe_mempool_tx_ids(self, _tx_ids) -> int:
+            self._assert_thread()
+            return 1
+
+        def confirm_tx_ids(self, _tx_ids) -> int:
+            self._assert_thread()
+            return 1
+
+        def add_audit_event(self, _event_type: str, _payload: dict) -> None:
+            self._assert_thread()
+
+        def close(self) -> None:
+            return
+
+    class _FakeWsClient:
+        def __init__(self, **kwargs) -> None:
+            self._kwargs = kwargs
+
+        def start(self) -> None:
+            def _invoke_callbacks() -> None:
+                try:
+                    self._kwargs["on_audit_event"]("coinset_ws_connected", {"ok": True})
+                    self._kwargs["on_mempool_tx_ids"](["a" * 64])
+                    self._kwargs["on_confirmed_tx_ids"](["b" * 64])
+                except Exception as exc:  # pragma: no cover - assertion path
+                    ws_errors.append(exc)
+
+            t = threading.Thread(target=_invoke_callbacks)
+            t.start()
+            t.join()
+
+        def stop(self, **_kwargs) -> None:
+            return
+
+    def _fake_run_once(**_kwargs):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("greenfloor.daemon.main.SqliteStore", _ThreadBoundStore)
+    monkeypatch.setattr("greenfloor.daemon.main.CoinsetWebsocketClient", _FakeWsClient)
+    monkeypatch.setattr("greenfloor.daemon.main.run_once", _fake_run_once)
+
+    code = _run_loop(
+        program_path=program,
+        markets_path=markets,
+        allowed_keys=None,
+        db_path_override=str(tmp_path / "state.sqlite"),
+        coinset_base_url="https://api.coinset.org",
+        state_dir=home / "state",
+    )
+
+    assert code == 0
+    assert ws_errors == []

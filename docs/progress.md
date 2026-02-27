@@ -1,5 +1,143 @@
 # Progress Log
 
+## 2026-02-27 (ECO.181.2022 continuous-posting hardening: reseed window tuning + remote canary soak)
+
+- Hardened daemon reseed gating in `greenfloor/daemon/main.py`:
+  - active-offer classification now treats `mempool_observed` as active only when recent (window reduced to `3 minutes`; previously `15 minutes`).
+  - goal: prevent stale `mempool_observed` rows from suppressing repost planning (`planned_count: 0`) across long windows.
+- Added deterministic coverage for reseed-state age handling in `tests/test_daemon_offer_execution.py`:
+  - recent `mempool_observed` state suppresses reseed,
+  - stale `mempool_observed` state permits reseed injection.
+- Standardized ECO market naming:
+  - `config/markets.yaml` active IDs normalized to `eco1812022_sell_xch` and `eco1812022_sell_wusdbc`.
+  - test coverage and docs updated to reference `ECO.181.2022` naming.
+- Removed temporary `CARBON22` alias dependency and replaced it with a code-level resolver fallback:
+  - `greenfloor/cli/manager.py` now reads recent successful `strategy_offer_execution` events for the target market and reuses `resolved_base_asset_id` / `resolved_quote_asset_id` as canonical Cloud Wallet global-id hints.
+  - this keeps CAT resolution functional even when vault display labels differ from current ticker naming, without requiring legacy alias strings in `config/cats.yaml`.
+- Testnet overlay guardrail update:
+  - disabled `tdbx_txch_sell` in `config/testnet-markets.yaml` (repo + John-Deere runtime copies) to keep mainnet canary isolation clean.
+- John-Deere canary evidence after deploy/restart:
+  - rerun status/reconcile loops show repeated successful repost events for `eco1812022_sell_wusdbc` (`planned_count: 1`, `executed_count: 1`) with Cloud Wallet fallback post success.
+  - 30-minute soak (6x/5-minute samples) after `3-minute` window tuning showed early post-restart `0/0` cycles, then stable `1/1` execution for the final four checkpoints.
+  - no command-path errors in soak checkpoints (`offers-status` / `offers-reconcile` completed each sample).
+
+## 2026-02-26 (daemon repost recovery: expired-offer reseed + Cloud Wallet fallback)
+
+- Fixed daemon repost gap where `strategy_actions_planned` stayed empty after offers expired while inventory buckets remained at/above target:
+  - added reseed behavior in `greenfloor/daemon/main.py`:
+    - when no strategy actions are planned and no active offer states exist for a market, daemon injects a single smallest-size repost action (`reason: "no_active_offer_reseed"`).
+- Fixed daemon quote-asset resolution for symbol-form quote assets (for example `wUSDC.b`) in offer-builder payloads:
+  - daemon now resolves quote symbols via `cats.yaml` to CAT hex IDs before SDK offer build.
+- Added Cloud Wallet posting fallback in daemon when local signer path fails with missing mnemonic:
+  - on `offer_builder_failed:signing_failed:missing_mnemonic_for_key_id` and configured Cloud Wallet credentials, daemon now executes one Cloud Wallet post fallback path and records execution status.
+  - improved fallback response parsing to handle noisy/pretty-printed manager output by extracting the trailing JSON object robustly.
+- Added deterministic coverage in `tests/test_daemon_offer_execution.py` for:
+  - no-active-offer reseed injection,
+  - symbol->CAT quote-asset resolution,
+  - Cloud Wallet fallback dispatch on missing mnemonic,
+  - noisy-output JSON extraction helper behavior.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_daemon_offer_execution.py tests/test_daemon_websocket_runtime.py tests/test_config_load.py` -> `22 passed`.
+- John-Deere rerun evidence after deployment:
+  - market state now includes a new live offer (`offer_id: GfkNFxdCuu2GXXEHWtw8UxiTYEJ1LTNCxeKQNiULb66b`) in `mempool_observed` while prior offer remains `expired`,
+  - `offers-status` + `offers-reconcile` loops no longer show the market stuck in `expired`-only state,
+  - daemon resumed repost behavior for `eco1812022_sell_wusdbc` after expiration.
+
+## 2026-02-26 (Coinset websocket default-path correction for daemon runtime)
+
+- Root cause for repeated websocket `404` disconnects (`https://www.coinset.org/ws`) identified:
+  - `greenfloor/config/models.py` populated `tx_block_websocket_url` with legacy mainnet default `wss://coinset.org/ws` when config left `websocket_url` blank.
+  - this model-level default overrode daemon CLI base-URL defaults and routed websocket attempts to a non-API host.
+- Implemented default-path correction:
+  - `greenfloor/config/models.py` now defaults mainnet websocket URL to `wss://api.coinset.org/ws`.
+  - `greenfloor/daemon/main.py` fallback websocket URL paths also use `wss://api.coinset.org/ws`.
+  - `config/program.yaml` inline websocket default comment updated to match.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_config_load.py tests/test_daemon_websocket_runtime.py` -> `11 passed`.
+- John-Deere rollout:
+  - synced `greenfloor/config/models.py` and `greenfloor/daemon/main.py`,
+  - restarted daemon,
+  - verified effective runtime resolution now reports:
+    - `program.tx_block_websocket_url = wss://api.coinset.org/ws`
+    - `_resolve_coinset_ws_url(...) = wss://api.coinset.org/ws`.
+
+## 2026-02-26 (websocket SQLite thread-safety fix + Coinset API default correction)
+
+- Fixed daemon websocket callback SQLite thread-safety in `greenfloor/daemon/main.py`:
+  - removed cross-thread reuse of one `SqliteStore` connection in `_run_loop` websocket callbacks.
+  - websocket callbacks now open/close callback-local `SqliteStore` connections before writing mempool/confirm/audit events.
+  - this removes the runtime crash seen on John-Deere:
+    - `sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same thread`.
+- Corrected mainnet Coinset API defaults to the API host:
+  - `greenfloor/adapters/coinset.py`: `CoinsetAdapter.MAINNET_BASE_URL` -> `https://api.coinset.org`.
+  - `greenfloor/daemon/main.py`: CLI default `--coinset-base-url` -> `https://api.coinset.org`.
+- Added deterministic regression coverage in `tests/test_daemon_websocket_runtime.py`:
+  - new test asserts websocket callbacks can run on a worker thread without cross-thread store usage.
+- Validation snapshot:
+  - `.venv/bin/python -m pytest tests/test_daemon_websocket_runtime.py tests/test_coinset_adapter.py` -> `15 passed`.
+- John-Deere deployment verification:
+  - synced patched files to `/home/hoffmang/greenfloor/greenfloor/{daemon/main.py,adapters/coinset.py}`,
+  - confirmed default adapter base URL resolves to `https://api.coinset.org`,
+  - restarted `greenfloord` without Coinset env override and verified fee-estimate API call succeeds using defaults.
+
+## 2026-02-26 (John-Deere mainnet cutover checklist execution for `eco1812022_sell_wusdbc`)
+
+- Updated repo baseline `config/program.yaml` to mainnet defaults and synced it to John-Deere repo path:
+  - `app.network: mainnet`
+  - `keys.registry[*].network: mainnet`
+  - `venues.dexie.api_base: https://api.dexie.space`
+- Confirmed John-Deere runtime home config already had mainnet + Cloud Wallet credentials populated (`~/.greenfloor/config/program.yaml`).
+- Ran remote preflight successfully:
+  - `config-validate` -> `config validation ok`
+  - `doctor` -> `"ok": true` (warnings only for optional Pushover env vars).
+- Executed market shaping checklist commands for `eco1812022_sell_wusdbc` (`size_base_units` 1, 10, 100) with `--until-ready`:
+  - all three returned `stop_reason: "ready"` and readiness targets met.
+  - operational requirement discovered: `GREENFLOOR_COINSET_BASE_URL=https://api.coinset.org` needed on John-Deere; default `https://coinset.org` caused fee-preflight and coin-record 404s.
+- Ran pre-daemon posting proof sequence successfully:
+  - `build-and-post-offer --market-id eco1812022_sell_wusdbc --size-base-units 1` posted to Dexie mainnet (`offer_id: 9xwe1eFzaKDVfuxkwhndzaYTepCtJwgCFJpFTcL8Jj8R`, `publish_failures: 0`).
+  - `offers-status` showed persisted offer row and `strategy_offer_execution` evidence.
+  - `offers-reconcile` completed and transitioned state to `mempool_observed` (Dexie fallback signal path).
+- Started long-running daemon on John-Deere with Coinset override and ran canary status/reconcile checks.
+- New blocker identified for continuous websocket signal ingestion:
+  - `~/.greenfloor/logs/daemon-cutover.log` shows websocket thread crash:
+    - `sqlite3.ProgrammingError: SQLite objects created in a thread can only be used in that same thread`
+  - Trace points to websocket audit callback path (`greenfloor/daemon/coinset_ws.py` -> `greenfloor/daemon/main.py` -> `greenfloor/storage/sqlite.py`).
+  - Current canary shows daemon cycle events continue, but websocket audit emission path is not thread-safe and needs remediation before declaring strict-close continuous-posting hardening complete.
+
+## 2026-02-26 (mainnet continuous-posting cutover checklist implementation)
+
+- Implemented an operator-ready cutover checklist in `docs/runbook.md` for promoting `eco1812022_sell_wusdbc` from one-off manager proofs to continuous daemon posting.
+- Added explicit step-by-step commands for:
+  - mainnet runtime lock-in (`app.network`, `runtime.dry_run`, Dexie mainnet API, Cloud Wallet credentials),
+  - canary market isolation (`eco1812022_sell_wusdbc` only),
+  - denomination shaping to target ladder buckets (`1:10`, `10:2`, `100:1`),
+  - pre-daemon single-cycle validation (`build-and-post-offer` -> `offers-status` -> `offers-reconcile`),
+  - long-running daemon startup (`greenfloord` without `--once`),
+  - periodic canary verification loop commands scoped by market id.
+- Added explicit canary pass criteria in runbook:
+  - repeated successful `strategy_offer_execution` events,
+  - maintained open-offer presence with only brief rollover gaps,
+  - no persistent post failures across consecutive daemon cycles,
+  - healthy websocket signal ingestion (`coinset_ws_*` without prolonged disconnect loops).
+
+## 2026-02-26 (CI pre-commit cache stabilization + pytest runtime speedup)
+
+- Fixed CI pre-commit cache path behavior in `.github/workflows/ci.yml`:
+  - switched to a single `actions/cache@v4` step for restore/save lifecycle,
+  - cache path now uses workspace-local `./.cache/pre-commit`,
+  - `PRE_COMMIT_HOME` now uses absolute workspace path (`${{ github.workspace }}/.cache/pre-commit`),
+  - added restore-key prefix fallback by `{os, arch, py311}` tuple.
+- Verified cache health on subsequent CI run:
+  - no path-validation warnings,
+  - pre-commit cache archives successfully saved for all matrix targets (`Linux/X64`, `Linux/ARM64`, `macOS/ARM64`),
+  - first run remained expected cold-start miss; next runs can hit saved keys.
+- Removed a 30-second wall-clock delay from daemon runtime test coverage:
+  - `tests/test_daemon_websocket_runtime.py::test_run_loop_refreshes_log_level_without_restart` now stubs `time.sleep` in loop mode,
+  - preserved existing behavior assertions while eliminating real interval wait in deterministic tests.
+- Validation snapshot after test-speed update:
+  - targeted test: `1 passed in 0.13s`,
+  - full suite: `278 passed, 3 skipped in 0.58s`.
+
 ## 2026-02-26 (post-output UX + market config normalization closeout)
 
 - Improved operator UX for `build-and-post-offer` Dexie publishes:
@@ -9,9 +147,9 @@
     - testnet: `https://testnet.dexie.space/offers/<id>`
   - Added deterministic coverage for standard + Cloud Wallet posting paths in `tests/test_manager_post_offer.py`.
 - Finalized mainnet market config normalization:
-  - Market IDs now follow pair/mode naming style (`carbon22_sell_xch`, `carbon22_sell_wusdbc`, `byc_two_sided_wusdbc`).
+  - Market IDs now follow pair/mode naming style (`eco1812022_sell_xch`, `eco1812022_sell_wusdbc`, `byc_two_sided_wusdbc`).
   - Mainnet receive addresses in base `config/markets.yaml` aligned to `xch1hpppalrmxk7x2vzvf5f5c4ylz6l9kwnjkanqtk3qszegrtkm2lvsr6h0df`.
-  - Updated `carbon22_sell_wusdbc` bucket targets to `1:10`, `10:2`, `100:1`.
+  - Updated `eco1812022_sell_wusdbc` bucket targets to `1:10`, `10:2`, `100:1`.
 - Confirmed remote environment alignment on `John-Deere`:
   - branch fast-forwarded to latest commits,
   - runtime config files synced for `markets.yaml`, `cats.yaml`, and optional `testnet-markets.yaml`,
@@ -20,12 +158,12 @@
 ## 2026-02-26 (mainnet market config normalization + John-Deere sync)
 
 - Normalized active mainnet market IDs in `config/markets.yaml` to pair-first naming:
-  - `carbon22_sell_xch`
-  - `carbon22_sell_wusdbc`
+  - `eco1812022_sell_xch`
+  - `eco1812022_sell_wusdbc`
   - `byc_two_sided_wusdbc`
 - Updated mainnet `receive_address` values in base `markets.yaml` to:
   - `xch1hpppalrmxk7x2vzvf5f5c4ylz6l9kwnjkanqtk3qszegrtkm2lvsr6h0df`
-- Updated `carbon22_sell_wusdbc` inventory bucket targets to:
+- Updated `eco1812022_sell_wusdbc` inventory bucket targets to:
   - `1: 10`, `10: 2`, `100: 1`
 - Added strict base-config address guard in `greenfloor/config/io.py`:
   - base `markets.yaml` now logs an error and fails validation when any market uses `txch1...` receive addresses,
@@ -163,26 +301,26 @@
   - Branch: `feat/cloud-wallet-onchain-refresh-followup`
   - Draft PR: `#36` (`WIP: Cloud Wallet off-chain cancel with on-chain refresh follow-up`)
 
-## 2026-02-26 (remote CARBON22 split + live offer proof; resolver hardening)
+## 2026-02-26 (remote ECO.181.2022 split + live offer proof; resolver hardening)
 
-- Completed remote Cloud Wallet execution on host `John-Deere` for current mainnet `CARBON22:wUSDC.b` workstream:
-  - Confirmed `CARBON22` wallet asset (`Asset_ymgm3ygl5om7ia4u9llk3iu7`) recovered to spendable state after self-transfer (`totalAmount: 200000`, `spendableAmount: 200000` at verification time).
+- Completed remote Cloud Wallet execution on host `John-Deere` for current mainnet `ECO.181.2022:wUSDC.b` workstream:
+  - Confirmed `ECO.181.2022` wallet asset (`Asset_ymgm3ygl5om7ia4u9llk3iu7`) recovered to spendable state after self-transfer (`totalAmount: 200000`, `spendableAmount: 200000` at verification time).
   - Submitted `coin-split` for `carbon_2022_wusdc_sell` with `amount_per_coin=10000` and `number_of_coins=10`; split request id `SignatureRequest_az9aoi4gxqlur4ccbfpsice8` moved to `SUBMITTED` and then into pending output state.
   - Posted a live test offer after split using current spendable chunk:
     - command: `build-and-post-offer --market-id carbon_2022_wusdc_sell --size-base-units 10`
     - result: success; offer id `8UjTyuLpooC7GAwrTzni6QK13p6yQPTZaVmjRFtZssVk`
     - signature request id `SignatureRequest_g3s0vutpbq25polq8am6ork9`, state `SUBMITTED`
-    - resolver output confirmed canonical mapping: base `Asset_ymgm3ygl5om7ia4u9llk3iu7` (CARBON22), quote `Asset_cxc7mql006dp2w3kigqlj58t` (wUSDC.b)
+    - resolver output confirmed canonical mapping: base `Asset_ymgm3ygl5om7ia4u9llk3iu7` (ECO.181.2022), quote `Asset_cxc7mql006dp2w3kigqlj58t` (wUSDC.b)
   - `offers-status --market-id carbon_2022_wusdc_sell` now reports the new offer in `open` state with fresh `strategy_offer_execution` evidence.
 - Closed remote resolver drift for `coins-list --asset <CAT-hex>`:
   - Root cause: CAT-hex resolution previously hard-failed when Dexie metadata for the CAT was missing/stale.
   - Fix in `greenfloor/cli/manager.py`: added deterministic local catalog hint fallback (`config/markets.yaml` assets + markets `base_symbol`) and direct wallet-label matching while preserving strict ambiguity rejection.
   - Verified remotely: `coins-list --asset 4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7` now resolves and lists `Asset_ymgm...` coins instead of raising `cloud_wallet_asset_resolution_failed:unmatched_wallet_cat_asset_for`.
 
-## 2026-02-25 (mainnet target alignment: CARBON22:wUSDC.b strict-close)
+## 2026-02-25 (mainnet target alignment: ECO.181.2022:wUSDC.b strict-close)
 
 - Updated planning alignment for live target execution:
-  - `docs/plan.md` active target now treats `CARBON22:wUSDC.b` as the primary mainnet strict-close objective, with `CARBON22:xch` retained as completed supporting proof.
+  - `docs/plan.md` active target now treats `ECO.181.2022:wUSDC.b` as the primary mainnet strict-close objective, with `ECO.181.2022:xch` retained as completed supporting proof.
   - Corrected stale historical wording that implied a 7-command current CLI core surface; current v1 core surface remains 10 commands.
 - Declared next execution evidence path:
   - Run one end-to-end manager proof on mainnet market `carbon_2022_wusdc_sell` (`build-and-post-offer` -> `offers-status` -> `offers-reconcile`) and record persisted lifecycle output.
@@ -194,7 +332,7 @@
   - Updated remote `carbon_2022_wusdc_sell` market stanza to use canonical `wUSDC.b` CAT tail (`fa4a...a99d`) and mainnet `xch1...` receive address.
   - `build-and-post-offer --market-id carbon_2022_wusdc_sell --size-base-units 1 --dry-run` failed with `offer_builder_failed:signing_failed:missing_mnemonic_for_key_id` (dry-run uses local signing path, no mnemonic in shell env).
   - Live `build-and-post-offer` failed before publish with `cloud_wallet_asset_resolution_failed:dexie_cat_metadata_not_found_for:4a1689...66e7`.
-  - `coins-list` on the target vault currently returns only `Asset_huun64oh7dbt9f1f9ie8khuw` coins, so no clear in-vault `CARBON22`/`wUSDC.b` inventory signal is visible yet.
+  - `coins-list` on the target vault currently returns only `Asset_huun64oh7dbt9f1f9ie8khuw` coins, so no clear in-vault `ECO.181.2022`/`wUSDC.b` inventory signal is visible yet.
 
 ## 2026-02-25 (upstreaming follow-up: cache key + metadata + formatting)
 
@@ -309,17 +447,17 @@
 ## 2026-02-25 (step 3 strict-close canonical pair proof)
 
 - Closed the canonical pair mapping gap for manager Cloud Wallet posting in `greenfloor/cli/manager.py`:
-  - `build-and-post-offer --pair CARBON22:xch` now resolves canonical market asset IDs (`CAT` hex tail and `xch`) to Cloud Wallet global asset IDs (`Asset_...`) before `createOffer`.
+  - `build-and-post-offer --pair ECO.181.2022:xch` now resolves canonical market asset IDs (`CAT` hex tail and `xch`) to Cloud Wallet global asset IDs (`Asset_...`) before `createOffer`.
   - CAT metadata validation now uses Dexie token metadata as the primary source; Cloud Wallet in-vault candidate ranking remains a temporary fallback selector until wallet APIs expose canonical CAT-tail metadata directly.
   - Added explicit result metadata (`resolved_base_asset_id`, `resolved_quote_asset_id`) to manager output and strategy-offer audit events.
   - Added direct state persistence in cloud-wallet manager post path (`offer_state` upsert + `strategy_offer_execution` audit event) so follow-up `offers-status` / `offers-reconcile` can observe posted offers.
 - Live canonical proof (remote host `John-Deere`) succeeded:
-  - command: `GREENFLOOR_COINSET_BASE_URL=\"https://api.coinset.org\" greenfloor-manager ... build-and-post-offer --pair CARBON22:xch --size-base-units 1`
+  - command: `GREENFLOOR_COINSET_BASE_URL=\"https://api.coinset.org\" greenfloor-manager ... build-and-post-offer --pair ECO.181.2022:xch --size-base-units 1`
   - `signature_request_id`: `SignatureRequest_gqxapuzsb1yectpxnyblci28`
   - venue post success on Dexie with offer id `EEn9gzNvg6a34jCsRhJZpJifW3FGXFy15VXkw6tzg48s`
   - `publish_failures: 0`
   - maker fee contract held: `offer_fee_mojos: 0`, `offer_fee_source: "maker_default_zero"`
-  - canonical request pair remained `CARBON22:xch` while resolved IDs were emitted in output.
+  - canonical request pair remained `ECO.181.2022:xch` while resolved IDs were emitted in output.
 - Lifecycle visibility now works after direct manager post:
   - `offers-status` showed persisted rows including `EEn9gzNvg6a34jCsRhJZpJifW3FGXFy15VXkw6tzg48s` and `strategy_offer_execution` audit payload with resolved asset IDs.
   - `offers-reconcile` reconciled persisted rows (`reconciled_count: 2`) and transitioned state based on current Dexie lookup responses.
@@ -337,7 +475,7 @@
   - `base_asset` changed to Cloud Wallet global ID `Asset_vznqpopp6sp3s0qwkuvua3dp`,
   - `quote_asset` changed to Cloud Wallet global ID `Asset_huun64oh7dbt9f1f9ie8khuw`.
 - Successful live command:
-  - `GREENFLOOR_COINSET_BASE_URL="https://api.coinset.org" greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml build-and-post-offer --pair CARBON22:Asset_huun64oh7dbt9f1f9ie8khuw --size-base-units 1`
+  - `GREENFLOOR_COINSET_BASE_URL="https://api.coinset.org" greenfloor-manager --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml build-and-post-offer --pair ECO.181.2022:Asset_huun64oh7dbt9f1f9ie8khuw --size-base-units 1`
 - Proof result:
   - `signature_request_id`: `SignatureRequest_mpve6gp6gw87oa4pshpntste`
   - `signature_state`: `SUBMITTED`
@@ -443,12 +581,12 @@ Validation snapshot: `196 passed, 5 skipped`; pre-commit all hooks pass.
   `from_input_spend_bundle_xch` round-trip via `greenfloor-native`), which is the correct
   boundary test for SDK surface GreenFloor actually uses.
 
-## 2026-02-24 (mainnet Step 2 operator proof: CARBON22:xch)
+## 2026-02-24 (mainnet Step 2 operator proof: ECO.181.2022:xch)
 
-- Executed end-to-end Step 2 coin-prep proof on mainnet pair `CARBON22:xch` using Cloud Wallet vault `Wallet_le99o1k4jfsof9mp817gxpi3`.
+- Executed end-to-end Step 2 coin-prep proof on mainnet pair `ECO.181.2022:xch` using Cloud Wallet vault `Wallet_le99o1k4jfsof9mp817gxpi3`.
 - Baseline inventory check (`coins-list`) confirmed live settled spendable inventory and coin-id visibility before prep actions.
 - Ran split prep with readiness mode:
-  - `greenfloor-manager coin-split --pair CARBON22:xch --coin-id 2f264eb91017f196596ee7a6635ff3d298a295226fbd1a57cb6b7493aefa3c34 --size-base-units 10 --until-ready --max-iterations 3`
+  - `greenfloor-manager coin-split --pair ECO.181.2022:xch --coin-id 2f264eb91017f196596ee7a6635ff3d298a295226fbd1a57cb6b7493aefa3c34 --size-base-units 10 --until-ready --max-iterations 3`
   - Result included `signature_state: "SUBMITTED"`, mempool signal, and coinset link:
     - `https://coinset.org/coin/63f7016c704eb0d6cdaf6fec0a6d2189c2e363b3b19d87e623cc36029fa06bcd`
   - Post-split inventory showed three new settled `amount=10` coins:
@@ -456,7 +594,7 @@ Validation snapshot: `196 passed, 5 skipped`; pre-commit all hooks pass.
     - `1bcbf190fe928a4c6485b41cab0dc3c535be7a96bd89f8edfb54c34d61c002b3`
     - `02ba4471f248875bdf314e4adb9eda683253848a1b6348a243b489a1033ee9c1`
 - Ran combine prep with explicit coin IDs:
-  - `greenfloor-manager coin-combine --pair CARBON22:xch --coin-id 75f3f88bed96681808b71a9558f4fe29017ecb42e146d9fdba01804dfd9a3548 --coin-id 1bcbf190fe928a4c6485b41cab0dc3c535be7a96bd89f8edfb54c34d61c002b3 --coin-id 02ba4471f248875bdf314e4adb9eda683253848a1b6348a243b489a1033ee9c1 --number-of-coins 3 --asset-id Asset_huun64oh7dbt9f1f9ie8khuw`
+  - `greenfloor-manager coin-combine --pair ECO.181.2022:xch --coin-id 75f3f88bed96681808b71a9558f4fe29017ecb42e146d9fdba01804dfd9a3548 --coin-id 1bcbf190fe928a4c6485b41cab0dc3c535be7a96bd89f8edfb54c34d61c002b3 --coin-id 02ba4471f248875bdf314e4adb9eda683253848a1b6348a243b489a1033ee9c1 --number-of-coins 3 --asset-id Asset_huun64oh7dbt9f1f9ie8khuw`
   - Result included `signature_state: "SUBMITTED"`, mempool signal, and coinset link:
     - `https://coinset.org/coin/76e4cd84f745abaa8f93fe5fbc10115d5a086dc95060c9ca1e08d320c20c3984`
 - Final inventory check confirmed combine settlement:
@@ -491,10 +629,10 @@ Validation snapshot: `196 passed, 5 skipped`; pre-commit all hooks pass.
   - Kept and documented direct boundary for coin prep operations: `manager.py` calls `greenfloor/adapters/cloud_wallet.py` directly for split/combine.
 - Added deterministic manager tests for readiness-loop validation and not-ready loop behavior in `tests/test_manager_post_offer.py`.
 
-## 2026-02-24 (live testing retarget to mainnet CARBON22)
+## 2026-02-24 (live testing retarget to mainnet ECO.181.2022)
 
-- Retargeted active live testing from `testnet11` proof pair context to mainnet `CARBON22:xch`.
-- Confirmed `CARBON22` CAT ID from repo config (`config/markets.yaml`): `4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7`.
+- Retargeted active live testing from `testnet11` proof pair context to mainnet `ECO.181.2022:xch`.
+- Confirmed `ECO.181.2022` CAT ID from repo config (`config/markets.yaml`): `4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7`.
 - Updated planning docs to reflect current live target while preserving prior `testnet11` proof artifacts as historical evidence.
 
 ## 2026-02-24 (cloud wallet vault-first step 2 completion)
@@ -745,8 +883,8 @@ Validation snapshot: `196 passed, 5 skipped`; pre-commit all hooks pass.
   - `tests/test_signing.py` adds offer-plan branch tests.
   - `tests/test_offer_builder_sdk.py` updated for offer-plan payload assertions.
 - Ran live manager proof commands on `testnet11`:
-  - `build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11 --dry-run`
-  - `build-and-post-offer --pair CARBON22:txch --size-base-units 1 --network testnet11`
+  - `build-and-post-offer --pair ECO.181.2022:txch --size-base-units 1 --network testnet11 --dry-run`
+  - `build-and-post-offer --pair ECO.181.2022:txch --size-base-units 1 --network testnet11`
   - Both currently fail with `signing_failed:no_unspent_offer_cat_coins`.
   - Verified configured receive address has zero XCH and zero CAT balances on `testnet11` across the seeded supported-asset list.
 - Verified quality gates after implementation:

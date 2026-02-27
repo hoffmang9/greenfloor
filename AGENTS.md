@@ -34,7 +34,7 @@ These rules exist because earlier implementation rounds introduced unnecessary c
 ### Do not build features ahead of the critical path
 
 - The critical path is: configure market -> build real offer -> post to venue -> verify on-chain.
-- Do not add CLI commands, metrics, observability, or operational tooling until there is a verified proof on the active live target (currently mainnet `CARBON22:xch`).
+- Do not add CLI commands, metrics, observability, or operational tooling until there is a verified proof on the active live target (currently mainnet `ECO.181.2022:xch`).
 - When in doubt, ask: "Does this help us post and manage a real offer on mainnet?" If no, defer it.
 
 ### Keep file count proportional to distinct responsibilities

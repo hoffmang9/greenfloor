@@ -123,10 +123,11 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
 
 ## Active Live Testing Target
 
-- Active live testing target is now mainnet `CARBON22:wUSDC.b` (primary), with `CARBON22:xch` as a completed supporting proof path.
-- `CARBON22` CAT ID: `4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7`.
+- Active live testing target is now mainnet `ECO.181.2022:wUSDC.b` (primary), with `ECO.181.2022:xch` as a completed supporting proof path.
+- `ECO.181.2022` CAT ID: `4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7`.
 - `wUSDC.b` CAT ID: `fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d`.
-- Strict-close objective status: completed manager lifecycle evidence for `carbon22_sell_wusdbc` is logged in `docs/progress.md` (2026-02-26 remote split + `build-and-post-offer` + `offers-status` evidence on mainnet).
+- Strict-close objective status: completed manager lifecycle evidence for `eco1812022_sell_wusdbc` is logged in `docs/progress.md` (2026-02-26 remote split + `build-and-post-offer` + `offers-status` evidence on mainnet).
+- Current daemon canary status: repost recovery is active with reseed fallback on `eco1812022_sell_wusdbc`; latest hardening reduced stale `mempool_observed` reseed blocking to a short recency window (`3 minutes`) and improved steady-state repost cadence in John-Deere soak checks.
 - Prior `testnet11` proof artifacts remain valid as historical closure evidence for G1-G3.
 
 ## Operational Hardening Follow-up
