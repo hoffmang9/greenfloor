@@ -481,11 +481,8 @@ query getSignatureRequest($id: ID!) {
         status = str(result.get("status", "")).upper()
         if status not in {"UNSIGNED", "PARTIALLY_SIGNED", "AWAITING_REVIEW", ""}:
             return result
-        try:
-            sr = self.sign_with_kms(signature_request_id=sig_id)
-            result["status"] = sr.get("status", result.get("status"))
-        except Exception:
-            logger.exception("kms_auto_sign_failed sig_request=%s", sig_id)
+        sr = self.sign_with_kms(signature_request_id=sig_id)
+        result["status"] = sr.get("status", result.get("status"))
         return result
 
     def _graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]:

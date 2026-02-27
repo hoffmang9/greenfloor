@@ -27,7 +27,7 @@
 
 **Pre-commit fix:**
 
-- Fixed pyright hook to use `.venv/bin/pyright` instead of bare `pyright` (was failing when pyright not on global PATH).
+- Dropped hardcoded `.venv/bin` path usage in local hooks and set `pytest` hook entry to `pytest -q`.
 
 **Test coverage:**
 

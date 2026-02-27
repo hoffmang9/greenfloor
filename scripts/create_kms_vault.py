@@ -6,8 +6,8 @@ Usage:
     set -a; source .env; set +a
     .venv/bin/python scripts/create_kms_vault.py
 
-Reads configuration from .env and/or config/program.yaml cloud_wallet section.
-Falls back to environment variables when program.yaml values are blank.
+Reads configuration from environment variables only (commonly loaded from .env).
+This script does not read config/program.yaml.
 
 Env vars (required -- set in .env):
     GREENFLOOR_CLOUD_WALLET_BASE_URL

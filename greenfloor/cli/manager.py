@@ -50,6 +50,8 @@ from greenfloor.storage.sqlite import SqliteStore
 _TEST_PHASE_OFFER_EXPIRY_MINUTES = 5
 _MANAGER_SERVICE_NAME = "manager"
 _TESTNET_NETWORKS: frozenset[str] = frozenset({"testnet", "testnet11"})
+_DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS = 4
+_DEXIE_INVALID_OFFER_RETRY_INITIAL_DELAY_SECONDS = 1.0
 
 
 def _is_testnet(network: str) -> bool:
@@ -820,6 +822,7 @@ def _resolve_cloud_wallet_asset_id(
     canonical_asset_id: str,
     symbol_hint: str | None = None,
     global_id_hint: str | None = None,
+    allow_dexie_lookup: bool = True,
 ) -> str:
     raw = canonical_asset_id.strip()
     if not raw:
@@ -907,6 +910,10 @@ query resolveWalletAssets($walletId: ID!) {
             raise RuntimeError(
                 f"cloud_wallet_asset_resolution_failed:ambiguous_wallet_cat_asset_for:{raw}"
             )
+        if not allow_dexie_lookup:
+            raise RuntimeError(
+                f"cloud_wallet_asset_resolution_failed:unsupported_canonical_asset_id:{raw}"
+            )
         token_row = _dexie_lookup_token_for_symbol(asset_ref=raw, network=wallet.network)
         if token_row is None:
             raise RuntimeError(
@@ -922,9 +929,13 @@ query resolveWalletAssets($walletId: ID!) {
     preferred_labels.extend(
         _local_catalog_label_hints_for_asset_id(canonical_asset_id=canonical_hex)
     )
-    dexie_token = _dexie_lookup_token_for_cat_id(
-        canonical_cat_id_hex=canonical_hex,
-        network=wallet.network,
+    dexie_token = (
+        _dexie_lookup_token_for_cat_id(
+            canonical_cat_id_hex=canonical_hex,
+            network=wallet.network,
+        )
+        if allow_dexie_lookup
+        else None
     )
     if dexie_token is not None:
         preferred_labels.extend(
@@ -949,7 +960,7 @@ query resolveWalletAssets($walletId: ID!) {
         raise RuntimeError(
             f"cloud_wallet_asset_resolution_failed:ambiguous_wallet_cat_asset_for:{raw}"
         )
-    if dexie_token is None:
+    if dexie_token is None and allow_dexie_lookup:
         raise RuntimeError(
             f"cloud_wallet_asset_resolution_failed:dexie_cat_metadata_not_found_for:{raw}"
         )
@@ -1047,7 +1058,12 @@ def _offer_markers(offers: list[dict]) -> set[str]:
     return markers
 
 
-def _pick_new_offer_artifact(*, offers: list[dict], known_markers: set[str]) -> str:
+def _pick_new_offer_artifact(
+    *,
+    offers: list[dict],
+    known_markers: set[str],
+    min_created_at: dt.datetime | None = None,
+) -> str:
     candidates: list[tuple[dt.datetime, str]] = []
     for offer in offers:
         bech32 = str(offer.get("bech32", "")).strip()
@@ -1059,6 +1075,12 @@ def _pick_new_offer_artifact(*, offers: list[dict], known_markers: set[str]) -> 
             markers.add(f"id:{offer_id}")
         if markers.issubset(known_markers):
             continue
+        created_at = _parse_iso8601(str(offer.get("createdAt", "")).strip())
+        if min_created_at is not None:
+            if created_at is None:
+                continue
+            if created_at < min_created_at:
+                continue
         expires_at = _parse_iso8601(str(offer.get("expiresAt", "")).strip())
         candidates.append((expires_at or dt.datetime.min.replace(tzinfo=dt.UTC), bech32))
     if not candidates:
@@ -1124,6 +1146,35 @@ def _call_with_moderate_retry(
                 )
             time.sleep(sleep_seconds)
             sleep_seconds = min(8.0, sleep_seconds * 2.0)
+
+
+def _post_dexie_offer_with_invalid_offer_retry(
+    *,
+    dexie: DexieAdapter,
+    offer_text: str,
+    drop_only: bool,
+    claim_rewards: bool,
+) -> dict[str, Any]:
+    attempt = 0
+    sleep_seconds = _DEXIE_INVALID_OFFER_RETRY_INITIAL_DELAY_SECONDS
+    while True:
+        result = dexie.post_offer(
+            offer_text,
+            drop_only=drop_only,
+            claim_rewards=claim_rewards,
+        )
+        error = str(result.get("error", "")).strip()
+        should_retry = (
+            bool(error)
+            and "dexie_http_error:400" in error
+            and "Invalid Offer" in error
+            and attempt < (_DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS - 1)
+        )
+        if not should_retry:
+            return result
+        attempt += 1
+        time.sleep(sleep_seconds)
+        sleep_seconds = min(8.0, sleep_seconds * 2.0)
 
 
 def _coinset_coin_url(*, coin_name: str, network: str = "mainnet") -> str:
@@ -1248,6 +1299,7 @@ def _poll_offer_artifact_until_available(
     wallet: CloudWalletAdapter,
     known_markers: set[str],
     timeout_seconds: int,
+    min_created_at: dt.datetime | None = None,
 ) -> str:
     start = time.monotonic()
     sleep_seconds = 2.0
@@ -1264,7 +1316,11 @@ def _poll_offer_artifact_until_available(
         )
         offers = wallet_payload.get("offers", [])
         if isinstance(offers, list):
-            offer_text = _pick_new_offer_artifact(offers=offers, known_markers=known_markers)
+            offer_text = _pick_new_offer_artifact(
+                offers=offers,
+                known_markers=known_markers,
+                min_created_at=min_created_at,
+            )
             if offer_text:
                 return offer_text
         if elapsed >= timeout_seconds:
@@ -2272,6 +2328,7 @@ def _build_and_post_offer_cloud_wallet(
         )
         prior_offers = prior_wallet_payload.get("offers", [])
         known_offer_markers = _offer_markers(prior_offers if isinstance(prior_offers, list) else [])
+        offer_request_started_at = dt.datetime.now(dt.UTC)
         offer_amount = int(
             size_base_units * int((market.pricing or {}).get("base_unit_mojo_multiplier", 1000))
         )
@@ -2316,6 +2373,7 @@ def _build_and_post_offer_cloud_wallet(
                 wallet=wallet,
                 known_markers=known_offer_markers,
                 timeout_seconds=15 * 60,
+                min_created_at=offer_request_started_at,
             )
         except RuntimeError as exc:
             post_results.append(
@@ -2378,8 +2436,9 @@ def _build_and_post_offer_cloud_wallet(
 
         if publish_venue == "dexie":
             assert dexie is not None
-            result = dexie.post_offer(
-                offer_text,
+            result = _post_dexie_offer_with_invalid_offer_retry(
+                dexie=dexie,
+                offer_text=offer_text,
                 drop_only=drop_only,
                 claim_rewards=claim_rewards,
             )
@@ -2728,9 +2787,19 @@ def _coins_list(
             )
         )
 
-    effective_asset = (cat_id or asset or "").strip()
     resolved_asset_filter: str | None = None
-    if effective_asset:
+    if cat_id and cat_id.strip():
+        raw_cat_id = cat_id.strip().lower()
+        if not _is_hex_asset_id(raw_cat_id):
+            raise ValueError("--cat-id must be a 64-character hex CAT asset id")
+        resolved_asset_filter = _resolve_cloud_wallet_asset_id(
+            wallet=wallet,
+            canonical_asset_id=raw_cat_id,
+            symbol_hint=None,
+            allow_dexie_lookup=False,
+        )
+    elif asset and asset.strip():
+        effective_asset = asset.strip()
         resolved_asset_filter = _resolve_cloud_wallet_asset_id(
             wallet=wallet,
             canonical_asset_id=effective_asset,

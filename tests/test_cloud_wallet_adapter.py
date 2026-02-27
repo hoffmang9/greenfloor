@@ -5,6 +5,7 @@ import json
 import urllib.error
 from email.message import Message
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -621,7 +622,104 @@ def test_split_coins_with_kms_auto_signs(monkeypatch, tmp_path: Path) -> None:
     assert result["status"] == "SIGNED"
 
 
-def test_auto_sign_catches_kms_errors(monkeypatch, tmp_path: Path) -> None:
+def test_create_offer_with_kms_auto_sign_wiring(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_kms_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    responses = [
+        {
+            "data": {
+                "createOffer": {"signatureRequest": {"id": "SigReq_create", "status": "UNSIGNED"}}
+            }
+        }
+    ]
+
+    def _fake_urlopen(req, timeout=0):
+        _ = req, timeout
+        return _FakeHttpResponse(responses.pop(0))
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    auto_sign_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        adapter,
+        "_auto_sign_if_kms",
+        lambda result: auto_sign_calls.append(dict(result))
+        or {"signature_request_id": result["signature_request_id"], "status": "SIGNED"},
+    )
+
+    result = adapter.create_offer(
+        offered=[{"assetId": "Asset_a", "amount": 100}],
+        requested=[{"assetId": "Asset_b", "amount": 200}],
+        fee=0,
+        expires_at_iso="2026-01-01T00:00:00+00:00",
+        split_input_coins=True,
+        split_input_coins_fee=0,
+    )
+    assert result["signature_request_id"] == "SigReq_create"
+    assert result["status"] == "SIGNED"
+    assert auto_sign_calls == [{"signature_request_id": "SigReq_create", "status": "UNSIGNED"}]
+
+
+def test_combine_coins_with_kms_auto_sign_wiring(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_kms_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    responses = [
+        {
+            "data": {
+                "combineCoins": {"signatureRequest": {"id": "SigReq_combine", "status": "UNSIGNED"}}
+            }
+        }
+    ]
+
+    def _fake_urlopen(req, timeout=0):
+        _ = req, timeout
+        return _FakeHttpResponse(responses.pop(0))
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    auto_sign_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        adapter,
+        "_auto_sign_if_kms",
+        lambda result: auto_sign_calls.append(dict(result))
+        or {"signature_request_id": result["signature_request_id"], "status": "SIGNED"},
+    )
+
+    result = adapter.combine_coins(number_of_coins=2, fee=0)
+    assert result["signature_request_id"] == "SigReq_combine"
+    assert result["status"] == "SIGNED"
+    assert auto_sign_calls == [{"signature_request_id": "SigReq_combine", "status": "UNSIGNED"}]
+
+
+def test_cancel_offer_with_kms_auto_sign_wiring(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_kms_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    responses = [
+        {
+            "data": {
+                "cancelOffer": {"signatureRequest": {"id": "SigReq_cancel", "status": "UNSIGNED"}}
+            }
+        }
+    ]
+
+    def _fake_urlopen(req, timeout=0):
+        _ = req, timeout
+        return _FakeHttpResponse(responses.pop(0))
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    auto_sign_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        adapter,
+        "_auto_sign_if_kms",
+        lambda result: auto_sign_calls.append(dict(result))
+        or {"signature_request_id": result["signature_request_id"], "status": "SIGNED"},
+    )
+
+    result = adapter.cancel_offer(offer_id="Offer_abc")
+    assert result["signature_request_id"] == "SigReq_cancel"
+    assert result["status"] == "SIGNED"
+    assert auto_sign_calls == [{"signature_request_id": "SigReq_cancel", "status": "UNSIGNED"}]
+
+
+def test_auto_sign_raises_kms_errors(monkeypatch, tmp_path: Path) -> None:
     adapter = _build_kms_adapter(tmp_path)
     monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
 
@@ -631,9 +729,8 @@ def test_auto_sign_catches_kms_errors(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(adapter, "sign_with_kms", _exploding_sign)
 
     result = {"signature_request_id": "SigReq_fail", "status": "UNSIGNED"}
-    out = adapter._auto_sign_if_kms(result)
-    # Should not raise; status unchanged
-    assert out["status"] == "UNSIGNED"
+    with pytest.raises(RuntimeError, match="KMS unavailable"):
+        adapter._auto_sign_if_kms(result)
 
 
 def test_sign_with_kms_raises_without_key_id(tmp_path: Path) -> None:
