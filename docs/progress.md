@@ -1,5 +1,39 @@
 # Progress Log
 
+## 2026-02-27 (AWS KMS vault signing + coins-list enhancements)
+
+**KMS-backed vault custody signing:**
+
+- Added `greenfloor/adapters/kms_signer.py`: P-256 public key extraction and ECDSA digest signing via AWS KMS. Includes custom ASN.1/DER parsing to convert KMS responses into the compact formats required by the ent-wallet API.
+- Extended `CloudWalletAdapter` with inline KMS auto-signing: `create_offer`, `split_coins`, `combine_coins`, and `cancel_offer` now detect `UNSIGNED` / `PARTIALLY_SIGNED` signature requests and automatically sign via KMS when configured.
+- New `CloudWalletConfig` fields: `kms_key_id`, `kms_region`, `kms_public_key_hex`.
+- New adapter methods: `sign_with_kms()`, `get_signature_request_with_messages()`, `_sign_signature_request()`, `_auto_sign_if_kms()`.
+- Added `boto3` dependency.
+
+**Vault creation tooling:**
+
+- Added `scripts/create_kms_vault.py`: standalone script to create an ent-wallet vault with a KMS P-256 custody key and a new 24-word BLS recovery key (with configurable clawback timelock). Reads all credentials from `.env` / environment variables -- no hardcoded secrets.
+
+**coins-list CLI enhancements:**
+
+- `--vault-id` flag: override the configured vault to query a different Cloud Wallet vault's coins.
+- `--cat-id` flag: filter coins by raw CAT asset ID hex (bypasses GraphQL Asset\_ ID resolution).
+
+**Credential hygiene:**
+
+- Production credentials (user_key_id, vault_id, kms_key_id, kms_region, kms_public_key_hex) blanked in `config/program.yaml` with inline comments explaining where to find each value.
+- Operator credentials live in `.env` (gitignored) and `~/.aws/credentials` -- never committed to the repo.
+- `scripts/create_kms_vault.py` reads KMS ARN from env vars; no hardcoded AWS account IDs.
+
+**Pre-commit fix:**
+
+- Fixed pyright hook to use `.venv/bin/pyright` instead of bare `pyright` (was failing when pyright not on global PATH).
+
+**Test coverage:**
+
+- `tests/test_kms_signer.py`: 11 tests for DER parsing, public key extraction, and digest signing (all mocked boto3).
+- `tests/test_cloud_wallet_adapter.py`: 9 new tests for KMS auto-signing flows, message matching, error handling, and end-to-end split_coins auto-sign.
+
 ## 2026-02-27 (codebase simplification round 2 + test coverage expansion)
 
 - Opened branch `simplify-and-test-coverage-round-2` targeting 12 identified simplification/coverage items (A–L).
