@@ -91,3 +91,83 @@ class DexieAdapter:
         if isinstance(result, dict):
             return result
         return {"success": False, "error": "invalid_response_format"}
+
+    def lookup_token_by_cat_id(self, cat_id_hex: str) -> dict | None:
+        """Find a token by CAT asset ID across swap tokens and v3 tickers."""
+        target = cat_id_hex.strip().lower()
+        if not target:
+            return None
+
+        for row in self._fetch_token_rows():
+            if _row_matches_cat_target(row, target):
+                return row
+
+        ticker_rows = self._fetch_ticker_rows()
+        for row in ticker_rows:
+            if _row_matches_cat_target(row, target, include_ticker_split=True):
+                return row
+        return None
+
+    def lookup_token_by_symbol(
+        self,
+        symbol: str,
+        *,
+        label_matcher: Any | None = None,
+    ) -> dict | None:
+        """Find a token by symbol/name/code with optional fuzzy label matching."""
+        target = symbol.strip()
+        if not target:
+            return None
+        match_fn = label_matcher or _case_insensitive_match
+        for row in self._fetch_token_rows():
+            for key in ("code", "name", "id"):
+                if match_fn(str(row.get(key, "")), target):
+                    return row
+        return None
+
+    def _fetch_token_rows(self) -> list[dict]:
+        try:
+            return self.get_tokens()
+        except Exception:
+            return []
+
+    def _fetch_ticker_rows(self) -> list[dict]:
+        url = f"{self.base_url}/v3/prices/tickers"
+        try:
+            with urllib.request.urlopen(url, timeout=20) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return []
+        if isinstance(payload, list):
+            return [r for r in payload if isinstance(r, dict)]
+        if isinstance(payload, dict):
+            tickers = payload.get("tickers")
+            if isinstance(tickers, list):
+                return [r for r in tickers if isinstance(r, dict)]
+        return []
+
+
+def _row_matches_cat_target(row: dict, target: str, *, include_ticker_split: bool = False) -> bool:
+    candidates = {
+        str(row.get("assetId", "")).strip().lower(),
+        str(row.get("asset_id", "")).strip().lower(),
+        str(row.get("id", "")).strip().lower(),
+        str(row.get("tokenId", "")).strip().lower(),
+        str(row.get("token_id", "")).strip().lower(),
+        str(row.get("base_currency", "")).strip().lower(),
+        str(row.get("target_currency", "")).strip().lower(),
+    }
+    ticker_id = str(row.get("ticker_id", "")).strip().lower()
+    if ticker_id:
+        candidates.add(ticker_id)
+        if include_ticker_split and "_" in ticker_id:
+            base, quote = ticker_id.split("_", 1)
+            candidates.add(base)
+            candidates.add(quote)
+    return target in candidates
+
+
+def _case_insensitive_match(left: str, right: str) -> bool:
+    a = left.strip().lower()
+    b = right.strip().lower()
+    return bool(a and b and a == b)

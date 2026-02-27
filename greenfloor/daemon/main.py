@@ -8,6 +8,7 @@ import os
 import time
 import urllib.parse
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -143,6 +144,29 @@ def _set_cooldown(cooldowns: dict[str, float], key: str, cooldown_seconds: int) 
     cooldowns[key] = time.monotonic() + float(cooldown_seconds)
 
 
+def _retry_with_backoff(
+    *,
+    action_fn: Callable[[], dict[str, Any]],
+    is_success: Callable[[dict[str, Any]], bool],
+    default_error: str,
+    retry_config: tuple[int, int, int],
+) -> tuple[dict[str, Any], int, str]:
+    """Generic retry loop with exponential backoff."""
+    attempts_max, backoff_ms, _ = retry_config
+    last_error = default_error
+    for attempt in range(1, attempts_max + 1):
+        try:
+            result = action_fn()
+        except Exception as exc:
+            result = {"success": False, "error": f"{default_error}:{exc}"}
+        if is_success(result):
+            return result, attempt, ""
+        last_error = str(result.get("error", default_error))
+        if attempt < attempts_max and backoff_ms > 0:
+            time.sleep((backoff_ms * (2 ** (attempt - 1))) / 1000.0)
+    return {"success": False, "error": last_error}, attempts_max, last_error
+
+
 def _post_offer_with_retry(
     *,
     publish_venue: str,
@@ -150,28 +174,19 @@ def _post_offer_with_retry(
     dexie: DexieAdapter,
     splash: SplashAdapter | None,
 ) -> tuple[dict[str, Any], int, str]:
-    attempts_max, backoff_ms, _ = _post_retry_config()
-    last_error = f"{publish_venue}_post_failed"
-    for attempt in range(1, attempts_max + 1):
-        try:
-            if publish_venue == "splash":
-                if splash is None:
-                    return (
-                        {"success": False, "error": "splash_not_configured"},
-                        attempt,
-                        "splash_not_configured",
-                    )
-                result = splash.post_offer(offer_text)
-            else:
-                result = dexie.post_offer(offer_text)
-        except Exception as exc:
-            result = {"success": False, "error": f"{publish_venue}_post_error:{exc}"}
-        if bool(result.get("success", False)) and str(result.get("id", "")).strip():
-            return result, attempt, ""
-        last_error = str(result.get("error", f"{publish_venue}_post_failed"))
-        if attempt < attempts_max and backoff_ms > 0:
-            time.sleep((backoff_ms * (2 ** (attempt - 1))) / 1000.0)
-    return {"success": False, "error": last_error}, attempts_max, last_error
+    def _do_post() -> dict[str, Any]:
+        if publish_venue == "splash":
+            if splash is None:
+                return {"success": False, "error": "splash_not_configured"}
+            return splash.post_offer(offer_text)
+        return dexie.post_offer(offer_text)
+
+    return _retry_with_backoff(
+        action_fn=_do_post,
+        is_success=lambda r: bool(r.get("success", False)) and bool(str(r.get("id", "")).strip()),
+        default_error=f"{publish_venue}_post_failed",
+        retry_config=_post_retry_config(),
+    )
 
 
 def _cancel_offer_with_retry(
@@ -179,19 +194,12 @@ def _cancel_offer_with_retry(
     dexie: DexieAdapter,
     offer_id: str,
 ) -> tuple[dict[str, Any], int, str]:
-    attempts_max, backoff_ms, _ = _cancel_retry_config()
-    last_error = "cancel_offer_failed"
-    for attempt in range(1, attempts_max + 1):
-        try:
-            result = dexie.cancel_offer(offer_id)
-        except Exception as exc:
-            result = {"success": False, "error": f"cancel_offer_error:{exc}"}
-        if bool(result.get("success", False)):
-            return result, attempt, ""
-        last_error = str(result.get("error", "cancel_offer_failed"))
-        if attempt < attempts_max and backoff_ms > 0:
-            time.sleep((backoff_ms * (2 ** (attempt - 1))) / 1000.0)
-    return {"success": False, "error": last_error}, attempts_max, last_error
+    return _retry_with_backoff(
+        action_fn=lambda: dexie.cancel_offer(offer_id),
+        is_success=lambda r: bool(r.get("success", False)),
+        default_error="cancel_offer_failed",
+        retry_config=_cancel_retry_config(),
+    )
 
 
 def _normalize_strategy_pair(quote_asset: str) -> str:
@@ -251,10 +259,14 @@ def _resolve_quote_asset_for_offer(*, quote_asset: str, network: str) -> str:
     return quote_asset
 
 
+def _market_pricing(market: Any) -> dict[str, Any]:
+    return dict(getattr(market, "pricing", {}) or {})
+
+
 def _strategy_config_from_market(market) -> StrategyConfig:
     sell_ladder = market.ladders.get("sell", [])
     targets_by_size = {int(e.size_base_units): int(e.target_count) for e in sell_ladder}
-    pricing = dict(getattr(market, "pricing", {}) or {})
+    pricing = _market_pricing(market)
 
     def _to_int(value: Any) -> int | None:
         if value is None:
@@ -406,7 +418,7 @@ def _inject_reseed_action_if_no_active_offers(
 
 
 def _resolve_quote_price_quote_per_base(market) -> float:
-    pricing = dict(getattr(market, "pricing", {}) or {})
+    pricing = _market_pricing(market)
     quote_price = pricing.get("fixed_quote_per_base")
     if quote_price is None:
         min_q = pricing.get("min_price_quote_per_base")
@@ -434,7 +446,7 @@ def _build_offer_for_action(
 ) -> dict[str, Any]:
     from greenfloor.cli.offer_builder_sdk import build_offer_text
 
-    pricing = dict(getattr(market, "pricing", {}) or {})
+    pricing = _market_pricing(market)
     try:
         quote_price = _resolve_quote_price_quote_per_base(market)
     except Exception as exc:
@@ -776,7 +788,7 @@ def _execute_cancel_policy_for_market(
     items: list[dict[str, Any]] = []
     move_bps = _abs_move_bps(current_xch_price_usd, previous_xch_price_usd)
     quote_type = str(market.quote_asset_type).strip().lower()
-    pricing = dict(getattr(market, "pricing", {}) or {})
+    pricing = _market_pricing(market)
     stable_vs_unstable = bool(pricing.get("cancel_policy_stable_vs_unstable", False))
     threshold_bps = _cancel_move_threshold_bps()
     if quote_type != "unstable":
@@ -895,6 +907,428 @@ def _execute_cancel_policy_for_market(
     }
 
 
+@dataclass(slots=True)
+class _MarketCycleResult:
+    cycle_errors: int = 0
+    strategy_planned: int = 0
+    strategy_executed: int = 0
+    cancel_triggered: bool = False
+    cancel_planned: int = 0
+    cancel_executed: int = 0
+
+
+def _process_single_market(
+    *,
+    market: Any,
+    program: Any,
+    allowed_keys: set[str] | None,
+    dexie: DexieAdapter,
+    splash: SplashAdapter,
+    wallet: WalletAdapter,
+    store: SqliteStore,
+    xch_price_usd: float | None,
+    previous_xch_price_usd: float | None,
+    now: datetime,
+    state_dir: Path,
+) -> _MarketCycleResult:
+    result = _MarketCycleResult()
+    signer_selection = resolve_market_key(
+        market,
+        allowed_keys,
+        signer_key_registry=program.signer_key_registry,
+        required_network=program.app_network,
+    )
+    store.add_price_policy_snapshot(
+        market.market_id,
+        {
+            "mode": market.mode,
+            "base_asset": market.base_asset,
+            "quote_asset": market.quote_asset,
+            "quote_asset_type": market.quote_asset_type,
+        },
+        source="startup",
+    )
+    persisted = store.get_alert_state(market.market_id)
+    state, event = evaluate_low_inventory_alert(
+        now=now,
+        program=program,
+        market=market,
+        state=AlertState(
+            is_low=persisted.is_low,
+            last_alert_at=persisted.last_alert_at,
+        ),
+    )
+    store.upsert_alert_state(
+        StoredAlertState(
+            market_id=market.market_id,
+            is_low=state.is_low,
+            last_alert_at=state.last_alert_at,
+        )
+    )
+    if event:
+        payload = {
+            "event": "low_inventory_alert",
+            "market_id": event.market_id,
+            "ticker": event.ticker,
+            "remaining_amount": event.remaining_amount,
+            "receive_address": event.receive_address,
+            "reason": event.reason,
+        }
+        print(json.dumps(payload))
+        store.add_audit_event("low_inventory_alert", payload, market_id=market.market_id)
+        send_pushover_alert(program, event)
+
+    try:
+        offers = dexie.get_offers(market.base_asset, market.quote_asset)
+    except Exception as exc:  # pragma: no cover - network dependent
+        result.cycle_errors += 1
+        store.add_audit_event(
+            "dexie_offers_error",
+            {"market_id": market.market_id, "error": str(exc)},
+            market_id=market.market_id,
+        )
+        offers = []
+    for offer in offers:
+        offer_id = str(offer.get("id", ""))
+        if not offer_id:
+            continue
+        status = int(offer.get("status", -1))
+        coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer)
+        signal_source = "dexie_status_fallback"
+        coinset_confirmed_tx_ids: list[str] = []
+        coinset_mempool_tx_ids: list[str] = []
+        if coinset_tx_ids:
+            tx_signal_state = store.get_tx_signal_state(coinset_tx_ids)
+            for tx_id in coinset_tx_ids:
+                signal = tx_signal_state.get(tx_id, {})
+                if signal.get("tx_block_confirmed_at"):
+                    coinset_confirmed_tx_ids.append(tx_id)
+                    continue
+                if signal.get("mempool_observed_at"):
+                    coinset_mempool_tx_ids.append(tx_id)
+        if coinset_confirmed_tx_ids and status != 3:
+            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.TX_CONFIRMED)
+            signal_source = "coinset_webhook"
+        elif coinset_mempool_tx_ids:
+            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.MEMPOOL_SEEN)
+            signal_source = "coinset_mempool"
+        elif status == 4:
+            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.TX_CONFIRMED)
+        elif status == 6:
+            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.EXPIRED)
+        else:
+            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.MEMPOOL_SEEN)
+        store.upsert_offer_state(
+            offer_id=offer_id,
+            market_id=market.market_id,
+            state=transition.new_state.value,
+            last_seen_status=status,
+        )
+        store.add_audit_event(
+            "offer_lifecycle_transition",
+            {
+                "offer_id": offer_id,
+                "market_id": market.market_id,
+                "old_state": transition.old_state.value,
+                "new_state": transition.new_state.value,
+                "signal": transition.signal.value,
+                "action": transition.action,
+                "reason": transition.reason,
+                "dexie_status": status,
+                "signal_source": signal_source,
+                "coinset_tx_ids": coinset_tx_ids,
+                "coinset_confirmed_tx_ids": coinset_confirmed_tx_ids,
+                "coinset_mempool_tx_ids": coinset_mempool_tx_ids,
+            },
+            market_id=market.market_id,
+        )
+    cancel_policy = _execute_cancel_policy_for_market(
+        market=market,
+        offers=offers,
+        runtime_dry_run=program.runtime_dry_run,
+        current_xch_price_usd=xch_price_usd,
+        previous_xch_price_usd=previous_xch_price_usd,
+        dexie=dexie,
+        store=store,
+    )
+    if bool(cancel_policy.get("triggered", False)):
+        result.cancel_triggered = True
+    result.cancel_planned += int(cancel_policy.get("planned_count", 0))
+    result.cancel_executed += int(cancel_policy.get("executed_count", 0))
+    store.add_audit_event(
+        "offer_cancel_policy",
+        {
+            "market_id": market.market_id,
+            "eligible": cancel_policy["eligible"],
+            "triggered": cancel_policy["triggered"],
+            "reason": cancel_policy["reason"],
+            "move_bps": cancel_policy["move_bps"],
+            "threshold_bps": cancel_policy["threshold_bps"],
+            "planned_count": cancel_policy["planned_count"],
+            "executed_count": cancel_policy["executed_count"],
+            "items": cancel_policy["items"],
+        },
+        market_id=market.market_id,
+    )
+
+    sell_ladder = market.ladders.get("sell", [])
+    ladder_sizes = [e.size_base_units for e in sell_ladder]
+    wallet_coins = wallet.list_asset_coins_base_units(
+        asset_id=market.base_asset,
+        key_id=market.signer_key_id,
+        receive_address=market.receive_address,
+        network=program.app_network,
+    )
+    if wallet_coins:
+        bucket_counts = compute_bucket_counts_from_coins(
+            coin_amounts_base_units=wallet_coins,
+            ladder_sizes=ladder_sizes,
+        )
+        store.add_audit_event(
+            "inventory_bucket_scan",
+            {
+                "market_id": market.market_id,
+                "source": "wallet_adapter",
+                "bucket_counts": bucket_counts,
+                "coin_count": len(wallet_coins),
+            },
+            market_id=market.market_id,
+        )
+    else:
+        bucket_counts = dict(market.inventory.bucket_counts)
+        store.add_audit_event(
+            "inventory_bucket_scan",
+            {
+                "market_id": market.market_id,
+                "source": "config_seed_or_no_asset_scan",
+                "asset_id": market.base_asset,
+                "bucket_counts": bucket_counts,
+            },
+            market_id=market.market_id,
+        )
+    strategy_config = _strategy_config_from_market(market)
+    strategy_actions = evaluate_market(
+        state=_strategy_state_from_bucket_counts(
+            bucket_counts,
+            xch_price_usd=xch_price_usd,
+        ),
+        config=strategy_config,
+        clock=now,
+    )
+    _daemon_logger.debug(
+        (
+            "strategy_evaluated market_id=%s pair=%s bucket_counts=%s "
+            "xch_price_usd=%s action_count=%s"
+        ),
+        market.market_id,
+        strategy_config.pair,
+        bucket_counts,
+        xch_price_usd,
+        len(strategy_actions),
+    )
+    strategy_actions = _inject_reseed_action_if_no_active_offers(
+        strategy_actions=strategy_actions,
+        strategy_config=strategy_config,
+        market=market,
+        store=store,
+        xch_price_usd=xch_price_usd,
+        clock=now,
+    )
+    _daemon_logger.debug(
+        "strategy_after_reseed market_id=%s action_count=%s reseed_injected=%s",
+        market.market_id,
+        len(strategy_actions),
+        any(str(action.reason) == "no_active_offer_reseed" for action in strategy_actions),
+    )
+    store.add_audit_event(
+        "strategy_actions_planned",
+        {
+            "market_id": market.market_id,
+            "xch_price_usd": xch_price_usd,
+            "actions": [
+                {
+                    "size": action.size,
+                    "repeat": action.repeat,
+                    "pair": action.pair,
+                    "expiry_unit": action.expiry_unit,
+                    "expiry_value": action.expiry_value,
+                    "cancel_after_create": action.cancel_after_create,
+                    "reason": action.reason,
+                    "target_spread_bps": action.target_spread_bps,
+                }
+                for action in strategy_actions
+            ],
+        },
+        market_id=market.market_id,
+    )
+    offer_execution = _execute_strategy_actions(
+        market=market,
+        strategy_actions=strategy_actions,
+        runtime_dry_run=program.runtime_dry_run,
+        xch_price_usd=xch_price_usd,
+        dexie=dexie,
+        splash=splash,
+        publish_venue=program.offer_publish_venue,
+        store=store,
+        app_network=program.app_network,
+        signer_key_registry=program.signer_key_registry,
+        program=program,
+    )
+    result.strategy_planned += int(offer_execution["planned_count"])
+    result.strategy_executed += int(offer_execution["executed_count"])
+    store.add_audit_event(
+        "strategy_offer_execution",
+        {
+            "market_id": market.market_id,
+            "planned_count": offer_execution["planned_count"],
+            "executed_count": offer_execution["executed_count"],
+            "items": offer_execution["items"],
+        },
+        market_id=market.market_id,
+    )
+    buckets = [
+        BucketSpec(
+            size_base_units=e.size_base_units,
+            target_count=e.target_count,
+            split_buffer_count=e.split_buffer_count,
+            combine_when_excess_factor=e.combine_when_excess_factor,
+            current_count=int(bucket_counts.get(e.size_base_units, 0)),
+        )
+        for e in sell_ladder
+    ]
+    plans = plan_coin_ops(
+        buckets=buckets,
+        max_operations_per_run=program.coin_ops_max_operations_per_run,
+        max_fee_budget_mojos=program.coin_ops_max_daily_fee_budget_mojos,
+        split_fee_mojos=program.coin_ops_split_fee_mojos,
+        combine_fee_mojos=program.coin_ops_combine_fee_mojos,
+    )
+    if plans:
+        projected_fee = projected_coin_ops_fee_mojos(
+            plans=plans,
+            split_fee_mojos=program.coin_ops_split_fee_mojos,
+            combine_fee_mojos=program.coin_ops_combine_fee_mojos,
+        )
+        spent_today = store.get_daily_fee_spent_mojos_utc()
+        executable_plans, overflow_plans = partition_plans_by_budget(
+            plans=plans,
+            split_fee_mojos=program.coin_ops_split_fee_mojos,
+            combine_fee_mojos=program.coin_ops_combine_fee_mojos,
+            spent_today_mojos=spent_today,
+            max_daily_fee_budget_mojos=program.coin_ops_max_daily_fee_budget_mojos,
+        )
+        if executable_plans:
+            execution = wallet.execute_coin_ops(
+                plans=executable_plans,
+                dry_run=program.runtime_dry_run,
+                key_id=signer_selection.key_id,
+                network=program.app_network,
+                market_id=market.market_id,
+                asset_id=market.base_asset,
+                receive_address=market.receive_address,
+                onboarding_selection_path=state_dir / "key_onboarding.json",
+                signer_fingerprint=signer_selection.fingerprint,
+            )
+        else:
+            execution = {
+                "dry_run": program.runtime_dry_run,
+                "planned_count": 0,
+                "executed_count": 0,
+                "status": "skipped_fee_budget",
+                "items": [],
+            }
+        if overflow_plans:
+            store.add_audit_event(
+                "coin_ops_partial_or_skipped_fee_budget",
+                {
+                    "market_id": market.market_id,
+                    "spent_today_mojos": spent_today,
+                    "projected_mojos": projected_fee,
+                    "max_daily_fee_budget_mojos": program.coin_ops_max_daily_fee_budget_mojos,
+                    "overflow_plans": [
+                        {
+                            "op_type": p.op_type,
+                            "size_base_units": p.size_base_units,
+                            "op_count": p.op_count,
+                            "reason": p.reason,
+                        }
+                        for p in overflow_plans
+                    ],
+                },
+                market_id=market.market_id,
+            )
+            execution_items = execution.get("items", [])
+            execution_items.extend(
+                [
+                    {
+                        "op_type": p.op_type,
+                        "size_base_units": p.size_base_units,
+                        "op_count": p.op_count,
+                        "status": "skipped",
+                        "reason": "fee_budget_guard",
+                        "operation_id": None,
+                    }
+                    for p in overflow_plans
+                ]
+            )
+            execution["items"] = execution_items
+        execution["planned_count"] = len(plans)
+        store.add_audit_event(
+            "coin_ops_plan",
+            {
+                "market_id": market.market_id,
+                "projected_fee_mojos": projected_fee,
+                "spent_today_mojos": spent_today,
+                "plans": [
+                    {
+                        "op_type": p.op_type,
+                        "size_base_units": p.size_base_units,
+                        "op_count": p.op_count,
+                        "reason": p.reason,
+                    }
+                    for p in plans
+                ],
+                "execution": execution,
+            },
+            market_id=market.market_id,
+        )
+        for item in execution.get("items", []):
+            event_type = f"coin_op_{item.get('status', 'unknown')}"
+            op_type = str(item.get("op_type"))
+            per_op_fee = (
+                program.coin_ops_split_fee_mojos
+                if op_type == "split"
+                else program.coin_ops_combine_fee_mojos
+            )
+            op_count = int(item.get("op_count", 0))
+            fee_mojos = per_op_fee * op_count if item.get("status") == "executed" else 0
+            store.add_audit_event(
+                event_type,
+                {
+                    "market_id": market.market_id,
+                    "op_type": op_type,
+                    "size_base_units": item.get("size_base_units"),
+                    "op_count": op_count,
+                    "reason": item.get("reason"),
+                    "operation_id": item.get("operation_id"),
+                    "fee_mojos": fee_mojos,
+                },
+                market_id=market.market_id,
+            )
+            store.add_coin_op_ledger_entry(
+                market_id=market.market_id,
+                op_type=op_type,
+                op_count=op_count,
+                fee_mojos=fee_mojos,
+                status=str(item.get("status", "unknown")),
+                reason=str(item.get("reason", "")),
+                operation_id=(
+                    str(item.get("operation_id")) if item.get("operation_id") is not None else None
+                ),
+            )
+    return result
+
+
 def run_once(
     program_path: Path,
     markets_path: Path,
@@ -964,412 +1398,26 @@ def run_once(
             if not market.enabled:
                 continue
             markets_processed += 1
-            signer_selection = resolve_market_key(
-                market,
-                allowed_keys,
-                signer_key_registry=program.signer_key_registry,
-                required_network=program.app_network,
-            )
-            store.add_price_policy_snapshot(
-                market.market_id,
-                {
-                    "mode": market.mode,
-                    "base_asset": market.base_asset,
-                    "quote_asset": market.quote_asset,
-                    "quote_asset_type": market.quote_asset_type,
-                },
-                source="startup",
-            )
-            persisted = store.get_alert_state(market.market_id)
-            state, event = evaluate_low_inventory_alert(
-                now=now,
+            mr = _process_single_market(
+                market=market,
                 program=program,
-                market=market,
-                state=AlertState(
-                    is_low=persisted.is_low,
-                    last_alert_at=persisted.last_alert_at,
-                ),
-            )
-            store.upsert_alert_state(
-                StoredAlertState(
-                    market_id=market.market_id,
-                    is_low=state.is_low,
-                    last_alert_at=state.last_alert_at,
-                )
-            )
-            if event:
-                payload = {
-                    "event": "low_inventory_alert",
-                    "market_id": event.market_id,
-                    "ticker": event.ticker,
-                    "remaining_amount": event.remaining_amount,
-                    "receive_address": event.receive_address,
-                    "reason": event.reason,
-                }
-                print(json.dumps(payload))
-                store.add_audit_event("low_inventory_alert", payload, market_id=market.market_id)
-                send_pushover_alert(program, event)
-
-            # Offer lifecycle transitions from live Dexie status snapshots.
-            try:
-                offers = dexie.get_offers(market.base_asset, market.quote_asset)
-            except Exception as exc:  # pragma: no cover - network dependent
-                cycle_error_count += 1
-                store.add_audit_event(
-                    "dexie_offers_error",
-                    {"market_id": market.market_id, "error": str(exc)},
-                    market_id=market.market_id,
-                )
-                offers = []
-            for offer in offers:
-                offer_id = str(offer.get("id", ""))
-                if not offer_id:
-                    continue
-                status = int(offer.get("status", -1))
-                coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer)
-                signal_source = "dexie_status_fallback"
-                coinset_confirmed_tx_ids: list[str] = []
-                coinset_mempool_tx_ids: list[str] = []
-                if coinset_tx_ids:
-                    tx_signal_state = store.get_tx_signal_state(coinset_tx_ids)
-                    for tx_id in coinset_tx_ids:
-                        signal = tx_signal_state.get(tx_id, {})
-                        if signal.get("tx_block_confirmed_at"):
-                            coinset_confirmed_tx_ids.append(tx_id)
-                            continue
-                        if signal.get("mempool_observed_at"):
-                            coinset_mempool_tx_ids.append(tx_id)
-                if coinset_confirmed_tx_ids and status != 3:
-                    transition = apply_offer_signal(
-                        OfferLifecycleState.OPEN, OfferSignal.TX_CONFIRMED
-                    )
-                    signal_source = "coinset_webhook"
-                elif coinset_mempool_tx_ids:
-                    transition = apply_offer_signal(
-                        OfferLifecycleState.OPEN, OfferSignal.MEMPOOL_SEEN
-                    )
-                    signal_source = "coinset_mempool"
-                elif status == 4:
-                    transition = apply_offer_signal(
-                        OfferLifecycleState.OPEN, OfferSignal.TX_CONFIRMED
-                    )
-                elif status == 6:
-                    transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.EXPIRED)
-                else:
-                    transition = apply_offer_signal(
-                        OfferLifecycleState.OPEN, OfferSignal.MEMPOOL_SEEN
-                    )
-                store.upsert_offer_state(
-                    offer_id=offer_id,
-                    market_id=market.market_id,
-                    state=transition.new_state.value,
-                    last_seen_status=status,
-                )
-                store.add_audit_event(
-                    "offer_lifecycle_transition",
-                    {
-                        "offer_id": offer_id,
-                        "market_id": market.market_id,
-                        "old_state": transition.old_state.value,
-                        "new_state": transition.new_state.value,
-                        "signal": transition.signal.value,
-                        "action": transition.action,
-                        "reason": transition.reason,
-                        "dexie_status": status,
-                        "signal_source": signal_source,
-                        "coinset_tx_ids": coinset_tx_ids,
-                        "coinset_confirmed_tx_ids": coinset_confirmed_tx_ids,
-                        "coinset_mempool_tx_ids": coinset_mempool_tx_ids,
-                    },
-                    market_id=market.market_id,
-                )
-            cancel_policy = _execute_cancel_policy_for_market(
-                market=market,
-                offers=offers,
-                runtime_dry_run=program.runtime_dry_run,
-                current_xch_price_usd=xch_price_usd,
-                previous_xch_price_usd=previous_xch_price_usd,
-                dexie=dexie,
-                store=store,
-            )
-            if bool(cancel_policy.get("triggered", False)):
-                cancel_triggered_count += 1
-            cancel_planned_total += int(cancel_policy.get("planned_count", 0))
-            cancel_executed_total += int(cancel_policy.get("executed_count", 0))
-            store.add_audit_event(
-                "offer_cancel_policy",
-                {
-                    "market_id": market.market_id,
-                    "eligible": cancel_policy["eligible"],
-                    "triggered": cancel_policy["triggered"],
-                    "reason": cancel_policy["reason"],
-                    "move_bps": cancel_policy["move_bps"],
-                    "threshold_bps": cancel_policy["threshold_bps"],
-                    "planned_count": cancel_policy["planned_count"],
-                    "executed_count": cancel_policy["executed_count"],
-                    "items": cancel_policy["items"],
-                },
-                market_id=market.market_id,
-            )
-
-            # Ladder-aware coin ops planning from market config.
-            sell_ladder = market.ladders.get("sell", [])
-            ladder_sizes = [e.size_base_units for e in sell_ladder]
-            wallet_coins = wallet.list_asset_coins_base_units(
-                asset_id=market.base_asset,
-                key_id=market.signer_key_id,
-                receive_address=market.receive_address,
-                network=program.app_network,
-            )
-            if wallet_coins:
-                bucket_counts = compute_bucket_counts_from_coins(
-                    coin_amounts_base_units=wallet_coins,
-                    ladder_sizes=ladder_sizes,
-                )
-                store.add_audit_event(
-                    "inventory_bucket_scan",
-                    {
-                        "market_id": market.market_id,
-                        "source": "wallet_adapter",
-                        "bucket_counts": bucket_counts,
-                        "coin_count": len(wallet_coins),
-                    },
-                    market_id=market.market_id,
-                )
-            else:
-                bucket_counts = dict(market.inventory.bucket_counts)
-                store.add_audit_event(
-                    "inventory_bucket_scan",
-                    {
-                        "market_id": market.market_id,
-                        "source": "config_seed_or_no_asset_scan",
-                        "asset_id": market.base_asset,
-                        "bucket_counts": bucket_counts,
-                    },
-                    market_id=market.market_id,
-                )
-            strategy_config = _strategy_config_from_market(market)
-            strategy_actions = evaluate_market(
-                state=_strategy_state_from_bucket_counts(
-                    bucket_counts,
-                    xch_price_usd=xch_price_usd,
-                ),
-                config=strategy_config,
-                clock=now,
-            )
-            _daemon_logger.debug(
-                (
-                    "strategy_evaluated market_id=%s pair=%s bucket_counts=%s "
-                    "xch_price_usd=%s action_count=%s"
-                ),
-                market.market_id,
-                strategy_config.pair,
-                bucket_counts,
-                xch_price_usd,
-                len(strategy_actions),
-            )
-            strategy_actions = _inject_reseed_action_if_no_active_offers(
-                strategy_actions=strategy_actions,
-                strategy_config=strategy_config,
-                market=market,
-                store=store,
-                xch_price_usd=xch_price_usd,
-                clock=now,
-            )
-            _daemon_logger.debug(
-                "strategy_after_reseed market_id=%s action_count=%s reseed_injected=%s",
-                market.market_id,
-                len(strategy_actions),
-                any(str(action.reason) == "no_active_offer_reseed" for action in strategy_actions),
-            )
-            store.add_audit_event(
-                "strategy_actions_planned",
-                {
-                    "market_id": market.market_id,
-                    "xch_price_usd": xch_price_usd,
-                    "actions": [
-                        {
-                            "size": action.size,
-                            "repeat": action.repeat,
-                            "pair": action.pair,
-                            "expiry_unit": action.expiry_unit,
-                            "expiry_value": action.expiry_value,
-                            "cancel_after_create": action.cancel_after_create,
-                            "reason": action.reason,
-                            "target_spread_bps": action.target_spread_bps,
-                        }
-                        for action in strategy_actions
-                    ],
-                },
-                market_id=market.market_id,
-            )
-            offer_execution = _execute_strategy_actions(
-                market=market,
-                strategy_actions=strategy_actions,
-                runtime_dry_run=program.runtime_dry_run,
-                xch_price_usd=xch_price_usd,
+                allowed_keys=allowed_keys,
                 dexie=dexie,
                 splash=splash,
-                publish_venue=program.offer_publish_venue,
+                wallet=wallet,
                 store=store,
-                app_network=program.app_network,
-                signer_key_registry=program.signer_key_registry,
-                program=program,
+                xch_price_usd=xch_price_usd,
+                previous_xch_price_usd=previous_xch_price_usd,
+                now=now,
+                state_dir=state_dir,
             )
-            strategy_planned_total += int(offer_execution["planned_count"])
-            strategy_executed_total += int(offer_execution["executed_count"])
-            store.add_audit_event(
-                "strategy_offer_execution",
-                {
-                    "market_id": market.market_id,
-                    "planned_count": offer_execution["planned_count"],
-                    "executed_count": offer_execution["executed_count"],
-                    "items": offer_execution["items"],
-                },
-                market_id=market.market_id,
-            )
-            buckets = [
-                BucketSpec(
-                    size_base_units=e.size_base_units,
-                    target_count=e.target_count,
-                    split_buffer_count=e.split_buffer_count,
-                    combine_when_excess_factor=e.combine_when_excess_factor,
-                    current_count=int(bucket_counts.get(e.size_base_units, 0)),
-                )
-                for e in sell_ladder
-            ]
-            plans = plan_coin_ops(
-                buckets=buckets,
-                max_operations_per_run=program.coin_ops_max_operations_per_run,
-                max_fee_budget_mojos=program.coin_ops_max_daily_fee_budget_mojos,
-                split_fee_mojos=program.coin_ops_split_fee_mojos,
-                combine_fee_mojos=program.coin_ops_combine_fee_mojos,
-            )
-            if plans:
-                projected_fee = projected_coin_ops_fee_mojos(
-                    plans=plans,
-                    split_fee_mojos=program.coin_ops_split_fee_mojos,
-                    combine_fee_mojos=program.coin_ops_combine_fee_mojos,
-                )
-                spent_today = store.get_daily_fee_spent_mojos_utc()
-                executable_plans, overflow_plans = partition_plans_by_budget(
-                    plans=plans,
-                    split_fee_mojos=program.coin_ops_split_fee_mojos,
-                    combine_fee_mojos=program.coin_ops_combine_fee_mojos,
-                    spent_today_mojos=spent_today,
-                    max_daily_fee_budget_mojos=program.coin_ops_max_daily_fee_budget_mojos,
-                )
-                if executable_plans:
-                    execution = wallet.execute_coin_ops(
-                        plans=executable_plans,
-                        dry_run=program.runtime_dry_run,
-                        key_id=signer_selection.key_id,
-                        network=program.app_network,
-                        market_id=market.market_id,
-                        asset_id=market.base_asset,
-                        receive_address=market.receive_address,
-                        onboarding_selection_path=state_dir / "key_onboarding.json",
-                        signer_fingerprint=signer_selection.fingerprint,
-                    )
-                else:
-                    execution = {
-                        "dry_run": program.runtime_dry_run,
-                        "planned_count": 0,
-                        "executed_count": 0,
-                        "status": "skipped_fee_budget",
-                        "items": [],
-                    }
-                if overflow_plans:
-                    store.add_audit_event(
-                        "coin_ops_partial_or_skipped_fee_budget",
-                        {
-                            "market_id": market.market_id,
-                            "spent_today_mojos": spent_today,
-                            "projected_mojos": projected_fee,
-                            "max_daily_fee_budget_mojos": program.coin_ops_max_daily_fee_budget_mojos,
-                            "overflow_plans": [
-                                {
-                                    "op_type": p.op_type,
-                                    "size_base_units": p.size_base_units,
-                                    "op_count": p.op_count,
-                                    "reason": p.reason,
-                                }
-                                for p in overflow_plans
-                            ],
-                        },
-                        market_id=market.market_id,
-                    )
-                    execution_items = execution.get("items", [])
-                    execution_items.extend(
-                        [
-                            {
-                                "op_type": p.op_type,
-                                "size_base_units": p.size_base_units,
-                                "op_count": p.op_count,
-                                "status": "skipped",
-                                "reason": "fee_budget_guard",
-                                "operation_id": None,
-                            }
-                            for p in overflow_plans
-                        ]
-                    )
-                    execution["items"] = execution_items
-                execution["planned_count"] = len(plans)
-                store.add_audit_event(
-                    "coin_ops_plan",
-                    {
-                        "market_id": market.market_id,
-                        "projected_fee_mojos": projected_fee,
-                        "spent_today_mojos": spent_today,
-                        "plans": [
-                            {
-                                "op_type": p.op_type,
-                                "size_base_units": p.size_base_units,
-                                "op_count": p.op_count,
-                                "reason": p.reason,
-                            }
-                            for p in plans
-                        ],
-                        "execution": execution,
-                    },
-                    market_id=market.market_id,
-                )
-                for item in execution.get("items", []):
-                    event_type = f"coin_op_{item.get('status', 'unknown')}"
-                    op_type = str(item.get("op_type"))
-                    per_op_fee = (
-                        program.coin_ops_split_fee_mojos
-                        if op_type == "split"
-                        else program.coin_ops_combine_fee_mojos
-                    )
-                    op_count = int(item.get("op_count", 0))
-                    fee_mojos = per_op_fee * op_count if item.get("status") == "executed" else 0
-                    store.add_audit_event(
-                        event_type,
-                        {
-                            "market_id": market.market_id,
-                            "op_type": op_type,
-                            "size_base_units": item.get("size_base_units"),
-                            "op_count": op_count,
-                            "reason": item.get("reason"),
-                            "operation_id": item.get("operation_id"),
-                            "fee_mojos": fee_mojos,
-                        },
-                        market_id=market.market_id,
-                    )
-                    store.add_coin_op_ledger_entry(
-                        market_id=market.market_id,
-                        op_type=op_type,
-                        op_count=op_count,
-                        fee_mojos=fee_mojos,
-                        status=str(item.get("status", "unknown")),
-                        reason=str(item.get("reason", "")),
-                        operation_id=(
-                            str(item.get("operation_id"))
-                            if item.get("operation_id") is not None
-                            else None
-                        ),
-                    )
+            cycle_error_count += mr.cycle_errors
+            strategy_planned_total += mr.strategy_planned
+            strategy_executed_total += mr.strategy_executed
+            if mr.cancel_triggered:
+                cancel_triggered_count += 1
+            cancel_planned_total += mr.cancel_planned
+            cancel_executed_total += mr.cancel_executed
         duration_ms = int((time.monotonic() - started_at) * 1000)
         store.add_audit_event(
             "daemon_cycle_summary",

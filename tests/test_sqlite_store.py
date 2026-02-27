@@ -150,3 +150,216 @@ def test_list_recent_audit_events_non_positive_limit_returns_empty(tmp_path: Pat
         assert store.list_recent_audit_events(limit=-5) == []
     finally:
         store.close()
+
+
+# ---------------------------------------------------------------------------
+# upsert_offer_state / list_offer_states
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_offer_state_insert_and_list(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.upsert_offer_state(
+            offer_id="offer-1", market_id="m1", state="open", last_seen_status=4
+        )
+        rows = store.list_offer_states()
+        assert len(rows) == 1
+        assert rows[0]["offer_id"] == "offer-1"
+        assert rows[0]["market_id"] == "m1"
+        assert rows[0]["state"] == "open"
+        assert rows[0]["last_seen_status"] == 4
+    finally:
+        store.close()
+
+
+def test_upsert_offer_state_updates_existing(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.upsert_offer_state(
+            offer_id="offer-1", market_id="m1", state="open", last_seen_status=4
+        )
+        store.upsert_offer_state(
+            offer_id="offer-1", market_id="m1", state="expired", last_seen_status=6
+        )
+        rows = store.list_offer_states()
+        assert len(rows) == 1
+        assert rows[0]["state"] == "expired"
+        assert rows[0]["last_seen_status"] == 6
+    finally:
+        store.close()
+
+
+def test_upsert_offer_state_null_last_seen_status(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.upsert_offer_state(
+            offer_id="offer-2", market_id="m1", state="unknown", last_seen_status=None
+        )
+        rows = store.list_offer_states()
+        assert len(rows) == 1
+        assert rows[0]["last_seen_status"] is None
+    finally:
+        store.close()
+
+
+def test_list_offer_states_filters_by_market_id(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.upsert_offer_state(offer_id="o1", market_id="m1", state="open", last_seen_status=4)
+        store.upsert_offer_state(offer_id="o2", market_id="m2", state="open", last_seen_status=4)
+        store.upsert_offer_state(offer_id="o3", market_id="m1", state="expired", last_seen_status=6)
+        m1_rows = store.list_offer_states(market_id="m1")
+        assert len(m1_rows) == 2
+        assert all(r["market_id"] == "m1" for r in m1_rows)
+        m2_rows = store.list_offer_states(market_id="m2")
+        assert len(m2_rows) == 1
+    finally:
+        store.close()
+
+
+def test_list_offer_states_respects_limit(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        for i in range(5):
+            store.upsert_offer_state(
+                offer_id=f"o{i}", market_id="m1", state="open", last_seen_status=4
+            )
+        assert len(store.list_offer_states(limit=3)) == 3
+        assert store.list_offer_states(limit=0) == []
+        assert store.list_offer_states(limit=-1) == []
+    finally:
+        store.close()
+
+
+def test_list_offer_states_orders_by_updated_at_desc(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.upsert_offer_state(offer_id="first", market_id="m1", state="open", last_seen_status=4)
+        store.upsert_offer_state(
+            offer_id="second", market_id="m1", state="open", last_seen_status=4
+        )
+        rows = store.list_offer_states()
+        assert rows[0]["offer_id"] == "second"
+        assert rows[1]["offer_id"] == "first"
+    finally:
+        store.close()
+
+
+# ---------------------------------------------------------------------------
+# add_price_policy_snapshot
+# ---------------------------------------------------------------------------
+
+
+def test_add_price_policy_snapshot_roundtrip(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.add_price_policy_snapshot("m1", {"spread_bps": 100}, source="startup")
+        store.add_price_policy_snapshot("m1", {"spread_bps": 200}, source="update")
+        rows = store.conn.execute(
+            "SELECT market_id, source, payload_json FROM price_policy_history ORDER BY id"
+        ).fetchall()
+        assert len(rows) == 2
+        assert rows[0]["source"] == "startup"
+        assert rows[1]["source"] == "update"
+    finally:
+        store.close()
+
+
+# ---------------------------------------------------------------------------
+# get_latest_xch_price_snapshot
+# ---------------------------------------------------------------------------
+
+
+def test_get_latest_xch_price_snapshot_none_when_empty(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        assert store.get_latest_xch_price_snapshot() is None
+    finally:
+        store.close()
+
+
+def test_get_latest_xch_price_snapshot_returns_latest(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.add_audit_event("xch_price_snapshot", {"price_usd": 25.5})
+        store.add_audit_event("xch_price_snapshot", {"price_usd": 30.0})
+        assert store.get_latest_xch_price_snapshot() == 30.0
+    finally:
+        store.close()
+
+
+def test_get_latest_xch_price_snapshot_ignores_non_price_events(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.add_audit_event("other_event", {"price_usd": 99.0})
+        assert store.get_latest_xch_price_snapshot() is None
+    finally:
+        store.close()
+
+
+def test_get_latest_xch_price_snapshot_rejects_non_positive(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.add_audit_event("xch_price_snapshot", {"price_usd": 0})
+        assert store.get_latest_xch_price_snapshot() is None
+        store.add_audit_event("xch_price_snapshot", {"price_usd": -5.0})
+        assert store.get_latest_xch_price_snapshot() is None
+    finally:
+        store.close()
+
+
+def test_get_latest_xch_price_snapshot_handles_malformed_payload(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.add_audit_event("xch_price_snapshot", {"no_price_key": True})
+        assert store.get_latest_xch_price_snapshot() is None
+    finally:
+        store.close()
+
+
+# ---------------------------------------------------------------------------
+# add_coin_op_ledger_entry
+# ---------------------------------------------------------------------------
+
+
+def test_add_coin_op_ledger_entry_persists_all_fields(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.add_coin_op_ledger_entry(
+            market_id="m1",
+            op_type="split",
+            op_count=3,
+            fee_mojos=500,
+            status="executed",
+            reason="normal",
+            operation_id="op-abc",
+        )
+        row = store.conn.execute("SELECT * FROM coin_op_ledger ORDER BY id DESC LIMIT 1").fetchone()
+        assert row["market_id"] == "m1"
+        assert row["op_type"] == "split"
+        assert row["op_count"] == 3
+        assert row["fee_mojos"] == 500
+        assert row["status"] == "executed"
+        assert row["reason"] == "normal"
+        assert row["operation_id"] == "op-abc"
+    finally:
+        store.close()
+
+
+def test_add_coin_op_ledger_entry_null_operation_id(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.add_coin_op_ledger_entry(
+            market_id="m1",
+            op_type="combine",
+            op_count=1,
+            fee_mojos=0,
+            status="skipped",
+            reason="dry_run",
+            operation_id=None,
+        )
+        row = store.conn.execute("SELECT * FROM coin_op_ledger ORDER BY id DESC LIMIT 1").fetchone()
+        assert row["operation_id"] is None
+    finally:
+        store.close()

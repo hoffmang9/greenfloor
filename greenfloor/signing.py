@@ -21,6 +21,8 @@ _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK: dict[str, bytes] = {
     "testnet11": bytes.fromhex("37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"),
 }
 
+_XCH_LIKE_ASSETS: frozenset[str] = frozenset({"", "xch", "txch", "1"})
+
 
 def _int_to_clvm_bytes(value: int) -> bytes:
     if value <= 0:
@@ -427,6 +429,50 @@ def _load_master_private_key(keyring_yaml_path: str, key_id: str) -> tuple[Any |
 
 
 # ---------------------------------------------------------------------------
+# Signing context
+# ---------------------------------------------------------------------------
+
+
+def _load_signing_context(
+    *,
+    sdk: Any,
+    keyring_yaml_path: str,
+    key_id: str,
+    network: str,
+    selected_coin_puzzle_hashes: set[bytes],
+) -> tuple[dict[bytes, Any] | None, bytes | None, str | None]:
+    """Load key material and derive synthetic keys for selected coins.
+
+    Returns (synthetic_sk_by_puzzle_hash, additional_data, None) on success,
+    or (None, None, error_reason) on failure.
+    """
+    master_private_key, key_error = _load_master_private_key(keyring_yaml_path, key_id)
+    if key_error:
+        return None, None, key_error
+    if master_private_key is None:
+        return None, None, "key_secrets_unavailable"
+
+    additional_data = _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK.get(network)
+    if additional_data is None:
+        return None, None, "unsupported_network_for_signing"
+
+    try:
+        master_sk = sdk.SecretKey.from_bytes(bytes(master_private_key))
+    except Exception as exc:
+        return None, None, f"master_key_conversion_error:{exc}"
+
+    synthetic_sk_by_puzzle_hash = _scan_synthetic_keys_for_puzzle_hashes(
+        sdk=sdk,
+        master_sk=master_sk,
+        selected_coin_puzzle_hashes=selected_coin_puzzle_hashes,
+    )
+    if synthetic_sk_by_puzzle_hash is None:
+        return None, None, "derivation_scan_failed_for_selected_coin"
+
+    return synthetic_sk_by_puzzle_hash, additional_data, None
+
+
+# ---------------------------------------------------------------------------
 # Spend-bundle construction & signing
 # ---------------------------------------------------------------------------
 
@@ -468,21 +514,6 @@ def _build_spend_bundle(
     receive_address: str,
 ) -> tuple[str | None, str | None]:
     """Build and sign a spend bundle. Returns (hex, None) or (None, error)."""
-    master_private_key, key_error = _load_master_private_key(keyring_yaml_path, key_id)
-    if key_error:
-        return None, key_error
-    if master_private_key is None:
-        return None, "key_secrets_unavailable"
-
-    additional_data = _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK.get(network)
-    if additional_data is None:
-        return None, "unsupported_network_for_signing"
-
-    try:
-        master_sk = sdk.SecretKey.from_bytes(bytes(master_private_key))
-    except Exception as exc:
-        return None, f"master_key_conversion_error:{exc}"
-
     selected_coin_puzzle_hashes: set[bytes] = set()
     for item in payload.get("selected_coins", []):
         try:
@@ -494,13 +525,17 @@ def _build_spend_bundle(
         except Exception as exc:
             return None, f"invalid_selected_coin_puzzle_hash:{exc}"
 
-    synthetic_sk_by_puzzle_hash = _scan_synthetic_keys_for_puzzle_hashes(
+    synthetic_sk_by_puzzle_hash, additional_data, ctx_err = _load_signing_context(
         sdk=sdk,
-        master_sk=master_sk,
+        keyring_yaml_path=keyring_yaml_path,
+        key_id=key_id,
+        network=network,
         selected_coin_puzzle_hashes=selected_coin_puzzle_hashes,
     )
-    if synthetic_sk_by_puzzle_hash is None:
-        return None, "derivation_scan_failed_for_selected_coin"
+    if ctx_err is not None:
+        return None, ctx_err
+    assert synthetic_sk_by_puzzle_hash is not None
+    assert additional_data is not None
 
     try:
         clvm = sdk.Clvm()
@@ -554,7 +589,7 @@ def _build_spend_bundle(
 
 def _asset_id_to_sdk_id(*, sdk: Any, asset_id: str) -> Any:
     raw = asset_id.strip().lower()
-    if raw in {"", "xch", "txch", "1"}:
+    if raw in _XCH_LIKE_ASSETS:
         return sdk.Id.xch()
     return sdk.Id.existing(_hex_to_bytes(raw))
 
@@ -621,7 +656,6 @@ def _build_offer_spend_bundle(
     offer_amount: int,
     request_asset_id: str,
     request_amount: int,
-    dry_run: bool,
 ) -> tuple[str | None, str | None]:
     if offer_amount <= 0 or request_amount <= 0:
         return None, "invalid_offer_or_request_amount"
@@ -631,7 +665,7 @@ def _build_offer_spend_bundle(
     offered_selected_xch: list[Any] = []
     offered_selected_cats: list[Any] = []
 
-    if offer_asset in {"", "xch", "txch", "1"}:
+    if offer_asset in _XCH_LIKE_ASSETS:
         try:
             xch_coins = _list_unspent_xch_coins(
                 sdk=sdk,
@@ -691,31 +725,20 @@ def _build_offer_spend_bundle(
     if offered_total < offer_amount:
         return None, "insufficient_offer_coin_total"
 
-    master_private_key, key_error = _load_master_private_key(keyring_yaml_path, key_id)
-    if key_error:
-        return None, key_error
-    if master_private_key is None:
-        return None, "key_secrets_unavailable"
-
-    additional_data = _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK.get(network)
-    if additional_data is None:
-        return None, "unsupported_network_for_signing"
-
-    try:
-        master_sk = sdk.SecretKey.from_bytes(bytes(master_private_key))
-    except Exception as exc:
-        return None, f"master_key_conversion_error:{exc}"
-
     selected_coin_puzzle_hashes = {
         _hex_to_bytes(str(item["p2_puzzle_hash"])) for item in selected_coin_entries
     }
-    synthetic_sk_by_puzzle_hash = _scan_synthetic_keys_for_puzzle_hashes(
+    synthetic_sk_by_puzzle_hash, additional_data, ctx_err = _load_signing_context(
         sdk=sdk,
-        master_sk=master_sk,
+        keyring_yaml_path=keyring_yaml_path,
+        key_id=key_id,
+        network=network,
         selected_coin_puzzle_hashes=selected_coin_puzzle_hashes,
     )
-    if synthetic_sk_by_puzzle_hash is None:
-        return None, "derivation_scan_failed_for_selected_coin"
+    if ctx_err is not None:
+        return None, ctx_err
+    assert synthetic_sk_by_puzzle_hash is not None
+    assert additional_data is not None
 
     try:
         clvm = sdk.Clvm()
@@ -726,7 +749,7 @@ def _build_offer_spend_bundle(
             spends.add_cat(cat)
 
         request_asset = request_asset_id.strip().lower()
-        if request_asset not in {"xch", "txch", "1", ""}:
+        if request_asset not in _XCH_LIKE_ASSETS:
             return None, "unsupported_request_asset_for_primary_offer_path"
 
         # Sage-style offer flow:
@@ -922,7 +945,6 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
             offer_amount=offer_amount,
             request_asset_id=request_asset_id,
             request_amount=request_amount,
-            dry_run=bool(payload.get("dry_run", False)),
         )
         if spend_bundle_hex is None:
             return {"status": "skipped", "reason": f"signing_failed:{error}"}
@@ -932,7 +954,7 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
             "spend_bundle_hex": spend_bundle_hex,
         }
 
-    if asset_id not in {"xch", "1", ""}:
+    if asset_id not in _XCH_LIKE_ASSETS:
         return {"status": "skipped", "reason": "asset_not_supported_yet"}
 
     size_base_units = int(plan.get("size_base_units", 0))
