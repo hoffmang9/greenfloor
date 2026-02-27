@@ -8,10 +8,12 @@
 - Added deterministic coverage for reseed-state age handling in `tests/test_daemon_offer_execution.py`:
   - recent `mempool_observed` state suppresses reseed,
   - stale `mempool_observed` state permits reseed injection.
-- Standardized ECO market naming and label compatibility:
+- Standardized ECO market naming:
   - `config/markets.yaml` active IDs normalized to `eco1812022_sell_xch` and `eco1812022_sell_wusdbc`.
-  - `config/cats.yaml` now includes `aliases: ["CARBON22"]` for `ECO.181.2022` to preserve Cloud Wallet label resolution in mixed-label vault metadata.
   - test coverage and docs updated to reference `ECO.181.2022` naming.
+- Removed temporary `CARBON22` alias dependency and replaced it with a code-level resolver fallback:
+  - `greenfloor/cli/manager.py` now reads recent successful `strategy_offer_execution` events for the target market and reuses `resolved_base_asset_id` / `resolved_quote_asset_id` as canonical Cloud Wallet global-id hints.
+  - this keeps CAT resolution functional even when vault display labels differ from current ticker naming, without requiring legacy alias strings in `config/cats.yaml`.
 - Testnet overlay guardrail update:
   - disabled `tdbx_txch_sell` in `config/testnet-markets.yaml` (repo + John-Deere runtime copies) to keep mainnet canary isolation clean.
 - John-Deere canary evidence after deploy/restart:

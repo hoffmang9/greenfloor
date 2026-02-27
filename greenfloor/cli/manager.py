@@ -900,6 +900,7 @@ def _resolve_cloud_wallet_asset_id(
     wallet: CloudWalletAdapter,
     canonical_asset_id: str,
     symbol_hint: str | None = None,
+    global_id_hint: str | None = None,
 ) -> str:
     raw = canonical_asset_id.strip()
     if not raw:
@@ -955,6 +956,9 @@ query resolveWalletAssets($walletId: ID!) {
             )
 
     if _canonical_is_xch(raw):
+        hinted = str(global_id_hint or "").strip()
+        if hinted and hinted in set(crypto_asset_ids):
+            return hinted
         if len(crypto_asset_ids) == 1:
             return crypto_asset_ids[0]
         if len(crypto_asset_ids) == 0:
@@ -965,6 +969,11 @@ query resolveWalletAssets($walletId: ID!) {
         raise RuntimeError(
             f"cloud_wallet_asset_resolution_failed:no_wallet_cat_asset_candidates_for:{raw}"
         )
+    hinted = str(global_id_hint or "").strip()
+    if hinted:
+        cat_asset_ids = {str(row.get("asset_id", "")).strip() for row in cat_assets}
+        if hinted in cat_asset_ids:
+            return hinted
 
     canonical_hex = raw.lower()
     preferred_labels: list[str] = []
@@ -1037,16 +1046,20 @@ def _resolve_cloud_wallet_offer_asset_ids(
     quote_asset_id: str,
     base_symbol_hint: str | None = None,
     quote_symbol_hint: str | None = None,
+    base_global_id_hint: str | None = None,
+    quote_global_id_hint: str | None = None,
 ) -> tuple[str, str]:
     resolved_base = _resolve_cloud_wallet_asset_id(
         wallet=wallet,
         canonical_asset_id=base_asset_id,
         symbol_hint=(base_symbol_hint or "").strip() or str(base_asset_id).strip(),
+        global_id_hint=(base_global_id_hint or "").strip() or None,
     )
     resolved_quote = _resolve_cloud_wallet_asset_id(
         wallet=wallet,
         canonical_asset_id=quote_asset_id,
         symbol_hint=(quote_symbol_hint or "").strip() or str(quote_asset_id).strip(),
+        global_id_hint=(quote_global_id_hint or "").strip() or None,
     )
     if (
         resolved_base == resolved_quote
@@ -1059,6 +1072,34 @@ def _resolve_cloud_wallet_offer_asset_ids(
             "cloud_wallet_asset_resolution_failed:resolved_assets_collide_for_non_xch_pair"
         )
     return resolved_base, resolved_quote
+
+
+def _recent_market_resolved_asset_id_hints(
+    *,
+    program_home_dir: str,
+    market_id: str,
+) -> tuple[str | None, str | None]:
+    db_path = (Path(program_home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
+    if not db_path.exists():
+        return None, None
+    store = SqliteStore(db_path)
+    try:
+        events = store.list_recent_audit_events(
+            event_types=["strategy_offer_execution"],
+            market_id=market_id,
+            limit=200,
+        )
+    finally:
+        store.close()
+    for event in events:
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        base_hint = str(payload.get("resolved_base_asset_id", "")).strip()
+        quote_hint = str(payload.get("resolved_quote_asset_id", "")).strip()
+        if base_hint.startswith("Asset_") and quote_hint.startswith("Asset_"):
+            return base_hint, quote_hint
+    return None, None
 
 
 def _parse_iso8601(value: str) -> dt.datetime | None:
@@ -2287,12 +2328,18 @@ def _build_and_post_offer_cloud_wallet(
         program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
     )
     wallet = _new_cloud_wallet_adapter(program)
+    base_global_hint, quote_global_hint = _recent_market_resolved_asset_id_hints(
+        program_home_dir=str(program.home_dir),
+        market_id=str(market.market_id),
+    )
     resolved_base_asset_id, resolved_quote_asset_id = _resolve_cloud_wallet_offer_asset_ids(
         wallet=wallet,
         base_asset_id=str(market.base_asset),
         quote_asset_id=str(market.quote_asset),
         base_symbol_hint=str(getattr(market, "base_symbol", "") or ""),
         quote_symbol_hint=str(getattr(market, "quote_asset", "") or ""),
+        base_global_id_hint=base_global_hint,
+        quote_global_id_hint=quote_global_hint,
     )
     db_path = (Path(program.home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
     store = SqliteStore(db_path)

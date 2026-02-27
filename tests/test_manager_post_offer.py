@@ -187,6 +187,90 @@ def test_resolve_cloud_wallet_asset_id_uses_local_catalog_hints_when_dexie_missi
     assert resolved == "Asset_carbon"
 
 
+def test_resolve_cloud_wallet_offer_asset_ids_uses_global_hints_without_label_match(
+    monkeypatch,
+) -> None:
+    base_cat = "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
+    quote_cat = "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d"
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        @staticmethod
+        def _graphql(*, query: str, variables: dict):
+            _ = query, variables
+            return {
+                "wallet": {
+                    "assets": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "assetId": "Asset_carbon",
+                                    "type": "CAT2",
+                                    "displayName": "Legacy Carbon Label",
+                                    "symbol": "",
+                                }
+                            },
+                            {
+                                "node": {
+                                    "assetId": "Asset_wusdc",
+                                    "type": "CAT2",
+                                    "displayName": "USD Coin",
+                                    "symbol": "",
+                                }
+                            },
+                        ]
+                    }
+                }
+            }
+
+    monkeypatch.setattr("greenfloor.cli.manager._dexie_lookup_token_for_cat_id", lambda **_: None)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._local_catalog_label_hints_for_asset_id", lambda **_: []
+    )
+
+    resolved_base, resolved_quote = manager_mod._resolve_cloud_wallet_offer_asset_ids(
+        wallet=cast(CloudWalletAdapter, _FakeWallet()),
+        base_asset_id=base_cat,
+        quote_asset_id=quote_cat,
+        base_symbol_hint="ECO.181.2022",
+        quote_symbol_hint="wUSDC.b",
+        base_global_id_hint="Asset_carbon",
+        quote_global_id_hint="Asset_wusdc",
+    )
+    assert resolved_base == "Asset_carbon"
+    assert resolved_quote == "Asset_wusdc"
+
+
+def test_recent_market_resolved_asset_id_hints_reads_strategy_execution(tmp_path: Path) -> None:
+    from greenfloor.storage.sqlite import SqliteStore
+
+    home_dir = tmp_path / "home"
+    db_path = home_dir / "db" / "greenfloor.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    store = SqliteStore(db_path)
+    try:
+        store.add_audit_event(
+            "strategy_offer_execution",
+            {
+                "market_id": "m1",
+                "resolved_base_asset_id": "Asset_base",
+                "resolved_quote_asset_id": "Asset_quote",
+            },
+            market_id="m1",
+        )
+    finally:
+        store.close()
+
+    base_hint, quote_hint = manager_mod._recent_market_resolved_asset_id_hints(
+        program_home_dir=str(home_dir),
+        market_id="m1",
+    )
+    assert base_hint == "Asset_base"
+    assert quote_hint == "Asset_quote"
+
+
 def test_format_json_output_pretty_mode_has_indentation() -> None:
     original = manager_mod._JSON_OUTPUT_COMPACT
     try:
