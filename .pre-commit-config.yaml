@@ -31,6 +31,6 @@ repos:
 
       - id: pytest
         name: pytest
-        entry: .venv/bin/pytest -q
+        entry: pytest -q
         language: system
         pass_filenames: false
