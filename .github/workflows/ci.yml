@@ -84,11 +84,14 @@ jobs:
           restore-keys: |
             pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-
 
-      - name: "Lint + Type-check + Test suite (pre-commit)"
+      - name: "Lint + Type-check (pre-commit)"
         env:
           PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
-          PYTEST_ADDOPTS: "-v --tb=short"
+          SKIP: pytest
         run: pre-commit run --all-files
+
+      - name: "Test suite (pytest)"
+        run: .venv/bin/pytest -v --tb=short
 
       - name: Resolve chia-wallet-sdk pinned commit
         if: matrix.os == 'ubuntu-latest'
