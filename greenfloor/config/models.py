@@ -48,9 +48,6 @@ class ProgramConfig:
     cloud_wallet_user_key_id: str = ""
     cloud_wallet_private_key_pem_path: str = ""
     cloud_wallet_vault_id: str = ""
-    cloud_wallet_kms_key_id: str = ""
-    cloud_wallet_kms_region: str = ""
-    cloud_wallet_kms_public_key_hex: str = ""
     app_log_level: str = "INFO"
     app_log_level_was_missing: bool = False
     signer_key_registry: dict[str, SignerKeyConfig] = field(default_factory=dict)
@@ -259,9 +256,6 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         cloud_wallet_user_key_id=str(cloud_wallet.get("user_key_id", "")).strip(),
         cloud_wallet_private_key_pem_path=str(cloud_wallet.get("private_key_pem_path", "")).strip(),
         cloud_wallet_vault_id=str(cloud_wallet.get("vault_id", "")).strip(),
-        cloud_wallet_kms_key_id=str(cloud_wallet.get("kms_key_id", "")).strip(),
-        cloud_wallet_kms_region=str(cloud_wallet.get("kms_region", "")).strip(),
-        cloud_wallet_kms_public_key_hex=str(cloud_wallet.get("kms_public_key_hex", "")).strip(),
         app_log_level=app_log_level,
         app_log_level_was_missing=app_log_level_was_missing,
         signer_key_registry=key_registry,

@@ -22,28 +22,18 @@ runtime:
 
 cloud_wallet:
   # Cloud Wallet GraphQL API origin only (manager appends /graphql).
+  # Example: https://api.vault.chia.net
   # Source: https://vault.chia.net/settings.json -> GRAPHQL_URI
-  base_url: "https://api.vault.chia.net"
+  base_url: ""
   # Settings -> API Keys -> Key Id (route: /settings/api-keys)
-  # Find at: https://vault.chia.net → Settings → API Keys → copy Key Id
   user_key_id: ""
   # Local path to downloaded API private key PEM.
   # Keep full PEM text in file (BEGIN/END PRIVATE KEY), not base64-only text.
-  private_key_pem_path: "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
+  # Recommended path: ~/.greenfloor/keys/cloud-wallet-user-auth-key.pem
+  private_key_pem_path: ""
   # Wallet GraphQL ID from target vault URL segment .../wallet/<ID>/...
-  # Find at: https://vault.chia.net → open vault → copy Wallet_... from URL
+  # Must be Wallet_... (do not use vaultLauncherId)
   vault_id: ""
-  # AWS KMS P-256 custody key for vault signing.
-  # Requires AWS credentials (~/.aws/credentials or env vars) on the host.
-  # Find at: AWS Console → KMS → Customer managed keys → copy ARN
-  kms_key_id: ""
-  # AWS region where the KMS key lives (e.g. us-west-2).
-  kms_region: ""
-  # Compressed P-256 public key hex (33 bytes). Derive with:
-  #   python -c "from greenfloor.adapters.kms_signer import \
-  #     get_public_key_compressed_hex; \
-  #     print(get_public_key_compressed_hex('<kms_key_id>', '<region>'))"
-  kms_public_key_hex: ""
 
 coin_ops:
   max_operations_per_run: 20

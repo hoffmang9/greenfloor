@@ -276,9 +276,6 @@ def _require_cloud_wallet_config(program) -> CloudWalletConfig:
         private_key_pem_path=program.cloud_wallet_private_key_pem_path,
         vault_id=program.cloud_wallet_vault_id,
         network=program.app_network,
-        kms_key_id=program.cloud_wallet_kms_key_id or None,
-        kms_region=program.cloud_wallet_kms_region or None,
-        kms_public_key_hex=program.cloud_wallet_kms_public_key_hex or None,
     )
 
 
@@ -2710,31 +2707,20 @@ def _coins_list(
     program_path: Path,
     asset: str | None,
     vault_id: str | None,
-    cat_id: str | None = None,
 ) -> int:
     program = load_program_config(program_path)
     wallet = _new_cloud_wallet_adapter(program)
-
-    # Allow querying a different vault than the one in program.yaml.
     if vault_id and vault_id.strip() and vault_id.strip() != wallet.vault_id:
-        override_config = _require_cloud_wallet_config(program)
-        wallet = CloudWalletAdapter(
-            CloudWalletConfig(
-                base_url=override_config.base_url,
-                user_key_id=override_config.user_key_id,
-                private_key_pem_path=override_config.private_key_pem_path,
-                vault_id=vault_id.strip(),
-                network=override_config.network,
-            )
+        raise ValueError(
+            "vault_id override is not supported with current cloud_wallet config; update program cloud_wallet.vault_id"
         )
-
-    effective_asset = (cat_id or asset or "").strip()
+    requested_asset = asset.strip() if asset else ""
     resolved_asset_filter: str | None = None
-    if effective_asset:
+    if requested_asset:
         resolved_asset_filter = _resolve_cloud_wallet_asset_id(
             wallet=wallet,
-            canonical_asset_id=effective_asset,
-            symbol_hint=effective_asset,
+            canonical_asset_id=requested_asset,
+            symbol_hint=requested_asset,
         )
     coins = wallet.list_coins(asset_id=resolved_asset_filter, include_pending=True)
     items = []
@@ -4059,7 +4045,6 @@ def main() -> None:
     p_coins_list = sub.add_parser("coins-list")
     p_coins_list.add_argument("--asset", default="")
     p_coins_list.add_argument("--vault-id", default="")
-    p_coins_list.add_argument("--cat-id", default="", help="hex CAT asset_id to filter by")
 
     p_coin_split = sub.add_parser("coin-split")
     split_market_group = p_coin_split.add_mutually_exclusive_group(required=True)
@@ -4231,7 +4216,6 @@ def main() -> None:
             program_path=Path(args.program_config),
             asset=args.asset or None,
             vault_id=args.vault_id or None,
-            cat_id=args.cat_id or None,
         )
     elif args.command == "coin-split":
         code = _coin_split(
