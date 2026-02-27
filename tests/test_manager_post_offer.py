@@ -89,7 +89,7 @@ def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypat
                                 "node": {
                                     "assetId": "Asset_carbon",
                                     "type": "CAT2",
-                                    "displayName": "CARBON22",
+                                    "displayName": "ECO.181.2022",
                                     "symbol": "",
                                 }
                             },
@@ -128,7 +128,7 @@ def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypat
         wallet=cast(CloudWalletAdapter, _FakeWallet()),
         base_asset_id=base_cat,
         quote_asset_id="wUSDC.b",
-        base_symbol_hint="CARBON22",
+        base_symbol_hint="ECO.181.2022",
         quote_symbol_hint="wUSDC.b",
     )
     assert base_asset == "Asset_carbon"
@@ -156,7 +156,7 @@ def test_resolve_cloud_wallet_asset_id_uses_local_catalog_hints_when_dexie_missi
                                 "node": {
                                     "assetId": "Asset_carbon",
                                     "type": "CAT2",
-                                    "displayName": "CARBON22",
+                                    "displayName": "ECO.181.2022",
                                     "symbol": "",
                                 }
                             },
@@ -176,7 +176,7 @@ def test_resolve_cloud_wallet_asset_id_uses_local_catalog_hints_when_dexie_missi
     monkeypatch.setattr("greenfloor.cli.manager._dexie_lookup_token_for_cat_id", lambda **_: None)
     monkeypatch.setattr(
         "greenfloor.cli.manager._local_catalog_label_hints_for_asset_id",
-        lambda *, canonical_asset_id: ["CARBON22"] if canonical_asset_id == base_cat else [],
+        lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == base_cat else [],
     )
 
     resolved = manager_mod._resolve_cloud_wallet_asset_id(

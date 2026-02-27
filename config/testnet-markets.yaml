@@ -1,7 +1,7 @@
 ---
 markets:
   - id: tdbx_txch_sell
-    enabled: true
+    enabled: false
     mode: sell_only
     base_asset: "d82dd03f8a9ad2f84353cd953c4de6b21dbaaf7de3ba3f4ddd9abe31ecba80ad"
     base_symbol: "TDBX"

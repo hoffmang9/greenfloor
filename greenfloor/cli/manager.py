@@ -373,6 +373,12 @@ def _local_catalog_label_hints_for_asset_id(*, canonical_asset_id: str) -> list[
                 value = str(row.get(key, "")).strip()
                 if value:
                     hints.append(value)
+            aliases = row.get("aliases")
+            if isinstance(aliases, list):
+                for alias in aliases:
+                    value = str(alias).strip()
+                    if value:
+                        hints.append(value)
     assets_rows = markets_payload.get("assets") if isinstance(markets_payload, dict) else None
     if isinstance(assets_rows, list):
         for row in assets_rows:
@@ -453,7 +459,7 @@ def _dexie_lookup_token_for_cat_id(*, canonical_cat_id_hex: str, network: str) -
             return row
 
     # Fallback: v3 ticker metadata often includes CAT tails not present in
-    # swap token listing (for example CARBON22 on some Dexie snapshots).
+    # swap token listing (for example ECO.181.2022 on some Dexie snapshots).
     tickers_payload = _fetch_json(f"{base_url}/v3/prices/tickers")
     ticker_rows: list[dict] = []
     if isinstance(tickers_payload, list):

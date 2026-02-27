@@ -74,6 +74,8 @@ cats:
       last_price_xch: "0.655387042578"
   - name: "Agricultural Reforestation Project 2022"
     base_symbol: "ECO.181.2022"
+    aliases:
+      - "CARBON22"
     asset_id: "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
     target_usd_per_unit: 7.75
     dexie:
