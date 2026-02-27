@@ -33,6 +33,7 @@ jobs:
       - name: Create venv and install dev dependencies
         run: |
           python -m venv .venv
+          export PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH"
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
