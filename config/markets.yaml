@@ -58,6 +58,8 @@ markets:
       side: "sell"
       fixed_quote_per_base: 7.75
       slippage_bps: 25
+      strategy_offer_expiry_unit: "hours"
+      strategy_offer_expiry_value: 2
     inventory:
       low_watermark_base_units: 500
       low_inventory_alert_threshold_base_units: null

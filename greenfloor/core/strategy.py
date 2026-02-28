@@ -21,6 +21,8 @@ class StrategyConfig:
     target_spread_bps: int | None = None
     min_xch_price_usd: float | None = None
     max_xch_price_usd: float | None = None
+    offer_expiry_unit: str | None = None
+    offer_expiry_value: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +60,13 @@ def evaluate_market(
         if config.max_xch_price_usd is not None and state.xch_price_usd > config.max_xch_price_usd:
             return []
     expiry_unit, expiry_value = _PAIR_EXPIRY_CONFIG.get(pair, _PAIR_EXPIRY_CONFIG["xch"])
+    configured_expiry_unit = str(config.offer_expiry_unit or "").strip().lower()
+    configured_expiry_value = (
+        int(config.offer_expiry_value) if config.offer_expiry_value is not None else None
+    )
+    if configured_expiry_unit in {"minutes", "hours"} and configured_expiry_value is not None:
+        if configured_expiry_value > 0:
+            expiry_unit, expiry_value = configured_expiry_unit, configured_expiry_value
 
     offer_configs = [
         (1, state.ones, config.ones_target),

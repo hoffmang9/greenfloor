@@ -48,6 +48,19 @@ _DAEMON_SERVICE_NAME = "daemon"
 _daemon_file_logger_initialized = False
 _daemon_file_log_handler: ConcurrentRotatingFileHandler | None = None
 _daemon_logger = logging.getLogger("greenfloor.daemon")
+_DISABLED_MARKET_LOG_INTERVAL_SECONDS_DEFAULT = 3600
+_DISABLED_MARKET_NEXT_LOG_AT: dict[str, float] = {}
+_DISABLED_MARKET_STARTUP_LOGGED = False
+
+
+def _log_market_decision(market_id: str, decision: str, **fields: Any) -> None:
+    extras = " ".join(f"{key}={fields[key]}" for key in sorted(fields))
+    if extras:
+        _daemon_logger.info(
+            "market_decision market_id=%s decision=%s %s", market_id, decision, extras
+        )
+    else:
+        _daemon_logger.info("market_decision market_id=%s decision=%s", market_id, decision)
 
 
 def _initialize_daemon_file_logging(home_dir: str, *, log_level: str | None) -> None:
@@ -64,6 +77,49 @@ def _initialize_daemon_file_logging(home_dir: str, *, log_level: str | None) -> 
         logger=_daemon_logger,
         handler=_daemon_file_log_handler,
     )
+
+
+def _disabled_market_log_interval_seconds() -> int:
+    return _env_int(
+        "GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS",
+        _DISABLED_MARKET_LOG_INTERVAL_SECONDS_DEFAULT,
+        minimum=60,
+    )
+
+
+def _should_log_disabled_market(*, market_id: str, now_monotonic: float | None = None) -> bool:
+    now_value = time.monotonic() if now_monotonic is None else float(now_monotonic)
+    deadline = float(_DISABLED_MARKET_NEXT_LOG_AT.get(market_id, 0.0))
+    if deadline > now_value:
+        return False
+    _DISABLED_MARKET_NEXT_LOG_AT[market_id] = now_value + float(
+        _disabled_market_log_interval_seconds()
+    )
+    return True
+
+
+def _log_disabled_markets_startup_once(*, markets: list[Any]) -> None:
+    global _DISABLED_MARKET_STARTUP_LOGGED
+    if _DISABLED_MARKET_STARTUP_LOGGED:
+        return
+    interval_seconds = _disabled_market_log_interval_seconds()
+    disabled_market_ids = [
+        str(getattr(market, "market_id", "")).strip()
+        for market in markets
+        if not bool(getattr(market, "enabled", True))
+    ]
+    disabled_market_ids = [market_id for market_id in disabled_market_ids if market_id]
+    if disabled_market_ids:
+        _daemon_logger.info(
+            "disabled_markets_startup count=%s interval_seconds=%s market_ids=%s",
+            len(disabled_market_ids),
+            interval_seconds,
+            sorted(disabled_market_ids),
+        )
+        now_value = time.monotonic()
+        for market_id in disabled_market_ids:
+            _DISABLED_MARKET_NEXT_LOG_AT[market_id] = now_value + float(interval_seconds)
+    _DISABLED_MARKET_STARTUP_LOGGED = True
 
 
 def _warn_if_log_level_auto_healed(*, program, program_path: Path) -> None:
@@ -294,6 +350,9 @@ def _strategy_config_from_market(market) -> StrategyConfig:
         target_spread_bps=_to_int(pricing.get("strategy_target_spread_bps")),
         min_xch_price_usd=_to_float(pricing.get("strategy_min_xch_price_usd")),
         max_xch_price_usd=_to_float(pricing.get("strategy_max_xch_price_usd")),
+        offer_expiry_unit=str(pricing.get("strategy_offer_expiry_unit", "")).strip().lower()
+        or None,
+        offer_expiry_value=_to_int(pricing.get("strategy_offer_expiry_value")),
     )
 
 
@@ -350,10 +409,11 @@ def _inject_reseed_action_if_no_active_offers(
     clock: datetime,
 ) -> list[PlannedAction]:
     if strategy_actions:
-        _daemon_logger.debug(
-            "reseed_skip market_id=%s reason=strategy_actions_present action_count=%s",
+        _log_market_decision(
             market.market_id,
-            len(strategy_actions),
+            "reseed_skip",
+            reason="strategy_actions_present",
+            action_count=len(strategy_actions),
         )
         return strategy_actions
     offer_states = store.list_offer_states(market_id=market.market_id, limit=500)
@@ -369,15 +429,13 @@ def _inject_reseed_action_if_no_active_offers(
         for item in offer_states
     )
     if has_active_offer:
-        _daemon_logger.debug(
-            (
-                "reseed_skip market_id=%s reason=active_offer_present "
-                "active_states=%s recent_mempool_window_seconds=%s state_counts=%s"
-            ),
+        _log_market_decision(
             market.market_id,
-            sorted(_ACTIVE_OFFER_STATES_FOR_RESEED),
-            _RESEED_MEMPOOL_MAX_AGE_SECONDS,
-            state_counts,
+            "reseed_skip",
+            reason="active_offer_present",
+            active_states=sorted(_ACTIVE_OFFER_STATES_FOR_RESEED),
+            recent_mempool_window_seconds=_RESEED_MEMPOOL_MAX_AGE_SECONDS,
+            state_counts=state_counts,
         )
         return strategy_actions
 
@@ -387,21 +445,23 @@ def _inject_reseed_action_if_no_active_offers(
         clock=clock,
     )
     if not seed_candidates:
-        _daemon_logger.debug(
-            "reseed_skip market_id=%s reason=no_seed_candidates pair=%s xch_price_usd=%s",
+        _log_market_decision(
             market.market_id,
-            strategy_config.pair,
-            xch_price_usd,
+            "reseed_skip",
+            reason="no_seed_candidates",
+            pair=strategy_config.pair,
+            xch_price_usd=xch_price_usd,
         )
         return strategy_actions
     smallest = min(seed_candidates, key=lambda action: int(action.size))
-    _daemon_logger.debug(
-        "reseed_injected market_id=%s size=%s pair=%s expiry=%s:%s reason=no_active_offer_reseed",
+    _log_market_decision(
         market.market_id,
-        int(smallest.size),
-        smallest.pair,
-        smallest.expiry_unit,
-        int(smallest.expiry_value),
+        "reseed_injected",
+        reason="no_active_offer_reseed",
+        size=int(smallest.size),
+        pair=smallest.pair,
+        expiry_unit=smallest.expiry_unit,
+        expiry_value=int(smallest.expiry_value),
     )
     return [
         PlannedAction(
@@ -676,6 +736,38 @@ def _execute_strategy_actions(
                 )
                 continue
 
+            if program is not None and _cloud_wallet_configured(program):
+                cloud_wallet_post = _cloud_wallet_offer_post_fallback(
+                    program=program,
+                    market=market,
+                    size_base_units=int(action.size),
+                    publish_venue=publish_venue,
+                    runtime_dry_run=runtime_dry_run,
+                )
+                if bool(cloud_wallet_post.get("success", False)):
+                    executed_count += 1
+                    items.append(
+                        {
+                            "size": action.size,
+                            "status": "executed",
+                            "reason": "cloud_wallet_post_success",
+                            "offer_id": cloud_wallet_post.get("offer_id"),
+                        }
+                    )
+                else:
+                    items.append(
+                        {
+                            "size": action.size,
+                            "status": "skipped",
+                            "reason": (
+                                "cloud_wallet_post_failed:"
+                                f"{str(cloud_wallet_post.get('error', 'unknown')).strip()}"
+                            ),
+                            "offer_id": None,
+                        }
+                    )
+                continue
+
             built = _build_offer_for_action(
                 market=market,
                 action=action,
@@ -685,29 +777,6 @@ def _execute_strategy_actions(
             )
             if built.get("status") != "executed":
                 built_reason = str(built.get("reason", "offer_builder_skipped"))
-                if (
-                    "missing_mnemonic_for_key_id" in built_reason
-                    and program is not None
-                    and _cloud_wallet_configured(program)
-                ):
-                    fallback = _cloud_wallet_offer_post_fallback(
-                        program=program,
-                        market=market,
-                        size_base_units=int(action.size),
-                        publish_venue=publish_venue,
-                        runtime_dry_run=runtime_dry_run,
-                    )
-                    if bool(fallback.get("success", False)):
-                        executed_count += 1
-                        items.append(
-                            {
-                                "size": action.size,
-                                "status": "executed",
-                                "reason": "cloud_wallet_fallback_post_success",
-                                "offer_id": fallback.get("offer_id"),
-                            }
-                        )
-                        continue
                 items.append(
                     {
                         "size": action.size,
@@ -932,11 +1001,23 @@ def _process_single_market(
     state_dir: Path,
 ) -> _MarketCycleResult:
     result = _MarketCycleResult()
+    _log_market_decision(
+        market.market_id,
+        "cycle_start",
+        mode=str(getattr(market, "mode", "")),
+        quote_asset=str(getattr(market, "quote_asset", "")),
+    )
     signer_selection = resolve_market_key(
         market,
         allowed_keys,
         signer_key_registry=program.signer_key_registry,
         required_network=program.app_network,
+    )
+    _log_market_decision(
+        market.market_id,
+        "signer_selected",
+        key_id=signer_selection.key_id,
+        network=program.app_network,
     )
     store.add_price_policy_snapshot(
         market.market_id,
@@ -980,8 +1061,20 @@ def _process_single_market(
 
     try:
         offers = dexie.get_offers(market.base_asset, market.quote_asset)
+        _log_market_decision(
+            market.market_id,
+            "dexie_offers_fetched",
+            offered=market.base_asset,
+            requested=market.quote_asset,
+            count=len(offers),
+        )
     except Exception as exc:  # pragma: no cover - network dependent
         result.cycle_errors += 1
+        _log_market_decision(
+            market.market_id,
+            "dexie_offers_error",
+            error=str(exc),
+        )
         store.add_audit_event(
             "dexie_offers_error",
             {"market_id": market.market_id, "error": str(exc)},
@@ -1018,6 +1111,16 @@ def _process_single_market(
             transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.EXPIRED)
         else:
             transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.MEMPOOL_SEEN)
+        _log_market_decision(
+            market.market_id,
+            "offer_transition",
+            offer_id=offer_id,
+            dexie_status=status,
+            signal_source=signal_source,
+            old_state=transition.old_state.value,
+            new_state=transition.new_state.value,
+            signal=transition.signal.value,
+        )
         store.upsert_offer_state(
             offer_id=offer_id,
             market_id=market.market_id,
@@ -1055,6 +1158,17 @@ def _process_single_market(
         result.cancel_triggered = True
     result.cancel_planned += int(cancel_policy.get("planned_count", 0))
     result.cancel_executed += int(cancel_policy.get("executed_count", 0))
+    _log_market_decision(
+        market.market_id,
+        "cancel_policy_evaluated",
+        eligible=cancel_policy["eligible"],
+        triggered=cancel_policy["triggered"],
+        reason=cancel_policy["reason"],
+        move_bps=cancel_policy["move_bps"],
+        threshold_bps=cancel_policy["threshold_bps"],
+        planned_count=cancel_policy["planned_count"],
+        executed_count=cancel_policy["executed_count"],
+    )
     store.add_audit_event(
         "offer_cancel_policy",
         {
@@ -1084,6 +1198,12 @@ def _process_single_market(
             coin_amounts_base_units=wallet_coins,
             ladder_sizes=ladder_sizes,
         )
+        _log_market_decision(
+            market.market_id,
+            "inventory_scan_wallet",
+            coin_count=len(wallet_coins),
+            bucket_counts=bucket_counts,
+        )
         store.add_audit_event(
             "inventory_bucket_scan",
             {
@@ -1096,6 +1216,12 @@ def _process_single_market(
         )
     else:
         bucket_counts = dict(market.inventory.bucket_counts)
+        _log_market_decision(
+            market.market_id,
+            "inventory_scan_config_fallback",
+            asset_id=market.base_asset,
+            bucket_counts=bucket_counts,
+        )
         store.add_audit_event(
             "inventory_bucket_scan",
             {
@@ -1115,16 +1241,13 @@ def _process_single_market(
         config=strategy_config,
         clock=now,
     )
-    _daemon_logger.debug(
-        (
-            "strategy_evaluated market_id=%s pair=%s bucket_counts=%s "
-            "xch_price_usd=%s action_count=%s"
-        ),
+    _log_market_decision(
         market.market_id,
-        strategy_config.pair,
-        bucket_counts,
-        xch_price_usd,
-        len(strategy_actions),
+        "strategy_evaluated",
+        pair=strategy_config.pair,
+        bucket_counts=bucket_counts,
+        xch_price_usd=xch_price_usd,
+        action_count=len(strategy_actions),
     )
     strategy_actions = _inject_reseed_action_if_no_active_offers(
         strategy_actions=strategy_actions,
@@ -1134,11 +1257,13 @@ def _process_single_market(
         xch_price_usd=xch_price_usd,
         clock=now,
     )
-    _daemon_logger.debug(
-        "strategy_after_reseed market_id=%s action_count=%s reseed_injected=%s",
+    _log_market_decision(
         market.market_id,
-        len(strategy_actions),
-        any(str(action.reason) == "no_active_offer_reseed" for action in strategy_actions),
+        "strategy_after_reseed",
+        action_count=len(strategy_actions),
+        reseed_injected=any(
+            str(action.reason) == "no_active_offer_reseed" for action in strategy_actions
+        ),
     )
     store.add_audit_event(
         "strategy_actions_planned",
@@ -1176,6 +1301,12 @@ def _process_single_market(
     )
     result.strategy_planned += int(offer_execution["planned_count"])
     result.strategy_executed += int(offer_execution["executed_count"])
+    _log_market_decision(
+        market.market_id,
+        "strategy_executed",
+        planned_count=offer_execution["planned_count"],
+        executed_count=offer_execution["executed_count"],
+    )
     store.add_audit_event(
         "strategy_offer_execution",
         {
@@ -1204,6 +1335,15 @@ def _process_single_market(
         combine_fee_mojos=program.coin_ops_combine_fee_mojos,
     )
     if plans:
+        _log_market_decision(
+            market.market_id,
+            "coin_ops_planned",
+            plan_count=len(plans),
+            split_plan_count=sum(1 for p in plans if str(p.op_type) == "split"),
+            combine_plan_count=sum(1 for p in plans if str(p.op_type) == "combine"),
+            split_op_count=sum(int(p.op_count) for p in plans if str(p.op_type) == "split"),
+            combine_op_count=sum(int(p.op_count) for p in plans if str(p.op_type) == "combine"),
+        )
         projected_fee = projected_coin_ops_fee_mojos(
             plans=plans,
             split_fee_mojos=program.coin_ops_split_fee_mojos,
@@ -1229,6 +1369,13 @@ def _process_single_market(
                 onboarding_selection_path=state_dir / "key_onboarding.json",
                 signer_fingerprint=signer_selection.fingerprint,
             )
+            _log_market_decision(
+                market.market_id,
+                "coin_ops_executed",
+                plan_count=len(plans),
+                executable_count=len(executable_plans),
+                overflow_count=len(overflow_plans),
+            )
         else:
             execution = {
                 "dry_run": program.runtime_dry_run,
@@ -1237,6 +1384,12 @@ def _process_single_market(
                 "status": "skipped_fee_budget",
                 "items": [],
             }
+            _log_market_decision(
+                market.market_id,
+                "coin_ops_skipped_fee_budget",
+                plan_count=len(plans),
+                overflow_count=len(overflow_plans),
+            )
         if overflow_plans:
             store.add_audit_event(
                 "coin_ops_partial_or_skipped_fee_budget",
@@ -1302,6 +1455,17 @@ def _process_single_market(
             )
             op_count = int(item.get("op_count", 0))
             fee_mojos = per_op_fee * op_count if item.get("status") == "executed" else 0
+            _log_market_decision(
+                market.market_id,
+                "coin_op_item_result",
+                op_type=op_type,
+                status=str(item.get("status", "unknown")),
+                op_count=op_count,
+                size_base_units=item.get("size_base_units"),
+                reason=str(item.get("reason", "")),
+                operation_id=item.get("operation_id"),
+                fee_mojos=fee_mojos,
+            )
             store.add_audit_event(
                 event_type,
                 {
@@ -1326,6 +1490,18 @@ def _process_single_market(
                     str(item.get("operation_id")) if item.get("operation_id") is not None else None
                 ),
             )
+    else:
+        _log_market_decision(market.market_id, "coin_ops_no_plans")
+    _log_market_decision(
+        market.market_id,
+        "cycle_complete",
+        cycle_errors=result.cycle_errors,
+        strategy_planned=result.strategy_planned,
+        strategy_executed=result.strategy_executed,
+        cancel_triggered=result.cancel_triggered,
+        cancel_planned=result.cancel_planned,
+        cancel_executed=result.cancel_executed,
+    )
     return result
 
 
@@ -1347,6 +1523,7 @@ def run_once(
         path=markets_path,
         overlay_path=testnet_markets_path,
     )
+    _log_disabled_markets_startup_once(markets=list(markets.markets))
     db_path = _resolve_db_path(program.home_dir, db_path_override)
     store = SqliteStore(db_path)
     started_at = time.monotonic()
@@ -1396,7 +1573,10 @@ def run_once(
         now = utcnow()
         for market in markets.markets:
             if not market.enabled:
+                if _should_log_disabled_market(market_id=market.market_id):
+                    _log_market_decision(market.market_id, "market_skipped", reason="disabled")
                 continue
+            _DISABLED_MARKET_NEXT_LOG_AT.pop(market.market_id, None)
             markets_processed += 1
             mr = _process_single_market(
                 market=market,

@@ -157,3 +157,18 @@ def test_evaluate_market_carries_target_spread_bps_into_actions() -> None:
     )
     assert len(actions) == 1
     assert actions[0].target_spread_bps == 125
+
+
+def test_evaluate_market_uses_configured_expiry_override() -> None:
+    actions = evaluate_market(
+        state=MarketState(ones=4, tens=2, hundreds=1, xch_price_usd=30.0),
+        config=StrategyConfig(
+            pair="xch",
+            offer_expiry_unit="hours",
+            offer_expiry_value=2,
+        ),
+        clock=_clock(),
+    )
+    assert len(actions) == 1
+    assert actions[0].expiry_unit == "hours"
+    assert actions[0].expiry_value == 2

@@ -138,6 +138,33 @@ def _validate_strategy_pricing(pricing: dict[str, Any], market_id: str) -> None:
             f"market {market_id}: strategy_min_xch_price_usd must be <= strategy_max_xch_price_usd"
         )
 
+    expiry_unit_raw = pricing.get("strategy_offer_expiry_unit")
+    expiry_value_raw = pricing.get("strategy_offer_expiry_value")
+    expiry_unit = str(expiry_unit_raw).strip().lower() if expiry_unit_raw is not None else None
+    has_expiry_unit = bool(expiry_unit)
+    has_expiry_value = expiry_value_raw is not None
+    if has_expiry_unit != has_expiry_value:
+        raise ValueError(
+            f"market {market_id}: strategy_offer_expiry_unit and strategy_offer_expiry_value must be set together"
+        )
+    if has_expiry_unit:
+        if expiry_unit not in {"minutes", "hours"}:
+            raise ValueError(
+                f"market {market_id}: strategy_offer_expiry_unit must be one of: minutes, hours"
+            )
+        if expiry_value_raw is None:
+            raise ValueError(
+                f"market {market_id}: strategy_offer_expiry_unit and strategy_offer_expiry_value must be set together"
+            )
+        try:
+            expiry_value = int(expiry_value_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"market {market_id}: strategy_offer_expiry_value must be an integer"
+            ) from exc
+        if expiry_value <= 0:
+            raise ValueError(f"market {market_id}: strategy_offer_expiry_value must be positive")
+
 
 def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
     app = _req(raw, "app")

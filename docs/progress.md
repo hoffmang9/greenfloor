@@ -1,5 +1,109 @@
 # Progress Log
 
+## 2026-02-28 (John-Deere long-expiry rollout for `eco1812022_sell_wusdbc` + 30-minute soak)
+
+- Added market-level strategy expiry override support:
+  - `greenfloor/core/strategy.py`:
+    - extended `StrategyConfig` with `offer_expiry_unit` / `offer_expiry_value`,
+    - `evaluate_market()` now uses configured expiry when present and valid; otherwise keeps existing pair defaults.
+  - `greenfloor/daemon/main.py`:
+    - `_strategy_config_from_market()` now maps pricing keys:
+      - `strategy_offer_expiry_unit`
+      - `strategy_offer_expiry_value`
+  - `greenfloor/config/models.py`:
+    - added validation for strategy expiry controls:
+      - unit/value must be set together,
+      - unit allowlist is `minutes|hours`,
+      - value must be a positive integer.
+- Added deterministic coverage:
+  - `tests/test_strategy.py`: verifies configured expiry override is propagated into planned actions.
+  - `tests/test_config_models.py`: validates reject/accept behavior for new expiry config fields.
+- Validation snapshot (local):
+  - `.venv/bin/python -m pytest tests/test_strategy.py tests/test_config_models.py tests/test_daemon_offer_execution.py` -> `58 passed`.
+- Deployed to `John-Deere` before next test cycle:
+  - synced logging updates (`greenfloor/daemon/main.py`, `greenfloor/signing.py`) to the running daemon host and restarted daemon.
+  - synced expiry override code (`greenfloor/core/strategy.py`, `greenfloor/config/models.py`, `greenfloor/daemon/main.py`).
+  - updated runtime `~/.greenfloor/config/markets.yaml` for `eco1812022_sell_wusdbc`:
+    - `strategy_offer_expiry_unit: hours`
+    - `strategy_offer_expiry_value: 2`
+- Runtime verification on `John-Deere`:
+  - recent `strategy_actions_planned` audit rows now show `expiry_unit="hours"` and `expiry_value=2`.
+  - `strategy_offer_execution` events continue to report `reason=cloud_wallet_post_success`.
+- 30-minute soak (6 samples / 5-minute cadence) against:
+  - `offers-status --market-id eco1812022_sell_wusdbc --limit 20 --events-limit 20`
+  - `offers-reconcile --market-id eco1812022_sell_wusdbc --limit 50`
+- Soak checkpoints (`by_state`):
+  - sample 1: `{"mempool_observed":9,"expired":11}`
+  - sample 2: `{"mempool_observed":11,"expired":9}`
+  - sample 3: `{"mempool_observed":4,"expired":16}`
+  - sample 4: `{"open":1,"mempool_observed":4,"expired":15}`
+  - sample 5: `{"mempool_observed":7,"expired":13}`
+  - sample 6: `{"mempool_observed":6,"expired":14}`
+- Post-soak state snapshot:
+  - `{"open":1,"mempool_observed":3,"expired":16}`
+- Outcome:
+  - Pass for "market stays posted" under current lifecycle policy: market remained active through mempool-observed rollover windows and recovered to `open` without manual intervention.
+  - No recurrence of `offer_builder_failed:signing_failed:no_unspent_offer_cat_coins` in this run.
+
+## 2026-02-28 (daemon disabled-market log throttling)
+
+- Reduced noisy disabled-market decision logs in daemon runtime:
+  - Added startup summary log emitted once per process:
+    - `disabled_markets_startup count=<n> interval_seconds=<s> market_ids=[...]`
+  - Replaced per-cycle disabled-market logging with throttled reporting:
+    - `market_decision ... decision=market_skipped reason=disabled` now logs at most once per interval per disabled market.
+- Added configurable throttle interval:
+  - `GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS` (default `3600`, minimum `60`).
+- Behavior details:
+  - Disabled markets are summarized once at startup and their per-market skip logs are deferred until interval expiry.
+  - If a market becomes enabled, daemon clears its disabled throttle state so a future disable logs immediately again.
+- Deterministic coverage added in `tests/test_daemon_helpers.py`:
+  - default/minimum interval parsing,
+  - per-market throttle behavior,
+  - startup summary one-time emission + throttle seeding.
+- Validation snapshot:
+  - `.venv/bin/python -m pyright greenfloor/daemon/main.py tests/test_daemon_helpers.py` -> `0 errors`.
+  - `.venv/bin/python -m pytest tests/test_daemon_helpers.py tests/test_daemon_offer_execution.py tests/test_daemon_websocket_runtime.py` -> `48 passed`.
+
+## 2026-02-28 (John-Deere 30-minute smoke after cloud-wallet daemon strategy fix)
+
+- Isolated runtime scope to one market on `John-Deere`:
+  - `eco1812022_sell_wusdbc` enabled.
+  - `eco1812022_sell_xch` and `byc_two_sided_wusdbc` disabled.
+- Deployed daemon strategy-path fix so cloud-wallet-configured markets post via cloud-wallet path directly (instead of local CAT coin discovery path), and added extra strategy/signing decision diagnostics.
+- Ran a 30-minute smoke monitor loop (7 samples / 5-minute cadence) against:
+  - `offers-status --market-id eco1812022_sell_wusdbc --limit 20 --events-limit 20`
+  - `offers-reconcile --market-id eco1812022_sell_wusdbc --limit 50`
+- Observed checkpoints and behavior:
+  - Sample 1 (`00:44:14Z`): `by_state={"open":1,"mempool_observed":4,"expired":15}`; `strategy_offer_execution planned=1 executed=1` (`reason=cloud_wallet_post_success`).
+  - Sample 2 (`00:49:38Z`): `by_state={"open":0,"mempool_observed":7,"expired":13}`; strategy did not reseed while mempool-observed offers were still inside the active window (`reseed_skip reason=active_offer_present`).
+  - Final post-loop check: `by_state={"open":1,"expired":19}` with fresh successful strategy post (`planned=1 executed=1`, `reason=cloud_wallet_post_success`).
+- Outcome:
+  - Smoke passed "market stays posted" with expected brief rollover gaps: open offer count transiently hit zero while mempool-observed offers were treated as active, then recovered to open without manual intervention.
+  - No recurrence of daemon `offer_builder_failed:signing_failed:no_unspent_offer_cat_coins` on this path.
+- Noted non-blocking operational signal:
+  - `coin_op_item_result` still reports split skips with `reason=missing_signer_selection` (coin-op shaping path), but strategy posting/reseeding remained healthy.
+
+## 2026-02-27 (John-Deere 30-minute post-deploy soak rerun)
+
+- Re-ran the canary soak pattern on `John-Deere` after syncing branch `kms-vault-signing`, enabling KMS runtime config, and validating KMS signing + manager post path.
+- Daemon precondition:
+  - `greenfloord` was not running at start; launched with mainnet config and `--coinset-base-url https://api.coinset.org`.
+- Soak procedure:
+  - 6 checkpoints over 30 minutes (5-minute cadence), each running:
+    - `offers-status --market-id eco1812022_sell_wusdbc --limit 20 --events-limit 20`
+    - `offers-reconcile --market-id eco1812022_sell_wusdbc --limit 50`
+- Observed checkpoint states (`by_state`):
+  - Sample 1 (`23:26:09Z`): `{"open": 1, "expired": 19}`
+  - Sample 2 (`23:31:20Z`): `{"expired": 20}`
+  - Sample 3 (`23:36:28Z`): `{"expired": 20}`
+  - Sample 4 (`23:41:36Z`): `{"expired": 20}`
+  - Sample 5 (`23:46:44Z`): `{"expired": 20}`
+  - Sample 6 (`23:51:52Z`): `{"expired": 20}`
+- Outcome:
+  - Soak failed pass criteria for "market stays posted"; open offer presence was lost after the first checkpoint and did not recover within the 30-minute window.
+  - Command path remained healthy (status/reconcile completed successfully at each checkpoint).
+
 ## 2026-02-27 (AWS KMS vault signing + coins-list enhancements)
 
 **KMS-backed vault custody signing:**

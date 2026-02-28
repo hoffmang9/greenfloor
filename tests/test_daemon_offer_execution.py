@@ -428,17 +428,8 @@ def test_resolve_quote_asset_for_offer_maps_symbol_from_cats(monkeypatch, tmp_pa
     assert resolved == "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d"
 
 
-def test_execute_strategy_actions_cloud_wallet_fallback_on_missing_mnemonic(monkeypatch) -> None:
+def test_execute_strategy_actions_uses_cloud_wallet_path_when_configured(monkeypatch) -> None:
     daemon_main._POST_COOLDOWN_UNTIL.clear()
-    monkeypatch.setattr(
-        daemon_main,
-        "_build_offer_for_action",
-        lambda **_kwargs: {
-            "status": "skipped",
-            "reason": "offer_builder_failed:signing_failed:missing_mnemonic_for_key_id",
-            "offer": None,
-        },
-    )
     monkeypatch.setattr(
         daemon_main,
         "_cloud_wallet_offer_post_fallback",
@@ -477,7 +468,59 @@ def test_execute_strategy_actions_cloud_wallet_fallback_on_missing_mnemonic(monk
     )
 
     assert result["executed_count"] == 1
-    assert result["items"][0]["reason"] == "cloud_wallet_fallback_post_success"
+    assert result["items"][0]["reason"] == "cloud_wallet_post_success"
+
+
+def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(monkeypatch) -> None:
+    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    calls = {"builder": 0}
+
+    def _unexpected_builder(**_kwargs):
+        calls["builder"] += 1
+        return {"status": "executed", "reason": "offer_builder_success", "offer": "offer1unused"}
+
+    monkeypatch.setattr(daemon_main, "_build_offer_for_action", _unexpected_builder)
+    monkeypatch.setattr(
+        daemon_main,
+        "_cloud_wallet_offer_post_fallback",
+        lambda **_kwargs: {"success": False, "error": "vault_signing_unavailable"},
+    )
+
+    class _Program:
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "UserAuthKey_abc"
+        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+
+    dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
+    store = _FakeStore()
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=1,
+            pair="usdc",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="no_active_offer_reseed",
+        )
+    ]
+
+    result = _execute_strategy_actions(
+        market=_market(),
+        strategy_actions=actions,
+        runtime_dry_run=False,
+        xch_price_usd=30.0,
+        dexie=cast(Any, dexie),
+        store=cast(Any, store),
+        publish_venue="dexie",
+        program=_Program(),
+    )
+
+    assert result["executed_count"] == 0
+    assert result["items"][0]["status"] == "skipped"
+    assert result["items"][0]["reason"] == "cloud_wallet_post_failed:vault_signing_unavailable"
+    assert calls["builder"] == 0
 
 
 def test_parse_last_json_object_handles_noisy_output() -> None:
