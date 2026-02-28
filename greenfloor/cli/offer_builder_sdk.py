@@ -44,6 +44,12 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
 
     asset_id = str(payload.get("asset_id", "xch")).strip().lower() or "xch"
     quote_asset = str(payload.get("quote_asset", "xch")).strip().lower() or "xch"
+    raw_offer_coin_ids = payload.get("offer_coin_ids", [])
+    offer_coin_ids = (
+        [str(value).strip().lower() for value in raw_offer_coin_ids if str(value).strip()]
+        if isinstance(raw_offer_coin_ids, list)
+        else []
+    )
     if quote_asset in {"xch", "txch", "1"}:
         request_asset_id = quote_asset
     else:
@@ -72,12 +78,24 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
             "keyring_yaml_path": keyring_yaml_path,
             "asset_id": asset_id,
             "dry_run": bool(payload.get("dry_run", False)),
+            "cloud_wallet_base_url": str(payload.get("cloud_wallet_base_url", "")).strip(),
+            "cloud_wallet_user_key_id": str(payload.get("cloud_wallet_user_key_id", "")).strip(),
+            "cloud_wallet_private_key_pem_path": str(
+                payload.get("cloud_wallet_private_key_pem_path", "")
+            ).strip(),
+            "cloud_wallet_vault_id": str(payload.get("cloud_wallet_vault_id", "")).strip(),
+            "cloud_wallet_kms_key_id": str(payload.get("cloud_wallet_kms_key_id", "")).strip(),
+            "cloud_wallet_kms_region": str(payload.get("cloud_wallet_kms_region", "")).strip(),
+            "cloud_wallet_kms_public_key_hex": str(
+                payload.get("cloud_wallet_kms_public_key_hex", "")
+            ).strip(),
             "plan": {
                 "op_type": "offer",
                 "offer_asset_id": asset_id,
                 "offer_amount": offer_amount,
                 "request_asset_id": request_asset_id,
                 "request_amount": request_amount,
+                "offer_coin_ids": offer_coin_ids,
             },
         }
     )

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+import yaml
 
 import greenfloor.cli.manager as manager_mod
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
@@ -456,7 +457,9 @@ def _write_markets_with_ladder(path: Path) -> None:
     )
 
 
-def _write_program_with_cloud_wallet(path: Path, *, provider: str = "dexie") -> None:
+def _write_program_with_cloud_wallet(
+    path: Path, *, provider: str = "dexie", with_kms: bool = False
+) -> None:
     """Write a program.yaml with valid Cloud Wallet credentials populated."""
     _write_program(path, provider=provider)
     text = path.read_text(encoding="utf-8")
@@ -464,6 +467,12 @@ def _write_program_with_cloud_wallet(path: Path, *, provider: str = "dexie") -> 
     text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
     text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
     text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
+    if with_kms:
+        text = text.replace(
+            '  kms_key_id: ""', '  kms_key_id: "arn:aws:kms:us-west-2:123:key/demo"'
+        )
+        text = text.replace('  kms_region: ""', '  kms_region: "us-west-2"')
+        text = text.replace('  kms_public_key_hex: ""', '  kms_public_key_hex: "02abc123"')
     path.write_text(text, encoding="utf-8")
 
 
@@ -560,6 +569,62 @@ def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, c
     assert (
         payload["results"][0]["result"]["offer_view_url"] == "https://dexie.space/offers/offer-123"
     )
+
+
+def test_build_and_post_offer_uses_market_configured_expiry_override(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+    raw = yaml.safe_load(markets.read_text(encoding="utf-8"))
+    pricing = dict(raw["markets"][0].get("pricing") or {})
+    pricing["strategy_offer_expiry_unit"] = "hours"
+    pricing["strategy_offer_expiry_value"] = 8
+    raw["markets"][0]["pricing"] = pricing
+    markets.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+
+    captured_payload: dict[str, object] = {}
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+        @staticmethod
+        def post_offer(offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = offer, drop_only, claim_rewards
+            return {"success": True, "id": "offer-expiry-1"}
+
+    def _fake_build(payload: dict) -> str:
+        captured_payload.update(payload)
+        return "offer1expiryoverride"
+
+    monkeypatch.setattr("greenfloor.cli.manager._build_offer_text_for_request", _fake_build)
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        size_base_units=10,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 0
+    assert captured_payload["expiry_unit"] == "hours"
+    assert captured_payload["expiry_value"] == 8
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["publish_failures"] == 0
+    assert payload["results"][0]["result"]["id"] == "offer-expiry-1"
 
 
 def test_build_and_post_offer_dry_run_builds_but_does_not_post(
@@ -3554,6 +3619,168 @@ def test_build_and_post_offer_dry_run_uses_cloud_wallet_when_configured(
     assert payload["dry_run"] is True
 
 
+def test_build_and_post_offer_uses_local_path_for_large_size_when_cloud_wallet_configured(
+    monkeypatch, tmp_path: Path
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program)
+    _write_markets(markets)
+
+    cloud_dispatched = [False]
+    local_builder_calls = [0]
+
+    def _fake_cloud_wallet(**kwargs):
+        _ = kwargs
+        cloud_dispatched[0] = True
+        return 0
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_and_post_offer_cloud_wallet",
+        _fake_cloud_wallet,
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request", lambda payload: "offer1abc"
+    )
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str):
+            pass
+
+        def post_offer(self, offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = offer, drop_only, claim_rewards
+            local_builder_calls[0] += 1
+            return {"success": True, "id": "local-100-id"}
+
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        size_base_units=100,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 0
+    assert cloud_dispatched[0] is False
+    assert local_builder_calls[0] == 1
+
+
+def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """KMS-configured runs must use the cloud wallet path for all sizes.
+
+    The cloud wallet's createOffer builds the complete vault spend bundle
+    (CAT + vault singleton) and _auto_sign_if_kms signs it. The local build
+    path cannot produce a valid vault offer because SingletonMember requires
+    the vault singleton to be included in the same spend bundle.
+    """
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program)
+    _write_markets(markets)
+
+    cloud_dispatched = [False]
+    local_builder_calls = [0]
+
+    def _fake_cloud_wallet(**kwargs):
+        _ = kwargs
+        cloud_dispatched[0] = True
+        return 0
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_and_post_offer_cloud_wallet",
+        _fake_cloud_wallet,
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda payload: local_builder_calls.__setitem__(0, local_builder_calls[0] + 1)
+        or "offer1abc",
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._kms_offer_signing_configured", lambda _program: True
+    )
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        size_base_units=10,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 0
+    assert cloud_dispatched[0] is True
+    assert local_builder_calls[0] == 0
+
+
+def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured_large_size(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """KMS-configured runs use cloud wallet path even for size >= 100."""
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program)
+    _write_markets(markets)
+
+    cloud_dispatched = [False]
+    local_builder_calls = [0]
+
+    def _fake_cloud_wallet(**kwargs):
+        _ = kwargs
+        cloud_dispatched[0] = True
+        return 0
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_and_post_offer_cloud_wallet",
+        _fake_cloud_wallet,
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request",
+        lambda payload: local_builder_calls.__setitem__(0, local_builder_calls[0] + 1)
+        or "offer1abc",
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._kms_offer_signing_configured", lambda _program: True
+    )
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        size_base_units=100,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 0
+    assert cloud_dispatched[0] is True
+    assert local_builder_calls[0] == 0
+
+
 # ---------------------------------------------------------------------------
 # _build_and_post_offer_cloud_wallet direct tests
 # ---------------------------------------------------------------------------
@@ -3614,6 +3841,10 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
             posted["offer"] = offer
             return {"success": True, "id": "dexie-99"}
 
+        @staticmethod
+        def get_offer(offer_id: str) -> dict[str, object]:
+            return {"success": True, "offer": {"id": str(offer_id), "status": 0}}
+
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
@@ -3658,6 +3889,279 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     assert "signed_offer_metadata:ticker=A1" in log_text
     assert "amount=10" in log_text
     assert "trading_pair=A1:xch" in log_text
+
+
+def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_override(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
+
+    program_path = tmp_path / "program.yaml"
+    markets_path = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program_path)
+    _write_markets_with_ladder(markets_path)
+    prog, mkt = _load_program_and_market(program_path, markets_path)
+    pricing = dict(mkt.pricing or {})
+    pricing["strategy_offer_expiry_unit"] = "hours"
+    pricing["strategy_offer_expiry_value"] = 8
+    mkt.pricing = pricing
+
+    captured_expires: dict[str, str] = {}
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def create_offer(
+            *,
+            offered,
+            requested,
+            fee,
+            expires_at_iso,
+            split_input_coins=True,
+            split_input_coins_fee=0,
+        ):
+            _ = offered, requested, fee, split_input_coins, split_input_coins_fee
+            captured_expires["iso"] = str(expires_at_iso)
+            return {"signature_request_id": "sr-expiry-1", "status": "UNSIGNED"}
+
+        @staticmethod
+        def get_wallet():
+            return {"offers": [{"bech32": "offer1cwexpiry"}]}
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str):
+            pass
+
+        @staticmethod
+        def post_offer(_offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = drop_only, claim_rewards
+            return {"success": True, "id": "dexie-expiry-1"}
+
+        @staticmethod
+        def get_offer(offer_id: str) -> dict[str, object]:
+            return {"success": True, "offer": {"id": str(offer_id), "status": 0}}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
+        lambda **kwargs: ("SUBMITTED", []),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        lambda **kwargs: "offer1cwexpiry",
+    )
+    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
+    )
+
+    code = _build_and_post_offer_cloud_wallet(
+        program=prog,
+        market=mkt,
+        size_base_units=1,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        quote_price=7.75,
+        dry_run=False,
+    )
+    assert code == 0
+    assert "iso" in captured_expires
+    expires_at = dt.datetime.fromisoformat(captured_expires["iso"])
+    now = dt.datetime.now(dt.UTC)
+    delta_seconds = (expires_at - now).total_seconds()
+    assert delta_seconds > 7 * 3600
+    assert delta_seconds < 9 * 3600
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["publish_failures"] == 0
+
+
+def test_build_and_post_offer_cloud_wallet_fails_when_dexie_offer_not_visible(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
+
+    program_path = tmp_path / "program.yaml"
+    markets_path = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program_path)
+    _write_markets_with_ladder(markets_path)
+    prog, mkt = _load_program_and_market(program_path, markets_path)
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def create_offer(
+            *,
+            offered,
+            requested,
+            fee,
+            expires_at_iso,
+            split_input_coins=True,
+            split_input_coins_fee=0,
+        ):
+            _ = offered, requested, fee, expires_at_iso, split_input_coins, split_input_coins_fee
+            return {"signature_request_id": "sr-visibility-1", "status": "UNSIGNED"}
+
+        @staticmethod
+        def get_wallet():
+            return {"offers": [{"bech32": "offer1cwvisibility"}]}
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str):
+            pass
+
+        @staticmethod
+        def post_offer(_offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = drop_only, claim_rewards
+            return {"success": True, "id": "dexie-missing-1"}
+
+        @staticmethod
+        def get_offer(_offer_id: str) -> dict[str, object]:
+            raise RuntimeError("dexie_http_error:404")
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
+        lambda **kwargs: ("SUBMITTED", []),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        lambda **kwargs: "offer1cwvisibility",
+    )
+    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
+    )
+
+    code = _build_and_post_offer_cloud_wallet(
+        program=prog,
+        market=mkt,
+        size_base_units=100,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        quote_price=7.75,
+        dry_run=False,
+    )
+
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["publish_failures"] == 1
+    assert "dexie_get_offer_error" in payload["results"][0]["result"]["error"]
+
+
+def test_build_and_post_offer_cloud_wallet_fails_when_dexie_visible_offer_size_mismatches(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
+
+    program_path = tmp_path / "program.yaml"
+    markets_path = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program_path)
+    _write_markets_with_ladder(markets_path)
+    prog, mkt = _load_program_and_market(program_path, markets_path)
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def create_offer(
+            *,
+            offered,
+            requested,
+            fee,
+            expires_at_iso,
+            split_input_coins=True,
+            split_input_coins_fee=0,
+        ):
+            _ = offered, requested, fee, expires_at_iso, split_input_coins, split_input_coins_fee
+            return {"signature_request_id": "sr-mismatch-1", "status": "UNSIGNED"}
+
+        @staticmethod
+        def get_wallet():
+            return {"offers": [{"bech32": "offer1cwmismatch"}]}
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str):
+            pass
+
+        @staticmethod
+        def post_offer(_offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = drop_only, claim_rewards
+            return {"success": True, "id": "dexie-mismatch-1"}
+
+        @staticmethod
+        def get_offer(offer_id: str) -> dict[str, object]:
+            return {
+                "success": True,
+                "offer": {
+                    "id": str(offer_id),
+                    "offered": [
+                        {
+                            "id": "a1",
+                            "amount": 10,
+                        }
+                    ],
+                },
+            }
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
+        lambda **kwargs: ("SUBMITTED", []),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        lambda **kwargs: "offer1cwmismatch",
+    )
+    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
+    )
+
+    code = _build_and_post_offer_cloud_wallet(
+        program=prog,
+        market=mkt,
+        size_base_units=100,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        quote_price=7.75,
+        dry_run=False,
+    )
+
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["publish_failures"] == 1
+    assert "dexie_offer_base_amount_mismatch" in payload["results"][0]["result"]["error"]
 
 
 def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
@@ -4003,6 +4507,95 @@ def test_poll_offer_artifact_until_available_requests_creator_open_pending(monke
     assert calls[0][1] == ["OPEN", "PENDING"]
 
 
+def test_poll_offer_artifact_until_available_requires_open_state(monkeypatch) -> None:
+    wallets = [
+        {
+            "offers": [
+                {
+                    "offerId": "pending-1",
+                    "state": "PENDING",
+                    "bech32": "offer1pending",
+                    "expiresAt": "2026-01-03T00:00:00Z",
+                    "createdAt": "2026-01-02T00:00:00Z",
+                }
+            ]
+        },
+        {
+            "offers": [
+                {
+                    "offerId": "open-1",
+                    "state": "OPEN",
+                    "bech32": "offer1open",
+                    "expiresAt": "2026-01-04T00:00:00Z",
+                    "createdAt": "2026-01-03T00:00:00Z",
+                }
+            ]
+        },
+    ]
+    monotonic_values = iter([0.0, 1.0, 1.0])
+
+    class _FakeWallet:
+        @staticmethod
+        def get_wallet():
+            if wallets:
+                return wallets.pop(0)
+            return {"offers": []}
+
+    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("greenfloor.cli.manager.time.monotonic", lambda: next(monotonic_values))
+
+    offer = manager_mod._poll_offer_artifact_until_available(
+        wallet=cast(CloudWalletAdapter, _FakeWallet()),
+        known_markers=set(),
+        timeout_seconds=10,
+        require_open_state=True,
+    )
+    assert offer == "offer1open"
+
+
+def test_resolve_quote_asset_for_local_offer_build_symbol_to_cat(
+    monkeypatch, tmp_path: Path
+) -> None:
+    cats_path = tmp_path / "cats.yaml"
+    cats_path.write_text(
+        "cats:\n"
+        "  - base_symbol: wUSDC.b\n"
+        "    asset_id: fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._default_cats_config_path",
+        lambda: str(cats_path),
+    )
+    resolved = manager_mod._resolve_quote_asset_for_local_offer_build(
+        quote_asset="wUSDC.b",
+        network="mainnet",
+    )
+    assert resolved == "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d"
+
+
+def test_resolve_quote_asset_for_local_offer_build_xch_network_mapping() -> None:
+    assert (
+        manager_mod._resolve_quote_asset_for_local_offer_build(
+            quote_asset="xch",
+            network="testnet11",
+        )
+        == "txch"
+    )
+
+
+def test_select_offer_coin_ids_for_target_amount_prefers_exact_match() -> None:
+    selected = manager_mod._select_offer_coin_ids_for_target_amount(
+        wallet_coins=[
+            {"name": "a" * 64, "state": "SETTLED", "amount": 1000},
+            {"name": "b" * 64, "state": "SETTLED", "amount": 100000},
+            {"name": "c" * 64, "state": "SETTLED", "amount": 50000},
+        ],
+        target_amount=100000,
+    )
+    assert selected == ["b" * 64]
+
+
 def test_post_dexie_offer_with_invalid_offer_retry_recovers(monkeypatch) -> None:
     calls: list[int] = []
     sleep_calls: list[float] = []
@@ -4117,6 +4710,10 @@ def test_build_and_post_offer_cloud_wallet_passes_min_created_at_to_artifact_pol
         def post_offer(_offer_text, *, drop_only=True, claim_rewards=False):
             _ = drop_only, claim_rewards
             return {"success": True, "id": "offer-id-1"}
+
+        @staticmethod
+        def get_offer(offer_id: str) -> dict[str, object]:
+            return {"success": True, "offer": {"id": str(offer_id), "status": 0}}
 
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(

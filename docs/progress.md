@@ -1,5 +1,104 @@
 # Progress Log
 
+## 2026-02-28 (KMS offer routing fix: route all KMS runs through cloud wallet path)
+
+- Root cause identified for `size=100` Dexie `Invalid Offer` rejection on local KMS vault path:
+  - The local MIPS vault signing path in `signing.py` builds the CAT spend using `SingletonMember`
+    but omits the vault singleton spend from the bundle.
+  - `SingletonMember` emits `SEND_MESSAGE`/`RECEIVE_MESSAGE` conditions that REQUIRE the vault
+    singleton to be spending in the same transaction. Without the singleton spend, the spend bundle
+    is structurally invalid and Dexie correctly rejects it.
+  - Verified against SDK source: `test_wallet.rs` confirms that every vault-controlled asset spend
+    must be paired with a vault singleton spend (built via `vault.spend(ctx, &mips_spend)`).
+  - The cloud wallet's `createOffer` builds the complete bundle (CAT spends + vault singleton spend)
+    internally and returns a valid offer after KMS signing via `_auto_sign_if_kms`.
+- Fixed routing in `greenfloor/cli/manager.py` (`_build_and_post_offer`):
+  - Previous: KMS-configured runs bypassed `_build_and_post_offer_cloud_wallet` and hit the
+    incomplete local vault MIPS build path.
+  - Fixed: KMS-configured runs now always route to `_build_and_post_offer_cloud_wallet`, matching
+    the daemon's behavior (`_cloud_wallet_offer_post_fallback` → `_build_and_post_offer_cloud_wallet`).
+  - New routing: `use_cloud_wallet_offer_generation = cloud_wallet_configured and (kms_configured or not _use_local_offer_build_path_for_size(...))`
+  - Removed dead KMS coin pre-selection block (only served the broken local vault path).
+- Updated tests (`tests/test_manager_post_offer.py`):
+  - Renamed `test_build_and_post_offer_uses_local_path_for_kms_configured` →
+    `test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured` with flipped assertions.
+  - Added `test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured_large_size`:
+    verifies KMS + `size=100` also routes to cloud wallet path.
+- Validation:
+  - `tests/test_manager_post_offer.py tests/test_signing.py tests/test_cloud_wallet_adapter.py` → `176 passed`.
+
+## 2026-02-28 (John-Deere catch-up + local KMS vault path retest, including failed intermediate states)
+
+- Synced John-Deere repo runtime files to current local-KMS vault-offer implementation before rerun:
+  - `greenfloor/adapters/cloud_wallet.py`
+  - `greenfloor/cli/manager.py`
+  - `greenfloor/cli/offer_builder_sdk.py`
+  - `greenfloor/signing.py`
+  - `greenfloor-native/src/lib.rs`
+- Rebuilt native extension on John-Deere (`.venv/bin/pip install -e ./greenfloor-native`) and confirmed daemon remained off during controlled manager tests.
+- Ran controlled command on John-Deere:
+  - `build-and-post-offer --market-id eco1812022_sell_wusdbc --size-base-units 100 --repeat 1 --venue dexie --dexie-base-url https://api.dexie.space`
+  - with `GREENFLOOR_COINSET_BASE_URL=https://api.coinset.org`.
+- Captured intermediate failure chain while advancing local path correctness (explicitly recording bad progress):
+  - `offer_builder_failed:signing_failed:missing_mnemonic_for_key_id`
+  - `offer_builder_failed:signing_failed:unsupported_vault_signer_cardinality_for_local_offer`
+  - `offer_builder_failed:signing_failed:unsupported_request_asset_for_primary_offer_path`
+  - `offer_builder_failed:signing_failed:build_offer_spend_bundle_error:argument 'value': 'bytes' object cannot be converted to 'Program'`
+- Current blocker after those fixes:
+  - Dexie rejects resulting artifact: `dexie_http_error:400:{"success":false,"error_message":"Invalid Offer"}`.
+- Net status:
+  - local KMS route now executes much further than before (past mnemonic/signer-cardinality/request-asset/memo-shape failures),
+  - but `size=100` still does not successfully post on Dexie because generated offer remains invalid.
+- Immediate next debugging hypothesis checklist:
+  - capture and compare the final `offer1...` artifact from local-KMS path vs a known-good Cloud Wallet small-size artifact at decoded spend-bundle level (coin spends, conditions, settlement announcements, requested payments),
+  - verify CAT-side requested-payment memo/announcement shape exactly matches ent-wallet `createOffer` expectations for CAT requests (not just XCH path parity),
+  - confirm vault MIPS wrapping of CAT pending spends reproduces ent-wallet `getP2Spend` semantics byte-for-byte for singleton-member path,
+  - run deterministic local checks for `validate_offer` + spend-bundle roundtrip before publish and persist decoded diagnostics in audit/progress for each failed `size=100` probe.
+
+## 2026-02-28 (local vault offer build + local KMS signing bridge path)
+
+- Added Cloud Wallet GraphQL vault snapshot helper (`greenfloor/adapters/cloud_wallet.py`):
+  - new `get_vault_custody_snapshot()` query returns launcher id, thresholds/timelock, and custody/recovery key metadata for local vault offer assembly.
+- Switched manager KMS routing to local offer-build path (`greenfloor/cli/manager.py`):
+  - KMS-configured runs now bypass cloud-wallet `createOffer` generation and use the local builder path,
+  - local offer payload now carries Cloud Wallet + KMS context needed for vault signer reconstruction.
+- Extended local offer builder payload forwarding (`greenfloor/cli/offer_builder_sdk.py`) to include Cloud Wallet/KMS context fields.
+- Implemented vault-aware local CAT-offer signing bridge in unified signing module (`greenfloor/signing.py`):
+  - added local vault context resolution from Cloud Wallet custody snapshot,
+  - ported/implemented the key ent-wallet `P2 singleton member` spend behavior for CAT pending spends in vault context,
+  - enabled empty aggregate signature fallback (`Signature.infinity`) for vault-local offer spends that emit no BLS targets.
+- Updated deterministic manager routing test coverage (`tests/test_manager_post_offer.py`) for the new KMS-local dispatch behavior.
+- Validation:
+  - targeted suite: `tests/test_cloud_wallet_adapter.py`, `tests/test_manager_post_offer.py`, `tests/test_signing.py`
+  - result: `175 passed`.
+
+## 2026-02-28 (Dexie reliability review + strict post-validation + controlled 100-only retest)
+
+- Re-reviewed Dexie integration against in-repo `DEXIE_DOCS_AND_API.md`:
+  - confirmed active code uses the correct offers API endpoints:
+    - `POST /v1/offers`
+    - `GET /v1/offers/:id`
+    - `GET /v1/offers` (pair search/reconcile)
+  - no endpoint-family mismatch found (`v1` offers paths are correct).
+- Added stricter publish validation in manager cloud-wallet post path (`greenfloor/cli/manager.py`):
+  - post is now accepted only if `GET /v1/offers/:id` returns the same offer id, and
+  - returned Dexie payload `offered` leg matches expected base asset id and expected base amount (action size).
+  - mismatches now produce explicit publish failure (`dexie_offer_base_amount_mismatch:...`) rather than false success.
+- Added targeted deterministic coverage in `tests/test_manager_post_offer.py`:
+  - non-visible Dexie id -> publish failure,
+  - visible but wrong offered amount for expected size -> publish failure.
+- Added coin watchlist enhancement in daemon websocket path:
+  - watchlist is now supplemented from Dexie offers that match locally-owned offer ids (offer-state + recent strategy executions),
+  - websocket coin-id observations are intersected against this watchlist and recorded as `coin_watch_hit`.
+- Validation snapshots:
+  - manager posting tests: `5 passed` (targeted cloud-wallet posting subset),
+  - websocket/coin watchlist tests: `62 passed`,
+  - no lint errors on touched files.
+- Controlled runtime evidence on `John-Deere` before this retest:
+  - repeated `size=100` attempts appeared in audit history,
+  - historical `cloud_wallet_post_success` ids for `size=100` often resolved to Dexie `404` afterward,
+  - newer guarded path records these as skipped/not-visible instead of successful executions.
+
 ## 2026-02-28 (John-Deere 60-minute soak, 8-hour expiry, full-profile runtime)
 
 - Executed requested long-run validation scope on `John-Deere`:

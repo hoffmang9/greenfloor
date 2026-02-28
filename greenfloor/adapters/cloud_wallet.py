@@ -372,6 +372,56 @@ query getWallet($walletId: ID, $isCreator: Boolean, $states: [OfferState!], $fir
                 normalized_offers.append(node)
         return {"offers": normalized_offers}
 
+    def get_vault_custody_snapshot(self) -> dict[str, Any]:
+        """Return vault custody config and signer key material for local vault spend assembly."""
+        query = """
+query getVaultCustodySnapshot($walletId: ID!, $first: Int!) {
+  wallet(id: $walletId) {
+    custodyConfig {
+      vaultCustodyConfig {
+        vaultLauncherId
+        custodyThreshold
+        recoveryThreshold
+        recoveryClawbackTimelock
+        custodyKeys(first: $first) {
+          edges {
+            node {
+              publicKey
+              curve
+            }
+          }
+        }
+        recoveryKeys(first: $first) {
+          edges {
+            node {
+              publicKey
+              curve
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+        payload = self._graphql(
+            query=query,
+            variables={
+                "walletId": self._vault_id,
+                "first": 50,
+            },
+        )
+        wallet = payload.get("wallet") if isinstance(payload, dict) else None
+        if not isinstance(wallet, dict):
+            return {}
+        custody_config = wallet.get("custodyConfig")
+        if not isinstance(custody_config, dict):
+            return {}
+        vault_cfg = custody_config.get("vaultCustodyConfig")
+        if not isinstance(vault_cfg, dict):
+            return {}
+        return vault_cfg
+
     # ------------------------------------------------------------------
     # KMS vault signing
     # ------------------------------------------------------------------

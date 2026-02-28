@@ -1063,9 +1063,13 @@ def _pick_new_offer_artifact(
     offers: list[dict],
     known_markers: set[str],
     min_created_at: dt.datetime | None = None,
+    require_open_state: bool = False,
 ) -> str:
-    candidates: list[tuple[dt.datetime, str]] = []
+    candidates: list[tuple[dt.datetime, dt.datetime, str]] = []
     for offer in offers:
+        state = str(offer.get("state", "")).strip().upper()
+        if require_open_state and state != "OPEN":
+            continue
         bech32 = str(offer.get("bech32", "")).strip()
         if not bech32.startswith("offer1"):
             continue
@@ -1082,11 +1086,18 @@ def _pick_new_offer_artifact(
             if created_at < min_created_at:
                 continue
         expires_at = _parse_iso8601(str(offer.get("expiresAt", "")).strip())
-        candidates.append((expires_at or dt.datetime.min.replace(tzinfo=dt.UTC), bech32))
+        candidates.append(
+            (
+                created_at or dt.datetime.min.replace(tzinfo=dt.UTC),
+                expires_at or dt.datetime.min.replace(tzinfo=dt.UTC),
+                bech32,
+            )
+        )
     if not candidates:
         return ""
-    candidates.sort(key=lambda row: row[0], reverse=True)
-    return candidates[0][1]
+    # Prefer the newest artifact by creation time to avoid reposting stale open offers.
+    candidates.sort(key=lambda row: (row[0], row[1]), reverse=True)
+    return candidates[0][2]
 
 
 def _wallet_get_wallet_offers(
@@ -1175,6 +1186,66 @@ def _post_dexie_offer_with_invalid_offer_retry(
         attempt += 1
         time.sleep(sleep_seconds)
         sleep_seconds = min(8.0, sleep_seconds * 2.0)
+
+
+def _verify_dexie_offer_visible_by_id(
+    *,
+    dexie: DexieAdapter,
+    offer_id: str,
+    max_attempts: int = 4,
+    delay_seconds: float = 1.5,
+    expected_base_asset_id: str | None = None,
+    expected_base_amount: float | None = None,
+) -> str | None:
+    clean_offer_id = str(offer_id).strip()
+    if not clean_offer_id:
+        return "dexie_offer_missing_id_after_publish"
+    attempts = max(1, int(max_attempts))
+    last_error = "dexie_offer_not_visible_after_publish"
+    for attempt in range(1, attempts + 1):
+        try:
+            payload = dexie.get_offer(clean_offer_id)
+        except Exception as exc:
+            last_error = f"dexie_get_offer_error:{exc}"
+            if attempt < attempts:
+                time.sleep(delay_seconds)
+            continue
+        offer_payload = payload.get("offer") if isinstance(payload, dict) else None
+        visible_id = (
+            str(offer_payload.get("id", "")).strip() if isinstance(offer_payload, dict) else ""
+        )
+        if visible_id == clean_offer_id:
+            if (
+                expected_base_asset_id
+                and expected_base_amount is not None
+                and isinstance(offer_payload, dict)
+            ):
+                offered = offer_payload.get("offered")
+                if isinstance(offered, list):
+                    observed_amount: float | None = None
+                    expected_asset = str(expected_base_asset_id).strip().lower()
+                    for row in offered:
+                        if not isinstance(row, dict):
+                            continue
+                        asset_id = str(row.get("id", "")).strip().lower()
+                        if asset_id != expected_asset:
+                            continue
+                        try:
+                            observed_amount = float(row.get("amount") or 0)
+                        except (TypeError, ValueError):
+                            observed_amount = None
+                        break
+                    if observed_amount is not None:
+                        if abs(observed_amount - float(expected_base_amount)) > 1e-9:
+                            return (
+                                "dexie_offer_base_amount_mismatch:"
+                                f"expected={expected_base_amount}:observed={observed_amount}"
+                            )
+            return None
+        last_error = "dexie_offer_visibility_payload_mismatch"
+        if attempt < attempts:
+            time.sleep(delay_seconds)
+    return last_error
 
 
 def _coinset_coin_url(*, coin_name: str, network: str = "mainnet") -> str:
@@ -1300,6 +1371,7 @@ def _poll_offer_artifact_until_available(
     known_markers: set[str],
     timeout_seconds: int,
     min_created_at: dt.datetime | None = None,
+    require_open_state: bool = False,
 ) -> str:
     start = time.monotonic()
     sleep_seconds = 2.0
@@ -1320,6 +1392,7 @@ def _poll_offer_artifact_until_available(
                 offers=offers,
                 known_markers=known_markers,
                 min_created_at=min_created_at,
+                require_open_state=require_open_state,
             )
             if offer_text:
                 return offer_text
@@ -2276,6 +2349,107 @@ def _resolve_market_denomination_entry(market, *, size_base_units: int):
     )
 
 
+def _resolve_offer_expiry_for_market(market) -> tuple[str, int]:
+    pricing = dict(getattr(market, "pricing", {}) or {})
+    unit = str(pricing.get("strategy_offer_expiry_unit", "")).strip().lower()
+    value_raw = pricing.get("strategy_offer_expiry_value")
+    if unit in {"minutes", "hours"}:
+        try:
+            value = int(value_raw or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return unit, value
+    return "minutes", _TEST_PHASE_OFFER_EXPIRY_MINUTES
+
+
+def _use_local_offer_build_path_for_size(*, size_base_units: int) -> bool:
+    """Use local offer generation for larger sizes by default.
+
+    Rationale: Cloud Wallet `create_offer` artifacts for larger maker sizes have
+    repeatedly failed Dexie validation in production, while local build artifacts
+    for equivalent offers are valid.
+    """
+    raw_threshold = os.getenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "100").strip()
+    try:
+        threshold = int(raw_threshold)
+    except ValueError:
+        threshold = 100
+    if threshold <= 0:
+        return False
+    return int(size_base_units) >= threshold
+
+
+def _kms_offer_signing_configured(program: Any) -> bool:
+    return bool(str(getattr(program, "cloud_wallet_kms_key_id", "")).strip())
+
+
+def _select_offer_coin_ids_for_target_amount(
+    *, wallet_coins: list[dict[str, Any]], target_amount: int
+) -> list[str]:
+    if target_amount <= 0:
+        return []
+    spendable_rows: list[tuple[int, str]] = []
+    for coin in wallet_coins:
+        if not _is_spendable_coin(coin):
+            continue
+        coin_name = str(coin.get("name", "")).strip()
+        if not _is_hex_asset_id(coin_name):
+            continue
+        try:
+            amount = int(coin.get("amount", 0))
+        except (TypeError, ValueError):
+            continue
+        if amount <= 0:
+            continue
+        spendable_rows.append((amount, coin_name.lower()))
+    if not spendable_rows:
+        return []
+    for amount, coin_name in spendable_rows:
+        if amount == target_amount:
+            return [coin_name]
+    spendable_rows.sort(key=lambda row: row[0], reverse=True)
+    running_total = 0
+    selected_coin_ids: list[str] = []
+    for amount, coin_name in spendable_rows:
+        selected_coin_ids.append(coin_name)
+        running_total += amount
+        if running_total >= target_amount:
+            return selected_coin_ids
+    return []
+
+
+def _resolve_quote_asset_for_local_offer_build(*, quote_asset: str, network: str) -> str:
+    normalized = str(quote_asset).strip().lower()
+    if normalized in {"xch", "txch", "1"}:
+        return "txch" if _is_testnet(network) else "xch"
+    if _is_hex_asset_id(normalized):
+        return normalized
+
+    cats_path = Path(_default_cats_config_path()).expanduser()
+    if not cats_path.exists():
+        return quote_asset
+    try:
+        raw = load_yaml(cats_path)
+    except Exception:
+        return quote_asset
+    if not isinstance(raw, dict):
+        return quote_asset
+    cats = raw.get("cats", [])
+    if not isinstance(cats, list):
+        return quote_asset
+    for item in cats:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("base_symbol", "")).strip().lower()
+        if symbol != normalized:
+            continue
+        asset_id = str(item.get("asset_id", "")).strip().lower()
+        if _is_hex_asset_id(asset_id):
+            return asset_id
+    return quote_asset
+
+
 def _build_offer_text_for_request(payload: dict) -> str:
     return build_offer_text(payload)
 
@@ -2317,6 +2491,7 @@ def _build_and_post_offer_cloud_wallet(
     built_offers_preview: list[dict[str, str]] = []
     publish_failures = 0
     offer_fee_mojos, offer_fee_source = _resolve_maker_offer_fee(network=program.app_network)
+    expiry_unit, expiry_value = _resolve_offer_expiry_for_market(market)
     dexie = DexieAdapter(dexie_base_url) if (not dry_run and publish_venue == "dexie") else None
     splash = SplashAdapter(splash_base_url) if (not dry_run and publish_venue == "splash") else None
 
@@ -2344,9 +2519,8 @@ def _build_and_post_offer_cloud_wallet(
 
         offered = [{"assetId": resolved_base_asset_id, "amount": offer_amount}]
         requested = [{"assetId": resolved_quote_asset_id, "amount": request_amount}]
-        expires_at = (
-            dt.datetime.now(dt.UTC) + dt.timedelta(minutes=_TEST_PHASE_OFFER_EXPIRY_MINUTES)
-        ).isoformat()
+        expires_at_delta = {expiry_unit: int(expiry_value)}
+        expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(**expires_at_delta)).isoformat()
         create_result = wallet.create_offer(
             offered=offered,
             requested=requested,
@@ -2374,6 +2548,7 @@ def _build_and_post_offer_cloud_wallet(
                 known_markers=known_offer_markers,
                 timeout_seconds=15 * 60,
                 min_created_at=offer_request_started_at,
+                require_open_state=True,
             )
         except RuntimeError as exc:
             post_results.append(
@@ -2442,6 +2617,20 @@ def _build_and_post_offer_cloud_wallet(
                 drop_only=drop_only,
                 claim_rewards=claim_rewards,
             )
+            if bool(result.get("success", False)):
+                posted_offer_id = str(result.get("id", "")).strip()
+                visibility_error = _verify_dexie_offer_visible_by_id(
+                    dexie=dexie,
+                    offer_id=posted_offer_id,
+                    expected_base_asset_id=str(market.base_asset),
+                    expected_base_amount=float(size_base_units),
+                )
+                if visibility_error:
+                    result = {
+                        **result,
+                        "success": False,
+                        "error": visibility_error,
+                    }
         else:
             assert splash is not None
             result = splash.post_offer(offer_text)
@@ -2459,7 +2648,7 @@ def _build_and_post_offer_cloud_wallet(
                 dexie_base_url=dexie_base_url,
                 offer_id=offer_id,
             )
-        if offer_id:
+        if offer_id and bool(result.get("success", False)):
             store.upsert_offer_state(
                 offer_id=offer_id,
                 market_id=str(market.market_id),
@@ -2551,6 +2740,9 @@ def _build_and_post_offer(
     signer_key = program.signer_key_registry.get(market.signer_key_id)
     keyring_yaml_path = signer_key.keyring_yaml_path if signer_key is not None else ""
     pricing = dict(getattr(market, "pricing", {}) or {})
+    base_unit_mojo_multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))
+    quote_unit_mojo_multiplier = int(pricing.get("quote_unit_mojo_multiplier", 1000))
+    expiry_unit, expiry_value = _resolve_offer_expiry_for_market(market)
     quote_price = pricing.get("fixed_quote_per_base")
     if quote_price is None:
         min_q = pricing.get("min_price_quote_per_base")
@@ -2572,7 +2764,15 @@ def _build_and_post_offer(
         and bool(program.cloud_wallet_private_key_pem_path)
         and bool(program.cloud_wallet_vault_id)
     )
-    if cloud_wallet_configured:
+    kms_configured = _kms_offer_signing_configured(program)
+    # KMS runs always use the cloud wallet path: the cloud wallet's createOffer builds
+    # the complete vault spend bundle (CAT + vault singleton) and _auto_sign_if_kms signs
+    # the resulting signature request. The local build path cannot produce a valid vault
+    # offer because it omits the vault singleton spend required by SingletonMember.
+    use_cloud_wallet_offer_generation = cloud_wallet_configured and (
+        kms_configured or not _use_local_offer_build_path_for_size(size_base_units=size_base_units)
+    )
+    if use_cloud_wallet_offer_generation:
         _initialize_manager_file_logging(program.home_dir, log_level=program.app_log_level)
         _warn_if_log_level_auto_healed(program=program, program_path=program_path)
         return _build_and_post_offer_cloud_wallet(
@@ -2588,6 +2788,8 @@ def _build_and_post_offer(
             quote_price=float(quote_price),
             dry_run=bool(dry_run),
         )
+
+    selected_offer_coin_ids: list[str] = []
 
     debug_dry_run_offer_capture_dir = os.getenv(
         "GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", ""
@@ -2606,28 +2808,44 @@ def _build_and_post_offer(
     splash = SplashAdapter(splash_base_url) if (not dry_run and publish_venue == "splash") else None
     publish_failures = 0
     for index in range(repeat):
+        resolved_quote_asset = _resolve_quote_asset_for_local_offer_build(
+            quote_asset=str(market.quote_asset),
+            network=network,
+        )
         payload = {
             "market_id": market.market_id,
             "base_asset": market.base_asset,
             "base_symbol": market.base_symbol,
-            "quote_asset": market.quote_asset,
+            "quote_asset": resolved_quote_asset,
             "quote_asset_type": market.quote_asset_type,
             "receive_address": market.receive_address,
             "size_base_units": int(size_base_units),
-            "pair": str(market.quote_asset).strip().lower(),
+            "pair": str(resolved_quote_asset).strip().lower(),
             "reason": "manual_build_and_post",
             "xch_price_usd": None,
-            "expiry_unit": "minutes",
-            "expiry_value": _TEST_PHASE_OFFER_EXPIRY_MINUTES,
+            "expiry_unit": expiry_unit,
+            "expiry_value": int(expiry_value),
             "quote_price_quote_per_base": float(quote_price),
-            "base_unit_mojo_multiplier": int(pricing.get("base_unit_mojo_multiplier", 1000)),
-            "quote_unit_mojo_multiplier": int(pricing.get("quote_unit_mojo_multiplier", 1000)),
+            "base_unit_mojo_multiplier": int(base_unit_mojo_multiplier),
+            "quote_unit_mojo_multiplier": int(quote_unit_mojo_multiplier),
             "fee_mojos": 0,
             "dry_run": bool(dry_run),
             "key_id": market.signer_key_id,
             "keyring_yaml_path": keyring_yaml_path,
             "network": network,
             "asset_id": market.base_asset,
+            "offer_coin_ids": selected_offer_coin_ids,
+            "cloud_wallet_base_url": str(program.cloud_wallet_base_url or "").strip(),
+            "cloud_wallet_user_key_id": str(program.cloud_wallet_user_key_id or "").strip(),
+            "cloud_wallet_private_key_pem_path": str(
+                program.cloud_wallet_private_key_pem_path or ""
+            ).strip(),
+            "cloud_wallet_vault_id": str(program.cloud_wallet_vault_id or "").strip(),
+            "cloud_wallet_kms_key_id": str(program.cloud_wallet_kms_key_id or "").strip(),
+            "cloud_wallet_kms_region": str(program.cloud_wallet_kms_region or "").strip(),
+            "cloud_wallet_kms_public_key_hex": str(
+                program.cloud_wallet_kms_public_key_hex or ""
+            ).strip(),
         }
         try:
             offer_text = _build_offer_text_for_request(payload)

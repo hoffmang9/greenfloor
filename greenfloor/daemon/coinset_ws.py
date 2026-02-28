@@ -9,7 +9,10 @@ from typing import Any
 
 import aiohttp
 
-from greenfloor.adapters.coinset import extract_coinset_tx_ids_from_offer_payload
+from greenfloor.adapters.coinset import (
+    extract_coin_ids_from_offer_payload,
+    extract_coinset_tx_ids_from_offer_payload,
+)
 
 _ws_logger = logging.getLogger("greenfloor.daemon.coinset_ws")
 _ws_logger.addHandler(logging.NullHandler())
@@ -40,6 +43,7 @@ class CoinsetWebsocketClient:
         on_mempool_tx_ids: Callable[[list[str]], None],
         on_confirmed_tx_ids: Callable[[list[str]], None],
         on_audit_event: Callable[[str, dict[str, Any]], None],
+        on_observed_coin_ids: Callable[[list[str]], None] | None = None,
         recovery_poll: Callable[[], list[str]] | None = None,
     ) -> None:
         self._ws_url = ws_url
@@ -47,6 +51,7 @@ class CoinsetWebsocketClient:
         self._on_mempool_tx_ids = on_mempool_tx_ids
         self._on_confirmed_tx_ids = on_confirmed_tx_ids
         self._on_audit_event = on_audit_event
+        self._on_observed_coin_ids = on_observed_coin_ids
         self._recovery_poll = recovery_poll
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -124,6 +129,7 @@ class CoinsetWebsocketClient:
             self._on_audit_event("coinset_ws_payload_ignored", {"kind": type(payload).__name__})
             return
         mempool_tx_ids, confirmed_tx_ids = _classify_payload_tx_ids(payload)
+        observed_coin_ids = extract_coin_ids_from_offer_payload(payload)
         if mempool_tx_ids:
             self._on_mempool_tx_ids(mempool_tx_ids)
             self._on_audit_event(
@@ -135,6 +141,13 @@ class CoinsetWebsocketClient:
             self._on_audit_event(
                 "coinset_ws_tx_block_event",
                 {"tx_id_count": len(confirmed_tx_ids)},
+            )
+        if observed_coin_ids:
+            if self._on_observed_coin_ids is not None:
+                self._on_observed_coin_ids(observed_coin_ids)
+            self._on_audit_event(
+                "coinset_ws_coin_observed",
+                {"coin_id_count": len(observed_coin_ids)},
             )
 
     async def _sleep_with_stop(self, seconds: float) -> None:
@@ -153,6 +166,7 @@ def capture_coinset_websocket_once(
     on_mempool_tx_ids: Callable[[list[str]], None],
     on_confirmed_tx_ids: Callable[[list[str]], None],
     on_audit_event: Callable[[str, dict[str, Any]], None],
+    on_observed_coin_ids: Callable[[list[str]], None] | None = None,
     recovery_poll: Callable[[], list[str]] | None = None,
 ) -> None:
     client = CoinsetWebsocketClient(
@@ -161,6 +175,7 @@ def capture_coinset_websocket_once(
         on_mempool_tx_ids=on_mempool_tx_ids,
         on_confirmed_tx_ids=on_confirmed_tx_ids,
         on_audit_event=on_audit_event,
+        on_observed_coin_ids=on_observed_coin_ids,
         recovery_poll=recovery_poll,
     )
     stop_event = threading.Event()
