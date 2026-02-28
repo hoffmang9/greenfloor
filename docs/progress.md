@@ -1,5 +1,32 @@
 # Progress Log
 
+## 2026-02-28 (Fix duplicate offer creation: CLI audit event format + daemon direct call)
+
+- Root cause: daemon was creating duplicate 100-unit offers on every cycle when using the cloud wallet (KMS) path.
+- Two compounding bugs identified and fixed (PR #46):
+
+### Bug 1: CLI audit event format (`greenfloor/cli/manager.py`)
+
+- `build-and-post-offer` emitted `strategy_offer_execution` events with a flat payload — no `items` list.
+- `_recent_offer_sizes_by_offer_id` only reads offer sizes from `items[*].size`, so CLI-posted offers fell
+  into `active_unmapped_offer_ids` instead of `active_counts_by_size[100]`.
+- Daemon saw `active_offer_counts_by_size={1: 14, 10: 2, 100: 0}` on every cycle and kept re-posting.
+- Fix: `store.add_audit_event("strategy_offer_execution", ...)` in the CLI now emits a proper `items` list
+  with `size`, `status`, `reason`, `offer_id`, and `attempts` fields — matching the daemon's own format.
+- Added regression test: `test_active_offer_counts_by_size_counts_cli_posted_offer`.
+
+### Bug 2: Daemon stdout-capture interface (`greenfloor/daemon/main.py`)
+
+- `_cloud_wallet_offer_post_fallback` wrapped `_build_and_post_offer_cloud_wallet` in `redirect_stdout`
+  and parsed the printed JSON back out via `_parse_last_json_object`. This was a CLI side-channel, not a
+  direct function call — violating the AGENTS.md "prefer direct function calls" rule.
+- Fix: `_build_and_post_offer_cloud_wallet` now returns `tuple[int, dict[str, Any]]` (exit code + payload)
+  alongside its existing stdout print. The daemon unpacks the tuple directly.
+- `StringIO`, `redirect_stdout`, and `_parse_last_json_object` removed from the daemon path entirely.
+- CLI stdout output and contract unchanged; CLI caller (`_build_and_post_offer`) discards the payload
+  and returns only the exit code.
+- Validation: `tests/test_daemon_offer_execution.py tests/test_manager_post_offer.py` → 137 passed.
+
 ## 2026-02-28 (KMS offer routing fix: route all KMS runs through cloud wallet path)
 
 - Root cause identified for `size=100` Dexie `Invalid Offer` rejection on local KMS vault path:
