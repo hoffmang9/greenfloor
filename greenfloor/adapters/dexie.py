@@ -28,12 +28,12 @@ class DexieAdapter:
         offers = payload.get("offers", [])
         return [o for o in offers if isinstance(o, dict)]
 
-    def get_offer(self, offer_id: str) -> dict[str, Any]:
+    def get_offer(self, offer_id: str, *, timeout: int = 20) -> dict[str, Any]:
         clean_offer_id = str(offer_id).strip()
         if not clean_offer_id:
             raise ValueError("offer_id is required")
         url = f"{self.base_url}/v1/offers/{urllib.parse.quote(clean_offer_id)}"
-        with urllib.request.urlopen(url, timeout=20) as resp:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
         if isinstance(payload, dict):
             return payload

@@ -1385,30 +1385,32 @@ def _process_single_market(
         market_id=market.market_id,
         clock=now,
     )
-    # Build a size map from the Dexie list response, then fetch individually for any
-    # of our offers that fall outside the 20-offer-per-page cap.
-    dexie_size_by_offer_id: dict[str, int] = _build_dexie_size_by_offer_id(
-        offers, str(market.base_asset)
-    )
+    # For any of our active offers not returned by the Dexie list (either genuinely
+    # beyond the 20-offer cap, or expired/completed), fetch them individually and
+    # add to the offers list so the state-transition loop below can handle expirations.
+    # A 5-second timeout prevents a hung TCP connection from stalling the daemon.
     dexie_offer_ids_in_list = {str(o.get("id", "")).strip() for o in offers if o.get("id")}
     beyond_cap_ids = our_offer_ids - dexie_offer_ids_in_list
+    augmented_offers = list(offers)
     for beyond_offer_id in beyond_cap_ids:
         try:
-            single_payload = dexie.get_offer(beyond_offer_id)
+            single_payload = dexie.get_offer(beyond_offer_id, timeout=5)
             single_offer = single_payload.get("offer") if isinstance(single_payload, dict) else None
             if isinstance(single_offer, dict):
-                sizes = _build_dexie_size_by_offer_id([single_offer], str(market.base_asset))
-                dexie_size_by_offer_id.update(sizes)
+                augmented_offers.append(single_offer)
         except Exception:  # pragma: no cover - network dependent
             pass
+    dexie_size_by_offer_id: dict[str, int] = _build_dexie_size_by_offer_id(
+        augmented_offers, str(market.base_asset)
+    )
     if dexie_fetch_error is None:
         _update_market_coin_watchlist_from_dexie(
             market=market,
-            offers=offers,
+            offers=augmented_offers,
             store=store,
             clock=now,
         )
-    for offer in offers:
+    for offer in augmented_offers:
         offer_id = str(offer.get("id", ""))
         if not offer_id:
             continue
