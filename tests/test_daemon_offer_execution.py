@@ -8,6 +8,7 @@ from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon import main as daemon_main
 from greenfloor.daemon.main import (
     _active_offer_counts_by_size,
+    _build_dexie_size_by_offer_id,
     _execute_strategy_actions,
     _inject_reseed_action_if_no_active_offers,
     _match_watched_coin_ids,
@@ -556,6 +557,73 @@ def test_active_offer_counts_by_size_counts_cli_posted_offer() -> None:
 
     assert counts == {1: 0, 10: 0, 100: 1}, "CLI-posted 100-unit offer must be counted"
     assert unmapped == 0, "CLI-posted offer must not appear in unmapped"
+
+
+def test_build_dexie_size_by_offer_id_extracts_sizes() -> None:
+    """_build_dexie_size_by_offer_id maps offer IDs to base-unit sizes from the Dexie list."""
+    base_asset = "asset-abc"
+    offers = [
+        {
+            "id": "offer-1",
+            "status": 0,
+            "offered": [{"id": "asset-abc", "code": "ECO", "amount": 1}],
+        },
+        {
+            "id": "offer-10",
+            "status": 0,
+            "offered": [{"id": "asset-abc", "code": "ECO", "amount": 10}],
+        },
+        {
+            "id": "offer-100",
+            "status": 0,
+            "offered": [{"id": "asset-abc", "code": "ECO", "amount": 100}],
+        },
+        {
+            "id": "offer-other",
+            "status": 0,
+            "offered": [{"id": "other-asset", "code": "OTHER", "amount": 5}],
+        },
+    ]
+
+    result = _build_dexie_size_by_offer_id(offers, base_asset)
+
+    assert result == {"offer-1": 1, "offer-10": 10, "offer-100": 100}
+    assert "offer-other" not in result
+
+
+def test_active_offer_counts_by_size_uses_dexie_hint_for_unmapped_offer() -> None:
+    """Offers with no audit event size entry must be resolved via dexie_size_by_offer_id.
+
+    This covers offers posted before the CLI audit event fix was deployed: they exist
+    in the DB in open state but have no strategy_offer_execution items entry. Without
+    the Dexie hint the daemon sees 100: 0 and creates a duplicate every cycle.
+    """
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.offer_states = [
+        {"offer_id": "legacy-hundred-1", "market_id": "m1", "state": "open"},
+    ]
+    # No audit events — this simulates a pre-fix CLI-posted offer.
+    store.audit_events = []
+
+    counts, _, unmapped_without_hint = _active_offer_counts_by_size(
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+    )
+    assert counts == {1: 0, 10: 0, 100: 0}
+    assert unmapped_without_hint == 1
+
+    # With the Dexie hint the offer is resolved to size 100.
+    dexie_hint = {"legacy-hundred-1": 100}
+    counts_with_hint, _, unmapped_with_hint = _active_offer_counts_by_size(
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+        dexie_size_by_offer_id=dexie_hint,
+    )
+    assert counts_with_hint == {1: 0, 10: 0, 100: 1}, "Dexie hint must resolve unmapped offer"
+    assert unmapped_with_hint == 0, "No offers should remain unmapped after Dexie hint"
 
 
 def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers() -> None:
