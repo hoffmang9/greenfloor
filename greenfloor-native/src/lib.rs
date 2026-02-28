@@ -29,9 +29,10 @@ fn validate_offer(offer: &str) -> PyResult<()> {
 }
 
 #[pyfunction]
-fn from_input_spend_bundle_xch(
+fn from_input_spend_bundle(
     spend_bundle_bytes: &[u8],
     requested_payments_xch: Vec<(Vec<u8>, Vec<(Vec<u8>, u64)>)>,
+    requested_payments_cats: Vec<(Vec<u8>, Vec<u8>, Vec<(Vec<u8>, u64)>)>,
 ) -> PyResult<Vec<u8>> {
     let spend_bundle = SpendBundle::from_bytes(spend_bundle_bytes).map_err(to_py_value_error)?;
 
@@ -47,6 +48,20 @@ fn from_input_spend_bundle_xch(
             .xch
             .push(NotarizedPayment::new(nonce, payments));
     }
+    for (asset_id_raw, nonce_raw, payments_raw) in requested_payments_cats {
+        let asset_id = parse_bytes32(&asset_id_raw, "asset_id")?;
+        let nonce = parse_bytes32(&nonce_raw, "nonce")?;
+        let mut payments = Vec::with_capacity(payments_raw.len());
+        for (puzzle_hash_raw, amount) in payments_raw {
+            let puzzle_hash = parse_bytes32(&puzzle_hash_raw, "puzzle_hash")?;
+            payments.push(Payment::new(puzzle_hash, amount, Memos::None));
+        }
+        requested_payments
+            .cats
+            .entry(asset_id)
+            .or_default()
+            .push(NotarizedPayment::new(nonce, payments));
+    }
 
     let mut ctx = SpendContext::new();
     let offer = Offer::from_input_spend_bundle(
@@ -60,9 +75,18 @@ fn from_input_spend_bundle_xch(
     offer_spend_bundle.to_bytes().map_err(to_py_value_error)
 }
 
+#[pyfunction]
+fn from_input_spend_bundle_xch(
+    spend_bundle_bytes: &[u8],
+    requested_payments_xch: Vec<(Vec<u8>, Vec<(Vec<u8>, u64)>)>,
+) -> PyResult<Vec<u8>> {
+    from_input_spend_bundle(spend_bundle_bytes, requested_payments_xch, Vec::new())
+}
+
 #[pymodule]
 fn greenfloor_native(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(validate_offer, m)?)?;
+    m.add_function(wrap_pyfunction!(from_input_spend_bundle, m)?)?;
     m.add_function(wrap_pyfunction!(from_input_spend_bundle_xch, m)?)?;
     Ok(())
 }

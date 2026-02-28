@@ -45,6 +45,25 @@ def test_handle_text_message_routes_tx_ids_to_callbacks() -> None:
     ]
 
 
+def test_handle_text_message_routes_coin_ids_to_callback() -> None:
+    coin_calls: list[list[str]] = []
+    audit_calls: list[tuple[str, dict]] = []
+    coin_id = "d" * 64
+    client = CoinsetWebsocketClient(
+        ws_url="wss://coinset.org/ws",
+        reconnect_interval_seconds=1,
+        on_mempool_tx_ids=lambda _tx_ids: None,
+        on_confirmed_tx_ids=lambda _tx_ids: None,
+        on_audit_event=lambda event_type, payload: audit_calls.append((event_type, payload)),
+        on_observed_coin_ids=lambda coin_ids: coin_calls.append(list(coin_ids)),
+    )
+
+    client._handle_text_message(json.dumps({"involved_coins": [f"0x{coin_id}"]}))
+
+    assert coin_calls == [[coin_id]]
+    assert [event for event, _ in audit_calls] == ["coinset_ws_coin_observed"]
+
+
 def test_handle_text_message_emits_parse_error_for_invalid_json() -> None:
     audit_calls: list[tuple[str, dict]] = []
     client = CoinsetWebsocketClient(

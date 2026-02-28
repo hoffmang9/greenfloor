@@ -7,10 +7,14 @@ from greenfloor.config.models import MarketConfig, MarketInventoryConfig
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon import main as daemon_main
 from greenfloor.daemon.main import (
+    _active_offer_counts_by_size,
     _execute_strategy_actions,
     _inject_reseed_action_if_no_active_offers,
+    _match_watched_coin_ids,
     _parse_last_json_object,
+    _set_watched_coin_ids_for_market,
     _strategy_config_from_market,
+    _update_market_coin_watchlist_from_dexie,
 )
 
 
@@ -19,16 +23,24 @@ class _FakeDexie:
         self.post_result = post_result
         self.posted: list[str] = []
         self.calls = 0
+        self.visible_offer_ids: set[str] = set()
 
     def post_offer(self, offer: str) -> dict:
         self.posted.append(offer)
         self.calls += 1
         return dict(self.post_result)
 
+    def get_offer(self, offer_id: str) -> dict[str, Any]:
+        clean_offer_id = str(offer_id).strip()
+        if clean_offer_id in self.visible_offer_ids:
+            return {"success": True, "offer": {"id": clean_offer_id, "status": 0}}
+        raise RuntimeError("dexie_http_error:404")
+
 
 class _FakeStore:
     def __init__(self) -> None:
         self.offer_states: list[dict] = []
+        self.audit_events: list[dict] = []
 
     def upsert_offer_state(
         self, *, offer_id: str, market_id: str, state: str, last_seen_status: int | None
@@ -45,6 +57,31 @@ class _FakeStore:
     def list_offer_states(self, *, market_id: str | None = None, limit: int = 200) -> list[dict]:
         _ = market_id, limit
         return list(self.offer_states)
+
+    def list_recent_audit_events(
+        self,
+        *,
+        event_types: list[str] | None = None,
+        market_id: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        rows = list(self.audit_events)
+        if event_types:
+            allowed = set(event_types)
+            rows = [row for row in rows if str(row.get("event_type", "")) in allowed]
+        if market_id:
+            rows = [row for row in rows if str(row.get("market_id", "")) == market_id]
+        return rows[: int(limit)]
+
+    def add_audit_event(self, event_type: str, payload: dict, market_id: str | None = None) -> None:
+        self.audit_events.insert(
+            0,
+            {
+                "event_type": str(event_type),
+                "market_id": market_id,
+                "payload": dict(payload),
+            },
+        )
 
 
 def _market() -> MarketConfig:
@@ -69,6 +106,7 @@ def _market() -> MarketConfig:
 
 def test_execute_strategy_actions_dry_run_plans_without_posting() -> None:
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
+    dexie.visible_offer_ids = {"offer-100", "offer-10", "offer-1"}
     store = _FakeStore()
     actions = [
         PlannedAction(
@@ -109,6 +147,7 @@ def test_execute_strategy_actions_skips_when_builder_skips(monkeypatch) -> None:
         lambda **_kwargs: {"status": "skipped", "reason": "builder_not_ready", "offer": None},
     )
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
+    dexie.visible_offer_ids = {"offer-100", "offer-10", "offer-1"}
     store = _FakeStore()
     actions = [
         PlannedAction(
@@ -329,15 +368,35 @@ def test_inject_reseed_action_when_no_active_offers() -> None:
         clock=datetime.now(UTC),
     )
 
-    assert len(actions) == 1
-    assert actions[0].size == 1
-    assert actions[0].repeat == 1
-    assert actions[0].reason == "no_active_offer_reseed"
+    assert [action.size for action in actions] == [1, 10, 100]
+    assert [action.repeat for action in actions] == [5, 2, 1]
+    assert all(action.reason == "offer_size_gap_reseed" for action in actions)
 
 
-def test_inject_reseed_action_skips_when_active_offer_exists() -> None:
+def test_inject_reseed_action_skips_when_offer_targets_are_satisfied() -> None:
     store = _FakeStore()
-    store.offer_states = [{"offer_id": "live-1", "market_id": "m1", "state": "open"}]
+    store.offer_states = [
+        *[{"offer_id": f"one-{idx}", "market_id": "m1", "state": "open"} for idx in range(1, 6)],
+        *[{"offer_id": f"ten-{idx}", "market_id": "m1", "state": "open"} for idx in range(1, 3)],
+        {"offer_id": "hundred-1", "market_id": "m1", "state": "open"},
+    ]
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "payload": {
+                "items": [
+                    {"offer_id": f"one-{idx}", "size": 1, "status": "executed"}
+                    for idx in range(1, 6)
+                ]
+                + [
+                    {"offer_id": f"ten-{idx}", "size": 10, "status": "executed"}
+                    for idx in range(1, 3)
+                ]
+                + [{"offer_id": "hundred-1", "size": 100, "status": "executed"}]
+            },
+        }
+    ]
     market = _market()
     strategy_config = _strategy_config_from_market(market)
 
@@ -353,7 +412,7 @@ def test_inject_reseed_action_skips_when_active_offer_exists() -> None:
     assert actions == []
 
 
-def test_inject_reseed_action_skips_when_mempool_offer_is_recent() -> None:
+def test_inject_reseed_action_fills_missing_sizes_when_recent_mempool_is_present() -> None:
     store = _FakeStore()
     now = datetime.now(UTC)
     store.offer_states = [
@@ -376,7 +435,9 @@ def test_inject_reseed_action_skips_when_mempool_offer_is_recent() -> None:
         clock=now,
     )
 
-    assert actions == []
+    assert [action.size for action in actions] == [1, 10, 100]
+    assert [action.repeat for action in actions] == [5, 2, 1]
+    assert all(action.reason == "offer_size_gap_reseed" for action in actions)
 
 
 def test_inject_reseed_action_when_only_mempool_offer_is_stale() -> None:
@@ -403,8 +464,83 @@ def test_inject_reseed_action_when_only_mempool_offer_is_stale() -> None:
         clock=now,
     )
 
-    assert len(actions) == 1
-    assert actions[0].reason == "no_active_offer_reseed"
+    assert [action.size for action in actions] == [1, 10, 100]
+    assert [action.repeat for action in actions] == [5, 2, 1]
+    assert all(action.reason == "offer_size_gap_reseed" for action in actions)
+
+
+def test_active_offer_counts_by_size_uses_offer_state_and_size_mapping() -> None:
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.offer_states = [
+        {"offer_id": "one-1", "market_id": "m1", "state": "open"},
+        {"offer_id": "ten-1", "market_id": "m1", "state": "refresh_due"},
+        {
+            "offer_id": "hundred-1",
+            "market_id": "m1",
+            "state": "mempool_observed",
+            "updated_at": now.isoformat(),
+        },
+        {"offer_id": "unknown-1", "market_id": "m1", "state": "open"},
+    ]
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "payload": {
+                "items": [
+                    {"offer_id": "one-1", "size": 1, "status": "executed"},
+                    {"offer_id": "ten-1", "size": 10, "status": "executed"},
+                    {"offer_id": "hundred-1", "size": 100, "status": "executed"},
+                ]
+            },
+        }
+    ]
+
+    counts, state_counts, unmapped = _active_offer_counts_by_size(
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+    )
+
+    assert counts == {1: 1, 10: 1, 100: 1}
+    assert state_counts["open"] == 2
+    assert state_counts["refresh_due"] == 1
+    assert state_counts["mempool_observed"] == 1
+    assert unmapped == 1
+
+
+def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers() -> None:
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.offer_states = [{"offer_id": "offer-1", "market_id": "m1", "state": "open"}]
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "payload": {"offer_id": "offer-1"},
+        }
+    ]
+    market = _market()
+    offers = [
+        {"id": "offer-1", "involved_coins": ["0x" + ("a" * 64)]},
+        {"id": "offer-2", "involved_coins": ["0x" + ("b" * 64)]},
+    ]
+
+    _update_market_coin_watchlist_from_dexie(
+        market=market,
+        offers=cast(list[dict[str, Any]], offers),
+        store=cast(Any, store),
+        clock=now,
+    )
+
+    hits = _match_watched_coin_ids(observed_coin_ids=["a" * 64, "b" * 64])
+    assert hits["m1"] == ["a" * 64]
+
+
+def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:
+    _set_watched_coin_ids_for_market(market_id="m-empty", coin_ids={"c" * 64})
+    assert _match_watched_coin_ids(observed_coin_ids=["d" * 64]) == {}
 
 
 def test_resolve_quote_asset_for_offer_maps_symbol_from_cats(monkeypatch, tmp_path) -> None:
@@ -443,6 +579,7 @@ def test_execute_strategy_actions_uses_cloud_wallet_path_when_configured(monkeyp
         cloud_wallet_vault_id = "Wallet_abc"
 
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
+    dexie.visible_offer_ids = {"offer-fallback-1"}
     store = _FakeStore()
     actions = [
         PlannedAction(
@@ -469,6 +606,115 @@ def test_execute_strategy_actions_uses_cloud_wallet_path_when_configured(monkeyp
 
     assert result["executed_count"] == 1
     assert result["items"][0]["reason"] == "cloud_wallet_post_success"
+
+
+def test_execute_strategy_actions_cloud_wallet_requires_dexie_visibility(monkeypatch) -> None:
+    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    monkeypatch.setattr(
+        daemon_main,
+        "_cloud_wallet_offer_post_fallback",
+        lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-missing"},
+    )
+
+    class _Program:
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "UserAuthKey_abc"
+        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+
+    dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
+    store = _FakeStore()
+    actions = [
+        PlannedAction(
+            size=100,
+            repeat=1,
+            pair="usdc",
+            expiry_unit="hours",
+            expiry_value=8,
+            cancel_after_create=True,
+            reason="offer_size_gap_reseed",
+        )
+    ]
+
+    result = _execute_strategy_actions(
+        market=_market(),
+        strategy_actions=actions,
+        runtime_dry_run=False,
+        xch_price_usd=30.0,
+        dexie=cast(Any, dexie),
+        store=cast(Any, store),
+        publish_venue="dexie",
+        program=_Program(),
+    )
+
+    assert result["executed_count"] == 0
+    assert result["items"][0]["status"] == "skipped"
+    assert "cloud_wallet_post_not_visible_on_dexie" in result["items"][0]["reason"]
+
+
+def test_execute_strategy_actions_posts_larger_sizes_first(monkeypatch) -> None:
+    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    seen_sizes: list[int] = []
+
+    def _fake_cloud_wallet_post(**kwargs: Any) -> dict[str, Any]:
+        seen_sizes.append(int(kwargs["size_base_units"]))
+        size = int(kwargs["size_base_units"])
+        return {"success": True, "offer_id": f"offer-{size}"}
+
+    monkeypatch.setattr(daemon_main, "_cloud_wallet_offer_post_fallback", _fake_cloud_wallet_post)
+
+    class _Program:
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "UserAuthKey_abc"
+        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+
+    dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
+    dexie.visible_offer_ids = {"offer-100", "offer-10", "offer-1"}
+    store = _FakeStore()
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=1,
+            pair="usdc",
+            expiry_unit="hours",
+            expiry_value=8,
+            cancel_after_create=True,
+            reason="offer_size_gap_reseed",
+        ),
+        PlannedAction(
+            size=10,
+            repeat=1,
+            pair="usdc",
+            expiry_unit="hours",
+            expiry_value=8,
+            cancel_after_create=True,
+            reason="offer_size_gap_reseed",
+        ),
+        PlannedAction(
+            size=100,
+            repeat=1,
+            pair="usdc",
+            expiry_unit="hours",
+            expiry_value=8,
+            cancel_after_create=True,
+            reason="offer_size_gap_reseed",
+        ),
+    ]
+
+    result = _execute_strategy_actions(
+        market=_market(),
+        strategy_actions=actions,
+        runtime_dry_run=False,
+        xch_price_usd=30.0,
+        dexie=cast(Any, dexie),
+        store=cast(Any, store),
+        publish_venue="dexie",
+        program=_Program(),
+    )
+
+    assert result["executed_count"] == 3
+    assert seen_sizes == [100, 10, 1]
 
 
 def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(monkeypatch) -> None:

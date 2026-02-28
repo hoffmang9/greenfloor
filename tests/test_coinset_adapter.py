@@ -5,6 +5,7 @@ import json
 from greenfloor.adapters.coinset import (
     CoinsetAdapter,
     build_webhook_callback_url,
+    extract_coin_ids_from_offer_payload,
     extract_coinset_tx_ids_from_offer_payload,
 )
 
@@ -179,6 +180,29 @@ def test_extract_tx_ids_ignores_wrong_length() -> None:
 
 def test_extract_tx_ids_empty_payload() -> None:
     assert extract_coinset_tx_ids_from_offer_payload({}) == []
+
+
+def test_extract_coin_ids_from_involved_coins_and_nested_inputs() -> None:
+    coin_a = "a" * 64
+    coin_b = "b" * 64
+    payload = {
+        "involved_coins": [f"0x{coin_a}", coin_b],
+        "input_coins": {
+            "xch": [
+                {"id": f"0x{coin_a}"},
+                {"name": coin_b},
+            ]
+        },
+    }
+    assert extract_coin_ids_from_offer_payload(payload) == [coin_a, coin_b]
+
+
+def test_extract_coin_ids_ignores_non_hash_values() -> None:
+    payload = {
+        "involved_coins": ["not-a-coin", "0x1234"],
+        "input_coins": {"xch": [{"id": "short"}]},
+    }
+    assert extract_coin_ids_from_offer_payload(payload) == []
 
 
 # ---------------------------------------------------------------------------

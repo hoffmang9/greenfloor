@@ -1,0 +1,34 @@
+---
+description: Sibling repositories available for reference alongside this workspace
+alwaysApply: true
+---
+
+# Sibling Repositories
+
+Two sibling repositories are available at the paths below and should be used as primary references when investigating blockchain protocol behavior, offer construction, vault MIPS signing, or CAT puzzle semantics.
+
+## `../ent-wallet` — Cloud Wallet API source
+
+Path: `/Users/hoffmang/src/ent-wallet`
+
+- TypeScript monorepo. Core offer building logic: `apps/api/src/dataSources/helpers/createOffer.ts`
+- P2 spend dispatch (vault vs standard): `packages/utils/src/chia/p2.ts` → `getP2Spend()`
+- Vault signing templates (fast-forward, member construction): `apps/api/src/dataSources/helpers/vault.ts`
+- Offer coin state / fast-forwardable determination: `packages/utils/src/chia/offerProcessor.ts`
+- Uses `cni-wallet-sdk` (TypeScript bindings to the same `chia-wallet-sdk` submodule used here)
+
+## `../chia-blockchain` — Reference Chia node implementation
+
+Path: `/Users/hoffmang/src/chia-blockchain`
+
+- Python. Singleton fast-forward mempool logic: `chia/full_node/eligible_coin_spends.py`
+- Mempool item fast-forward flag: `chia/types/mempool_item.py`
+- Tests: `chia/_tests/core/mempool/test_singleton_fast_forward.py`
+- Puzzle implementations: `chia/wallet/puzzles/`
+
+## Key facts for agents
+
+- `ent-wallet` uses `fastForward: true` for SECP256R1/KMS member signatures. The message signed is `delegatedPuzzleHash + vaultPuzzleHash` (not coin ID), keeping signatures valid across vault state transitions.
+- GreenFloor calls `create_offer` with `split_input_coins=True`. This triggers the pre-split path in `createOffer.ts`: offer coins land in `P2_CONDITIONS_OR_SINGLETON` with fixed conditions baked in. The vault singleton is spent only in the pre-split transaction; the final offer bundle contains no vault singleton spend and is self-contained.
+- The chia-blockchain singleton fast-forward path applies to singleton spends that emit no `AGG_SIG_ME`, `ASSERT_MY_COIN_ID`, or `RECEIVE_MESSAGE mode 23`. Pre-split offer coins from the vault path satisfy this because they use the `CONDITIONS` branch, not the `SINGLETON` branch.
+- `getP2Spend()` in `p2.ts` and the MIPS spend construction in `signing.py` both use a dummy coin for `mipsSpend()`; this is correct and intentional (confirmed in ent-wallet source line 76 of `p2.ts`).

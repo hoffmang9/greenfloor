@@ -22,13 +22,45 @@ _COINSET_TX_ID_KEYS = (
     "confirmed_tx_ids",
     "confirmedTxIds",
 )
+_COINSET_COIN_ID_KEYS = (
+    "coin_id",
+    "coinId",
+    "coin_name",
+    "coinName",
+    "involved_coins",
+    "involvedCoins",
+    "input_coins",
+    "inputCoins",
+    "output_coins",
+    "outputCoins",
+    "spent_coins",
+    "spentCoins",
+    "additions",
+    "removals",
+)
+
+
+def _normalize_hex_hash(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    normalized = value.strip().lower()
+    if normalized.startswith("0x"):
+        normalized = normalized[2:]
+    if len(normalized) != 64:
+        return ""
+    if not all(ch in "0123456789abcdef" for ch in normalized):
+        return ""
+    return normalized
 
 
 def _looks_like_tx_id(value: object) -> bool:
+    return bool(_normalize_hex_hash(value))
+
+
+def _looks_like_coin_id(value: object) -> bool:
     if not isinstance(value, str):
         return False
-    normalized = value.strip().lower()
-    return len(normalized) == 64 and all(ch in "0123456789abcdef" for ch in normalized)
+    return bool(_normalize_hex_hash(value))
 
 
 def extract_coinset_tx_ids_from_offer_payload(payload: dict[str, Any]) -> list[str]:
@@ -36,7 +68,7 @@ def extract_coinset_tx_ids_from_offer_payload(payload: dict[str, Any]) -> list[s
 
     def _add_candidate(candidate: object) -> None:
         if isinstance(candidate, str):
-            normalized = candidate.strip().lower()
+            normalized = _normalize_hex_hash(candidate)
             if _looks_like_tx_id(normalized) and normalized not in tx_ids:
                 tx_ids.append(normalized)
         elif isinstance(candidate, list):
@@ -59,6 +91,41 @@ def extract_coinset_tx_ids_from_offer_payload(payload: dict[str, Any]) -> list[s
 
     _walk(payload)
     return tx_ids
+
+
+def extract_coin_ids_from_offer_payload(payload: dict[str, Any]) -> list[str]:
+    coin_ids: list[str] = []
+
+    def _add_candidate(candidate: object) -> None:
+        if isinstance(candidate, str):
+            normalized = _normalize_hex_hash(candidate)
+            if _looks_like_coin_id(normalized) and normalized not in coin_ids:
+                coin_ids.append(normalized)
+            return
+        if isinstance(candidate, list):
+            for item in candidate:
+                _add_candidate(item)
+            return
+        if isinstance(candidate, dict):
+            for key in ("id", "coin_id", "coinId", "name", "coin_name", "coinName"):
+                if key in candidate:
+                    _add_candidate(candidate.get(key))
+
+    def _walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in _COINSET_COIN_ID_KEYS:
+                    _add_candidate(value)
+                if isinstance(value, dict | list):
+                    _walk(value)
+            return
+        if isinstance(node, list):
+            for item in node:
+                if isinstance(item, dict | list):
+                    _walk(item)
+
+    _walk(payload)
+    return coin_ids
 
 
 class CoinsetAdapter:

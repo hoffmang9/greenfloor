@@ -170,12 +170,15 @@ def test_build_signed_spend_bundle_offer_missing_request_asset_id() -> None:
 
 
 def test_build_signed_spend_bundle_offer_delegates_to_offer_builder(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
     monkeypatch.setattr(signing_mod, "_import_sdk", lambda: object())
-    monkeypatch.setattr(
-        signing_mod,
-        "_build_offer_spend_bundle",
-        lambda **_kw: ("aabb", None),
-    )
+
+    def _fake_build_offer_spend_bundle(**kwargs):
+        captured.update(kwargs)
+        return ("aabb", None)
+
+    monkeypatch.setattr(signing_mod, "_build_offer_spend_bundle", _fake_build_offer_spend_bundle)
     result = signing_mod.build_signed_spend_bundle(
         {
             "key_id": "k1",
@@ -189,11 +192,13 @@ def test_build_signed_spend_bundle_offer_delegates_to_offer_builder(monkeypatch)
                 "offer_amount": 10,
                 "request_asset_id": "xch",
                 "request_amount": 2,
+                "offer_coin_ids": ["ABCDEF"],
             },
         }
     )
     assert result["status"] == "executed"
     assert result["spend_bundle_hex"] == "aabb"
+    assert captured.get("offer_coin_ids") == ["abcdef"]
 
 
 def test_build_signed_spend_bundle_offer_propagates_missing_agg_sig_targets(monkeypatch) -> None:

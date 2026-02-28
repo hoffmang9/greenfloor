@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 import urllib.parse
 from collections.abc import Callable
@@ -16,7 +17,11 @@ from typing import Any
 import yaml
 from concurrent_log_handler import ConcurrentRotatingFileHandler
 
-from greenfloor.adapters.coinset import CoinsetAdapter, extract_coinset_tx_ids_from_offer_payload
+from greenfloor.adapters.coinset import (
+    CoinsetAdapter,
+    extract_coin_ids_from_offer_payload,
+    extract_coinset_tx_ids_from_offer_payload,
+)
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.price import PriceAdapter
 from greenfloor.adapters.splash import SplashAdapter
@@ -51,6 +56,8 @@ _daemon_logger = logging.getLogger("greenfloor.daemon")
 _DISABLED_MARKET_LOG_INTERVAL_SECONDS_DEFAULT = 3600
 _DISABLED_MARKET_NEXT_LOG_AT: dict[str, float] = {}
 _DISABLED_MARKET_STARTUP_LOGGED = False
+_WATCHED_COIN_IDS_BY_MARKET: dict[str, set[str]] = {}
+_WATCHED_COIN_IDS_LOCK = threading.Lock()
 
 
 def _log_market_decision(market_id: str, decision: str, **fields: Any) -> None:
@@ -399,6 +406,190 @@ def _is_recent_mempool_observed_offer_state(
     return 0 <= age_seconds <= float(max_age_seconds)
 
 
+def _strategy_target_counts_by_size(strategy_config: StrategyConfig) -> dict[int, int]:
+    return {
+        1: int(strategy_config.ones_target),
+        10: int(strategy_config.tens_target),
+        100: int(strategy_config.hundreds_target),
+    }
+
+
+def _recent_offer_sizes_by_offer_id(*, store: SqliteStore, market_id: str) -> dict[str, int]:
+    events = store.list_recent_audit_events(
+        event_types=["strategy_offer_execution"],
+        market_id=market_id,
+        limit=1500,
+    )
+    size_by_offer_id: dict[str, int] = {}
+    for event in events:
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        items = payload.get("items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status", "")).strip().lower() != "executed":
+                continue
+            offer_id = str(item.get("offer_id", "")).strip()
+            if not offer_id:
+                continue
+            try:
+                size = int(item.get("size") or 0)
+            except (TypeError, ValueError):
+                continue
+            if size <= 0:
+                continue
+            # Events are returned newest-first; keep first (latest) mapping.
+            if offer_id not in size_by_offer_id:
+                size_by_offer_id[offer_id] = size
+    return size_by_offer_id
+
+
+def _recent_executed_offer_ids(*, store: SqliteStore, market_id: str) -> set[str]:
+    events = store.list_recent_audit_events(
+        event_types=["strategy_offer_execution"],
+        market_id=market_id,
+        limit=1500,
+    )
+    offer_ids: set[str] = set()
+    for event in events:
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        single_offer_id = str(payload.get("offer_id", "")).strip()
+        if single_offer_id:
+            offer_ids.add(single_offer_id)
+        items = payload.get("items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status", "")).strip().lower() != "executed":
+                continue
+            item_offer_id = str(item.get("offer_id", "")).strip()
+            if item_offer_id:
+                offer_ids.add(item_offer_id)
+    return offer_ids
+
+
+def _watchlist_offer_ids_from_store(
+    *, store: SqliteStore, market_id: str, clock: datetime
+) -> set[str]:
+    tracked_states = {
+        OfferLifecycleState.OPEN.value,
+        OfferLifecycleState.REFRESH_DUE.value,
+        "unknown_orphaned",
+    }
+    offer_ids: set[str] = set()
+    for item in store.list_offer_states(market_id=market_id, limit=500):
+        state = str(item.get("state", "")).strip().lower()
+        offer_id = str(item.get("offer_id", "")).strip()
+        if not offer_id:
+            continue
+        if state in tracked_states or _is_recent_mempool_observed_offer_state(
+            offer_state=item, clock=clock
+        ):
+            offer_ids.add(offer_id)
+    return offer_ids
+
+
+def _set_watched_coin_ids_for_market(*, market_id: str, coin_ids: set[str]) -> None:
+    with _WATCHED_COIN_IDS_LOCK:
+        _WATCHED_COIN_IDS_BY_MARKET[market_id] = set(coin_ids)
+
+
+def _match_watched_coin_ids(*, observed_coin_ids: list[str]) -> dict[str, list[str]]:
+    normalized = {
+        str(coin_id).strip().lower() for coin_id in observed_coin_ids if str(coin_id).strip()
+    }
+    if not normalized:
+        return {}
+    matches: dict[str, list[str]] = {}
+    with _WATCHED_COIN_IDS_LOCK:
+        for market_id, watched in _WATCHED_COIN_IDS_BY_MARKET.items():
+            intersection = sorted(normalized.intersection(watched))
+            if intersection:
+                matches[market_id] = intersection
+    return matches
+
+
+def _update_market_coin_watchlist_from_dexie(
+    *,
+    market,
+    offers: list[dict[str, Any]],
+    store: SqliteStore,
+    clock: datetime,
+) -> None:
+    watch_offer_ids = _watchlist_offer_ids_from_store(
+        store=store,
+        market_id=market.market_id,
+        clock=clock,
+    )
+    watch_offer_ids.update(_recent_executed_offer_ids(store=store, market_id=market.market_id))
+    watched_coin_ids: set[str] = set()
+    matched_offer_count = 0
+    for offer in offers:
+        offer_id = str(offer.get("id", "")).strip()
+        if not offer_id or offer_id not in watch_offer_ids:
+            continue
+        matched_offer_count += 1
+        watched_coin_ids.update(extract_coin_ids_from_offer_payload(offer))
+    _set_watched_coin_ids_for_market(market_id=market.market_id, coin_ids=watched_coin_ids)
+    store.add_audit_event(
+        "coin_watchlist_updated",
+        {
+            "market_id": market.market_id,
+            "watch_offer_count": len(watch_offer_ids),
+            "matched_offer_count": matched_offer_count,
+            "watch_coin_count": len(watched_coin_ids),
+            "watch_coin_sample": sorted(watched_coin_ids)[:10],
+        },
+        market_id=market.market_id,
+    )
+
+
+def _active_offer_counts_by_size(
+    *,
+    store: SqliteStore,
+    market_id: str,
+    clock: datetime,
+    limit: int = 500,
+) -> tuple[dict[int, int], dict[str, int], int]:
+    offer_states = store.list_offer_states(market_id=market_id, limit=limit)
+    state_counts: dict[str, int] = {}
+    for item in offer_states:
+        state = str(item.get("state", "")).strip().lower()
+        if not state:
+            continue
+        state_counts[state] = int(state_counts.get(state, 0)) + 1
+    active_offer_ids: list[str] = []
+    for item in offer_states:
+        state = str(item.get("state", "")).strip().lower()
+        if state in _ACTIVE_OFFER_STATES_FOR_RESEED:
+            active_offer_id = str(item.get("offer_id", "")).strip()
+            if active_offer_id:
+                active_offer_ids.append(active_offer_id)
+            continue
+        if _is_recent_mempool_observed_offer_state(offer_state=item, clock=clock):
+            active_offer_id = str(item.get("offer_id", "")).strip()
+            if active_offer_id:
+                active_offer_ids.append(active_offer_id)
+    size_by_offer_id = _recent_offer_sizes_by_offer_id(store=store, market_id=market_id)
+    active_counts_by_size: dict[int, int] = {1: 0, 10: 0, 100: 0}
+    active_unmapped_offer_ids = 0
+    for offer_id in active_offer_ids:
+        size = size_by_offer_id.get(offer_id)
+        if size in active_counts_by_size:
+            active_counts_by_size[size] = int(active_counts_by_size[size]) + 1
+        else:
+            active_unmapped_offer_ids += 1
+    return active_counts_by_size, state_counts, active_unmapped_offer_ids
+
+
 def _inject_reseed_action_if_no_active_offers(
     *,
     strategy_actions: list[PlannedAction],
@@ -416,26 +607,27 @@ def _inject_reseed_action_if_no_active_offers(
             action_count=len(strategy_actions),
         )
         return strategy_actions
-    offer_states = store.list_offer_states(market_id=market.market_id, limit=500)
-    state_counts: dict[str, int] = {}
-    for item in offer_states:
-        state = str(item.get("state", "")).strip().lower()
-        if not state:
-            continue
-        state_counts[state] = int(state_counts.get(state, 0)) + 1
-    has_active_offer = any(
-        str(item.get("state", "")).strip().lower() in _ACTIVE_OFFER_STATES_FOR_RESEED
-        or _is_recent_mempool_observed_offer_state(offer_state=item, clock=clock)
-        for item in offer_states
+    target_by_size = _strategy_target_counts_by_size(strategy_config)
+    active_counts_by_size, state_counts, active_unmapped_offer_ids = _active_offer_counts_by_size(
+        store=store,
+        market_id=market.market_id,
+        clock=clock,
     )
-    if has_active_offer:
+    missing_by_size = {
+        size: max(0, int(target_by_size.get(size, 0)) - int(active_counts_by_size.get(size, 0)))
+        for size in target_by_size
+    }
+    if sum(missing_by_size.values()) <= 0:
         _log_market_decision(
             market.market_id,
             "reseed_skip",
-            reason="active_offer_present",
+            reason="active_offer_targets_satisfied",
             active_states=sorted(_ACTIVE_OFFER_STATES_FOR_RESEED),
             recent_mempool_window_seconds=_RESEED_MEMPOOL_MAX_AGE_SECONDS,
             state_counts=state_counts,
+            active_counts_by_size=active_counts_by_size,
+            target_counts_by_size=target_by_size,
+            active_unmapped_offer_ids=active_unmapped_offer_ids,
         )
         return strategy_actions
 
@@ -453,28 +645,57 @@ def _inject_reseed_action_if_no_active_offers(
             xch_price_usd=xch_price_usd,
         )
         return strategy_actions
-    smallest = min(seed_candidates, key=lambda action: int(action.size))
+
+    # Reseed one action per ladder size so the market rehydrates as 1/10/100,
+    # not only the smallest denomination.
+    one_per_size: dict[int, PlannedAction] = {}
+    for candidate in seed_candidates:
+        size = int(candidate.size)
+        if size not in one_per_size:
+            one_per_size[size] = candidate
+    reseed_actions: list[PlannedAction] = []
+    for size in sorted(one_per_size):
+        missing = int(missing_by_size.get(size, 0))
+        if missing <= 0:
+            continue
+        action = one_per_size[size]
+        reseed_actions.append(
+            PlannedAction(
+                size=int(action.size),
+                repeat=int(missing),
+                pair=action.pair,
+                expiry_unit=action.expiry_unit,
+                expiry_value=int(action.expiry_value),
+                cancel_after_create=action.cancel_after_create,
+                reason="offer_size_gap_reseed",
+                target_spread_bps=action.target_spread_bps,
+            )
+        )
+    if not reseed_actions:
+        _log_market_decision(
+            market.market_id,
+            "reseed_skip",
+            reason="missing_sizes_no_seed_template",
+            missing_by_size=missing_by_size,
+            candidate_sizes=sorted(one_per_size),
+        )
+        return strategy_actions
+
     _log_market_decision(
         market.market_id,
         "reseed_injected",
-        reason="no_active_offer_reseed",
-        size=int(smallest.size),
-        pair=smallest.pair,
-        expiry_unit=smallest.expiry_unit,
-        expiry_value=int(smallest.expiry_value),
+        reason="offer_size_gap_reseed",
+        sizes=[int(action.size) for action in reseed_actions],
+        repeats=[int(action.repeat) for action in reseed_actions],
+        action_count=sum(int(action.repeat) for action in reseed_actions),
+        active_counts_by_size=active_counts_by_size,
+        target_counts_by_size=target_by_size,
+        missing_by_size=missing_by_size,
+        pair=strategy_config.pair,
+        expiry_unit=reseed_actions[0].expiry_unit,
+        expiry_value=int(reseed_actions[0].expiry_value),
     )
-    return [
-        PlannedAction(
-            size=int(smallest.size),
-            repeat=1,
-            pair=smallest.pair,
-            expiry_unit=smallest.expiry_unit,
-            expiry_value=int(smallest.expiry_value),
-            cancel_after_create=smallest.cancel_after_create,
-            reason="no_active_offer_reseed",
-            target_spread_bps=smallest.target_spread_bps,
-        )
-    ]
+    return reseed_actions
 
 
 def _resolve_quote_price_quote_per_base(market) -> float:
@@ -630,6 +851,34 @@ def _parse_last_json_object(raw_text: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def _verify_offer_visible_on_dexie(
+    *,
+    dexie: DexieAdapter,
+    offer_id: str,
+    attempts: int = 4,
+    delay_seconds: float = 1.5,
+) -> tuple[bool, str]:
+    clean_offer_id = str(offer_id).strip()
+    if not clean_offer_id:
+        return False, "missing_offer_id"
+    for attempt in range(1, max(1, int(attempts)) + 1):
+        try:
+            payload = dexie.get_offer(clean_offer_id)
+        except Exception as exc:
+            if attempt >= attempts:
+                return False, f"dexie_get_offer_error:{exc}"
+            time.sleep(delay_seconds)
+            continue
+        offer_payload = payload.get("offer") if isinstance(payload, dict) else None
+        if isinstance(offer_payload, dict):
+            confirmed_id = str(offer_payload.get("id", "")).strip()
+            if confirmed_id == clean_offer_id:
+                return True, ""
+        if attempt < attempts:
+            time.sleep(delay_seconds)
+    return False, "dexie_offer_not_visible_after_publish"
+
+
 def _resolve_coinset_ws_url(*, program, coinset_base_url: str) -> str:
     configured = str(getattr(program, "tx_block_websocket_url", "")).strip()
     if configured:
@@ -692,6 +941,22 @@ def _run_coinset_signal_capture_once(
     def _on_audit_event(event_type: str, payload: dict[str, Any]) -> None:
         store.add_audit_event(event_type, payload)
 
+    def _on_observed_coin_ids(coin_ids: list[str]) -> None:
+        if not coin_ids:
+            return
+        hits = _match_watched_coin_ids(observed_coin_ids=coin_ids)
+        if not hits:
+            return
+        store.add_audit_event(
+            "coin_watch_hit",
+            {
+                "coin_id_count": len(coin_ids),
+                "coin_ids_sample": sorted({str(c).strip().lower() for c in coin_ids})[:10],
+                "market_hits": {market_id: ids[:10] for market_id, ids in hits.items()},
+                "source": "coinset_websocket",
+            },
+        )
+
     capture_coinset_websocket_once(
         ws_url=ws_url,
         reconnect_interval_seconds=program.tx_block_websocket_reconnect_interval_seconds,
@@ -699,6 +964,7 @@ def _run_coinset_signal_capture_once(
         on_mempool_tx_ids=_on_mempool_tx_ids,
         on_confirmed_tx_ids=_on_confirmed_tx_ids,
         on_audit_event=_on_audit_event,
+        on_observed_coin_ids=_on_observed_coin_ids,
         recovery_poll=coinset.get_all_mempool_tx_ids,
     )
 
@@ -723,7 +989,11 @@ def _execute_strategy_actions(
     cooldown_key = f"{publish_venue}:{market.market_id}"
     signer_key = (signer_key_registry or {}).get(market.signer_key_id)
     keyring_yaml_path = str(getattr(signer_key, "keyring_yaml_path", "") or "")
-    for action in strategy_actions:
+    # Prioritize larger ladder sizes first to reduce input-coin contention in
+    # cloud-wallet sequential posting (e.g. keep 100-size offers from being
+    # displaced by a burst of 1-size posts in the same cycle).
+    ordered_actions = sorted(strategy_actions, key=lambda action: int(action.size), reverse=True)
+    for action in ordered_actions:
         for _ in range(int(action.repeat)):
             if runtime_dry_run:
                 items.append(
@@ -745,13 +1015,31 @@ def _execute_strategy_actions(
                     runtime_dry_run=runtime_dry_run,
                 )
                 if bool(cloud_wallet_post.get("success", False)):
+                    cloud_wallet_offer_id = str(cloud_wallet_post.get("offer_id", "")).strip()
+                    if publish_venue == "dexie" and cloud_wallet_offer_id:
+                        visible, visibility_error = _verify_offer_visible_on_dexie(
+                            dexie=dexie,
+                            offer_id=cloud_wallet_offer_id,
+                        )
+                        if not visible:
+                            items.append(
+                                {
+                                    "size": action.size,
+                                    "status": "skipped",
+                                    "reason": (
+                                        f"cloud_wallet_post_not_visible_on_dexie:{visibility_error}"
+                                    ),
+                                    "offer_id": cloud_wallet_offer_id or None,
+                                }
+                            )
+                            continue
                     executed_count += 1
                     items.append(
                         {
                             "size": action.size,
                             "status": "executed",
                             "reason": "cloud_wallet_post_success",
-                            "offer_id": cloud_wallet_post.get("offer_id"),
+                            "offer_id": cloud_wallet_offer_id or None,
                         }
                     )
                 else:
@@ -1059,6 +1347,7 @@ def _process_single_market(
         store.add_audit_event("low_inventory_alert", payload, market_id=market.market_id)
         send_pushover_alert(program, event)
 
+    dexie_fetch_error: str | None = None
     try:
         offers = dexie.get_offers(market.base_asset, market.quote_asset)
         _log_market_decision(
@@ -1069,6 +1358,7 @@ def _process_single_market(
             count=len(offers),
         )
     except Exception as exc:  # pragma: no cover - network dependent
+        dexie_fetch_error = str(exc)
         result.cycle_errors += 1
         _log_market_decision(
             market.market_id,
@@ -1081,6 +1371,13 @@ def _process_single_market(
             market_id=market.market_id,
         )
         offers = []
+    if dexie_fetch_error is None:
+        _update_market_coin_watchlist_from_dexie(
+            market=market,
+            offers=offers,
+            store=store,
+            clock=now,
+        )
     for offer in offers:
         offer_id = str(offer.get("id", ""))
         if not offer_id:
@@ -1109,6 +1406,9 @@ def _process_single_market(
             transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.TX_CONFIRMED)
         elif status == 6:
             transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.EXPIRED)
+        elif status == 0:
+            # Dexie status 0 means the offer is still listed/open.
+            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.REFRESH_POSTED)
         else:
             transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.MEMPOOL_SEEN)
         _log_market_decision(
@@ -1233,10 +1533,24 @@ def _process_single_market(
             market_id=market.market_id,
         )
     strategy_config = _strategy_config_from_market(market)
+    active_offer_counts_by_size, offer_state_counts, active_unmapped_offer_ids = (
+        _active_offer_counts_by_size(
+            store=store,
+            market_id=market.market_id,
+            clock=now,
+        )
+    )
+    _log_market_decision(
+        market.market_id,
+        "strategy_state_source",
+        source="dexie_offer_coverage",
+        active_offer_counts_by_size=active_offer_counts_by_size,
+        state_counts=offer_state_counts,
+        active_unmapped_offer_ids=active_unmapped_offer_ids,
+    )
     strategy_actions = evaluate_market(
         state=_strategy_state_from_bucket_counts(
-            bucket_counts,
-            xch_price_usd=xch_price_usd,
+            active_offer_counts_by_size, xch_price_usd=xch_price_usd
         ),
         config=strategy_config,
         clock=now,
@@ -1245,7 +1559,7 @@ def _process_single_market(
         market.market_id,
         "strategy_evaluated",
         pair=strategy_config.pair,
-        bucket_counts=bucket_counts,
+        offer_counts=active_offer_counts_by_size,
         xch_price_usd=xch_price_usd,
         action_count=len(strategy_actions),
     )
@@ -1684,12 +1998,33 @@ def _run_loop(
     def _on_audit_event(event_type: str, payload: dict[str, Any]) -> None:
         _with_ws_store(lambda store: store.add_audit_event(event_type, payload))
 
+    def _on_observed_coin_ids(coin_ids: list[str]) -> None:
+        if not coin_ids:
+            return
+        hits = _match_watched_coin_ids(observed_coin_ids=coin_ids)
+        if not hits:
+            return
+
+        def _write(store: SqliteStore) -> None:
+            store.add_audit_event(
+                "coin_watch_hit",
+                {
+                    "coin_id_count": len(coin_ids),
+                    "coin_ids_sample": sorted({str(c).strip().lower() for c in coin_ids})[:10],
+                    "market_hits": {market_id: ids[:10] for market_id, ids in hits.items()},
+                    "source": "coinset_websocket",
+                },
+            )
+
+        _with_ws_store(_write)
+
     ws_client = CoinsetWebsocketClient(
         ws_url=ws_url,
         reconnect_interval_seconds=current_program.tx_block_websocket_reconnect_interval_seconds,
         on_mempool_tx_ids=_on_mempool_tx_ids,
         on_confirmed_tx_ids=_on_confirmed_tx_ids,
         on_audit_event=_on_audit_event,
+        on_observed_coin_ids=_on_observed_coin_ids,
         recovery_poll=coinset.get_all_mempool_tx_ids,
     )
     ws_client.start()
