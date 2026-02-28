@@ -552,43 +552,12 @@ def _update_market_coin_watchlist_from_dexie(
     )
 
 
-def _build_dexie_size_by_offer_id(
-    offers: list[dict[str, Any]], base_asset_id: str
-) -> dict[str, int]:
-    """Extract size-in-base-units for each offer from the Dexie list payload.
-
-    Dexie's offered[*].amount is already in display/base units (not mojos),
-    so it maps directly to our size_base_units buckets (1, 10, 100).
-    """
-    result: dict[str, int] = {}
-    clean_base = str(base_asset_id).strip().lower()
-    for offer in offers:
-        if not isinstance(offer, dict):
-            continue
-        offer_id = str(offer.get("id", "")).strip()
-        if not offer_id:
-            continue
-        for offered_item in offer.get("offered") or []:
-            if not isinstance(offered_item, dict):
-                continue
-            if str(offered_item.get("id", "")).strip().lower() != clean_base:
-                continue
-            try:
-                size = int(offered_item["amount"])
-            except (TypeError, ValueError, KeyError):
-                continue
-            if size > 0:
-                result[offer_id] = size
-    return result
-
-
 def _active_offer_counts_by_size(
     *,
     store: SqliteStore,
     market_id: str,
     clock: datetime,
     limit: int = 500,
-    dexie_size_by_offer_id: dict[str, int] | None = None,
 ) -> tuple[dict[int, int], dict[str, int], int]:
     offer_states = store.list_offer_states(market_id=market_id, limit=limit)
     state_counts: dict[str, int] = {}
@@ -614,8 +583,6 @@ def _active_offer_counts_by_size(
     active_unmapped_offer_ids = 0
     for offer_id in active_offer_ids:
         size = size_by_offer_id.get(offer_id)
-        if size is None and dexie_size_by_offer_id:
-            size = dexie_size_by_offer_id.get(offer_id)
         if size in active_counts_by_size:
             active_counts_by_size[size] = int(active_counts_by_size[size]) + 1
         else:
@@ -631,7 +598,6 @@ def _inject_reseed_action_if_no_active_offers(
     store: SqliteStore,
     xch_price_usd: float | None,
     clock: datetime,
-    dexie_size_by_offer_id: dict[str, int] | None = None,
 ) -> list[PlannedAction]:
     if strategy_actions:
         _log_market_decision(
@@ -646,7 +612,6 @@ def _inject_reseed_action_if_no_active_offers(
         store=store,
         market_id=market.market_id,
         clock=clock,
-        dexie_size_by_offer_id=dexie_size_by_offer_id,
     )
     missing_by_size = {
         size: max(0, int(target_by_size.get(size, 0)) - int(active_counts_by_size.get(size, 0)))
@@ -1357,10 +1322,8 @@ def _process_single_market(
         send_pushover_alert(program, event)
 
     dexie_fetch_error: str | None = None
-    dexie_size_hint: dict[str, int] = {}
     try:
         offers = dexie.get_offers(market.base_asset, market.quote_asset)
-        dexie_size_hint = _build_dexie_size_by_offer_id(offers, str(market.base_asset))
         _log_market_decision(
             market.market_id,
             "dexie_offers_fetched",
@@ -1382,6 +1345,11 @@ def _process_single_market(
             market_id=market.market_id,
         )
         offers = []
+    our_offer_ids = _watchlist_offer_ids_from_store(
+        store=store,
+        market_id=market.market_id,
+        clock=now,
+    )
     if dexie_fetch_error is None:
         _update_market_coin_watchlist_from_dexie(
             market=market,
@@ -1392,6 +1360,8 @@ def _process_single_market(
     for offer in offers:
         offer_id = str(offer.get("id", ""))
         if not offer_id:
+            continue
+        if offer_id not in our_offer_ids:
             continue
         status = int(offer.get("status", -1))
         coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer)
@@ -1549,7 +1519,6 @@ def _process_single_market(
             store=store,
             market_id=market.market_id,
             clock=now,
-            dexie_size_by_offer_id=dexie_size_hint,
         )
     )
     _log_market_decision(
@@ -1582,7 +1551,6 @@ def _process_single_market(
         store=store,
         xch_price_usd=xch_price_usd,
         clock=now,
-        dexie_size_by_offer_id=dexie_size_hint,
     )
     _log_market_decision(
         market.market_id,
