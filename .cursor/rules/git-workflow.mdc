@@ -1,0 +1,52 @@
+---
+description: Git workflow rules — never push directly to main
+alwaysApply: true
+---
+
+# Git Workflow
+
+## Never push directly to main
+
+Always create a feature branch, push the branch, and open a PR. Never use
+`git push origin main` or `git push -u origin HEAD` when HEAD is on `main`.
+
+**Before committing**, check the current branch:
+
+```bash
+git branch --show-current
+```
+
+If it returns `main`, create a branch first:
+
+```bash
+git checkout -b <descriptive-branch-name>
+```
+
+## Branch naming
+
+Use `fix/` for bug fixes, `feat/` for new features, `chore/` for maintenance:
+
+- `fix/kms-offer-routing`
+- `feat/coin-combine-ladder`
+- `chore/update-deps`
+
+## PR workflow
+
+```bash
+git checkout -b fix/my-fix   # create branch BEFORE committing
+# ... make changes ...
+PATH="$(pwd)/.venv/bin:$PATH" git commit -m "..."   # hooks need .venv/bin
+git push -u origin HEAD
+gh pr create --title "..." --body "..."
+```
+
+## Retroactive branch (already pushed to main)
+
+If a commit was accidentally pushed to main directly, create a retroactive
+branch at the same commit so CI can run via PR:
+
+```bash
+git checkout -b fix/my-fix <commit-sha>
+git push -u origin fix/my-fix
+gh pr create --base main --title "..." --body "..."
+```
