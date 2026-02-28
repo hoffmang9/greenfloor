@@ -786,32 +786,31 @@ def _cloud_wallet_offer_post_fallback(
     publish_venue: str,
     runtime_dry_run: bool,
 ) -> dict[str, Any]:
-    from contextlib import redirect_stdout
-    from io import StringIO
-
     from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
 
-    out = StringIO()
     quote_price = _resolve_quote_price_quote_per_base(market)
-    with redirect_stdout(out):
-        exit_code = _build_and_post_offer_cloud_wallet(
-            program=program,
-            market=market,
-            size_base_units=size_base_units,
-            repeat=1,
-            publish_venue=publish_venue,
-            dexie_base_url=str(program.dexie_api_base),
-            splash_base_url=str(program.splash_api_base),
-            drop_only=True,
-            claim_rewards=False,
-            quote_price=quote_price,
-            dry_run=runtime_dry_run,
-        )
+    exit_code, payload = _build_and_post_offer_cloud_wallet(
+        program=program,
+        market=market,
+        size_base_units=size_base_units,
+        repeat=1,
+        publish_venue=publish_venue,
+        dexie_base_url=str(program.dexie_api_base),
+        splash_base_url=str(program.splash_api_base),
+        drop_only=True,
+        claim_rewards=False,
+        quote_price=quote_price,
+        dry_run=runtime_dry_run,
+    )
     if exit_code != 0:
-        return {"success": False, "error": f"cloud_wallet_fallback_exit_code:{exit_code}"}
-    payload = _parse_last_json_object(out.getvalue())
-    if payload is None:
-        return {"success": False, "error": "cloud_wallet_fallback_invalid_json"}
+        results = payload.get("results", [])
+        result = (
+            results[0].get("result", {})
+            if isinstance(results, list) and results and isinstance(results[0], dict)
+            else {}
+        )
+        error = str(result.get("error", "")).strip() if isinstance(result, dict) else ""
+        return {"success": False, "error": error or f"cloud_wallet_fallback_exit_code:{exit_code}"}
     results = payload.get("results", [])
     if not isinstance(results, list) or not results:
         return {"success": False, "error": "cloud_wallet_fallback_missing_results"}
@@ -824,31 +823,6 @@ def _cloud_wallet_offer_post_fallback(
         "offer_id": str(result.get("id", "")).strip() or None,
         "error": str(result.get("error", "")).strip() if not success else "",
     }
-
-
-def _parse_last_json_object(raw_text: str) -> dict[str, Any] | None:
-    text = str(raw_text or "")
-    end = text.rfind("}")
-    if end < 0:
-        return None
-    depth = 0
-    start = -1
-    for idx in range(end, -1, -1):
-        ch = text[idx]
-        if ch == "}":
-            depth += 1
-        elif ch == "{":
-            depth -= 1
-            if depth == 0:
-                start = idx
-                break
-    if start < 0:
-        return None
-    try:
-        parsed = json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
 
 
 def _verify_offer_visible_on_dexie(

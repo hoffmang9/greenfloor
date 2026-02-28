@@ -11,7 +11,6 @@ from greenfloor.daemon.main import (
     _execute_strategy_actions,
     _inject_reseed_action_if_no_active_offers,
     _match_watched_coin_ids,
-    _parse_last_json_object,
     _set_watched_coin_ids_for_market,
     _strategy_config_from_market,
     _update_market_coin_watchlist_from_dexie,
@@ -510,6 +509,55 @@ def test_active_offer_counts_by_size_uses_offer_state_and_size_mapping() -> None
     assert unmapped == 1
 
 
+def test_active_offer_counts_by_size_counts_cli_posted_offer() -> None:
+    """CLI-posted offers must be counted by _active_offer_counts_by_size.
+
+    Before the fix the CLI emitted strategy_offer_execution events without an
+    items list, so _recent_offer_sizes_by_offer_id returned no size for the
+    offer ID and it landed in active_unmapped_offer_ids instead of
+    active_counts_by_size[100]. This caused the daemon to post a duplicate
+    100-unit offer on every cycle.
+    """
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.offer_states = [
+        {"offer_id": "cli-hundred-1", "market_id": "m1", "state": "open"},
+    ]
+    # Event written by the fixed CLI path — has items with size/status/offer_id.
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "payload": {
+                "market_id": "m1",
+                "planned_count": 1,
+                "executed_count": 1,
+                "items": [
+                    {
+                        "size": 100,
+                        "status": "executed",
+                        "reason": "dexie_post_success",
+                        "offer_id": "cli-hundred-1",
+                        "attempts": 1,
+                    }
+                ],
+                "venue": "dexie",
+                "signature_request_id": "SignatureRequest_abc",
+                "signature_state": "SUBMITTED",
+            },
+        }
+    ]
+
+    counts, state_counts, unmapped = _active_offer_counts_by_size(
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+    )
+
+    assert counts == {1: 0, 10: 0, 100: 1}, "CLI-posted 100-unit offer must be counted"
+    assert unmapped == 0, "CLI-posted offer must not appear in unmapped"
+
+
 def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers() -> None:
     store = _FakeStore()
     now = datetime.now(UTC)
@@ -767,10 +815,3 @@ def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(mon
     assert result["items"][0]["status"] == "skipped"
     assert result["items"][0]["reason"] == "cloud_wallet_post_failed:vault_signing_unavailable"
     assert calls["builder"] == 0
-
-
-def test_parse_last_json_object_handles_noisy_output() -> None:
-    raw = '....\nsignature submitted: abc\n{\n  "publish_failures": 0,\n  "results": [{"result": {"success": true, "id": "o1"}}]\n}\n'
-    parsed = _parse_last_json_object(raw)
-    assert parsed is not None
-    assert int(parsed["publish_failures"]) == 0
