@@ -2658,8 +2658,18 @@ def _build_and_post_offer_cloud_wallet(
             store.add_audit_event(
                 "strategy_offer_execution",
                 {
-                    "offer_id": offer_id,
                     "market_id": str(market.market_id),
+                    "planned_count": 1,
+                    "executed_count": 1,
+                    "items": [
+                        {
+                            "size": int(size_base_units),
+                            "status": "executed",
+                            "reason": f"{publish_venue}_post_success",
+                            "offer_id": offer_id,
+                            "attempts": 1,
+                        }
+                    ],
                     "venue": publish_venue,
                     "signature_request_id": signature_request_id,
                     "signature_state": signature_state,
