@@ -10,7 +10,7 @@ markets:
     quote_asset: "xch"
     quote_asset_type: unstable
     signer_key_id: "key-main-1"
-    receive_address: "xch1hpppalrmxk7x2vzvf5f5c4ylz6l9kwnjkanqtk3qszegrtkm2lvsr6h0df"
+    receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
     pricing:
       reference_source: "coingecko"
       reference_pair: "xch_usd"
@@ -53,11 +53,13 @@ markets:
     quote_asset: "wUSDC.b"
     quote_asset_type: stable
     signer_key_id: "key-main-1"
-    receive_address: "xch1hpppalrmxk7x2vzvf5f5c4ylz6l9kwnjkanqtk3qszegrtkm2lvsr6h0df"
+    receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
     pricing:
       side: "sell"
       fixed_quote_per_base: 7.75
       slippage_bps: 25
+      strategy_offer_expiry_unit: "hours"
+      strategy_offer_expiry_value: 2
     inventory:
       low_watermark_base_units: 500
       low_inventory_alert_threshold_base_units: null
@@ -89,7 +91,7 @@ markets:
     quote_asset: "wUSDC.b"
     quote_asset_type: stable
     signer_key_id: "key-main-2"
-    receive_address: "xch1hpppalrmxk7x2vzvf5f5c4ylz6l9kwnjkanqtk3qszegrtkm2lvsr6h0df"
+    receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
     pricing:
       buy_min_quote_per_base: 0.99
       sell_max_quote_per_base: 1.01

@@ -109,6 +109,37 @@ def test_parse_markets_config_accepts_valid_strategy_controls() -> None:
     assert out.markets[0].pricing["strategy_target_spread_bps"] == 120
 
 
+def test_parse_markets_config_rejects_partial_strategy_expiry_override() -> None:
+    row = _base_market_row()
+    row["pricing"] = {"strategy_offer_expiry_unit": "hours"}
+    with pytest.raises(
+        ValueError,
+        match="strategy_offer_expiry_unit and strategy_offer_expiry_value must be set together",
+    ):
+        parse_markets_config({"markets": [row]})
+
+
+def test_parse_markets_config_rejects_invalid_strategy_expiry_unit() -> None:
+    row = _base_market_row()
+    row["pricing"] = {
+        "strategy_offer_expiry_unit": "days",
+        "strategy_offer_expiry_value": 1,
+    }
+    with pytest.raises(ValueError, match="strategy_offer_expiry_unit must be one of"):
+        parse_markets_config({"markets": [row]})
+
+
+def test_parse_markets_config_accepts_strategy_expiry_override() -> None:
+    row = _base_market_row()
+    row["pricing"] = {
+        "strategy_offer_expiry_unit": "hours",
+        "strategy_offer_expiry_value": 2,
+    }
+    out = parse_markets_config({"markets": [row]})
+    assert out.markets[0].pricing["strategy_offer_expiry_unit"] == "hours"
+    assert out.markets[0].pricing["strategy_offer_expiry_value"] == 2
+
+
 # ---------------------------------------------------------------------------
 # parse_program_config: happy path
 # ---------------------------------------------------------------------------

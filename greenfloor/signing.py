@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import logging
 import os
 from typing import Any
 
@@ -22,6 +23,7 @@ _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK: dict[str, bytes] = {
 }
 
 _XCH_LIKE_ASSETS: frozenset[str] = frozenset({"", "xch", "txch", "1"})
+logger = logging.getLogger("greenfloor.signing")
 
 
 def _int_to_clvm_bytes(value: int) -> bytes:
@@ -664,6 +666,10 @@ def _build_offer_spend_bundle(
     offer_asset = offer_asset_id.strip().lower()
     offered_selected_xch: list[Any] = []
     offered_selected_cats: list[Any] = []
+    discovered_coin_count = 0
+    selected_coin_count = 0
+    selected_total = 0
+    selection_error_reason: str | None = None
 
     if offer_asset in _XCH_LIKE_ASSETS:
         try:
@@ -674,12 +680,42 @@ def _build_offer_spend_bundle(
             )
         except Exception as exc:
             return None, str(exc)
+        discovered_coin_count = len(xch_coins)
         if not xch_coins:
+            logger.info(
+                "offer_coin_discovery network=%s receive_address=%s offer_asset_id=%s "
+                "request_asset_id=%s discovered_coin_count=%s selected_coin_count=%s "
+                "selected_total=%s outcome=%s",
+                network,
+                receive_address,
+                offer_asset_id,
+                request_asset_id,
+                discovered_coin_count,
+                selected_coin_count,
+                selected_total,
+                "no_unspent_offer_xch_coins",
+            )
             return None, "no_unspent_offer_xch_coins"
         try:
             offered_selected_xch = sdk.select_coins(xch_coins, offer_amount)
         except Exception as exc:
+            selection_error_reason = f"offer_coin_selection_failed:{exc}"
+            logger.info(
+                "offer_coin_discovery network=%s receive_address=%s offer_asset_id=%s "
+                "request_asset_id=%s discovered_coin_count=%s selected_coin_count=%s "
+                "selected_total=%s outcome=%s",
+                network,
+                receive_address,
+                offer_asset_id,
+                request_asset_id,
+                discovered_coin_count,
+                selected_coin_count,
+                selected_total,
+                selection_error_reason,
+            )
             return None, f"offer_coin_selection_failed:{exc}"
+        selected_coin_count = len(offered_selected_xch)
+        selected_total = sum(int(coin.amount) for coin in offered_selected_xch)
     else:
         try:
             cat_coins = _list_unspent_cat_coins(
@@ -690,11 +726,55 @@ def _build_offer_spend_bundle(
             )
         except Exception as exc:
             return None, str(exc)
+        discovered_coin_count = len(cat_coins)
         if not cat_coins:
+            logger.info(
+                "offer_coin_discovery network=%s receive_address=%s offer_asset_id=%s "
+                "request_asset_id=%s discovered_coin_count=%s selected_coin_count=%s "
+                "selected_total=%s outcome=%s",
+                network,
+                receive_address,
+                offer_asset_id,
+                request_asset_id,
+                discovered_coin_count,
+                selected_coin_count,
+                selected_total,
+                "no_unspent_offer_cat_coins",
+            )
             return None, "no_unspent_offer_cat_coins"
         offered_selected_cats = _select_cats(cat_coins, offer_amount)
         if not offered_selected_cats:
+            selection_error_reason = "insufficient_offer_cat_coins"
+            logger.info(
+                "offer_coin_discovery network=%s receive_address=%s offer_asset_id=%s "
+                "request_asset_id=%s discovered_coin_count=%s selected_coin_count=%s "
+                "selected_total=%s outcome=%s",
+                network,
+                receive_address,
+                offer_asset_id,
+                request_asset_id,
+                discovered_coin_count,
+                selected_coin_count,
+                selected_total,
+                selection_error_reason,
+            )
             return None, "insufficient_offer_cat_coins"
+        selected_coin_count = len(offered_selected_cats)
+        selected_total = sum(int(cat.coin.amount) for cat in offered_selected_cats)
+
+    logger.info(
+        "offer_coin_discovery network=%s receive_address=%s offer_asset_id=%s "
+        "request_asset_id=%s discovered_coin_count=%s selected_coin_count=%s "
+        "selected_total=%s outcome=%s",
+        network,
+        receive_address,
+        offer_asset_id,
+        request_asset_id,
+        discovered_coin_count,
+        selected_coin_count,
+        selected_total,
+        "selected",
+    )
 
     offered_total = 0
     selected_coin_entries: list[dict[str, Any]] = []

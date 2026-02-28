@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import random
 import string
 import time
@@ -11,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True, slots=True)
 class CloudWalletConfig:
@@ -19,6 +22,9 @@ class CloudWalletConfig:
     private_key_pem_path: str
     vault_id: str
     network: str
+    kms_key_id: str | None = None
+    kms_region: str | None = None
+    kms_public_key_hex: str | None = None
 
 
 class CloudWalletAdapter:
@@ -33,6 +39,9 @@ class CloudWalletAdapter:
         )
         self._vault_id = config.vault_id
         self._network = config.network
+        self._kms_key_id = (config.kms_key_id or "").strip() or None
+        self._kms_region = (config.kms_region or "").strip() or "us-west-2"
+        self._kms_public_key_hex = (config.kms_public_key_hex or "").strip() or None
 
     @property
     def vault_id(self) -> str:
@@ -41,6 +50,21 @@ class CloudWalletAdapter:
     @property
     def network(self) -> str:
         return self._network
+
+    @property
+    def kms_configured(self) -> bool:
+        return self._kms_key_id is not None
+
+    def _resolve_kms_public_key(self) -> str:
+        """Return the compressed-hex KMS public key, fetching from AWS if not cached."""
+        if self._kms_public_key_hex:
+            return self._kms_public_key_hex
+        if not self._kms_key_id:
+            raise RuntimeError("kms_key_id is not configured")
+        from greenfloor.adapters.kms_signer import get_public_key_compressed_hex
+
+        self._kms_public_key_hex = get_public_key_compressed_hex(self._kms_key_id, self._kms_region)
+        return self._kms_public_key_hex
 
     def list_coins(
         self,
@@ -144,10 +168,11 @@ mutation splitCoins($walletId: ID!, $fee: BigInt!, $coinIds: [ID!]!, $amountPerC
         )
         split_payload = response.get("splitCoins") or {}
         signature_request = split_payload.get("signatureRequest") or {}
-        return {
+        result = {
             "signature_request_id": str(signature_request.get("id", "")).strip(),
             "status": str(signature_request.get("status", "")).strip(),
         }
+        return self._auto_sign_if_kms(result)
 
     def combine_coins(
         self,
@@ -201,10 +226,11 @@ mutation combineCoins(
         )
         combine_payload = response.get("combineCoins") or {}
         signature_request = combine_payload.get("signatureRequest") or {}
-        return {
+        result = {
             "signature_request_id": str(signature_request.get("id", "")).strip(),
             "status": str(signature_request.get("status", "")).strip(),
         }
+        return self._auto_sign_if_kms(result)
 
     def create_offer(
         self,
@@ -243,10 +269,11 @@ mutation createOffer($input: CreateOfferInput!) {
         )
         create_payload = response.get("createOffer") or {}
         signature_request = create_payload.get("signatureRequest") or {}
-        return {
+        result = {
             "signature_request_id": str(signature_request.get("id", "")).strip(),
             "status": str(signature_request.get("status", "")).strip(),
         }
+        return self._auto_sign_if_kms(result)
 
     def cancel_offer(self, *, offer_id: str, cancel_off_chain: bool = False) -> dict[str, Any]:
         clean_offer_id = str(offer_id).strip()
@@ -274,10 +301,11 @@ mutation cancelOffer($input: CancelOfferInput!) {
         )
         cancel_payload = response.get("cancelOffer") or {}
         signature_request = cancel_payload.get("signatureRequest") or {}
-        return {
+        result = {
             "signature_request_id": str(signature_request.get("id", "")).strip(),
             "status": str(signature_request.get("status", "")).strip(),
         }
+        return self._auto_sign_if_kms(result)
 
     def get_signature_request(self, *, signature_request_id: str) -> dict[str, Any]:
         query = """
@@ -343,6 +371,119 @@ query getWallet($walletId: ID, $isCreator: Boolean, $states: [OfferState!], $fir
             if isinstance(node, dict):
                 normalized_offers.append(node)
         return {"offers": normalized_offers}
+
+    # ------------------------------------------------------------------
+    # KMS vault signing
+    # ------------------------------------------------------------------
+
+    _SIGN_SIGNATURE_REQUEST_MUTATION = """
+mutation SignSignatureRequest($input: SignSignatureRequestInput!) {
+  signSignatureRequest(input: $input) {
+    signatureRequest {
+      id
+      status
+    }
+  }
+}
+"""
+
+    _GET_SIGNATURE_REQUEST_WITH_MESSAGES_QUERY = """
+query getSignatureRequest($id: ID!) {
+  signatureRequest(id: $id) {
+    id
+    status
+    messages {
+      publicKey
+      message
+    }
+  }
+}
+"""
+
+    def get_signature_request_with_messages(self, *, signature_request_id: str) -> dict[str, Any]:
+        """Fetch a signature request including its signable messages."""
+        payload = self._graphql(
+            query=self._GET_SIGNATURE_REQUEST_WITH_MESSAGES_QUERY,
+            variables={"id": signature_request_id},
+        )
+        sr = payload.get("signatureRequest") or {}
+        if not isinstance(sr, dict):
+            return {"id": signature_request_id, "status": "UNKNOWN", "messages": []}
+        return sr
+
+    def _sign_signature_request(
+        self,
+        *,
+        signature_request_id: str,
+        public_key_hex: str,
+        message_hex: str,
+        signature_hex: str,
+    ) -> dict[str, Any]:
+        """Submit a single signature to the ent-wallet API."""
+        resp = self._graphql(
+            query=self._SIGN_SIGNATURE_REQUEST_MUTATION,
+            variables={
+                "input": {
+                    "signatureRequestId": signature_request_id,
+                    "publicKey": public_key_hex,
+                    "message": message_hex,
+                    "signature": signature_hex,
+                }
+            },
+        )
+        return (resp.get("signSignatureRequest") or {}).get("signatureRequest") or {}
+
+    def sign_with_kms(self, *, signature_request_id: str) -> dict[str, Any]:
+        """Sign all messages matching our KMS key on a signature request.
+
+        Returns the final signature request state after signing.
+        """
+        if not self._kms_key_id:
+            raise RuntimeError("kms_key_id is not configured; cannot sign with KMS")
+        from greenfloor.adapters.kms_signer import sign_digest
+
+        pubkey_hex = self._resolve_kms_public_key()
+        sr = self.get_signature_request_with_messages(signature_request_id=signature_request_id)
+        messages = sr.get("messages") or []
+        signed_count = 0
+        last_result: dict[str, Any] = sr
+
+        for msg in messages:
+            msg_pubkey = str(msg.get("publicKey", "")).lower().replace("0x", "")
+            if msg_pubkey != pubkey_hex.lower().replace("0x", ""):
+                continue
+            message_hex = str(msg.get("message", "")).replace("0x", "")
+            logger.info("kms_signing message for sig_request=%s", signature_request_id)
+            compact_sig_hex = sign_digest(self._kms_key_id, self._kms_region, message_hex)
+            last_result = self._sign_signature_request(
+                signature_request_id=signature_request_id,
+                public_key_hex=pubkey_hex,
+                message_hex=message_hex,
+                signature_hex=compact_sig_hex,
+            )
+            signed_count += 1
+
+        logger.info(
+            "kms_sign_complete sig_request=%s signed=%d", signature_request_id, signed_count
+        )
+        return last_result
+
+    def _auto_sign_if_kms(self, result: dict[str, Any]) -> dict[str, Any]:
+        """If KMS is configured and the operation returned a signature request, sign it.
+
+        Mutates ``result`` in place with the updated status and returns it.
+        """
+        if not self.kms_configured:
+            return result
+        sig_id = str(result.get("signature_request_id", "")).strip()
+        if not sig_id:
+            return result
+        status = str(result.get("status", "")).upper()
+        if status not in {"UNSIGNED", "PARTIALLY_SIGNED", "AWAITING_REVIEW", ""}:
+            return result
+        sr = self.sign_with_kms(signature_request_id=sig_id)
+        result["status"] = sr.get("status", result.get("status"))
+        return result
 
     def _graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps({"query": query, "variables": variables}, separators=(",", ":"))
