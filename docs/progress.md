@@ -1,5 +1,50 @@
 # Progress Log
 
+## 2026-02-28 (John-Deere 60-minute soak, 8-hour expiry, full-profile runtime)
+
+- Executed requested long-run validation scope on `John-Deere`:
+  - duration: `60 minutes` (12 checkpoints, 5-minute cadence),
+  - expiry under test: `8 hours` for `eco1812022_sell_wusdbc`,
+  - market structure: full configured runtime profile (enabled flags aligned to repo config),
+  - units: full ladder (`1/10/100`) as observed through normal strategy planning.
+- Pre-run operational guardrails:
+  - stopped running daemon before runtime sync.
+  - verified runtime file parity for active code paths by SHA-256 hash match against local `fe4f180` content for:
+    - `greenfloor/config/models.py`
+    - `greenfloor/core/strategy.py`
+    - `greenfloor/daemon/main.py`
+    - `greenfloor/signing.py`
+- Runtime config update on host:
+  - `~/.greenfloor/config/markets.yaml`:
+    - `eco1812022_sell_wusdbc.pricing.strategy_offer_expiry_unit: hours`
+    - `eco1812022_sell_wusdbc.pricing.strategy_offer_expiry_value: 8`
+- Soak command set at each checkpoint:
+  - `offers-status --market-id eco1812022_sell_wusdbc --limit 20 --events-limit 20`
+  - `offers-reconcile --market-id eco1812022_sell_wusdbc --limit 50`
+- Checkpoint `by_state` progression:
+  - 1/12: `{"mempool_observed":8,"expired":12}`
+  - 2/12: `{"mempool_observed":5,"expired":15}`
+  - 3/12: `{"mempool_observed":7,"expired":13}`
+  - 4/12: `{"mempool_observed":7,"expired":13}`
+  - 5/12: `{"open":1,"mempool_observed":4,"expired":15}`
+  - 6/12: `{"mempool_observed":6,"expired":14}`
+  - 7/12: `{"mempool_observed":7,"expired":13}`
+  - 8/12: `{"mempool_observed":6,"expired":14}`
+  - 9/12: `{"mempool_observed":6,"expired":14}`
+  - 10/12: `{"mempool_observed":7,"expired":13}`
+  - 11/12: `{"mempool_observed":9,"expired":11}`
+  - 12/12: `{"mempool_observed":7,"expired":13}`
+- Reseed-health gate evidence (PASS) from runtime audit DB during soak window (`02:01`-`03:00` UTC):
+  - `strategy_actions_planned` events: `101`
+  - events containing `no_active_offer_reseed`: `36`
+  - `strategy_offer_execution` events: `137`
+  - events with `planned_count > 0`: `36`
+  - events with `executed_count > 0`: `36`
+  - `cloud_wallet_post_success` items: `36`
+- Outcome:
+  - Primary success gate passed: reseed events were repeatedly planned and executed successfully throughout the full hour.
+  - No recurrence of `offer_builder_failed:signing_failed:no_unspent_offer_cat_coins` during this test window.
+
 ## 2026-02-28 (John-Deere long-expiry rollout for `eco1812022_sell_wusdbc` + 30-minute soak)
 
 - Added market-level strategy expiry override support:
