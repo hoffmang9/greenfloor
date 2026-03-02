@@ -15,9 +15,11 @@ This file defines implementation conventions for coding agents and contributors.
 - Ensure all posted offers have expiry; stable-vs-unstable pair offers should use shorter expiries.
 - Keep the architecture boundaries strict:
   - `greenfloor/core`: deterministic policy logic only (no IO).
-  - `greenfloor/config`: parse/validate configuration.
+  - `greenfloor/config`: parse/validate configuration, config path resolution, quote-asset resolution.
   - `greenfloor/* adapters`: side effects (network, filesystem, wallet, notifications).
   - `greenfloor/signing.py`: unified signing module (coin discovery, spend-bundle construction, broadcast).
+  - `greenfloor/hex_utils.py`: canonical hex identifier validation and normalization.
+  - `greenfloor/logging_setup.py`: unified rotating-file log initialization.
   - `greenfloor/cli/manager.py`: operator CLI commands.
   - `greenfloor/cli/offer_builder_sdk.py`: offer text construction.
 
@@ -51,13 +53,13 @@ These rules exist because earlier implementation rounds introduced unnecessary c
 
 ### Manager CLI surface discipline
 
-- The manager currently has 10 commands: `bootstrap-home`, `config-validate`, `doctor`, `keys-onboard`, `build-and-post-offer`, `offers-status`, `offers-reconcile`, `coins-list`, `coin-split`, `coin-combine`.
+- The manager currently has 15 commands: `bootstrap-home`, `config-validate`, `doctor`, `keys-onboard`, `build-and-post-offer`, `offers-status`, `offers-reconcile`, `offers-cancel`, `coins-list`, `coin-split`, `coin-combine`, `cats-add`, `cats-list`, `cats-delete`, `set-log-level`.
 - Do not add new commands without explicit user request or a documented need tied to mainnet proof.
 - Each new command must have a test that exercises it end-to-end with deterministic fixtures.
 
-### No verbatim duplication within a file
+### No verbatim duplication within a file or across files
 
-- If the same logic block (more than ~10 lines) appears more than once anywhere in the same file, extract it to a named helper function before committing. Do not land a PR with copy-pasted blocks.
+- If the same logic block (more than ~10 lines) appears more than once anywhere in the **codebase**, extract it to a shared module before committing. Cross-file duplication is equally harmful to within-file duplication.
 - When implementing a second function whose core logic closely mirrors an existing one, read the existing function carefully before writing, extract the shared kernel first, and verify both callers use the extracted helper.
 
 ### Allowlist over blocklist for state checks
@@ -83,6 +85,25 @@ These rules exist because earlier implementation rounds introduced unnecessary c
 
 - If the same setup block (config file writing, credential patching, env variable setting) appears in more than two test functions, extract it to a named helper function in the test file before adding the third instance.
 - Named helpers are preferred over fixtures when the setup is a pure function of its arguments (no session/module scope needed). This keeps the extraction visible and avoids fixture magic.
+
+### Function length discipline
+
+- No function should exceed ~150 lines of logic (excluding docstrings and blank lines). If a function approaches this limit, decompose it into named sub-functions with clear single responsibilities.
+- This applies especially to daemon market-cycle processing and CLI offer-construction paths.
+
+### Import direction discipline
+
+- The daemon (`greenfloor/daemon/`) must never import from the CLI (`greenfloor/cli/`). The CLI must never import from the daemon. Shared logic used by both must live in `greenfloor/core/`, `greenfloor/config/`, `greenfloor/adapters/`, or a dedicated shared module (e.g. `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`).
+- If you find yourself importing a private function (`_foo`) from another boundary, that function belongs in a shared module.
+
+### Minimize module-level mutable state
+
+- Module-level mutable dicts, sets, lists, and boolean flags make testing fragile and modules non-reentrant. Prefer passing mutable state through a dataclass/object parameter.
+- Module-level constants (frozen sets, named tuples) are fine.
+
+### Single canonical utility implementations
+
+- The codebase has canonical shared utilities in `greenfloor/hex_utils.py` (hex ID validation/normalization), `greenfloor/logging_setup.py` (log initialization), and `greenfloor/config/io.py` (config path resolution, YAML I/O, quote-asset resolution). Do not re-derive or re-implement these — import and use the shared version.
 
 ## Required Pre-Implementation Review
 

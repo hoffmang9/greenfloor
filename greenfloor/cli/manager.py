@@ -25,12 +25,18 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.cli.offer_builder_sdk import build_offer_text
 from greenfloor.config.io import (
+    default_cats_config_path as _default_cats_config_path_shared,
+)
+from greenfloor.config.io import (
+    is_testnet,
     load_markets_config_with_optional_overlay,
     load_program_config,
     load_yaml,
+    resolve_quote_asset_for_offer,
     write_yaml,
 )
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
+from greenfloor.hex_utils import is_hex_id, normalize_hex_id
 from greenfloor.keys.onboarding import (
     KeyOnboardingSelection,
     determine_onboarding_branch,
@@ -40,46 +46,34 @@ from greenfloor.keys.onboarding import (
 from greenfloor.keys.router import resolve_market_key
 from greenfloor.logging_setup import (
     ALLOWED_LOG_LEVELS,
-    apply_level_to_root,
-    coerce_log_level,
-    create_rotating_file_handler,
+    initialize_service_file_logging,
     normalize_log_level_name,
+    warn_if_log_level_auto_healed,
 )
 from greenfloor.storage.sqlite import SqliteStore
 
 _TEST_PHASE_OFFER_EXPIRY_MINUTES = 5
 _MANAGER_SERVICE_NAME = "manager"
-_TESTNET_NETWORKS: frozenset[str] = frozenset({"testnet", "testnet11"})
 _DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS = 4
 _DEXIE_INVALID_OFFER_RETRY_INITIAL_DELAY_SECONDS = 1.0
 
 
-def _is_testnet(network: str) -> bool:
-    return network.strip().lower() in _TESTNET_NETWORKS
-
-
-_manager_file_logger_initialized = False
 _manager_logger = logging.getLogger("greenfloor.manager")
 
 
 def _initialize_manager_file_logging(home_dir: str, *, log_level: str | None) -> None:
-    global _manager_file_logger_initialized
-    if _manager_file_logger_initialized:
-        return
-    effective_level = coerce_log_level(log_level)
-    root_logger = logging.getLogger()
-    handler = create_rotating_file_handler(service_name=_MANAGER_SERVICE_NAME, home_dir=home_dir)
-    root_logger.addHandler(handler)
-    apply_level_to_root(effective_level=effective_level, logger=_manager_logger, handler=handler)
-    _manager_file_logger_initialized = True
+    initialize_service_file_logging(
+        service_name=_MANAGER_SERVICE_NAME,
+        home_dir=home_dir,
+        log_level=log_level,
+        service_logger=_manager_logger,
+    )
 
 
 def _warn_if_log_level_auto_healed(*, program, program_path: Path) -> None:
-    if bool(getattr(program, "app_log_level_was_missing", False)):
-        _manager_logger.warning(
-            "program config missing app.log_level; wrote default INFO to %s",
-            os.fspath(program_path),
-        )
+    warn_if_log_level_auto_healed(
+        program_obj=program, program_path=program_path, logger=_manager_logger
+    )
 
 
 def _condition_has_offer_expiration(condition: object) -> bool:
@@ -149,10 +143,9 @@ def _extract_coin_id_hints_from_offer_text(offer_text: str) -> list[str]:
             coin_id_hex = str(to_hex(coin_id_obj)).strip().lower()
         except Exception:
             continue
-        if coin_id_hex.startswith("0x"):
-            coin_id_hex = coin_id_hex[2:]
-        if len(coin_id_hex) == 64 and all(c in "0123456789abcdef" for c in coin_id_hex):
-            hints.append(coin_id_hex)
+        normalized = normalize_hex_id(coin_id_hex)
+        if normalized:
+            hints.append(normalized)
     # Stable order, unique values.
     return list(dict.fromkeys(hints))
 
@@ -234,10 +227,8 @@ def _default_testnet_markets_config_path() -> str:
 
 
 def _default_cats_config_path() -> str:
-    home_default = Path("~/.greenfloor/config/cats.yaml").expanduser()
-    if home_default.exists():
-        return str(home_default)
-    return "config/cats.yaml"
+    shared = _default_cats_config_path_shared()
+    return str(shared) if shared is not None else "config/cats.yaml"
 
 
 _JSON_OUTPUT_COMPACT = False
@@ -298,8 +289,7 @@ def _canonical_is_cloud_global_id(asset_id: str) -> bool:
 
 
 def _is_hex_asset_id(value: str) -> bool:
-    raw = value.strip().lower()
-    return len(raw) == 64 and all(c in "0123456789abcdef" for c in raw)
+    return is_hex_id(value)
 
 
 def _normalize_label(value: str) -> str:
@@ -431,6 +421,11 @@ def _dexie_lookup_token_for_symbol(*, asset_ref: str, network: str) -> dict | No
 
 
 def _normalize_hex_asset_id(asset_id: str) -> str:
+    result = normalize_hex_id(asset_id)
+    if result:
+        return result
+    # Fallback: return stripped/lowered even if not valid 64-char hex,
+    # since callers may pass shorter strings that get validated later.
     normalized = str(asset_id).strip().lower()
     if normalized.startswith("0x"):
         normalized = normalized[2:]
@@ -1249,7 +1244,7 @@ def _verify_dexie_offer_visible_by_id(
 
 
 def _coinset_coin_url(*, coin_name: str, network: str = "mainnet") -> str:
-    base = "https://testnet11.coinset.org" if _is_testnet(network) else "https://coinset.org"
+    base = "https://testnet11.coinset.org" if is_testnet(network) else "https://coinset.org"
     return f"{base}/coin/{coin_name.strip()}"
 
 
@@ -1406,7 +1401,7 @@ def _coinset_base_url(*, network: str) -> str:
     base = os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip()
     if not base:
         return ""
-    if _is_testnet(network):
+    if is_testnet(network):
         allow_mainnet = os.getenv("GREENFLOOR_ALLOW_MAINNET_COINSET_FOR_TESTNET11", "").strip()
         if (
             "coinset.org" in base
@@ -1419,7 +1414,7 @@ def _coinset_base_url(*, network: str) -> str:
 
 def _coinset_adapter(*, network: str) -> CoinsetAdapter:
     base_url = _coinset_base_url(network=network)
-    require_testnet11 = _is_testnet(network)
+    require_testnet11 = is_testnet(network)
     try:
         return CoinsetAdapter(
             base_url or None, network=network, require_testnet11=require_testnet11
@@ -2274,7 +2269,7 @@ def _resolve_dexie_base_url(network: str, explicit_base_url: str | None) -> str:
     network_l = network.strip().lower()
     if network_l in {"mainnet", ""}:
         return "https://api.dexie.space"
-    if network_l in _TESTNET_NETWORKS:
+    if is_testnet(network_l):
         return "https://api-testnet.dexie.space"
     raise ValueError(f"unsupported network for dexie posting: {network}")
 
@@ -2314,7 +2309,7 @@ def _resolve_offer_publish_settings(
         raise ValueError("offer publish venue must be dexie or splash")
     if dexie_base_url and dexie_base_url.strip():
         dexie_base = dexie_base_url.strip().rstrip("/")
-    elif _is_testnet(network):
+    elif is_testnet(network):
         dexie_base = _resolve_dexie_base_url(network, None)
     else:
         dexie_base = str(program.dexie_api_base).strip().rstrip("/")
@@ -2420,34 +2415,7 @@ def _select_offer_coin_ids_for_target_amount(
 
 
 def _resolve_quote_asset_for_local_offer_build(*, quote_asset: str, network: str) -> str:
-    normalized = str(quote_asset).strip().lower()
-    if normalized in {"xch", "txch", "1"}:
-        return "txch" if _is_testnet(network) else "xch"
-    if _is_hex_asset_id(normalized):
-        return normalized
-
-    cats_path = Path(_default_cats_config_path()).expanduser()
-    if not cats_path.exists():
-        return quote_asset
-    try:
-        raw = load_yaml(cats_path)
-    except Exception:
-        return quote_asset
-    if not isinstance(raw, dict):
-        return quote_asset
-    cats = raw.get("cats", [])
-    if not isinstance(cats, list):
-        return quote_asset
-    for item in cats:
-        if not isinstance(item, dict):
-            continue
-        symbol = str(item.get("base_symbol", "")).strip().lower()
-        if symbol != normalized:
-            continue
-        asset_id = str(item.get("asset_id", "")).strip().lower()
-        if _is_hex_asset_id(asset_id):
-            return asset_id
-    return quote_asset
+    return resolve_quote_asset_for_offer(quote_asset=quote_asset, network=network)
 
 
 def _build_offer_text_for_request(payload: dict) -> str:
@@ -2976,7 +2944,7 @@ def _resolve_market_for_build(
         }
         quote_match = str(market.quote_asset).strip().lower()
         quote_matches = {quote_match}
-        if network_l in _TESTNET_NETWORKS:
+        if is_testnet(network_l):
             if quote_match == "xch":
                 quote_matches.add("txch")
             elif quote_match == "txch":
