@@ -830,7 +830,8 @@ query resolveAssetByIdentifier($identifier: String) {
         return None
     global_id = str(asset.get("id", "")).strip()
     asset_type = str(asset.get("type", "")).strip().upper()
-    if global_id.startswith("Asset_") and asset_type in {"CAT2", "CAT", "TOKEN"}:
+    # Accept both CAT2 and CAT as equivalent wallet CAT types.
+    if global_id.startswith("Asset_") and asset_type in {"CAT2", "CAT"}:
         return global_id
     return None
 
@@ -887,7 +888,7 @@ query resolveWalletAssets($walletId: ID!) {
             continue
         if asset_type == "CRYPTOCURRENCY":
             crypto_asset_ids.append(asset_global_id)
-        elif asset_type in {"CAT2", "CAT", "TOKEN"}:
+        elif asset_type in {"CAT2", "CAT"}:
             cat_assets.append(
                 {
                     "asset_id": asset_global_id,
@@ -2471,8 +2472,8 @@ def _build_and_post_offer_cloud_wallet(
         program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
     )
     wallet = _new_cloud_wallet_adapter(program)
-    cfg_base_global = str(getattr(market, "cloud_wallet_base_global_id", "") or "").strip()
-    cfg_quote_global = str(getattr(market, "cloud_wallet_quote_global_id", "") or "").strip()
+    cfg_base_global = str(getattr(market, "cloud_wallet_base_global_id", "")).strip()
+    cfg_quote_global = str(getattr(market, "cloud_wallet_quote_global_id", "")).strip()
     db_base_hint, db_quote_hint = _recent_market_resolved_asset_id_hints(
         program_home_dir=str(program.home_dir),
         market_id=str(market.market_id),

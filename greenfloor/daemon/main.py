@@ -2000,6 +2000,7 @@ def run_once(
 
     try:
         markets_processed = 0
+        markets_attempted = 0
         cycle_error_count = 0
         strategy_planned_total = 0
         strategy_executed_total = 0
@@ -2050,13 +2051,13 @@ def run_once(
             _DISABLED_MARKET_NEXT_LOG_AT.pop(market.market_id, None)
             enabled_markets.append(market)
 
-        markets_processed = len(enabled_markets)
+        markets_attempted = len(enabled_markets)
         if bool(getattr(program, "runtime_parallel_markets", False)) and len(enabled_markets) > 1:
             max_workers = min(len(enabled_markets), 4)
             _daemon_logger.info(
                 "market_parallel_dispatch enabled=true workers=%s markets=%s",
                 max_workers,
-                markets_processed,
+                markets_attempted,
             )
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
                 future_to_market = {
@@ -2081,13 +2082,16 @@ def run_once(
                     market_id = str(getattr(market, "market_id", "")).strip()
                     try:
                         mr = future.result()
-                    except Exception as exc:  # pragma: no cover - defensive
+                    except Exception as exc:
                         cycle_error_count += 1
                         _log_market_decision(
                             market_id or "unknown",
                             "cycle_failed",
                             error=str(exc),
                         )
+                        # This runs in the main thread while iterating
+                        # `as_completed`, so emitting the aggregate market-cycle
+                        # error through the outer store is thread-safe.
                         store.add_audit_event(
                             "market_cycle_error",
                             {
@@ -2097,6 +2101,7 @@ def run_once(
                             },
                         )
                         continue
+                    markets_processed += 1
                     cycle_error_count += mr.cycle_errors
                     strategy_planned_total += mr.strategy_planned
                     strategy_executed_total += mr.strategy_executed
@@ -2107,7 +2112,7 @@ def run_once(
         else:
             _daemon_logger.info(
                 "market_parallel_dispatch enabled=false workers=1 markets=%s",
-                markets_processed,
+                markets_attempted,
             )
             for market in enabled_markets:
                 market_id = str(getattr(market, "market_id", "")).strip()
@@ -2125,7 +2130,7 @@ def run_once(
                         now=now,
                         state_dir=state_dir,
                     )
-                except Exception as exc:  # pragma: no cover - defensive
+                except Exception as exc:
                     cycle_error_count += 1
                     _log_market_decision(
                         market_id or "unknown",
@@ -2141,6 +2146,7 @@ def run_once(
                         },
                     )
                     continue
+                markets_processed += 1
                 cycle_error_count += mr.cycle_errors
                 strategy_planned_total += mr.strategy_planned
                 strategy_executed_total += mr.strategy_executed
@@ -2153,6 +2159,7 @@ def run_once(
             "daemon_cycle_summary",
             {
                 "duration_ms": duration_ms,
+                "markets_attempted": markets_attempted,
                 "markets_processed": markets_processed,
                 "error_count": cycle_error_count,
                 "strategy_planned_total": strategy_planned_total,
