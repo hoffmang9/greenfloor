@@ -153,6 +153,7 @@ def test_parse_program_config_minimal_valid() -> None:
     assert cfg.runtime_loop_interval_seconds == 30
     assert cfg.runtime_dry_run is False
     assert cfg.tx_block_trigger_mode == "websocket"
+    assert cfg.runtime_parallel_markets is False
     assert cfg.offer_publish_venue == "dexie"
     assert cfg.coin_ops_minimum_fee_mojos == 0
     assert cfg.app_log_level == "INFO"
@@ -227,6 +228,13 @@ def test_parse_program_config_splash_venue() -> None:
     raw["venues"]["offer_publish"]["provider"] = "splash"
     cfg = parse_program_config(raw)
     assert cfg.offer_publish_venue == "splash"
+
+
+def test_parse_program_config_parallel_markets_enabled() -> None:
+    raw = _base_program_raw()
+    raw["runtime"]["parallel_markets"] = True
+    cfg = parse_program_config(raw)
+    assert cfg.runtime_parallel_markets is True
 
 
 def test_parse_program_config_multiple_keys_in_registry() -> None:

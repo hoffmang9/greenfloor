@@ -44,6 +44,7 @@ class ProgramConfig:
     pushover_user_key_env: str
     pushover_app_token_env: str
     pushover_recipient_key_env: str
+    runtime_parallel_markets: bool = False
     cloud_wallet_base_url: str = ""
     cloud_wallet_user_key_id: str = ""
     cloud_wallet_private_key_pem_path: str = ""
@@ -86,6 +87,8 @@ class MarketConfig:
     inventory: MarketInventoryConfig
     pricing: dict[str, Any] = field(default_factory=dict)
     ladders: dict[str, list[MarketLadderEntry]] = field(default_factory=dict)
+    cloud_wallet_base_global_id: str = ""
+    cloud_wallet_quote_global_id: str = ""
 
 
 @dataclass(slots=True)
@@ -258,6 +261,7 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         home_dir=str(_req(app, "home_dir")),
         runtime_loop_interval_seconds=int(_req(runtime, "loop_interval_seconds")),
         runtime_dry_run=bool(runtime.get("dry_run", False)),
+        runtime_parallel_markets=bool(runtime.get("parallel_markets", False)),
         tx_block_trigger_mode=tx_block_trigger_mode,
         tx_block_websocket_url=tx_block_websocket_url,
         tx_block_websocket_reconnect_interval_seconds=tx_block_websocket_reconnect_interval_seconds,
@@ -343,6 +347,10 @@ def parse_markets_config(raw: dict[str, Any]) -> MarketsConfig:
                 inventory=inv,
                 pricing=pricing,
                 ladders=ladders,
+                cloud_wallet_base_global_id=str(row.get("cloud_wallet_base_global_id", "")).strip(),
+                cloud_wallet_quote_global_id=str(
+                    row.get("cloud_wallet_quote_global_id", "")
+                ).strip(),
             )
         )
     return MarketsConfig(markets=markets)

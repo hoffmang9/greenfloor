@@ -811,6 +811,30 @@ def _cats_delete(
     return 0
 
 
+def _resolve_asset_by_identifier(wallet: CloudWalletAdapter, hex_identifier: str) -> str | None:
+    """Query cloud wallet ``asset(identifier:)`` for an exact CAT tail-hash match."""
+    query = """
+query resolveAssetByIdentifier($identifier: String) {
+  asset(identifier: $identifier) {
+    id
+    type
+  }
+}
+"""
+    try:
+        payload = wallet._graphql(query=query, variables={"identifier": hex_identifier})
+    except Exception:
+        return None
+    asset = payload.get("asset")
+    if not isinstance(asset, dict):
+        return None
+    global_id = str(asset.get("id", "")).strip()
+    asset_type = str(asset.get("type", "")).strip().upper()
+    if global_id.startswith("Asset_") and asset_type in {"CAT2", "CAT", "TOKEN"}:
+        return global_id
+    return None
+
+
 def _resolve_cloud_wallet_asset_id(
     *,
     wallet: CloudWalletAdapter,
@@ -893,6 +917,13 @@ query resolveWalletAssets($walletId: ID!) {
             return hinted
 
     canonical_hex = raw.lower()
+
+    # Exact identifier lookup: query Cloud Wallet by CAT tail hash (hex).
+    if _is_hex_asset_id(canonical_hex):
+        identifier_match = _resolve_asset_by_identifier(wallet, canonical_hex)
+        if identifier_match is not None:
+            return identifier_match
+
     preferred_labels: list[str] = []
     if symbol_hint:
         preferred_labels.append(symbol_hint)
@@ -2440,10 +2471,14 @@ def _build_and_post_offer_cloud_wallet(
         program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
     )
     wallet = _new_cloud_wallet_adapter(program)
-    base_global_hint, quote_global_hint = _recent_market_resolved_asset_id_hints(
+    cfg_base_global = str(getattr(market, "cloud_wallet_base_global_id", "") or "").strip()
+    cfg_quote_global = str(getattr(market, "cloud_wallet_quote_global_id", "") or "").strip()
+    db_base_hint, db_quote_hint = _recent_market_resolved_asset_id_hints(
         program_home_dir=str(program.home_dir),
         market_id=str(market.market_id),
     )
+    base_global_hint = cfg_base_global or db_base_hint
+    quote_global_hint = cfg_quote_global or db_quote_hint
     resolved_base_asset_id, resolved_quote_asset_id = _resolve_cloud_wallet_offer_asset_ids(
         wallet=wallet,
         base_asset_id=str(market.base_asset),
