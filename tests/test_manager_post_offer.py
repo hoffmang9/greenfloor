@@ -349,6 +349,52 @@ def test_resolve_cloud_wallet_asset_id_identifier_miss_falls_through(monkeypatch
     assert resolved == "Asset_carbon"
 
 
+def test_resolve_cloud_wallet_asset_id_identifier_error_falls_through(monkeypatch) -> None:
+    """When asset(identifier:) raises, fall through to label matching."""
+    cat_hex = "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        @staticmethod
+        def _graphql(*, query: str, variables: dict):
+            if "resolveAssetByIdentifier" in query:
+                raise RuntimeError("network_error")
+            return {
+                "wallet": {
+                    "assets": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "assetId": "Asset_carbon",
+                                    "type": "CAT2",
+                                    "displayName": "ECO.181.2022",
+                                    "symbol": "",
+                                }
+                            },
+                        ]
+                    }
+                }
+            }
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._dexie_lookup_token_for_cat_id",
+        lambda *, canonical_cat_id_hex, network: (
+            {"ticker_id": f"{cat_hex}_xch", "base_code": "ECO.181.2022"}
+            if canonical_cat_id_hex == cat_hex
+            else None
+        ),
+    )
+
+    resolved = manager_mod._resolve_cloud_wallet_asset_id(
+        wallet=cast(CloudWalletAdapter, _FakeWallet()),
+        canonical_asset_id=cat_hex,
+        symbol_hint="ECO.181.2022",
+    )
+    assert resolved == "Asset_carbon"
+
+
 def test_recent_market_resolved_asset_id_hints_reads_strategy_execution(tmp_path: Path) -> None:
     from greenfloor.storage.sqlite import SqliteStore
 

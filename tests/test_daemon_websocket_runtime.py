@@ -322,7 +322,72 @@ def test_run_once_parallel_market_failure_isolated(monkeypatch, tmp_path: Path) 
         store.close()
     assert len(events) == 1
     payload = events[0]["payload"]
-    assert payload["markets_processed"] == 2
+    assert payload["markets_attempted"] == 2
+    assert payload["markets_processed"] == 1
+    assert payload["error_count"] >= 1
+
+
+def test_run_once_sequential_market_failure_isolated(monkeypatch, tmp_path: Path) -> None:
+    import greenfloor.daemon.main as daemon_mod
+
+    home = tmp_path / "home"
+    state_dir = home / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program, home, parallel_markets=False)
+    _write_markets_two(markets)
+    db_path = tmp_path / "state.sqlite"
+
+    class _FakePriceAdapter:
+        async def get_xch_price(self) -> float:
+            return 30.0
+
+    class _FakeWalletAdapter:
+        pass
+
+    class _FakeDexieAdapter:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+    class _FakeSplashAdapter:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+    def _fake_process_single_market(**kwargs):
+        market = kwargs["market"]
+        if str(market.market_id) == "m1":
+            raise RuntimeError("boom-sequential")
+        return daemon_mod._MarketCycleResult(strategy_planned=2, strategy_executed=1)
+
+    monkeypatch.setattr("greenfloor.daemon.main.PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr(
+        "greenfloor.daemon.main._process_single_market", _fake_process_single_market
+    )
+
+    code = run_once(
+        program_path=program,
+        markets_path=markets,
+        allowed_keys=None,
+        db_path_override=str(db_path),
+        coinset_base_url="https://coinset.org",
+        state_dir=state_dir,
+        poll_coinset_mempool=False,
+    )
+    assert code == 0
+
+    store = SqliteStore(db_path)
+    try:
+        events = store.list_recent_audit_events(event_types=["daemon_cycle_summary"], limit=1)
+    finally:
+        store.close()
+    assert len(events) == 1
+    payload = events[0]["payload"]
+    assert payload["markets_attempted"] == 2
+    assert payload["markets_processed"] == 1
     assert payload["error_count"] >= 1
 
 
@@ -390,6 +455,7 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(monkeypatch, tmp_path:
     assert code == 0
     assert sequential_seen == ["m1"]
     assert parallel_seen == []
+    cycle1_parallel_count = len(parallel_seen)
 
     _write_markets_two(markets)  # add a new enabled market while daemon keeps running
     code = run_once(
@@ -402,14 +468,17 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(monkeypatch, tmp_path:
         poll_coinset_mempool=False,
     )
     assert code == 0
-    assert set(parallel_seen) == {"m1", "m2"}
+    assert len(parallel_seen) == cycle1_parallel_count + 2
+    assert set(parallel_seen[cycle1_parallel_count:]) == {"m1", "m2"}
 
     store = SqliteStore(db_path)
     try:
         events = store.list_recent_audit_events(event_types=["daemon_cycle_summary"], limit=2)
     finally:
         store.close()
+    attempted = sorted(int(e["payload"]["markets_attempted"]) for e in events)
     processed = sorted(int(e["payload"]["markets_processed"]) for e in events)
+    assert attempted == [1, 2]
     assert processed == [1, 2]
 
 

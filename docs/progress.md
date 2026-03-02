@@ -13,6 +13,15 @@
   - `parallel_markets` config parsing,
   - new-market-added-next-cycle behavior in parallel mode (no daemon restart required).
 - Daemon test suite remains green after the change.
+- Reviewer follow-up refinements:
+  - cycle summary now differentiates `markets_attempted` from successful `markets_processed`,
+  - removed incorrect `# pragma: no cover` markers from covered exception handlers,
+  - added sequential exception-path coverage for parity with parallel failure isolation tests,
+  - simplified cloud-wallet global-id hint extraction by removing redundant fallback wrappers,
+  - added identifier-lookup exception fallback test (`_graphql` raise -> label-path fallback),
+  - added `parse_markets_config` coverage for `cloud_wallet_base_global_id` / `cloud_wallet_quote_global_id`,
+  - narrowed CAT type aliases to `CAT2` + `CAT` (dropped `TOKEN`),
+  - documented why parallel market error audit events are written by the outer main-thread store.
 
 ## 2026-03-02 (PR #47 — simplify, deduplicate, and decompose)
 

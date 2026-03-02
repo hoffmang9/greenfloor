@@ -140,6 +140,17 @@ def test_parse_markets_config_accepts_strategy_expiry_override() -> None:
     assert out.markets[0].pricing["strategy_offer_expiry_value"] == 2
 
 
+def test_parse_markets_config_reads_cloud_wallet_global_ids() -> None:
+    row = _base_market_row()
+    row["cloud_wallet_base_global_id"] = "Asset_base123"
+    row["cloud_wallet_quote_global_id"] = "Asset_quote456"
+
+    out = parse_markets_config({"markets": [row]})
+
+    assert out.markets[0].cloud_wallet_base_global_id == "Asset_base123"
+    assert out.markets[0].cloud_wallet_quote_global_id == "Asset_quote456"
+
+
 # ---------------------------------------------------------------------------
 # parse_program_config: happy path
 # ---------------------------------------------------------------------------
