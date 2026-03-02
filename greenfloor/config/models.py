@@ -86,6 +86,8 @@ class MarketConfig:
     inventory: MarketInventoryConfig
     pricing: dict[str, Any] = field(default_factory=dict)
     ladders: dict[str, list[MarketLadderEntry]] = field(default_factory=dict)
+    cloud_wallet_base_global_id: str = ""
+    cloud_wallet_quote_global_id: str = ""
 
 
 @dataclass(slots=True)
@@ -343,6 +345,10 @@ def parse_markets_config(raw: dict[str, Any]) -> MarketsConfig:
                 inventory=inv,
                 pricing=pricing,
                 ladders=ladders,
+                cloud_wallet_base_global_id=str(row.get("cloud_wallet_base_global_id", "")).strip(),
+                cloud_wallet_quote_global_id=str(
+                    row.get("cloud_wallet_quote_global_id", "")
+                ).strip(),
             )
         )
     return MarketsConfig(markets=markets)
