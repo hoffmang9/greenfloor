@@ -1,5 +1,19 @@
 # Progress Log
 
+## 2026-03-02 (Parallel market processing with failure isolation)
+
+- Added optional daemon market parallelism via `runtime.parallel_markets` (default `false`) in `program.yaml`.
+- `run_once` now supports parallel dispatch across enabled markets with worker cap `min(enabled_markets, 4)`, while preserving sequential mode when disabled.
+- Added per-market failure isolation in parallel mode: one market exception no longer aborts all markets in the cycle; failures are logged with `market_cycle_error` audit events.
+- Added cooldown-map thread safety for concurrent market workers (`_POST_COOLDOWN_UNTIL`, `_CANCEL_COOLDOWN_UNTIL`).
+- Kept SQLite safety by using a per-thread `SqliteStore` connection for each parallel market worker.
+- Added deterministic tests for:
+  - parallel overlap execution in `run_once`,
+  - failure isolation in parallel mode,
+  - `parallel_markets` config parsing,
+  - new-market-added-next-cycle behavior in parallel mode (no daemon restart required).
+- Daemon test suite remains green after the change.
+
 ## 2026-03-02 (PR #47 — simplify, deduplicate, and decompose)
 
 - Extracted 6 duplicated utility implementations into shared modules:

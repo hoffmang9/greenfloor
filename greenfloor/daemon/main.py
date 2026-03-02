@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -67,6 +68,7 @@ class DaemonRunState:
 _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS = 500
 _POST_COOLDOWN_UNTIL: dict[str, float] = {}
 _CANCEL_COOLDOWN_UNTIL: dict[str, float] = {}
+_COOLDOWN_LOCK = threading.Lock()
 _DAEMON_SERVICE_NAME = "daemon"
 _daemon_logger = logging.getLogger("greenfloor.daemon")
 _DISABLED_MARKET_LOG_INTERVAL_SECONDS_DEFAULT = 3600
@@ -204,7 +206,8 @@ def _cancel_retry_config() -> tuple[int, int, int]:
 
 
 def _cooldown_remaining_ms(cooldowns: dict[str, float], key: str) -> int:
-    deadline = float(cooldowns.get(key, 0.0))
+    with _COOLDOWN_LOCK:
+        deadline = float(cooldowns.get(key, 0.0))
     remaining = max(0.0, deadline - time.monotonic())
     return int(remaining * 1000)
 
@@ -212,7 +215,8 @@ def _cooldown_remaining_ms(cooldowns: dict[str, float], key: str) -> int:
 def _set_cooldown(cooldowns: dict[str, float], key: str, cooldown_seconds: int) -> None:
     if cooldown_seconds <= 0:
         return
-    cooldowns[key] = time.monotonic() + float(cooldown_seconds)
+    with _COOLDOWN_LOCK:
+        cooldowns[key] = time.monotonic() + float(cooldown_seconds)
 
 
 def _retry_with_backoff(
@@ -1937,6 +1941,40 @@ def _process_single_market(
     return result
 
 
+def _process_single_market_with_store(
+    *,
+    market: Any,
+    program: Any,
+    allowed_keys: set[str] | None,
+    dexie: DexieAdapter,
+    splash: SplashAdapter,
+    wallet: WalletAdapter,
+    db_path: Path,
+    xch_price_usd: float | None,
+    previous_xch_price_usd: float | None,
+    now: datetime,
+    state_dir: Path,
+) -> _MarketCycleResult:
+    """Run one market cycle with a thread-local SQLite connection."""
+    store = SqliteStore(db_path)
+    try:
+        return _process_single_market(
+            market=market,
+            program=program,
+            allowed_keys=allowed_keys,
+            dexie=dexie,
+            splash=splash,
+            wallet=wallet,
+            store=store,
+            xch_price_usd=xch_price_usd,
+            previous_xch_price_usd=previous_xch_price_usd,
+            now=now,
+            state_dir=state_dir,
+        )
+    finally:
+        store.close()
+
+
 def run_once(
     program_path: Path,
     markets_path: Path,
@@ -2003,33 +2041,113 @@ def run_once(
                 store.add_audit_event("coinset_mempool_error", {"error": str(exc)})
 
         now = utcnow()
+        enabled_markets: list[Any] = []
         for market in markets.markets:
             if not market.enabled:
                 if _should_log_disabled_market(market_id=market.market_id):
                     _log_market_decision(market.market_id, "market_skipped", reason="disabled")
                 continue
             _DISABLED_MARKET_NEXT_LOG_AT.pop(market.market_id, None)
-            markets_processed += 1
-            mr = _process_single_market(
-                market=market,
-                program=program,
-                allowed_keys=allowed_keys,
-                dexie=dexie,
-                splash=splash,
-                wallet=wallet,
-                store=store,
-                xch_price_usd=xch_price_usd,
-                previous_xch_price_usd=previous_xch_price_usd,
-                now=now,
-                state_dir=state_dir,
+            enabled_markets.append(market)
+
+        markets_processed = len(enabled_markets)
+        if bool(getattr(program, "runtime_parallel_markets", False)) and len(enabled_markets) > 1:
+            max_workers = min(len(enabled_markets), 4)
+            _daemon_logger.info(
+                "market_parallel_dispatch enabled=true workers=%s markets=%s",
+                max_workers,
+                markets_processed,
             )
-            cycle_error_count += mr.cycle_errors
-            strategy_planned_total += mr.strategy_planned
-            strategy_executed_total += mr.strategy_executed
-            if mr.cancel_triggered:
-                cancel_triggered_count += 1
-            cancel_planned_total += mr.cancel_planned
-            cancel_executed_total += mr.cancel_executed
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                future_to_market = {
+                    pool.submit(
+                        _process_single_market_with_store,
+                        market=market,
+                        program=program,
+                        allowed_keys=allowed_keys,
+                        dexie=dexie,
+                        splash=splash,
+                        wallet=wallet,
+                        db_path=db_path,
+                        xch_price_usd=xch_price_usd,
+                        previous_xch_price_usd=previous_xch_price_usd,
+                        now=now,
+                        state_dir=state_dir,
+                    ): market
+                    for market in enabled_markets
+                }
+                for future in concurrent.futures.as_completed(future_to_market):
+                    market = future_to_market[future]
+                    market_id = str(getattr(market, "market_id", "")).strip()
+                    try:
+                        mr = future.result()
+                    except Exception as exc:  # pragma: no cover - defensive
+                        cycle_error_count += 1
+                        _log_market_decision(
+                            market_id or "unknown",
+                            "cycle_failed",
+                            error=str(exc),
+                        )
+                        store.add_audit_event(
+                            "market_cycle_error",
+                            {
+                                "market_id": market_id,
+                                "error": str(exc),
+                                "source": "parallel_market_worker",
+                            },
+                        )
+                        continue
+                    cycle_error_count += mr.cycle_errors
+                    strategy_planned_total += mr.strategy_planned
+                    strategy_executed_total += mr.strategy_executed
+                    if mr.cancel_triggered:
+                        cancel_triggered_count += 1
+                    cancel_planned_total += mr.cancel_planned
+                    cancel_executed_total += mr.cancel_executed
+        else:
+            _daemon_logger.info(
+                "market_parallel_dispatch enabled=false workers=1 markets=%s",
+                markets_processed,
+            )
+            for market in enabled_markets:
+                market_id = str(getattr(market, "market_id", "")).strip()
+                try:
+                    mr = _process_single_market(
+                        market=market,
+                        program=program,
+                        allowed_keys=allowed_keys,
+                        dexie=dexie,
+                        splash=splash,
+                        wallet=wallet,
+                        store=store,
+                        xch_price_usd=xch_price_usd,
+                        previous_xch_price_usd=previous_xch_price_usd,
+                        now=now,
+                        state_dir=state_dir,
+                    )
+                except Exception as exc:  # pragma: no cover - defensive
+                    cycle_error_count += 1
+                    _log_market_decision(
+                        market_id or "unknown",
+                        "cycle_failed",
+                        error=str(exc),
+                    )
+                    store.add_audit_event(
+                        "market_cycle_error",
+                        {
+                            "market_id": market_id,
+                            "error": str(exc),
+                            "source": "sequential_market_worker",
+                        },
+                    )
+                    continue
+                cycle_error_count += mr.cycle_errors
+                strategy_planned_total += mr.strategy_planned
+                strategy_executed_total += mr.strategy_executed
+                if mr.cancel_triggered:
+                    cancel_triggered_count += 1
+                cancel_planned_total += mr.cancel_planned
+                cancel_executed_total += mr.cancel_executed
         duration_ms = int((time.monotonic() - started_at) * 1000)
         store.add_audit_event(
             "daemon_cycle_summary",

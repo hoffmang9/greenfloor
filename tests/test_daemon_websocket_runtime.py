@@ -4,10 +4,11 @@ import threading
 from pathlib import Path
 
 from greenfloor.daemon.main import _run_loop, run_once
+from greenfloor.storage.sqlite import SqliteStore
 from tests.logging_helpers import reset_concurrent_log_handlers
 
 
-def _write_program(path: Path, home_dir: Path) -> None:
+def _write_program(path: Path, home_dir: Path, *, parallel_markets: bool = False) -> None:
     path.write_text(
         "\n".join(
             [
@@ -18,6 +19,7 @@ def _write_program(path: Path, home_dir: Path) -> None:
                 "runtime:",
                 "  loop_interval_seconds: 30",
                 "  dry_run: false",
+                f"  parallel_markets: {'true' if parallel_markets else 'false'}",
                 "chain_signals:",
                 "  tx_block_trigger:",
                 '    mode: "websocket"',
@@ -100,6 +102,55 @@ def _write_markets(path: Path) -> None:
     )
 
 
+def _write_markets_two(path: Path) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                "markets:",
+                "  - id: m1",
+                "    enabled: true",
+                '    base_asset: "asset1"',
+                '    base_symbol: "AS1"',
+                '    quote_asset: "xch"',
+                '    quote_asset_type: "unstable"',
+                '    signer_key_id: "key-main-1"',
+                '    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"',
+                '    mode: "sell_only"',
+                "    inventory:",
+                "      low_watermark_base_units: 10",
+                "      bucket_counts:",
+                "        1: 0",
+                "    ladders:",
+                "      sell:",
+                "        - size_base_units: 1",
+                "          target_count: 1",
+                "          split_buffer_count: 0",
+                "          combine_when_excess_factor: 2.0",
+                "  - id: m2",
+                "    enabled: true",
+                '    base_asset: "asset2"',
+                '    base_symbol: "AS2"',
+                '    quote_asset: "xch"',
+                '    quote_asset_type: "unstable"',
+                '    signer_key_id: "key-main-1"',
+                '    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"',
+                '    mode: "sell_only"',
+                "    inventory:",
+                "      low_watermark_base_units: 10",
+                "      bucket_counts:",
+                "        1: 0",
+                "    ladders:",
+                "      sell:",
+                "        - size_base_units: 1",
+                "          target_count: 1",
+                "          split_buffer_count: 0",
+                "          combine_when_excess_factor: 2.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path) -> None:
     import greenfloor.daemon.main as daemon_mod
 
@@ -149,6 +200,217 @@ def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path) -
     log_text = (home / "logs" / "debug.log").read_text(encoding="utf-8")
     assert "daemon_starting mode=loop" in log_text
     assert "daemon_stopped mode=loop" in log_text
+
+
+def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path) -> None:
+    import greenfloor.daemon.main as daemon_mod
+
+    home = tmp_path / "home"
+    state_dir = home / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program, home, parallel_markets=True)
+    _write_markets_two(markets)
+    db_path = tmp_path / "state.sqlite"
+
+    class _FakePriceAdapter:
+        async def get_xch_price(self) -> float:
+            return 30.0
+
+    class _FakeWalletAdapter:
+        pass
+
+    class _FakeDexieAdapter:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+    class _FakeSplashAdapter:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+    started: list[str] = []
+    started_lock = threading.Lock()
+    both_started = threading.Event()
+
+    def _fake_process_single_market(**kwargs):
+        market = kwargs["market"]
+        with started_lock:
+            started.append(str(market.market_id))
+            if len(started) == 2:
+                both_started.set()
+        assert both_started.wait(timeout=1.0)
+        return daemon_mod._MarketCycleResult()
+
+    monkeypatch.setattr("greenfloor.daemon.main.PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr(
+        "greenfloor.daemon.main._process_single_market_with_store", _fake_process_single_market
+    )
+
+    code = run_once(
+        program_path=program,
+        markets_path=markets,
+        allowed_keys=None,
+        db_path_override=str(db_path),
+        coinset_base_url="https://coinset.org",
+        state_dir=state_dir,
+        poll_coinset_mempool=False,
+    )
+    assert code == 0
+    assert set(started) == {"m1", "m2"}
+
+
+def test_run_once_parallel_market_failure_isolated(monkeypatch, tmp_path: Path) -> None:
+    import greenfloor.daemon.main as daemon_mod
+
+    home = tmp_path / "home"
+    state_dir = home / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program, home, parallel_markets=True)
+    _write_markets_two(markets)
+    db_path = tmp_path / "state.sqlite"
+
+    class _FakePriceAdapter:
+        async def get_xch_price(self) -> float:
+            return 30.0
+
+    class _FakeWalletAdapter:
+        pass
+
+    class _FakeDexieAdapter:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+    class _FakeSplashAdapter:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+    def _fake_process_single_market(**kwargs):
+        market = kwargs["market"]
+        if str(market.market_id) == "m1":
+            raise RuntimeError("boom")
+        return daemon_mod._MarketCycleResult(strategy_planned=2, strategy_executed=1)
+
+    monkeypatch.setattr("greenfloor.daemon.main.PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr(
+        "greenfloor.daemon.main._process_single_market_with_store", _fake_process_single_market
+    )
+
+    code = run_once(
+        program_path=program,
+        markets_path=markets,
+        allowed_keys=None,
+        db_path_override=str(db_path),
+        coinset_base_url="https://coinset.org",
+        state_dir=state_dir,
+        poll_coinset_mempool=False,
+    )
+    assert code == 0
+
+    store = SqliteStore(db_path)
+    try:
+        events = store.list_recent_audit_events(event_types=["daemon_cycle_summary"], limit=1)
+    finally:
+        store.close()
+    assert len(events) == 1
+    payload = events[0]["payload"]
+    assert payload["markets_processed"] == 2
+    assert payload["error_count"] >= 1
+
+
+def test_run_once_parallel_picks_up_new_market_next_cycle(monkeypatch, tmp_path: Path) -> None:
+    import greenfloor.daemon.main as daemon_mod
+
+    home = tmp_path / "home"
+    state_dir = home / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program, home, parallel_markets=True)
+    _write_markets(markets)  # first cycle has one enabled market
+    db_path = tmp_path / "state.sqlite"
+
+    class _FakePriceAdapter:
+        async def get_xch_price(self) -> float:
+            return 30.0
+
+    class _FakeWalletAdapter:
+        pass
+
+    class _FakeDexieAdapter:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+    class _FakeSplashAdapter:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+    sequential_seen: list[str] = []
+    parallel_seen: list[str] = []
+
+    def _fake_process_single_market(**kwargs):
+        market = kwargs["market"]
+        sequential_seen.append(str(market.market_id))
+        return daemon_mod._MarketCycleResult()
+
+    def _fake_process_single_market_with_store(**kwargs):
+        market = kwargs["market"]
+        parallel_seen.append(str(market.market_id))
+        return daemon_mod._MarketCycleResult()
+
+    monkeypatch.setattr("greenfloor.daemon.main.PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr(
+        "greenfloor.daemon.main._process_single_market", _fake_process_single_market
+    )
+    monkeypatch.setattr(
+        "greenfloor.daemon.main._process_single_market_with_store",
+        _fake_process_single_market_with_store,
+    )
+
+    code = run_once(
+        program_path=program,
+        markets_path=markets,
+        allowed_keys=None,
+        db_path_override=str(db_path),
+        coinset_base_url="https://coinset.org",
+        state_dir=state_dir,
+        poll_coinset_mempool=False,
+    )
+    assert code == 0
+    assert sequential_seen == ["m1"]
+    assert parallel_seen == []
+
+    _write_markets_two(markets)  # add a new enabled market while daemon keeps running
+    code = run_once(
+        program_path=program,
+        markets_path=markets,
+        allowed_keys=None,
+        db_path_override=str(db_path),
+        coinset_base_url="https://coinset.org",
+        state_dir=state_dir,
+        poll_coinset_mempool=False,
+    )
+    assert code == 0
+    assert set(parallel_seen) == {"m1", "m2"}
+
+    store = SqliteStore(db_path)
+    try:
+        events = store.list_recent_audit_events(event_types=["daemon_cycle_summary"], limit=2)
+    finally:
+        store.close()
+    processed = sorted(int(e["payload"]["markets_processed"]) for e in events)
+    assert processed == [1, 2]
 
 
 def test_run_once_uses_websocket_capture_when_enabled(monkeypatch, tmp_path: Path) -> None:
