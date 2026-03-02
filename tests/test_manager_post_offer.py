@@ -247,6 +247,108 @@ def test_resolve_cloud_wallet_offer_asset_ids_uses_global_hints_without_label_ma
     assert resolved_quote == "Asset_wusdc"
 
 
+def test_resolve_cloud_wallet_asset_id_uses_identifier_lookup(monkeypatch) -> None:
+    """When the Cloud Wallet asset(identifier:) query returns a match, use it directly."""
+    cat_hex = "9720fcb8333984c72f914fc5090509ae9f7b1ff72eff2ed6825d944d7a571066"
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        @staticmethod
+        def _graphql(*, query: str, variables: dict):
+            if "resolveAssetByIdentifier" in query:
+                return {
+                    "asset": {
+                        "id": "Asset_eco49",
+                        "type": "CAT2",
+                    }
+                }
+            return {
+                "wallet": {
+                    "assets": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "assetId": "Asset_eco181",
+                                    "type": "CAT2",
+                                    "displayName": "Agricultural Reforestation 2022",
+                                    "symbol": "",
+                                }
+                            },
+                            {
+                                "node": {
+                                    "assetId": "Asset_eco49",
+                                    "type": "CAT2",
+                                    "displayName": "Antioquia and Caldas 2022",
+                                    "symbol": "",
+                                }
+                            },
+                        ]
+                    }
+                }
+            }
+
+    monkeypatch.setattr("greenfloor.cli.manager._dexie_lookup_token_for_cat_id", lambda **_: None)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._local_catalog_label_hints_for_asset_id", lambda **_: []
+    )
+
+    resolved = manager_mod._resolve_cloud_wallet_asset_id(
+        wallet=cast(CloudWalletAdapter, _FakeWallet()),
+        canonical_asset_id=cat_hex,
+        symbol_hint="ECO.49.2022",
+        allow_dexie_lookup=False,
+    )
+    assert resolved == "Asset_eco49"
+
+
+def test_resolve_cloud_wallet_asset_id_identifier_miss_falls_through(monkeypatch) -> None:
+    """When asset(identifier:) returns null, fall through to label matching."""
+    cat_hex = "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        @staticmethod
+        def _graphql(*, query: str, variables: dict):
+            if "resolveAssetByIdentifier" in query:
+                return {"asset": None}
+            return {
+                "wallet": {
+                    "assets": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "assetId": "Asset_carbon",
+                                    "type": "CAT2",
+                                    "displayName": "ECO.181.2022",
+                                    "symbol": "",
+                                }
+                            },
+                        ]
+                    }
+                }
+            }
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._dexie_lookup_token_for_cat_id",
+        lambda *, canonical_cat_id_hex, network: (
+            {"ticker_id": f"{cat_hex}_xch", "base_code": "ECO.181.2022"}
+            if canonical_cat_id_hex == cat_hex
+            else None
+        ),
+    )
+
+    resolved = manager_mod._resolve_cloud_wallet_asset_id(
+        wallet=cast(CloudWalletAdapter, _FakeWallet()),
+        canonical_asset_id=cat_hex,
+        symbol_hint="ECO.181.2022",
+    )
+    assert resolved == "Asset_carbon"
+
+
 def test_recent_market_resolved_asset_id_hints_reads_strategy_execution(tmp_path: Path) -> None:
     from greenfloor.storage.sqlite import SqliteStore
 
