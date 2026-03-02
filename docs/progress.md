@@ -1,5 +1,32 @@
 # Progress Log
 
+## 2026-03-02 (PR #47 — simplify, deduplicate, and decompose)
+
+- Extracted 6 duplicated utility implementations into shared modules:
+  - `greenfloor/hex_utils.py`: canonical `is_hex_id` / `normalize_hex_id` (replaces `_is_hex_asset_id`, `_normalize_hex_hash`, `_normalize_hex_32`, inline hex validation across 5 files).
+  - `greenfloor/logging_setup.py`: added `initialize_service_file_logging` and `warn_if_log_level_auto_healed` (replaces per-service init boilerplate in daemon and manager).
+  - `greenfloor/config/io.py`: added `is_testnet`, `default_cats_config_path`, `resolve_quote_asset_for_offer` (replaces identical implementations in `daemon/main.py` and `cli/manager.py`).
+- Decomposed `_process_single_market` (~570 lines) into ~80-line orchestrator + 3 sub-functions: `_reconcile_offer_states`, `_evaluate_and_execute_strategy`, `_plan_and_execute_coin_ops`.
+- Split `_execute_strategy_actions` into `_execute_single_cloud_wallet_action` and `_execute_single_local_action` dispatch helpers.
+- Renamed `allow_empty_signatures` → `skip_bls_signing` in `signing.py` for clarity.
+- Extracted `_build_vault_cat_inner_spend` helper in `signing.py`.
+- Added named retry predicates (`_is_venue_post_success`, `_is_cancel_success`) and timezone-missing warning in daemon.
+- Added `DaemonRunState` dataclass and injectable `build_and_post_fn` callback to mitigate daemon→CLI import cycle.
+- Updated `AGENTS.md` with four new rules: function-length discipline, import-direction discipline, minimize module-level mutable state, single canonical utility implementations.
+- 453 tests pass; 3 pre-existing sqlite sandbox failures unchanged.
+
+## 2026-03-01 (PR #46 merged — duplicate offer creation fully resolved, codebase current)
+
+- PR #46 ("Fix duplicate offer creation: CLI audit event format + daemon direct call") merged to main.
+- All four root causes of spurious 100-unit offer creation addressed across the PR:
+  - Bug 1: CLI `build-and-post-offer` emitted `strategy_offer_execution` events without an `items` list; daemon saw `100: 0` on every cycle and kept re-posting.
+  - Bug 2: Daemon `_cloud_wallet_offer_post_fallback` used a `redirect_stdout` + JSON-parse side-channel instead of a direct function call; replaced with a `tuple[int, dict]` return from `_build_and_post_offer_cloud_wallet`.
+  - Bug 3: Dexie state-update loop processed foreign makers' offers, inflating `active_unmapped_offer_ids`.
+  - Bug 4: Dexie 20-offer-per-page cap hid the 100-unit offer; fixed by individually fetching beyond-cap offer IDs.
+- Verified on John-Deere: daemon logs `active_offer_counts_by_size={1: 16, 10: 4, 100: 1}`, `active_unmapped_offer_ids=0`, `action_count=0`, `planned_count=0`.
+- Full test suite: **456 passed, 3 skipped** (the 3 skips are intentional env-gated integration tests).
+- Manager CLI surface: **15 commands** — `bootstrap-home`, `config-validate`, `doctor`, `keys-onboard`, `build-and-post-offer`, `offers-status`, `offers-reconcile`, `offers-cancel`, `coins-list`, `coin-split`, `coin-combine`, `cats-add`, `cats-list`, `cats-delete`, `set-log-level`.
+
 ## 2026-02-28 (Fix duplicate offer creation: ownership gate + beyond-cap individual lookup)
 
 Two more root causes of spurious 100-unit offer creation identified and fixed (PR #46 additional commits):
@@ -576,6 +603,7 @@ Two more root causes of spurious 100-unit offer creation identified and fixed (P
 - Added manager adjunct commands for CAT catalog operations:
   - `cats-list`: prints all known CATs from `--cats-config` (default `~/.greenfloor/config/cats.yaml`, fallback repo `config/cats.yaml`).
   - `cats-add`: adds or replaces CAT entries by `--cat-id` or `--ticker`, with Dexie-assisted lookup by default and full manual override fields (`--name`, `--base-symbol`, `--ticker-id`, `--pool-id`, `--last-price-xch`, `--target-usd-per-unit`).
+  - `cats-delete`: removes a CAT entry from `cats.yaml` by `--cat-id` or `--ticker`.
 - Added `--cats-config` global manager flag and bootstrap seeding support:
   - `bootstrap-home` now seeds `cats.yaml` via `--cats-template` (default `config/cats.yaml`) alongside `program.yaml` and `markets.yaml`.
 - Updated local CAT label hint resolution fallback used by Cloud Wallet asset resolution:

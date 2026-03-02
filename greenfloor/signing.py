@@ -16,6 +16,7 @@ from typing import Any
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter
+from greenfloor.hex_utils import normalize_hex_id
 
 _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK: dict[str, bytes] = {
     # Match chia-wallet-sdk consensus constants for AGG_SIG_ME domain separation.
@@ -520,7 +521,7 @@ def _sign_and_aggregate(
     coin_spends: list[Any],
     synthetic_sk_by_puzzle_hash: dict[bytes, Any],
     additional_data: bytes,
-    allow_empty_signatures: bool = False,
+    skip_bls_signing: bool = False,
 ) -> tuple[Any | None, str | None]:
     """Collect AGG_SIG targets from coin spends, sign, and aggregate."""
     sk_by_pk_bytes: dict[bytes, Any] = {}
@@ -538,7 +539,7 @@ def _sign_and_aggregate(
                 return None, "missing_private_key_for_agg_sig_target"
             signatures.append(sk.sign(message))
     if not signatures:
-        if allow_empty_signatures:
+        if skip_bls_signing:
             return sdk.Signature.infinity(), None
         return None, "no_agg_sig_targets_found"
     return sdk.Signature.aggregate(signatures), None
@@ -635,14 +636,7 @@ def _asset_id_to_sdk_id(*, sdk: Any, asset_id: str) -> Any:
 
 
 def _normalize_hex_32(value: str) -> str:
-    raw = value.strip().lower()
-    if raw.startswith("0x"):
-        raw = raw[2:]
-    if len(raw) != 64:
-        return ""
-    if not all(ch in "0123456789abcdef" for ch in raw):
-        return ""
-    return raw
+    return normalize_hex_id(value)
 
 
 def _normalize_hex_any(value: str) -> str:
@@ -934,6 +928,22 @@ def _scan_synthetic_keys_for_puzzle_hashes(
     return None
 
 
+def _build_vault_cat_inner_spend(
+    *, sdk: Any, clvm: Any, delegated: Any, vault_ctx: dict[str, Any]
+) -> Any:
+    """Build a MIPS inner spend for a vault-owned CAT coin."""
+    dummy_coin = sdk.Coin(sdk.tree_hash_atom(b""), sdk.tree_hash_atom(b""), 1)
+    mips = clvm.mips_spend(dummy_coin, delegated)
+    mips.singleton_member(
+        sdk.MemberConfig().with_top_level(True),
+        vault_ctx["launcher_id"],
+        False,
+        vault_ctx["inner_puzzle_hash"],
+        1,
+    )
+    return mips.spend(vault_ctx["p2_singleton_message_hash"])
+
+
 def _build_offer_spend_bundle(
     *,
     sdk: Any,
@@ -1220,20 +1230,9 @@ def _build_offer_spend_bundle(
                     and isinstance(p2_puzzle_hash, bytes)
                     and bytes(p2_puzzle_hash) == vault_ctx["p2_singleton_message_hash"]
                 ):
-                    dummy_coin = sdk.Coin(
-                        sdk.tree_hash_atom(b""),
-                        sdk.tree_hash_atom(b""),
-                        1,
+                    cat_inner_spend = _build_vault_cat_inner_spend(
+                        sdk=sdk, clvm=clvm, delegated=delegated, vault_ctx=vault_ctx
                     )
-                    mips = clvm.mips_spend(dummy_coin, delegated)
-                    mips.singleton_member(
-                        sdk.MemberConfig().with_top_level(True),
-                        vault_ctx["launcher_id"],
-                        False,
-                        vault_ctx["inner_puzzle_hash"],
-                        1,
-                    )
-                    cat_inner_spend = mips.spend(vault_ctx["p2_singleton_message_hash"])
                 else:
                     if not isinstance(p2_puzzle_hash, bytes):
                         return None, "missing_p2_puzzle_hash_for_pending_spend"
@@ -1263,7 +1262,7 @@ def _build_offer_spend_bundle(
             coin_spends=coin_spends,
             synthetic_sk_by_puzzle_hash=synthetic_sk_by_puzzle_hash,
             additional_data=additional_data,
-            allow_empty_signatures=vault_ctx is not None,
+            skip_bls_signing=vault_ctx is not None,
         )
         if sign_err is not None:
             return None, sign_err

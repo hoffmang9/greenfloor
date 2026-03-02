@@ -6,6 +6,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+from greenfloor.hex_utils import normalize_hex_id
+
 _COINSET_TX_ID_KEYS = (
     "tx_id",
     "txId",
@@ -41,16 +43,7 @@ _COINSET_COIN_ID_KEYS = (
 
 
 def _normalize_hex_hash(value: object) -> str:
-    if not isinstance(value, str):
-        return ""
-    normalized = value.strip().lower()
-    if normalized.startswith("0x"):
-        normalized = normalized[2:]
-    if len(normalized) != 64:
-        return ""
-    if not all(ch in "0123456789abcdef" for ch in normalized):
-        return ""
-    return normalized
+    return normalize_hex_id(value)
 
 
 def _looks_like_tx_id(value: object) -> bool:
@@ -58,8 +51,6 @@ def _looks_like_tx_id(value: object) -> bool:
 
 
 def _looks_like_coin_id(value: object) -> bool:
-    if not isinstance(value, str):
-        return False
     return bool(_normalize_hex_hash(value))
 
 

@@ -9,13 +9,12 @@ import threading
 import time
 import urllib.parse
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml
-from concurrent_log_handler import ConcurrentRotatingFileHandler
+import yaml  # noqa: F401
 
 from greenfloor.adapters.coinset import (
     CoinsetAdapter,
@@ -27,8 +26,10 @@ from greenfloor.adapters.price import PriceAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
 from greenfloor.config.io import (
+    default_cats_config_path,
     load_markets_config_with_optional_overlay,
     load_program_config,
+    resolve_quote_asset_for_offer,
 )
 from greenfloor.core.coin_ops import BucketSpec, plan_coin_ops
 from greenfloor.core.fee_budget import partition_plans_by_budget, projected_coin_ops_fee_mojos
@@ -37,21 +38,36 @@ from greenfloor.core.notifications import AlertState, evaluate_low_inventory_ale
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
 from greenfloor.core.strategy import MarketState, PlannedAction, StrategyConfig, evaluate_market
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient, capture_coinset_websocket_once
+from greenfloor.hex_utils import is_hex_id
 from greenfloor.keys.router import resolve_market_key
 from greenfloor.logging_setup import (
-    apply_level_to_root,
-    coerce_log_level,
-    create_rotating_file_handler,
+    initialize_service_file_logging,
+    warn_if_log_level_auto_healed,
 )
 from greenfloor.notify.pushover import send_pushover_alert
 from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
+
+
+@dataclass
+class DaemonRunState:
+    """Mutable state carried across daemon loop iterations.
+
+    Bundling this avoids module-level mutable globals and makes the daemon
+    reentrant for testing.
+    """
+
+    post_cooldown_until: dict[str, float] = field(default_factory=dict)
+    cancel_cooldown_until: dict[str, float] = field(default_factory=dict)
+    disabled_market_next_log_at: dict[str, float] = field(default_factory=dict)
+    disabled_market_startup_logged: bool = False
+    watched_coin_ids_by_market: dict[str, set[str]] = field(default_factory=dict)
+    watched_coin_ids_lock: threading.Lock = field(default_factory=threading.Lock)
+
 
 _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS = 500
 _POST_COOLDOWN_UNTIL: dict[str, float] = {}
 _CANCEL_COOLDOWN_UNTIL: dict[str, float] = {}
 _DAEMON_SERVICE_NAME = "daemon"
-_daemon_file_logger_initialized = False
-_daemon_file_log_handler: ConcurrentRotatingFileHandler | None = None
 _daemon_logger = logging.getLogger("greenfloor.daemon")
 _DISABLED_MARKET_LOG_INTERVAL_SECONDS_DEFAULT = 3600
 _DISABLED_MARKET_NEXT_LOG_AT: dict[str, float] = {}
@@ -71,18 +87,12 @@ def _log_market_decision(market_id: str, decision: str, **fields: Any) -> None:
 
 
 def _initialize_daemon_file_logging(home_dir: str, *, log_level: str | None) -> None:
-    global _daemon_file_logger_initialized, _daemon_file_log_handler
-    root_logger = logging.getLogger()
-    effective_level = coerce_log_level(log_level)
-    if not _daemon_file_logger_initialized:
-        handler = create_rotating_file_handler(service_name=_DAEMON_SERVICE_NAME, home_dir=home_dir)
-        root_logger.addHandler(handler)
-        _daemon_file_log_handler = handler
-        _daemon_file_logger_initialized = True
-    apply_level_to_root(
-        effective_level=effective_level,
-        logger=_daemon_logger,
-        handler=_daemon_file_log_handler,
+    initialize_service_file_logging(
+        service_name=_DAEMON_SERVICE_NAME,
+        home_dir=home_dir,
+        log_level=log_level,
+        service_logger=_daemon_logger,
+        allow_reinit_level=True,
     )
 
 
@@ -130,11 +140,9 @@ def _log_disabled_markets_startup_once(*, markets: list[Any]) -> None:
 
 
 def _warn_if_log_level_auto_healed(*, program, program_path: Path) -> None:
-    if bool(getattr(program, "app_log_level_was_missing", False)):
-        _daemon_logger.warning(
-            "program config missing app.log_level; wrote default INFO to %s",
-            os.fspath(program_path),
-        )
+    warn_if_log_level_auto_healed(
+        program_obj=program, program_path=program_path, logger=_daemon_logger
+    )
 
 
 def _consume_reload_marker(state_dir: Path) -> bool:
@@ -230,6 +238,14 @@ def _retry_with_backoff(
     return {"success": False, "error": last_error}, attempts_max, last_error
 
 
+def _is_venue_post_success(result: dict[str, Any]) -> bool:
+    return bool(result.get("success", False)) and bool(str(result.get("id", "")).strip())
+
+
+def _is_cancel_success(result: dict[str, Any]) -> bool:
+    return bool(result.get("success", False))
+
+
 def _post_offer_with_retry(
     *,
     publish_venue: str,
@@ -246,7 +262,7 @@ def _post_offer_with_retry(
 
     return _retry_with_backoff(
         action_fn=_do_post,
-        is_success=lambda r: bool(r.get("success", False)) and bool(str(r.get("id", "")).strip()),
+        is_success=_is_venue_post_success,
         default_error=f"{publish_venue}_post_failed",
         retry_config=_post_retry_config(),
     )
@@ -259,7 +275,7 @@ def _cancel_offer_with_retry(
 ) -> tuple[dict[str, Any], int, str]:
     return _retry_with_backoff(
         action_fn=lambda: dexie.cancel_offer(offer_id),
-        is_success=lambda r: bool(r.get("success", False)),
+        is_success=_is_cancel_success,
         default_error="cancel_offer_failed",
         retry_config=_cancel_retry_config(),
     )
@@ -275,51 +291,15 @@ def _normalize_strategy_pair(quote_asset: str) -> str:
 
 
 def _is_hex_asset_id(value: str) -> bool:
-    normalized = value.strip().lower()
-    return len(normalized) == 64 and all(ch in "0123456789abcdef" for ch in normalized)
+    return is_hex_id(value)
 
 
 def _default_cats_config_path() -> Path | None:
-    home_candidate = Path("~/.greenfloor/config/cats.yaml").expanduser()
-    if home_candidate.exists():
-        return home_candidate
-    repo_candidate = Path("config/cats.yaml")
-    if repo_candidate.exists():
-        return repo_candidate
-    return None
+    return default_cats_config_path()
 
 
 def _resolve_quote_asset_for_offer(*, quote_asset: str, network: str) -> str:
-    normalized = quote_asset.strip().lower()
-    if normalized in {"xch", "txch", "1"}:
-        if network.strip().lower() in {"testnet", "testnet11"}:
-            return "txch"
-        return "xch"
-    if _is_hex_asset_id(normalized):
-        return normalized
-
-    cats_path = _default_cats_config_path()
-    if cats_path is None:
-        return quote_asset
-    try:
-        raw = yaml.safe_load(cats_path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return quote_asset
-    if not isinstance(raw, dict):
-        return quote_asset
-    cats = raw.get("cats", [])
-    if not isinstance(cats, list):
-        return quote_asset
-    for item in cats:
-        if not isinstance(item, dict):
-            continue
-        symbol = str(item.get("base_symbol", "")).strip().lower()
-        if symbol != normalized:
-            continue
-        asset_id = str(item.get("asset_id", "")).strip().lower()
-        if _is_hex_asset_id(asset_id):
-            return asset_id
-    return quote_asset
+    return resolve_quote_asset_for_offer(quote_asset=quote_asset, network=network)
 
 
 def _market_pricing(market: Any) -> dict[str, Any]:
@@ -401,6 +381,9 @@ def _is_recent_mempool_observed_offer_state(
     except ValueError:
         return False
     if updated_at.tzinfo is None:
+        _daemon_logger.warning(
+            "offer state timestamp missing timezone, assuming UTC: %s", updated_at_raw
+        )
         updated_at = updated_at.replace(tzinfo=UTC)
     age_seconds = (clock - updated_at).total_seconds()
     return 0 <= age_seconds <= float(max_age_seconds)
@@ -820,11 +803,15 @@ def _cloud_wallet_offer_post_fallback(
     size_base_units: int,
     publish_venue: str,
     runtime_dry_run: bool,
+    build_and_post_fn: Callable[..., tuple[int, dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
-    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
+    if build_and_post_fn is None:
+        from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
+
+        build_and_post_fn = _build_and_post_offer_cloud_wallet
 
     quote_price = _resolve_quote_price_quote_per_base(market)
-    exit_code, payload = _build_and_post_offer_cloud_wallet(
+    exit_code, payload = build_and_post_fn(
         program=program,
         market=market,
         size_base_units=size_base_units,
@@ -978,6 +965,125 @@ def _run_coinset_signal_capture_once(
     )
 
 
+def _execute_single_cloud_wallet_action(
+    *,
+    program: Any,
+    market: Any,
+    action: Any,
+    publish_venue: str,
+    runtime_dry_run: bool,
+    dexie: DexieAdapter,
+) -> dict[str, Any]:
+    """Execute a single strategy action via the cloud wallet path."""
+    cloud_wallet_post = _cloud_wallet_offer_post_fallback(
+        program=program,
+        market=market,
+        size_base_units=int(action.size),
+        publish_venue=publish_venue,
+        runtime_dry_run=runtime_dry_run,
+    )
+    if bool(cloud_wallet_post.get("success", False)):
+        cloud_wallet_offer_id = str(cloud_wallet_post.get("offer_id", "")).strip()
+        if publish_venue == "dexie" and cloud_wallet_offer_id:
+            visible, visibility_error = _verify_offer_visible_on_dexie(
+                dexie=dexie,
+                offer_id=cloud_wallet_offer_id,
+            )
+            if not visible:
+                return {
+                    "size": action.size,
+                    "status": "skipped",
+                    "reason": (f"cloud_wallet_post_not_visible_on_dexie:{visibility_error}"),
+                    "offer_id": cloud_wallet_offer_id or None,
+                }
+        return {
+            "size": action.size,
+            "status": "executed",
+            "reason": "cloud_wallet_post_success",
+            "offer_id": cloud_wallet_offer_id or None,
+        }
+    return {
+        "size": action.size,
+        "status": "skipped",
+        "reason": (
+            f"cloud_wallet_post_failed:{str(cloud_wallet_post.get('error', 'unknown')).strip()}"
+        ),
+        "offer_id": None,
+    }
+
+
+def _execute_single_local_action(
+    *,
+    market: Any,
+    action: Any,
+    xch_price_usd: float | None,
+    app_network: str,
+    keyring_yaml_path: str,
+    dexie: DexieAdapter,
+    splash: SplashAdapter | None,
+    publish_venue: str,
+    store: SqliteStore,
+) -> dict[str, Any]:
+    """Execute a single strategy action via the local build+sign+post path."""
+    built = _build_offer_for_action(
+        market=market,
+        action=action,
+        xch_price_usd=xch_price_usd,
+        network=app_network,
+        keyring_yaml_path=keyring_yaml_path,
+    )
+    if built.get("status") != "executed":
+        built_reason = str(built.get("reason", "offer_builder_skipped"))
+        return {
+            "size": action.size,
+            "status": "skipped",
+            "reason": built_reason,
+            "offer_id": None,
+        }
+    _, _, cooldown_seconds = _post_retry_config()
+    cooldown_key = f"{publish_venue}:{market.market_id}"
+    remaining_ms = _cooldown_remaining_ms(_POST_COOLDOWN_UNTIL, cooldown_key)
+    if remaining_ms > 0:
+        return {
+            "size": action.size,
+            "status": "skipped",
+            "reason": f"post_cooldown_active:{remaining_ms}ms",
+            "offer_id": None,
+        }
+    offer_text = str(built["offer"])
+    post_result, attempt_count, post_error = _post_offer_with_retry(
+        publish_venue=publish_venue,
+        offer_text=offer_text,
+        dexie=dexie,
+        splash=splash,
+    )
+    success = bool(post_result.get("success", False))
+    offer_id_raw = post_result.get("id")
+    offer_id = str(offer_id_raw).strip() if offer_id_raw is not None else ""
+    if success and offer_id:
+        store.upsert_offer_state(
+            offer_id=offer_id,
+            market_id=market.market_id,
+            state=OfferLifecycleState.OPEN.value,
+            last_seen_status=0,
+        )
+        return {
+            "size": action.size,
+            "status": "executed",
+            "reason": f"{publish_venue}_post_success",
+            "offer_id": offer_id,
+            "attempts": attempt_count,
+        }
+    _set_cooldown(_POST_COOLDOWN_UNTIL, cooldown_key, cooldown_seconds)
+    return {
+        "size": action.size,
+        "status": "skipped",
+        "reason": f"{publish_venue}_post_retry_exhausted:{post_error}",
+        "offer_id": offer_id or None,
+        "attempts": attempt_count,
+    }
+
+
 def _execute_strategy_actions(
     *,
     market,
@@ -994,8 +1100,6 @@ def _execute_strategy_actions(
 ) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     executed_count = 0
-    _, _, cooldown_seconds = _post_retry_config()
-    cooldown_key = f"{publish_venue}:{market.market_id}"
     signer_key = (signer_key_registry or {}).get(market.signer_key_id)
     keyring_yaml_path = str(getattr(signer_key, "keyring_yaml_path", "") or "")
     # Prioritize larger ladder sizes first to reduce input-coin contention in
@@ -1014,126 +1118,30 @@ def _execute_strategy_actions(
                     }
                 )
                 continue
-
             if program is not None and _cloud_wallet_configured(program):
-                cloud_wallet_post = _cloud_wallet_offer_post_fallback(
+                item = _execute_single_cloud_wallet_action(
                     program=program,
                     market=market,
-                    size_base_units=int(action.size),
+                    action=action,
                     publish_venue=publish_venue,
                     runtime_dry_run=runtime_dry_run,
-                )
-                if bool(cloud_wallet_post.get("success", False)):
-                    cloud_wallet_offer_id = str(cloud_wallet_post.get("offer_id", "")).strip()
-                    if publish_venue == "dexie" and cloud_wallet_offer_id:
-                        visible, visibility_error = _verify_offer_visible_on_dexie(
-                            dexie=dexie,
-                            offer_id=cloud_wallet_offer_id,
-                        )
-                        if not visible:
-                            items.append(
-                                {
-                                    "size": action.size,
-                                    "status": "skipped",
-                                    "reason": (
-                                        f"cloud_wallet_post_not_visible_on_dexie:{visibility_error}"
-                                    ),
-                                    "offer_id": cloud_wallet_offer_id or None,
-                                }
-                            )
-                            continue
-                    executed_count += 1
-                    items.append(
-                        {
-                            "size": action.size,
-                            "status": "executed",
-                            "reason": "cloud_wallet_post_success",
-                            "offer_id": cloud_wallet_offer_id or None,
-                        }
-                    )
-                else:
-                    items.append(
-                        {
-                            "size": action.size,
-                            "status": "skipped",
-                            "reason": (
-                                "cloud_wallet_post_failed:"
-                                f"{str(cloud_wallet_post.get('error', 'unknown')).strip()}"
-                            ),
-                            "offer_id": None,
-                        }
-                    )
-                continue
-
-            built = _build_offer_for_action(
-                market=market,
-                action=action,
-                xch_price_usd=xch_price_usd,
-                network=app_network,
-                keyring_yaml_path=keyring_yaml_path,
-            )
-            if built.get("status") != "executed":
-                built_reason = str(built.get("reason", "offer_builder_skipped"))
-                items.append(
-                    {
-                        "size": action.size,
-                        "status": "skipped",
-                        "reason": built_reason,
-                        "offer_id": None,
-                    }
-                )
-                continue
-
-            remaining_ms = _cooldown_remaining_ms(_POST_COOLDOWN_UNTIL, cooldown_key)
-            if remaining_ms > 0:
-                items.append(
-                    {
-                        "size": action.size,
-                        "status": "skipped",
-                        "reason": f"post_cooldown_active:{remaining_ms}ms",
-                        "offer_id": None,
-                    }
-                )
-                continue
-
-            offer_text = str(built["offer"])
-            post_result, attempt_count, post_error = _post_offer_with_retry(
-                publish_venue=publish_venue,
-                offer_text=offer_text,
-                dexie=dexie,
-                splash=splash,
-            )
-            success = bool(post_result.get("success", False))
-            offer_id_raw = post_result.get("id")
-            offer_id = str(offer_id_raw).strip() if offer_id_raw is not None else ""
-            if success and offer_id:
-                executed_count += 1
-                store.upsert_offer_state(
-                    offer_id=offer_id,
-                    market_id=market.market_id,
-                    state=OfferLifecycleState.OPEN.value,
-                    last_seen_status=0,
-                )
-                items.append(
-                    {
-                        "size": action.size,
-                        "status": "executed",
-                        "reason": f"{publish_venue}_post_success",
-                        "offer_id": offer_id,
-                        "attempts": attempt_count,
-                    }
+                    dexie=dexie,
                 )
             else:
-                _set_cooldown(_POST_COOLDOWN_UNTIL, cooldown_key, cooldown_seconds)
-                items.append(
-                    {
-                        "size": action.size,
-                        "status": "skipped",
-                        "reason": f"{publish_venue}_post_retry_exhausted:{post_error}",
-                        "offer_id": offer_id or None,
-                        "attempts": attempt_count,
-                    }
+                item = _execute_single_local_action(
+                    market=market,
+                    action=action,
+                    xch_price_usd=xch_price_usd,
+                    app_network=app_network,
+                    keyring_yaml_path=keyring_yaml_path,
+                    dexie=dexie,
+                    splash=splash,
+                    publish_venue=publish_venue,
+                    store=store,
                 )
+            if item.get("status") == "executed":
+                executed_count += 1
+            items.append(item)
     return {
         "planned_count": sum(int(a.repeat) for a in strategy_actions),
         "executed_count": executed_count,
@@ -1283,79 +1291,20 @@ class _MarketCycleResult:
     cancel_executed: int = 0
 
 
-def _process_single_market(
+def _reconcile_offer_states(
     *,
     market: Any,
-    program: Any,
-    allowed_keys: set[str] | None,
     dexie: DexieAdapter,
-    splash: SplashAdapter,
-    wallet: WalletAdapter,
     store: SqliteStore,
-    xch_price_usd: float | None,
-    previous_xch_price_usd: float | None,
     now: datetime,
-    state_dir: Path,
-) -> _MarketCycleResult:
-    result = _MarketCycleResult()
-    _log_market_decision(
-        market.market_id,
-        "cycle_start",
-        mode=str(getattr(market, "mode", "")),
-        quote_asset=str(getattr(market, "quote_asset", "")),
-    )
-    signer_selection = resolve_market_key(
-        market,
-        allowed_keys,
-        signer_key_registry=program.signer_key_registry,
-        required_network=program.app_network,
-    )
-    _log_market_decision(
-        market.market_id,
-        "signer_selected",
-        key_id=signer_selection.key_id,
-        network=program.app_network,
-    )
-    store.add_price_policy_snapshot(
-        market.market_id,
-        {
-            "mode": market.mode,
-            "base_asset": market.base_asset,
-            "quote_asset": market.quote_asset,
-            "quote_asset_type": market.quote_asset_type,
-        },
-        source="startup",
-    )
-    persisted = store.get_alert_state(market.market_id)
-    state, event = evaluate_low_inventory_alert(
-        now=now,
-        program=program,
-        market=market,
-        state=AlertState(
-            is_low=persisted.is_low,
-            last_alert_at=persisted.last_alert_at,
-        ),
-    )
-    store.upsert_alert_state(
-        StoredAlertState(
-            market_id=market.market_id,
-            is_low=state.is_low,
-            last_alert_at=state.last_alert_at,
-        )
-    )
-    if event:
-        payload = {
-            "event": "low_inventory_alert",
-            "market_id": event.market_id,
-            "ticker": event.ticker,
-            "remaining_amount": event.remaining_amount,
-            "receive_address": event.receive_address,
-            "reason": event.reason,
-        }
-        print(json.dumps(payload))
-        store.add_audit_event("low_inventory_alert", payload, market_id=market.market_id)
-        send_pushover_alert(program, event)
+    result: _MarketCycleResult,
+) -> tuple[list[dict[str, Any]], dict[str, int], str | None, list[dict[str, Any]]]:
+    """Fetch Dexie offers, augment beyond-cap offers, and transition lifecycle states.
 
+    Returns (augmented_offers, dexie_size_by_offer_id, dexie_fetch_error, offers).
+    offers is the raw Dexie list (used by cancel policy); augmented_offers includes
+    beyond-cap individually-fetched offers.
+    """
     dexie_fetch_error: str | None = None
     try:
         offers = dexie.get_offers(market.base_asset, market.quote_asset)
@@ -1479,93 +1428,22 @@ def _process_single_market(
             },
             market_id=market.market_id,
         )
-    cancel_policy = _execute_cancel_policy_for_market(
-        market=market,
-        offers=offers,
-        runtime_dry_run=program.runtime_dry_run,
-        current_xch_price_usd=xch_price_usd,
-        previous_xch_price_usd=previous_xch_price_usd,
-        dexie=dexie,
-        store=store,
-    )
-    if bool(cancel_policy.get("triggered", False)):
-        result.cancel_triggered = True
-    result.cancel_planned += int(cancel_policy.get("planned_count", 0))
-    result.cancel_executed += int(cancel_policy.get("executed_count", 0))
-    _log_market_decision(
-        market.market_id,
-        "cancel_policy_evaluated",
-        eligible=cancel_policy["eligible"],
-        triggered=cancel_policy["triggered"],
-        reason=cancel_policy["reason"],
-        move_bps=cancel_policy["move_bps"],
-        threshold_bps=cancel_policy["threshold_bps"],
-        planned_count=cancel_policy["planned_count"],
-        executed_count=cancel_policy["executed_count"],
-    )
-    store.add_audit_event(
-        "offer_cancel_policy",
-        {
-            "market_id": market.market_id,
-            "eligible": cancel_policy["eligible"],
-            "triggered": cancel_policy["triggered"],
-            "reason": cancel_policy["reason"],
-            "move_bps": cancel_policy["move_bps"],
-            "threshold_bps": cancel_policy["threshold_bps"],
-            "planned_count": cancel_policy["planned_count"],
-            "executed_count": cancel_policy["executed_count"],
-            "items": cancel_policy["items"],
-        },
-        market_id=market.market_id,
-    )
+    return augmented_offers, dexie_size_by_offer_id, dexie_fetch_error, offers
 
-    sell_ladder = market.ladders.get("sell", [])
-    ladder_sizes = [e.size_base_units for e in sell_ladder]
-    wallet_coins = wallet.list_asset_coins_base_units(
-        asset_id=market.base_asset,
-        key_id=market.signer_key_id,
-        receive_address=market.receive_address,
-        network=program.app_network,
-    )
-    if wallet_coins:
-        bucket_counts = compute_bucket_counts_from_coins(
-            coin_amounts_base_units=wallet_coins,
-            ladder_sizes=ladder_sizes,
-        )
-        _log_market_decision(
-            market.market_id,
-            "inventory_scan_wallet",
-            coin_count=len(wallet_coins),
-            bucket_counts=bucket_counts,
-        )
-        store.add_audit_event(
-            "inventory_bucket_scan",
-            {
-                "market_id": market.market_id,
-                "source": "wallet_adapter",
-                "bucket_counts": bucket_counts,
-                "coin_count": len(wallet_coins),
-            },
-            market_id=market.market_id,
-        )
-    else:
-        bucket_counts = dict(market.inventory.bucket_counts)
-        _log_market_decision(
-            market.market_id,
-            "inventory_scan_config_fallback",
-            asset_id=market.base_asset,
-            bucket_counts=bucket_counts,
-        )
-        store.add_audit_event(
-            "inventory_bucket_scan",
-            {
-                "market_id": market.market_id,
-                "source": "config_seed_or_no_asset_scan",
-                "asset_id": market.base_asset,
-                "bucket_counts": bucket_counts,
-            },
-            market_id=market.market_id,
-        )
+
+def _evaluate_and_execute_strategy(
+    *,
+    market: Any,
+    program: Any,
+    dexie: DexieAdapter,
+    splash: SplashAdapter,
+    store: SqliteStore,
+    xch_price_usd: float | None,
+    now: datetime,
+    dexie_size_by_offer_id: dict[str, int],
+    result: _MarketCycleResult,
+) -> None:
+    """Evaluate market strategy, inject reseed if needed, and execute offer actions."""
     strategy_config = _strategy_config_from_market(market)
     active_offer_counts_by_size, offer_state_counts, active_unmapped_offer_ids = (
         _active_offer_counts_by_size(
@@ -1667,6 +1545,20 @@ def _process_single_market(
         },
         market_id=market.market_id,
     )
+
+
+def _plan_and_execute_coin_ops(
+    *,
+    market: Any,
+    program: Any,
+    wallet: WalletAdapter,
+    store: SqliteStore,
+    sell_ladder: list[Any],
+    bucket_counts: dict[int, int],
+    signer_selection: Any,
+    state_dir: Path,
+) -> None:
+    """Plan and execute coin split/combine operations for a market."""
     buckets = [
         BucketSpec(
             size_base_units=e.size_base_units,
@@ -1842,6 +1734,196 @@ def _process_single_market(
             )
     else:
         _log_market_decision(market.market_id, "coin_ops_no_plans")
+
+
+def _process_single_market(
+    *,
+    market: Any,
+    program: Any,
+    allowed_keys: set[str] | None,
+    dexie: DexieAdapter,
+    splash: SplashAdapter,
+    wallet: WalletAdapter,
+    store: SqliteStore,
+    xch_price_usd: float | None,
+    previous_xch_price_usd: float | None,
+    now: datetime,
+    state_dir: Path,
+) -> _MarketCycleResult:
+    result = _MarketCycleResult()
+    _log_market_decision(
+        market.market_id,
+        "cycle_start",
+        mode=str(getattr(market, "mode", "")),
+        quote_asset=str(getattr(market, "quote_asset", "")),
+    )
+    signer_selection = resolve_market_key(
+        market,
+        allowed_keys,
+        signer_key_registry=program.signer_key_registry,
+        required_network=program.app_network,
+    )
+    _log_market_decision(
+        market.market_id,
+        "signer_selected",
+        key_id=signer_selection.key_id,
+        network=program.app_network,
+    )
+    store.add_price_policy_snapshot(
+        market.market_id,
+        {
+            "mode": market.mode,
+            "base_asset": market.base_asset,
+            "quote_asset": market.quote_asset,
+            "quote_asset_type": market.quote_asset_type,
+        },
+        source="startup",
+    )
+    persisted = store.get_alert_state(market.market_id)
+    state, event = evaluate_low_inventory_alert(
+        now=now,
+        program=program,
+        market=market,
+        state=AlertState(
+            is_low=persisted.is_low,
+            last_alert_at=persisted.last_alert_at,
+        ),
+    )
+    store.upsert_alert_state(
+        StoredAlertState(
+            market_id=market.market_id,
+            is_low=state.is_low,
+            last_alert_at=state.last_alert_at,
+        )
+    )
+    if event:
+        payload = {
+            "event": "low_inventory_alert",
+            "market_id": event.market_id,
+            "ticker": event.ticker,
+            "remaining_amount": event.remaining_amount,
+            "receive_address": event.receive_address,
+            "reason": event.reason,
+        }
+        print(json.dumps(payload))
+        store.add_audit_event("low_inventory_alert", payload, market_id=market.market_id)
+        send_pushover_alert(program, event)
+
+    _, dexie_size_by_offer_id, _, offers = _reconcile_offer_states(
+        market=market,
+        dexie=dexie,
+        store=store,
+        now=now,
+        result=result,
+    )
+    cancel_policy = _execute_cancel_policy_for_market(
+        market=market,
+        offers=offers,
+        runtime_dry_run=program.runtime_dry_run,
+        current_xch_price_usd=xch_price_usd,
+        previous_xch_price_usd=previous_xch_price_usd,
+        dexie=dexie,
+        store=store,
+    )
+    if bool(cancel_policy.get("triggered", False)):
+        result.cancel_triggered = True
+    result.cancel_planned += int(cancel_policy.get("planned_count", 0))
+    result.cancel_executed += int(cancel_policy.get("executed_count", 0))
+    _log_market_decision(
+        market.market_id,
+        "cancel_policy_evaluated",
+        eligible=cancel_policy["eligible"],
+        triggered=cancel_policy["triggered"],
+        reason=cancel_policy["reason"],
+        move_bps=cancel_policy["move_bps"],
+        threshold_bps=cancel_policy["threshold_bps"],
+        planned_count=cancel_policy["planned_count"],
+        executed_count=cancel_policy["executed_count"],
+    )
+    store.add_audit_event(
+        "offer_cancel_policy",
+        {
+            "market_id": market.market_id,
+            "eligible": cancel_policy["eligible"],
+            "triggered": cancel_policy["triggered"],
+            "reason": cancel_policy["reason"],
+            "move_bps": cancel_policy["move_bps"],
+            "threshold_bps": cancel_policy["threshold_bps"],
+            "planned_count": cancel_policy["planned_count"],
+            "executed_count": cancel_policy["executed_count"],
+            "items": cancel_policy["items"],
+        },
+        market_id=market.market_id,
+    )
+
+    sell_ladder = market.ladders.get("sell", [])
+    ladder_sizes = [e.size_base_units for e in sell_ladder]
+    wallet_coins = wallet.list_asset_coins_base_units(
+        asset_id=market.base_asset,
+        key_id=market.signer_key_id,
+        receive_address=market.receive_address,
+        network=program.app_network,
+    )
+    if wallet_coins:
+        bucket_counts = compute_bucket_counts_from_coins(
+            coin_amounts_base_units=wallet_coins,
+            ladder_sizes=ladder_sizes,
+        )
+        _log_market_decision(
+            market.market_id,
+            "inventory_scan_wallet",
+            coin_count=len(wallet_coins),
+            bucket_counts=bucket_counts,
+        )
+        store.add_audit_event(
+            "inventory_bucket_scan",
+            {
+                "market_id": market.market_id,
+                "source": "wallet_adapter",
+                "bucket_counts": bucket_counts,
+                "coin_count": len(wallet_coins),
+            },
+            market_id=market.market_id,
+        )
+    else:
+        bucket_counts = dict(market.inventory.bucket_counts)
+        _log_market_decision(
+            market.market_id,
+            "inventory_scan_config_fallback",
+            asset_id=market.base_asset,
+            bucket_counts=bucket_counts,
+        )
+        store.add_audit_event(
+            "inventory_bucket_scan",
+            {
+                "market_id": market.market_id,
+                "source": "config_seed_or_no_asset_scan",
+                "asset_id": market.base_asset,
+                "bucket_counts": bucket_counts,
+            },
+            market_id=market.market_id,
+        )
+    _evaluate_and_execute_strategy(
+        market=market,
+        program=program,
+        dexie=dexie,
+        splash=splash,
+        store=store,
+        xch_price_usd=xch_price_usd,
+        now=now,
+        dexie_size_by_offer_id=dexie_size_by_offer_id,
+        result=result,
+    )
+    _plan_and_execute_coin_ops(
+        market=market,
+        program=program,
+        wallet=wallet,
+        store=store,
+        sell_ladder=sell_ladder,
+        bucket_counts=bucket_counts,
+        signer_selection=signer_selection,
+        state_dir=state_dir,
+    )
     _log_market_decision(
         market.market_id,
         "cycle_complete",

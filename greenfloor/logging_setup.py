@@ -66,3 +66,51 @@ def apply_level_to_root(
         existing.setLevel(effective_level)
     root_logger.setLevel(effective_level)
     logger.setLevel(effective_level)
+
+
+# ---------------------------------------------------------------------------
+# Unified per-service file logging initialization
+# ---------------------------------------------------------------------------
+
+_initialized_services: dict[str, ConcurrentRotatingFileHandler] = {}
+
+
+def initialize_service_file_logging(
+    *,
+    service_name: str,
+    home_dir: str | Path,
+    log_level: str | None,
+    service_logger: logging.Logger,
+    allow_reinit_level: bool = False,
+) -> ConcurrentRotatingFileHandler | None:
+    """Set up rotating-file logging for a named service.
+
+    On the first call for a given *service_name*, creates and attaches a
+    ``ConcurrentRotatingFileHandler`` to the root logger.  Subsequent calls
+    with ``allow_reinit_level=True`` update the effective log level without
+    adding a duplicate handler.
+
+    Returns the handler (or *None* if a handler already exists and
+    *allow_reinit_level* is False).
+    """
+    effective_level = coerce_log_level(log_level)
+    handler = _initialized_services.get(service_name)
+    if handler is None:
+        handler = create_rotating_file_handler(service_name=service_name, home_dir=home_dir)
+        logging.getLogger().addHandler(handler)
+        _initialized_services[service_name] = handler
+    elif not allow_reinit_level:
+        return handler
+    apply_level_to_root(effective_level=effective_level, logger=service_logger, handler=handler)
+    return handler
+
+
+def warn_if_log_level_auto_healed(
+    *, program_obj: object, program_path: Path, logger: logging.Logger
+) -> None:
+    """Emit a warning if the program config was missing ``app.log_level``."""
+    if bool(getattr(program_obj, "app_log_level_was_missing", False)):
+        logger.warning(
+            "program config missing app.log_level; wrote default INFO to %s",
+            os.fspath(program_path),
+        )
