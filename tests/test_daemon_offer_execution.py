@@ -8,10 +8,10 @@ from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon import main as daemon_main
 from greenfloor.daemon.main import (
     _active_offer_counts_by_size,
+    _build_dexie_size_by_offer_id,
     _execute_strategy_actions,
     _inject_reseed_action_if_no_active_offers,
     _match_watched_coin_ids,
-    _parse_last_json_object,
     _set_watched_coin_ids_for_market,
     _strategy_config_from_market,
     _update_market_coin_watchlist_from_dexie,
@@ -510,6 +510,55 @@ def test_active_offer_counts_by_size_uses_offer_state_and_size_mapping() -> None
     assert unmapped == 1
 
 
+def test_active_offer_counts_by_size_counts_cli_posted_offer() -> None:
+    """CLI-posted offers must be counted by _active_offer_counts_by_size.
+
+    Before the fix the CLI emitted strategy_offer_execution events without an
+    items list, so _recent_offer_sizes_by_offer_id returned no size for the
+    offer ID and it landed in active_unmapped_offer_ids instead of
+    active_counts_by_size[100]. This caused the daemon to post a duplicate
+    100-unit offer on every cycle.
+    """
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.offer_states = [
+        {"offer_id": "cli-hundred-1", "market_id": "m1", "state": "open"},
+    ]
+    # Event written by the fixed CLI path — has items with size/status/offer_id.
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "payload": {
+                "market_id": "m1",
+                "planned_count": 1,
+                "executed_count": 1,
+                "items": [
+                    {
+                        "size": 100,
+                        "status": "executed",
+                        "reason": "dexie_post_success",
+                        "offer_id": "cli-hundred-1",
+                        "attempts": 1,
+                    }
+                ],
+                "venue": "dexie",
+                "signature_request_id": "SignatureRequest_abc",
+                "signature_state": "SUBMITTED",
+            },
+        }
+    ]
+
+    counts, state_counts, unmapped = _active_offer_counts_by_size(
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+    )
+
+    assert counts == {1: 0, 10: 0, 100: 1}, "CLI-posted 100-unit offer must be counted"
+    assert unmapped == 0, "CLI-posted offer must not appear in unmapped"
+
+
 def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers() -> None:
     store = _FakeStore()
     now = datetime.now(UTC)
@@ -536,6 +585,87 @@ def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers()
 
     hits = _match_watched_coin_ids(observed_coin_ids=["a" * 64, "b" * 64])
     assert hits["m1"] == ["a" * 64]
+
+
+def test_build_dexie_size_by_offer_id_extracts_sizes() -> None:
+    """_build_dexie_size_by_offer_id maps offer IDs to base-unit sizes."""
+    base_asset = "asset-abc"
+    offers = [
+        {"id": "offer-1", "offered": [{"id": "asset-abc", "amount": 1}]},
+        {"id": "offer-10", "offered": [{"id": "asset-abc", "amount": 10}]},
+        {"id": "offer-100", "offered": [{"id": "asset-abc", "amount": 100}]},
+        {"id": "offer-other", "offered": [{"id": "other-asset", "amount": 5}]},
+    ]
+    result = _build_dexie_size_by_offer_id(offers, base_asset)
+    assert result == {"offer-1": 1, "offer-10": 10, "offer-100": 100}
+    assert "offer-other" not in result
+
+
+def test_active_offer_counts_by_size_uses_dexie_hint_for_beyond_cap_offer() -> None:
+    """Offers beyond the Dexie 20-offer cap must be resolved via dexie_size_by_offer_id.
+
+    When we have more active offers than Dexie returns in its list endpoint, the
+    beyond-cap offer won't be in the 20-offer response. The daemon fetches it
+    individually from dexie.get_offer() and passes the result as dexie_size_by_offer_id.
+    The ownership gate ensures only our own offers are in the DB, so this lookup is safe.
+    """
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.offer_states = [
+        {"offer_id": "beyond-cap-hundred", "market_id": "m1", "state": "open"},
+    ]
+    store.audit_events = []
+
+    counts_without, _, unmapped_without = _active_offer_counts_by_size(
+        store=cast(Any, store), market_id="m1", clock=now
+    )
+    assert counts_without == {1: 0, 10: 0, 100: 0}
+    assert unmapped_without == 1
+
+    counts_with, _, unmapped_with = _active_offer_counts_by_size(
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+        dexie_size_by_offer_id={"beyond-cap-hundred": 100},
+    )
+    assert counts_with == {1: 0, 10: 0, 100: 1}
+    assert unmapped_with == 0
+
+
+def test_active_offer_counts_by_size_foreign_offer_stays_unmapped() -> None:
+    """Offers in the DB with no audit event entry must remain unmapped, never counted.
+
+    This is the observable invariant enforced by the Dexie ownership gate: after the
+    fix the Dexie state-update loop skips offers that are not in our_offer_ids, so
+    foreign offers never reach the DB. If they somehow did, _active_offer_counts_by_size
+    must still not count them by size — they land in active_unmapped_offer_ids instead,
+    keeping counts conservative and leaving a visible signal in the strategy_state_source
+    log.
+    """
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.offer_states = [
+        # Our offer, correctly mapped via audit event.
+        {"offer_id": "ours-100", "market_id": "m1", "state": "open"},
+        # Foreign offer — in open state but no audit event (never posted by us).
+        {"offer_id": "foreign-100", "market_id": "m1", "state": "open"},
+    ]
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "payload": {"items": [{"offer_id": "ours-100", "size": 100, "status": "executed"}]},
+        }
+    ]
+
+    counts, _, unmapped = _active_offer_counts_by_size(
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+    )
+
+    assert counts == {1: 0, 10: 0, 100: 1}, "Only our mapped offer should be counted"
+    assert unmapped == 1, "Foreign offer must stay unmapped, not inflate the count"
 
 
 def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:
@@ -767,10 +897,3 @@ def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(mon
     assert result["items"][0]["status"] == "skipped"
     assert result["items"][0]["reason"] == "cloud_wallet_post_failed:vault_signing_unavailable"
     assert calls["builder"] == 0
-
-
-def test_parse_last_json_object_handles_noisy_output() -> None:
-    raw = '....\nsignature submitted: abc\n{\n  "publish_failures": 0,\n  "results": [{"result": {"success": true, "id": "o1"}}]\n}\n'
-    parsed = _parse_last_json_object(raw)
-    assert parsed is not None
-    assert int(parsed["publish_failures"]) == 0

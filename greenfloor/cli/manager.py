@@ -2467,7 +2467,7 @@ def _build_and_post_offer_cloud_wallet(
     claim_rewards: bool,
     quote_price: float,
     dry_run: bool,
-) -> int:
+) -> tuple[int, dict[str, Any]]:
     _initialize_manager_file_logging(
         program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
     )
@@ -2658,8 +2658,18 @@ def _build_and_post_offer_cloud_wallet(
             store.add_audit_event(
                 "strategy_offer_execution",
                 {
-                    "offer_id": offer_id,
                     "market_id": str(market.market_id),
+                    "planned_count": 1,
+                    "executed_count": 1,
+                    "items": [
+                        {
+                            "size": int(size_base_units),
+                            "status": "executed",
+                            "reason": f"{publish_venue}_post_success",
+                            "offer_id": offer_id,
+                            "attempts": 1,
+                        }
+                    ],
                     "venue": publish_venue,
                     "signature_request_id": signature_request_id,
                     "signature_state": signature_state,
@@ -2675,33 +2685,31 @@ def _build_and_post_offer_cloud_wallet(
             }
         )
 
-    print(
-        _format_json_output(
-            {
-                "market_id": market.market_id,
-                "pair": f"{market.base_asset}:{market.quote_asset}",
-                "resolved_base_asset_id": resolved_base_asset_id,
-                "resolved_quote_asset_id": resolved_quote_asset_id,
-                "network": program.app_network,
-                "size_base_units": size_base_units,
-                "repeat": repeat,
-                "publish_venue": publish_venue,
-                "dexie_base_url": dexie_base_url,
-                "splash_base_url": splash_base_url if publish_venue == "splash" else None,
-                "drop_only": drop_only,
-                "claim_rewards": claim_rewards,
-                "dry_run": bool(dry_run),
-                "publish_attempts": len(post_results),
-                "publish_failures": publish_failures,
-                "built_offers_preview": built_offers_preview,
-                "results": post_results,
-                "offer_fee_mojos": offer_fee_mojos,
-                "offer_fee_source": offer_fee_source,
-            }
-        )
-    )
+    payload: dict[str, Any] = {
+        "market_id": market.market_id,
+        "pair": f"{market.base_asset}:{market.quote_asset}",
+        "resolved_base_asset_id": resolved_base_asset_id,
+        "resolved_quote_asset_id": resolved_quote_asset_id,
+        "network": program.app_network,
+        "size_base_units": size_base_units,
+        "repeat": repeat,
+        "publish_venue": publish_venue,
+        "dexie_base_url": dexie_base_url,
+        "splash_base_url": splash_base_url if publish_venue == "splash" else None,
+        "drop_only": drop_only,
+        "claim_rewards": claim_rewards,
+        "dry_run": bool(dry_run),
+        "publish_attempts": len(post_results),
+        "publish_failures": publish_failures,
+        "built_offers_preview": built_offers_preview,
+        "results": post_results,
+        "offer_fee_mojos": offer_fee_mojos,
+        "offer_fee_source": offer_fee_source,
+    }
+    print(_format_json_output(payload))
     store.close()
-    return 0 if publish_failures == 0 else 2
+    exit_code = 0 if publish_failures == 0 else 2
+    return exit_code, payload
 
 
 def _build_and_post_offer(
@@ -2775,7 +2783,7 @@ def _build_and_post_offer(
     if use_cloud_wallet_offer_generation:
         _initialize_manager_file_logging(program.home_dir, log_level=program.app_log_level)
         _warn_if_log_level_auto_healed(program=program, program_path=program_path)
-        return _build_and_post_offer_cloud_wallet(
+        exit_code, _ = _build_and_post_offer_cloud_wallet(
             program=program,
             market=market,
             size_base_units=size_base_units,
@@ -2788,6 +2796,7 @@ def _build_and_post_offer(
             quote_price=float(quote_price),
             dry_run=bool(dry_run),
         )
+        return exit_code
 
     selected_offer_coin_ids: list[str] = []
 

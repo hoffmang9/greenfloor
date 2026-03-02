@@ -1,5 +1,64 @@
 # Progress Log
 
+## 2026-02-28 (Fix duplicate offer creation: ownership gate + beyond-cap individual lookup)
+
+Two more root causes of spurious 100-unit offer creation identified and fixed (PR #46 additional commits):
+
+### Bug 3: Dexie state-update loop processed all makers' offers, not just ours
+
+- The Dexie `/v1/offers` list returns up to 20 open offers from **every maker** for the pair.
+- The daemon's state-update loop called `store.upsert_offer_state()` for every offer in the response,
+  writing foreign makers' offers into our DB in `open` state.
+- Those foreign offers had no `strategy_offer_execution` audit event (we never posted them), so they
+  surfaced as `active_unmapped_offer_ids` and inflated the active count in an unclassified bucket.
+- Fix: `_watchlist_offer_ids_from_store` is called once before the loop. Any `offer_id not in our_offer_ids`
+  is skipped. Our own offers are always in the DB before this loop runs (inserted during the posting flow),
+  so no legitimate offers are excluded.
+- Added regression test: `test_active_offer_counts_by_size_foreign_offer_stays_unmapped`.
+
+### Bug 4: Dexie 20-offer-per-page cap hid our 100-unit offer from the size map
+
+- After Bug 3 was fixed, we had 21 active offers (16 size-1, 4 size-10, 1 size-100), but Dexie returns
+  only 20 per page. The 100-unit offer was always the 21st and never appeared in the list response.
+- `_active_offer_counts_by_size` saw `{1: 16, 10: 4, 100: 0}` every cycle and the strategy kept
+  planning a new 100-unit offer.
+- Fix: added `_build_dexie_size_by_offer_id` helper and, in `_process_single_market`, identify
+  `beyond_cap_ids = our_offer_ids - dexie_offer_ids_in_list`. For each beyond-cap offer, call
+  `dexie.get_offer(offer_id)` individually (1 extra HTTP call) to resolve the size. Pass the combined
+  `dexie_size_by_offer_id` map as a fallback to `_active_offer_counts_by_size` and
+  `_inject_reseed_action_if_no_active_offers`.
+- Verified on John-Deere: daemon now logs `active_offer_counts_by_size={1: 16, 10: 4, 100: 1}`,
+  `active_unmapped_offer_ids=0`, `action_count=0`, `planned_count=0` — no new offers created.
+- Added tests: `test_build_dexie_size_by_offer_id_extracts_sizes`,
+  `test_active_offer_counts_by_size_uses_dexie_hint_for_beyond_cap_offer`.
+
+## 2026-02-28 (Fix duplicate offer creation: CLI audit event format + daemon direct call)
+
+- Root cause: daemon was creating duplicate 100-unit offers on every cycle when using the cloud wallet (KMS) path.
+- Two compounding bugs identified and fixed (PR #46):
+
+### Bug 1: CLI audit event format (`greenfloor/cli/manager.py`)
+
+- `build-and-post-offer` emitted `strategy_offer_execution` events with a flat payload — no `items` list.
+- `_recent_offer_sizes_by_offer_id` only reads offer sizes from `items[*].size`, so CLI-posted offers fell
+  into `active_unmapped_offer_ids` instead of `active_counts_by_size[100]`.
+- Daemon saw `active_offer_counts_by_size={1: 14, 10: 2, 100: 0}` on every cycle and kept re-posting.
+- Fix: `store.add_audit_event("strategy_offer_execution", ...)` in the CLI now emits a proper `items` list
+  with `size`, `status`, `reason`, `offer_id`, and `attempts` fields — matching the daemon's own format.
+- Added regression test: `test_active_offer_counts_by_size_counts_cli_posted_offer`.
+
+### Bug 2: Daemon stdout-capture interface (`greenfloor/daemon/main.py`)
+
+- `_cloud_wallet_offer_post_fallback` wrapped `_build_and_post_offer_cloud_wallet` in `redirect_stdout`
+  and parsed the printed JSON back out via `_parse_last_json_object`. This was a CLI side-channel, not a
+  direct function call — violating the AGENTS.md "prefer direct function calls" rule.
+- Fix: `_build_and_post_offer_cloud_wallet` now returns `tuple[int, dict[str, Any]]` (exit code + payload)
+  alongside its existing stdout print. The daemon unpacks the tuple directly.
+- `StringIO`, `redirect_stdout`, and `_parse_last_json_object` removed from the daemon path entirely.
+- CLI stdout output and contract unchanged; CLI caller (`_build_and_post_offer`) discards the payload
+  and returns only the exit code.
+- Validation: `tests/test_daemon_offer_execution.py tests/test_manager_post_offer.py` → 137 passed.
+
 ## 2026-02-28 (KMS offer routing fix: route all KMS runs through cloud wallet path)
 
 - Root cause identified for `size=100` Dexie `Invalid Offer` rejection on local KMS vault path:

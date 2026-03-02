@@ -3548,7 +3548,7 @@ def test_build_and_post_offer_dispatches_to_cloud_wallet_when_configured(
     def _fake_cloud_wallet(**kwargs):
         dispatched[0] = True
         captured_dry_run.append(bool(kwargs["dry_run"]))
-        return 0
+        return 0, {}
 
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_and_post_offer_cloud_wallet",
@@ -3590,7 +3590,7 @@ def test_build_and_post_offer_dry_run_uses_cloud_wallet_when_configured(
         dispatched[0] = True
         captured_dry_run.append(bool(kwargs["dry_run"]))
         print(json.dumps({"dry_run": True, "results": [], "built_offers_preview": []}))
-        return 0
+        return 0, {"dry_run": True, "results": [], "built_offers_preview": []}
 
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_and_post_offer_cloud_wallet",
@@ -3633,7 +3633,7 @@ def test_build_and_post_offer_uses_local_path_for_large_size_when_cloud_wallet_c
     def _fake_cloud_wallet(**kwargs):
         _ = kwargs
         cloud_dispatched[0] = True
-        return 0
+        return 0, {}
 
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_and_post_offer_cloud_wallet",
@@ -3696,7 +3696,7 @@ def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured(
     def _fake_cloud_wallet(**kwargs):
         _ = kwargs
         cloud_dispatched[0] = True
-        return 0
+        return 0, {}
 
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_and_post_offer_cloud_wallet",
@@ -3746,7 +3746,7 @@ def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured_large_si
     def _fake_cloud_wallet(**kwargs):
         _ = kwargs
         cloud_dispatched[0] = True
-        return 0
+        return 0, {}
 
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_and_post_offer_cloud_wallet",
@@ -3860,7 +3860,7 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     )
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
 
-    code = _build_and_post_offer_cloud_wallet(
+    code, _ = _build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=10,
@@ -3961,7 +3961,7 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
         "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
     )
 
-    code = _build_and_post_offer_cloud_wallet(
+    code, _ = _build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=1,
@@ -4049,7 +4049,7 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_offer_not_visible(
         "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
     )
 
-    code = _build_and_post_offer_cloud_wallet(
+    code, _ = _build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=100,
@@ -4144,7 +4144,7 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_visible_offer_size_m
         "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
     )
 
-    code = _build_and_post_offer_cloud_wallet(
+    code, _ = _build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=100,
@@ -4209,7 +4209,7 @@ def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("cloud_wallet_offer_artifact_timeout")),
     )
 
-    code = _build_and_post_offer_cloud_wallet(
+    code, _ = _build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=10,
@@ -4288,7 +4288,7 @@ def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
     )
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
 
-    code = _build_and_post_offer_cloud_wallet(
+    code, _ = _build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=10,
@@ -4361,7 +4361,7 @@ def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
     )
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FailDexie)
 
-    code = _build_and_post_offer_cloud_wallet(
+    code, _ = _build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=10,
@@ -4720,7 +4720,7 @@ def test_build_and_post_offer_cloud_wallet_passes_min_created_at_to_artifact_pol
         "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
     )
 
-    code = manager_mod._build_and_post_offer_cloud_wallet(
+    code, _ = manager_mod._build_and_post_offer_cloud_wallet(
         program=manager_mod.load_program_config(program_path),
         market=market,
         size_base_units=1,

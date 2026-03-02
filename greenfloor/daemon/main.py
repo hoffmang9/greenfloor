@@ -552,12 +552,43 @@ def _update_market_coin_watchlist_from_dexie(
     )
 
 
+def _build_dexie_size_by_offer_id(
+    offers: list[dict[str, Any]], base_asset_id: str
+) -> dict[str, int]:
+    """Extract {offer_id -> size_base_units} from a list of flat Dexie offer dicts.
+
+    Works with both the list endpoint (each element is a flat offer dict) and a
+    single element extracted from a get_offer() response (payload["offer"]).
+    """
+    result: dict[str, int] = {}
+    clean_base = str(base_asset_id).strip().lower()
+    for offer in offers:
+        if not isinstance(offer, dict):
+            continue
+        offer_id = str(offer.get("id", "")).strip()
+        if not offer_id:
+            continue
+        for offered_item in offer.get("offered") or []:
+            if not isinstance(offered_item, dict):
+                continue
+            if str(offered_item.get("id", "")).strip().lower() != clean_base:
+                continue
+            try:
+                size = int(offered_item["amount"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if size > 0:
+                result[offer_id] = size
+    return result
+
+
 def _active_offer_counts_by_size(
     *,
     store: SqliteStore,
     market_id: str,
     clock: datetime,
     limit: int = 500,
+    dexie_size_by_offer_id: dict[str, int] | None = None,
 ) -> tuple[dict[int, int], dict[str, int], int]:
     offer_states = store.list_offer_states(market_id=market_id, limit=limit)
     state_counts: dict[str, int] = {}
@@ -583,6 +614,8 @@ def _active_offer_counts_by_size(
     active_unmapped_offer_ids = 0
     for offer_id in active_offer_ids:
         size = size_by_offer_id.get(offer_id)
+        if size is None and dexie_size_by_offer_id:
+            size = dexie_size_by_offer_id.get(offer_id)
         if size in active_counts_by_size:
             active_counts_by_size[size] = int(active_counts_by_size[size]) + 1
         else:
@@ -598,6 +631,7 @@ def _inject_reseed_action_if_no_active_offers(
     store: SqliteStore,
     xch_price_usd: float | None,
     clock: datetime,
+    dexie_size_by_offer_id: dict[str, int] | None = None,
 ) -> list[PlannedAction]:
     if strategy_actions:
         _log_market_decision(
@@ -612,6 +646,7 @@ def _inject_reseed_action_if_no_active_offers(
         store=store,
         market_id=market.market_id,
         clock=clock,
+        dexie_size_by_offer_id=dexie_size_by_offer_id,
     )
     missing_by_size = {
         size: max(0, int(target_by_size.get(size, 0)) - int(active_counts_by_size.get(size, 0)))
@@ -786,32 +821,31 @@ def _cloud_wallet_offer_post_fallback(
     publish_venue: str,
     runtime_dry_run: bool,
 ) -> dict[str, Any]:
-    from contextlib import redirect_stdout
-    from io import StringIO
-
     from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
 
-    out = StringIO()
     quote_price = _resolve_quote_price_quote_per_base(market)
-    with redirect_stdout(out):
-        exit_code = _build_and_post_offer_cloud_wallet(
-            program=program,
-            market=market,
-            size_base_units=size_base_units,
-            repeat=1,
-            publish_venue=publish_venue,
-            dexie_base_url=str(program.dexie_api_base),
-            splash_base_url=str(program.splash_api_base),
-            drop_only=True,
-            claim_rewards=False,
-            quote_price=quote_price,
-            dry_run=runtime_dry_run,
-        )
+    exit_code, payload = _build_and_post_offer_cloud_wallet(
+        program=program,
+        market=market,
+        size_base_units=size_base_units,
+        repeat=1,
+        publish_venue=publish_venue,
+        dexie_base_url=str(program.dexie_api_base),
+        splash_base_url=str(program.splash_api_base),
+        drop_only=True,
+        claim_rewards=False,
+        quote_price=quote_price,
+        dry_run=runtime_dry_run,
+    )
     if exit_code != 0:
-        return {"success": False, "error": f"cloud_wallet_fallback_exit_code:{exit_code}"}
-    payload = _parse_last_json_object(out.getvalue())
-    if payload is None:
-        return {"success": False, "error": "cloud_wallet_fallback_invalid_json"}
+        results = payload.get("results", [])
+        result = (
+            results[0].get("result", {})
+            if isinstance(results, list) and results and isinstance(results[0], dict)
+            else {}
+        )
+        error = str(result.get("error", "")).strip() if isinstance(result, dict) else ""
+        return {"success": False, "error": error or f"cloud_wallet_fallback_exit_code:{exit_code}"}
     results = payload.get("results", [])
     if not isinstance(results, list) or not results:
         return {"success": False, "error": "cloud_wallet_fallback_missing_results"}
@@ -824,31 +858,6 @@ def _cloud_wallet_offer_post_fallback(
         "offer_id": str(result.get("id", "")).strip() or None,
         "error": str(result.get("error", "")).strip() if not success else "",
     }
-
-
-def _parse_last_json_object(raw_text: str) -> dict[str, Any] | None:
-    text = str(raw_text or "")
-    end = text.rfind("}")
-    if end < 0:
-        return None
-    depth = 0
-    start = -1
-    for idx in range(end, -1, -1):
-        ch = text[idx]
-        if ch == "}":
-            depth += 1
-        elif ch == "{":
-            depth -= 1
-            if depth == 0:
-                start = idx
-                break
-    if start < 0:
-        return None
-    try:
-        parsed = json.loads(text[start : end + 1])
-    except json.JSONDecodeError:
-        return None
-    return parsed if isinstance(parsed, dict) else None
 
 
 def _verify_offer_visible_on_dexie(
@@ -1371,16 +1380,41 @@ def _process_single_market(
             market_id=market.market_id,
         )
         offers = []
+    our_offer_ids = _watchlist_offer_ids_from_store(
+        store=store,
+        market_id=market.market_id,
+        clock=now,
+    )
+    # For any of our active offers not returned by the Dexie list (either genuinely
+    # beyond the 20-offer cap, or expired/completed), fetch them individually and
+    # add to the offers list so the state-transition loop below can handle expirations.
+    # A 5-second timeout prevents a hung TCP connection from stalling the daemon.
+    dexie_offer_ids_in_list = {str(o.get("id", "")).strip() for o in offers if o.get("id")}
+    beyond_cap_ids = our_offer_ids - dexie_offer_ids_in_list
+    augmented_offers = list(offers)
+    for beyond_offer_id in beyond_cap_ids:
+        try:
+            single_payload = dexie.get_offer(beyond_offer_id, timeout=5)
+            single_offer = single_payload.get("offer") if isinstance(single_payload, dict) else None
+            if isinstance(single_offer, dict):
+                augmented_offers.append(single_offer)
+        except Exception:  # pragma: no cover - network dependent
+            pass
+    dexie_size_by_offer_id: dict[str, int] = _build_dexie_size_by_offer_id(
+        augmented_offers, str(market.base_asset)
+    )
     if dexie_fetch_error is None:
         _update_market_coin_watchlist_from_dexie(
             market=market,
-            offers=offers,
+            offers=augmented_offers,
             store=store,
             clock=now,
         )
-    for offer in offers:
+    for offer in augmented_offers:
         offer_id = str(offer.get("id", ""))
         if not offer_id:
+            continue
+        if offer_id not in our_offer_ids:
             continue
         status = int(offer.get("status", -1))
         coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer)
@@ -1538,6 +1572,7 @@ def _process_single_market(
             store=store,
             market_id=market.market_id,
             clock=now,
+            dexie_size_by_offer_id=dexie_size_by_offer_id,
         )
     )
     _log_market_decision(
@@ -1570,6 +1605,7 @@ def _process_single_market(
         store=store,
         xch_price_usd=xch_price_usd,
         clock=now,
+        dexie_size_by_offer_id=dexie_size_by_offer_id,
     )
     _log_market_decision(
         market.market_id,
