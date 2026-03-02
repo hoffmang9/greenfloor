@@ -21,7 +21,8 @@
   - added identifier-lookup exception fallback test (`_graphql` raise -> label-path fallback),
   - added `parse_markets_config` coverage for `cloud_wallet_base_global_id` / `cloud_wallet_quote_global_id`,
   - narrowed CAT type aliases to `CAT2` + `CAT` (dropped `TOKEN`),
-  - documented why parallel market error audit events are written by the outer main-thread store.
+  - documented why parallel market error audit events are written by the outer main-thread store,
+  - added SQLite lock-wait tuning (`connect(timeout=30s)` + `PRAGMA busy_timeout=30000`) to reduce transient `database is locked` failures under parallel market workers.
 
 ## 2026-03-02 (PR #47 — simplify, deduplicate, and decompose)
 

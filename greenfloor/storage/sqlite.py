@@ -22,8 +22,11 @@ class SqliteStore:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.db_path)
+        # Parallel market workers open independent connections. Use a non-zero
+        # lock wait so short write-contention windows do not fail immediately.
+        self.conn = sqlite3.connect(self.db_path, timeout=30.0)
         self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA busy_timeout = 30000")
         self._init_schema()
 
     def close(self) -> None:
