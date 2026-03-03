@@ -51,6 +51,7 @@ from greenfloor.logging_setup import (
     warn_if_log_level_auto_healed,
 )
 from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
+from greenfloor.signing import sign_and_broadcast_mixed_split
 from greenfloor.storage.sqlite import SqliteStore
 
 _TEST_PHASE_OFFER_EXPIRY_MINUTES = 5
@@ -2575,8 +2576,6 @@ def _ensure_offer_bootstrap_denominations(
     existing_coin_ids = {
         str(c.get("id", "")).strip() for c in wallet.list_coins(include_pending=True) if c.get("id")
     }
-    from greenfloor.signing import sign_and_broadcast_mixed_split
-
     signing_payload = {
         "key_id": key_id,
         "network": str(program.app_network),

@@ -3955,6 +3955,7 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     _write_markets_with_ladder(markets_path)
     prog, mkt = _load_program_and_market(program_path, markets_path)
     prog.home_dir = str(tmp_path)
+    prog.home_dir = str(tmp_path)
     reset_concurrent_log_handlers(module=manager_mod)
 
     class _FakeWallet:
@@ -4675,7 +4676,7 @@ def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
         lambda **_k: (0, "coinset_conservative", None),
     )
     monkeypatch.setattr(
-        "greenfloor.signing.sign_and_broadcast_mixed_split",
+        "greenfloor.cli.manager.sign_and_broadcast_mixed_split",
         lambda _payload: {"status": "executed", "operation_id": "tx-1"},
     )
     monkeypatch.setattr(
