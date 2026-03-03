@@ -1964,6 +1964,28 @@ def _resolve_coin_op_fee(
         return None
 
 
+_TEMP_ZERO_FEE_FOR_CAT_SPLITS = True
+
+
+def _effective_coin_split_fee_for_asset(
+    *,
+    canonical_asset_id: str,
+    resolved_asset_id: str,
+    fee_mojos: int,
+    fee_source: str,
+) -> tuple[int, str]:
+    """Return coin-split fee policy for the target asset.
+
+    Temporary policy: CAT splits are forced to zero fee until backend support for
+    the default split-fee path is fixed. Keep this as a single switch point so
+    reverting to the default fee process is one-line.
+    """
+    _ = resolved_asset_id
+    if _TEMP_ZERO_FEE_FOR_CAT_SPLITS and not _canonical_is_xch(canonical_asset_id):
+        return 0, "temporary_cat_split_zero_fee"
+    return int(fee_mojos), str(fee_source)
+
+
 def _coin_op_build_iteration_payload(
     *,
     wallet: CloudWalletAdapter,
@@ -3529,8 +3551,12 @@ def _coin_split(
     market = setup.market
     wallet = setup.wallet
     resolved_split_asset_id = setup.resolved_asset_id
-    fee_mojos = setup.fee_mojos
-    fee_source = setup.fee_source
+    fee_mojos, fee_source = _effective_coin_split_fee_for_asset(
+        canonical_asset_id=str(market.base_asset),
+        resolved_asset_id=str(setup.resolved_asset_id),
+        fee_mojos=setup.fee_mojos,
+        fee_source=setup.fee_source,
+    )
     selected_venue = setup.selected_venue
     denomination_target = None
     if size_base_units is not None and int(size_base_units) > 0:

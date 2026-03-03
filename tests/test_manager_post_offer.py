@@ -2128,6 +2128,28 @@ def test_resolve_taker_or_coin_operation_fee_fails_on_temporary_advice_unavailab
         raise AssertionError("expected _CoinsetFeeLookupPreflightError")
 
 
+def test_effective_coin_split_fee_for_cat_is_temporarily_zero() -> None:
+    fee, source = manager_mod._effective_coin_split_fee_for_asset(
+        canonical_asset_id="a1",
+        resolved_asset_id="Asset_cat_a1",
+        fee_mojos=42,
+        fee_source="coinset_conservative",
+    )
+    assert fee == 0
+    assert source == "temporary_cat_split_zero_fee"
+
+
+def test_effective_coin_split_fee_for_xch_keeps_default_fee() -> None:
+    fee, source = manager_mod._effective_coin_split_fee_for_asset(
+        canonical_asset_id="xch",
+        resolved_asset_id="Asset_xch",
+        fee_mojos=42,
+        fee_source="coinset_conservative",
+    )
+    assert fee == 42
+    assert source == "coinset_conservative"
+
+
 def test_resolve_maker_offer_fee_is_zero() -> None:
     fee, source = manager_mod._resolve_maker_offer_fee(network="mainnet")
     assert fee == 0
@@ -2179,11 +2201,12 @@ def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys
         no_wait=True,
     )
     assert code == 0
-    assert calls["split"] == (["Coin_abc123"], 10, 2, 42)
+    assert calls["split"] == (["Coin_abc123"], 10, 2, 0)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["venue"] is None
     assert payload["waited"] is False
-    assert payload["fee_mojos"] == 42
+    assert payload["fee_mojos"] == 0
+    assert payload["fee_source"] == "temporary_cat_split_zero_fee"
     assert payload["coin_selection_mode"] == "explicit"
     assert payload["resolved_asset_id"] == "Asset_split_base"
 
@@ -2242,7 +2265,7 @@ def test_coin_split_auto_selects_largest_spendable_asset_coin(
         no_wait=True,
     )
     assert code == 0
-    assert calls["split"] == (["Coin_big"], 10, 10, 42)
+    assert calls["split"] == (["Coin_big"], 10, 10, 0)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["coin_selection_mode"] == "adapter_auto_select"
     assert payload["resolved_asset_id"] == "Asset_split_base"
@@ -2357,7 +2380,7 @@ def test_coin_split_guardrail_override_allows_lock_all_spendable(
         allow_lock_all_spendable=True,
     )
     assert code == 0
-    assert calls["split"] == (["Coin_only"], 10, 10, 42)
+    assert calls["split"] == (["Coin_only"], 10, 10, 0)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["coin_selection_mode"] == "adapter_auto_select"
     assert payload["resolved_asset_id"] == "Asset_split_base"
@@ -2415,7 +2438,7 @@ def test_coin_split_guardrail_prompt_override_allows_continue(
         prompt_for_override=True,
     )
     assert code == 0
-    assert calls["split"] == (["Coin_only"], 10, 10, 42)
+    assert calls["split"] == (["Coin_only"], 10, 10, 0)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["resolved_asset_id"] == "Asset_split_base"
 
@@ -2836,7 +2859,7 @@ def test_coin_split_uses_market_ladder_target_when_size_is_provided(
         size_base_units=10,
     )
     assert code == 0
-    assert calls["split"] == (["Coin_abc123"], 10, 4, 42)
+    assert calls["split"] == (["Coin_abc123"], 10, 4, 0)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["venue"] == "splash"
     assert payload["denomination_target"]["required_count"] == 4
