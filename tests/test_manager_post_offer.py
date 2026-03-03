@@ -4673,7 +4673,7 @@ def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
     )
 
     assert code == 0
-    assert create_offer_calls == [123]
+    assert create_offer_calls == [0]
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["bootstrap_actions"][0]["status"] == "failed"
 

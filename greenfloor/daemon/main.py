@@ -31,6 +31,7 @@ from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
 from greenfloor.config.io import (
     default_cats_config_path,
+    default_state_dir_path,
     load_markets_config_with_optional_overlay,
     load_program_config,
     resolve_quote_asset_for_offer,
@@ -872,30 +873,50 @@ def _cloud_wallet_spendable_amounts_by_asset(
     wallet: CloudWalletAdapter,
     asset_ids: set[str],
 ) -> dict[str, int]:
-    coins = wallet.list_coins(include_pending=True)
-    totals: dict[str, int] = {asset_id: 0 for asset_id in asset_ids}
-    for coin in coins:
-        if not isinstance(coin, dict):
-            continue
-        state = str(coin.get("state", "")).strip().upper()
-        if state not in _CLOUD_WALLET_SPENDABLE_STATES:
-            continue
-        asset_payload = coin.get("asset")
-        if isinstance(asset_payload, dict):
-            asset_id = str(asset_payload.get("id", "")).strip().lower()
-        else:
-            asset_id = ""
-        if not asset_id:
-            continue
-        if asset_id not in totals:
-            continue
+    requested_asset_ids = {str(asset_id).strip() for asset_id in asset_ids if str(asset_id).strip()}
+    totals: dict[str, int] = {asset_id: 0 for asset_id in requested_asset_ids}
+    if not requested_asset_ids:
+        return totals
+
+    # Query each requested asset directly. Some wallet backends can return
+    # incomplete/unhelpful results for broad unfiltered inventory reads, while
+    # asset-scoped reads remain accurate.
+    for requested_asset_id in requested_asset_ids:
+        requested_asset_id_lower = requested_asset_id.lower()
         try:
-            amount = int(coin.get("amount", 0))
-        except (TypeError, ValueError):
-            amount = 0
-        if amount <= 0:
+            coins = wallet.list_coins(asset_id=requested_asset_id, include_pending=True)
+        except TypeError:
+            # Backward-compatible fallback for adapters/test doubles that do
+            # not yet accept an `asset_id` keyword.
+            coins = wallet.list_coins(include_pending=True)
+        except Exception as exc:
+            _daemon_logger.warning(
+                "cloud_wallet_inventory_lookup_failed asset_id=%s error=%s",
+                requested_asset_id,
+                exc,
+            )
             continue
-        totals[asset_id] += amount
+
+        for coin in coins:
+            if not isinstance(coin, dict):
+                continue
+            state = str(coin.get("state", "")).strip().upper()
+            if state not in _CLOUD_WALLET_SPENDABLE_STATES:
+                continue
+            asset_payload = coin.get("asset")
+            if isinstance(asset_payload, dict):
+                coin_asset_id = str(asset_payload.get("id", "")).strip()
+            else:
+                coin_asset_id = ""
+            if coin_asset_id.lower() != requested_asset_id_lower:
+                continue
+            try:
+                amount = int(coin.get("amount", 0))
+            except (TypeError, ValueError):
+                amount = 0
+            if amount <= 0:
+                continue
+            totals[requested_asset_id] += amount
     return totals
 
 
@@ -921,23 +942,24 @@ def _reservation_request_for_cloud_offer_with_assets(
 ) -> dict[str, int]:
     pricing = market.pricing or {}
     base_multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))
-    base_asset_id = str(resolved_base_asset_id or "").strip().lower()
+    base_asset_id = str(resolved_base_asset_id or "").strip()
     if not base_asset_id:
         return {}
     offer_amount = int(action.size) * base_multiplier
     if offer_amount <= 0:
         return {}
     request: dict[str, int] = {base_asset_id: offer_amount}
-    fee_asset = str(fee_asset_id or "").strip().lower()
+    fee_asset = str(fee_asset_id or "").strip()
     if fee_asset and int(fee_amount_mojos) > 0:
         request[fee_asset] = int(request.get(fee_asset, 0)) + int(fee_amount_mojos)
     return request
 
 
 def _estimate_cloud_offer_fee_reservation_mojos(*, program: Any) -> int:
-    min_fee = int(max(0, int(getattr(program, "coin_ops_minimum_fee_mojos", 0))))
-    split_fee = int(max(0, int(getattr(program, "coin_ops_split_fee_mojos", 0))))
-    return max(min_fee, split_fee)
+    _ = program
+    # Offer files must always be created with zero fees. Fees are only used
+    # for coin split/combine operations outside offer creation.
+    return 0
 
 
 def _resolve_cloud_wallet_offer_asset_ids_for_reservation(
@@ -2665,11 +2687,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--state-dir",
-        default=".greenfloor/state",
+        default=str(default_state_dir_path()),
         help="State directory used for reload marker and daemon-local state",
     )
     args = parser.parse_args()
-    state_dir = Path(args.state_dir)
+    state_dir = Path(args.state_dir).expanduser()
     testnet_markets_path = (
         Path(args.testnet_markets_config) if str(args.testnet_markets_config).strip() else None
     )

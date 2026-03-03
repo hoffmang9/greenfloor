@@ -1,5 +1,40 @@
 # Progress Log
 
+## 2026-03-03 (Offer creation fee policy enforcement: always zero)
+
+- Root cause identified from John-Deere runtime behavior:
+  - offer creation was already passing `fee=0`, but the cloud-wallet fallback path could pass a non-zero `split_input_coins_fee` when bootstrap reported `fallback_to_cloud_wallet_offer_split` with `fee_mojos`;
+  - this violated the offer policy that offer files must be zero-fee and fees should apply only to split/combine coin operations.
+- Implemented policy fix:
+  - `greenfloor/cli/manager.py` (`_build_and_post_offer_cloud_wallet`) now always forces `split_input_coins_fee = 0`, including fallback paths;
+  - `greenfloor/daemon/main.py` fee-reservation estimation remains hard-set to `0` for cloud-wallet offer execution, so reservation admission no longer allocates fee-side XCH for offer creation.
+- Added/updated deterministic coverage:
+  - `tests/test_manager_post_offer.py` now asserts fallback bootstrap still calls cloud-wallet `create_offer` with zero split-input fee (`create_offer_calls == [0]`).
+- Validation:
+  - targeted manager cloud-wallet tests passed (`9 passed`);
+  - targeted daemon reservation/parallel tests passed (`8 passed`).
+- John-Deere runtime verification:
+  - direct live probes of `_build_and_post_offer_cloud_wallet` intercepted `CloudWalletAdapter.create_offer(...)` on both normal and fallback markets and confirmed `fee=0` and `split_input_coins_fee=0`;
+  - emitted payloads confirmed `offer_fee_mojos: 0` and successful Dexie publish in both paths.
+
+## 2026-03-03 (Reservation inventory fix for asset-scoped Cloud Wallet queries)
+
+- Root cause identified from John-Deere runtime behavior:
+  - parallel reservation admission used an unfiltered `wallet.list_coins(include_pending=True)` read for capacity checks;
+  - on this wallet/backend combination, broad unfiltered inventory reads intermittently returned pending-only views, producing false `available=0` admission outcomes (`reservation_insufficient_asset_*`) for otherwise spendable CAT balances.
+- Implemented daemon-side fix in `greenfloor/daemon/main.py`:
+  - `_cloud_wallet_spendable_amounts_by_asset` now queries spendable inventory per requested asset via `wallet.list_coins(asset_id=<requested>, include_pending=True)`,
+  - preserves spendable-state filtering and explicit per-asset totals,
+  - includes compatibility fallback for adapters/test doubles that do not accept `asset_id`,
+  - logs targeted warning on per-asset lookup exceptions.
+- Added deterministic regression coverage in `tests/test_daemon_offer_execution.py`:
+  - `test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory` reproduces pending-only unfiltered inventory behavior while asset-scoped reads are spendable, and verifies reservation admission proceeds successfully.
+- Validation:
+  - targeted daemon reservation/parallel suite passed (`8 passed`).
+- John-Deere operational verification:
+  - after temporarily disabling `runtime.offer_parallelism_enabled`, `eco292021_sell_wusdbc` resumed posting and showed fresh `dexie_post_success` executions for sizes `1`, `10`, and `100`;
+  - confirms offer posting path is healthy and isolates failure mode to reservation admission inventory reads.
+
 ## 2026-03-03 (Parallel offer dispatch with asset reservations)
 
 - John-Deere validation + canary verification:
