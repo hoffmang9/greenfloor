@@ -944,6 +944,59 @@ def _build_vault_cat_inner_spend(
     return mips.spend(vault_ctx["p2_singleton_message_hash"])
 
 
+def _materialize_coin_spends_from_finished(
+    *,
+    sdk: Any,
+    clvm: Any,
+    finished: Any,
+    synthetic_sk_by_puzzle_hash: dict[bytes, Any],
+    vault_ctx: dict[str, Any] | None,
+) -> tuple[list[Any] | None, str | None]:
+    pending_cat_spends: list[Any] = []
+    for pending_spend in finished.pending_spends():
+        coin = pending_spend.coin()
+        pending_cat = None
+        try:
+            pending_cat = pending_spend.as_cat()
+        except Exception:
+            pending_cat = None
+        delegated = clvm.delegated_spend(pending_spend.conditions())
+        if pending_cat is not None:
+            p2_puzzle_hash = None
+            try:
+                p2_puzzle_hash = pending_spend.p2_puzzle_hash()
+            except Exception:
+                p2_puzzle_hash = getattr(pending_cat.info, "p2_puzzle_hash", coin.puzzle_hash)
+            if (
+                vault_ctx is not None
+                and isinstance(p2_puzzle_hash, bytes)
+                and bytes(p2_puzzle_hash) == vault_ctx["p2_singleton_message_hash"]
+            ):
+                cat_inner_spend = _build_vault_cat_inner_spend(
+                    sdk=sdk, clvm=clvm, delegated=delegated, vault_ctx=vault_ctx
+                )
+            else:
+                if not isinstance(p2_puzzle_hash, bytes):
+                    return None, "missing_p2_puzzle_hash_for_pending_spend"
+                synthetic_sk = synthetic_sk_by_puzzle_hash.get(bytes(p2_puzzle_hash))
+                if synthetic_sk is None:
+                    return None, "missing_signing_key_for_pending_spend"
+                cat_inner_spend = clvm.standard_spend(synthetic_sk.public_key(), delegated)
+            pending_cat_spends.append(sdk.CatSpend(pending_cat, cat_inner_spend))
+            continue
+        try:
+            signing_puzzle_hash = pending_spend.p2_puzzle_hash()
+        except Exception:
+            signing_puzzle_hash = coin.puzzle_hash
+        synthetic_sk = synthetic_sk_by_puzzle_hash.get(signing_puzzle_hash)
+        if synthetic_sk is None:
+            return None, "missing_signing_key_for_pending_spend"
+        clvm.spend_standard_coin(coin, synthetic_sk.public_key(), delegated)
+    if pending_cat_spends:
+        clvm.spend_cats(pending_cat_spends)
+    return clvm.coin_spends(), None
+
+
 def _build_offer_spend_bundle(
     *,
     sdk: Any,
@@ -1210,49 +1263,16 @@ def _build_offer_spend_bundle(
 
         deltas = spends.apply(actions)
         finished = spends.prepare(deltas)
-        pending_cat_spends: list[Any] = []
-        for pending_spend in finished.pending_spends():
-            coin = pending_spend.coin()
-            pending_cat = None
-            try:
-                pending_cat = pending_spend.as_cat()
-            except Exception:
-                pending_cat = None
-            delegated = clvm.delegated_spend(pending_spend.conditions())
-            if pending_cat is not None:
-                p2_puzzle_hash = None
-                try:
-                    p2_puzzle_hash = pending_spend.p2_puzzle_hash()
-                except Exception:
-                    p2_puzzle_hash = getattr(pending_cat.info, "p2_puzzle_hash", coin.puzzle_hash)
-                if (
-                    vault_ctx is not None
-                    and isinstance(p2_puzzle_hash, bytes)
-                    and bytes(p2_puzzle_hash) == vault_ctx["p2_singleton_message_hash"]
-                ):
-                    cat_inner_spend = _build_vault_cat_inner_spend(
-                        sdk=sdk, clvm=clvm, delegated=delegated, vault_ctx=vault_ctx
-                    )
-                else:
-                    if not isinstance(p2_puzzle_hash, bytes):
-                        return None, "missing_p2_puzzle_hash_for_pending_spend"
-                    synthetic_sk = synthetic_sk_by_puzzle_hash.get(bytes(p2_puzzle_hash))
-                    if synthetic_sk is None:
-                        return None, "missing_signing_key_for_pending_spend"
-                    cat_inner_spend = clvm.standard_spend(synthetic_sk.public_key(), delegated)
-                pending_cat_spends.append(sdk.CatSpend(pending_cat, cat_inner_spend))
-                continue
-            try:
-                signing_puzzle_hash = pending_spend.p2_puzzle_hash()
-            except Exception:
-                signing_puzzle_hash = coin.puzzle_hash
-            synthetic_sk = synthetic_sk_by_puzzle_hash.get(signing_puzzle_hash)
-            if synthetic_sk is None:
-                return None, "missing_signing_key_for_pending_spend"
-            clvm.spend_standard_coin(coin, synthetic_sk.public_key(), delegated)
-        if pending_cat_spends:
-            clvm.spend_cats(pending_cat_spends)
-        coin_spends = clvm.coin_spends()
+        coin_spends, spend_error = _materialize_coin_spends_from_finished(
+            sdk=sdk,
+            clvm=clvm,
+            finished=finished,
+            synthetic_sk_by_puzzle_hash=synthetic_sk_by_puzzle_hash,
+            vault_ctx=vault_ctx,
+        )
+        if spend_error is not None:
+            return None, spend_error
+        assert coin_spends is not None
     except Exception as exc:
         return None, f"build_offer_spend_bundle_error:{exc}"
 
@@ -1322,6 +1342,269 @@ def _broadcast_spend_bundle(*, sdk: Any, spend_bundle_hex: str, network: str) ->
         "reason": str(response.get("status", "submitted")),
         "operation_id": tx_id,
     }
+
+
+def _coin_id_set(raw_values: Any) -> set[str]:
+    if not isinstance(raw_values, list):
+        return set()
+    values: set[str] = set()
+    for value in raw_values:
+        parsed = _normalize_hex_any(str(value))
+        if parsed:
+            values.add(parsed)
+    return values
+
+
+def _insufficient_xch_fee_balance_error(
+    *, xch_coins: list[Any], required_fee_mojos: int
+) -> str | None:
+    if int(required_fee_mojos) <= 0:
+        return None
+    available = sum(int(getattr(coin, "amount", 0)) for coin in xch_coins)
+    if available < int(required_fee_mojos):
+        return (
+            "insufficient_xch_fee_balance_for_mixed_split:"
+            f"required={int(required_fee_mojos)}:available={available}"
+        )
+    return None
+
+
+def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None, str | None]:
+    key_id = str(payload.get("key_id", "")).strip()
+    network = str(payload.get("network", "")).strip()
+    receive_address = str(payload.get("receive_address", "")).strip()
+    keyring_yaml_path = str(payload.get("keyring_yaml_path", "")).strip()
+    asset_id = str(payload.get("asset_id", "")).strip().lower()
+    if not key_id or not network or not receive_address:
+        return None, "missing_key_or_network_or_address"
+    if not keyring_yaml_path:
+        return None, "missing_keyring_yaml_path"
+    if not asset_id:
+        return None, "missing_asset_id"
+
+    raw_outputs = payload.get("output_amounts_base_units", [])
+    if not isinstance(raw_outputs, list) or not raw_outputs:
+        return None, "missing_output_amounts"
+    output_amounts: list[int] = []
+    for value in raw_outputs:
+        amount = int(value)
+        if amount <= 0:
+            return None, "invalid_output_amount"
+        output_amounts.append(amount)
+    fee_mojos = int(payload.get("fee_mojos", 0))
+    if fee_mojos < 0:
+        return None, "invalid_fee_mojos"
+
+    try:
+        sdk = _import_sdk()
+    except Exception as exc:
+        return None, f"wallet_sdk_import_error:{exc}"
+
+    requested_coin_ids = _coin_id_set(payload.get("selected_coin_ids", []))
+    target_total = sum(output_amounts)
+    receive_puzzle_hash = sdk.Address.decode(receive_address).puzzle_hash
+
+    offered_selected_xch: list[Any] = []
+    offered_selected_cats: list[Any] = []
+    fee_selected_xch: list[Any] = []
+    selected_coin_entries: list[dict[str, Any]] = []
+
+    if asset_id in _XCH_LIKE_ASSETS:
+        xch_coins = _list_unspent_xch_coins(
+            sdk=sdk, receive_address=receive_address, network=network
+        )
+        if requested_coin_ids:
+            xch_coins = [c for c in xch_coins if sdk.to_hex(c.coin_id()) in requested_coin_ids]
+        if not xch_coins:
+            return None, "no_unspent_xch_coins_for_mixed_split"
+        required_total = target_total + fee_mojos
+        try:
+            offered_selected_xch = sdk.select_coins(xch_coins, required_total)
+        except Exception as exc:
+            return None, f"mixed_split_coin_selection_failed:{exc}"
+    else:
+        if requested_coin_ids:
+            offered_selected_cats = _list_unspent_cat_coins_by_ids(
+                sdk=sdk,
+                network=network,
+                coin_ids=sorted(requested_coin_ids),
+            )
+        else:
+            offered_selected_cats = _list_unspent_cat_coins(
+                sdk=sdk,
+                receive_address=receive_address,
+                network=network,
+                asset_id=asset_id,
+            )
+        if not offered_selected_cats:
+            return None, "no_unspent_cat_coins_for_mixed_split"
+        offered_selected_cats = _select_cats(offered_selected_cats, target_total)
+        if not offered_selected_cats:
+            return None, "insufficient_cat_coins_for_mixed_split"
+        if fee_mojos > 0:
+            xch_coins = _list_unspent_xch_coins(
+                sdk=sdk, receive_address=receive_address, network=network
+            )
+            fee_balance_error = _insufficient_xch_fee_balance_error(
+                xch_coins=xch_coins,
+                required_fee_mojos=fee_mojos,
+            )
+            if fee_balance_error is not None:
+                return None, fee_balance_error
+            try:
+                fee_selected_xch = sdk.select_coins(xch_coins, fee_mojos)
+            except Exception as exc:
+                return None, f"mixed_split_fee_coin_selection_failed:{exc}"
+
+    offered_total = 0
+    for coin in offered_selected_xch:
+        amount = int(coin.amount)
+        offered_total += amount
+        selected_coin_entries.append(
+            {
+                "coin_id": sdk.to_hex(coin.coin_id()),
+                "parent_coin_info": sdk.to_hex(coin.parent_coin_info),
+                "puzzle_hash": sdk.to_hex(coin.puzzle_hash),
+                "amount": amount,
+                "p2_puzzle_hash": sdk.to_hex(coin.puzzle_hash),
+            }
+        )
+    for cat in offered_selected_cats:
+        amount = int(cat.coin.amount)
+        offered_total += amount
+        selected_coin_entries.append(
+            {
+                "coin_id": sdk.to_hex(cat.coin.coin_id()),
+                "parent_coin_info": sdk.to_hex(cat.coin.parent_coin_info),
+                "puzzle_hash": sdk.to_hex(cat.coin.puzzle_hash),
+                "amount": amount,
+                "p2_puzzle_hash": sdk.to_hex(cat.info.p2_puzzle_hash),
+            }
+        )
+    fee_xch_total = 0
+    for coin in fee_selected_xch:
+        amount = int(coin.amount)
+        fee_xch_total += amount
+        selected_coin_entries.append(
+            {
+                "coin_id": sdk.to_hex(coin.coin_id()),
+                "parent_coin_info": sdk.to_hex(coin.parent_coin_info),
+                "puzzle_hash": sdk.to_hex(coin.puzzle_hash),
+                "amount": amount,
+                "p2_puzzle_hash": sdk.to_hex(coin.puzzle_hash),
+            }
+        )
+
+    if offered_total < target_total:
+        return None, "insufficient_offered_total_for_mixed_split"
+    if asset_id not in _XCH_LIKE_ASSETS and fee_mojos > fee_xch_total:
+        return None, "insufficient_fee_coin_total_for_mixed_split"
+
+    selected_coin_puzzle_hashes = {
+        _hex_to_bytes(str(item["p2_puzzle_hash"])) for item in selected_coin_entries
+    }
+    vault_ctx, vault_ctx_error = _resolve_local_vault_offer_context(
+        sdk=sdk,
+        payload=payload,
+        network=network,
+    )
+    if vault_ctx_error is not None:
+        return None, vault_ctx_error
+    if vault_ctx is not None and fee_xch_total > 0:
+        # Local vault mixed-split + explicit fee is not supported yet. Caller
+        # falls back to cloud-wallet offer-time split behavior on this error.
+        return None, "mixed_split_vault_with_fee_not_supported"
+    if vault_ctx is None:
+        synthetic_sk_by_puzzle_hash, additional_data, ctx_err = _load_signing_context(
+            sdk=sdk,
+            keyring_yaml_path=keyring_yaml_path,
+            key_id=key_id,
+            network=network,
+            selected_coin_puzzle_hashes=selected_coin_puzzle_hashes,
+        )
+        if ctx_err is not None:
+            return None, ctx_err
+        assert synthetic_sk_by_puzzle_hash is not None
+        assert additional_data is not None
+    else:
+        synthetic_sk_by_puzzle_hash = {}
+        additional_data = _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK.get(network)
+        if additional_data is None:
+            return None, "unsupported_network_for_signing"
+
+    try:
+        clvm = sdk.Clvm()
+        spends = sdk.Spends(clvm, receive_puzzle_hash)
+        for coin in offered_selected_xch:
+            spends.add_xch(coin)
+        for cat in offered_selected_cats:
+            spends.add_cat(cat)
+        for fee_coin in fee_selected_xch:
+            spends.add_xch(fee_coin)
+
+        actions: list[Any] = []
+        asset_sdk_id = _asset_id_to_sdk_id(sdk=sdk, asset_id=asset_id)
+        for amount in output_amounts:
+            actions.append(sdk.Action.send(asset_sdk_id, receive_puzzle_hash, int(amount), None))
+        offered_change = offered_total - target_total
+        if asset_id in _XCH_LIKE_ASSETS:
+            offered_change -= fee_mojos
+        if offered_change > 0:
+            actions.append(
+                sdk.Action.send(asset_sdk_id, receive_puzzle_hash, int(offered_change), None)
+            )
+        if fee_xch_total > 0:
+            xch_change = fee_xch_total - fee_mojos
+            if xch_change > 0:
+                actions.append(
+                    sdk.Action.send(sdk.Id.xch(), receive_puzzle_hash, int(xch_change), None)
+                )
+
+        deltas = spends.apply(actions)
+        finished = spends.prepare(deltas)
+        coin_spends, spend_error = _materialize_coin_spends_from_finished(
+            sdk=sdk,
+            clvm=clvm,
+            finished=finished,
+            synthetic_sk_by_puzzle_hash=synthetic_sk_by_puzzle_hash,
+            vault_ctx=vault_ctx,
+        )
+        if spend_error is not None:
+            return None, spend_error
+        assert coin_spends is not None
+    except Exception as exc:
+        return None, f"build_mixed_split_spend_bundle_error:{exc}"
+
+    aggregate_sig, sign_err = _sign_and_aggregate(
+        sdk=sdk,
+        coin_spends=coin_spends,
+        synthetic_sk_by_puzzle_hash=synthetic_sk_by_puzzle_hash,
+        additional_data=additional_data,
+        skip_bls_signing=vault_ctx is not None and fee_xch_total == 0,
+    )
+    if sign_err is not None:
+        return None, sign_err
+    spend_bundle = sdk.SpendBundle(coin_spends, aggregate_sig)
+    return sdk.to_hex(spend_bundle.to_bytes()), None
+
+
+def sign_and_broadcast_mixed_split(payload: dict[str, Any]) -> dict[str, Any]:
+    spend_bundle_hex, error = _build_mixed_split_spend_bundle(payload)
+    if spend_bundle_hex is None:
+        return {"status": "skipped", "reason": f"signing_failed:{error}", "operation_id": None}
+    try:
+        sdk = _import_sdk()
+    except Exception as exc:
+        return {
+            "status": "skipped",
+            "reason": f"wallet_sdk_import_error:{exc}",
+            "operation_id": None,
+        }
+    return _broadcast_spend_bundle(
+        sdk=sdk,
+        spend_bundle_hex=spend_bundle_hex,
+        network=str(payload.get("network", "")).strip(),
+    )
 
 
 # ---------------------------------------------------------------------------

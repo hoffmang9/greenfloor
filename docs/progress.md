@@ -1,5 +1,46 @@
 # Progress Log
 
+## 2026-03-02 (Offer bootstrap review hardening follow-ups)
+
+- Added timeout + explicit wait error surfacing for bootstrap confirmation waits in `greenfloor/cli/manager.py`:
+  - `_wait_for_mempool_then_confirmation` now accepts `timeout_seconds`,
+  - `_ensure_offer_bootstrap_denominations` now returns structured `bootstrap_wait_failed` with `wait_error` and fallback metadata when wait phase fails.
+- Moved `sign_and_broadcast_mixed_split` import to module scope in manager to avoid repeated hot-path import.
+- Clarified bootstrap fee-cost policy and fallback semantics in manager comments:
+  - documented output-fanout fee-cost heuristic intent,
+  - documented intentional behavior where `coin_ops.minimum_fee_mojos: 0` permits zero-fee fallback when Coinset fee advice is unavailable.
+- Hardened planner and wait-path assumptions:
+  - `greenfloor/offer_bootstrap.py` now supports both dict-shaped and object-shaped coin records (`id`/`amount`),
+  - bootstrap wait coin scanning now supports optional `asset_id` filtering and bootstrap path now reuses previously fetched asset-scoped coin IDs instead of issuing a second full-wallet inventory read.
+- Added explicit fee-funding guardrails for mixed bootstrap signing in `greenfloor/signing.py`:
+  - new XCH fee-balance check returns `insufficient_xch_fee_balance_for_mixed_split:required=<...>:available=<...>` before spend construction,
+  - manager now emits targeted operator guidance when this condition occurs,
+  - documented vault+explicit-fee local mixed-split limitation and expected cloud-wallet fallback behavior.
+- Expanded deterministic coverage:
+  - `tests/test_manager_post_offer.py`: wait-error surfacing, asset-filtered mempool/confirmation detection, fee-balance guidance path.
+  - `tests/test_offer_bootstrap.py`: object-shaped coin input support and clarified ladder-count semantics around exact-size matches.
+  - `tests/test_signing.py`: `_coin_id_set` prefixed/unprefixed hex behavior and XCH fee-balance helper checks.
+
+## 2026-03-02 (Offer bootstrap denomination preflight for build-and-post-offer)
+
+- Implemented denomination bootstrap preflight in Cloud Wallet `build-and-post-offer` path (`greenfloor/cli/manager.py`):
+  - before each create-offer attempt, manager now checks market `ladders.sell` deficits using spendable inventory and plans a mixed-output bootstrap when under target+buffer.
+  - preflight result is included in command JSON output under `bootstrap_actions`.
+  - when local mixed bootstrap cannot run safely, manager falls back to Cloud Wallet offer-time split with `split_input_coins_fee` populated from bootstrap fee resolution.
+- Added new deterministic planner module `greenfloor/offer_bootstrap.py`:
+  - computes exact-match per-size deficits and plans a one-transaction mixed output set (`X*1`, `Y*10`, `Z*100`, etc.) from a qualifying large source coin.
+- Extended Coinset fee recommendation support for larger split fanout (`greenfloor/adapters/coinset.py`):
+  - `get_fee_estimate` / `get_conservative_fee_estimate` now support dynamic `cost` and optional `spend_count`.
+  - manager fee resolver now accepts size-aware fee inputs while preserving compatibility with older test doubles/signatures.
+- Added local mixed-output signing + broadcast entrypoint (`greenfloor/signing.py`):
+  - new `sign_and_broadcast_mixed_split(payload)` builds and broadcasts mixed-output split transactions.
+  - supports XCH and CAT spend assembly with existing CAT/vault pending-spend materialization paths; includes deterministic fallback/error contracts.
+- Added deterministic coverage:
+  - new `tests/test_offer_bootstrap.py` for mixed-output planning behavior.
+  - new manager regression for fallback split fee propagation to Cloud Wallet create-offer.
+  - new signing regressions for mixed-split broadcast success/failure wrappers.
+  - targeted validation: `184 passed` across `test_offer_bootstrap`, `test_signing`, `test_manager_post_offer`, and `test_coinset_adapter`.
+
 ## 2026-03-02 (Parallel market processing with failure isolation)
 
 - Added optional daemon market parallelism via `runtime.parallel_markets` (default `false`) in `program.yaml`.

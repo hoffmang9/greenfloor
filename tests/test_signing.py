@@ -287,6 +287,97 @@ def test_sign_and_broadcast_calls_broadcast(monkeypatch) -> None:
     assert broadcast_called["network"] == "testnet11"
 
 
+def test_sign_and_broadcast_mixed_split_propagates_signing_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        signing_mod,
+        "_build_mixed_split_spend_bundle",
+        lambda _payload: (None, "missing_output_amounts"),
+    )
+    result = signing_mod.sign_and_broadcast_mixed_split(
+        {
+            "key_id": "k1",
+            "network": "mainnet",
+            "receive_address": "xch1abc",
+            "keyring_yaml_path": "/tmp/k.yaml",
+            "asset_id": "xch",
+            "output_amounts_base_units": [1],
+        }
+    )
+    assert result["status"] == "skipped"
+    assert result["reason"] == "signing_failed:missing_output_amounts"
+    assert result["operation_id"] is None
+
+
+def test_sign_and_broadcast_mixed_split_calls_broadcast(monkeypatch) -> None:
+    broadcast_called = {}
+
+    monkeypatch.setattr(
+        signing_mod, "_build_mixed_split_spend_bundle", lambda _payload: ("aabb", None)
+    )
+
+    class _FakeSdk:
+        pass
+
+    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: _FakeSdk)
+
+    def _fake_broadcast(*, sdk, spend_bundle_hex, network):
+        broadcast_called["hex"] = spend_bundle_hex
+        broadcast_called["network"] = network
+        return {"status": "executed", "reason": "submitted", "operation_id": "tx-mixed"}
+
+    monkeypatch.setattr(signing_mod, "_broadcast_spend_bundle", _fake_broadcast)
+    result = signing_mod.sign_and_broadcast_mixed_split(
+        {
+            "key_id": "k1",
+            "network": "testnet11",
+            "receive_address": "txch1abc",
+            "keyring_yaml_path": "/tmp/k.yaml",
+            "asset_id": "xch",
+            "output_amounts_base_units": [1, 10, 100],
+        }
+    )
+    assert result["status"] == "executed"
+    assert result["operation_id"] == "tx-mixed"
+    assert broadcast_called["hex"] == "aabb"
+    assert broadcast_called["network"] == "testnet11"
+
+
+def test_insufficient_xch_fee_balance_error_when_fee_exceeds_total() -> None:
+    class _Coin:
+        def __init__(self, amount: int) -> None:
+            self.amount = amount
+
+    err = signing_mod._insufficient_xch_fee_balance_error(
+        xch_coins=[_Coin(50), _Coin(20)],
+        required_fee_mojos=100,
+    )
+    assert err == "insufficient_xch_fee_balance_for_mixed_split:required=100:available=70"
+
+
+def test_insufficient_xch_fee_balance_error_none_when_sufficient() -> None:
+    class _Coin:
+        def __init__(self, amount: int) -> None:
+            self.amount = amount
+
+    err = signing_mod._insufficient_xch_fee_balance_error(
+        xch_coins=[_Coin(50), _Coin(70)],
+        required_fee_mojos=100,
+    )
+    assert err is None
+
+
+def test_coin_id_set_accepts_hex_with_or_without_prefix() -> None:
+    ids = signing_mod._coin_id_set(
+        [
+            "0x" + ("ab" * 32),
+            "ab" * 32,
+            "0x" + ("cd" * 32),
+            "not-hex",
+        ]
+    )
+    assert ids == {("ab" * 32), ("cd" * 32)}
+
+
 def test_build_additions_from_plan_split() -> None:
     additions, error = signing_mod._build_additions_from_plan(
         plan={"op_type": "split", "size_base_units": 10, "op_count": 2},

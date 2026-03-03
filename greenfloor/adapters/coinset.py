@@ -240,17 +240,38 @@ class CoinsetAdapter:
             return {"success": False, "error": "invalid_response_payload"}
         return payload
 
-    def get_fee_estimate(self, *, target_times: list[int] | None = None) -> dict[str, Any]:
+    def get_fee_estimate(
+        self,
+        *,
+        target_times: list[int] | None = None,
+        cost: int = 1_000_000,
+        spend_count: int | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "target_times": target_times or [60, 300, 600],
+            "cost": int(cost),
+        }
+        if spend_count is not None and int(spend_count) > 0:
+            body["spend_count"] = int(spend_count)
         payload = self._post_json(
             "get_fee_estimate",
-            {"target_times": target_times or [60, 300, 600], "cost": 1_000_000},
+            body,
         )
         if not isinstance(payload, dict):
             return {"success": False, "error": "invalid_response_payload"}
         return payload
 
-    def get_conservative_fee_estimate(self) -> int | None:
-        payload = self.get_fee_estimate(target_times=[300, 600, 1200])
+    def get_conservative_fee_estimate(
+        self,
+        *,
+        cost: int = 1_000_000,
+        spend_count: int | None = None,
+    ) -> int | None:
+        payload = self.get_fee_estimate(
+            target_times=[300, 600, 1200],
+            cost=int(cost),
+            spend_count=spend_count,
+        )
         if not payload.get("success", False):
             return None
         estimates = payload.get("estimates")

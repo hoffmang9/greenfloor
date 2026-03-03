@@ -3632,6 +3632,55 @@ def test_wait_for_mempool_ignores_coins_in_initial_set(monkeypatch) -> None:
     assert lc_call[0] == 2
 
 
+def test_wait_for_mempool_filters_to_requested_asset(monkeypatch) -> None:
+    import time as time_module
+
+    from greenfloor.cli.manager import _wait_for_mempool_then_confirmation
+
+    class _FakeWallet:
+        @staticmethod
+        def list_coins(*, include_pending=True):
+            _ = include_pending
+            return [
+                {
+                    "id": "other-coin",
+                    "name": "other-name",
+                    "state": "CONFIRMED",
+                    "asset": {"id": "xch"},
+                },
+                {
+                    "id": "target-coin",
+                    "name": "target-name",
+                    "state": "CONFIRMED",
+                    "asset": {"id": "asset_target"},
+                },
+            ]
+
+    elapsed_seq = iter([0.0, 0.0])
+    monkeypatch.setattr(time_module, "sleep", lambda _: None)
+    monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._coinset_reconcile_coin_state",
+        lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._watch_reorg_risk_with_coinset",
+        lambda **kwargs: [{"event": "reorg_watch_complete"}],
+    )
+
+    events = _wait_for_mempool_then_confirmation(
+        wallet=_FakeWallet(),  # type: ignore[arg-type]
+        network="mainnet",
+        initial_coin_ids=set(),
+        asset_id="asset_target",
+        mempool_warning_seconds=300,
+        confirmation_warning_seconds=900,
+    )
+    confirmed = [e for e in events if e["event"] == "confirmed"]
+    assert len(confirmed) == 1
+    assert confirmed[0]["coin_name"] == "target-name"
+
+
 def test_watch_reorg_risk_waits_until_additional_blocks(monkeypatch) -> None:
     import time as time_module
 
@@ -3852,8 +3901,9 @@ def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured(
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_offer_text_for_request",
-        lambda payload: local_builder_calls.__setitem__(0, local_builder_calls[0] + 1)
-        or "offer1abc",
+        lambda payload: (
+            local_builder_calls.__setitem__(0, local_builder_calls[0] + 1) or "offer1abc"
+        ),
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._kms_offer_signing_configured", lambda _program: True
@@ -3902,8 +3952,9 @@ def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured_large_si
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_offer_text_for_request",
-        lambda payload: local_builder_calls.__setitem__(0, local_builder_calls[0] + 1)
-        or "offer1abc",
+        lambda payload: (
+            local_builder_calls.__setitem__(0, local_builder_calls[0] + 1) or "offer1abc"
+        ),
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._kms_offer_signing_configured", lambda _program: True
@@ -3952,6 +4003,7 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     _write_program_with_cloud_wallet(program_path)
     _write_markets_with_ladder(markets_path)
     prog, mkt = _load_program_and_market(program_path, markets_path)
+    prog.home_dir = str(tmp_path)
     prog.home_dir = str(tmp_path)
     reset_concurrent_log_handlers(module=manager_mod)
 
@@ -4529,6 +4581,239 @@ def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
     assert payload["publish_failures"] == 0
     assert payload["results"] == []
     assert len(payload["built_offers_preview"]) == 1
+
+
+def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
+
+    program_path = tmp_path / "program.yaml"
+    markets_path = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program_path)
+    _write_markets_with_ladder(markets_path)
+    prog, mkt = _load_program_and_market(program_path, markets_path)
+
+    create_offer_calls: list[int] = []
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def create_offer(
+            *,
+            offered,
+            requested,
+            fee,
+            expires_at_iso,
+            split_input_coins=True,
+            split_input_coins_fee=0,
+        ):
+            _ = offered, requested, fee, expires_at_iso, split_input_coins
+            create_offer_calls.append(int(split_input_coins_fee))
+            return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
+
+        @staticmethod
+        def get_wallet():
+            return {"offers": [{"bech32": "offer1bootstrapfee"}]}
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str):
+            pass
+
+        @staticmethod
+        def post_offer(_offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = drop_only, claim_rewards
+            return {"success": True, "id": "dexie-bootstrap-1"}
+
+        @staticmethod
+        def get_offer(offer_id: str) -> dict[str, object]:
+            return {"success": True, "offer": {"id": str(offer_id), "status": 0}}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._ensure_offer_bootstrap_denominations",
+        lambda **_kwargs: {
+            "status": "failed",
+            "reason": "bootstrap_failed_for_test",
+            "fallback_to_cloud_wallet_offer_split": True,
+            "fee_mojos": 123,
+        },
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
+        lambda **kwargs: ("SUBMITTED", []),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        lambda **kwargs: "offer1bootstrapfee",
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        lambda _offer: None,
+    )
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+
+    code, _ = _build_and_post_offer_cloud_wallet(
+        program=prog,
+        market=mkt,
+        size_base_units=10,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        quote_price=0.003,
+        dry_run=False,
+    )
+
+    assert code == 0
+    assert create_offer_calls == [123]
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["bootstrap_actions"][0]["status"] == "failed"
+
+
+def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    keyring_path = tmp_path / "keyring.yaml"
+    keyring_path.write_text("keys: []\n", encoding="utf-8")
+
+    class _Program:
+        app_network = "mainnet"
+        coin_ops_minimum_fee_mojos = 0
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "k"
+        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+        cloud_wallet_kms_key_id = ""
+        cloud_wallet_kms_region = ""
+        cloud_wallet_kms_public_key_hex = ""
+
+    class _LadderEntry:
+        size_base_units = 1
+        target_count = 2
+        split_buffer_count = 0
+
+    class _Market:
+        ladders = {"sell": [_LadderEntry()]}
+        receive_address = "xch1test"
+        base_asset = "xch"
+
+    class _Wallet:
+        @staticmethod
+        def list_coins(*, asset_id=None, include_pending=False):
+            _ = asset_id, include_pending
+            return [{"id": "coin_big", "amount": 10, "state": "CONFIRMED"}]
+
+    class _Plan:
+        source_coin_id = "coin_big"
+        source_amount = 10
+        output_amounts_base_units = [1, 1]
+        total_output_amount = 2
+        change_amount = 8
+        deficits = []
+
+    monkeypatch.setattr("greenfloor.cli.manager.plan_bootstrap_mixed_outputs", lambda **_k: _Plan())
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_bootstrap_split_fee",
+        lambda **_k: (0, "coinset_conservative", None),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager.sign_and_broadcast_mixed_split",
+        lambda _payload: {"status": "executed", "operation_id": "tx-1"},
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
+        lambda **_k: (_ for _ in ()).throw(RuntimeError("confirmation_wait_timeout")),
+    )
+
+    result = manager_mod._ensure_offer_bootstrap_denominations(
+        program=_Program(),
+        market=_Market(),
+        wallet=cast(CloudWalletAdapter, _Wallet()),
+        resolved_base_asset_id="xch",
+        key_id="key-main-1",
+        keyring_yaml_path=str(keyring_path),
+    )
+    assert result["status"] == "failed"
+    assert result["reason"] == "bootstrap_wait_failed"
+    assert result["wait_error"] == "confirmation_wait_timeout"
+    assert result["fallback_to_cloud_wallet_offer_split"] is True
+
+
+def test_ensure_offer_bootstrap_denominations_reports_fee_balance_guidance(
+    monkeypatch, tmp_path: Path
+) -> None:
+    keyring_path = tmp_path / "keyring.yaml"
+    keyring_path.write_text("keys: []\n", encoding="utf-8")
+
+    class _Program:
+        app_network = "mainnet"
+        coin_ops_minimum_fee_mojos = 0
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "k"
+        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+        cloud_wallet_kms_key_id = ""
+        cloud_wallet_kms_region = ""
+        cloud_wallet_kms_public_key_hex = ""
+
+    class _LadderEntry:
+        size_base_units = 1
+        target_count = 2
+        split_buffer_count = 0
+
+    class _Market:
+        ladders = {"sell": [_LadderEntry()]}
+        receive_address = "xch1test"
+        base_asset = "xch"
+
+    class _Wallet:
+        @staticmethod
+        def list_coins(*, asset_id=None, include_pending=False):
+            _ = asset_id, include_pending
+            return [{"id": "coin_big", "amount": 10, "state": "CONFIRMED"}]
+
+    class _Plan:
+        source_coin_id = "coin_big"
+        source_amount = 10
+        output_amounts_base_units = [1, 1]
+        total_output_amount = 2
+        change_amount = 8
+        deficits = []
+
+    monkeypatch.setattr("greenfloor.cli.manager.plan_bootstrap_mixed_outputs", lambda **_k: _Plan())
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_bootstrap_split_fee",
+        lambda **_k: (100, "coinset_conservative", None),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager.sign_and_broadcast_mixed_split",
+        lambda _payload: {
+            "status": "skipped",
+            "reason": "insufficient_xch_fee_balance_for_mixed_split:required=100:available=0",
+        },
+    )
+
+    result = manager_mod._ensure_offer_bootstrap_denominations(
+        program=_Program(),
+        market=_Market(),
+        wallet=cast(CloudWalletAdapter, _Wallet()),
+        resolved_base_asset_id="xch",
+        key_id="key-main-1",
+        keyring_yaml_path=str(keyring_path),
+    )
+    assert result["status"] == "failed"
+    assert "insufficient_xch_fee_balance_for_mixed_split" in str(result["reason"])
+    assert "insufficient spendable xch balance for bootstrap fee" in str(
+        result["operator_guidance"]
+    )
 
 
 def test_poll_offer_artifact_until_available_returns_new_offer(monkeypatch) -> None:
