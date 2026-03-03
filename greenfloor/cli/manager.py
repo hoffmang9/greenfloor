@@ -1673,6 +1673,7 @@ def _wait_for_mempool_then_confirmation(
     initial_coin_ids: set[str],
     mempool_warning_seconds: int,
     confirmation_warning_seconds: int,
+    timeout_seconds: int | None = None,
 ) -> list[dict[str, str]]:
     events: list[dict[str, str]] = []
     start = time.monotonic()
@@ -1754,6 +1755,8 @@ def _wait_for_mempool_then_confirmation(
         if elapsed >= next_heartbeat:
             print(".", end="", file=sys.stderr, flush=True)
             next_heartbeat += 5
+        if timeout_seconds is not None and timeout_seconds > 0 and elapsed >= timeout_seconds:
+            raise RuntimeError("confirmation_wait_timeout")
         if not seen_pending and elapsed >= next_mempool_warning:
             events.append(
                 {
@@ -2611,13 +2614,37 @@ def _ensure_offer_bootstrap_denominations(
             },
         }
 
-    wait_events = _wait_for_mempool_then_confirmation(
-        wallet=wallet,
-        network=str(program.app_network),
-        initial_coin_ids=existing_coin_ids,
-        mempool_warning_seconds=5 * 60,
-        confirmation_warning_seconds=15 * 60,
-    )
+    wait_events: list[dict[str, str]] = []
+    wait_error: str | None = None
+    try:
+        wait_events = _wait_for_mempool_then_confirmation(
+            wallet=wallet,
+            network=str(program.app_network),
+            initial_coin_ids=existing_coin_ids,
+            mempool_warning_seconds=5 * 60,
+            confirmation_warning_seconds=15 * 60,
+            timeout_seconds=20 * 60,
+        )
+    except Exception as exc:
+        wait_error = str(exc)
+        return {
+            "status": "failed",
+            "reason": "bootstrap_wait_failed",
+            "wait_error": wait_error,
+            "fallback_to_cloud_wallet_offer_split": True,
+            "fee_mojos": int(fee_mojos),
+            "fee_source": fee_source,
+            "fee_lookup_error": fee_lookup_error,
+            "plan": {
+                "source_coin_id": bootstrap_plan.source_coin_id,
+                "source_amount": bootstrap_plan.source_amount,
+                "output_count": len(bootstrap_plan.output_amounts_base_units),
+                "total_output_amount": bootstrap_plan.total_output_amount,
+                "change_amount": bootstrap_plan.change_amount,
+            },
+            "operation_id": str(bootstrap_result.get("operation_id", "")).strip(),
+            "wait_events": wait_events,
+        }
     refreshed_asset_coins = wallet.list_coins(asset_id=resolved_base_asset_id, include_pending=True)
     refreshed_spendable = [coin for coin in refreshed_asset_coins if _is_spendable_coin(coin)]
     remaining_plan = plan_bootstrap_mixed_outputs(
@@ -2631,6 +2658,7 @@ def _ensure_offer_bootstrap_denominations(
         "fee_mojos": int(fee_mojos),
         "fee_source": fee_source,
         "fee_lookup_error": fee_lookup_error,
+        "wait_error": wait_error,
         "plan": {
             "source_coin_id": bootstrap_plan.source_coin_id,
             "source_amount": bootstrap_plan.source_amount,

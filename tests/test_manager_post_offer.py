@@ -4628,6 +4628,75 @@ def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
     assert payload["bootstrap_actions"][0]["status"] == "failed"
 
 
+def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
+    monkeypatch, tmp_path: Path
+) -> None:
+    keyring_path = tmp_path / "keyring.yaml"
+    keyring_path.write_text("keys: []\n", encoding="utf-8")
+
+    class _Program:
+        app_network = "mainnet"
+        coin_ops_minimum_fee_mojos = 0
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "k"
+        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+        cloud_wallet_kms_key_id = ""
+        cloud_wallet_kms_region = ""
+        cloud_wallet_kms_public_key_hex = ""
+
+    class _LadderEntry:
+        size_base_units = 1
+        target_count = 2
+        split_buffer_count = 0
+
+    class _Market:
+        ladders = {"sell": [_LadderEntry()]}
+        receive_address = "xch1test"
+        base_asset = "xch"
+
+    class _Wallet:
+        @staticmethod
+        def list_coins(*, asset_id=None, include_pending=False):
+            _ = asset_id, include_pending
+            return [{"id": "coin_big", "amount": 10, "state": "CONFIRMED"}]
+
+    class _Plan:
+        source_coin_id = "coin_big"
+        source_amount = 10
+        output_amounts_base_units = [1, 1]
+        total_output_amount = 2
+        change_amount = 8
+        deficits = []
+
+    monkeypatch.setattr("greenfloor.cli.manager.plan_bootstrap_mixed_outputs", lambda **_k: _Plan())
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_bootstrap_split_fee",
+        lambda **_k: (0, "coinset_conservative", None),
+    )
+    monkeypatch.setattr(
+        "greenfloor.signing.sign_and_broadcast_mixed_split",
+        lambda _payload: {"status": "executed", "operation_id": "tx-1"},
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
+        lambda **_k: (_ for _ in ()).throw(RuntimeError("confirmation_wait_timeout")),
+    )
+
+    result = manager_mod._ensure_offer_bootstrap_denominations(
+        program=_Program(),
+        market=_Market(),
+        wallet=cast(CloudWalletAdapter, _Wallet()),
+        resolved_base_asset_id="xch",
+        key_id="key-main-1",
+        keyring_yaml_path=str(keyring_path),
+    )
+    assert result["status"] == "failed"
+    assert result["reason"] == "bootstrap_wait_failed"
+    assert result["wait_error"] == "confirmation_wait_timeout"
+    assert result["fallback_to_cloud_wallet_offer_split"] is True
+
+
 def test_poll_offer_artifact_until_available_returns_new_offer(monkeypatch) -> None:
     wallets = [
         {
