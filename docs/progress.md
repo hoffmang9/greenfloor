@@ -1,5 +1,58 @@
 # Progress Log
 
+## 2026-03-03 (Parallel offer dispatch with asset reservations)
+
+- John-Deere validation + canary verification:
+  - Synced John-Deere runtime repo to branch `feat/parallel-offer-reservations` at commit `8924d2e`.
+  - Ran targeted regression suites on John-Deere: `232 passed` across daemon/reservation/manager/config test files.
+  - Verified daemon singleton lock behavior operationally:
+    - held `state_dir/daemon.lock` via loop-mode lock holder,
+    - `greenfloord --once` correctly exited with lock conflict (`exit_code=3`) and emitted `daemon_lock_conflict` with lock metadata.
+  - Ran real-config `greenfloord --once` canary on John-Deere (`~/.greenfloor/config/*`):
+    - cycle succeeded and posted Dexie offers for active market (`eco492022_sell_wusdbc`) with successful signature submission.
+  - Ran 3-minute loop-mode soak (`timeout 180`) on real config:
+    - expected timeout exit (`124`) with no daemon stderr/stdout anomalies,
+    - audit counters remained healthy (`offer_parallel_fallback` unchanged at `0`, `reservation_expired` unchanged at `0`, `market_cycle_error` unchanged),
+    - `daemon_cycle_summary` and `strategy_offer_execution` continued incrementing during soak.
+
+- Edge-hardening follow-ups completed:
+  - Added singleton daemon instance lock (`state_dir/daemon.lock`) with non-blocking OS file lock semantics (`flock`).
+  - `greenfloord --once` now also acquires the same lock (exits with lock-conflict code when another daemon instance is active) to prevent competing offer/coin activity against a running loop daemon.
+  - Reservation admission now uses resolved Cloud Wallet global asset IDs (same resolver family used by manager offer creation), reducing ID-domain mismatch risk between market config IDs and wallet coin asset IDs.
+  - Reservation requests now include a fee-side XCH bucket (conservative floor via runtime fee config), reducing parallel CAT-offer fee contention races.
+  - Parallel reservation path now fails closed with same-cycle sequential fallback and explicit `offer_parallel_fallback` audit events when reservation/coordinator path raises.
+  - Reservation acquire now executes under SQLite transaction-scoped write lock (`BEGIN IMMEDIATE`) to reduce cross-process check/insert races for shared wallet capacity.
+  - Added inactive-lease retention pruning path in coordinator stale-cleanup flow to bound reservation-ledger growth over time.
+- Added deterministic tests for:
+  - XCH fee-bucket contention rejection,
+  - resolved-asset-ID reservation admission path,
+  - reservation-path exception fallback to sequential cloud-wallet execution.
+  - cross-instance reservation contention with a single winner under shared DB,
+  - atomic reservation acquire success/failure contracts and inactive-lease prune behavior in sqlite store tests.
+
+- Implemented reservation-based parallel cloud-wallet offer dispatch across market workers:
+  - Added persistent reservation lease ledger in `greenfloor/storage/sqlite.py` (`offer_reservation_lease`) with APIs for acquire/release/expire and per-asset reserved totals.
+  - Added thread-safe runtime coordinator in `greenfloor/daemon/reservations.py` (`AssetReservationCoordinator`) to gate concurrent offer admission by `(wallet_id, asset_id)` capacity.
+  - Integrated coordinator into daemon strategy execution in `greenfloor/daemon/main.py`:
+    - optional parallel cloud-wallet action workers behind runtime flags,
+    - reservation acquire before submit and release on terminal execution result,
+    - stale lease cleanup at cycle start.
+- Refactored cloud-wallet posting flow in `greenfloor/cli/manager.py` into explicit phases:
+  - `_cloud_wallet_create_offer_phase`,
+  - `_cloud_wallet_wait_offer_artifact_phase`,
+  - `_cloud_wallet_post_offer_phase`.
+- Added guarded runtime config in `greenfloor/config/models.py`:
+  - `runtime.offer_parallelism_enabled` (default `false`),
+  - `runtime.offer_parallelism_max_workers` (default `4`),
+  - `runtime.reservation_ttl_seconds` (default `300`, min `30`).
+- Added deterministic coverage:
+  - storage lease roundtrip/release/expiry tests in `tests/test_sqlite_store.py`,
+  - daemon contention/release behavior tests in `tests/test_daemon_offer_execution.py`,
+  - manager phase contract tests in `tests/test_manager_post_offer.py`,
+  - runtime config parsing tests in `tests/test_config_models.py`.
+- Validation:
+  - targeted suite passed: `214 passed` across `test_sqlite_store`, `test_config_models`, `test_daemon_offer_execution`, and `test_manager_post_offer`.
+
 ## 2026-03-02 (Offer bootstrap review hardening follow-ups)
 
 - Added timeout + explicit wait error surfacing for bootstrap confirmation waits in `greenfloor/cli/manager.py`:

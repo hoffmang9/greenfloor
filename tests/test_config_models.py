@@ -165,6 +165,9 @@ def test_parse_program_config_minimal_valid() -> None:
     assert cfg.runtime_dry_run is False
     assert cfg.tx_block_trigger_mode == "websocket"
     assert cfg.runtime_parallel_markets is False
+    assert cfg.runtime_offer_parallelism_enabled is False
+    assert cfg.runtime_offer_parallelism_max_workers == 4
+    assert cfg.runtime_reservation_ttl_seconds == 300
     assert cfg.offer_publish_venue == "dexie"
     assert cfg.coin_ops_minimum_fee_mojos == 0
     assert cfg.app_log_level == "INFO"
@@ -246,6 +249,17 @@ def test_parse_program_config_parallel_markets_enabled() -> None:
     raw["runtime"]["parallel_markets"] = True
     cfg = parse_program_config(raw)
     assert cfg.runtime_parallel_markets is True
+
+
+def test_parse_program_config_offer_parallelism_runtime_flags() -> None:
+    raw = _base_program_raw()
+    raw["runtime"]["offer_parallelism_enabled"] = True
+    raw["runtime"]["offer_parallelism_max_workers"] = 2
+    raw["runtime"]["reservation_ttl_seconds"] = 900
+    cfg = parse_program_config(raw)
+    assert cfg.runtime_offer_parallelism_enabled is True
+    assert cfg.runtime_offer_parallelism_max_workers == 2
+    assert cfg.runtime_reservation_ttl_seconds == 900
 
 
 def test_parse_program_config_multiple_keys_in_registry() -> None:

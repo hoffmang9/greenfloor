@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
@@ -16,6 +17,8 @@ from greenfloor.daemon.main import (
     _strategy_config_from_market,
     _update_market_coin_watchlist_from_dexie,
 )
+from greenfloor.daemon.reservations import AssetReservationCoordinator
+from greenfloor.storage.sqlite import SqliteStore
 
 
 class _FakeDexie:
@@ -897,3 +900,453 @@ def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(mon
     assert result["items"][0]["status"] == "skipped"
     assert result["items"][0]["reason"] == "cloud_wallet_post_failed:vault_signing_unavailable"
     assert calls["builder"] == 0
+
+
+def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(
+    monkeypatch, tmp_path
+) -> None:
+    daemon_main._POST_COOLDOWN_UNTIL.clear()
+
+    class _FakeCloudWallet:
+        def list_coins(self, *, include_pending: bool = True):
+            _ = include_pending
+            return [
+                {
+                    "amount": 1500,
+                    "state": "SPENDABLE",
+                    "asset": {"id": "asset"},
+                },
+                {
+                    "amount": 10_000_000,
+                    "state": "SPENDABLE",
+                    "asset": {"id": "xch_asset"},
+                },
+            ]
+
+    monkeypatch.setattr(
+        daemon_main,
+        "_new_cloud_wallet_adapter_for_daemon",
+        lambda _program: _FakeCloudWallet(),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        lambda **_kwargs: ("asset", "xch_asset"),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_cloud_wallet_offer_post_fallback",
+        lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
+    )
+
+    class _Program:
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "UserAuthKey_abc"
+        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+        runtime_offer_parallelism_enabled = True
+        runtime_offer_parallelism_max_workers = 2
+        runtime_reservation_ttl_seconds = 300
+        coin_ops_minimum_fee_mojos = 0
+        coin_ops_split_fee_mojos = 0
+
+    db_path = tmp_path / "reservations.sqlite"
+    coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
+    dexie = _FakeDexie(post_result={"success": True, "id": "offer-parallel"})
+    dexie.visible_offer_ids = {"offer-parallel"}
+    store = _FakeStore()
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=2,
+            pair="usdc",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="no_active_offer_reseed",
+        )
+    ]
+    result = _execute_strategy_actions(
+        market=_market(),
+        strategy_actions=actions,
+        runtime_dry_run=False,
+        xch_price_usd=30.0,
+        dexie=cast(Any, dexie),
+        store=cast(Any, store),
+        publish_venue="dexie",
+        program=_Program(),
+        reservation_coordinator=coordinator,
+    )
+    assert result["planned_count"] == 2
+    assert result["executed_count"] == 1
+    assert any("reservation_insufficient_asset" in str(item["reason"]) for item in result["items"])
+    sqlite_store = SqliteStore(db_path)
+    try:
+        rows = sqlite_store.list_offer_reservation_leases()
+        assert len(rows) == 1
+        assert rows[0]["status"] == "released_success"
+    finally:
+        sqlite_store.close()
+
+
+def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
+    monkeypatch, tmp_path
+) -> None:
+    daemon_main._POST_COOLDOWN_UNTIL.clear()
+
+    class _FakeCloudWallet:
+        def list_coins(self, *, include_pending: bool = True):
+            _ = include_pending
+            return [
+                {
+                    "amount": 5000,
+                    "state": "SPENDABLE",
+                    "asset": {"id": "asset"},
+                },
+                {
+                    "amount": 10_000_000,
+                    "state": "SPENDABLE",
+                    "asset": {"id": "xch_asset"},
+                },
+            ]
+
+    monkeypatch.setattr(
+        daemon_main,
+        "_new_cloud_wallet_adapter_for_daemon",
+        lambda _program: _FakeCloudWallet(),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        lambda **_kwargs: ("asset", "xch_asset"),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_cloud_wallet_offer_post_fallback",
+        lambda **_kwargs: {"success": False, "error": "vault_unavailable"},
+    )
+
+    class _Program:
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "UserAuthKey_abc"
+        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+        runtime_offer_parallelism_enabled = True
+        runtime_offer_parallelism_max_workers = 2
+        runtime_reservation_ttl_seconds = 300
+        coin_ops_minimum_fee_mojos = 0
+        coin_ops_split_fee_mojos = 0
+
+    db_path = tmp_path / "reservations.sqlite"
+    coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
+    dexie = _FakeDexie(post_result={"success": True, "id": "offer-parallel"})
+    store = _FakeStore()
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=1,
+            pair="usdc",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="no_active_offer_reseed",
+        )
+    ]
+    result = _execute_strategy_actions(
+        market=_market(),
+        strategy_actions=actions,
+        runtime_dry_run=False,
+        xch_price_usd=30.0,
+        dexie=cast(Any, dexie),
+        store=cast(Any, store),
+        publish_venue="dexie",
+        program=_Program(),
+        reservation_coordinator=coordinator,
+    )
+    assert result["executed_count"] == 0
+    sqlite_store = SqliteStore(db_path)
+    try:
+        rows = sqlite_store.list_offer_reservation_leases()
+        assert len(rows) == 1
+        assert rows[0]["status"] == "released_failed"
+    finally:
+        sqlite_store.close()
+
+
+def test_reservation_coordinator_expires_stale_leases(tmp_path) -> None:
+    db_path = tmp_path / "reservations.sqlite"
+    coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=30)
+    store = SqliteStore(db_path)
+    try:
+        store.add_offer_reservation_lease(
+            reservation_id="res-stale",
+            market_id="m1",
+            wallet_id="Wallet_abc",
+            asset_amounts={"asset": 1000},
+            lease_seconds=30,
+        )
+        rows = store.list_offer_reservation_leases(reservation_id="res-stale")
+        assert rows[0]["status"] == "active"
+    finally:
+        store.close()
+    store = SqliteStore(db_path)
+    try:
+        store.expire_offer_reservation_leases(now=datetime.now(UTC) + timedelta(hours=1))
+    finally:
+        store.close()
+    assert coordinator.expire_stale() == 0
+    store = SqliteStore(db_path)
+    try:
+        rows = store.list_offer_reservation_leases(reservation_id="res-stale")
+        assert rows[0]["status"] == "expired"
+    finally:
+        store.close()
+
+
+def test_execute_strategy_actions_parallel_reserves_xch_fee_bucket(monkeypatch, tmp_path) -> None:
+    daemon_main._POST_COOLDOWN_UNTIL.clear()
+
+    class _FakeCloudWallet:
+        def list_coins(self, *, include_pending: bool = True):
+            _ = include_pending
+            return [
+                {"amount": 5000, "state": "SPENDABLE", "asset": {"id": "asset"}},
+                {"amount": 10, "state": "SPENDABLE", "asset": {"id": "xch_asset"}},
+            ]
+
+    monkeypatch.setattr(
+        daemon_main,
+        "_new_cloud_wallet_adapter_for_daemon",
+        lambda _program: _FakeCloudWallet(),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        lambda **_kwargs: ("asset", "xch_asset"),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_cloud_wallet_offer_post_fallback",
+        lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
+    )
+
+    class _Program:
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "UserAuthKey_abc"
+        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+        runtime_offer_parallelism_enabled = True
+        runtime_offer_parallelism_max_workers = 2
+        runtime_reservation_ttl_seconds = 300
+        coin_ops_minimum_fee_mojos = 10
+        coin_ops_split_fee_mojos = 0
+
+    db_path = tmp_path / "reservations.sqlite"
+    coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
+    dexie = _FakeDexie(post_result={"success": True, "id": "offer-parallel"})
+    dexie.visible_offer_ids = {"offer-parallel"}
+    store = _FakeStore()
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=2,
+            pair="usdc",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="no_active_offer_reseed",
+        )
+    ]
+    result = _execute_strategy_actions(
+        market=_market(),
+        strategy_actions=actions,
+        runtime_dry_run=False,
+        xch_price_usd=30.0,
+        dexie=cast(Any, dexie),
+        store=cast(Any, store),
+        publish_venue="dexie",
+        program=_Program(),
+        reservation_coordinator=coordinator,
+    )
+    assert result["executed_count"] == 1
+    assert any(
+        "reservation_insufficient_xch_asset" in str(item["reason"]) for item in result["items"]
+    )
+
+
+def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservation_error(
+    monkeypatch,
+) -> None:
+    daemon_main._POST_COOLDOWN_UNTIL.clear()
+
+    class _FakeCloudWallet:
+        def list_coins(self, *, include_pending: bool = True):
+            _ = include_pending
+            return [{"amount": 5000, "state": "SPENDABLE", "asset": {"id": "asset"}}]
+
+    class _BrokenCoordinator:
+        def try_acquire(self, **_kwargs):
+            raise RuntimeError("reservation_storage_down")
+
+    monkeypatch.setattr(
+        daemon_main,
+        "_new_cloud_wallet_adapter_for_daemon",
+        lambda _program: _FakeCloudWallet(),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        lambda **_kwargs: ("asset", "xch_asset"),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_cloud_wallet_offer_post_fallback",
+        lambda **_kwargs: {"success": True, "offer_id": "offer-fallback"},
+    )
+
+    class _Program:
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "UserAuthKey_abc"
+        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+        runtime_offer_parallelism_enabled = True
+        runtime_offer_parallelism_max_workers = 2
+        runtime_reservation_ttl_seconds = 300
+        coin_ops_minimum_fee_mojos = 0
+        coin_ops_split_fee_mojos = 0
+
+    dexie = _FakeDexie(post_result={"success": True, "id": "offer-fallback"})
+    dexie.visible_offer_ids = {"offer-fallback"}
+    store = _FakeStore()
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=1,
+            pair="usdc",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="no_active_offer_reseed",
+        )
+    ]
+    result = _execute_strategy_actions(
+        market=_market(),
+        strategy_actions=actions,
+        runtime_dry_run=False,
+        xch_price_usd=30.0,
+        dexie=cast(Any, dexie),
+        store=cast(Any, store),
+        publish_venue="dexie",
+        program=_Program(),
+        reservation_coordinator=cast(Any, _BrokenCoordinator()),
+    )
+    assert result["executed_count"] == 1
+    assert any(event["event_type"] == "offer_parallel_fallback" for event in store.audit_events)
+
+
+def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservation(
+    monkeypatch, tmp_path
+) -> None:
+    daemon_main._POST_COOLDOWN_UNTIL.clear()
+
+    class _FakeCloudWallet:
+        def list_coins(self, *, include_pending: bool = True):
+            _ = include_pending
+            return [
+                {"amount": 1500, "state": "SPENDABLE", "asset": {"id": "asset_global"}},
+                {"amount": 10_000_000, "state": "SPENDABLE", "asset": {"id": "xch_asset"}},
+            ]
+
+    monkeypatch.setattr(
+        daemon_main,
+        "_new_cloud_wallet_adapter_for_daemon",
+        lambda _program: _FakeCloudWallet(),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        lambda **_kwargs: ("asset_global", "xch_asset"),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_cloud_wallet_offer_post_fallback",
+        lambda **_kwargs: {"success": True, "offer_id": "offer-resolved-asset"},
+    )
+
+    class _Program:
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "UserAuthKey_abc"
+        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+        runtime_offer_parallelism_enabled = True
+        runtime_offer_parallelism_max_workers = 2
+        runtime_reservation_ttl_seconds = 300
+        coin_ops_minimum_fee_mojos = 0
+        coin_ops_split_fee_mojos = 0
+
+    market = _market()
+    market.base_asset = "asset-local-only"
+    db_path = tmp_path / "reservations.sqlite"
+    coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
+    dexie = _FakeDexie(post_result={"success": True, "id": "offer-resolved-asset"})
+    dexie.visible_offer_ids = {"offer-resolved-asset"}
+    store = _FakeStore()
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=1,
+            pair="usdc",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="no_active_offer_reseed",
+        )
+    ]
+    result = _execute_strategy_actions(
+        market=market,
+        strategy_actions=actions,
+        runtime_dry_run=False,
+        xch_price_usd=30.0,
+        dexie=cast(Any, dexie),
+        store=cast(Any, store),
+        publish_venue="dexie",
+        program=_Program(),
+        reservation_coordinator=coordinator,
+    )
+    assert result["executed_count"] == 1
+
+
+def test_reservation_coordinator_cross_instance_contention_allows_single_winner(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "reservations.sqlite"
+    coordinator_a = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
+    coordinator_b = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
+    barrier = threading.Barrier(2)
+    results: list[tuple[bool, str | None]] = []
+    results_lock = threading.Lock()
+
+    def _attempt(coordinator: AssetReservationCoordinator) -> None:
+        barrier.wait()
+        acquired = coordinator.try_acquire(
+            market_id="m1",
+            wallet_id="wallet-1",
+            requested_amounts={"asset": 100},
+            available_amounts={"asset": 100},
+        )
+        with results_lock:
+            results.append((acquired.ok, acquired.error))
+
+    thread_a = threading.Thread(target=_attempt, args=(coordinator_a,))
+    thread_b = threading.Thread(target=_attempt, args=(coordinator_b,))
+    thread_a.start()
+    thread_b.start()
+    thread_a.join()
+    thread_b.join()
+
+    assert len(results) == 2
+    success_count = sum(1 for ok, _ in results if ok)
+    failure_count = sum(1 for ok, _ in results if not ok)
+    assert success_count == 1
+    assert failure_count == 1
+    assert any("reservation_insufficient_asset" in str(error) for ok, error in results if not ok)

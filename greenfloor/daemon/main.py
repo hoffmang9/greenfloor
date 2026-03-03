@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import concurrent.futures
+import contextlib
+import fcntl
 import json
 import logging
 import os
@@ -17,6 +19,7 @@ from typing import Any
 
 import yaml  # noqa: F401
 
+from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import (
     CoinsetAdapter,
     extract_coin_ids_from_offer_payload,
@@ -39,6 +42,7 @@ from greenfloor.core.notifications import AlertState, evaluate_low_inventory_ale
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
 from greenfloor.core.strategy import MarketState, PlannedAction, StrategyConfig, evaluate_market
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient, capture_coinset_websocket_once
+from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.hex_utils import is_hex_id
 from greenfloor.keys.router import resolve_market_key
 from greenfloor.logging_setup import (
@@ -76,6 +80,14 @@ _DISABLED_MARKET_NEXT_LOG_AT: dict[str, float] = {}
 _DISABLED_MARKET_STARTUP_LOGGED = False
 _WATCHED_COIN_IDS_BY_MARKET: dict[str, set[str]] = {}
 _WATCHED_COIN_IDS_LOCK = threading.Lock()
+_CLOUD_WALLET_SPENDABLE_STATES = {
+    "CONFIRMED",
+    "UNSPENT",
+    "SPENDABLE",
+    "AVAILABLE",
+    "SETTLED",
+}
+_DAEMON_INSTANCE_LOCK_FILENAME = "daemon.lock"
 
 
 def _log_market_decision(market_id: str, decision: str, **fields: Any) -> None:
@@ -153,6 +165,45 @@ def _consume_reload_marker(state_dir: Path) -> bool:
         return False
     marker.unlink(missing_ok=True)
     return True
+
+
+def _daemon_instance_lock_path(*, state_dir: Path) -> Path:
+    return state_dir / _DAEMON_INSTANCE_LOCK_FILENAME
+
+
+@contextlib.contextmanager
+def _acquire_daemon_instance_lock(*, state_dir: Path, mode: str):
+    state_dir.mkdir(parents=True, exist_ok=True)
+    lock_path = _daemon_instance_lock_path(state_dir=state_dir)
+    lock_file = lock_path.open("a+", encoding="utf-8")
+    try:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            existing = ""
+            try:
+                lock_file.seek(0)
+                existing = lock_file.read().strip()
+            except Exception:
+                existing = ""
+            detail = f" daemon_lock_metadata={existing}" if existing else ""
+            raise RuntimeError(f"daemon_already_running:{lock_path}{detail}") from exc
+        payload = {
+            "pid": os.getpid(),
+            "mode": str(mode).strip(),
+            "acquired_at": datetime.now(UTC).isoformat(),
+        }
+        lock_file.seek(0)
+        lock_file.truncate()
+        lock_file.write(json.dumps(payload, sort_keys=True))
+        lock_file.flush()
+        yield
+    finally:
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        lock_file.close()
 
 
 def _resolve_db_path(program_home_dir: str, explicit_db_path: str | None) -> Path:
@@ -800,6 +851,128 @@ def _cloud_wallet_configured(program: Any) -> bool:
     return all(str(getattr(program, key, "")).strip() for key in required)
 
 
+def _new_cloud_wallet_adapter_for_daemon(program: Any) -> CloudWalletAdapter:
+    return CloudWalletAdapter(
+        CloudWalletConfig(
+            base_url=str(program.cloud_wallet_base_url).strip(),
+            user_key_id=str(program.cloud_wallet_user_key_id).strip(),
+            private_key_pem_path=str(program.cloud_wallet_private_key_pem_path).strip(),
+            vault_id=str(program.cloud_wallet_vault_id).strip(),
+            network=str(program.app_network).strip(),
+            kms_key_id=str(getattr(program, "cloud_wallet_kms_key_id", "")).strip() or None,
+            kms_region=str(getattr(program, "cloud_wallet_kms_region", "")).strip() or None,
+            kms_public_key_hex=str(getattr(program, "cloud_wallet_kms_public_key_hex", "")).strip()
+            or None,
+        )
+    )
+
+
+def _cloud_wallet_spendable_amounts_by_asset(
+    *,
+    wallet: CloudWalletAdapter,
+    asset_ids: set[str],
+) -> dict[str, int]:
+    coins = wallet.list_coins(include_pending=True)
+    totals: dict[str, int] = {asset_id: 0 for asset_id in asset_ids}
+    for coin in coins:
+        if not isinstance(coin, dict):
+            continue
+        state = str(coin.get("state", "")).strip().upper()
+        if state not in _CLOUD_WALLET_SPENDABLE_STATES:
+            continue
+        asset_payload = coin.get("asset")
+        if isinstance(asset_payload, dict):
+            asset_id = str(asset_payload.get("id", "")).strip().lower()
+        else:
+            asset_id = ""
+        if not asset_id:
+            continue
+        if asset_id not in totals:
+            continue
+        try:
+            amount = int(coin.get("amount", 0))
+        except (TypeError, ValueError):
+            amount = 0
+        if amount <= 0:
+            continue
+        totals[asset_id] += amount
+    return totals
+
+
+def _reservation_request_for_cloud_offer(*, market: Any, action: Any) -> dict[str, int]:
+    return _reservation_request_for_cloud_offer_with_assets(
+        market=market,
+        action=action,
+        resolved_base_asset_id=str(
+            getattr(market, "cloud_wallet_base_global_id", "") or getattr(market, "base_asset", "")
+        ).strip(),
+        fee_asset_id="xch",
+        fee_amount_mojos=0,
+    )
+
+
+def _reservation_request_for_cloud_offer_with_assets(
+    *,
+    market: Any,
+    action: Any,
+    resolved_base_asset_id: str,
+    fee_asset_id: str,
+    fee_amount_mojos: int,
+) -> dict[str, int]:
+    pricing = market.pricing or {}
+    base_multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))
+    base_asset_id = str(resolved_base_asset_id or "").strip().lower()
+    if not base_asset_id:
+        return {}
+    offer_amount = int(action.size) * base_multiplier
+    if offer_amount <= 0:
+        return {}
+    request: dict[str, int] = {base_asset_id: offer_amount}
+    fee_asset = str(fee_asset_id or "").strip().lower()
+    if fee_asset and int(fee_amount_mojos) > 0:
+        request[fee_asset] = int(request.get(fee_asset, 0)) + int(fee_amount_mojos)
+    return request
+
+
+def _estimate_cloud_offer_fee_reservation_mojos(*, program: Any) -> int:
+    min_fee = int(max(0, int(getattr(program, "coin_ops_minimum_fee_mojos", 0))))
+    split_fee = int(max(0, int(getattr(program, "coin_ops_split_fee_mojos", 0))))
+    return max(min_fee, split_fee)
+
+
+def _resolve_cloud_wallet_offer_asset_ids_for_reservation(
+    *,
+    program: Any,
+    market: Any,
+    wallet: CloudWalletAdapter,
+) -> tuple[str, str]:
+    from greenfloor.cli.manager import _resolve_cloud_wallet_offer_asset_ids
+
+    quote_asset = _resolve_quote_asset_for_offer(
+        quote_asset=str(getattr(market, "quote_asset", "")),
+        network=str(getattr(program, "app_network", "mainnet")),
+    )
+    resolved_base_asset_id, _ = _resolve_cloud_wallet_offer_asset_ids(
+        wallet=wallet,
+        base_asset_id=str(getattr(market, "base_asset", "")).strip(),
+        quote_asset_id=str(quote_asset).strip(),
+        base_symbol_hint=str(getattr(market, "base_symbol", "") or ""),
+        quote_symbol_hint=str(getattr(market, "quote_asset", "") or ""),
+        base_global_id_hint=str(getattr(market, "cloud_wallet_base_global_id", "") or ""),
+        quote_global_id_hint=str(getattr(market, "cloud_wallet_quote_global_id", "") or ""),
+    )
+    resolved_xch_asset_id, _ = _resolve_cloud_wallet_offer_asset_ids(
+        wallet=wallet,
+        base_asset_id="xch",
+        quote_asset_id=str(quote_asset).strip(),
+        base_symbol_hint="xch",
+        quote_symbol_hint=str(getattr(market, "quote_asset", "") or ""),
+        base_global_id_hint="",
+        quote_global_id_hint=str(getattr(market, "cloud_wallet_quote_global_id", "") or ""),
+    )
+    return resolved_base_asset_id, resolved_xch_asset_id
+
+
 def _cloud_wallet_offer_post_fallback(
     *,
     program: Any,
@@ -1101,6 +1274,7 @@ def _execute_strategy_actions(
     app_network: str = "mainnet",
     signer_key_registry: dict[str, Any] | None = None,
     program: Any | None = None,
+    reservation_coordinator: AssetReservationCoordinator | None = None,
 ) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     executed_count = 0
@@ -1110,42 +1284,169 @@ def _execute_strategy_actions(
     # cloud-wallet sequential posting (e.g. keep 100-size offers from being
     # displaced by a burst of 1-size posts in the same cycle).
     ordered_actions = sorted(strategy_actions, key=lambda action: int(action.size), reverse=True)
-    for action in ordered_actions:
-        for _ in range(int(action.repeat)):
-            if runtime_dry_run:
-                items.append(
-                    {
-                        "size": action.size,
-                        "status": "planned",
-                        "reason": "dry_run",
-                        "offer_id": None,
-                    }
-                )
-                continue
-            if program is not None and _cloud_wallet_configured(program):
-                item = _execute_single_cloud_wallet_action(
+    can_parallelize_cloud_offers = (
+        program is not None
+        and _cloud_wallet_configured(program)
+        and bool(getattr(program, "runtime_offer_parallelism_enabled", False))
+        and not runtime_dry_run
+        and reservation_coordinator is not None
+    )
+    if can_parallelize_cloud_offers:
+        try:
+            assert program is not None
+            assert reservation_coordinator is not None
+            cloud_wallet = _new_cloud_wallet_adapter_for_daemon(program)
+            resolved_base_asset_id, resolved_xch_asset_id = (
+                _resolve_cloud_wallet_offer_asset_ids_for_reservation(
                     program=program,
                     market=market,
-                    action=action,
-                    publish_venue=publish_venue,
-                    runtime_dry_run=runtime_dry_run,
-                    dexie=dexie,
+                    wallet=cloud_wallet,
                 )
-            else:
-                item = _execute_single_local_action(
-                    market=market,
-                    action=action,
-                    xch_price_usd=xch_price_usd,
-                    app_network=app_network,
-                    keyring_yaml_path=keyring_yaml_path,
-                    dexie=dexie,
-                    splash=splash,
-                    publish_venue=publish_venue,
-                    store=store,
+            )
+            fee_amount_mojos = _estimate_cloud_offer_fee_reservation_mojos(program=program)
+            submissions: list[tuple[int, Any, str]] = []
+            next_index = 0
+            for action in ordered_actions:
+                for _ in range(int(action.repeat)):
+                    requested_amounts = _reservation_request_for_cloud_offer_with_assets(
+                        market=market,
+                        action=action,
+                        resolved_base_asset_id=resolved_base_asset_id,
+                        fee_asset_id=resolved_xch_asset_id,
+                        fee_amount_mojos=fee_amount_mojos,
+                    )
+                    if not requested_amounts:
+                        items.append(
+                            {
+                                "size": action.size,
+                                "status": "skipped",
+                                "reason": "reservation_invalid_request",
+                                "offer_id": None,
+                            }
+                        )
+                        continue
+                    available_amounts = _cloud_wallet_spendable_amounts_by_asset(
+                        wallet=cloud_wallet,
+                        asset_ids=set(requested_amounts.keys()),
+                    )
+                    acquired = reservation_coordinator.try_acquire(
+                        market_id=str(market.market_id),
+                        wallet_id=str(program.cloud_wallet_vault_id).strip(),
+                        requested_amounts=requested_amounts,
+                        available_amounts=available_amounts,
+                    )
+                    if not acquired.ok or not acquired.reservation_id:
+                        items.append(
+                            {
+                                "size": action.size,
+                                "status": "skipped",
+                                "reason": str(acquired.error or "reservation_rejected"),
+                                "offer_id": None,
+                            }
+                        )
+                        continue
+                    submissions.append((next_index, action, acquired.reservation_id))
+                    next_index += 1
+
+            if submissions:
+                max_workers = min(
+                    len(submissions),
+                    max(1, int(getattr(program, "runtime_offer_parallelism_max_workers", 4))),
                 )
-            if item.get("status") == "executed":
-                executed_count += 1
-            items.append(item)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    future_to_submission: dict[
+                        concurrent.futures.Future[dict[str, Any]], tuple[int, str]
+                    ] = {}
+                    for submit_index, action, reservation_id in submissions:
+                        future = pool.submit(
+                            _execute_single_cloud_wallet_action,
+                            program=program,
+                            market=market,
+                            action=action,
+                            publish_venue=publish_venue,
+                            runtime_dry_run=runtime_dry_run,
+                            dexie=dexie,
+                        )
+                        future_to_submission[future] = (submit_index, reservation_id)
+                    submitted_items: list[tuple[int, dict[str, Any]]] = []
+                    for future in concurrent.futures.as_completed(future_to_submission):
+                        submit_index, reservation_id = future_to_submission[future]
+                        try:
+                            item = future.result()
+                        except Exception as exc:
+                            item = {
+                                "size": 0,
+                                "status": "skipped",
+                                "reason": f"parallel_offer_worker_error:{exc}",
+                                "offer_id": None,
+                            }
+                        release_status = (
+                            "released_success"
+                            if str(item.get("status", "")).strip().lower() == "executed"
+                            else "released_failed"
+                        )
+                        reservation_coordinator.release(
+                            reservation_id=reservation_id, status=release_status
+                        )
+                        item["reservation_id"] = reservation_id
+                        submitted_items.append((submit_index, item))
+                    for _, item in sorted(submitted_items, key=lambda pair: pair[0]):
+                        if item.get("status") == "executed":
+                            executed_count += 1
+                        items.append(item)
+            return {
+                "planned_count": sum(int(a.repeat) for a in strategy_actions),
+                "executed_count": executed_count,
+                "items": items,
+            }
+        except Exception as exc:
+            store.add_audit_event(
+                "offer_parallel_fallback",
+                {
+                    "market_id": str(getattr(market, "market_id", "")),
+                    "error": str(exc),
+                    "reason": "reservation_parallel_path_failed",
+                },
+                market_id=str(getattr(market, "market_id", "")),
+            )
+            can_parallelize_cloud_offers = False
+    if not can_parallelize_cloud_offers:
+        for action in ordered_actions:
+            for _ in range(int(action.repeat)):
+                if runtime_dry_run:
+                    items.append(
+                        {
+                            "size": action.size,
+                            "status": "planned",
+                            "reason": "dry_run",
+                            "offer_id": None,
+                        }
+                    )
+                    continue
+                if program is not None and _cloud_wallet_configured(program):
+                    item = _execute_single_cloud_wallet_action(
+                        program=program,
+                        market=market,
+                        action=action,
+                        publish_venue=publish_venue,
+                        runtime_dry_run=runtime_dry_run,
+                        dexie=dexie,
+                    )
+                else:
+                    item = _execute_single_local_action(
+                        market=market,
+                        action=action,
+                        xch_price_usd=xch_price_usd,
+                        app_network=app_network,
+                        keyring_yaml_path=keyring_yaml_path,
+                        dexie=dexie,
+                        splash=splash,
+                        publish_venue=publish_venue,
+                        store=store,
+                    )
+                if item.get("status") == "executed":
+                    executed_count += 1
+                items.append(item)
     return {
         "planned_count": sum(int(a.repeat) for a in strategy_actions),
         "executed_count": executed_count,
@@ -1446,6 +1747,7 @@ def _evaluate_and_execute_strategy(
     now: datetime,
     dexie_size_by_offer_id: dict[str, int],
     result: _MarketCycleResult,
+    reservation_coordinator: AssetReservationCoordinator | None = None,
 ) -> None:
     """Evaluate market strategy, inject reseed if needed, and execute offer actions."""
     strategy_config = _strategy_config_from_market(market)
@@ -1530,6 +1832,7 @@ def _evaluate_and_execute_strategy(
         app_network=program.app_network,
         signer_key_registry=program.signer_key_registry,
         program=program,
+        reservation_coordinator=reservation_coordinator,
     )
     result.strategy_planned += int(offer_execution["planned_count"])
     result.strategy_executed += int(offer_execution["executed_count"])
@@ -1753,6 +2056,7 @@ def _process_single_market(
     previous_xch_price_usd: float | None,
     now: datetime,
     state_dir: Path,
+    reservation_coordinator: AssetReservationCoordinator | None = None,
 ) -> _MarketCycleResult:
     result = _MarketCycleResult()
     _log_market_decision(
@@ -1917,6 +2221,7 @@ def _process_single_market(
         now=now,
         dexie_size_by_offer_id=dexie_size_by_offer_id,
         result=result,
+        reservation_coordinator=reservation_coordinator,
     )
     _plan_and_execute_coin_ops(
         market=market,
@@ -1954,6 +2259,7 @@ def _process_single_market_with_store(
     previous_xch_price_usd: float | None,
     now: datetime,
     state_dir: Path,
+    reservation_coordinator: AssetReservationCoordinator | None = None,
 ) -> _MarketCycleResult:
     """Run one market cycle with a thread-local SQLite connection."""
     store = SqliteStore(db_path)
@@ -1970,6 +2276,7 @@ def _process_single_market_with_store(
             previous_xch_price_usd=previous_xch_price_usd,
             now=now,
             state_dir=state_dir,
+            reservation_coordinator=reservation_coordinator,
         )
     finally:
         store.close()
@@ -2012,6 +2319,17 @@ def run_once(
         wallet = WalletAdapter()
         price = PriceAdapter()
         previous_xch_price_usd = store.get_latest_xch_price_snapshot()
+        reservation_coordinator: AssetReservationCoordinator | None = None
+        if bool(
+            getattr(program, "runtime_offer_parallelism_enabled", False)
+        ) and _cloud_wallet_configured(program):
+            reservation_coordinator = AssetReservationCoordinator(
+                db_path=db_path,
+                lease_seconds=int(getattr(program, "runtime_reservation_ttl_seconds", 300)),
+            )
+            expired_count = reservation_coordinator.expire_stale()
+            if expired_count > 0:
+                store.add_audit_event("reservation_expired", {"count": int(expired_count)})
         xch_price_usd: float | None = None
         try:
             xch_price_usd = asyncio.run(price.get_xch_price())
@@ -2074,6 +2392,7 @@ def run_once(
                         previous_xch_price_usd=previous_xch_price_usd,
                         now=now,
                         state_dir=state_dir,
+                        reservation_coordinator=reservation_coordinator,
                     ): market
                     for market in enabled_markets
                 }
@@ -2129,6 +2448,7 @@ def run_once(
                         previous_xch_price_usd=previous_xch_price_usd,
                         now=now,
                         state_dir=state_dir,
+                        reservation_coordinator=reservation_coordinator,
                     )
                 except Exception as exc:
                     cycle_error_count += 1
@@ -2349,44 +2669,55 @@ def main() -> None:
         help="State directory used for reload marker and daemon-local state",
     )
     args = parser.parse_args()
+    state_dir = Path(args.state_dir)
     testnet_markets_path = (
         Path(args.testnet_markets_config) if str(args.testnet_markets_config).strip() else None
     )
 
     allowed_keys = {k.strip() for k in args.key_ids.split(",") if k.strip()} or None
-    if args.once:
-        program = load_program_config(Path(args.program_config))
-        _initialize_daemon_file_logging(
-            program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
-        )
-        _warn_if_log_level_auto_healed(program=program, program_path=Path(args.program_config))
-        _daemon_logger.info(
-            "daemon_starting mode=once program_config=%s markets_config=%s",
-            args.program_config,
-            args.markets_config,
-        )
-        exit_code = run_once(
-            Path(args.program_config),
-            Path(args.markets_config),
-            allowed_keys,
-            args.state_db or None,
-            args.coinset_base_url,
-            Path(args.state_dir),
-            poll_coinset_mempool=False,
-            use_websocket_capture=program.tx_block_trigger_mode == "websocket",
-            testnet_markets_path=testnet_markets_path,
-        )
-        _daemon_logger.info("daemon_stopped mode=once exit_code=%s", exit_code)
-    else:
-        exit_code = _run_loop(
-            program_path=Path(args.program_config),
-            markets_path=Path(args.markets_config),
-            testnet_markets_path=testnet_markets_path,
-            allowed_keys=allowed_keys,
-            db_path_override=args.state_db or None,
-            coinset_base_url=args.coinset_base_url,
-            state_dir=Path(args.state_dir),
-        )
+    try:
+        with _acquire_daemon_instance_lock(
+            state_dir=state_dir,
+            mode="once" if args.once else "loop",
+        ):
+            if args.once:
+                program = load_program_config(Path(args.program_config))
+                _initialize_daemon_file_logging(
+                    program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
+                )
+                _warn_if_log_level_auto_healed(
+                    program=program, program_path=Path(args.program_config)
+                )
+                _daemon_logger.info(
+                    "daemon_starting mode=once program_config=%s markets_config=%s",
+                    args.program_config,
+                    args.markets_config,
+                )
+                exit_code = run_once(
+                    Path(args.program_config),
+                    Path(args.markets_config),
+                    allowed_keys,
+                    args.state_db or None,
+                    args.coinset_base_url,
+                    state_dir,
+                    poll_coinset_mempool=False,
+                    use_websocket_capture=program.tx_block_trigger_mode == "websocket",
+                    testnet_markets_path=testnet_markets_path,
+                )
+                _daemon_logger.info("daemon_stopped mode=once exit_code=%s", exit_code)
+            else:
+                exit_code = _run_loop(
+                    program_path=Path(args.program_config),
+                    markets_path=Path(args.markets_config),
+                    testnet_markets_path=testnet_markets_path,
+                    allowed_keys=allowed_keys,
+                    db_path_override=args.state_db or None,
+                    coinset_base_url=args.coinset_base_url,
+                    state_dir=state_dir,
+                )
+    except RuntimeError as exc:
+        print(json.dumps({"event": "daemon_lock_conflict", "error": str(exc)}))
+        raise SystemExit(3) from exc
     raise SystemExit(exit_code)
 
 
