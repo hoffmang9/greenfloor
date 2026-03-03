@@ -1355,6 +1355,20 @@ def _coin_id_set(raw_values: Any) -> set[str]:
     return values
 
 
+def _insufficient_xch_fee_balance_error(
+    *, xch_coins: list[Any], required_fee_mojos: int
+) -> str | None:
+    if int(required_fee_mojos) <= 0:
+        return None
+    available = sum(int(getattr(coin, "amount", 0)) for coin in xch_coins)
+    if available < int(required_fee_mojos):
+        return (
+            "insufficient_xch_fee_balance_for_mixed_split:"
+            f"required={int(required_fee_mojos)}:available={available}"
+        )
+    return None
+
+
 def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None, str | None]:
     key_id = str(payload.get("key_id", "")).strip()
     network = str(payload.get("network", "")).strip()
@@ -1431,6 +1445,12 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
             xch_coins = _list_unspent_xch_coins(
                 sdk=sdk, receive_address=receive_address, network=network
             )
+            fee_balance_error = _insufficient_xch_fee_balance_error(
+                xch_coins=xch_coins,
+                required_fee_mojos=fee_mojos,
+            )
+            if fee_balance_error is not None:
+                return None, fee_balance_error
             try:
                 fee_selected_xch = sdk.select_coins(xch_coins, fee_mojos)
             except Exception as exc:

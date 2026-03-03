@@ -37,17 +37,28 @@ def _count_exact_amount_coins(
     return counts
 
 
+def _coin_value(coin: Any, field: str, default: Any) -> Any:
+    if isinstance(coin, dict):
+        return coin.get(field, default)
+    return getattr(coin, field, default)
+
+
 def plan_bootstrap_mixed_outputs(
     *,
     sell_ladder: list[Any],
-    spendable_coins: list[dict[str, Any]],
+    spendable_coins: list[Any],
 ) -> BootstrapPlan | None:
+    """Build a one-shot mixed-output bootstrap plan from ladder deficits.
+
+    `spendable_coins` may be dict-like wallet payloads or lightweight objects
+    exposing `id` and `amount` attributes.
+    """
     sorted_ladder = _sorted_ladder_entries(sell_ladder)
     if not sorted_ladder:
         return None
 
     ladder_sizes = [int(row.size_base_units) for row in sorted_ladder]
-    spendable_amounts = [int(coin.get("amount", 0)) for coin in spendable_coins]
+    spendable_amounts = [int(_coin_value(coin, "amount", 0)) for coin in spendable_coins]
     counts = _count_exact_amount_coins(
         spendable_coin_amounts=spendable_amounts,
         ladder_sizes=ladder_sizes,
@@ -80,9 +91,11 @@ def plan_bootstrap_mixed_outputs(
         return None
 
     candidate = None
-    for coin in sorted(spendable_coins, key=lambda c: int(c.get("amount", 0)), reverse=True):
-        amount = int(coin.get("amount", 0))
-        coin_id = str(coin.get("id", "")).strip()
+    for coin in sorted(
+        spendable_coins, key=lambda c: int(_coin_value(c, "amount", 0)), reverse=True
+    ):
+        amount = int(_coin_value(coin, "amount", 0))
+        coin_id = str(_coin_value(coin, "id", "")).strip()
         if not coin_id:
             continue
         if amount >= total_output_amount:

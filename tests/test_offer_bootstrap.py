@@ -44,3 +44,18 @@ def test_plan_bootstrap_mixed_outputs_returns_none_when_ready() -> None:
     ]
 
     assert plan_bootstrap_mixed_outputs(sell_ladder=ladder, spendable_coins=spendable) is None
+
+
+def test_plan_bootstrap_mixed_outputs_accepts_object_coin_shape() -> None:
+    @dataclass
+    class _Coin:
+        id: str
+        amount: int
+
+    ladder = [_Entry(size_base_units=10, target_count=2, split_buffer_count=0)]
+    spendable = [_Coin(id="coin-big-object", amount=100)]
+
+    plan = plan_bootstrap_mixed_outputs(sell_ladder=ladder, spendable_coins=spendable)
+    assert plan is not None
+    assert plan.source_coin_id == "coin-big-object"
+    assert plan.output_amounts_base_units == [10, 10]

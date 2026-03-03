@@ -342,6 +342,30 @@ def test_sign_and_broadcast_mixed_split_calls_broadcast(monkeypatch) -> None:
     assert broadcast_called["network"] == "testnet11"
 
 
+def test_insufficient_xch_fee_balance_error_when_fee_exceeds_total() -> None:
+    class _Coin:
+        def __init__(self, amount: int) -> None:
+            self.amount = amount
+
+    err = signing_mod._insufficient_xch_fee_balance_error(
+        xch_coins=[_Coin(50), _Coin(20)],
+        required_fee_mojos=100,
+    )
+    assert err == "insufficient_xch_fee_balance_for_mixed_split:required=100:available=70"
+
+
+def test_insufficient_xch_fee_balance_error_none_when_sufficient() -> None:
+    class _Coin:
+        def __init__(self, amount: int) -> None:
+            self.amount = amount
+
+    err = signing_mod._insufficient_xch_fee_balance_error(
+        xch_coins=[_Coin(50), _Coin(70)],
+        required_fee_mojos=100,
+    )
+    assert err is None
+
+
 def test_build_additions_from_plan_split() -> None:
     additions, error = signing_mod._build_additions_from_plan(
         plan={"op_type": "split", "size_base_units": 10, "op_count": 2},

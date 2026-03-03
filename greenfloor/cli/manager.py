@@ -1672,6 +1672,7 @@ def _wait_for_mempool_then_confirmation(
     wallet: CloudWalletAdapter,
     network: str,
     initial_coin_ids: set[str],
+    asset_id: str | None = None,
     mempool_warning_seconds: int,
     confirmation_warning_seconds: int,
     timeout_seconds: int | None = None,
@@ -1683,6 +1684,9 @@ def _wait_for_mempool_then_confirmation(
     sleep_seconds = 2.0
     next_mempool_warning = mempool_warning_seconds
     next_confirmation_warning = confirmation_warning_seconds
+    target_asset = (
+        asset_id.strip().lower() if isinstance(asset_id, str) and asset_id.strip() else None
+    )
     while True:
         elapsed = int(time.monotonic() - start)
         coins = _call_with_moderate_retry(
@@ -1694,14 +1698,16 @@ def _wait_for_mempool_then_confirmation(
         pending = [
             c
             for c in coins
+            if target_asset is None or _coin_asset_id(c).lower() == target_asset
+            if str(c.get("id", "")).strip() not in initial_coin_ids
             if str(c.get("state", "")).strip().upper() in {"PENDING", "MEMPOOL"}
-            and str(c.get("id", "")).strip() not in initial_coin_ids
         ]
         confirmed = [
             c
             for c in coins
+            if target_asset is None or _coin_asset_id(c).lower() == target_asset
+            if str(c.get("id", "")).strip() not in initial_coin_ids
             if str(c.get("state", "")).strip().upper() not in {"PENDING", "MEMPOOL"}
-            and str(c.get("id", "")).strip() not in initial_coin_ids
         ]
         if pending and not seen_pending:
             seen_pending = True
@@ -2503,6 +2509,11 @@ def _build_offer_text_for_request(payload: dict) -> str:
 
 def _bootstrap_fee_cost_for_output_count(output_count: int) -> int:
     count = max(1, int(output_count))
+    # Heuristic cost model for Coinset fee advice:
+    # - 1_000_000 baseline for a simple bootstrap spend
+    # - +250_000 per extra output to bias fee advice upward as fanout grows
+    # This is intentionally conservative (not a CLVM consensus constant) and
+    # should be tuned empirically from observed mempool/confirmation behavior.
     return 1_000_000 + max(0, count - 1) * 250_000
 
 
@@ -2523,6 +2534,9 @@ def _resolve_bootstrap_split_fee(
         )
         return int(fee_mojos), fee_source, None
     except Exception as exc:
+        # Preserve the existing fee policy contract: fallback honors
+        # `coin_ops.minimum_fee_mojos` exactly, and an explicit zero config
+        # value means "allow zero-fee fallback when fee advice is unavailable".
         fallback_fee = max(0, int(minimum_fee_mojos))
         return fallback_fee, "config_minimum_fee_fallback", str(exc)
 
@@ -2574,7 +2588,7 @@ def _ensure_offer_bootstrap_denominations(
         output_count=len(bootstrap_plan.output_amounts_base_units),
     )
     existing_coin_ids = {
-        str(c.get("id", "")).strip() for c in wallet.list_coins(include_pending=True) if c.get("id")
+        str(c.get("id", "")).strip() for c in asset_scoped_coins if str(c.get("id", "")).strip()
     }
     signing_payload = {
         "key_id": key_id,
@@ -2599,9 +2613,18 @@ def _ensure_offer_bootstrap_denominations(
     }
     bootstrap_result = sign_and_broadcast_mixed_split(signing_payload)
     if str(bootstrap_result.get("status", "")).strip().lower() != "executed":
+        bootstrap_reason = str(bootstrap_result.get("reason", "bootstrap_signing_failed"))
+        operator_guidance = None
+        if "insufficient_xch_fee_balance_for_mixed_split" in bootstrap_reason:
+            operator_guidance = (
+                "insufficient spendable xch balance for bootstrap fee; add or free xch "
+                "coins in the signing wallet, or reduce coin_ops.minimum_fee_mojos only "
+                "if zero-fee fallback is acceptable for your environment"
+            )
         return {
             "status": "failed",
-            "reason": str(bootstrap_result.get("reason", "bootstrap_signing_failed")),
+            "reason": bootstrap_reason,
+            "operator_guidance": operator_guidance,
             "fallback_to_cloud_wallet_offer_split": True,
             "fee_mojos": int(fee_mojos),
             "fee_source": fee_source,
@@ -2620,6 +2643,7 @@ def _ensure_offer_bootstrap_denominations(
             wallet=wallet,
             network=str(program.app_network),
             initial_coin_ids=existing_coin_ids,
+            asset_id=resolved_base_asset_id,
             mempool_warning_seconds=5 * 60,
             confirmation_warning_seconds=15 * 60,
             timeout_seconds=20 * 60,
