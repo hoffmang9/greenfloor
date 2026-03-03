@@ -5397,3 +5397,77 @@ def test_coin_combine_until_ready_with_coin_ids_stops_with_requires_new_coin_sel
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["stop_reason"] == "requires_new_coin_selection"
     assert payload["denomination_readiness"]["ready"] is False
+
+
+def test_cloud_wallet_create_offer_phase_returns_structured_intermediate(monkeypatch) -> None:
+    class _Wallet:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def create_offer(self, **_kwargs):
+            self.calls += 1
+            return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
+
+    wallet = _Wallet()
+    monkeypatch.setattr(
+        manager_mod,
+        "_wallet_get_wallet_offers",
+        lambda *_args, **_kwargs: {"offers": []},
+    )
+    monkeypatch.setattr(
+        manager_mod,
+        "_poll_signature_request_until_not_unsigned",
+        lambda **_kwargs: ("SUBMITTED", [{"event": "signature_wait_warning"}]),
+    )
+    market = type(
+        "Market",
+        (),
+        {"pricing": {"base_unit_mojo_multiplier": 1000, "quote_unit_mojo_multiplier": 1000}},
+    )()
+    payload = manager_mod._cloud_wallet_create_offer_phase(
+        wallet=cast(CloudWalletAdapter, wallet),
+        market=market,
+        size_base_units=3,
+        quote_price=2.0,
+        resolved_base_asset_id="Asset_base",
+        resolved_quote_asset_id="Asset_quote",
+        offer_fee_mojos=0,
+        split_input_coins_fee=0,
+        expiry_unit="minutes",
+        expiry_value=30,
+    )
+    assert payload["signature_request_id"] == "sr-1"
+    assert payload["signature_state"] == "SUBMITTED"
+    assert payload["offer_amount"] == 3000
+    assert isinstance(payload["wait_events"], list)
+    assert wallet.calls == 1
+
+
+def test_cloud_wallet_post_offer_phase_verifies_dexie_visibility(monkeypatch) -> None:
+    class _Dexie:
+        pass
+
+    dexie = _Dexie()
+    monkeypatch.setattr(
+        manager_mod,
+        "_post_dexie_offer_with_invalid_offer_retry",
+        lambda **_kwargs: {"success": True, "id": "offer-1"},
+    )
+    monkeypatch.setattr(
+        manager_mod,
+        "_verify_dexie_offer_visible_by_id",
+        lambda **_kwargs: "dexie_offer_not_visible_after_publish",
+    )
+    market = type("Market", (), {"base_asset": "asset"})()
+    result = manager_mod._cloud_wallet_post_offer_phase(
+        publish_venue="dexie",
+        dexie=cast(Any, dexie),
+        splash=None,
+        offer_text="offer1abc",
+        drop_only=False,
+        claim_rewards=False,
+        market=market,
+        size_base_units=1,
+    )
+    assert result["success"] is False
+    assert "dexie_offer_not_visible_after_publish" in str(result["error"])

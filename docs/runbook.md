@@ -129,6 +129,9 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 - `xch_price_snapshot`: current price captured for strategy/cancel policy.
 - `strategy_actions_planned`: deterministic action plan from strategy core.
 - `strategy_offer_execution`: offer build/post execution results.
+- `offer_parallel_fallback`: reservation/parallel execution path failed and daemon fell back to sequential strategy execution for the cycle.
+- `reservation_expired`: stale reservation leases reclaimed at cycle start.
+  - stale-cleanup now also prunes older inactive reservation rows to control ledger growth.
 - `offer_cancel_policy`: cancel eligibility and triggered/non-triggered reasons.
 - `offer_lifecycle_transition`: offer state transitions from Dexie status.
 - `coin_ops_plan` and `coin_op_*`: split/combine planning and execution outcomes.
@@ -159,6 +162,10 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - `GREENFLOOR_OFFER_CANCEL_MAX_ATTEMPTS` (default: `2`, min `1`)
   - `GREENFLOOR_OFFER_CANCEL_BACKOFF_MS` (default: `250`, min `0`)
   - `GREENFLOOR_OFFER_CANCEL_COOLDOWN_SECONDS` (default: `30`, min `0`)
+- Runtime reservation/parallel cloud-wallet controls (`~/.greenfloor/config/program.yaml` -> `runtime`):
+  - `offer_parallelism_enabled` (default: `false`)
+  - `offer_parallelism_max_workers` (default: `4`, min `1`)
+  - `reservation_ttl_seconds` (default: `300`, min `30`)
 - Offer-builder override command:
   - `GREENFLOOR_OFFER_BUILDER_CMD`
 - Coinset endpoint override (coin reads + chain history + tx submit):
@@ -172,6 +179,9 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - `fallback_poll_interval_seconds`: recovery snapshot window used by websocket reconnect and `greenfloord --once` bounded capture
 - Strategy execution dry-run:
   - set `runtime.dry_run` in `~/.greenfloor/config/program.yaml`
+- Daemon singleton lock behavior:
+  - daemon loop and `--once` both require exclusive lock on `state_dir/daemon.lock`.
+  - if lock is held, process exits with `daemon_lock_conflict` event and non-zero exit code.
 - Validate config + override sanity before deploy:
   - `greenfloor-manager doctor` (includes warnings for invalid runtime override env values)
 

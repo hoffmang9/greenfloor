@@ -45,6 +45,9 @@ class ProgramConfig:
     pushover_app_token_env: str
     pushover_recipient_key_env: str
     runtime_parallel_markets: bool = False
+    runtime_offer_parallelism_enabled: bool = False
+    runtime_offer_parallelism_max_workers: int = 4
+    runtime_reservation_ttl_seconds: int = 300
     cloud_wallet_base_url: str = ""
     cloud_wallet_user_key_id: str = ""
     cloud_wallet_private_key_pem_path: str = ""
@@ -262,6 +265,11 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         runtime_loop_interval_seconds=int(_req(runtime, "loop_interval_seconds")),
         runtime_dry_run=bool(runtime.get("dry_run", False)),
         runtime_parallel_markets=bool(runtime.get("parallel_markets", False)),
+        runtime_offer_parallelism_enabled=bool(runtime.get("offer_parallelism_enabled", False)),
+        runtime_offer_parallelism_max_workers=max(
+            1, int(runtime.get("offer_parallelism_max_workers", 4))
+        ),
+        runtime_reservation_ttl_seconds=max(30, int(runtime.get("reservation_ttl_seconds", 300))),
         tx_block_trigger_mode=tx_block_trigger_mode,
         tx_block_websocket_url=tx_block_websocket_url,
         tx_block_websocket_reconnect_interval_seconds=tx_block_websocket_reconnect_interval_seconds,

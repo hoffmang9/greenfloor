@@ -2708,6 +2708,126 @@ def _ensure_offer_bootstrap_denominations(
     }
 
 
+def _cloud_wallet_create_offer_phase(
+    *,
+    wallet: CloudWalletAdapter,
+    market,
+    size_base_units: int,
+    quote_price: float,
+    resolved_base_asset_id: str,
+    resolved_quote_asset_id: str,
+    offer_fee_mojos: int,
+    split_input_coins_fee: int,
+    expiry_unit: str,
+    expiry_value: int,
+) -> dict[str, Any]:
+    prior_wallet_payload = _wallet_get_wallet_offers(
+        wallet,
+        is_creator=True,
+        states=["OPEN", "PENDING"],
+    )
+    prior_offers = prior_wallet_payload.get("offers", [])
+    known_offer_markers = _offer_markers(prior_offers if isinstance(prior_offers, list) else [])
+    offer_request_started_at = dt.datetime.now(dt.UTC)
+    offer_amount = int(
+        size_base_units * int((market.pricing or {}).get("base_unit_mojo_multiplier", 1000))
+    )
+    request_amount = int(
+        round(
+            float(size_base_units)
+            * float(quote_price)
+            * int((market.pricing or {}).get("quote_unit_mojo_multiplier", 1000))
+        )
+    )
+    if request_amount <= 0:
+        raise ValueError("request_amount must be positive")
+    offered = [{"assetId": resolved_base_asset_id, "amount": offer_amount}]
+    requested = [{"assetId": resolved_quote_asset_id, "amount": request_amount}]
+    expires_at_delta = {expiry_unit: int(expiry_value)}
+    expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(**expires_at_delta)).isoformat()
+    create_result = wallet.create_offer(
+        offered=offered,
+        requested=requested,
+        fee=offer_fee_mojos,
+        expires_at_iso=expires_at,
+        split_input_coins=True,
+        split_input_coins_fee=split_input_coins_fee,
+    )
+    signature_request_id = str(create_result.get("signature_request_id", "")).strip()
+    wait_events: list[dict[str, str]] = []
+    signature_state = str(create_result.get("status", "UNKNOWN")).strip()
+    if signature_request_id:
+        signature_state, signature_wait_events = _poll_signature_request_until_not_unsigned(
+            wallet=wallet,
+            signature_request_id=signature_request_id,
+            timeout_seconds=15 * 60,
+            warning_interval_seconds=10 * 60,
+        )
+        wait_events.extend(signature_wait_events)
+    return {
+        "known_offer_markers": known_offer_markers,
+        "offer_request_started_at": offer_request_started_at,
+        "signature_request_id": signature_request_id,
+        "signature_state": signature_state,
+        "wait_events": wait_events,
+        "expires_at": expires_at,
+        "offer_amount": offer_amount,
+    }
+
+
+def _cloud_wallet_wait_offer_artifact_phase(
+    *,
+    wallet: CloudWalletAdapter,
+    known_markers: set[str],
+    offer_request_started_at: dt.datetime,
+) -> str:
+    return _poll_offer_artifact_until_available(
+        wallet=wallet,
+        known_markers=known_markers,
+        timeout_seconds=15 * 60,
+        min_created_at=offer_request_started_at,
+        require_open_state=True,
+    )
+
+
+def _cloud_wallet_post_offer_phase(
+    *,
+    publish_venue: str,
+    dexie: DexieAdapter | None,
+    splash: SplashAdapter | None,
+    offer_text: str,
+    drop_only: bool,
+    claim_rewards: bool,
+    market,
+    size_base_units: int,
+) -> dict[str, Any]:
+    if publish_venue == "dexie":
+        assert dexie is not None
+        result = _post_dexie_offer_with_invalid_offer_retry(
+            dexie=dexie,
+            offer_text=offer_text,
+            drop_only=drop_only,
+            claim_rewards=claim_rewards,
+        )
+        if bool(result.get("success", False)):
+            posted_offer_id = str(result.get("id", "")).strip()
+            visibility_error = _verify_dexie_offer_visible_by_id(
+                dexie=dexie,
+                offer_id=posted_offer_id,
+                expected_base_asset_id=str(market.base_asset),
+                expected_base_amount=float(size_base_units),
+            )
+            if visibility_error:
+                return {
+                    **result,
+                    "success": False,
+                    "error": visibility_error,
+                }
+        return result
+    assert splash is not None
+    return splash.post_offer(offer_text)
+
+
 def _build_and_post_offer_cloud_wallet(
     *,
     program,
@@ -2773,59 +2893,28 @@ def _build_and_post_offer_cloud_wallet(
             if bool(bootstrap_result.get("fallback_to_cloud_wallet_offer_split", False)):
                 split_input_coins_fee = int(bootstrap_result.get("fee_mojos", 0))
 
-        prior_wallet_payload = _wallet_get_wallet_offers(
-            wallet,
-            is_creator=True,
-            states=["OPEN", "PENDING"],
-        )
-        prior_offers = prior_wallet_payload.get("offers", [])
-        known_offer_markers = _offer_markers(prior_offers if isinstance(prior_offers, list) else [])
-        offer_request_started_at = dt.datetime.now(dt.UTC)
-        offer_amount = int(
-            size_base_units * int((market.pricing or {}).get("base_unit_mojo_multiplier", 1000))
-        )
-        request_amount = int(
-            round(
-                float(size_base_units)
-                * float(quote_price)
-                * int((market.pricing or {}).get("quote_unit_mojo_multiplier", 1000))
-            )
-        )
-        if request_amount <= 0:
-            raise ValueError("request_amount must be positive")
-
-        offered = [{"assetId": resolved_base_asset_id, "amount": offer_amount}]
-        requested = [{"assetId": resolved_quote_asset_id, "amount": request_amount}]
-        expires_at_delta = {expiry_unit: int(expiry_value)}
-        expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(**expires_at_delta)).isoformat()
-        create_result = wallet.create_offer(
-            offered=offered,
-            requested=requested,
-            fee=offer_fee_mojos,
-            expires_at_iso=expires_at,
-            split_input_coins=True,
+        create_phase = _cloud_wallet_create_offer_phase(
+            wallet=wallet,
+            market=market,
+            size_base_units=size_base_units,
+            quote_price=quote_price,
+            resolved_base_asset_id=resolved_base_asset_id,
+            resolved_quote_asset_id=resolved_quote_asset_id,
+            offer_fee_mojos=offer_fee_mojos,
             split_input_coins_fee=split_input_coins_fee,
+            expiry_unit=expiry_unit,
+            expiry_value=expiry_value,
         )
-        signature_request_id = str(create_result.get("signature_request_id", "")).strip()
-        wait_events: list[dict[str, str]] = []
-        signature_state = str(create_result.get("status", "UNKNOWN")).strip()
-        if signature_request_id:
-            signature_state, signature_wait_events = _poll_signature_request_until_not_unsigned(
-                wallet=wallet,
-                signature_request_id=signature_request_id,
-                timeout_seconds=15 * 60,
-                warning_interval_seconds=10 * 60,
-            )
-            wait_events.extend(signature_wait_events)
-
+        signature_request_id = str(create_phase["signature_request_id"]).strip()
+        signature_state = str(create_phase["signature_state"]).strip()
+        wait_events = list(create_phase["wait_events"])
+        expires_at = str(create_phase["expires_at"])
         offer_text = ""
         try:
-            offer_text = _poll_offer_artifact_until_available(
+            offer_text = _cloud_wallet_wait_offer_artifact_phase(
                 wallet=wallet,
-                known_markers=known_offer_markers,
-                timeout_seconds=15 * 60,
-                min_created_at=offer_request_started_at,
-                require_open_state=True,
+                known_markers=set(create_phase["known_offer_markers"]),
+                offer_request_started_at=create_phase["offer_request_started_at"],
             )
         except RuntimeError as exc:
             post_results.append(
@@ -2886,31 +2975,16 @@ def _build_and_post_offer_cloud_wallet(
             )
             continue
 
-        if publish_venue == "dexie":
-            assert dexie is not None
-            result = _post_dexie_offer_with_invalid_offer_retry(
-                dexie=dexie,
-                offer_text=offer_text,
-                drop_only=drop_only,
-                claim_rewards=claim_rewards,
-            )
-            if bool(result.get("success", False)):
-                posted_offer_id = str(result.get("id", "")).strip()
-                visibility_error = _verify_dexie_offer_visible_by_id(
-                    dexie=dexie,
-                    offer_id=posted_offer_id,
-                    expected_base_asset_id=str(market.base_asset),
-                    expected_base_amount=float(size_base_units),
-                )
-                if visibility_error:
-                    result = {
-                        **result,
-                        "success": False,
-                        "error": visibility_error,
-                    }
-        else:
-            assert splash is not None
-            result = splash.post_offer(offer_text)
+        result = _cloud_wallet_post_offer_phase(
+            publish_venue=publish_venue,
+            dexie=dexie,
+            splash=splash,
+            offer_text=offer_text,
+            drop_only=drop_only,
+            claim_rewards=claim_rewards,
+            market=market,
+            size_base_units=size_base_units,
+        )
         if result.get("success") is False:
             publish_failures += 1
         offer_id = str(result.get("id", "")).strip()

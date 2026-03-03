@@ -1,3 +1,4 @@
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
@@ -361,5 +362,131 @@ def test_add_coin_op_ledger_entry_null_operation_id(tmp_path: Path) -> None:
         )
         row = store.conn.execute("SELECT * FROM coin_op_ledger ORDER BY id DESC LIMIT 1").fetchone()
         assert row["operation_id"] is None
+    finally:
+        store.close()
+
+
+def test_offer_reservation_lease_roundtrip(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.add_offer_reservation_lease(
+            reservation_id="res-1",
+            market_id="m1",
+            wallet_id="vault-1",
+            asset_amounts={"xch": 1000, "cat-1": 2500},
+            lease_seconds=120,
+        )
+        rows = store.list_offer_reservation_leases(reservation_id="res-1")
+        assert len(rows) == 2
+        assert {r["asset_id"] for r in rows} == {"xch", "cat-1"}
+        reserved = store.get_offer_reserved_amounts_by_asset(wallet_id="vault-1")
+        assert reserved["xch"] == 1000
+        assert reserved["cat-1"] == 2500
+    finally:
+        store.close()
+
+
+def test_offer_reservation_release_clears_reserved_amount(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.add_offer_reservation_lease(
+            reservation_id="res-2",
+            market_id="m1",
+            wallet_id="vault-1",
+            asset_amounts={"xch": 700},
+            lease_seconds=120,
+        )
+        updated = store.release_offer_reservation_lease(
+            reservation_id="res-2",
+            release_status="released_success",
+        )
+        assert updated == 1
+        reserved = store.get_offer_reserved_amounts_by_asset(wallet_id="vault-1")
+        assert reserved.get("xch", 0) == 0
+        rows = store.list_offer_reservation_leases(reservation_id="res-2")
+        assert rows[0]["status"] == "released_success"
+        assert rows[0]["released_at"] is not None
+    finally:
+        store.close()
+
+
+def test_offer_reservation_expiry_marks_active_rows_expired(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.add_offer_reservation_lease(
+            reservation_id="res-3",
+            market_id="m1",
+            wallet_id="vault-1",
+            asset_amounts={"xch": 120},
+            lease_seconds=1,
+        )
+        expired = store.expire_offer_reservation_leases(now=datetime.now(UTC) + timedelta(hours=1))
+        assert expired == 1
+        rows = store.list_offer_reservation_leases(reservation_id="res-3")
+        assert rows[0]["status"] == "expired"
+        assert rows[0]["released_at"] is not None
+    finally:
+        store.close()
+
+
+def test_try_acquire_offer_reservation_lease_rejects_insufficient_capacity(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        err = store.try_acquire_offer_reservation_lease(
+            reservation_id="res-4",
+            market_id="m1",
+            wallet_id="vault-1",
+            requested_amounts={"asset": 100},
+            available_amounts={"asset": 50},
+            lease_seconds=120,
+        )
+        assert err is not None
+        assert "reservation_insufficient_asset" in err
+        rows = store.list_offer_reservation_leases(reservation_id="res-4")
+        assert rows == []
+    finally:
+        store.close()
+
+
+def test_try_acquire_offer_reservation_lease_persists_rows_on_success(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        err = store.try_acquire_offer_reservation_lease(
+            reservation_id="res-5",
+            market_id="m1",
+            wallet_id="vault-1",
+            requested_amounts={"asset": 100, "xch": 20},
+            available_amounts={"asset": 150, "xch": 40},
+            lease_seconds=120,
+        )
+        assert err is None
+        rows = store.list_offer_reservation_leases(reservation_id="res-5")
+        assert len(rows) == 2
+        reserved = store.get_offer_reserved_amounts_by_asset(wallet_id="vault-1")
+        assert reserved["asset"] == 100
+        assert reserved["xch"] == 20
+    finally:
+        store.close()
+
+
+def test_prune_offer_reservation_leases_removes_old_inactive_rows(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "gf.sqlite")
+    try:
+        store.add_offer_reservation_lease(
+            reservation_id="res-6",
+            market_id="m1",
+            wallet_id="vault-1",
+            asset_amounts={"asset": 10},
+            lease_seconds=120,
+        )
+        store.release_offer_reservation_lease(
+            reservation_id="res-6",
+            release_status="released_success",
+        )
+        removed = store.prune_offer_reservation_leases(
+            older_than=datetime.now(UTC) + timedelta(hours=1)
+        )
+        assert removed == 1
+        assert store.list_offer_reservation_leases(reservation_id="res-6") == []
     finally:
         store.close()

@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
+import pytest
+
 from greenfloor.daemon.main import _run_loop, run_once
 from greenfloor.storage.sqlite import SqliteStore
 from tests.logging_helpers import reset_concurrent_log_handlers
@@ -700,3 +702,34 @@ def test_run_loop_websocket_callbacks_use_callback_thread_store(
 
     assert code == 0
     assert ws_errors == []
+
+
+def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:
+    import greenfloor.daemon.main as daemon_mod
+
+    state_dir = tmp_path / "state"
+    with daemon_mod._acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
+        with pytest.raises(RuntimeError, match="daemon_already_running"):
+            with daemon_mod._acquire_daemon_instance_lock(state_dir=state_dir, mode="once"):
+                pass
+
+
+def test_main_once_exits_with_lock_conflict(monkeypatch, tmp_path: Path, capsys) -> None:
+    import greenfloor.daemon.main as daemon_mod
+
+    state_dir = tmp_path / "state"
+    with daemon_mod._acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "greenfloord",
+                "--once",
+                "--state-dir",
+                str(state_dir),
+            ],
+        )
+        with pytest.raises(SystemExit) as exc:
+            daemon_mod.main()
+        assert exc.value.code == 3
+        out = capsys.readouterr().out
+        assert "daemon_lock_conflict" in out
