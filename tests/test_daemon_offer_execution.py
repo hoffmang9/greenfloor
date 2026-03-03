@@ -1316,6 +1316,94 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
     assert result["executed_count"] == 1
 
 
+def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
+    monkeypatch, tmp_path
+) -> None:
+    daemon_main._POST_COOLDOWN_UNTIL.clear()
+
+    class _FakeCloudWallet:
+        def list_coins(
+            self, *, asset_id: str | None = None, include_pending: bool = True
+        ) -> list[dict[str, Any]]:
+            _ = include_pending
+            # Simulate the wallet behavior observed on John-Deere where a broad
+            # unfiltered query reports pending-only inventory.
+            if not asset_id:
+                return [
+                    {
+                        "amount": 9_999_999_999_000,
+                        "state": "PENDING",
+                        "asset": {"id": "xch_asset"},
+                    }
+                ]
+            if asset_id == "asset_global":
+                return [{"amount": 1500, "state": "SETTLED", "asset": {"id": "asset_global"}}]
+            if asset_id == "xch_asset":
+                return [{"amount": 1000, "state": "SETTLED", "asset": {"id": "xch_asset"}}]
+            return []
+
+    monkeypatch.setattr(
+        daemon_main,
+        "_new_cloud_wallet_adapter_for_daemon",
+        lambda _program: _FakeCloudWallet(),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        lambda **_kwargs: ("asset_global", "xch_asset"),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_cloud_wallet_offer_post_fallback",
+        lambda **_kwargs: {"success": True, "offer_id": "offer-scoped"},
+    )
+
+    class _Program:
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "UserAuthKey_abc"
+        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+        runtime_offer_parallelism_enabled = True
+        runtime_offer_parallelism_max_workers = 2
+        runtime_reservation_ttl_seconds = 300
+        coin_ops_minimum_fee_mojos = 0
+        coin_ops_split_fee_mojos = 0
+
+    market = _market()
+    market.base_asset = "asset-local-only"
+    db_path = tmp_path / "reservations.sqlite"
+    coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
+    dexie = _FakeDexie(post_result={"success": True, "id": "offer-scoped"})
+    dexie.visible_offer_ids = {"offer-scoped"}
+    store = _FakeStore()
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=1,
+            pair="usdc",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="no_active_offer_reseed",
+        )
+    ]
+    result = _execute_strategy_actions(
+        market=market,
+        strategy_actions=actions,
+        runtime_dry_run=False,
+        xch_price_usd=30.0,
+        dexie=cast(Any, dexie),
+        store=cast(Any, store),
+        publish_venue="dexie",
+        program=_Program(),
+        reservation_coordinator=coordinator,
+    )
+    assert result["executed_count"] == 1
+    assert not any(
+        "reservation_insufficient_asset" in str(item["reason"]) for item in result["items"]
+    )
+
+
 def test_reservation_coordinator_cross_instance_contention_allows_single_winner(
     tmp_path,
 ) -> None:

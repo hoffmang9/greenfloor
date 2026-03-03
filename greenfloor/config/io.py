@@ -109,6 +109,11 @@ def default_cats_config_path() -> Path | None:
     return None
 
 
+def default_state_dir_path() -> Path:
+    """Return the canonical daemon state dir under ~/.greenfloor."""
+    return Path("~/.greenfloor/state").expanduser()
+
+
 def resolve_quote_asset_for_offer(*, quote_asset: str, network: str) -> str:
     """Resolve a quote asset identifier to its canonical form for offer building.
 

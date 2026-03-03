@@ -1,5 +1,23 @@
 # Progress Log
 
+## 2026-03-03 (Reservation inventory fix for asset-scoped Cloud Wallet queries)
+
+- Root cause identified from John-Deere runtime behavior:
+  - parallel reservation admission used an unfiltered `wallet.list_coins(include_pending=True)` read for capacity checks;
+  - on this wallet/backend combination, broad unfiltered inventory reads intermittently returned pending-only views, producing false `available=0` admission outcomes (`reservation_insufficient_asset_*`) for otherwise spendable CAT balances.
+- Implemented daemon-side fix in `greenfloor/daemon/main.py`:
+  - `_cloud_wallet_spendable_amounts_by_asset` now queries spendable inventory per requested asset via `wallet.list_coins(asset_id=<requested>, include_pending=True)`,
+  - preserves spendable-state filtering and explicit per-asset totals,
+  - includes compatibility fallback for adapters/test doubles that do not accept `asset_id`,
+  - logs targeted warning on per-asset lookup exceptions.
+- Added deterministic regression coverage in `tests/test_daemon_offer_execution.py`:
+  - `test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory` reproduces pending-only unfiltered inventory behavior while asset-scoped reads are spendable, and verifies reservation admission proceeds successfully.
+- Validation:
+  - targeted daemon reservation/parallel suite passed (`8 passed`).
+- John-Deere operational verification:
+  - after temporarily disabling `runtime.offer_parallelism_enabled`, `eco292021_sell_wusdbc` resumed posting and showed fresh `dexie_post_success` executions for sizes `1`, `10`, and `100`;
+  - confirms offer posting path is healthy and isolates failure mode to reservation admission inventory reads.
+
 ## 2026-03-03 (Parallel offer dispatch with asset reservations)
 
 - John-Deere validation + canary verification:

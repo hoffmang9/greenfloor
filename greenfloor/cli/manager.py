@@ -28,6 +28,9 @@ from greenfloor.config.io import (
     default_cats_config_path as _default_cats_config_path_shared,
 )
 from greenfloor.config.io import (
+    default_state_dir_path as _default_state_dir_path_shared,
+)
+from greenfloor.config.io import (
     is_testnet,
     load_markets_config_with_optional_overlay,
     load_program_config,
@@ -4624,7 +4627,7 @@ def main() -> None:
     p_onboard = sub.add_parser("keys-onboard")
     p_onboard.add_argument("--chia-keys-dir", default="")
     p_onboard.add_argument("--key-id", required=True)
-    p_onboard.add_argument("--state-dir", default=".greenfloor/state")
+    p_onboard.add_argument("--state-dir", default=str(_default_state_dir_path_shared()))
 
     p_build_post = sub.add_parser("build-and-post-offer")
     group_market = p_build_post.add_mutually_exclusive_group(required=True)
@@ -4769,7 +4772,7 @@ def main() -> None:
         code = _keys_onboard(
             program_path=Path(args.program_config),
             key_id=args.key_id,
-            state_dir=Path(args.state_dir),
+            state_dir=Path(args.state_dir).expanduser(),
             chia_keys_dir=Path(args.chia_keys_dir).expanduser()
             if str(args.chia_keys_dir).strip()
             else None,
