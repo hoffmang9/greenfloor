@@ -3852,8 +3852,9 @@ def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured(
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_offer_text_for_request",
-        lambda payload: local_builder_calls.__setitem__(0, local_builder_calls[0] + 1)
-        or "offer1abc",
+        lambda payload: (
+            local_builder_calls.__setitem__(0, local_builder_calls[0] + 1) or "offer1abc"
+        ),
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._kms_offer_signing_configured", lambda _program: True
@@ -3902,8 +3903,9 @@ def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured_large_si
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_offer_text_for_request",
-        lambda payload: local_builder_calls.__setitem__(0, local_builder_calls[0] + 1)
-        or "offer1abc",
+        lambda payload: (
+            local_builder_calls.__setitem__(0, local_builder_calls[0] + 1) or "offer1abc"
+        ),
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._kms_offer_signing_configured", lambda _program: True
@@ -4529,6 +4531,101 @@ def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
     assert payload["publish_failures"] == 0
     assert payload["results"] == []
     assert len(payload["built_offers_preview"]) == 1
+
+
+def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
+
+    program_path = tmp_path / "program.yaml"
+    markets_path = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program_path)
+    _write_markets_with_ladder(markets_path)
+    prog, mkt = _load_program_and_market(program_path, markets_path)
+
+    create_offer_calls: list[int] = []
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def create_offer(
+            *,
+            offered,
+            requested,
+            fee,
+            expires_at_iso,
+            split_input_coins=True,
+            split_input_coins_fee=0,
+        ):
+            _ = offered, requested, fee, expires_at_iso, split_input_coins
+            create_offer_calls.append(int(split_input_coins_fee))
+            return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
+
+        @staticmethod
+        def get_wallet():
+            return {"offers": [{"bech32": "offer1bootstrapfee"}]}
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str):
+            pass
+
+        @staticmethod
+        def post_offer(_offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = drop_only, claim_rewards
+            return {"success": True, "id": "dexie-bootstrap-1"}
+
+        @staticmethod
+        def get_offer(offer_id: str) -> dict[str, object]:
+            return {"success": True, "offer": {"id": str(offer_id), "status": 0}}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._ensure_offer_bootstrap_denominations",
+        lambda **_kwargs: {
+            "status": "failed",
+            "reason": "bootstrap_failed_for_test",
+            "fallback_to_cloud_wallet_offer_split": True,
+            "fee_mojos": 123,
+        },
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
+        lambda **kwargs: ("SUBMITTED", []),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        lambda **kwargs: "offer1bootstrapfee",
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        lambda _offer: None,
+    )
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+
+    code, _ = _build_and_post_offer_cloud_wallet(
+        program=prog,
+        market=mkt,
+        size_base_units=10,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        quote_price=0.003,
+        dry_run=False,
+    )
+
+    assert code == 0
+    assert create_offer_calls == [123]
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["bootstrap_actions"][0]["status"] == "failed"
 
 
 def test_poll_offer_artifact_until_available_returns_new_offer(monkeypatch) -> None:

@@ -1,5 +1,25 @@
 # Progress Log
 
+## 2026-03-02 (Offer bootstrap denomination preflight for build-and-post-offer)
+
+- Implemented denomination bootstrap preflight in Cloud Wallet `build-and-post-offer` path (`greenfloor/cli/manager.py`):
+  - before each create-offer attempt, manager now checks market `ladders.sell` deficits using spendable inventory and plans a mixed-output bootstrap when under target+buffer.
+  - preflight result is included in command JSON output under `bootstrap_actions`.
+  - when local mixed bootstrap cannot run safely, manager falls back to Cloud Wallet offer-time split with `split_input_coins_fee` populated from bootstrap fee resolution.
+- Added new deterministic planner module `greenfloor/offer_bootstrap.py`:
+  - computes exact-match per-size deficits and plans a one-transaction mixed output set (`X*1`, `Y*10`, `Z*100`, etc.) from a qualifying large source coin.
+- Extended Coinset fee recommendation support for larger split fanout (`greenfloor/adapters/coinset.py`):
+  - `get_fee_estimate` / `get_conservative_fee_estimate` now support dynamic `cost` and optional `spend_count`.
+  - manager fee resolver now accepts size-aware fee inputs while preserving compatibility with older test doubles/signatures.
+- Added local mixed-output signing + broadcast entrypoint (`greenfloor/signing.py`):
+  - new `sign_and_broadcast_mixed_split(payload)` builds and broadcasts mixed-output split transactions.
+  - supports XCH and CAT spend assembly with existing CAT/vault pending-spend materialization paths; includes deterministic fallback/error contracts.
+- Added deterministic coverage:
+  - new `tests/test_offer_bootstrap.py` for mixed-output planning behavior.
+  - new manager regression for fallback split fee propagation to Cloud Wallet create-offer.
+  - new signing regressions for mixed-split broadcast success/failure wrappers.
+  - targeted validation: `184 passed` across `test_offer_bootstrap`, `test_signing`, `test_manager_post_offer`, and `test_coinset_adapter`.
+
 ## 2026-03-02 (Parallel market processing with failure isolation)
 
 - Added optional daemon market parallelism via `runtime.parallel_markets` (default `false`) in `program.yaml`.

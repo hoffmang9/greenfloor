@@ -50,6 +50,7 @@ from greenfloor.logging_setup import (
     normalize_log_level_name,
     warn_if_log_level_auto_healed,
 )
+from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
 from greenfloor.storage.sqlite import SqliteStore
 
 _TEST_PHASE_OFFER_EXPIRY_MINUTES = 5
@@ -1458,7 +1459,12 @@ def _coinset_adapter(*, network: str) -> CoinsetAdapter:
         return CoinsetAdapter(base_url or None, network=network)
 
 
-def _coinset_fee_lookup_preflight(*, network: str) -> dict[str, str]:
+def _coinset_fee_lookup_preflight(
+    *,
+    network: str,
+    fee_cost: int = 1_000_000,
+    spend_count: int | None = None,
+) -> dict[str, str]:
     try:
         coinset = _coinset_adapter(network=network)
     except Exception as exc:
@@ -1477,7 +1483,16 @@ def _coinset_fee_lookup_preflight(*, network: str) -> dict[str, str]:
         ),
     }
     try:
-        payload = coinset.get_fee_estimate(target_times=[300, 600, 1200])
+        try:
+            payload = coinset.get_fee_estimate(
+                target_times=[300, 600, 1200],
+                cost=max(1, int(fee_cost)),
+                spend_count=spend_count,
+            )
+        except TypeError as exc:
+            if "unexpected keyword argument" not in str(exc):
+                raise
+            payload = coinset.get_fee_estimate(target_times=[300, 600, 1200])
     except Exception as exc:
         raise _CoinsetFeeLookupPreflightError(
             failure_kind="endpoint_validation_failed",
@@ -1498,7 +1513,15 @@ def _coinset_fee_lookup_preflight(*, network: str) -> dict[str, str]:
             diagnostics=diagnostics,
         )
 
-    recommended = coinset.get_conservative_fee_estimate()
+    try:
+        recommended = coinset.get_conservative_fee_estimate(
+            cost=max(1, int(fee_cost)),
+            spend_count=spend_count,
+        )
+    except TypeError as exc:
+        if "unexpected keyword argument" not in str(exc):
+            raise
+        recommended = coinset.get_conservative_fee_estimate()
     if recommended is None:
         raise _CoinsetFeeLookupPreflightError(
             failure_kind="temporary_fee_advice_unavailable",
@@ -1514,6 +1537,8 @@ def _resolve_operation_fee(
     role: str,
     network: str,
     minimum_fee_mojos: int = 0,
+    fee_cost: int = 1_000_000,
+    spend_count: int | None = None,
 ) -> tuple[int, str]:
     if role == "maker_create_offer":
         return 0, "maker_default_zero"
@@ -1528,7 +1553,15 @@ def _resolve_operation_fee(
     for attempt in range(max_attempts):
         advised = None
         try:
-            advised = coinset.get_conservative_fee_estimate()
+            try:
+                advised = coinset.get_conservative_fee_estimate(
+                    cost=max(1, int(fee_cost)),
+                    spend_count=spend_count,
+                )
+            except TypeError as exc:
+                if "unexpected keyword argument" not in str(exc):
+                    raise
+                advised = coinset.get_conservative_fee_estimate()
         except Exception:
             advised = None
         if advised is not None:
@@ -1544,13 +1577,23 @@ def _resolve_operation_fee(
 
 
 def _resolve_taker_or_coin_operation_fee(
-    *, network: str, minimum_fee_mojos: int = 0
+    *,
+    network: str,
+    minimum_fee_mojos: int = 0,
+    fee_cost: int = 1_000_000,
+    spend_count: int | None = None,
 ) -> tuple[int, str]:
-    _coinset_fee_lookup_preflight(network=network)
+    _coinset_fee_lookup_preflight(
+        network=network,
+        fee_cost=fee_cost,
+        spend_count=spend_count,
+    )
     return _resolve_operation_fee(
         role="taker_or_coin_operation",
         network=network,
         minimum_fee_mojos=minimum_fee_mojos,
+        fee_cost=fee_cost,
+        spend_count=spend_count,
     )
 
 
@@ -2454,10 +2497,167 @@ def _build_offer_text_for_request(payload: dict) -> str:
     return build_offer_text(payload)
 
 
+def _bootstrap_fee_cost_for_output_count(output_count: int) -> int:
+    count = max(1, int(output_count))
+    return 1_000_000 + max(0, count - 1) * 250_000
+
+
+def _resolve_bootstrap_split_fee(
+    *,
+    network: str,
+    minimum_fee_mojos: int,
+    output_count: int,
+) -> tuple[int, str, str | None]:
+    fee_cost = _bootstrap_fee_cost_for_output_count(output_count)
+    spend_count = max(1, int(output_count))
+    try:
+        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(
+            network=network,
+            minimum_fee_mojos=minimum_fee_mojos,
+            fee_cost=fee_cost,
+            spend_count=spend_count,
+        )
+        return int(fee_mojos), fee_source, None
+    except Exception as exc:
+        fallback_fee = max(0, int(minimum_fee_mojos))
+        return fallback_fee, "config_minimum_fee_fallback", str(exc)
+
+
+def _ensure_offer_bootstrap_denominations(
+    *,
+    program: Any,
+    market: Any,
+    wallet: CloudWalletAdapter,
+    resolved_base_asset_id: str,
+    key_id: str,
+    keyring_yaml_path: str,
+) -> dict[str, Any]:
+    ladders = getattr(market, "ladders", {}) or {}
+    sell_ladder = list(ladders.get("sell", []) or []) if isinstance(ladders, dict) else []
+    if not sell_ladder:
+        return {"status": "skipped", "reason": "missing_sell_ladder"}
+    if not hasattr(wallet, "list_coins"):
+        return {
+            "status": "skipped",
+            "reason": "wallet_list_coins_unavailable_for_bootstrap",
+            "fallback_to_cloud_wallet_offer_split": True,
+        }
+
+    asset_scoped_coins = wallet.list_coins(asset_id=resolved_base_asset_id, include_pending=True)
+    spendable_asset_coins = [coin for coin in asset_scoped_coins if _is_spendable_coin(coin)]
+    bootstrap_plan = plan_bootstrap_mixed_outputs(
+        sell_ladder=sell_ladder,
+        spendable_coins=spendable_asset_coins,
+    )
+    if bootstrap_plan is None:
+        return {"status": "skipped", "reason": "already_ready"}
+    if not keyring_yaml_path:
+        return {
+            "status": "skipped",
+            "reason": "missing_keyring_yaml_path_for_bootstrap",
+            "fallback_to_cloud_wallet_offer_split": True,
+        }
+    if not Path(keyring_yaml_path).expanduser().exists():
+        return {
+            "status": "skipped",
+            "reason": "keyring_yaml_path_not_found_for_bootstrap",
+            "fallback_to_cloud_wallet_offer_split": True,
+        }
+
+    fee_mojos, fee_source, fee_lookup_error = _resolve_bootstrap_split_fee(
+        network=str(program.app_network),
+        minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
+        output_count=len(bootstrap_plan.output_amounts_base_units),
+    )
+    existing_coin_ids = {
+        str(c.get("id", "")).strip() for c in wallet.list_coins(include_pending=True) if c.get("id")
+    }
+    from greenfloor.signing import sign_and_broadcast_mixed_split
+
+    signing_payload = {
+        "key_id": key_id,
+        "network": str(program.app_network),
+        "receive_address": str(market.receive_address),
+        "keyring_yaml_path": keyring_yaml_path,
+        "asset_id": str(market.base_asset),
+        "selected_coin_ids": [bootstrap_plan.source_coin_id],
+        "output_amounts_base_units": list(bootstrap_plan.output_amounts_base_units),
+        "fee_mojos": int(fee_mojos),
+        "cloud_wallet_base_url": str(program.cloud_wallet_base_url or "").strip(),
+        "cloud_wallet_user_key_id": str(program.cloud_wallet_user_key_id or "").strip(),
+        "cloud_wallet_private_key_pem_path": str(
+            program.cloud_wallet_private_key_pem_path or ""
+        ).strip(),
+        "cloud_wallet_vault_id": str(program.cloud_wallet_vault_id or "").strip(),
+        "cloud_wallet_kms_key_id": str(program.cloud_wallet_kms_key_id or "").strip(),
+        "cloud_wallet_kms_region": str(program.cloud_wallet_kms_region or "").strip(),
+        "cloud_wallet_kms_public_key_hex": str(
+            program.cloud_wallet_kms_public_key_hex or ""
+        ).strip(),
+    }
+    bootstrap_result = sign_and_broadcast_mixed_split(signing_payload)
+    if str(bootstrap_result.get("status", "")).strip().lower() != "executed":
+        return {
+            "status": "failed",
+            "reason": str(bootstrap_result.get("reason", "bootstrap_signing_failed")),
+            "fallback_to_cloud_wallet_offer_split": True,
+            "fee_mojos": int(fee_mojos),
+            "fee_source": fee_source,
+            "fee_lookup_error": fee_lookup_error,
+            "plan": {
+                "source_coin_id": bootstrap_plan.source_coin_id,
+                "output_count": len(bootstrap_plan.output_amounts_base_units),
+                "total_output_amount": bootstrap_plan.total_output_amount,
+            },
+        }
+
+    wait_events = _wait_for_mempool_then_confirmation(
+        wallet=wallet,
+        network=str(program.app_network),
+        initial_coin_ids=existing_coin_ids,
+        mempool_warning_seconds=5 * 60,
+        confirmation_warning_seconds=15 * 60,
+    )
+    refreshed_asset_coins = wallet.list_coins(asset_id=resolved_base_asset_id, include_pending=True)
+    refreshed_spendable = [coin for coin in refreshed_asset_coins if _is_spendable_coin(coin)]
+    remaining_plan = plan_bootstrap_mixed_outputs(
+        sell_ladder=sell_ladder,
+        spendable_coins=refreshed_spendable,
+    )
+    return {
+        "status": "executed",
+        "reason": "bootstrap_submitted",
+        "ready": remaining_plan is None,
+        "fee_mojos": int(fee_mojos),
+        "fee_source": fee_source,
+        "fee_lookup_error": fee_lookup_error,
+        "plan": {
+            "source_coin_id": bootstrap_plan.source_coin_id,
+            "source_amount": bootstrap_plan.source_amount,
+            "output_count": len(bootstrap_plan.output_amounts_base_units),
+            "total_output_amount": bootstrap_plan.total_output_amount,
+            "change_amount": bootstrap_plan.change_amount,
+            "deficits": [
+                {
+                    "size_base_units": d.size_base_units,
+                    "required_count": d.required_count,
+                    "current_count": d.current_count,
+                    "deficit_count": d.deficit_count,
+                }
+                for d in bootstrap_plan.deficits
+            ],
+        },
+        "operation_id": str(bootstrap_result.get("operation_id", "")).strip(),
+        "wait_events": wait_events,
+    }
+
+
 def _build_and_post_offer_cloud_wallet(
     *,
     program,
     market,
+    key_id: str = "",
+    keyring_yaml_path: str = "",
     size_base_units: int,
     repeat: int,
     publish_venue: str,
@@ -2493,6 +2693,7 @@ def _build_and_post_offer_cloud_wallet(
     store = SqliteStore(db_path)
     post_results: list[dict] = []
     built_offers_preview: list[dict[str, str]] = []
+    bootstrap_actions: list[dict[str, Any]] = []
     publish_failures = 0
     offer_fee_mojos, offer_fee_source = _resolve_maker_offer_fee(network=program.app_network)
     expiry_unit, expiry_value = _resolve_offer_expiry_for_market(market)
@@ -2500,6 +2701,22 @@ def _build_and_post_offer_cloud_wallet(
     splash = SplashAdapter(splash_base_url) if (not dry_run and publish_venue == "splash") else None
 
     for _ in range(repeat):
+        split_input_coins_fee = 0
+        if dry_run:
+            bootstrap_actions.append({"status": "skipped", "reason": "dry_run"})
+        else:
+            bootstrap_result = _ensure_offer_bootstrap_denominations(
+                program=program,
+                market=market,
+                wallet=wallet,
+                resolved_base_asset_id=resolved_base_asset_id,
+                key_id=key_id,
+                keyring_yaml_path=keyring_yaml_path,
+            )
+            bootstrap_actions.append(bootstrap_result)
+            if bool(bootstrap_result.get("fallback_to_cloud_wallet_offer_split", False)):
+                split_input_coins_fee = int(bootstrap_result.get("fee_mojos", 0))
+
         prior_wallet_payload = _wallet_get_wallet_offers(
             wallet,
             is_creator=True,
@@ -2531,7 +2748,7 @@ def _build_and_post_offer_cloud_wallet(
             fee=offer_fee_mojos,
             expires_at_iso=expires_at,
             split_input_coins=True,
-            split_input_coins_fee=0,
+            split_input_coins_fee=split_input_coins_fee,
         )
         signature_request_id = str(create_result.get("signature_request_id", "")).strip()
         wait_events: list[dict[str, str]] = []
@@ -2706,6 +2923,7 @@ def _build_and_post_offer_cloud_wallet(
         "publish_attempts": len(post_results),
         "publish_failures": publish_failures,
         "built_offers_preview": built_offers_preview,
+        "bootstrap_actions": bootstrap_actions,
         "results": post_results,
         "offer_fee_mojos": offer_fee_mojos,
         "offer_fee_source": offer_fee_source,
@@ -2750,7 +2968,7 @@ def _build_and_post_offer(
         network=network,
     )
     signer_key = program.signer_key_registry.get(market.signer_key_id)
-    keyring_yaml_path = signer_key.keyring_yaml_path if signer_key is not None else ""
+    keyring_yaml_path = str(signer_key.keyring_yaml_path or "") if signer_key is not None else ""
     pricing = dict(getattr(market, "pricing", {}) or {})
     base_unit_mojo_multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))
     quote_unit_mojo_multiplier = int(pricing.get("quote_unit_mojo_multiplier", 1000))
@@ -2790,6 +3008,8 @@ def _build_and_post_offer(
         exit_code, _ = _build_and_post_offer_cloud_wallet(
             program=program,
             market=market,
+            key_id=str(market.signer_key_id),
+            keyring_yaml_path=keyring_yaml_path,
             size_base_units=size_base_units,
             repeat=repeat,
             publish_venue=publish_venue,

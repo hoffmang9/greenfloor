@@ -287,6 +287,61 @@ def test_sign_and_broadcast_calls_broadcast(monkeypatch) -> None:
     assert broadcast_called["network"] == "testnet11"
 
 
+def test_sign_and_broadcast_mixed_split_propagates_signing_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        signing_mod,
+        "_build_mixed_split_spend_bundle",
+        lambda _payload: (None, "missing_output_amounts"),
+    )
+    result = signing_mod.sign_and_broadcast_mixed_split(
+        {
+            "key_id": "k1",
+            "network": "mainnet",
+            "receive_address": "xch1abc",
+            "keyring_yaml_path": "/tmp/k.yaml",
+            "asset_id": "xch",
+            "output_amounts_base_units": [1],
+        }
+    )
+    assert result["status"] == "skipped"
+    assert result["reason"] == "signing_failed:missing_output_amounts"
+    assert result["operation_id"] is None
+
+
+def test_sign_and_broadcast_mixed_split_calls_broadcast(monkeypatch) -> None:
+    broadcast_called = {}
+
+    monkeypatch.setattr(
+        signing_mod, "_build_mixed_split_spend_bundle", lambda _payload: ("aabb", None)
+    )
+
+    class _FakeSdk:
+        pass
+
+    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: _FakeSdk)
+
+    def _fake_broadcast(*, sdk, spend_bundle_hex, network):
+        broadcast_called["hex"] = spend_bundle_hex
+        broadcast_called["network"] = network
+        return {"status": "executed", "reason": "submitted", "operation_id": "tx-mixed"}
+
+    monkeypatch.setattr(signing_mod, "_broadcast_spend_bundle", _fake_broadcast)
+    result = signing_mod.sign_and_broadcast_mixed_split(
+        {
+            "key_id": "k1",
+            "network": "testnet11",
+            "receive_address": "txch1abc",
+            "keyring_yaml_path": "/tmp/k.yaml",
+            "asset_id": "xch",
+            "output_amounts_base_units": [1, 10, 100],
+        }
+    )
+    assert result["status"] == "executed"
+    assert result["operation_id"] == "tx-mixed"
+    assert broadcast_called["hex"] == "aabb"
+    assert broadcast_called["network"] == "testnet11"
+
+
 def test_build_additions_from_plan_split() -> None:
     additions, error = signing_mod._build_additions_from_plan(
         plan={"op_type": "split", "size_base_units": 10, "op_count": 2},
