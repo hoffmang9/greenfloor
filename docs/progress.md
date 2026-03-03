@@ -1,5 +1,22 @@
 # Progress Log
 
+## 2026-03-03 (Offer creation fee policy enforcement: always zero)
+
+- Root cause identified from John-Deere runtime behavior:
+  - offer creation was already passing `fee=0`, but the cloud-wallet fallback path could pass a non-zero `split_input_coins_fee` when bootstrap reported `fallback_to_cloud_wallet_offer_split` with `fee_mojos`;
+  - this violated the offer policy that offer files must be zero-fee and fees should apply only to split/combine coin operations.
+- Implemented policy fix:
+  - `greenfloor/cli/manager.py` (`_build_and_post_offer_cloud_wallet`) now always forces `split_input_coins_fee = 0`, including fallback paths;
+  - `greenfloor/daemon/main.py` fee-reservation estimation remains hard-set to `0` for cloud-wallet offer execution, so reservation admission no longer allocates fee-side XCH for offer creation.
+- Added/updated deterministic coverage:
+  - `tests/test_manager_post_offer.py` now asserts fallback bootstrap still calls cloud-wallet `create_offer` with zero split-input fee (`create_offer_calls == [0]`).
+- Validation:
+  - targeted manager cloud-wallet tests passed (`9 passed`);
+  - targeted daemon reservation/parallel tests passed (`8 passed`).
+- John-Deere runtime verification:
+  - direct live probes of `_build_and_post_offer_cloud_wallet` intercepted `CloudWalletAdapter.create_offer(...)` on both normal and fallback markets and confirmed `fee=0` and `split_input_coins_fee=0`;
+  - emitted payloads confirmed `offer_fee_mojos: 0` and successful Dexie publish in both paths.
+
 ## 2026-03-03 (Reservation inventory fix for asset-scoped Cloud Wallet queries)
 
 - Root cause identified from John-Deere runtime behavior:

@@ -873,17 +873,16 @@ def _cloud_wallet_spendable_amounts_by_asset(
     wallet: CloudWalletAdapter,
     asset_ids: set[str],
 ) -> dict[str, int]:
-    normalized_asset_ids = {
-        str(asset_id).strip().lower() for asset_id in asset_ids if str(asset_id).strip()
-    }
-    totals: dict[str, int] = {asset_id: 0 for asset_id in normalized_asset_ids}
-    if not normalized_asset_ids:
+    requested_asset_ids = {str(asset_id).strip() for asset_id in asset_ids if str(asset_id).strip()}
+    totals: dict[str, int] = {asset_id: 0 for asset_id in requested_asset_ids}
+    if not requested_asset_ids:
         return totals
 
     # Query each requested asset directly. Some wallet backends can return
     # incomplete/unhelpful results for broad unfiltered inventory reads, while
     # asset-scoped reads remain accurate.
-    for requested_asset_id in normalized_asset_ids:
+    for requested_asset_id in requested_asset_ids:
+        requested_asset_id_lower = requested_asset_id.lower()
         try:
             coins = wallet.list_coins(asset_id=requested_asset_id, include_pending=True)
         except TypeError:
@@ -906,10 +905,10 @@ def _cloud_wallet_spendable_amounts_by_asset(
                 continue
             asset_payload = coin.get("asset")
             if isinstance(asset_payload, dict):
-                coin_asset_id = str(asset_payload.get("id", "")).strip().lower()
+                coin_asset_id = str(asset_payload.get("id", "")).strip()
             else:
                 coin_asset_id = ""
-            if coin_asset_id != requested_asset_id:
+            if coin_asset_id.lower() != requested_asset_id_lower:
                 continue
             try:
                 amount = int(coin.get("amount", 0))
@@ -943,23 +942,24 @@ def _reservation_request_for_cloud_offer_with_assets(
 ) -> dict[str, int]:
     pricing = market.pricing or {}
     base_multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))
-    base_asset_id = str(resolved_base_asset_id or "").strip().lower()
+    base_asset_id = str(resolved_base_asset_id or "").strip()
     if not base_asset_id:
         return {}
     offer_amount = int(action.size) * base_multiplier
     if offer_amount <= 0:
         return {}
     request: dict[str, int] = {base_asset_id: offer_amount}
-    fee_asset = str(fee_asset_id or "").strip().lower()
+    fee_asset = str(fee_asset_id or "").strip()
     if fee_asset and int(fee_amount_mojos) > 0:
         request[fee_asset] = int(request.get(fee_asset, 0)) + int(fee_amount_mojos)
     return request
 
 
 def _estimate_cloud_offer_fee_reservation_mojos(*, program: Any) -> int:
-    min_fee = int(max(0, int(getattr(program, "coin_ops_minimum_fee_mojos", 0))))
-    split_fee = int(max(0, int(getattr(program, "coin_ops_split_fee_mojos", 0))))
-    return max(min_fee, split_fee)
+    _ = program
+    # Offer files must always be created with zero fees. Fees are only used
+    # for coin split/combine operations outside offer creation.
+    return 0
 
 
 def _resolve_cloud_wallet_offer_asset_ids_for_reservation(

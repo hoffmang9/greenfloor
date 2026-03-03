@@ -1103,7 +1103,9 @@ def test_reservation_coordinator_expires_stale_leases(tmp_path) -> None:
         store.close()
 
 
-def test_execute_strategy_actions_parallel_reserves_xch_fee_bucket(monkeypatch, tmp_path) -> None:
+def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
+    monkeypatch, tmp_path
+) -> None:
     daemon_main._POST_COOLDOWN_UNTIL.clear()
 
     class _FakeCloudWallet:
@@ -1168,9 +1170,9 @@ def test_execute_strategy_actions_parallel_reserves_xch_fee_bucket(monkeypatch, 
         program=_Program(),
         reservation_coordinator=coordinator,
     )
-    assert result["executed_count"] == 1
-    assert any(
-        "reservation_insufficient_xch_asset" in str(item["reason"]) for item in result["items"]
+    assert result["executed_count"] == 2
+    assert all(
+        "reservation_insufficient_xch_asset" not in str(item["reason"]) for item in result["items"]
     )
 
 

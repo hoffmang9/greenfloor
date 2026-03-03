@@ -2893,8 +2893,10 @@ def _build_and_post_offer_cloud_wallet(
                 keyring_yaml_path=keyring_yaml_path,
             )
             bootstrap_actions.append(bootstrap_result)
+            # Offer creation must remain zero-fee. Any split/combine fee belongs
+            # to explicit coin operations, not the offer itself.
             if bool(bootstrap_result.get("fallback_to_cloud_wallet_offer_split", False)):
-                split_input_coins_fee = int(bootstrap_result.get("fee_mojos", 0))
+                split_input_coins_fee = 0
 
         create_phase = _cloud_wallet_create_offer_phase(
             wallet=wallet,
