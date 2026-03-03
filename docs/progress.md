@@ -2,6 +2,19 @@
 
 ## 2026-03-03 (Parallel offer dispatch with asset reservations)
 
+- John-Deere validation + canary verification:
+  - Synced John-Deere runtime repo to branch `feat/parallel-offer-reservations` at commit `8924d2e`.
+  - Ran targeted regression suites on John-Deere: `232 passed` across daemon/reservation/manager/config test files.
+  - Verified daemon singleton lock behavior operationally:
+    - held `state_dir/daemon.lock` via loop-mode lock holder,
+    - `greenfloord --once` correctly exited with lock conflict (`exit_code=3`) and emitted `daemon_lock_conflict` with lock metadata.
+  - Ran real-config `greenfloord --once` canary on John-Deere (`~/.greenfloor/config/*`):
+    - cycle succeeded and posted Dexie offers for active market (`eco492022_sell_wusdbc`) with successful signature submission.
+  - Ran 3-minute loop-mode soak (`timeout 180`) on real config:
+    - expected timeout exit (`124`) with no daemon stderr/stdout anomalies,
+    - audit counters remained healthy (`offer_parallel_fallback` unchanged at `0`, `reservation_expired` unchanged at `0`, `market_cycle_error` unchanged),
+    - `daemon_cycle_summary` and `strategy_offer_execution` continued incrementing during soak.
+
 - Edge-hardening follow-ups completed:
   - Added singleton daemon instance lock (`state_dir/daemon.lock`) with non-blocking OS file lock semantics (`flock`).
   - `greenfloord --once` now also acquires the same lock (exits with lock-conflict code when another daemon instance is active) to prevent competing offer/coin activity against a running loop daemon.
