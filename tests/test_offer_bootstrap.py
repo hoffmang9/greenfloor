@@ -21,6 +21,8 @@ def test_plan_bootstrap_mixed_outputs_builds_deficit_outputs() -> None:
     spendable = [
         {"id": "coin-small-1", "amount": 1},
         {"id": "coin-big", "amount": 1000},
+        # This exact 100 coin satisfies the 100-size ladder bucket and avoids
+        # creating an unnecessary 100 output in the bootstrap fanout plan.
         {"id": "coin-hundred", "amount": 100},
     ]
 

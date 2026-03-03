@@ -2621,6 +2621,11 @@ def _ensure_offer_bootstrap_denominations(
                 "coins in the signing wallet, or reduce coin_ops.minimum_fee_mojos only "
                 "if zero-fee fallback is acceptable for your environment"
             )
+        elif "mixed_split_vault_with_fee_not_supported" in bootstrap_reason:
+            operator_guidance = (
+                "local vault mixed-split with explicit fee is not supported; manager will "
+                "fall back to cloud-wallet offer-time split for this attempt"
+            )
         return {
             "status": "failed",
             "reason": bootstrap_reason,
@@ -3019,6 +3024,8 @@ def _build_and_post_offer(
         network=network,
     )
     signer_key = program.signer_key_registry.get(market.signer_key_id)
+    # Normalize optional keyring path to a concrete string for downstream paths
+    # (pyright and runtime callers) that treat this as a non-optional value.
     keyring_yaml_path = str(signer_key.keyring_yaml_path or "") if signer_key is not None else ""
     pricing = dict(getattr(market, "pricing", {}) or {})
     base_unit_mojo_multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))

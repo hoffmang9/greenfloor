@@ -1511,6 +1511,8 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
     if vault_ctx_error is not None:
         return None, vault_ctx_error
     if vault_ctx is not None and fee_xch_total > 0:
+        # Local vault mixed-split + explicit fee is not supported yet. Caller
+        # falls back to cloud-wallet offer-time split behavior on this error.
         return None, "mixed_split_vault_with_fee_not_supported"
     if vault_ctx is None:
         synthetic_sk_by_puzzle_hash, additional_data, ctx_err = _load_signing_context(

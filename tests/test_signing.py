@@ -366,6 +366,18 @@ def test_insufficient_xch_fee_balance_error_none_when_sufficient() -> None:
     assert err is None
 
 
+def test_coin_id_set_accepts_hex_with_or_without_prefix() -> None:
+    ids = signing_mod._coin_id_set(
+        [
+            "0x" + ("ab" * 32),
+            "ab" * 32,
+            "0x" + ("cd" * 32),
+            "not-hex",
+        ]
+    )
+    assert ids == {("ab" * 32), ("cd" * 32)}
+
+
 def test_build_additions_from_plan_split() -> None:
     additions, error = signing_mod._build_additions_from_plan(
         plan={"op_type": "split", "size_base_units": 10, "op_count": 2},
