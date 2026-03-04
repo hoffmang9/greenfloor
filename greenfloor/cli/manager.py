@@ -2906,6 +2906,7 @@ def _build_and_post_offer_cloud_wallet(
     dry_run: bool,
     action_side: str = "sell",
 ) -> tuple[int, dict[str, Any]]:
+    side = _normalize_offer_side(action_side)
     _initialize_manager_file_logging(
         program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
     )
@@ -2952,7 +2953,7 @@ def _build_and_post_offer_cloud_wallet(
                 key_id=key_id,
                 keyring_yaml_path=keyring_yaml_path,
                 quote_price=float(quote_price),
-                action_side=action_side,
+                action_side=side,
             )
             bootstrap_actions.append(bootstrap_result)
             # Offer creation must remain zero-fee. Any split/combine fee belongs
@@ -2971,7 +2972,7 @@ def _build_and_post_offer_cloud_wallet(
             split_input_coins_fee=split_input_coins_fee,
             expiry_unit=expiry_unit,
             expiry_value=expiry_value,
-            action_side=action_side,
+            action_side=side,
         )
         signature_request_id = str(create_phase["signature_request_id"]).strip()
         signature_state = str(create_phase["signature_state"]).strip()
@@ -3083,6 +3084,7 @@ def _build_and_post_offer_cloud_wallet(
                     "items": [
                         {
                             "size": int(size_base_units),
+                            "side": side,
                             "status": "executed",
                             "reason": f"{publish_venue}_post_success",
                             "offer_id": offer_id,

@@ -4020,6 +4020,7 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
+    from greenfloor.storage.sqlite import SqliteStore
 
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
@@ -4105,6 +4106,20 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
         payload["results"][0]["result"]["offer_view_url"] == "https://dexie.space/offers/dexie-99"
     )
     assert payload["offer_fee_mojos"] == 0
+    db_path = (tmp_path / "db" / "greenfloor.sqlite").resolve()
+    store = SqliteStore(db_path)
+    try:
+        events = store.list_recent_audit_events(
+            event_types=["strategy_offer_execution"],
+            market_id="m1",
+            limit=1,
+        )
+    finally:
+        store.close()
+    assert len(events) == 1
+    event_items = list((events[0].get("payload") or {}).get("items") or [])
+    assert len(event_items) == 1
+    assert event_items[0]["side"] == "sell"
     assert captured.err == ""
     log_text = (tmp_path / "logs" / "debug.log").read_text(encoding="utf-8")
     assert "signed_offer_file:offer1testartifact" in log_text
@@ -4206,6 +4221,103 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
     assert delta_seconds < 9 * 3600
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["publish_failures"] == 0
+
+
+def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
+    from greenfloor.storage.sqlite import SqliteStore
+
+    program_path = tmp_path / "program.yaml"
+    markets_path = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program_path)
+    _write_markets_with_ladder(markets_path)
+    prog, mkt = _load_program_and_market(program_path, markets_path)
+    prog.home_dir = str(tmp_path)
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def create_offer(
+            *,
+            offered,
+            requested,
+            fee,
+            expires_at_iso,
+            split_input_coins=True,
+            split_input_coins_fee=0,
+        ):
+            _ = offered, requested, fee, expires_at_iso, split_input_coins, split_input_coins_fee
+            return {"signature_request_id": "sr-buy-audit-1", "status": "UNSIGNED"}
+
+        @staticmethod
+        def get_wallet():
+            return {"offers": [{"bech32": "offer1buyaudit"}]}
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str):
+            pass
+
+        @staticmethod
+        def post_offer(_offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = drop_only, claim_rewards
+            return {"success": True, "id": "dexie-buy-audit-1"}
+
+        @staticmethod
+        def get_offer(offer_id: str) -> dict[str, object]:
+            return {"success": True, "offer": {"id": str(offer_id), "status": 0}}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
+        lambda **kwargs: ("SUBMITTED", []),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        lambda **kwargs: "offer1buyaudit",
+    )
+    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
+    )
+
+    code, _ = _build_and_post_offer_cloud_wallet(
+        program=prog,
+        market=mkt,
+        size_base_units=10,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        quote_price=0.003,
+        dry_run=False,
+        action_side="buy",
+    )
+    assert code == 0
+    _ = capsys.readouterr()
+    db_path = (tmp_path / "db" / "greenfloor.sqlite").resolve()
+    store = SqliteStore(db_path)
+    try:
+        events = store.list_recent_audit_events(
+            event_types=["strategy_offer_execution"],
+            market_id="m1",
+            limit=1,
+        )
+    finally:
+        store.close()
+    assert len(events) == 1
+    event_items = list((events[0].get("payload") or {}).get("items") or [])
+    assert len(event_items) == 1
+    assert event_items[0]["side"] == "buy"
 
 
 def test_build_and_post_offer_cloud_wallet_fails_when_dexie_offer_not_visible(

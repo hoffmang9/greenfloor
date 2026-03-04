@@ -584,6 +584,47 @@ def test_active_offer_counts_by_size_and_side_unknown_metadata_stays_unmapped() 
     assert unmapped == 1
 
 
+def test_active_offer_counts_by_size_and_side_malformed_side_stays_unmapped() -> None:
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.offer_states = [
+        {"offer_id": "offer-bad-side", "market_id": "m1", "state": "open"},
+        {"offer_id": "offer-missing-side", "market_id": "m1", "state": "open"},
+    ]
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "payload": {
+                "items": [
+                    {
+                        "offer_id": "offer-bad-side",
+                        "size": 10,
+                        "status": "executed",
+                        "side": "not-a-side",
+                    },
+                    {
+                        "offer_id": "offer-missing-side",
+                        "size": 10,
+                        "status": "executed",
+                    },
+                ]
+            },
+        }
+    ]
+
+    counts_by_side, state_counts, unmapped = _active_offer_counts_by_size_and_side(
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+    )
+
+    assert counts_by_side["buy"] == {1: 0, 10: 0, 100: 0}
+    assert counts_by_side["sell"] == {1: 0, 10: 0, 100: 0}
+    assert state_counts["open"] == 2
+    assert unmapped == 2
+
+
 def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers() -> None:
     store = _FakeStore()
     now = datetime.now(UTC)

@@ -549,15 +549,22 @@ def _normalize_offer_side(value: Any) -> str:
     return "buy" if side == "buy" else "sell"
 
 
+def _parse_offer_side_metadata(value: Any) -> str | None:
+    side = str(value or "").strip().lower()
+    if side in {"buy", "sell"}:
+        return side
+    return None
+
+
 def _recent_offer_metadata_by_offer_id(
     *, store: SqliteStore, market_id: str
-) -> dict[str, tuple[int, str]]:
+) -> dict[str, tuple[int, str | None]]:
     events = store.list_recent_audit_events(
         event_types=["strategy_offer_execution"],
         market_id=market_id,
         limit=1500,
     )
-    metadata_by_offer_id: dict[str, tuple[int, str]] = {}
+    metadata_by_offer_id: dict[str, tuple[int, str | None]] = {}
     for event in events:
         payload = event.get("payload")
         if not isinstance(payload, dict):
@@ -579,7 +586,7 @@ def _recent_offer_metadata_by_offer_id(
                 continue
             if size <= 0:
                 continue
-            side = _normalize_offer_side(item.get("side"))
+            side = _parse_offer_side_metadata(item.get("side"))
             # Events are returned newest-first; keep first (latest) mapping.
             if offer_id not in metadata_by_offer_id:
                 metadata_by_offer_id[offer_id] = (size, side)
@@ -798,11 +805,11 @@ def _active_offer_counts_by_size_and_side(
     for offer_id in active_offer_ids:
         metadata = metadata_by_offer_id.get(offer_id)
         size = metadata[0] if metadata is not None else None
-        if metadata is None:
+        side = metadata[1] if metadata is not None else None
+        if metadata is None or side is None:
             # Do not assume buy/sell direction when metadata is unavailable.
             active_unmapped_offer_ids += 1
             continue
-        side = metadata[1]
         if size is None and dexie_size_by_offer_id:
             size = dexie_size_by_offer_id.get(offer_id)
         normalized_side = _normalize_offer_side(side)
