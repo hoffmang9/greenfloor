@@ -2702,7 +2702,7 @@ def _ensure_offer_bootstrap_denominations(
             wallet=wallet,
             network=str(program.app_network),
             initial_coin_ids=existing_coin_ids,
-            asset_id=resolved_base_asset_id,
+            asset_id=split_asset_id,
             mempool_warning_seconds=5 * 60,
             confirmation_warning_seconds=15 * 60,
             timeout_seconds=20 * 60,

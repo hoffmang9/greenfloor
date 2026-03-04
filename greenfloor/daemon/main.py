@@ -798,7 +798,11 @@ def _active_offer_counts_by_size_and_side(
     for offer_id in active_offer_ids:
         metadata = metadata_by_offer_id.get(offer_id)
         size = metadata[0] if metadata is not None else None
-        side = metadata[1] if metadata is not None else "sell"
+        if metadata is None:
+            # Do not assume buy/sell direction when metadata is unavailable.
+            active_unmapped_offer_ids += 1
+            continue
+        side = metadata[1]
         if size is None and dexie_size_by_offer_id:
             size = dexie_size_by_offer_id.get(offer_id)
         normalized_side = _normalize_offer_side(side)

@@ -4027,9 +4027,6 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     _write_markets_with_ladder(markets_path)
     prog, mkt = _load_program_and_market(program_path, markets_path)
     prog.home_dir = str(tmp_path)
-    prog.home_dir = str(tmp_path)
-    prog.home_dir = str(tmp_path)
-    prog.home_dir = str(tmp_path)
     reset_concurrent_log_handlers(module=manager_mod)
 
     class _FakeWallet:
@@ -4845,6 +4842,82 @@ def test_ensure_offer_bootstrap_denominations_reports_fee_balance_guidance(
     assert "insufficient spendable xch balance for bootstrap fee" in str(
         result["operator_guidance"]
     )
+
+
+def test_ensure_offer_bootstrap_denominations_buy_waits_on_quote_asset(
+    monkeypatch, tmp_path: Path
+) -> None:
+    keyring_path = tmp_path / "keyring.yaml"
+    keyring_path.write_text("keys: []\n", encoding="utf-8")
+    wait_asset_ids: list[str] = []
+    list_asset_ids: list[str | None] = []
+
+    class _Program:
+        app_network = "mainnet"
+        coin_ops_minimum_fee_mojos = 0
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "k"
+        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
+        cloud_wallet_vault_id = "Wallet_abc"
+        cloud_wallet_kms_key_id = ""
+        cloud_wallet_kms_region = ""
+        cloud_wallet_kms_public_key_hex = ""
+
+    class _LadderEntry:
+        size_base_units = 10
+        target_count = 1
+        split_buffer_count = 0
+
+    class _Market:
+        ladders = {"buy": [_LadderEntry()]}
+        receive_address = "xch1test"
+        base_asset = "base_asset"
+        quote_asset = "quote_asset"
+        pricing = {"quote_unit_mojo_multiplier": 1000}
+
+    class _Wallet:
+        @staticmethod
+        def list_coins(*, asset_id=None, include_pending=False):
+            _ = include_pending
+            list_asset_ids.append(asset_id)
+            return [{"id": "coin_big", "amount": 50_000, "state": "CONFIRMED"}]
+
+    class _Plan:
+        source_coin_id = "coin_big"
+        source_amount = 50_000
+        output_amounts_base_units = [10_000]
+        total_output_amount = 10_000
+        change_amount = 40_000
+        deficits = []
+
+    monkeypatch.setattr("greenfloor.cli.manager.plan_bootstrap_mixed_outputs", lambda **_k: _Plan())
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_bootstrap_split_fee",
+        lambda **_k: (0, "coinset_conservative", None),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager.sign_and_broadcast_mixed_split",
+        lambda _payload: {"status": "executed", "operation_id": "tx-1"},
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
+        lambda **kwargs: wait_asset_ids.append(str(kwargs.get("asset_id"))) or [],
+    )
+
+    result = manager_mod._ensure_offer_bootstrap_denominations(
+        program=_Program(),
+        market=_Market(),
+        wallet=cast(CloudWalletAdapter, _Wallet()),
+        resolved_base_asset_id="Asset_base",
+        resolved_quote_asset_id="Asset_quote",
+        key_id="key-main-1",
+        keyring_yaml_path=str(keyring_path),
+        quote_price=1.0,
+        action_side="buy",
+    )
+    assert result["status"] == "executed"
+    assert wait_asset_ids == ["Asset_quote"]
+    assert list_asset_ids[0] == "Asset_quote"
 
 
 def test_poll_offer_artifact_until_available_returns_new_offer(monkeypatch) -> None:

@@ -9,6 +9,7 @@ from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon import main as daemon_main
 from greenfloor.daemon.main import (
     _active_offer_counts_by_size,
+    _active_offer_counts_by_size_and_side,
     _build_dexie_size_by_offer_id,
     _execute_strategy_actions,
     _inject_reseed_action_if_no_active_offers,
@@ -560,6 +561,27 @@ def test_active_offer_counts_by_size_counts_cli_posted_offer() -> None:
 
     assert counts == {1: 0, 10: 0, 100: 1}, "CLI-posted 100-unit offer must be counted"
     assert unmapped == 0, "CLI-posted offer must not appear in unmapped"
+
+
+def test_active_offer_counts_by_size_and_side_unknown_metadata_stays_unmapped() -> None:
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.offer_states = [
+        {"offer_id": "offer-unknown-side", "market_id": "m1", "state": "open"},
+    ]
+    # No strategy_offer_execution audit event metadata for this active offer.
+    store.audit_events = []
+
+    counts_by_side, state_counts, unmapped = _active_offer_counts_by_size_and_side(
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+    )
+
+    assert counts_by_side["buy"] == {1: 0, 10: 0, 100: 0}
+    assert counts_by_side["sell"] == {1: 0, 10: 0, 100: 0}
+    assert state_counts["open"] == 1
+    assert unmapped == 1
 
 
 def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers() -> None:

@@ -108,48 +108,44 @@ def _req(mapping: dict[str, Any], key: str) -> Any:
 def _validate_strategy_pricing(
     pricing: dict[str, Any], market_id: str, quote_asset_type: str | None = None
 ) -> None:
-    # Stable quote markets do not use XCH spread/price-band controls on the
-    # primary path. Keep those optional and unvalidated here so stable two-sided
-    # configs can stay minimal.
-    quote_type = str(quote_asset_type or "").strip().lower()
-    if quote_type != "stable":
-        spread_raw = pricing.get("strategy_target_spread_bps")
-        if spread_raw is not None:
-            try:
-                spread = int(spread_raw)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"market {market_id}: strategy_target_spread_bps must be an integer"
-                ) from exc
-            if spread <= 0:
-                raise ValueError(f"market {market_id}: strategy_target_spread_bps must be positive")
-
-        min_raw = pricing.get("strategy_min_xch_price_usd")
-        max_raw = pricing.get("strategy_max_xch_price_usd")
-        min_price: float | None = None
-        max_price: float | None = None
-        if min_raw is not None:
-            try:
-                min_price = float(min_raw)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"market {market_id}: strategy_min_xch_price_usd must be numeric"
-                ) from exc
-            if min_price <= 0:
-                raise ValueError(f"market {market_id}: strategy_min_xch_price_usd must be > 0")
-        if max_raw is not None:
-            try:
-                max_price = float(max_raw)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"market {market_id}: strategy_max_xch_price_usd must be numeric"
-                ) from exc
-            if max_price <= 0:
-                raise ValueError(f"market {market_id}: strategy_max_xch_price_usd must be > 0")
-        if min_price is not None and max_price is not None and min_price > max_price:
+    _ = quote_asset_type
+    spread_raw = pricing.get("strategy_target_spread_bps")
+    if spread_raw is not None:
+        try:
+            spread = int(spread_raw)
+        except (TypeError, ValueError) as exc:
             raise ValueError(
-                f"market {market_id}: strategy_min_xch_price_usd must be <= strategy_max_xch_price_usd"
-            )
+                f"market {market_id}: strategy_target_spread_bps must be an integer"
+            ) from exc
+        if spread <= 0:
+            raise ValueError(f"market {market_id}: strategy_target_spread_bps must be positive")
+
+    min_raw = pricing.get("strategy_min_xch_price_usd")
+    max_raw = pricing.get("strategy_max_xch_price_usd")
+    min_price: float | None = None
+    max_price: float | None = None
+    if min_raw is not None:
+        try:
+            min_price = float(min_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"market {market_id}: strategy_min_xch_price_usd must be numeric"
+            ) from exc
+        if min_price <= 0:
+            raise ValueError(f"market {market_id}: strategy_min_xch_price_usd must be > 0")
+    if max_raw is not None:
+        try:
+            max_price = float(max_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"market {market_id}: strategy_max_xch_price_usd must be numeric"
+            ) from exc
+        if max_price <= 0:
+            raise ValueError(f"market {market_id}: strategy_max_xch_price_usd must be > 0")
+    if min_price is not None and max_price is not None and min_price > max_price:
+        raise ValueError(
+            f"market {market_id}: strategy_min_xch_price_usd must be <= strategy_max_xch_price_usd"
+        )
 
     expiry_unit_raw = pricing.get("strategy_offer_expiry_unit")
     expiry_value_raw = pricing.get("strategy_offer_expiry_value")
