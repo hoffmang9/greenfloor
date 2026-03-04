@@ -1,5 +1,23 @@
 # Progress Log
 
+## 2026-03-03 (Temporary CAT split zero-fee policy + John-Deere rollout)
+
+- Implemented temporary CAT coin-split fee policy in `greenfloor/cli/manager.py`:
+  - added `_effective_coin_split_fee_for_asset(...)` and single switch `_TEMP_ZERO_FEE_FOR_CAT_SPLITS = True`,
+  - CAT splits now force `fee_mojos=0` with `fee_source="temporary_cat_split_zero_fee"`,
+  - XCH split/combine/default fee resolution behavior remains unchanged.
+- Updated deterministic manager coverage in `tests/test_manager_post_offer.py`:
+  - new unit tests for CAT-vs-XCH split-fee policy dispatch,
+  - existing CAT `coin-split` assertions updated to require zero fee and policy fee source in payload.
+- Validation:
+  - targeted manager split-fee suite passed (`7 passed`),
+  - full `pre-commit run --all-files` passed before PR update.
+- PR/deploy operations:
+  - opened PR #53 (`fix/cat-split-zero-fee`) with the CAT split policy change,
+  - switched John-Deere runtime repo to `fix/cat-split-zero-fee` at `2f66b3c`,
+  - restarted daemon in branch context and verified active process:
+    - `.venv/bin/python -m greenfloor.daemon.main --program-config ... --markets-config ... --state-dir ...`.
+
 ## 2026-03-03 (Offer creation fee policy enforcement: always zero)
 
 - Root cause identified from John-Deere runtime behavior:

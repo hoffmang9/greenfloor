@@ -7,19 +7,24 @@ This file summarizes the public docs currently available from `https://www.coins
 ## Overview
 
 - Coinset positions itself as a free, fast, reliable Chia blockchain API service.
-- Mainnet base URL: `https://coinset.org`.
+- Mainnet API base URL: `https://api.coinset.org`.
 - Testnet11 base URL: `https://testnet11.api.coinset.org`.
 - Most documented endpoints use `POST` + JSON body.
 - Real-time updates are documented via WebSocket at `wss://coinset.org/ws`.
+- Docs site is hosted separately at `https://www.coinset.org/docs`.
 
 ### Network Routing (Explicit)
 
 Use these exact hosts:
 
 ```bash
-# For mainnet
-curl https://coinset.org
-# For testnet
+# Docs
+curl https://www.coinset.org/docs
+
+# Mainnet API
+curl https://api.coinset.org
+
+# Testnet API
 curl https://testnet11.api.coinset.org
 ```
 
@@ -41,6 +46,12 @@ curl https://testnet11.api.coinset.org
   - `error` (string)
   - plus endpoint-specific payload keys
 - Hash-like fields are usually documented as hex strings (for example `header_hash`, `coin_id`, `tx_id`).
+- In live responses, some numeric fields may appear as:
+  - integers
+  - decimal strings
+  - hex strings (`0x...`)
+  - occasionally bare `0x` for zero-like values
+- Some fields that are semantically numeric/opcode-like may appear as either strings or integers.
 - Common optional filters on coin queries:
   - `start_height` (`uint32`)
   - `end_height` (`uint32`)
@@ -60,6 +71,15 @@ curl https://testnet11.api.coinset.org
 - `POST /get_block_spends_with_conditions` - spends + conditions by `header_hash`
 - `POST /get_blocks` - blocks in `[start, end]` with optional `exclude_header_hash`, `exclude_reorged`
 - `POST /get_unfinished_block_headers` - unfinished block headers (empty body)
+
+#### Fee Analysis Notes (Block + Spend Level)
+
+- `get_blocks` exposes block-level fee totals via `transactions_info.fees`.
+- For spend-level inspection, use `get_block_spends_with_conditions`.
+- A practical spend-fee estimator is:
+  - `coin_spend.coin.amount - sum(CREATE_COIN output amounts)`
+- In practice, `get_blocks` payloads can occasionally omit `header_hash`; if needed, resolve via:
+  - `POST /get_block_record_by_height`
 
 ### Coins
 
@@ -154,11 +174,24 @@ Use this as a quick "minimum payload" guide when wiring clients.
 - Treat hash-like fields as hex strings exactly as documented (for example `0x...` values).
 - `push_tx` appears in multiple docs paths, but the route is the same API call (`POST /push_tx`).
 - Coin query defaults may return only unspent records unless `include_spent_coins` is set.
+- Keep API host and docs host separate:
+  - docs: `https://www.coinset.org/docs`
+  - API: `https://api.coinset.org`
+
+## Known Runtime Quirks
+
+- Some runtime environments can get blocked by upstream protections when using
+  generic/default HTTP clients. Using a stable, explicit `User-Agent` header
+  improves reliability for scripted calls.
+- Expect mixed field typing in some responses (int/decimal-string/hex-string).
+  Parse defensively in automation.
+- For long scans over many blocks, build fail-soft behavior so single malformed
+  or transiently failing blocks do not abort the entire run.
 
 ## Quick Request Patterns
 
 ```bash
-curl -X POST "https://coinset.org/<endpoint>" \
+curl -X POST "https://api.coinset.org/<endpoint>" \
   -H "Content-Type: application/json" \
   -d '<json body>'
 ```

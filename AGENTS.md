@@ -1,129 +1,70 @@
 # AGENTS.md
 
-This file defines implementation conventions for coding agents and contributors.
+Implementation policy for coding agents and contributors.
 
-## Core Expectations
+## Rule Priority
 
-- Work at a senior-developer standard: prefer explicit tradeoffs and maintainable design.
-- If uncertain about behavior or requirements, ask for clarification before coding.
-- Treat `chia-wallet-sdk` (repo submodule) as the default library for blockchain syncing, spend-bundle signing, and offer-file generation in GreenFloor.
-- Treat offer files as `offer1...` Bech32m strings produced/consumed via `chia-wallet-sdk` offer encode/decode contracts.
-- Do not introduce fallback execution paths to mask primary-path correctness gaps; debug and fix the primary path directly.
-- Narrow exception: temporary symbol-rename compatibility shims for upstream `chia-wallet-sdk` bindings are allowed only during explicit migration windows (for example `validate_offer` -> `verify_offer`, `from_input_spend_bundle_xch` -> `from_input_spend_bundle`). Treat these as short-lived and remove them once the pinned submodule baseline is stable.
-- Network symbol discipline is mandatory: mainnet pairs use `xch`, testnet11 pairs use `txch`. Do not use `xch` in testnet11 pair examples, defaults, runbooks, workflows, or operator commands.
-- Treat offer cancellation as exceptional: only for stable-vs-unstable pairs, only on strong unstable-side price moves, and not as routine lifecycle management.
-- Ensure all posted offers have expiry; stable-vs-unstable pair offers should use shorter expiries.
-- Keep the architecture boundaries strict:
-  - `greenfloor/core`: deterministic policy logic only (no IO).
-  - `greenfloor/config`: parse/validate configuration, config path resolution, quote-asset resolution.
-  - `greenfloor/* adapters`: side effects (network, filesystem, wallet, notifications).
-  - `greenfloor/signing.py`: unified signing module (coin discovery, spend-bundle construction, broadcast).
-  - `greenfloor/hex_utils.py`: canonical hex identifier validation and normalization.
-  - `greenfloor/logging_setup.py`: unified rotating-file log initialization.
-  - `greenfloor/cli/manager.py`: operator CLI commands.
-  - `greenfloor/cli/offer_builder_sdk.py`: offer text construction.
+When rules conflict, apply this order: correctness > safety > architecture > style > convenience.
 
-## Simplicity and Design Discipline
+Severity tags:
 
-These rules exist because earlier implementation rounds introduced unnecessary complexity that had to be removed. Follow them strictly.
+- `[MUST]`: required.
+- `[SHOULD]`: expected unless a documented reason exists.
+- `[CONTEXT]`: current scope or intent (can change as the project evolves).
 
-### Prefer direct function calls over subprocess chains
+## Core Policy
 
-- Within the same Python package, always use direct function calls.
-- Never spawn a subprocess to call another module in the same virtualenv unless there is an explicit isolation or security requirement documented in a decision note.
-- One env-var escape hatch per boundary is acceptable for operator overrides (e.g. `GREENFLOOR_WALLET_EXECUTOR_CMD`, `GREENFLOOR_OFFER_BUILDER_CMD`). Do not add more than one override per call site.
+- `[MUST]` Work at a senior-developer standard: explicit tradeoffs and maintainable design.
+- `[MUST]` If behavior or requirements are unclear, ask before coding.
+- `[MUST]` Use `chia-wallet-sdk` (repo submodule) for blockchain sync, signing, and offer encode/decode.
+- `[MUST]` Treat offers as `offer1...` Bech32m strings from `chia-wallet-sdk` contracts.
+- `[MUST]` Fix the primary path; do not add fallback execution paths to hide correctness gaps.
+- `[SHOULD]` Temporary sdk symbol-rename shims are allowed only during explicit migrations and must be removed once the pinned baseline stabilizes.
+- `[MUST]` Network symbol discipline: mainnet uses `xch`, testnet11 uses `txch` in examples, defaults, runbooks, workflows, and operator commands.
+- `[SHOULD]` Offer cancellation is exceptional (stable-vs-unstable only, and only on strong unstable-side moves).
+- `[MUST]` All posted offers must include expiry; stable-vs-unstable pairs should use shorter expiries.
 
-### Do not build features ahead of the critical path
+## Architecture Boundaries
 
-- The critical path is: configure market -> build real offer -> post to venue -> verify on-chain.
-- Do not add CLI commands, metrics, observability, or operational tooling until there is a verified proof on the active live target (currently mainnet `ECO.181.2022:xch`).
-- When in doubt, ask: "Does this help us post and manage a real offer on mainnet?" If no, defer it.
+- `[MUST]` `greenfloor/core`: deterministic policy only (no IO).
+- `[MUST]` `greenfloor/config`: parse/validate config, resolve paths, resolve quote assets.
+- `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet, notifications).
+- `[MUST]` `greenfloor/signing.py`: unified signing entry point (coin discovery, spend-bundle construction, broadcast).
+- `[MUST]` `greenfloor/cli/manager.py`: operator CLI commands.
+- `[MUST]` `greenfloor/cli/offer_builder_sdk.py`: offer text construction.
+- `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`, `greenfloor/config/io.py`.
+- `[MUST]` Import direction: daemon never imports CLI; CLI never imports daemon. Shared logic belongs in shared modules.
 
-### Keep file count proportional to distinct responsibilities
+## Design Constraints
 
-- Each source file should own a distinct, non-trivial responsibility.
-- Never create a file whose only job is to validate inputs, marshal a payload, and forward to the next file. That is a function, not a module.
-- If two files have the same structure (read JSON, validate, call next layer, return JSON), they should be one file with two functions.
+- `[MUST]` Prefer direct function calls within the package; do not spawn subprocesses for same-env Python calls unless isolation/security is documented in `docs/decisions/`.
+- `[MUST]` Signing/execution path is 2 layers max: adapter -> `greenfloor/signing.py`.
+- `[MUST]` Avoid unnecessary indirection layers (`executor`, `worker`, `engine`, etc.).
+- `[MUST]` Keep one distinct responsibility per file; merge pass-through modules into functions.
+- `[MUST]` Eliminate duplicated logic blocks (>10 lines) by extracting shared helpers.
+- `[MUST]` Use allowlists for state checks; never rely on negated blocklists.
+- `[MUST]` For similar polling loops, match existing interval/accumulator style; warning cadence must be additive (`next_warning += warning_interval`).
+- `[SHOULD]` Keep functions under ~150 logic lines (excluding docstrings/blank lines).
+- `[SHOULD]` Minimize module-level mutable state; pass mutable state through objects/dataclasses.
 
-### Limit indirection layers
+## Current Scope
 
-- The signing/execution path must stay at 2 layers max: the adapter (WalletAdapter or offer_builder_sdk) calls `greenfloor/signing.py`. That's it.
-- Do not introduce intermediate "executor", "passthrough", "worker", "signer", "builder", "engine" layers.
-- If a new layer is genuinely needed, write a decision note in `docs/decisions/` explaining why.
+- `[CONTEXT]` Critical path: configure market -> build real offer -> post to venue -> verify on-chain.
+- `[CONTEXT]` Defer new CLI commands, metrics, and observability work until live-target proof exists for the active market.
+- `[CONTEXT]` v1 notifications cover only low-inventory alerts and must include ticker, remaining amount, and receive address.
 
-### Manager CLI surface discipline
+## Before You Commit
 
-- The manager currently has 15 commands: `bootstrap-home`, `config-validate`, `doctor`, `keys-onboard`, `build-and-post-offer`, `offers-status`, `offers-reconcile`, `offers-cancel`, `coins-list`, `coin-split`, `coin-combine`, `cats-add`, `cats-list`, `cats-delete`, `set-log-level`.
-- Do not add new commands without explicit user request or a documented need tied to mainnet proof.
-- Each new command must have a test that exercises it end-to-end with deterministic fixtures.
+- `[MUST]` Python version is 3.11+.
+- `[MUST]` Use venv binaries for Python tooling (for example `.venv/bin/python -m pytest`).
+- `[MUST]` Run `pre-commit run --all-files`.
+- `[MUST]` Every conditional dispatch gate has deterministic tests for each branch.
+- `[MUST]` Every `while True` + `time.sleep` loop has deterministic timeout/warning tests (mock `time.sleep` and `time.monotonic`).
+- `[MUST]` Extract repeated test setup into a named helper when it appears in more than two tests.
+- `[SHOULD]` Deterministic test harness runtime stays under 10 minutes wall clock (target under 5).
 
-### No verbatim duplication within a file or across files
+## Review and Decisions
 
-- If the same logic block (more than ~10 lines) appears more than once anywhere in the **codebase**, extract it to a shared module before committing. Cross-file duplication is equally harmful to within-file duplication.
-- When implementing a second function whose core logic closely mirrors an existing one, read the existing function carefully before writing, extract the shared kernel first, and verify both callers use the extracted helper.
-
-### Allowlist over blocklist for state checks
-
-- When classifying entities by state (coin spendability, offer status, lock state), always write an explicit allowlist of valid states. Never negate a blocklist of known-bad states; unknown or transitional states are never implicitly safe.
-- If a helper function already encodes the allowlist (`_is_spendable_coin`, etc.), all callers in the same module must use that helper. Do not reimplement the same check inline.
-
-### Consistent accumulator patterns in polling loops
-
-- When adding a wait/poll loop that resembles another loop already in the same file, read the existing loop first and match its interval/accumulator pattern exactly.
-- Additive re-warning pattern required: `next_warning += warning_interval` (not `warning_interval += warning_interval`, which doubles geometrically). Verify by checking that the first warning fires at time T, the second at 2T, the third at 3T.
-
-### Every dispatch gate must have tests for all branches
-
-- When a function contains a conditional dispatch (e.g., `if cloud_wallet_configured and not dry_run`), each branch of the gate must have its own deterministic test: one that triggers the primary branch, one that falls through.
-- Gates controlled by configuration state are especially error-prone; test both the "configured + active" and "not configured / dry_run" paths explicitly.
-
-### Every wait loop must have a deterministic test
-
-- Every function containing `while True` with `time.sleep` must have at least one deterministic test. The test must mock `time.sleep` (to eliminate wall-clock cost) and `time.monotonic` (to exercise timeout and warning paths). Tests that rely on real elapsed time are not acceptable.
-
-### Extract test setup helpers at first duplication
-
-- If the same setup block (config file writing, credential patching, env variable setting) appears in more than two test functions, extract it to a named helper function in the test file before adding the third instance.
-- Named helpers are preferred over fixtures when the setup is a pure function of its arguments (no session/module scope needed). This keeps the extraction visible and avoids fixture magic.
-
-### Function length discipline
-
-- No function should exceed ~150 lines of logic (excluding docstrings and blank lines). If a function approaches this limit, decompose it into named sub-functions with clear single responsibilities.
-- This applies especially to daemon market-cycle processing and CLI offer-construction paths.
-
-### Import direction discipline
-
-- The daemon (`greenfloor/daemon/`) must never import from the CLI (`greenfloor/cli/`). The CLI must never import from the daemon. Shared logic used by both must live in `greenfloor/core/`, `greenfloor/config/`, `greenfloor/adapters/`, or a dedicated shared module (e.g. `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`).
-- If you find yourself importing a private function (`_foo`) from another boundary, that function belongs in a shared module.
-
-### Minimize module-level mutable state
-
-- Module-level mutable dicts, sets, lists, and boolean flags make testing fragile and modules non-reentrant. Prefer passing mutable state through a dataclass/object parameter.
-- Module-level constants (frozen sets, named tuples) are fine.
-
-### Single canonical utility implementations
-
-- The codebase has canonical shared utilities in `greenfloor/hex_utils.py` (hex ID validation/normalization), `greenfloor/logging_setup.py` (log initialization), and `greenfloor/config/io.py` (config path resolution, YAML I/O, quote-asset resolution). Do not re-derive or re-implement these — import and use the shared version.
-
-## Required Pre-Implementation Review
-
-- Read all repo markdown docs in root/docs before major implementation changes.
-- Review legacy behavior in `old/*.py` before changing market-making semantics.
-
-## Testing and Quality Gates
-
-- Python minimum version: 3.11.
-- For Python-related commands in this repo, use the project virtual environment binaries (for example `.venv/bin/python -m pytest`, `.venv/bin/python -m ruff`, `.venv/bin/python -m pyright`).
-- PR-required deterministic test harness must complete under 10 minutes wall clock (prefer under 5).
-- Required PR checks:
-  - `pre-commit run --all-files`
-
-## Notifications (V1 Scope)
-
-- Only low-inventory alerts are in scope for v1.
-- Alert payload must include ticker, remaining amount, and receive address.
-
-## Progress and Decisions
-
-- Update `docs/progress.md` for major milestones.
-- Add a decision note in `docs/decisions/` for non-trivial architecture/policy changes.
+- `[MUST]` Before major behavior changes, read markdown docs in `docs/` and review legacy behavior in `old/*.py`.
+- `[MUST]` Record major milestones in `docs/progress.md`.
+- `[MUST]` Add a decision note in `docs/decisions/` for non-trivial architecture or policy changes.
