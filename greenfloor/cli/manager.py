@@ -1964,9 +1964,6 @@ def _resolve_coin_op_fee(
         return None
 
 
-_TEMP_ZERO_FEE_FOR_CAT_SPLITS = True
-
-
 def _normalize_offer_side(value: str | None) -> str:
     side = str(value or "").strip().lower()
     return "buy" if side == "buy" else "sell"
@@ -1979,15 +1976,8 @@ def _effective_coin_split_fee_for_asset(
     fee_mojos: int,
     fee_source: str,
 ) -> tuple[int, str]:
-    """Return coin-split fee policy for the target asset.
-
-    Temporary policy: CAT splits are forced to zero fee until backend support for
-    the default split-fee path is fixed. Keep this as a single switch point so
-    reverting to the default fee process is one-line.
-    """
+    """Return coin-split fee policy for the target asset."""
     _ = resolved_asset_id
-    if _TEMP_ZERO_FEE_FOR_CAT_SPLITS and not _canonical_is_xch(canonical_asset_id):
-        return 0, "temporary_cat_split_zero_fee"
     return int(fee_mojos), str(fee_source)
 
 
