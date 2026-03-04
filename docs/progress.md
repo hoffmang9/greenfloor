@@ -1,5 +1,42 @@
 # Progress Log
 
+## 2026-03-04 (Coin-split fee re-enabled + John-Deere branch rollout)
+
+- Re-enabled default coin-split fee behavior in `greenfloor/cli/manager.py`:
+  - removed temporary CAT split zero-fee override in `_effective_coin_split_fee_for_asset(...)`,
+  - `coin-split` now uses normal advised/config fallback fee resolution again.
+- Updated deterministic manager tests in `tests/test_manager_post_offer.py`:
+  - CAT split fee assertions now expect standard advised fee flow (`coinset_conservative`) rather than forced-zero policy.
+- Validation completed before push:
+  - `pytest -q tests/test_manager_post_offer.py` passed (`130 passed`),
+  - `pre-commit run --all-files` passed (ruff, format, prettier, yamllint, pyright, pytest).
+- Pushed update branch commit:
+  - branch: `feat/byc-two-sided-market-simplification`,
+  - commit: `d84328a` (`fix: re-enable default coin-split fee resolution`),
+  - PR updated: #54.
+- John-Deere operational prep + verification:
+  - using `~/.greenfloor/config/program.yaml` as-is, confirmed `coin_ops.minimum_fee_mojos = 10_000_000`,
+  - executed fee-less direct cloud-wallet split of one spendable 1 XCH coin into:
+    - `40` coins of `10_000_000_000` mojos (`minimum_fee_mojos * 1000`),
+    - `1` remainder coin of `600_000_000_000` mojos,
+  - verified resulting state as spendable inventory in the active vault.
+- John-Deere daemon branch cutover:
+  - direct GitHub fetch was unavailable on host (`Permission denied (publickey)`), so branch sync used a transferred git bundle,
+  - checked out `feat/byc-two-sided-market-simplification` at `d84328a` in `/home/hoffmang/greenfloor`,
+  - restarted daemon with existing runtime args against `~/.greenfloor/config/*.yaml` and verified running process:
+    - PID `285247`,
+    - cwd `/home/hoffmang/greenfloor`,
+    - command `.venv/bin/python -m greenfloor.daemon.main --program-config /home/hoffmang/.greenfloor/config/program.yaml --markets-config /home/hoffmang/.greenfloor/config/markets.yaml --state-dir /home/hoffmang/.greenfloor/state`.
+- Follow-up PR-review hardening and rollout:
+  - pushed `845b38c` (`fix: fail-closed offer side metadata and persist manager side`) on `feat/byc-two-sided-market-simplification`,
+  - update includes fail-closed side metadata parsing in daemon offer accounting and explicit `side` persistence in manager `strategy_offer_execution` audit items,
+  - added/updated deterministic coverage in `tests/test_daemon_offer_execution.py` and `tests/test_manager_post_offer.py`,
+  - validation at commit time: `pre-commit run --all-files` passed (includes pytest hook), and focused suite passed (`164 passed`).
+- John-Deere updated to newest branch commit:
+  - synced host repo to `845b38c` via transferred git bundle and `git merge --ff-only`,
+  - restarted daemon against existing `~/.greenfloor/config/*.yaml` runtime args and verified active process,
+  - verified host repo head at runtime: `845b38c`.
+
 ## 2026-03-03 (BYC<>wUSDC.b two-sided activation + config simplification hooks)
 
 - Implemented explicit side-aware offer execution flow for two-sided markets:
