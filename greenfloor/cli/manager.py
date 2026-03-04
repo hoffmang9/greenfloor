@@ -1967,6 +1967,11 @@ def _resolve_coin_op_fee(
 _TEMP_ZERO_FEE_FOR_CAT_SPLITS = True
 
 
+def _normalize_offer_side(value: str | None) -> str:
+    side = str(value or "").strip().lower()
+    return "buy" if side == "buy" else "sell"
+
+
 def _effective_coin_split_fee_for_asset(
     *,
     canonical_asset_id: str,
@@ -2566,19 +2571,53 @@ def _resolve_bootstrap_split_fee(
         return fallback_fee, "config_minimum_fee_fallback", str(exc)
 
 
+@dataclass(frozen=True, slots=True)
+class _BootstrapLadderEntry:
+    size_base_units: int
+    target_count: int
+    split_buffer_count: int
+
+
 def _ensure_offer_bootstrap_denominations(
     *,
     program: Any,
     market: Any,
     wallet: CloudWalletAdapter,
     resolved_base_asset_id: str,
+    resolved_quote_asset_id: str,
     key_id: str,
     keyring_yaml_path: str,
+    quote_price: float,
+    action_side: str = "sell",
 ) -> dict[str, Any]:
+    side = _normalize_offer_side(action_side)
     ladders = getattr(market, "ladders", {}) or {}
-    sell_ladder = list(ladders.get("sell", []) or []) if isinstance(ladders, dict) else []
-    if not sell_ladder:
-        return {"status": "skipped", "reason": "missing_sell_ladder"}
+    side_ladder = list(ladders.get(side, []) or []) if isinstance(ladders, dict) else []
+    if not side_ladder:
+        return {"status": "skipped", "reason": f"missing_{side}_ladder"}
+    pricing = dict(getattr(market, "pricing", {}) or {})
+    quote_unit_multiplier = int(pricing.get("quote_unit_mojo_multiplier", 1000))
+    if side == "buy":
+        ladder_for_split = []
+        for entry in side_ladder:
+            quote_amount = int(
+                round(float(entry.size_base_units) * float(quote_price) * quote_unit_multiplier)
+            )
+            if quote_amount <= 0:
+                continue
+            ladder_for_split.append(
+                _BootstrapLadderEntry(
+                    size_base_units=quote_amount,
+                    target_count=int(entry.target_count),
+                    split_buffer_count=int(entry.split_buffer_count),
+                )
+            )
+        split_asset_id = str(resolved_quote_asset_id).strip()
+    else:
+        ladder_for_split = side_ladder
+        split_asset_id = str(resolved_base_asset_id).strip()
+    if not split_asset_id:
+        return {"status": "skipped", "reason": f"missing_{side}_asset_for_bootstrap"}
     if not hasattr(wallet, "list_coins"):
         return {
             "status": "skipped",
@@ -2586,10 +2625,10 @@ def _ensure_offer_bootstrap_denominations(
             "fallback_to_cloud_wallet_offer_split": True,
         }
 
-    asset_scoped_coins = wallet.list_coins(asset_id=resolved_base_asset_id, include_pending=True)
+    asset_scoped_coins = wallet.list_coins(asset_id=split_asset_id, include_pending=True)
     spendable_asset_coins = [coin for coin in asset_scoped_coins if _is_spendable_coin(coin)]
     bootstrap_plan = plan_bootstrap_mixed_outputs(
-        sell_ladder=sell_ladder,
+        sell_ladder=ladder_for_split,
         spendable_coins=spendable_asset_coins,
     )
     if bootstrap_plan is None:
@@ -2620,7 +2659,7 @@ def _ensure_offer_bootstrap_denominations(
         "network": str(program.app_network),
         "receive_address": str(market.receive_address),
         "keyring_yaml_path": keyring_yaml_path,
-        "asset_id": str(market.base_asset),
+        "asset_id": str(market.quote_asset if side == "buy" else market.base_asset),
         "selected_coin_ids": [bootstrap_plan.source_coin_id],
         "output_amounts_base_units": list(bootstrap_plan.output_amounts_base_units),
         "fee_mojos": int(fee_mojos),
@@ -2698,10 +2737,10 @@ def _ensure_offer_bootstrap_denominations(
             "operation_id": str(bootstrap_result.get("operation_id", "")).strip(),
             "wait_events": wait_events,
         }
-    refreshed_asset_coins = wallet.list_coins(asset_id=resolved_base_asset_id, include_pending=True)
+    refreshed_asset_coins = wallet.list_coins(asset_id=split_asset_id, include_pending=True)
     refreshed_spendable = [coin for coin in refreshed_asset_coins if _is_spendable_coin(coin)]
     remaining_plan = plan_bootstrap_mixed_outputs(
-        sell_ladder=sell_ladder,
+        sell_ladder=ladder_for_split,
         spendable_coins=refreshed_spendable,
     )
     return {
@@ -2745,7 +2784,9 @@ def _cloud_wallet_create_offer_phase(
     split_input_coins_fee: int,
     expiry_unit: str,
     expiry_value: int,
+    action_side: str = "sell",
 ) -> dict[str, Any]:
+    side = _normalize_offer_side(action_side)
     prior_wallet_payload = _wallet_get_wallet_offers(
         wallet,
         is_creator=True,
@@ -2766,8 +2807,12 @@ def _cloud_wallet_create_offer_phase(
     )
     if request_amount <= 0:
         raise ValueError("request_amount must be positive")
-    offered = [{"assetId": resolved_base_asset_id, "amount": offer_amount}]
-    requested = [{"assetId": resolved_quote_asset_id, "amount": request_amount}]
+    if side == "buy":
+        offered = [{"assetId": resolved_quote_asset_id, "amount": request_amount}]
+        requested = [{"assetId": resolved_base_asset_id, "amount": offer_amount}]
+    else:
+        offered = [{"assetId": resolved_base_asset_id, "amount": offer_amount}]
+        requested = [{"assetId": resolved_quote_asset_id, "amount": request_amount}]
     expires_at_delta = {expiry_unit: int(expiry_value)}
     expires_at = (dt.datetime.now(dt.UTC) + dt.timedelta(**expires_at_delta)).isoformat()
     create_result = wallet.create_offer(
@@ -2797,6 +2842,7 @@ def _cloud_wallet_create_offer_phase(
         "wait_events": wait_events,
         "expires_at": expires_at,
         "offer_amount": offer_amount,
+        "side": side,
     }
 
 
@@ -2868,6 +2914,7 @@ def _build_and_post_offer_cloud_wallet(
     claim_rewards: bool,
     quote_price: float,
     dry_run: bool,
+    action_side: str = "sell",
 ) -> tuple[int, dict[str, Any]]:
     _initialize_manager_file_logging(
         program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
@@ -2911,8 +2958,11 @@ def _build_and_post_offer_cloud_wallet(
                 market=market,
                 wallet=wallet,
                 resolved_base_asset_id=resolved_base_asset_id,
+                resolved_quote_asset_id=resolved_quote_asset_id,
                 key_id=key_id,
                 keyring_yaml_path=keyring_yaml_path,
+                quote_price=float(quote_price),
+                action_side=action_side,
             )
             bootstrap_actions.append(bootstrap_result)
             # Offer creation must remain zero-fee. Any split/combine fee belongs
@@ -2931,6 +2981,7 @@ def _build_and_post_offer_cloud_wallet(
             split_input_coins_fee=split_input_coins_fee,
             expiry_unit=expiry_unit,
             expiry_value=expiry_value,
+            action_side=action_side,
         )
         signature_request_id = str(create_phase["signature_request_id"]).strip()
         signature_state = str(create_phase["signature_state"]).strip()

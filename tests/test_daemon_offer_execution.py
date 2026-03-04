@@ -931,7 +931,7 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(
     monkeypatch.setattr(
         daemon_main,
         "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
-        lambda **_kwargs: ("asset", "xch_asset"),
+        lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
         daemon_main,
@@ -1018,7 +1018,7 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
     monkeypatch.setattr(
         daemon_main,
         "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
-        lambda **_kwargs: ("asset", "xch_asset"),
+        lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
         daemon_main,
@@ -1124,7 +1124,7 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
     monkeypatch.setattr(
         daemon_main,
         "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
-        lambda **_kwargs: ("asset", "xch_asset"),
+        lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
         daemon_main,
@@ -1198,7 +1198,7 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservati
     monkeypatch.setattr(
         daemon_main,
         "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
-        lambda **_kwargs: ("asset", "xch_asset"),
+        lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
         daemon_main,
@@ -1267,7 +1267,7 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
     monkeypatch.setattr(
         daemon_main,
         "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
-        lambda **_kwargs: ("asset_global", "xch_asset"),
+        lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
         daemon_main,
@@ -1352,7 +1352,7 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
     monkeypatch.setattr(
         daemon_main,
         "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
-        lambda **_kwargs: ("asset_global", "xch_asset"),
+        lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
         daemon_main,

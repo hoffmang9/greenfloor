@@ -35,6 +35,7 @@ class PlannedAction:
     cancel_after_create: bool
     reason: str
     target_spread_bps: int | None = None
+    side: str = "sell"
 
 
 _PAIR_EXPIRY_CONFIG: dict[str, tuple[str, int]] = {
@@ -81,6 +82,7 @@ def evaluate_market(
                 PlannedAction(
                     size=size,
                     repeat=target - current,
+                    side="sell",
                     pair=pair,
                     expiry_unit=expiry_unit,
                     expiry_value=expiry_value,

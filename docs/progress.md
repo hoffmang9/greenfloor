@@ -1,5 +1,27 @@
 # Progress Log
 
+## 2026-03-03 (BYC<>wUSDC.b two-sided activation + config simplification hooks)
+
+- Implemented explicit side-aware offer execution flow for two-sided markets:
+  - `PlannedAction` now carries `side` (`buy`/`sell`) with sell as the default for existing paths,
+  - daemon strategy evaluation now supports `mode: two_sided` by reading both `ladders.buy` and `ladders.sell` as config-driven targets,
+  - execution/audit payloads now include action `side` so active-offer accounting can track buy vs sell counts.
+- Extended cloud-wallet offer posting to be side-aware:
+  - buy offers now invert offered/requested legs (`offered=quote`, `requested=base`),
+  - sell offers keep the existing behavior (`offered=base`, `requested=quote`).
+- Updated bootstrap denomination planning for two-sided behavior:
+  - sell-side bootstrap remains base-asset denominated,
+  - buy-side bootstrap is quote-asset-only and derives per-offer quote denomination from `size_base_units * fixed_quote_per_base`.
+- Kept CAT split-fee policy unchanged:
+  - offer creation continues to enforce `split_input_coins_fee=0`,
+  - CAT coin-split paths still use temporary zero-fee policy.
+- Simplified BYC market config in `config/markets.yaml`:
+  - enabled `byc_two_sided_wusdbc`,
+  - replaced unused two-sided min/max knobs with `fixed_quote_per_base: 0.999`,
+  - set target mix to 1 buy + 3 sell at size 10 with small buffers.
+- Added explicit extension-hook intent (without implementing new model logic):
+  - side-aware price/inventory planning boundaries are now clearer for future sophisticated pricing and inventory models.
+
 ## 2026-03-03 (Temporary CAT split zero-fee policy + John-Deere rollout)
 
 - Implemented temporary CAT coin-split fee policy in `greenfloor/cli/manager.py`:

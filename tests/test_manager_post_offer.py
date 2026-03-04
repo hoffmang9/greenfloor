@@ -4028,6 +4028,8 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     prog, mkt = _load_program_and_market(program_path, markets_path)
     prog.home_dir = str(tmp_path)
     prog.home_dir = str(tmp_path)
+    prog.home_dir = str(tmp_path)
+    prog.home_dir = str(tmp_path)
     reset_concurrent_log_handlers(module=manager_mod)
 
     class _FakeWallet:
@@ -4124,6 +4126,7 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
     _write_program_with_cloud_wallet(program_path)
     _write_markets_with_ladder(markets_path)
     prog, mkt = _load_program_and_market(program_path, markets_path)
+    prog.home_dir = str(tmp_path)
     pricing = dict(mkt.pricing or {})
     pricing["strategy_offer_expiry_unit"] = "hours"
     pricing["strategy_offer_expiry_value"] = 8
@@ -4616,6 +4619,7 @@ def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
     _write_program_with_cloud_wallet(program_path)
     _write_markets_with_ladder(markets_path)
     prog, mkt = _load_program_and_market(program_path, markets_path)
+    prog.home_dir = str(tmp_path)
 
     create_offer_calls: list[int] = []
 
@@ -4761,8 +4765,10 @@ def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
         market=_Market(),
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="xch",
+        resolved_quote_asset_id="wusdc",
         key_id="key-main-1",
         keyring_yaml_path=str(keyring_path),
+        quote_price=0.999,
     )
     assert result["status"] == "failed"
     assert result["reason"] == "bootstrap_wait_failed"
@@ -4829,8 +4835,10 @@ def test_ensure_offer_bootstrap_denominations_reports_fee_balance_guidance(
         market=_Market(),
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="xch",
+        resolved_quote_asset_id="wusdc",
         key_id="key-main-1",
         keyring_yaml_path=str(keyring_path),
+        quote_price=0.999,
     )
     assert result["status"] == "failed"
     assert "insufficient_xch_fee_balance_for_mixed_split" in str(result["reason"])
@@ -5176,8 +5184,10 @@ def test_build_and_post_offer_cloud_wallet_passes_min_created_at_to_artifact_pol
         "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
     )
 
+    program = manager_mod.load_program_config(program_path)
+    program.home_dir = str(tmp_path)
     code, _ = manager_mod._build_and_post_offer_cloud_wallet(
-        program=manager_mod.load_program_config(program_path),
+        program=program,
         market=market,
         size_base_units=1,
         repeat=1,
@@ -5464,6 +5474,47 @@ def test_cloud_wallet_create_offer_phase_returns_structured_intermediate(monkeyp
     assert payload["offer_amount"] == 3000
     assert isinstance(payload["wait_events"], list)
     assert wallet.calls == 1
+
+
+def test_cloud_wallet_create_offer_phase_buy_side_swaps_offer_legs(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _Wallet:
+        def create_offer(self, **kwargs):
+            captured.update(kwargs)
+            return {"signature_request_id": "sr-buy", "status": "UNSIGNED"}
+
+    monkeypatch.setattr(
+        manager_mod,
+        "_wallet_get_wallet_offers",
+        lambda *_args, **_kwargs: {"offers": []},
+    )
+    monkeypatch.setattr(
+        manager_mod,
+        "_poll_signature_request_until_not_unsigned",
+        lambda **_kwargs: ("SUBMITTED", []),
+    )
+    market = type(
+        "Market",
+        (),
+        {"pricing": {"base_unit_mojo_multiplier": 1000, "quote_unit_mojo_multiplier": 1000}},
+    )()
+    payload = manager_mod._cloud_wallet_create_offer_phase(
+        wallet=cast(CloudWalletAdapter, _Wallet()),
+        market=market,
+        size_base_units=10,
+        quote_price=0.999,
+        resolved_base_asset_id="Asset_base",
+        resolved_quote_asset_id="Asset_quote",
+        offer_fee_mojos=0,
+        split_input_coins_fee=0,
+        expiry_unit="minutes",
+        expiry_value=30,
+        action_side="buy",
+    )
+    assert payload["side"] == "buy"
+    assert captured["offered"] == [{"assetId": "Asset_quote", "amount": 9990}]
+    assert captured["requested"] == [{"assetId": "Asset_base", "amount": 10000}]
 
 
 def test_cloud_wallet_post_offer_phase_verifies_dexie_visibility(monkeypatch) -> None:

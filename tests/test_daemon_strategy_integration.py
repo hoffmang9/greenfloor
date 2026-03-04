@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from greenfloor.config.models import MarketConfig, MarketInventoryConfig, MarketLadderEntry
 from greenfloor.daemon.main import (
+    _evaluate_two_sided_market_actions,
     _normalize_strategy_pair,
     _strategy_config_from_market,
     _strategy_state_from_bucket_counts,
@@ -81,3 +84,36 @@ def test_strategy_state_from_bucket_counts_includes_xch_price() -> None:
     assert state.tens == 1
     assert state.hundreds == 0
     assert state.xch_price_usd == 32.5
+
+
+def test_evaluate_two_sided_market_actions_uses_side_targets_from_ladders() -> None:
+    market = _market_with_quote("wUSDC.b")
+    market.mode = "two_sided"
+    market.quote_asset_type = "stable"
+    market.ladders = {
+        "buy": [
+            MarketLadderEntry(
+                size_base_units=10,
+                target_count=1,
+                split_buffer_count=0,
+                combine_when_excess_factor=2.0,
+            )
+        ],
+        "sell": [
+            MarketLadderEntry(
+                size_base_units=10,
+                target_count=3,
+                split_buffer_count=0,
+                combine_when_excess_factor=2.0,
+            )
+        ],
+    }
+    actions = _evaluate_two_sided_market_actions(
+        market=market,
+        counts_by_side={"buy": {10: 0}, "sell": {10: 1}},
+        xch_price_usd=None,
+        now=datetime.now(UTC),
+    )
+    by_side = {(a.side, a.size): int(a.repeat) for a in actions}
+    assert by_side[("buy", 10)] == 1
+    assert by_side[("sell", 10)] == 2

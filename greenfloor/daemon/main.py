@@ -399,6 +399,31 @@ def _strategy_config_from_market(market) -> StrategyConfig:
     )
 
 
+def _strategy_config_for_side(*, market: Any, side: str) -> StrategyConfig:
+    ladders = getattr(market, "ladders", {}) or {}
+    side_ladder = list(ladders.get(side, []) or []) if isinstance(ladders, dict) else []
+    targets_by_size = {int(e.size_base_units): int(e.target_count) for e in side_ladder}
+    pricing = _market_pricing(market)
+
+    expiry_value_raw = pricing.get("strategy_offer_expiry_value")
+    expiry_value: int | None = None
+    if expiry_value_raw is not None:
+        try:
+            expiry_value = int(expiry_value_raw)
+        except (TypeError, ValueError):
+            expiry_value = None
+
+    return StrategyConfig(
+        pair=_normalize_strategy_pair(market.quote_asset),
+        ones_target=int(targets_by_size.get(1, 0)),
+        tens_target=int(targets_by_size.get(10, 0)),
+        hundreds_target=int(targets_by_size.get(100, 0)),
+        offer_expiry_unit=str(pricing.get("strategy_offer_expiry_unit", "")).strip().lower()
+        or None,
+        offer_expiry_value=expiry_value,
+    )
+
+
 def _strategy_state_from_bucket_counts(
     bucket_counts: dict[int, int],
     *,
@@ -410,6 +435,38 @@ def _strategy_state_from_bucket_counts(
         hundreds=int(bucket_counts.get(100, 0)),
         xch_price_usd=xch_price_usd,
     )
+
+
+def _evaluate_two_sided_market_actions(
+    *,
+    market: Any,
+    counts_by_side: dict[str, dict[int, int]],
+    xch_price_usd: float | None,
+    now: datetime,
+) -> list[PlannedAction]:
+    actions: list[PlannedAction] = []
+    for side in ("buy", "sell"):
+        side_config = _strategy_config_for_side(market=market, side=side)
+        side_state = _strategy_state_from_bucket_counts(
+            counts_by_side.get(side, {}),
+            xch_price_usd=xch_price_usd,
+        )
+        side_actions = evaluate_market(state=side_state, config=side_config, clock=now)
+        actions.extend(
+            PlannedAction(
+                size=int(action.size),
+                repeat=int(action.repeat),
+                pair=action.pair,
+                expiry_unit=action.expiry_unit,
+                expiry_value=int(action.expiry_value),
+                cancel_after_create=action.cancel_after_create,
+                reason=action.reason,
+                target_spread_bps=action.target_spread_bps,
+                side=side,
+            )
+            for action in side_actions
+        )
+    return actions
 
 
 _ACTIVE_OFFER_STATES_FOR_RESEED = {
@@ -485,6 +542,48 @@ def _recent_offer_sizes_by_offer_id(*, store: SqliteStore, market_id: str) -> di
             if offer_id not in size_by_offer_id:
                 size_by_offer_id[offer_id] = size
     return size_by_offer_id
+
+
+def _normalize_offer_side(value: Any) -> str:
+    side = str(value or "").strip().lower()
+    return "buy" if side == "buy" else "sell"
+
+
+def _recent_offer_metadata_by_offer_id(
+    *, store: SqliteStore, market_id: str
+) -> dict[str, tuple[int, str]]:
+    events = store.list_recent_audit_events(
+        event_types=["strategy_offer_execution"],
+        market_id=market_id,
+        limit=1500,
+    )
+    metadata_by_offer_id: dict[str, tuple[int, str]] = {}
+    for event in events:
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        items = payload.get("items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status", "")).strip().lower() != "executed":
+                continue
+            offer_id = str(item.get("offer_id", "")).strip()
+            if not offer_id:
+                continue
+            try:
+                size = int(item.get("size") or 0)
+            except (TypeError, ValueError):
+                continue
+            if size <= 0:
+                continue
+            side = _normalize_offer_side(item.get("side"))
+            # Events are returned newest-first; keep first (latest) mapping.
+            if offer_id not in metadata_by_offer_id:
+                metadata_by_offer_id[offer_id] = (size, side)
+    return metadata_by_offer_id
 
 
 def _recent_executed_offer_ids(*, store: SqliteStore, market_id: str) -> set[str]:
@@ -648,11 +747,12 @@ def _active_offer_counts_by_size(
             active_offer_id = str(item.get("offer_id", "")).strip()
             if active_offer_id:
                 active_offer_ids.append(active_offer_id)
-    size_by_offer_id = _recent_offer_sizes_by_offer_id(store=store, market_id=market_id)
+    metadata_by_offer_id = _recent_offer_metadata_by_offer_id(store=store, market_id=market_id)
     active_counts_by_size: dict[int, int] = {1: 0, 10: 0, 100: 0}
     active_unmapped_offer_ids = 0
     for offer_id in active_offer_ids:
-        size = size_by_offer_id.get(offer_id)
+        metadata = metadata_by_offer_id.get(offer_id)
+        size = metadata[0] if metadata is not None else None
         if size is None and dexie_size_by_offer_id:
             size = dexie_size_by_offer_id.get(offer_id)
         if size in active_counts_by_size:
@@ -660,6 +760,53 @@ def _active_offer_counts_by_size(
         else:
             active_unmapped_offer_ids += 1
     return active_counts_by_size, state_counts, active_unmapped_offer_ids
+
+
+def _active_offer_counts_by_size_and_side(
+    *,
+    store: SqliteStore,
+    market_id: str,
+    clock: datetime,
+    limit: int = 500,
+    dexie_size_by_offer_id: dict[str, int] | None = None,
+) -> tuple[dict[str, dict[int, int]], dict[str, int], int]:
+    counts_by_side: dict[str, dict[int, int]] = {
+        "buy": {1: 0, 10: 0, 100: 0},
+        "sell": {1: 0, 10: 0, 100: 0},
+    }
+    offer_states = store.list_offer_states(market_id=market_id, limit=limit)
+    state_counts: dict[str, int] = {}
+    for item in offer_states:
+        state = str(item.get("state", "")).strip().lower()
+        if not state:
+            continue
+        state_counts[state] = int(state_counts.get(state, 0)) + 1
+    active_offer_ids: list[str] = []
+    for item in offer_states:
+        state = str(item.get("state", "")).strip().lower()
+        if state in _ACTIVE_OFFER_STATES_FOR_RESEED:
+            active_offer_id = str(item.get("offer_id", "")).strip()
+            if active_offer_id:
+                active_offer_ids.append(active_offer_id)
+            continue
+        if _is_recent_mempool_observed_offer_state(offer_state=item, clock=clock):
+            active_offer_id = str(item.get("offer_id", "")).strip()
+            if active_offer_id:
+                active_offer_ids.append(active_offer_id)
+    metadata_by_offer_id = _recent_offer_metadata_by_offer_id(store=store, market_id=market_id)
+    active_unmapped_offer_ids = 0
+    for offer_id in active_offer_ids:
+        metadata = metadata_by_offer_id.get(offer_id)
+        size = metadata[0] if metadata is not None else None
+        side = metadata[1] if metadata is not None else "sell"
+        if size is None and dexie_size_by_offer_id:
+            size = dexie_size_by_offer_id.get(offer_id)
+        normalized_side = _normalize_offer_side(side)
+        if size in counts_by_side[normalized_side]:
+            counts_by_side[normalized_side][size] = int(counts_by_side[normalized_side][size]) + 1
+        else:
+            active_unmapped_offer_ids += 1
+    return counts_by_side, state_counts, active_unmapped_offer_ids
 
 
 def _inject_reseed_action_if_no_active_offers(
@@ -801,6 +948,13 @@ def _build_offer_for_action(
 ) -> dict[str, Any]:
     from greenfloor.cli.offer_builder_sdk import build_offer_text
 
+    side = _normalize_offer_side(getattr(action, "side", "sell"))
+    if side == "buy":
+        return {
+            "status": "skipped",
+            "reason": "offer_builder_failed:buy_side_requires_cloud_wallet_path",
+            "offer": None,
+        }
     pricing = _market_pricing(market)
     try:
         quote_price = _resolve_quote_price_quote_per_base(market)
@@ -823,6 +977,7 @@ def _build_offer_for_action(
         "size_base_units": int(action.size),
         "pair": action.pair,
         "reason": action.reason,
+        "side": side,
         "xch_price_usd": xch_price_usd,
         "target_spread_bps": action.target_spread_bps,
         "expiry_unit": action.expiry_unit,
@@ -927,6 +1082,10 @@ def _reservation_request_for_cloud_offer(*, market: Any, action: Any) -> dict[st
         resolved_base_asset_id=str(
             getattr(market, "cloud_wallet_base_global_id", "") or getattr(market, "base_asset", "")
         ).strip(),
+        resolved_quote_asset_id=str(
+            getattr(market, "cloud_wallet_quote_global_id", "")
+            or getattr(market, "quote_asset", "")
+        ).strip(),
         fee_asset_id="xch",
         fee_amount_mojos=0,
     )
@@ -937,18 +1096,31 @@ def _reservation_request_for_cloud_offer_with_assets(
     market: Any,
     action: Any,
     resolved_base_asset_id: str,
+    resolved_quote_asset_id: str,
     fee_asset_id: str,
     fee_amount_mojos: int,
 ) -> dict[str, int]:
     pricing = market.pricing or {}
     base_multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))
+    quote_multiplier = int(pricing.get("quote_unit_mojo_multiplier", 1000))
     base_asset_id = str(resolved_base_asset_id or "").strip()
-    if not base_asset_id:
+    quote_asset_id = str(resolved_quote_asset_id or "").strip()
+    if not base_asset_id or not quote_asset_id:
         return {}
-    offer_amount = int(action.size) * base_multiplier
+    side = _normalize_offer_side(getattr(action, "side", "sell"))
+    base_amount = int(action.size) * base_multiplier
+    quote_amount = int(
+        round(
+            float(action.size)
+            * float(_resolve_quote_price_quote_per_base(market))
+            * float(quote_multiplier)
+        )
+    )
+    offer_asset_id = quote_asset_id if side == "buy" else base_asset_id
+    offer_amount = quote_amount if side == "buy" else base_amount
     if offer_amount <= 0:
         return {}
-    request: dict[str, int] = {base_asset_id: offer_amount}
+    request: dict[str, int] = {offer_asset_id: offer_amount}
     fee_asset = str(fee_asset_id or "").strip()
     if fee_asset and int(fee_amount_mojos) > 0:
         request[fee_asset] = int(request.get(fee_asset, 0)) + int(fee_amount_mojos)
@@ -967,14 +1139,14 @@ def _resolve_cloud_wallet_offer_asset_ids_for_reservation(
     program: Any,
     market: Any,
     wallet: CloudWalletAdapter,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     from greenfloor.cli.manager import _resolve_cloud_wallet_offer_asset_ids
 
     quote_asset = _resolve_quote_asset_for_offer(
         quote_asset=str(getattr(market, "quote_asset", "")),
         network=str(getattr(program, "app_network", "mainnet")),
     )
-    resolved_base_asset_id, _ = _resolve_cloud_wallet_offer_asset_ids(
+    resolved_base_asset_id, resolved_quote_asset_id = _resolve_cloud_wallet_offer_asset_ids(
         wallet=wallet,
         base_asset_id=str(getattr(market, "base_asset", "")).strip(),
         quote_asset_id=str(quote_asset).strip(),
@@ -992,7 +1164,7 @@ def _resolve_cloud_wallet_offer_asset_ids_for_reservation(
         base_global_id_hint="",
         quote_global_id_hint=str(getattr(market, "cloud_wallet_quote_global_id", "") or ""),
     )
-    return resolved_base_asset_id, resolved_xch_asset_id
+    return resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id
 
 
 def _cloud_wallet_offer_post_fallback(
@@ -1002,6 +1174,7 @@ def _cloud_wallet_offer_post_fallback(
     size_base_units: int,
     publish_venue: str,
     runtime_dry_run: bool,
+    side: str = "sell",
     build_and_post_fn: Callable[..., tuple[int, dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     if build_and_post_fn is None:
@@ -1022,6 +1195,7 @@ def _cloud_wallet_offer_post_fallback(
         claim_rewards=False,
         quote_price=quote_price,
         dry_run=runtime_dry_run,
+        action_side=side,
     )
     if exit_code != 0:
         results = payload.get("results", [])
@@ -1180,6 +1354,7 @@ def _execute_single_cloud_wallet_action(
         size_base_units=int(action.size),
         publish_venue=publish_venue,
         runtime_dry_run=runtime_dry_run,
+        side=_normalize_offer_side(getattr(action, "side", "sell")),
     )
     if bool(cloud_wallet_post.get("success", False)):
         cloud_wallet_offer_id = str(cloud_wallet_post.get("offer_id", "")).strip()
@@ -1191,18 +1366,21 @@ def _execute_single_cloud_wallet_action(
             if not visible:
                 return {
                     "size": action.size,
+                    "side": _normalize_offer_side(getattr(action, "side", "sell")),
                     "status": "skipped",
                     "reason": (f"cloud_wallet_post_not_visible_on_dexie:{visibility_error}"),
                     "offer_id": cloud_wallet_offer_id or None,
                 }
         return {
             "size": action.size,
+            "side": _normalize_offer_side(getattr(action, "side", "sell")),
             "status": "executed",
             "reason": "cloud_wallet_post_success",
             "offer_id": cloud_wallet_offer_id or None,
         }
     return {
         "size": action.size,
+        "side": _normalize_offer_side(getattr(action, "side", "sell")),
         "status": "skipped",
         "reason": (
             f"cloud_wallet_post_failed:{str(cloud_wallet_post.get('error', 'unknown')).strip()}"
@@ -1235,6 +1413,7 @@ def _execute_single_local_action(
         built_reason = str(built.get("reason", "offer_builder_skipped"))
         return {
             "size": action.size,
+            "side": _normalize_offer_side(getattr(action, "side", "sell")),
             "status": "skipped",
             "reason": built_reason,
             "offer_id": None,
@@ -1245,6 +1424,7 @@ def _execute_single_local_action(
     if remaining_ms > 0:
         return {
             "size": action.size,
+            "side": _normalize_offer_side(getattr(action, "side", "sell")),
             "status": "skipped",
             "reason": f"post_cooldown_active:{remaining_ms}ms",
             "offer_id": None,
@@ -1268,6 +1448,7 @@ def _execute_single_local_action(
         )
         return {
             "size": action.size,
+            "side": _normalize_offer_side(getattr(action, "side", "sell")),
             "status": "executed",
             "reason": f"{publish_venue}_post_success",
             "offer_id": offer_id,
@@ -1276,6 +1457,7 @@ def _execute_single_local_action(
     _set_cooldown(_POST_COOLDOWN_UNTIL, cooldown_key, cooldown_seconds)
     return {
         "size": action.size,
+        "side": _normalize_offer_side(getattr(action, "side", "sell")),
         "status": "skipped",
         "reason": f"{publish_venue}_post_retry_exhausted:{post_error}",
         "offer_id": offer_id or None,
@@ -1318,7 +1500,7 @@ def _execute_strategy_actions(
             assert program is not None
             assert reservation_coordinator is not None
             cloud_wallet = _new_cloud_wallet_adapter_for_daemon(program)
-            resolved_base_asset_id, resolved_xch_asset_id = (
+            resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id = (
                 _resolve_cloud_wallet_offer_asset_ids_for_reservation(
                     program=program,
                     market=market,
@@ -1334,6 +1516,7 @@ def _execute_strategy_actions(
                         market=market,
                         action=action,
                         resolved_base_asset_id=resolved_base_asset_id,
+                        resolved_quote_asset_id=resolved_quote_asset_id,
                         fee_asset_id=resolved_xch_asset_id,
                         fee_amount_mojos=fee_amount_mojos,
                     )
@@ -1341,6 +1524,7 @@ def _execute_strategy_actions(
                         items.append(
                             {
                                 "size": action.size,
+                                "side": _normalize_offer_side(getattr(action, "side", "sell")),
                                 "status": "skipped",
                                 "reason": "reservation_invalid_request",
                                 "offer_id": None,
@@ -1361,6 +1545,7 @@ def _execute_strategy_actions(
                         items.append(
                             {
                                 "size": action.size,
+                                "side": _normalize_offer_side(getattr(action, "side", "sell")),
                                 "status": "skipped",
                                 "reason": str(acquired.error or "reservation_rejected"),
                                 "offer_id": None,
@@ -1398,6 +1583,7 @@ def _execute_strategy_actions(
                         except Exception as exc:
                             item = {
                                 "size": 0,
+                                "side": "sell",
                                 "status": "skipped",
                                 "reason": f"parallel_offer_worker_error:{exc}",
                                 "offer_id": None,
@@ -1439,6 +1625,7 @@ def _execute_strategy_actions(
                     items.append(
                         {
                             "size": action.size,
+                            "side": _normalize_offer_side(getattr(action, "side", "sell")),
                             "status": "planned",
                             "reason": "dry_run",
                             "offer_id": None,
@@ -1772,47 +1959,78 @@ def _evaluate_and_execute_strategy(
     reservation_coordinator: AssetReservationCoordinator | None = None,
 ) -> None:
     """Evaluate market strategy, inject reseed if needed, and execute offer actions."""
+    market_mode = str(getattr(market, "mode", "")).strip().lower()
     strategy_config = _strategy_config_from_market(market)
-    active_offer_counts_by_size, offer_state_counts, active_unmapped_offer_ids = (
-        _active_offer_counts_by_size(
-            store=store,
-            market_id=market.market_id,
-            clock=now,
-            dexie_size_by_offer_id=dexie_size_by_offer_id,
+    if market_mode == "two_sided":
+        offer_counts_by_side, offer_state_counts, active_unmapped_offer_ids = (
+            _active_offer_counts_by_size_and_side(
+                store=store,
+                market_id=market.market_id,
+                clock=now,
+                dexie_size_by_offer_id=dexie_size_by_offer_id,
+            )
         )
-    )
+        active_offer_counts_by_size = {
+            1: int(offer_counts_by_side["buy"][1]) + int(offer_counts_by_side["sell"][1]),
+            10: int(offer_counts_by_side["buy"][10]) + int(offer_counts_by_side["sell"][10]),
+            100: int(offer_counts_by_side["buy"][100]) + int(offer_counts_by_side["sell"][100]),
+        }
+    else:
+        active_offer_counts_by_size, offer_state_counts, active_unmapped_offer_ids = (
+            _active_offer_counts_by_size(
+                store=store,
+                market_id=market.market_id,
+                clock=now,
+                dexie_size_by_offer_id=dexie_size_by_offer_id,
+            )
+        )
+        offer_counts_by_side = {
+            "buy": {1: 0, 10: 0, 100: 0},
+            "sell": dict(active_offer_counts_by_size),
+        }
     _log_market_decision(
         market.market_id,
         "strategy_state_source",
         source="dexie_offer_coverage",
         active_offer_counts_by_size=active_offer_counts_by_size,
+        active_offer_counts_by_side=offer_counts_by_side,
         state_counts=offer_state_counts,
         active_unmapped_offer_ids=active_unmapped_offer_ids,
     )
-    strategy_actions = evaluate_market(
-        state=_strategy_state_from_bucket_counts(
-            active_offer_counts_by_size, xch_price_usd=xch_price_usd
-        ),
-        config=strategy_config,
-        clock=now,
-    )
+    if market_mode == "two_sided":
+        strategy_actions = _evaluate_two_sided_market_actions(
+            market=market,
+            counts_by_side=offer_counts_by_side,
+            xch_price_usd=xch_price_usd,
+            now=now,
+        )
+    else:
+        strategy_actions = evaluate_market(
+            state=_strategy_state_from_bucket_counts(
+                active_offer_counts_by_size, xch_price_usd=xch_price_usd
+            ),
+            config=strategy_config,
+            clock=now,
+        )
     _log_market_decision(
         market.market_id,
         "strategy_evaluated",
         pair=strategy_config.pair,
+        mode=market_mode or "sell_only",
         offer_counts=active_offer_counts_by_size,
         xch_price_usd=xch_price_usd,
         action_count=len(strategy_actions),
     )
-    strategy_actions = _inject_reseed_action_if_no_active_offers(
-        strategy_actions=strategy_actions,
-        strategy_config=strategy_config,
-        market=market,
-        store=store,
-        xch_price_usd=xch_price_usd,
-        clock=now,
-        dexie_size_by_offer_id=dexie_size_by_offer_id,
-    )
+    if market_mode != "two_sided":
+        strategy_actions = _inject_reseed_action_if_no_active_offers(
+            strategy_actions=strategy_actions,
+            strategy_config=strategy_config,
+            market=market,
+            store=store,
+            xch_price_usd=xch_price_usd,
+            clock=now,
+            dexie_size_by_offer_id=dexie_size_by_offer_id,
+        )
     _log_market_decision(
         market.market_id,
         "strategy_after_reseed",
@@ -1836,6 +2054,7 @@ def _evaluate_and_execute_strategy(
                     "cancel_after_create": action.cancel_after_create,
                     "reason": action.reason,
                     "target_spread_bps": action.target_spread_bps,
+                    "side": _normalize_offer_side(getattr(action, "side", "sell")),
                 }
                 for action in strategy_actions
             ],

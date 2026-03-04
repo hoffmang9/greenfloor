@@ -140,6 +140,18 @@ def test_parse_markets_config_accepts_strategy_expiry_override() -> None:
     assert out.markets[0].pricing["strategy_offer_expiry_value"] == 2
 
 
+def test_parse_markets_config_stable_quote_skips_xch_strategy_validation() -> None:
+    row = _base_market_row()
+    row["quote_asset_type"] = "stable"
+    row["pricing"] = {
+        "strategy_target_spread_bps": 0,
+        "strategy_min_xch_price_usd": -1,
+        "strategy_max_xch_price_usd": "invalid",
+    }
+    out = parse_markets_config({"markets": [row]})
+    assert len(out.markets) == 1
+
+
 def test_parse_markets_config_reads_cloud_wallet_global_ids() -> None:
     row = _base_market_row()
     row["cloud_wallet_base_global_id"] = "Asset_base123"
