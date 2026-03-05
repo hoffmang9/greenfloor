@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -64,6 +65,36 @@ _DEXIE_INVALID_OFFER_RETRY_INITIAL_DELAY_SECONDS = 1.0
 
 
 _manager_logger = logging.getLogger("greenfloor.manager")
+_DEBUG_LOG_PATH = Path("/Users/hoffmang/src/greenfloor/.cursor/debug-67dae3.log")
+_DEBUG_SESSION_ID = "67dae3"
+
+
+def _debug67_log(
+    *,
+    run_id: str,
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict[str, Any],
+) -> None:
+    path = _DEBUG_LOG_PATH
+    if not path.parent.exists():
+        path = Path(__file__).resolve().parents[2] / ".cursor" / "debug-67dae3.log"
+    payload = {
+        "sessionId": _DEBUG_SESSION_ID,
+        "runId": run_id,
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, separators=(",", ":")) + "\n")
+    except Exception:
+        return
 
 
 def _initialize_manager_file_logging(home_dir: str, *, log_level: str | None) -> None:
@@ -1096,10 +1127,14 @@ def _pick_new_offer_artifact(
     known_markers: set[str],
     min_created_at: dt.datetime | None = None,
     require_open_state: bool = False,
+    prefer_newest: bool = True,
 ) -> str:
     candidates: list[tuple[dt.datetime, dt.datetime, str]] = []
+    allowed_candidate_states = {"OPEN", "PENDING"}
     for offer in offers:
         state = str(offer.get("state", "")).strip().upper()
+        if state not in allowed_candidate_states:
+            continue
         if require_open_state and state != "OPEN":
             continue
         bech32 = str(offer.get("bech32", "")).strip()
@@ -1127,22 +1162,73 @@ def _pick_new_offer_artifact(
         )
     if not candidates:
         return ""
-    # Prefer the newest artifact by creation time to avoid reposting stale open offers.
-    candidates.sort(key=lambda row: (row[0], row[1]), reverse=True)
+    # For strict OPEN polling, newest is preferred. For relaxed all-state lookup,
+    # earliest-after-create is safer when multiple markets create concurrently.
+    candidates.sort(key=lambda row: (row[0], row[1]), reverse=bool(prefer_newest))
     return candidates[0][2]
 
 
 def _wallet_get_wallet_offers(
     wallet: CloudWalletAdapter,
     *,
-    is_creator: bool,
-    states: list[str],
+    is_creator: bool | None,
+    states: list[str] | None,
 ) -> dict[str, Any]:
     try:
         return wallet.get_wallet(is_creator=is_creator, states=states, first=100)
     except TypeError:
         # Backward compatibility for deterministic test doubles that still expose get_wallet() with no args.
         return wallet.get_wallet()
+
+
+def _debug_wallet_offer_view(
+    *,
+    label: str,
+    offers: list[dict[str, Any]],
+    known_markers: set[str],
+    min_created_at: dt.datetime | None,
+) -> dict[str, Any]:
+    state_counts: dict[str, int] = {}
+    created_values: list[dt.datetime] = []
+    for offer in offers:
+        state = str(offer.get("state", "")).strip().upper() or "UNKNOWN"
+        state_counts[state] = state_counts.get(state, 0) + 1
+        created = _parse_iso8601(str(offer.get("createdAt", "")).strip())
+        if created is not None:
+            created_values.append(created)
+    newest = max(created_values).isoformat() if created_values else ""
+    oldest = min(created_values).isoformat() if created_values else ""
+    return {
+        "label": label,
+        "count": len(offers),
+        "state_counts": state_counts,
+        "newest_created_at": newest,
+        "oldest_created_at": oldest,
+        "has_candidate_open": bool(
+            _pick_new_offer_artifact(
+                offers=offers,
+                known_markers=known_markers,
+                min_created_at=min_created_at,
+                require_open_state=True,
+            )
+        ),
+        "has_candidate_any": bool(
+            _pick_new_offer_artifact(
+                offers=offers,
+                known_markers=known_markers,
+                min_created_at=min_created_at,
+                require_open_state=False,
+            )
+        ),
+        "has_candidate_no_time": bool(
+            _pick_new_offer_artifact(
+                offers=offers,
+                known_markers=known_markers,
+                min_created_at=None,
+                require_open_state=False,
+            )
+        ),
+    }
 
 
 def _dexie_offer_status(payload: dict[str, Any]) -> int | None:
@@ -1155,6 +1241,16 @@ def _dexie_offer_status(payload: dict[str, Any]) -> int | None:
 def _safe_int(value: object) -> int | None:
     try:
         return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _cloud_wallet_rate_limit_retry_seconds(error_text: str) -> float | None:
+    match = re.search(r"try again in (\d+) seconds", error_text, flags=re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return float(int(match.group(1)))
     except (TypeError, ValueError):
         return None
 
@@ -1174,6 +1270,26 @@ def _call_with_moderate_retry(
             return call()
         except Exception as exc:
             attempt += 1
+            error_text = str(exc)
+            rate_limit_wait = _cloud_wallet_rate_limit_retry_seconds(error_text)
+            if rate_limit_wait is not None:
+                sleep_seconds = max(sleep_seconds, min(30.0, rate_limit_wait + 0.25))
+                # region agent log
+                _debug67_log(
+                    run_id="post-fix",
+                    hypothesis_id="H16",
+                    location="greenfloor/cli/manager.py:_call_with_moderate_retry:rate_limit_backoff",
+                    message="cloud_wallet_rate_limit_backoff_applied",
+                    data={
+                        "action": action,
+                        "attempt": int(attempt),
+                        "max_attempts": int(max_attempts),
+                        "elapsed_seconds": int(elapsed_seconds),
+                        "retry_after_seconds": float(rate_limit_wait),
+                        "sleep_seconds": float(sleep_seconds),
+                    },
+                )
+                # endregion
             if attempt >= max_attempts:
                 raise RuntimeError(f"{action}_retry_exhausted:{exc}") from exc
             if events is not None:
@@ -1184,7 +1300,7 @@ def _call_with_moderate_retry(
                         "attempt": str(attempt),
                         "elapsed_seconds": str(elapsed_seconds),
                         "wait_reason": "transient_poll_failure",
-                        "error": str(exc),
+                        "error": error_text,
                     }
                 )
             time.sleep(sleep_seconds)
@@ -1226,8 +1342,10 @@ def _verify_dexie_offer_visible_by_id(
     offer_id: str,
     max_attempts: int = 4,
     delay_seconds: float = 1.5,
-    expected_base_asset_id: str | None = None,
-    expected_base_amount: float | None = None,
+    expected_offered_asset_id: str | None = None,
+    expected_offered_symbol: str | None = None,
+    expected_requested_asset_id: str | None = None,
+    expected_requested_symbol: str | None = None,
 ) -> str | None:
     clean_offer_id = str(offer_id).strip()
     if not clean_offer_id:
@@ -1247,32 +1365,55 @@ def _verify_dexie_offer_visible_by_id(
             str(offer_payload.get("id", "")).strip() if isinstance(offer_payload, dict) else ""
         )
         if visible_id == clean_offer_id:
-            if (
-                expected_base_asset_id
-                and expected_base_amount is not None
-                and isinstance(offer_payload, dict)
-            ):
+            if isinstance(offer_payload, dict):
                 offered = offer_payload.get("offered")
-                if isinstance(offered, list):
-                    observed_amount: float | None = None
-                    expected_asset = str(expected_base_asset_id).strip().lower()
+                requested = offer_payload.get("requested")
+                if expected_offered_asset_id and isinstance(offered, list):
+                    expected_asset = str(expected_offered_asset_id).strip().lower()
+                    expected_symbol = str(expected_offered_symbol or "").strip().lower()
+                    expected_asset_found = False
                     for row in offered:
                         if not isinstance(row, dict):
                             continue
                         asset_id = str(row.get("id", "")).strip().lower()
-                        if asset_id != expected_asset:
+                        code = str(row.get("code", "")).strip().lower()
+                        name = str(row.get("name", "")).strip().lower()
+                        if asset_id != expected_asset and (
+                            not expected_symbol
+                            or (code != expected_symbol and name != expected_symbol)
+                        ):
                             continue
-                        try:
-                            observed_amount = float(row.get("amount") or 0)
-                        except (TypeError, ValueError):
-                            observed_amount = None
+                        expected_asset_found = True
                         break
-                    if observed_amount is not None:
-                        if abs(observed_amount - float(expected_base_amount)) > 1e-9:
-                            return (
-                                "dexie_offer_base_amount_mismatch:"
-                                f"expected={expected_base_amount}:observed={observed_amount}"
-                            )
+                    if not expected_asset_found:
+                        return (
+                            "dexie_offer_offered_asset_missing:"
+                            f"expected_asset={expected_offered_asset_id}:"
+                            f"expected_symbol={expected_offered_symbol}"
+                        )
+                if expected_requested_asset_id and isinstance(requested, list):
+                    expected_asset = str(expected_requested_asset_id).strip().lower()
+                    expected_symbol = str(expected_requested_symbol or "").strip().lower()
+                    expected_asset_found = False
+                    for row in requested:
+                        if not isinstance(row, dict):
+                            continue
+                        asset_id = str(row.get("id", "")).strip().lower()
+                        code = str(row.get("code", "")).strip().lower()
+                        name = str(row.get("name", "")).strip().lower()
+                        if asset_id != expected_asset and (
+                            not expected_symbol
+                            or (code != expected_symbol and name != expected_symbol)
+                        ):
+                            continue
+                        expected_asset_found = True
+                        break
+                    if not expected_asset_found:
+                        return (
+                            "dexie_offer_requested_asset_missing:"
+                            f"expected_asset={expected_requested_asset_id}:"
+                            f"expected_symbol={expected_requested_symbol}"
+                        )
             return None
         last_error = "dexie_offer_visibility_payload_mismatch"
         if attempt < attempts:
@@ -1404,6 +1545,8 @@ def _poll_offer_artifact_until_available(
     timeout_seconds: int,
     min_created_at: dt.datetime | None = None,
     require_open_state: bool = False,
+    states: tuple[str, ...] | None = ("OPEN", "PENDING"),
+    prefer_newest: bool = True,
 ) -> str:
     start = time.monotonic()
     sleep_seconds = 2.0
@@ -1414,21 +1557,257 @@ def _poll_offer_artifact_until_available(
             call=lambda: _wallet_get_wallet_offers(
                 wallet,
                 is_creator=True,
-                states=["OPEN", "PENDING"],
+                states=list(states) if states is not None else None,
             ),
             elapsed_seconds=elapsed,
         )
         offers = wallet_payload.get("offers", [])
+        open_count = 0
+        pending_count = 0
+        candidate_without_open_state = False
+        candidate_without_time_gate = False
+        offer_samples: list[dict[str, Any]] = []
+        settled_missing_settlement_type_count = 0
         if isinstance(offers, list):
+            for offer in offers:
+                state = (
+                    str(offer.get("state", "")).strip().upper() if isinstance(offer, dict) else ""
+                )
+                if state == "OPEN":
+                    open_count += 1
+                elif state == "PENDING":
+                    pending_count += 1
+                if state == "SETTLED":
+                    settlement_type = (
+                        str(offer.get("settlementType", "")).strip().upper()
+                        if isinstance(offer, dict)
+                        else ""
+                    )
+                    if not settlement_type:
+                        settled_missing_settlement_type_count += 1
+            for offer in offers[:3]:
+                if not isinstance(offer, dict):
+                    continue
+                bech32 = str(offer.get("bech32", "")).strip()
+                offer_id = str(offer.get("offerId", "")).strip()
+                created_at = str(offer.get("createdAt", "")).strip()
+                created_dt = _parse_iso8601(created_at)
+                markers = {f"bech32:{bech32}"} if bech32 else set()
+                if offer_id:
+                    markers.add(f"id:{offer_id}")
+                offer_samples.append(
+                    {
+                        "state": str(offer.get("state", "")).strip(),
+                        "offer_id": offer_id,
+                        "id": str(offer.get("id", "")).strip(),
+                        "created_at": created_at,
+                        "settlement_type": str(offer.get("settlementType", "")).strip(),
+                        "has_offer_bech32": bech32.startswith("offer1"),
+                        "bech32_len": len(bech32),
+                        "markers_already_known": bool(markers) and markers.issubset(known_markers),
+                        "created_at_gte_min": (
+                            bool(created_dt and min_created_at and created_dt >= min_created_at)
+                            if min_created_at is not None
+                            else None
+                        ),
+                    }
+                )
             offer_text = _pick_new_offer_artifact(
                 offers=offers,
                 known_markers=known_markers,
                 min_created_at=min_created_at,
                 require_open_state=require_open_state,
+                prefer_newest=prefer_newest,
+            )
+            candidate_without_open_state = bool(
+                _pick_new_offer_artifact(
+                    offers=offers,
+                    known_markers=known_markers,
+                    min_created_at=min_created_at,
+                    require_open_state=False,
+                    prefer_newest=prefer_newest,
+                )
+            )
+            candidate_without_time_gate = bool(
+                _pick_new_offer_artifact(
+                    offers=offers,
+                    known_markers=known_markers,
+                    min_created_at=None,
+                    require_open_state=False,
+                    prefer_newest=prefer_newest,
+                )
             )
             if offer_text:
+                selected_offer_state = ""
+                selected_offer_settlement_type = ""
+                selected_offer_id = ""
+                selected_offer_created_at = ""
+                for offer in offers:
+                    if not isinstance(offer, dict):
+                        continue
+                    if str(offer.get("bech32", "")).strip() != offer_text:
+                        continue
+                    selected_offer_state = str(offer.get("state", "")).strip()
+                    selected_offer_settlement_type = str(offer.get("settlementType", "")).strip()
+                    selected_offer_id = str(offer.get("offerId", "")).strip()
+                    selected_offer_created_at = str(offer.get("createdAt", "")).strip()
+                    break
+                # region agent log
+                _debug67_log(
+                    run_id="pre-fix",
+                    hypothesis_id="H3",
+                    location="greenfloor/cli/manager.py:_poll_offer_artifact_until_available:found",
+                    message="offer_artifact_found",
+                    data={
+                        "elapsed_seconds": elapsed,
+                        "offers_seen": len(offers),
+                        "known_marker_count": len(known_markers),
+                        "require_open_state": bool(require_open_state),
+                        "prefer_newest": bool(prefer_newest),
+                        "selected_offer_state": selected_offer_state,
+                        "selected_offer_settlement_type": selected_offer_settlement_type,
+                        "selected_offer_id": selected_offer_id,
+                        "selected_offer_created_at": selected_offer_created_at,
+                        "settled_missing_settlement_type_count": int(
+                            settled_missing_settlement_type_count
+                        ),
+                    },
+                )
+                # endregion
                 return offer_text
         if elapsed >= timeout_seconds:
+            diagnostic_views: list[dict[str, Any]] = []
+            for label, is_creator, diag_states in (
+                ("creator_open_pending", True, ["OPEN", "PENDING"]),
+                ("creator_all_states", True, None),
+                ("all_creators_all_states", None, None),
+            ):
+                try:
+                    payload_diag = _wallet_get_wallet_offers(
+                        wallet,
+                        is_creator=is_creator,
+                        states=diag_states,
+                    )
+                    diag_offers = payload_diag.get("offers", [])
+                    if isinstance(diag_offers, list):
+                        diagnostic_views.append(
+                            _debug_wallet_offer_view(
+                                label=label,
+                                offers=diag_offers,
+                                known_markers=known_markers,
+                                min_created_at=min_created_at,
+                            )
+                        )
+                except Exception as exc:
+                    diagnostic_views.append({"label": label, "error": str(exc)})
+            # region agent log
+            _debug67_log(
+                run_id="pre-fix",
+                hypothesis_id="H3",
+                location="greenfloor/cli/manager.py:_poll_offer_artifact_until_available:timeout",
+                message="offer_artifact_timeout",
+                data={
+                    "elapsed_seconds": elapsed,
+                    "timeout_seconds": int(timeout_seconds),
+                    "offers_seen": len(offers) if isinstance(offers, list) else -1,
+                    "open_count": int(open_count),
+                    "pending_count": int(pending_count),
+                    "known_marker_count": len(known_markers),
+                    "candidate_without_open_state": bool(candidate_without_open_state),
+                    "candidate_without_time_gate": bool(candidate_without_time_gate),
+                    "offer_samples": offer_samples,
+                    "settled_missing_settlement_type_count": int(
+                        settled_missing_settlement_type_count
+                    ),
+                    "require_open_state": bool(require_open_state),
+                    "min_created_at_set": min_created_at is not None,
+                    "min_created_at": min_created_at.isoformat() if min_created_at else "",
+                    "diagnostic_views": diagnostic_views,
+                },
+            )
+            # endregion
+            raise RuntimeError("cloud_wallet_offer_artifact_timeout")
+        time.sleep(sleep_seconds)
+        sleep_seconds = min(20.0, sleep_seconds * 1.5)
+
+
+def _poll_offer_artifact_by_signature_request(
+    *,
+    wallet: CloudWalletAdapter,
+    signature_request_id: str,
+    known_markers: set[str],
+    timeout_seconds: int,
+    min_created_at: dt.datetime | None = None,
+) -> str:
+    start = time.monotonic()
+    sleep_seconds = 2.0
+    while True:
+        elapsed = int(time.monotonic() - start)
+        payload = _call_with_moderate_retry(
+            action="wallet_get_signature_request_offer",
+            call=lambda: wallet.get_signature_request_offer(
+                signature_request_id=signature_request_id
+            ),
+            elapsed_seconds=elapsed,
+        )
+        bech32 = str(payload.get("bech32", "")).strip()
+        offer_id = str(payload.get("offer_id", "")).strip()
+        offer_state = str(payload.get("state", "")).strip().upper()
+        created_at_raw = str(payload.get("created_at", "")).strip()
+        created_at = _parse_iso8601(created_at_raw)
+        markers = {f"bech32:{bech32}"} if bech32 else set()
+        if offer_id:
+            markers.add(f"id:{offer_id}")
+        markers_already_known = bool(markers) and markers.issubset(known_markers)
+        created_at_gte_min = (
+            bool(created_at and min_created_at and created_at >= min_created_at)
+            if min_created_at is not None
+            else True
+        )
+        if (
+            bech32.startswith("offer1")
+            and offer_state in {"OPEN", "PENDING", "SETTLED"}
+            and not markers_already_known
+            and created_at_gte_min
+        ):
+            # region agent log
+            _debug67_log(
+                run_id="post-fix",
+                hypothesis_id="H29",
+                location="greenfloor/cli/manager.py:_poll_offer_artifact_by_signature_request:found",
+                message="offer_artifact_found_from_signature_request",
+                data={
+                    "elapsed_seconds": elapsed,
+                    "signature_request_id": signature_request_id,
+                    "offer_id": offer_id,
+                    "offer_state": offer_state,
+                    "created_at": created_at_raw,
+                    "known_marker_count": len(known_markers),
+                },
+            )
+            # endregion
+            return bech32
+        if elapsed >= timeout_seconds:
+            # region agent log
+            _debug67_log(
+                run_id="post-fix",
+                hypothesis_id="H29",
+                location="greenfloor/cli/manager.py:_poll_offer_artifact_by_signature_request:timeout",
+                message="offer_artifact_signature_request_timeout",
+                data={
+                    "elapsed_seconds": elapsed,
+                    "timeout_seconds": int(timeout_seconds),
+                    "signature_request_id": signature_request_id,
+                    "offer_id": offer_id,
+                    "offer_state": offer_state,
+                    "created_at": created_at_raw,
+                    "has_bech32_offer1": bech32.startswith("offer1"),
+                    "markers_already_known": markers_already_known,
+                    "created_at_gte_min": created_at_gte_min,
+                    "known_marker_count": len(known_markers),
+                },
+            )
+            # endregion
             raise RuntimeError("cloud_wallet_offer_artifact_timeout")
         time.sleep(sleep_seconds)
         sleep_seconds = min(20.0, sleep_seconds * 1.5)
@@ -1788,6 +2167,8 @@ def _wait_for_mempool_then_confirmation(
 
 
 def _is_spendable_coin(coin: dict) -> bool:
+    if bool(coin.get("isLocked", False)):
+        return False
     coin_state = str(coin.get("state", "")).strip().upper()
     if not coin_state:
         return False
@@ -1802,6 +2183,58 @@ def _is_spendable_coin(coin: dict) -> bool:
     }:
         return False
     return coin_state in {"CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE", "SETTLED"}
+
+
+def _wallet_asset_amounts_for_scope(
+    *,
+    wallet: CloudWalletAdapter,
+    asset_id: str,
+) -> tuple[int | None, int | None, int | None]:
+    """Return (total, spendable, locked) amounts for a resolved wallet asset id."""
+    if not hasattr(wallet, "_graphql"):
+        return None, None, None
+    query = """
+query walletAssetAmounts($walletId: ID!, $first: Int) {
+  wallet(id: $walletId) {
+    assets(first: $first) {
+      edges {
+        node {
+          assetId
+          totalAmount
+          spendableAmount
+          lockedAmount
+        }
+      }
+    }
+  }
+}
+"""
+    try:
+        payload = wallet._graphql(
+            query=query,
+            variables={"walletId": wallet.vault_id, "first": 100},
+        )
+    except Exception:
+        return None, None, None
+    wallet_payload = payload.get("wallet") or {}
+    assets_payload = wallet_payload.get("assets") or {}
+    edges = assets_payload.get("edges") or []
+    target = asset_id.strip()
+    for edge in edges:
+        node = edge.get("node") if isinstance(edge, dict) else None
+        if not isinstance(node, dict):
+            continue
+        node_asset_id = str(node.get("assetId", "")).strip()
+        if node_asset_id != target:
+            continue
+        try:
+            total_amount = int(node.get("totalAmount", 0))
+            spendable_amount = int(node.get("spendableAmount", 0))
+            locked_amount = int(node.get("lockedAmount", 0))
+        except (TypeError, ValueError):
+            return None, None, None
+        return total_amount, spendable_amount, locked_amount
+    return None, None, None
 
 
 def _coin_asset_id(coin: dict) -> str:
@@ -2784,6 +3217,21 @@ def _cloud_wallet_create_offer_phase(
     )
     prior_offers = prior_wallet_payload.get("offers", [])
     known_offer_markers = _offer_markers(prior_offers if isinstance(prior_offers, list) else [])
+    # region agent log
+    _debug67_log(
+        run_id="pre-fix",
+        hypothesis_id="H27",
+        location="greenfloor/cli/manager.py:_cloud_wallet_create_offer_phase:known_markers_snapshot",
+        message="known_markers_snapshot",
+        data={
+            "market_id": str(getattr(market, "market_id", "")),
+            "side": side,
+            "prior_offers_count": len(prior_offers) if isinstance(prior_offers, list) else -1,
+            "known_marker_count": len(known_offer_markers),
+            "known_marker_samples": sorted(list(known_offer_markers))[:4],
+        },
+    )
+    # endregion
     offer_request_started_at = dt.datetime.now(dt.UTC)
     offer_amount = int(
         size_base_units * int((market.pricing or {}).get("base_unit_mojo_multiplier", 1000))
@@ -2813,6 +3261,22 @@ def _cloud_wallet_create_offer_phase(
         split_input_coins=True,
         split_input_coins_fee=split_input_coins_fee,
     )
+    # region agent log
+    _debug67_log(
+        run_id="pre-fix",
+        hypothesis_id="H6",
+        location="greenfloor/cli/manager.py:_cloud_wallet_create_offer_phase:create_result",
+        message="create_offer_result",
+        data={
+            "market_id": str(getattr(market, "market_id", "")),
+            "side": side,
+            "offer_amount": int(offer_amount),
+            "request_amount": int(request_amount),
+            "status": str(create_result.get("status", "")),
+            "signature_request_id": str(create_result.get("signature_request_id", "")),
+        },
+    )
+    # endregion
     signature_request_id = str(create_result.get("signature_request_id", "")).strip()
     wait_events: list[dict[str, str]] = []
     signature_state = str(create_result.get("status", "UNKNOWN")).strip()
@@ -2824,6 +3288,20 @@ def _cloud_wallet_create_offer_phase(
             warning_interval_seconds=10 * 60,
         )
         wait_events.extend(signature_wait_events)
+    # region agent log
+    _debug67_log(
+        run_id="pre-fix",
+        hypothesis_id="H6",
+        location="greenfloor/cli/manager.py:_cloud_wallet_create_offer_phase:signature_state",
+        message="create_offer_signature_state",
+        data={
+            "market_id": str(getattr(market, "market_id", "")),
+            "side": side,
+            "signature_request_id": signature_request_id,
+            "signature_state": str(signature_state),
+        },
+    )
+    # endregion
     return {
         "known_offer_markers": known_offer_markers,
         "offer_request_started_at": offer_request_started_at,
@@ -2832,6 +3310,7 @@ def _cloud_wallet_create_offer_phase(
         "wait_events": wait_events,
         "expires_at": expires_at,
         "offer_amount": offer_amount,
+        "request_amount": request_amount,
         "side": side,
     }
 
@@ -2841,14 +3320,112 @@ def _cloud_wallet_wait_offer_artifact_phase(
     wallet: CloudWalletAdapter,
     known_markers: set[str],
     offer_request_started_at: dt.datetime,
+    signature_request_id: str = "",
+    timeout_seconds: int = 15 * 60,
 ) -> str:
-    return _poll_offer_artifact_until_available(
-        wallet=wallet,
-        known_markers=known_markers,
-        timeout_seconds=15 * 60,
-        min_created_at=offer_request_started_at,
-        require_open_state=True,
-    )
+    strict_timeout = max(15, int(timeout_seconds))
+    try:
+        return _poll_offer_artifact_until_available(
+            wallet=wallet,
+            known_markers=known_markers,
+            timeout_seconds=strict_timeout,
+            min_created_at=offer_request_started_at,
+            require_open_state=False,
+            states=("OPEN", "PENDING"),
+            prefer_newest=True,
+        )
+    except RuntimeError as exc:
+        if str(exc) != "cloud_wallet_offer_artifact_timeout":
+            raise
+        extended_timeout = max(45, strict_timeout * 3)
+        if signature_request_id:
+            # region agent log
+            _debug67_log(
+                run_id="post-fix",
+                hypothesis_id="H29",
+                location="greenfloor/cli/manager.py:_cloud_wallet_wait_offer_artifact_phase:signature_request_lookup_start",
+                message="artifact_signature_request_lookup_start",
+                data={
+                    "signature_request_id": signature_request_id,
+                    "strict_timeout_seconds": strict_timeout,
+                    "extended_timeout_seconds": int(extended_timeout),
+                },
+            )
+            # endregion
+            try:
+                return _poll_offer_artifact_by_signature_request(
+                    wallet=wallet,
+                    signature_request_id=signature_request_id,
+                    known_markers=known_markers,
+                    timeout_seconds=int(extended_timeout),
+                    min_created_at=offer_request_started_at,
+                )
+            except RuntimeError as sr_exc:
+                # region agent log
+                _debug67_log(
+                    run_id="post-fix",
+                    hypothesis_id="H29",
+                    location="greenfloor/cli/manager.py:_cloud_wallet_wait_offer_artifact_phase:signature_request_lookup_error",
+                    message="artifact_signature_request_lookup_error",
+                    data={
+                        "signature_request_id": signature_request_id,
+                        "error": str(sr_exc),
+                    },
+                )
+                # endregion
+        # region agent log
+        _debug67_log(
+            run_id="post-fix",
+            hypothesis_id="H28",
+            location="greenfloor/cli/manager.py:_cloud_wallet_wait_offer_artifact_phase:retry_open_pending",
+            message="artifact_timeout_retry_extended_open_pending",
+            data={
+                "strict_timeout_seconds": strict_timeout,
+                "extended_timeout_seconds": int(extended_timeout),
+                "states_extended": ["OPEN", "PENDING"],
+                "require_open_state_extended": False,
+                "prefer_newest_extended": True,
+            },
+        )
+        # endregion
+        try:
+            return _poll_offer_artifact_until_available(
+                wallet=wallet,
+                known_markers=known_markers,
+                timeout_seconds=int(extended_timeout),
+                min_created_at=offer_request_started_at,
+                require_open_state=False,
+                states=("OPEN", "PENDING"),
+                prefer_newest=True,
+            )
+        except RuntimeError as retry_exc:
+            if str(retry_exc) != "cloud_wallet_offer_artifact_timeout":
+                raise
+        # region agent log
+        _debug67_log(
+            run_id="post-fix",
+            hypothesis_id="H15",
+            location="greenfloor/cli/manager.py:_cloud_wallet_wait_offer_artifact_phase:fallback_relaxed_lookup",
+            message="artifact_timeout_retry_relaxed_state_lookup",
+            data={
+                "strict_timeout_seconds": strict_timeout,
+                "require_open_state_strict": False,
+                "states_strict": ["OPEN", "PENDING"],
+                "require_open_state_relaxed": False,
+                "states_relaxed": "ALL",
+                "prefer_newest_relaxed": False,
+            },
+        )
+        # endregion
+        return _poll_offer_artifact_until_available(
+            wallet=wallet,
+            known_markers=known_markers,
+            timeout_seconds=15,
+            min_created_at=offer_request_started_at,
+            require_open_state=False,
+            states=None,
+            prefer_newest=False,
+        )
 
 
 def _cloud_wallet_post_offer_phase(
@@ -2860,7 +3437,10 @@ def _cloud_wallet_post_offer_phase(
     drop_only: bool,
     claim_rewards: bool,
     market,
-    size_base_units: int,
+    expected_offered_asset_id: str,
+    expected_offered_symbol: str,
+    expected_requested_asset_id: str,
+    expected_requested_symbol: str,
 ) -> dict[str, Any]:
     if publish_venue == "dexie":
         assert dexie is not None
@@ -2875,8 +3455,10 @@ def _cloud_wallet_post_offer_phase(
             visibility_error = _verify_dexie_offer_visible_by_id(
                 dexie=dexie,
                 offer_id=posted_offer_id,
-                expected_base_asset_id=str(market.base_asset),
-                expected_base_amount=float(size_base_units),
+                expected_offered_asset_id=str(expected_offered_asset_id),
+                expected_offered_symbol=str(expected_offered_symbol),
+                expected_requested_asset_id=str(expected_requested_asset_id),
+                expected_requested_symbol=str(expected_requested_symbol),
             )
             if visibility_error:
                 return {
@@ -2905,6 +3487,7 @@ def _build_and_post_offer_cloud_wallet(
     quote_price: float,
     dry_run: bool,
     action_side: str = "sell",
+    offer_artifact_timeout_seconds: int = 15 * 60,
 ) -> tuple[int, dict[str, Any]]:
     side = _normalize_offer_side(action_side)
     _initialize_manager_file_logging(
@@ -2984,8 +3567,56 @@ def _build_and_post_offer_cloud_wallet(
                 wallet=wallet,
                 known_markers=set(create_phase["known_offer_markers"]),
                 offer_request_started_at=create_phase["offer_request_started_at"],
+                signature_request_id=signature_request_id,
+                timeout_seconds=int(offer_artifact_timeout_seconds),
             )
         except RuntimeError as exc:
+            if str(getattr(market, "market_id", "")).strip() == "byc_two_sided_wusdbc":
+                sr_status = ""
+                sr_message_count = -1
+                pending_offer_count = -1
+                try:
+                    sr_payload = wallet.get_signature_request(
+                        signature_request_id=signature_request_id
+                    )
+                    sr_status = str(sr_payload.get("status", "")).strip().upper()
+                except Exception:
+                    sr_status = ""
+                try:
+                    sr_with_messages = wallet.get_signature_request_with_messages(
+                        signature_request_id=signature_request_id
+                    )
+                    messages = sr_with_messages.get("messages") or []
+                    sr_message_count = len(messages) if isinstance(messages, list) else -1
+                except Exception:
+                    sr_message_count = -1
+                try:
+                    latest_wallet = _wallet_get_wallet_offers(
+                        wallet, is_creator=True, states=["OPEN", "PENDING"]
+                    )
+                    latest_offers = latest_wallet.get("offers", [])
+                    pending_offer_count = (
+                        len(latest_offers) if isinstance(latest_offers, list) else -1
+                    )
+                except Exception:
+                    pending_offer_count = -1
+                # region agent log
+                _debug67_log(
+                    run_id="pre-fix",
+                    hypothesis_id="H7",
+                    location="greenfloor/cli/manager.py:_build_and_post_offer_cloud_wallet:artifact_timeout_context",
+                    message="artifact_timeout_signature_context",
+                    data={
+                        "market_id": str(getattr(market, "market_id", "")),
+                        "signature_request_id": signature_request_id,
+                        "signature_state_initial": signature_state,
+                        "signature_state_current": sr_status,
+                        "signature_message_count": int(sr_message_count),
+                        "wallet_open_pending_count": int(pending_offer_count),
+                        "error": str(exc),
+                    },
+                )
+                # endregion
             post_results.append(
                 {
                     "venue": publish_venue,
@@ -3052,7 +3683,26 @@ def _build_and_post_offer_cloud_wallet(
             drop_only=drop_only,
             claim_rewards=claim_rewards,
             market=market,
-            size_base_units=size_base_units,
+            expected_offered_asset_id=(
+                str(market.quote_asset)
+                if str(create_phase.get("side", "sell")).strip().lower() == "buy"
+                else str(market.base_asset)
+            ),
+            expected_offered_symbol=(
+                str(getattr(market, "quote_asset", ""))
+                if str(create_phase.get("side", "sell")).strip().lower() == "buy"
+                else str(getattr(market, "base_symbol", ""))
+            ),
+            expected_requested_asset_id=(
+                str(market.base_asset)
+                if str(create_phase.get("side", "sell")).strip().lower() == "buy"
+                else str(market.quote_asset)
+            ),
+            expected_requested_symbol=(
+                str(getattr(market, "base_symbol", ""))
+                if str(create_phase.get("side", "sell")).strip().lower() == "buy"
+                else str(getattr(market, "quote_asset", ""))
+            ),
         )
         if result.get("success") is False:
             publish_failures += 1
@@ -3459,15 +4109,22 @@ def _coins_list(
             symbol_hint=effective_asset,
         )
     coins = wallet.list_coins(asset_id=resolved_asset_filter, include_pending=True)
+    filtered_asset_id = str(resolved_asset_filter or "").strip().lower()
     items = []
     for coin in coins:
         coin_state = str(coin.get("state", "")).strip().upper()
         pending = coin_state in {"PENDING", "MEMPOOL"}
         spendable = _is_spendable_coin(coin)
         asset_raw = coin.get("asset")
-        asset_id = "xch"
+        reported_asset_id = "xch"
         if isinstance(asset_raw, dict):
-            asset_id = str(asset_raw.get("id", "xch")).strip()
+            reported_asset_id = str(asset_raw.get("id", "xch")).strip()
+        # When Cloud Wallet coin listing is asset-scoped, trust the query scope for
+        # membership and normalize output asset id to that scope. Some backends
+        # may return mixed asset metadata in scoped responses.
+        output_asset_id = (
+            str(resolved_asset_filter).strip() if filtered_asset_id else reported_asset_id
+        )
         items.append(
             {
                 "coin_id": str(coin.get("name", coin.get("id", ""))).strip(),
@@ -3475,9 +4132,44 @@ def _coins_list(
                 "state": coin_state or "UNKNOWN",
                 "pending": pending,
                 "spendable": spendable,
-                "asset": asset_id,
+                "asset": output_asset_id,
             }
         )
+    scoped_total_amount: int | None = None
+    scoped_spendable_amount: int | None = None
+    scoped_locked_amount: int | None = None
+    if filtered_asset_id:
+        (
+            scoped_total_amount,
+            scoped_spendable_amount,
+            scoped_locked_amount,
+        ) = _wallet_asset_amounts_for_scope(
+            wallet=wallet,
+            asset_id=str(resolved_asset_filter).strip(),
+        )
+        if scoped_spendable_amount is not None:
+            remaining_spendable = max(0, int(scoped_spendable_amount))
+            for item in items:
+                amount = int(item.get("amount", 0))
+                state = str(item.get("state", "")).strip().upper()
+                candidate = state not in {"SPENT", "SPENDING", "LOCKED", "RESERVED", "UNCONFIRMED"}
+                is_spendable = bool(candidate and amount > 0 and remaining_spendable >= amount)
+                item["spendable"] = is_spendable
+                if is_spendable:
+                    remaining_spendable -= amount
+            # Fall back to state-derived spendability if no allocation matched at all.
+            if int(scoped_spendable_amount) > 0 and all(
+                not bool(item.get("spendable", False)) for item in items
+            ):
+                for item in items:
+                    state = str(item.get("state", "")).strip().upper()
+                    item["spendable"] = state in {
+                        "CONFIRMED",
+                        "UNSPENT",
+                        "SPENDABLE",
+                        "AVAILABLE",
+                        "SETTLED",
+                    }
     print(
         _format_json_output(
             {
@@ -3485,10 +4177,29 @@ def _coins_list(
                 "network": wallet.network,
                 "count": len(items),
                 "items": items,
+                "asset_total_amount": scoped_total_amount,
+                "asset_spendable_amount": scoped_spendable_amount,
+                "asset_locked_amount": scoped_locked_amount,
             }
         )
     )
     return 0
+
+
+def _coin_status(
+    *,
+    program_path: Path,
+    asset: str | None,
+    vault_id: str | None,
+    cat_id: str | None = None,
+) -> int:
+    """Show per-coin state/spendability for an optional asset scope."""
+    return _coins_list(
+        program_path=program_path,
+        asset=asset,
+        vault_id=vault_id,
+        cat_id=cat_id,
+    )
 
 
 @dataclass(slots=True)
@@ -4787,6 +5498,11 @@ def main() -> None:
     p_coins_list.add_argument("--vault-id", default="")
     p_coins_list.add_argument("--cat-id", default="", help="hex CAT asset_id to filter by")
 
+    p_coin_status = sub.add_parser("coin-status")
+    p_coin_status.add_argument("--asset", default="")
+    p_coin_status.add_argument("--vault-id", default="")
+    p_coin_status.add_argument("--cat-id", default="", help="hex CAT asset_id to filter by")
+
     p_coin_split = sub.add_parser("coin-split")
     split_market_group = p_coin_split.add_mutually_exclusive_group(required=True)
     split_market_group.add_argument("--market-id", default="")
@@ -4954,6 +5670,13 @@ def main() -> None:
         )
     elif args.command == "coins-list":
         code = _coins_list(
+            program_path=Path(args.program_config),
+            asset=args.asset or None,
+            vault_id=args.vault_id or None,
+            cat_id=args.cat_id or None,
+        )
+    elif args.command == "coin-status":
+        code = _coin_status(
             program_path=Path(args.program_config),
             asset=args.asset or None,
             vault_id=args.vault_id or None,

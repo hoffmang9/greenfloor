@@ -198,6 +198,70 @@ def test_cloud_wallet_graphql_missing_data_raises(monkeypatch, tmp_path: Path) -
         adapter._graphql(query="query test {}", variables={})
 
 
+def test_cloud_wallet_graphql_retries_http_429_with_backoff(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    def _fake_sleep(seconds: float) -> None:
+        sleeps.append(float(seconds))
+
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        calls["n"] += 1
+        if calls["n"] == 1:
+            headers = Message()
+            headers["Retry-After"] = "3"
+            raise urllib.error.HTTPError(
+                req.full_url,
+                429,
+                "too many requests",
+                headers,
+                io.BytesIO(b'{"error":"rate limited"}'),
+            )
+        if calls["n"] == 2:
+            raise urllib.error.HTTPError(
+                req.full_url,
+                429,
+                "too many requests",
+                Message(),
+                io.BytesIO(b'{"error":"rate limited"}'),
+            )
+        return _FakeHttpResponse({"data": {"ok": True}})
+
+    monkeypatch.setattr("time.sleep", _fake_sleep)
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    payload = adapter._graphql(query="query test {}", variables={})
+    assert payload == {"ok": True}
+    assert calls["n"] == 3
+    assert sleeps == [3.0, 2.0]
+
+
+def test_cloud_wallet_graphql_retries_rate_limit_error_payload(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    sleeps: list[float] = []
+    responses = [
+        {"errors": [{"message": "Rate limit exceeded, please try again in 2 seconds"}]},
+        {"errors": [{"message": "Rate limit exceeded, please try again in 2 seconds"}]},
+        {"data": {"ok": True}},
+    ]
+
+    def _fake_sleep(seconds: float) -> None:
+        sleeps.append(float(seconds))
+
+    def _fake_urlopen(_req, timeout=0):
+        _ = timeout
+        return _FakeHttpResponse(responses.pop(0))
+
+    monkeypatch.setattr("time.sleep", _fake_sleep)
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    payload = adapter._graphql(query="query test {}", variables={})
+    assert payload == {"ok": True}
+    assert sleeps == [2.0, 2.0]
+
+
 def test_cloud_wallet_get_signature_request_handles_non_dict(monkeypatch, tmp_path: Path) -> None:
     adapter = _build_adapter(tmp_path)
     monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
