@@ -26,6 +26,10 @@
 - Temporary BYC pause on John-Deere:
   - set `~/.greenfloor/config/markets.yaml` market `byc_two_sided_wusdbc` to `enabled: false`,
   - confirmed daemon remained running and other markets continued `coin_ops_plan` activity while BYC events stopped advancing.
+- Documented upstream Cloud Wallet / `ent-wallet` investigation draft in `docs/ent-wallet-upstream-byc-coin-query-issue.md`:
+  - localized the `+0.200 BYC` live row overcount to stray coin `4344df4191e68429233d787130b7eff6e2655673840edfa6feecfdcfc920933d` (`310` mojos),
+  - captured the incoherent ancestry (`310 -> 270 -> 140 -> 100 -> 0 -> 900 -> 1000 -> ...`) and mixed BYC/XCH asset resolution evidence,
+  - separated that bug from the independent `walletAsset.totalAmount` `+100` mojo drift.
 
 ## 2026-03-04 (Coin-split fee re-enabled + John-Deere branch rollout)
 

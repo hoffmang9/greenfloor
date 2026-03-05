@@ -902,7 +902,7 @@ def test_offers_cancel_cancel_open_uses_cloud_wallet(monkeypatch, tmp_path: Path
         vault_id = "wallet-1"
 
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {
                 "offers": [
                     {
@@ -958,7 +958,7 @@ def test_offers_cancel_pending_offer_uses_off_chain_cancel(
         vault_id = "wallet-1"
 
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {
                 "offers": [
                     {
@@ -1016,7 +1016,7 @@ def test_offers_cancel_can_submit_onchain_refresh_after_offchain(
         vault_id = "wallet-1"
 
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {
                 "offers": [
                     {
@@ -1810,6 +1810,7 @@ def test_coins_list_keeps_asset_scoped_rows_when_wallet_reports_mixed_asset_meta
 ) -> None:
     program = tmp_path / "program.yaml"
     _write_program_with_cloud_wallet(program)
+    warning_calls: list[tuple[object, ...]] = []
 
     class _FakeWallet:
         vault_id = "wallet-1"
@@ -1838,6 +1839,10 @@ def test_coins_list_keeps_asset_scoped_rows_when_wallet_reports_mixed_asset_meta
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
+        "greenfloor.cli.manager._manager_logger.warning",
+        lambda *args, **kwargs: warning_calls.append(args),
+    )
+    monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
         lambda *, wallet, canonical_asset_id, symbol_hint=None: "Asset_kg8byr1jz72w12g9tjchiypp",
     )
@@ -1847,9 +1852,95 @@ def test_coins_list_keeps_asset_scoped_rows_when_wallet_reports_mixed_asset_meta
     assert payload["count"] == 2
     assert {item["coin_id"] for item in payload["items"]} == {"coin-byc-1", "coin-xch-1"}
     assert {item["asset"] for item in payload["items"]} == {"Asset_kg8byr1jz72w12g9tjchiypp"}
+    assert {item["reported_asset"] for item in payload["items"]} == {
+        "Asset_kg8byr1jz72w12g9tjchiypp",
+        "Asset_huun64oh7dbt9f1f9ie8khuw",
+    }
+    assert {item["scoped_asset"] for item in payload["items"]} == {"Asset_kg8byr1jz72w12g9tjchiypp"}
+    assert payload["asset_total_amount"] is None
+    assert payload["asset_spendable_amount"] is None
+    assert payload["asset_locked_amount"] is None
+    assert payload["asset_totals_withheld_reason"] == "mixed_reported_asset_ids_detected"
+    assert payload["warnings"][0]["code"] == "mixed_reported_asset_ids_detected"
+    assert warning_calls
+    assert "coins_list_mixed_asset_metadata" in str(warning_calls[0][0])
 
 
-def test_coins_list_reconciles_spendable_to_asset_scope_totals(
+def test_coins_list_keeps_asset_totals_when_scoped_rows_omit_reported_asset(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    _write_program_with_cloud_wallet(program)
+    warning_calls: list[tuple[object, ...]] = []
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, asset_id=None, include_pending=True):
+            _ = asset_id, include_pending
+            return [
+                {
+                    "name": "coin-byc-1",
+                    "amount": 20000,
+                    "state": "SETTLED",
+                },
+                {
+                    "name": "coin-byc-2",
+                    "amount": 30000,
+                    "state": "SETTLED",
+                },
+            ]
+
+        @staticmethod
+        def _graphql(*, query, variables):
+            _ = query, variables
+            return {
+                "wallet": {
+                    "assets": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "assetId": "Asset_kg8byr1jz72w12g9tjchiypp",
+                                    "totalAmount": 50000,
+                                    "spendableAmount": 50000,
+                                    "lockedAmount": 0,
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._manager_logger.warning",
+        lambda *args, **kwargs: warning_calls.append(args),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        lambda *, wallet, canonical_asset_id, symbol_hint=None: "Asset_kg8byr1jz72w12g9tjchiypp",
+    )
+    code = _coins_list(program_path=program, asset="BYC", vault_id=None)
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["count"] == 2
+    assert {item["asset"] for item in payload["items"]} == {"Asset_kg8byr1jz72w12g9tjchiypp"}
+    assert {item["reported_asset"] for item in payload["items"]} == {None}
+    assert {item["scoped_asset"] for item in payload["items"]} == {"Asset_kg8byr1jz72w12g9tjchiypp"}
+    assert payload["asset_total_amount"] == 50000
+    assert payload["asset_spendable_amount"] == 50000
+    assert payload["asset_locked_amount"] == 0
+    assert payload["asset_totals_withheld_reason"] is None
+    assert payload["warnings"] == []
+    assert warning_calls == []
+
+
+def test_coins_list_keeps_row_level_spendability_separate_from_wallet_asset_totals(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
@@ -1870,13 +1961,13 @@ def test_coins_list_reconciles_spendable_to_asset_scope_totals(
                     "name": "coin-a",
                     "amount": 10000,
                     "state": "SETTLED",
-                    "asset": {"id": "Asset_huun"},
+                    "asset": {"id": "Asset_kg8"},
                 },
                 {
                     "name": "coin-b",
                     "amount": 10000,
                     "state": "SETTLED",
-                    "asset": {"id": "Asset_huun"},
+                    "asset": {"id": "Asset_kg8"},
                 },
                 {
                     "name": "coin-c",
@@ -1917,8 +2008,90 @@ def test_coins_list_reconciles_spendable_to_asset_scope_totals(
     assert payload["asset_total_amount"] == 20480
     assert payload["asset_spendable_amount"] == 10480
     assert payload["asset_locked_amount"] == 10000
+    assert payload["asset_totals_withheld_reason"] is None
+    assert payload["warnings"] == []
     spendable_total = sum(int(item["amount"]) for item in payload["items"] if item["spendable"])
-    assert spendable_total == 10480
+    assert spendable_total == 20480
+
+
+def test_coins_list_warns_when_item_amount_sum_differs_from_wallet_asset_total(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    _write_program_with_cloud_wallet(program)
+    warning_calls: list[tuple[object, ...]] = []
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, asset_id=None, include_pending=True):
+            _ = asset_id, include_pending
+            return [
+                {
+                    "name": "coin-a",
+                    "amount": 10000,
+                    "state": "SETTLED",
+                    "asset": {"id": "Asset_kg8"},
+                },
+                {
+                    "name": "coin-b",
+                    "amount": 10000,
+                    "state": "SETTLED",
+                    "asset": {"id": "Asset_kg8"},
+                },
+            ]
+
+        @staticmethod
+        def _graphql(*, query, variables):
+            _ = query, variables
+            return {
+                "wallet": {
+                    "assets": {
+                        "edges": [
+                            {
+                                "node": {
+                                    "assetId": "Asset_kg8",
+                                    "totalAmount": 20480,
+                                    "spendableAmount": 20480,
+                                    "lockedAmount": 0,
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._manager_logger.warning",
+        lambda *args, **kwargs: warning_calls.append(args),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        lambda *, wallet, canonical_asset_id, symbol_hint=None: "Asset_kg8",
+    )
+    code = _coins_list(program_path=program, asset="BYC", vault_id=None)
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["item_amount_sum"] == 20000
+    assert payload["asset_total_amount"] == 20480
+    assert payload["warnings"] == [
+        {
+            "code": "item_amount_sum_mismatch",
+            "message": "sum(items.amount) does not match wallet asset total amount",
+            "resolved_asset_id": "Asset_kg8",
+            "items_amount_sum": 20000,
+            "wallet_asset_total_amount": 20480,
+            "difference_amount": -480,
+        }
+    ]
+    assert warning_calls
+    assert "coins_list_amount_mismatch" in str(warning_calls[0][0])
 
 
 def test_coins_list_cat_id_uses_wallet_resolution_without_dexie(
@@ -2386,7 +2559,8 @@ def test_coin_split_auto_selects_largest_spendable_asset_coin(
             if asset_id == "Asset_split_base":
                 return [
                     {"id": "Coin_small", "name": "small", "amount": 100, "state": "SETTLED"},
-                    {"id": "Coin_big", "name": "big", "amount": 500, "state": "SETTLED"},
+                    {"id": "Coin_big", "name": "big", "amount": 1500, "state": "SETTLED"},
+                    {"id": "Coin_reserve", "name": "reserve", "amount": 1100, "state": "SETTLED"},
                     {"id": "Coin_pending", "name": "pending", "amount": 999, "state": "PENDING"},
                 ]
             return [{"id": "Coin_old", "name": "old", "amount": 1, "state": "SETTLED"}]
@@ -2444,7 +2618,7 @@ def test_coin_split_guardrail_blocks_when_it_would_lock_all_spendable_coins(
         def list_coins(*, include_pending=True, asset_id=None):
             _ = include_pending
             if asset_id == "Asset_split_base":
-                return [{"id": "Coin_only", "name": "only", "amount": 500, "state": "SETTLED"}]
+                return [{"id": "Coin_only", "name": "only", "amount": 1500, "state": "SETTLED"}]
             return [{"id": "Coin_old", "name": "old", "amount": 1, "state": "SETTLED"}]
 
         @staticmethod
@@ -2502,7 +2676,7 @@ def test_coin_split_guardrail_override_allows_lock_all_spendable(
         def list_coins(*, include_pending=True, asset_id=None):
             _ = include_pending
             if asset_id == "Asset_split_base":
-                return [{"id": "Coin_only", "name": "only", "amount": 500, "state": "SETTLED"}]
+                return [{"id": "Coin_only", "name": "only", "amount": 1500, "state": "SETTLED"}]
             return [{"id": "Coin_old", "name": "old", "amount": 1, "state": "SETTLED"}]
 
         @staticmethod
@@ -2559,7 +2733,7 @@ def test_coin_split_guardrail_prompt_override_allows_continue(
         def list_coins(*, include_pending=True, asset_id=None):
             _ = include_pending
             if asset_id == "Asset_split_base":
-                return [{"id": "Coin_only", "name": "only", "amount": 500, "state": "SETTLED"}]
+                return [{"id": "Coin_only", "name": "only", "amount": 1500, "state": "SETTLED"}]
             return [{"id": "Coin_old", "name": "old", "amount": 1, "state": "SETTLED"}]
 
         @staticmethod
@@ -3035,8 +3209,16 @@ def test_coin_combine_uses_market_ladder_threshold_when_size_is_provided(
 
         @staticmethod
         def list_coins(*, include_pending=True, asset_id=None):
-            _ = include_pending, asset_id
-            return [{"id": "Coin_abc123", "name": "coin-1"}]
+            _ = include_pending
+            if asset_id == "a1":
+                return [
+                    {"id": f"Coin_{i}", "name": f"coin-{i}", "amount": 1500 + i, "state": "SETTLED"}
+                    for i in range(6)
+                ] + [
+                    {"id": "Coin_dust_1", "name": "dust-1", "amount": 100, "state": "SETTLED"},
+                    {"id": "Coin_dust_2", "name": "dust-2", "amount": 999, "state": "SETTLED"},
+                ]
+            return [{"id": "Coin_old", "name": "old", "amount": 1, "state": "SETTLED"}]
 
         @staticmethod
         def combine_coins(*, number_of_coins, fee, largest_first, asset_id, input_coin_ids=None):
@@ -3062,7 +3244,13 @@ def test_coin_combine_uses_market_ladder_threshold_when_size_is_provided(
         size_base_units=10,
     )
     assert code == 0
-    assert calls["combine"] == (6, 77, True, "a1", None)
+    assert calls["combine"] == (
+        6,
+        77,
+        True,
+        "a1",
+        ["Coin_5", "Coin_4", "Coin_3", "Coin_2", "Coin_1", "Coin_0"],
+    )
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["venue"] == "splash"
     assert payload["denomination_target"]["combine_threshold_count"] == 6
@@ -3110,8 +3298,13 @@ def test_coin_combine_ladder_threshold_uses_ceil(monkeypatch, tmp_path: Path, ca
 
         @staticmethod
         def list_coins(*, include_pending=True, asset_id=None):
-            _ = include_pending, asset_id
-            return [{"id": "Coin_abc123", "name": "coin-1"}]
+            _ = include_pending
+            if asset_id == "a1":
+                return [
+                    {"id": f"Coin_{i}", "name": f"coin-{i}", "amount": 2000 + i, "state": "SETTLED"}
+                    for i in range(5)
+                ]
+            return [{"id": "Coin_old", "name": "old", "amount": 1, "state": "SETTLED"}]
 
         @staticmethod
         def combine_coins(*, number_of_coins, fee, largest_first, asset_id, input_coin_ids=None):
@@ -3137,6 +3330,71 @@ def test_coin_combine_ladder_threshold_uses_ceil(monkeypatch, tmp_path: Path, ca
     )
     assert code == 0
     assert calls["combine"][0] == 5
+
+
+def test_coin_combine_auto_selection_ignores_cat_dust_under_one_unit(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program)
+    _write_markets(markets)
+    calls = {}
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending
+            if asset_id == "Asset_split_base":
+                return [
+                    {"id": "Coin_big_1", "name": "big-1", "amount": 2000, "state": "SETTLED"},
+                    {"id": "Coin_big_2", "name": "big-2", "amount": 1500, "state": "SETTLED"},
+                    {"id": "Coin_dust_1", "name": "dust-1", "amount": 999, "state": "SETTLED"},
+                    {"id": "Coin_dust_2", "name": "dust-2", "amount": 100, "state": "SETTLED"},
+                ]
+            return [{"id": "Coin_old", "name": "old", "amount": 1, "state": "SETTLED"}]
+
+        @staticmethod
+        def combine_coins(*, number_of_coins, fee, largest_first, asset_id, input_coin_ids=None):
+            calls["combine"] = (number_of_coins, fee, largest_first, asset_id, input_coin_ids)
+            return {"signature_request_id": "sr-combine", "status": "UNSIGNED"}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        lambda *, wallet, canonical_asset_id, symbol_hint=None: "Asset_split_base",
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network, minimum_fee_mojos=0: (77, "coinset_conservative"),
+    )
+    code = _coin_combine(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        number_of_coins=2,
+        asset_id="a1",
+        coin_ids=[],
+        no_wait=True,
+    )
+    assert code == 0
+    assert calls["combine"] == (
+        2,
+        77,
+        True,
+        "Asset_split_base",
+        ["Coin_big_1", "Coin_big_2"],
+    )
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["coin_selection_mode"] == "adapter_auto_select"
+    assert payload["resolved_asset_id"] == "Asset_split_base"
 
 
 def test_coin_split_until_ready_ignores_unknown_states_and_string_asset(
@@ -3320,7 +3578,7 @@ def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, c
         network="mainnet",
         market_id="m1",
         pair=None,
-        coin_ids=[],
+        coin_ids=["coin-a"],
         amount_per_coin=0,
         number_of_coins=0,
         no_wait=False,
@@ -3332,9 +3590,9 @@ def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, c
     assert code == 2
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["until_ready"] is True
-    assert payload["stop_reason"] == "max_iterations_reached"
+    assert payload["stop_reason"] == "requires_new_coin_selection"
     assert payload["denomination_readiness"]["ready"] is False
-    assert len(payload["operations"]) == 2
+    assert len(payload["operations"]) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -4210,7 +4468,7 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
             return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
 
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {"offers": [{"bech32": "offer1testartifact"}]}
 
     posted = {}
@@ -4327,7 +4585,7 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
             return {"signature_request_id": "sr-expiry-1", "status": "UNSIGNED"}
 
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {"offers": [{"bech32": "offer1cwexpiry"}]}
 
     class _FakeDexie:
@@ -4416,7 +4674,7 @@ def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
             return {"signature_request_id": "sr-buy-audit-1", "status": "UNSIGNED"}
 
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {"offers": [{"bech32": "offer1buyaudit"}]}
 
     class _FakeDexie:
@@ -4511,7 +4769,7 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_offer_not_visible(
             return {"signature_request_id": "sr-visibility-1", "status": "UNSIGNED"}
 
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {"offers": [{"bech32": "offer1cwvisibility"}]}
 
     class _FakeDexie:
@@ -4595,7 +4853,7 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_visible_offer_size_m
             return {"signature_request_id": "sr-mismatch-1", "status": "UNSIGNED"}
 
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {"offers": [{"bech32": "offer1cwmismatch"}]}
 
     class _FakeDexie:
@@ -4690,7 +4948,7 @@ def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
             return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
 
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {"offers": []}  # no offer1... bech32
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
@@ -4754,7 +5012,7 @@ def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
             return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
 
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {"offers": [{"bech32": "offer1badoffer"}]}
 
     post_called = [False]
@@ -4833,7 +5091,7 @@ def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
             return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
 
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {"offers": [{"bech32": "offer1dryruncloudwallet"}]}
 
     class _FailDexie:
@@ -4913,7 +5171,7 @@ def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
             return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
 
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {"offers": [{"bech32": "offer1bootstrapfee"}]}
 
     class _FakeDexie:
@@ -5217,7 +5475,7 @@ def test_poll_offer_artifact_until_available_returns_new_offer(monkeypatch) -> N
 
     class _FakeWallet:
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             if wallets:
                 return wallets.pop(0)
             return {"offers": []}
@@ -5263,7 +5521,7 @@ def test_poll_offer_artifact_until_available_filters_out_stale_created_at(monkey
 
     class _FakeWallet:
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             if wallets:
                 return wallets.pop(0)
             return {"offers": []}
@@ -5291,7 +5549,7 @@ def test_poll_offer_artifact_until_available_times_out(monkeypatch) -> None:
 
     class _FakeWallet:
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             return {"offers": []}
 
     monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
@@ -5376,7 +5634,7 @@ def test_poll_offer_artifact_until_available_requires_open_state(monkeypatch) ->
 
     class _FakeWallet:
         @staticmethod
-        def get_wallet():
+        def get_wallet(*, is_creator=None, states=None, first=100):
             if wallets:
                 return wallets.pop(0)
             return {"offers": []}

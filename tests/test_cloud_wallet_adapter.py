@@ -138,6 +138,50 @@ def test_cloud_wallet_list_coins_stops_on_missing_end_cursor(monkeypatch, tmp_pa
     assert calls["n"] == 1
 
 
+def test_cloud_wallet_list_coins_omits_row_asset_for_asset_scoped_queries(
+    monkeypatch, tmp_path: Path
+) -> None:
+    adapter = _build_adapter(tmp_path)
+    queries: list[str] = []
+
+    def _fake_graphql(*, query, variables):
+        queries.append(query)
+        assert variables["assetId"] == "Asset_byc"
+        return {
+            "coins": {
+                "pageInfo": {"hasNextPage": False, "endCursor": ""},
+                "edges": [{"node": {"id": "Coin_1", "name": "11", "amount": 10}}],
+            }
+        }
+
+    monkeypatch.setattr(adapter, "_graphql", _fake_graphql)
+    coins = adapter.list_coins(asset_id="Asset_byc")
+    assert len(coins) == 1
+    assert "asset {" not in queries[0]
+
+
+def test_cloud_wallet_list_coins_keeps_row_asset_for_unscoped_queries(
+    monkeypatch, tmp_path: Path
+) -> None:
+    adapter = _build_adapter(tmp_path)
+    queries: list[str] = []
+
+    def _fake_graphql(*, query, variables):
+        queries.append(query)
+        assert variables["assetId"] is None
+        return {
+            "coins": {
+                "pageInfo": {"hasNextPage": False, "endCursor": ""},
+                "edges": [{"node": {"id": "Coin_1", "name": "11", "amount": 10}}],
+            }
+        }
+
+    monkeypatch.setattr(adapter, "_graphql", _fake_graphql)
+    coins = adapter.list_coins()
+    assert len(coins) == 1
+    assert "asset {" in queries[0]
+
+
 def test_cloud_wallet_graphql_http_error_contains_status_and_snippet(
     monkeypatch, tmp_path: Path
 ) -> None:

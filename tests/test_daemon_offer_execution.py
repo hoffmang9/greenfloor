@@ -1393,8 +1393,8 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
             self, *, asset_id: str | None = None, include_pending: bool = True
         ) -> list[dict[str, Any]]:
             _ = include_pending
-            # Simulate the wallet behavior observed on John-Deere where a broad
-            # unfiltered query reports pending-only inventory.
+            # Simulate the wallet behavior that motivated asset-scoped filtering:
+            # a broad unfiltered query reports pending-only inventory.
             if not asset_id:
                 return [
                     {

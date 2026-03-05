@@ -73,8 +73,20 @@ class CloudWalletAdapter:
         asset_id: str | None = None,
         include_pending: bool = True,
     ) -> list[dict[str, Any]]:
-        query = """
-query listCoins($walletId: ID!, $includePending: Boolean, $after: String, $assetId: ID) {
+        # Upstream Cloud Wallet can mis-resolve `node.asset` on asset-scoped coin
+        # queries, including falling back to XCH for rows that were already
+        # selected by the requested CAT scope. Match the first-party UI here:
+        # when `asset_id` is provided, trust the query scope and omit row asset
+        # metadata instead of importing misleading fallback values.
+        asset_fields = ""
+        if not asset_id:
+            asset_fields = """
+        asset {
+          id
+          type
+        }"""
+        query = f"""
+query listCoins($walletId: ID!, $includePending: Boolean, $after: String, $assetId: ID) {{
   coins(
     walletId: $walletId
     assetId: $assetId
@@ -84,29 +96,25 @@ query listCoins($walletId: ID!, $includePending: Boolean, $after: String, $asset
     sortKey: AMOUNT
     first: 100
     after: $after
-  ) {
-    pageInfo {
+  ) {{
+    pageInfo {{
       hasNextPage
       endCursor
-    }
-    edges {
+    }}
+    edges {{
       cursor
-      node {
+      node {{
         id
         name
         amount
         state
         isLocked
         puzzleHash
-        parentCoinName
-        asset {
-          id
-          type
-        }
-      }
-    }
-  }
-}
+        parentCoinName{asset_fields}
+      }}
+    }}
+  }}
+}}
 """
         after: str | None = None
         coins: list[dict[str, Any]] = []

@@ -29,6 +29,10 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.price import PriceAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
+from greenfloor.cloud_wallet_offer_runtime import (
+    build_and_post_offer_cloud_wallet,
+    resolve_cloud_wallet_offer_asset_ids,
+)
 from greenfloor.config.io import (
     default_cats_config_path,
     default_state_dir_path,
@@ -89,8 +93,6 @@ _CLOUD_WALLET_SPENDABLE_STATES = {
     "SETTLED",
 }
 _DAEMON_INSTANCE_LOCK_FILENAME = "daemon.lock"
-_DEBUG_LOG_PATH = Path("/Users/hoffmang/src/greenfloor/.cursor/debug-67dae3.log")
-_DEBUG_SESSION_ID = "67dae3"
 
 
 def _log_market_decision(market_id: str, decision: str, **fields: Any) -> None:
@@ -101,34 +103,6 @@ def _log_market_decision(market_id: str, decision: str, **fields: Any) -> None:
         )
     else:
         _daemon_logger.info("market_decision market_id=%s decision=%s", market_id, decision)
-
-
-def _debug67_log(
-    *,
-    run_id: str,
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict[str, Any],
-) -> None:
-    path = _DEBUG_LOG_PATH
-    if not path.parent.exists():
-        path = Path(__file__).resolve().parents[2] / ".cursor" / "debug-67dae3.log"
-    payload = {
-        "sessionId": _DEBUG_SESSION_ID,
-        "runId": run_id,
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, separators=(",", ":")) + "\n")
-    except Exception:
-        return
 
 
 def _initialize_daemon_file_logging(home_dir: str, *, log_level: str | None) -> None:
@@ -794,14 +768,13 @@ def _build_dexie_size_by_offer_id(
     return result
 
 
-def _active_offer_counts_by_size(
+def _active_offer_state_summary(
     *,
     store: SqliteStore,
     market_id: str,
     clock: datetime,
     limit: int = 500,
-    dexie_size_by_offer_id: dict[str, int] | None = None,
-) -> tuple[dict[int, int], dict[str, int], int]:
+) -> tuple[list[str], dict[str, int], dict[str, tuple[int, str | None]]]:
     offer_states = store.list_offer_states(market_id=market_id, limit=limit)
     state_counts: dict[str, int] = {}
     for item in offer_states:
@@ -821,7 +794,27 @@ def _active_offer_counts_by_size(
             active_offer_id = str(item.get("offer_id", "")).strip()
             if active_offer_id:
                 active_offer_ids.append(active_offer_id)
-    metadata_by_offer_id = _recent_offer_metadata_by_offer_id(store=store, market_id=market_id)
+    return (
+        active_offer_ids,
+        state_counts,
+        _recent_offer_metadata_by_offer_id(store=store, market_id=market_id),
+    )
+
+
+def _active_offer_counts_by_size(
+    *,
+    store: SqliteStore,
+    market_id: str,
+    clock: datetime,
+    limit: int = 500,
+    dexie_size_by_offer_id: dict[str, int] | None = None,
+) -> tuple[dict[int, int], dict[str, int], int]:
+    active_offer_ids, state_counts, metadata_by_offer_id = _active_offer_state_summary(
+        store=store,
+        market_id=market_id,
+        clock=clock,
+        limit=limit,
+    )
     active_counts_by_size: dict[int, int] = {1: 0, 10: 0, 100: 0}
     active_unmapped_offer_ids = 0
     for offer_id in active_offer_ids:
@@ -848,26 +841,12 @@ def _active_offer_counts_by_size_and_side(
         "buy": {1: 0, 10: 0, 100: 0},
         "sell": {1: 0, 10: 0, 100: 0},
     }
-    offer_states = store.list_offer_states(market_id=market_id, limit=limit)
-    state_counts: dict[str, int] = {}
-    for item in offer_states:
-        state = str(item.get("state", "")).strip().lower()
-        if not state:
-            continue
-        state_counts[state] = int(state_counts.get(state, 0)) + 1
-    active_offer_ids: list[str] = []
-    for item in offer_states:
-        state = str(item.get("state", "")).strip().lower()
-        if state in _ACTIVE_OFFER_STATES_FOR_RESEED:
-            active_offer_id = str(item.get("offer_id", "")).strip()
-            if active_offer_id:
-                active_offer_ids.append(active_offer_id)
-            continue
-        if _is_recent_mempool_observed_offer_state(offer_state=item, clock=clock):
-            active_offer_id = str(item.get("offer_id", "")).strip()
-            if active_offer_id:
-                active_offer_ids.append(active_offer_id)
-    metadata_by_offer_id = _recent_offer_metadata_by_offer_id(store=store, market_id=market_id)
+    active_offer_ids, state_counts, metadata_by_offer_id = _active_offer_state_summary(
+        store=store,
+        market_id=market_id,
+        clock=clock,
+        limit=limit,
+    )
     active_unmapped_offer_ids = 0
     for offer_id in active_offer_ids:
         metadata = metadata_by_offer_id.get(offer_id)
@@ -1361,13 +1340,11 @@ def _resolve_cloud_wallet_offer_asset_ids_for_reservation(
     market: Any,
     wallet: CloudWalletAdapter,
 ) -> tuple[str, str, str]:
-    from greenfloor.cli.manager import _resolve_cloud_wallet_offer_asset_ids
-
     quote_asset = _resolve_quote_asset_for_offer(
         quote_asset=str(getattr(market, "quote_asset", "")),
         network=str(getattr(program, "app_network", "mainnet")),
     )
-    resolved_base_asset_id, resolved_quote_asset_id = _resolve_cloud_wallet_offer_asset_ids(
+    resolved_base_asset_id, resolved_quote_asset_id = resolve_cloud_wallet_offer_asset_ids(
         wallet=wallet,
         base_asset_id=str(getattr(market, "base_asset", "")).strip(),
         quote_asset_id=str(quote_asset).strip(),
@@ -1376,7 +1353,7 @@ def _resolve_cloud_wallet_offer_asset_ids_for_reservation(
         base_global_id_hint=str(getattr(market, "cloud_wallet_base_global_id", "") or ""),
         quote_global_id_hint=str(getattr(market, "cloud_wallet_quote_global_id", "") or ""),
     )
-    resolved_xch_asset_id, _ = _resolve_cloud_wallet_offer_asset_ids(
+    resolved_xch_asset_id, _ = resolve_cloud_wallet_offer_asset_ids(
         wallet=wallet,
         base_asset_id="xch",
         quote_asset_id=str(quote_asset).strip(),
@@ -1399,9 +1376,7 @@ def _cloud_wallet_offer_post_fallback(
     build_and_post_fn: Callable[..., tuple[int, dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     if build_and_post_fn is None:
-        from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
-
-        build_and_post_fn = _build_and_post_offer_cloud_wallet
+        build_and_post_fn = build_and_post_offer_cloud_wallet
 
     quote_price = _resolve_quote_price_quote_per_base(market)
     artifact_timeout_seconds = int(
@@ -1573,25 +1548,6 @@ def _execute_single_cloud_wallet_action(
     dexie: DexieAdapter,
 ) -> dict[str, Any]:
     """Execute a single strategy action via the cloud wallet path."""
-    market_id = str(getattr(market, "market_id", "")).strip()
-    if market_id == "byc_two_sided_wusdbc":
-        # region agent log
-        _debug67_log(
-            run_id="pre-fix",
-            hypothesis_id="H3_H5",
-            location="greenfloor/daemon/main.py:_execute_single_cloud_wallet_action:entry",
-            message="cloud_wallet_action_entry",
-            data={
-                "market_id": market_id,
-                "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                "size": int(action.size),
-                "publish_venue": str(publish_venue),
-                "artifact_timeout_seconds": int(
-                    getattr(program, "runtime_cloud_wallet_offer_artifact_timeout_seconds", 30)
-                ),
-            },
-        )
-        # endregion
     cloud_wallet_post = _cloud_wallet_offer_post_fallback(
         program=program,
         market=market,
@@ -1600,23 +1556,6 @@ def _execute_single_cloud_wallet_action(
         runtime_dry_run=runtime_dry_run,
         side=_normalize_offer_side(getattr(action, "side", "sell")),
     )
-    if market_id == "byc_two_sided_wusdbc":
-        # region agent log
-        _debug67_log(
-            run_id="pre-fix",
-            hypothesis_id="H3_H5",
-            location="greenfloor/daemon/main.py:_execute_single_cloud_wallet_action:post_result",
-            message="cloud_wallet_post_result",
-            data={
-                "market_id": market_id,
-                "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                "size": int(action.size),
-                "success": bool(cloud_wallet_post.get("success", False)),
-                "offer_id": str(cloud_wallet_post.get("offer_id", "")).strip(),
-                "error": str(cloud_wallet_post.get("error", "")).strip(),
-            },
-        )
-        # endregion
     if bool(cloud_wallet_post.get("success", False)):
         cloud_wallet_offer_id = str(cloud_wallet_post.get("offer_id", "")).strip()
         if publish_venue == "dexie" and cloud_wallet_offer_id:
@@ -1726,6 +1665,105 @@ def _execute_single_local_action(
     }
 
 
+def _expand_strategy_actions(strategy_actions: list[Any]) -> list[Any]:
+    ordered_actions = sorted(strategy_actions, key=lambda action: int(action.size), reverse=True)
+    expanded_actions: list[Any] = []
+    for action in ordered_actions:
+        expanded_actions.extend(action for _ in range(int(action.repeat)))
+    return expanded_actions
+
+
+def _cloud_wallet_skip_item(*, action: Any, reason: str) -> dict[str, Any]:
+    return {
+        "size": action.size,
+        "side": _normalize_offer_side(getattr(action, "side", "sell")),
+        "status": "skipped",
+        "reason": reason,
+        "offer_id": None,
+    }
+
+
+def _single_input_preferred_skip_reason(
+    *,
+    requested_amounts: dict[str, int],
+    spendable_profiles: dict[str, dict[str, int]],
+) -> str | None:
+    # Prefer single-input offers on our side: if aggregate balance is
+    # sufficient but no single spendable coin can satisfy the offered
+    # amount, defer posting and let coin-ops combine first.
+    primary_request_candidates = [
+        (asset_id, int(amount))
+        for asset_id, amount in requested_amounts.items()
+        if str(asset_id).strip() and int(amount) > 0
+    ]
+    if not primary_request_candidates:
+        return None
+    primary_asset_id, primary_needed = max(
+        primary_request_candidates, key=lambda pair: int(pair[1])
+    )
+    primary_profile = spendable_profiles.get(str(primary_asset_id), {})
+    primary_total = int(primary_profile.get("total", 0))
+    primary_max = int(primary_profile.get("max_single", 0))
+    if primary_total >= primary_needed and primary_max < primary_needed:
+        return (
+            "single_input_preferred_requires_combine"
+            f":asset_id={primary_asset_id}"
+            f":needed={primary_needed}"
+            f":max_single={primary_max}"
+            f":available={primary_total}"
+        )
+    return None
+
+
+def _prepare_parallel_cloud_wallet_submission(
+    *,
+    program: Any,
+    market: Any,
+    action: Any,
+    cloud_wallet: CloudWalletAdapter,
+    resolved_base_asset_id: str,
+    resolved_quote_asset_id: str,
+    resolved_xch_asset_id: str,
+    fee_amount_mojos: int,
+    reservation_coordinator: AssetReservationCoordinator,
+) -> tuple[str | None, dict[str, Any] | None]:
+    requested_amounts = _reservation_request_for_cloud_offer_with_assets(
+        market=market,
+        action=action,
+        resolved_base_asset_id=resolved_base_asset_id,
+        resolved_quote_asset_id=resolved_quote_asset_id,
+        fee_asset_id=resolved_xch_asset_id,
+        fee_amount_mojos=fee_amount_mojos,
+    )
+    if not requested_amounts:
+        return None, _cloud_wallet_skip_item(action=action, reason="reservation_invalid_request")
+    spendable_profiles = _cloud_wallet_spendable_profiles_by_asset(
+        wallet=cloud_wallet,
+        asset_ids=set(requested_amounts.keys()),
+    )
+    available_amounts = {
+        asset_id: int(profile.get("total", 0)) for asset_id, profile in spendable_profiles.items()
+    }
+    single_input_skip_reason = _single_input_preferred_skip_reason(
+        requested_amounts=requested_amounts,
+        spendable_profiles=spendable_profiles,
+    )
+    if single_input_skip_reason:
+        return None, _cloud_wallet_skip_item(action=action, reason=single_input_skip_reason)
+    acquired = reservation_coordinator.try_acquire(
+        market_id=str(market.market_id),
+        wallet_id=str(program.cloud_wallet_vault_id).strip(),
+        requested_amounts=requested_amounts,
+        available_amounts=available_amounts,
+    )
+    if not acquired.ok or not acquired.reservation_id:
+        return None, _cloud_wallet_skip_item(
+            action=action,
+            reason=str(acquired.error or "reservation_rejected"),
+        )
+    return str(acquired.reservation_id), None
+
+
 def _execute_strategy_actions(
     *,
     market,
@@ -1745,10 +1783,7 @@ def _execute_strategy_actions(
     executed_count = 0
     signer_key = (signer_key_registry or {}).get(market.signer_key_id)
     keyring_yaml_path = str(getattr(signer_key, "keyring_yaml_path", "") or "")
-    # Prioritize larger ladder sizes first to reduce input-coin contention in
-    # cloud-wallet sequential posting (e.g. keep 100-size offers from being
-    # displaced by a burst of 1-size posts in the same cycle).
-    ordered_actions = sorted(strategy_actions, key=lambda action: int(action.size), reverse=True)
+    expanded_actions = _expand_strategy_actions(strategy_actions)
     can_parallelize_cloud_offers = (
         program is not None
         and _cloud_wallet_configured(program)
@@ -1770,133 +1805,23 @@ def _execute_strategy_actions(
             )
             fee_amount_mojos = _estimate_cloud_offer_fee_reservation_mojos(program=program)
             submissions: list[tuple[int, Any, str]] = []
-            next_index = 0
-            for action in ordered_actions:
-                for _ in range(int(action.repeat)):
-                    requested_amounts = _reservation_request_for_cloud_offer_with_assets(
-                        market=market,
-                        action=action,
-                        resolved_base_asset_id=resolved_base_asset_id,
-                        resolved_quote_asset_id=resolved_quote_asset_id,
-                        fee_asset_id=resolved_xch_asset_id,
-                        fee_amount_mojos=fee_amount_mojos,
-                    )
-                    if not requested_amounts:
-                        items.append(
-                            {
-                                "size": action.size,
-                                "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                                "status": "skipped",
-                                "reason": "reservation_invalid_request",
-                                "offer_id": None,
-                            }
-                        )
-                        continue
-                    spendable_profiles = _cloud_wallet_spendable_profiles_by_asset(
-                        wallet=cloud_wallet,
-                        asset_ids=set(requested_amounts.keys()),
-                    )
-                    available_amounts = {
-                        asset_id: int(profile.get("total", 0))
-                        for asset_id, profile in spendable_profiles.items()
-                    }
-                    # Prefer single-input offers on our side: if aggregate balance is
-                    # sufficient but no single spendable coin can satisfy the offered
-                    # amount, defer posting and let coin-ops combine first.
-                    primary_request_candidates = [
-                        (asset_id, int(amount))
-                        for asset_id, amount in requested_amounts.items()
-                        if str(asset_id).strip() and int(amount) > 0
-                    ]
-                    if primary_request_candidates:
-                        primary_asset_id, primary_needed = max(
-                            primary_request_candidates, key=lambda pair: int(pair[1])
-                        )
-                        primary_profile = spendable_profiles.get(str(primary_asset_id), {})
-                        primary_total = int(primary_profile.get("total", 0))
-                        primary_max = int(primary_profile.get("max_single", 0))
-                        if primary_total >= primary_needed and primary_max < primary_needed:
-                            items.append(
-                                {
-                                    "size": action.size,
-                                    "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                                    "status": "skipped",
-                                    "reason": (
-                                        "single_input_preferred_requires_combine"
-                                        f":asset_id={primary_asset_id}"
-                                        f":needed={primary_needed}"
-                                        f":max_single={primary_max}"
-                                        f":available={primary_total}"
-                                    ),
-                                    "offer_id": None,
-                                }
-                            )
-                            continue
-                    if str(getattr(market, "market_id", "")).strip() == "byc_two_sided_wusdbc":
-                        # region agent log
-                        _debug67_log(
-                            run_id="pre-fix",
-                            hypothesis_id="H1_H2",
-                            location="greenfloor/daemon/main.py:_execute_strategy_actions:pre_try_acquire",
-                            message="reservation_precheck",
-                            data={
-                                "market_id": str(getattr(market, "market_id", "")).strip(),
-                                "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                                "size": int(action.size),
-                                "requested_amounts": requested_amounts,
-                                "available_amounts": available_amounts,
-                            },
-                        )
-                        # endregion
-                    acquired = reservation_coordinator.try_acquire(
-                        market_id=str(market.market_id),
-                        wallet_id=str(program.cloud_wallet_vault_id).strip(),
-                        requested_amounts=requested_amounts,
-                        available_amounts=available_amounts,
-                    )
-                    if not acquired.ok or not acquired.reservation_id:
-                        if str(getattr(market, "market_id", "")).strip() == "byc_two_sided_wusdbc":
-                            # region agent log
-                            _debug67_log(
-                                run_id="pre-fix",
-                                hypothesis_id="H1_H2_H4",
-                                location="greenfloor/daemon/main.py:_execute_strategy_actions:try_acquire_failed",
-                                message="reservation_rejected",
-                                data={
-                                    "market_id": str(getattr(market, "market_id", "")).strip(),
-                                    "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                                    "size": int(action.size),
-                                    "error": str(acquired.error or "reservation_rejected"),
-                                },
-                            )
-                            # endregion
-                        items.append(
-                            {
-                                "size": action.size,
-                                "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                                "status": "skipped",
-                                "reason": str(acquired.error or "reservation_rejected"),
-                                "offer_id": None,
-                            }
-                        )
-                        continue
-                    if str(getattr(market, "market_id", "")).strip() == "byc_two_sided_wusdbc":
-                        # region agent log
-                        _debug67_log(
-                            run_id="pre-fix",
-                            hypothesis_id="H4",
-                            location="greenfloor/daemon/main.py:_execute_strategy_actions:try_acquire_ok",
-                            message="reservation_acquired",
-                            data={
-                                "market_id": str(getattr(market, "market_id", "")).strip(),
-                                "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                                "size": int(action.size),
-                                "reservation_id": str(acquired.reservation_id),
-                            },
-                        )
-                        # endregion
-                    submissions.append((next_index, action, acquired.reservation_id))
-                    next_index += 1
+            for submit_index, action in enumerate(expanded_actions):
+                reservation_id, skip_item = _prepare_parallel_cloud_wallet_submission(
+                    program=program,
+                    market=market,
+                    action=action,
+                    cloud_wallet=cloud_wallet,
+                    resolved_base_asset_id=resolved_base_asset_id,
+                    resolved_quote_asset_id=resolved_quote_asset_id,
+                    resolved_xch_asset_id=resolved_xch_asset_id,
+                    fee_amount_mojos=fee_amount_mojos,
+                    reservation_coordinator=reservation_coordinator,
+                )
+                if skip_item is not None:
+                    items.append(skip_item)
+                    continue
+                assert reservation_id is not None
+                submissions.append((submit_index, action, reservation_id))
 
             if submissions:
                 max_workers = min(
@@ -1908,21 +1833,6 @@ def _execute_strategy_actions(
                         concurrent.futures.Future[dict[str, Any]], tuple[int, str]
                     ] = {}
                     for submit_index, action, reservation_id in submissions:
-                        if str(getattr(market, "market_id", "")).strip() == "byc_two_sided_wusdbc":
-                            # region agent log
-                            _debug67_log(
-                                run_id="pre-fix",
-                                hypothesis_id="H5",
-                                location="greenfloor/daemon/main.py:_execute_strategy_actions:submit_worker",
-                                message="worker_submitted",
-                                data={
-                                    "market_id": str(getattr(market, "market_id", "")).strip(),
-                                    "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                                    "size": int(action.size),
-                                    "reservation_id": str(reservation_id),
-                                },
-                            )
-                            # endregion
                         future = pool.submit(
                             _execute_single_cloud_wallet_action,
                             program=program,
@@ -1939,23 +1849,6 @@ def _execute_strategy_actions(
                         try:
                             item = future.result()
                         except Exception as exc:
-                            if (
-                                str(getattr(market, "market_id", "")).strip()
-                                == "byc_two_sided_wusdbc"
-                            ):
-                                # region agent log
-                                _debug67_log(
-                                    run_id="pre-fix",
-                                    hypothesis_id="H5",
-                                    location="greenfloor/daemon/main.py:_execute_strategy_actions:worker_exception",
-                                    message="worker_exception",
-                                    data={
-                                        "market_id": str(getattr(market, "market_id", "")).strip(),
-                                        "reservation_id": str(reservation_id),
-                                        "error": str(exc),
-                                    },
-                                )
-                                # endregion
                             item = {
                                 "size": 0,
                                 "side": "sell",
@@ -1968,22 +1861,6 @@ def _execute_strategy_actions(
                             if str(item.get("status", "")).strip().lower() == "executed"
                             else "released_failed"
                         )
-                        if str(getattr(market, "market_id", "")).strip() == "byc_two_sided_wusdbc":
-                            # region agent log
-                            _debug67_log(
-                                run_id="pre-fix",
-                                hypothesis_id="H5",
-                                location="greenfloor/daemon/main.py:_execute_strategy_actions:worker_result",
-                                message="worker_result",
-                                data={
-                                    "market_id": str(getattr(market, "market_id", "")).strip(),
-                                    "reservation_id": str(reservation_id),
-                                    "status": str(item.get("status", "")),
-                                    "reason": str(item.get("reason", "")),
-                                    "offer_id": str(item.get("offer_id", "") or ""),
-                                },
-                            )
-                            # endregion
                         reservation_coordinator.release(
                             reservation_id=reservation_id, status=release_status
                         )
@@ -1994,7 +1871,7 @@ def _execute_strategy_actions(
                             executed_count += 1
                         items.append(item)
             return {
-                "planned_count": sum(int(a.repeat) for a in strategy_actions),
+                "planned_count": len(expanded_actions),
                 "executed_count": executed_count,
                 "items": items,
             }
@@ -2010,45 +1887,44 @@ def _execute_strategy_actions(
             )
             can_parallelize_cloud_offers = False
     if not can_parallelize_cloud_offers:
-        for action in ordered_actions:
-            for _ in range(int(action.repeat)):
-                if runtime_dry_run:
-                    items.append(
-                        {
-                            "size": action.size,
-                            "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                            "status": "planned",
-                            "reason": "dry_run",
-                            "offer_id": None,
-                        }
-                    )
-                    continue
-                if program is not None and _cloud_wallet_configured(program):
-                    item = _execute_single_cloud_wallet_action(
-                        program=program,
-                        market=market,
-                        action=action,
-                        publish_venue=publish_venue,
-                        runtime_dry_run=runtime_dry_run,
-                        dexie=dexie,
-                    )
-                else:
-                    item = _execute_single_local_action(
-                        market=market,
-                        action=action,
-                        xch_price_usd=xch_price_usd,
-                        app_network=app_network,
-                        keyring_yaml_path=keyring_yaml_path,
-                        dexie=dexie,
-                        splash=splash,
-                        publish_venue=publish_venue,
-                        store=store,
-                    )
-                if item.get("status") == "executed":
-                    executed_count += 1
-                items.append(item)
+        for action in expanded_actions:
+            if runtime_dry_run:
+                items.append(
+                    {
+                        "size": action.size,
+                        "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                        "status": "planned",
+                        "reason": "dry_run",
+                        "offer_id": None,
+                    }
+                )
+                continue
+            if program is not None and _cloud_wallet_configured(program):
+                item = _execute_single_cloud_wallet_action(
+                    program=program,
+                    market=market,
+                    action=action,
+                    publish_venue=publish_venue,
+                    runtime_dry_run=runtime_dry_run,
+                    dexie=dexie,
+                )
+            else:
+                item = _execute_single_local_action(
+                    market=market,
+                    action=action,
+                    xch_price_usd=xch_price_usd,
+                    app_network=app_network,
+                    keyring_yaml_path=keyring_yaml_path,
+                    dexie=dexie,
+                    splash=splash,
+                    publish_venue=publish_venue,
+                    store=store,
+                )
+            if item.get("status") == "executed":
+                executed_count += 1
+            items.append(item)
     return {
-        "planned_count": sum(int(a.repeat) for a in strategy_actions),
+        "planned_count": len(expanded_actions),
         "executed_count": executed_count,
         "items": items,
     }
@@ -2276,44 +2152,6 @@ def _reconcile_offer_states(
         except Exception:  # pragma: no cover - network dependent
             pass
     augmented_offers = list(augmented_by_id.values())
-    if str(market.market_id).strip() == "byc_two_sided_wusdbc":
-        market_offer_ids_in_list = sorted(
-            {
-                str(o.get("id", "")).strip()
-                for o in offers
-                if isinstance(o, dict) and str(o.get("id", "")).strip()
-            }
-        )
-        our_statuses = []
-        for offer in augmented_offers:
-            if not isinstance(offer, dict):
-                continue
-            oid = str(offer.get("id", "")).strip()
-            if not oid or oid not in our_offer_ids:
-                continue
-            our_statuses.append(
-                {
-                    "id": oid,
-                    "status": int(offer.get("status", -1)),
-                    "in_top_list": oid in market_offer_ids_in_list,
-                }
-            )
-        # region agent log
-        _debug67_log(
-            run_id="pre-fix",
-            hypothesis_id="H9",
-            location="greenfloor/daemon/main.py:_reconcile_offer_states:dexie_visibility_snapshot",
-            message="dexie_visibility_snapshot",
-            data={
-                "market_id": str(market.market_id).strip(),
-                "offers_list_count": len(offers),
-                "augmented_offers_count": len(augmented_offers),
-                "our_offer_ids_count": len(our_offer_ids),
-                "beyond_cap_ids_count": len(beyond_cap_ids),
-                "our_augmented_statuses": our_statuses,
-            },
-        )
-        # endregion
     dexie_size_by_offer_id: dict[str, int] = _build_dexie_size_by_offer_id(
         augmented_offers, str(market.base_asset)
     )
@@ -2472,31 +2310,6 @@ def _evaluate_and_execute_strategy(
         xch_price_usd=xch_price_usd,
         action_count=len(strategy_actions),
     )
-    if str(market.market_id).strip() == "byc_two_sided_wusdbc":
-        # region agent log
-        _debug67_log(
-            run_id="pre-fix",
-            hypothesis_id="H8",
-            location="greenfloor/daemon/main.py:_evaluate_and_execute_strategy:state_and_actions",
-            message="strategy_state_snapshot",
-            data={
-                "market_id": str(market.market_id).strip(),
-                "offer_counts_by_size": active_offer_counts_by_size,
-                "offer_counts_by_side": offer_counts_by_side,
-                "offer_state_counts": offer_state_counts,
-                "active_unmapped_offer_ids": active_unmapped_offer_ids,
-                "planned_actions": [
-                    {
-                        "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                        "size": int(getattr(action, "size", 0)),
-                        "repeat": int(getattr(action, "repeat", 0)),
-                        "reason": str(getattr(action, "reason", "")),
-                    }
-                    for action in strategy_actions
-                ],
-            },
-        )
-        # endregion
     if market_mode != "two_sided":
         strategy_actions = _inject_reseed_action_if_no_active_offers(
             strategy_actions=strategy_actions,
