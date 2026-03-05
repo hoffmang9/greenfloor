@@ -36,7 +36,7 @@ from greenfloor.config.io import (
     load_program_config,
     resolve_quote_asset_for_offer,
 )
-from greenfloor.core.coin_ops import BucketSpec, plan_coin_ops
+from greenfloor.core.coin_ops import BucketSpec, CoinOpPlan, plan_coin_ops
 from greenfloor.core.fee_budget import partition_plans_by_budget, projected_coin_ops_fee_mojos
 from greenfloor.core.inventory import compute_bucket_counts_from_coins
 from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert, utcnow
@@ -89,6 +89,8 @@ _CLOUD_WALLET_SPENDABLE_STATES = {
     "SETTLED",
 }
 _DAEMON_INSTANCE_LOCK_FILENAME = "daemon.lock"
+_DEBUG_LOG_PATH = Path("/Users/hoffmang/src/greenfloor/.cursor/debug-67dae3.log")
+_DEBUG_SESSION_ID = "67dae3"
 
 
 def _log_market_decision(market_id: str, decision: str, **fields: Any) -> None:
@@ -99,6 +101,34 @@ def _log_market_decision(market_id: str, decision: str, **fields: Any) -> None:
         )
     else:
         _daemon_logger.info("market_decision market_id=%s decision=%s", market_id, decision)
+
+
+def _debug67_log(
+    *,
+    run_id: str,
+    hypothesis_id: str,
+    location: str,
+    message: str,
+    data: dict[str, Any],
+) -> None:
+    path = _DEBUG_LOG_PATH
+    if not path.parent.exists():
+        path = Path(__file__).resolve().parents[2] / ".cursor" / "debug-67dae3.log"
+    payload = {
+        "sessionId": _DEBUG_SESSION_ID,
+        "runId": run_id,
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, separators=(",", ":")) + "\n")
+    except Exception:
+        return
 
 
 def _initialize_daemon_file_logging(home_dir: str, *, log_level: str | None) -> None:
@@ -255,6 +285,43 @@ def _cancel_retry_config() -> tuple[int, int, int]:
     backoff_ms = _env_int("GREENFLOOR_OFFER_CANCEL_BACKOFF_MS", 250, minimum=0)
     cooldown_seconds = _env_int("GREENFLOOR_OFFER_CANCEL_COOLDOWN_SECONDS", 30, minimum=0)
     return attempts, backoff_ms, cooldown_seconds
+
+
+def _combine_retry_config() -> tuple[int, int]:
+    attempts = _env_int("GREENFLOOR_COIN_OPS_COMBINE_MAX_ATTEMPTS", 3, minimum=1)
+    backoff_ms = _env_int("GREENFLOOR_COIN_OPS_COMBINE_BACKOFF_MS", 1000, minimum=0)
+    return attempts, backoff_ms
+
+
+def _combine_input_coin_cap() -> int:
+    # Keep CAT parent lookup fan-out bounded when Cloud Wallet resolves many input coins.
+    return _env_int("GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP", 5, minimum=2)
+
+
+def _is_cloud_wallet_rate_limited_error(exc: Exception) -> bool:
+    text = str(exc).strip().lower()
+    return "status not ok: 429" in text or " 429" in text or text.endswith(":429")
+
+
+def _combine_coins_with_retry(
+    *,
+    cloud_wallet: CloudWalletAdapter,
+    combine_kwargs: dict[str, Any],
+) -> dict[str, Any]:
+    attempts_max, backoff_ms = _combine_retry_config()
+    last_exc: Exception | None = None
+    for attempt in range(1, attempts_max + 1):
+        try:
+            return cloud_wallet.combine_coins(**combine_kwargs)
+        except Exception as exc:
+            last_exc = exc
+            if attempt >= attempts_max or not _is_cloud_wallet_rate_limited_error(exc):
+                raise
+            if backoff_ms > 0:
+                time.sleep((backoff_ms * (2 ** (attempt - 1))) / 1000.0)
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("combine_coins_failed_without_exception")
 
 
 def _cooldown_remaining_ms(cooldowns: dict[str, float], key: str) -> int:
@@ -1039,10 +1106,21 @@ def _cloud_wallet_spendable_amounts_by_asset(
     wallet: CloudWalletAdapter,
     asset_ids: set[str],
 ) -> dict[str, int]:
+    profiles = _cloud_wallet_spendable_profiles_by_asset(wallet=wallet, asset_ids=asset_ids)
+    return {asset_id: int(profile.get("total", 0)) for asset_id, profile in profiles.items()}
+
+
+def _cloud_wallet_spendable_profiles_by_asset(
+    *,
+    wallet: CloudWalletAdapter,
+    asset_ids: set[str],
+) -> dict[str, dict[str, int]]:
     requested_asset_ids = {str(asset_id).strip() for asset_id in asset_ids if str(asset_id).strip()}
-    totals: dict[str, int] = {asset_id: 0 for asset_id in requested_asset_ids}
+    profiles: dict[str, dict[str, int]] = {
+        asset_id: {"total": 0, "max_single": 0, "coin_count": 0} for asset_id in requested_asset_ids
+    }
     if not requested_asset_ids:
-        return totals
+        return profiles
 
     # Query each requested asset directly. Some wallet backends can return
     # incomplete/unhelpful results for broad unfiltered inventory reads, while
@@ -1082,8 +1160,140 @@ def _cloud_wallet_spendable_amounts_by_asset(
                 amount = 0
             if amount <= 0:
                 continue
-            totals[requested_asset_id] += amount
-    return totals
+            profile = profiles[requested_asset_id]
+            profile["total"] += amount
+            profile["coin_count"] += 1
+            if amount > int(profile.get("max_single", 0)):
+                profile["max_single"] = amount
+    return profiles
+
+
+def _base_unit_mojo_multiplier_for_market(*, market: Any) -> int:
+    pricing = getattr(market, "pricing", {}) or {}
+    try:
+        multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))
+    except (TypeError, ValueError):
+        multiplier = 1000
+    return max(1, multiplier)
+
+
+def _cloud_wallet_spendable_base_unit_coin_amounts(
+    *,
+    wallet: CloudWalletAdapter,
+    resolved_asset_id: str,
+    base_unit_mojo_multiplier: int,
+) -> list[int]:
+    target_asset = str(resolved_asset_id).strip().lower()
+    if not target_asset:
+        return []
+    multiplier = max(1, int(base_unit_mojo_multiplier))
+    try:
+        coins = wallet.list_coins(asset_id=resolved_asset_id, include_pending=True)
+    except Exception:
+        return []
+    amounts_base_units: list[int] = []
+    for coin in coins:
+        if not isinstance(coin, dict):
+            continue
+        state = str(coin.get("state", "")).strip().upper()
+        if state not in _CLOUD_WALLET_SPENDABLE_STATES:
+            continue
+        asset_payload = coin.get("asset")
+        coin_asset_id = (
+            str(asset_payload.get("id", "")).strip() if isinstance(asset_payload, dict) else ""
+        )
+        if coin_asset_id.lower() != target_asset:
+            continue
+        try:
+            amount_mojos = int(coin.get("amount", 0))
+        except (TypeError, ValueError):
+            amount_mojos = 0
+        if amount_mojos <= 0:
+            continue
+        amount_base_units = amount_mojos // multiplier
+        if amount_base_units > 0:
+            amounts_base_units.append(amount_base_units)
+    return amounts_base_units
+
+
+def _select_spendable_coins_for_target_amount(
+    *,
+    coins: list[dict[str, Any]],
+    target_amount: int,
+) -> tuple[list[str], int, bool]:
+    """Pick spendable input coins to reach target; prefer exact sum first.
+
+    Returns (coin_ids, selected_total, exact_match).
+    """
+    required = int(target_amount)
+    if required <= 0:
+        return [], 0, False
+    entries: list[tuple[str, int]] = []
+    for coin in coins:
+        if not isinstance(coin, dict):
+            continue
+        coin_id = str(coin.get("id", "")).strip()
+        if not coin_id:
+            continue
+        try:
+            amount = int(coin.get("amount", 0))
+        except (TypeError, ValueError):
+            amount = 0
+        if amount <= 0:
+            continue
+        entries.append((coin_id, amount))
+    if not entries:
+        return [], 0, False
+
+    max_amount = max(amount for _, amount in entries)
+    cap = required + max_amount
+    # Guard memory on unusually large amount domains.
+    if cap > 500_000:
+        ordered = sorted(entries, key=lambda row: row[1], reverse=True)
+        picked_ids: list[str] = []
+        running = 0
+        for coin_id, amount in ordered:
+            picked_ids.append(coin_id)
+            running += amount
+            if running >= required:
+                return picked_ids, running, running == required
+        return [], 0, False
+
+    best: dict[int, list[int]] = {0: []}
+    for idx, (_coin_id, amount) in enumerate(entries):
+        snapshot = list(best.items())
+        for prev_sum, subset in snapshot:
+            next_sum = int(prev_sum) + int(amount)
+            if next_sum > cap:
+                continue
+            candidate = subset + [idx]
+            existing = best.get(next_sum)
+            if existing is None or len(candidate) < len(existing):
+                best[next_sum] = candidate
+
+    exact_subset = best.get(required)
+    if exact_subset is not None and len(exact_subset) > 0:
+        ids = [entries[i][0] for i in exact_subset]
+        total = sum(entries[i][1] for i in exact_subset)
+        return ids, total, True
+
+    overs = [s for s in best.keys() if s > required]
+    if not overs:
+        return [], 0, False
+    best_over = min(
+        overs,
+        key=lambda s: (
+            int(s) - required,
+            len(best.get(s, [])),
+            int(s),
+        ),
+    )
+    subset = best.get(best_over, [])
+    if not subset:
+        return [], 0, False
+    ids = [entries[i][0] for i in subset]
+    total = sum(entries[i][1] for i in subset)
+    return ids, total, False
 
 
 def _reservation_request_for_cloud_offer(*, market: Any, action: Any) -> dict[str, int]:
@@ -1194,6 +1404,9 @@ def _cloud_wallet_offer_post_fallback(
         build_and_post_fn = _build_and_post_offer_cloud_wallet
 
     quote_price = _resolve_quote_price_quote_per_base(market)
+    artifact_timeout_seconds = int(
+        getattr(program, "runtime_cloud_wallet_offer_artifact_timeout_seconds", 30)
+    )
     exit_code, payload = build_and_post_fn(
         program=program,
         market=market,
@@ -1207,6 +1420,7 @@ def _cloud_wallet_offer_post_fallback(
         quote_price=quote_price,
         dry_run=runtime_dry_run,
         action_side=side,
+        offer_artifact_timeout_seconds=artifact_timeout_seconds,
     )
     if exit_code != 0:
         results = payload.get("results", [])
@@ -1359,6 +1573,25 @@ def _execute_single_cloud_wallet_action(
     dexie: DexieAdapter,
 ) -> dict[str, Any]:
     """Execute a single strategy action via the cloud wallet path."""
+    market_id = str(getattr(market, "market_id", "")).strip()
+    if market_id == "byc_two_sided_wusdbc":
+        # region agent log
+        _debug67_log(
+            run_id="pre-fix",
+            hypothesis_id="H3_H5",
+            location="greenfloor/daemon/main.py:_execute_single_cloud_wallet_action:entry",
+            message="cloud_wallet_action_entry",
+            data={
+                "market_id": market_id,
+                "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                "size": int(action.size),
+                "publish_venue": str(publish_venue),
+                "artifact_timeout_seconds": int(
+                    getattr(program, "runtime_cloud_wallet_offer_artifact_timeout_seconds", 30)
+                ),
+            },
+        )
+        # endregion
     cloud_wallet_post = _cloud_wallet_offer_post_fallback(
         program=program,
         market=market,
@@ -1367,6 +1600,23 @@ def _execute_single_cloud_wallet_action(
         runtime_dry_run=runtime_dry_run,
         side=_normalize_offer_side(getattr(action, "side", "sell")),
     )
+    if market_id == "byc_two_sided_wusdbc":
+        # region agent log
+        _debug67_log(
+            run_id="pre-fix",
+            hypothesis_id="H3_H5",
+            location="greenfloor/daemon/main.py:_execute_single_cloud_wallet_action:post_result",
+            message="cloud_wallet_post_result",
+            data={
+                "market_id": market_id,
+                "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                "size": int(action.size),
+                "success": bool(cloud_wallet_post.get("success", False)),
+                "offer_id": str(cloud_wallet_post.get("offer_id", "")).strip(),
+                "error": str(cloud_wallet_post.get("error", "")).strip(),
+            },
+        )
+        # endregion
     if bool(cloud_wallet_post.get("success", False)):
         cloud_wallet_offer_id = str(cloud_wallet_post.get("offer_id", "")).strip()
         if publish_venue == "dexie" and cloud_wallet_offer_id:
@@ -1542,10 +1792,62 @@ def _execute_strategy_actions(
                             }
                         )
                         continue
-                    available_amounts = _cloud_wallet_spendable_amounts_by_asset(
+                    spendable_profiles = _cloud_wallet_spendable_profiles_by_asset(
                         wallet=cloud_wallet,
                         asset_ids=set(requested_amounts.keys()),
                     )
+                    available_amounts = {
+                        asset_id: int(profile.get("total", 0))
+                        for asset_id, profile in spendable_profiles.items()
+                    }
+                    # Prefer single-input offers on our side: if aggregate balance is
+                    # sufficient but no single spendable coin can satisfy the offered
+                    # amount, defer posting and let coin-ops combine first.
+                    primary_request_candidates = [
+                        (asset_id, int(amount))
+                        for asset_id, amount in requested_amounts.items()
+                        if str(asset_id).strip() and int(amount) > 0
+                    ]
+                    if primary_request_candidates:
+                        primary_asset_id, primary_needed = max(
+                            primary_request_candidates, key=lambda pair: int(pair[1])
+                        )
+                        primary_profile = spendable_profiles.get(str(primary_asset_id), {})
+                        primary_total = int(primary_profile.get("total", 0))
+                        primary_max = int(primary_profile.get("max_single", 0))
+                        if primary_total >= primary_needed and primary_max < primary_needed:
+                            items.append(
+                                {
+                                    "size": action.size,
+                                    "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                                    "status": "skipped",
+                                    "reason": (
+                                        "single_input_preferred_requires_combine"
+                                        f":asset_id={primary_asset_id}"
+                                        f":needed={primary_needed}"
+                                        f":max_single={primary_max}"
+                                        f":available={primary_total}"
+                                    ),
+                                    "offer_id": None,
+                                }
+                            )
+                            continue
+                    if str(getattr(market, "market_id", "")).strip() == "byc_two_sided_wusdbc":
+                        # region agent log
+                        _debug67_log(
+                            run_id="pre-fix",
+                            hypothesis_id="H1_H2",
+                            location="greenfloor/daemon/main.py:_execute_strategy_actions:pre_try_acquire",
+                            message="reservation_precheck",
+                            data={
+                                "market_id": str(getattr(market, "market_id", "")).strip(),
+                                "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                                "size": int(action.size),
+                                "requested_amounts": requested_amounts,
+                                "available_amounts": available_amounts,
+                            },
+                        )
+                        # endregion
                     acquired = reservation_coordinator.try_acquire(
                         market_id=str(market.market_id),
                         wallet_id=str(program.cloud_wallet_vault_id).strip(),
@@ -1553,6 +1855,21 @@ def _execute_strategy_actions(
                         available_amounts=available_amounts,
                     )
                     if not acquired.ok or not acquired.reservation_id:
+                        if str(getattr(market, "market_id", "")).strip() == "byc_two_sided_wusdbc":
+                            # region agent log
+                            _debug67_log(
+                                run_id="pre-fix",
+                                hypothesis_id="H1_H2_H4",
+                                location="greenfloor/daemon/main.py:_execute_strategy_actions:try_acquire_failed",
+                                message="reservation_rejected",
+                                data={
+                                    "market_id": str(getattr(market, "market_id", "")).strip(),
+                                    "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                                    "size": int(action.size),
+                                    "error": str(acquired.error or "reservation_rejected"),
+                                },
+                            )
+                            # endregion
                         items.append(
                             {
                                 "size": action.size,
@@ -1563,6 +1880,21 @@ def _execute_strategy_actions(
                             }
                         )
                         continue
+                    if str(getattr(market, "market_id", "")).strip() == "byc_two_sided_wusdbc":
+                        # region agent log
+                        _debug67_log(
+                            run_id="pre-fix",
+                            hypothesis_id="H4",
+                            location="greenfloor/daemon/main.py:_execute_strategy_actions:try_acquire_ok",
+                            message="reservation_acquired",
+                            data={
+                                "market_id": str(getattr(market, "market_id", "")).strip(),
+                                "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                                "size": int(action.size),
+                                "reservation_id": str(acquired.reservation_id),
+                            },
+                        )
+                        # endregion
                     submissions.append((next_index, action, acquired.reservation_id))
                     next_index += 1
 
@@ -1576,6 +1908,21 @@ def _execute_strategy_actions(
                         concurrent.futures.Future[dict[str, Any]], tuple[int, str]
                     ] = {}
                     for submit_index, action, reservation_id in submissions:
+                        if str(getattr(market, "market_id", "")).strip() == "byc_two_sided_wusdbc":
+                            # region agent log
+                            _debug67_log(
+                                run_id="pre-fix",
+                                hypothesis_id="H5",
+                                location="greenfloor/daemon/main.py:_execute_strategy_actions:submit_worker",
+                                message="worker_submitted",
+                                data={
+                                    "market_id": str(getattr(market, "market_id", "")).strip(),
+                                    "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                                    "size": int(action.size),
+                                    "reservation_id": str(reservation_id),
+                                },
+                            )
+                            # endregion
                         future = pool.submit(
                             _execute_single_cloud_wallet_action,
                             program=program,
@@ -1592,6 +1939,23 @@ def _execute_strategy_actions(
                         try:
                             item = future.result()
                         except Exception as exc:
+                            if (
+                                str(getattr(market, "market_id", "")).strip()
+                                == "byc_two_sided_wusdbc"
+                            ):
+                                # region agent log
+                                _debug67_log(
+                                    run_id="pre-fix",
+                                    hypothesis_id="H5",
+                                    location="greenfloor/daemon/main.py:_execute_strategy_actions:worker_exception",
+                                    message="worker_exception",
+                                    data={
+                                        "market_id": str(getattr(market, "market_id", "")).strip(),
+                                        "reservation_id": str(reservation_id),
+                                        "error": str(exc),
+                                    },
+                                )
+                                # endregion
                             item = {
                                 "size": 0,
                                 "side": "sell",
@@ -1604,6 +1968,22 @@ def _execute_strategy_actions(
                             if str(item.get("status", "")).strip().lower() == "executed"
                             else "released_failed"
                         )
+                        if str(getattr(market, "market_id", "")).strip() == "byc_two_sided_wusdbc":
+                            # region agent log
+                            _debug67_log(
+                                run_id="pre-fix",
+                                hypothesis_id="H5",
+                                location="greenfloor/daemon/main.py:_execute_strategy_actions:worker_result",
+                                message="worker_result",
+                                data={
+                                    "market_id": str(getattr(market, "market_id", "")).strip(),
+                                    "reservation_id": str(reservation_id),
+                                    "status": str(item.get("status", "")),
+                                    "reason": str(item.get("reason", "")),
+                                    "offer_id": str(item.get("offer_id", "") or ""),
+                                },
+                            )
+                            # endregion
                         reservation_coordinator.release(
                             reservation_id=reservation_id, status=release_status
                         )
@@ -1866,14 +2246,74 @@ def _reconcile_offer_states(
     dexie_offer_ids_in_list = {str(o.get("id", "")).strip() for o in offers if o.get("id")}
     beyond_cap_ids = our_offer_ids - dexie_offer_ids_in_list
     augmented_offers = list(offers)
+    augmented_by_id: dict[str, dict[str, Any]] = {}
+    for offer in augmented_offers:
+        if not isinstance(offer, dict):
+            continue
+        offer_id = str(offer.get("id", "")).strip()
+        if not offer_id:
+            continue
+        augmented_by_id[offer_id] = offer
+
+    # Refresh all of our watched offers individually. Dexie list snapshots can
+    # lag status transitions; direct offer fetches make lifecycle state updates
+    # deterministic for strategy planning.
+    for watched_offer_id in sorted(our_offer_ids):
+        try:
+            single_payload = dexie.get_offer(watched_offer_id, timeout=5)
+            single_offer = single_payload.get("offer") if isinstance(single_payload, dict) else None
+            if isinstance(single_offer, dict):
+                augmented_by_id[watched_offer_id] = single_offer
+        except Exception:  # pragma: no cover - network dependent
+            continue
+
     for beyond_offer_id in beyond_cap_ids:
         try:
             single_payload = dexie.get_offer(beyond_offer_id, timeout=5)
             single_offer = single_payload.get("offer") if isinstance(single_payload, dict) else None
             if isinstance(single_offer, dict):
-                augmented_offers.append(single_offer)
+                augmented_by_id[beyond_offer_id] = single_offer
         except Exception:  # pragma: no cover - network dependent
             pass
+    augmented_offers = list(augmented_by_id.values())
+    if str(market.market_id).strip() == "byc_two_sided_wusdbc":
+        market_offer_ids_in_list = sorted(
+            {
+                str(o.get("id", "")).strip()
+                for o in offers
+                if isinstance(o, dict) and str(o.get("id", "")).strip()
+            }
+        )
+        our_statuses = []
+        for offer in augmented_offers:
+            if not isinstance(offer, dict):
+                continue
+            oid = str(offer.get("id", "")).strip()
+            if not oid or oid not in our_offer_ids:
+                continue
+            our_statuses.append(
+                {
+                    "id": oid,
+                    "status": int(offer.get("status", -1)),
+                    "in_top_list": oid in market_offer_ids_in_list,
+                }
+            )
+        # region agent log
+        _debug67_log(
+            run_id="pre-fix",
+            hypothesis_id="H9",
+            location="greenfloor/daemon/main.py:_reconcile_offer_states:dexie_visibility_snapshot",
+            message="dexie_visibility_snapshot",
+            data={
+                "market_id": str(market.market_id).strip(),
+                "offers_list_count": len(offers),
+                "augmented_offers_count": len(augmented_offers),
+                "our_offer_ids_count": len(our_offer_ids),
+                "beyond_cap_ids_count": len(beyond_cap_ids),
+                "our_augmented_statuses": our_statuses,
+            },
+        )
+        # endregion
     dexie_size_by_offer_id: dict[str, int] = _build_dexie_size_by_offer_id(
         augmented_offers, str(market.base_asset)
     )
@@ -2032,6 +2472,31 @@ def _evaluate_and_execute_strategy(
         xch_price_usd=xch_price_usd,
         action_count=len(strategy_actions),
     )
+    if str(market.market_id).strip() == "byc_two_sided_wusdbc":
+        # region agent log
+        _debug67_log(
+            run_id="pre-fix",
+            hypothesis_id="H8",
+            location="greenfloor/daemon/main.py:_evaluate_and_execute_strategy:state_and_actions",
+            message="strategy_state_snapshot",
+            data={
+                "market_id": str(market.market_id).strip(),
+                "offer_counts_by_size": active_offer_counts_by_size,
+                "offer_counts_by_side": offer_counts_by_side,
+                "offer_state_counts": offer_state_counts,
+                "active_unmapped_offer_ids": active_unmapped_offer_ids,
+                "planned_actions": [
+                    {
+                        "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                        "size": int(getattr(action, "size", 0)),
+                        "repeat": int(getattr(action, "repeat", 0)),
+                        "reason": str(getattr(action, "reason", "")),
+                    }
+                    for action in strategy_actions
+                ],
+            },
+        )
+        # endregion
     if market_mode != "two_sided":
         strategy_actions = _inject_reseed_action_if_no_active_offers(
             strategy_actions=strategy_actions,
@@ -2159,16 +2624,13 @@ def _plan_and_execute_coin_ops(
             max_daily_fee_budget_mojos=program.coin_ops_max_daily_fee_budget_mojos,
         )
         if executable_plans:
-            execution = wallet.execute_coin_ops(
+            execution = _execute_coin_ops_cloud_wallet_kms_only(
+                market=market,
+                program=program,
                 plans=executable_plans,
-                dry_run=program.runtime_dry_run,
-                key_id=signer_selection.key_id,
-                network=program.app_network,
-                market_id=market.market_id,
-                asset_id=market.base_asset,
-                receive_address=market.receive_address,
-                onboarding_selection_path=state_dir / "key_onboarding.json",
-                signer_fingerprint=signer_selection.fingerprint,
+                wallet=wallet,
+                signer_selection=signer_selection,
+                state_dir=state_dir,
             )
             _log_market_decision(
                 market.market_id,
@@ -2295,6 +2757,437 @@ def _plan_and_execute_coin_ops(
         _log_market_decision(market.market_id, "coin_ops_no_plans")
 
 
+def _execute_coin_ops_cloud_wallet_kms_only(
+    *,
+    market: Any,
+    program: Any,
+    plans: list[CoinOpPlan],
+    wallet: WalletAdapter,
+    signer_selection: Any,
+    state_dir: Path,
+) -> dict[str, Any]:
+    _ = wallet, state_dir
+    if not _cloud_wallet_configured(program):
+        return {
+            "dry_run": bool(program.runtime_dry_run),
+            "planned_count": len(plans),
+            "executed_count": 0,
+            "status": "skipped",
+            "signer_selection": None,
+            "items": [
+                {
+                    "op_type": plan.op_type,
+                    "size_base_units": plan.size_base_units,
+                    "op_count": plan.op_count,
+                    "status": "skipped",
+                    "reason": "cloud_wallet_required_for_coin_ops",
+                    "operation_id": None,
+                }
+                for plan in plans
+            ],
+        }
+
+    if not str(getattr(program, "cloud_wallet_kms_key_id", "")).strip():
+        return {
+            "dry_run": bool(program.runtime_dry_run),
+            "planned_count": len(plans),
+            "executed_count": 0,
+            "status": "skipped",
+            "signer_selection": None,
+            "items": [
+                {
+                    "op_type": plan.op_type,
+                    "size_base_units": plan.size_base_units,
+                    "op_count": plan.op_count,
+                    "status": "skipped",
+                    "reason": "cloud_wallet_kms_required_for_coin_ops",
+                    "operation_id": None,
+                }
+                for plan in plans
+            ],
+        }
+
+    cloud_wallet = _new_cloud_wallet_adapter_for_daemon(program)
+    resolved_base_asset_id, _, _ = _resolve_cloud_wallet_offer_asset_ids_for_reservation(
+        program=program,
+        market=market,
+        wallet=cloud_wallet,
+    )
+
+    base_unit_mojo_multiplier = _base_unit_mojo_multiplier_for_market(market=market)
+    items: list[dict[str, Any]] = []
+    executed_count = 0
+    combine_input_cap = _combine_input_coin_cap()
+
+    def _spendable_asset_scoped_coins(coins: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        scoped: list[dict[str, Any]] = []
+        target_asset = str(resolved_base_asset_id).strip().lower()
+        for coin in coins:
+            if not isinstance(coin, dict):
+                continue
+            coin_id = str(coin.get("id", "")).strip()
+            if not coin_id:
+                continue
+            state = str(coin.get("state", "")).strip().upper()
+            if state not in _CLOUD_WALLET_SPENDABLE_STATES:
+                continue
+            asset_payload = coin.get("asset")
+            coin_asset = (
+                str(asset_payload.get("id", "")).strip() if isinstance(asset_payload, dict) else ""
+            )
+            if coin_asset.lower() != target_asset:
+                continue
+            scoped.append(coin)
+        return scoped
+
+    for plan in plans:
+        op_type = str(plan.op_type)
+        op_count = int(plan.op_count)
+        size_base_units = int(plan.size_base_units)
+        if op_count <= 0 or size_base_units <= 0:
+            items.append(
+                {
+                    "op_type": op_type,
+                    "size_base_units": size_base_units,
+                    "op_count": op_count,
+                    "status": "skipped",
+                    "reason": "invalid_plan",
+                    "operation_id": None,
+                }
+            )
+            continue
+        if bool(program.runtime_dry_run):
+            items.append(
+                {
+                    "op_type": op_type,
+                    "size_base_units": size_base_units,
+                    "op_count": op_count,
+                    "status": "planned",
+                    "reason": "dry_run:cloud_wallet_kms",
+                    "operation_id": None,
+                }
+            )
+            continue
+
+        try:
+            if op_type == "split":
+                amount_per_coin_mojos = size_base_units * base_unit_mojo_multiplier
+                required_amount = amount_per_coin_mojos * op_count
+                coins = cloud_wallet.list_coins(
+                    asset_id=resolved_base_asset_id, include_pending=True
+                )
+                spendable = _spendable_asset_scoped_coins(coins)
+                if not spendable:
+                    items.append(
+                        {
+                            "op_type": op_type,
+                            "size_base_units": size_base_units,
+                            "op_count": op_count,
+                            "status": "skipped",
+                            "reason": "no_spendable_split_coin_available",
+                            "operation_id": None,
+                        }
+                    )
+                    continue
+                attempted_coin_ids: set[str] = set()
+                split_submitted = False
+                for attempt_index in range(2):
+                    # Re-read before each attempt to avoid selecting stale now-locked coins.
+                    fresh = cloud_wallet.list_coins(
+                        asset_id=resolved_base_asset_id, include_pending=True
+                    )
+                    candidate_spendable = [
+                        coin
+                        for coin in _spendable_asset_scoped_coins(fresh)
+                        if str(coin.get("id", "")).strip() not in attempted_coin_ids
+                    ]
+                    fresh_spendable = [
+                        coin
+                        for coin in candidate_spendable
+                        if int(coin.get("amount", 0)) >= required_amount
+                    ]
+                    if not fresh_spendable:
+                        aggregate_amount = sum(
+                            int(coin.get("amount", 0)) for coin in candidate_spendable
+                        )
+                        if attempt_index == 0 and aggregate_amount >= required_amount:
+                            combine_coin_ids, combine_total, exact_match = (
+                                _select_spendable_coins_for_target_amount(
+                                    coins=candidate_spendable,
+                                    target_amount=required_amount,
+                                )
+                            )
+                            if len(combine_coin_ids) >= 2:
+                                amount_by_coin_id = {
+                                    str(coin.get("id", "")).strip(): int(coin.get("amount", 0))
+                                    for coin in candidate_spendable
+                                }
+                                combine_input_coin_ids = list(combine_coin_ids[:combine_input_cap])
+                                combine_cap_applied = len(combine_input_coin_ids) < len(
+                                    combine_coin_ids
+                                )
+                                combine_selected_total = sum(
+                                    amount_by_coin_id.get(coin_id, 0)
+                                    for coin_id in combine_input_coin_ids
+                                )
+                                combine_exact_match = combine_selected_total == required_amount
+                                combine_target_amount = (
+                                    required_amount
+                                    if combine_selected_total >= required_amount
+                                    else combine_selected_total
+                                )
+                                if combine_cap_applied and combine_selected_total < required_amount:
+                                    _daemon_logger.info(
+                                        "coin_ops_combine_cap_progress "
+                                        "market_id=%s required_amount=%s selected_total=%s "
+                                        "selected_before_cap=%s selected_after_cap=%s input_coin_cap=%s "
+                                        "note=%s",
+                                        str(getattr(market, "market_id", "")).strip() or "unknown",
+                                        int(required_amount),
+                                        int(combine_selected_total),
+                                        int(len(combine_coin_ids)),
+                                        int(len(combine_input_coin_ids)),
+                                        int(combine_input_cap),
+                                        "submitted capped progress combine; next cycle likely needs only 2-coin combine",
+                                    )
+                                try:
+                                    combine_result = _combine_coins_with_retry(
+                                        cloud_wallet=cloud_wallet,
+                                        combine_kwargs={
+                                            "number_of_coins": len(combine_input_coin_ids),
+                                            "fee": int(program.coin_ops_combine_fee_mojos),
+                                            "asset_id": resolved_base_asset_id,
+                                            "largest_first": True,
+                                            "input_coin_ids": combine_input_coin_ids,
+                                            "target_amount": combine_target_amount,
+                                        },
+                                    )
+                                except Exception as exc:
+                                    items.append(
+                                        {
+                                            "op_type": op_type,
+                                            "size_base_units": size_base_units,
+                                            "op_count": op_count,
+                                            "status": "skipped",
+                                            "reason": (
+                                                f"cloud_wallet_coin_op_error:{exc}"
+                                                ":combine_for_split_prereq"
+                                            ),
+                                            "operation_id": None,
+                                        }
+                                    )
+                                    split_submitted = True
+                                    break
+                                combine_sig_id = str(
+                                    combine_result.get("signature_request_id", "")
+                                ).strip()
+                                if not combine_sig_id:
+                                    items.append(
+                                        {
+                                            "op_type": op_type,
+                                            "size_base_units": size_base_units,
+                                            "op_count": op_count,
+                                            "status": "skipped",
+                                            "reason": "combine_missing_signature_request_id_for_split_prereq",
+                                            "operation_id": None,
+                                        }
+                                    )
+                                    split_submitted = True
+                                    break
+                                items.append(
+                                    {
+                                        "op_type": "combine",
+                                        "size_base_units": size_base_units,
+                                        "op_count": len(combine_input_coin_ids),
+                                        "status": "executed",
+                                        "reason": (
+                                            "cloud_wallet_kms_combine_submitted_for_split_prereq_exact"
+                                            if combine_exact_match
+                                            else "cloud_wallet_kms_combine_submitted_for_split_prereq_with_change"
+                                        ),
+                                        "operation_id": combine_sig_id,
+                                        "data": {
+                                            "target_amount": required_amount,
+                                            "selected_total": int(combine_selected_total),
+                                            "exact_match": bool(combine_exact_match),
+                                            "input_coin_cap_applied": bool(combine_cap_applied),
+                                            "input_coin_cap": int(combine_input_cap),
+                                            "selected_coin_count_before_cap": len(combine_coin_ids),
+                                            "selected_coin_count_after_cap": len(
+                                                combine_input_coin_ids
+                                            ),
+                                            "next_step_note": (
+                                                "submitted capped progress combine; next cycle likely needs "
+                                                "only 2-coin combine"
+                                                if combine_cap_applied
+                                                and combine_selected_total < required_amount
+                                                else ""
+                                            ),
+                                        },
+                                    }
+                                )
+                                executed_count += 1
+                                split_submitted = True
+                                break
+                        break
+                    selected_coin = max(fresh_spendable, key=lambda c: int(c.get("amount", 0)))
+                    selected_coin_id = str(selected_coin.get("id", "")).strip()
+                    if not selected_coin_id:
+                        break
+                    attempted_coin_ids.add(selected_coin_id)
+                    try:
+                        result = cloud_wallet.split_coins(
+                            coin_ids=[selected_coin_id],
+                            amount_per_coin=amount_per_coin_mojos,
+                            number_of_coins=op_count,
+                            fee=int(program.coin_ops_split_fee_mojos),
+                        )
+                    except Exception as exc:
+                        error_text = str(exc)
+                        if (
+                            "Some selected coins are not spendable" in error_text
+                            and attempt_index == 0
+                        ):
+                            continue
+                        items.append(
+                            {
+                                "op_type": op_type,
+                                "size_base_units": size_base_units,
+                                "op_count": op_count,
+                                "status": "skipped",
+                                "reason": (
+                                    f"cloud_wallet_coin_op_error:{exc}"
+                                    f":selected_coin_id={selected_coin_id}"
+                                ),
+                                "operation_id": None,
+                            }
+                        )
+                        split_submitted = True
+                        break
+
+                    signature_request_id = str(result.get("signature_request_id", "")).strip()
+                    if not signature_request_id:
+                        items.append(
+                            {
+                                "op_type": op_type,
+                                "size_base_units": size_base_units,
+                                "op_count": op_count,
+                                "status": "skipped",
+                                "reason": "split_missing_signature_request_id",
+                                "operation_id": None,
+                            }
+                        )
+                        split_submitted = True
+                        break
+                    items.append(
+                        {
+                            "op_type": op_type,
+                            "size_base_units": size_base_units,
+                            "op_count": op_count,
+                            "status": "executed",
+                            "reason": "cloud_wallet_kms_split_submitted",
+                            "operation_id": signature_request_id,
+                        }
+                    )
+                    executed_count += 1
+                    split_submitted = True
+                    break
+
+                if not split_submitted:
+                    items.append(
+                        {
+                            "op_type": op_type,
+                            "size_base_units": size_base_units,
+                            "op_count": op_count,
+                            "status": "skipped",
+                            "reason": "no_spendable_split_coin_meets_required_amount",
+                            "operation_id": None,
+                        }
+                    )
+                continue
+
+            if op_type == "combine":
+                requested_number_of_coins = max(2, op_count)
+                capped_number_of_coins = min(requested_number_of_coins, combine_input_cap)
+                result = _combine_coins_with_retry(
+                    cloud_wallet=cloud_wallet,
+                    combine_kwargs={
+                        "number_of_coins": capped_number_of_coins,
+                        "fee": int(program.coin_ops_combine_fee_mojos),
+                        "asset_id": resolved_base_asset_id,
+                        "largest_first": True,
+                    },
+                )
+                signature_request_id = str(result.get("signature_request_id", "")).strip()
+                if not signature_request_id:
+                    items.append(
+                        {
+                            "op_type": op_type,
+                            "size_base_units": size_base_units,
+                            "op_count": op_count,
+                            "status": "skipped",
+                            "reason": "combine_missing_signature_request_id",
+                            "operation_id": None,
+                        }
+                    )
+                    continue
+                items.append(
+                    {
+                        "op_type": op_type,
+                        "size_base_units": size_base_units,
+                        "op_count": op_count,
+                        "status": "executed",
+                        "reason": "cloud_wallet_kms_combine_submitted",
+                        "operation_id": signature_request_id,
+                        "data": {
+                            "requested_number_of_coins": int(requested_number_of_coins),
+                            "submitted_number_of_coins": int(capped_number_of_coins),
+                            "input_coin_cap_applied": bool(
+                                capped_number_of_coins < requested_number_of_coins
+                            ),
+                            "input_coin_cap": int(combine_input_cap),
+                        },
+                    }
+                )
+                executed_count += 1
+                continue
+
+            items.append(
+                {
+                    "op_type": op_type,
+                    "size_base_units": size_base_units,
+                    "op_count": op_count,
+                    "status": "skipped",
+                    "reason": "invalid_plan",
+                    "operation_id": None,
+                }
+            )
+        except Exception as exc:
+            items.append(
+                {
+                    "op_type": op_type,
+                    "size_base_units": size_base_units,
+                    "op_count": op_count,
+                    "status": "skipped",
+                    "reason": f"cloud_wallet_coin_op_error:{exc}",
+                    "operation_id": None,
+                }
+            )
+
+    return {
+        "dry_run": bool(program.runtime_dry_run),
+        "planned_count": len(plans),
+        "executed_count": executed_count,
+        "status": "cloud_wallet_kms",
+        "signer_selection": {
+            "selected_source": "signer_registry",
+            "key_id": str(getattr(signer_selection, "key_id", "")).strip(),
+            "network": str(getattr(program, "app_network", "")).strip(),
+        },
+        "items": items,
+    }
+
+
 def _process_single_market(
     *,
     market: Any,
@@ -2418,51 +3311,99 @@ def _process_single_market(
 
     sell_ladder = market.ladders.get("sell", [])
     ladder_sizes = [e.size_base_units for e in sell_ladder]
-    wallet_coins = wallet.list_asset_coins_base_units(
-        asset_id=market.base_asset,
-        key_id=market.signer_key_id,
-        receive_address=market.receive_address,
-        network=program.app_network,
-    )
-    if wallet_coins:
-        bucket_counts = compute_bucket_counts_from_coins(
-            coin_amounts_base_units=wallet_coins,
-            ladder_sizes=ladder_sizes,
-        )
-        _log_market_decision(
-            market.market_id,
-            "inventory_scan_wallet",
-            coin_count=len(wallet_coins),
-            bucket_counts=bucket_counts,
-        )
-        store.add_audit_event(
-            "inventory_bucket_scan",
-            {
-                "market_id": market.market_id,
-                "source": "wallet_adapter",
-                "bucket_counts": bucket_counts,
-                "coin_count": len(wallet_coins),
-            },
-            market_id=market.market_id,
-        )
-    else:
-        bucket_counts = dict(market.inventory.bucket_counts)
-        _log_market_decision(
-            market.market_id,
-            "inventory_scan_config_fallback",
+    bucket_counts: dict[int, int] | None = None
+    wallet_coins: list[int] = []
+
+    if _cloud_wallet_configured(program):
+        try:
+            cloud_wallet = _new_cloud_wallet_adapter_for_daemon(program)
+            resolved_base_asset_id, _, _ = _resolve_cloud_wallet_offer_asset_ids_for_reservation(
+                program=program,
+                market=market,
+                wallet=cloud_wallet,
+            )
+            wallet_coins = _cloud_wallet_spendable_base_unit_coin_amounts(
+                wallet=cloud_wallet,
+                resolved_asset_id=resolved_base_asset_id,
+                base_unit_mojo_multiplier=_base_unit_mojo_multiplier_for_market(market=market),
+            )
+            bucket_counts = compute_bucket_counts_from_coins(
+                coin_amounts_base_units=wallet_coins,
+                ladder_sizes=ladder_sizes,
+            )
+            _log_market_decision(
+                market.market_id,
+                "inventory_scan_wallet",
+                source="cloud_wallet",
+                resolved_asset_id=resolved_base_asset_id,
+                coin_count=len(wallet_coins),
+                bucket_counts=bucket_counts,
+            )
+            store.add_audit_event(
+                "inventory_bucket_scan",
+                {
+                    "market_id": market.market_id,
+                    "source": "cloud_wallet",
+                    "resolved_asset_id": resolved_base_asset_id,
+                    "bucket_counts": bucket_counts,
+                    "coin_count": len(wallet_coins),
+                },
+                market_id=market.market_id,
+            )
+        except Exception as exc:
+            _daemon_logger.warning(
+                "cloud_wallet_inventory_scan_failed market_id=%s error=%s",
+                market.market_id,
+                exc,
+            )
+
+    if bucket_counts is None:
+        wallet_coins = wallet.list_asset_coins_base_units(
             asset_id=market.base_asset,
-            bucket_counts=bucket_counts,
+            key_id=market.signer_key_id,
+            receive_address=market.receive_address,
+            network=program.app_network,
         )
-        store.add_audit_event(
-            "inventory_bucket_scan",
-            {
-                "market_id": market.market_id,
-                "source": "config_seed_or_no_asset_scan",
-                "asset_id": market.base_asset,
-                "bucket_counts": bucket_counts,
-            },
-            market_id=market.market_id,
-        )
+        if wallet_coins:
+            bucket_counts = compute_bucket_counts_from_coins(
+                coin_amounts_base_units=wallet_coins,
+                ladder_sizes=ladder_sizes,
+            )
+            _log_market_decision(
+                market.market_id,
+                "inventory_scan_wallet",
+                source="wallet_adapter",
+                coin_count=len(wallet_coins),
+                bucket_counts=bucket_counts,
+            )
+            store.add_audit_event(
+                "inventory_bucket_scan",
+                {
+                    "market_id": market.market_id,
+                    "source": "wallet_adapter",
+                    "bucket_counts": bucket_counts,
+                    "coin_count": len(wallet_coins),
+                },
+                market_id=market.market_id,
+            )
+        else:
+            bucket_counts = dict(market.inventory.bucket_counts)
+            _log_market_decision(
+                market.market_id,
+                "inventory_scan_config_fallback",
+                asset_id=market.base_asset,
+                bucket_counts=bucket_counts,
+            )
+            store.add_audit_event(
+                "inventory_bucket_scan",
+                {
+                    "market_id": market.market_id,
+                    "source": "config_seed_or_no_asset_scan",
+                    "asset_id": market.base_asset,
+                    "bucket_counts": bucket_counts,
+                },
+                market_id=market.market_id,
+            )
     _evaluate_and_execute_strategy(
         market=market,
         program=program,

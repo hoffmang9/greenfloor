@@ -1,5 +1,32 @@
 # Progress Log
 
+## 2026-03-05 (Cloud Wallet combine 429 hardening + John-Deere smoke)
+
+- Added daemon-side Cloud Wallet combine retry/backoff in `greenfloor/daemon/main.py` for `429` responses:
+  - new env knobs: `GREENFLOOR_COIN_OPS_COMBINE_MAX_ATTEMPTS` (default `3`) and `GREENFLOOR_COIN_OPS_COMBINE_BACKOFF_MS` (default `1000`),
+  - retries use exponential delay (`base * 2^(attempt-1)`).
+- Added bounded combine fan-out guard in daemon coin-ops:
+  - `GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP` default changed to `5` (minimum `2`),
+  - normal combine submissions now cap `number_of_coins` to this limit.
+- Improved split-prereq combine behavior under cap:
+  - when full target requires more inputs than cap, daemon now submits a capped progress combine (instead of skipping),
+  - execution payload now records cap metadata and emits `next_step_note` indicating next cycle is likely a 2-coin combine.
+- Added daemon log note for capped progress combines:
+  - `coin_ops_combine_cap_progress` with market id, required amount, selected total, before/after counts, and cap value.
+- Added/updated deterministic tests in `tests/test_daemon_offer_execution.py`:
+  - retry on `429`,
+  - normal combine cap application,
+  - split-prereq capped progress combine path.
+- Validation completed:
+  - local targeted daemon suite: `4 passed`,
+  - John-Deere targeted daemon suite: `4 passed`.
+- John-Deere runtime operations:
+  - restarted daemon and monitored for 12 minutes,
+  - observed executed combine event with cap metadata (`op_count=5`, `input_coin_cap=5`, `input_coin_cap_applied=true`, progress `next_step_note` present).
+- Temporary BYC pause on John-Deere:
+  - set `~/.greenfloor/config/markets.yaml` market `byc_two_sided_wusdbc` to `enabled: false`,
+  - confirmed daemon remained running and other markets continued `coin_ops_plan` activity while BYC events stopped advancing.
+
 ## 2026-03-04 (Coin-split fee re-enabled + John-Deere branch rollout)
 
 - Re-enabled default coin-split fee behavior in `greenfloor/cli/manager.py`:
