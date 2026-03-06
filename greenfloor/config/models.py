@@ -5,6 +5,9 @@ from typing import Any
 
 from greenfloor.logging_setup import normalize_log_level_name
 
+_CANONICAL_CAT_UNIT_MOJOS = 1000
+_XCH_UNIT_SYMBOLS = frozenset({"xch", "txch", "1"})
+
 
 @dataclass(frozen=True, slots=True)
 class SignerKeyConfig:
@@ -105,7 +108,10 @@ def _req(mapping: dict[str, Any], key: str) -> Any:
     return mapping[key]
 
 
-def _validate_strategy_pricing(pricing: dict[str, Any], market_id: str) -> None:
+def _validate_strategy_pricing(
+    pricing: dict[str, Any], market_id: str, quote_asset_type: str | None = None
+) -> None:
+    _ = quote_asset_type
     spread_raw = pricing.get("strategy_target_spread_bps")
     if spread_raw is not None:
         try:
@@ -170,6 +176,31 @@ def _validate_strategy_pricing(pricing: dict[str, Any], market_id: str) -> None:
             ) from exc
         if expiry_value <= 0:
             raise ValueError(f"market {market_id}: strategy_offer_expiry_value must be positive")
+
+
+def _uses_cat_units(asset_id: str) -> bool:
+    normalized = str(asset_id).strip().lower()
+    return bool(normalized) and normalized not in _XCH_UNIT_SYMBOLS
+
+
+def canonicalize_asset_unit_mojo_multiplier(
+    *,
+    asset_id: str,
+    raw_value: Any,
+    field_name: str,
+    market_id: str,
+) -> int:
+    if raw_value in (None, ""):
+        return _CANONICAL_CAT_UNIT_MOJOS
+    try:
+        multiplier = int(raw_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"market {market_id}: {field_name} must be an integer") from exc
+    if multiplier <= 0:
+        raise ValueError(f"market {market_id}: {field_name} must be positive")
+    if _uses_cat_units(asset_id) and multiplier != _CANONICAL_CAT_UNIT_MOJOS:
+        raise ValueError(f"market {market_id}: {field_name} must be 1000 for CAT assets")
+    return multiplier
 
 
 def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
@@ -340,7 +371,23 @@ def parse_markets_config(raw: dict[str, Any]) -> MarketsConfig:
             ladders[str(side)] = side_entries
         market_id = str(_req(row, "id"))
         pricing = dict(row.get("pricing", {}))
-        _validate_strategy_pricing(pricing, market_id)
+        pricing["base_unit_mojo_multiplier"] = canonicalize_asset_unit_mojo_multiplier(
+            asset_id=str(_req(row, "base_asset")),
+            raw_value=pricing.get("base_unit_mojo_multiplier"),
+            field_name="base_unit_mojo_multiplier",
+            market_id=market_id,
+        )
+        pricing["quote_unit_mojo_multiplier"] = canonicalize_asset_unit_mojo_multiplier(
+            asset_id=str(_req(row, "quote_asset")),
+            raw_value=pricing.get("quote_unit_mojo_multiplier"),
+            field_name="quote_unit_mojo_multiplier",
+            market_id=market_id,
+        )
+        _validate_strategy_pricing(
+            pricing,
+            market_id,
+            quote_asset_type=str(row.get("quote_asset_type", "")).strip().lower(),
+        )
         markets.append(
             MarketConfig(
                 market_id=market_id,

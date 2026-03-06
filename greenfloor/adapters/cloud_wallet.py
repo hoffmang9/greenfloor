@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 import random
+import re
 import string
 import time
 import urllib.error
@@ -72,8 +73,20 @@ class CloudWalletAdapter:
         asset_id: str | None = None,
         include_pending: bool = True,
     ) -> list[dict[str, Any]]:
-        query = """
-query listCoins($walletId: ID!, $includePending: Boolean, $after: String, $assetId: ID) {
+        # Upstream Cloud Wallet can mis-resolve `node.asset` on asset-scoped coin
+        # queries, including falling back to XCH for rows that were already
+        # selected by the requested CAT scope. Match the first-party UI here:
+        # when `asset_id` is provided, trust the query scope and omit row asset
+        # metadata instead of importing misleading fallback values.
+        asset_fields = ""
+        if not asset_id:
+            asset_fields = """
+        asset {
+          id
+          type
+        }"""
+        query = f"""
+query listCoins($walletId: ID!, $includePending: Boolean, $after: String, $assetId: ID) {{
   coins(
     walletId: $walletId
     assetId: $assetId
@@ -83,28 +96,25 @@ query listCoins($walletId: ID!, $includePending: Boolean, $after: String, $asset
     sortKey: AMOUNT
     first: 100
     after: $after
-  ) {
-    pageInfo {
+  ) {{
+    pageInfo {{
       hasNextPage
       endCursor
-    }
-    edges {
+    }}
+    edges {{
       cursor
-      node {
+      node {{
         id
         name
         amount
         state
+        isLocked
         puzzleHash
-        parentCoinName
-        asset {
-          id
-          type
-        }
-      }
-    }
-  }
-}
+        parentCoinName{asset_fields}
+      }}
+    }}
+  }}
+}}
 """
         after: str | None = None
         coins: list[dict[str, Any]] = []
@@ -322,6 +332,81 @@ query getSignatureRequest($id: ID!) {
             return {"id": signature_request_id, "status": "UNKNOWN"}
         return signature_request
 
+    def get_coin_record(self, *, coin_id: str) -> dict[str, Any]:
+        clean_coin_id = str(coin_id).strip()
+        if not clean_coin_id:
+            raise ValueError("coin_id is required")
+        query = """
+query getCoinRecord($id: ID!) {
+  node(id: $id) {
+    __typename
+    ... on CoinRecord {
+      id
+      name
+      amount
+      state
+      isLocked
+      isLinkedToOpenOffer
+      puzzleHash
+      parentCoinName
+      createdBlockHeight
+      spentBlockHeight
+      asset {
+        id
+        type
+      }
+    }
+  }
+}
+"""
+        payload = self._graphql(query=query, variables={"id": clean_coin_id})
+        coin_record = payload.get("node")
+        if not isinstance(coin_record, dict):
+            return {"id": clean_coin_id, "state": "UNKNOWN"}
+        return coin_record
+
+    def get_signature_request_offer(self, *, signature_request_id: str) -> dict[str, Any]:
+        query = """
+query getSignatureRequestOffer($id: ID!) {
+  signatureRequest(id: $id) {
+    id
+    status
+    transaction {
+      offer {
+        id
+        offerId
+        bech32
+        state
+        createdAt
+      }
+    }
+  }
+}
+"""
+        payload = self._graphql(query=query, variables={"id": signature_request_id})
+        signature_request = payload.get("signatureRequest") or {}
+        if not isinstance(signature_request, dict):
+            return {"id": signature_request_id, "status": "UNKNOWN"}
+        transaction = signature_request.get("transaction") or {}
+        offer = transaction.get("offer") if isinstance(transaction, dict) else None
+        if not isinstance(offer, dict):
+            return {
+                "id": str(signature_request.get("id", signature_request_id)).strip(),
+                "status": str(signature_request.get("status", "UNKNOWN")).strip(),
+                "offer_id": "",
+                "bech32": "",
+                "state": "",
+                "created_at": "",
+            }
+        return {
+            "id": str(signature_request.get("id", signature_request_id)).strip(),
+            "status": str(signature_request.get("status", "UNKNOWN")).strip(),
+            "offer_id": str(offer.get("id", "")).strip() or str(offer.get("offerId", "")).strip(),
+            "bech32": str(offer.get("bech32", "")).strip(),
+            "state": str(offer.get("state", "")).strip(),
+            "created_at": str(offer.get("createdAt", "")).strip(),
+        }
+
     def get_wallet(
         self,
         *,
@@ -535,6 +620,35 @@ query getSignatureRequest($id: ID!) {
         result["status"] = sr.get("status", result.get("status"))
         return result
 
+    @staticmethod
+    def _parse_retry_after_seconds(value: str) -> int | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if text.isdigit():
+            seconds = int(text)
+            return seconds if seconds > 0 else None
+        match = re.search(r"try again in\s+(\d+)\s+seconds?", text, flags=re.IGNORECASE)
+        if match is None:
+            return None
+        seconds = int(match.group(1))
+        return seconds if seconds > 0 else None
+
+    @staticmethod
+    def _is_rate_limit_error_message(message: str) -> bool:
+        normalized = str(message or "").strip().lower()
+        return "rate limit" in normalized or "too many requests" in normalized
+
+    @staticmethod
+    def _backoff_seconds_for_attempt(
+        *, attempt_index: int, retry_after_seconds: int | None
+    ) -> float:
+        # attempt_index is zero-based.
+        exponential = min(16.0, float(2**attempt_index))
+        if retry_after_seconds is None:
+            return exponential
+        return float(max(exponential, int(retry_after_seconds)))
+
     def _graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps({"query": query, "variables": variables}, separators=(",", ":"))
         headers = self._build_auth_headers(body)
@@ -549,30 +663,71 @@ query getSignatureRequest($id: ID!) {
                 **headers,
             },
         )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            raw = exc.read().decode("utf-8", errors="replace").strip()
-            snippet = raw[:200] if raw else ""
-            message = f"cloud_wallet_http_error:{exc.code}"
-            if snippet:
-                message = f"{message}:{snippet}"
-            raise RuntimeError(message) from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"cloud_wallet_network_error:{exc.reason}") from exc
-        if not isinstance(payload, dict):
-            raise RuntimeError("cloud_wallet_invalid_response")
-        errors = payload.get("errors")
-        if isinstance(errors, list) and errors:
-            first = errors[0]
-            if isinstance(first, dict):
-                raise RuntimeError(f"cloud_wallet_graphql_error:{first.get('message', 'unknown')}")
-            raise RuntimeError(f"cloud_wallet_graphql_error:{first}")
-        data = payload.get("data")
-        if not isinstance(data, dict):
-            raise RuntimeError("cloud_wallet_missing_data")
-        return data
+        max_attempts = 5
+        for attempt in range(max_attempts):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                raw = exc.read().decode("utf-8", errors="replace").strip()
+                snippet = raw[:200] if raw else ""
+                retry_after_header = exc.headers.get("Retry-After") if exc.headers else None
+                retry_after_seconds = self._parse_retry_after_seconds(str(retry_after_header or ""))
+                if retry_after_seconds is None:
+                    retry_after_seconds = self._parse_retry_after_seconds(raw)
+                if int(exc.code) == 429 and attempt < (max_attempts - 1):
+                    sleep_seconds = self._backoff_seconds_for_attempt(
+                        attempt_index=attempt,
+                        retry_after_seconds=retry_after_seconds,
+                    )
+                    logger.warning(
+                        "cloud_wallet_rate_limited http_status=429 attempt=%s/%s sleep_seconds=%.1f retry_after_seconds=%s",
+                        attempt + 1,
+                        max_attempts,
+                        sleep_seconds,
+                        retry_after_seconds,
+                    )
+                    time.sleep(sleep_seconds)
+                    continue
+                message = f"cloud_wallet_http_error:{exc.code}"
+                if snippet:
+                    message = f"{message}:{snippet}"
+                raise RuntimeError(message) from exc
+            except urllib.error.URLError as exc:
+                raise RuntimeError(f"cloud_wallet_network_error:{exc.reason}") from exc
+            if not isinstance(payload, dict):
+                raise RuntimeError("cloud_wallet_invalid_response")
+            errors = payload.get("errors")
+            if isinstance(errors, list) and errors:
+                first = errors[0]
+                if isinstance(first, dict):
+                    error_message = str(first.get("message", "unknown"))
+                else:
+                    error_message = str(first)
+                retry_after_seconds = self._parse_retry_after_seconds(error_message)
+                if self._is_rate_limit_error_message(error_message) and attempt < (
+                    max_attempts - 1
+                ):
+                    sleep_seconds = self._backoff_seconds_for_attempt(
+                        attempt_index=attempt,
+                        retry_after_seconds=retry_after_seconds,
+                    )
+                    logger.warning(
+                        "cloud_wallet_rate_limited graphql_error attempt=%s/%s sleep_seconds=%.1f retry_after_seconds=%s message=%s",
+                        attempt + 1,
+                        max_attempts,
+                        sleep_seconds,
+                        retry_after_seconds,
+                        error_message,
+                    )
+                    time.sleep(sleep_seconds)
+                    continue
+                raise RuntimeError(f"cloud_wallet_graphql_error:{error_message}")
+            data = payload.get("data")
+            if not isinstance(data, dict):
+                raise RuntimeError("cloud_wallet_missing_data")
+            return data
+        raise RuntimeError("cloud_wallet_rate_limit_retry_exhausted")
 
     def _build_auth_headers(self, raw_body: str) -> dict[str, str]:
         nonce = self._random_nonce(10)

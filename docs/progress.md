@@ -1,5 +1,133 @@
 # Progress Log
 
+## 2026-03-05 (BYC scoped-query leak fail-closed mitigation + John-Deere validation)
+
+- Root cause for the remaining BYC coin-op failure on John-Deere was narrowed further:
+  - the failing split candidate `CoinRecord_d6dc31acf63aa4022fe0dafedde6032c8be089eedae4fe1a2a682ef47932f921` came from `coins(assetId=BYC)` but direct `node(id)` lookup resolved it as `Asset_huun64oh7dbt9f1f9ie8khuw` (`CRYPTOCURRENCY` / XCH),
+  - two other `10000`-mojo rows returned by the same BYC-scoped query also resolved to XCH,
+  - the `19480`-mojo pending branch under puzzle hash `7ff9f7e13048e191717a34ff04c31b951254aced5cd93e1caac1e8849f700144` also resolved to XCH.
+- Implemented a temporary upstream-defense in `greenfloor/daemon/main.py`:
+  - added `_coin_matches_direct_spendable_lookup(...)`,
+  - coin-op selection now re-fetches each candidate `CoinRecord` by id and requires:
+    - matching asset id,
+    - spendable state,
+    - `isLocked = false`,
+    - `isLinkedToOpenOffer = false`,
+  - added explicit code comment that this is temporary until Cloud Wallet fixes the scoped-query leak.
+- Added `CloudWalletAdapter.get_coin_record(...)` in `greenfloor/adapters/cloud_wallet.py` for direct coin validation during daemon coin-op selection.
+- Added deterministic regression coverage in `tests/test_daemon_offer_execution.py`:
+  - direct-lookup filtering for `_cloud_wallet_spendable_base_unit_coin_amounts(...)`,
+  - split candidate revalidation that skips wrong-asset and locked rows before submission.
+- Validation completed locally:
+  - targeted daemon suite passed: `5 passed`.
+- John-Deere rollout + verification:
+  - synced updated `greenfloor/adapters/cloud_wallet.py` and `greenfloor/daemon/main.py`,
+  - restarted daemon against existing `~/.greenfloor/config/*.yaml`,
+  - direct live helper probe on host showed:
+    - `19480` pending row -> rejected,
+    - locked `10000` row -> rejected,
+    - leaked XCH `d6dc...` row -> rejected,
+    - leaked XCH `0d26...` row -> rejected,
+    - only the known stray `310`-mojo row remained lookup-admissible, but it stays below CAT min-amount filtering.
+- Post-deploy BYC cycle result on John-Deere:
+  - daemon still posted/maintained the expected 4 correctly priced BYC offers on Dexie,
+  - `inventory_scan_wallet` for BYC moved to `coin_count=0 bucket_counts={10: 0}`,
+  - previous split failure `cloud_wallet_graphql_error:Some selected coins are not spendable:selected_coin_id=CoinRecord_d6dc...` disappeared,
+  - replacement fail-closed outcome is now `reason=no_spendable_split_coin_available`.
+- Documentation updated:
+  - extended `docs/ent-wallet-upstream-byc-coin-query-issue.md` with the new live evidence that BYC-scoped rows can directly resolve to XCH on `node(id)` lookup,
+  - recorded the temporary client-side mitigation as an operational stopgap pending upstream fix.
+
+## 2026-03-05 (Cloud Wallet combine 429 hardening + John-Deere smoke)
+
+- Added daemon-side Cloud Wallet combine retry/backoff in `greenfloor/daemon/main.py` for `429` responses:
+  - new env knobs: `GREENFLOOR_COIN_OPS_COMBINE_MAX_ATTEMPTS` (default `3`) and `GREENFLOOR_COIN_OPS_COMBINE_BACKOFF_MS` (default `1000`),
+  - retries use exponential delay (`base * 2^(attempt-1)`).
+- Added bounded combine fan-out guard in daemon coin-ops:
+  - `GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP` default changed to `5` (minimum `2`),
+  - normal combine submissions now cap `number_of_coins` to this limit.
+- Improved split-prereq combine behavior under cap:
+  - when full target requires more inputs than cap, daemon now submits a capped progress combine (instead of skipping),
+  - execution payload now records cap metadata and emits `next_step_note` indicating next cycle is likely a 2-coin combine.
+- Added daemon log note for capped progress combines:
+  - `coin_ops_combine_cap_progress` with market id, required amount, selected total, before/after counts, and cap value.
+- Added/updated deterministic tests in `tests/test_daemon_offer_execution.py`:
+  - retry on `429`,
+  - normal combine cap application,
+  - split-prereq capped progress combine path.
+- Validation completed:
+  - local targeted daemon suite: `4 passed`,
+  - John-Deere targeted daemon suite: `4 passed`.
+- John-Deere runtime operations:
+  - restarted daemon and monitored for 12 minutes,
+  - observed executed combine event with cap metadata (`op_count=5`, `input_coin_cap=5`, `input_coin_cap_applied=true`, progress `next_step_note` present).
+- Temporary BYC pause on John-Deere:
+  - set `~/.greenfloor/config/markets.yaml` market `byc_two_sided_wusdbc` to `enabled: false`,
+  - confirmed daemon remained running and other markets continued `coin_ops_plan` activity while BYC events stopped advancing.
+- Documented upstream Cloud Wallet / `ent-wallet` investigation draft in `docs/ent-wallet-upstream-byc-coin-query-issue.md`:
+  - localized the `+0.200 BYC` live row overcount to stray coin `4344df4191e68429233d787130b7eff6e2655673840edfa6feecfdcfc920933d` (`310` mojos),
+  - captured the incoherent ancestry (`310 -> 270 -> 140 -> 100 -> 0 -> 900 -> 1000 -> ...`) and mixed BYC/XCH asset resolution evidence,
+  - separated that bug from the independent `walletAsset.totalAmount` `+100` mojo drift.
+
+## 2026-03-04 (Coin-split fee re-enabled + John-Deere branch rollout)
+
+- Re-enabled default coin-split fee behavior in `greenfloor/cli/manager.py`:
+  - removed temporary CAT split zero-fee override in `_effective_coin_split_fee_for_asset(...)`,
+  - `coin-split` now uses normal advised/config fallback fee resolution again.
+- Updated deterministic manager tests in `tests/test_manager_post_offer.py`:
+  - CAT split fee assertions now expect standard advised fee flow (`coinset_conservative`) rather than forced-zero policy.
+- Validation completed before push:
+  - `pytest -q tests/test_manager_post_offer.py` passed (`130 passed`),
+  - `pre-commit run --all-files` passed (ruff, format, prettier, yamllint, pyright, pytest).
+- Pushed update branch commit:
+  - branch: `feat/byc-two-sided-market-simplification`,
+  - commit: `d84328a` (`fix: re-enable default coin-split fee resolution`),
+  - PR updated: #54.
+- John-Deere operational prep + verification:
+  - using `~/.greenfloor/config/program.yaml` as-is, confirmed `coin_ops.minimum_fee_mojos = 10_000_000`,
+  - executed fee-less direct cloud-wallet split of one spendable 1 XCH coin into:
+    - `40` coins of `10_000_000_000` mojos (`minimum_fee_mojos * 1000`),
+    - `1` remainder coin of `600_000_000_000` mojos,
+  - verified resulting state as spendable inventory in the active vault.
+- John-Deere daemon branch cutover:
+  - direct GitHub fetch was unavailable on host (`Permission denied (publickey)`), so branch sync used a transferred git bundle,
+  - checked out `feat/byc-two-sided-market-simplification` at `d84328a` in `/home/hoffmang/greenfloor`,
+  - restarted daemon with existing runtime args against `~/.greenfloor/config/*.yaml` and verified running process:
+    - PID `285247`,
+    - cwd `/home/hoffmang/greenfloor`,
+    - command `.venv/bin/python -m greenfloor.daemon.main --program-config /home/hoffmang/.greenfloor/config/program.yaml --markets-config /home/hoffmang/.greenfloor/config/markets.yaml --state-dir /home/hoffmang/.greenfloor/state`.
+- Follow-up PR-review hardening and rollout:
+  - pushed `845b38c` (`fix: fail-closed offer side metadata and persist manager side`) on `feat/byc-two-sided-market-simplification`,
+  - update includes fail-closed side metadata parsing in daemon offer accounting and explicit `side` persistence in manager `strategy_offer_execution` audit items,
+  - added/updated deterministic coverage in `tests/test_daemon_offer_execution.py` and `tests/test_manager_post_offer.py`,
+  - validation at commit time: `pre-commit run --all-files` passed (includes pytest hook), and focused suite passed (`164 passed`).
+- John-Deere updated to newest branch commit:
+  - synced host repo to `845b38c` via transferred git bundle and `git merge --ff-only`,
+  - restarted daemon against existing `~/.greenfloor/config/*.yaml` runtime args and verified active process,
+  - verified host repo head at runtime: `845b38c`.
+
+## 2026-03-03 (BYC<>wUSDC.b two-sided activation + config simplification hooks)
+
+- Implemented explicit side-aware offer execution flow for two-sided markets:
+  - `PlannedAction` now carries `side` (`buy`/`sell`) with sell as the default for existing paths,
+  - daemon strategy evaluation now supports `mode: two_sided` by reading both `ladders.buy` and `ladders.sell` as config-driven targets,
+  - execution/audit payloads now include action `side` so active-offer accounting can track buy vs sell counts.
+- Extended cloud-wallet offer posting to be side-aware:
+  - buy offers now invert offered/requested legs (`offered=quote`, `requested=base`),
+  - sell offers keep the existing behavior (`offered=base`, `requested=quote`).
+- Updated bootstrap denomination planning for two-sided behavior:
+  - sell-side bootstrap remains base-asset denominated,
+  - buy-side bootstrap is quote-asset-only and derives per-offer quote denomination from `size_base_units * fixed_quote_per_base`.
+- Kept CAT split-fee policy unchanged:
+  - offer creation continues to enforce `split_input_coins_fee=0`,
+  - CAT coin-split paths still use temporary zero-fee policy.
+- Simplified BYC market config in `config/markets.yaml`:
+  - enabled `byc_two_sided_wusdbc`,
+  - replaced unused two-sided min/max knobs with `fixed_quote_per_base: 0.999`,
+  - set target mix to 1 buy + 3 sell at size 10 with small buffers.
+- Added explicit extension-hook intent (without implementing new model logic):
+  - side-aware price/inventory planning boundaries are now clearer for future sophisticated pricing and inventory models.
+
 ## 2026-03-03 (Temporary CAT split zero-fee policy + John-Deere rollout)
 
 - Implemented temporary CAT coin-split fee policy in `greenfloor/cli/manager.py`:

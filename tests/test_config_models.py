@@ -140,6 +140,18 @@ def test_parse_markets_config_accepts_strategy_expiry_override() -> None:
     assert out.markets[0].pricing["strategy_offer_expiry_value"] == 2
 
 
+def test_parse_markets_config_stable_quote_validates_present_strategy_fields() -> None:
+    row = _base_market_row()
+    row["quote_asset_type"] = "stable"
+    row["pricing"] = {
+        "strategy_target_spread_bps": 0,
+        "strategy_min_xch_price_usd": -1,
+        "strategy_max_xch_price_usd": "invalid",
+    }
+    with pytest.raises(ValueError, match="strategy_target_spread_bps"):
+        parse_markets_config({"markets": [row]})
+
+
 def test_parse_markets_config_reads_cloud_wallet_global_ids() -> None:
     row = _base_market_row()
     row["cloud_wallet_base_global_id"] = "Asset_base123"
@@ -149,6 +161,44 @@ def test_parse_markets_config_reads_cloud_wallet_global_ids() -> None:
 
     assert out.markets[0].cloud_wallet_base_global_id == "Asset_base123"
     assert out.markets[0].cloud_wallet_quote_global_id == "Asset_quote456"
+
+
+def test_parse_markets_config_defaults_cat_unit_multipliers_to_1000() -> None:
+    row = _base_market_row()
+    row["base_asset"] = "BYC"
+    row["quote_asset"] = "wUSDC.b"
+
+    out = parse_markets_config({"markets": [row]})
+
+    assert out.markets[0].pricing["base_unit_mojo_multiplier"] == 1000
+    assert out.markets[0].pricing["quote_unit_mojo_multiplier"] == 1000
+
+
+def test_parse_markets_config_rejects_noncanonical_cat_base_multiplier() -> None:
+    row = _base_market_row()
+    row["base_asset"] = "BYC"
+    row["pricing"] = {"base_unit_mojo_multiplier": 10}
+
+    with pytest.raises(ValueError, match="base_unit_mojo_multiplier must be 1000 for CAT assets"):
+        parse_markets_config({"markets": [row]})
+
+
+def test_parse_markets_config_rejects_noncanonical_cat_quote_multiplier() -> None:
+    row = _base_market_row()
+    row["quote_asset"] = "wUSDC.b"
+    row["pricing"] = {"quote_unit_mojo_multiplier": 10}
+
+    with pytest.raises(ValueError, match="quote_unit_mojo_multiplier must be 1000 for CAT assets"):
+        parse_markets_config({"markets": [row]})
+
+
+def test_parse_markets_config_preserves_xch_multiplier_override() -> None:
+    row = _base_market_row()
+    row["pricing"] = {"quote_unit_mojo_multiplier": 1_000_000_000_000}
+
+    out = parse_markets_config({"markets": [row]})
+
+    assert out.markets[0].pricing["quote_unit_mojo_multiplier"] == 1_000_000_000_000
 
 
 # ---------------------------------------------------------------------------

@@ -343,7 +343,7 @@ markets:
           combine_when_excess_factor: 2.0
 
   - id: byc_two_sided_wusdbc
-    enabled: false
+    enabled: true
     mode: two_sided
     base_asset: "BYC"
     base_symbol: "BYC"
@@ -352,9 +352,7 @@ markets:
     signer_key_id: "key-main-2"
     receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
     pricing:
-      buy_min_quote_per_base: 0.99
-      sell_max_quote_per_base: 1.01
-      slippage_bps: 50
+      fixed_quote_per_base: 0.999
     inventory:
       low_watermark_base_units: 200
       low_inventory_alert_threshold_base_units: 200
@@ -364,11 +362,11 @@ markets:
     ladders:
       buy:
         - size_base_units: 10
-          target_count: 8
+          target_count: 1
           split_buffer_count: 1
           combine_when_excess_factor: 2.0
       sell:
         - size_base_units: 10
-          target_count: 8
+          target_count: 3
           split_buffer_count: 1
           combine_when_excess_factor: 2.0

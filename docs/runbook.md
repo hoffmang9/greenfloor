@@ -38,7 +38,9 @@ Optional developer bootstrap for testnet markets:
     - `cloud_wallet.vault_id`: open the target vault and copy the URL segment in `.../wallet/<ID>/...`; use the `Wallet_...` value, not `vaultLauncherId`.
 - Review vault coin inventory before shaping or posting:
   - `greenfloor-manager coins-list`
+  - `greenfloor-manager coin-status`
   - Optional asset scope: `greenfloor-manager coins-list --asset <ticker|CAT-id|Asset-id|xch>`
+  - Optional asset scope: `greenfloor-manager coin-status --asset <ticker|CAT-id|Asset-id|xch>`
 - Shape denominations for the selected market context:
   - Split: `greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10`
   - Combine: `greenfloor-manager coin-combine --pair TDBX:txch --input-coin-count 10 --asset-id xch`
