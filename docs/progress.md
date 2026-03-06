@@ -1,5 +1,43 @@
 # Progress Log
 
+## 2026-03-05 (BYC scoped-query leak fail-closed mitigation + John-Deere validation)
+
+- Root cause for the remaining BYC coin-op failure on John-Deere was narrowed further:
+  - the failing split candidate `CoinRecord_d6dc31acf63aa4022fe0dafedde6032c8be089eedae4fe1a2a682ef47932f921` came from `coins(assetId=BYC)` but direct `node(id)` lookup resolved it as `Asset_huun64oh7dbt9f1f9ie8khuw` (`CRYPTOCURRENCY` / XCH),
+  - two other `10000`-mojo rows returned by the same BYC-scoped query also resolved to XCH,
+  - the `19480`-mojo pending branch under puzzle hash `7ff9f7e13048e191717a34ff04c31b951254aced5cd93e1caac1e8849f700144` also resolved to XCH.
+- Implemented a temporary upstream-defense in `greenfloor/daemon/main.py`:
+  - added `_coin_matches_direct_spendable_lookup(...)`,
+  - coin-op selection now re-fetches each candidate `CoinRecord` by id and requires:
+    - matching asset id,
+    - spendable state,
+    - `isLocked = false`,
+    - `isLinkedToOpenOffer = false`,
+  - added explicit code comment that this is temporary until Cloud Wallet fixes the scoped-query leak.
+- Added `CloudWalletAdapter.get_coin_record(...)` in `greenfloor/adapters/cloud_wallet.py` for direct coin validation during daemon coin-op selection.
+- Added deterministic regression coverage in `tests/test_daemon_offer_execution.py`:
+  - direct-lookup filtering for `_cloud_wallet_spendable_base_unit_coin_amounts(...)`,
+  - split candidate revalidation that skips wrong-asset and locked rows before submission.
+- Validation completed locally:
+  - targeted daemon suite passed: `5 passed`.
+- John-Deere rollout + verification:
+  - synced updated `greenfloor/adapters/cloud_wallet.py` and `greenfloor/daemon/main.py`,
+  - restarted daemon against existing `~/.greenfloor/config/*.yaml`,
+  - direct live helper probe on host showed:
+    - `19480` pending row -> rejected,
+    - locked `10000` row -> rejected,
+    - leaked XCH `d6dc...` row -> rejected,
+    - leaked XCH `0d26...` row -> rejected,
+    - only the known stray `310`-mojo row remained lookup-admissible, but it stays below CAT min-amount filtering.
+- Post-deploy BYC cycle result on John-Deere:
+  - daemon still posted/maintained the expected 4 correctly priced BYC offers on Dexie,
+  - `inventory_scan_wallet` for BYC moved to `coin_count=0 bucket_counts={10: 0}`,
+  - previous split failure `cloud_wallet_graphql_error:Some selected coins are not spendable:selected_coin_id=CoinRecord_d6dc...` disappeared,
+  - replacement fail-closed outcome is now `reason=no_spendable_split_coin_available`.
+- Documentation updated:
+  - extended `docs/ent-wallet-upstream-byc-coin-query-issue.md` with the new live evidence that BYC-scoped rows can directly resolve to XCH on `node(id)` lookup,
+  - recorded the temporary client-side mitigation as an operational stopgap pending upstream fix.
+
 ## 2026-03-05 (Cloud Wallet combine 429 hardening + John-Deere smoke)
 
 - Added daemon-side Cloud Wallet combine retry/backoff in `greenfloor/daemon/main.py` for `429` responses:

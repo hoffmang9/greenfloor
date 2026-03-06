@@ -153,3 +153,40 @@ Likely area:
 ## Notes for `greenfloor`
 
 As a client-side mitigation, `greenfloor` should avoid requesting per-row `asset` when the query is already scoped by `assetId`, matching the first-party Cloud Wallet UI pattern. That does not fix the upstream stray-row bug, but it avoids surfacing misleading XCH fallback metadata.
+
+## Additional live evidence (2026-03-05)
+
+After re-enabling the BYC market on `John-Deere`, the same scoped query leak showed up in a more operationally dangerous form:
+
+- `coins(assetId=BYC)` returned three `10000`-mojo rows plus one `19480`-mojo pending row as if they were BYC candidates,
+- the daemon selected one of those `10000`-mojo rows for a BYC split prerequisite,
+- Cloud Wallet rejected the split with `Some selected coins are not spendable`.
+
+Direct `node(id: ...)` lookups for those rows showed they were not BYC at all:
+
+- `CoinRecord_d6dc31acf63aa4022fe0dafedde6032c8be089eedae4fe1a2a682ef47932f921` -> `asset.id = Asset_huun64oh7dbt9f1f9ie8khuw` (`CRYPTOCURRENCY` / XCH)
+- `CoinRecord_0d26203557f42398c223d3f7e9fbfe22a38aaa19bb23477b66ad361f14ff64de` -> same XCH asset
+- `CoinRecord_d899186795556f1698b573a354a72165c5419636ced8fa18d113af1972b8868b` -> same XCH asset
+- `CoinRecord_1a1d1e8e9ea204e7f5c94a8f9665a934955bf5c4ff13bbbae77c2e69b022b539` -> same XCH asset, `PENDING`
+
+Notably:
+
+- the leaked `10000`-mojo rows looked perfectly spendable from the scoped query surface (`SETTLED`, not linked to open offers, one even reported `isLocked=false`),
+- at least one of those rows did **not** appear in an unscoped `coins(walletId=...)` read at all,
+- so the scoped query is not merely mislabeling a real BYC coin; it appears to be returning rows that should not be in the BYC result set.
+
+This moves the bug from "inventory accounting drift" into "coin-op candidate corruption": a client that trusts the scoped BYC query can attempt invalid CAT splits/combinations against XCH rows.
+
+## Temporary client mitigation now deployed
+
+`greenfloor` now carries a temporary fail-closed mitigation for coin ops:
+
+- keep the existing scoped query path for inventory discovery,
+- but before using a scoped row as a CAT split/combine candidate, re-fetch that exact `CoinRecord` by id,
+- require the direct lookup to confirm:
+  - matching asset id,
+  - spendable state,
+  - `isLocked = false`,
+  - `isLinkedToOpenOffer = false`.
+
+This mitigation is intentionally temporary and should be removed once the upstream `coins(assetId=...)` query stops leaking cross-asset rows.

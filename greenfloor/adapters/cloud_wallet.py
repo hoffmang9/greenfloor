@@ -332,6 +332,39 @@ query getSignatureRequest($id: ID!) {
             return {"id": signature_request_id, "status": "UNKNOWN"}
         return signature_request
 
+    def get_coin_record(self, *, coin_id: str) -> dict[str, Any]:
+        clean_coin_id = str(coin_id).strip()
+        if not clean_coin_id:
+            raise ValueError("coin_id is required")
+        query = """
+query getCoinRecord($id: ID!) {
+  node(id: $id) {
+    __typename
+    ... on CoinRecord {
+      id
+      name
+      amount
+      state
+      isLocked
+      isLinkedToOpenOffer
+      puzzleHash
+      parentCoinName
+      createdBlockHeight
+      spentBlockHeight
+      asset {
+        id
+        type
+      }
+    }
+  }
+}
+"""
+        payload = self._graphql(query=query, variables={"id": clean_coin_id})
+        coin_record = payload.get("node")
+        if not isinstance(coin_record, dict):
+            return {"id": clean_coin_id, "state": "UNKNOWN"}
+        return coin_record
+
     def get_signature_request_offer(self, *, signature_request_id: str) -> dict[str, Any]:
         query = """
 query getSignatureRequestOffer($id: ID!) {

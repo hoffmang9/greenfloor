@@ -92,6 +92,80 @@ _CLOUD_WALLET_SPENDABLE_STATES = {
     "AVAILABLE",
     "SETTLED",
 }
+
+
+def _cloud_wallet_coin_matches_asset_scope(*, coin: dict[str, Any], scoped_asset_id: str) -> bool:
+    target_asset = str(scoped_asset_id).strip().lower()
+    if not target_asset:
+        return False
+    asset_payload = coin.get("asset")
+    if isinstance(asset_payload, dict):
+        coin_asset_id = str(asset_payload.get("id", "")).strip().lower()
+        if coin_asset_id:
+            return coin_asset_id == target_asset
+    # Asset-scoped Cloud Wallet coin queries can omit per-row asset metadata.
+    # When that happens, trust the requested scope rather than discarding rows.
+    return True
+
+
+def _coin_op_min_amount_mojos(*, canonical_asset_id: str) -> int:
+    if str(canonical_asset_id).strip().lower() == "xch":
+        return 0
+    return 1000
+
+
+def _coin_meets_coin_op_min_amount(coin: dict[str, Any], *, canonical_asset_id: str) -> bool:
+    try:
+        amount = int(coin.get("amount", 0))
+    except (TypeError, ValueError):
+        return False
+    return amount >= _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
+
+
+def _coin_matches_direct_spendable_lookup(
+    *,
+    wallet: Any,
+    coin: dict[str, Any],
+    scoped_asset_id: str,
+    cache: dict[str, bool] | None = None,
+) -> bool:
+    get_coin_record = getattr(wallet, "get_coin_record", None)
+    if not callable(get_coin_record):
+        return True
+    coin_id = str(coin.get("id", "")).strip()
+    if not coin_id:
+        return False
+    if cache is not None and coin_id in cache:
+        return bool(cache[coin_id])
+    # Temporary upstream defense: asset-scoped Cloud Wallet coin queries can
+    # leak cross-asset rows into CAT inventories. Re-check the exact coin
+    # record before coin-op selection until upstream fixes the scoped query.
+    try:
+        coin_record = get_coin_record(coin_id=coin_id)
+    except Exception:
+        result = False
+    else:
+        if not isinstance(coin_record, dict):
+            result = False
+        else:
+            state = str(coin_record.get("state", "")).strip().upper()
+            asset_payload = coin_record.get("asset")
+            asset_id = (
+                str(asset_payload.get("id", "")).strip().lower()
+                if isinstance(asset_payload, dict)
+                else ""
+            )
+            result = bool(
+                state in _CLOUD_WALLET_SPENDABLE_STATES
+                and not bool(coin_record.get("isLocked"))
+                and not bool(coin_record.get("isLinkedToOpenOffer"))
+                and asset_id == str(scoped_asset_id).strip().lower()
+            )
+    if cache is not None:
+        cache[coin_id] = result
+    return result
+
+
 _DAEMON_INSTANCE_LOCK_FILENAME = "daemon.lock"
 
 
@@ -1126,12 +1200,10 @@ def _cloud_wallet_spendable_profiles_by_asset(
             state = str(coin.get("state", "")).strip().upper()
             if state not in _CLOUD_WALLET_SPENDABLE_STATES:
                 continue
-            asset_payload = coin.get("asset")
-            if isinstance(asset_payload, dict):
-                coin_asset_id = str(asset_payload.get("id", "")).strip()
-            else:
-                coin_asset_id = ""
-            if coin_asset_id.lower() != requested_asset_id_lower:
+            if not _cloud_wallet_coin_matches_asset_scope(
+                coin=coin,
+                scoped_asset_id=requested_asset_id_lower,
+            ):
                 continue
             try:
                 amount = int(coin.get("amount", 0))
@@ -1161,6 +1233,7 @@ def _cloud_wallet_spendable_base_unit_coin_amounts(
     wallet: CloudWalletAdapter,
     resolved_asset_id: str,
     base_unit_mojo_multiplier: int,
+    canonical_asset_id: str,
 ) -> list[int]:
     target_asset = str(resolved_asset_id).strip().lower()
     if not target_asset:
@@ -1171,17 +1244,23 @@ def _cloud_wallet_spendable_base_unit_coin_amounts(
     except Exception:
         return []
     amounts_base_units: list[int] = []
+    direct_lookup_cache: dict[str, bool] = {}
     for coin in coins:
         if not isinstance(coin, dict):
             continue
         state = str(coin.get("state", "")).strip().upper()
         if state not in _CLOUD_WALLET_SPENDABLE_STATES:
             continue
-        asset_payload = coin.get("asset")
-        coin_asset_id = (
-            str(asset_payload.get("id", "")).strip() if isinstance(asset_payload, dict) else ""
-        )
-        if coin_asset_id.lower() != target_asset:
+        if not _cloud_wallet_coin_matches_asset_scope(coin=coin, scoped_asset_id=target_asset):
+            continue
+        if not _coin_meets_coin_op_min_amount(coin, canonical_asset_id=canonical_asset_id):
+            continue
+        if not _coin_matches_direct_spendable_lookup(
+            wallet=wallet,
+            coin=coin,
+            scoped_asset_id=target_asset,
+            cache=direct_lookup_cache,
+        ):
             continue
         try:
             amount_mojos = int(coin.get("amount", 0))
@@ -2631,10 +2710,12 @@ def _execute_coin_ops_cloud_wallet_kms_only(
     items: list[dict[str, Any]] = []
     executed_count = 0
     combine_input_cap = _combine_input_coin_cap()
+    direct_coin_lookup_cache: dict[str, bool] = {}
 
     def _spendable_asset_scoped_coins(coins: list[dict[str, Any]]) -> list[dict[str, Any]]:
         scoped: list[dict[str, Any]] = []
         target_asset = str(resolved_base_asset_id).strip().lower()
+        canonical_asset_id = str(getattr(market, "base_asset", "")).strip()
         for coin in coins:
             if not isinstance(coin, dict):
                 continue
@@ -2644,11 +2725,16 @@ def _execute_coin_ops_cloud_wallet_kms_only(
             state = str(coin.get("state", "")).strip().upper()
             if state not in _CLOUD_WALLET_SPENDABLE_STATES:
                 continue
-            asset_payload = coin.get("asset")
-            coin_asset = (
-                str(asset_payload.get("id", "")).strip() if isinstance(asset_payload, dict) else ""
-            )
-            if coin_asset.lower() != target_asset:
+            if not _cloud_wallet_coin_matches_asset_scope(coin=coin, scoped_asset_id=target_asset):
+                continue
+            if not _coin_meets_coin_op_min_amount(coin, canonical_asset_id=canonical_asset_id):
+                continue
+            if not _coin_matches_direct_spendable_lookup(
+                wallet=cloud_wallet,
+                coin=coin,
+                scoped_asset_id=target_asset,
+                cache=direct_coin_lookup_cache,
+            ):
                 continue
             scoped.append(coin)
         return scoped
@@ -3139,6 +3225,7 @@ def _process_single_market(
                 wallet=cloud_wallet,
                 resolved_asset_id=resolved_base_asset_id,
                 base_unit_mojo_multiplier=_base_unit_mojo_multiplier_for_market(market=market),
+                canonical_asset_id=str(market.base_asset),
             )
             bucket_counts = compute_bucket_counts_from_coins(
                 coin_amounts_base_units=wallet_coins,
