@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -111,7 +112,11 @@ def _req(mapping: dict[str, Any], key: str) -> Any:
 def _validate_strategy_pricing(
     pricing: dict[str, Any], market_id: str, quote_asset_type: str | None = None
 ) -> None:
-    _ = quote_asset_type
+    quote_type = str(quote_asset_type or "").strip().lower()
+    for legacy_field in ("reference_source", "reference_pair"):
+        if pricing.get(legacy_field) is not None:
+            raise ValueError(f"market {market_id}: {legacy_field} is no longer supported")
+
     spread_raw = pricing.get("strategy_target_spread_bps")
     if spread_raw is not None:
         try:
@@ -150,32 +155,40 @@ def _validate_strategy_pricing(
             f"market {market_id}: strategy_min_xch_price_usd must be <= strategy_max_xch_price_usd"
         )
 
-    expiry_unit_raw = pricing.get("strategy_offer_expiry_unit")
-    expiry_value_raw = pricing.get("strategy_offer_expiry_value")
-    expiry_unit = str(expiry_unit_raw).strip().lower() if expiry_unit_raw is not None else None
-    has_expiry_unit = bool(expiry_unit)
-    has_expiry_value = expiry_value_raw is not None
-    if has_expiry_unit != has_expiry_value:
+    if (
+        pricing.get("strategy_offer_expiry_unit") is not None
+        or pricing.get("strategy_offer_expiry_value") is not None
+    ):
         raise ValueError(
-            f"market {market_id}: strategy_offer_expiry_unit and strategy_offer_expiry_value must be set together"
+            f"market {market_id}: strategy_offer_expiry_unit/value are no longer supported; use strategy_offer_expiry_minutes"
         )
-    if has_expiry_unit:
-        if expiry_unit not in {"minutes", "hours"}:
-            raise ValueError(
-                f"market {market_id}: strategy_offer_expiry_unit must be one of: minutes, hours"
-            )
-        if expiry_value_raw is None:
-            raise ValueError(
-                f"market {market_id}: strategy_offer_expiry_unit and strategy_offer_expiry_value must be set together"
-            )
+
+    expiry_minutes_raw = pricing.get("strategy_offer_expiry_minutes")
+    if expiry_minutes_raw is not None:
         try:
-            expiry_value = int(expiry_value_raw)
+            expiry_minutes = int(expiry_minutes_raw)
         except (TypeError, ValueError) as exc:
             raise ValueError(
-                f"market {market_id}: strategy_offer_expiry_value must be an integer"
+                f"market {market_id}: strategy_offer_expiry_minutes must be an integer"
             ) from exc
-        if expiry_value <= 0:
-            raise ValueError(f"market {market_id}: strategy_offer_expiry_value must be positive")
+        if expiry_minutes <= 0:
+            raise ValueError(f"market {market_id}: strategy_offer_expiry_minutes must be positive")
+        if quote_type == "unstable" and expiry_minutes > 15:
+            warnings.warn(
+                f"market {market_id}: unstable strategy_offer_expiry_minutes={expiry_minutes} exceeds 15 minutes",
+                stacklevel=2,
+            )
+
+    threshold_raw = pricing.get("cancel_move_threshold_bps")
+    if threshold_raw is not None:
+        try:
+            threshold = int(threshold_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"market {market_id}: cancel_move_threshold_bps must be an integer"
+            ) from exc
+        if threshold <= 0:
+            raise ValueError(f"market {market_id}: cancel_move_threshold_bps must be positive")
 
 
 def _uses_cat_units(asset_id: str) -> bool:

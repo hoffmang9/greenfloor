@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 
 from greenfloor.config.models import MarketConfig, MarketInventoryConfig, MarketLadderEntry
 from greenfloor.daemon.main import (
+    _effective_sell_bucket_counts_for_coin_ops,
     _evaluate_two_sided_market_actions,
+    _executed_sell_offer_counts_by_size,
     _normalize_strategy_pair,
     _strategy_config_from_market,
     _strategy_state_from_bucket_counts,
@@ -84,6 +86,104 @@ def test_strategy_state_from_bucket_counts_includes_xch_price() -> None:
     assert state.tens == 1
     assert state.hundreds == 0
     assert state.xch_price_usd == 32.5
+
+
+def test_effective_sell_bucket_counts_for_coin_ops_counts_live_sells_toward_target_only() -> None:
+    market = _market_with_quote("wUSDC.b")
+    market.mode = "two_sided"
+    market.quote_asset_type = "stable"
+    market.ladders = {
+        "buy": [
+            MarketLadderEntry(
+                size_base_units=10,
+                target_count=1,
+                split_buffer_count=1,
+                combine_when_excess_factor=2.0,
+            )
+        ],
+        "sell": [
+            MarketLadderEntry(
+                size_base_units=10,
+                target_count=3,
+                split_buffer_count=1,
+                combine_when_excess_factor=2.0,
+            )
+        ],
+    }
+    effective = _effective_sell_bucket_counts_for_coin_ops(
+        sell_ladder=market.ladders["sell"],
+        wallet_bucket_counts={10: 0},
+        active_sell_offer_counts_by_size={10: 3},
+    )
+    assert effective[10] == 3
+
+
+def test_effective_sell_bucket_counts_for_coin_ops_caps_live_sell_credit_at_target() -> None:
+    market = _market_with_quote("wUSDC.b")
+    market.mode = "two_sided"
+    market.quote_asset_type = "stable"
+    market.ladders = {
+        "buy": [
+            MarketLadderEntry(
+                size_base_units=10,
+                target_count=1,
+                split_buffer_count=1,
+                combine_when_excess_factor=2.0,
+            )
+        ],
+        "sell": [
+            MarketLadderEntry(
+                size_base_units=10,
+                target_count=3,
+                split_buffer_count=1,
+                combine_when_excess_factor=2.0,
+            )
+        ],
+    }
+    effective = _effective_sell_bucket_counts_for_coin_ops(
+        sell_ladder=market.ladders["sell"],
+        wallet_bucket_counts={10: 0},
+        active_sell_offer_counts_by_size={10: 4},
+    )
+    assert effective[10] == 3
+
+
+def test_effective_sell_bucket_counts_for_coin_ops_accounts_for_new_sell_posts_in_cycle() -> None:
+    market = _market_with_quote("wUSDC.b")
+    market.mode = "sell_only"
+    market.quote_asset_type = "stable"
+    market.ladders = {
+        "sell": [
+            MarketLadderEntry(
+                size_base_units=10,
+                target_count=2,
+                split_buffer_count=1,
+                combine_when_excess_factor=2.0,
+            )
+        ]
+    }
+    effective = _effective_sell_bucket_counts_for_coin_ops(
+        sell_ladder=market.ladders["sell"],
+        wallet_bucket_counts={10: 2},
+        active_sell_offer_counts_by_size={10: 0},
+        newly_executed_sell_offer_counts_by_size={10: 2},
+    )
+    assert effective[10] == 2
+
+
+def test_executed_sell_offer_counts_by_size_counts_only_executed_sell_items() -> None:
+    counts = _executed_sell_offer_counts_by_size(
+        {
+            "items": [
+                {"status": "executed", "side": "sell", "size": 10},
+                {"status": "executed", "side": "sell", "size": 10},
+                {"status": "executed", "side": "buy", "size": 10},
+                {"status": "skipped", "side": "sell", "size": 10},
+                {"status": "executed", "side": "sell", "size": 1},
+            ]
+        }
+    )
+    assert counts == {10: 2, 1: 1}
 
 
 def test_evaluate_two_sided_market_actions_uses_side_targets_from_ladders() -> None:

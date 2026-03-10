@@ -26,7 +26,6 @@ from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
 from greenfloor.signing import sign_and_broadcast_mixed_split
 from greenfloor.storage.sqlite import SqliteStore
 
-_TEST_PHASE_OFFER_EXPIRY_MINUTES = 5
 _MANAGER_SERVICE_NAME = "manager"
 _DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS = 4
 _DEXIE_INVALID_OFFER_RETRY_INITIAL_DELAY_SECONDS = 1.0
@@ -1464,16 +1463,14 @@ def dexie_offer_view_url(*, dexie_base_url: str, offer_id: str) -> str:
 
 def resolve_offer_expiry_for_market(market: Any) -> tuple[str, int]:
     pricing = dict(getattr(market, "pricing", {}) or {})
-    unit = str(pricing.get("strategy_offer_expiry_unit", "")).strip().lower()
-    value_raw = pricing.get("strategy_offer_expiry_value")
-    if unit in {"minutes", "hours"}:
-        try:
-            value = int(value_raw or 0)
-        except (TypeError, ValueError):
-            value = 0
-        if value > 0:
-            return unit, value
-    return "minutes", _TEST_PHASE_OFFER_EXPIRY_MINUTES
+    value_raw = pricing.get("strategy_offer_expiry_minutes")
+    try:
+        value = int(value_raw or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value > 0:
+        return "minutes", value
+    return "minutes", 10
 
 
 def _bootstrap_fee_cost_for_output_count(output_count: int) -> int:

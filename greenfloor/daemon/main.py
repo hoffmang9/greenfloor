@@ -26,7 +26,7 @@ from greenfloor.adapters.coinset import (
     extract_coinset_tx_ids_from_offer_payload,
 )
 from greenfloor.adapters.dexie import DexieAdapter
-from greenfloor.adapters.price import PriceAdapter
+from greenfloor.adapters.price import PriceAdapter, XchPriceProvider
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
 from greenfloor.cloud_wallet_offer_runtime import (
@@ -238,6 +238,10 @@ def _warn_if_log_level_auto_healed(*, program, program_path: Path) -> None:
     )
 
 
+def _log_daemon_event(*, level: int, payload: dict[str, Any]) -> None:
+    _daemon_logger.log(level, "daemon_event %s", json.dumps(payload, sort_keys=True))
+
+
 def _consume_reload_marker(state_dir: Path) -> bool:
     marker = state_dir / "reload_request.json"
     if not marker.exists():
@@ -291,7 +295,16 @@ def _resolve_db_path(program_home_dir: str, explicit_db_path: str | None) -> Pat
     return (Path(program_home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
 
 
-def _cancel_move_threshold_bps() -> int:
+def _cancel_move_threshold_bps(*, market: Any | None = None) -> int:
+    pricing = dict(getattr(market, "pricing", {}) or {}) if market is not None else {}
+    threshold_raw = pricing.get("cancel_move_threshold_bps")
+    if threshold_raw is not None:
+        try:
+            parsed_threshold = int(threshold_raw)
+        except (TypeError, ValueError):
+            parsed_threshold = 0
+        if parsed_threshold > 0:
+            return parsed_threshold
     raw = os.getenv("GREENFLOOR_UNSTABLE_CANCEL_MOVE_BPS", "").strip()
     if not raw:
         return _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS
@@ -508,9 +521,7 @@ def _strategy_config_from_market(market) -> StrategyConfig:
         target_spread_bps=_to_int(pricing.get("strategy_target_spread_bps")),
         min_xch_price_usd=_to_float(pricing.get("strategy_min_xch_price_usd")),
         max_xch_price_usd=_to_float(pricing.get("strategy_max_xch_price_usd")),
-        offer_expiry_unit=str(pricing.get("strategy_offer_expiry_unit", "")).strip().lower()
-        or None,
-        offer_expiry_value=_to_int(pricing.get("strategy_offer_expiry_value")),
+        offer_expiry_minutes=_to_int(pricing.get("strategy_offer_expiry_minutes")),
     )
 
 
@@ -520,22 +531,20 @@ def _strategy_config_for_side(*, market: Any, side: str) -> StrategyConfig:
     targets_by_size = {int(e.size_base_units): int(e.target_count) for e in side_ladder}
     pricing = _market_pricing(market)
 
-    expiry_value_raw = pricing.get("strategy_offer_expiry_value")
-    expiry_value: int | None = None
-    if expiry_value_raw is not None:
+    expiry_minutes_raw = pricing.get("strategy_offer_expiry_minutes")
+    expiry_minutes: int | None = None
+    if expiry_minutes_raw is not None:
         try:
-            expiry_value = int(expiry_value_raw)
+            expiry_minutes = int(expiry_minutes_raw)
         except (TypeError, ValueError):
-            expiry_value = None
+            expiry_minutes = None
 
     return StrategyConfig(
         pair=_normalize_strategy_pair(market.quote_asset),
         ones_target=int(targets_by_size.get(1, 0)),
         tens_target=int(targets_by_size.get(10, 0)),
         hundreds_target=int(targets_by_size.get(100, 0)),
-        offer_expiry_unit=str(pricing.get("strategy_offer_expiry_unit", "")).strip().lower()
-        or None,
-        offer_expiry_value=expiry_value,
+        offer_expiry_minutes=expiry_minutes,
     )
 
 
@@ -550,6 +559,60 @@ def _strategy_state_from_bucket_counts(
         hundreds=int(bucket_counts.get(100, 0)),
         xch_price_usd=xch_price_usd,
     )
+
+
+def _effective_sell_bucket_counts_for_coin_ops(
+    *,
+    sell_ladder: list[Any],
+    wallet_bucket_counts: dict[int, int],
+    active_sell_offer_counts_by_size: dict[int, int] | None,
+    newly_executed_sell_offer_counts_by_size: dict[int, int] | None = None,
+) -> dict[int, int]:
+    effective_counts = dict(wallet_bucket_counts)
+    active_sell_counts = active_sell_offer_counts_by_size or {}
+    newly_executed_sell_counts = newly_executed_sell_offer_counts_by_size or {}
+    for entry in sell_ladder:
+        size_base_units = int(getattr(entry, "size_base_units", 0))
+        if size_base_units <= 0:
+            continue
+        target_count = max(0, int(getattr(entry, "target_count", 0)))
+        newly_executed_sell_count = max(0, int(newly_executed_sell_counts.get(size_base_units, 0)))
+        wallet_count = max(
+            0,
+            int(wallet_bucket_counts.get(size_base_units, 0)) - newly_executed_sell_count,
+        )
+        active_sell_count = max(0, int(active_sell_counts.get(size_base_units, 0)))
+        effective_active_sell_count = active_sell_count + newly_executed_sell_count
+        # Count live sell offers toward the market target, but not toward the
+        # split buffer. That preserves at most one extra ready coin above the
+        # active sell ladder coverage.
+        effective_counts[size_base_units] = wallet_count + min(
+            effective_active_sell_count,
+            target_count,
+        )
+    return effective_counts
+
+
+def _executed_sell_offer_counts_by_size(offer_execution: dict[str, Any]) -> dict[int, int]:
+    counts: dict[int, int] = {}
+    items = offer_execution.get("items", [])
+    if not isinstance(items, list):
+        return counts
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status", "")).strip().lower() != "executed":
+            continue
+        if _normalize_offer_side(item.get("side", "sell")) != "sell":
+            continue
+        try:
+            size = int(item.get("size", 0))
+        except (TypeError, ValueError):
+            continue
+        if size <= 0:
+            continue
+        counts[size] = counts.get(size, 0) + 1
+    return counts
 
 
 def _evaluate_two_sided_market_actions(
@@ -775,6 +838,11 @@ def _match_watched_coin_ids(*, observed_coin_ids: list[str]) -> dict[str, list[s
             if intersection:
                 matches[market_id] = intersection
     return matches
+
+
+def _watched_coin_ids_for_market(*, market_id: str) -> set[str]:
+    with _WATCHED_COIN_IDS_LOCK:
+        return set(_WATCHED_COIN_IDS_BY_MARKET.get(market_id, set()))
 
 
 def _update_market_coin_watchlist_from_dexie(
@@ -2024,7 +2092,7 @@ def _execute_cancel_policy_for_market(
     quote_type = str(market.quote_asset_type).strip().lower()
     pricing = _market_pricing(market)
     stable_vs_unstable = bool(pricing.get("cancel_policy_stable_vs_unstable", False))
-    threshold_bps = _cancel_move_threshold_bps()
+    threshold_bps = _cancel_move_threshold_bps(market=market)
     if quote_type != "unstable":
         return {
             "eligible": False,
@@ -2325,7 +2393,7 @@ def _evaluate_and_execute_strategy(
     dexie_size_by_offer_id: dict[str, int],
     result: _MarketCycleResult,
     reservation_coordinator: AssetReservationCoordinator | None = None,
-) -> None:
+) -> tuple[dict[str, dict[int, int]], dict[int, int]]:
     """Evaluate market strategy, inject reseed if needed, and execute offer actions."""
     market_mode = str(getattr(market, "mode", "")).strip().lower()
     strategy_config = _strategy_config_from_market(market)
@@ -2461,6 +2529,7 @@ def _evaluate_and_execute_strategy(
         },
         market_id=market.market_id,
     )
+    return offer_counts_by_side, _executed_sell_offer_counts_by_size(offer_execution)
 
 
 def _plan_and_execute_coin_ops(
@@ -2470,11 +2539,19 @@ def _plan_and_execute_coin_ops(
     wallet: WalletAdapter,
     store: SqliteStore,
     sell_ladder: list[Any],
-    bucket_counts: dict[int, int],
+    wallet_bucket_counts: dict[int, int],
+    active_sell_offer_counts_by_size: dict[int, int] | None,
+    newly_executed_sell_offer_counts_by_size: dict[int, int] | None,
     signer_selection: Any,
     state_dir: Path,
 ) -> None:
     """Plan and execute coin split/combine operations for a market."""
+    bucket_counts = _effective_sell_bucket_counts_for_coin_ops(
+        sell_ladder=sell_ladder,
+        wallet_bucket_counts=wallet_bucket_counts,
+        active_sell_offer_counts_by_size=active_sell_offer_counts_by_size,
+        newly_executed_sell_offer_counts_by_size=newly_executed_sell_offer_counts_by_size,
+    )
     buckets = [
         BucketSpec(
             size_base_units=e.size_base_units,
@@ -2770,6 +2847,21 @@ def _execute_coin_ops_cloud_wallet_kms_only(
 
         try:
             if op_type == "split":
+                if op_count == 1:
+                    # A one-output split only manufactures bookkeeping churn.
+                    # Let the market continue rather than creating a cosmetic
+                    # "split 1 coin into 1 coin" transaction.
+                    items.append(
+                        {
+                            "op_type": op_type,
+                            "size_base_units": size_base_units,
+                            "op_count": op_count,
+                            "status": "skipped",
+                            "reason": "split_single_coin_noop_skipped",
+                            "operation_id": None,
+                        }
+                    )
+                    continue
                 amount_per_coin_mojos = size_base_units * base_unit_mojo_multiplier
                 required_amount = amount_per_coin_mojos * op_count
                 coins = cloud_wallet.list_coins(
@@ -3008,13 +3100,45 @@ def _execute_coin_ops_cloud_wallet_kms_only(
             if op_type == "combine":
                 requested_number_of_coins = max(2, op_count)
                 capped_number_of_coins = min(requested_number_of_coins, combine_input_cap)
+                target_coin_amount_mojos = size_base_units * base_unit_mojo_multiplier
+                watched_coin_ids = _watched_coin_ids_for_market(
+                    market_id=str(getattr(market, "market_id", "")).strip()
+                )
+                exact_bucket_coin_ids: list[str] = []
+                for coin in _spendable_asset_scoped_coins(
+                    cloud_wallet.list_coins(asset_id=resolved_base_asset_id, include_pending=True)
+                ):
+                    coin_id = str(coin.get("id", "")).strip()
+                    if not coin_id or coin_id.lower() in watched_coin_ids:
+                        continue
+                    try:
+                        amount_mojos = int(coin.get("amount", 0))
+                    except (TypeError, ValueError):
+                        continue
+                    if amount_mojos != target_coin_amount_mojos:
+                        continue
+                    exact_bucket_coin_ids.append(coin_id)
+                combine_input_coin_ids = exact_bucket_coin_ids[:capped_number_of_coins]
+                if len(combine_input_coin_ids) < 2:
+                    items.append(
+                        {
+                            "op_type": op_type,
+                            "size_base_units": size_base_units,
+                            "op_count": op_count,
+                            "status": "skipped",
+                            "reason": "no_spendable_combine_coin_available",
+                            "operation_id": None,
+                        }
+                    )
+                    continue
                 result = _combine_coins_with_retry(
                     cloud_wallet=cloud_wallet,
                     combine_kwargs={
-                        "number_of_coins": capped_number_of_coins,
+                        "number_of_coins": len(combine_input_coin_ids),
                         "fee": int(program.coin_ops_combine_fee_mojos),
                         "asset_id": resolved_base_asset_id,
                         "largest_first": True,
+                        "input_coin_ids": combine_input_coin_ids,
                     },
                 )
                 signature_request_id = str(result.get("signature_request_id", "")).strip()
@@ -3040,11 +3164,12 @@ def _execute_coin_ops_cloud_wallet_kms_only(
                         "operation_id": signature_request_id,
                         "data": {
                             "requested_number_of_coins": int(requested_number_of_coins),
-                            "submitted_number_of_coins": int(capped_number_of_coins),
+                            "submitted_number_of_coins": int(len(combine_input_coin_ids)),
                             "input_coin_cap_applied": bool(
                                 capped_number_of_coins < requested_number_of_coins
                             ),
                             "input_coin_cap": int(combine_input_cap),
+                            "input_coin_ids": combine_input_coin_ids,
                         },
                     }
                 )
@@ -3157,7 +3282,7 @@ def _process_single_market(
             "receive_address": event.receive_address,
             "reason": event.reason,
         }
-        print(json.dumps(payload))
+        _log_daemon_event(level=logging.INFO, payload=payload)
         store.add_audit_event("low_inventory_alert", payload, market_id=market.market_id)
         send_pushover_alert(program, event)
 
@@ -3304,7 +3429,7 @@ def _process_single_market(
                 },
                 market_id=market.market_id,
             )
-    _evaluate_and_execute_strategy(
+    offer_counts_by_side, newly_executed_sell_offer_counts_by_size = _evaluate_and_execute_strategy(
         market=market,
         program=program,
         dexie=dexie,
@@ -3322,7 +3447,9 @@ def _process_single_market(
         wallet=wallet,
         store=store,
         sell_ladder=sell_ladder,
-        bucket_counts=bucket_counts,
+        wallet_bucket_counts=bucket_counts,
+        active_sell_offer_counts_by_size=offer_counts_by_side.get("sell", {}),
+        newly_executed_sell_offer_counts_by_size=newly_executed_sell_offer_counts_by_size,
         signer_selection=signer_selection,
         state_dir=state_dir,
     )
@@ -3410,7 +3537,22 @@ def run_once(
         dexie = DexieAdapter(program.dexie_api_base)
         splash = SplashAdapter(program.splash_api_base)
         wallet = WalletAdapter()
-        price = PriceAdapter()
+        cloud_wallet_price_fn = None
+        if _cloud_wallet_configured(program):
+            try:
+                cloud_wallet_price_fn = _new_cloud_wallet_adapter_for_daemon(
+                    program
+                ).get_chia_usd_quote
+            except Exception as exc:
+                store.add_audit_event(
+                    "xch_price_provider_init_error",
+                    {"provider": "cloud_wallet_quote", "error": str(exc)},
+                )
+        price = XchPriceProvider(
+            cloud_wallet_price_fn=cloud_wallet_price_fn,
+            cloud_wallet_ttl_seconds=120,
+            fallback_price_adapter=PriceAdapter(),
+        )
         previous_xch_price_usd = store.get_latest_xch_price_snapshot()
         reservation_coordinator: AssetReservationCoordinator | None = None
         if bool(
@@ -3704,7 +3846,7 @@ def _run_loop(
                 program=current_program,
             )
             if _consume_reload_marker(state_dir):
-                print(json.dumps({"event": "config_reloaded"}))
+                _log_daemon_event(level=logging.INFO, payload={"event": "config_reloaded"})
             time.sleep(max(1, current_program.runtime_loop_interval_seconds))
             current_program = load_program_config(program_path)
     except KeyboardInterrupt:
@@ -3809,7 +3951,18 @@ def main() -> None:
                     state_dir=state_dir,
                 )
     except RuntimeError as exc:
-        print(json.dumps({"event": "daemon_lock_conflict", "error": str(exc)}))
+        try:
+            program = load_program_config(Path(args.program_config))
+            _initialize_daemon_file_logging(
+                program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
+            )
+            _warn_if_log_level_auto_healed(program=program, program_path=Path(args.program_config))
+        except Exception:
+            pass
+        _log_daemon_event(
+            level=logging.ERROR,
+            payload={"event": "daemon_lock_conflict", "error": str(exc)},
+        )
         raise SystemExit(3) from exc
     raise SystemExit(exit_code)
 

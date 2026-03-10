@@ -136,3 +136,32 @@ def test_dexie_get_offer_requires_non_empty_offer_id() -> None:
     adapter = DexieAdapter("https://api.dexie.space")
     with pytest.raises(ValueError, match="offer_id is required"):
         adapter.get_offer("   ")
+
+
+def test_dexie_lookup_uses_ttl_cache_for_tokens(monkeypatch) -> None:
+    adapter = DexieAdapter("https://api.dexie.space", cache_ttl_seconds=900)
+    calls = {"count": 0}
+
+    def _fake_urlopen(url, timeout=0):
+        _ = timeout
+        calls["count"] += 1
+        if str(url).endswith("/v1/swap/tokens"):
+            return _FakeHttpResponse(
+                {
+                    "tokens": [
+                        {
+                            "id": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+                            "code": "BYC",
+                            "name": "Biochar",
+                        }
+                    ]
+                }
+            )
+        raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    first = adapter.lookup_token_by_symbol("BYC")
+    second = adapter.lookup_token_by_symbol("BYC")
+    assert first is not None
+    assert second is not None
+    assert calls["count"] == 1

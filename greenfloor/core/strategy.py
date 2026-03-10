@@ -21,8 +21,7 @@ class StrategyConfig:
     target_spread_bps: int | None = None
     min_xch_price_usd: float | None = None
     max_xch_price_usd: float | None = None
-    offer_expiry_unit: str | None = None
-    offer_expiry_value: int | None = None
+    offer_expiry_minutes: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,10 +37,7 @@ class PlannedAction:
     side: str = "sell"
 
 
-_PAIR_EXPIRY_CONFIG: dict[str, tuple[str, int]] = {
-    "xch": ("minutes", 10),
-    "usdc": ("minutes", 10),
-}
+_DEFAULT_OFFER_EXPIRY_MINUTES = 10
 
 
 def evaluate_market(
@@ -60,14 +56,11 @@ def evaluate_market(
             return []
         if config.max_xch_price_usd is not None and state.xch_price_usd > config.max_xch_price_usd:
             return []
-    expiry_unit, expiry_value = _PAIR_EXPIRY_CONFIG.get(pair, _PAIR_EXPIRY_CONFIG["xch"])
-    configured_expiry_unit = str(config.offer_expiry_unit or "").strip().lower()
-    configured_expiry_value = (
-        int(config.offer_expiry_value) if config.offer_expiry_value is not None else None
+    expiry_minutes = (
+        int(config.offer_expiry_minutes)
+        if config.offer_expiry_minutes is not None and int(config.offer_expiry_minutes) > 0
+        else _DEFAULT_OFFER_EXPIRY_MINUTES
     )
-    if configured_expiry_unit in {"minutes", "hours"} and configured_expiry_value is not None:
-        if configured_expiry_value > 0:
-            expiry_unit, expiry_value = configured_expiry_unit, configured_expiry_value
 
     offer_configs = [
         (1, state.ones, config.ones_target),
@@ -84,8 +77,8 @@ def evaluate_market(
                     repeat=target - current,
                     side="sell",
                     pair=pair,
-                    expiry_unit=expiry_unit,
-                    expiry_value=expiry_value,
+                    expiry_unit="minutes",
+                    expiry_value=expiry_minutes,
                     cancel_after_create=True,
                     reason="below_target",
                     target_spread_bps=config.target_spread_bps,

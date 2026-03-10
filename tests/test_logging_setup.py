@@ -7,8 +7,10 @@ from greenfloor.logging_setup import (
     cast_log_level,
     coerce_log_level,
     create_rotating_file_handler,
+    initialize_service_file_logging,
     normalize_log_level_name,
 )
+from tests.logging_helpers import reset_concurrent_log_handlers
 
 
 def test_normalize_log_level_name_valid_levels() -> None:
@@ -47,3 +49,34 @@ def test_create_rotating_file_handler_creates_log_dir(tmp_path) -> None:
     log_dir = tmp_path / "logs"
     assert log_dir.exists()
     handler.close()
+
+
+def test_initialize_service_file_logging_reuses_single_process_handler(tmp_path) -> None:
+    import greenfloor.logging_setup as logging_setup_mod
+
+    reset_concurrent_log_handlers(module=logging_setup_mod)
+    root_logger = logging.getLogger()
+    logger_a = logging.getLogger("greenfloor.manager")
+    logger_b = logging.getLogger("greenfloor.daemon")
+    try:
+        handler_a = initialize_service_file_logging(
+            service_name="manager",
+            home_dir=str(tmp_path),
+            log_level="INFO",
+            service_logger=logger_a,
+        )
+        handler_b = initialize_service_file_logging(
+            service_name="daemon",
+            home_dir=str(tmp_path),
+            log_level="INFO",
+            service_logger=logger_b,
+        )
+        rotating_handlers = [
+            handler
+            for handler in root_logger.handlers
+            if handler.__class__.__name__.endswith("RotatingFileHandler")
+        ]
+        assert handler_a is handler_b
+        assert len(rotating_handlers) == 1
+    finally:
+        reset_concurrent_log_handlers(module=logging_setup_mod)

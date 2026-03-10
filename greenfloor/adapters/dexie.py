@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -8,8 +9,18 @@ from typing import Any
 
 
 class DexieAdapter:
-    def __init__(self, base_url: str) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        cache_ttl_seconds: int = 900,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
+        self._cache_ttl_seconds = max(1, int(cache_ttl_seconds))
+        self._token_rows_cache: list[dict] | None = None
+        self._token_rows_cached_at_epoch_s: float | None = None
+        self._ticker_rows_cache: list[dict] | None = None
+        self._ticker_rows_cached_at_epoch_s: float | None = None
 
     def get_tokens(self) -> list[dict]:
         url = f"{self.base_url}/v1/swap/tokens"
@@ -126,25 +137,53 @@ class DexieAdapter:
         return None
 
     def _fetch_token_rows(self) -> list[dict]:
+        now = time.time()
+        if (
+            self._token_rows_cache is not None
+            and self._token_rows_cached_at_epoch_s is not None
+            and (now - self._token_rows_cached_at_epoch_s) <= self._cache_ttl_seconds
+        ):
+            return list(self._token_rows_cache)
         try:
-            return self.get_tokens()
+            rows = self.get_tokens()
         except Exception:
+            if self._token_rows_cache is not None:
+                return list(self._token_rows_cache)
             return []
+        self._token_rows_cache = list(rows)
+        self._token_rows_cached_at_epoch_s = now
+        return list(rows)
 
     def _fetch_ticker_rows(self) -> list[dict]:
+        now = time.time()
+        if (
+            self._ticker_rows_cache is not None
+            and self._ticker_rows_cached_at_epoch_s is not None
+            and (now - self._ticker_rows_cached_at_epoch_s) <= self._cache_ttl_seconds
+        ):
+            return list(self._ticker_rows_cache)
         url = f"{self.base_url}/v3/prices/tickers"
         try:
             with urllib.request.urlopen(url, timeout=20) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
         except Exception:
+            if self._ticker_rows_cache is not None:
+                return list(self._ticker_rows_cache)
             return []
+        rows: list[dict]
         if isinstance(payload, list):
-            return [r for r in payload if isinstance(r, dict)]
-        if isinstance(payload, dict):
+            rows = [r for r in payload if isinstance(r, dict)]
+        elif isinstance(payload, dict):
             tickers = payload.get("tickers")
             if isinstance(tickers, list):
-                return [r for r in tickers if isinstance(r, dict)]
-        return []
+                rows = [r for r in tickers if isinstance(r, dict)]
+            else:
+                rows = []
+        else:
+            rows = []
+        self._ticker_rows_cache = list(rows)
+        self._ticker_rows_cached_at_epoch_s = now
+        return list(rows)
 
 
 def _row_matches_cat_target(row: dict, target: str, *, include_ticker_split: bool = False) -> bool:

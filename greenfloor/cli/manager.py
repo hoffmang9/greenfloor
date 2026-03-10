@@ -1613,6 +1613,40 @@ def _coin_meets_coin_op_min_amount(coin: dict, *, canonical_asset_id: str) -> bo
     )
 
 
+def _coin_matches_direct_spendable_lookup(
+    *,
+    wallet: Any,
+    coin: dict,
+    scoped_asset_id: str,
+    cache: dict[str, bool] | None = None,
+) -> bool:
+    get_coin_record = getattr(wallet, "get_coin_record", None)
+    if not callable(get_coin_record):
+        return True
+    coin_id = str(coin.get("id", "")).strip()
+    if not coin_id:
+        return False
+    if cache is not None and coin_id in cache:
+        return bool(cache[coin_id])
+    try:
+        coin_record = get_coin_record(coin_id=coin_id)
+    except Exception:
+        result = False
+    else:
+        if not isinstance(coin_record, dict):
+            result = False
+        else:
+            result = (
+                _is_spendable_coin(coin_record)
+                and not bool(coin_record.get("isLinkedToOpenOffer"))
+                and _coin_asset_id(coin_record).strip().lower()
+                == str(scoped_asset_id).strip().lower()
+            )
+    if cache is not None:
+        cache[coin_id] = result
+    return result
+
+
 def _evaluate_denomination_readiness(
     *,
     wallet: CloudWalletAdapter,
@@ -3375,11 +3409,18 @@ def _coin_combine(
                 )
         elif min_coin_amount_mojos > 0:
             asset_scoped_coins = wallet.list_coins(asset_id=resolved_asset_id, include_pending=True)
+            direct_lookup_cache: dict[str, bool] = {}
             eligible_asset_coins = [
                 c
                 for c in asset_scoped_coins
                 if _is_spendable_coin(c)
                 and _coin_meets_coin_op_min_amount(c, canonical_asset_id=combine_canonical_asset_id)
+                and _coin_matches_direct_spendable_lookup(
+                    wallet=wallet,
+                    coin=c,
+                    scoped_asset_id=resolved_asset_id,
+                    cache=direct_lookup_cache,
+                )
                 and str(c.get("id", "")).strip()
             ]
             if len(eligible_asset_coins) < number_of_coins:

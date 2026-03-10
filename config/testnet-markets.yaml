@@ -10,8 +10,6 @@ markets:
     signer_key_id: "key-main-1"
     receive_address: "txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k"
     pricing:
-      reference_source: "coingecko"
-      reference_pair: "txch_usd"
       side: "sell"
       fixed_quote_per_base: 0.004714285714285714
       quote_unit_mojo_multiplier: 1000000000000
@@ -19,6 +17,7 @@ markets:
       strategy_target_spread_bps: 140
       strategy_min_xch_price_usd: 20.0
       strategy_max_xch_price_usd: 60.0
+      strategy_offer_expiry_minutes: 10
       cancel_policy_stable_vs_unstable: true
     inventory:
       low_watermark_base_units: 500
@@ -53,8 +52,6 @@ markets:
     signer_key_id: "key-main-1"
     receive_address: "txch1t37dk4kxmptw9eceyjvxn55cfrh827yf5f0nnnm2t6r882nkl66qknnt9k"
     pricing:
-      reference_source: "coingecko"
-      reference_pair: "txch_usd"
       side: "sell"
       fixed_quote_per_base: 0.002420604183
       quote_unit_mojo_multiplier: 1000000000000
@@ -62,6 +59,7 @@ markets:
       strategy_target_spread_bps: 140
       strategy_min_xch_price_usd: 20.0
       strategy_max_xch_price_usd: 60.0
+      strategy_offer_expiry_minutes: 10
       cancel_policy_stable_vs_unstable: true
     inventory:
       low_watermark_base_units: 0
