@@ -936,9 +936,39 @@ def _apply_action_cadence_gate(
             continue
         spacing_seconds = max(1, expiry_seconds // target_count)
         active_count = int(active_counts_by_side.get(side, {}).get(size, 0))
+        final_gap = max(0, target_count - active_count)
         last_post_at = latest_by_key.get((side, size))
         allowed_repeat = repeat
         last_post_age_seconds: int | None = None
+        if final_gap <= 1:
+            gated_actions.append(
+                PlannedAction(
+                    size=size,
+                    repeat=1,
+                    pair=action.pair,
+                    expiry_unit=action.expiry_unit,
+                    expiry_value=int(action.expiry_value),
+                    cancel_after_create=action.cancel_after_create,
+                    reason=action.reason,
+                    target_spread_bps=action.target_spread_bps,
+                    side=getattr(action, "side", "sell"),
+                )
+            )
+            if repeat != 1:
+                blocked_sizes.append(
+                    {
+                        "side": side,
+                        "size": size,
+                        "requested_repeat": repeat,
+                        "allowed_repeat": 1,
+                        "target_count": target_count,
+                        "active_count": active_count,
+                        "spacing_seconds": spacing_seconds,
+                        "last_post_age_seconds": None,
+                        "reason": "final_gap_bypass",
+                    }
+                )
+            continue
         if last_post_at is None:
             allowed_repeat = (
                 min(repeat, _RESEED_CADENCE_BOOTSTRAP_MAX_REPEAT)

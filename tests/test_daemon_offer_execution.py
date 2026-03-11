@@ -688,6 +688,49 @@ def test_apply_action_cadence_gate_reduces_general_strategy_repeat_to_one() -> N
     ]
 
 
+def test_apply_action_cadence_gate_does_not_block_final_missing_offer() -> None:
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "created_at": (now - timedelta(seconds=30)).isoformat(),
+            "payload": {
+                "items": [
+                    {"offer_id": "recent-one", "size": 1, "side": "sell", "status": "executed"}
+                ]
+            },
+        }
+    ]
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=1,
+            pair="xch",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="below_target",
+            side="sell",
+        )
+    ]
+
+    gated, blocked = daemon_main._apply_action_cadence_gate(
+        actions=actions,
+        target_counts_by_side={"buy": {}, "sell": {1: 5}},
+        active_counts_by_side={"buy": {}, "sell": {1: 4}},
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+    )
+
+    assert len(gated) == 1
+    assert gated[0].size == 1
+    assert gated[0].repeat == 1
+    assert blocked == []
+
+
 def test_active_offer_counts_by_size_uses_offer_state_and_size_mapping() -> None:
     store = _FakeStore()
     now = datetime.now(UTC)

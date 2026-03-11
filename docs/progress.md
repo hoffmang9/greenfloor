@@ -1,5 +1,17 @@
 # Progress Log
 
+## 2026-03-10 (final-gap cadence bypass + BYC quote-balance confirmation)
+
+- Tightened the generalized short-TTL cadence gate in `greenfloor/daemon/main.py` after reviewing the live `eco1812020_sell_xch` underfill:
+  - the prior generalized gate could still suppress the last missing `1` when the market sat at `4/5` and the latest same-size post was inside the spacing window,
+  - the gate now bypasses cadence suppression for the final missing offer (`target_count - active_count <= 1`) so the daemon can still restore the rung to target.
+- Added deterministic coverage in `tests/test_daemon_offer_execution.py` for the exact `4/5 -> allow 1 more` case.
+- Rechecked the live `byc_two_sided_wusdbc` buy-side failure on `John-Deere` with direct wallet evidence:
+  - the daemon does plan the configured buy-side offer,
+  - current `strategy_offer_execution` rows show the buy action is skipped by Cloud Wallet with `cloud_wallet_offer_insufficient_spendable_balance:side=buy:required=9990:available=50`,
+  - direct `wallet.list_coins(asset_id=Asset_cxc7mql006dp2w3kigqlj58t, include_pending={False,True})` returns exactly one unlocked settled `wUSDC.b` coin of `50`,
+  - so the present blocker is insufficient spendable quote inventory in the vault, not Dexie visibility.
+
 ## 2026-03-10 (daemon general strategy cadence gate + BYC buy-side finding)
 
 - Followed up on live `John-Deere` monitoring after the first short-TTL cadence patch:
