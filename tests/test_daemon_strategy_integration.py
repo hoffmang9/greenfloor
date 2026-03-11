@@ -117,30 +117,22 @@ def test_strategy_state_from_bucket_counts_includes_xch_price() -> None:
     assert state.xch_price_usd == 32.5
 
 
+def _sell_ladder(*entries: tuple[int, int]) -> list[MarketLadderEntry]:
+    """Build a sell ladder from (size_base_units, target_count) pairs."""
+    return [
+        MarketLadderEntry(
+            size_base_units=size,
+            target_count=target,
+            split_buffer_count=1,
+            combine_when_excess_factor=2.0,
+        )
+        for size, target in entries
+    ]
+
+
 def test_effective_sell_bucket_counts_for_coin_ops_counts_live_sells_toward_target_only() -> None:
-    market = _market_with_quote("wUSDC.b")
-    market.mode = "two_sided"
-    market.quote_asset_type = "stable"
-    market.ladders = {
-        "buy": [
-            MarketLadderEntry(
-                size_base_units=10,
-                target_count=1,
-                split_buffer_count=1,
-                combine_when_excess_factor=2.0,
-            )
-        ],
-        "sell": [
-            MarketLadderEntry(
-                size_base_units=10,
-                target_count=3,
-                split_buffer_count=1,
-                combine_when_excess_factor=2.0,
-            )
-        ],
-    }
     effective = _effective_sell_bucket_counts_for_coin_ops(
-        sell_ladder=market.ladders["sell"],
+        sell_ladder=_sell_ladder((10, 3)),
         wallet_bucket_counts={10: 0},
         active_sell_offer_counts_by_size={10: 3},
     )
@@ -148,29 +140,8 @@ def test_effective_sell_bucket_counts_for_coin_ops_counts_live_sells_toward_targ
 
 
 def test_effective_sell_bucket_counts_for_coin_ops_caps_live_sell_credit_at_target() -> None:
-    market = _market_with_quote("wUSDC.b")
-    market.mode = "two_sided"
-    market.quote_asset_type = "stable"
-    market.ladders = {
-        "buy": [
-            MarketLadderEntry(
-                size_base_units=10,
-                target_count=1,
-                split_buffer_count=1,
-                combine_when_excess_factor=2.0,
-            )
-        ],
-        "sell": [
-            MarketLadderEntry(
-                size_base_units=10,
-                target_count=3,
-                split_buffer_count=1,
-                combine_when_excess_factor=2.0,
-            )
-        ],
-    }
     effective = _effective_sell_bucket_counts_for_coin_ops(
-        sell_ladder=market.ladders["sell"],
+        sell_ladder=_sell_ladder((10, 3)),
         wallet_bucket_counts={10: 0},
         active_sell_offer_counts_by_size={10: 4},
     )
@@ -178,21 +149,8 @@ def test_effective_sell_bucket_counts_for_coin_ops_caps_live_sell_credit_at_targ
 
 
 def test_effective_sell_bucket_counts_for_coin_ops_accounts_for_new_sell_posts_in_cycle() -> None:
-    market = _market_with_quote("wUSDC.b")
-    market.mode = "sell_only"
-    market.quote_asset_type = "stable"
-    market.ladders = {
-        "sell": [
-            MarketLadderEntry(
-                size_base_units=10,
-                target_count=2,
-                split_buffer_count=1,
-                combine_when_excess_factor=2.0,
-            )
-        ]
-    }
     effective = _effective_sell_bucket_counts_for_coin_ops(
-        sell_ladder=market.ladders["sell"],
+        sell_ladder=_sell_ladder((10, 2)),
         wallet_bucket_counts={10: 2},
         active_sell_offer_counts_by_size={10: 0},
         newly_executed_sell_offer_counts_by_size={10: 2},

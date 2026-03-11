@@ -5,7 +5,34 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass, field
 from typing import Any
+
+
+@dataclass
+class _RowCache:
+    """Minimal TTL cache for a list of dict rows."""
+
+    ttl: int
+    _rows: list[dict] | None = field(default=None, init=False, repr=False)
+    _cached_at: float | None = field(default=None, init=False, repr=False)
+
+    def get_if_fresh(self, now: float) -> list[dict] | None:
+        if (
+            self._rows is not None
+            and self._cached_at is not None
+            and (now - self._cached_at) <= self.ttl
+        ):
+            return list(self._rows)
+        return None
+
+    def store(self, rows: list[dict], now: float) -> list[dict]:
+        self._rows = list(rows)
+        self._cached_at = now
+        return list(rows)
+
+    def stale(self) -> list[dict]:
+        return list(self._rows) if self._rows is not None else []
 
 
 class DexieAdapter:
@@ -16,11 +43,9 @@ class DexieAdapter:
         cache_ttl_seconds: int = 900,
     ) -> None:
         self.base_url = base_url.rstrip("/")
-        self._cache_ttl_seconds = max(1, int(cache_ttl_seconds))
-        self._token_rows_cache: list[dict] | None = None
-        self._token_rows_cached_at_epoch_s: float | None = None
-        self._ticker_rows_cache: list[dict] | None = None
-        self._ticker_rows_cached_at_epoch_s: float | None = None
+        ttl = max(1, int(cache_ttl_seconds))
+        self._token_cache = _RowCache(ttl=ttl)
+        self._ticker_cache = _RowCache(ttl=ttl)
 
     def get_tokens(self) -> list[dict]:
         url = f"{self.base_url}/v1/swap/tokens"
@@ -136,54 +161,35 @@ class DexieAdapter:
                     return row
         return None
 
-    def _fetch_token_rows(self) -> list[dict]:
+    def _cached_fetch(self, cache: _RowCache, fetcher: Any) -> list[dict]:
+        """Fetch rows through *cache*, falling back to stale rows on error."""
         now = time.time()
-        if (
-            self._token_rows_cache is not None
-            and self._token_rows_cached_at_epoch_s is not None
-            and (now - self._token_rows_cached_at_epoch_s) <= self._cache_ttl_seconds
-        ):
-            return list(self._token_rows_cache)
+        fresh = cache.get_if_fresh(now)
+        if fresh is not None:
+            return fresh
         try:
-            rows = self.get_tokens()
+            rows = fetcher()
         except Exception:
-            if self._token_rows_cache is not None:
-                return list(self._token_rows_cache)
-            return []
-        self._token_rows_cache = list(rows)
-        self._token_rows_cached_at_epoch_s = now
-        return list(rows)
+            return cache.stale()
+        return cache.store(rows, now)
+
+    def _fetch_token_rows(self) -> list[dict]:
+        return self._cached_fetch(self._token_cache, self.get_tokens)
 
     def _fetch_ticker_rows(self) -> list[dict]:
-        now = time.time()
-        if (
-            self._ticker_rows_cache is not None
-            and self._ticker_rows_cached_at_epoch_s is not None
-            and (now - self._ticker_rows_cached_at_epoch_s) <= self._cache_ttl_seconds
-        ):
-            return list(self._ticker_rows_cache)
-        url = f"{self.base_url}/v3/prices/tickers"
-        try:
+        def _fetch() -> list[dict]:
+            url = f"{self.base_url}/v3/prices/tickers"
             with urllib.request.urlopen(url, timeout=20) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            if self._ticker_rows_cache is not None:
-                return list(self._ticker_rows_cache)
+            if isinstance(payload, list):
+                return [r for r in payload if isinstance(r, dict)]
+            if isinstance(payload, dict):
+                tickers = payload.get("tickers")
+                if isinstance(tickers, list):
+                    return [r for r in tickers if isinstance(r, dict)]
             return []
-        rows: list[dict]
-        if isinstance(payload, list):
-            rows = [r for r in payload if isinstance(r, dict)]
-        elif isinstance(payload, dict):
-            tickers = payload.get("tickers")
-            if isinstance(tickers, list):
-                rows = [r for r in tickers if isinstance(r, dict)]
-            else:
-                rows = []
-        else:
-            rows = []
-        self._ticker_rows_cache = list(rows)
-        self._ticker_rows_cached_at_epoch_s = now
-        return list(rows)
+
+        return self._cached_fetch(self._ticker_cache, _fetch)
 
 
 def _row_matches_cat_target(row: dict, target: str, *, include_ticker_split: bool = False) -> bool:

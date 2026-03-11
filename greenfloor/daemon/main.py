@@ -31,6 +31,7 @@ from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
 from greenfloor.cloud_wallet_offer_runtime import (
     build_and_post_offer_cloud_wallet,
+    is_transient_dexie_visibility_404_error,
     resolve_cloud_wallet_offer_asset_ids,
 )
 from greenfloor.config.io import (
@@ -48,7 +49,7 @@ from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, ap
 from greenfloor.core.strategy import MarketState, PlannedAction, StrategyConfig, evaluate_market
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient, capture_coinset_websocket_once
 from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.hex_utils import is_hex_id
+from greenfloor.hex_utils import default_mojo_multiplier_for_asset, is_hex_id
 from greenfloor.keys.router import resolve_market_key
 from greenfloor.logging_setup import (
     initialize_service_file_logging,
@@ -92,14 +93,6 @@ _CLOUD_WALLET_SPENDABLE_STATES = {
     "AVAILABLE",
     "SETTLED",
 }
-
-
-def _canonical_is_xch(asset_id: str) -> bool:
-    return str(asset_id or "").strip().lower() in {"xch", "txch", "1"}
-
-
-def _default_mojo_multiplier_for_asset(asset_id: str) -> int:
-    return 1_000_000_000_000 if _canonical_is_xch(asset_id) else 1000
 
 
 def _cloud_wallet_coin_matches_asset_scope(*, coin: dict[str, Any], scoped_asset_id: str) -> bool:
@@ -502,6 +495,22 @@ def _market_pricing(market: Any) -> dict[str, Any]:
     return dict(getattr(market, "pricing", {}) or {})
 
 
+def _normalize_target_counts(
+    raw: dict,
+    *,
+    defaults: dict[int, int] | None = None,
+) -> dict[int, int]:
+    """Normalize a {size: target_count} mapping from config or ladder data.
+
+    Drops non-positive sizes, clamps negative targets to zero, and falls back
+    to *defaults* when the result would otherwise be empty.
+    """
+    out = {int(k): max(0, int(v)) for k, v in raw.items() if int(k) > 0}
+    if not out and defaults:
+        return dict(defaults)
+    return out
+
+
 def _strategy_config_from_market(market) -> StrategyConfig:
     sell_ladder = market.ladders.get("sell", [])
     targets_by_size = {int(e.size_base_units): int(e.target_count) for e in sell_ladder}
@@ -525,11 +534,7 @@ def _strategy_config_from_market(market) -> StrategyConfig:
             return None
         return parsed
 
-    normalized_targets = {
-        int(size): max(0, int(target)) for size, target in targets_by_size.items() if int(size) > 0
-    }
-    if not normalized_targets:
-        normalized_targets = {1: 5, 10: 2, 100: 1}
+    normalized_targets = _normalize_target_counts(targets_by_size, defaults={1: 5, 10: 2, 100: 1})
 
     return StrategyConfig(
         pair=_normalize_strategy_pair(market.quote_asset),
@@ -558,9 +563,7 @@ def _strategy_config_for_side(*, market: Any, side: str) -> StrategyConfig:
         except (TypeError, ValueError):
             expiry_minutes = None
 
-    normalized_targets = {
-        int(size): max(0, int(target)) for size, target in targets_by_size.items() if int(size) > 0
-    }
+    normalized_targets = _normalize_target_counts(targets_by_size)
 
     return StrategyConfig(
         pair=_normalize_strategy_pair(market.quote_asset),
@@ -1292,13 +1295,13 @@ def _build_offer_for_action(
         "base_unit_mojo_multiplier": int(
             pricing.get(
                 "base_unit_mojo_multiplier",
-                _default_mojo_multiplier_for_asset(str(market.base_asset)),
+                default_mojo_multiplier_for_asset(str(market.base_asset)),
             )
         ),
         "quote_unit_mojo_multiplier": int(
             pricing.get(
                 "quote_unit_mojo_multiplier",
-                _default_mojo_multiplier_for_asset(str(resolved_quote_asset)),
+                default_mojo_multiplier_for_asset(str(resolved_quote_asset)),
             )
         ),
         "key_id": market.signer_key_id,
@@ -1406,7 +1409,7 @@ def _cloud_wallet_spendable_profiles_by_asset(
 
 def _base_unit_mojo_multiplier_for_market(*, market: Any) -> int:
     pricing = getattr(market, "pricing", {}) or {}
-    default_multiplier = _default_mojo_multiplier_for_asset(str(getattr(market, "base_asset", "")))
+    default_multiplier = default_mojo_multiplier_for_asset(str(getattr(market, "base_asset", "")))
     try:
         multiplier = int(pricing.get("base_unit_mojo_multiplier", default_multiplier))
     except (TypeError, ValueError):
@@ -1829,6 +1832,17 @@ def _execute_single_cloud_wallet_action(
                 offer_id=cloud_wallet_offer_id,
             )
             if not visible:
+                # Transient 404 → Dexie propagation lag; mark as pending so the
+                # active-count reader keeps the offer in scope until the grace
+                # period expires (see _is_stale_pending_visibility_offer).
+                if is_transient_dexie_visibility_404_error(visibility_error or ""):
+                    return {
+                        "size": action.size,
+                        "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                        "status": "executed",
+                        "reason": _PENDING_VISIBILITY_REASON,
+                        "offer_id": cloud_wallet_offer_id or None,
+                    }
                 return {
                     "size": action.size,
                     "side": _normalize_offer_side(getattr(action, "side", "sell")),
@@ -3025,6 +3039,10 @@ def _execute_coin_ops_cloud_wallet_kms_only(
                     continue
                 amount_per_coin_mojos = size_base_units * base_unit_mojo_multiplier
                 canonical_asset_id = str(getattr(market, "base_asset", "")).strip()
+                # Defensive inner check: _plan_and_execute_coin_ops filters the
+                # ladder before reaching here, but callers that bypass that
+                # layer (e.g. direct tests or future call sites) also get a
+                # clean rejection rather than a failed RPC call.
                 if not _coin_op_target_amount_allowed(
                     amount_mojos=amount_per_coin_mojos,
                     canonical_asset_id=canonical_asset_id,
@@ -3285,6 +3303,7 @@ def _execute_coin_ops_cloud_wallet_kms_only(
                 capped_number_of_coins = min(requested_number_of_coins, combine_input_cap)
                 target_coin_amount_mojos = size_base_units * base_unit_mojo_multiplier
                 canonical_asset_id = str(getattr(market, "base_asset", "")).strip()
+                # Defensive inner check — see comment in the split branch above.
                 if not _coin_op_target_amount_allowed(
                     amount_mojos=target_coin_amount_mojos,
                     canonical_asset_id=canonical_asset_id,

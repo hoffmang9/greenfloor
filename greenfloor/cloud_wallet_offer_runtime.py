@@ -20,7 +20,12 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.io import is_testnet, load_yaml
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
-from greenfloor.hex_utils import is_hex_id, normalize_hex_id
+from greenfloor.hex_utils import (
+    canonical_is_xch,
+    default_mojo_multiplier_for_asset,
+    is_hex_id,
+    normalize_hex_id,
+)
 from greenfloor.logging_setup import initialize_service_file_logging
 from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
 from greenfloor.signing import sign_and_broadcast_mixed_split
@@ -290,15 +295,6 @@ class _CoinsetFeeLookupPreflightError(RuntimeError):
         super().__init__(f"{failure_kind}:{detail}")
 
 
-def _canonical_is_xch(asset_id: str) -> bool:
-    value = asset_id.strip().lower()
-    return value in {"xch", "txch"}
-
-
-def _default_mojo_multiplier_for_asset(asset_id: str) -> int:
-    return 1_000_000_000_000 if _canonical_is_xch(asset_id) else 1000
-
-
 def _canonical_is_cloud_global_id(asset_id: str) -> bool:
     return asset_id.strip().startswith("Asset_")
 
@@ -530,7 +526,7 @@ query resolveWalletAssets($walletId: ID!) {
                     "symbol": symbol,
                 }
             )
-    if _canonical_is_xch(raw):
+    if canonical_is_xch(raw):
         hinted = str(global_id_hint or "").strip()
         if hinted and hinted in set(crypto_asset_ids):
             return hinted
@@ -645,8 +641,8 @@ def resolve_cloud_wallet_offer_asset_ids(
     )
     if (
         resolved_base == resolved_quote
-        and not _canonical_is_xch(base_asset_id)
-        and not _canonical_is_xch(quote_asset_id)
+        and not canonical_is_xch(base_asset_id)
+        and not canonical_is_xch(quote_asset_id)
         and not _canonical_is_cloud_global_id(base_asset_id)
         and not _canonical_is_cloud_global_id(quote_asset_id)
     ):
@@ -1633,7 +1629,7 @@ def ensure_offer_bootstrap_denominations(
     quote_unit_multiplier = int(
         pricing.get(
             "quote_unit_mojo_multiplier",
-            _default_mojo_multiplier_for_asset(str(resolved_quote_asset_id)),
+            default_mojo_multiplier_for_asset(str(resolved_quote_asset_id)),
         )
     )
     if side == "buy":
@@ -1842,7 +1838,7 @@ def cloud_wallet_create_offer_phase(
         * int(
             (market.pricing or {}).get(
                 "base_unit_mojo_multiplier",
-                _default_mojo_multiplier_for_asset(str(resolved_base_asset_id)),
+                default_mojo_multiplier_for_asset(str(resolved_base_asset_id)),
             )
         )
     )
@@ -1853,7 +1849,7 @@ def cloud_wallet_create_offer_phase(
             * int(
                 (market.pricing or {}).get(
                     "quote_unit_mojo_multiplier",
-                    _default_mojo_multiplier_for_asset(str(resolved_quote_asset_id)),
+                    default_mojo_multiplier_for_asset(str(resolved_quote_asset_id)),
                 )
             )
         )

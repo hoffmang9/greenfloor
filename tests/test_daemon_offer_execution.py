@@ -90,6 +90,39 @@ class _FakeStore:
         )
 
 
+class _CloudWalletProgram:
+    """Minimal program stub for cloud-wallet offer-execution tests (4-field variant)."""
+
+    cloud_wallet_base_url = "https://api.vault.chia.net"
+    cloud_wallet_user_key_id = "UserAuthKey_abc"
+    cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
+    cloud_wallet_vault_id = "Wallet_abc"
+
+
+class _ParallelCloudWalletProgram(_CloudWalletProgram):
+    """Cloud-wallet program stub with offer parallelism enabled."""
+
+    runtime_offer_parallelism_enabled = True
+    runtime_offer_parallelism_max_workers = 2
+    runtime_reservation_ttl_seconds = 300
+    coin_ops_minimum_fee_mojos = 0
+    coin_ops_split_fee_mojos = 0
+
+
+class _CoinOpsProgram:
+    """Minimal program stub for coin-op tests (includes dry-run and fee fields)."""
+
+    runtime_dry_run = False
+    app_network = "mainnet"
+    cloud_wallet_base_url = "https://wallet.example"
+    cloud_wallet_user_key_id = "user-key"
+    cloud_wallet_private_key_pem_path = "/tmp/key.pem"
+    cloud_wallet_vault_id = "vault-1"
+    cloud_wallet_kms_key_id = "kms-key"
+    coin_ops_split_fee_mojos = 0
+    coin_ops_combine_fee_mojos = 0
+
+
 def _market() -> MarketConfig:
     return MarketConfig(
         market_id="m1",
@@ -829,6 +862,45 @@ def test_active_offer_counts_keeps_pending_visibility_offer_when_seen_on_dexie()
     assert unmapped == 0
 
 
+def test_active_offer_counts_keeps_pending_when_no_dexie_snapshot() -> None:
+    """When dexie_size_by_offer_id is None (no Dexie snapshot this cycle),
+    _is_stale_pending_visibility_offer returns False unconditionally, so the
+    offer is not evicted regardless of age.
+    """
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    very_old = (now - timedelta(hours=1)).isoformat()
+    store.offer_states = [
+        {"offer_id": "pending-old", "market_id": "m1", "state": "open"},
+    ]
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "created_at": very_old,
+            "payload": {
+                "items": [
+                    {
+                        "offer_id": "pending-old",
+                        "size": 50,
+                        "status": "executed",
+                        "reason": "cloud_wallet_post_success_dexie_visibility_pending",
+                    }
+                ]
+            },
+        }
+    ]
+    counts, _, unmapped = _active_offer_counts_by_size(
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+        dexie_size_by_offer_id=None,
+        tracked_sizes={50},
+    )
+    assert counts == {50: 1}
+    assert unmapped == 0
+
+
 def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:
     _set_watched_coin_ids_for_market(market_id="m-empty", coin_ids={"c" * 64})
     assert _match_watched_coin_ids(observed_coin_ids=["d" * 64]) == {}
@@ -863,11 +935,7 @@ def test_execute_strategy_actions_uses_cloud_wallet_path_when_configured(monkeyp
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-1"},
     )
 
-    class _Program:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_abc"
-        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
+    _Program = _CloudWalletProgram
 
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
     dexie.visible_offer_ids = {"offer-fallback-1"}
@@ -907,11 +975,7 @@ def test_execute_strategy_actions_cloud_wallet_requires_dexie_visibility(monkeyp
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-missing"},
     )
 
-    class _Program:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_abc"
-        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
+    _Program = _CloudWalletProgram
 
     class _DexieNon404:
         def get_offer(self, offer_id: str) -> dict[str, Any]:
@@ -950,6 +1014,11 @@ def test_execute_strategy_actions_cloud_wallet_requires_dexie_visibility(monkeyp
 def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
     monkeypatch,
 ) -> None:
+    """A transient 404 from Dexie is treated as pending-visibility, not a hard failure.
+
+    The offer is counted as executed with _PENDING_VISIBILITY_REASON so the
+    active-offer reader keeps it in scope until the grace period expires.
+    """
     daemon_main._POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr(
         daemon_main,
@@ -957,11 +1026,7 @@ def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-pending"},
     )
 
-    class _Program:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_abc"
-        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
+    _Program = _CloudWalletProgram
 
     class _Dexie404:
         def get_offer(self, offer_id: str) -> dict[str, Any]:
@@ -992,9 +1057,9 @@ def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
         program=_Program(),
     )
 
-    assert result["executed_count"] == 0
-    assert result["items"][0]["status"] == "skipped"
-    assert "cloud_wallet_post_not_visible_on_dexie:" in str(result["items"][0]["reason"])
+    assert result["executed_count"] == 1
+    assert result["items"][0]["status"] == "executed"
+    assert result["items"][0]["reason"] == daemon_main._PENDING_VISIBILITY_REASON
     assert result["items"][0]["offer_id"] == "offer-fallback-pending"
 
 
@@ -1009,11 +1074,7 @@ def test_execute_strategy_actions_posts_larger_sizes_first(monkeypatch) -> None:
 
     monkeypatch.setattr(daemon_main, "_cloud_wallet_offer_post_fallback", _fake_cloud_wallet_post)
 
-    class _Program:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_abc"
-        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
+    _Program = _CloudWalletProgram
 
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
     dexie.visible_offer_ids = {"offer-100", "offer-10", "offer-1"}
@@ -1078,11 +1139,7 @@ def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(mon
         lambda **_kwargs: {"success": False, "error": "vault_signing_unavailable"},
     )
 
-    class _Program:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_abc"
-        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
+    _Program = _CloudWalletProgram
 
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
     store = _FakeStore()
@@ -1152,16 +1209,7 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(
         lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
     )
 
-    class _Program:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_abc"
-        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-        runtime_offer_parallelism_enabled = True
-        runtime_offer_parallelism_max_workers = 2
-        runtime_reservation_ttl_seconds = 300
-        coin_ops_minimum_fee_mojos = 0
-        coin_ops_split_fee_mojos = 0
+    _Program = _ParallelCloudWalletProgram
 
     db_path = tmp_path / "reservations.sqlite"
     coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
@@ -1239,16 +1287,7 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
         lambda **_kwargs: {"success": False, "error": "vault_unavailable"},
     )
 
-    class _Program:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_abc"
-        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-        runtime_offer_parallelism_enabled = True
-        runtime_offer_parallelism_max_workers = 2
-        runtime_reservation_ttl_seconds = 300
-        coin_ops_minimum_fee_mojos = 0
-        coin_ops_split_fee_mojos = 0
+    _Program = _ParallelCloudWalletProgram
 
     db_path = tmp_path / "reservations.sqlite"
     coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
@@ -1345,16 +1384,8 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
         lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
     )
 
-    class _Program:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_abc"
-        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-        runtime_offer_parallelism_enabled = True
-        runtime_offer_parallelism_max_workers = 2
-        runtime_reservation_ttl_seconds = 300
+    class _Program(_ParallelCloudWalletProgram):
         coin_ops_minimum_fee_mojos = 10
-        coin_ops_split_fee_mojos = 0
 
     db_path = tmp_path / "reservations.sqlite"
     coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
@@ -1419,16 +1450,7 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservati
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback"},
     )
 
-    class _Program:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_abc"
-        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-        runtime_offer_parallelism_enabled = True
-        runtime_offer_parallelism_max_workers = 2
-        runtime_reservation_ttl_seconds = 300
-        coin_ops_minimum_fee_mojos = 0
-        coin_ops_split_fee_mojos = 0
+    _Program = _ParallelCloudWalletProgram
 
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-fallback"})
     dexie.visible_offer_ids = {"offer-fallback"}
@@ -1488,16 +1510,7 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
         lambda **_kwargs: {"success": True, "offer_id": "offer-resolved-asset"},
     )
 
-    class _Program:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_abc"
-        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-        runtime_offer_parallelism_enabled = True
-        runtime_offer_parallelism_max_workers = 2
-        runtime_reservation_ttl_seconds = 300
-        coin_ops_minimum_fee_mojos = 0
-        coin_ops_split_fee_mojos = 0
+    _Program = _ParallelCloudWalletProgram
 
     market = _market()
     market.base_asset = "asset-local-only"
@@ -1573,16 +1586,7 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
         lambda **_kwargs: {"success": True, "offer_id": "offer-scoped"},
     )
 
-    class _Program:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_abc"
-        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-        runtime_offer_parallelism_enabled = True
-        runtime_offer_parallelism_max_workers = 2
-        runtime_reservation_ttl_seconds = 300
-        coin_ops_minimum_fee_mojos = 0
-        coin_ops_split_fee_mojos = 0
+    _Program = _ParallelCloudWalletProgram
 
     market = _market()
     market.base_asset = "asset-local-only"
@@ -1666,16 +1670,7 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
         lambda **_kwargs: {"success": True, "offer_id": "offer-should-not-post"},
     )
 
-    class _Program:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_abc"
-        cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-        runtime_offer_parallelism_enabled = True
-        runtime_offer_parallelism_max_workers = 2
-        runtime_reservation_ttl_seconds = 300
-        coin_ops_minimum_fee_mojos = 0
-        coin_ops_split_fee_mojos = 0
+    _Program = _ParallelCloudWalletProgram
 
     market = _market()
     market.base_asset = "asset-local-only"
@@ -1847,16 +1842,8 @@ def test_reservation_coordinator_cross_instance_contention_allows_single_winner(
 
 
 def test_execute_coin_ops_cloud_wallet_kms_only_requires_kms() -> None:
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
+    class _Program(_CoinOpsProgram):
         cloud_wallet_kms_key_id = ""
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
 
     class _Signer:
         key_id = "key-main-2"
@@ -1878,16 +1865,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_requires_kms() -> None:
 
 
 def test_execute_coin_ops_cloud_wallet_kms_only_split_submits(monkeypatch) -> None:
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
@@ -1948,16 +1926,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_submits(monkeypatch) -> No
 def test_execute_coin_ops_cloud_wallet_kms_only_split_retries_on_not_spendable(
     monkeypatch,
 ) -> None:
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
@@ -2024,16 +1993,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_retries_on_not_spendable(
 def test_execute_coin_ops_cloud_wallet_kms_only_split_ignores_asset_mismatch(
     monkeypatch,
 ) -> None:
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
@@ -2079,16 +2039,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_ignores_asset_mismatch(
 def test_execute_coin_ops_cloud_wallet_kms_only_split_revalidates_coin_identity(
     monkeypatch,
 ) -> None:
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
@@ -2168,16 +2119,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_revalidates_coin_identity(
 def test_execute_coin_ops_cloud_wallet_kms_only_split_requires_sufficient_amount(
     monkeypatch,
 ) -> None:
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
@@ -2223,16 +2165,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_requires_sufficient_amount
 def test_execute_coin_ops_cloud_wallet_kms_only_split_combines_when_aggregate_sufficient(
     monkeypatch,
 ) -> None:
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
@@ -2314,16 +2247,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_combine_cap_submits_progre
 ) -> None:
     monkeypatch.setenv("GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP", "5")
 
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
@@ -2406,16 +2330,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_combine_cap_submits_progre
 def test_execute_coin_ops_cloud_wallet_kms_only_split_ignores_sub_cat_dust_on_scoped_reads(
     monkeypatch,
 ) -> None:
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
@@ -2500,16 +2415,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_ignores_sub_cat_dust_on_sc
 def test_execute_coin_ops_cloud_wallet_kms_only_split_rejects_sub_minimum_cat_outputs(
     monkeypatch,
 ) -> None:
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
@@ -2564,16 +2470,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_rejects_sub_minimum_cat_ou
 def test_execute_coin_ops_cloud_wallet_kms_only_skips_single_output_split(
     monkeypatch,
 ) -> None:
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
@@ -2616,16 +2513,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_combine_retries_on_429(
     monkeypatch.setenv("GREENFLOOR_COIN_OPS_COMBINE_MAX_ATTEMPTS", "3")
     monkeypatch.setenv("GREENFLOOR_COIN_OPS_COMBINE_BACKOFF_MS", "0")
 
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
@@ -2681,16 +2569,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_combine_applies_input_coin_cap(
 ) -> None:
     monkeypatch.setenv("GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP", "7")
 
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
@@ -2752,16 +2631,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_combine_applies_input_coin_cap(
 def test_execute_coin_ops_cloud_wallet_kms_only_combine_excludes_watched_coin_ids(
     monkeypatch,
 ) -> None:
-    class _Program:
-        runtime_dry_run = False
-        app_network = "mainnet"
-        cloud_wallet_base_url = "https://wallet.example"
-        cloud_wallet_user_key_id = "user-key"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "vault-1"
-        cloud_wallet_kms_key_id = "kms-key"
-        coin_ops_split_fee_mojos = 0
-        coin_ops_combine_fee_mojos = 0
+    _Program = _CoinOpsProgram
 
     class _Signer:
         key_id = "key-main-2"
