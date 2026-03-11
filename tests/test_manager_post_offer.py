@@ -1610,15 +1610,34 @@ def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypa
         def parse_assert_before_seconds_relative():
             return object()
 
-    class _CoinSpendWithExpiry:
+    class _OutputValue:
         @staticmethod
-        def conditions():
+        def to_list():
             return [_ConditionWithExpiry()]
+
+    class _Output:
+        value = _OutputValue()
+
+    class _Program:
+        @staticmethod
+        def run(_solution, _max_cost: int, _mempool_mode: bool):
+            return _Output()
+
+    class _Clvm:
+        @staticmethod
+        def deserialize(_blob: bytes):
+            return _Program()
+
+    class _CoinSpendWithExpiry:
+        puzzle_reveal = b"puzzle"
+        solution = b"solution"
 
     class _SpendBundleWithExpiry:
         coin_spends = [_CoinSpendWithExpiry()]
 
     class _Sdk:
+        Clvm = _Clvm
+
         @staticmethod
         def validate_offer(offer: str) -> None:
             assert offer == "offer1ok"
@@ -1644,15 +1663,34 @@ def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> 
         def parse_assert_before_height_absolute():
             return object()
 
-    class _CoinSpendWithExpiry:
+    class _OutputValue:
         @staticmethod
-        def conditions():
+        def to_list():
             return [_ConditionWithExpiry()]
+
+    class _Output:
+        value = _OutputValue()
+
+    class _Program:
+        @staticmethod
+        def run(_solution, _max_cost: int, _mempool_mode: bool):
+            return _Output()
+
+    class _Clvm:
+        @staticmethod
+        def deserialize(_blob: bytes):
+            return _Program()
+
+    class _CoinSpendWithExpiry:
+        puzzle_reveal = b"puzzle"
+        solution = b"solution"
 
     class _SpendBundleWithExpiry:
         coin_spends = [_CoinSpendWithExpiry()]
 
     class _Sdk:
+        Clvm = _Clvm
+
         @staticmethod
         def verify_offer(offer: str) -> bool:
             return offer == "offer1ok"
@@ -1712,6 +1750,61 @@ def test_verify_offer_text_for_dexie_rejects_offer_without_expiration_condition(
 
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
     assert _verify_offer_text_for_dexie("offer1noexpiry") == "wallet_sdk_offer_missing_expiration"
+
+
+def test_verify_offer_text_for_dexie_extracts_expiry_from_coin_spend_program(
+    monkeypatch,
+) -> None:
+    def _import_module(name: str):
+        if name == "greenfloor_native":
+            raise ImportError("disable native path for this test")
+        return __import__(name)
+
+    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+
+    class _ConditionWithExpiry:
+        @staticmethod
+        def parse_assert_before_seconds_absolute():
+            return object()
+
+    class _OutputValue:
+        @staticmethod
+        def to_list():
+            return [_ConditionWithExpiry()]
+
+    class _Output:
+        value = _OutputValue()
+
+    class _Program:
+        @staticmethod
+        def run(_solution, _max_cost: int, _mempool_mode: bool):
+            return _Output()
+
+    class _Clvm:
+        @staticmethod
+        def deserialize(_blob: bytes):
+            return _Program()
+
+    class _CoinSpend:
+        puzzle_reveal = b"puzzle"
+        solution = b"solution"
+
+    class _SpendBundle:
+        coin_spends = [_CoinSpend()]
+
+    class _Sdk:
+        Clvm = _Clvm
+
+        @staticmethod
+        def validate_offer(_offer: str) -> None:
+            return None
+
+        @staticmethod
+        def decode_offer(_offer: str):
+            return _SpendBundle()
+
+    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+    assert _verify_offer_text_for_dexie("offer1ok") is None
 
 
 def test_verify_offer_text_for_dexie_rejects_duplicate_spent_coin_ids(

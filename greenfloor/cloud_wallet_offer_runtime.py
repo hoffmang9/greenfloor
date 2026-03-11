@@ -99,16 +99,52 @@ def _offer_has_expiration_condition(sdk: object, offer_text: str) -> bool:
     spend_bundle = decode_offer(offer_text)
     coin_spends = getattr(spend_bundle, "coin_spends", None) or []
     for coin_spend in coin_spends:
-        conditions_fn = getattr(coin_spend, "conditions", None)
-        if not callable(conditions_fn):
-            continue
-        conditions = conditions_fn() or []
-        if not isinstance(conditions, list):
-            continue
-        for condition in conditions:
+        for condition in _extract_offer_conditions_from_coin_spend(sdk, coin_spend):
             if _condition_has_offer_expiration(condition):
                 return True
     return False
+
+
+def _extract_offer_conditions_from_coin_spend(sdk: object, coin_spend: object) -> list[object]:
+    # Derive conditions from CLVM execution of puzzle reveal + solution.
+    clvm_cls = getattr(sdk, "Clvm", None)
+    if not callable(clvm_cls):
+        return []
+    puzzle_reveal = getattr(coin_spend, "puzzle_reveal", None)
+    solution = getattr(coin_spend, "solution", None)
+    if not isinstance(puzzle_reveal, bytes | bytearray | memoryview) or not isinstance(
+        solution, bytes | bytearray | memoryview
+    ):
+        return []
+
+    try:
+        clvm = clvm_cls()
+        deserialize_fn = getattr(clvm, "deserialize", None)
+        if not callable(deserialize_fn):
+            return []
+        puzzle_program = deserialize_fn(bytes(puzzle_reveal))
+        solution_program = deserialize_fn(bytes(solution))
+        run_fn = getattr(puzzle_program, "run", None)
+        if not callable(run_fn):
+            return []
+        run_output = run_fn(solution_program, 1_000_000_000_000, True)
+        value = getattr(run_output, "value", None)
+        if value is None:
+            return []
+        to_list_fn = getattr(value, "to_list", None)
+        if callable(to_list_fn):
+            parsed = to_list_fn() or []
+            if isinstance(parsed, collections.abc.Iterable) and not isinstance(
+                parsed, bytes | bytearray | str
+            ):
+                return list(parsed)
+        if isinstance(value, collections.abc.Iterable) and not isinstance(
+            value, bytes | bytearray | str
+        ):
+            return list(value)
+    except Exception:
+        return []
+    return []
 
 
 def _offer_has_duplicate_spent_coin_ids(sdk: object, offer_text: str) -> bool:
