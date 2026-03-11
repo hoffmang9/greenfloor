@@ -408,7 +408,7 @@ def test_inject_reseed_action_when_no_active_offers() -> None:
     )
 
     assert [action.size for action in actions] == [1, 10, 100]
-    assert [action.repeat for action in actions] == [5, 2, 1]
+    assert [action.repeat for action in actions] == [2, 2, 1]
     assert all(action.reason == "offer_size_gap_reseed" for action in actions)
 
 
@@ -475,7 +475,7 @@ def test_inject_reseed_action_fills_missing_sizes_when_recent_mempool_is_present
     )
 
     assert [action.size for action in actions] == [1, 10, 100]
-    assert [action.repeat for action in actions] == [5, 2, 1]
+    assert [action.repeat for action in actions] == [2, 2, 1]
     assert all(action.reason == "offer_size_gap_reseed" for action in actions)
 
 
@@ -504,8 +504,82 @@ def test_inject_reseed_action_when_only_mempool_offer_is_stale() -> None:
     )
 
     assert [action.size for action in actions] == [1, 10, 100]
-    assert [action.repeat for action in actions] == [5, 2, 1]
+    assert [action.repeat for action in actions] == [2, 2, 1]
     assert all(action.reason == "offer_size_gap_reseed" for action in actions)
+
+
+def test_inject_reseed_action_respects_recent_same_size_post_cadence() -> None:
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.offer_states = [
+        {"offer_id": "one-1", "market_id": "m1", "state": "open"},
+        {"offer_id": "one-2", "market_id": "m1", "state": "open"},
+    ]
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "created_at": (now - timedelta(seconds=60)).isoformat(),
+            "payload": {
+                "items": [
+                    {"offer_id": "recent-one", "size": 1, "status": "executed"},
+                    {"offer_id": "one-1", "size": 1, "status": "executed"},
+                    {"offer_id": "one-2", "size": 1, "status": "executed"},
+                ]
+            },
+        }
+    ]
+    market = _market()
+    strategy_config = _strategy_config_from_market(market)
+
+    actions = _inject_reseed_action_if_no_active_offers(
+        strategy_actions=[],
+        strategy_config=strategy_config,
+        market=market,
+        store=cast(Any, store),
+        xch_price_usd=30.0,
+        clock=now,
+    )
+
+    assert [action.size for action in actions] == [10, 100]
+    assert [action.repeat for action in actions] == [2, 1]
+
+
+def test_inject_reseed_action_allows_one_small_offer_after_cadence_window() -> None:
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.offer_states = [
+        {"offer_id": "one-1", "market_id": "m1", "state": "open"},
+        {"offer_id": "one-2", "market_id": "m1", "state": "open"},
+    ]
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "created_at": (now - timedelta(minutes=4)).isoformat(),
+            "payload": {
+                "items": [
+                    {"offer_id": "stale-one", "size": 1, "status": "executed"},
+                    {"offer_id": "one-1", "size": 1, "status": "executed"},
+                    {"offer_id": "one-2", "size": 1, "status": "executed"},
+                ]
+            },
+        }
+    ]
+    market = _market()
+    strategy_config = _strategy_config_from_market(market)
+
+    actions = _inject_reseed_action_if_no_active_offers(
+        strategy_actions=[],
+        strategy_config=strategy_config,
+        market=market,
+        store=cast(Any, store),
+        xch_price_usd=30.0,
+        clock=now,
+    )
+
+    assert [action.size for action in actions] == [1, 10, 100]
+    assert [action.repeat for action in actions] == [1, 2, 1]
 
 
 def test_active_offer_counts_by_size_uses_offer_state_and_size_mapping() -> None:

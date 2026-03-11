@@ -683,6 +683,8 @@ _ACTIVE_OFFER_STATES_FOR_RESEED = {
 _RESEED_MEMPOOL_MAX_AGE_SECONDS = 3 * 60
 _PENDING_VISIBILITY_RECHECK_MAX_AGE_SECONDS = 2 * 60
 _PENDING_VISIBILITY_REASON = "cloud_wallet_post_success_dexie_visibility_pending"
+_RESEED_CADENCE_MIN_TARGET_COUNT = 3
+_RESEED_CADENCE_BOOTSTRAP_MAX_REPEAT = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -821,6 +823,174 @@ def _recent_offer_metadata_by_offer_id(
                     created_at=created_at,
                 )
     return metadata_by_offer_id
+
+
+def _parse_event_created_at(value: Any) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _expiry_seconds_for_action(action: PlannedAction) -> int | None:
+    unit = str(action.expiry_unit or "").strip().lower()
+    try:
+        value = int(action.expiry_value)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    unit_seconds = {
+        "second": 1,
+        "seconds": 1,
+        "minute": 60,
+        "minutes": 60,
+        "hour": 60 * 60,
+        "hours": 60 * 60,
+        "day": 24 * 60 * 60,
+        "days": 24 * 60 * 60,
+    }.get(unit)
+    if unit_seconds is None:
+        return None
+    return value * unit_seconds
+
+
+def _latest_successful_offer_created_at_by_size(
+    *, store: SqliteStore, market_id: str
+) -> dict[int, datetime]:
+    events = store.list_recent_audit_events(
+        event_types=["strategy_offer_execution"],
+        market_id=market_id,
+        limit=1500,
+    )
+    latest_by_size: dict[int, datetime] = {}
+    seen_offer_ids: set[str] = set()
+    for event in events:
+        created_at = _parse_event_created_at(event.get("created_at"))
+        if created_at is None:
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        items = payload.get("items")
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("status", "")).strip().lower() != "executed":
+                continue
+            offer_id = str(item.get("offer_id", "")).strip()
+            if not offer_id or offer_id in seen_offer_ids:
+                continue
+            seen_offer_ids.add(offer_id)
+            try:
+                size = int(item.get("size") or 0)
+            except (TypeError, ValueError):
+                continue
+            if size <= 0 or size in latest_by_size:
+                continue
+            latest_by_size[size] = created_at
+    return latest_by_size
+
+
+def _apply_reseed_cadence_gate(
+    *,
+    reseed_actions: list[PlannedAction],
+    target_by_size: dict[int, int],
+    active_counts_by_size: dict[int, int],
+    store: SqliteStore,
+    market_id: str,
+    clock: datetime,
+) -> tuple[list[PlannedAction], list[dict[str, Any]]]:
+    latest_by_size = _latest_successful_offer_created_at_by_size(
+        store=store,
+        market_id=market_id,
+    )
+    gated_actions: list[PlannedAction] = []
+    blocked_sizes: list[dict[str, Any]] = []
+    for action in reseed_actions:
+        size = int(action.size)
+        repeat = max(0, int(action.repeat))
+        target_count = int(target_by_size.get(size, 0))
+        if repeat <= 0:
+            continue
+        if target_count < _RESEED_CADENCE_MIN_TARGET_COUNT:
+            gated_actions.append(action)
+            continue
+        expiry_seconds = _expiry_seconds_for_action(action)
+        if expiry_seconds is None or expiry_seconds <= 0:
+            gated_actions.append(action)
+            continue
+        spacing_seconds = max(1, expiry_seconds // target_count)
+        active_count = int(active_counts_by_size.get(size, 0))
+        last_post_at = latest_by_size.get(size)
+        allowed_repeat = repeat
+        last_post_age_seconds: int | None = None
+        if last_post_at is None:
+            allowed_repeat = (
+                min(repeat, _RESEED_CADENCE_BOOTSTRAP_MAX_REPEAT)
+                if active_count <= 0
+                else min(repeat, 1)
+            )
+        else:
+            age_seconds = max(0.0, (clock - last_post_at).total_seconds())
+            last_post_age_seconds = int(age_seconds)
+            if age_seconds < float(spacing_seconds):
+                allowed_repeat = 0
+            else:
+                allowed_repeat = (
+                    min(repeat, _RESEED_CADENCE_BOOTSTRAP_MAX_REPEAT)
+                    if active_count <= 0
+                    else min(repeat, 1)
+                )
+        if allowed_repeat <= 0:
+            blocked_sizes.append(
+                {
+                    "size": size,
+                    "requested_repeat": repeat,
+                    "target_count": target_count,
+                    "active_count": active_count,
+                    "spacing_seconds": spacing_seconds,
+                    "last_post_age_seconds": last_post_age_seconds,
+                }
+            )
+            continue
+        if allowed_repeat == repeat:
+            gated_actions.append(action)
+            continue
+        gated_actions.append(
+            PlannedAction(
+                size=size,
+                repeat=allowed_repeat,
+                pair=action.pair,
+                expiry_unit=action.expiry_unit,
+                expiry_value=int(action.expiry_value),
+                cancel_after_create=action.cancel_after_create,
+                reason=action.reason,
+                target_spread_bps=action.target_spread_bps,
+                side=getattr(action, "side", "sell"),
+            )
+        )
+        blocked_sizes.append(
+            {
+                "size": size,
+                "requested_repeat": repeat,
+                "allowed_repeat": allowed_repeat,
+                "target_count": target_count,
+                "active_count": active_count,
+                "spacing_seconds": spacing_seconds,
+                "last_post_age_seconds": last_post_age_seconds,
+            }
+        )
+    return gated_actions, blocked_sizes
 
 
 def _is_stale_pending_visibility_offer(
@@ -1219,6 +1389,25 @@ def _inject_reseed_action_if_no_active_offers(
             candidate_sizes=sorted(one_per_size),
         )
         return strategy_actions
+    reseed_actions, cadence_limited_sizes = _apply_reseed_cadence_gate(
+        reseed_actions=reseed_actions,
+        target_by_size=target_by_size,
+        active_counts_by_size=active_counts_by_size,
+        store=store,
+        market_id=market.market_id,
+        clock=clock,
+    )
+    if not reseed_actions:
+        _log_market_decision(
+            market.market_id,
+            "reseed_skip",
+            reason="reseed_cadence_gate_active",
+            active_counts_by_size=active_counts_by_size,
+            target_counts_by_size=target_by_size,
+            missing_by_size=missing_by_size,
+            cadence_limited_sizes=cadence_limited_sizes,
+        )
+        return strategy_actions
 
     _log_market_decision(
         market.market_id,
@@ -1233,6 +1422,7 @@ def _inject_reseed_action_if_no_active_offers(
         pair=strategy_config.pair,
         expiry_unit=reseed_actions[0].expiry_unit,
         expiry_value=int(reseed_actions[0].expiry_value),
+        cadence_limited_sizes=cadence_limited_sizes,
     )
     return reseed_actions
 

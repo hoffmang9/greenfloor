@@ -1,5 +1,17 @@
 # Progress Log
 
+## 2026-03-10 (daemon small-offer reseed cadence gating)
+
+- Hardened sell-only reseed behavior in `greenfloor/daemon/main.py` to reduce bursty `1`-offer reposting on short-TTL markets:
+  - repeated same-size reseed actions now consult recent successful `strategy_offer_execution` timestamps for the market,
+  - small repeated ladders (`target_count >= 3`) are cadence-limited to approximately one spacing interval at a time instead of reposting the full deficit in a single cycle,
+  - cold-start / fully empty ladders still permit a small bootstrap burst (`2`) so markets do not stay empty for the full spacing window.
+- Goal: keep `10`-minute `1`-offer ladders, especially `eco1812020_sell_xch`, from expiring in synchronized bursts that temporarily drop live Dexie coverage below target even though the daemon later refills the rung.
+- Added deterministic coverage in `tests/test_daemon_offer_execution.py` for:
+  - empty-market bootstrap reseed limiting,
+  - suppression when the most recent successful same-size post is still inside the cadence window,
+  - resuming a single small-offer refill after the cadence window elapses.
+
 ## 2026-03-10 (Dexie 404 reconciliation fix for stale ECO 50 offers)
 
 - Root cause confirmed on `John-Deere` for `eco1812020_sell_xch` not reposting its `50` rung:
@@ -16,6 +28,18 @@
 - Live remediation on `John-Deere`:
   - identified stale open `50` offer rows for `eco1812020_sell_xch`,
   - prepared cleanup so the market can resume posting replacement `50` offers immediately instead of waiting for manual DB intervention.
+
+## 2026-03-10 (upstream ent-wallet duplicate vault CAT input report + workaround analysis)
+
+- Documented a new upstream Cloud Wallet / `ent-wallet` issue draft in `docs/ent-wallet-upstream-duplicate-vault-cat-offer-inputs.md`:
+  - live `John-Deere` evidence shows malformed `50`-unit ECO vault offers already contain duplicate CAT inputs before `greenfloor` validates the returned `offer1...`,
+  - Cloud Wallet `CREATE_OFFER` transactions themselves report the same CAT coin id multiple times in `inputs`,
+  - likely root cause is the row-multiplying `transactionCoinRecords` join in `getUnspentVaultCoinsByWalletId(...)`.
+- Captured temporary workaround options while waiting for the upstream fix:
+  - safest immediate mitigation is pausing the `50` rung,
+  - more targeted operational stopgap is combining explicit clean ECO inputs into a fresh exact `50000`-mojo CAT coin,
+  - off-chain cancellation of malformed internal wallet offers may free locked polluted inputs,
+  - a possible future `greenfloor` mitigation is a cooldown and/or exact-input-combine path when `wallet_sdk_offer_duplicate_spent_coin_ids` recurs.
 
 ## 2026-03-05 (BYC scoped-query leak fail-closed mitigation + John-Deere validation)
 
