@@ -582,6 +582,112 @@ def test_inject_reseed_action_allows_one_small_offer_after_cadence_window() -> N
     assert [action.repeat for action in actions] == [1, 2, 1]
 
 
+def test_apply_action_cadence_gate_limits_general_strategy_actions() -> None:
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "created_at": (now - timedelta(seconds=60)).isoformat(),
+            "payload": {
+                "items": [
+                    {"offer_id": "recent-one", "size": 1, "side": "sell", "status": "executed"}
+                ]
+            },
+        }
+    ]
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=2,
+            pair="xch",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="below_target",
+            side="sell",
+        )
+    ]
+
+    gated, blocked = daemon_main._apply_action_cadence_gate(
+        actions=actions,
+        target_counts_by_side={"buy": {}, "sell": {1: 5}},
+        active_counts_by_side={"buy": {}, "sell": {1: 3}},
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+    )
+
+    assert gated == []
+    assert blocked == [
+        {
+            "side": "sell",
+            "size": 1,
+            "requested_repeat": 2,
+            "target_count": 5,
+            "active_count": 3,
+            "spacing_seconds": 120,
+            "last_post_age_seconds": 60,
+        }
+    ]
+
+
+def test_apply_action_cadence_gate_reduces_general_strategy_repeat_to_one() -> None:
+    store = _FakeStore()
+    now = datetime.now(UTC)
+    store.audit_events = [
+        {
+            "event_type": "strategy_offer_execution",
+            "market_id": "m1",
+            "created_at": (now - timedelta(minutes=4)).isoformat(),
+            "payload": {
+                "items": [
+                    {"offer_id": "stale-one", "size": 1, "side": "sell", "status": "executed"}
+                ]
+            },
+        }
+    ]
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=2,
+            pair="xch",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="below_target",
+            side="sell",
+        )
+    ]
+
+    gated, blocked = daemon_main._apply_action_cadence_gate(
+        actions=actions,
+        target_counts_by_side={"buy": {}, "sell": {1: 5}},
+        active_counts_by_side={"buy": {}, "sell": {1: 3}},
+        store=cast(Any, store),
+        market_id="m1",
+        clock=now,
+    )
+
+    assert len(gated) == 1
+    assert gated[0].size == 1
+    assert gated[0].repeat == 1
+    assert gated[0].reason == "below_target"
+    assert blocked == [
+        {
+            "side": "sell",
+            "size": 1,
+            "requested_repeat": 2,
+            "allowed_repeat": 1,
+            "target_count": 5,
+            "active_count": 3,
+            "spacing_seconds": 120,
+            "last_post_age_seconds": 240,
+        }
+    ]
+
+
 def test_active_offer_counts_by_size_uses_offer_state_and_size_mapping() -> None:
     store = _FakeStore()
     now = datetime.now(UTC)

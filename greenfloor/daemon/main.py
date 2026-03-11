@@ -862,15 +862,15 @@ def _expiry_seconds_for_action(action: PlannedAction) -> int | None:
     return value * unit_seconds
 
 
-def _latest_successful_offer_created_at_by_size(
+def _latest_successful_offer_created_at_by_side_and_size(
     *, store: SqliteStore, market_id: str
-) -> dict[int, datetime]:
+) -> dict[tuple[str, int], datetime]:
     events = store.list_recent_audit_events(
         event_types=["strategy_offer_execution"],
         market_id=market_id,
         limit=1500,
     )
-    latest_by_size: dict[int, datetime] = {}
+    latest_by_key: dict[tuple[str, int], datetime] = {}
     seen_offer_ids: set[str] = set()
     for event in events:
         created_at = _parse_event_created_at(event.get("created_at"))
@@ -895,31 +895,36 @@ def _latest_successful_offer_created_at_by_size(
                 size = int(item.get("size") or 0)
             except (TypeError, ValueError):
                 continue
-            if size <= 0 or size in latest_by_size:
+            if size <= 0:
                 continue
-            latest_by_size[size] = created_at
-    return latest_by_size
+            side = _normalize_offer_side(item.get("side"))
+            key = (side, size)
+            if key in latest_by_key:
+                continue
+            latest_by_key[key] = created_at
+    return latest_by_key
 
 
-def _apply_reseed_cadence_gate(
+def _apply_action_cadence_gate(
     *,
-    reseed_actions: list[PlannedAction],
-    target_by_size: dict[int, int],
-    active_counts_by_size: dict[int, int],
+    actions: list[PlannedAction],
+    target_counts_by_side: dict[str, dict[int, int]],
+    active_counts_by_side: dict[str, dict[int, int]],
     store: SqliteStore,
     market_id: str,
     clock: datetime,
 ) -> tuple[list[PlannedAction], list[dict[str, Any]]]:
-    latest_by_size = _latest_successful_offer_created_at_by_size(
+    latest_by_key = _latest_successful_offer_created_at_by_side_and_size(
         store=store,
         market_id=market_id,
     )
     gated_actions: list[PlannedAction] = []
     blocked_sizes: list[dict[str, Any]] = []
-    for action in reseed_actions:
+    for action in actions:
+        side = _normalize_offer_side(getattr(action, "side", "sell"))
         size = int(action.size)
         repeat = max(0, int(action.repeat))
-        target_count = int(target_by_size.get(size, 0))
+        target_count = int(target_counts_by_side.get(side, {}).get(size, 0))
         if repeat <= 0:
             continue
         if target_count < _RESEED_CADENCE_MIN_TARGET_COUNT:
@@ -930,8 +935,8 @@ def _apply_reseed_cadence_gate(
             gated_actions.append(action)
             continue
         spacing_seconds = max(1, expiry_seconds // target_count)
-        active_count = int(active_counts_by_size.get(size, 0))
-        last_post_at = latest_by_size.get(size)
+        active_count = int(active_counts_by_side.get(side, {}).get(size, 0))
+        last_post_at = latest_by_key.get((side, size))
         allowed_repeat = repeat
         last_post_age_seconds: int | None = None
         if last_post_at is None:
@@ -954,6 +959,7 @@ def _apply_reseed_cadence_gate(
         if allowed_repeat <= 0:
             blocked_sizes.append(
                 {
+                    "side": side,
                     "size": size,
                     "requested_repeat": repeat,
                     "target_count": target_count,
@@ -981,6 +987,7 @@ def _apply_reseed_cadence_gate(
         )
         blocked_sizes.append(
             {
+                "side": side,
                 "size": size,
                 "requested_repeat": repeat,
                 "allowed_repeat": allowed_repeat,
@@ -1389,10 +1396,13 @@ def _inject_reseed_action_if_no_active_offers(
             candidate_sizes=sorted(one_per_size),
         )
         return strategy_actions
-    reseed_actions, cadence_limited_sizes = _apply_reseed_cadence_gate(
-        reseed_actions=reseed_actions,
-        target_by_size=target_by_size,
-        active_counts_by_size=active_counts_by_size,
+    reseed_actions, cadence_limited_sizes = _apply_action_cadence_gate(
+        actions=reseed_actions,
+        target_counts_by_side={"buy": {}, "sell": dict(target_by_size)},
+        active_counts_by_side={
+            "buy": {},
+            "sell": {int(size): int(count) for size, count in active_counts_by_size.items()},
+        },
         store=store,
         market_id=market.market_id,
         clock=clock,
@@ -2791,6 +2801,14 @@ def _evaluate_and_execute_strategy(
             + int(offer_counts_by_side["sell"].get(size, 0))
             for size in sorted(tracked_sizes)
         }
+        target_counts_by_side = {
+            "buy": _strategy_target_counts_by_size(
+                _strategy_config_for_side(market=market, side="buy")
+            ),
+            "sell": _strategy_target_counts_by_size(
+                _strategy_config_for_side(market=market, side="sell")
+            ),
+        }
     else:
         active_offer_counts_by_size, offer_state_counts, active_unmapped_offer_ids = (
             _active_offer_counts_by_size(
@@ -2804,6 +2822,10 @@ def _evaluate_and_execute_strategy(
         offer_counts_by_side = {
             "buy": {size: 0 for size in sorted(tracked_sizes)},
             "sell": dict(active_offer_counts_by_size),
+        }
+        target_counts_by_side = {
+            "buy": {},
+            "sell": _strategy_target_counts_by_size(strategy_config),
         }
     _log_market_decision(
         market.market_id,
@@ -2829,6 +2851,14 @@ def _evaluate_and_execute_strategy(
             config=strategy_config,
             clock=now,
         )
+    strategy_actions, cadence_limited_sizes = _apply_action_cadence_gate(
+        actions=strategy_actions,
+        target_counts_by_side=target_counts_by_side,
+        active_counts_by_side=offer_counts_by_side,
+        store=store,
+        market_id=market.market_id,
+        clock=now,
+    )
     _log_market_decision(
         market.market_id,
         "strategy_evaluated",
@@ -2837,6 +2867,7 @@ def _evaluate_and_execute_strategy(
         offer_counts=active_offer_counts_by_size,
         xch_price_usd=xch_price_usd,
         action_count=len(strategy_actions),
+        cadence_limited_sizes=cadence_limited_sizes,
     )
     if market_mode != "two_sided":
         strategy_actions = _inject_reseed_action_if_no_active_offers(

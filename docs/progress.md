@@ -1,5 +1,23 @@
 # Progress Log
 
+## 2026-03-10 (daemon general strategy cadence gate + BYC buy-side finding)
+
+- Followed up on live `John-Deere` monitoring after the first short-TTL cadence patch:
+  - the initial gate only affected reseed injection,
+  - ordinary `strategy_actions_present` planning still emitted repeated `1`-offer posts for `eco1812020_sell_xch`,
+  - live Dexie samples continued to oscillate (`5 -> 4 -> 3 -> 2`) and remote audit events still showed grouped `1` executions from the main strategy path.
+- Generalized cadence limiting in `greenfloor/daemon/main.py`:
+  - the action gate now keys by `(side, size)` using recent successful `strategy_offer_execution` events,
+  - ordinary `below_target` actions are cadence-limited before execution, not only reseed-only actions,
+  - existing reseed gating now reuses the same helper so the behavior is consistent across both planning paths.
+- Added deterministic coverage in `tests/test_daemon_offer_execution.py` for:
+  - suppressing general strategy actions when the most recent same-side/same-size post is still inside the cadence window,
+  - reducing ordinary repeated `below_target` actions to a single post once the cadence window has elapsed.
+- Separate live finding on `byc_two_sided_wusdbc`:
+  - the daemon repeatedly observed `buy: 0 / sell: 3`, planned one buy-side action, and still finished cycles with `strategy_executed=0`,
+  - current local builder path explicitly skips buy-side offers with `offer_builder_failed:buy_side_requires_cloud_wallet_path`,
+  - this is a distinct two-sided BYC defect and is not fixed by the ECO/XCH cadence change.
+
 ## 2026-03-10 (daemon small-offer reseed cadence gating)
 
 - Hardened sell-only reseed behavior in `greenfloor/daemon/main.py` to reduce bursty `1`-offer reposting on short-TTL markets:
