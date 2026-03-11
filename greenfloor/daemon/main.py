@@ -851,6 +851,16 @@ def _is_stale_pending_visibility_offer(
     return (clock - created_at).total_seconds() > float(max_age_seconds)
 
 
+def _is_dexie_offer_missing_error(error: Exception) -> bool:
+    raw = str(error).strip()
+    if not raw:
+        return False
+    normalized = raw.lower()
+    return is_transient_dexie_visibility_404_error(raw) or (
+        "http error 404" in normalized and "not found" in normalized
+    )
+
+
 def _recent_executed_offer_ids(*, store: SqliteStore, market_id: str) -> set[str]:
     events = store.list_recent_audit_events(
         event_types=["strategy_offer_execution"],
@@ -2413,16 +2423,55 @@ def _reconcile_offer_states(
     # Refresh all of our watched offers individually. Dexie list snapshots can
     # lag status transitions; direct offer fetches make lifecycle state updates
     # deterministic for strategy planning.
+    missing_watched_offer_ids: set[str] = set()
     for watched_offer_id in sorted(our_offer_ids):
         try:
             single_payload = dexie.get_offer(watched_offer_id, timeout=5)
             single_offer = single_payload.get("offer") if isinstance(single_payload, dict) else None
             if isinstance(single_offer, dict):
                 augmented_by_id[watched_offer_id] = single_offer
-        except Exception:  # pragma: no cover - network dependent
+        except Exception as exc:  # pragma: no cover - network dependent
+            if _is_dexie_offer_missing_error(exc):
+                transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.EXPIRED)
+                missing_watched_offer_ids.add(watched_offer_id)
+                _log_market_decision(
+                    market.market_id,
+                    "offer_transition",
+                    offer_id=watched_offer_id,
+                    dexie_status=None,
+                    signal_source="dexie_get_offer_404",
+                    old_state=transition.old_state.value,
+                    new_state=transition.new_state.value,
+                    signal=transition.signal.value,
+                )
+                store.upsert_offer_state(
+                    offer_id=watched_offer_id,
+                    market_id=market.market_id,
+                    state=transition.new_state.value,
+                    last_seen_status=None,
+                )
+                store.add_audit_event(
+                    "offer_lifecycle_transition",
+                    {
+                        "offer_id": watched_offer_id,
+                        "market_id": market.market_id,
+                        "old_state": transition.old_state.value,
+                        "new_state": transition.new_state.value,
+                        "signal": transition.signal.value,
+                        "action": transition.action,
+                        "reason": transition.reason,
+                        "dexie_status": None,
+                        "signal_source": "dexie_get_offer_404",
+                        "dexie_error": str(exc),
+                        "coinset_tx_ids": [],
+                        "coinset_confirmed_tx_ids": [],
+                        "coinset_mempool_tx_ids": [],
+                    },
+                    market_id=market.market_id,
+                )
             continue
 
-    for beyond_offer_id in beyond_cap_ids:
+    for beyond_offer_id in beyond_cap_ids - missing_watched_offer_ids:
         try:
             single_payload = dexie.get_offer(beyond_offer_id, timeout=5)
             single_offer = single_payload.get("offer") if isinstance(single_payload, dict) else None

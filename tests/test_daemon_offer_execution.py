@@ -901,6 +901,73 @@ def test_active_offer_counts_keeps_pending_when_no_dexie_snapshot() -> None:
     assert unmapped == 0
 
 
+def test_reconcile_offer_states_expires_watched_offer_on_direct_dexie_404(tmp_path: Path) -> None:
+    db_path = tmp_path / "state.sqlite"
+    store = SqliteStore(db_path)
+    market = _market()
+    now = datetime.now(UTC)
+    try:
+        store.upsert_offer_state(
+            offer_id="offer-50",
+            market_id=market.market_id,
+            state="open",
+            last_seen_status=0,
+        )
+        store.add_audit_event(
+            "strategy_offer_execution",
+            {
+                "market_id": market.market_id,
+                "planned_count": 1,
+                "executed_count": 1,
+                "items": [
+                    {
+                        "offer_id": "offer-50",
+                        "size": 50,
+                        "side": "sell",
+                        "status": "executed",
+                        "reason": "dexie_post_success",
+                    }
+                ],
+            },
+            market_id=market.market_id,
+        )
+
+        class _FakeDexie:
+            def get_offers(self, offered: str, requested: str) -> list[dict[str, Any]]:
+                _ = offered, requested
+                return []
+
+            def get_offer(self, offer_id: str, *, timeout: int = 20) -> dict[str, Any]:
+                _ = offer_id, timeout
+                raise RuntimeError("HTTP Error 404: Not Found")
+
+        result = daemon_main._MarketCycleResult()
+        daemon_main._reconcile_offer_states(
+            market=market,
+            dexie=cast(Any, _FakeDexie()),
+            store=store,
+            now=now,
+            result=result,
+        )
+
+        rows = {
+            r["offer_id"]: r for r in store.list_offer_states(market_id=market.market_id, limit=20)
+        }
+        transitions = store.list_recent_audit_events(
+            event_types=["offer_lifecycle_transition"],
+            market_id=market.market_id,
+            limit=20,
+        )
+    finally:
+        store.close()
+
+    assert rows["offer-50"]["state"] == "expired"
+    assert rows["offer-50"]["last_seen_status"] is None
+    assert transitions[0]["payload"]["offer_id"] == "offer-50"
+    assert transitions[0]["payload"]["signal_source"] == "dexie_get_offer_404"
+    assert transitions[0]["payload"]["dexie_error"] == "HTTP Error 404: Not Found"
+
+
 def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:
     _set_watched_coin_ids_for_market(market_id="m-empty", coin_ids={"c" * 64})
     assert _match_watched_coin_ids(observed_coin_ids=["d" * 64]) == {}

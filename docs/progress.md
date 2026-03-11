@@ -1,5 +1,22 @@
 # Progress Log
 
+## 2026-03-10 (Dexie 404 reconciliation fix for stale ECO 50 offers)
+
+- Root cause confirmed on `John-Deere` for `eco1812020_sell_xch` not reposting its `50` rung:
+  - Dexie no longer returned several watched `50` offer ids,
+  - direct `DexieAdapter.get_offer(...)` on those ids returned `HTTP Error 404: Not Found`,
+  - daemon reconciliation left the prior `offer_state` rows at `open`, so strategy kept counting `50: 1` and suppressed replacement posting.
+- Fixed `greenfloor/daemon/main.py` reconciliation for watched offers that vanish from Dexie:
+  - direct watched-offer fetches that 404 now transition the local offer state to `expired`,
+  - ordinary direct-fetch network failures still remain non-terminal and do not clear active state.
+- Added deterministic regression coverage in `tests/test_daemon_offer_execution.py` for the exact stale-watch scenario:
+  - watched offer present in local state,
+  - Dexie list omits it,
+  - direct `get_offer()` 404 forces the row out of the active set.
+- Live remediation on `John-Deere`:
+  - identified stale open `50` offer rows for `eco1812020_sell_xch`,
+  - prepared cleanup so the market can resume posting replacement `50` offers immediately instead of waiting for manual DB intervention.
+
 ## 2026-03-05 (BYC scoped-query leak fail-closed mitigation + John-Deere validation)
 
 - Root cause for the remaining BYC coin-op failure on John-Deere was narrowed further:
