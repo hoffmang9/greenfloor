@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 from typing import Any, cast
 
@@ -8,6 +9,7 @@ from greenfloor.cloud_wallet_offer_runtime import (
     build_and_post_offer_cloud_wallet,
     cloud_wallet_create_offer_phase,
     cloud_wallet_post_offer_phase,
+    cloud_wallet_wait_offer_artifact_phase,
     is_transient_dexie_visibility_404_error,
     resolve_cloud_wallet_offer_asset_ids,
 )
@@ -204,6 +206,52 @@ def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path:
     assert payload["built_offers_preview"] == [
         {"offer_prefix": "offer1runtime", "offer_length": str(len("offer1runtime"))}
     ]
+
+
+def test_cloud_wallet_wait_offer_artifact_phase_prefers_signature_request_lookup() -> None:
+    calls = {"signature": 0, "generic": 0}
+
+    result = cloud_wallet_wait_offer_artifact_phase(
+        wallet=cast(CloudWalletAdapter, object()),
+        known_markers={"id:known"},
+        offer_request_started_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+        signature_request_id="sr-123",
+        timeout_seconds=30,
+        poll_offer_artifact_by_signature_request_fn=lambda **_kwargs: (
+            calls.__setitem__("signature", calls["signature"] + 1) or "offer1signature"
+        ),
+        poll_offer_artifact_until_available_fn=lambda **_kwargs: (
+            calls.__setitem__("generic", calls["generic"] + 1) or "offer1generic"
+        ),
+    )
+
+    assert result == "offer1signature"
+    assert calls == {"signature": 1, "generic": 0}
+
+
+def test_cloud_wallet_wait_offer_artifact_phase_falls_back_after_signature_timeout() -> None:
+    calls = {"signature": 0, "generic": 0}
+
+    def _signature_poll(**_kwargs: Any) -> str:
+        calls["signature"] += 1
+        raise RuntimeError("cloud_wallet_offer_artifact_timeout")
+
+    def _generic_poll(**_kwargs: Any) -> str:
+        calls["generic"] += 1
+        return "offer1generic"
+
+    result = cloud_wallet_wait_offer_artifact_phase(
+        wallet=cast(CloudWalletAdapter, object()),
+        known_markers={"id:known"},
+        offer_request_started_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+        signature_request_id="sr-123",
+        timeout_seconds=30,
+        poll_offer_artifact_by_signature_request_fn=_signature_poll,
+        poll_offer_artifact_until_available_fn=_generic_poll,
+    )
+
+    assert result == "offer1generic"
+    assert calls == {"signature": 2, "generic": 1}
 
 
 def test_cloud_wallet_post_offer_phase_fails_after_repeated_dexie_404_visibility() -> None:

@@ -1,5 +1,37 @@
 # Progress Log
 
+## 2026-03-11 (parallel reservation drain timing + John-Deere worker cap set to 3)
+
+- Diagnosed the remaining `eco1812020_sell_xch` underfill behavior on `John-Deere` as refill-drain latency in the daemon reservation queue rather than duplicate offer artifact assignment:
+  - strategy planning repeatedly produced full refill batches,
+  - reservation leases for queued items stayed active for long periods before worker pickup/release.
+- Refactored parallel Cloud Wallet strategy execution in `greenfloor/daemon/main.py` so reservation acquisition happens at worker execution time instead of pre-acquiring every queued submission.
+- Added `market_decision` timing instrumentation (same logger path used by `debug.log`) for:
+  - `parallel_offer_dispatch` (planned/queued/worker counts),
+  - `parallel_offer_queue_wait` (per-submission queue delay),
+  - `parallel_offer_reservation_acquired` / `parallel_offer_reservation_released` (acquire and hold timings).
+- Updated live `John-Deere` runtime config to `runtime.offer_parallelism_max_workers: 3`, deployed the patched daemon file, restarted, and verified new debug evidence:
+  - `parallel_offer_dispatch ... workers=3` for `eco1812020_sell_xch`,
+  - queue/lease timing lines now visible in `debug.log` for active refill cycles.
+
+## 2026-03-11 (removed ladder cadence throttling after live ECO/XCH watch)
+
+- Re-ran live `John-Deere` monitoring for `eco1812020_sell_xch` while treating Dexie as authoritative apart from normal latency:
+  - repeated Dexie / SQLite snapshots showed the market oscillating below target (`1` rung dropping from `2` to `1`) while the daemon still held recently-open local rows that had not reconciled out yet,
+  - current underfill was therefore not a Dexie-visibility bug; the daemon was simply refilling too slowly once multiple short-TTL offers expired near each other.
+- Removed the strategy/reseed cadence throttle in `greenfloor/daemon/main.py`:
+  - `_apply_action_cadence_gate(...)` now passes planned actions through unchanged instead of suppressing or shrinking repost batches,
+  - removed the now-dead recent-post cadence bookkeeping tied to `strategy_offer_execution` history.
+- Updated deterministic coverage in `tests/test_daemon_offer_execution.py` to assert the new passthrough behavior instead of the old cadence-limited cases.
+- Enabled `runtime.offer_parallelism_enabled` on `John-Deere` and re-watched the live market:
+  - the daemon now does plan the full missing burst immediately, and Cloud Wallet begins draining the burst in parallel,
+  - but the current submission ordering still prioritizes larger sizes first (`10` before `1`), so Dexie can remain underfilled on the critical small rung while the worker spends several minutes posting larger replacements,
+  - `greenfloor/cloud_wallet_offer_runtime.py` also writes per-offer `strategy_offer_execution` audit rows during posting, which explains the staggered DB evidence seen during live monitoring.
+- Fixed the refill ordering in `greenfloor/daemon/main.py`:
+  - `_expand_strategy_actions(...)` no longer re-sorts planned actions by descending size before submission,
+  - strategy/reseed action order now follows the planner's natural ascending ladder order so missing `1` offers are submitted before missing `10` offers.
+- Added deterministic regression coverage in `tests/test_daemon_offer_execution.py` for preserving strategy action order during expansion.
+
 ## 2026-03-10 (final-gap cadence bypass + BYC quote-balance confirmation)
 
 - Tightened the generalized short-TTL cadence gate in `greenfloor/daemon/main.py` after reviewing the live `eco1812020_sell_xch` underfill:

@@ -175,6 +175,33 @@ def test_execute_strategy_actions_dry_run_plans_without_posting() -> None:
     assert store.offer_states == []
 
 
+def test_expand_strategy_actions_preserves_strategy_order() -> None:
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=2,
+            pair="xch",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="below_target",
+        ),
+        PlannedAction(
+            size=10,
+            repeat=2,
+            pair="xch",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="below_target",
+        ),
+    ]
+
+    expanded = daemon_main._expand_strategy_actions(actions)
+
+    assert [action.size for action in expanded] == [1, 1, 10, 10]
+
+
 def test_execute_strategy_actions_skips_when_builder_skips(monkeypatch) -> None:
     import greenfloor.daemon.main as daemon_main
 
@@ -408,7 +435,7 @@ def test_inject_reseed_action_when_no_active_offers() -> None:
     )
 
     assert [action.size for action in actions] == [1, 10, 100]
-    assert [action.repeat for action in actions] == [2, 2, 1]
+    assert [action.repeat for action in actions] == [5, 2, 1]
     assert all(action.reason == "offer_size_gap_reseed" for action in actions)
 
 
@@ -475,7 +502,7 @@ def test_inject_reseed_action_fills_missing_sizes_when_recent_mempool_is_present
     )
 
     assert [action.size for action in actions] == [1, 10, 100]
-    assert [action.repeat for action in actions] == [2, 2, 1]
+    assert [action.repeat for action in actions] == [5, 2, 1]
     assert all(action.reason == "offer_size_gap_reseed" for action in actions)
 
 
@@ -504,11 +531,11 @@ def test_inject_reseed_action_when_only_mempool_offer_is_stale() -> None:
     )
 
     assert [action.size for action in actions] == [1, 10, 100]
-    assert [action.repeat for action in actions] == [2, 2, 1]
+    assert [action.repeat for action in actions] == [5, 2, 1]
     assert all(action.reason == "offer_size_gap_reseed" for action in actions)
 
 
-def test_inject_reseed_action_respects_recent_same_size_post_cadence() -> None:
+def test_inject_reseed_action_refills_missing_same_size_offers_immediately() -> None:
     store = _FakeStore()
     now = datetime.now(UTC)
     store.offer_states = [
@@ -541,11 +568,11 @@ def test_inject_reseed_action_respects_recent_same_size_post_cadence() -> None:
         clock=now,
     )
 
-    assert [action.size for action in actions] == [10, 100]
-    assert [action.repeat for action in actions] == [2, 1]
+    assert [action.size for action in actions] == [1, 10, 100]
+    assert [action.repeat for action in actions] == [3, 2, 1]
 
 
-def test_inject_reseed_action_allows_one_small_offer_after_cadence_window() -> None:
+def test_inject_reseed_action_is_not_limited_by_old_cadence_window() -> None:
     store = _FakeStore()
     now = datetime.now(UTC)
     store.offer_states = [
@@ -579,10 +606,10 @@ def test_inject_reseed_action_allows_one_small_offer_after_cadence_window() -> N
     )
 
     assert [action.size for action in actions] == [1, 10, 100]
-    assert [action.repeat for action in actions] == [1, 2, 1]
+    assert [action.repeat for action in actions] == [3, 2, 1]
 
 
-def test_apply_action_cadence_gate_limits_general_strategy_actions() -> None:
+def test_apply_action_cadence_gate_passes_through_general_strategy_actions() -> None:
     store = _FakeStore()
     now = datetime.now(UTC)
     store.audit_events = [
@@ -619,91 +646,24 @@ def test_apply_action_cadence_gate_limits_general_strategy_actions() -> None:
         clock=now,
     )
 
-    assert gated == []
-    assert blocked == [
-        {
-            "side": "sell",
-            "size": 1,
-            "requested_repeat": 2,
-            "target_count": 5,
-            "active_count": 3,
-            "spacing_seconds": 120,
-            "last_post_age_seconds": 60,
-        }
-    ]
+    assert gated == actions
+    assert blocked == []
 
 
-def test_apply_action_cadence_gate_reduces_general_strategy_repeat_to_one() -> None:
+def test_apply_action_cadence_gate_filters_zero_repeat_actions() -> None:
     store = _FakeStore()
     now = datetime.now(UTC)
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "created_at": (now - timedelta(minutes=4)).isoformat(),
-            "payload": {
-                "items": [
-                    {"offer_id": "stale-one", "size": 1, "side": "sell", "status": "executed"}
-                ]
-            },
-        }
-    ]
     actions = [
         PlannedAction(
             size=1,
-            repeat=2,
+            repeat=0,
             pair="xch",
             expiry_unit="minutes",
             expiry_value=10,
             cancel_after_create=True,
             reason="below_target",
             side="sell",
-        )
-    ]
-
-    gated, blocked = daemon_main._apply_action_cadence_gate(
-        actions=actions,
-        target_counts_by_side={"buy": {}, "sell": {1: 5}},
-        active_counts_by_side={"buy": {}, "sell": {1: 3}},
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-    )
-
-    assert len(gated) == 1
-    assert gated[0].size == 1
-    assert gated[0].repeat == 1
-    assert gated[0].reason == "below_target"
-    assert blocked == [
-        {
-            "side": "sell",
-            "size": 1,
-            "requested_repeat": 2,
-            "allowed_repeat": 1,
-            "target_count": 5,
-            "active_count": 3,
-            "spacing_seconds": 120,
-            "last_post_age_seconds": 240,
-        }
-    ]
-
-
-def test_apply_action_cadence_gate_does_not_block_final_missing_offer() -> None:
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "created_at": (now - timedelta(seconds=30)).isoformat(),
-            "payload": {
-                "items": [
-                    {"offer_id": "recent-one", "size": 1, "side": "sell", "status": "executed"}
-                ]
-            },
-        }
-    ]
-    actions = [
+        ),
         PlannedAction(
             size=1,
             repeat=1,
@@ -713,7 +673,7 @@ def test_apply_action_cadence_gate_does_not_block_final_missing_offer() -> None:
             cancel_after_create=True,
             reason="below_target",
             side="sell",
-        )
+        ),
     ]
 
     gated, blocked = daemon_main._apply_action_cadence_gate(
@@ -726,7 +686,6 @@ def test_apply_action_cadence_gate_does_not_block_final_missing_offer() -> None:
     )
 
     assert len(gated) == 1
-    assert gated[0].size == 1
     assert gated[0].repeat == 1
     assert blocked == []
 
@@ -1399,7 +1358,7 @@ def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
     assert result["items"][0]["offer_id"] == "offer-fallback-pending"
 
 
-def test_execute_strategy_actions_posts_larger_sizes_first(monkeypatch) -> None:
+def test_execute_strategy_actions_preserves_planned_size_order(monkeypatch) -> None:
     daemon_main._POST_COOLDOWN_UNTIL.clear()
     seen_sizes: list[int] = []
 
@@ -1457,7 +1416,7 @@ def test_execute_strategy_actions_posts_larger_sizes_first(monkeypatch) -> None:
     )
 
     assert result["executed_count"] == 3
-    assert seen_sizes == [100, 10, 1]
+    assert seen_sizes == [1, 10, 100]
 
 
 def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(monkeypatch) -> None:

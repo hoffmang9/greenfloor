@@ -1931,19 +1931,34 @@ def cloud_wallet_wait_offer_artifact_phase(
     if poll_offer_artifact_by_signature_request_fn is None:
         poll_offer_artifact_by_signature_request_fn = poll_offer_artifact_by_signature_request
     strict_timeout = max(15, int(timeout_seconds))
-    try:
-        return poll_offer_artifact_until_available_fn(
-            wallet=wallet,
-            known_markers=known_markers,
-            timeout_seconds=strict_timeout,
-            min_created_at=offer_request_started_at,
-            require_open_state=False,
-            states=("OPEN", "PENDING"),
-            prefer_newest=True,
-        )
-    except RuntimeError as exc:
-        if str(exc) != "cloud_wallet_offer_artifact_timeout":
-            raise
+    if signature_request_id:
+        try:
+            return poll_offer_artifact_by_signature_request_fn(
+                wallet=wallet,
+                signature_request_id=signature_request_id,
+                known_markers=known_markers,
+                timeout_seconds=strict_timeout,
+                min_created_at=offer_request_started_at,
+            )
+        except RuntimeError:
+            # Signature-request scoped lookup is preferred when supported, but
+            # not all test stubs or adapter variants implement this path.
+            # Fall back to generic wallet offer polling in those cases.
+            pass
+    else:
+        try:
+            return poll_offer_artifact_until_available_fn(
+                wallet=wallet,
+                known_markers=known_markers,
+                timeout_seconds=strict_timeout,
+                min_created_at=offer_request_started_at,
+                require_open_state=False,
+                states=("OPEN", "PENDING"),
+                prefer_newest=True,
+            )
+        except RuntimeError as exc:
+            if str(exc) != "cloud_wallet_offer_artifact_timeout":
+                raise
     extended_timeout = max(45, strict_timeout * 3)
     if signature_request_id:
         try:

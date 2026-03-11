@@ -683,8 +683,6 @@ _ACTIVE_OFFER_STATES_FOR_RESEED = {
 _RESEED_MEMPOOL_MAX_AGE_SECONDS = 3 * 60
 _PENDING_VISIBILITY_RECHECK_MAX_AGE_SECONDS = 2 * 60
 _PENDING_VISIBILITY_REASON = "cloud_wallet_post_success_dexie_visibility_pending"
-_RESEED_CADENCE_MIN_TARGET_COUNT = 3
-_RESEED_CADENCE_BOOTSTRAP_MAX_REPEAT = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -862,49 +860,6 @@ def _expiry_seconds_for_action(action: PlannedAction) -> int | None:
     return value * unit_seconds
 
 
-def _latest_successful_offer_created_at_by_side_and_size(
-    *, store: SqliteStore, market_id: str
-) -> dict[tuple[str, int], datetime]:
-    events = store.list_recent_audit_events(
-        event_types=["strategy_offer_execution"],
-        market_id=market_id,
-        limit=1500,
-    )
-    latest_by_key: dict[tuple[str, int], datetime] = {}
-    seen_offer_ids: set[str] = set()
-    for event in events:
-        created_at = _parse_event_created_at(event.get("created_at"))
-        if created_at is None:
-            continue
-        payload = event.get("payload")
-        if not isinstance(payload, dict):
-            continue
-        items = payload.get("items")
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            if str(item.get("status", "")).strip().lower() != "executed":
-                continue
-            offer_id = str(item.get("offer_id", "")).strip()
-            if not offer_id or offer_id in seen_offer_ids:
-                continue
-            seen_offer_ids.add(offer_id)
-            try:
-                size = int(item.get("size") or 0)
-            except (TypeError, ValueError):
-                continue
-            if size <= 0:
-                continue
-            side = _normalize_offer_side(item.get("side"))
-            key = (side, size)
-            if key in latest_by_key:
-                continue
-            latest_by_key[key] = created_at
-    return latest_by_key
-
-
 def _apply_action_cadence_gate(
     *,
     actions: list[PlannedAction],
@@ -914,120 +869,9 @@ def _apply_action_cadence_gate(
     market_id: str,
     clock: datetime,
 ) -> tuple[list[PlannedAction], list[dict[str, Any]]]:
-    latest_by_key = _latest_successful_offer_created_at_by_side_and_size(
-        store=store,
-        market_id=market_id,
-    )
-    gated_actions: list[PlannedAction] = []
-    blocked_sizes: list[dict[str, Any]] = []
-    for action in actions:
-        side = _normalize_offer_side(getattr(action, "side", "sell"))
-        size = int(action.size)
-        repeat = max(0, int(action.repeat))
-        target_count = int(target_counts_by_side.get(side, {}).get(size, 0))
-        if repeat <= 0:
-            continue
-        if target_count < _RESEED_CADENCE_MIN_TARGET_COUNT:
-            gated_actions.append(action)
-            continue
-        expiry_seconds = _expiry_seconds_for_action(action)
-        if expiry_seconds is None or expiry_seconds <= 0:
-            gated_actions.append(action)
-            continue
-        spacing_seconds = max(1, expiry_seconds // target_count)
-        active_count = int(active_counts_by_side.get(side, {}).get(size, 0))
-        final_gap = max(0, target_count - active_count)
-        last_post_at = latest_by_key.get((side, size))
-        allowed_repeat = repeat
-        last_post_age_seconds: int | None = None
-        if final_gap <= 1:
-            gated_actions.append(
-                PlannedAction(
-                    size=size,
-                    repeat=1,
-                    pair=action.pair,
-                    expiry_unit=action.expiry_unit,
-                    expiry_value=int(action.expiry_value),
-                    cancel_after_create=action.cancel_after_create,
-                    reason=action.reason,
-                    target_spread_bps=action.target_spread_bps,
-                    side=getattr(action, "side", "sell"),
-                )
-            )
-            if repeat != 1:
-                blocked_sizes.append(
-                    {
-                        "side": side,
-                        "size": size,
-                        "requested_repeat": repeat,
-                        "allowed_repeat": 1,
-                        "target_count": target_count,
-                        "active_count": active_count,
-                        "spacing_seconds": spacing_seconds,
-                        "last_post_age_seconds": None,
-                        "reason": "final_gap_bypass",
-                    }
-                )
-            continue
-        if last_post_at is None:
-            allowed_repeat = (
-                min(repeat, _RESEED_CADENCE_BOOTSTRAP_MAX_REPEAT)
-                if active_count <= 0
-                else min(repeat, 1)
-            )
-        else:
-            age_seconds = max(0.0, (clock - last_post_at).total_seconds())
-            last_post_age_seconds = int(age_seconds)
-            if age_seconds < float(spacing_seconds):
-                allowed_repeat = 0
-            else:
-                allowed_repeat = (
-                    min(repeat, _RESEED_CADENCE_BOOTSTRAP_MAX_REPEAT)
-                    if active_count <= 0
-                    else min(repeat, 1)
-                )
-        if allowed_repeat <= 0:
-            blocked_sizes.append(
-                {
-                    "side": side,
-                    "size": size,
-                    "requested_repeat": repeat,
-                    "target_count": target_count,
-                    "active_count": active_count,
-                    "spacing_seconds": spacing_seconds,
-                    "last_post_age_seconds": last_post_age_seconds,
-                }
-            )
-            continue
-        if allowed_repeat == repeat:
-            gated_actions.append(action)
-            continue
-        gated_actions.append(
-            PlannedAction(
-                size=size,
-                repeat=allowed_repeat,
-                pair=action.pair,
-                expiry_unit=action.expiry_unit,
-                expiry_value=int(action.expiry_value),
-                cancel_after_create=action.cancel_after_create,
-                reason=action.reason,
-                target_spread_bps=action.target_spread_bps,
-                side=getattr(action, "side", "sell"),
-            )
-        )
-        blocked_sizes.append(
-            {
-                "side": side,
-                "size": size,
-                "requested_repeat": repeat,
-                "allowed_repeat": allowed_repeat,
-                "target_count": target_count,
-                "active_count": active_count,
-                "spacing_seconds": spacing_seconds,
-                "last_post_age_seconds": last_post_age_seconds,
-            }
-        )
-    return gated_actions, blocked_sizes
+    _ = target_counts_by_side, active_counts_by_side, store, market_id, clock
+    passthrough_actions = [action for action in actions if int(action.repeat) > 0]
+    return passthrough_actions, []
 
 
 def _is_stale_pending_visibility_offer(
@@ -2185,9 +2029,8 @@ def _execute_single_local_action(
 
 
 def _expand_strategy_actions(strategy_actions: list[Any]) -> list[Any]:
-    ordered_actions = sorted(strategy_actions, key=lambda action: int(action.size), reverse=True)
     expanded_actions: list[Any] = []
-    for action in ordered_actions:
+    for action in strategy_actions:
         expanded_actions.extend(action for _ in range(int(action.repeat)))
     return expanded_actions
 
@@ -2236,7 +2079,6 @@ def _single_input_preferred_skip_reason(
 
 def _prepare_parallel_cloud_wallet_submission(
     *,
-    program: Any,
     market: Any,
     action: Any,
     cloud_wallet: CloudWalletAdapter,
@@ -2244,8 +2086,7 @@ def _prepare_parallel_cloud_wallet_submission(
     resolved_quote_asset_id: str,
     resolved_xch_asset_id: str,
     fee_amount_mojos: int,
-    reservation_coordinator: AssetReservationCoordinator,
-) -> tuple[str | None, dict[str, Any] | None]:
+) -> tuple[dict[str, int] | None, dict[str, int] | None, dict[str, Any] | None]:
     requested_amounts = _reservation_request_for_cloud_offer_with_assets(
         market=market,
         action=action,
@@ -2255,7 +2096,11 @@ def _prepare_parallel_cloud_wallet_submission(
         fee_amount_mojos=fee_amount_mojos,
     )
     if not requested_amounts:
-        return None, _cloud_wallet_skip_item(action=action, reason="reservation_invalid_request")
+        return (
+            None,
+            None,
+            _cloud_wallet_skip_item(action=action, reason="reservation_invalid_request"),
+        )
     spendable_profiles = _cloud_wallet_spendable_profiles_by_asset(
         wallet=cloud_wallet,
         asset_ids=set(requested_amounts.keys()),
@@ -2268,19 +2113,8 @@ def _prepare_parallel_cloud_wallet_submission(
         spendable_profiles=spendable_profiles,
     )
     if single_input_skip_reason:
-        return None, _cloud_wallet_skip_item(action=action, reason=single_input_skip_reason)
-    acquired = reservation_coordinator.try_acquire(
-        market_id=str(market.market_id),
-        wallet_id=str(program.cloud_wallet_vault_id).strip(),
-        requested_amounts=requested_amounts,
-        available_amounts=available_amounts,
-    )
-    if not acquired.ok or not acquired.reservation_id:
-        return None, _cloud_wallet_skip_item(
-            action=action,
-            reason=str(acquired.error or "reservation_rejected"),
-        )
-    return str(acquired.reservation_id), None
+        return None, None, _cloud_wallet_skip_item(action=action, reason=single_input_skip_reason)
+    return requested_amounts, available_amounts, None
 
 
 def _execute_strategy_actions(
@@ -2323,37 +2157,97 @@ def _execute_strategy_actions(
                 )
             )
             fee_amount_mojos = _estimate_cloud_offer_fee_reservation_mojos(program=program)
-            submissions: list[tuple[int, Any, str]] = []
+            # Health-check the coordinator once per batch before dispatching.
+            # Using an empty request avoids any lease writes while still
+            # surfacing storage/runtime failures early so we can fail over.
+            reservation_coordinator.try_acquire(
+                market_id=str(market.market_id),
+                wallet_id=str(program.cloud_wallet_vault_id).strip(),
+                requested_amounts={},
+                available_amounts={},
+            )
+            submissions: list[tuple[int, Any, dict[str, int], dict[str, int]]] = []
             for submit_index, action in enumerate(expanded_actions):
-                reservation_id, skip_item = _prepare_parallel_cloud_wallet_submission(
-                    program=program,
-                    market=market,
-                    action=action,
-                    cloud_wallet=cloud_wallet,
-                    resolved_base_asset_id=resolved_base_asset_id,
-                    resolved_quote_asset_id=resolved_quote_asset_id,
-                    resolved_xch_asset_id=resolved_xch_asset_id,
-                    fee_amount_mojos=fee_amount_mojos,
-                    reservation_coordinator=reservation_coordinator,
+                requested_amounts, available_amounts, skip_item = (
+                    _prepare_parallel_cloud_wallet_submission(
+                        market=market,
+                        action=action,
+                        cloud_wallet=cloud_wallet,
+                        resolved_base_asset_id=resolved_base_asset_id,
+                        resolved_quote_asset_id=resolved_quote_asset_id,
+                        resolved_xch_asset_id=resolved_xch_asset_id,
+                        fee_amount_mojos=fee_amount_mojos,
+                    )
                 )
                 if skip_item is not None:
                     items.append(skip_item)
                     continue
-                assert reservation_id is not None
-                submissions.append((submit_index, action, reservation_id))
+                assert requested_amounts is not None
+                assert available_amounts is not None
+                submissions.append((submit_index, action, requested_amounts, available_amounts))
 
             if submissions:
+                coordinator = reservation_coordinator
+                assert coordinator is not None
+                wallet_id = str(program.cloud_wallet_vault_id).strip()
                 max_workers = min(
                     len(submissions),
                     max(1, int(getattr(program, "runtime_offer_parallelism_max_workers", 4))),
                 )
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-                    future_to_submission: dict[
-                        concurrent.futures.Future[dict[str, Any]], tuple[int, str]
-                    ] = {}
-                    for submit_index, action, reservation_id in submissions:
-                        future = pool.submit(
-                            _execute_single_cloud_wallet_action,
+                _log_market_decision(
+                    str(getattr(market, "market_id", "")),
+                    "parallel_offer_dispatch",
+                    planned_count=len(expanded_actions),
+                    queued_count=len(submissions),
+                    workers=max_workers,
+                )
+
+                def _run_parallel_submission(
+                    *,
+                    submit_index: int,
+                    action: Any,
+                    requested_amounts: dict[str, int],
+                    available_amounts: dict[str, int],
+                    queued_at_monotonic: float,
+                ) -> dict[str, Any]:
+                    queue_wait_ms = int((time.monotonic() - queued_at_monotonic) * 1000)
+                    _log_market_decision(
+                        str(getattr(market, "market_id", "")),
+                        "parallel_offer_queue_wait",
+                        submit_index=submit_index,
+                        size=int(getattr(action, "size", 0)),
+                        side=_normalize_offer_side(getattr(action, "side", "sell")),
+                        queue_wait_ms=queue_wait_ms,
+                    )
+                    acquire_started = time.monotonic()
+                    acquired = coordinator.try_acquire(
+                        market_id=str(market.market_id),
+                        wallet_id=wallet_id,
+                        requested_amounts=requested_amounts,
+                        available_amounts=available_amounts,
+                    )
+                    acquire_ms = int((time.monotonic() - acquire_started) * 1000)
+                    if not acquired.ok or not acquired.reservation_id:
+                        return {
+                            **_cloud_wallet_skip_item(
+                                action=action,
+                                reason=str(acquired.error or "reservation_rejected"),
+                            ),
+                            "queue_wait_ms": queue_wait_ms,
+                            "reservation_acquire_ms": acquire_ms,
+                        }
+                    reservation_id = str(acquired.reservation_id)
+                    reserved_at = time.monotonic()
+                    _log_market_decision(
+                        str(getattr(market, "market_id", "")),
+                        "parallel_offer_reservation_acquired",
+                        submit_index=submit_index,
+                        reservation_id=reservation_id,
+                        queue_wait_ms=queue_wait_ms,
+                        reservation_acquire_ms=acquire_ms,
+                    )
+                    try:
+                        item = _execute_single_cloud_wallet_action(
                             program=program,
                             market=market,
                             action=action,
@@ -2361,10 +2255,50 @@ def _execute_strategy_actions(
                             runtime_dry_run=runtime_dry_run,
                             dexie=dexie,
                         )
-                        future_to_submission[future] = (submit_index, reservation_id)
+                    except Exception as exc:
+                        item = {
+                            "size": 0,
+                            "side": "sell",
+                            "status": "skipped",
+                            "reason": f"parallel_offer_worker_error:{exc}",
+                            "offer_id": None,
+                        }
+                    release_status = (
+                        "released_success"
+                        if str(item.get("status", "")).strip().lower() == "executed"
+                        else "released_failed"
+                    )
+                    coordinator.release(reservation_id=reservation_id, status=release_status)
+                    reservation_hold_ms = int((time.monotonic() - reserved_at) * 1000)
+                    _log_market_decision(
+                        str(getattr(market, "market_id", "")),
+                        "parallel_offer_reservation_released",
+                        submit_index=submit_index,
+                        reservation_id=reservation_id,
+                        release_status=release_status,
+                        reservation_hold_ms=reservation_hold_ms,
+                    )
+                    item["reservation_id"] = reservation_id
+                    item["queue_wait_ms"] = queue_wait_ms
+                    item["reservation_acquire_ms"] = acquire_ms
+                    item["reservation_hold_ms"] = reservation_hold_ms
+                    return item
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    future_to_submission: dict[concurrent.futures.Future[dict[str, Any]], int] = {}
+                    for submit_index, action, requested_amounts, available_amounts in submissions:
+                        future = pool.submit(
+                            _run_parallel_submission,
+                            submit_index=submit_index,
+                            action=action,
+                            requested_amounts=requested_amounts,
+                            available_amounts=available_amounts,
+                            queued_at_monotonic=time.monotonic(),
+                        )
+                        future_to_submission[future] = submit_index
                     submitted_items: list[tuple[int, dict[str, Any]]] = []
                     for future in concurrent.futures.as_completed(future_to_submission):
-                        submit_index, reservation_id = future_to_submission[future]
+                        submit_index = future_to_submission[future]
                         try:
                             item = future.result()
                         except Exception as exc:
@@ -2375,15 +2309,6 @@ def _execute_strategy_actions(
                                 "reason": f"parallel_offer_worker_error:{exc}",
                                 "offer_id": None,
                             }
-                        release_status = (
-                            "released_success"
-                            if str(item.get("status", "")).strip().lower() == "executed"
-                            else "released_failed"
-                        )
-                        reservation_coordinator.release(
-                            reservation_id=reservation_id, status=release_status
-                        )
-                        item["reservation_id"] = reservation_id
                         submitted_items.append((submit_index, item))
                     for _, item in sorted(submitted_items, key=lambda pair: pair[0]):
                         if item.get("status") == "executed":
