@@ -2498,6 +2498,7 @@ def _cloud_wallet_post_offer_phase(
     expected_offered_symbol: str,
     expected_requested_asset_id: str,
     expected_requested_symbol: str,
+    sleep_fn: collections.abc.Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
     return _shared_cloud_wallet_post_offer_phase(
         publish_venue=publish_venue,
@@ -2513,6 +2514,7 @@ def _cloud_wallet_post_offer_phase(
         expected_requested_symbol=expected_requested_symbol,
         post_dexie_offer_with_invalid_offer_retry_fn=_post_dexie_offer_with_invalid_offer_retry,
         verify_dexie_offer_visible_by_id_fn=_verify_dexie_offer_visible_by_id,
+        sleep_fn=sleep_fn,
     )
 
 

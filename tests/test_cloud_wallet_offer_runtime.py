@@ -206,9 +206,49 @@ def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path:
     ]
 
 
-def test_cloud_wallet_post_offer_phase_tolerates_transient_dexie_404_visibility() -> None:
+def test_cloud_wallet_post_offer_phase_fails_after_repeated_dexie_404_visibility() -> None:
     class _Dexie:
         pass
+
+    post_attempts: list[int] = []
+    result = cloud_wallet_post_offer_phase(
+        publish_venue="dexie",
+        dexie=cast(Any, _Dexie()),
+        splash=None,
+        offer_text="offer1abc",
+        drop_only=True,
+        claim_rewards=False,
+        market=object(),
+        expected_offered_asset_id="asset_a",
+        expected_offered_symbol="A",
+        expected_requested_asset_id="asset_b",
+        expected_requested_symbol="B",
+        post_dexie_offer_with_invalid_offer_retry_fn=lambda **_kwargs: (
+            post_attempts.append(1) or {"success": True, "id": "offer-123"}
+        ),
+        verify_dexie_offer_visible_by_id_fn=lambda **_kwargs: (
+            "dexie_get_offer_error:HTTP Error 404: Not Found"
+        ),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["success"] is False
+    assert result["id"] == "offer-123"
+    assert "dexie_get_offer_error:HTTP Error 404: Not Found" in str(result["error"])
+    assert len(post_attempts) == 3
+
+
+def test_cloud_wallet_post_offer_phase_retries_transient_dexie_404_until_visible() -> None:
+    class _Dexie:
+        pass
+
+    verify_calls = {"count": 0}
+
+    def _verify(**_kwargs: Any) -> str | None:
+        verify_calls["count"] += 1
+        if verify_calls["count"] < 3:
+            return "dexie_get_offer_error:HTTP Error 404: Not Found"
+        return None
 
     result = cloud_wallet_post_offer_phase(
         publish_venue="dexie",
@@ -226,13 +266,12 @@ def test_cloud_wallet_post_offer_phase_tolerates_transient_dexie_404_visibility(
             "success": True,
             "id": "offer-123",
         },
-        verify_dexie_offer_visible_by_id_fn=lambda **_kwargs: (
-            "dexie_get_offer_error:HTTP Error 404: Not Found"
-        ),
+        verify_dexie_offer_visible_by_id_fn=_verify,
+        sleep_fn=lambda _seconds: None,
     )
 
-    assert result["success"] is False
-    assert "dexie_get_offer_error:HTTP Error 404: Not Found" in str(result["error"])
+    assert result == {"success": True, "id": "offer-123"}
+    assert verify_calls["count"] == 3
 
 
 def test_is_transient_dexie_visibility_404_error_matches_common_404_shapes() -> None:

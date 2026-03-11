@@ -2594,6 +2594,7 @@ class _MarketCycleResult:
 def _reconcile_offer_states(
     *,
     market: Any,
+    network: str,
     dexie: DexieAdapter,
     store: SqliteStore,
     now: datetime,
@@ -2606,13 +2607,18 @@ def _reconcile_offer_states(
     beyond-cap individually-fetched offers.
     """
     dexie_fetch_error: str | None = None
+    dexie_offered_asset = str(market.base_asset).strip()
+    dexie_requested_asset = _resolve_quote_asset_for_offer(
+        quote_asset=str(market.quote_asset),
+        network=network,
+    )
     try:
-        offers = dexie.get_offers(market.base_asset, market.quote_asset)
+        offers = dexie.get_offers(dexie_offered_asset, dexie_requested_asset)
         _log_market_decision(
             market.market_id,
             "dexie_offers_fetched",
-            offered=market.base_asset,
-            requested=market.quote_asset,
+            offered=dexie_offered_asset,
+            requested=dexie_requested_asset,
             count=len(offers),
         )
     except Exception as exc:  # pragma: no cover - network dependent
@@ -3812,6 +3818,7 @@ def _process_single_market(
 
     _, dexie_size_by_offer_id, _, offers = _reconcile_offer_states(
         market=market,
+        network=program.app_network,
         dexie=dexie,
         store=store,
         now=now,

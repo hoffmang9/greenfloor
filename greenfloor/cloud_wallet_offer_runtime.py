@@ -34,6 +34,8 @@ from greenfloor.storage.sqlite import SqliteStore
 _MANAGER_SERVICE_NAME = "manager"
 _DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS = 4
 _DEXIE_INVALID_OFFER_RETRY_INITIAL_DELAY_SECONDS = 1.0
+_DEXIE_VISIBILITY_POST_MAX_ATTEMPTS = 3
+_DEXIE_VISIBILITY_POST_DELAY_SECONDS = 2.0
 _runtime_logger = logging.getLogger("greenfloor.manager")
 _JSON_OUTPUT_COMPACT = False
 
@@ -1994,21 +1996,29 @@ def cloud_wallet_post_offer_phase(
     post_dexie_offer_with_invalid_offer_retry_fn: collections.abc.Callable[..., dict[str, Any]]
     | None = None,
     verify_dexie_offer_visible_by_id_fn: collections.abc.Callable[..., str | None] | None = None,
+    sleep_fn: collections.abc.Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
     _ = market
     if post_dexie_offer_with_invalid_offer_retry_fn is None:
         post_dexie_offer_with_invalid_offer_retry_fn = post_dexie_offer_with_invalid_offer_retry
     if verify_dexie_offer_visible_by_id_fn is None:
         verify_dexie_offer_visible_by_id_fn = verify_dexie_offer_visible_by_id
+    if sleep_fn is None:
+        sleep_fn = time.sleep
     if publish_venue == "dexie":
         assert dexie is not None
-        result = post_dexie_offer_with_invalid_offer_retry_fn(
-            dexie=dexie,
-            offer_text=offer_text,
-            drop_only=drop_only,
-            claim_rewards=claim_rewards,
-        )
-        if bool(result.get("success", False)):
+        last_result: dict[str, Any] = {}
+        last_visibility_error = ""
+        for attempt in range(1, _DEXIE_VISIBILITY_POST_MAX_ATTEMPTS + 1):
+            result = post_dexie_offer_with_invalid_offer_retry_fn(
+                dexie=dexie,
+                offer_text=offer_text,
+                drop_only=drop_only,
+                claim_rewards=claim_rewards,
+            )
+            last_result = dict(result)
+            if not bool(result.get("success", False)):
+                return result
             posted_offer_id = str(result.get("id", "")).strip()
             visibility_error = verify_dexie_offer_visible_by_id_fn(
                 dexie=dexie,
@@ -2018,13 +2028,22 @@ def cloud_wallet_post_offer_phase(
                 expected_requested_asset_id=str(expected_requested_asset_id),
                 expected_requested_symbol=str(expected_requested_symbol),
             )
-            if visibility_error:
+            if not visibility_error:
+                return result
+            last_visibility_error = str(visibility_error)
+            if not is_transient_dexie_visibility_404_error(last_visibility_error):
                 return {
                     **result,
                     "success": False,
-                    "error": visibility_error,
+                    "error": last_visibility_error,
                 }
-        return result
+            if attempt < _DEXIE_VISIBILITY_POST_MAX_ATTEMPTS:
+                sleep_fn(_DEXIE_VISIBILITY_POST_DELAY_SECONDS)
+        return {
+            **last_result,
+            "success": False,
+            "error": (last_visibility_error or "dexie_offer_not_visible_after_publish"),
+        }
     assert splash is not None
     return splash.post_offer(offer_text)
 
@@ -2257,9 +2276,9 @@ def build_and_post_offer_cloud_wallet(
             claim_rewards=claim_rewards,
             market=market,
             expected_offered_asset_id=(
-                str(market.quote_asset)
+                str(resolved_quote_asset_id)
                 if str(create_phase.get("side", "sell")).strip().lower() == "buy"
-                else str(market.base_asset)
+                else str(resolved_base_asset_id)
             ),
             expected_offered_symbol=(
                 str(getattr(market, "quote_asset", ""))
@@ -2267,9 +2286,9 @@ def build_and_post_offer_cloud_wallet(
                 else str(getattr(market, "base_symbol", ""))
             ),
             expected_requested_asset_id=(
-                str(market.base_asset)
+                str(resolved_base_asset_id)
                 if str(create_phase.get("side", "sell")).strip().lower() == "buy"
-                else str(market.quote_asset)
+                else str(resolved_quote_asset_id)
             ),
             expected_requested_symbol=(
                 str(getattr(market, "base_symbol", ""))

@@ -5131,7 +5131,7 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_offer_not_visible(
 
         @staticmethod
         def get_offer(_offer_id: str) -> dict[str, object]:
-            raise RuntimeError("dexie_http_error:404")
+            raise RuntimeError("dexie_http_error:500")
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
@@ -6530,3 +6530,44 @@ def test_cloud_wallet_post_offer_phase_verifies_dexie_visibility(monkeypatch) ->
     )
     assert result["success"] is False
     assert "dexie_offer_not_visible_after_publish" in str(result["error"])
+
+
+def test_cloud_wallet_post_offer_phase_fails_after_repeated_transient_dexie_404(
+    monkeypatch,
+) -> None:
+    class _Dexie:
+        pass
+
+    dexie = _Dexie()
+    post_calls = {"count": 0}
+    monkeypatch.setattr(
+        manager_mod,
+        "_post_dexie_offer_with_invalid_offer_retry",
+        lambda **_kwargs: (
+            post_calls.__setitem__("count", post_calls["count"] + 1)
+            or {"success": True, "id": "offer-1"}
+        ),
+    )
+    monkeypatch.setattr(
+        manager_mod,
+        "_verify_dexie_offer_visible_by_id",
+        lambda **_kwargs: "dexie_get_offer_error:HTTP Error 404: Not Found",
+    )
+    market = type("Market", (), {"base_asset": "asset"})()
+    result = manager_mod._cloud_wallet_post_offer_phase(
+        publish_venue="dexie",
+        dexie=cast(Any, dexie),
+        splash=None,
+        offer_text="offer1abc",
+        drop_only=False,
+        claim_rewards=False,
+        market=market,
+        expected_offered_asset_id="asset",
+        expected_offered_symbol="asset",
+        expected_requested_asset_id="xch",
+        expected_requested_symbol="xch",
+        sleep_fn=lambda _seconds: None,
+    )
+    assert result["success"] is False
+    assert "404" in str(result["error"])
+    assert post_calls["count"] == 3

@@ -1167,6 +1167,7 @@ def test_reconcile_offer_states_expires_watched_offer_on_direct_dexie_404(tmp_pa
         result = daemon_main._MarketCycleResult()
         daemon_main._reconcile_offer_states(
             market=market,
+            network="mainnet",
             dexie=cast(Any, _FakeDexie()),
             store=store,
             now=now,
@@ -1189,6 +1190,51 @@ def test_reconcile_offer_states_expires_watched_offer_on_direct_dexie_404(tmp_pa
     assert transitions[0]["payload"]["offer_id"] == "offer-50"
     assert transitions[0]["payload"]["signal_source"] == "dexie_get_offer_404"
     assert transitions[0]["payload"]["dexie_error"] == "HTTP Error 404: Not Found"
+
+
+def test_reconcile_offer_states_resolves_quote_asset_before_dexie_fetch(
+    monkeypatch, tmp_path: Path
+) -> None:
+    store = daemon_main.SqliteStore(tmp_path / "state.db")
+    market = _market()
+    market.quote_asset = "wUSDC.b"
+    cats = tmp_path / "cats.yaml"
+    cats.write_text(
+        "\n".join(
+            [
+                "cats:",
+                "  - base_symbol: wUSDC.b",
+                "    asset_id: fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(daemon_main, "_default_cats_config_path", lambda: cats)
+    captured: dict[str, str] = {}
+
+    class _FakeDexie:
+        def get_offers(self, offered: str, requested: str) -> list[dict[str, Any]]:
+            captured["offered"] = offered
+            captured["requested"] = requested
+            return []
+
+    try:
+        result = daemon_main._MarketCycleResult()
+        daemon_main._reconcile_offer_states(
+            market=market,
+            network="mainnet",
+            dexie=cast(Any, _FakeDexie()),
+            store=store,
+            now=datetime.now(UTC),
+            result=result,
+        )
+    finally:
+        store.close()
+
+    assert captured == {
+        "offered": "asset",
+        "requested": "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d",
+    }
 
 
 def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:
