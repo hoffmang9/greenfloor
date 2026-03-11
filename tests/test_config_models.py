@@ -203,6 +203,14 @@ def test_parse_markets_config_defaults_cat_unit_multipliers_to_1000() -> None:
     assert out.markets[0].pricing["quote_unit_mojo_multiplier"] == 1000
 
 
+def test_parse_markets_config_defaults_xch_quote_multiplier_to_one_trillion() -> None:
+    row = _base_market_row()
+    row["quote_asset"] = "xch"
+    out = parse_markets_config({"markets": [row]})
+    assert out.markets[0].pricing["base_unit_mojo_multiplier"] == 1000
+    assert out.markets[0].pricing["quote_unit_mojo_multiplier"] == 1_000_000_000_000
+
+
 def test_parse_markets_config_rejects_noncanonical_cat_base_multiplier() -> None:
     row = _base_market_row()
     row["base_asset"] = "BYC"

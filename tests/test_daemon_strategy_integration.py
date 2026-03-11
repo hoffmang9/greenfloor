@@ -62,6 +62,35 @@ def test_strategy_config_from_market_uses_sell_ladder_targets() -> None:
     assert cfg.ones_target == 7
     assert cfg.tens_target == 3
     assert cfg.hundreds_target == 2
+    assert cfg.target_counts_by_size == {1: 7, 10: 3, 100: 2}
+
+
+def test_strategy_config_from_market_tracks_non_legacy_ladder_sizes() -> None:
+    market = _market_with_quote("xch")
+    market.ladders = {
+        "sell": [
+            MarketLadderEntry(
+                size_base_units=1,
+                target_count=5,
+                split_buffer_count=1,
+                combine_when_excess_factor=2.0,
+            ),
+            MarketLadderEntry(
+                size_base_units=10,
+                target_count=2,
+                split_buffer_count=1,
+                combine_when_excess_factor=2.0,
+            ),
+            MarketLadderEntry(
+                size_base_units=50,
+                target_count=1,
+                split_buffer_count=0,
+                combine_when_excess_factor=2.0,
+            ),
+        ]
+    }
+    cfg = _strategy_config_from_market(market)
+    assert cfg.target_counts_by_size == {1: 5, 10: 2, 50: 1}
 
 
 def test_strategy_config_from_market_reads_configurable_price_bands_and_spread() -> None:

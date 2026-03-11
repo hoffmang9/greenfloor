@@ -7,6 +7,7 @@ from typing import Any
 from greenfloor.logging_setup import normalize_log_level_name
 
 _CANONICAL_CAT_UNIT_MOJOS = 1000
+_CANONICAL_XCH_UNIT_MOJOS = 1_000_000_000_000
 _XCH_UNIT_SYMBOLS = frozenset({"xch", "txch", "1"})
 
 
@@ -204,6 +205,8 @@ def canonicalize_asset_unit_mojo_multiplier(
     market_id: str,
 ) -> int:
     if raw_value in (None, ""):
+        if str(asset_id).strip().lower() in _XCH_UNIT_SYMBOLS:
+            return _CANONICAL_XCH_UNIT_MOJOS
         return _CANONICAL_CAT_UNIT_MOJOS
     try:
         multiplier = int(raw_value)

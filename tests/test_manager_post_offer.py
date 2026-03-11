@@ -1714,6 +1714,59 @@ def test_verify_offer_text_for_dexie_rejects_offer_without_expiration_condition(
     assert _verify_offer_text_for_dexie("offer1noexpiry") == "wallet_sdk_offer_missing_expiration"
 
 
+def test_verify_offer_text_for_dexie_rejects_duplicate_spent_coin_ids(
+    monkeypatch,
+) -> None:
+    def _import_module(name: str):
+        if name == "greenfloor_native":
+            raise ImportError("disable native path for this test")
+        return __import__(name)
+
+    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+
+    class _ConditionWithExpiry:
+        @staticmethod
+        def parse_assert_before_height_absolute():
+            return object()
+
+    class _Coin:
+        def __init__(self, coin_id: str):
+            self._coin_id = coin_id
+
+        def coin_id(self):
+            return self._coin_id
+
+    class _CoinSpend:
+        def __init__(self, coin_id: str):
+            self.coin = _Coin(coin_id)
+
+        @staticmethod
+        def conditions():
+            return [_ConditionWithExpiry()]
+
+    class _SpendBundleWithDuplicates:
+        coin_spends = [_CoinSpend("aa" * 32), _CoinSpend("aa" * 32)]
+
+    class _Sdk:
+        @staticmethod
+        def validate_offer(_offer: str) -> None:
+            return None
+
+        @staticmethod
+        def decode_offer(_offer: str):
+            return _SpendBundleWithDuplicates()
+
+        @staticmethod
+        def to_hex(value):
+            return str(value)
+
+    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+    assert (
+        _verify_offer_text_for_dexie("offer1duplicate")
+        == "wallet_sdk_offer_duplicate_spent_coin_ids"
+    )
+
+
 def test_verify_offer_text_for_dexie_uses_greenfloor_native_before_sdk(monkeypatch) -> None:
     calls = {}
 
@@ -1743,6 +1796,54 @@ def test_verify_offer_text_for_dexie_returns_native_validation_error(monkeypatch
     monkeypatch.setitem(sys.modules, "greenfloor_native", _Native)
     assert _verify_offer_text_for_dexie("offer1bad") == (
         "wallet_sdk_offer_validate_failed:native_invalid_offer"
+    )
+
+
+def test_verify_offer_text_for_dexie_checks_duplicate_spends_after_native_validation(
+    monkeypatch,
+) -> None:
+    class _Native:
+        @staticmethod
+        def validate_offer(_offer: str) -> None:
+            return None
+
+    class _ConditionWithExpiry:
+        @staticmethod
+        def parse_assert_before_height_absolute():
+            return object()
+
+    class _Coin:
+        def __init__(self, coin_id: str):
+            self._coin_id = coin_id
+
+        def coin_id(self):
+            return self._coin_id
+
+    class _CoinSpend:
+        def __init__(self, coin_id: str):
+            self.coin = _Coin(coin_id)
+
+        @staticmethod
+        def conditions():
+            return [_ConditionWithExpiry()]
+
+    class _SpendBundleWithDuplicates:
+        coin_spends = [_CoinSpend("bb" * 32), _CoinSpend("bb" * 32)]
+
+    class _Sdk:
+        @staticmethod
+        def decode_offer(_offer: str):
+            return _SpendBundleWithDuplicates()
+
+        @staticmethod
+        def to_hex(value):
+            return str(value)
+
+    monkeypatch.setitem(sys.modules, "greenfloor_native", _Native)
+    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+    assert (
+        _verify_offer_text_for_dexie("offer1native-dupe")
+        == "wallet_sdk_offer_duplicate_spent_coin_ids"
     )
 
 
@@ -3148,6 +3249,60 @@ def test_coin_combine_returns_structured_error_when_coin_id_not_found(
     assert payload["success"] is False
     assert payload["error"] == "coin_id_resolution_failed"
     assert payload["unknown_coin_ids"] == ["missing-coin-name"]
+
+
+def test_coin_combine_rejects_mixed_asset_coin_ids_before_api_call(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program)
+    _write_markets(markets)
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending, asset_id
+            return [
+                {"id": "Coin_xch", "name": "coin-xch", "asset": {"id": "xch"}},
+                {"id": "Coin_cat", "name": "coin-cat", "asset": {"id": "Asset_cat"}},
+            ]
+
+        @staticmethod
+        def combine_coins(*, number_of_coins, fee, largest_first, asset_id, input_coin_ids=None):
+            _ = number_of_coins, fee, largest_first, asset_id, input_coin_ids
+            raise AssertionError("combine_coins should not be called for mixed assets")
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
+    )
+    code = _coin_combine(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        number_of_coins=2,
+        asset_id="xch",
+        coin_ids=["coin-xch", "coin-cat"],
+        no_wait=True,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["success"] is False
+    assert payload["error"] == "coin_id_asset_mismatch"
+    assert payload["resolved_asset_id"] == "xch"
+    assert payload["mismatched_coin_ids"] == ["Coin_cat"]
+    assert payload["mismatched_coin_assets"] == [
+        {"coin_id": "Coin_cat", "coin_asset_id": "asset_cat"}
+    ]
 
 
 def test_coin_split_uses_market_ladder_target_when_size_is_provided(
