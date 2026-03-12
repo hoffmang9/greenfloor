@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Any
 
 import greenfloor.signing as signing_mod
 
@@ -730,3 +731,106 @@ def test_broadcast_spend_bundle_success_returns_operation_id(monkeypatch) -> Non
     assert result["status"] == "executed"
     assert result["reason"] == "submitted"
     assert result["operation_id"] == ("99" * 32)
+
+
+def test_broadcast_spend_bundle_falls_back_to_structured_payload(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _Coin:
+        parent_coin_info = bytes.fromhex("11" * 32)
+        puzzle_hash = bytes.fromhex("22" * 32)
+        amount = 7
+
+    class _CoinSpend:
+        coin = _Coin()
+        puzzle_reveal = bytes.fromhex("ff")
+        solution = bytes.fromhex("80")
+
+    class _Signature:
+        @staticmethod
+        def to_bytes() -> bytes:
+            return bytes.fromhex("aa" * 96)
+
+    class _SpendBundleObj:
+        coin_spends = [_CoinSpend()]
+        aggregated_signature = _Signature()
+
+        @staticmethod
+        def hash() -> bytes:
+            return b"\x77" * 32
+
+    class _Sdk:
+        @staticmethod
+        def to_hex(value: bytes) -> str:
+            return value.hex()
+
+        class SpendBundle:
+            @staticmethod
+            def from_bytes(_value):
+                return _SpendBundleObj()
+
+    class _Adapter:
+        def push_tx(self, *, spend_bundle_hex: str):
+            captured["hex"] = spend_bundle_hex
+            return {
+                "success": False,
+                "error": 'invalid type: string "abcd", expected struct SpendBundle',
+            }
+
+        def push_tx_structured(self, *, spend_bundle: dict[str, Any]):
+            captured["structured"] = spend_bundle
+            return {"success": True, "status": "submitted"}
+
+    monkeypatch.setattr(signing_mod, "_coinset_adapter", lambda *, network: _Adapter())
+    result = signing_mod._broadcast_spend_bundle(
+        sdk=_Sdk,
+        spend_bundle_hex="aabb",
+        network="mainnet",
+    )
+    assert captured["hex"] == "aabb"
+    structured = captured["structured"]
+    assert isinstance(structured, dict)
+    assert structured["aggregated_signature"].startswith("0x")
+    assert structured["coin_spends"][0]["coin"]["amount"] == 7
+    assert result["status"] == "executed"
+    assert result["reason"] == "submitted"
+    assert result["operation_id"] == ("77" * 32)
+
+
+def test_infer_vault_nonce_for_p2_hash_matches_nonzero_nonce() -> None:
+    class _MemberConfig:
+        def __init__(self) -> None:
+            self.nonce = 0
+
+        def with_top_level(self, _value: bool):
+            return self
+
+        def with_nonce(self, value: int):
+            self.nonce = int(value)
+            return self
+
+    class _Sdk:
+        @staticmethod
+        def MemberConfig():
+            return _MemberConfig()
+
+        @staticmethod
+        def singleton_member_hash(
+            cfg: _MemberConfig, launcher_id: bytes, _fast_forward: bool
+        ) -> bytes:
+            # Encode nonce into the final byte for deterministic test matching.
+            return launcher_id[:-1] + bytes([cfg.nonce % 256])
+
+    launcher_id = bytes.fromhex("11" * 32)
+    vault_ctx: dict[str, Any] = {
+        "launcher_id": launcher_id,
+        "max_nonce_probe": 20,
+        "nonce_by_p2_hash": {},
+    }
+    target_p2_hash = launcher_id[:-1] + bytes([7])
+    nonce = signing_mod._infer_vault_nonce_for_p2_hash(
+        sdk=_Sdk,
+        vault_ctx=vault_ctx,
+        p2_puzzle_hash=target_p2_hash,
+    )
+    assert nonce == 7

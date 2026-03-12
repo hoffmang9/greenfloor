@@ -1,5 +1,78 @@
 # Progress Log
 
+## 2026-03-12 (Auto-increment scan mode + John-Deere production validation request)
+
+- Extended `scripts/list_vault_coins_coinset.py` incremental workflow with `--auto-increment`:
+  - automatically enables `--incremental-from-checkpoint`,
+  - auto-selects checkpoint path `~/.greenfloor/cache/vault_coinset_checkpoint.json` when `--checkpoint-file` is not supplied,
+  - rejects conflicting `--no-resume-checkpoint` usage.
+- Added `--clear-caches` convenience mode:
+  - clears launcher/checkpoint cache files before scanning,
+  - targets explicit `--launcher-id-file`/`--checkpoint-file` paths when provided,
+  - otherwise clears default cache files under `~/.greenfloor/cache/`.
+- Output metadata now reports `scan_window.auto_increment` so operators can confirm convenience-mode activation in JSON output.
+- John-Deere production validation:
+  - `--cat-ticker wUSDB.c` correctly fails fast with `unknown cat ticker(s): wUSDB.c` (metadata guardrail),
+  - `--cat-ticker wUSDC.b --auto-increment` resumes from checkpoint (`resumed: true`, `start_nonce: 1`) and returns `13` CAT rows,
+  - smallest observed `wUSDC.b` coin remains `50` mojos; next smallest entries are `9990`-mojo ladder coins.
+  - `--clear-caches` production rerun deleted both cache files and rebuilt scan caches from scratch on John-Deere.
+  - Follow-up combine action submitted for the two smallest spendable Cloud Wallet `wUSDC.b` coins:
+    - selected coin ids: `CoinRecord_2f6bcdd9...` (`50`) + `CoinRecord_08cfbf79...` (`9990`),
+    - combine submission result: `SignatureRequest_qov8rv505zh37p7dok28x1h9` (`UNSIGNED` pending signer flow).
+
+## 2026-03-12 (Coinset capability probe + incremental scan integration docs)
+
+- Added host capability probe utility: `scripts/probe_coinset_capabilities.py`.
+  - Resolves launcher id from arg/file/Cloud Wallet and derives vault member P2 hash.
+  - Probes batched Coinset endpoints with and without height windows:
+    - `get_coin_records_by_puzzle_hashes`
+    - `get_coin_records_by_hints`
+    - `get_coin_records_by_names` (using a sampled known coin id)
+  - Emits structured JSON capability profile for runtime host validation.
+- Added operator runbook for Coinset validation workflows: `docs/coinset-validation.md`.
+  - Includes capability probe command, full scan command, incremental checkpoint command, and optional Coinset CLI parity checks.
+  - Documents expected outcomes and failure handling for unsupported range mode / transient edge errors.
+- Updated `docs/runbook.md` to link to the dedicated Coinset validation runbook.
+- Updated `COINSET_DOCS_AND_API.md` status header:
+  - kept as local snapshot (not removed),
+  - points operators to canonical Coinset CLI skill and repo-specific validation assets.
+
+## 2026-03-12 (Vault CAT dust combine execution + PR scope update)
+
+- Extended `scripts/list_vault_coins_coinset.py` with CAT dust combine execution support:
+  - added `--combine-dust` mode to submit Cloud Wallet `combineCoins` using explicit `inputCoinIds`,
+  - added `--combine-dry-run` to plan batches without submitting,
+  - added tunables: `--dust-threshold-mojos` (default `1000`), `--combine-max-inputs` (default `5`), and `--combine-fee-mojos` (default `0`).
+- Dust combine flow now:
+  - filters CAT rows below threshold from Coinset-discovered vault inventory,
+  - groups by CAT asset id, resolves Cloud Wallet `Asset_*` id by identifier,
+  - maps coin-name hex ids to Cloud Wallet `CoinRecord_*` ids before mutation submission,
+  - emits structured per-asset operation results (submitted/skipped/error) in JSON output.
+- Validation completed locally on updated script:
+  - `pre-commit run --files scripts/list_vault_coins_coinset.py` passed,
+  - script compile/help checks passed.
+- Updated PR #56 scope metadata to reflect new capability:
+  - title changed to `feat: vault coinset scanner with CAT filters and dust combine`,
+  - body updated with dust-combine behavior and refreshed test plan.
+
+## 2026-03-11 (Vault Coinset scanner + CAT metadata filters + CI fix)
+
+- Added standalone vault coin discovery script: `scripts/list_vault_coins_coinset.py`.
+  - Uses only vault singleton launcher id to derive nonce-scoped vault P2 hashes.
+  - Scans Coinset via both `get_coin_records_by_puzzle_hash` and `get_coin_records_by_hint`.
+  - Classifies discovered rows as `XCH`, `CAT`, or `OTHER`.
+- Added launcher-id reuse flow for operator ergonomics:
+  - `--resolve-launcher-id-only` resolves launcher id and exits.
+  - `--launcher-id-file` persists launcher id for reuse on subsequent calls without Cloud Wallet auth flags.
+- Added CAT targeting controls to script output/filtering:
+  - supports CAT filters by id (`--cat-id`, `--cat-asset-id`) and by ticker (`--cat-ticker`),
+  - resolves ticker/name metadata from local `config/cats.yaml` and `config/markets.yaml`,
+  - outputs resolved requested CAT ids/tickers and matched symbol hints per CAT row.
+- Opened PR #56 (`feat/vault-coinset-catalog-filtering`) and addressed CI failures:
+  - root cause was ruff/ruff-format auto-modifying `scripts/list_vault_coins_coinset.py` in CI pre-commit,
+  - applied formatter/lint canonicalization in follow-up commit `6eb0e95`,
+  - final CI status: all matrix jobs passing (`ubuntu-latest`, `ubuntu-24.04-arm`, `macos-14`).
+
 ## 2026-03-11 (parallel reservation drain timing + John-Deere worker cap set to 3)
 
 - Diagnosed the remaining `eco1812020_sell_xch` underfill behavior on `John-Deere` as refill-drain latency in the daemon reservation queue rather than duplicate offer artifact assignment:

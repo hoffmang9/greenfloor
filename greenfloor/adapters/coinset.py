@@ -193,14 +193,47 @@ class CoinsetAdapter:
         *,
         puzzle_hash_hex: str,
         include_spent_coins: bool = False,
+        start_height: int | None = None,
+        end_height: int | None = None,
     ) -> list[dict[str, Any]]:
+        body: dict[str, Any] = {
+            "puzzle_hash": puzzle_hash_hex,
+            "include_spent_coins": include_spent_coins,
+        }
+        if start_height is not None:
+            body["start_height"] = int(start_height)
+        if end_height is not None:
+            body["end_height"] = int(end_height)
         payload = self._post_json(
             "get_coin_records_by_puzzle_hash",
-            {
-                "puzzle_hash": puzzle_hash_hex,
-                "include_spent_coins": include_spent_coins,
-            },
+            body,
         )
+        if not payload.get("success", False):
+            return []
+        records = payload.get("coin_records") or []
+        if not isinstance(records, list):
+            return []
+        return [r for r in records if isinstance(r, dict)]
+
+    def get_coin_records_by_puzzle_hashes(
+        self,
+        *,
+        puzzle_hashes_hex: list[str],
+        include_spent_coins: bool = False,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not puzzle_hashes_hex:
+            return []
+        body: dict[str, Any] = {
+            "puzzle_hashes": [str(value) for value in puzzle_hashes_hex],
+            "include_spent_coins": include_spent_coins,
+        }
+        if start_height is not None:
+            body["start_height"] = int(start_height)
+        if end_height is not None:
+            body["end_height"] = int(end_height)
+        payload = self._post_json("get_coin_records_by_puzzle_hashes", body)
         if not payload.get("success", False):
             return []
         records = payload.get("coin_records") or []
@@ -216,6 +249,84 @@ class CoinsetAdapter:
         if not isinstance(record, dict):
             return None
         return record
+
+    def get_coin_records_by_names(
+        self,
+        *,
+        coin_names_hex: list[str],
+        include_spent_coins: bool = True,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not coin_names_hex:
+            return []
+        body: dict[str, Any] = {
+            "names": [str(value) for value in coin_names_hex],
+            "include_spent_coins": bool(include_spent_coins),
+        }
+        if start_height is not None:
+            body["start_height"] = int(start_height)
+        if end_height is not None:
+            body["end_height"] = int(end_height)
+        payload = self._post_json("get_coin_records_by_names", body)
+        if not payload.get("success", False):
+            return []
+        records = payload.get("coin_records") or []
+        if not isinstance(records, list):
+            return []
+        return [r for r in records if isinstance(r, dict)]
+
+    def get_coin_records_by_parent_ids(
+        self,
+        *,
+        parent_ids_hex: list[str],
+        include_spent_coins: bool = True,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not parent_ids_hex:
+            return []
+        body: dict[str, Any] = {
+            "parent_ids": [str(value) for value in parent_ids_hex],
+            "include_spent_coins": bool(include_spent_coins),
+        }
+        if start_height is not None:
+            body["start_height"] = int(start_height)
+        if end_height is not None:
+            body["end_height"] = int(end_height)
+        payload = self._post_json("get_coin_records_by_parent_ids", body)
+        if not payload.get("success", False):
+            return []
+        records = payload.get("coin_records") or []
+        if not isinstance(records, list):
+            return []
+        return [r for r in records if isinstance(r, dict)]
+
+    def get_coin_records_by_hints(
+        self,
+        *,
+        hints_hex: list[str],
+        include_spent_coins: bool = False,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not hints_hex:
+            return []
+        body: dict[str, Any] = {
+            "hints": [str(value) for value in hints_hex],
+            "include_spent_coins": bool(include_spent_coins),
+        }
+        if start_height is not None:
+            body["start_height"] = int(start_height)
+        if end_height is not None:
+            body["end_height"] = int(end_height)
+        payload = self._post_json("get_coin_records_by_hints", body)
+        if not payload.get("success", False):
+            return []
+        records = payload.get("coin_records") or []
+        if not isinstance(records, list):
+            return []
+        return [r for r in records if isinstance(r, dict)]
 
     def get_puzzle_and_solution(
         self,
@@ -236,6 +347,12 @@ class CoinsetAdapter:
 
     def push_tx(self, *, spend_bundle_hex: str) -> dict[str, Any]:
         payload = self._post_json("push_tx", {"spend_bundle": spend_bundle_hex})
+        if not isinstance(payload, dict):
+            return {"success": False, "error": "invalid_response_payload"}
+        return payload
+
+    def push_tx_structured(self, *, spend_bundle: dict[str, Any]) -> dict[str, Any]:
+        payload = self._post_json("push_tx", {"spend_bundle": spend_bundle})
         if not isinstance(payload, dict):
             return {"success": False, "error": "invalid_response_payload"}
         return payload
