@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import importlib
 import json
 import random
@@ -58,14 +57,20 @@ def _coin_id_from_record(record: dict[str, Any]) -> str:
         normalized = normalize_hex_id(candidate)
         if normalized:
             return normalized
-    parent_hex = str(coin.get("parent_coin_info", "")).strip()
-    puzzle_hex = str(coin.get("puzzle_hash", "")).strip()
+    parent_hex = normalize_hex_id(coin.get("parent_coin_info"))
+    puzzle_hex = normalize_hex_id(coin.get("puzzle_hash"))
     amount = _safe_int(coin.get("amount"), default=-1)
-    if not parent_hex or not puzzle_hex or amount < 0:
+    # Only synthesize a coin id from canonical fields. Any non-canonical parent
+    # or puzzle hash should be treated as invalid row data, not padded/coerced
+    # into a potentially fake coin id.
+    if not parent_hex or not puzzle_hex or amount < 0 or amount > 0xFFFFFFFFFFFFFFFF:
         return ""
-    return hashlib.sha256(
-        _hex_to_bytes(parent_hex) + _hex_to_bytes(puzzle_hex) + int(amount).to_bytes(8, "big")
-    ).hexdigest()
+    try:
+        sdk = _import_sdk()
+        coin = sdk.Coin(_hex_to_bytes(parent_hex), _hex_to_bytes(puzzle_hex), int(amount))
+        return normalize_hex_id(sdk.to_hex(coin.coin_id())) or ""
+    except Exception:
+        return ""
 
 
 def _chunk_values(values: list[str], chunk_size: int) -> list[list[str]]:
@@ -78,8 +83,8 @@ def _coin_from_record(*, sdk: Any, record: dict[str, Any]) -> Any | None:
     coin_data = record.get("coin")
     if not isinstance(coin_data, dict):
         return None
-    parent_hex = str(coin_data.get("parent_coin_info", "")).strip()
-    puzzle_hex = str(coin_data.get("puzzle_hash", "")).strip()
+    parent_hex = normalize_hex_id(coin_data.get("parent_coin_info"))
+    puzzle_hex = normalize_hex_id(coin_data.get("puzzle_hash"))
     if not parent_hex or not puzzle_hex:
         return None
     try:
@@ -318,6 +323,22 @@ class CoinsetScanner:
                 include_spent_coins=include_spent,
             )
         )
+
+    def existing_coin_names(self, *, coin_ids_hex: list[str]) -> set[str]:
+        """Return the subset of coin ids that Coinset resolves by exact name."""
+        existing: set[str] = set()
+        if not coin_ids_hex:
+            return existing
+        for batch in _chunk_values(coin_ids_hex, 200):
+            rows = self.by_names(
+                coin_names=[_to_coinset_hex(_hex_to_bytes(coin_id)) for coin_id in batch],
+                include_spent=True,
+            )
+            for record in rows:
+                coin_id = _coin_id_from_record(record)
+                if coin_id:
+                    existing.add(coin_id)
+        return existing
 
 
 def _detect_cat_asset_id(
@@ -1562,6 +1583,16 @@ def main() -> int:
         row.coin_type = "OTHER"
 
     max_nonce_scanned = max(nonce_to_p2.keys()) if nonce_to_p2 else 0
+    pre_verify_count = len(by_coin_id)
+    verified_coin_ids = scanner.existing_coin_names(coin_ids_hex=sorted(by_coin_id.keys()))
+    verification_applied = bool(verified_coin_ids)
+    if verification_applied:
+        by_coin_id = {
+            coin_id: row for coin_id, row in by_coin_id.items() if coin_id in verified_coin_ids
+        }
+    dropped_unverified_count = (
+        max(0, pre_verify_count - len(by_coin_id)) if verification_applied else 0
+    )
     if checkpoint_enabled:
         _save_scan_checkpoint(
             checkpoint_file=checkpoint_file,
@@ -1609,6 +1640,12 @@ def main() -> int:
                 "requested_cat_tickers": sorted(set(requested_cat_tickers_raw)),
                 "max_nonce_scanned": max_nonce_scanned,
                 "count": len(filtered),
+                "name_verification": {
+                    "applied": verification_applied,
+                    "pre_verify_count": pre_verify_count,
+                    "verified_count": len(by_coin_id) if verification_applied else None,
+                    "dropped_unverified_count": dropped_unverified_count,
+                },
                 "cache_clear": cache_clear_result or None,
                 "checkpoint": {
                     "enabled": checkpoint_enabled,

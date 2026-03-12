@@ -276,6 +276,32 @@ class CoinsetAdapter:
             return []
         return [r for r in records if isinstance(r, dict)]
 
+    def get_coin_records_by_parent_ids(
+        self,
+        *,
+        parent_ids_hex: list[str],
+        include_spent_coins: bool = True,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not parent_ids_hex:
+            return []
+        body: dict[str, Any] = {
+            "parent_ids": [str(value) for value in parent_ids_hex],
+            "include_spent_coins": bool(include_spent_coins),
+        }
+        if start_height is not None:
+            body["start_height"] = int(start_height)
+        if end_height is not None:
+            body["end_height"] = int(end_height)
+        payload = self._post_json("get_coin_records_by_parent_ids", body)
+        if not payload.get("success", False):
+            return []
+        records = payload.get("coin_records") or []
+        if not isinstance(records, list):
+            return []
+        return [r for r in records if isinstance(r, dict)]
+
     def get_coin_records_by_hints(
         self,
         *,
@@ -321,6 +347,12 @@ class CoinsetAdapter:
 
     def push_tx(self, *, spend_bundle_hex: str) -> dict[str, Any]:
         payload = self._post_json("push_tx", {"spend_bundle": spend_bundle_hex})
+        if not isinstance(payload, dict):
+            return {"success": False, "error": "invalid_response_payload"}
+        return payload
+
+    def push_tx_structured(self, *, spend_bundle: dict[str, Any]) -> dict[str, Any]:
+        payload = self._post_json("push_tx", {"spend_bundle": spend_bundle})
         if not isinstance(payload, dict):
             return {"success": False, "error": "invalid_response_payload"}
         return payload

@@ -676,7 +676,7 @@ def _resolve_local_vault_offer_context(
     sdk: Any,
     payload: dict[str, Any],
     network: str,
-) -> tuple[dict[str, bytes] | None, str | None]:
+) -> tuple[dict[str, Any] | None, str | None]:
     kms_key_id = str(payload.get("cloud_wallet_kms_key_id", "")).strip()
     if not kms_key_id:
         return None, None
@@ -824,10 +824,21 @@ def _resolve_local_vault_offer_context(
             False,
         )
     )
+    max_nonce_probe = int(payload.get("cloud_wallet_vault_nonce_probe_max", 2048))
+    if max_nonce_probe < 0:
+        max_nonce_probe = 0
     return {
         "launcher_id": launcher_id,
         "inner_puzzle_hash": inner_puzzle_hash,
         "p2_singleton_message_hash": p2_singleton_message_hash,
+        "custody_hash": custody_hash,
+        "recovery_hash": recovery_hash,
+        "custody_threshold": int(custody_threshold),
+        "custody_keys": custody_keys,
+        "kms_key_id": kms_key_id,
+        "kms_region": str(payload.get("cloud_wallet_kms_region", "")).strip() or "us-west-2",
+        "max_nonce_probe": max_nonce_probe,
+        "nonce_by_p2_hash": {p2_singleton_message_hash: 0},
     }, None
 
 
@@ -929,19 +940,266 @@ def _scan_synthetic_keys_for_puzzle_hashes(
 
 
 def _build_vault_cat_inner_spend(
-    *, sdk: Any, clvm: Any, delegated: Any, vault_ctx: dict[str, Any]
+    *,
+    sdk: Any,
+    clvm: Any,
+    delegated: Any,
+    vault_ctx: dict[str, Any],
+    nonce: int,
+    p2_puzzle_hash: bytes,
 ) -> Any:
     """Build a MIPS inner spend for a vault-owned CAT coin."""
     dummy_coin = sdk.Coin(sdk.tree_hash_atom(b""), sdk.tree_hash_atom(b""), 1)
     mips = clvm.mips_spend(dummy_coin, delegated)
+    member_config = sdk.MemberConfig().with_top_level(True).with_nonce(int(nonce))
     mips.singleton_member(
-        sdk.MemberConfig().with_top_level(True),
+        member_config,
         vault_ctx["launcher_id"],
         False,
         vault_ctx["inner_puzzle_hash"],
         1,
     )
-    return mips.spend(vault_ctx["p2_singleton_message_hash"])
+    return mips.spend(p2_puzzle_hash)
+
+
+def _infer_vault_nonce_for_p2_hash(
+    *, sdk: Any, vault_ctx: dict[str, Any], p2_puzzle_hash: bytes
+) -> int | None:
+    if not isinstance(p2_puzzle_hash, bytes):
+        return None
+    nonce_cache = vault_ctx.setdefault("nonce_by_p2_hash", {})
+    if isinstance(nonce_cache, dict):
+        cached = nonce_cache.get(bytes(p2_puzzle_hash))
+        if isinstance(cached, int) and cached >= 0:
+            return cached
+    max_nonce_probe = max(0, int(vault_ctx.get("max_nonce_probe", 2048)))
+    launcher_id = vault_ctx["launcher_id"]
+    for nonce in range(max_nonce_probe + 1):
+        cfg = sdk.MemberConfig().with_top_level(True).with_nonce(int(nonce))
+        candidate = bytes(sdk.singleton_member_hash(cfg, launcher_id, False))
+        if candidate == p2_puzzle_hash:
+            if isinstance(nonce_cache, dict):
+                nonce_cache[bytes(p2_puzzle_hash)] = int(nonce)
+            return int(nonce)
+    return None
+
+
+def _extract_mode23_receive_messages_from_coin_spends(
+    *, sdk: Any, coin_spends: list[Any]
+) -> list[tuple[bytes, bytes]]:
+    messages: list[tuple[bytes, bytes]] = []
+    try:
+        clvm = sdk.Clvm()
+    except Exception:
+        return messages
+    for coin_spend in coin_spends:
+        coin = getattr(coin_spend, "coin", None)
+        if coin is None:
+            continue
+        try:
+            coin_id = bytes(coin.coin_id())
+            puzzle_program = clvm.deserialize(bytes(coin_spend.puzzle_reveal))
+            solution_program = clvm.deserialize(bytes(coin_spend.solution))
+            run_output = puzzle_program.run(solution_program, 1_000_000_000_000, True)
+            value = getattr(run_output, "value", None)
+            if value is None:
+                continue
+            to_list = getattr(value, "to_list", None)
+            conds_raw = to_list() if callable(to_list) else []
+            if not isinstance(conds_raw, list):
+                continue
+            conds: list[Any] = conds_raw
+        except Exception:
+            continue
+        for condition in conds:
+            parse_receive = getattr(condition, "parse_receive_message", None)
+            if not callable(parse_receive):
+                continue
+            try:
+                parsed = parse_receive()
+            except Exception:
+                continue
+            if parsed is None:
+                continue
+            mode = int(getattr(parsed, "mode", -1))
+            message = getattr(parsed, "message", b"")
+            if mode == 23 and isinstance(message, bytes):
+                messages.append((bytes(message), coin_id))
+    return messages
+
+
+def _coin_from_coinset_record(*, sdk: Any, record: dict[str, Any]) -> Any | None:
+    coin_data = record.get("coin")
+    if not isinstance(coin_data, dict):
+        return None
+    parent_hex = normalize_hex_id(coin_data.get("parent_coin_info"))
+    puzzle_hex = normalize_hex_id(coin_data.get("puzzle_hash"))
+    amount = int(coin_data.get("amount", 0))
+    if not parent_hex or not puzzle_hex or amount <= 0:
+        return None
+    return sdk.Coin(_hex_to_bytes(parent_hex), _hex_to_bytes(puzzle_hex), amount)
+
+
+def _coin_id_hex_from_record(*, sdk: Any, record: dict[str, Any]) -> str:
+    coin_data = record.get("coin")
+    if not isinstance(coin_data, dict):
+        return ""
+    for candidate in (
+        coin_data.get("name"),
+        coin_data.get("coin_id"),
+        coin_data.get("coin_name"),
+        record.get("name"),
+    ):
+        normalized = normalize_hex_id(candidate)
+        if normalized:
+            return normalized
+    coin = _coin_from_coinset_record(sdk=sdk, record=record)
+    if coin is not None:
+        try:
+            return normalize_hex_id(bytes(coin.coin_id()).hex())
+        except Exception:
+            return ""
+    return ""
+
+
+def _fetch_latest_vault_from_coinset(
+    *, sdk: Any, network: str, vault_ctx: dict[str, Any]
+) -> tuple[Any | None, str | None]:
+    coinset = _coinset_adapter(network=network)
+    launcher_hex = normalize_hex_id(bytes(vault_ctx["launcher_id"]).hex())
+    launcher_children = coinset.get_coin_records_by_parent_ids(
+        parent_ids_hex=[f"0x{launcher_hex}"],
+        include_spent_coins=True,
+    )
+    if not launcher_children:
+        return None, "vault_singleton_coin_not_found"
+    child_coin = launcher_children[0].get("coin")
+    if not isinstance(child_coin, dict):
+        return None, "vault_singleton_coin_not_found"
+    singleton_puzzle_hash = normalize_hex_id(child_coin.get("puzzle_hash"))
+    if not singleton_puzzle_hash:
+        return None, "vault_singleton_coin_not_found"
+
+    leaf_candidates = coinset.get_coin_records_by_puzzle_hash(
+        puzzle_hash_hex=f"0x{singleton_puzzle_hash}",
+        include_spent_coins=False,
+    )
+    if not leaf_candidates:
+        return None, "vault_singleton_coin_not_found"
+    leaf_candidates.sort(
+        key=lambda r: (
+            int(r.get("confirmed_block_index", 0)),
+            _coin_id_hex_from_record(sdk=sdk, record=r),
+        ),
+        reverse=True,
+    )
+    current_record = leaf_candidates[0]
+    current_coin = _coin_from_coinset_record(sdk=sdk, record=current_record)
+    if current_coin is None:
+        return None, "vault_singleton_coin_invalid"
+    parent_id = normalize_hex_id(current_coin.parent_coin_info.hex())
+    if not parent_id:
+        return None, "vault_singleton_parent_missing"
+    parent_record = coinset.get_coin_record_by_name(coin_name_hex=f"0x{parent_id}")
+    if not isinstance(parent_record, dict):
+        return None, "vault_singleton_parent_not_found"
+    parent_coin = _coin_from_coinset_record(sdk=sdk, record=parent_record)
+    if parent_coin is None:
+        return None, "vault_singleton_parent_invalid"
+    parent_parent_hex = normalize_hex_id(parent_coin.parent_coin_info.hex())
+    if not parent_parent_hex:
+        return None, "vault_singleton_grandparent_missing"
+    is_eve = parent_id == launcher_hex
+    proof = sdk.Proof(
+        _hex_to_bytes(parent_parent_hex),
+        None if is_eve else bytes(vault_ctx["inner_puzzle_hash"]),
+        int(parent_coin.amount),
+    )
+    info = sdk.VaultInfo(bytes(vault_ctx["launcher_id"]), bytes(vault_ctx["inner_puzzle_hash"]))
+    return sdk.Vault(current_coin, proof, info), None
+
+
+def _append_vault_singleton_spend_for_cat_bundle(
+    *,
+    sdk: Any,
+    coin_spends: list[Any],
+    vault_ctx: dict[str, Any],
+    network: str,
+) -> tuple[list[Any] | None, str | None]:
+    if int(vault_ctx.get("custody_threshold", 0)) != 1:
+        return None, "vault_custody_threshold_not_supported_for_local_direct_spend"
+    vault, vault_error = _fetch_latest_vault_from_coinset(
+        sdk=sdk,
+        network=network,
+        vault_ctx=vault_ctx,
+    )
+    if vault_error is not None or vault is None:
+        return None, (vault_error or "vault_singleton_resolution_failed")
+
+    receive_messages = _extract_mode23_receive_messages_from_coin_spends(
+        sdk=sdk,
+        coin_spends=coin_spends,
+    )
+    if not receive_messages:
+        return None, "vault_receive_message_23_not_found"
+
+    vault_clvm = sdk.Clvm()
+    conditions = [
+        vault_clvm.create_coin(bytes(vault_ctx["inner_puzzle_hash"]), int(vault.coin.amount), None)
+    ]
+    for message, coin_id in receive_messages:
+        conditions.append(
+            vault_clvm.send_message(23, bytes(message), [vault_clvm.atom(bytes(coin_id))])
+        )
+    delegated_spend = vault_clvm.delegated_spend(conditions)
+    delegated_hash = bytes(delegated_spend.puzzle.tree_hash())
+
+    custody_keys = vault_ctx.get("custody_keys") if isinstance(vault_ctx, dict) else None
+    if not isinstance(custody_keys, list):
+        return None, "vault_custody_keys_missing"
+    secp_keys = [
+        key
+        for key in custody_keys
+        if isinstance(key, dict) and str(key.get("curve", "")).strip().upper() == "SECP256R1"
+    ]
+    if len(secp_keys) != 1:
+        return None, "vault_single_secp256r1_custody_key_required"
+    custody_key_hex = _normalize_hex_any(str(secp_keys[0].get("public_key_hex", "")))
+    if not custody_key_hex:
+        return None, "vault_custody_key_invalid"
+    kms_key_id = str(vault_ctx.get("kms_key_id", "")).strip()
+    kms_region = str(vault_ctx.get("kms_region", "")).strip() or "us-west-2"
+    if not kms_key_id:
+        return None, "vault_kms_key_id_missing"
+    try:
+        from greenfloor.adapters.kms_signer import get_public_key_compressed_hex, sign_digest
+    except Exception as exc:
+        return None, f"vault_kms_import_error:{exc}"
+    kms_pubkey = _normalize_hex_any(get_public_key_compressed_hex(kms_key_id, kms_region))
+    if kms_pubkey != custody_key_hex:
+        return None, "vault_kms_public_key_mismatch"
+    signature_message = delegated_hash + bytes(vault.coin.puzzle_hash)
+    signature_hex = sign_digest(kms_key_id, kms_region, signature_message.hex())
+    try:
+        signature = sdk.R1Signature.from_bytes(bytes.fromhex(signature_hex))
+        public_key = sdk.R1PublicKey.from_bytes(_hex_to_bytes(custody_key_hex))
+    except Exception as exc:
+        return None, f"vault_signature_decode_error:{exc}"
+
+    mips = vault_clvm.mips_spend(vault.coin, delegated_spend)
+    mips.m_of_n(
+        sdk.MemberConfig().with_top_level(True),
+        1,
+        [bytes(vault_ctx["custody_hash"]), bytes(vault_ctx["recovery_hash"])],
+    )
+    mips.r1_member(
+        sdk.MemberConfig(),
+        public_key,
+        signature,
+        True,
+    )
+    mips.spend_vault(vault)
+    return list(coin_spends) + list(vault_clvm.coin_spends()), None
 
 
 def _materialize_coin_spends_from_finished(
@@ -951,6 +1209,7 @@ def _materialize_coin_spends_from_finished(
     finished: Any,
     synthetic_sk_by_puzzle_hash: dict[bytes, Any],
     vault_ctx: dict[str, Any] | None,
+    network: str,
 ) -> tuple[list[Any] | None, str | None]:
     pending_cat_spends: list[Any] = []
     for pending_spend in finished.pending_spends():
@@ -967,13 +1226,23 @@ def _materialize_coin_spends_from_finished(
                 p2_puzzle_hash = pending_spend.p2_puzzle_hash()
             except Exception:
                 p2_puzzle_hash = getattr(pending_cat.info, "p2_puzzle_hash", coin.puzzle_hash)
-            if (
-                vault_ctx is not None
-                and isinstance(p2_puzzle_hash, bytes)
-                and bytes(p2_puzzle_hash) == vault_ctx["p2_singleton_message_hash"]
-            ):
+            inferred_nonce: int | None = None
+            if vault_ctx is not None and isinstance(p2_puzzle_hash, bytes):
+                inferred_nonce = _infer_vault_nonce_for_p2_hash(
+                    sdk=sdk,
+                    vault_ctx=vault_ctx,
+                    p2_puzzle_hash=bytes(p2_puzzle_hash),
+                )
+            if inferred_nonce is not None:
+                if vault_ctx is None:
+                    return None, "missing_vault_context_for_pending_spend"
                 cat_inner_spend = _build_vault_cat_inner_spend(
-                    sdk=sdk, clvm=clvm, delegated=delegated, vault_ctx=vault_ctx
+                    sdk=sdk,
+                    clvm=clvm,
+                    delegated=delegated,
+                    vault_ctx=vault_ctx,
+                    nonce=inferred_nonce,
+                    p2_puzzle_hash=bytes(p2_puzzle_hash),
                 )
             else:
                 if not isinstance(p2_puzzle_hash, bytes):
@@ -992,9 +1261,29 @@ def _materialize_coin_spends_from_finished(
         if synthetic_sk is None:
             return None, "missing_signing_key_for_pending_spend"
         clvm.spend_standard_coin(coin, synthetic_sk.public_key(), delegated)
+    result_coin_spends_raw = clvm.coin_spends()
+    result_coin_spends: list[Any] = (
+        list(result_coin_spends_raw) if isinstance(result_coin_spends_raw, list) else []
+    )
     if pending_cat_spends:
         clvm.spend_cats(pending_cat_spends)
-    return clvm.coin_spends(), None
+        result_coin_spends_raw = clvm.coin_spends()
+        result_coin_spends = (
+            list(result_coin_spends_raw) if isinstance(result_coin_spends_raw, list) else []
+        )
+    if vault_ctx is not None and pending_cat_spends:
+        merged_coin_spends, vault_append_error = _append_vault_singleton_spend_for_cat_bundle(
+            sdk=sdk,
+            coin_spends=list(result_coin_spends),
+            vault_ctx=vault_ctx,
+            network=network,
+        )
+        if vault_append_error is not None:
+            return None, vault_append_error
+        if merged_coin_spends is None:
+            return None, "vault_spend_merge_failed"
+        result_coin_spends = list(merged_coin_spends)
+    return list(result_coin_spends), None
 
 
 def _build_offer_spend_bundle(
@@ -1269,6 +1558,7 @@ def _build_offer_spend_bundle(
             finished=finished,
             synthetic_sk_by_puzzle_hash=synthetic_sk_by_puzzle_hash,
             vault_ctx=vault_ctx,
+            network=network,
         )
         if spend_error is not None:
             return None, spend_error
@@ -1325,14 +1615,31 @@ def _broadcast_spend_bundle(*, sdk: Any, spend_bundle_hex: str, network: str) ->
             "operation_id": None,
         }
 
+    coinset = _coinset_adapter(network=network)
     try:
-        response = _coinset_adapter(network=network).push_tx(spend_bundle_hex=spend_bundle_hex)
+        response = coinset.push_tx(spend_bundle_hex=spend_bundle_hex)
     except Exception as exc:
         return {
             "status": "skipped",
             "reason": f"push_tx_error:{exc}",
             "operation_id": None,
         }
+    if not bool(response.get("success", False)):
+        # Some Coinset/full-node frontends reject hex-string spend bundles and
+        # require structured SpendBundle JSON payloads.
+        error_text = str(response.get("error") or "").strip().lower()
+        if "expected struct spendbundle" in error_text or "invalid type: string" in error_text:
+            try:
+                structured_bundle = _spend_bundle_to_coinset_json(
+                    sdk=sdk, spend_bundle=spend_bundle
+                )
+                response = coinset.push_tx_structured(spend_bundle=structured_bundle)
+            except Exception as exc:
+                return {
+                    "status": "skipped",
+                    "reason": f"push_tx_structured_error:{exc}",
+                    "operation_id": None,
+                }
     if not bool(response.get("success", False)):
         err = response.get("error") or "push_tx_rejected"
         return {"status": "skipped", "reason": str(err), "operation_id": None}
@@ -1341,6 +1648,38 @@ def _broadcast_spend_bundle(*, sdk: Any, spend_bundle_hex: str, network: str) ->
         "status": "executed",
         "reason": str(response.get("status", "submitted")),
         "operation_id": tx_id,
+    }
+
+
+def _as_0x_hex(value: Any) -> str:
+    if isinstance(value, bytes | bytearray | memoryview):
+        return f"0x{bytes(value).hex()}"
+    as_bytes = bytes(value)
+    return f"0x{as_bytes.hex()}"
+
+
+def _spend_bundle_to_coinset_json(*, sdk: Any, spend_bundle: Any) -> dict[str, Any]:
+    coin_spends_payload: list[dict[str, Any]] = []
+    coin_spends = getattr(spend_bundle, "coin_spends", None) or []
+    for coin_spend in coin_spends:
+        coin = getattr(coin_spend, "coin", None)
+        if coin is None:
+            continue
+        coin_spends_payload.append(
+            {
+                "coin": {
+                    "parent_coin_info": _as_0x_hex(coin.parent_coin_info),
+                    "puzzle_hash": _as_0x_hex(coin.puzzle_hash),
+                    "amount": int(coin.amount),
+                },
+                "puzzle_reveal": _as_0x_hex(coin_spend.puzzle_reveal),
+                "solution": _as_0x_hex(coin_spend.solution),
+            }
+        )
+    aggregated_signature = _as_0x_hex(spend_bundle.aggregated_signature.to_bytes())
+    return {
+        "coin_spends": coin_spends_payload,
+        "aggregated_signature": aggregated_signature,
     }
 
 
@@ -1568,6 +1907,7 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
             finished=finished,
             synthetic_sk_by_puzzle_hash=synthetic_sk_by_puzzle_hash,
             vault_ctx=vault_ctx,
+            network=network,
         )
         if spend_error is not None:
             return None, spend_error
