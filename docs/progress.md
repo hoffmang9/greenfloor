@@ -1,5 +1,23 @@
 # Progress Log
 
+## 2026-03-11 (Vault Coinset scanner + CAT metadata filters + CI fix)
+
+- Added standalone vault coin discovery script: `scripts/list_vault_coins_coinset.py`.
+  - Uses only vault singleton launcher id to derive nonce-scoped vault P2 hashes.
+  - Scans Coinset via both `get_coin_records_by_puzzle_hash` and `get_coin_records_by_hint`.
+  - Classifies discovered rows as `XCH`, `CAT`, or `OTHER`.
+- Added launcher-id reuse flow for operator ergonomics:
+  - `--resolve-launcher-id-only` resolves launcher id and exits.
+  - `--launcher-id-file` persists launcher id for reuse on subsequent calls without Cloud Wallet auth flags.
+- Added CAT targeting controls to script output/filtering:
+  - supports CAT filters by id (`--cat-id`, `--cat-asset-id`) and by ticker (`--cat-ticker`),
+  - resolves ticker/name metadata from local `config/cats.yaml` and `config/markets.yaml`,
+  - outputs resolved requested CAT ids/tickers and matched symbol hints per CAT row.
+- Opened PR #56 (`feat/vault-coinset-catalog-filtering`) and addressed CI failures:
+  - root cause was ruff/ruff-format auto-modifying `scripts/list_vault_coins_coinset.py` in CI pre-commit,
+  - applied formatter/lint canonicalization in follow-up commit `6eb0e95`,
+  - final CI status: all matrix jobs passing (`ubuntu-latest`, `ubuntu-24.04-arm`, `macos-14`).
+
 ## 2026-03-05 (BYC scoped-query leak fail-closed mitigation + John-Deere validation)
 
 - Root cause for the remaining BYC coin-op failure on John-Deere was narrowed further:
