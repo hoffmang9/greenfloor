@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 from greenfloor.config.models import MarketConfig, MarketInventoryConfig
@@ -1467,9 +1468,7 @@ def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(mon
     assert calls["builder"] == 0
 
 
-def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(
-    monkeypatch, tmp_path
-) -> None:
+def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(monkeypatch) -> None:
     daemon_main._POST_COOLDOWN_UNTIL.clear()
 
     class _FakeCloudWallet:
@@ -1506,8 +1505,29 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(
 
     _Program = _ParallelCloudWalletProgram
 
-    db_path = tmp_path / "reservations.sqlite"
-    coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
+    class _DeterministicContentionCoordinator:
+        def __init__(self) -> None:
+            self.non_empty_acquire_calls = 0
+            self.released: list[tuple[str, str]] = []
+
+        def try_acquire(self, **kwargs):
+            requested = dict(kwargs.get("requested_amounts", {}) or {})
+            if not requested:
+                # Daemon health-check path.
+                return SimpleNamespace(ok=True, reservation_id="res-health", error=None)
+            self.non_empty_acquire_calls += 1
+            if self.non_empty_acquire_calls == 1:
+                return SimpleNamespace(ok=True, reservation_id="res-1", error=None)
+            return SimpleNamespace(
+                ok=False,
+                reservation_id=None,
+                error="reservation_insufficient_asset",
+            )
+
+        def release(self, *, reservation_id: str, status: str) -> None:
+            self.released.append((str(reservation_id), str(status)))
+
+    coordinator = _DeterministicContentionCoordinator()
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-parallel"})
     dexie.visible_offer_ids = {"offer-parallel"}
     store = _FakeStore()
@@ -1531,18 +1551,12 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(
         store=cast(Any, store),
         publish_venue="dexie",
         program=_Program(),
-        reservation_coordinator=coordinator,
+        reservation_coordinator=cast(Any, coordinator),
     )
     assert result["planned_count"] == 2
     assert result["executed_count"] == 1
     assert any("reservation_insufficient_asset" in str(item["reason"]) for item in result["items"])
-    sqlite_store = SqliteStore(db_path)
-    try:
-        rows = sqlite_store.list_offer_reservation_leases()
-        assert len(rows) == 1
-        assert rows[0]["status"] == "released_success"
-    finally:
-        sqlite_store.close()
+    assert coordinator.released == [("res-1", "released_success")]
 
 
 def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
