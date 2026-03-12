@@ -1,5 +1,18 @@
 # Coinset Docs & API Reference
 
+## Status
+
+This file is kept as a local snapshot/reference and should not be removed.
+Use it for offline notes and endpoint quick-lookups, but treat the Coinset CLI
+skill as the canonical operator workflow reference:
+
+- [coinset CLI SKILL.md](https://raw.githubusercontent.com/coinset-org/cli/refs/heads/main/SKILL.md)
+
+For repo-specific execution and host validation, use:
+
+- `docs/coinset-validation.md`
+- `scripts/probe_coinset_capabilities.py`
+
 This file summarizes the public docs currently available from `https://www.coinset.org/docs` and linked usage pages.
 
 **As of:** 2026-02-19

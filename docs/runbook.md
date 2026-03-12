@@ -2,6 +2,9 @@
 
 This runbook covers first deployment and recovery workflows for GreenFloor v1.
 
+Coinset-specific vault scan validation and capability probing are documented in
+`docs/coinset-validation.md`.
+
 ## 1) First Deployment (Clean Machine)
 
 1. Install dependencies:

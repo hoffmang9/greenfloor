@@ -5,6 +5,8 @@ import argparse
 import hashlib
 import importlib
 import json
+import random
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -15,6 +17,7 @@ import yaml
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter
+from greenfloor.cloud_wallet_offer_runtime import poll_signature_request_until_not_unsigned
 from greenfloor.hex_utils import is_hex_id, normalize_hex_id
 
 
@@ -65,6 +68,12 @@ def _coin_id_from_record(record: dict[str, Any]) -> str:
     ).hexdigest()
 
 
+def _chunk_values(values: list[str], chunk_size: int) -> list[list[str]]:
+    if chunk_size <= 0:
+        return [values] if values else []
+    return [values[idx : idx + chunk_size] for idx in range(0, len(values), chunk_size)]
+
+
 def _coin_from_record(*, sdk: Any, record: dict[str, Any]) -> Any | None:
     coin_data = record.get("coin")
     if not isinstance(coin_data, dict):
@@ -102,76 +111,294 @@ def _is_spendable_coin_state(state: str) -> bool:
     return coin_state in {"CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE", "SETTLED"}
 
 
+def _normalize_coinset_base_url(*, base_url: str | None, network: str) -> str | None:
+    raw = str(base_url or "").strip()
+    if not raw:
+        return None
+    normalized = raw.rstrip("/")
+    lower = normalized.lower()
+    mainnet_aliases = {
+        "coinset.org",
+        "https://coinset.org",
+        "http://coinset.org",
+        "www.coinset.org",
+        "https://www.coinset.org",
+        "http://www.coinset.org",
+    }
+    testnet_aliases = {
+        "testnet11.coinset.org",
+        "https://testnet11.coinset.org",
+        "http://testnet11.coinset.org",
+        "www.testnet11.coinset.org",
+        "https://www.testnet11.coinset.org",
+        "http://www.testnet11.coinset.org",
+    }
+    is_testnet11 = network.strip().lower() in {"testnet", "testnet11"}
+    if lower in mainnet_aliases:
+        return (
+            CoinsetAdapter.TESTNET11_BASE_URL if is_testnet11 else CoinsetAdapter.MAINNET_BASE_URL
+        )
+    if lower in testnet_aliases:
+        return CoinsetAdapter.TESTNET11_BASE_URL
+    return normalized
+
+
+def _is_retryable_coinset_error(exc: Exception) -> bool:
+    message = str(exc).strip().lower()
+    if not message:
+        return False
+    retry_markers = (
+        "coinset_network_error",
+        "timed out",
+        "timeout",
+        "connection reset",
+        "connection refused",
+        "remote end closed connection",
+        "temporary failure",
+        "temporarily unavailable",
+        "bad gateway",
+        "service unavailable",
+        "too many requests",
+        "http error 429",
+        "coinset_http_error:429",
+        "coinset_http_error:502",
+        "coinset_http_error:503",
+        "coinset_http_error:504",
+        "ssl",
+        "handshake",
+        "cloudflare",
+    )
+    return any(marker in message for marker in retry_markers)
+
+
+def _coinset_with_retries(
+    func: Any,
+    *,
+    attempts: int = 4,
+    initial_delay_seconds: float = 0.8,
+    jitter_ratio: float = 0.25,
+) -> Any:
+    delay = max(0.1, float(initial_delay_seconds))
+    jitter = min(max(0.0, float(jitter_ratio)), 0.9)
+    last_exc: Exception | None = None
+    for attempt in range(1, max(1, int(attempts)) + 1):
+        try:
+            return func()
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt >= attempts or not _is_retryable_coinset_error(exc):
+                raise
+            sleep_multiplier = 1.0 + random.uniform(-jitter, jitter)
+            time.sleep(max(0.05, delay * sleep_multiplier))
+            delay = min(delay * 2.0, 8.0)
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("coinset_retry_logic_unreachable")
+
+
 class CoinsetScanner:
     def __init__(self, *, network: str, base_url: str | None = None) -> None:
         require_testnet11 = network.strip().lower() in {"testnet", "testnet11"}
+        resolved_base_url = _normalize_coinset_base_url(base_url=base_url, network=network)
         self.adapter = CoinsetAdapter(
-            base_url=base_url, network=network, require_testnet11=require_testnet11
+            base_url=resolved_base_url, network=network, require_testnet11=require_testnet11
         )
 
     def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
-        payload = dict(body)
-        if self.adapter.network == "testnet11":
-            payload.setdefault("network", "testnet11")
-        req = urllib.request.Request(
-            f"{self.adapter.base_url}/{endpoint}",
-            data=json.dumps(payload).encode("utf-8"),
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": "greenfloor-vault-coinset-scanner/0.1",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            parsed = json.loads(resp.read().decode("utf-8"))
+        def _request_once() -> dict[str, Any]:
+            payload = dict(body)
+            if self.adapter.network == "testnet11":
+                payload.setdefault("network", "testnet11")
+            req = urllib.request.Request(
+                f"{self.adapter.base_url}/{endpoint}",
+                data=json.dumps(payload).encode("utf-8"),
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "greenfloor-vault-coinset-scanner/0.1",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                response_payload = json.loads(resp.read().decode("utf-8"))
+            if not isinstance(response_payload, dict):
+                raise RuntimeError("coinset_invalid_response_payload")
+            return response_payload
+
+        parsed = _coinset_with_retries(_request_once)
         if not isinstance(parsed, dict):
             raise RuntimeError("coinset_invalid_response_payload")
         return parsed
 
-    def by_puzzle_hash(self, *, puzzle_hash: str, include_spent: bool) -> list[dict[str, Any]]:
-        return self.adapter.get_coin_records_by_puzzle_hash(
-            puzzle_hash_hex=puzzle_hash,
-            include_spent_coins=include_spent,
+    def by_puzzle_hash(
+        self,
+        *,
+        puzzle_hash: str,
+        include_spent: bool,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return _coinset_with_retries(
+            lambda: self.adapter.get_coin_records_by_puzzle_hash(
+                puzzle_hash_hex=puzzle_hash,
+                include_spent_coins=include_spent,
+                start_height=start_height,
+                end_height=end_height,
+            )
         )
 
-    def by_hint(self, *, hint: str, include_spent: bool) -> list[dict[str, Any]]:
+    def by_puzzle_hashes(
+        self,
+        *,
+        puzzle_hashes: list[str],
+        include_spent: bool,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not puzzle_hashes:
+            return []
+        return _coinset_with_retries(
+            lambda: self.adapter.get_coin_records_by_puzzle_hashes(
+                puzzle_hashes_hex=puzzle_hashes,
+                include_spent_coins=include_spent,
+                start_height=start_height,
+                end_height=end_height,
+            )
+        )
+
+    def by_hint(
+        self,
+        *,
+        hint: str,
+        include_spent: bool,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
         payload = self._post_json(
             "get_coin_records_by_hint",
-            {"hint": hint, "include_spent_coins": include_spent},
+            {
+                "hint": hint,
+                "include_spent_coins": include_spent,
+                **({"start_height": int(start_height)} if start_height is not None else {}),
+                **({"end_height": int(end_height)} if end_height is not None else {}),
+            },
         )
         if not payload.get("success", False):
             return []
         rows = payload.get("coin_records") or []
         return [row for row in rows if isinstance(row, dict)]
 
+    def by_hints(
+        self,
+        *,
+        hints: list[str],
+        include_spent: bool,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not hints:
+            return []
+        return _coinset_with_retries(
+            lambda: self.adapter.get_coin_records_by_hints(
+                hints_hex=hints,
+                include_spent_coins=include_spent,
+                start_height=start_height,
+                end_height=end_height,
+            )
+        )
+
+    def by_names(
+        self, *, coin_names: list[str], include_spent: bool = True
+    ) -> list[dict[str, Any]]:
+        if not coin_names:
+            return []
+        return _coinset_with_retries(
+            lambda: self.adapter.get_coin_records_by_names(
+                coin_names_hex=coin_names,
+                include_spent_coins=include_spent,
+            )
+        )
+
 
 def _detect_cat_asset_id(
-    *, sdk: Any, coinset: CoinsetScanner, record: dict[str, Any]
+    *,
+    sdk: Any,
+    coinset: CoinsetScanner,
+    coin_id: str,
+    record: dict[str, Any],
+    cat_asset_cache: dict[str, str],
+    parent_record_cache: dict[str, dict[str, Any] | None],
+    puzzle_solution_cache: dict[str, dict[str, Any] | None],
+    parent_lineage_cache: dict[str, dict[str, Any]],
 ) -> str | None:
+    cached = cat_asset_cache.get(coin_id)
+    if cached is not None:
+        return cached or None
     coin = _coin_from_record(sdk=sdk, record=record)
     if coin is None:
+        cat_asset_cache[coin_id] = ""
         return None
-    parent_record = coinset.adapter.get_coin_record_by_name(
-        coin_name_hex=_to_coinset_hex(coin.parent_coin_info)
-    )
+    parent_coin_id_hex = normalize_hex_id(coin.parent_coin_info.hex()) or ""
+    if not parent_coin_id_hex:
+        cat_asset_cache[coin_id] = ""
+        return None
+    parent_lineage = parent_lineage_cache.get(parent_coin_id_hex)
+    if isinstance(parent_lineage, dict):
+        child_assets = parent_lineage.get("child_asset_ids")
+        if isinstance(child_assets, dict):
+            cached_asset = normalize_hex_id(child_assets.get(coin_id))
+            if cached_asset:
+                cat_asset_cache[coin_id] = cached_asset
+                return cached_asset
+            # Cached lineage says this child is not a CAT child.
+            if coin_id in child_assets:
+                cat_asset_cache[coin_id] = ""
+                return None
+
+    parent_record = parent_record_cache.get(parent_coin_id_hex)
+    if parent_record is None and parent_coin_id_hex not in parent_record_cache:
+        parent_record = _coinset_with_retries(
+            lambda: coinset.by_names(
+                coin_names=[_to_coinset_hex(coin.parent_coin_info)],
+                include_spent=True,
+            )
+        )
+        if isinstance(parent_record, list):
+            parent_record = parent_record[0] if parent_record else None
+        parent_record_cache[parent_coin_id_hex] = parent_record
     if not isinstance(parent_record, dict):
+        cat_asset_cache[coin_id] = ""
         return None
     parent_coin = _coin_from_record(sdk=sdk, record=parent_record)
     if parent_coin is None:
+        cat_asset_cache[coin_id] = ""
         return None
     spent_height = _safe_int(parent_record.get("spent_block_index"), default=0)
     if spent_height <= 0:
+        cat_asset_cache[coin_id] = ""
         return None
-    solution = coinset.adapter.get_puzzle_and_solution(
-        coin_id_hex=_to_coinset_hex(parent_coin.coin_id()),
-        height=spent_height,
-    )
+
+    parent_coin_name = normalize_hex_id(sdk.to_hex(parent_coin.coin_id())) or ""
+    if not parent_coin_name:
+        cat_asset_cache[coin_id] = ""
+        return None
+    solution_cache_key = f"{parent_coin_name}:{spent_height}"
+    solution = puzzle_solution_cache.get(solution_cache_key)
+    if solution is None and solution_cache_key not in puzzle_solution_cache:
+        solution = _coinset_with_retries(
+            lambda: coinset.adapter.get_puzzle_and_solution(
+                coin_id_hex=_to_coinset_hex(parent_coin.coin_id()),
+                height=spent_height,
+            )
+        )
+        puzzle_solution_cache[solution_cache_key] = solution
     if not isinstance(solution, dict):
+        cat_asset_cache[coin_id] = ""
         return None
     puzzle_reveal_hex = str(solution.get("puzzle_reveal", "")).strip()
     solution_hex = str(solution.get("solution", "")).strip()
     if not puzzle_reveal_hex or not solution_hex:
+        cat_asset_cache[coin_id] = ""
         return None
     try:
         clvm = sdk.Clvm()
@@ -181,19 +408,40 @@ def _detect_cat_asset_id(
             parent_coin, parent_solution_program
         )
     except Exception:
+        cat_asset_cache[coin_id] = ""
         return None
     if not parsed_children:
+        parent_lineage_cache[parent_coin_id_hex] = {
+            "spent_height": spent_height,
+            "child_asset_ids": {coin_id: ""},
+        }
+        cat_asset_cache[coin_id] = ""
         return None
     wanted_id = sdk.to_hex(coin.coin_id())
+    child_assets: dict[str, str] = {}
     for cat in parsed_children:
         child_coin = getattr(cat, "coin", None)
         info = getattr(cat, "info", None)
         if child_coin is None or info is None:
             continue
-        if sdk.to_hex(child_coin.coin_id()) != wanted_id:
+        child_id = normalize_hex_id(sdk.to_hex(child_coin.coin_id())) or ""
+        if not child_id:
             continue
-        asset_id = normalize_hex_id(sdk.to_hex(info.asset_id))
-        return asset_id or None
+        asset_id = normalize_hex_id(sdk.to_hex(info.asset_id)) or ""
+        child_assets[child_id] = asset_id
+        cat_asset_cache[child_id] = asset_id
+
+    if coin_id not in child_assets:
+        child_assets[coin_id] = ""
+    parent_lineage_cache[parent_coin_id_hex] = {
+        "spent_height": spent_height,
+        "child_asset_ids": child_assets,
+    }
+    target_asset = child_assets.get(wanted_id) or child_assets.get(coin_id) or ""
+    if target_asset:
+        cat_asset_cache[coin_id] = target_asset
+        return target_asset
+    cat_asset_cache[coin_id] = ""
     return None
 
 
@@ -265,7 +513,16 @@ def _coin_name_to_global_id_map_for_asset(
     *,
     asset_global_id: str,
 ) -> dict[str, str]:
-    coins = wallet.list_coins(include_pending=True)
+    # Prefer asset-scoped coin queries so Cloud Wallet performs server-side
+    # filtering against the requested CAT and we avoid brittle row-level
+    # asset-id comparisons.
+    coins = wallet.list_coins(asset_id=asset_global_id, include_pending=True)
+    scoped_query = True
+    if not coins:
+        # Fallback to unscoped listing for environments that return empty pages
+        # for asset-scoped requests; retain legacy row-level asset filtering.
+        coins = wallet.list_coins(include_pending=True)
+        scoped_query = False
     mapping: dict[str, str] = {}
     for coin in coins:
         coin_global_id = str(coin.get("id", "")).strip()
@@ -277,10 +534,11 @@ def _coin_name_to_global_id_map_for_asset(
             continue
         if bool(coin.get("isLocked", False)):
             continue
-        asset = coin.get("asset")
-        asset_id = str(asset.get("id", "")).strip() if isinstance(asset, dict) else ""
-        if asset_id != asset_global_id:
-            continue
+        if not scoped_query:
+            asset = coin.get("asset")
+            asset_id = str(asset.get("id", "")).strip() if isinstance(asset, dict) else ""
+            if asset_id != asset_global_id:
+                continue
         mapping[coin_name] = coin_global_id
     return mapping
 
@@ -296,6 +554,11 @@ def _combine_cat_dust(
     max_inputs = max(2, int(args.combine_max_inputs))
     fee_mojos = max(0, int(args.combine_fee_mojos))
     dry_run = bool(args.combine_dry_run)
+    wait_for_signature = not bool(args.combine_no_wait_signature)
+    signature_timeout_seconds = max(1, int(args.combine_signature_timeout_seconds))
+    signature_warning_interval_seconds = max(
+        1, int(args.combine_signature_warning_interval_seconds)
+    )
 
     dust_by_asset: dict[str, list[CoinRow]] = {}
     for row in rows:
@@ -330,10 +593,13 @@ def _combine_cat_dust(
                     "asset_global_id": asset_global_id,
                     "status": "error",
                     "reason": "coin_id_not_mappable_to_cloud_wallet_global_id",
+                    "dust_coin_count": len(dust_rows),
+                    "unresolved_coin_count": len(unresolved_coin_ids),
+                    "unresolved_coin_ids_sample": unresolved_coin_ids[:25],
                     "unresolved_coin_ids": unresolved_coin_ids,
                     "operator_guidance": (
-                        "re-run after wallet sync settles or pass a narrower filter; Cloud Wallet must expose "
-                        "CoinRecord global ids for all selected coin names before combine can be submitted"
+                        "Coinset-discovered CAT coin names did not map 1:1 to Cloud Wallet Coin_* ids. "
+                        "Treat this as a wallet-vs-chain divergence signal and investigate Cloud Wallet sync/indexing."
                     ),
                 }
             )
@@ -374,11 +640,36 @@ def _combine_cat_dust(
                 asset_id=asset_global_id,
                 input_coin_ids=list(batch["input_coin_ids"]),
             )
+            signature_request_id = str(result.get("signature_request_id", "")).strip()
+            final_status = str(result.get("status", "")).strip().upper()
+            signature_wait_events: list[dict[str, str]] = []
+            if wait_for_signature and signature_request_id and final_status == "UNSIGNED":
+                try:
+                    polled_status, signature_wait_events = (
+                        poll_signature_request_until_not_unsigned(
+                            wallet=wallet,
+                            signature_request_id=signature_request_id,
+                            timeout_seconds=signature_timeout_seconds,
+                            warning_interval_seconds=signature_warning_interval_seconds,
+                        )
+                    )
+                    final_status = str(polled_status).strip().upper() or final_status
+                except Exception as exc:  # noqa: BLE001
+                    final_status = "SIGNATURE_WAIT_ERROR"
+                    signature_wait_events.append(
+                        {
+                            "event": "signature_wait_error",
+                            "message": str(exc),
+                        }
+                    )
             submitted_batches.append(
                 {
                     **batch,
-                    "signature_request_id": str(result.get("signature_request_id", "")).strip(),
-                    "status": str(result.get("status", "")).strip(),
+                    "signature_request_id": signature_request_id,
+                    "status": final_status,
+                    "initial_status": str(result.get("status", "")).strip(),
+                    "waited_for_signature": wait_for_signature,
+                    "signature_wait_events": signature_wait_events,
                 }
             )
 
@@ -398,6 +689,9 @@ def _combine_cat_dust(
         "combine_max_inputs": max_inputs,
         "combine_fee_mojos": fee_mojos,
         "combine_dry_run": dry_run,
+        "combine_wait_for_signature": wait_for_signature,
+        "combine_signature_timeout_seconds": signature_timeout_seconds,
+        "combine_signature_warning_interval_seconds": signature_warning_interval_seconds,
         "operations": operations,
     }
 
@@ -416,6 +710,226 @@ def _write_launcher_id_file(path: str, launcher_id: str) -> None:
     file_path = Path(path).expanduser()
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(f"{launcher_id}\n", encoding="utf-8")
+
+
+def _clear_cache_files(paths: list[str]) -> dict[str, str]:
+    results: dict[str, str] = {}
+    for raw_path in paths:
+        clean = str(raw_path).strip()
+        if not clean:
+            continue
+        path = Path(clean).expanduser()
+        key = str(path)
+        if path.exists():
+            try:
+                path.unlink()
+                results[key] = "deleted"
+            except Exception as exc:  # noqa: BLE001
+                results[key] = f"delete_failed:{exc}"
+        else:
+            results[key] = "not_found"
+    return results
+
+
+def _coin_row_to_dict(row: CoinRow) -> dict[str, Any]:
+    return {
+        "coin_id": row.coin_id,
+        "puzzle_hash": row.puzzle_hash,
+        "parent_coin_info": row.parent_coin_info,
+        "amount": int(row.amount),
+        "confirmed_block_index": int(row.confirmed_block_index),
+        "spent_block_index": int(row.spent_block_index),
+        "discovered_nonces": sorted(int(nonce) for nonce in row.discovered_nonces),
+        "discovered_by_puzzle_hash": bool(row.discovered_by_puzzle_hash),
+        "discovered_by_hint": bool(row.discovered_by_hint),
+        "coin_type": str(row.coin_type),
+        "cat_asset_id": normalize_hex_id(row.cat_asset_id) if row.cat_asset_id else None,
+        "cat_symbols": [str(symbol) for symbol in row.cat_symbols],
+    }
+
+
+def _coin_row_from_dict(payload: dict[str, Any]) -> CoinRow | None:
+    coin_id = normalize_hex_id(payload.get("coin_id"))
+    if not coin_id:
+        return None
+    nonces_raw = payload.get("discovered_nonces")
+    nonces = [int(value) for value in nonces_raw] if isinstance(nonces_raw, list) else []
+    return CoinRow(
+        coin_id=coin_id,
+        puzzle_hash=normalize_hex_id(payload.get("puzzle_hash")) or "",
+        parent_coin_info=normalize_hex_id(payload.get("parent_coin_info")) or "",
+        amount=_safe_int(payload.get("amount"), default=0),
+        confirmed_block_index=_safe_int(payload.get("confirmed_block_index"), default=0),
+        spent_block_index=_safe_int(payload.get("spent_block_index"), default=0),
+        discovered_nonces=sorted(set(nonces)),
+        discovered_by_puzzle_hash=bool(payload.get("discovered_by_puzzle_hash", False)),
+        discovered_by_hint=bool(payload.get("discovered_by_hint", False)),
+        coin_type=str(payload.get("coin_type", "UNKNOWN")).strip().upper() or "UNKNOWN",
+        cat_asset_id=normalize_hex_id(payload.get("cat_asset_id")) or None,
+        cat_symbols=[
+            str(symbol).strip()
+            for symbol in (
+                payload.get("cat_symbols") if isinstance(payload.get("cat_symbols"), list) else []
+            )
+            if str(symbol).strip()
+        ],
+    )
+
+
+def _load_scan_checkpoint(
+    *,
+    checkpoint_file: str,
+    network: str,
+    launcher_id: str,
+    include_spent: bool,
+) -> tuple[
+    int, dict[int, str], dict[str, CoinRow], dict[str, str], dict[str, dict[str, Any]], int | None
+]:
+    path = Path(checkpoint_file).expanduser()
+    if not path.exists():
+        return 0, {}, {}, {}, {}, None
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return 0, {}, {}, {}, {}, None
+    if not isinstance(parsed, dict):
+        return 0, {}, {}, {}, {}, None
+    if normalize_hex_id(parsed.get("launcher_id")) != normalize_hex_id(launcher_id):
+        return 0, {}, {}, {}, {}, None
+    if str(parsed.get("network", "")).strip().lower() != str(network).strip().lower():
+        return 0, {}, {}, {}, {}, None
+    if bool(parsed.get("include_spent", False)) != bool(include_spent):
+        return 0, {}, {}, {}, {}, None
+
+    raw_nonce_map = parsed.get("nonce_to_p2")
+    nonce_to_p2: dict[int, str] = {}
+    if isinstance(raw_nonce_map, dict):
+        for nonce_key, p2_hash in raw_nonce_map.items():
+            try:
+                nonce = int(nonce_key)
+            except (TypeError, ValueError):
+                continue
+            clean_hash = normalize_hex_id(p2_hash)
+            if clean_hash:
+                nonce_to_p2[nonce] = clean_hash
+
+    raw_rows = parsed.get("coin_rows")
+    by_coin_id: dict[str, CoinRow] = {}
+    if isinstance(raw_rows, list):
+        for row_raw in raw_rows:
+            if not isinstance(row_raw, dict):
+                continue
+            row = _coin_row_from_dict(row_raw)
+            if row is None:
+                continue
+            by_coin_id[row.coin_id] = row
+
+    raw_cat_cache = parsed.get("cat_asset_cache")
+    cat_asset_cache: dict[str, str] = {}
+    if isinstance(raw_cat_cache, dict):
+        for coin_id_raw, asset_id_raw in raw_cat_cache.items():
+            coin_id = normalize_hex_id(coin_id_raw)
+            if not coin_id:
+                continue
+            asset_id = normalize_hex_id(asset_id_raw) or ""
+            cat_asset_cache[coin_id] = asset_id
+
+    raw_parent_lineage = parsed.get("parent_lineage_cache")
+    parent_lineage_cache: dict[str, dict[str, Any]] = {}
+    if isinstance(raw_parent_lineage, dict):
+        for parent_id_raw, lineage_raw in raw_parent_lineage.items():
+            parent_id = normalize_hex_id(parent_id_raw)
+            if not parent_id or not isinstance(lineage_raw, dict):
+                continue
+            child_assets_raw = lineage_raw.get("child_asset_ids")
+            child_assets: dict[str, str] = {}
+            if isinstance(child_assets_raw, dict):
+                for child_id_raw, asset_id_raw in child_assets_raw.items():
+                    child_id = normalize_hex_id(child_id_raw)
+                    if not child_id:
+                        continue
+                    child_assets[child_id] = normalize_hex_id(asset_id_raw) or ""
+            parent_lineage_cache[parent_id] = {
+                "spent_height": _safe_int(lineage_raw.get("spent_height"), default=0),
+                "child_asset_ids": child_assets,
+            }
+
+    max_nonce_completed = _safe_int(parsed.get("max_nonce_completed"), default=-1)
+    last_synced_height_raw = parsed.get("last_synced_height")
+    last_synced_height = (
+        _safe_int(last_synced_height_raw, default=-1) if last_synced_height_raw is not None else -1
+    )
+    if last_synced_height < 0:
+        last_synced_height = None
+    next_nonce = max(0, max_nonce_completed + 1)
+    return (
+        next_nonce,
+        nonce_to_p2,
+        by_coin_id,
+        cat_asset_cache,
+        parent_lineage_cache,
+        last_synced_height,
+    )
+
+
+def _save_scan_checkpoint(
+    *,
+    checkpoint_file: str,
+    network: str,
+    launcher_id: str,
+    include_spent: bool,
+    max_nonce_completed: int,
+    nonce_to_p2: dict[int, str],
+    by_coin_id: dict[str, CoinRow],
+    cat_asset_cache: dict[str, str],
+    parent_lineage_cache: dict[str, dict[str, Any]],
+    last_synced_height: int | None,
+    scan_start_height: int | None,
+    scan_end_height: int | None,
+) -> None:
+    path = Path(checkpoint_file).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": 1,
+        "network": str(network).strip().lower(),
+        "launcher_id": normalize_hex_id(launcher_id) or "",
+        "include_spent": bool(include_spent),
+        "max_nonce_completed": int(max_nonce_completed),
+        "last_synced_height": int(last_synced_height) if last_synced_height is not None else None,
+        "scan_window": {
+            "start_height": int(scan_start_height) if scan_start_height is not None else None,
+            "end_height": int(scan_end_height) if scan_end_height is not None else None,
+        },
+        "nonce_to_p2": {str(k): v for k, v in sorted(nonce_to_p2.items())},
+        "coin_rows": [
+            _coin_row_to_dict(row) for row in sorted(by_coin_id.values(), key=lambda r: r.coin_id)
+        ],
+        "cat_asset_cache": {
+            coin_id: asset_id for coin_id, asset_id in sorted(cat_asset_cache.items())
+        },
+        "parent_lineage_cache": {
+            parent_id: {
+                "spent_height": _safe_int(lineage.get("spent_height"), default=0),
+                "child_asset_ids": {
+                    child_id: normalize_hex_id(asset_id) or ""
+                    for child_id, asset_id in sorted(
+                        (
+                            (normalize_hex_id(raw_child_id) or "", raw_asset_id)
+                            for raw_child_id, raw_asset_id in (
+                                lineage.get("child_asset_ids").items()
+                                if isinstance(lineage.get("child_asset_ids"), dict)
+                                else []
+                            )
+                        ),
+                        key=lambda item: item[0],
+                    )
+                    if child_id
+                },
+            }
+            for parent_id, lineage in sorted(parent_lineage_cache.items())
+        },
+    }
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def _normalize_label(value: object) -> str:
@@ -584,7 +1098,113 @@ def main() -> int:
         default=0,
         help="Fee mojos per combine request (default 0).",
     )
+    parser.add_argument(
+        "--combine-no-wait-signature",
+        action="store_true",
+        help="Do not wait for signature request to leave UNSIGNED after combine submission.",
+    )
+    parser.add_argument(
+        "--combine-signature-timeout-seconds",
+        type=int,
+        default=15 * 60,
+        help="Maximum wait time for combine signature request to leave UNSIGNED (default 900).",
+    )
+    parser.add_argument(
+        "--combine-signature-warning-interval-seconds",
+        type=int,
+        default=10 * 60,
+        help="Warning cadence while waiting on combine signature state (default 600).",
+    )
+    parser.add_argument(
+        "--checkpoint-file",
+        default="",
+        help=(
+            "Optional JSON checkpoint/cache file. "
+            "When set, nonce scan progress and CAT classification cache are resumed across runs."
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint-save-interval",
+        type=int,
+        default=1,
+        help="Save checkpoint after every N nonce scans (default 1).",
+    )
+    parser.add_argument(
+        "--no-resume-checkpoint",
+        action="store_true",
+        help="Ignore existing checkpoint contents and start scanning from nonce 0.",
+    )
+    parser.add_argument(
+        "--nonce-batch-size",
+        type=int,
+        default=32,
+        help="Nonce scan batch size for Coinset puzzle_hashes/hints queries (default 32).",
+    )
+    parser.add_argument(
+        "--empty-batch-stop-count",
+        type=int,
+        default=1,
+        help="Stop after this many consecutive empty nonce batches beyond nonce 0 (default 1).",
+    )
+    parser.add_argument(
+        "--parent-lookup-batch-size",
+        type=int,
+        default=64,
+        help="Parent coin lookup batch size for get_coin_records_by_names (default 64).",
+    )
+    parser.add_argument(
+        "--start-height",
+        type=int,
+        default=None,
+        help="Optional Coinset start_height filter for coin record queries.",
+    )
+    parser.add_argument(
+        "--end-height",
+        type=int,
+        default=None,
+        help="Optional Coinset end_height filter for coin record queries.",
+    )
+    parser.add_argument(
+        "--incremental-from-checkpoint",
+        action="store_true",
+        help=(
+            "When checkpointing is enabled, continue from checkpoint last_synced_height + 1 "
+            "and cap end_height to current chain peak when omitted."
+        ),
+    )
+    parser.add_argument(
+        "--auto-increment",
+        action="store_true",
+        help=(
+            "Convenience mode: enables checkpointing and incremental-from-checkpoint. "
+            "Uses ~/.greenfloor/cache/vault_coinset_checkpoint.json when --checkpoint-file is unset."
+        ),
+    )
+    parser.add_argument(
+        "--clear-caches",
+        action="store_true",
+        help=(
+            "Clear launcher/checkpoint cache files before scanning. "
+            "Targets launcher-id-file/checkpoint-file when provided, otherwise default cache paths."
+        ),
+    )
     args = parser.parse_args()
+
+    if bool(args.auto_increment):
+        if bool(args.no_resume_checkpoint):
+            raise ValueError("cannot use --auto-increment with --no-resume-checkpoint")
+        if not str(args.checkpoint_file).strip():
+            args.checkpoint_file = "~/.greenfloor/cache/vault_coinset_checkpoint.json"
+        args.incremental_from_checkpoint = True
+    if bool(args.clear_caches):
+        cache_files = [
+            str(args.launcher_id_file).strip() or "~/.greenfloor/cache/vault_launcher_id.txt",
+            str(args.checkpoint_file).strip()
+            or "~/.greenfloor/cache/vault_coinset_checkpoint.json",
+        ]
+        cache_clear_result = _clear_cache_files(cache_files)
+    else:
+        cache_clear_result = {}
 
     launcher_id = normalize_hex_id(args.launcher_id)
     launcher_id_source = "arg"
@@ -643,25 +1263,193 @@ def main() -> int:
         else str(args.asset_type).strip().lower()
     )
 
-    by_coin_id: dict[str, CoinRow] = {}
-    nonce_to_p2: dict[int, str] = {}
+    max_nonce_target = max(0, int(args.max_nonce))
+    checkpoint_file = str(args.checkpoint_file).strip()
+    checkpoint_save_interval = max(1, int(args.checkpoint_save_interval))
+    checkpoint_enabled = bool(checkpoint_file)
+    checkpoint_resumed = False
+    checkpoint_start_nonce = 0
 
-    for nonce in range(0, max(0, int(args.max_nonce)) + 1):
-        cfg = sdk.MemberConfig().with_top_level(True).with_nonce(int(nonce))
-        p2_hash = normalize_hex_id(
-            sdk.to_hex(sdk.singleton_member_hash(cfg, _hex_to_bytes(launcher_id), False))
+    by_coin_id: dict[str, CoinRow]
+    nonce_to_p2: dict[int, str]
+    cat_asset_cache: dict[str, str]
+    parent_lineage_cache: dict[str, dict[str, Any]]
+    checkpoint_last_synced_height: int | None
+    if checkpoint_enabled and not bool(args.no_resume_checkpoint):
+        (
+            checkpoint_start_nonce,
+            nonce_to_p2,
+            by_coin_id,
+            cat_asset_cache,
+            parent_lineage_cache,
+            checkpoint_last_synced_height,
+        ) = _load_scan_checkpoint(
+            checkpoint_file=checkpoint_file,
+            network=args.network,
+            launcher_id=launcher_id,
+            include_spent=bool(args.include_spent),
         )
-        if not p2_hash:
-            continue
-        nonce_to_p2[nonce] = p2_hash
-        by_puzzle = scanner.by_puzzle_hash(
-            puzzle_hash=_to_coinset_hex(_hex_to_bytes(p2_hash)), include_spent=args.include_spent
+        checkpoint_resumed = (
+            checkpoint_start_nonce > 0
+            or bool(by_coin_id)
+            or bool(cat_asset_cache)
+            or bool(parent_lineage_cache)
         )
-        by_hint = scanner.by_hint(
-            hint=_to_coinset_hex(_hex_to_bytes(p2_hash)), include_spent=args.include_spent
+    else:
+        by_coin_id = {}
+        nonce_to_p2 = {}
+        cat_asset_cache = {}
+        parent_lineage_cache = {}
+        checkpoint_last_synced_height = None
+
+    nonce_batch_size = max(1, int(args.nonce_batch_size))
+    empty_batch_stop_count = max(1, int(args.empty_batch_stop_count))
+    parent_lookup_batch_size = max(1, int(args.parent_lookup_batch_size))
+    requested_start_height = (
+        args.start_height if args.start_height is None else max(0, int(args.start_height))
+    )
+    requested_end_height = (
+        args.end_height if args.end_height is None else max(0, int(args.end_height))
+    )
+    if requested_start_height is not None and requested_end_height is not None:
+        if requested_end_height < requested_start_height:
+            raise ValueError("end-height must be greater than or equal to start-height")
+    if bool(args.incremental_from_checkpoint) and requested_start_height is not None:
+        raise ValueError("cannot use --start-height with --incremental-from-checkpoint")
+    if bool(args.incremental_from_checkpoint) and not checkpoint_enabled:
+        raise ValueError("--incremental-from-checkpoint requires --checkpoint-file")
+
+    chain_peak_height: int | None = None
+    if bool(args.incremental_from_checkpoint) or requested_end_height is None:
+        state = _coinset_with_retries(lambda: scanner.adapter.get_blockchain_state())
+        if isinstance(state, dict):
+            peak_raw = state.get("peak")
+            if isinstance(peak_raw, dict):
+                chain_peak_height = _safe_int(peak_raw.get("height"), default=-1)
+            if chain_peak_height is None or chain_peak_height < 0:
+                chain_peak_height = _safe_int(state.get("peak_height"), default=-1)
+            if chain_peak_height is not None and chain_peak_height < 0:
+                chain_peak_height = None
+
+    effective_start_height = requested_start_height
+    if bool(args.incremental_from_checkpoint):
+        if checkpoint_last_synced_height is not None and checkpoint_last_synced_height >= 0:
+            effective_start_height = int(checkpoint_last_synced_height) + 1
+        elif effective_start_height is None:
+            effective_start_height = 0
+    effective_end_height = requested_end_height
+    if effective_end_height is None and chain_peak_height is not None:
+        effective_end_height = int(chain_peak_height)
+    checkpoint_synced_height = (
+        int(effective_end_height)
+        if effective_end_height is not None
+        else (int(chain_peak_height) if chain_peak_height is not None else None)
+    )
+
+    if (
+        effective_start_height is not None
+        and effective_end_height is not None
+        and effective_start_height > effective_end_height
+    ):
+        stop_reason = "scan_window_exhausted"
+        print(
+            json.dumps(
+                {
+                    "network": scanner.adapter.network,
+                    "coinset_base_url": scanner.adapter.base_url,
+                    "launcher_id": launcher_id,
+                    "asset_type": effective_asset_type,
+                    "requested_cat_ids": sorted(requested_cat_ids),
+                    "requested_cat_tickers": sorted(set(requested_cat_tickers_raw)),
+                    "max_nonce_scanned": max(nonce_to_p2.keys()) if nonce_to_p2 else 0,
+                    "count": 0,
+                    "checkpoint": {
+                        "enabled": checkpoint_enabled,
+                        "file": str(Path(checkpoint_file).expanduser())
+                        if checkpoint_enabled
+                        else None,
+                        "resumed": checkpoint_resumed,
+                        "start_nonce": checkpoint_start_nonce,
+                        "save_interval": checkpoint_save_interval if checkpoint_enabled else None,
+                        "cat_asset_cache_entries": len(cat_asset_cache),
+                        "parent_lineage_cache_entries": len(parent_lineage_cache),
+                        "last_synced_height": checkpoint_last_synced_height,
+                    },
+                    "scan_batches": {
+                        "nonce_batch_size": nonce_batch_size,
+                        "empty_batch_stop_count": empty_batch_stop_count,
+                        "parent_lookup_batch_size": parent_lookup_batch_size,
+                    },
+                    "scan_window": {
+                        "start_height": effective_start_height,
+                        "end_height": effective_end_height,
+                        "chain_peak_height": chain_peak_height,
+                        "incremental_from_checkpoint": bool(args.incremental_from_checkpoint),
+                        "auto_increment": bool(args.auto_increment),
+                    },
+                    "scan_stop_reason": stop_reason,
+                    "combine_dust": None,
+                    "coins": [],
+                },
+                indent=2,
+            )
         )
-        if nonce > 0 and not by_puzzle and not by_hint:
+        return 0
+
+    scanned_since_resume = 0
+    empty_batch_count = 0
+    stop_reason = "max_nonce_reached"
+    for batch_start in range(checkpoint_start_nonce, max_nonce_target + 1, nonce_batch_size):
+        batch_end = min(batch_start + nonce_batch_size - 1, max_nonce_target)
+        batch_nonces = list(range(batch_start, batch_end + 1))
+        nonce_p2: dict[int, str] = {}
+        for nonce in batch_nonces:
+            cfg = sdk.MemberConfig().with_top_level(True).with_nonce(int(nonce))
+            p2_hash = normalize_hex_id(
+                sdk.to_hex(sdk.singleton_member_hash(cfg, _hex_to_bytes(launcher_id), False))
+            )
+            if p2_hash:
+                nonce_p2[nonce] = p2_hash
+                nonce_to_p2[nonce] = p2_hash
+        p2_hashes = list(
+            dict.fromkeys(_to_coinset_hex(_hex_to_bytes(v)) for v in nonce_p2.values())
+        )
+        by_puzzle = scanner.by_puzzle_hashes(
+            puzzle_hashes=p2_hashes,
+            include_spent=args.include_spent,
+            start_height=effective_start_height,
+            end_height=effective_end_height,
+        )
+        by_hint = scanner.by_hints(
+            hints=p2_hashes,
+            include_spent=args.include_spent,
+            start_height=effective_start_height,
+            end_height=effective_end_height,
+        )
+        batch_has_any = bool(by_puzzle) or bool(by_hint)
+        if batch_end > 0 and not batch_has_any:
+            empty_batch_count += 1
+        else:
+            empty_batch_count = 0
+        if empty_batch_count >= empty_batch_stop_count:
+            stop_reason = "empty_nonce_batches"
+            if checkpoint_enabled:
+                _save_scan_checkpoint(
+                    checkpoint_file=checkpoint_file,
+                    network=args.network,
+                    launcher_id=launcher_id,
+                    include_spent=bool(args.include_spent),
+                    max_nonce_completed=batch_end,
+                    nonce_to_p2=nonce_to_p2,
+                    by_coin_id=by_coin_id,
+                    cat_asset_cache=cat_asset_cache,
+                    parent_lineage_cache=parent_lineage_cache,
+                    last_synced_height=checkpoint_synced_height,
+                    scan_start_height=effective_start_height,
+                    scan_end_height=effective_end_height,
+                )
             break
+
         for source, records in (("puzzle_hash", by_puzzle), ("hint", by_hint)):
             for record in records:
                 coin_id = _coin_id_from_record(record)
@@ -688,18 +1476,66 @@ def main() -> int:
                         cat_symbols=[],
                     )
                     by_coin_id[coin_id] = row
-                if nonce not in row.discovered_nonces:
-                    row.discovered_nonces.append(nonce)
-                    row.discovered_nonces.sort()
+                for nonce, batch_p2 in nonce_p2.items():
+                    if row.puzzle_hash == batch_p2 and nonce not in row.discovered_nonces:
+                        row.discovered_nonces.append(nonce)
+                row.discovered_nonces.sort()
                 if source == "puzzle_hash":
                     row.discovered_by_puzzle_hash = True
                 if source == "hint":
                     row.discovered_by_hint = True
 
+        scanned_since_resume += len(batch_nonces)
+        if checkpoint_enabled and (
+            scanned_since_resume % checkpoint_save_interval == 0 or batch_end >= max_nonce_target
+        ):
+            _save_scan_checkpoint(
+                checkpoint_file=checkpoint_file,
+                network=args.network,
+                launcher_id=launcher_id,
+                include_spent=bool(args.include_spent),
+                max_nonce_completed=batch_end,
+                nonce_to_p2=nonce_to_p2,
+                by_coin_id=by_coin_id,
+                cat_asset_cache=cat_asset_cache,
+                parent_lineage_cache=parent_lineage_cache,
+                last_synced_height=checkpoint_synced_height,
+                scan_start_height=effective_start_height,
+                scan_end_height=effective_end_height,
+            )
+
+    parent_record_cache: dict[str, dict[str, Any] | None] = {}
+    puzzle_solution_cache: dict[str, dict[str, Any] | None] = {}
+    unresolved_parent_ids = sorted(
+        {
+            row.parent_coin_info
+            for row in by_coin_id.values()
+            if row.parent_coin_info and row.parent_coin_info not in parent_record_cache
+        }
+    )
+    for parent_batch in _chunk_values(unresolved_parent_ids, parent_lookup_batch_size):
+        parent_records = scanner.by_names(
+            coin_names=[_to_coinset_hex(_hex_to_bytes(parent_id)) for parent_id in parent_batch],
+            include_spent=True,
+        )
+        for parent in parent_records:
+            parent_id = _coin_id_from_record(parent)
+            if parent_id:
+                parent_record_cache[parent_id] = parent
+
     for row in by_coin_id.values():
         p2_hashes = {nonce_to_p2.get(nonce, "") for nonce in row.discovered_nonces}
         if row.puzzle_hash and row.puzzle_hash in p2_hashes:
             row.coin_type = "XCH"
+            continue
+        cached_asset_id = cat_asset_cache.get(row.coin_id)
+        if cached_asset_id is not None:
+            if cached_asset_id:
+                row.coin_type = "CAT"
+                row.cat_asset_id = cached_asset_id
+                row.cat_symbols = list(asset_id_to_symbols.get(cached_asset_id, []))
+            else:
+                row.coin_type = "OTHER"
             continue
         record = {
             "coin": {
@@ -708,13 +1544,39 @@ def main() -> int:
                 "amount": row.amount,
             },
         }
-        cat_asset_id = _detect_cat_asset_id(sdk=sdk, coinset=scanner, record=record)
+        cat_asset_id = _detect_cat_asset_id(
+            sdk=sdk,
+            coinset=scanner,
+            coin_id=row.coin_id,
+            record=record,
+            cat_asset_cache=cat_asset_cache,
+            parent_record_cache=parent_record_cache,
+            puzzle_solution_cache=puzzle_solution_cache,
+            parent_lineage_cache=parent_lineage_cache,
+        )
         if cat_asset_id:
             row.coin_type = "CAT"
             row.cat_asset_id = cat_asset_id
             row.cat_symbols = list(asset_id_to_symbols.get(cat_asset_id, []))
             continue
         row.coin_type = "OTHER"
+
+    max_nonce_scanned = max(nonce_to_p2.keys()) if nonce_to_p2 else 0
+    if checkpoint_enabled:
+        _save_scan_checkpoint(
+            checkpoint_file=checkpoint_file,
+            network=args.network,
+            launcher_id=launcher_id,
+            include_spent=bool(args.include_spent),
+            max_nonce_completed=max_nonce_scanned,
+            nonce_to_p2=nonce_to_p2,
+            by_coin_id=by_coin_id,
+            cat_asset_cache=cat_asset_cache,
+            parent_lineage_cache=parent_lineage_cache,
+            last_synced_height=checkpoint_synced_height,
+            scan_start_height=effective_start_height,
+            scan_end_height=effective_end_height,
+        )
 
     filtered: list[CoinRow] = []
     for row in sorted(by_coin_id.values(), key=lambda r: (r.coin_type, r.amount, r.coin_id)):
@@ -745,8 +1607,32 @@ def main() -> int:
                 "asset_type": effective_asset_type,
                 "requested_cat_ids": sorted(requested_cat_ids),
                 "requested_cat_tickers": sorted(set(requested_cat_tickers_raw)),
-                "max_nonce_scanned": max(nonce_to_p2.keys()) if nonce_to_p2 else 0,
+                "max_nonce_scanned": max_nonce_scanned,
                 "count": len(filtered),
+                "cache_clear": cache_clear_result or None,
+                "checkpoint": {
+                    "enabled": checkpoint_enabled,
+                    "file": str(Path(checkpoint_file).expanduser()) if checkpoint_enabled else None,
+                    "resumed": checkpoint_resumed,
+                    "start_nonce": checkpoint_start_nonce,
+                    "save_interval": checkpoint_save_interval if checkpoint_enabled else None,
+                    "cat_asset_cache_entries": len(cat_asset_cache),
+                    "parent_lineage_cache_entries": len(parent_lineage_cache),
+                    "last_synced_height": checkpoint_synced_height,
+                },
+                "scan_batches": {
+                    "nonce_batch_size": nonce_batch_size,
+                    "empty_batch_stop_count": empty_batch_stop_count,
+                    "parent_lookup_batch_size": parent_lookup_batch_size,
+                },
+                "scan_window": {
+                    "start_height": effective_start_height,
+                    "end_height": effective_end_height,
+                    "chain_peak_height": chain_peak_height,
+                    "incremental_from_checkpoint": bool(args.incremental_from_checkpoint),
+                    "auto_increment": bool(args.auto_increment),
+                },
+                "scan_stop_reason": stop_reason,
                 "combine_dust": combine_plan,
                 "coins": [
                     {

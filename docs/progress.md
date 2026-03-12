@@ -1,5 +1,42 @@
 # Progress Log
 
+## 2026-03-12 (Auto-increment scan mode + John-Deere production validation request)
+
+- Extended `scripts/list_vault_coins_coinset.py` incremental workflow with `--auto-increment`:
+  - automatically enables `--incremental-from-checkpoint`,
+  - auto-selects checkpoint path `~/.greenfloor/cache/vault_coinset_checkpoint.json` when `--checkpoint-file` is not supplied,
+  - rejects conflicting `--no-resume-checkpoint` usage.
+- Added `--clear-caches` convenience mode:
+  - clears launcher/checkpoint cache files before scanning,
+  - targets explicit `--launcher-id-file`/`--checkpoint-file` paths when provided,
+  - otherwise clears default cache files under `~/.greenfloor/cache/`.
+- Output metadata now reports `scan_window.auto_increment` so operators can confirm convenience-mode activation in JSON output.
+- John-Deere production validation:
+  - `--cat-ticker wUSDB.c` correctly fails fast with `unknown cat ticker(s): wUSDB.c` (metadata guardrail),
+  - `--cat-ticker wUSDC.b --auto-increment` resumes from checkpoint (`resumed: true`, `start_nonce: 1`) and returns `13` CAT rows,
+  - smallest observed `wUSDC.b` coin remains `50` mojos; next smallest entries are `9990`-mojo ladder coins.
+  - `--clear-caches` production rerun deleted both cache files and rebuilt scan caches from scratch on John-Deere.
+  - Follow-up combine action submitted for the two smallest spendable Cloud Wallet `wUSDC.b` coins:
+    - selected coin ids: `CoinRecord_2f6bcdd9...` (`50`) + `CoinRecord_08cfbf79...` (`9990`),
+    - combine submission result: `SignatureRequest_qov8rv505zh37p7dok28x1h9` (`UNSIGNED` pending signer flow).
+
+## 2026-03-12 (Coinset capability probe + incremental scan integration docs)
+
+- Added host capability probe utility: `scripts/probe_coinset_capabilities.py`.
+  - Resolves launcher id from arg/file/Cloud Wallet and derives vault member P2 hash.
+  - Probes batched Coinset endpoints with and without height windows:
+    - `get_coin_records_by_puzzle_hashes`
+    - `get_coin_records_by_hints`
+    - `get_coin_records_by_names` (using a sampled known coin id)
+  - Emits structured JSON capability profile for runtime host validation.
+- Added operator runbook for Coinset validation workflows: `docs/coinset-validation.md`.
+  - Includes capability probe command, full scan command, incremental checkpoint command, and optional Coinset CLI parity checks.
+  - Documents expected outcomes and failure handling for unsupported range mode / transient edge errors.
+- Updated `docs/runbook.md` to link to the dedicated Coinset validation runbook.
+- Updated `COINSET_DOCS_AND_API.md` status header:
+  - kept as local snapshot (not removed),
+  - points operators to canonical Coinset CLI skill and repo-specific validation assets.
+
 ## 2026-03-12 (Vault CAT dust combine execution + PR scope update)
 
 - Extended `scripts/list_vault_coins_coinset.py` with CAT dust combine execution support:
