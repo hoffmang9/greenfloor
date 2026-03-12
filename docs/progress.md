@@ -1,5 +1,23 @@
 # Progress Log
 
+## 2026-03-12 (Vault CAT dust combine execution + PR scope update)
+
+- Extended `scripts/list_vault_coins_coinset.py` with CAT dust combine execution support:
+  - added `--combine-dust` mode to submit Cloud Wallet `combineCoins` using explicit `inputCoinIds`,
+  - added `--combine-dry-run` to plan batches without submitting,
+  - added tunables: `--dust-threshold-mojos` (default `1000`), `--combine-max-inputs` (default `5`), and `--combine-fee-mojos` (default `0`).
+- Dust combine flow now:
+  - filters CAT rows below threshold from Coinset-discovered vault inventory,
+  - groups by CAT asset id, resolves Cloud Wallet `Asset_*` id by identifier,
+  - maps coin-name hex ids to Cloud Wallet `CoinRecord_*` ids before mutation submission,
+  - emits structured per-asset operation results (submitted/skipped/error) in JSON output.
+- Validation completed locally on updated script:
+  - `pre-commit run --files scripts/list_vault_coins_coinset.py` passed,
+  - script compile/help checks passed.
+- Updated PR #56 scope metadata to reflect new capability:
+  - title changed to `feat: vault coinset scanner with CAT filters and dust combine`,
+  - body updated with dust-combine behavior and refreshed test plan.
+
 ## 2026-03-11 (Vault Coinset scanner + CAT metadata filters + CI fix)
 
 - Added standalone vault coin discovery script: `scripts/list_vault_coins_coinset.py`.
