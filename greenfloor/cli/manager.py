@@ -245,6 +245,10 @@ def _canonical_is_xch(asset_id: str) -> bool:
     return value in {"xch", "txch"}
 
 
+def _default_mojo_multiplier_for_asset(asset_id: str) -> int:
+    return 1_000_000_000_000 if _canonical_is_xch(asset_id) else 1000
+
+
 def _canonical_is_cloud_global_id(asset_id: str) -> bool:
     return asset_id.strip().startswith("Asset_")
 
@@ -1613,6 +1617,40 @@ def _coin_meets_coin_op_min_amount(coin: dict, *, canonical_asset_id: str) -> bo
     )
 
 
+def _coin_matches_direct_spendable_lookup(
+    *,
+    wallet: Any,
+    coin: dict,
+    scoped_asset_id: str,
+    cache: dict[str, bool] | None = None,
+) -> bool:
+    get_coin_record = getattr(wallet, "get_coin_record", None)
+    if not callable(get_coin_record):
+        return True
+    coin_id = str(coin.get("id", "")).strip()
+    if not coin_id:
+        return False
+    if cache is not None and coin_id in cache:
+        return bool(cache[coin_id])
+    try:
+        coin_record = get_coin_record(coin_id=coin_id)
+    except Exception:
+        result = False
+    else:
+        if not isinstance(coin_record, dict):
+            result = False
+        else:
+            result = (
+                _is_spendable_coin(coin_record)
+                and not bool(coin_record.get("isLinkedToOpenOffer"))
+                and _coin_asset_id(coin_record).strip().lower()
+                == str(scoped_asset_id).strip().lower()
+            )
+    if cache is not None:
+        cache[coin_id] = result
+    return result
+
+
 def _evaluate_denomination_readiness(
     *,
     wallet: CloudWalletAdapter,
@@ -1685,6 +1723,37 @@ def _resolve_coin_global_ids(
         else:
             unresolved.append(token)
     return resolved, unresolved
+
+
+def _coin_id_asset_lookup(wallet_coins: list[dict]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for coin in wallet_coins:
+        coin_id = str(coin.get("id", "")).strip()
+        if not coin_id:
+            continue
+        lookup[coin_id] = _coin_asset_id(coin).strip().lower()
+    return lookup
+
+
+def _classify_resolved_coin_ids_by_asset(
+    *,
+    wallet_coins: list[dict],
+    resolved_coin_ids: list[str],
+    expected_asset_id: str,
+) -> tuple[list[str], list[dict[str, str]]]:
+    lookup = _coin_id_asset_lookup(wallet_coins)
+    expected = str(expected_asset_id).strip().lower()
+    unknown: list[str] = []
+    mismatched: list[dict[str, str]] = []
+    for coin_id in resolved_coin_ids:
+        normalized_coin_id = str(coin_id).strip()
+        actual_asset = lookup.get(normalized_coin_id)
+        if actual_asset is None:
+            unknown.append(normalized_coin_id)
+            continue
+        if actual_asset != expected:
+            mismatched.append({"coin_id": normalized_coin_id, "coin_asset_id": actual_asset})
+    return unknown, mismatched
 
 
 # ---------------------------------------------------------------------------
@@ -2429,6 +2498,7 @@ def _cloud_wallet_post_offer_phase(
     expected_offered_symbol: str,
     expected_requested_asset_id: str,
     expected_requested_symbol: str,
+    sleep_fn: collections.abc.Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
     return _shared_cloud_wallet_post_offer_phase(
         publish_venue=publish_venue,
@@ -2444,6 +2514,7 @@ def _cloud_wallet_post_offer_phase(
         expected_requested_symbol=expected_requested_symbol,
         post_dexie_offer_with_invalid_offer_retry_fn=_post_dexie_offer_with_invalid_offer_retry,
         verify_dexie_offer_visible_by_id_fn=_verify_dexie_offer_visible_by_id,
+        sleep_fn=sleep_fn,
     )
 
 
@@ -2537,8 +2608,22 @@ def _build_and_post_offer(
     # (pyright and runtime callers) that treat this as a non-optional value.
     keyring_yaml_path = str(signer_key.keyring_yaml_path or "") if signer_key is not None else ""
     pricing = dict(getattr(market, "pricing", {}) or {})
-    base_unit_mojo_multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))
-    quote_unit_mojo_multiplier = int(pricing.get("quote_unit_mojo_multiplier", 1000))
+    default_quote_asset = _resolve_quote_asset_for_local_offer_build(
+        quote_asset=str(market.quote_asset),
+        network=network,
+    )
+    base_unit_mojo_multiplier = int(
+        pricing.get(
+            "base_unit_mojo_multiplier",
+            _default_mojo_multiplier_for_asset(str(market.base_asset)),
+        )
+    )
+    quote_unit_mojo_multiplier = int(
+        pricing.get(
+            "quote_unit_mojo_multiplier",
+            _default_mojo_multiplier_for_asset(str(default_quote_asset)),
+        )
+    )
     expiry_unit, expiry_value = _resolve_offer_expiry_for_market(market)
     quote_price = pricing.get("fixed_quote_per_base")
     if quote_price is None:
@@ -3373,13 +3458,51 @@ def _coin_combine(
                 raise ValueError(
                     "when --coin-id is provided, --input-coin-count must match the number of --coin-id values"
                 )
+            unresolved_coin_ids, mismatched_coin_ids = _classify_resolved_coin_ids_by_asset(
+                wallet_coins=wallet_coins,
+                resolved_coin_ids=resolved_input_coin_ids,
+                expected_asset_id=resolved_asset_id,
+            )
+            if unresolved_coin_ids:
+                break
+            if mismatched_coin_ids:
+                print(
+                    _format_json_output(
+                        {
+                            **_coin_op_base_payload(market, selected_venue, wallet),
+                            "waited": False,
+                            "success": False,
+                            "error": "coin_id_asset_mismatch",
+                            "resolved_asset_id": resolved_asset_id,
+                            "mismatched_coin_ids": [
+                                str(entry.get("coin_id", "")).strip()
+                                for entry in mismatched_coin_ids
+                                if str(entry.get("coin_id", "")).strip()
+                            ],
+                            "mismatched_coin_assets": mismatched_coin_ids,
+                            "operator_guidance": (
+                                "all explicit --coin-id values must resolve to the same asset "
+                                "as --asset-id; re-run coins-list scoped to the target asset "
+                                "and retry with only those coin ids"
+                            ),
+                        }
+                    )
+                )
+                return 2
         elif min_coin_amount_mojos > 0:
             asset_scoped_coins = wallet.list_coins(asset_id=resolved_asset_id, include_pending=True)
+            direct_lookup_cache: dict[str, bool] = {}
             eligible_asset_coins = [
                 c
                 for c in asset_scoped_coins
                 if _is_spendable_coin(c)
                 and _coin_meets_coin_op_min_amount(c, canonical_asset_id=combine_canonical_asset_id)
+                and _coin_matches_direct_spendable_lookup(
+                    wallet=wallet,
+                    coin=c,
+                    scoped_asset_id=resolved_asset_id,
+                    cache=direct_lookup_cache,
+                )
                 and str(c.get("id", "")).strip()
             ]
             if len(eligible_asset_coins) < number_of_coins:

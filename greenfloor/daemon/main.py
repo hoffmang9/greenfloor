@@ -26,11 +26,12 @@ from greenfloor.adapters.coinset import (
     extract_coinset_tx_ids_from_offer_payload,
 )
 from greenfloor.adapters.dexie import DexieAdapter
-from greenfloor.adapters.price import PriceAdapter
+from greenfloor.adapters.price import PriceAdapter, XchPriceProvider
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
 from greenfloor.cloud_wallet_offer_runtime import (
     build_and_post_offer_cloud_wallet,
+    is_transient_dexie_visibility_404_error,
     resolve_cloud_wallet_offer_asset_ids,
 )
 from greenfloor.config.io import (
@@ -48,7 +49,7 @@ from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, ap
 from greenfloor.core.strategy import MarketState, PlannedAction, StrategyConfig, evaluate_market
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient, capture_coinset_websocket_once
 from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.hex_utils import is_hex_id
+from greenfloor.hex_utils import default_mojo_multiplier_for_asset, is_hex_id
 from greenfloor.keys.router import resolve_market_key
 from greenfloor.logging_setup import (
     initialize_service_file_logging,
@@ -120,6 +121,10 @@ def _coin_meets_coin_op_min_amount(coin: dict[str, Any], *, canonical_asset_id: 
     except (TypeError, ValueError):
         return False
     return amount >= _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
+
+
+def _coin_op_target_amount_allowed(*, amount_mojos: int, canonical_asset_id: str) -> bool:
+    return int(amount_mojos) >= _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
 
 
 def _coin_matches_direct_spendable_lookup(
@@ -238,6 +243,10 @@ def _warn_if_log_level_auto_healed(*, program, program_path: Path) -> None:
     )
 
 
+def _log_daemon_event(*, level: int, payload: dict[str, Any]) -> None:
+    _daemon_logger.log(level, "daemon_event %s", json.dumps(payload, sort_keys=True))
+
+
 def _consume_reload_marker(state_dir: Path) -> bool:
     marker = state_dir / "reload_request.json"
     if not marker.exists():
@@ -291,7 +300,16 @@ def _resolve_db_path(program_home_dir: str, explicit_db_path: str | None) -> Pat
     return (Path(program_home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
 
 
-def _cancel_move_threshold_bps() -> int:
+def _cancel_move_threshold_bps(*, market: Any | None = None) -> int:
+    pricing = dict(getattr(market, "pricing", {}) or {}) if market is not None else {}
+    threshold_raw = pricing.get("cancel_move_threshold_bps")
+    if threshold_raw is not None:
+        try:
+            parsed_threshold = int(threshold_raw)
+        except (TypeError, ValueError):
+            parsed_threshold = 0
+        if parsed_threshold > 0:
+            return parsed_threshold
     raw = os.getenv("GREENFLOOR_UNSTABLE_CANCEL_MOVE_BPS", "").strip()
     if not raw:
         return _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS
@@ -477,6 +495,22 @@ def _market_pricing(market: Any) -> dict[str, Any]:
     return dict(getattr(market, "pricing", {}) or {})
 
 
+def _normalize_target_counts(
+    raw: dict,
+    *,
+    defaults: dict[int, int] | None = None,
+) -> dict[int, int]:
+    """Normalize a {size: target_count} mapping from config or ladder data.
+
+    Drops non-positive sizes, clamps negative targets to zero, and falls back
+    to *defaults* when the result would otherwise be empty.
+    """
+    out = {int(k): max(0, int(v)) for k, v in raw.items() if int(k) > 0}
+    if not out and defaults:
+        return dict(defaults)
+    return out
+
+
 def _strategy_config_from_market(market) -> StrategyConfig:
     sell_ladder = market.ladders.get("sell", [])
     targets_by_size = {int(e.size_base_units): int(e.target_count) for e in sell_ladder}
@@ -500,17 +534,18 @@ def _strategy_config_from_market(market) -> StrategyConfig:
             return None
         return parsed
 
+    normalized_targets = _normalize_target_counts(targets_by_size, defaults={1: 5, 10: 2, 100: 1})
+
     return StrategyConfig(
         pair=_normalize_strategy_pair(market.quote_asset),
-        ones_target=int(targets_by_size.get(1, 5)),
-        tens_target=int(targets_by_size.get(10, 2)),
-        hundreds_target=int(targets_by_size.get(100, 1)),
+        ones_target=int(normalized_targets.get(1, 0)),
+        tens_target=int(normalized_targets.get(10, 0)),
+        hundreds_target=int(normalized_targets.get(100, 0)),
         target_spread_bps=_to_int(pricing.get("strategy_target_spread_bps")),
         min_xch_price_usd=_to_float(pricing.get("strategy_min_xch_price_usd")),
         max_xch_price_usd=_to_float(pricing.get("strategy_max_xch_price_usd")),
-        offer_expiry_unit=str(pricing.get("strategy_offer_expiry_unit", "")).strip().lower()
-        or None,
-        offer_expiry_value=_to_int(pricing.get("strategy_offer_expiry_value")),
+        offer_expiry_minutes=_to_int(pricing.get("strategy_offer_expiry_minutes")),
+        target_counts_by_size=normalized_targets,
     )
 
 
@@ -520,22 +555,23 @@ def _strategy_config_for_side(*, market: Any, side: str) -> StrategyConfig:
     targets_by_size = {int(e.size_base_units): int(e.target_count) for e in side_ladder}
     pricing = _market_pricing(market)
 
-    expiry_value_raw = pricing.get("strategy_offer_expiry_value")
-    expiry_value: int | None = None
-    if expiry_value_raw is not None:
+    expiry_minutes_raw = pricing.get("strategy_offer_expiry_minutes")
+    expiry_minutes: int | None = None
+    if expiry_minutes_raw is not None:
         try:
-            expiry_value = int(expiry_value_raw)
+            expiry_minutes = int(expiry_minutes_raw)
         except (TypeError, ValueError):
-            expiry_value = None
+            expiry_minutes = None
+
+    normalized_targets = _normalize_target_counts(targets_by_size)
 
     return StrategyConfig(
         pair=_normalize_strategy_pair(market.quote_asset),
-        ones_target=int(targets_by_size.get(1, 0)),
-        tens_target=int(targets_by_size.get(10, 0)),
-        hundreds_target=int(targets_by_size.get(100, 0)),
-        offer_expiry_unit=str(pricing.get("strategy_offer_expiry_unit", "")).strip().lower()
-        or None,
-        offer_expiry_value=expiry_value,
+        ones_target=int(normalized_targets.get(1, 0)),
+        tens_target=int(normalized_targets.get(10, 0)),
+        hundreds_target=int(normalized_targets.get(100, 0)),
+        offer_expiry_minutes=expiry_minutes,
+        target_counts_by_size=normalized_targets,
     )
 
 
@@ -544,12 +580,68 @@ def _strategy_state_from_bucket_counts(
     *,
     xch_price_usd: float | None,
 ) -> MarketState:
+    normalized_bucket_counts = {int(size): int(count) for size, count in bucket_counts.items()}
     return MarketState(
-        ones=int(bucket_counts.get(1, 0)),
-        tens=int(bucket_counts.get(10, 0)),
-        hundreds=int(bucket_counts.get(100, 0)),
+        ones=int(normalized_bucket_counts.get(1, 0)),
+        tens=int(normalized_bucket_counts.get(10, 0)),
+        hundreds=int(normalized_bucket_counts.get(100, 0)),
         xch_price_usd=xch_price_usd,
+        bucket_counts_by_size=normalized_bucket_counts,
     )
+
+
+def _effective_sell_bucket_counts_for_coin_ops(
+    *,
+    sell_ladder: list[Any],
+    wallet_bucket_counts: dict[int, int],
+    active_sell_offer_counts_by_size: dict[int, int] | None,
+    newly_executed_sell_offer_counts_by_size: dict[int, int] | None = None,
+) -> dict[int, int]:
+    effective_counts = dict(wallet_bucket_counts)
+    active_sell_counts = active_sell_offer_counts_by_size or {}
+    newly_executed_sell_counts = newly_executed_sell_offer_counts_by_size or {}
+    for entry in sell_ladder:
+        size_base_units = int(getattr(entry, "size_base_units", 0))
+        if size_base_units <= 0:
+            continue
+        target_count = max(0, int(getattr(entry, "target_count", 0)))
+        newly_executed_sell_count = max(0, int(newly_executed_sell_counts.get(size_base_units, 0)))
+        wallet_count = max(
+            0,
+            int(wallet_bucket_counts.get(size_base_units, 0)) - newly_executed_sell_count,
+        )
+        active_sell_count = max(0, int(active_sell_counts.get(size_base_units, 0)))
+        effective_active_sell_count = active_sell_count + newly_executed_sell_count
+        # Count live sell offers toward the market target, but not toward the
+        # split buffer. That preserves at most one extra ready coin above the
+        # active sell ladder coverage.
+        effective_counts[size_base_units] = wallet_count + min(
+            effective_active_sell_count,
+            target_count,
+        )
+    return effective_counts
+
+
+def _executed_sell_offer_counts_by_size(offer_execution: dict[str, Any]) -> dict[int, int]:
+    counts: dict[int, int] = {}
+    items = offer_execution.get("items", [])
+    if not isinstance(items, list):
+        return counts
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status", "")).strip().lower() != "executed":
+            continue
+        if _normalize_offer_side(item.get("side", "sell")) != "sell":
+            continue
+        try:
+            size = int(item.get("size", 0))
+        except (TypeError, ValueError):
+            continue
+        if size <= 0:
+            continue
+        counts[size] = counts.get(size, 0) + 1
+    return counts
 
 
 def _evaluate_two_sided_market_actions(
@@ -589,6 +681,16 @@ _ACTIVE_OFFER_STATES_FOR_RESEED = {
     OfferLifecycleState.REFRESH_DUE.value,
 }
 _RESEED_MEMPOOL_MAX_AGE_SECONDS = 3 * 60
+_PENDING_VISIBILITY_RECHECK_MAX_AGE_SECONDS = 2 * 60
+_PENDING_VISIBILITY_REASON = "cloud_wallet_post_success_dexie_visibility_pending"
+
+
+@dataclass(frozen=True, slots=True)
+class _OfferExecutionMetadata:
+    size: int
+    side: str | None
+    reason: str
+    created_at: str
 
 
 def _is_recent_mempool_observed_offer_state(
@@ -618,6 +720,12 @@ def _is_recent_mempool_observed_offer_state(
 
 
 def _strategy_target_counts_by_size(strategy_config: StrategyConfig) -> dict[int, int]:
+    if strategy_config.target_counts_by_size:
+        return {
+            int(size): int(target)
+            for size, target in sorted(strategy_config.target_counts_by_size.items())
+            if int(size) > 0 and int(target) >= 0
+        }
     return {
         1: int(strategy_config.ones_target),
         10: int(strategy_config.tens_target),
@@ -673,14 +781,15 @@ def _parse_offer_side_metadata(value: Any) -> str | None:
 
 def _recent_offer_metadata_by_offer_id(
     *, store: SqliteStore, market_id: str
-) -> dict[str, tuple[int, str | None]]:
+) -> dict[str, _OfferExecutionMetadata]:
     events = store.list_recent_audit_events(
         event_types=["strategy_offer_execution"],
         market_id=market_id,
         limit=1500,
     )
-    metadata_by_offer_id: dict[str, tuple[int, str | None]] = {}
+    metadata_by_offer_id: dict[str, _OfferExecutionMetadata] = {}
     for event in events:
+        created_at = str(event.get("created_at", "")).strip()
         payload = event.get("payload")
         if not isinstance(payload, dict):
             continue
@@ -702,10 +811,105 @@ def _recent_offer_metadata_by_offer_id(
             if size <= 0:
                 continue
             side = _parse_offer_side_metadata(item.get("side"))
+            reason = str(item.get("reason", "")).strip()
             # Events are returned newest-first; keep first (latest) mapping.
             if offer_id not in metadata_by_offer_id:
-                metadata_by_offer_id[offer_id] = (size, side)
+                metadata_by_offer_id[offer_id] = _OfferExecutionMetadata(
+                    size=size,
+                    side=side,
+                    reason=reason,
+                    created_at=created_at,
+                )
     return metadata_by_offer_id
+
+
+def _parse_event_created_at(value: Any) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _expiry_seconds_for_action(action: PlannedAction) -> int | None:
+    unit = str(action.expiry_unit or "").strip().lower()
+    try:
+        value = int(action.expiry_value)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    unit_seconds = {
+        "second": 1,
+        "seconds": 1,
+        "minute": 60,
+        "minutes": 60,
+        "hour": 60 * 60,
+        "hours": 60 * 60,
+        "day": 24 * 60 * 60,
+        "days": 24 * 60 * 60,
+    }.get(unit)
+    if unit_seconds is None:
+        return None
+    return value * unit_seconds
+
+
+def _apply_action_cadence_gate(
+    *,
+    actions: list[PlannedAction],
+    target_counts_by_side: dict[str, dict[int, int]],
+    active_counts_by_side: dict[str, dict[int, int]],
+    store: SqliteStore,
+    market_id: str,
+    clock: datetime,
+) -> tuple[list[PlannedAction], list[dict[str, Any]]]:
+    _ = target_counts_by_side, active_counts_by_side, store, market_id, clock
+    passthrough_actions = [action for action in actions if int(action.repeat) > 0]
+    return passthrough_actions, []
+
+
+def _is_stale_pending_visibility_offer(
+    *,
+    offer_id: str,
+    metadata: _OfferExecutionMetadata,
+    dexie_size_by_offer_id: dict[str, int] | None,
+    clock: datetime,
+    max_age_seconds: int = _PENDING_VISIBILITY_RECHECK_MAX_AGE_SECONDS,
+) -> bool:
+    if metadata.reason != _PENDING_VISIBILITY_REASON:
+        return False
+    if dexie_size_by_offer_id is None:
+        # No Dexie visibility snapshot available this cycle.
+        return False
+    if offer_id in dexie_size_by_offer_id:
+        return False
+    created_at_raw = str(metadata.created_at).strip()
+    if not created_at_raw:
+        return True
+    normalized = created_at_raw.replace("Z", "+00:00")
+    try:
+        created_at = datetime.fromisoformat(normalized)
+    except ValueError:
+        return True
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=UTC)
+    return (clock - created_at).total_seconds() > float(max_age_seconds)
+
+
+def _is_dexie_offer_missing_error(error: Exception) -> bool:
+    raw = str(error).strip()
+    if not raw:
+        return False
+    normalized = raw.lower()
+    return is_transient_dexie_visibility_404_error(raw) or (
+        "http error 404" in normalized and "not found" in normalized
+    )
 
 
 def _recent_executed_offer_ids(*, store: SqliteStore, market_id: str) -> set[str]:
@@ -775,6 +979,11 @@ def _match_watched_coin_ids(*, observed_coin_ids: list[str]) -> dict[str, list[s
             if intersection:
                 matches[market_id] = intersection
     return matches
+
+
+def _watched_coin_ids_for_market(*, market_id: str) -> set[str]:
+    with _WATCHED_COIN_IDS_LOCK:
+        return set(_WATCHED_COIN_IDS_BY_MARKET.get(market_id, set()))
 
 
 def _update_market_coin_watchlist_from_dexie(
@@ -848,7 +1057,7 @@ def _active_offer_state_summary(
     market_id: str,
     clock: datetime,
     limit: int = 500,
-) -> tuple[list[str], dict[str, int], dict[str, tuple[int, str | None]]]:
+) -> tuple[list[str], dict[str, int], dict[str, _OfferExecutionMetadata]]:
     offer_states = store.list_offer_states(market_id=market_id, limit=limit)
     state_counts: dict[str, int] = {}
     for item in offer_states:
@@ -882,6 +1091,7 @@ def _active_offer_counts_by_size(
     clock: datetime,
     limit: int = 500,
     dexie_size_by_offer_id: dict[str, int] | None = None,
+    tracked_sizes: set[int] | None = None,
 ) -> tuple[dict[int, int], dict[str, int], int]:
     active_offer_ids, state_counts, metadata_by_offer_id = _active_offer_state_summary(
         store=store,
@@ -889,11 +1099,24 @@ def _active_offer_counts_by_size(
         clock=clock,
         limit=limit,
     )
-    active_counts_by_size: dict[int, int] = {1: 0, 10: 0, 100: 0}
+    normalized_sizes = (
+        {int(size) for size in tracked_sizes if int(size) > 0}
+        if tracked_sizes is not None
+        else {1, 10, 100}
+    )
+    active_counts_by_size: dict[int, int] = {size: 0 for size in sorted(normalized_sizes)}
     active_unmapped_offer_ids = 0
     for offer_id in active_offer_ids:
         metadata = metadata_by_offer_id.get(offer_id)
-        size = metadata[0] if metadata is not None else None
+        if metadata is not None and _is_stale_pending_visibility_offer(
+            offer_id=offer_id,
+            metadata=metadata,
+            dexie_size_by_offer_id=dexie_size_by_offer_id,
+            clock=clock,
+        ):
+            active_unmapped_offer_ids += 1
+            continue
+        size = metadata.size if metadata is not None else None
         if size is None and dexie_size_by_offer_id:
             size = dexie_size_by_offer_id.get(offer_id)
         if size in active_counts_by_size:
@@ -910,10 +1133,16 @@ def _active_offer_counts_by_size_and_side(
     clock: datetime,
     limit: int = 500,
     dexie_size_by_offer_id: dict[str, int] | None = None,
+    tracked_sizes: set[int] | None = None,
 ) -> tuple[dict[str, dict[int, int]], dict[str, int], int]:
+    normalized_sizes = (
+        {int(size) for size in tracked_sizes if int(size) > 0}
+        if tracked_sizes is not None
+        else {1, 10, 100}
+    )
     counts_by_side: dict[str, dict[int, int]] = {
-        "buy": {1: 0, 10: 0, 100: 0},
-        "sell": {1: 0, 10: 0, 100: 0},
+        "buy": {size: 0 for size in sorted(normalized_sizes)},
+        "sell": {size: 0 for size in sorted(normalized_sizes)},
     }
     active_offer_ids, state_counts, metadata_by_offer_id = _active_offer_state_summary(
         store=store,
@@ -924,8 +1153,16 @@ def _active_offer_counts_by_size_and_side(
     active_unmapped_offer_ids = 0
     for offer_id in active_offer_ids:
         metadata = metadata_by_offer_id.get(offer_id)
-        size = metadata[0] if metadata is not None else None
-        side = metadata[1] if metadata is not None else None
+        if metadata is not None and _is_stale_pending_visibility_offer(
+            offer_id=offer_id,
+            metadata=metadata,
+            dexie_size_by_offer_id=dexie_size_by_offer_id,
+            clock=clock,
+        ):
+            active_unmapped_offer_ids += 1
+            continue
+        size = metadata.size if metadata is not None else None
+        side = metadata.side if metadata is not None else None
         if metadata is None or side is None:
             # Do not assume buy/sell direction when metadata is unavailable.
             active_unmapped_offer_ids += 1
@@ -964,6 +1201,7 @@ def _inject_reseed_action_if_no_active_offers(
         market_id=market.market_id,
         clock=clock,
         dexie_size_by_offer_id=dexie_size_by_offer_id,
+        tracked_sizes=set(target_by_size.keys()),
     )
     missing_by_size = {
         size: max(0, int(target_by_size.get(size, 0)) - int(active_counts_by_size.get(size, 0)))
@@ -984,7 +1222,7 @@ def _inject_reseed_action_if_no_active_offers(
         return strategy_actions
 
     seed_candidates = evaluate_market(
-        state=MarketState(ones=0, tens=0, hundreds=0, xch_price_usd=xch_price_usd),
+        state=_strategy_state_from_bucket_counts({}, xch_price_usd=xch_price_usd),
         config=strategy_config,
         clock=clock,
     )
@@ -1032,6 +1270,28 @@ def _inject_reseed_action_if_no_active_offers(
             candidate_sizes=sorted(one_per_size),
         )
         return strategy_actions
+    reseed_actions, cadence_limited_sizes = _apply_action_cadence_gate(
+        actions=reseed_actions,
+        target_counts_by_side={"buy": {}, "sell": dict(target_by_size)},
+        active_counts_by_side={
+            "buy": {},
+            "sell": {int(size): int(count) for size, count in active_counts_by_size.items()},
+        },
+        store=store,
+        market_id=market.market_id,
+        clock=clock,
+    )
+    if not reseed_actions:
+        _log_market_decision(
+            market.market_id,
+            "reseed_skip",
+            reason="reseed_cadence_gate_active",
+            active_counts_by_size=active_counts_by_size,
+            target_counts_by_size=target_by_size,
+            missing_by_size=missing_by_size,
+            cadence_limited_sizes=cadence_limited_sizes,
+        )
+        return strategy_actions
 
     _log_market_decision(
         market.market_id,
@@ -1046,6 +1306,7 @@ def _inject_reseed_action_if_no_active_offers(
         pair=strategy_config.pair,
         expiry_unit=reseed_actions[0].expiry_unit,
         expiry_value=int(reseed_actions[0].expiry_value),
+        cadence_limited_sizes=cadence_limited_sizes,
     )
     return reseed_actions
 
@@ -1095,14 +1356,15 @@ def _build_offer_for_action(
             "reason": f"offer_builder_failed:{exc}",
             "offer": None,
         }
+    resolved_quote_asset = _resolve_quote_asset_for_offer(
+        quote_asset=str(market.quote_asset),
+        network=network,
+    )
     payload = {
         "market_id": market.market_id,
         "base_asset": market.base_asset,
         "base_symbol": market.base_symbol,
-        "quote_asset": _resolve_quote_asset_for_offer(
-            quote_asset=str(market.quote_asset),
-            network=network,
-        ),
+        "quote_asset": resolved_quote_asset,
         "quote_asset_type": market.quote_asset_type,
         "receive_address": market.receive_address,
         "size_base_units": int(action.size),
@@ -1114,8 +1376,18 @@ def _build_offer_for_action(
         "expiry_unit": action.expiry_unit,
         "expiry_value": int(action.expiry_value),
         "quote_price_quote_per_base": quote_price,
-        "base_unit_mojo_multiplier": int(pricing.get("base_unit_mojo_multiplier", 1000)),
-        "quote_unit_mojo_multiplier": int(pricing.get("quote_unit_mojo_multiplier", 1000)),
+        "base_unit_mojo_multiplier": int(
+            pricing.get(
+                "base_unit_mojo_multiplier",
+                default_mojo_multiplier_for_asset(str(market.base_asset)),
+            )
+        ),
+        "quote_unit_mojo_multiplier": int(
+            pricing.get(
+                "quote_unit_mojo_multiplier",
+                default_mojo_multiplier_for_asset(str(resolved_quote_asset)),
+            )
+        ),
         "key_id": market.signer_key_id,
         "keyring_yaml_path": keyring_yaml_path,
         "network": network,
@@ -1221,10 +1493,11 @@ def _cloud_wallet_spendable_profiles_by_asset(
 
 def _base_unit_mojo_multiplier_for_market(*, market: Any) -> int:
     pricing = getattr(market, "pricing", {}) or {}
+    default_multiplier = default_mojo_multiplier_for_asset(str(getattr(market, "base_asset", "")))
     try:
-        multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))
+        multiplier = int(pricing.get("base_unit_mojo_multiplier", default_multiplier))
     except (TypeError, ValueError):
-        multiplier = 1000
+        multiplier = default_multiplier
     return max(1, multiplier)
 
 
@@ -1643,6 +1916,17 @@ def _execute_single_cloud_wallet_action(
                 offer_id=cloud_wallet_offer_id,
             )
             if not visible:
+                # Transient 404 → Dexie propagation lag; mark as pending so the
+                # active-count reader keeps the offer in scope until the grace
+                # period expires (see _is_stale_pending_visibility_offer).
+                if is_transient_dexie_visibility_404_error(visibility_error or ""):
+                    return {
+                        "size": action.size,
+                        "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                        "status": "executed",
+                        "reason": _PENDING_VISIBILITY_REASON,
+                        "offer_id": cloud_wallet_offer_id or None,
+                    }
                 return {
                     "size": action.size,
                     "side": _normalize_offer_side(getattr(action, "side", "sell")),
@@ -1745,9 +2029,8 @@ def _execute_single_local_action(
 
 
 def _expand_strategy_actions(strategy_actions: list[Any]) -> list[Any]:
-    ordered_actions = sorted(strategy_actions, key=lambda action: int(action.size), reverse=True)
     expanded_actions: list[Any] = []
-    for action in ordered_actions:
+    for action in strategy_actions:
         expanded_actions.extend(action for _ in range(int(action.repeat)))
     return expanded_actions
 
@@ -1796,7 +2079,6 @@ def _single_input_preferred_skip_reason(
 
 def _prepare_parallel_cloud_wallet_submission(
     *,
-    program: Any,
     market: Any,
     action: Any,
     cloud_wallet: CloudWalletAdapter,
@@ -1804,8 +2086,7 @@ def _prepare_parallel_cloud_wallet_submission(
     resolved_quote_asset_id: str,
     resolved_xch_asset_id: str,
     fee_amount_mojos: int,
-    reservation_coordinator: AssetReservationCoordinator,
-) -> tuple[str | None, dict[str, Any] | None]:
+) -> tuple[dict[str, int] | None, dict[str, int] | None, dict[str, Any] | None]:
     requested_amounts = _reservation_request_for_cloud_offer_with_assets(
         market=market,
         action=action,
@@ -1815,7 +2096,11 @@ def _prepare_parallel_cloud_wallet_submission(
         fee_amount_mojos=fee_amount_mojos,
     )
     if not requested_amounts:
-        return None, _cloud_wallet_skip_item(action=action, reason="reservation_invalid_request")
+        return (
+            None,
+            None,
+            _cloud_wallet_skip_item(action=action, reason="reservation_invalid_request"),
+        )
     spendable_profiles = _cloud_wallet_spendable_profiles_by_asset(
         wallet=cloud_wallet,
         asset_ids=set(requested_amounts.keys()),
@@ -1828,19 +2113,8 @@ def _prepare_parallel_cloud_wallet_submission(
         spendable_profiles=spendable_profiles,
     )
     if single_input_skip_reason:
-        return None, _cloud_wallet_skip_item(action=action, reason=single_input_skip_reason)
-    acquired = reservation_coordinator.try_acquire(
-        market_id=str(market.market_id),
-        wallet_id=str(program.cloud_wallet_vault_id).strip(),
-        requested_amounts=requested_amounts,
-        available_amounts=available_amounts,
-    )
-    if not acquired.ok or not acquired.reservation_id:
-        return None, _cloud_wallet_skip_item(
-            action=action,
-            reason=str(acquired.error or "reservation_rejected"),
-        )
-    return str(acquired.reservation_id), None
+        return None, None, _cloud_wallet_skip_item(action=action, reason=single_input_skip_reason)
+    return requested_amounts, available_amounts, None
 
 
 def _execute_strategy_actions(
@@ -1883,37 +2157,97 @@ def _execute_strategy_actions(
                 )
             )
             fee_amount_mojos = _estimate_cloud_offer_fee_reservation_mojos(program=program)
-            submissions: list[tuple[int, Any, str]] = []
+            # Health-check the coordinator once per batch before dispatching.
+            # Using an empty request avoids any lease writes while still
+            # surfacing storage/runtime failures early so we can fail over.
+            reservation_coordinator.try_acquire(
+                market_id=str(market.market_id),
+                wallet_id=str(program.cloud_wallet_vault_id).strip(),
+                requested_amounts={},
+                available_amounts={},
+            )
+            submissions: list[tuple[int, Any, dict[str, int], dict[str, int]]] = []
             for submit_index, action in enumerate(expanded_actions):
-                reservation_id, skip_item = _prepare_parallel_cloud_wallet_submission(
-                    program=program,
-                    market=market,
-                    action=action,
-                    cloud_wallet=cloud_wallet,
-                    resolved_base_asset_id=resolved_base_asset_id,
-                    resolved_quote_asset_id=resolved_quote_asset_id,
-                    resolved_xch_asset_id=resolved_xch_asset_id,
-                    fee_amount_mojos=fee_amount_mojos,
-                    reservation_coordinator=reservation_coordinator,
+                requested_amounts, available_amounts, skip_item = (
+                    _prepare_parallel_cloud_wallet_submission(
+                        market=market,
+                        action=action,
+                        cloud_wallet=cloud_wallet,
+                        resolved_base_asset_id=resolved_base_asset_id,
+                        resolved_quote_asset_id=resolved_quote_asset_id,
+                        resolved_xch_asset_id=resolved_xch_asset_id,
+                        fee_amount_mojos=fee_amount_mojos,
+                    )
                 )
                 if skip_item is not None:
                     items.append(skip_item)
                     continue
-                assert reservation_id is not None
-                submissions.append((submit_index, action, reservation_id))
+                assert requested_amounts is not None
+                assert available_amounts is not None
+                submissions.append((submit_index, action, requested_amounts, available_amounts))
 
             if submissions:
+                coordinator = reservation_coordinator
+                assert coordinator is not None
+                wallet_id = str(program.cloud_wallet_vault_id).strip()
                 max_workers = min(
                     len(submissions),
                     max(1, int(getattr(program, "runtime_offer_parallelism_max_workers", 4))),
                 )
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-                    future_to_submission: dict[
-                        concurrent.futures.Future[dict[str, Any]], tuple[int, str]
-                    ] = {}
-                    for submit_index, action, reservation_id in submissions:
-                        future = pool.submit(
-                            _execute_single_cloud_wallet_action,
+                _log_market_decision(
+                    str(getattr(market, "market_id", "")),
+                    "parallel_offer_dispatch",
+                    planned_count=len(expanded_actions),
+                    queued_count=len(submissions),
+                    workers=max_workers,
+                )
+
+                def _run_parallel_submission(
+                    *,
+                    submit_index: int,
+                    action: Any,
+                    requested_amounts: dict[str, int],
+                    available_amounts: dict[str, int],
+                    queued_at_monotonic: float,
+                ) -> dict[str, Any]:
+                    queue_wait_ms = int((time.monotonic() - queued_at_monotonic) * 1000)
+                    _log_market_decision(
+                        str(getattr(market, "market_id", "")),
+                        "parallel_offer_queue_wait",
+                        submit_index=submit_index,
+                        size=int(getattr(action, "size", 0)),
+                        side=_normalize_offer_side(getattr(action, "side", "sell")),
+                        queue_wait_ms=queue_wait_ms,
+                    )
+                    acquire_started = time.monotonic()
+                    acquired = coordinator.try_acquire(
+                        market_id=str(market.market_id),
+                        wallet_id=wallet_id,
+                        requested_amounts=requested_amounts,
+                        available_amounts=available_amounts,
+                    )
+                    acquire_ms = int((time.monotonic() - acquire_started) * 1000)
+                    if not acquired.ok or not acquired.reservation_id:
+                        return {
+                            **_cloud_wallet_skip_item(
+                                action=action,
+                                reason=str(acquired.error or "reservation_rejected"),
+                            ),
+                            "queue_wait_ms": queue_wait_ms,
+                            "reservation_acquire_ms": acquire_ms,
+                        }
+                    reservation_id = str(acquired.reservation_id)
+                    reserved_at = time.monotonic()
+                    _log_market_decision(
+                        str(getattr(market, "market_id", "")),
+                        "parallel_offer_reservation_acquired",
+                        submit_index=submit_index,
+                        reservation_id=reservation_id,
+                        queue_wait_ms=queue_wait_ms,
+                        reservation_acquire_ms=acquire_ms,
+                    )
+                    try:
+                        item = _execute_single_cloud_wallet_action(
                             program=program,
                             market=market,
                             action=action,
@@ -1921,10 +2255,50 @@ def _execute_strategy_actions(
                             runtime_dry_run=runtime_dry_run,
                             dexie=dexie,
                         )
-                        future_to_submission[future] = (submit_index, reservation_id)
+                    except Exception as exc:
+                        item = {
+                            "size": 0,
+                            "side": "sell",
+                            "status": "skipped",
+                            "reason": f"parallel_offer_worker_error:{exc}",
+                            "offer_id": None,
+                        }
+                    release_status = (
+                        "released_success"
+                        if str(item.get("status", "")).strip().lower() == "executed"
+                        else "released_failed"
+                    )
+                    coordinator.release(reservation_id=reservation_id, status=release_status)
+                    reservation_hold_ms = int((time.monotonic() - reserved_at) * 1000)
+                    _log_market_decision(
+                        str(getattr(market, "market_id", "")),
+                        "parallel_offer_reservation_released",
+                        submit_index=submit_index,
+                        reservation_id=reservation_id,
+                        release_status=release_status,
+                        reservation_hold_ms=reservation_hold_ms,
+                    )
+                    item["reservation_id"] = reservation_id
+                    item["queue_wait_ms"] = queue_wait_ms
+                    item["reservation_acquire_ms"] = acquire_ms
+                    item["reservation_hold_ms"] = reservation_hold_ms
+                    return item
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                    future_to_submission: dict[concurrent.futures.Future[dict[str, Any]], int] = {}
+                    for submit_index, action, requested_amounts, available_amounts in submissions:
+                        future = pool.submit(
+                            _run_parallel_submission,
+                            submit_index=submit_index,
+                            action=action,
+                            requested_amounts=requested_amounts,
+                            available_amounts=available_amounts,
+                            queued_at_monotonic=time.monotonic(),
+                        )
+                        future_to_submission[future] = submit_index
                     submitted_items: list[tuple[int, dict[str, Any]]] = []
                     for future in concurrent.futures.as_completed(future_to_submission):
-                        submit_index, reservation_id = future_to_submission[future]
+                        submit_index = future_to_submission[future]
                         try:
                             item = future.result()
                         except Exception as exc:
@@ -1935,15 +2309,6 @@ def _execute_strategy_actions(
                                 "reason": f"parallel_offer_worker_error:{exc}",
                                 "offer_id": None,
                             }
-                        release_status = (
-                            "released_success"
-                            if str(item.get("status", "")).strip().lower() == "executed"
-                            else "released_failed"
-                        )
-                        reservation_coordinator.release(
-                            reservation_id=reservation_id, status=release_status
-                        )
-                        item["reservation_id"] = reservation_id
                         submitted_items.append((submit_index, item))
                     for _, item in sorted(submitted_items, key=lambda pair: pair[0]):
                         if item.get("status") == "executed":
@@ -2024,7 +2389,7 @@ def _execute_cancel_policy_for_market(
     quote_type = str(market.quote_asset_type).strip().lower()
     pricing = _market_pricing(market)
     stable_vs_unstable = bool(pricing.get("cancel_policy_stable_vs_unstable", False))
-    threshold_bps = _cancel_move_threshold_bps()
+    threshold_bps = _cancel_move_threshold_bps(market=market)
     if quote_type != "unstable":
         return {
             "eligible": False,
@@ -2154,6 +2519,7 @@ class _MarketCycleResult:
 def _reconcile_offer_states(
     *,
     market: Any,
+    network: str,
     dexie: DexieAdapter,
     store: SqliteStore,
     now: datetime,
@@ -2166,13 +2532,18 @@ def _reconcile_offer_states(
     beyond-cap individually-fetched offers.
     """
     dexie_fetch_error: str | None = None
+    dexie_offered_asset = str(market.base_asset).strip()
+    dexie_requested_asset = _resolve_quote_asset_for_offer(
+        quote_asset=str(market.quote_asset),
+        network=network,
+    )
     try:
-        offers = dexie.get_offers(market.base_asset, market.quote_asset)
+        offers = dexie.get_offers(dexie_offered_asset, dexie_requested_asset)
         _log_market_decision(
             market.market_id,
             "dexie_offers_fetched",
-            offered=market.base_asset,
-            requested=market.quote_asset,
+            offered=dexie_offered_asset,
+            requested=dexie_requested_asset,
             count=len(offers),
         )
     except Exception as exc:  # pragma: no cover - network dependent
@@ -2213,16 +2584,55 @@ def _reconcile_offer_states(
     # Refresh all of our watched offers individually. Dexie list snapshots can
     # lag status transitions; direct offer fetches make lifecycle state updates
     # deterministic for strategy planning.
+    missing_watched_offer_ids: set[str] = set()
     for watched_offer_id in sorted(our_offer_ids):
         try:
             single_payload = dexie.get_offer(watched_offer_id, timeout=5)
             single_offer = single_payload.get("offer") if isinstance(single_payload, dict) else None
             if isinstance(single_offer, dict):
                 augmented_by_id[watched_offer_id] = single_offer
-        except Exception:  # pragma: no cover - network dependent
+        except Exception as exc:  # pragma: no cover - network dependent
+            if _is_dexie_offer_missing_error(exc):
+                transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.EXPIRED)
+                missing_watched_offer_ids.add(watched_offer_id)
+                _log_market_decision(
+                    market.market_id,
+                    "offer_transition",
+                    offer_id=watched_offer_id,
+                    dexie_status=None,
+                    signal_source="dexie_get_offer_404",
+                    old_state=transition.old_state.value,
+                    new_state=transition.new_state.value,
+                    signal=transition.signal.value,
+                )
+                store.upsert_offer_state(
+                    offer_id=watched_offer_id,
+                    market_id=market.market_id,
+                    state=transition.new_state.value,
+                    last_seen_status=None,
+                )
+                store.add_audit_event(
+                    "offer_lifecycle_transition",
+                    {
+                        "offer_id": watched_offer_id,
+                        "market_id": market.market_id,
+                        "old_state": transition.old_state.value,
+                        "new_state": transition.new_state.value,
+                        "signal": transition.signal.value,
+                        "action": transition.action,
+                        "reason": transition.reason,
+                        "dexie_status": None,
+                        "signal_source": "dexie_get_offer_404",
+                        "dexie_error": str(exc),
+                        "coinset_tx_ids": [],
+                        "coinset_confirmed_tx_ids": [],
+                        "coinset_mempool_tx_ids": [],
+                    },
+                    market_id=market.market_id,
+                )
             continue
 
-    for beyond_offer_id in beyond_cap_ids:
+    for beyond_offer_id in beyond_cap_ids - missing_watched_offer_ids:
         try:
             single_payload = dexie.get_offer(beyond_offer_id, timeout=5)
             single_offer = single_payload.get("offer") if isinstance(single_payload, dict) else None
@@ -2325,10 +2735,18 @@ def _evaluate_and_execute_strategy(
     dexie_size_by_offer_id: dict[str, int],
     result: _MarketCycleResult,
     reservation_coordinator: AssetReservationCoordinator | None = None,
-) -> None:
+) -> tuple[dict[str, dict[int, int]], dict[int, int]]:
     """Evaluate market strategy, inject reseed if needed, and execute offer actions."""
     market_mode = str(getattr(market, "mode", "")).strip().lower()
     strategy_config = _strategy_config_from_market(market)
+    tracked_sizes = {
+        int(entry.size_base_units)
+        for side_entries in (getattr(market, "ladders", {}) or {}).values()
+        for entry in side_entries
+        if int(getattr(entry, "size_base_units", 0)) > 0
+    }
+    if not tracked_sizes:
+        tracked_sizes = set(_strategy_target_counts_by_size(strategy_config).keys())
     if market_mode == "two_sided":
         offer_counts_by_side, offer_state_counts, active_unmapped_offer_ids = (
             _active_offer_counts_by_size_and_side(
@@ -2336,12 +2754,21 @@ def _evaluate_and_execute_strategy(
                 market_id=market.market_id,
                 clock=now,
                 dexie_size_by_offer_id=dexie_size_by_offer_id,
+                tracked_sizes=tracked_sizes,
             )
         )
         active_offer_counts_by_size = {
-            1: int(offer_counts_by_side["buy"][1]) + int(offer_counts_by_side["sell"][1]),
-            10: int(offer_counts_by_side["buy"][10]) + int(offer_counts_by_side["sell"][10]),
-            100: int(offer_counts_by_side["buy"][100]) + int(offer_counts_by_side["sell"][100]),
+            size: int(offer_counts_by_side["buy"].get(size, 0))
+            + int(offer_counts_by_side["sell"].get(size, 0))
+            for size in sorted(tracked_sizes)
+        }
+        target_counts_by_side = {
+            "buy": _strategy_target_counts_by_size(
+                _strategy_config_for_side(market=market, side="buy")
+            ),
+            "sell": _strategy_target_counts_by_size(
+                _strategy_config_for_side(market=market, side="sell")
+            ),
         }
     else:
         active_offer_counts_by_size, offer_state_counts, active_unmapped_offer_ids = (
@@ -2350,11 +2777,16 @@ def _evaluate_and_execute_strategy(
                 market_id=market.market_id,
                 clock=now,
                 dexie_size_by_offer_id=dexie_size_by_offer_id,
+                tracked_sizes=tracked_sizes,
             )
         )
         offer_counts_by_side = {
-            "buy": {1: 0, 10: 0, 100: 0},
+            "buy": {size: 0 for size in sorted(tracked_sizes)},
             "sell": dict(active_offer_counts_by_size),
+        }
+        target_counts_by_side = {
+            "buy": {},
+            "sell": _strategy_target_counts_by_size(strategy_config),
         }
     _log_market_decision(
         market.market_id,
@@ -2380,6 +2812,14 @@ def _evaluate_and_execute_strategy(
             config=strategy_config,
             clock=now,
         )
+    strategy_actions, cadence_limited_sizes = _apply_action_cadence_gate(
+        actions=strategy_actions,
+        target_counts_by_side=target_counts_by_side,
+        active_counts_by_side=offer_counts_by_side,
+        store=store,
+        market_id=market.market_id,
+        clock=now,
+    )
     _log_market_decision(
         market.market_id,
         "strategy_evaluated",
@@ -2388,6 +2828,7 @@ def _evaluate_and_execute_strategy(
         offer_counts=active_offer_counts_by_size,
         xch_price_usd=xch_price_usd,
         action_count=len(strategy_actions),
+        cadence_limited_sizes=cadence_limited_sizes,
     )
     if market_mode != "two_sided":
         strategy_actions = _inject_reseed_action_if_no_active_offers(
@@ -2461,6 +2902,7 @@ def _evaluate_and_execute_strategy(
         },
         market_id=market.market_id,
     )
+    return offer_counts_by_side, _executed_sell_offer_counts_by_size(offer_execution)
 
 
 def _plan_and_execute_coin_ops(
@@ -2470,11 +2912,52 @@ def _plan_and_execute_coin_ops(
     wallet: WalletAdapter,
     store: SqliteStore,
     sell_ladder: list[Any],
-    bucket_counts: dict[int, int],
+    wallet_bucket_counts: dict[int, int],
+    active_sell_offer_counts_by_size: dict[int, int] | None,
+    newly_executed_sell_offer_counts_by_size: dict[int, int] | None,
     signer_selection: Any,
     state_dir: Path,
 ) -> None:
     """Plan and execute coin split/combine operations for a market."""
+    bucket_counts = _effective_sell_bucket_counts_for_coin_ops(
+        sell_ladder=sell_ladder,
+        wallet_bucket_counts=wallet_bucket_counts,
+        active_sell_offer_counts_by_size=active_sell_offer_counts_by_size,
+        newly_executed_sell_offer_counts_by_size=newly_executed_sell_offer_counts_by_size,
+    )
+    base_unit_mojo_multiplier = _base_unit_mojo_multiplier_for_market(market=market)
+    canonical_base_asset_id = str(getattr(market, "base_asset", "")).strip()
+    invalid_buckets: list[dict[str, int]] = []
+    valid_sell_ladder: list[Any] = []
+    for entry in sell_ladder:
+        size_base_units = int(getattr(entry, "size_base_units", 0))
+        if size_base_units <= 0:
+            continue
+        target_amount_mojos = size_base_units * int(base_unit_mojo_multiplier)
+        if _coin_op_target_amount_allowed(
+            amount_mojos=target_amount_mojos,
+            canonical_asset_id=canonical_base_asset_id,
+        ):
+            valid_sell_ladder.append(entry)
+            continue
+        invalid_buckets.append(
+            {
+                "size_base_units": size_base_units,
+                "target_amount_mojos": int(target_amount_mojos),
+                "minimum_allowed_mojos": int(
+                    _coin_op_min_amount_mojos(canonical_asset_id=canonical_base_asset_id)
+                ),
+            }
+        )
+    if invalid_buckets:
+        _log_market_decision(
+            market.market_id,
+            "coin_ops_skip_sub_minimum_target_amount",
+            invalid_bucket_count=len(invalid_buckets),
+            invalid_buckets=invalid_buckets,
+        )
+    if not valid_sell_ladder:
+        return
     buckets = [
         BucketSpec(
             size_base_units=e.size_base_units,
@@ -2483,7 +2966,7 @@ def _plan_and_execute_coin_ops(
             combine_when_excess_factor=e.combine_when_excess_factor,
             current_count=int(bucket_counts.get(e.size_base_units, 0)),
         )
-        for e in sell_ladder
+        for e in valid_sell_ladder
     ]
     plans = plan_coin_ops(
         buckets=buckets,
@@ -2770,7 +3253,48 @@ def _execute_coin_ops_cloud_wallet_kms_only(
 
         try:
             if op_type == "split":
+                if op_count == 1:
+                    # A one-output split only manufactures bookkeeping churn.
+                    # Let the market continue rather than creating a cosmetic
+                    # "split 1 coin into 1 coin" transaction.
+                    items.append(
+                        {
+                            "op_type": op_type,
+                            "size_base_units": size_base_units,
+                            "op_count": op_count,
+                            "status": "skipped",
+                            "reason": "split_single_coin_noop_skipped",
+                            "operation_id": None,
+                        }
+                    )
+                    continue
                 amount_per_coin_mojos = size_base_units * base_unit_mojo_multiplier
+                canonical_asset_id = str(getattr(market, "base_asset", "")).strip()
+                # Defensive inner check: _plan_and_execute_coin_ops filters the
+                # ladder before reaching here, but callers that bypass that
+                # layer (e.g. direct tests or future call sites) also get a
+                # clean rejection rather than a failed RPC call.
+                if not _coin_op_target_amount_allowed(
+                    amount_mojos=amount_per_coin_mojos,
+                    canonical_asset_id=canonical_asset_id,
+                ):
+                    items.append(
+                        {
+                            "op_type": op_type,
+                            "size_base_units": size_base_units,
+                            "op_count": op_count,
+                            "status": "skipped",
+                            "reason": "split_amount_below_coin_op_minimum",
+                            "operation_id": None,
+                            "data": {
+                                "amount_per_coin_mojos": int(amount_per_coin_mojos),
+                                "minimum_allowed_mojos": int(
+                                    _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
+                                ),
+                            },
+                        }
+                    )
+                    continue
                 required_amount = amount_per_coin_mojos * op_count
                 coins = cloud_wallet.list_coins(
                     asset_id=resolved_base_asset_id, include_pending=True
@@ -3008,13 +3532,68 @@ def _execute_coin_ops_cloud_wallet_kms_only(
             if op_type == "combine":
                 requested_number_of_coins = max(2, op_count)
                 capped_number_of_coins = min(requested_number_of_coins, combine_input_cap)
+                target_coin_amount_mojos = size_base_units * base_unit_mojo_multiplier
+                canonical_asset_id = str(getattr(market, "base_asset", "")).strip()
+                # Defensive inner check — see comment in the split branch above.
+                if not _coin_op_target_amount_allowed(
+                    amount_mojos=target_coin_amount_mojos,
+                    canonical_asset_id=canonical_asset_id,
+                ):
+                    items.append(
+                        {
+                            "op_type": op_type,
+                            "size_base_units": size_base_units,
+                            "op_count": op_count,
+                            "status": "skipped",
+                            "reason": "combine_target_amount_below_coin_op_minimum",
+                            "operation_id": None,
+                            "data": {
+                                "target_coin_amount_mojos": int(target_coin_amount_mojos),
+                                "minimum_allowed_mojos": int(
+                                    _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
+                                ),
+                            },
+                        }
+                    )
+                    continue
+                watched_coin_ids = _watched_coin_ids_for_market(
+                    market_id=str(getattr(market, "market_id", "")).strip()
+                )
+                exact_bucket_coin_ids: list[str] = []
+                for coin in _spendable_asset_scoped_coins(
+                    cloud_wallet.list_coins(asset_id=resolved_base_asset_id, include_pending=True)
+                ):
+                    coin_id = str(coin.get("id", "")).strip()
+                    if not coin_id or coin_id.lower() in watched_coin_ids:
+                        continue
+                    try:
+                        amount_mojos = int(coin.get("amount", 0))
+                    except (TypeError, ValueError):
+                        continue
+                    if amount_mojos != target_coin_amount_mojos:
+                        continue
+                    exact_bucket_coin_ids.append(coin_id)
+                combine_input_coin_ids = exact_bucket_coin_ids[:capped_number_of_coins]
+                if len(combine_input_coin_ids) < 2:
+                    items.append(
+                        {
+                            "op_type": op_type,
+                            "size_base_units": size_base_units,
+                            "op_count": op_count,
+                            "status": "skipped",
+                            "reason": "no_spendable_combine_coin_available",
+                            "operation_id": None,
+                        }
+                    )
+                    continue
                 result = _combine_coins_with_retry(
                     cloud_wallet=cloud_wallet,
                     combine_kwargs={
-                        "number_of_coins": capped_number_of_coins,
+                        "number_of_coins": len(combine_input_coin_ids),
                         "fee": int(program.coin_ops_combine_fee_mojos),
                         "asset_id": resolved_base_asset_id,
                         "largest_first": True,
+                        "input_coin_ids": combine_input_coin_ids,
                     },
                 )
                 signature_request_id = str(result.get("signature_request_id", "")).strip()
@@ -3040,11 +3619,12 @@ def _execute_coin_ops_cloud_wallet_kms_only(
                         "operation_id": signature_request_id,
                         "data": {
                             "requested_number_of_coins": int(requested_number_of_coins),
-                            "submitted_number_of_coins": int(capped_number_of_coins),
+                            "submitted_number_of_coins": int(len(combine_input_coin_ids)),
                             "input_coin_cap_applied": bool(
                                 capped_number_of_coins < requested_number_of_coins
                             ),
                             "input_coin_cap": int(combine_input_cap),
+                            "input_coin_ids": combine_input_coin_ids,
                         },
                     }
                 )
@@ -3157,12 +3737,13 @@ def _process_single_market(
             "receive_address": event.receive_address,
             "reason": event.reason,
         }
-        print(json.dumps(payload))
+        _log_daemon_event(level=logging.INFO, payload=payload)
         store.add_audit_event("low_inventory_alert", payload, market_id=market.market_id)
         send_pushover_alert(program, event)
 
     _, dexie_size_by_offer_id, _, offers = _reconcile_offer_states(
         market=market,
+        network=program.app_network,
         dexie=dexie,
         store=store,
         now=now,
@@ -3304,7 +3885,7 @@ def _process_single_market(
                 },
                 market_id=market.market_id,
             )
-    _evaluate_and_execute_strategy(
+    offer_counts_by_side, newly_executed_sell_offer_counts_by_size = _evaluate_and_execute_strategy(
         market=market,
         program=program,
         dexie=dexie,
@@ -3322,7 +3903,9 @@ def _process_single_market(
         wallet=wallet,
         store=store,
         sell_ladder=sell_ladder,
-        bucket_counts=bucket_counts,
+        wallet_bucket_counts=bucket_counts,
+        active_sell_offer_counts_by_size=offer_counts_by_side.get("sell", {}),
+        newly_executed_sell_offer_counts_by_size=newly_executed_sell_offer_counts_by_size,
         signer_selection=signer_selection,
         state_dir=state_dir,
     )
@@ -3410,7 +3993,22 @@ def run_once(
         dexie = DexieAdapter(program.dexie_api_base)
         splash = SplashAdapter(program.splash_api_base)
         wallet = WalletAdapter()
-        price = PriceAdapter()
+        cloud_wallet_price_fn = None
+        if _cloud_wallet_configured(program):
+            try:
+                cloud_wallet_price_fn = _new_cloud_wallet_adapter_for_daemon(
+                    program
+                ).get_chia_usd_quote
+            except Exception as exc:
+                store.add_audit_event(
+                    "xch_price_provider_init_error",
+                    {"provider": "cloud_wallet_quote", "error": str(exc)},
+                )
+        price = XchPriceProvider(
+            cloud_wallet_price_fn=cloud_wallet_price_fn,
+            cloud_wallet_ttl_seconds=120,
+            fallback_price_adapter=PriceAdapter(),
+        )
         previous_xch_price_usd = store.get_latest_xch_price_snapshot()
         reservation_coordinator: AssetReservationCoordinator | None = None
         if bool(
@@ -3704,7 +4302,7 @@ def _run_loop(
                 program=current_program,
             )
             if _consume_reload_marker(state_dir):
-                print(json.dumps({"event": "config_reloaded"}))
+                _log_daemon_event(level=logging.INFO, payload={"event": "config_reloaded"})
             time.sleep(max(1, current_program.runtime_loop_interval_seconds))
             current_program = load_program_config(program_path)
     except KeyboardInterrupt:
@@ -3809,7 +4407,18 @@ def main() -> None:
                     state_dir=state_dir,
                 )
     except RuntimeError as exc:
-        print(json.dumps({"event": "daemon_lock_conflict", "error": str(exc)}))
+        try:
+            program = load_program_config(Path(args.program_config))
+            _initialize_daemon_file_logging(
+                program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
+            )
+            _warn_if_log_level_auto_healed(program=program, program_path=Path(args.program_config))
+        except Exception:
+            pass
+        _log_daemon_event(
+            level=logging.ERROR,
+            payload={"event": "daemon_lock_conflict", "error": str(exc)},
+        )
         raise SystemExit(3) from exc
     raise SystemExit(exit_code)
 

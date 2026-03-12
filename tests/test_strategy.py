@@ -164,11 +164,29 @@ def test_evaluate_market_uses_configured_expiry_override() -> None:
         state=MarketState(ones=4, tens=2, hundreds=1, xch_price_usd=30.0),
         config=StrategyConfig(
             pair="xch",
-            offer_expiry_unit="hours",
-            offer_expiry_value=2,
+            offer_expiry_minutes=120,
         ),
         clock=_clock(),
     )
     assert len(actions) == 1
-    assert actions[0].expiry_unit == "hours"
-    assert actions[0].expiry_value == 2
+    assert actions[0].expiry_unit == "minutes"
+    assert actions[0].expiry_value == 120
+
+
+def test_evaluate_market_respects_dynamic_target_sizes() -> None:
+    actions = evaluate_market(
+        state=MarketState(
+            ones=5,
+            tens=2,
+            hundreds=0,
+            xch_price_usd=30.0,
+            bucket_counts_by_size={1: 5, 10: 2, 50: 0},
+        ),
+        config=StrategyConfig(
+            pair="xch",
+            target_counts_by_size={1: 5, 10: 2, 50: 1},
+        ),
+        clock=_clock(),
+    )
+    assert [action.size for action in actions] == [50]
+    assert [action.repeat for action in actions] == [1]

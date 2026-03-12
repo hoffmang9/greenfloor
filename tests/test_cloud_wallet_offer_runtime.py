@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
 from greenfloor.cloud_wallet_offer_runtime import (
     build_and_post_offer_cloud_wallet,
+    cloud_wallet_create_offer_phase,
+    cloud_wallet_post_offer_phase,
+    cloud_wallet_wait_offer_artifact_phase,
+    is_transient_dexie_visibility_404_error,
     resolve_cloud_wallet_offer_asset_ids,
 )
 
@@ -201,3 +206,169 @@ def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path:
     assert payload["built_offers_preview"] == [
         {"offer_prefix": "offer1runtime", "offer_length": str(len("offer1runtime"))}
     ]
+
+
+def test_cloud_wallet_wait_offer_artifact_phase_prefers_signature_request_lookup() -> None:
+    calls = {"signature": 0, "generic": 0}
+
+    result = cloud_wallet_wait_offer_artifact_phase(
+        wallet=cast(CloudWalletAdapter, object()),
+        known_markers={"id:known"},
+        offer_request_started_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+        signature_request_id="sr-123",
+        timeout_seconds=30,
+        poll_offer_artifact_by_signature_request_fn=lambda **_kwargs: (
+            calls.__setitem__("signature", calls["signature"] + 1) or "offer1signature"
+        ),
+        poll_offer_artifact_until_available_fn=lambda **_kwargs: (
+            calls.__setitem__("generic", calls["generic"] + 1) or "offer1generic"
+        ),
+    )
+
+    assert result == "offer1signature"
+    assert calls == {"signature": 1, "generic": 0}
+
+
+def test_cloud_wallet_wait_offer_artifact_phase_falls_back_after_signature_timeout() -> None:
+    calls = {"signature": 0, "generic": 0}
+
+    def _signature_poll(**_kwargs: Any) -> str:
+        calls["signature"] += 1
+        raise RuntimeError("cloud_wallet_offer_artifact_timeout")
+
+    def _generic_poll(**_kwargs: Any) -> str:
+        calls["generic"] += 1
+        return "offer1generic"
+
+    result = cloud_wallet_wait_offer_artifact_phase(
+        wallet=cast(CloudWalletAdapter, object()),
+        known_markers={"id:known"},
+        offer_request_started_at=dt.datetime(2026, 1, 1, tzinfo=dt.UTC),
+        signature_request_id="sr-123",
+        timeout_seconds=30,
+        poll_offer_artifact_by_signature_request_fn=_signature_poll,
+        poll_offer_artifact_until_available_fn=_generic_poll,
+    )
+
+    assert result == "offer1generic"
+    assert calls == {"signature": 2, "generic": 1}
+
+
+def test_cloud_wallet_post_offer_phase_fails_after_repeated_dexie_404_visibility() -> None:
+    class _Dexie:
+        pass
+
+    post_attempts: list[int] = []
+    result = cloud_wallet_post_offer_phase(
+        publish_venue="dexie",
+        dexie=cast(Any, _Dexie()),
+        splash=None,
+        offer_text="offer1abc",
+        drop_only=True,
+        claim_rewards=False,
+        market=object(),
+        expected_offered_asset_id="asset_a",
+        expected_offered_symbol="A",
+        expected_requested_asset_id="asset_b",
+        expected_requested_symbol="B",
+        post_dexie_offer_with_invalid_offer_retry_fn=lambda **_kwargs: (
+            post_attempts.append(1) or {"success": True, "id": "offer-123"}
+        ),
+        verify_dexie_offer_visible_by_id_fn=lambda **_kwargs: (
+            "dexie_get_offer_error:HTTP Error 404: Not Found"
+        ),
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result["success"] is False
+    assert result["id"] == "offer-123"
+    assert "dexie_get_offer_error:HTTP Error 404: Not Found" in str(result["error"])
+    assert len(post_attempts) == 3
+
+
+def test_cloud_wallet_post_offer_phase_retries_transient_dexie_404_until_visible() -> None:
+    class _Dexie:
+        pass
+
+    verify_calls = {"count": 0}
+
+    def _verify(**_kwargs: Any) -> str | None:
+        verify_calls["count"] += 1
+        if verify_calls["count"] < 3:
+            return "dexie_get_offer_error:HTTP Error 404: Not Found"
+        return None
+
+    result = cloud_wallet_post_offer_phase(
+        publish_venue="dexie",
+        dexie=cast(Any, _Dexie()),
+        splash=None,
+        offer_text="offer1abc",
+        drop_only=True,
+        claim_rewards=False,
+        market=object(),
+        expected_offered_asset_id="asset_a",
+        expected_offered_symbol="A",
+        expected_requested_asset_id="asset_b",
+        expected_requested_symbol="B",
+        post_dexie_offer_with_invalid_offer_retry_fn=lambda **_kwargs: {
+            "success": True,
+            "id": "offer-123",
+        },
+        verify_dexie_offer_visible_by_id_fn=_verify,
+        sleep_fn=lambda _seconds: None,
+    )
+
+    assert result == {"success": True, "id": "offer-123"}
+    assert verify_calls["count"] == 3
+
+
+def test_is_transient_dexie_visibility_404_error_matches_common_404_shapes() -> None:
+    assert is_transient_dexie_visibility_404_error(
+        "dexie_get_offer_error:HTTP Error 404: Not Found"
+    )
+    assert is_transient_dexie_visibility_404_error("dexie_http_error:404")
+    assert not is_transient_dexie_visibility_404_error("dexie_network_error:timed out")
+
+
+def test_cloud_wallet_create_offer_phase_rejects_insufficient_spendable_balance() -> None:
+    class _Wallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        @staticmethod
+        def list_coins(*, asset_id=None, include_pending=True):
+            _ = asset_id, include_pending
+            return [
+                {"id": "coin-a", "amount": 10_000, "state": "SETTLED"},
+                {"id": "coin-b", "amount": 10_000, "state": "SETTLED"},
+            ]
+
+        @staticmethod
+        def create_offer(**_kwargs):
+            raise AssertionError("create_offer must not run when spendable balance is insufficient")
+
+    class _Market:
+        pricing = {
+            "base_unit_mojo_multiplier": 1000,
+            "quote_unit_mojo_multiplier": 1_000_000_000_000,
+        }
+
+    try:
+        cloud_wallet_create_offer_phase(
+            wallet=cast(CloudWalletAdapter, _Wallet()),
+            market=_Market(),
+            size_base_units=50,
+            quote_price=2.94117647,
+            resolved_base_asset_id="Asset_base",
+            resolved_quote_asset_id="Asset_quote",
+            offer_fee_mojos=0,
+            split_input_coins_fee=0,
+            expiry_unit="minutes",
+            expiry_value=10,
+            action_side="sell",
+            wallet_get_wallet_offers_fn=lambda *_args, **_kwargs: {"offers": []},
+            poll_signature_request_until_not_unsigned_fn=lambda **_kwargs: ("SUBMITTED", []),
+        )
+        raise AssertionError("expected insufficient spendable balance error")
+    except RuntimeError as exc:
+        assert "cloud_wallet_offer_insufficient_spendable_balance" in str(exc)

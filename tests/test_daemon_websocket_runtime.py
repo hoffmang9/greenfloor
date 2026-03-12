@@ -717,6 +717,11 @@ def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:
 def test_main_once_exits_with_lock_conflict(monkeypatch, tmp_path: Path, capsys) -> None:
     import greenfloor.daemon.main as daemon_mod
 
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    program = tmp_path / "program.yaml"
+    _write_program(program, home)
+    reset_concurrent_log_handlers(module=daemon_mod)
     state_dir = tmp_path / "state"
     with daemon_mod._acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
         monkeypatch.setattr(
@@ -724,6 +729,8 @@ def test_main_once_exits_with_lock_conflict(monkeypatch, tmp_path: Path, capsys)
             [
                 "greenfloord",
                 "--once",
+                "--program-config",
+                str(program),
                 "--state-dir",
                 str(state_dir),
             ],
@@ -731,5 +738,7 @@ def test_main_once_exits_with_lock_conflict(monkeypatch, tmp_path: Path, capsys)
         with pytest.raises(SystemExit) as exc:
             daemon_mod.main()
         assert exc.value.code == 3
-        out = capsys.readouterr().out
-        assert "daemon_lock_conflict" in out
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        log_text = (home / "logs" / "debug.log").read_text(encoding="utf-8")
+        assert "daemon_lock_conflict" in log_text

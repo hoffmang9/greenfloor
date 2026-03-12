@@ -1,15 +1,51 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass, field
 from typing import Any
 
 
+@dataclass
+class _RowCache:
+    """Minimal TTL cache for a list of dict rows."""
+
+    ttl: int
+    _rows: list[dict] | None = field(default=None, init=False, repr=False)
+    _cached_at: float | None = field(default=None, init=False, repr=False)
+
+    def get_if_fresh(self, now: float) -> list[dict] | None:
+        if (
+            self._rows is not None
+            and self._cached_at is not None
+            and (now - self._cached_at) <= self.ttl
+        ):
+            return list(self._rows)
+        return None
+
+    def store(self, rows: list[dict], now: float) -> list[dict]:
+        self._rows = list(rows)
+        self._cached_at = now
+        return list(rows)
+
+    def stale(self) -> list[dict]:
+        return list(self._rows) if self._rows is not None else []
+
+
 class DexieAdapter:
-    def __init__(self, base_url: str) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        cache_ttl_seconds: int = 900,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
+        ttl = max(1, int(cache_ttl_seconds))
+        self._token_cache = _RowCache(ttl=ttl)
+        self._ticker_cache = _RowCache(ttl=ttl)
 
     def get_tokens(self) -> list[dict]:
         url = f"{self.base_url}/v1/swap/tokens"
@@ -125,26 +161,35 @@ class DexieAdapter:
                     return row
         return None
 
-    def _fetch_token_rows(self) -> list[dict]:
+    def _cached_fetch(self, cache: _RowCache, fetcher: Any) -> list[dict]:
+        """Fetch rows through *cache*, falling back to stale rows on error."""
+        now = time.time()
+        fresh = cache.get_if_fresh(now)
+        if fresh is not None:
+            return fresh
         try:
-            return self.get_tokens()
+            rows = fetcher()
         except Exception:
-            return []
+            return cache.stale()
+        return cache.store(rows, now)
+
+    def _fetch_token_rows(self) -> list[dict]:
+        return self._cached_fetch(self._token_cache, self.get_tokens)
 
     def _fetch_ticker_rows(self) -> list[dict]:
-        url = f"{self.base_url}/v3/prices/tickers"
-        try:
+        def _fetch() -> list[dict]:
+            url = f"{self.base_url}/v3/prices/tickers"
             with urllib.request.urlopen(url, timeout=20) as resp:
                 payload = json.loads(resp.read().decode("utf-8"))
-        except Exception:
+            if isinstance(payload, list):
+                return [r for r in payload if isinstance(r, dict)]
+            if isinstance(payload, dict):
+                tickers = payload.get("tickers")
+                if isinstance(tickers, list):
+                    return [r for r in tickers if isinstance(r, dict)]
             return []
-        if isinstance(payload, list):
-            return [r for r in payload if isinstance(r, dict)]
-        if isinstance(payload, dict):
-            tickers = payload.get("tickers")
-            if isinstance(tickers, list):
-                return [r for r in tickers if isinstance(r, dict)]
-        return []
+
+        return self._cached_fetch(self._ticker_cache, _fetch)
 
 
 def _row_matches_cat_target(row: dict, target: str, *, include_ticker_split: bool = False) -> bool:

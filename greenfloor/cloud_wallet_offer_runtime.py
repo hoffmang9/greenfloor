@@ -20,16 +20,22 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.io import is_testnet, load_yaml
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
-from greenfloor.hex_utils import is_hex_id, normalize_hex_id
+from greenfloor.hex_utils import (
+    canonical_is_xch,
+    default_mojo_multiplier_for_asset,
+    is_hex_id,
+    normalize_hex_id,
+)
 from greenfloor.logging_setup import initialize_service_file_logging
 from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
 from greenfloor.signing import sign_and_broadcast_mixed_split
 from greenfloor.storage.sqlite import SqliteStore
 
-_TEST_PHASE_OFFER_EXPIRY_MINUTES = 5
 _MANAGER_SERVICE_NAME = "manager"
 _DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS = 4
 _DEXIE_INVALID_OFFER_RETRY_INITIAL_DELAY_SECONDS = 1.0
+_DEXIE_VISIBILITY_POST_MAX_ATTEMPTS = 3
+_DEXIE_VISIBILITY_POST_DELAY_SECONDS = 2.0
 _runtime_logger = logging.getLogger("greenfloor.manager")
 _JSON_OUTPUT_COMPACT = False
 
@@ -100,15 +106,82 @@ def _offer_has_expiration_condition(sdk: object, offer_text: str) -> bool:
     spend_bundle = decode_offer(offer_text)
     coin_spends = getattr(spend_bundle, "coin_spends", None) or []
     for coin_spend in coin_spends:
-        conditions_fn = getattr(coin_spend, "conditions", None)
-        if not callable(conditions_fn):
-            continue
-        conditions = conditions_fn() or []
-        if not isinstance(conditions, list):
-            continue
-        for condition in conditions:
+        for condition in _extract_offer_conditions_from_coin_spend(sdk, coin_spend):
             if _condition_has_offer_expiration(condition):
                 return True
+    return False
+
+
+def _extract_offer_conditions_from_coin_spend(sdk: object, coin_spend: object) -> list[object]:
+    # Derive conditions from CLVM execution of puzzle reveal + solution.
+    clvm_cls = getattr(sdk, "Clvm", None)
+    if not callable(clvm_cls):
+        return []
+    puzzle_reveal = getattr(coin_spend, "puzzle_reveal", None)
+    solution = getattr(coin_spend, "solution", None)
+    if not isinstance(puzzle_reveal, bytes | bytearray | memoryview) or not isinstance(
+        solution, bytes | bytearray | memoryview
+    ):
+        return []
+
+    try:
+        clvm = clvm_cls()
+        deserialize_fn = getattr(clvm, "deserialize", None)
+        if not callable(deserialize_fn):
+            return []
+        puzzle_program = deserialize_fn(bytes(puzzle_reveal))
+        solution_program = deserialize_fn(bytes(solution))
+        run_fn = getattr(puzzle_program, "run", None)
+        if not callable(run_fn):
+            return []
+        run_output = run_fn(solution_program, 1_000_000_000_000, True)
+        value = getattr(run_output, "value", None)
+        if value is None:
+            return []
+        to_list_fn = getattr(value, "to_list", None)
+        if callable(to_list_fn):
+            parsed = to_list_fn() or []
+            if isinstance(parsed, collections.abc.Iterable) and not isinstance(
+                parsed, bytes | bytearray | str
+            ):
+                return list(parsed)
+        if isinstance(value, collections.abc.Iterable) and not isinstance(
+            value, bytes | bytearray | str
+        ):
+            return list(value)
+    except Exception:
+        return []
+    return []
+
+
+def _offer_has_duplicate_spent_coin_ids(sdk: object, offer_text: str) -> bool:
+    decode_offer = getattr(sdk, "decode_offer", None)
+    to_hex = getattr(sdk, "to_hex", None)
+    if not callable(decode_offer) or not callable(to_hex):
+        return False
+    try:
+        spend_bundle = decode_offer(offer_text)
+    except Exception:
+        return False
+    coin_spends = getattr(spend_bundle, "coin_spends", None) or []
+    seen: set[str] = set()
+    for coin_spend in coin_spends:
+        coin = getattr(coin_spend, "coin", None)
+        if coin is None:
+            continue
+        coin_id_fn = getattr(coin, "coin_id", None)
+        if not callable(coin_id_fn):
+            continue
+        try:
+            coin_id_hex = str(to_hex(coin_id_fn())).strip().lower()
+        except Exception:
+            continue
+        normalized = normalize_hex_id(coin_id_hex)
+        if not normalized:
+            continue
+        if normalized in seen:
+            return True
+        seen.add(normalized)
     return False
 
 
@@ -169,6 +242,7 @@ def log_signed_offer_artifact(
 
 
 def verify_offer_text_for_dexie(offer_text: str) -> str | None:
+    native_validated = False
     try:
         native = importlib.import_module("greenfloor_native")
     except Exception:
@@ -176,23 +250,32 @@ def verify_offer_text_for_dexie(offer_text: str) -> str | None:
     else:
         try:
             native.validate_offer(offer_text)
-            return None
+            native_validated = True
         except Exception as exc:
             return f"wallet_sdk_offer_validate_failed:{exc}"
     try:
         import chia_wallet_sdk as sdk  # type: ignore
     except Exception as exc:
+        if native_validated:
+            return None
         return f"wallet_sdk_import_error:{exc}"
     try:
-        validate_offer = getattr(sdk, "validate_offer", None)
-        if callable(validate_offer):
-            validate_offer(offer_text)
-        else:
-            verify_offer = getattr(sdk, "verify_offer", None)
-            if not callable(verify_offer):
-                return "wallet_sdk_validate_offer_unavailable"
-            if not bool(verify_offer(offer_text)):
-                return "wallet_sdk_offer_verify_false"
+        decode_offer = getattr(sdk, "decode_offer", None)
+        decode_available = callable(decode_offer)
+        if not native_validated:
+            validate_offer = getattr(sdk, "validate_offer", None)
+            if callable(validate_offer):
+                validate_offer(offer_text)
+            else:
+                verify_offer = getattr(sdk, "verify_offer", None)
+                if not callable(verify_offer):
+                    return "wallet_sdk_validate_offer_unavailable"
+                if not bool(verify_offer(offer_text)):
+                    return "wallet_sdk_offer_verify_false"
+        if native_validated and not decode_available:
+            return None
+        if _offer_has_duplicate_spent_coin_ids(sdk, offer_text):
+            return "wallet_sdk_offer_duplicate_spent_coin_ids"
         if not _offer_has_expiration_condition(sdk, offer_text):
             return "wallet_sdk_offer_missing_expiration"
     except Exception as exc:
@@ -212,11 +295,6 @@ class _CoinsetFeeLookupPreflightError(RuntimeError):
         self.detail = detail
         self.diagnostics = diagnostics
         super().__init__(f"{failure_kind}:{detail}")
-
-
-def _canonical_is_xch(asset_id: str) -> bool:
-    value = asset_id.strip().lower()
-    return value in {"xch", "txch"}
 
 
 def _canonical_is_cloud_global_id(asset_id: str) -> bool:
@@ -450,7 +528,7 @@ query resolveWalletAssets($walletId: ID!) {
                     "symbol": symbol,
                 }
             )
-    if _canonical_is_xch(raw):
+    if canonical_is_xch(raw):
         hinted = str(global_id_hint or "").strip()
         if hinted and hinted in set(crypto_asset_ids):
             return hinted
@@ -565,8 +643,8 @@ def resolve_cloud_wallet_offer_asset_ids(
     )
     if (
         resolved_base == resolved_quote
-        and not _canonical_is_xch(base_asset_id)
-        and not _canonical_is_xch(quote_asset_id)
+        and not canonical_is_xch(base_asset_id)
+        and not canonical_is_xch(quote_asset_id)
         and not _canonical_is_cloud_global_id(base_asset_id)
         and not _canonical_is_cloud_global_id(quote_asset_id)
     ):
@@ -852,6 +930,13 @@ def verify_dexie_offer_visible_by_id(
         if attempt < attempts:
             sleep_fn(delay_seconds)
     return last_error
+
+
+def is_transient_dexie_visibility_404_error(error: str) -> bool:
+    normalized = str(error).strip().lower()
+    return (
+        "dexie_get_offer_error" in normalized and "404" in normalized
+    ) or "dexie_http_error:404" in normalized
 
 
 def _coinset_coin_url(*, coin_name: str, network: str = "mainnet") -> str:
@@ -1464,16 +1549,14 @@ def dexie_offer_view_url(*, dexie_base_url: str, offer_id: str) -> str:
 
 def resolve_offer_expiry_for_market(market: Any) -> tuple[str, int]:
     pricing = dict(getattr(market, "pricing", {}) or {})
-    unit = str(pricing.get("strategy_offer_expiry_unit", "")).strip().lower()
-    value_raw = pricing.get("strategy_offer_expiry_value")
-    if unit in {"minutes", "hours"}:
-        try:
-            value = int(value_raw or 0)
-        except (TypeError, ValueError):
-            value = 0
-        if value > 0:
-            return unit, value
-    return "minutes", _TEST_PHASE_OFFER_EXPIRY_MINUTES
+    value_raw = pricing.get("strategy_offer_expiry_minutes")
+    try:
+        value = int(value_raw or 0)
+    except (TypeError, ValueError):
+        value = 0
+    if value > 0:
+        return "minutes", value
+    return "minutes", 10
 
 
 def _bootstrap_fee_cost_for_output_count(output_count: int) -> int:
@@ -1545,7 +1628,12 @@ def ensure_offer_bootstrap_denominations(
     if not side_ladder:
         return {"status": "skipped", "reason": f"missing_{side}_ladder"}
     pricing = dict(getattr(market, "pricing", {}) or {})
-    quote_unit_multiplier = int(pricing.get("quote_unit_mojo_multiplier", 1000))
+    quote_unit_multiplier = int(
+        pricing.get(
+            "quote_unit_mojo_multiplier",
+            default_mojo_multiplier_for_asset(str(resolved_quote_asset_id)),
+        )
+    )
     if side == "buy":
         ladder_for_split = []
         for entry in side_ladder:
@@ -1748,13 +1836,24 @@ def cloud_wallet_create_offer_phase(
     known_offer_markers = offer_markers(prior_offers if isinstance(prior_offers, list) else [])
     offer_request_started_at = dt.datetime.now(dt.UTC)
     offer_amount = int(
-        size_base_units * int((market.pricing or {}).get("base_unit_mojo_multiplier", 1000))
+        size_base_units
+        * int(
+            (market.pricing or {}).get(
+                "base_unit_mojo_multiplier",
+                default_mojo_multiplier_for_asset(str(resolved_base_asset_id)),
+            )
+        )
     )
     request_amount = int(
         round(
             float(size_base_units)
             * float(quote_price)
-            * int((market.pricing or {}).get("quote_unit_mojo_multiplier", 1000))
+            * int(
+                (market.pricing or {}).get(
+                    "quote_unit_mojo_multiplier",
+                    default_mojo_multiplier_for_asset(str(resolved_quote_asset_id)),
+                )
+            )
         )
     )
     if request_amount <= 0:
@@ -1762,9 +1861,26 @@ def cloud_wallet_create_offer_phase(
     if side == "buy":
         offered = [{"assetId": resolved_quote_asset_id, "amount": request_amount}]
         requested = [{"assetId": resolved_base_asset_id, "amount": offer_amount}]
+        spend_asset_id = str(resolved_quote_asset_id).strip()
+        required_spendable_amount = int(request_amount)
     else:
         offered = [{"assetId": resolved_base_asset_id, "amount": offer_amount}]
         requested = [{"assetId": resolved_quote_asset_id, "amount": request_amount}]
+        spend_asset_id = str(resolved_base_asset_id).strip()
+        required_spendable_amount = int(offer_amount)
+    if hasattr(wallet, "list_coins") and spend_asset_id:
+        asset_scoped_coins = wallet.list_coins(asset_id=spend_asset_id, include_pending=True)
+        spendable_amount = sum(
+            int(coin.get("amount", 0))
+            for coin in asset_scoped_coins
+            if isinstance(coin, dict) and _is_spendable_coin(coin)
+        )
+        if spendable_amount < required_spendable_amount:
+            raise RuntimeError(
+                "cloud_wallet_offer_insufficient_spendable_balance:"
+                f"side={side}:required={required_spendable_amount}:"
+                f"available={spendable_amount}:asset_id={spend_asset_id}"
+            )
     expires_at = (
         dt.datetime.now(dt.UTC) + dt.timedelta(**{expiry_unit: int(expiry_value)})
     ).isoformat()
@@ -1815,19 +1931,34 @@ def cloud_wallet_wait_offer_artifact_phase(
     if poll_offer_artifact_by_signature_request_fn is None:
         poll_offer_artifact_by_signature_request_fn = poll_offer_artifact_by_signature_request
     strict_timeout = max(15, int(timeout_seconds))
-    try:
-        return poll_offer_artifact_until_available_fn(
-            wallet=wallet,
-            known_markers=known_markers,
-            timeout_seconds=strict_timeout,
-            min_created_at=offer_request_started_at,
-            require_open_state=False,
-            states=("OPEN", "PENDING"),
-            prefer_newest=True,
-        )
-    except RuntimeError as exc:
-        if str(exc) != "cloud_wallet_offer_artifact_timeout":
-            raise
+    if signature_request_id:
+        try:
+            return poll_offer_artifact_by_signature_request_fn(
+                wallet=wallet,
+                signature_request_id=signature_request_id,
+                known_markers=known_markers,
+                timeout_seconds=strict_timeout,
+                min_created_at=offer_request_started_at,
+            )
+        except RuntimeError:
+            # Signature-request scoped lookup is preferred when supported, but
+            # not all test stubs or adapter variants implement this path.
+            # Fall back to generic wallet offer polling in those cases.
+            pass
+    else:
+        try:
+            return poll_offer_artifact_until_available_fn(
+                wallet=wallet,
+                known_markers=known_markers,
+                timeout_seconds=strict_timeout,
+                min_created_at=offer_request_started_at,
+                require_open_state=False,
+                states=("OPEN", "PENDING"),
+                prefer_newest=True,
+            )
+        except RuntimeError as exc:
+            if str(exc) != "cloud_wallet_offer_artifact_timeout":
+                raise
     extended_timeout = max(45, strict_timeout * 3)
     if signature_request_id:
         try:
@@ -1880,21 +2011,29 @@ def cloud_wallet_post_offer_phase(
     post_dexie_offer_with_invalid_offer_retry_fn: collections.abc.Callable[..., dict[str, Any]]
     | None = None,
     verify_dexie_offer_visible_by_id_fn: collections.abc.Callable[..., str | None] | None = None,
+    sleep_fn: collections.abc.Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
     _ = market
     if post_dexie_offer_with_invalid_offer_retry_fn is None:
         post_dexie_offer_with_invalid_offer_retry_fn = post_dexie_offer_with_invalid_offer_retry
     if verify_dexie_offer_visible_by_id_fn is None:
         verify_dexie_offer_visible_by_id_fn = verify_dexie_offer_visible_by_id
+    if sleep_fn is None:
+        sleep_fn = time.sleep
     if publish_venue == "dexie":
         assert dexie is not None
-        result = post_dexie_offer_with_invalid_offer_retry_fn(
-            dexie=dexie,
-            offer_text=offer_text,
-            drop_only=drop_only,
-            claim_rewards=claim_rewards,
-        )
-        if bool(result.get("success", False)):
+        last_result: dict[str, Any] = {}
+        last_visibility_error = ""
+        for attempt in range(1, _DEXIE_VISIBILITY_POST_MAX_ATTEMPTS + 1):
+            result = post_dexie_offer_with_invalid_offer_retry_fn(
+                dexie=dexie,
+                offer_text=offer_text,
+                drop_only=drop_only,
+                claim_rewards=claim_rewards,
+            )
+            last_result = dict(result)
+            if not bool(result.get("success", False)):
+                return result
             posted_offer_id = str(result.get("id", "")).strip()
             visibility_error = verify_dexie_offer_visible_by_id_fn(
                 dexie=dexie,
@@ -1904,13 +2043,22 @@ def cloud_wallet_post_offer_phase(
                 expected_requested_asset_id=str(expected_requested_asset_id),
                 expected_requested_symbol=str(expected_requested_symbol),
             )
-            if visibility_error:
+            if not visibility_error:
+                return result
+            last_visibility_error = str(visibility_error)
+            if not is_transient_dexie_visibility_404_error(last_visibility_error):
                 return {
                     **result,
                     "success": False,
-                    "error": visibility_error,
+                    "error": last_visibility_error,
                 }
-        return result
+            if attempt < _DEXIE_VISIBILITY_POST_MAX_ATTEMPTS:
+                sleep_fn(_DEXIE_VISIBILITY_POST_DELAY_SECONDS)
+        return {
+            **last_result,
+            "success": False,
+            "error": (last_visibility_error or "dexie_offer_not_visible_after_publish"),
+        }
     assert splash is not None
     return splash.post_offer(offer_text)
 
@@ -2038,19 +2186,32 @@ def build_and_post_offer_cloud_wallet(
             if bool(bootstrap_result.get("fallback_to_cloud_wallet_offer_split", False)):
                 split_input_coins_fee = 0
 
-        create_phase = cloud_wallet_create_offer_phase_fn(
-            wallet=wallet,
-            market=market,
-            size_base_units=size_base_units,
-            quote_price=quote_price,
-            resolved_base_asset_id=resolved_base_asset_id,
-            resolved_quote_asset_id=resolved_quote_asset_id,
-            offer_fee_mojos=offer_fee_mojos,
-            split_input_coins_fee=split_input_coins_fee,
-            expiry_unit=expiry_unit,
-            expiry_value=expiry_value,
-            action_side=side,
-        )
+        try:
+            create_phase = cloud_wallet_create_offer_phase_fn(
+                wallet=wallet,
+                market=market,
+                size_base_units=size_base_units,
+                quote_price=quote_price,
+                resolved_base_asset_id=resolved_base_asset_id,
+                resolved_quote_asset_id=resolved_quote_asset_id,
+                offer_fee_mojos=offer_fee_mojos,
+                split_input_coins_fee=split_input_coins_fee,
+                expiry_unit=expiry_unit,
+                expiry_value=expiry_value,
+                action_side=side,
+            )
+        except Exception as exc:
+            post_results.append(
+                {
+                    "venue": publish_venue,
+                    "result": {
+                        "success": False,
+                        "error": str(exc),
+                    },
+                }
+            )
+            publish_failures += 1
+            continue
         signature_request_id = str(create_phase["signature_request_id"]).strip()
         signature_state = str(create_phase["signature_state"]).strip()
         wait_events = list(create_phase["wait_events"])
@@ -2130,9 +2291,9 @@ def build_and_post_offer_cloud_wallet(
             claim_rewards=claim_rewards,
             market=market,
             expected_offered_asset_id=(
-                str(market.quote_asset)
+                str(resolved_quote_asset_id)
                 if str(create_phase.get("side", "sell")).strip().lower() == "buy"
-                else str(market.base_asset)
+                else str(resolved_base_asset_id)
             ),
             expected_offered_symbol=(
                 str(getattr(market, "quote_asset", ""))
@@ -2140,9 +2301,9 @@ def build_and_post_offer_cloud_wallet(
                 else str(getattr(market, "base_symbol", ""))
             ),
             expected_requested_asset_id=(
-                str(market.base_asset)
+                str(resolved_base_asset_id)
                 if str(create_phase.get("side", "sell")).strip().lower() == "buy"
-                else str(market.quote_asset)
+                else str(resolved_quote_asset_id)
             ),
             expected_requested_symbol=(
                 str(getattr(market, "base_symbol", ""))

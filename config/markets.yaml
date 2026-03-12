@@ -14,8 +14,6 @@ markets:
     cloud_wallet_base_global_id: "Asset_ymgm3ygl5om7ia4u9llk3iu7"
     cloud_wallet_quote_global_id: "Asset_huun64oh7dbt9f1f9ie8khuw"
     pricing:
-      reference_source: "coingecko"
-      reference_pair: "xch_usd"
       side: "sell"
       min_price_quote_per_base: 0.0031
       max_price_quote_per_base: 0.0038
@@ -23,6 +21,7 @@ markets:
       strategy_target_spread_bps: 140
       strategy_min_xch_price_usd: 20.0
       strategy_max_xch_price_usd: 60.0
+      strategy_offer_expiry_minutes: 10
       cancel_policy_stable_vs_unstable: true
     inventory:
       low_watermark_base_units: 500
@@ -62,8 +61,7 @@ markets:
       side: "sell"
       fixed_quote_per_base: 7.75
       slippage_bps: 25
-      strategy_offer_expiry_unit: "hours"
-      strategy_offer_expiry_value: 2
+      strategy_offer_expiry_minutes: 120
     inventory:
       low_watermark_base_units: 500
       low_inventory_alert_threshold_base_units: null
@@ -99,8 +97,6 @@ markets:
     cloud_wallet_base_global_id: "Asset_wjfkwih7s6c1y6rlswnznr6p"
     cloud_wallet_quote_global_id: "Asset_huun64oh7dbt9f1f9ie8khuw"
     pricing:
-      reference_source: "coingecko"
-      reference_pair: "xch_usd"
       side: "sell"
       min_price_quote_per_base: 0.0027
       max_price_quote_per_base: 0.0033
@@ -108,6 +104,7 @@ markets:
       strategy_target_spread_bps: 140
       strategy_min_xch_price_usd: 20.0
       strategy_max_xch_price_usd: 60.0
+      strategy_offer_expiry_minutes: 10
       cancel_policy_stable_vs_unstable: true
     inventory:
       low_watermark_base_units: 500
@@ -147,8 +144,7 @@ markets:
       side: "sell"
       fixed_quote_per_base: 6.75
       slippage_bps: 25
-      strategy_offer_expiry_unit: "hours"
-      strategy_offer_expiry_value: 2
+      strategy_offer_expiry_minutes: 120
     inventory:
       low_watermark_base_units: 500
       low_inventory_alert_threshold_base_units: null
@@ -173,7 +169,7 @@ markets:
           combine_when_excess_factor: 2.0
 
   - id: eco1812020_sell_xch
-    enabled: false
+    enabled: true
     mode: sell_only
     base_asset: "e257aca547a83020e537e87f8c83e9332d2c3adb729c052e6f04971317084327"
     base_symbol: "ECO.181.2020"
@@ -184,8 +180,6 @@ markets:
     cloud_wallet_base_global_id: "Asset_s1ifxnpgnf8n3hsd6wlb04q5"
     cloud_wallet_quote_global_id: "Asset_huun64oh7dbt9f1f9ie8khuw"
     pricing:
-      reference_source: "coingecko"
-      reference_pair: "xch_usd"
       side: "sell"
       min_price_quote_per_base: 0.0030
       max_price_quote_per_base: 0.0037
@@ -193,6 +187,8 @@ markets:
       strategy_target_spread_bps: 140
       strategy_min_xch_price_usd: 20.0
       strategy_max_xch_price_usd: 60.0
+      strategy_offer_expiry_minutes: 10
+      cancel_move_threshold_bps: 300
       cancel_policy_stable_vs_unstable: true
     inventory:
       low_watermark_base_units: 500
@@ -232,8 +228,7 @@ markets:
       side: "sell"
       fixed_quote_per_base: 7.50
       slippage_bps: 25
-      strategy_offer_expiry_unit: "hours"
-      strategy_offer_expiry_value: 2
+      strategy_offer_expiry_minutes: 120
     inventory:
       low_watermark_base_units: 500
       low_inventory_alert_threshold_base_units: null
@@ -269,8 +264,6 @@ markets:
     cloud_wallet_base_global_id: "Asset_e3jexei5nswyy916lg77vabz"
     cloud_wallet_quote_global_id: "Asset_huun64oh7dbt9f1f9ie8khuw"
     pricing:
-      reference_source: "coingecko"
-      reference_pair: "xch_usd"
       side: "sell"
       min_price_quote_per_base: 0.0027
       max_price_quote_per_base: 0.0033
@@ -278,6 +271,7 @@ markets:
       strategy_target_spread_bps: 140
       strategy_min_xch_price_usd: 20.0
       strategy_max_xch_price_usd: 60.0
+      strategy_offer_expiry_minutes: 10
       cancel_policy_stable_vs_unstable: true
     inventory:
       low_watermark_base_units: 500
@@ -317,8 +311,46 @@ markets:
       side: "sell"
       fixed_quote_per_base: 6.75
       slippage_bps: 25
-      strategy_offer_expiry_unit: "hours"
-      strategy_offer_expiry_value: 2
+      strategy_offer_expiry_minutes: 120
+    inventory:
+      low_watermark_base_units: 500
+      low_inventory_alert_threshold_base_units: null
+      current_available_base_units: 500
+      bucket_counts:
+        1: 0
+        10: 0
+        100: 0
+    ladders:
+      sell:
+        - size_base_units: 1
+          target_count: 5
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+        - size_base_units: 10
+          target_count: 2
+          split_buffer_count: 1
+          combine_when_excess_factor: 2.0
+        - size_base_units: 100
+          target_count: 1
+          split_buffer_count: 0
+          combine_when_excess_factor: 2.0
+
+  - id: eco292021_sell_wusdbc
+    enabled: true
+    mode: sell_only
+    base_asset: "5af8db0b15e0de99ad1eff02486bb1998602053c56dfb22dc04e0f5e17ccec8d"
+    base_symbol: "ECO.29.2021"
+    quote_asset: "wUSDC.b"
+    quote_asset_type: stable
+    signer_key_id: "key-main-1"
+    receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
+    cloud_wallet_base_global_id: "Asset_aihyg9ncps0bqdkyw9j7i8x2"
+    cloud_wallet_quote_global_id: "Asset_cxc7mql006dp2w3kigqlj58t"
+    pricing:
+      side: "sell"
+      fixed_quote_per_base: 6.5
+      slippage_bps: 25
+      strategy_offer_expiry_minutes: 120
     inventory:
       low_watermark_base_units: 500
       low_inventory_alert_threshold_base_units: null
@@ -353,6 +385,7 @@ markets:
     receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
     pricing:
       fixed_quote_per_base: 0.999
+      strategy_offer_expiry_minutes: 30
     inventory:
       low_watermark_base_units: 200
       low_inventory_alert_threshold_base_units: 200
