@@ -87,6 +87,26 @@ def test_cancel_policy_requires_strong_price_move() -> None:
     assert out["reason"] == "price_move_below_threshold"
 
 
+def test_cancel_policy_uses_market_specific_threshold_when_present() -> None:
+    import greenfloor.daemon.main as daemon_main
+
+    daemon_main._CANCEL_COOLDOWN_UNTIL.clear()
+    market = _market("unstable", stable_vs_unstable=True)
+    market.pricing["cancel_move_threshold_bps"] = 100
+    out = _execute_cancel_policy_for_market(
+        market=market,
+        offers=[{"id": "o1", "status": 0}],
+        runtime_dry_run=True,
+        current_xch_price_usd=30.6,
+        previous_xch_price_usd=30.0,
+        dexie=cast(Any, _FakeDexie({"success": True})),
+        store=cast(Any, _FakeStore()),
+    )
+    assert out["eligible"] is True
+    assert out["triggered"] is True
+    assert out["threshold_bps"] == 100
+
+
 def test_cancel_policy_dry_run_marks_planned_only() -> None:
     import greenfloor.daemon.main as daemon_main
 

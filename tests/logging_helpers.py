@@ -20,3 +20,5 @@ def reset_concurrent_log_handlers(*, module) -> None:
         module._daemon_file_log_handler = None
     # Reset the shared logging_setup registry so handlers are re-created.
     _logging_setup._initialized_services.clear()
+    _logging_setup._active_handler = None
+    _logging_setup._active_service_name = None

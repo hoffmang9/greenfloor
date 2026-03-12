@@ -109,35 +109,64 @@ def test_parse_markets_config_accepts_valid_strategy_controls() -> None:
     assert out.markets[0].pricing["strategy_target_spread_bps"] == 120
 
 
-def test_parse_markets_config_rejects_partial_strategy_expiry_override() -> None:
+def test_parse_markets_config_rejects_legacy_strategy_expiry_fields() -> None:
     row = _base_market_row()
-    row["pricing"] = {"strategy_offer_expiry_unit": "hours"}
+    row["pricing"] = {"strategy_offer_expiry_unit": "hours", "strategy_offer_expiry_value": 2}
     with pytest.raises(
         ValueError,
-        match="strategy_offer_expiry_unit and strategy_offer_expiry_value must be set together",
+        match="strategy_offer_expiry_unit/value are no longer supported",
     ):
         parse_markets_config({"markets": [row]})
 
 
-def test_parse_markets_config_rejects_invalid_strategy_expiry_unit() -> None:
+def test_parse_markets_config_rejects_invalid_strategy_expiry_minutes_type() -> None:
     row = _base_market_row()
     row["pricing"] = {
-        "strategy_offer_expiry_unit": "days",
-        "strategy_offer_expiry_value": 1,
+        "strategy_offer_expiry_minutes": "abc",
     }
-    with pytest.raises(ValueError, match="strategy_offer_expiry_unit must be one of"):
+    with pytest.raises(ValueError, match="strategy_offer_expiry_minutes must be an integer"):
         parse_markets_config({"markets": [row]})
 
 
 def test_parse_markets_config_accepts_strategy_expiry_override() -> None:
     row = _base_market_row()
+    row["quote_asset_type"] = "stable"
     row["pricing"] = {
-        "strategy_offer_expiry_unit": "hours",
-        "strategy_offer_expiry_value": 2,
+        "strategy_offer_expiry_minutes": 120,
     }
     out = parse_markets_config({"markets": [row]})
-    assert out.markets[0].pricing["strategy_offer_expiry_unit"] == "hours"
-    assert out.markets[0].pricing["strategy_offer_expiry_value"] == 2
+    assert out.markets[0].pricing["strategy_offer_expiry_minutes"] == 120
+
+
+def test_parse_markets_config_warns_when_unstable_expiry_above_15_minutes() -> None:
+    row = _base_market_row()
+    row["pricing"] = {"strategy_offer_expiry_minutes": 30}
+    with pytest.warns(UserWarning, match="exceeds 15 minutes"):
+        parse_markets_config({"markets": [row]})
+
+
+def test_parse_markets_config_rejects_legacy_reference_fields() -> None:
+    row = _base_market_row()
+    row["pricing"] = {
+        "reference_source": "coingecko",
+        "reference_pair": "xch_usd",
+    }
+    with pytest.raises(ValueError, match="reference_source is no longer supported"):
+        parse_markets_config({"markets": [row]})
+
+
+def test_parse_markets_config_rejects_invalid_cancel_move_threshold_bps() -> None:
+    row = _base_market_row()
+    row["pricing"] = {"cancel_move_threshold_bps": 0}
+    with pytest.raises(ValueError, match="cancel_move_threshold_bps must be positive"):
+        parse_markets_config({"markets": [row]})
+
+
+def test_parse_markets_config_accepts_cancel_move_threshold_bps() -> None:
+    row = _base_market_row()
+    row["pricing"] = {"cancel_move_threshold_bps": 250}
+    out = parse_markets_config({"markets": [row]})
+    assert out.markets[0].pricing["cancel_move_threshold_bps"] == 250
 
 
 def test_parse_markets_config_stable_quote_validates_present_strategy_fields() -> None:
@@ -172,6 +201,14 @@ def test_parse_markets_config_defaults_cat_unit_multipliers_to_1000() -> None:
 
     assert out.markets[0].pricing["base_unit_mojo_multiplier"] == 1000
     assert out.markets[0].pricing["quote_unit_mojo_multiplier"] == 1000
+
+
+def test_parse_markets_config_defaults_xch_quote_multiplier_to_one_trillion() -> None:
+    row = _base_market_row()
+    row["quote_asset"] = "xch"
+    out = parse_markets_config({"markets": [row]})
+    assert out.markets[0].pricing["base_unit_mojo_multiplier"] == 1000
+    assert out.markets[0].pricing["quote_unit_mojo_multiplier"] == 1_000_000_000_000
 
 
 def test_parse_markets_config_rejects_noncanonical_cat_base_multiplier() -> None:

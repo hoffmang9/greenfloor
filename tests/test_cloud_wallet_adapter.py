@@ -182,6 +182,31 @@ def test_cloud_wallet_list_coins_keeps_row_asset_for_unscoped_queries(
     assert "asset {" in queries[0]
 
 
+def test_cloud_wallet_get_chia_usd_quote_reads_numeric_price(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(
+        adapter,
+        "_graphql",
+        lambda *, query, variables: {  # noqa: ARG005
+            "quote": {
+                "price": "31.42",
+                "baseAsset": "chia",
+                "currency": "usd",
+                "source": "coingecko.com",
+                "createdAt": "2026-03-10T12:00:00Z",
+            }
+        },
+    )
+    assert adapter.get_chia_usd_quote() == 31.42
+
+
+def test_cloud_wallet_get_chia_usd_quote_rejects_missing_quote(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_graphql", lambda *, query, variables: {"quote": None})  # noqa: ARG005
+    with pytest.raises(RuntimeError, match="cloud_wallet_missing_quote"):
+        adapter.get_chia_usd_quote()
+
+
 def test_cloud_wallet_graphql_http_error_contains_status_and_snippet(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -449,6 +474,25 @@ def test_cloud_wallet_get_wallet_passes_offer_filters(monkeypatch, tmp_path: Pat
     assert variables["isCreator"] is True  # type: ignore[index]
     assert variables["states"] == ["OPEN", "PENDING"]  # type: ignore[index]
     assert variables["first"] == 25  # type: ignore[index]
+
+
+def test_cloud_wallet_get_wallet_clamps_first_to_cloud_wallet_max(
+    monkeypatch, tmp_path: Path
+) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    captured: dict[str, object] = {}
+
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        return _FakeHttpResponse({"data": {"wallet": {"offers": {"edges": []}}}})
+
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    payload = adapter.get_wallet(is_creator=True, states=["OPEN"], first=120)
+    assert payload == {"offers": []}
+    variables = captured["body"]["variables"]  # type: ignore[index]
+    assert variables["first"] == 100  # type: ignore[index]
 
 
 # ---------------------------------------------------------------------------

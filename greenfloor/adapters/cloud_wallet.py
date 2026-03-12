@@ -140,6 +140,33 @@ query listCoins($walletId: ID!, $includePending: Boolean, $after: String, $asset
                 break
         return coins
 
+    def get_chia_usd_quote(self) -> float:
+        query = """
+query quote($asset: String!) {
+  quote(asset: $asset) {
+    price
+    baseAsset
+    currency
+    source
+    createdAt
+  }
+}
+"""
+        payload = self._graphql(query=query, variables={"asset": "chia"})
+        quote_payload = payload.get("quote")
+        if not isinstance(quote_payload, dict):
+            raise RuntimeError("cloud_wallet_missing_quote")
+        raw_price = quote_payload.get("price")
+        if not isinstance(raw_price, str | int | float):
+            raise RuntimeError("cloud_wallet_invalid_quote_price")
+        try:
+            price = float(raw_price)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("cloud_wallet_invalid_quote_price") from exc
+        if price <= 0:
+            raise RuntimeError("cloud_wallet_invalid_quote_price")
+        return price
+
     def split_coins(
         self,
         *,
@@ -414,6 +441,9 @@ query getSignatureRequestOffer($id: ID!) {
         states: list[str] | None = None,
         first: int = 100,
     ) -> dict[str, Any]:
+        # Cloud Wallet currently rejects wallet.offers limits above 100.
+        # Revisit this guard if Cloud Wallet pagination defaults/maxima change.
+        first_limit = min(100, max(0, int(first)))
         query = """
 query getWallet($walletId: ID, $isCreator: Boolean, $states: [OfferState!], $first: Int) {
   wallet(id: $walletId) {
@@ -439,7 +469,7 @@ query getWallet($walletId: ID, $isCreator: Boolean, $states: [OfferState!], $fir
                 "walletId": self._vault_id,
                 "isCreator": is_creator,
                 "states": states,
-                "first": int(first),
+                "first": first_limit,
             },
         )
         wallet = payload.get("wallet") or {}

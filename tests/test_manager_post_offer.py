@@ -122,7 +122,16 @@ def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypat
         "greenfloor.cli.manager._dexie_lookup_token_for_cat_id", _fake_lookup_by_cat
     )
     monkeypatch.setattr(
+        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id", _fake_lookup_by_cat
+    )
+    monkeypatch.setattr(
         "greenfloor.cli.manager._dexie_lookup_token_for_symbol",
+        lambda *, asset_ref, network: (
+            {"id": quote_cat, "code": "wUSDC.b"} if asset_ref == "wUSDC.b" else None
+        ),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_symbol",
         lambda *, asset_ref, network: (
             {"id": quote_cat, "code": "wUSDC.b"} if asset_ref == "wUSDC.b" else None
         ),
@@ -765,8 +774,7 @@ def test_build_and_post_offer_uses_market_configured_expiry_override(
     _write_markets(markets)
     raw = yaml.safe_load(markets.read_text(encoding="utf-8"))
     pricing = dict(raw["markets"][0].get("pricing") or {})
-    pricing["strategy_offer_expiry_unit"] = "hours"
-    pricing["strategy_offer_expiry_value"] = 8
+    pricing["strategy_offer_expiry_minutes"] = 12
     raw["markets"][0]["pricing"] = pricing
     markets.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
@@ -805,8 +813,8 @@ def test_build_and_post_offer_uses_market_configured_expiry_override(
         dry_run=False,
     )
     assert code == 0
-    assert captured_payload["expiry_unit"] == "hours"
-    assert captured_payload["expiry_value"] == 8
+    assert captured_payload["expiry_unit"] == "minutes"
+    assert captured_payload["expiry_value"] == 12
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["publish_failures"] == 0
     assert payload["results"][0]["result"]["id"] == "offer-expiry-1"
@@ -1602,15 +1610,34 @@ def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypa
         def parse_assert_before_seconds_relative():
             return object()
 
-    class _CoinSpendWithExpiry:
+    class _OutputValue:
         @staticmethod
-        def conditions():
+        def to_list():
             return [_ConditionWithExpiry()]
+
+    class _Output:
+        value = _OutputValue()
+
+    class _Program:
+        @staticmethod
+        def run(_solution, _max_cost: int, _mempool_mode: bool):
+            return _Output()
+
+    class _Clvm:
+        @staticmethod
+        def deserialize(_blob: bytes):
+            return _Program()
+
+    class _CoinSpendWithExpiry:
+        puzzle_reveal = b"puzzle"
+        solution = b"solution"
 
     class _SpendBundleWithExpiry:
         coin_spends = [_CoinSpendWithExpiry()]
 
     class _Sdk:
+        Clvm = _Clvm
+
         @staticmethod
         def validate_offer(offer: str) -> None:
             assert offer == "offer1ok"
@@ -1636,15 +1663,34 @@ def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> 
         def parse_assert_before_height_absolute():
             return object()
 
-    class _CoinSpendWithExpiry:
+    class _OutputValue:
         @staticmethod
-        def conditions():
+        def to_list():
             return [_ConditionWithExpiry()]
+
+    class _Output:
+        value = _OutputValue()
+
+    class _Program:
+        @staticmethod
+        def run(_solution, _max_cost: int, _mempool_mode: bool):
+            return _Output()
+
+    class _Clvm:
+        @staticmethod
+        def deserialize(_blob: bytes):
+            return _Program()
+
+    class _CoinSpendWithExpiry:
+        puzzle_reveal = b"puzzle"
+        solution = b"solution"
 
     class _SpendBundleWithExpiry:
         coin_spends = [_CoinSpendWithExpiry()]
 
     class _Sdk:
+        Clvm = _Clvm
+
         @staticmethod
         def verify_offer(offer: str) -> bool:
             return offer == "offer1ok"
@@ -1706,6 +1752,114 @@ def test_verify_offer_text_for_dexie_rejects_offer_without_expiration_condition(
     assert _verify_offer_text_for_dexie("offer1noexpiry") == "wallet_sdk_offer_missing_expiration"
 
 
+def test_verify_offer_text_for_dexie_extracts_expiry_from_coin_spend_program(
+    monkeypatch,
+) -> None:
+    def _import_module(name: str):
+        if name == "greenfloor_native":
+            raise ImportError("disable native path for this test")
+        return __import__(name)
+
+    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+
+    class _ConditionWithExpiry:
+        @staticmethod
+        def parse_assert_before_seconds_absolute():
+            return object()
+
+    class _OutputValue:
+        @staticmethod
+        def to_list():
+            return [_ConditionWithExpiry()]
+
+    class _Output:
+        value = _OutputValue()
+
+    class _Program:
+        @staticmethod
+        def run(_solution, _max_cost: int, _mempool_mode: bool):
+            return _Output()
+
+    class _Clvm:
+        @staticmethod
+        def deserialize(_blob: bytes):
+            return _Program()
+
+    class _CoinSpend:
+        puzzle_reveal = b"puzzle"
+        solution = b"solution"
+
+    class _SpendBundle:
+        coin_spends = [_CoinSpend()]
+
+    class _Sdk:
+        Clvm = _Clvm
+
+        @staticmethod
+        def validate_offer(_offer: str) -> None:
+            return None
+
+        @staticmethod
+        def decode_offer(_offer: str):
+            return _SpendBundle()
+
+    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+    assert _verify_offer_text_for_dexie("offer1ok") is None
+
+
+def test_verify_offer_text_for_dexie_rejects_duplicate_spent_coin_ids(
+    monkeypatch,
+) -> None:
+    def _import_module(name: str):
+        if name == "greenfloor_native":
+            raise ImportError("disable native path for this test")
+        return __import__(name)
+
+    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+
+    class _ConditionWithExpiry:
+        @staticmethod
+        def parse_assert_before_height_absolute():
+            return object()
+
+    class _Coin:
+        def __init__(self, coin_id: str):
+            self._coin_id = coin_id
+
+        def coin_id(self):
+            return self._coin_id
+
+    class _CoinSpend:
+        def __init__(self, coin_id: str):
+            self.coin = _Coin(coin_id)
+
+        @staticmethod
+        def conditions():
+            return [_ConditionWithExpiry()]
+
+    class _SpendBundleWithDuplicates:
+        coin_spends = [_CoinSpend("aa" * 32), _CoinSpend("aa" * 32)]
+
+    class _Sdk:
+        @staticmethod
+        def validate_offer(_offer: str) -> None:
+            return None
+
+        @staticmethod
+        def decode_offer(_offer: str):
+            return _SpendBundleWithDuplicates()
+
+        @staticmethod
+        def to_hex(value):
+            return str(value)
+
+    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+    assert (
+        _verify_offer_text_for_dexie("offer1duplicate")
+        == "wallet_sdk_offer_duplicate_spent_coin_ids"
+    )
+
+
 def test_verify_offer_text_for_dexie_uses_greenfloor_native_before_sdk(monkeypatch) -> None:
     calls = {}
 
@@ -1735,6 +1889,54 @@ def test_verify_offer_text_for_dexie_returns_native_validation_error(monkeypatch
     monkeypatch.setitem(sys.modules, "greenfloor_native", _Native)
     assert _verify_offer_text_for_dexie("offer1bad") == (
         "wallet_sdk_offer_validate_failed:native_invalid_offer"
+    )
+
+
+def test_verify_offer_text_for_dexie_checks_duplicate_spends_after_native_validation(
+    monkeypatch,
+) -> None:
+    class _Native:
+        @staticmethod
+        def validate_offer(_offer: str) -> None:
+            return None
+
+    class _ConditionWithExpiry:
+        @staticmethod
+        def parse_assert_before_height_absolute():
+            return object()
+
+    class _Coin:
+        def __init__(self, coin_id: str):
+            self._coin_id = coin_id
+
+        def coin_id(self):
+            return self._coin_id
+
+    class _CoinSpend:
+        def __init__(self, coin_id: str):
+            self.coin = _Coin(coin_id)
+
+        @staticmethod
+        def conditions():
+            return [_ConditionWithExpiry()]
+
+    class _SpendBundleWithDuplicates:
+        coin_spends = [_CoinSpend("bb" * 32), _CoinSpend("bb" * 32)]
+
+    class _Sdk:
+        @staticmethod
+        def decode_offer(_offer: str):
+            return _SpendBundleWithDuplicates()
+
+        @staticmethod
+        def to_hex(value):
+            return str(value)
+
+    monkeypatch.setitem(sys.modules, "greenfloor_native", _Native)
+    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+    assert (
+        _verify_offer_text_for_dexie("offer1native-dupe")
+        == "wallet_sdk_offer_duplicate_spent_coin_ids"
     )
 
 
@@ -3142,6 +3344,60 @@ def test_coin_combine_returns_structured_error_when_coin_id_not_found(
     assert payload["unknown_coin_ids"] == ["missing-coin-name"]
 
 
+def test_coin_combine_rejects_mixed_asset_coin_ids_before_api_call(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program)
+    _write_markets(markets)
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending, asset_id
+            return [
+                {"id": "Coin_xch", "name": "coin-xch", "asset": {"id": "xch"}},
+                {"id": "Coin_cat", "name": "coin-cat", "asset": {"id": "Asset_cat"}},
+            ]
+
+        @staticmethod
+        def combine_coins(*, number_of_coins, fee, largest_first, asset_id, input_coin_ids=None):
+            _ = number_of_coins, fee, largest_first, asset_id, input_coin_ids
+            raise AssertionError("combine_coins should not be called for mixed assets")
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
+    )
+    code = _coin_combine(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        number_of_coins=2,
+        asset_id="xch",
+        coin_ids=["coin-xch", "coin-cat"],
+        no_wait=True,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["success"] is False
+    assert payload["error"] == "coin_id_asset_mismatch"
+    assert payload["resolved_asset_id"] == "xch"
+    assert payload["mismatched_coin_ids"] == ["Coin_cat"]
+    assert payload["mismatched_coin_assets"] == [
+        {"coin_id": "Coin_cat", "coin_asset_id": "asset_cat"}
+    ]
+
+
 def test_coin_split_uses_market_ladder_target_when_size_is_provided(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
@@ -3395,6 +3651,99 @@ def test_coin_combine_auto_selection_ignores_cat_dust_under_one_unit(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["coin_selection_mode"] == "adapter_auto_select"
     assert payload["resolved_asset_id"] == "Asset_split_base"
+
+
+def test_coin_combine_auto_selection_directly_filters_cross_asset_scoped_rows(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program_with_cloud_wallet(program)
+    _write_markets(markets)
+    calls = {}
+
+    class _FakeWallet:
+        vault_id = "wallet-1"
+
+        def __init__(self, _config):
+            pass
+
+        @staticmethod
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending
+            if asset_id == "Asset_split_base":
+                return [
+                    {"id": "Coin_good_1", "name": "good-1", "amount": 1000, "state": "SETTLED"},
+                    {"id": "Coin_bad", "name": "bad", "amount": 1000, "state": "SETTLED"},
+                    {"id": "Coin_good_2", "name": "good-2", "amount": 1000, "state": "SETTLED"},
+                ]
+            return [{"id": "Coin_old", "name": "old", "amount": 1, "state": "SETTLED"}]
+
+        @staticmethod
+        def get_coin_record(*, coin_id):
+            mapping = {
+                "Coin_good_1": {
+                    "id": "Coin_good_1",
+                    "amount": 1000,
+                    "state": "SETTLED",
+                    "isLocked": False,
+                    "isLinkedToOpenOffer": False,
+                    "asset": {"id": "Asset_split_base"},
+                },
+                "Coin_good_2": {
+                    "id": "Coin_good_2",
+                    "amount": 1000,
+                    "state": "SETTLED",
+                    "isLocked": False,
+                    "isLinkedToOpenOffer": False,
+                    "asset": {"id": "Asset_split_base"},
+                },
+                "Coin_bad": {
+                    "id": "Coin_bad",
+                    "amount": 1000,
+                    "state": "SETTLED",
+                    "isLocked": False,
+                    "isLinkedToOpenOffer": False,
+                    "asset": {"id": "Asset_huun64oh7dbt9f1f9ie8khuw"},
+                },
+            }
+            return mapping[coin_id]
+
+        @staticmethod
+        def combine_coins(*, number_of_coins, fee, largest_first, asset_id, input_coin_ids=None):
+            calls["combine"] = (number_of_coins, fee, largest_first, asset_id, input_coin_ids)
+            return {"signature_request_id": "sr-combine", "status": "UNSIGNED"}
+
+    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        lambda *, wallet, canonical_asset_id, symbol_hint=None: "Asset_split_base",
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        lambda *, network, minimum_fee_mojos=0: (77, "coinset_conservative"),
+    )
+    code = _coin_combine(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        number_of_coins=2,
+        asset_id="a1",
+        coin_ids=[],
+        no_wait=True,
+    )
+    assert code == 0
+    assert calls["combine"] == (
+        2,
+        77,
+        True,
+        "Asset_split_base",
+        ["Coin_good_1", "Coin_good_2"],
+    )
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["coin_selection_mode"] == "adapter_auto_select"
 
 
 def test_coin_split_until_ready_ignores_unknown_states_and_string_asset(
@@ -4557,8 +4906,7 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
     prog, mkt = _load_program_and_market(program_path, markets_path)
     prog.home_dir = str(tmp_path)
     pricing = dict(mkt.pricing or {})
-    pricing["strategy_offer_expiry_unit"] = "hours"
-    pricing["strategy_offer_expiry_value"] = 8
+    pricing["strategy_offer_expiry_minutes"] = 12
     mkt.pricing = pricing
 
     captured_expires: dict[str, str] = {}
@@ -4634,8 +4982,8 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
     expires_at = dt.datetime.fromisoformat(captured_expires["iso"])
     now = dt.datetime.now(dt.UTC)
     delta_seconds = (expires_at - now).total_seconds()
-    assert delta_seconds > 7 * 3600
-    assert delta_seconds < 9 * 3600
+    assert delta_seconds > 10 * 60
+    assert delta_seconds < 14 * 60
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["publish_failures"] == 0
 
@@ -4783,7 +5131,7 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_offer_not_visible(
 
         @staticmethod
         def get_offer(_offer_id: str) -> dict[str, object]:
-            raise RuntimeError("dexie_http_error:404")
+            raise RuntimeError("dexie_http_error:500")
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
@@ -6182,3 +6530,44 @@ def test_cloud_wallet_post_offer_phase_verifies_dexie_visibility(monkeypatch) ->
     )
     assert result["success"] is False
     assert "dexie_offer_not_visible_after_publish" in str(result["error"])
+
+
+def test_cloud_wallet_post_offer_phase_fails_after_repeated_transient_dexie_404(
+    monkeypatch,
+) -> None:
+    class _Dexie:
+        pass
+
+    dexie = _Dexie()
+    post_calls = {"count": 0}
+    monkeypatch.setattr(
+        manager_mod,
+        "_post_dexie_offer_with_invalid_offer_retry",
+        lambda **_kwargs: (
+            post_calls.__setitem__("count", post_calls["count"] + 1)
+            or {"success": True, "id": "offer-1"}
+        ),
+    )
+    monkeypatch.setattr(
+        manager_mod,
+        "_verify_dexie_offer_visible_by_id",
+        lambda **_kwargs: "dexie_get_offer_error:HTTP Error 404: Not Found",
+    )
+    market = type("Market", (), {"base_asset": "asset"})()
+    result = manager_mod._cloud_wallet_post_offer_phase(
+        publish_venue="dexie",
+        dexie=cast(Any, dexie),
+        splash=None,
+        offer_text="offer1abc",
+        drop_only=False,
+        claim_rewards=False,
+        market=market,
+        expected_offered_asset_id="asset",
+        expected_offered_symbol="asset",
+        expected_requested_asset_id="xch",
+        expected_requested_symbol="xch",
+        sleep_fn=lambda _seconds: None,
+    )
+    assert result["success"] is False
+    assert "404" in str(result["error"])
+    assert post_calls["count"] == 3

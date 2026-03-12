@@ -73,6 +73,8 @@ def apply_level_to_root(
 # ---------------------------------------------------------------------------
 
 _initialized_services: dict[str, ConcurrentRotatingFileHandler] = {}
+_active_handler: ConcurrentRotatingFileHandler | None = None
+_active_service_name: str | None = None
 
 
 def initialize_service_file_logging(
@@ -93,13 +95,19 @@ def initialize_service_file_logging(
     Returns the handler (or *None* if a handler already exists and
     *allow_reinit_level* is False).
     """
+    global _active_handler, _active_service_name
     effective_level = coerce_log_level(log_level)
-    handler = _initialized_services.get(service_name)
+    known_handler = _initialized_services.get(service_name)
+    if known_handler is not None and not allow_reinit_level:
+        return known_handler
+    handler = _active_handler
     if handler is None:
         handler = create_rotating_file_handler(service_name=service_name, home_dir=home_dir)
         logging.getLogger().addHandler(handler)
-        _initialized_services[service_name] = handler
-    elif not allow_reinit_level:
+        _active_handler = handler
+        _active_service_name = service_name
+    _initialized_services[service_name] = handler
+    if not allow_reinit_level and known_handler is None and _active_service_name != service_name:
         return handler
     apply_level_to_root(effective_level=effective_level, logger=service_logger, handler=handler)
     return handler
