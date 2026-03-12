@@ -5,17 +5,17 @@ import argparse
 import hashlib
 import importlib
 import json
-from pathlib import Path
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
+
+import yaml
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.hex_utils import is_hex_id, normalize_hex_id
-
-import yaml
 
 
 def _import_sdk() -> Any:
@@ -74,7 +74,9 @@ def _coin_from_record(*, sdk: Any, record: dict[str, Any]) -> Any | None:
     if not parent_hex or not puzzle_hex:
         return None
     try:
-        return sdk.Coin(_hex_to_bytes(parent_hex), _hex_to_bytes(puzzle_hex), int(coin_data.get("amount", 0)))
+        return sdk.Coin(
+            _hex_to_bytes(parent_hex), _hex_to_bytes(puzzle_hex), int(coin_data.get("amount", 0))
+        )
     except Exception:
         return None
 
@@ -98,7 +100,9 @@ class CoinRow:
 class CoinsetScanner:
     def __init__(self, *, network: str, base_url: str | None = None) -> None:
         require_testnet11 = network.strip().lower() in {"testnet", "testnet11"}
-        self.adapter = CoinsetAdapter(base_url=base_url, network=network, require_testnet11=require_testnet11)
+        self.adapter = CoinsetAdapter(
+            base_url=base_url, network=network, require_testnet11=require_testnet11
+        )
 
     def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
         payload = dict(body)
@@ -137,11 +141,15 @@ class CoinsetScanner:
         return [row for row in rows if isinstance(row, dict)]
 
 
-def _detect_cat_asset_id(*, sdk: Any, coinset: CoinsetScanner, record: dict[str, Any]) -> str | None:
+def _detect_cat_asset_id(
+    *, sdk: Any, coinset: CoinsetScanner, record: dict[str, Any]
+) -> str | None:
     coin = _coin_from_record(sdk=sdk, record=record)
     if coin is None:
         return None
-    parent_record = coinset.adapter.get_coin_record_by_name(coin_name_hex=_to_coinset_hex(coin.parent_coin_info))
+    parent_record = coinset.adapter.get_coin_record_by_name(
+        coin_name_hex=_to_coinset_hex(coin.parent_coin_info)
+    )
     if not isinstance(parent_record, dict):
         return None
     parent_coin = _coin_from_record(sdk=sdk, record=parent_record)
@@ -164,7 +172,9 @@ def _detect_cat_asset_id(*, sdk: Any, coinset: CoinsetScanner, record: dict[str,
         clvm = sdk.Clvm()
         parent_puzzle_program = clvm.deserialize(_hex_to_bytes(puzzle_reveal_hex))
         parent_solution_program = clvm.deserialize(_hex_to_bytes(solution_hex))
-        parsed_children = parent_puzzle_program.puzzle().parse_child_cats(parent_coin, parent_solution_program)
+        parsed_children = parent_puzzle_program.puzzle().parse_child_cats(
+            parent_coin, parent_solution_program
+        )
     except Exception:
         return None
     if not parsed_children:
@@ -193,7 +203,9 @@ def _launcher_from_cloud_wallet(args: argparse.Namespace) -> str:
         )
     )
     snapshot = wallet.get_vault_custody_snapshot()
-    launcher = normalize_hex_id(snapshot.get("vaultLauncherId")) if isinstance(snapshot, dict) else ""
+    launcher = (
+        normalize_hex_id(snapshot.get("vaultLauncherId")) if isinstance(snapshot, dict) else ""
+    )
     if not launcher:
         raise RuntimeError("vault_launcher_id_missing_from_cloud_wallet_snapshot")
     return launcher
@@ -318,7 +330,11 @@ def main() -> int:
     )
     parser.add_argument("--network", default="mainnet", choices=["mainnet", "testnet11", "testnet"])
     parser.add_argument("--coinset-base-url", default="")
-    parser.add_argument("--launcher-id", default="", help="Optional vault launcher id hex; fetched from Cloud Wallet when omitted.")
+    parser.add_argument(
+        "--launcher-id",
+        default="",
+        help="Optional vault launcher id hex; fetched from Cloud Wallet when omitted.",
+    )
     parser.add_argument(
         "--launcher-id-file",
         default="",
@@ -365,7 +381,9 @@ def main() -> int:
             args.vault_id,
         ]
         if any(not str(v).strip() for v in required):
-            raise ValueError("launcher-id, launcher-id-file, or full Cloud Wallet auth args are required")
+            raise ValueError(
+                "launcher-id, launcher-id-file, or full Cloud Wallet auth args are required"
+            )
         launcher_id = _launcher_from_cloud_wallet(args)
         launcher_id_source = "cloud_wallet"
     if str(args.launcher_id_file).strip() and launcher_id_source in {"cloud_wallet", "arg"}:
@@ -401,7 +419,9 @@ def main() -> int:
     if unresolved_cat_tickers:
         raise ValueError(f"unknown cat ticker(s): {', '.join(unresolved_cat_tickers)}")
     effective_asset_type = (
-        "cat" if requested_cat_ids or requested_cat_tickers_raw else str(args.asset_type).strip().lower()
+        "cat"
+        if requested_cat_ids or requested_cat_tickers_raw
+        else str(args.asset_type).strip().lower()
     )
 
     by_coin_id: dict[str, CoinRow] = {}
@@ -409,12 +429,18 @@ def main() -> int:
 
     for nonce in range(0, max(0, int(args.max_nonce)) + 1):
         cfg = sdk.MemberConfig().with_top_level(True).with_nonce(int(nonce))
-        p2_hash = normalize_hex_id(sdk.to_hex(sdk.singleton_member_hash(cfg, _hex_to_bytes(launcher_id), False)))
+        p2_hash = normalize_hex_id(
+            sdk.to_hex(sdk.singleton_member_hash(cfg, _hex_to_bytes(launcher_id), False))
+        )
         if not p2_hash:
             continue
         nonce_to_p2[nonce] = p2_hash
-        by_puzzle = scanner.by_puzzle_hash(puzzle_hash=_to_coinset_hex(_hex_to_bytes(p2_hash)), include_spent=args.include_spent)
-        by_hint = scanner.by_hint(hint=_to_coinset_hex(_hex_to_bytes(p2_hash)), include_spent=args.include_spent)
+        by_puzzle = scanner.by_puzzle_hash(
+            puzzle_hash=_to_coinset_hex(_hex_to_bytes(p2_hash)), include_spent=args.include_spent
+        )
+        by_hint = scanner.by_hint(
+            hint=_to_coinset_hex(_hex_to_bytes(p2_hash)), include_spent=args.include_spent
+        )
         if nonce > 0 and not by_puzzle and not by_hint:
             break
         for source, records in (("puzzle_hash", by_puzzle), ("hint", by_hint)):
@@ -431,7 +457,9 @@ def main() -> int:
                         puzzle_hash=normalize_hex_id(coin.get("puzzle_hash")) or "",
                         parent_coin_info=normalize_hex_id(coin.get("parent_coin_info")) or "",
                         amount=_safe_int(coin.get("amount"), default=0),
-                        confirmed_block_index=_safe_int(record.get("confirmed_block_index"), default=0),
+                        confirmed_block_index=_safe_int(
+                            record.get("confirmed_block_index"), default=0
+                        ),
                         spent_block_index=_safe_int(record.get("spent_block_index"), default=0),
                         discovered_nonces=[],
                         discovered_by_puzzle_hash=False,
