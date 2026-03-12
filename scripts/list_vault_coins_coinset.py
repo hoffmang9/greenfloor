@@ -97,6 +97,11 @@ class CoinRow:
     cat_symbols: list[str]
 
 
+def _is_spendable_coin_state(state: str) -> bool:
+    coin_state = str(state or "").strip().upper()
+    return coin_state in {"CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE", "SETTLED"}
+
+
 class CoinsetScanner:
     def __init__(self, *, network: str, base_url: str | None = None) -> None:
         require_testnet11 = network.strip().lower() in {"testnet", "testnet11"}
@@ -209,6 +214,192 @@ def _launcher_from_cloud_wallet(args: argparse.Namespace) -> str:
     if not launcher:
         raise RuntimeError("vault_launcher_id_missing_from_cloud_wallet_snapshot")
     return launcher
+
+
+def _require_cloud_wallet_adapter(args: argparse.Namespace) -> CloudWalletAdapter:
+    required = [
+        args.cloud_wallet_base_url,
+        args.cloud_wallet_user_key_id,
+        args.cloud_wallet_private_key_pem_path,
+        args.vault_id,
+    ]
+    if any(not str(v).strip() for v in required):
+        raise ValueError(
+            "combine mode requires Cloud Wallet args: "
+            "--cloud-wallet-base-url, --cloud-wallet-user-key-id, "
+            "--cloud-wallet-private-key-pem-path, --vault-id"
+        )
+    return CloudWalletAdapter(
+        CloudWalletConfig(
+            base_url=args.cloud_wallet_base_url,
+            user_key_id=args.cloud_wallet_user_key_id,
+            private_key_pem_path=args.cloud_wallet_private_key_pem_path,
+            vault_id=args.vault_id,
+            network=args.network,
+        )
+    )
+
+
+def _resolve_cloud_wallet_cat_global_id(wallet: CloudWalletAdapter, cat_asset_id_hex: str) -> str:
+    query = """
+query resolveAssetByIdentifier($identifier: String) {
+  asset(identifier: $identifier) {
+    id
+    type
+  }
+}
+"""
+    payload = wallet._graphql(query=query, variables={"identifier": cat_asset_id_hex})  # noqa: SLF001
+    asset = payload.get("asset") if isinstance(payload, dict) else None
+    if not isinstance(asset, dict):
+        raise RuntimeError(f"cloud_wallet_asset_lookup_failed:{cat_asset_id_hex}")
+    global_id = str(asset.get("id", "")).strip()
+    asset_type = str(asset.get("type", "")).strip().upper()
+    if not global_id.startswith("Asset_") or asset_type not in {"CAT", "CAT2"}:
+        raise RuntimeError(f"cloud_wallet_asset_lookup_not_cat:{cat_asset_id_hex}:{asset_type}")
+    return global_id
+
+
+def _coin_name_to_global_id_map_for_asset(
+    wallet: CloudWalletAdapter,
+    *,
+    asset_global_id: str,
+) -> dict[str, str]:
+    coins = wallet.list_coins(include_pending=True)
+    mapping: dict[str, str] = {}
+    for coin in coins:
+        coin_global_id = str(coin.get("id", "")).strip()
+        coin_name = normalize_hex_id(coin.get("name"))
+        state = str(coin.get("state", "")).strip()
+        if not coin_global_id or not coin_name:
+            continue
+        if not _is_spendable_coin_state(state):
+            continue
+        if bool(coin.get("isLocked", False)):
+            continue
+        asset = coin.get("asset")
+        asset_id = str(asset.get("id", "")).strip() if isinstance(asset, dict) else ""
+        if asset_id != asset_global_id:
+            continue
+        mapping[coin_name] = coin_global_id
+    return mapping
+
+
+def _combine_cat_dust(
+    *,
+    args: argparse.Namespace,
+    wallet: CloudWalletAdapter,
+    rows: list[CoinRow],
+    requested_cat_ids: set[str],
+) -> dict[str, Any]:
+    threshold = max(1, int(args.dust_threshold_mojos))
+    max_inputs = max(2, int(args.combine_max_inputs))
+    fee_mojos = max(0, int(args.combine_fee_mojos))
+    dry_run = bool(args.combine_dry_run)
+
+    dust_by_asset: dict[str, list[CoinRow]] = {}
+    for row in rows:
+        if row.coin_type != "CAT" or not row.cat_asset_id:
+            continue
+        if int(row.amount) >= threshold:
+            continue
+        if requested_cat_ids and row.cat_asset_id not in requested_cat_ids:
+            continue
+        dust_by_asset.setdefault(row.cat_asset_id, []).append(row)
+
+    operations: list[dict[str, Any]] = []
+    for asset_id_hex in sorted(dust_by_asset.keys()):
+        dust_rows = sorted(dust_by_asset[asset_id_hex], key=lambda c: (c.amount, c.coin_id))
+        if len(dust_rows) < 2:
+            operations.append(
+                {
+                    "cat_asset_id": asset_id_hex,
+                    "status": "skipped",
+                    "reason": "insufficient_dust_coins",
+                    "dust_coin_count": len(dust_rows),
+                }
+            )
+            continue
+        asset_global_id = _resolve_cloud_wallet_cat_global_id(wallet, asset_id_hex)
+        global_map = _coin_name_to_global_id_map_for_asset(wallet, asset_global_id=asset_global_id)
+        unresolved_coin_ids = [row.coin_id for row in dust_rows if row.coin_id not in global_map]
+        if unresolved_coin_ids:
+            operations.append(
+                {
+                    "cat_asset_id": asset_id_hex,
+                    "asset_global_id": asset_global_id,
+                    "status": "error",
+                    "reason": "coin_id_not_mappable_to_cloud_wallet_global_id",
+                    "unresolved_coin_ids": unresolved_coin_ids,
+                    "operator_guidance": (
+                        "re-run after wallet sync settles or pass a narrower filter; Cloud Wallet must expose "
+                        "CoinRecord global ids for all selected coin names before combine can be submitted"
+                    ),
+                }
+            )
+            continue
+
+        input_coin_global_ids = [global_map[row.coin_id] for row in dust_rows]
+        batch_plans: list[dict[str, Any]] = []
+        for offset in range(0, len(input_coin_global_ids), max_inputs):
+            batch = input_coin_global_ids[offset : offset + max_inputs]
+            if len(batch) <= 1:
+                continue
+            batch_plans.append(
+                {
+                    "input_coin_ids": batch,
+                    "input_coin_count": len(batch),
+                }
+            )
+
+        if dry_run:
+            operations.append(
+                {
+                    "cat_asset_id": asset_id_hex,
+                    "asset_global_id": asset_global_id,
+                    "status": "dry_run",
+                    "fee_mojos": fee_mojos,
+                    "dust_coin_count": len(dust_rows),
+                    "batches": batch_plans,
+                }
+            )
+            continue
+
+        submitted_batches: list[dict[str, Any]] = []
+        for batch in batch_plans:
+            result = wallet.combine_coins(
+                number_of_coins=int(batch["input_coin_count"]),
+                fee=fee_mojos,
+                largest_first=False,
+                asset_id=asset_global_id,
+                input_coin_ids=list(batch["input_coin_ids"]),
+            )
+            submitted_batches.append(
+                {
+                    **batch,
+                    "signature_request_id": str(result.get("signature_request_id", "")).strip(),
+                    "status": str(result.get("status", "")).strip(),
+                }
+            )
+
+        operations.append(
+            {
+                "cat_asset_id": asset_id_hex,
+                "asset_global_id": asset_global_id,
+                "status": "submitted",
+                "fee_mojos": fee_mojos,
+                "dust_coin_count": len(dust_rows),
+                "submitted_batches": submitted_batches,
+            }
+        )
+
+    return {
+        "threshold_mojos": threshold,
+        "combine_max_inputs": max_inputs,
+        "combine_fee_mojos": fee_mojos,
+        "combine_dry_run": dry_run,
+        "operations": operations,
+    }
 
 
 def _read_launcher_id_file(path: str) -> str:
@@ -365,6 +556,34 @@ def main() -> int:
         help="CAT ticker/symbol filter from config metadata (repeat or comma-separate). Implies --asset-type cat.",
     )
     parser.add_argument("--cat-asset-id", default="")
+    parser.add_argument(
+        "--combine-dust",
+        action="store_true",
+        help="Combine CAT dust coins (< threshold mojos) using explicit Cloud Wallet inputCoinIds.",
+    )
+    parser.add_argument(
+        "--combine-dry-run",
+        action="store_true",
+        help="Plan CAT dust combines but do not submit Cloud Wallet combine requests.",
+    )
+    parser.add_argument(
+        "--dust-threshold-mojos",
+        type=int,
+        default=1000,
+        help="Dust threshold in CAT mojos; coins with amount below this are selected (default 1000).",
+    )
+    parser.add_argument(
+        "--combine-max-inputs",
+        type=int,
+        default=5,
+        help="Maximum input coins per combine mutation batch (default 5).",
+    )
+    parser.add_argument(
+        "--combine-fee-mojos",
+        type=int,
+        default=0,
+        help="Fee mojos per combine request (default 0).",
+    )
     args = parser.parse_args()
 
     launcher_id = normalize_hex_id(args.launcher_id)
@@ -507,6 +726,16 @@ def main() -> int:
             continue
         filtered.append(row)
 
+    combine_plan: dict[str, Any] | None = None
+    if bool(args.combine_dust):
+        wallet = _require_cloud_wallet_adapter(args)
+        combine_plan = _combine_cat_dust(
+            args=args,
+            wallet=wallet,
+            rows=filtered,
+            requested_cat_ids=requested_cat_ids,
+        )
+
     print(
         json.dumps(
             {
@@ -518,6 +747,7 @@ def main() -> int:
                 "requested_cat_tickers": sorted(set(requested_cat_tickers_raw)),
                 "max_nonce_scanned": max(nonce_to_p2.keys()) if nonce_to_p2 else 0,
                 "count": len(filtered),
+                "combine_dust": combine_plan,
                 "coins": [
                     {
                         "coin_id": row.coin_id,
