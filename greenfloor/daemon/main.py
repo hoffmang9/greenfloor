@@ -2685,7 +2685,9 @@ def _reconcile_offer_states(
             # Dexie status 0 means the offer is still listed/open.
             transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.REFRESH_POSTED)
         else:
-            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.MEMPOOL_SEEN)
+            # Non-terminal Dexie fallback statuses are not mempool evidence.
+            # Only Coinset mempool signals should drive MEMPOOL_SEEN transitions.
+            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.REFRESH_POSTED)
         _log_market_decision(
             market.market_id,
             "offer_transition",

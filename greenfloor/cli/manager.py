@@ -3849,12 +3849,13 @@ def _reconciled_state_from_dexie_status(
             "cancelled",
         }:
             return current_state
-        transition = apply_offer_signal(
-            OfferLifecycleState.OPEN,
-            OfferSignal.MEMPOOL_SEEN,
-        )
-        return transition.new_state.value
-    return "unknown_orphaned"
+        # Dexie status alone is not sufficient evidence of a mempool take.
+        # Only Coinset mempool tx signals should move an offer to
+        # `mempool_observed`; otherwise preserve the current state.
+        return current_state
+    # Preserve state for unrecognized Dexie statuses instead of creating an
+    # orphan classification.
+    return current_state
 
 
 def _offers_reconcile(
@@ -3931,7 +3932,7 @@ def _offers_reconcile(
                         signal_source = "coinset_mempool"
                     if status is None:
                         if not coinset_tx_ids:
-                            next_state = "unknown_orphaned"
+                            next_state = current_state
                             reason = "missing_status"
                         elif signal_source == "none":
                             next_state = current_state
@@ -3946,7 +3947,18 @@ def _offers_reconcile(
                 except urllib.error.HTTPError as exc:
                     status = None
                     if int(getattr(exc, "code", 0)) == 404:
-                        next_state = "unknown_orphaned"
+                        transition = apply_offer_signal(
+                            OfferLifecycleState.OPEN,
+                            OfferSignal.EXPIRED,
+                        )
+                        if current_state in {
+                            OfferLifecycleState.TX_BLOCK_CONFIRMED.value,
+                            OfferLifecycleState.EXPIRED.value,
+                            "cancelled",
+                        }:
+                            next_state = current_state
+                        else:
+                            next_state = transition.new_state.value
                         reason = "dexie_offer_not_found"
                     else:
                         next_state = current_state

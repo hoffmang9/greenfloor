@@ -1197,6 +1197,49 @@ def test_reconcile_offer_states_resolves_quote_asset_before_dexie_fetch(
     }
 
 
+def test_reconcile_offer_states_dexie_fallback_status_does_not_mark_mempool(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "state.sqlite"
+    store = SqliteStore(db_path)
+    market = _market()
+    try:
+        store.upsert_offer_state(
+            offer_id="offer-open",
+            market_id=market.market_id,
+            state="open",
+            last_seen_status=0,
+        )
+
+        class _FakeDexie:
+            def get_offers(self, offered: str, requested: str) -> list[dict[str, Any]]:
+                _ = offered, requested
+                return [{"id": "offer-open", "status": 5}]
+
+            def get_offer(self, offer_id: str, *, timeout: int = 20) -> dict[str, Any]:
+                _ = offer_id, timeout
+                raise RuntimeError("unexpected_get_offer_call")
+
+        result = daemon_main._MarketCycleResult()
+        daemon_main._reconcile_offer_states(
+            market=market,
+            network="mainnet",
+            dexie=cast(Any, _FakeDexie()),
+            store=store,
+            now=datetime.now(UTC),
+            result=result,
+        )
+
+        rows = {
+            r["offer_id"]: r for r in store.list_offer_states(market_id=market.market_id, limit=20)
+        }
+    finally:
+        store.close()
+
+    assert rows["offer-open"]["state"] == "open"
+    assert rows["offer-open"]["last_seen_status"] == 5
+
+
 def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:
     _set_watched_coin_ids_for_market(market_id="m-empty", coin_ids={"c" * 64})
     assert _match_watched_coin_ids(observed_coin_ids=["d" * 64]) == {}

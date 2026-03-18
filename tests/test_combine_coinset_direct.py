@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 
@@ -107,6 +108,99 @@ def test_kms_resolution_check_runs_live_probe_when_requested() -> None:
     assert result["ok"] is True
     assert result["live_probe_ran"] is True
     assert calls == {"pubkey": 1, "sign": 1}
+
+
+def test_resolve_cat_asset_id_retries_until_all_inputs_present(monkeypatch) -> None:
+    mod = _load_script_module()
+    coin_a = "a" * 64
+    coin_b = "b" * 64
+    asset_id = "c" * 64
+    calls = {"count": 0}
+
+    def _import_sdk() -> Any:
+        return SimpleNamespace(
+            to_hex=lambda value: f"0x{value}" if not str(value).startswith("0x") else str(value)
+        )
+
+    def _list_unspent_cat_coins_by_ids(*, sdk: Any, network: str, coin_ids: list[str]) -> list[Any]:
+        _ = sdk, network, coin_ids
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return [
+                SimpleNamespace(
+                    coin=SimpleNamespace(coin_id=coin_a),
+                    info=SimpleNamespace(asset_id=asset_id),
+                )
+            ]
+        return [
+            SimpleNamespace(
+                coin=SimpleNamespace(coin_id=coin_a),
+                info=SimpleNamespace(asset_id=asset_id),
+            ),
+            SimpleNamespace(
+                coin=SimpleNamespace(coin_id=coin_b),
+                info=SimpleNamespace(asset_id=asset_id),
+            ),
+        ]
+
+    import greenfloor.signing as signing_mod
+
+    monkeypatch.setattr(signing_mod, "_import_sdk", _import_sdk)
+    monkeypatch.setattr(
+        signing_mod, "_list_unspent_cat_coins_by_ids", _list_unspent_cat_coins_by_ids
+    )
+    sleeps: list[float] = []
+    resolved_asset, check = mod._resolve_cat_asset_id_for_coin_ids(
+        network="mainnet",
+        coin_ids=[coin_a, coin_b],
+        max_attempts=3,
+        retry_sleep_seconds=0.25,
+        sleep_fn=lambda value: sleeps.append(float(value)),
+    )
+    assert resolved_asset == asset_id
+    assert check["ok"] is True
+    assert check["resolved_cat_count"] == 2
+    assert calls["count"] == 2
+    assert sleeps == [0.25]
+
+
+def test_resolve_cat_asset_id_reports_missing_coin_ids(monkeypatch) -> None:
+    mod = _load_script_module()
+    coin_a = "a" * 64
+    coin_b = "b" * 64
+    asset_id = "c" * 64
+
+    def _import_sdk() -> Any:
+        return SimpleNamespace(
+            to_hex=lambda value: f"0x{value}" if not str(value).startswith("0x") else str(value)
+        )
+
+    def _list_unspent_cat_coins_by_ids(*, sdk: Any, network: str, coin_ids: list[str]) -> list[Any]:
+        _ = sdk, network, coin_ids
+        return [
+            SimpleNamespace(
+                coin=SimpleNamespace(coin_id=coin_a),
+                info=SimpleNamespace(asset_id=asset_id),
+            )
+        ]
+
+    import greenfloor.signing as signing_mod
+
+    monkeypatch.setattr(signing_mod, "_import_sdk", _import_sdk)
+    monkeypatch.setattr(
+        signing_mod, "_list_unspent_cat_coins_by_ids", _list_unspent_cat_coins_by_ids
+    )
+    resolved_asset, check = mod._resolve_cat_asset_id_for_coin_ids(
+        network="mainnet",
+        coin_ids=[coin_a, coin_b],
+        max_attempts=2,
+        retry_sleep_seconds=0.0,
+        sleep_fn=lambda _value: None,
+    )
+    assert resolved_asset is None
+    assert check["ok"] is False
+    assert check["reason"] == "coinset_ids_not_all_resolved_as_unspent_cat"
+    assert check["missing_coin_ids"] == [coin_b]
 
 
 def test_run_preflight_only_does_not_broadcast(monkeypatch) -> None:

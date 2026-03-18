@@ -174,22 +174,63 @@ def _resolve_cat_asset_id_for_coin_ids(
     *,
     network: str,
     coin_ids: list[str],
+    max_attempts: int = 4,
+    retry_sleep_seconds: float = 1.0,
+    sleep_fn: Any = time.sleep,
 ) -> tuple[str | None, dict[str, Any]]:
     import greenfloor.signing as signing_mod
 
     sdk = signing_mod._import_sdk()  # noqa: SLF001
-    cats = signing_mod._list_unspent_cat_coins_by_ids(  # noqa: SLF001
-        sdk=sdk,
-        network=network,
-        coin_ids=coin_ids,
-    )
-    if len(cats) != len(coin_ids):
-        return None, {
+    requested_ids = [coin_id for coin_id in coin_ids if coin_id]
+    requested_set = set(requested_ids)
+    if not requested_ids:
+        return None, {"ok": False, "reason": "no_coin_ids_requested"}
+    attempts = max(1, int(max_attempts))
+
+    cats: list[Any] = []
+    last_exception: str | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            cats = signing_mod._list_unspent_cat_coins_by_ids(  # noqa: SLF001
+                sdk=sdk,
+                network=network,
+                coin_ids=requested_ids,
+            )
+            last_exception = None
+        except Exception as exc:  # noqa: BLE001
+            cats = []
+            last_exception = str(exc)
+        resolved_ids = {
+            normalize_hex_id(sdk.to_hex(cat.coin.coin_id))
+            for cat in cats
+            if normalize_hex_id(sdk.to_hex(cat.coin.coin_id))
+        }
+        missing_ids = sorted(requested_set - resolved_ids)
+        if not last_exception and not missing_ids:
+            break
+        if attempt < attempts:
+            sleep_fn(max(0.0, float(retry_sleep_seconds)))
+    else:
+        resolved_ids = {
+            normalize_hex_id(sdk.to_hex(cat.coin.coin_id))
+            for cat in cats
+            if normalize_hex_id(sdk.to_hex(cat.coin.coin_id))
+        }
+        missing_ids = sorted(requested_set - resolved_ids)
+        payload: dict[str, Any] = {
             "ok": False,
             "reason": "coinset_ids_not_all_resolved_as_unspent_cat",
             "resolved_cat_count": len(cats),
-            "requested_count": len(coin_ids),
+            "requested_count": len(requested_ids),
+            "missing_coin_ids": missing_ids,
+            "resolved_coin_ids": sorted(resolved_ids),
+            "max_attempts": attempts,
         }
+        if last_exception:
+            payload["last_exception"] = last_exception
+            payload["reason"] = "coinset_cat_resolution_error"
+        return None, payload
+
     asset_ids: list[str] = []
     for cat in cats:
         raw = normalize_hex_id(sdk.to_hex(cat.info.asset_id))
@@ -210,6 +251,8 @@ def _resolve_cat_asset_id_for_coin_ids(
         "ok": True,
         "asset_id": unique[0],
         "resolved_cat_count": len(cats),
+        "requested_count": len(requested_ids),
+        "max_attempts": attempts,
     }
 
 
@@ -553,6 +596,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verify-timeout-seconds", type=int, default=15 * 60)
     parser.add_argument("--verify-poll-seconds", type=int, default=8)
     parser.add_argument("--verify-warning-interval-seconds", type=int, default=5 * 60)
+    parser.add_argument(
+        "--cat-resolution-max-attempts",
+        type=int,
+        default=4,
+        help="Retry attempts for CAT resolution from selected input coin IDs.",
+    )
+    parser.add_argument(
+        "--cat-resolution-retry-sleep-seconds",
+        type=float,
+        default=1.0,
+        help="Sleep between CAT-resolution retry attempts.",
+    )
     return parser
 
 
@@ -623,6 +678,9 @@ def run(
     asset_id, asset_check = _resolve_cat_asset_id_for_coin_ids(
         network=coinset.network,
         coin_ids=[coin.coin_id for coin in resolved_inputs],
+        max_attempts=max(1, int(args.cat_resolution_max_attempts)),
+        retry_sleep_seconds=max(0.0, float(args.cat_resolution_retry_sleep_seconds)),
+        sleep_fn=sleep_fn,
     )
     preflight = _preflight_checks(
         args=args,
