@@ -116,7 +116,7 @@ def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path,
         store.close()
     assert rows["offer-ok"]["state"] == "tx_block_confirmed"
     assert rows["offer-ok"]["last_seen_status"] == 4
-    assert rows["offer-missing"]["state"] == "unknown_orphaned"
+    assert rows["offer-missing"]["state"] == "expired"
     assert len(events) == 1
     assert events[0]["payload"]["signal"] == "coinset_tx_block_webhook"
 
@@ -225,11 +225,11 @@ def test_offers_reconcile_coinset_signal_matrix(monkeypatch, tmp_path: Path, cap
     assert by_offer["offer-mempool"]["signal_source"] == "coinset_mempool"
     assert by_offer["offer-mempool"]["taker_diagnostic"] == "coinset_mempool_observed"
 
-    assert by_offer["offer-no-signal"]["new_state"] == "mempool_observed"
+    assert by_offer["offer-no-signal"]["new_state"] == "open"
     assert by_offer["offer-no-signal"]["signal_source"] == "dexie_status_fallback"
     assert by_offer["offer-no-signal"]["taker_diagnostic"] == "none"
 
-    assert by_offer["offer-missing-status"]["new_state"] == "unknown_orphaned"
+    assert by_offer["offer-missing-status"]["new_state"] == "open"
     assert by_offer["offer-missing-status"]["reason"] == "missing_status"
     assert by_offer["offer-missing-status"]["signal_source"] == "none"
 

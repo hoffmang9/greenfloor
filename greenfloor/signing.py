@@ -12,6 +12,7 @@ import importlib
 import json
 import logging
 import os
+import time
 from typing import Any
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
@@ -1708,6 +1709,39 @@ def _insufficient_xch_fee_balance_error(
     return None
 
 
+def _resolve_requested_cat_coins_for_mixed_split(
+    *,
+    sdk: Any,
+    network: str,
+    requested_coin_ids: set[str],
+    target_total: int,
+    max_attempts: int = 4,
+    retry_sleep_seconds: float = 1.0,
+) -> tuple[list[Any], str | None]:
+    attempts = max(1, int(max_attempts))
+    coin_ids = sorted(requested_coin_ids)
+    latest: list[Any] = []
+    for attempt in range(1, attempts + 1):
+        latest = _list_unspent_cat_coins_by_ids(
+            sdk=sdk,
+            network=network,
+            coin_ids=coin_ids,
+        )
+        selected = _select_cats(latest, target_total)
+        if selected:
+            return selected, None
+        if attempt < attempts:
+            time.sleep(max(0.0, float(retry_sleep_seconds)))
+    resolved_total = sum(int(cat.coin.amount) for cat in latest)
+    return [], (
+        "requested_cat_coin_resolution_incomplete_for_mixed_split:"
+        f"requested_count={len(coin_ids)}:"
+        f"resolved_count={len(latest)}:"
+        f"resolved_total={resolved_total}:"
+        f"target_total={int(target_total)}"
+    )
+
+
 def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None, str | None]:
     key_id = str(payload.get("key_id", "")).strip()
     network = str(payload.get("network", "")).strip()
@@ -1763,11 +1797,16 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
             return None, f"mixed_split_coin_selection_failed:{exc}"
     else:
         if requested_coin_ids:
-            offered_selected_cats = _list_unspent_cat_coins_by_ids(
-                sdk=sdk,
-                network=network,
-                coin_ids=sorted(requested_coin_ids),
+            offered_selected_cats, requested_cat_error = (
+                _resolve_requested_cat_coins_for_mixed_split(
+                    sdk=sdk,
+                    network=network,
+                    requested_coin_ids=requested_coin_ids,
+                    target_total=target_total,
+                )
             )
+            if requested_cat_error is not None:
+                return None, requested_cat_error
         else:
             offered_selected_cats = _list_unspent_cat_coins(
                 sdk=sdk,
@@ -1777,9 +1816,10 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
             )
         if not offered_selected_cats:
             return None, "no_unspent_cat_coins_for_mixed_split"
-        offered_selected_cats = _select_cats(offered_selected_cats, target_total)
-        if not offered_selected_cats:
-            return None, "insufficient_cat_coins_for_mixed_split"
+        if not requested_coin_ids:
+            offered_selected_cats = _select_cats(offered_selected_cats, target_total)
+            if not offered_selected_cats:
+                return None, "insufficient_cat_coins_for_mixed_split"
         if fee_mojos > 0:
             xch_coins = _list_unspent_xch_coins(
                 sdk=sdk, receive_address=receive_address, network=network
