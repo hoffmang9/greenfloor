@@ -12,12 +12,17 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
+from greenfloor.cloud_wallet_asset_cache import (
+    load_wallet_assets_edges,
+    save_wallet_assets_edges,
+    wallet_assets_cache_path,
+)
 from greenfloor.config.io import is_testnet, load_yaml
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.hex_utils import (
@@ -37,6 +42,18 @@ _DEXIE_VISIBILITY_POST_MAX_ATTEMPTS = 3
 _DEXIE_VISIBILITY_POST_DELAY_SECONDS = 2.0
 _runtime_logger = logging.getLogger("greenfloor.manager")
 _JSON_OUTPUT_COMPACT = False
+
+
+class SupportsWalletAssetsSeed(Protocol):
+    """Minimal Cloud Wallet shape for ``seed_cloud_wallet_assets_cache``."""
+
+    @property
+    def vault_id(self) -> str: ...
+
+    @property
+    def _base_url(self) -> str: ...
+
+    def _graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]: ...
 
 
 def _format_json_output(payload: object) -> str:
@@ -447,6 +464,113 @@ def _local_catalog_label_hints_for_asset_id(*, canonical_asset_id: str) -> list[
     return sorted(set(hints))
 
 
+def _wallet_asset_edges_for_resolve(
+    *,
+    wallet: CloudWalletAdapter,
+    program_home_dir: str | None,
+) -> list[dict[str, Any]]:
+    """Return ``wallet.assets.edges`` from cache or Cloud Wallet GraphQL."""
+    home_for_cache = str(program_home_dir or "").strip()
+    base_url_for_cache = str(getattr(wallet, "_base_url", "") or "").strip()
+    if home_for_cache and base_url_for_cache:
+        cached = load_wallet_assets_edges(
+            home_for_cache,
+            base_url=base_url_for_cache,
+            vault_id=str(wallet.vault_id),
+        )
+        if cached is not None:
+            _runtime_logger.debug(
+                "cloud_wallet_wallet_assets_cache_hit vault_id=%s",
+                wallet.vault_id,
+            )
+            return cached
+    query = """
+query resolveWalletAssets($walletId: ID!) {
+  wallet(id: $walletId) {
+    assets {
+      edges {
+        node {
+          assetId
+          type
+          displayName
+          symbol
+        }
+      }
+    }
+  }
+}
+"""
+    payload = wallet._graphql(query=query, variables={"walletId": wallet.vault_id})
+    wallet_payload = payload.get("wallet") or {}
+    assets_payload = wallet_payload.get("assets") or {}
+    raw_edges = assets_payload.get("edges") or []
+    edges = raw_edges if isinstance(raw_edges, list) else []
+    if home_for_cache and base_url_for_cache and edges:
+        save_wallet_assets_edges(
+            home_for_cache,
+            base_url=base_url_for_cache,
+            vault_id=str(wallet.vault_id),
+            edges=edges,
+        )
+    return edges
+
+
+def seed_cloud_wallet_assets_cache(
+    *,
+    wallet: SupportsWalletAssetsSeed,
+    program_home_dir: str,
+) -> dict[str, Any]:
+    """Fetch ``resolveWalletAssets`` once and write the disk catalog cache.
+
+    Always hits the network (ignores any existing cache read). Operators use
+    this to warm ``~/.greenfloor/cache/wallet_assets_*.json`` before starting
+    the daemon or after vault asset changes.
+    """
+    home = str(program_home_dir).strip()
+    base = str(getattr(wallet, "_base_url", "") or "").strip()
+    if not home:
+        raise ValueError("program_home_dir is required")
+    if not base:
+        raise ValueError("wallet API base_url is missing")
+    vault_id = str(wallet.vault_id).strip()
+    query = """
+query resolveWalletAssets($walletId: ID!) {
+  wallet(id: $walletId) {
+    assets {
+      edges {
+        node {
+          assetId
+          type
+          displayName
+          symbol
+        }
+      }
+    }
+  }
+}
+"""
+    payload = wallet._graphql(query=query, variables={"walletId": vault_id})
+    wallet_payload = payload.get("wallet") or {}
+    assets_payload = wallet_payload.get("assets") or {}
+    raw_edges = assets_payload.get("edges") or []
+    edges = raw_edges if isinstance(raw_edges, list) else []
+    if not edges:
+        raise RuntimeError("cloud_wallet_assets_seed_failed:empty_edges")
+    save_wallet_assets_edges(
+        home,
+        base_url=base,
+        vault_id=vault_id,
+        edges=edges,
+    )
+    path = wallet_assets_cache_path(home, base_url=base, vault_id=vault_id)
+    return {
+        "cache_path": str(path),
+        "edge_count": len(edges),
+        "vault_id": vault_id,
+        "base_url": base,
+    }
+
+
 def _resolve_asset_by_identifier(wallet: CloudWalletAdapter, hex_identifier: str) -> str | None:
     query = """
 query resolveAssetByIdentifier($identifier: String) {
@@ -477,6 +601,7 @@ def resolve_cloud_wallet_asset_id(
     symbol_hint: str | None = None,
     global_id_hint: str | None = None,
     allow_dexie_lookup: bool = True,
+    program_home_dir: str | None = None,
 ) -> str:
     raw = canonical_asset_id.strip()
     if not raw:
@@ -485,26 +610,10 @@ def resolve_cloud_wallet_asset_id(
         return raw
     if not hasattr(wallet, "_graphql"):
         return raw
-    query = """
-query resolveWalletAssets($walletId: ID!) {
-  wallet(id: $walletId) {
-    assets {
-      edges {
-        node {
-          assetId
-          type
-          displayName
-          symbol
-        }
-      }
-    }
-  }
-}
-"""
-    payload = wallet._graphql(query=query, variables={"walletId": wallet.vault_id})
-    wallet_payload = payload.get("wallet") or {}
-    assets_payload = wallet_payload.get("assets") or {}
-    edges = assets_payload.get("edges") or []
+    edges = _wallet_asset_edges_for_resolve(
+        wallet=wallet,
+        program_home_dir=program_home_dir,
+    )
     crypto_asset_ids: list[str] = []
     cat_assets: list[dict[str, str]] = []
     for edge in edges:
@@ -627,18 +736,21 @@ def resolve_cloud_wallet_offer_asset_ids(
     quote_symbol_hint: str | None = None,
     base_global_id_hint: str | None = None,
     quote_global_id_hint: str | None = None,
+    program_home_dir: str | None = None,
 ) -> tuple[str, str]:
     resolved_base = resolve_cloud_wallet_asset_id(
         wallet=wallet,
         canonical_asset_id=base_asset_id,
         symbol_hint=(base_symbol_hint or "").strip() or str(base_asset_id).strip(),
         global_id_hint=(base_global_id_hint or "").strip() or None,
+        program_home_dir=program_home_dir,
     )
     resolved_quote = resolve_cloud_wallet_asset_id(
         wallet=wallet,
         canonical_asset_id=quote_asset_id,
         symbol_hint=(quote_symbol_hint or "").strip() or str(quote_asset_id).strip(),
         global_id_hint=(quote_global_id_hint or "").strip() or None,
+        program_home_dir=program_home_dir,
     )
     if (
         resolved_base == resolved_quote
@@ -2198,6 +2310,7 @@ def build_and_post_offer_cloud_wallet(
         quote_symbol_hint=str(getattr(market, "quote_asset", "") or ""),
         base_global_id_hint=base_global_hint,
         quote_global_id_hint=quote_global_hint,
+        program_home_dir=str(program.home_dir),
     )
     db_path = (Path(program.home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
     store = SqliteStore(db_path)

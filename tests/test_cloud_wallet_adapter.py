@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import urllib.error
 from email.message import Message
 from pathlib import Path
@@ -67,6 +68,52 @@ def _build_kms_adapter(tmp_path: Path) -> CloudWalletAdapter:
             kms_region="us-west-2",
             kms_public_key_hex="03aabbccdd" + "00" * 28,
         )
+    )
+
+
+@pytest.mark.parametrize(
+    ("src", "expected"),
+    [
+        ("query listCoins($w: ID!) { coins { edges { node { id } } } }", "query_listCoins"),
+        ("mutation createOffer($input: CreateOfferInput!) { x }", "mutation_createOffer"),
+        (
+            "\nmutation SignSignatureRequest($input: SignSignatureRequestInput!) {\n  x\n}\n",
+            "mutation_SignSignatureRequest",
+        ),
+        ("query { wallet { id } }", "query_anonymous"),
+        ("subscription onBalance { event }", "subscription_onBalance"),
+        ("not graphql at all", "unknown"),
+    ],
+)
+def test_cloud_wallet_graphql_operation_label(src: str, expected: str) -> None:
+    assert CloudWalletAdapter._graphql_operation_label(src) == expected
+
+
+def test_cloud_wallet_graphql_ok_log_includes_operation_and_duration(
+    monkeypatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *_a, **_k: _FakeHttpResponse(
+            {
+                "data": {
+                    "coins": {
+                        "pageInfo": {"hasNextPage": False, "endCursor": ""},
+                        "edges": [],
+                    }
+                }
+            }
+        ),
+    )
+    with caplog.at_level(logging.INFO, logger="greenfloor.adapters.cloud_wallet"):
+        adapter.list_coins()
+    assert any(
+        "cloud_wallet_graphql_ok" in rec.message
+        and "operation=query_listCoins" in rec.message
+        and "duration_ms=" in rec.message
+        for rec in caplog.records
     )
 
 

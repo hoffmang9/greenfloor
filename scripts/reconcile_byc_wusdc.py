@@ -244,11 +244,13 @@ def main() -> int:
         wallet=wallet,
         canonical_asset_id=args.byc,
         symbol_hint=args.byc,
+        program_home_dir=str(program.home_dir),
     )
     quote_asset_id = _resolve_cloud_wallet_asset_id(
         wallet=wallet,
         canonical_asset_id=args.quote,
         symbol_hint=args.quote,
+        program_home_dir=str(program.home_dir),
     )
 
     asset_rows = _wallet_asset_rows(wallet=wallet)

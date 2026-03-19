@@ -70,6 +70,9 @@ from greenfloor.cloud_wallet_offer_runtime import (
     recent_market_resolved_asset_id_hints as _shared_recent_market_resolved_asset_id_hints,
 )
 from greenfloor.cloud_wallet_offer_runtime import (
+    resolve_cloud_wallet_asset_id as _shared_resolve_cloud_wallet_asset_id,
+)
+from greenfloor.cloud_wallet_offer_runtime import (
     resolve_cloud_wallet_offer_asset_ids as _shared_resolve_cloud_wallet_offer_asset_ids,
 )
 from greenfloor.cloud_wallet_offer_runtime import (
@@ -77,6 +80,9 @@ from greenfloor.cloud_wallet_offer_runtime import (
 )
 from greenfloor.cloud_wallet_offer_runtime import (
     resolve_offer_expiry_for_market as _shared_resolve_offer_expiry_for_market,
+)
+from greenfloor.cloud_wallet_offer_runtime import (
+    seed_cloud_wallet_assets_cache as _shared_seed_cloud_wallet_assets_cache,
 )
 from greenfloor.cloud_wallet_offer_runtime import (
     verify_dexie_offer_visible_by_id as _shared_verify_dexie_offer_visible_by_id,
@@ -775,31 +781,6 @@ def _cats_delete(
     return 0
 
 
-def _resolve_asset_by_identifier(wallet: CloudWalletAdapter, hex_identifier: str) -> str | None:
-    """Query cloud wallet ``asset(identifier:)`` for an exact CAT tail-hash match."""
-    query = """
-query resolveAssetByIdentifier($identifier: String) {
-  asset(identifier: $identifier) {
-    id
-    type
-  }
-}
-"""
-    try:
-        payload = wallet._graphql(query=query, variables={"identifier": hex_identifier})
-    except Exception:
-        return None
-    asset = payload.get("asset")
-    if not isinstance(asset, dict):
-        return None
-    global_id = str(asset.get("id", "")).strip()
-    asset_type = str(asset.get("type", "")).strip().upper()
-    # Accept both CAT2 and CAT as equivalent wallet CAT types.
-    if global_id.startswith("Asset_") and asset_type in {"CAT2", "CAT"}:
-        return global_id
-    return None
-
-
 def _resolve_cloud_wallet_asset_id(
     *,
     wallet: CloudWalletAdapter,
@@ -807,157 +788,16 @@ def _resolve_cloud_wallet_asset_id(
     symbol_hint: str | None = None,
     global_id_hint: str | None = None,
     allow_dexie_lookup: bool = True,
+    program_home_dir: str | None = None,
 ) -> str:
-    raw = canonical_asset_id.strip()
-    if not raw:
-        raise ValueError("asset_id must be non-empty")
-    if _canonical_is_cloud_global_id(raw):
-        return raw
-    if not hasattr(wallet, "_graphql"):
-        # Test doubles and alternate adapters may not expose raw GraphQL.
-        return raw
-
-    query = """
-query resolveWalletAssets($walletId: ID!) {
-  wallet(id: $walletId) {
-    assets {
-      edges {
-        node {
-          assetId
-          type
-          displayName
-          symbol
-        }
-      }
-    }
-  }
-}
-"""
-    payload = wallet._graphql(query=query, variables={"walletId": wallet.vault_id})
-    wallet_payload = payload.get("wallet") or {}
-    assets_payload = wallet_payload.get("assets") or {}
-    edges = assets_payload.get("edges") or []
-
-    crypto_asset_ids: list[str] = []
-    cat_assets: list[dict[str, str]] = []
-    for edge in edges:
-        node = edge.get("node") if isinstance(edge, dict) else None
-        if not isinstance(node, dict):
-            continue
-        asset_global_id = str(node.get("assetId", "")).strip()
-        asset_type = str(node.get("type", "")).strip().upper()
-        display_name = str(node.get("displayName", "")).strip()
-        symbol = str(node.get("symbol", "")).strip()
-        if not asset_global_id.startswith("Asset_"):
-            continue
-        if asset_type == "CRYPTOCURRENCY":
-            crypto_asset_ids.append(asset_global_id)
-        elif asset_type in {"CAT2", "CAT"}:
-            cat_assets.append(
-                {
-                    "asset_id": asset_global_id,
-                    "display_name": display_name,
-                    "symbol": symbol,
-                }
-            )
-
-    if _canonical_is_xch(raw):
-        hinted = str(global_id_hint or "").strip()
-        if hinted and hinted in set(crypto_asset_ids):
-            return hinted
-        if len(crypto_asset_ids) == 1:
-            return crypto_asset_ids[0]
-        if len(crypto_asset_ids) == 0:
-            raise RuntimeError("cloud_wallet_asset_resolution_failed:no_crypto_asset_found_for_xch")
-        raise RuntimeError("cloud_wallet_asset_resolution_failed:ambiguous_crypto_asset_for_xch")
-
-    if not cat_assets:
-        raise RuntimeError(
-            f"cloud_wallet_asset_resolution_failed:no_wallet_cat_asset_candidates_for:{raw}"
-        )
-    hinted = str(global_id_hint or "").strip()
-    if hinted:
-        cat_asset_ids = {str(row.get("asset_id", "")).strip() for row in cat_assets}
-        if hinted in cat_asset_ids:
-            return hinted
-
-    canonical_hex = raw.lower()
-
-    # Exact identifier lookup: query Cloud Wallet by CAT tail hash (hex).
-    if _is_hex_asset_id(canonical_hex):
-        identifier_match = _resolve_asset_by_identifier(wallet, canonical_hex)
-        if identifier_match is not None:
-            return identifier_match
-
-    preferred_labels: list[str] = []
-    if symbol_hint:
-        preferred_labels.append(symbol_hint)
-
-    if not _is_hex_asset_id(canonical_hex):
-        direct_matches = _wallet_label_matches_asset_ref(cat_assets=cat_assets, label=raw)
-        if len(direct_matches) == 1:
-            return direct_matches[0]
-        if len(direct_matches) > 1:
-            raise RuntimeError(
-                f"cloud_wallet_asset_resolution_failed:ambiguous_wallet_cat_asset_for:{raw}"
-            )
-        if not allow_dexie_lookup:
-            raise RuntimeError(
-                f"cloud_wallet_asset_resolution_failed:unsupported_canonical_asset_id:{raw}"
-            )
-        token_row = _dexie_lookup_token_for_symbol(asset_ref=raw, network=wallet.network)
-        if token_row is None:
-            raise RuntimeError(
-                f"cloud_wallet_asset_resolution_failed:unsupported_canonical_asset_id:{raw}"
-            )
-        token_id = str(token_row.get("id", "")).strip().lower()
-        if not _is_hex_asset_id(token_id):
-            raise RuntimeError(
-                f"cloud_wallet_asset_resolution_failed:dexie_symbol_unresolved_to_cat_id:{raw}"
-            )
-        canonical_hex = token_id
-
-    preferred_labels.extend(
-        _local_catalog_label_hints_for_asset_id(canonical_asset_id=canonical_hex)
+    return _shared_resolve_cloud_wallet_asset_id(
+        wallet=wallet,
+        canonical_asset_id=canonical_asset_id,
+        symbol_hint=symbol_hint,
+        global_id_hint=global_id_hint,
+        allow_dexie_lookup=allow_dexie_lookup,
+        program_home_dir=program_home_dir,
     )
-    dexie_token = (
-        _dexie_lookup_token_for_cat_id(
-            canonical_cat_id_hex=canonical_hex,
-            network=wallet.network,
-        )
-        if allow_dexie_lookup
-        else None
-    )
-    if dexie_token is not None:
-        preferred_labels.extend(
-            [
-                str(dexie_token.get("code", "")).strip(),
-                str(dexie_token.get("name", "")).strip(),
-                str(dexie_token.get("base_code", "")).strip(),
-                str(dexie_token.get("base_name", "")).strip(),
-                str(dexie_token.get("target_code", "")).strip(),
-                str(dexie_token.get("target_name", "")).strip(),
-            ]
-        )
-    preferred_labels = [label for label in preferred_labels if label]
-
-    matched_assets: list[str] = []
-    for label in preferred_labels:
-        matched_assets.extend(_wallet_label_matches_asset_ref(cat_assets=cat_assets, label=label))
-    unique_matches = sorted(set(matched_assets))
-    if len(unique_matches) == 1:
-        return unique_matches[0]
-    if len(unique_matches) > 1:
-        raise RuntimeError(
-            f"cloud_wallet_asset_resolution_failed:ambiguous_wallet_cat_asset_for:{raw}"
-        )
-    if dexie_token is None and allow_dexie_lookup:
-        raise RuntimeError(
-            f"cloud_wallet_asset_resolution_failed:dexie_cat_metadata_not_found_for:{raw}"
-        )
-    if len(cat_assets) == 1:
-        return cat_assets[0]["asset_id"]
-    raise RuntimeError(f"cloud_wallet_asset_resolution_failed:unmatched_wallet_cat_asset_for:{raw}")
 
 
 _resolve_cloud_wallet_offer_asset_ids = _shared_resolve_cloud_wallet_offer_asset_ids
@@ -2897,6 +2737,7 @@ def _coins_list(
             canonical_asset_id=raw_cat_id,
             symbol_hint=None,
             allow_dexie_lookup=False,
+            program_home_dir=str(program.home_dir),
         )
     elif asset and asset.strip():
         effective_asset = asset.strip()
@@ -2904,6 +2745,7 @@ def _coins_list(
             wallet=wallet,
             canonical_asset_id=effective_asset,
             symbol_hint=effective_asset,
+            program_home_dir=str(program.home_dir),
         )
     coins = wallet.list_coins(asset_id=resolved_asset_filter, include_pending=True)
     filtered_asset_id = str(resolved_asset_filter or "").strip().lower()
@@ -3029,6 +2871,36 @@ def _coins_list(
     return 0
 
 
+def _seed_wallet_assets_cache(
+    *,
+    program_path: Path,
+    vault_id: str | None,
+) -> int:
+    program = load_program_config(program_path)
+    wallet = _new_cloud_wallet_adapter(program)
+    if vault_id and vault_id.strip() and vault_id.strip() != wallet.vault_id:
+        override_config = _require_cloud_wallet_config(program)
+        wallet = CloudWalletAdapter(
+            CloudWalletConfig(
+                base_url=override_config.base_url,
+                user_key_id=override_config.user_key_id,
+                private_key_pem_path=override_config.private_key_pem_path,
+                vault_id=vault_id.strip(),
+                network=override_config.network,
+            )
+        )
+    try:
+        payload = _shared_seed_cloud_wallet_assets_cache(
+            wallet=wallet,
+            program_home_dir=str(program.home_dir),
+        )
+    except Exception as exc:
+        print(_format_json_output({"ok": False, "error": str(exc)}), file=sys.stderr)
+        return 1
+    print(_format_json_output({"ok": True, **payload}))
+    return 0
+
+
 def _coin_status(
     *,
     program_path: Path,
@@ -3086,6 +2958,7 @@ def _coin_op_setup(
         wallet=wallet,
         canonical_asset_id=canonical,
         symbol_hint=hint,
+        program_home_dir=str(program.home_dir),
     )
     fee_result = _resolve_coin_op_fee(
         network=network,
@@ -4227,6 +4100,7 @@ def _offers_cancel(
                         wallet=wallet,
                         canonical_asset_id=onchain_market.base_asset,  # type: ignore[union-attr]
                         symbol_hint=onchain_market.base_symbol,  # type: ignore[union-attr]
+                        program_home_dir=str(program.home_dir),
                     )
                     market_coins = wallet.list_coins(
                         asset_id=resolved_asset_id,
@@ -4439,6 +4313,12 @@ def main() -> None:
     p_coins_list.add_argument("--vault-id", default="")
     p_coins_list.add_argument("--cat-id", default="", help="hex CAT asset_id to filter by")
 
+    p_seed_assets = sub.add_parser(
+        "seed-wallet-assets-cache",
+        help="Fetch resolveWalletAssets once and write ~/.greenfloor/cache/wallet_assets_*.json",
+    )
+    p_seed_assets.add_argument("--vault-id", default="")
+
     p_coin_status = sub.add_parser("coin-status")
     p_coin_status.add_argument("--asset", default="")
     p_coin_status.add_argument("--vault-id", default="")
@@ -4615,6 +4495,11 @@ def main() -> None:
             asset=args.asset or None,
             vault_id=args.vault_id or None,
             cat_id=args.cat_id or None,
+        )
+    elif args.command == "seed-wallet-assets-cache":
+        code = _seed_wallet_assets_cache(
+            program_path=Path(args.program_config),
+            vault_id=args.vault_id or None,
         )
     elif args.command == "coin-status":
         code = _coin_status(
