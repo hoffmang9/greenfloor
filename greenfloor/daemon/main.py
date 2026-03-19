@@ -5,6 +5,8 @@ import asyncio
 import concurrent.futures
 import contextlib
 import fcntl
+import hashlib
+import importlib
 import json
 import logging
 import os
@@ -127,6 +129,36 @@ def _coin_op_target_amount_allowed(*, amount_mojos: int, canonical_asset_id: str
     return int(amount_mojos) >= _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
 
 
+def _stable_market_slot_index(*, market_id: str, slot_count: int) -> int:
+    normalized_slots = max(1, int(slot_count))
+    if normalized_slots == 1:
+        return 0
+    digest = hashlib.sha256(str(market_id).strip().encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], byteorder="big", signed=False) % normalized_slots
+
+
+def _select_markets_for_cycle_slot(
+    *,
+    enabled_markets: list[Any],
+    slot_count: int,
+    cycle_index: int | None,
+) -> tuple[list[Any], int]:
+    normalized_slots = max(1, int(slot_count))
+    if normalized_slots <= 1:
+        return list(enabled_markets), 0
+    slot_index = int(cycle_index or 0) % normalized_slots
+    selected = [
+        market
+        for market in enabled_markets
+        if _stable_market_slot_index(
+            market_id=str(getattr(market, "market_id", "")),
+            slot_count=normalized_slots,
+        )
+        == slot_index
+    ]
+    return selected, slot_index
+
+
 def _coin_matches_direct_spendable_lookup(
     *,
     wallet: Any,
@@ -145,26 +177,36 @@ def _coin_matches_direct_spendable_lookup(
     # Temporary upstream defense: asset-scoped Cloud Wallet coin queries can
     # leak cross-asset rows into CAT inventories. Re-check the exact coin
     # record before coin-op selection until upstream fixes the scoped query.
+    fallback_result = bool(
+        str(coin.get("state", "")).strip().upper() in _CLOUD_WALLET_SPENDABLE_STATES
+        and not bool(coin.get("isLocked"))
+    )
     try:
         coin_record = get_coin_record(coin_id=coin_id)
     except Exception:
-        result = False
+        # Fail-open on lookup errors so transient Cloud Wallet read timeouts do
+        # not collapse scoped inventories to zero.
+        result = fallback_result
     else:
         if not isinstance(coin_record, dict):
-            result = False
+            result = fallback_result
         else:
-            state = str(coin_record.get("state", "")).strip().upper()
+            state = str(coin_record.get("state", coin.get("state", ""))).strip().upper()
             asset_payload = coin_record.get("asset")
             asset_id = (
                 str(asset_payload.get("id", "")).strip().lower()
                 if isinstance(asset_payload, dict)
                 else ""
             )
-            result = bool(
+            base_match = bool(
                 state in _CLOUD_WALLET_SPENDABLE_STATES
                 and not bool(coin_record.get("isLocked"))
                 and not bool(coin_record.get("isLinkedToOpenOffer"))
-                and asset_id == str(scoped_asset_id).strip().lower()
+            )
+            # Some coin-record lookups omit asset metadata despite scoped query
+            # context. When asset id is missing, trust the scoped list row.
+            result = base_match and (
+                asset_id == str(scoped_asset_id).strip().lower() if asset_id else True
             )
     if cache is not None:
         cache[coin_id] = result
@@ -367,6 +409,103 @@ def _combine_input_coin_cap() -> int:
 def _is_cloud_wallet_rate_limited_error(exc: Exception) -> bool:
     text = str(exc).strip().lower()
     return "status not ok: 429" in text or " 429" in text or text.endswith(":429")
+
+
+def _is_transient_cloud_wallet_upstream_error_text(error_text: str) -> bool:
+    normalized = str(error_text or "").strip().lower()
+    transient_markers = (
+        "read operation timed out",
+        "timed out",
+        "timeout",
+        "cloud_wallet_http_error:502",
+        "cloud_wallet_http_error:503",
+        "cloud_wallet_http_error:504",
+        "service temporarily unavailable",
+        "service unavailable",
+        "bad gateway",
+        "gateway timeout",
+        "cloud_wallet_network_error",
+        "connection reset",
+        "connection refused",
+    )
+    return any(marker in normalized for marker in transient_markers)
+
+
+def _cloud_wallet_reason_is_503(reason_text: str) -> bool:
+    normalized = str(reason_text or "").strip().lower()
+    return "cloud_wallet_http_error:503" in normalized or "503 service temporarily unavailable" in normalized
+
+
+def _cloud_wallet_item_is_success(item: dict[str, Any]) -> bool:
+    status = str(item.get("status", "")).strip().lower()
+    reason = str(item.get("reason", "")).strip().lower()
+    return status == "executed" and (
+        reason == "cloud_wallet_post_success" or reason == _PENDING_VISIBILITY_REASON.lower()
+    )
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _cloud_wallet_market_health_payload(
+    *,
+    store: SqliteStore,
+    market_id: str,
+    current_items: list[dict[str, Any]],
+    now: datetime,
+    recent_event_limit: int = 40,
+) -> dict[str, Any]:
+    last_success_at: str | None = now.isoformat() if any(
+        _cloud_wallet_item_is_success(item) for item in current_items
+    ) else None
+    rolling_503_count = sum(
+        1
+        for item in current_items
+        if _cloud_wallet_reason_is_503(str(item.get("reason", "")))
+    )
+    recent = store.list_recent_audit_events(
+        event_types=["strategy_offer_execution"],
+        market_id=str(market_id),
+        limit=max(1, int(recent_event_limit)),
+    )
+    for event in recent:
+        payload = event.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        items = payload.get("items", [])
+        if not isinstance(items, list):
+            continue
+        rolling_503_count += sum(
+            1 for item in items if isinstance(item, dict) and _cloud_wallet_reason_is_503(str(item.get("reason", "")))
+        )
+        if last_success_at is None and any(
+            isinstance(item, dict) and _cloud_wallet_item_is_success(item) for item in items
+        ):
+            event_created_at = _parse_iso_datetime(str(event.get("created_at", "")))
+            if event_created_at is not None:
+                last_success_at = event_created_at.isoformat()
+    last_success_age_seconds: int | None = None
+    if last_success_at is not None:
+        parsed_success_at = _parse_iso_datetime(last_success_at)
+        if parsed_success_at is not None:
+            if parsed_success_at.tzinfo is None:
+                parsed_success_at = parsed_success_at.replace(tzinfo=UTC)
+            delta = (now - parsed_success_at).total_seconds()
+            last_success_age_seconds = max(0, int(delta))
+    return {
+        "market_id": str(market_id),
+        "rolling_window_events": max(1, int(recent_event_limit)),
+        "rolling_503_count": int(rolling_503_count),
+        "last_cloud_wallet_success_at": last_success_at,
+        "last_cloud_wallet_success_age_seconds": last_success_age_seconds,
+    }
 
 
 def _combine_coins_with_retry(
@@ -1442,16 +1581,53 @@ def _cloud_wallet_spendable_profiles_by_asset(
 ) -> dict[str, dict[str, int]]:
     requested_asset_ids = {str(asset_id).strip() for asset_id in asset_ids if str(asset_id).strip()}
     profiles: dict[str, dict[str, int]] = {
-        asset_id: {"total": 0, "max_single": 0, "coin_count": 0} for asset_id in requested_asset_ids
+        asset_id: {"total": 0, "max_single": 0, "coin_count": 0, "max_single_known": 0}
+        for asset_id in requested_asset_ids
     }
     if not requested_asset_ids:
         return profiles
+
+    def _wallet_asset_amounts_for_scope(*, scoped_asset_id: str) -> tuple[int | None, int | None, int | None]:
+        if not hasattr(wallet, "_graphql"):
+            return None, None, None
+        query = """
+query walletAssetAmounts($walletId: ID!, $assetId: ID!) {
+  wallet(id: $walletId) {
+    asset(assetId: $assetId) {
+      totalAmount
+      spendableAmount
+      lockedAmount
+    }
+  }
+}
+"""
+        try:
+            payload = wallet._graphql(  # noqa: SLF001
+                query=query,
+                variables={"walletId": wallet.vault_id, "assetId": scoped_asset_id},
+            )
+        except Exception:
+            return None, None, None
+        wallet_payload = payload.get("wallet") if isinstance(payload, dict) else None
+        if not isinstance(wallet_payload, dict):
+            return None, None, None
+        asset_payload = wallet_payload.get("asset")
+        if not isinstance(asset_payload, dict):
+            return None, None, None
+        try:
+            total_amount = int(asset_payload.get("totalAmount", 0))
+            spendable_amount = int(asset_payload.get("spendableAmount", 0))
+            locked_amount = int(asset_payload.get("lockedAmount", 0))
+        except (TypeError, ValueError):
+            return None, None, None
+        return total_amount, spendable_amount, locked_amount
 
     # Query each requested asset directly. Some wallet backends can return
     # incomplete/unhelpful results for broad unfiltered inventory reads, while
     # asset-scoped reads remain accurate.
     for requested_asset_id in requested_asset_ids:
         requested_asset_id_lower = requested_asset_id.lower()
+        profile = profiles[requested_asset_id]
         try:
             coins = wallet.list_coins(asset_id=requested_asset_id, include_pending=True)
         except TypeError:
@@ -1464,8 +1640,19 @@ def _cloud_wallet_spendable_profiles_by_asset(
                 requested_asset_id,
                 exc,
             )
+            _total_amount, spendable_amount, _locked_amount = _wallet_asset_amounts_for_scope(
+                scoped_asset_id=requested_asset_id
+            )
+            if spendable_amount is not None and spendable_amount > 0:
+                profile["total"] = max(int(profile.get("total", 0)), int(spendable_amount))
+                _daemon_logger.info(
+                    "cloud_wallet_inventory_lookup_fallback asset_id=%s source=wallet_asset spendable=%s",
+                    requested_asset_id,
+                    spendable_amount,
+                )
             continue
 
+        profile["max_single_known"] = 1
         for coin in coins:
             if not isinstance(coin, dict):
                 continue
@@ -1483,11 +1670,21 @@ def _cloud_wallet_spendable_profiles_by_asset(
                 amount = 0
             if amount <= 0:
                 continue
-            profile = profiles[requested_asset_id]
             profile["total"] += amount
             profile["coin_count"] += 1
             if amount > int(profile.get("max_single", 0)):
                 profile["max_single"] = amount
+        if int(profile.get("total", 0)) <= 0:
+            _total_amount, spendable_amount, _locked_amount = _wallet_asset_amounts_for_scope(
+                scoped_asset_id=requested_asset_id
+            )
+            if spendable_amount is not None and spendable_amount > 0:
+                profile["total"] = int(spendable_amount)
+                _daemon_logger.info(
+                    "cloud_wallet_inventory_lookup_fallback asset_id=%s source=wallet_asset spendable=%s",
+                    requested_asset_id,
+                    spendable_amount,
+                )
     return profiles
 
 
@@ -1545,6 +1742,49 @@ def _cloud_wallet_spendable_base_unit_coin_amounts(
         if amount_base_units > 0:
             amounts_base_units.append(amount_base_units)
     return amounts_base_units
+
+
+def _coinset_cat_spendable_base_unit_coin_amounts(
+    *,
+    canonical_asset_id: str,
+    receive_address: str,
+    network: str,
+    base_unit_mojo_multiplier: int,
+) -> list[int]:
+    asset_hex = str(canonical_asset_id).strip().lower()
+    if not asset_hex or not is_hex_id(asset_hex):
+        return []
+    try:
+        sdk = importlib.import_module("chia_wallet_sdk")
+        address = sdk.Address.decode(str(receive_address))
+        inner_puzzle_hash = bytes(address.puzzle_hash)
+        asset_id_bytes = bytes.fromhex(asset_hex)
+        cat_puzzle_hash = sdk.cat_puzzle_hash(asset_id_bytes, inner_puzzle_hash)
+        coinset = CoinsetAdapter(network=str(network))
+        records = coinset.get_coin_records_by_puzzle_hash(
+            puzzle_hash_hex=f"0x{bytes(cat_puzzle_hash).hex()}",
+            include_spent_coins=False,
+        )
+    except Exception:
+        return []
+    multiplier = max(1, int(base_unit_mojo_multiplier))
+    amounts: list[int] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        coin_payload = record.get("coin")
+        if not isinstance(coin_payload, dict):
+            continue
+        try:
+            amount_mojos = int(coin_payload.get("amount", 0))
+        except (TypeError, ValueError):
+            continue
+        if amount_mojos <= 0:
+            continue
+        amount_base_units = amount_mojos // multiplier
+        if amount_base_units > 0:
+            amounts.append(amount_base_units)
+    return amounts
 
 
 def _select_spendable_coins_for_target_amount(
@@ -1724,6 +1964,8 @@ def _cloud_wallet_offer_post_fallback(
     size_base_units: int,
     publish_venue: str,
     runtime_dry_run: bool,
+    key_id: str = "",
+    keyring_yaml_path: str = "",
     side: str = "sell",
     build_and_post_fn: Callable[..., tuple[int, dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
@@ -1737,6 +1979,8 @@ def _cloud_wallet_offer_post_fallback(
     exit_code, payload = build_and_post_fn(
         program=program,
         market=market,
+        key_id=str(key_id or ""),
+        keyring_yaml_path=str(keyring_yaml_path or ""),
         size_base_units=size_base_units,
         repeat=1,
         publish_venue=publish_venue,
@@ -1749,16 +1993,47 @@ def _cloud_wallet_offer_post_fallback(
         action_side=side,
         offer_artifact_timeout_seconds=artifact_timeout_seconds,
     )
-    if exit_code != 0:
-        results = payload.get("results", [])
-        result = (
-            results[0].get("result", {})
-            if isinstance(results, list) and results and isinstance(results[0], dict)
-            else {}
-        )
-        error = str(result.get("error", "")).strip() if isinstance(result, dict) else ""
-        return {"success": False, "error": error or f"cloud_wallet_fallback_exit_code:{exit_code}"}
     results = payload.get("results", [])
+    result = (
+        results[0].get("result", {}) if isinstance(results, list) and results and isinstance(results[0], dict) else {}
+    )
+    timing_payload = result.get("timing_ms", {}) if isinstance(result, dict) else {}
+    create_ms = (
+        int(timing_payload.get("create_total_ms"))
+        if isinstance(timing_payload, dict) and timing_payload.get("create_total_ms") is not None
+        else None
+    )
+    publish_ms = (
+        int(timing_payload.get("publish_ms"))
+        if isinstance(timing_payload, dict) and timing_payload.get("publish_ms") is not None
+        else None
+    )
+    total_ms = (
+        int(timing_payload.get("total_ms"))
+        if isinstance(timing_payload, dict) and timing_payload.get("total_ms") is not None
+        else None
+    )
+    create_phase_ms = (
+        int(timing_payload.get("create_phase_ms"))
+        if isinstance(timing_payload, dict) and timing_payload.get("create_phase_ms") is not None
+        else None
+    )
+    artifact_wait_ms = (
+        int(timing_payload.get("artifact_wait_ms"))
+        if isinstance(timing_payload, dict) and timing_payload.get("artifact_wait_ms") is not None
+        else None
+    )
+    if exit_code != 0:
+        error = str(result.get("error", "")).strip() if isinstance(result, dict) else ""
+        return {
+            "success": False,
+            "error": error or f"cloud_wallet_fallback_exit_code:{exit_code}",
+            "offer_create_ms": create_ms,
+            "offer_publish_ms": publish_ms,
+            "offer_total_ms": total_ms,
+            "offer_create_phase_ms": create_phase_ms,
+            "offer_artifact_wait_ms": artifact_wait_ms,
+        }
     if not isinstance(results, list) or not results:
         return {"success": False, "error": "cloud_wallet_fallback_missing_results"}
     result = results[0].get("result", {}) if isinstance(results[0], dict) else {}
@@ -1769,6 +2044,11 @@ def _cloud_wallet_offer_post_fallback(
         "success": success,
         "offer_id": str(result.get("id", "")).strip() or None,
         "error": str(result.get("error", "")).strip() if not success else "",
+        "offer_create_ms": create_ms,
+        "offer_publish_ms": publish_ms,
+        "offer_total_ms": total_ms,
+        "offer_create_phase_ms": create_phase_ms,
+        "offer_artifact_wait_ms": artifact_wait_ms,
     }
 
 
@@ -1898,6 +2178,8 @@ def _execute_single_cloud_wallet_action(
     publish_venue: str,
     runtime_dry_run: bool,
     dexie: DexieAdapter,
+    key_id: str,
+    keyring_yaml_path: str,
 ) -> dict[str, Any]:
     """Execute a single strategy action via the cloud wallet path."""
     cloud_wallet_post = _cloud_wallet_offer_post_fallback(
@@ -1906,8 +2188,17 @@ def _execute_single_cloud_wallet_action(
         size_base_units=int(action.size),
         publish_venue=publish_venue,
         runtime_dry_run=runtime_dry_run,
+        key_id=key_id,
+        keyring_yaml_path=keyring_yaml_path,
         side=_normalize_offer_side(getattr(action, "side", "sell")),
     )
+    timing_fields = {
+        "offer_create_ms": cloud_wallet_post.get("offer_create_ms"),
+        "offer_publish_ms": cloud_wallet_post.get("offer_publish_ms"),
+        "offer_total_ms": cloud_wallet_post.get("offer_total_ms"),
+        "offer_create_phase_ms": cloud_wallet_post.get("offer_create_phase_ms"),
+        "offer_artifact_wait_ms": cloud_wallet_post.get("offer_artifact_wait_ms"),
+    }
     if bool(cloud_wallet_post.get("success", False)):
         cloud_wallet_offer_id = str(cloud_wallet_post.get("offer_id", "")).strip()
         if publish_venue == "dexie" and cloud_wallet_offer_id:
@@ -1926,6 +2217,7 @@ def _execute_single_cloud_wallet_action(
                         "status": "executed",
                         "reason": _PENDING_VISIBILITY_REASON,
                         "offer_id": cloud_wallet_offer_id or None,
+                        **timing_fields,
                     }
                 return {
                     "size": action.size,
@@ -1933,6 +2225,7 @@ def _execute_single_cloud_wallet_action(
                     "status": "skipped",
                     "reason": (f"cloud_wallet_post_not_visible_on_dexie:{visibility_error}"),
                     "offer_id": cloud_wallet_offer_id or None,
+                    **timing_fields,
                 }
         return {
             "size": action.size,
@@ -1940,6 +2233,7 @@ def _execute_single_cloud_wallet_action(
             "status": "executed",
             "reason": "cloud_wallet_post_success",
             "offer_id": cloud_wallet_offer_id or None,
+            **timing_fields,
         }
     return {
         "size": action.size,
@@ -1949,6 +2243,7 @@ def _execute_single_cloud_wallet_action(
             f"cloud_wallet_post_failed:{str(cloud_wallet_post.get('error', 'unknown')).strip()}"
         ),
         "offer_id": None,
+        **timing_fields,
     }
 
 
@@ -1965,6 +2260,8 @@ def _execute_single_local_action(
     store: SqliteStore,
 ) -> dict[str, Any]:
     """Execute a single strategy action via the local build+sign+post path."""
+    action_started = time.monotonic()
+    build_started = action_started
     built = _build_offer_for_action(
         market=market,
         action=action,
@@ -1972,6 +2269,7 @@ def _execute_single_local_action(
         network=app_network,
         keyring_yaml_path=keyring_yaml_path,
     )
+    build_ms = int((time.monotonic() - build_started) * 1000)
     if built.get("status") != "executed":
         built_reason = str(built.get("reason", "offer_builder_skipped"))
         return {
@@ -1980,6 +2278,9 @@ def _execute_single_local_action(
             "status": "skipped",
             "reason": built_reason,
             "offer_id": None,
+            "offer_create_ms": build_ms,
+            "offer_publish_ms": None,
+            "offer_total_ms": int((time.monotonic() - action_started) * 1000),
         }
     _, _, cooldown_seconds = _post_retry_config()
     cooldown_key = f"{publish_venue}:{market.market_id}"
@@ -1991,14 +2292,19 @@ def _execute_single_local_action(
             "status": "skipped",
             "reason": f"post_cooldown_active:{remaining_ms}ms",
             "offer_id": None,
+            "offer_create_ms": build_ms,
+            "offer_publish_ms": None,
+            "offer_total_ms": int((time.monotonic() - action_started) * 1000),
         }
     offer_text = str(built["offer"])
+    publish_started = time.monotonic()
     post_result, attempt_count, post_error = _post_offer_with_retry(
         publish_venue=publish_venue,
         offer_text=offer_text,
         dexie=dexie,
         splash=splash,
     )
+    publish_ms = int((time.monotonic() - publish_started) * 1000)
     success = bool(post_result.get("success", False))
     offer_id_raw = post_result.get("id")
     offer_id = str(offer_id_raw).strip() if offer_id_raw is not None else ""
@@ -2016,6 +2322,9 @@ def _execute_single_local_action(
             "reason": f"{publish_venue}_post_success",
             "offer_id": offer_id,
             "attempts": attempt_count,
+            "offer_create_ms": build_ms,
+            "offer_publish_ms": publish_ms,
+            "offer_total_ms": int((time.monotonic() - action_started) * 1000),
         }
     _set_cooldown(_POST_COOLDOWN_UNTIL, cooldown_key, cooldown_seconds)
     return {
@@ -2025,6 +2334,9 @@ def _execute_single_local_action(
         "reason": f"{publish_venue}_post_retry_exhausted:{post_error}",
         "offer_id": offer_id or None,
         "attempts": attempt_count,
+        "offer_create_ms": build_ms,
+        "offer_publish_ms": publish_ms,
+        "offer_total_ms": int((time.monotonic() - action_started) * 1000),
     }
 
 
@@ -2066,6 +2378,9 @@ def _single_input_preferred_skip_reason(
     primary_profile = spendable_profiles.get(str(primary_asset_id), {})
     primary_total = int(primary_profile.get("total", 0))
     primary_max = int(primary_profile.get("max_single", 0))
+    primary_max_known = bool(int(primary_profile.get("max_single_known", 0)))
+    if not primary_max_known:
+        return None
     if primary_total >= primary_needed and primary_max < primary_needed:
         return (
             "single_input_preferred_requires_combine"
@@ -2134,8 +2449,12 @@ def _execute_strategy_actions(
 ) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     executed_count = 0
-    signer_key = (signer_key_registry or {}).get(market.signer_key_id)
-    keyring_yaml_path = str(getattr(signer_key, "keyring_yaml_path", "") or "")
+    signer_key_id = str(getattr(market, "signer_key_id", "") or "").strip()
+    signer_key = (signer_key_registry or {}).get(signer_key_id)
+    if isinstance(signer_key, dict):
+        keyring_yaml_path = str(signer_key.get("keyring_yaml_path", "") or "").strip()
+    else:
+        keyring_yaml_path = str(getattr(signer_key, "keyring_yaml_path", "") or "").strip()
     expanded_actions = _expand_strategy_actions(strategy_actions)
     can_parallelize_cloud_offers = (
         program is not None
@@ -2247,14 +2566,34 @@ def _execute_strategy_actions(
                         reservation_acquire_ms=acquire_ms,
                     )
                     try:
-                        item = _execute_single_cloud_wallet_action(
-                            program=program,
-                            market=market,
-                            action=action,
-                            publish_venue=publish_venue,
-                            runtime_dry_run=runtime_dry_run,
-                            dexie=dexie,
-                        )
+                        attempts_max, backoff_ms, _ = _post_retry_config()
+                        item: dict[str, Any] | None = None
+                        last_exc: Exception | None = None
+                        for attempt_index in range(max(1, int(attempts_max))):
+                            try:
+                                item = _execute_single_cloud_wallet_action(
+                                    program=program,
+                                    market=market,
+                                    action=action,
+                                    publish_venue=publish_venue,
+                                    runtime_dry_run=runtime_dry_run,
+                                    dexie=dexie,
+                                    key_id=str(getattr(market, "signer_key_id", "") or ""),
+                                    keyring_yaml_path=keyring_yaml_path,
+                                )
+                                break
+                            except Exception as exc:
+                                last_exc = exc
+                                if (
+                                    attempt_index >= (max(1, int(attempts_max)) - 1)
+                                    or not _is_transient_cloud_wallet_upstream_error_text(str(exc))
+                                ):
+                                    raise
+                                if backoff_ms > 0:
+                                    sleep_seconds = (backoff_ms * (2**attempt_index)) / 1000.0
+                                    time.sleep(float(sleep_seconds))
+                        if item is None:
+                            raise RuntimeError(str(last_exc or "cloud_wallet_parallel_worker_failed"))
                     except Exception as exc:
                         item = {
                             "size": 0,
@@ -2311,9 +2650,53 @@ def _execute_strategy_actions(
                             }
                         submitted_items.append((submit_index, item))
                     for _, item in sorted(submitted_items, key=lambda pair: pair[0]):
+                        if any(
+                            item.get(key) is not None
+                            for key in (
+                                "offer_create_ms",
+                                "offer_publish_ms",
+                                "offer_total_ms",
+                            )
+                        ):
+                            _log_market_decision(
+                                str(getattr(market, "market_id", "")),
+                                "offer_action_timing",
+                                size=int(item.get("size", 0) or 0),
+                                side=str(item.get("side", "sell")),
+                                status=str(item.get("status", "")),
+                                reason=str(item.get("reason", "")),
+                                offer_id=str(item.get("offer_id", "") or ""),
+                                offer_create_ms=item.get("offer_create_ms"),
+                                offer_publish_ms=item.get("offer_publish_ms"),
+                                offer_total_ms=item.get("offer_total_ms"),
+                                offer_create_phase_ms=item.get("offer_create_phase_ms"),
+                                offer_artifact_wait_ms=item.get("offer_artifact_wait_ms"),
+                            )
                         if item.get("status") == "executed":
                             executed_count += 1
                         items.append(item)
+                _, _, cooldown_seconds = _post_retry_config()
+                transient_parallel_failures = sum(
+                    1
+                    for _submit_idx, item in submitted_items
+                    if str(item.get("status", "")).strip().lower() == "skipped"
+                    and _is_transient_cloud_wallet_upstream_error_text(str(item.get("reason", "")))
+                )
+                total_parallel = len(submitted_items)
+                if (
+                    total_parallel > 0
+                    and cooldown_seconds > 0
+                    and transient_parallel_failures >= max(2, (total_parallel + 1) // 2)
+                ):
+                    cooldown_key = f"{publish_venue}:{market.market_id}"
+                    _set_cooldown(_POST_COOLDOWN_UNTIL, cooldown_key, cooldown_seconds)
+                    _log_market_decision(
+                        str(getattr(market, "market_id", "")),
+                        "parallel_offer_transient_cooldown",
+                        transient_failures=transient_parallel_failures,
+                        total_parallel=total_parallel,
+                        cooldown_seconds=cooldown_seconds,
+                    )
             return {
                 "planned_count": len(expanded_actions),
                 "executed_count": executed_count,
@@ -2344,14 +2727,40 @@ def _execute_strategy_actions(
                 )
                 continue
             if program is not None and _cloud_wallet_configured(program):
-                item = _execute_single_cloud_wallet_action(
-                    program=program,
-                    market=market,
-                    action=action,
-                    publish_venue=publish_venue,
-                    runtime_dry_run=runtime_dry_run,
-                    dexie=dexie,
-                )
+                attempts_max, backoff_ms, _ = _post_retry_config()
+                item: dict[str, Any] | None = None
+                last_exc: Exception | None = None
+                for attempt_index in range(max(1, int(attempts_max))):
+                    try:
+                        item = _execute_single_cloud_wallet_action(
+                            program=program,
+                            market=market,
+                            action=action,
+                            publish_venue=publish_venue,
+                            runtime_dry_run=runtime_dry_run,
+                            dexie=dexie,
+                            key_id=str(getattr(market, "signer_key_id", "") or ""),
+                            keyring_yaml_path=keyring_yaml_path,
+                        )
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        if (
+                            attempt_index >= (max(1, int(attempts_max)) - 1)
+                            or not _is_transient_cloud_wallet_upstream_error_text(str(exc))
+                        ):
+                            break
+                        if backoff_ms > 0:
+                            sleep_seconds = (backoff_ms * (2**attempt_index)) / 1000.0
+                            time.sleep(float(sleep_seconds))
+                if item is None:
+                    item = {
+                        "size": action.size,
+                        "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                        "status": "skipped",
+                        "reason": f"cloud_wallet_action_error:{last_exc}",
+                        "offer_id": None,
+                    }
             else:
                 item = _execute_single_local_action(
                     market=market,
@@ -2366,6 +2775,24 @@ def _execute_strategy_actions(
                 )
             if item.get("status") == "executed":
                 executed_count += 1
+            if any(
+                item.get(key) is not None
+                for key in ("offer_create_ms", "offer_publish_ms", "offer_total_ms")
+            ):
+                _log_market_decision(
+                    str(getattr(market, "market_id", "")),
+                    "offer_action_timing",
+                    size=int(item.get("size", 0) or 0),
+                    side=str(item.get("side", "sell")),
+                    status=str(item.get("status", "")),
+                    reason=str(item.get("reason", "")),
+                    offer_id=str(item.get("offer_id", "") or ""),
+                    offer_create_ms=item.get("offer_create_ms"),
+                    offer_publish_ms=item.get("offer_publish_ms"),
+                    offer_total_ms=item.get("offer_total_ms"),
+                    offer_create_phase_ms=item.get("offer_create_phase_ms"),
+                    offer_artifact_wait_ms=item.get("offer_artifact_wait_ms"),
+                )
             items.append(item)
     return {
         "planned_count": len(expanded_actions),
@@ -2902,6 +3329,17 @@ def _evaluate_and_execute_strategy(
             "executed_count": offer_execution["executed_count"],
             "items": offer_execution["items"],
         },
+        market_id=market.market_id,
+    )
+    health_payload = _cloud_wallet_market_health_payload(
+        store=store,
+        market_id=str(market.market_id),
+        current_items=list(offer_execution["items"]),
+        now=now,
+    )
+    store.add_audit_event(
+        "cloud_wallet_market_health",
+        health_payload,
         market_id=market.market_id,
     )
     return offer_counts_by_side, _executed_sell_offer_counts_by_size(offer_execution)
@@ -3795,6 +4233,7 @@ def _process_single_market(
     ladder_sizes = [e.size_base_units for e in sell_ladder]
     bucket_counts: dict[int, int] | None = None
     wallet_coins: list[int] = []
+    cloud_wallet_scan_empty = False
 
     if _cloud_wallet_configured(program):
         try:
@@ -3810,6 +4249,7 @@ def _process_single_market(
                 base_unit_mojo_multiplier=_base_unit_mojo_multiplier_for_market(market=market),
                 canonical_asset_id=str(market.base_asset),
             )
+            cloud_wallet_scan_empty = len(wallet_coins) == 0
             bucket_counts = compute_bucket_counts_from_coins(
                 coin_amounts_base_units=wallet_coins,
                 ladder_sizes=ladder_sizes,
@@ -3840,8 +4280,23 @@ def _process_single_market(
                 exc,
             )
 
-    if bucket_counts is None:
-        wallet_coins = wallet.list_asset_coins_base_units(
+    if bucket_counts is None or cloud_wallet_scan_empty:
+        fallback_source = (
+            "wallet_adapter_fallback_after_empty_cloud_wallet_scan"
+            if cloud_wallet_scan_empty
+            else "wallet_adapter"
+        )
+        if cloud_wallet_scan_empty and str(market.base_asset).strip().lower() not in {"xch", "1", ""}:
+            wallet_coins = _coinset_cat_spendable_base_unit_coin_amounts(
+                canonical_asset_id=str(market.base_asset),
+                receive_address=str(market.receive_address),
+                network=str(program.app_network),
+                base_unit_mojo_multiplier=_base_unit_mojo_multiplier_for_market(market=market),
+            )
+            if wallet_coins:
+                fallback_source = "coinset_cat_scan_fallback_after_empty_cloud_wallet_scan"
+        if not wallet_coins:
+            wallet_coins = wallet.list_asset_coins_base_units(
             asset_id=market.base_asset,
             key_id=market.signer_key_id,
             receive_address=market.receive_address,
@@ -3855,7 +4310,7 @@ def _process_single_market(
             _log_market_decision(
                 market.market_id,
                 "inventory_scan_wallet",
-                source="wallet_adapter",
+                source=fallback_source,
                 coin_count=len(wallet_coins),
                 bucket_counts=bucket_counts,
             )
@@ -3863,7 +4318,7 @@ def _process_single_market(
                 "inventory_bucket_scan",
                 {
                     "market_id": market.market_id,
-                    "source": "wallet_adapter",
+                    "source": fallback_source,
                     "bucket_counts": bucket_counts,
                     "coin_count": len(wallet_coins),
                 },
@@ -3887,30 +4342,60 @@ def _process_single_market(
                 },
                 market_id=market.market_id,
             )
-    offer_counts_by_side, newly_executed_sell_offer_counts_by_size = _evaluate_and_execute_strategy(
-        market=market,
-        program=program,
-        dexie=dexie,
-        splash=splash,
-        store=store,
-        xch_price_usd=xch_price_usd,
-        now=now,
-        dexie_size_by_offer_id=dexie_size_by_offer_id,
-        result=result,
-        reservation_coordinator=reservation_coordinator,
-    )
-    _plan_and_execute_coin_ops(
-        market=market,
-        program=program,
-        wallet=wallet,
-        store=store,
-        sell_ladder=sell_ladder,
-        wallet_bucket_counts=bucket_counts,
-        active_sell_offer_counts_by_size=offer_counts_by_side.get("sell", {}),
-        newly_executed_sell_offer_counts_by_size=newly_executed_sell_offer_counts_by_size,
-        signer_selection=signer_selection,
-        state_dir=state_dir,
-    )
+    offer_counts_by_side: dict[str, dict[int, int]] = {"buy": {}, "sell": {}}
+    newly_executed_sell_offer_counts_by_size: dict[int, int] = {}
+    try:
+        offer_counts_by_side, newly_executed_sell_offer_counts_by_size = (
+            _evaluate_and_execute_strategy(
+                market=market,
+                program=program,
+                dexie=dexie,
+                splash=splash,
+                store=store,
+                xch_price_usd=xch_price_usd,
+                now=now,
+                dexie_size_by_offer_id=dexie_size_by_offer_id,
+                result=result,
+                reservation_coordinator=reservation_coordinator,
+            )
+        )
+    except Exception as exc:
+        result.cycle_errors += 1
+        _log_market_decision(
+            market.market_id,
+            "strategy_failed",
+            error=str(exc),
+        )
+        store.add_audit_event(
+            "strategy_execution_error",
+            {"market_id": market.market_id, "error": str(exc)},
+            market_id=market.market_id,
+        )
+    try:
+        _plan_and_execute_coin_ops(
+            market=market,
+            program=program,
+            wallet=wallet,
+            store=store,
+            sell_ladder=sell_ladder,
+            wallet_bucket_counts=bucket_counts,
+            active_sell_offer_counts_by_size=offer_counts_by_side.get("sell", {}),
+            newly_executed_sell_offer_counts_by_size=newly_executed_sell_offer_counts_by_size,
+            signer_selection=signer_selection,
+            state_dir=state_dir,
+        )
+    except Exception as exc:
+        result.cycle_errors += 1
+        _log_market_decision(
+            market.market_id,
+            "coin_ops_failed",
+            error=str(exc),
+        )
+        store.add_audit_event(
+            "coin_ops_execution_error",
+            {"market_id": market.market_id, "error": str(exc)},
+            market_id=market.market_id,
+        )
     _log_market_decision(
         market.market_id,
         "cycle_complete",
@@ -3971,6 +4456,7 @@ def run_once(
     use_websocket_capture: bool = False,
     program=None,
     testnet_markets_path: Path | None = None,
+    cycle_index: int | None = None,
 ) -> int:
     if program is None:
         program = load_program_config(program_path)
@@ -4062,9 +4548,24 @@ def run_once(
             _DISABLED_MARKET_NEXT_LOG_AT.pop(market.market_id, None)
             enabled_markets.append(market)
 
-        markets_attempted = len(enabled_markets)
-        if bool(getattr(program, "runtime_parallel_markets", False)) and len(enabled_markets) > 1:
-            max_workers = min(len(enabled_markets), 4)
+        slot_count = max(1, int(getattr(program, "runtime_market_slot_count", 1)))
+        selected_markets, slot_index = _select_markets_for_cycle_slot(
+            enabled_markets=enabled_markets,
+            slot_count=slot_count,
+            cycle_index=cycle_index,
+        )
+        if slot_count > 1:
+            _daemon_logger.info(
+                "market_slot_dispatch slot_index=%s slot_count=%s enabled=%s selected=%s",
+                slot_index,
+                slot_count,
+                len(enabled_markets),
+                len(selected_markets),
+            )
+
+        markets_attempted = len(selected_markets)
+        if bool(getattr(program, "runtime_parallel_markets", False)) and len(selected_markets) > 1:
+            max_workers = max(1, len(selected_markets))
             _daemon_logger.info(
                 "market_parallel_dispatch enabled=true workers=%s markets=%s",
                 max_workers,
@@ -4087,7 +4588,7 @@ def run_once(
                         state_dir=state_dir,
                         reservation_coordinator=reservation_coordinator,
                     ): market
-                    for market in enabled_markets
+                    for market in selected_markets
                 }
                 for future in concurrent.futures.as_completed(future_to_market):
                     market = future_to_market[future]
@@ -4126,7 +4627,7 @@ def run_once(
                 "market_parallel_dispatch enabled=false workers=1 markets=%s",
                 markets_attempted,
             )
-            for market in enabled_markets:
+            for market in selected_markets:
                 market_id = str(getattr(market, "market_id", "")).strip()
                 try:
                     mr = _process_single_market(
@@ -4172,6 +4673,8 @@ def run_once(
             "daemon_cycle_summary",
             {
                 "duration_ms": duration_ms,
+                "slot_count": slot_count,
+                "slot_index": slot_index,
                 "markets_attempted": markets_attempted,
                 "markets_processed": markets_processed,
                 "error_count": cycle_error_count,
@@ -4286,6 +4789,7 @@ def _run_loop(
     ws_client.start()
 
     try:
+        cycle_index = 0
         while True:
             _initialize_daemon_file_logging(
                 current_program.home_dir,
@@ -4302,7 +4806,9 @@ def _run_loop(
                 state_dir=state_dir,
                 poll_coinset_mempool=False,
                 program=current_program,
+                cycle_index=cycle_index,
             )
+            cycle_index += 1
             if _consume_reload_marker(state_dir):
                 _log_daemon_event(level=logging.INFO, payload={"event": "config_reloaded"})
             time.sleep(max(1, current_program.runtime_loop_interval_seconds))

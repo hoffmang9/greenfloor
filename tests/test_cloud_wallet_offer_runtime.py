@@ -10,6 +10,7 @@ from greenfloor.cloud_wallet_offer_runtime import (
     cloud_wallet_create_offer_phase,
     cloud_wallet_post_offer_phase,
     cloud_wallet_wait_offer_artifact_phase,
+    ensure_offer_bootstrap_denominations,
     is_transient_dexie_visibility_404_error,
     resolve_cloud_wallet_offer_asset_ids,
 )
@@ -208,6 +209,74 @@ def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path:
     ]
 
 
+def test_build_and_post_offer_cloud_wallet_emits_timing_diagnostics(tmp_path: Path) -> None:
+    class _Program:
+        home_dir = str(tmp_path)
+        app_network = "mainnet"
+        app_log_level = "INFO"
+
+    class _Market:
+        market_id = "m1"
+        base_asset = "base-asset"
+        quote_asset = "quote-asset"
+        base_symbol = "BASE"
+
+    class _Wallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+    class _Dexie:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+    exit_code, payload = build_and_post_offer_cloud_wallet(
+        program=_Program(),
+        market=_Market(),
+        size_base_units=5,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        quote_price=1.5,
+        dry_run=False,
+        wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
+        dexie_adapter_cls=_Dexie,  # type: ignore[arg-type]
+        initialize_manager_file_logging_fn=lambda *args, **kwargs: None,
+        recent_market_resolved_asset_id_hints_fn=lambda **kwargs: (None, None),
+        resolve_cloud_wallet_offer_asset_ids_fn=lambda **kwargs: ("Asset_base", "Asset_quote"),
+        resolve_maker_offer_fee_fn=lambda **kwargs: (0, "test"),
+        resolve_offer_expiry_for_market_fn=lambda _market: ("minutes", 30),
+        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
+            "status": "skipped",
+            "reason": "already_ready",
+        },
+        cloud_wallet_create_offer_phase_fn=lambda **kwargs: {
+            "known_offer_markers": set(),
+            "offer_request_started_at": "start",
+            "signature_request_id": "sr-timing-1",
+            "signature_state": "SUBMITTED",
+            "wait_events": [],
+            "expires_at": "2026-01-01T00:00:00+00:00",
+            "offer_amount": 5000,
+            "request_amount": 7500,
+            "side": "sell",
+        },
+        cloud_wallet_wait_offer_artifact_phase_fn=lambda **kwargs: "offer1timing",
+        log_signed_offer_artifact_fn=lambda **kwargs: None,
+        verify_offer_text_for_dexie_fn=lambda _offer_text: None,
+        cloud_wallet_post_offer_phase_fn=lambda **kwargs: {"success": True, "id": "offer-timing-1"},
+        dexie_offer_view_url_fn=lambda **kwargs: "https://dexie.space/offers/offer-timing-1",
+    )
+
+    assert exit_code == 0
+    timing = payload["results"][0]["result"]["timing_ms"]
+    assert isinstance(timing["create_total_ms"], int)
+    assert isinstance(timing["publish_ms"], int)
+    assert isinstance(timing["total_ms"], int)
+
+
 def test_cloud_wallet_wait_offer_artifact_phase_prefers_signature_request_lookup() -> None:
     calls = {"signature": 0, "generic": 0}
 
@@ -372,3 +441,178 @@ def test_cloud_wallet_create_offer_phase_rejects_insufficient_spendable_balance(
         raise AssertionError("expected insufficient spendable balance error")
     except RuntimeError as exc:
         assert "cloud_wallet_offer_insufficient_spendable_balance" in str(exc)
+
+
+def test_cloud_wallet_create_offer_phase_always_disables_split_input_coins() -> None:
+    captured: dict[str, Any] = {}
+
+    class _Wallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        @staticmethod
+        def list_coins(*, asset_id=None, include_pending=True):
+            _ = asset_id, include_pending
+            return [{"id": "coin-a", "amount": 500_000, "state": "SETTLED"}]
+
+        @staticmethod
+        def create_offer(**kwargs):
+            captured.update(kwargs)
+            return {"signature_request_id": "sr-1", "status": "SUBMITTED"}
+
+    class _Market:
+        pricing = {
+            "base_unit_mojo_multiplier": 1000,
+            "quote_unit_mojo_multiplier": 1000,
+        }
+
+    payload = cloud_wallet_create_offer_phase(
+        wallet=cast(CloudWalletAdapter, _Wallet()),
+        market=_Market(),
+        size_base_units=1,
+        quote_price=1.0,
+        resolved_base_asset_id="Asset_base",
+        resolved_quote_asset_id="Asset_quote",
+        offer_fee_mojos=0,
+        split_input_coins_fee=123456,
+        expiry_unit="minutes",
+        expiry_value=10,
+        action_side="sell",
+        wallet_get_wallet_offers_fn=lambda *_args, **_kwargs: {"offers": []},
+        poll_signature_request_until_not_unsigned_fn=lambda **_kwargs: ("SUBMITTED", []),
+    )
+
+    assert payload["signature_request_id"] == "sr-1"
+    assert captured["split_input_coins"] is False
+    assert captured["split_input_coins_fee"] == 0
+
+
+def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(tmp_path: Path) -> None:
+    class _Program:
+        home_dir = str(tmp_path)
+        app_network = "mainnet"
+        app_log_level = "INFO"
+
+    class _Market:
+        market_id = "m1"
+        base_asset = "base-asset"
+        quote_asset = "quote-asset"
+        base_symbol = "BASE"
+
+    class _Wallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+    class _Dexie:
+        def __init__(self, _base_url: str) -> None:
+            pass
+
+    code, payload = build_and_post_offer_cloud_wallet(
+        program=_Program(),
+        market=_Market(),
+        size_base_units=5,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        quote_price=1.5,
+        dry_run=False,
+        wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
+        dexie_adapter_cls=_Dexie,  # type: ignore[arg-type]
+        initialize_manager_file_logging_fn=lambda *args, **kwargs: None,
+        recent_market_resolved_asset_id_hints_fn=lambda **kwargs: (None, None),
+        resolve_cloud_wallet_offer_asset_ids_fn=lambda **kwargs: ("Asset_base", "Asset_quote"),
+        resolve_maker_offer_fee_fn=lambda **kwargs: (0, "test"),
+        resolve_offer_expiry_for_market_fn=lambda _market: ("minutes", 30),
+        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
+            "status": "executed",
+            "reason": "bootstrap_submitted",
+            "ready": False,
+        },
+        cloud_wallet_create_offer_phase_fn=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("create phase should not run while bootstrap is pending")
+        ),
+        cloud_wallet_wait_offer_artifact_phase_fn=lambda **kwargs: "offer1unused",
+        log_signed_offer_artifact_fn=lambda **kwargs: None,
+        verify_offer_text_for_dexie_fn=lambda _offer_text: None,
+        cloud_wallet_post_offer_phase_fn=lambda **kwargs: {"success": True, "id": "offer-unused"},
+        dexie_offer_view_url_fn=lambda **kwargs: "https://dexie.space/offers/offer-unused",
+    )
+
+    assert code == 2
+    assert payload["publish_failures"] == 1
+    assert payload["results"][0]["result"]["error"].startswith("bootstrap_pending:")
+
+
+def test_bootstrap_uses_cloud_wallet_split_without_keyring() -> None:
+    class _Program:
+        app_network = "mainnet"
+        coin_ops_minimum_fee_mojos = 10
+        cloud_wallet_base_url = "https://api.vault.chia.net"
+        cloud_wallet_user_key_id = "UserAuthKey_1"
+        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
+        cloud_wallet_vault_id = "Wallet_1"
+        cloud_wallet_kms_key_id = "arn:aws:kms:us-west-2:123:key/1"
+        cloud_wallet_kms_region = "us-west-2"
+        cloud_wallet_kms_public_key_hex = "02" + ("00" * 32)
+
+    class _LadderEntry:
+        size_base_units = 10
+        target_count = 1
+        split_buffer_count = 1
+
+    class _Market:
+        base_asset = "cat-asset"
+        quote_asset = "wUSDC.b"
+        receive_address = "xch1test"
+        ladders = {"sell": [_LadderEntry()]}
+
+    class _Deficit:
+        size_base_units = 10
+        required_count = 2
+        current_count = 0
+        deficit_count = 2
+
+    class _Plan:
+        source_coin_id = "coin-1"
+        source_amount = 20
+        output_amounts_base_units = [10, 10]
+        total_output_amount = 20
+        change_amount = 0
+        deficits: list[Any] = [_Deficit()]
+
+    class _Wallet:
+        def list_coins(self, *, asset_id: str, include_pending: bool = True):
+            _ = asset_id, include_pending
+            return [{"id": "coin-1", "amount": "20"}]
+
+    split_calls: list[dict[str, Any]] = []
+
+    def _fake_split_coins(**kwargs: Any) -> dict[str, Any]:
+        split_calls.append(dict(kwargs))
+        return {"signature_request_id": "SignatureRequest_1", "status": "SUBMITTED"}
+
+    result = ensure_offer_bootstrap_denominations(
+        program=_Program(),
+        market=_Market(),
+        wallet=cast(Any, _Wallet()),
+        resolved_base_asset_id="Asset_cat",
+        resolved_quote_asset_id="Asset_quote",
+        key_id="key-main-1",
+        keyring_yaml_path="",
+        quote_price=1.0,
+        action_side="sell",
+        plan_bootstrap_mixed_outputs_fn=lambda **_kwargs: _Plan(),
+        resolve_bootstrap_split_fee_fn=lambda **_kwargs: (10, "coinset_conservative", None),
+        split_coins_fn=_fake_split_coins,
+        poll_signature_request_until_not_unsigned_fn=lambda **_kwargs: ("SUBMITTED", []),
+        wait_for_mempool_then_confirmation_fn=lambda **_kwargs: [],
+        is_spendable_coin_fn=lambda _coin: True,
+    )
+
+    assert result["status"] == "executed"
+    assert result["signature_request_id"] == "SignatureRequest_1"
+    assert split_calls and split_calls[0]["coin_ids"] == ["coin-1"]
+    assert int(split_calls[0]["amount_per_coin"]) == 10

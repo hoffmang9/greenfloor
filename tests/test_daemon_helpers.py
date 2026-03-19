@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from greenfloor.daemon import main as daemon_main
 from greenfloor.daemon.main import (
     _abs_move_bps,
     _cancel_retry_config,
+    _cloud_wallet_market_health_payload,
     _cloud_wallet_configured,
     _cooldown_remaining_ms,
     _disabled_market_log_interval_seconds,
@@ -18,7 +20,9 @@ from greenfloor.daemon.main import (
     _post_retry_config,
     _resolve_quote_asset_for_offer,
     _retry_with_backoff,
+    _select_markets_for_cycle_slot,
     _set_cooldown,
+    _stable_market_slot_index,
     _should_log_disabled_market,
 )
 
@@ -210,6 +214,49 @@ def test_log_disabled_markets_startup_once_logs_and_seeds_throttle(monkeypatch) 
     daemon_main._DISABLED_MARKET_STARTUP_LOGGED = False
 
 
+def test_cloud_wallet_market_health_payload_tracks_503_and_last_success() -> None:
+    class _Store:
+        @staticmethod
+        def list_recent_audit_events(**kwargs: Any) -> list[dict[str, Any]]:
+            _ = kwargs
+            return [
+                {
+                    "created_at": "2026-03-19T02:55:00+00:00",
+                    "payload": {
+                        "items": [
+                            {
+                                "status": "skipped",
+                                "reason": "cloud_wallet_action_error:cloud_wallet_http_error:503:<html>...</html>",
+                            }
+                        ]
+                    },
+                },
+                {
+                    "created_at": "2026-03-19T02:50:00+00:00",
+                    "payload": {"items": [{"status": "executed", "reason": "cloud_wallet_post_success"}]},
+                },
+            ]
+
+    now = datetime(2026, 3, 19, 3, 0, 0, tzinfo=UTC)
+    payload = _cloud_wallet_market_health_payload(
+        store=_Store(),  # type: ignore[arg-type]
+        market_id="m1",
+        current_items=[
+            {
+                "status": "skipped",
+                "reason": "cloud_wallet_action_error:cloud_wallet_http_error:503:<html>...</html>",
+            }
+        ],
+        now=now,
+        recent_event_limit=20,
+    )
+    assert payload["market_id"] == "m1"
+    assert payload["rolling_window_events"] == 20
+    assert payload["rolling_503_count"] == 2
+    assert payload["last_cloud_wallet_success_at"] == "2026-03-19T02:50:00+00:00"
+    assert payload["last_cloud_wallet_success_age_seconds"] == 600
+
+
 # ---------------------------------------------------------------------------
 # _abs_move_bps
 # ---------------------------------------------------------------------------
@@ -257,6 +304,40 @@ def test_cloud_wallet_configured_false_when_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
+# market slot selection
+# ---------------------------------------------------------------------------
+
+
+def test_stable_market_slot_index_is_deterministic() -> None:
+    first = _stable_market_slot_index(market_id="market-alpha", slot_count=2)
+    second = _stable_market_slot_index(market_id="market-alpha", slot_count=2)
+    assert first in {0, 1}
+    assert first == second
+
+
+def test_select_markets_for_cycle_slot_rotates_between_slots() -> None:
+    class _Market:
+        def __init__(self, market_id: str) -> None:
+            self.market_id = market_id
+
+    enabled = [_Market("market-a"), _Market("market-b"), _Market("market-c"), _Market("market-d")]
+    first_cycle, first_slot = _select_markets_for_cycle_slot(
+        enabled_markets=enabled, slot_count=2, cycle_index=0
+    )
+    second_cycle, second_slot = _select_markets_for_cycle_slot(
+        enabled_markets=enabled, slot_count=2, cycle_index=1
+    )
+
+    first_ids = {m.market_id for m in first_cycle}
+    second_ids = {m.market_id for m in second_cycle}
+
+    assert first_slot == 0
+    assert second_slot == 1
+    assert first_ids.isdisjoint(second_ids)
+    assert first_ids | second_ids == {m.market_id for m in enabled}
+
+
+# ---------------------------------------------------------------------------
 # _market_pricing
 # ---------------------------------------------------------------------------
 
@@ -298,3 +379,40 @@ def test_resolve_quote_asset_xch_testnet() -> None:
 def test_resolve_quote_asset_hex_passthrough() -> None:
     hex_id = "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d"
     assert _resolve_quote_asset_for_offer(quote_asset=hex_id, network="mainnet") == hex_id
+
+
+def test_direct_spendable_lookup_fails_open_on_lookup_exception() -> None:
+    class _Wallet:
+        @staticmethod
+        def get_coin_record(*, coin_id: str) -> dict[str, Any]:
+            _ = coin_id
+            raise TimeoutError("The read operation timed out")
+
+    coin = {"id": "coin-1", "state": "SETTLED", "isLocked": False}
+    assert daemon_main._coin_matches_direct_spendable_lookup(
+        wallet=_Wallet(),
+        coin=coin,
+        scoped_asset_id="asset-1",
+        cache={},
+    )
+
+
+def test_direct_spendable_lookup_accepts_missing_asset_metadata() -> None:
+    class _Wallet:
+        @staticmethod
+        def get_coin_record(*, coin_id: str) -> dict[str, Any]:
+            _ = coin_id
+            return {
+                "id": "coin-1",
+                "state": "SETTLED",
+                "isLocked": False,
+                "isLinkedToOpenOffer": False,
+            }
+
+    coin = {"id": "coin-1", "state": "SETTLED", "isLocked": False}
+    assert daemon_main._coin_matches_direct_spendable_lookup(
+        wallet=_Wallet(),
+        coin=coin,
+        scoped_asset_id="asset-1",
+        cache={},
+    )
