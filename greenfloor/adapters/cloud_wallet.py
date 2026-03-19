@@ -714,9 +714,7 @@ query getSignatureRequest($id: ID!) {
         )
         request_timeout_seconds = max(
             5,
-            int(
-                os.getenv("GREENFLOOR_CLOUD_WALLET_HTTP_TIMEOUT_SECONDS", "10").strip() or "10"
-            ),
+            int(os.getenv("GREENFLOOR_CLOUD_WALLET_HTTP_TIMEOUT_SECONDS", "10").strip() or "10"),
         )
         for attempt in range(max_attempts):
             # Build fresh auth headers per attempt. Cloud Wallet rejects replayed
@@ -775,8 +773,14 @@ query getSignatureRequest($id: ID!) {
                 if snippet:
                     message = f"{message}:{snippet}"
                 raise RuntimeError(message) from exc
-            except urllib.error.URLError as exc:
-                if self._is_transient_url_error(exc.reason) and attempt < (max_attempts - 1):
+            except (urllib.error.URLError, TimeoutError) as exc:
+                reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+                is_transient = (
+                    self._is_transient_url_error(exc.reason)
+                    if isinstance(exc, urllib.error.URLError)
+                    else True
+                )
+                if is_transient and attempt < (max_attempts - 1):
                     sleep_seconds = self._backoff_seconds_for_attempt(
                         attempt_index=attempt,
                         retry_after_seconds=None,
@@ -786,43 +790,11 @@ query getSignatureRequest($id: ID!) {
                         attempt + 1,
                         max_attempts,
                         sleep_seconds,
-                        exc.reason,
+                        reason,
                     )
                     time.sleep(sleep_seconds)
                     continue
-                raise RuntimeError(f"cloud_wallet_network_error:{exc.reason}") from exc
-            except TimeoutError as exc:
-                if attempt < (max_attempts - 1):
-                    sleep_seconds = self._backoff_seconds_for_attempt(
-                        attempt_index=attempt,
-                        retry_after_seconds=None,
-                    )
-                    logger.warning(
-                        "cloud_wallet_transient_network_error attempt=%s/%s sleep_seconds=%.1f reason=%s",
-                        attempt + 1,
-                        max_attempts,
-                        sleep_seconds,
-                        exc,
-                    )
-                    time.sleep(sleep_seconds)
-                    continue
-                raise RuntimeError(f"cloud_wallet_network_error:{exc}") from exc
-            except socket.timeout as exc:
-                if attempt < (max_attempts - 1):
-                    sleep_seconds = self._backoff_seconds_for_attempt(
-                        attempt_index=attempt,
-                        retry_after_seconds=None,
-                    )
-                    logger.warning(
-                        "cloud_wallet_transient_network_error attempt=%s/%s sleep_seconds=%.1f reason=%s",
-                        attempt + 1,
-                        max_attempts,
-                        sleep_seconds,
-                        exc,
-                    )
-                    time.sleep(sleep_seconds)
-                    continue
-                raise RuntimeError(f"cloud_wallet_network_error:{exc}") from exc
+                raise RuntimeError(f"cloud_wallet_network_error:{reason}") from exc
             if not isinstance(payload, dict):
                 raise RuntimeError("cloud_wallet_invalid_response")
             errors = payload.get("errors")

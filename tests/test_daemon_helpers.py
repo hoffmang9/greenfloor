@@ -10,8 +10,8 @@ from greenfloor.daemon import main as daemon_main
 from greenfloor.daemon.main import (
     _abs_move_bps,
     _cancel_retry_config,
-    _cloud_wallet_market_health_payload,
     _cloud_wallet_configured,
+    _cloud_wallet_market_health_payload,
     _cooldown_remaining_ms,
     _disabled_market_log_interval_seconds,
     _env_int,
@@ -20,9 +20,7 @@ from greenfloor.daemon.main import (
     _post_retry_config,
     _resolve_quote_asset_for_offer,
     _retry_with_backoff,
-    _select_markets_for_cycle_slot,
     _set_cooldown,
-    _stable_market_slot_index,
     _should_log_disabled_market,
 )
 
@@ -215,32 +213,26 @@ def test_log_disabled_markets_startup_once_logs_and_seeds_throttle(monkeypatch) 
 
 
 def test_cloud_wallet_market_health_payload_tracks_503_and_last_success() -> None:
-    class _Store:
-        @staticmethod
-        def list_recent_audit_events(**kwargs: Any) -> list[dict[str, Any]]:
-            _ = kwargs
-            return [
-                {
-                    "created_at": "2026-03-19T02:55:00+00:00",
-                    "payload": {
-                        "items": [
-                            {
-                                "status": "skipped",
-                                "reason": "cloud_wallet_action_error:cloud_wallet_http_error:503:<html>...</html>",
-                            }
-                        ]
-                    },
-                },
-                {
-                    "created_at": "2026-03-19T02:50:00+00:00",
-                    "payload": {"items": [{"status": "executed", "reason": "cloud_wallet_post_success"}]},
-                },
-            ]
+    # Clear any leftover in-memory state from prior test runs.
+    daemon_main._CLOUD_WALLET_HEALTH_WINDOW.pop("m1-health-test", None)
+
+    success_time = datetime(2026, 3, 19, 2, 50, 0, tzinfo=UTC)
+    _cloud_wallet_market_health_payload(
+        market_id="m1-health-test",
+        current_items=[
+            {"status": "executed", "reason": "cloud_wallet_post_success"},
+            {
+                "status": "skipped",
+                "reason": "cloud_wallet_action_error:cloud_wallet_http_error:503:<html>...</html>",
+            },
+        ],
+        now=success_time,
+        window_size=20,
+    )
 
     now = datetime(2026, 3, 19, 3, 0, 0, tzinfo=UTC)
     payload = _cloud_wallet_market_health_payload(
-        store=_Store(),  # type: ignore[arg-type]
-        market_id="m1",
+        market_id="m1-health-test",
         current_items=[
             {
                 "status": "skipped",
@@ -248,13 +240,15 @@ def test_cloud_wallet_market_health_payload_tracks_503_and_last_success() -> Non
             }
         ],
         now=now,
-        recent_event_limit=20,
+        window_size=20,
     )
-    assert payload["market_id"] == "m1"
-    assert payload["rolling_window_events"] == 20
+    assert payload["market_id"] == "m1-health-test"
+    assert payload["rolling_window_events"] == 2
     assert payload["rolling_503_count"] == 2
     assert payload["last_cloud_wallet_success_at"] == "2026-03-19T02:50:00+00:00"
     assert payload["last_cloud_wallet_success_age_seconds"] == 600
+
+    daemon_main._CLOUD_WALLET_HEALTH_WINDOW.pop("m1-health-test", None)
 
 
 # ---------------------------------------------------------------------------
@@ -301,40 +295,6 @@ def test_cloud_wallet_configured_false_when_empty() -> None:
         cloud_wallet_vault_id = "Wallet_abc"
 
     assert _cloud_wallet_configured(_Prog()) is False
-
-
-# ---------------------------------------------------------------------------
-# market slot selection
-# ---------------------------------------------------------------------------
-
-
-def test_stable_market_slot_index_is_deterministic() -> None:
-    first = _stable_market_slot_index(market_id="market-alpha", slot_count=2)
-    second = _stable_market_slot_index(market_id="market-alpha", slot_count=2)
-    assert first in {0, 1}
-    assert first == second
-
-
-def test_select_markets_for_cycle_slot_rotates_between_slots() -> None:
-    class _Market:
-        def __init__(self, market_id: str) -> None:
-            self.market_id = market_id
-
-    enabled = [_Market("market-a"), _Market("market-b"), _Market("market-c"), _Market("market-d")]
-    first_cycle, first_slot = _select_markets_for_cycle_slot(
-        enabled_markets=enabled, slot_count=2, cycle_index=0
-    )
-    second_cycle, second_slot = _select_markets_for_cycle_slot(
-        enabled_markets=enabled, slot_count=2, cycle_index=1
-    )
-
-    first_ids = {m.market_id for m in first_cycle}
-    second_ids = {m.market_id for m in second_cycle}
-
-    assert first_slot == 0
-    assert second_slot == 1
-    assert first_ids.isdisjoint(second_ids)
-    assert first_ids | second_ids == {m.market_id for m in enabled}
 
 
 # ---------------------------------------------------------------------------

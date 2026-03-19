@@ -148,6 +148,13 @@ def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path:
         home_dir = str(tmp_path)
         app_network = "mainnet"
         app_log_level = "INFO"
+        runtime_cloud_wallet_bootstrap_signature_wait_timeout_seconds = 45
+        runtime_cloud_wallet_bootstrap_signature_warning_interval_seconds = 30
+        runtime_cloud_wallet_bootstrap_wait_timeout_seconds = 120
+        runtime_cloud_wallet_bootstrap_wait_mempool_warning_seconds = 30
+        runtime_cloud_wallet_bootstrap_wait_confirmation_warning_seconds = 60
+        runtime_cloud_wallet_create_signature_wait_timeout_seconds = 120
+        runtime_cloud_wallet_create_signature_warning_interval_seconds = 60
 
     class _Market:
         market_id = "m1"
@@ -214,6 +221,13 @@ def test_build_and_post_offer_cloud_wallet_emits_timing_diagnostics(tmp_path: Pa
         home_dir = str(tmp_path)
         app_network = "mainnet"
         app_log_level = "INFO"
+        runtime_cloud_wallet_bootstrap_signature_wait_timeout_seconds = 45
+        runtime_cloud_wallet_bootstrap_signature_warning_interval_seconds = 30
+        runtime_cloud_wallet_bootstrap_wait_timeout_seconds = 120
+        runtime_cloud_wallet_bootstrap_wait_mempool_warning_seconds = 30
+        runtime_cloud_wallet_bootstrap_wait_confirmation_warning_seconds = 60
+        runtime_cloud_wallet_create_signature_wait_timeout_seconds = 120
+        runtime_cloud_wallet_create_signature_warning_interval_seconds = 60
 
     class _Market:
         market_id = "m1"
@@ -487,11 +501,20 @@ def test_cloud_wallet_create_offer_phase_always_disables_split_input_coins() -> 
     assert captured["split_input_coins_fee"] == 0
 
 
-def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(tmp_path: Path) -> None:
+def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(
+    tmp_path: Path,
+) -> None:
     class _Program:
         home_dir = str(tmp_path)
         app_network = "mainnet"
         app_log_level = "INFO"
+        runtime_cloud_wallet_bootstrap_signature_wait_timeout_seconds = 45
+        runtime_cloud_wallet_bootstrap_signature_warning_interval_seconds = 30
+        runtime_cloud_wallet_bootstrap_wait_timeout_seconds = 120
+        runtime_cloud_wallet_bootstrap_wait_mempool_warning_seconds = 30
+        runtime_cloud_wallet_bootstrap_wait_confirmation_warning_seconds = 60
+        runtime_cloud_wallet_create_signature_wait_timeout_seconds = 120
+        runtime_cloud_wallet_create_signature_warning_interval_seconds = 60
 
     class _Market:
         market_id = "m1"
@@ -600,8 +623,6 @@ def test_bootstrap_uses_cloud_wallet_split_without_keyring() -> None:
         wallet=cast(Any, _Wallet()),
         resolved_base_asset_id="Asset_cat",
         resolved_quote_asset_id="Asset_quote",
-        key_id="key-main-1",
-        keyring_yaml_path="",
         quote_price=1.0,
         action_side="sell",
         plan_bootstrap_mixed_outputs_fn=lambda **_kwargs: _Plan(),

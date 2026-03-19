@@ -361,7 +361,9 @@ def test_cloud_wallet_graphql_retries_transient_http_503(monkeypatch, tmp_path: 
     assert sleeps == [1.0, 2.0]
 
 
-def test_cloud_wallet_graphql_retries_transient_network_timeout(monkeypatch, tmp_path: Path) -> None:
+def test_cloud_wallet_graphql_retries_transient_network_timeout(
+    monkeypatch, tmp_path: Path
+) -> None:
     adapter = _build_adapter(tmp_path)
     monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
     sleeps: list[float] = []

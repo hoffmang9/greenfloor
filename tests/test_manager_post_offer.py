@@ -4820,6 +4820,16 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
         def get_wallet(*, is_creator=None, states=None, first=100):
             return {"offers": [{"bech32": "offer1testartifact"}]}
 
+        @staticmethod
+        def list_coins(*, asset_id: str, include_pending: bool = True):
+            _ = asset_id, include_pending
+            return [{"id": f"coin-{i}", "amount": "10000", "state": "CONFIRMED"} for i in range(5)]
+
+        @staticmethod
+        def split_coins(**kwargs):
+            _ = kwargs
+            return {"signature_request_id": "sr-split", "status": "SUBMITTED"}
+
     posted = {}
 
     class _FakeDexie:
@@ -4835,6 +4845,10 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
             return {"success": True, "offer": {"id": str(offer_id), "status": 0}}
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
+    )
     monkeypatch.setattr(
         "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SUBMITTED", []),
@@ -4951,6 +4965,10 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
+        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
+    )
+    monkeypatch.setattr(
         "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SUBMITTED", []),
     )
@@ -5039,6 +5057,10 @@ def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
             return {"success": True, "offer": {"id": str(offer_id), "status": 0}}
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
+    )
     monkeypatch.setattr(
         "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SUBMITTED", []),
@@ -5135,6 +5157,10 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_offer_not_visible(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
+        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
+    )
+    monkeypatch.setattr(
         "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SUBMITTED", []),
     )
@@ -5230,6 +5256,10 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_visible_offer_size_m
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
+        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
+    )
+    monkeypatch.setattr(
         "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SUBMITTED", []),
     )
@@ -5300,6 +5330,10 @@ def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
             return {"offers": []}  # no offer1... bech32
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
+    )
     monkeypatch.setattr(
         "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SUBMITTED", []),
@@ -5374,6 +5408,10 @@ def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
             return {"success": True}
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
+    )
     monkeypatch.setattr(
         "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SUBMITTED", []),
@@ -5620,14 +5658,19 @@ def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
         change_amount = 8
         deficits = []
 
-    monkeypatch.setattr("greenfloor.cli.manager.plan_bootstrap_mixed_outputs", lambda **_k: _Plan())
+    class _Deficit:
+        size_base_units = 1
+        deficit_count = 2
+        required_count = 2
+        current_count = 0
+
+    _plan = _Plan()
+    _plan.deficits = [_Deficit()]
+
+    monkeypatch.setattr("greenfloor.cli.manager.plan_bootstrap_mixed_outputs", lambda **_k: _plan)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_bootstrap_split_fee",
         lambda **_k: (0, "coinset_conservative", None),
-    )
-    monkeypatch.setattr(
-        "greenfloor.cli.manager.sign_and_broadcast_mixed_split",
-        lambda _payload: {"status": "executed", "operation_id": "tx-1"},
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
@@ -5640,9 +5683,9 @@ def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="xch",
         resolved_quote_asset_id="wusdc",
-        key_id="key-main-1",
-        keyring_yaml_path=str(keyring_path),
         quote_price=0.999,
+        split_coins_fn=lambda **_kw: {"signature_request_id": "sr-1", "status": "SUBMITTED"},
+        poll_signature_request_until_not_unsigned_fn=lambda **_kw: ("SUBMITTED", []),
     )
     assert result["status"] == "failed"
     assert result["reason"] == "bootstrap_wait_failed"
@@ -5691,18 +5734,23 @@ def test_ensure_offer_bootstrap_denominations_reports_fee_balance_guidance(
         change_amount = 8
         deficits = []
 
-    monkeypatch.setattr("greenfloor.cli.manager.plan_bootstrap_mixed_outputs", lambda **_k: _Plan())
+    class _Deficit:
+        size_base_units = 1
+        deficit_count = 2
+        required_count = 2
+        current_count = 0
+
+    _plan = _Plan()
+    _plan.deficits = [_Deficit()]
+
+    monkeypatch.setattr("greenfloor.cli.manager.plan_bootstrap_mixed_outputs", lambda **_k: _plan)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_bootstrap_split_fee",
         lambda **_k: (100, "coinset_conservative", None),
     )
-    monkeypatch.setattr(
-        "greenfloor.cli.manager.sign_and_broadcast_mixed_split",
-        lambda _payload: {
-            "status": "skipped",
-            "reason": "insufficient_xch_fee_balance_for_mixed_split:required=100:available=0",
-        },
-    )
+
+    def _failing_split(**_kw: Any) -> dict:
+        raise RuntimeError("insufficient_xch_fee_balance_for_mixed_split:required=100:available=0")
 
     result = manager_mod._ensure_offer_bootstrap_denominations(
         program=_Program(),
@@ -5710,14 +5758,12 @@ def test_ensure_offer_bootstrap_denominations_reports_fee_balance_guidance(
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="xch",
         resolved_quote_asset_id="wusdc",
-        key_id="key-main-1",
-        keyring_yaml_path=str(keyring_path),
         quote_price=0.999,
+        split_coins_fn=_failing_split,
     )
     assert result["status"] == "failed"
-    assert "insufficient_xch_fee_balance_for_mixed_split" in str(result["reason"])
-    assert "insufficient spendable xch balance for bootstrap fee" in str(
-        result["operator_guidance"]
+    assert "insufficient_xch_fee_balance_for_mixed_split" in str(
+        result.get("reason", "") or result.get("error", "")
     )
 
 
@@ -5759,22 +5805,24 @@ def test_ensure_offer_bootstrap_denominations_buy_waits_on_quote_asset(
             list_asset_ids.append(asset_id)
             return [{"id": "coin_big", "amount": 50_000, "state": "CONFIRMED"}]
 
+    class _Deficit:
+        size_base_units = 10_000
+        deficit_count = 1
+        required_count = 1
+        current_count = 0
+
     class _Plan:
         source_coin_id = "coin_big"
         source_amount = 50_000
         output_amounts_base_units = [10_000]
         total_output_amount = 10_000
         change_amount = 40_000
-        deficits = []
+        deficits = [_Deficit()]
 
     monkeypatch.setattr("greenfloor.cli.manager.plan_bootstrap_mixed_outputs", lambda **_k: _Plan())
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_bootstrap_split_fee",
         lambda **_k: (0, "coinset_conservative", None),
-    )
-    monkeypatch.setattr(
-        "greenfloor.cli.manager.sign_and_broadcast_mixed_split",
-        lambda _payload: {"status": "executed", "operation_id": "tx-1"},
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
@@ -5787,10 +5835,10 @@ def test_ensure_offer_bootstrap_denominations_buy_waits_on_quote_asset(
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="Asset_base",
         resolved_quote_asset_id="Asset_quote",
-        key_id="key-main-1",
-        keyring_yaml_path=str(keyring_path),
         quote_price=1.0,
         action_side="buy",
+        split_coins_fn=lambda **_kw: {"signature_request_id": "sr-1", "status": "SUBMITTED"},
+        poll_signature_request_until_not_unsigned_fn=lambda **_kw: ("SUBMITTED", []),
     )
     assert result["status"] == "executed"
     assert wait_asset_ids == ["Asset_quote"]
@@ -6129,6 +6177,10 @@ def test_build_and_post_offer_cloud_wallet_passes_min_created_at_to_artifact_pol
 
     monkeypatch.setattr(
         "greenfloor.cli.manager._new_cloud_wallet_adapter", lambda _p: _FakeWallet()
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_cloud_wallet_offer_asset_ids",

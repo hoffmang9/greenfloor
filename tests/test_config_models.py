@@ -252,7 +252,6 @@ def test_parse_program_config_minimal_valid() -> None:
     assert cfg.runtime_dry_run is False
     assert cfg.tx_block_trigger_mode == "websocket"
     assert cfg.runtime_parallel_markets is False
-    assert cfg.runtime_market_slot_count == 1
     assert cfg.runtime_offer_parallelism_enabled is False
     assert cfg.runtime_offer_parallelism_max_workers == 4
     assert cfg.runtime_reservation_ttl_seconds == 300
@@ -337,13 +336,6 @@ def test_parse_program_config_parallel_markets_enabled() -> None:
     raw["runtime"]["parallel_markets"] = True
     cfg = parse_program_config(raw)
     assert cfg.runtime_parallel_markets is True
-
-
-def test_parse_program_config_market_slot_count_runtime_flag() -> None:
-    raw = _base_program_raw()
-    raw["runtime"]["market_slot_count"] = 2
-    cfg = parse_program_config(raw)
-    assert cfg.runtime_market_slot_count == 2
 
 
 def test_parse_program_config_offer_parallelism_runtime_flags() -> None:

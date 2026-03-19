@@ -1898,7 +1898,8 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
     )
     assert result["executed_count"] == 0
     assert all(
-        str(item.get("reason", "")).startswith("parallel_offer_worker_error:") for item in result["items"]
+        str(item.get("reason", "")).startswith("parallel_offer_worker_error:")
+        for item in result["items"]
     )
     remaining_ms = daemon_main._cooldown_remaining_ms(
         daemon_main._POST_COOLDOWN_UNTIL,

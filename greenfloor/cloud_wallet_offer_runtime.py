@@ -1598,8 +1598,6 @@ def ensure_offer_bootstrap_denominations(
     wallet: CloudWalletAdapter,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
-    key_id: str,
-    keyring_yaml_path: str,
     quote_price: float,
     action_side: str = "sell",
     bootstrap_signature_wait_timeout_seconds: int = 45,
@@ -1609,8 +1607,6 @@ def ensure_offer_bootstrap_denominations(
     bootstrap_wait_confirmation_warning_seconds: int = 60,
     plan_bootstrap_mixed_outputs_fn: collections.abc.Callable[..., Any] | None = None,
     resolve_bootstrap_split_fee_fn: collections.abc.Callable[..., tuple[int, str, str | None]]
-    | None = None,
-    sign_and_broadcast_mixed_split_fn: collections.abc.Callable[[dict[str, Any]], dict[str, Any]]
     | None = None,
     split_coins_fn: collections.abc.Callable[..., dict[str, Any]] | None = None,
     poll_signature_request_until_not_unsigned_fn: collections.abc.Callable[
@@ -1625,9 +1621,8 @@ def ensure_offer_bootstrap_denominations(
         plan_bootstrap_mixed_outputs_fn = plan_bootstrap_mixed_outputs
     if resolve_bootstrap_split_fee_fn is None:
         resolve_bootstrap_split_fee_fn = _resolve_bootstrap_split_fee
-    _ = sign_and_broadcast_mixed_split_fn
     if split_coins_fn is None:
-        split_coins_fn = wallet.split_coins
+        split_coins_fn = getattr(wallet, "split_coins", None)
     if poll_signature_request_until_not_unsigned_fn is None:
         poll_signature_request_until_not_unsigned_fn = poll_signature_request_until_not_unsigned
     if wait_for_mempool_then_confirmation_fn is None:
@@ -1681,7 +1676,6 @@ def ensure_offer_bootstrap_denominations(
     )
     if bootstrap_plan is None:
         return {"status": "skipped", "reason": "already_ready"}
-    _ = key_id, keyring_yaml_path
     fee_mojos, fee_source, fee_lookup_error = resolve_bootstrap_split_fee_fn(
         network=str(program.app_network),
         minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
@@ -1714,6 +1708,8 @@ def ensure_offer_bootstrap_denominations(
                 "max_coin_count_from_source": max_coin_count,
             },
         }
+    if split_coins_fn is None:
+        return {"status": "failed", "reason": "split_coins_not_available"}
     try:
         split_result = split_coins_fn(
             coin_ids=[bootstrap_plan.source_coin_id],
@@ -1775,9 +1771,7 @@ def ensure_offer_bootstrap_denominations(
             initial_coin_ids=existing_coin_ids,
             asset_id=split_asset_id,
             mempool_warning_seconds=max(10, int(bootstrap_wait_mempool_warning_seconds)),
-            confirmation_warning_seconds=max(
-                10, int(bootstrap_wait_confirmation_warning_seconds)
-            ),
+            confirmation_warning_seconds=max(10, int(bootstrap_wait_confirmation_warning_seconds)),
             timeout_seconds=max(10, int(bootstrap_wait_timeout_seconds)),
         )
     except Exception as exc:
@@ -2102,8 +2096,6 @@ def build_and_post_offer_cloud_wallet(
     *,
     program: Any,
     market: Any,
-    key_id: str = "",
-    keyring_yaml_path: str = "",
     size_base_units: int,
     repeat: int,
     publish_venue: str,
@@ -2165,51 +2157,26 @@ def build_and_post_offer_cloud_wallet(
         dexie_offer_view_url_fn = dexie_offer_view_url
 
     side = normalize_offer_side(action_side)
-    bootstrap_signature_wait_timeout_seconds = max(
-        5,
-        int(
-            getattr(program, "runtime_cloud_wallet_bootstrap_signature_wait_timeout_seconds", 45)
-        ),
+    bootstrap_signature_wait_timeout_seconds = int(
+        program.runtime_cloud_wallet_bootstrap_signature_wait_timeout_seconds
     )
-    bootstrap_signature_warning_interval_seconds = max(
-        5,
-        int(
-            getattr(
-                program,
-                "runtime_cloud_wallet_bootstrap_signature_warning_interval_seconds",
-                30,
-            )
-        ),
+    bootstrap_signature_warning_interval_seconds = int(
+        program.runtime_cloud_wallet_bootstrap_signature_warning_interval_seconds
     )
-    bootstrap_wait_timeout_seconds = max(
-        10, int(getattr(program, "runtime_cloud_wallet_bootstrap_wait_timeout_seconds", 120))
+    bootstrap_wait_timeout_seconds = int(
+        program.runtime_cloud_wallet_bootstrap_wait_timeout_seconds
     )
-    bootstrap_wait_mempool_warning_seconds = max(
-        10,
-        int(getattr(program, "runtime_cloud_wallet_bootstrap_wait_mempool_warning_seconds", 30)),
+    bootstrap_wait_mempool_warning_seconds = int(
+        program.runtime_cloud_wallet_bootstrap_wait_mempool_warning_seconds
     )
-    bootstrap_wait_confirmation_warning_seconds = max(
-        10,
-        int(
-            getattr(
-                program,
-                "runtime_cloud_wallet_bootstrap_wait_confirmation_warning_seconds",
-                60,
-            )
-        ),
+    bootstrap_wait_confirmation_warning_seconds = int(
+        program.runtime_cloud_wallet_bootstrap_wait_confirmation_warning_seconds
     )
-    create_signature_wait_timeout_seconds = max(
-        5, int(getattr(program, "runtime_cloud_wallet_create_signature_wait_timeout_seconds", 120))
+    create_signature_wait_timeout_seconds = int(
+        program.runtime_cloud_wallet_create_signature_wait_timeout_seconds
     )
-    create_signature_warning_interval_seconds = max(
-        5,
-        int(
-            getattr(
-                program,
-                "runtime_cloud_wallet_create_signature_warning_interval_seconds",
-                60,
-            )
-        ),
+    create_signature_warning_interval_seconds = int(
+        program.runtime_cloud_wallet_create_signature_warning_interval_seconds
     )
     initialize_manager_file_logging_fn(
         program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
@@ -2248,19 +2215,21 @@ def build_and_post_offer_cloud_wallet(
     )
 
     for _ in range(repeat):
-        offer_attempt_started = time.monotonic()
-        create_phase_ms: int | None = None
-        artifact_wait_ms: int | None = None
-        create_total_ms: int | None = None
-        publish_ms: int | None = None
+        _t: dict[str, int | None] = {
+            "started": int(time.monotonic() * 1000),
+            "create_phase_ms": None,
+            "artifact_wait_ms": None,
+            "create_total_ms": None,
+            "publish_ms": None,
+        }
 
-        def _timing_payload() -> dict[str, int | None]:
+        def _timing_payload(_t: dict[str, int | None] = _t) -> dict[str, int | None]:
             return {
-                "create_phase_ms": create_phase_ms,
-                "artifact_wait_ms": artifact_wait_ms,
-                "create_total_ms": create_total_ms,
-                "publish_ms": publish_ms,
-                "total_ms": int((time.monotonic() - offer_attempt_started) * 1000),
+                "create_phase_ms": _t["create_phase_ms"],
+                "artifact_wait_ms": _t["artifact_wait_ms"],
+                "create_total_ms": _t["create_total_ms"],
+                "publish_ms": _t["publish_ms"],
+                "total_ms": int(time.monotonic() * 1000) - int(_t["started"] or 0),
             }
 
         bootstrap_result: dict[str, Any] = {"status": "skipped", "reason": "dry_run"}
@@ -2273,8 +2242,6 @@ def build_and_post_offer_cloud_wallet(
                 wallet=wallet,
                 resolved_base_asset_id=resolved_base_asset_id,
                 resolved_quote_asset_id=resolved_quote_asset_id,
-                key_id=key_id,
-                keyring_yaml_path=keyring_yaml_path,
                 quote_price=float(quote_price),
                 action_side=side,
                 bootstrap_signature_wait_timeout_seconds=bootstrap_signature_wait_timeout_seconds,
@@ -2285,22 +2252,25 @@ def build_and_post_offer_cloud_wallet(
             )
             bootstrap_actions.append(bootstrap_result)
             bootstrap_status = str(bootstrap_result.get("status", "")).strip().lower()
-            bootstrap_reason = str(bootstrap_result.get("reason", "")).strip() or "bootstrap_precheck_failed"
+            bootstrap_reason = (
+                str(bootstrap_result.get("reason", "")).strip() or "bootstrap_precheck_failed"
+            )
             bootstrap_ready = bool(bootstrap_result.get("ready", False))
             if bootstrap_status == "failed":
-                post_results.append(
-                    {
-                        "venue": publish_venue,
-                        "result": {
-                            "success": False,
-                            "error": f"bootstrap_failed:{bootstrap_reason}",
-                            "bootstrap": bootstrap_result,
-                            "timing_ms": _timing_payload(),
-                        },
-                    }
-                )
-                publish_failures += 1
-                continue
+                if not bootstrap_result.get("fallback_to_cloud_wallet_offer_split"):
+                    post_results.append(
+                        {
+                            "venue": publish_venue,
+                            "result": {
+                                "success": False,
+                                "error": f"bootstrap_failed:{bootstrap_reason}",
+                                "bootstrap": bootstrap_result,
+                                "timing_ms": _timing_payload(),
+                            },
+                        }
+                    )
+                    publish_failures += 1
+                    continue
             if bootstrap_status == "executed" and not bootstrap_ready:
                 post_results.append(
                     {
@@ -2347,7 +2317,7 @@ def build_and_post_offer_cloud_wallet(
                 signature_wait_timeout_seconds=create_signature_wait_timeout_seconds,
                 signature_wait_warning_interval_seconds=create_signature_warning_interval_seconds,
             )
-            create_phase_ms = int((time.monotonic() - create_started) * 1000)
+            _t["create_phase_ms"] = int((time.monotonic() - create_started) * 1000)
         except Exception as exc:
             post_results.append(
                 {
@@ -2375,8 +2345,8 @@ def build_and_post_offer_cloud_wallet(
                 signature_request_id=signature_request_id,
                 timeout_seconds=int(offer_artifact_timeout_seconds),
             )
-            artifact_wait_ms = int((time.monotonic() - wait_started) * 1000)
-            create_total_ms = int((time.monotonic() - create_started) * 1000)
+            _t["artifact_wait_ms"] = int((time.monotonic() - wait_started) * 1000)
+            _t["create_total_ms"] = int((time.monotonic() - create_started) * 1000)
         except RuntimeError as exc:
             post_results.append(
                 {
@@ -2470,7 +2440,7 @@ def build_and_post_offer_cloud_wallet(
                 else str(getattr(market, "quote_asset", ""))
             ),
         )
-        publish_ms = int((time.monotonic() - publish_started) * 1000)
+        _t["publish_ms"] = int((time.monotonic() - publish_started) * 1000)
         if result.get("success") is False:
             publish_failures += 1
         offer_id = str(result.get("id", "")).strip()

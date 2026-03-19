@@ -117,7 +117,6 @@ from greenfloor.logging_setup import (
     warn_if_log_level_auto_healed,
 )
 from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
-from greenfloor.signing import sign_and_broadcast_mixed_split
 from greenfloor.storage.sqlite import SqliteStore
 
 _TEST_PHASE_OFFER_EXPIRY_MINUTES = 5
@@ -2412,10 +2411,9 @@ def _ensure_offer_bootstrap_denominations(
     wallet: CloudWalletAdapter,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
-    key_id: str,
-    keyring_yaml_path: str,
     quote_price: float,
     action_side: str = "sell",
+    **kwargs: Any,
 ) -> dict[str, Any]:
     return _shared_ensure_offer_bootstrap_denominations(
         program=program,
@@ -2423,15 +2421,13 @@ def _ensure_offer_bootstrap_denominations(
         wallet=wallet,
         resolved_base_asset_id=resolved_base_asset_id,
         resolved_quote_asset_id=resolved_quote_asset_id,
-        key_id=key_id,
-        keyring_yaml_path=keyring_yaml_path,
         quote_price=quote_price,
         action_side=action_side,
         plan_bootstrap_mixed_outputs_fn=plan_bootstrap_mixed_outputs,
         resolve_bootstrap_split_fee_fn=_resolve_bootstrap_split_fee,
-        sign_and_broadcast_mixed_split_fn=sign_and_broadcast_mixed_split,
         wait_for_mempool_then_confirmation_fn=_wait_for_mempool_then_confirmation,
         is_spendable_coin_fn=_is_spendable_coin,
+        **kwargs,
     )
 
 
@@ -2448,6 +2444,7 @@ def _cloud_wallet_create_offer_phase(
     expiry_unit: str,
     expiry_value: int,
     action_side: str = "sell",
+    **kwargs: Any,
 ) -> dict[str, Any]:
     return _shared_cloud_wallet_create_offer_phase(
         wallet=wallet,
@@ -2463,6 +2460,7 @@ def _cloud_wallet_create_offer_phase(
         action_side=action_side,
         wallet_get_wallet_offers_fn=_wallet_get_wallet_offers,
         poll_signature_request_until_not_unsigned_fn=_poll_signature_request_until_not_unsigned,
+        **kwargs,
     )
 
 
@@ -2536,11 +2534,10 @@ def _build_and_post_offer_cloud_wallet(
     action_side: str = "sell",
     offer_artifact_timeout_seconds: int = 15 * 60,
 ) -> tuple[int, dict[str, Any]]:
+    _ = key_id, keyring_yaml_path
     return _shared_build_and_post_offer_cloud_wallet(
         program=program,
         market=market,
-        key_id=key_id,
-        keyring_yaml_path=keyring_yaml_path,
         size_base_units=size_base_units,
         repeat=repeat,
         publish_venue=publish_venue,
