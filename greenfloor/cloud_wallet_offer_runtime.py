@@ -12,7 +12,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter
@@ -42,6 +42,18 @@ _DEXIE_VISIBILITY_POST_MAX_ATTEMPTS = 3
 _DEXIE_VISIBILITY_POST_DELAY_SECONDS = 2.0
 _runtime_logger = logging.getLogger("greenfloor.manager")
 _JSON_OUTPUT_COMPACT = False
+
+
+class SupportsWalletAssetsSeed(Protocol):
+    """Minimal Cloud Wallet shape for ``seed_cloud_wallet_assets_cache``."""
+
+    @property
+    def vault_id(self) -> str: ...
+
+    @property
+    def _base_url(self) -> str: ...
+
+    def _graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]: ...
 
 
 def _format_json_output(payload: object) -> str:
@@ -505,7 +517,7 @@ query resolveWalletAssets($walletId: ID!) {
 
 def seed_cloud_wallet_assets_cache(
     *,
-    wallet: CloudWalletAdapter,
+    wallet: SupportsWalletAssetsSeed,
     program_home_dir: str,
 ) -> dict[str, Any]:
     """Fetch ``resolveWalletAssets`` once and write the disk catalog cache.

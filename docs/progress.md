@@ -1,5 +1,31 @@
 # Progress Log
 
+## 2026-03-19 (post-#56 through `feat/cloud-wallet-asset-cache-and-seed-cli`: CW resilience, combine fixes, asset cache)
+
+Reviewed `main` from **`178121c`** (`feat: vault coinset scanner with CAT filters and dust combine`, #56) through branch tip **`73e478d`** (`feat/cloud-wallet-asset-cache-and-seed-cli`). Summary of merged / branch-only work in range `178121c..HEAD`:
+
+- **`24cc814` — #57 fix: stabilize CAT combine resolution and offer state reconciliation**
+  - Hardened CAT coin re-resolution in Cloud Wallet / Coinset combine paths so transient misses do not skip combine batches.
+  - Tightened offer lifecycle handling so Dexie status fallbacks do not incorrectly promote offers into **mempool** / orphaned-style states.
+  - Touches: `greenfloor/cloud_wallet_offer_runtime.py`, `greenfloor/daemon/main.py`, `greenfloor/signing.py`, `scripts/combine_coinset_direct.py`, plus new/extended daemon and combine tests.
+
+- **`3a3ce23` — #58 fix: harden cloud-wallet offer execution during upstream instability**
+  - Shorter / clearer timeout budgets and **per-market isolation** so one stuck market does not stall the whole daemon cycle; added **market health** style telemetry for diagnosing 503-heavy deficits.
+  - Refactor pass: deduplicated `CloudWalletAdapter._graphql` error handling, shared helpers (`_opt_int`, `_execute_cloud_wallet_action_with_retry`, `_log_offer_action_timing`), replaced per-cycle DB “health” probing with an **in-memory rolling window**, removed dead parallel slotting helpers, consolidated **`runtime.cloud_wallet_*`** timeouts into **`ProgramConfig`** with explicit defaults, restored bootstrap `fallback_to_cloud_wallet_offer_split` behavior, and repaired manager post-offer tests under the new shapes.
+  - Large diff in `greenfloor/daemon/main.py`, `greenfloor/cli/manager.py`, adapter/runtime tests.
+
+- **`8a14217` — #59 fix: handle callable `coin_id` in direct combine resolution**
+  - Some `chia-wallet-sdk` surfaces expose CAT `coin_id` as a callable; `scripts/combine_coinset_direct.py` now normalizes extraction before `to_hex` so direct combines work across SDK variants.
+  - Tests in `tests/test_combine_coinset_direct.py`.
+
+- **`73e478d` — feat(cloud-wallet): disk asset catalog cache, GraphQL timing, `seed-wallet-assets-cache`**
+  - New module `greenfloor/cloud_wallet_asset_cache.py`: persists **`resolveWalletAssets`** edges under **`$HOME/.greenfloor/cache/`** (keyed by API origin + vault) with **TTL** (`GREENFLOOR_CLOUD_WALLET_ASSETS_CACHE_TTL_SECONDS`, minimum 60s).
+  - GraphQL client: structured **`cloud_wallet_graphql_ok`** / slow / failure logging with **`duration_ms`**, **`http_timeout_s`**, **`operation`**; env overrides **`GREENFLOOR_CLOUD_WALLET_HTTP_TIMEOUT_SECONDS`**, **`GREENFLOOR_CLOUD_WALLET_MAX_ATTEMPTS`**, **`GREENFLOOR_CLOUD_WALLET_SLOW_LOG_MS`** (documented in `docs/runbook.md`).
+  - Manager: **`seed-wallet-assets-cache`** to warm the catalog without going through offer creation; **`SupportsWalletAssetsSeed`** protocol for `seed_cloud_wallet_assets_cache` typing/tests.
+  - `config/program.yaml` sample / defaults aligned with consolidated runtime knobs where applicable.
+
+**Net:** ~2.4k insertions / ~436 deletions across 20 files (diffstat `178121c..HEAD`). Operational focus: **Vault API instability** (timeouts, 504/503), **deterministic combine + reconciliation**, and **fewer redundant `resolveWalletAssets` calls** via disk cache + explicit seed command.
+
 ## 2026-03-12 (Auto-increment scan mode + John-Deere production validation request)
 
 - Extended `scripts/list_vault_coins_coinset.py` incremental workflow with `--auto-increment`:

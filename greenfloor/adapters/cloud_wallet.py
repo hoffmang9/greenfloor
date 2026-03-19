@@ -746,8 +746,8 @@ query getSignatureRequest($id: ID!) {
         for attempt in range(max_attempts):
             attempt_started = time.monotonic()
 
-            def elapsed_ms() -> int:
-                return int((time.monotonic() - attempt_started) * 1000)
+            def elapsed_ms(_t0: float = attempt_started) -> int:
+                return int((time.monotonic() - _t0) * 1000)
 
             # Build fresh auth headers per attempt. Cloud Wallet rejects replayed
             # nonces, so retries must not reuse the same signed request headers.

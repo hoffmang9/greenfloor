@@ -2511,9 +2511,7 @@ def test_coins_list_vault_id_override_uses_override_wallet_end_to_end(
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _OverrideWallet)
     monkeypatch.setattr(
         "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
-        lambda **kw: (
-            resolver_wallet_ids.append(kw["wallet"].vault_id) or "Asset_resolved"
-        ),
+        lambda **kw: (resolver_wallet_ids.append(kw["wallet"].vault_id) or "Asset_resolved"),
     )
 
     code = _coins_list(

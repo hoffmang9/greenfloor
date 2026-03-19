@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -43,9 +44,7 @@ def test_wallet_assets_cache_respects_ttl(tmp_path: Path, monkeypatch: pytest.Mo
 
 def test_wallet_assets_cache_rejects_schema_mismatch(tmp_path: Path) -> None:
     home = str(tmp_path / "h")
-    path = wallet_assets_cache_path(
-        home, base_url="https://x.example", vault_id="Wallet_q"
-    )
+    path = wallet_assets_cache_path(home, base_url="https://x.example", vault_id="Wallet_q")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
@@ -59,9 +58,7 @@ def test_wallet_assets_cache_rejects_schema_mismatch(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    assert (
-        load_wallet_assets_edges(home, base_url="https://x.example", vault_id="Wallet_q") is None
-    )
+    assert load_wallet_assets_edges(home, base_url="https://x.example", vault_id="Wallet_q") is None
 
 
 def test_wallet_assets_cache_ttl_default_is_twelve_hours(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -77,7 +74,7 @@ def test_seed_cloud_wallet_assets_cache_writes_file(tmp_path: Path) -> None:
         vault_id = "Wallet_v"
         _base_url = "https://cw.example"
 
-        def _graphql(self, query: str, variables: dict) -> dict:
+        def _graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]:
             assert variables.get("walletId") == "Wallet_v"
             return {"wallet": {"assets": {"edges": edges}}}
 
@@ -94,7 +91,7 @@ def test_seed_cloud_wallet_assets_cache_empty_edges_raises(tmp_path: Path) -> No
         vault_id = "Wallet_v"
         _base_url = "https://cw.example"
 
-        def _graphql(self, query: str, variables: dict) -> dict:
+        def _graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]:
             return {"wallet": {"assets": {"edges": []}}}
 
     with pytest.raises(RuntimeError, match="empty_edges"):

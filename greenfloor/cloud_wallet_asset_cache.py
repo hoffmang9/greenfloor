@@ -42,7 +42,10 @@ def _cache_stem(*, base_url: str, vault_id: str) -> str:
 
 
 def wallet_assets_cache_path(home_dir: str, *, base_url: str, vault_id: str) -> Path:
-    return wallet_assets_cache_dir(home_dir) / f"{_cache_stem(base_url=base_url, vault_id=vault_id)}.json"
+    return (
+        wallet_assets_cache_dir(home_dir)
+        / f"{_cache_stem(base_url=base_url, vault_id=vault_id)}.json"
+    )
 
 
 def load_wallet_assets_edges(

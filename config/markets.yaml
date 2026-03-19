@@ -185,8 +185,6 @@ markets:
       max_price_quote_per_base: 0.0037
       slippage_bps: 100
       strategy_target_spread_bps: 140
-      strategy_min_xch_price_usd: 20.0
-      strategy_max_xch_price_usd: 60.0
       strategy_offer_expiry_minutes: 10
       cancel_move_threshold_bps: 300
       cancel_policy_stable_vs_unstable: true
