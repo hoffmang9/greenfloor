@@ -1928,6 +1928,7 @@ def _resolve_cloud_wallet_offer_asset_ids_for_reservation(
         quote_symbol_hint=str(getattr(market, "quote_asset", "") or ""),
         base_global_id_hint=str(getattr(market, "cloud_wallet_base_global_id", "") or ""),
         quote_global_id_hint=str(getattr(market, "cloud_wallet_quote_global_id", "") or ""),
+        program_home_dir=str(getattr(program, "home_dir", "") or ""),
     )
     resolved_xch_asset_id, _ = resolve_cloud_wallet_offer_asset_ids(
         wallet=wallet,
@@ -1937,6 +1938,7 @@ def _resolve_cloud_wallet_offer_asset_ids_for_reservation(
         quote_symbol_hint=str(getattr(market, "quote_asset", "") or ""),
         base_global_id_hint="",
         quote_global_id_hint=str(getattr(market, "cloud_wallet_quote_global_id", "") or ""),
+        program_home_dir=str(getattr(program, "home_dir", "") or ""),
     )
     return resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id
 

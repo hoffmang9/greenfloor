@@ -17,6 +17,16 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# GraphQL document shape: `query Name(` / `mutation Name(` / `query {` (anonymous).
+_GRAPHQL_NAMED_OP_RE = re.compile(
+    r"\b(query|mutation|subscription)\s+(\w+)\s*[\(\{]",
+    re.IGNORECASE | re.DOTALL,
+)
+_GRAPHQL_ANON_OP_RE = re.compile(
+    r"\b(query|mutation|subscription)\s*\{",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 @dataclass(frozen=True, slots=True)
 class CloudWalletConfig:
@@ -707,6 +717,17 @@ query getSignatureRequest($id: ID!) {
             return exponential
         return float(max(exponential, int(retry_after_seconds)))
 
+    @staticmethod
+    def _graphql_operation_label(query: str) -> str:
+        text = str(query or "")
+        match = _GRAPHQL_NAMED_OP_RE.search(text)
+        if match:
+            return f"{match.group(1).lower()}_{match.group(2)}"
+        match = _GRAPHQL_ANON_OP_RE.search(text)
+        if match:
+            return f"{match.group(1).lower()}_anonymous"
+        return "unknown"
+
     def _graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps({"query": query, "variables": variables}, separators=(",", ":"))
         max_attempts = max(
@@ -716,7 +737,18 @@ query getSignatureRequest($id: ID!) {
             5,
             int(os.getenv("GREENFLOOR_CLOUD_WALLET_HTTP_TIMEOUT_SECONDS", "10").strip() or "10"),
         )
+        operation = self._graphql_operation_label(query)
+        slow_ms_env = os.getenv("GREENFLOOR_CLOUD_WALLET_SLOW_LOG_MS", "").strip()
+        if slow_ms_env:
+            slow_threshold_ms = max(0, int(slow_ms_env or "0"))
+        else:
+            slow_threshold_ms = max(1, int(request_timeout_seconds * 1000 * 0.8))
         for attempt in range(max_attempts):
+            attempt_started = time.monotonic()
+
+            def elapsed_ms() -> int:
+                return int((time.monotonic() - attempt_started) * 1000)
+
             # Build fresh auth headers per attempt. Cloud Wallet rejects replayed
             # nonces, so retries must not reuse the same signed request headers.
             headers = self._build_auth_headers(body)
@@ -735,6 +767,7 @@ query getSignatureRequest($id: ID!) {
                 with urllib.request.urlopen(req, timeout=request_timeout_seconds) as resp:
                     payload = json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as exc:
+                duration_ms = elapsed_ms()
                 raw = exc.read().decode("utf-8", errors="replace").strip()
                 snippet = raw[:200] if raw else ""
                 retry_after_header = exc.headers.get("Retry-After") if exc.headers else None
@@ -747,7 +780,10 @@ query getSignatureRequest($id: ID!) {
                         retry_after_seconds=retry_after_seconds,
                     )
                     logger.warning(
-                        "cloud_wallet_rate_limited http_status=429 attempt=%s/%s sleep_seconds=%.1f retry_after_seconds=%s",
+                        "cloud_wallet_rate_limited http_status=429 operation=%s duration_ms=%s "
+                        "attempt=%s/%s sleep_seconds=%.1f retry_after_seconds=%s",
+                        operation,
+                        duration_ms,
                         attempt + 1,
                         max_attempts,
                         sleep_seconds,
@@ -761,8 +797,11 @@ query getSignatureRequest($id: ID!) {
                         retry_after_seconds=retry_after_seconds,
                     )
                     logger.warning(
-                        "cloud_wallet_transient_http_error http_status=%s attempt=%s/%s sleep_seconds=%.1f",
+                        "cloud_wallet_transient_http_error http_status=%s operation=%s duration_ms=%s "
+                        "attempt=%s/%s sleep_seconds=%.1f",
                         exc.code,
+                        operation,
+                        duration_ms,
                         attempt + 1,
                         max_attempts,
                         sleep_seconds,
@@ -772,8 +811,15 @@ query getSignatureRequest($id: ID!) {
                 message = f"cloud_wallet_http_error:{exc.code}"
                 if snippet:
                     message = f"{message}:{snippet}"
+                logger.warning(
+                    "cloud_wallet_http_error_final operation=%s duration_ms=%s http_status=%s",
+                    operation,
+                    duration_ms,
+                    exc.code,
+                )
                 raise RuntimeError(message) from exc
             except (urllib.error.URLError, TimeoutError) as exc:
+                duration_ms = elapsed_ms()
                 reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
                 is_transient = (
                     self._is_transient_url_error(exc.reason)
@@ -786,7 +832,10 @@ query getSignatureRequest($id: ID!) {
                         retry_after_seconds=None,
                     )
                     logger.warning(
-                        "cloud_wallet_transient_network_error attempt=%s/%s sleep_seconds=%.1f reason=%s",
+                        "cloud_wallet_transient_network_error operation=%s duration_ms=%s "
+                        "attempt=%s/%s sleep_seconds=%.1f reason=%s",
+                        operation,
+                        duration_ms,
                         attempt + 1,
                         max_attempts,
                         sleep_seconds,
@@ -794,11 +843,18 @@ query getSignatureRequest($id: ID!) {
                     )
                     time.sleep(sleep_seconds)
                     continue
+                logger.warning(
+                    "cloud_wallet_network_error_final operation=%s duration_ms=%s reason=%s",
+                    operation,
+                    duration_ms,
+                    reason,
+                )
                 raise RuntimeError(f"cloud_wallet_network_error:{reason}") from exc
             if not isinstance(payload, dict):
                 raise RuntimeError("cloud_wallet_invalid_response")
             errors = payload.get("errors")
             if isinstance(errors, list) and errors:
+                duration_ms = elapsed_ms()
                 first = errors[0]
                 if isinstance(first, dict):
                     error_message = str(first.get("message", "unknown"))
@@ -813,7 +869,10 @@ query getSignatureRequest($id: ID!) {
                         retry_after_seconds=retry_after_seconds,
                     )
                     logger.warning(
-                        "cloud_wallet_rate_limited graphql_error attempt=%s/%s sleep_seconds=%.1f retry_after_seconds=%s message=%s",
+                        "cloud_wallet_rate_limited graphql_error operation=%s duration_ms=%s "
+                        "attempt=%s/%s sleep_seconds=%.1f retry_after_seconds=%s message=%s",
+                        operation,
+                        duration_ms,
                         attempt + 1,
                         max_attempts,
                         sleep_seconds,
@@ -822,10 +881,34 @@ query getSignatureRequest($id: ID!) {
                     )
                     time.sleep(sleep_seconds)
                     continue
+                logger.warning(
+                    "cloud_wallet_graphql_error_final operation=%s duration_ms=%s message=%s",
+                    operation,
+                    duration_ms,
+                    error_message,
+                )
                 raise RuntimeError(f"cloud_wallet_graphql_error:{error_message}")
             data = payload.get("data")
             if not isinstance(data, dict):
                 raise RuntimeError("cloud_wallet_missing_data")
+            duration_ms = elapsed_ms()
+            logger.info(
+                "cloud_wallet_graphql_ok operation=%s duration_ms=%s attempt=%s/%s http_timeout_s=%s",
+                operation,
+                duration_ms,
+                attempt + 1,
+                max_attempts,
+                request_timeout_seconds,
+            )
+            if slow_threshold_ms > 0 and duration_ms >= slow_threshold_ms:
+                logger.warning(
+                    "cloud_wallet_graphql_slow operation=%s duration_ms=%s threshold_ms=%s "
+                    "http_timeout_s=%s",
+                    operation,
+                    duration_ms,
+                    slow_threshold_ms,
+                    request_timeout_seconds,
+                )
             return data
         raise RuntimeError("cloud_wallet_rate_limit_retry_exhausted")
 

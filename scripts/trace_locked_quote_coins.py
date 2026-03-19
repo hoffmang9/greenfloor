@@ -599,6 +599,7 @@ def main() -> int:
         wallet=wallet,
         canonical_asset_id=args.quote,
         symbol_hint=args.quote,
+        program_home_dir=str(program.home_dir),
     )
     wallet_asset = _wallet_asset_row(wallet=wallet, asset_id=quote_asset_id)
     quote_coins = _fetch_quote_coins(wallet=wallet, asset_id=quote_asset_id)
