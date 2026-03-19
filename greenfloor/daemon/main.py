@@ -41,6 +41,7 @@ from greenfloor.config.io import (
     load_markets_config_with_optional_overlay,
     load_program_config,
     resolve_quote_asset_for_offer,
+    resolve_trade_asset_for_dexie,
 )
 from greenfloor.core.coin_ops import BucketSpec, CoinOpPlan, plan_coin_ops
 from greenfloor.core.fee_budget import partition_plans_by_budget, projected_coin_ops_fee_mojos
@@ -94,6 +95,31 @@ _CLOUD_WALLET_SPENDABLE_STATES = {
     "AVAILABLE",
     "SETTLED",
 }
+
+
+class CloudWalletAssetScopedListCache:
+    """Per-daemon-cycle cache of Cloud Wallet asset-scoped ``list_coins`` results.
+
+    Within one ``run_once`` cycle, the same resolved asset id is fetched at most
+    once (thread-safe for parallel markets). Coin split/combine paths still call
+    ``list_coins`` directly so they see fresh spendable state.
+    """
+
+    def __init__(self, wallet: CloudWalletAdapter) -> None:
+        self._wallet = wallet
+        self._lock = threading.Lock()
+        self._by_asset: dict[str, list[dict[str, Any]]] = {}
+
+    def list_coins_scoped(self, *, resolved_asset_id: str) -> list[dict[str, Any]]:
+        key = str(resolved_asset_id).strip().lower()
+        if not key:
+            return []
+        with self._lock:
+            if key not in self._by_asset:
+                self._by_asset[key] = self._wallet.list_coins(
+                    asset_id=resolved_asset_id, include_pending=True
+                )
+            return self._by_asset[key]
 
 
 def _cloud_wallet_coin_matches_asset_scope(*, coin: dict[str, Any], scoped_asset_id: str) -> bool:
@@ -1559,6 +1585,7 @@ def _cloud_wallet_spendable_profiles_by_asset(
     *,
     wallet: CloudWalletAdapter,
     asset_ids: set[str],
+    scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> dict[str, dict[str, int]]:
     requested_asset_ids = {str(asset_id).strip() for asset_id in asset_ids if str(asset_id).strip()}
     profiles: dict[str, dict[str, int]] = {
@@ -1612,7 +1639,10 @@ query walletAssetAmounts($walletId: ID!, $assetId: ID!) {
         requested_asset_id_lower = requested_asset_id.lower()
         profile = profiles[requested_asset_id]
         try:
-            coins = wallet.list_coins(asset_id=requested_asset_id, include_pending=True)
+            if scoped_list_cache is not None:
+                coins = scoped_list_cache.list_coins_scoped(resolved_asset_id=requested_asset_id)
+            else:
+                coins = wallet.list_coins(asset_id=requested_asset_id, include_pending=True)
         except TypeError:
             # Backward-compatible fallback for adapters/test doubles that do
             # not yet accept an `asset_id` keyword.
@@ -1687,13 +1717,17 @@ def _cloud_wallet_spendable_base_unit_coin_amounts(
     resolved_asset_id: str,
     base_unit_mojo_multiplier: int,
     canonical_asset_id: str,
+    scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> list[int]:
     target_asset = str(resolved_asset_id).strip().lower()
     if not target_asset:
         return []
     multiplier = max(1, int(base_unit_mojo_multiplier))
     try:
-        coins = wallet.list_coins(asset_id=resolved_asset_id, include_pending=True)
+        if scoped_list_cache is not None:
+            coins = scoped_list_cache.list_coins_scoped(resolved_asset_id=resolved_asset_id)
+        else:
+            coins = wallet.list_coins(asset_id=resolved_asset_id, include_pending=True)
     except Exception:
         return []
     amounts_base_units: list[int] = []
@@ -2402,6 +2436,7 @@ def _prepare_parallel_cloud_wallet_submission(
     resolved_quote_asset_id: str,
     resolved_xch_asset_id: str,
     fee_amount_mojos: int,
+    scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> tuple[dict[str, int] | None, dict[str, int] | None, dict[str, Any] | None]:
     requested_amounts = _reservation_request_for_cloud_offer_with_assets(
         market=market,
@@ -2420,6 +2455,7 @@ def _prepare_parallel_cloud_wallet_submission(
     spendable_profiles = _cloud_wallet_spendable_profiles_by_asset(
         wallet=cloud_wallet,
         asset_ids=set(requested_amounts.keys()),
+        scoped_list_cache=scoped_list_cache,
     )
     available_amounts = {
         asset_id: int(profile.get("total", 0)) for asset_id, profile in spendable_profiles.items()
@@ -2447,6 +2483,7 @@ def _execute_strategy_actions(
     signer_key_registry: dict[str, Any] | None = None,
     program: Any | None = None,
     reservation_coordinator: AssetReservationCoordinator | None = None,
+    cloud_wallet_scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     executed_count = 0
@@ -2497,6 +2534,7 @@ def _execute_strategy_actions(
                         resolved_quote_asset_id=resolved_quote_asset_id,
                         resolved_xch_asset_id=resolved_xch_asset_id,
                         fee_amount_mojos=fee_amount_mojos,
+                        scoped_list_cache=cloud_wallet_scoped_list_cache,
                     )
                 )
                 if skip_item is not None:
@@ -2885,7 +2923,10 @@ def _reconcile_offer_states(
     beyond-cap individually-fetched offers.
     """
     dexie_fetch_error: str | None = None
-    dexie_offered_asset = str(market.base_asset).strip()
+    dexie_offered_asset = resolve_trade_asset_for_dexie(
+        asset=str(market.base_asset),
+        network=network,
+    )
     dexie_requested_asset = _resolve_quote_asset_for_offer(
         quote_asset=str(market.quote_asset),
         network=network,
@@ -3090,6 +3131,7 @@ def _evaluate_and_execute_strategy(
     dexie_size_by_offer_id: dict[str, int],
     result: _MarketCycleResult,
     reservation_coordinator: AssetReservationCoordinator | None = None,
+    cloud_wallet_scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> tuple[dict[str, dict[int, int]], dict[int, int]]:
     """Evaluate market strategy, inject reseed if needed, and execute offer actions."""
     market_mode = str(getattr(market, "mode", "")).strip().lower()
@@ -3238,6 +3280,7 @@ def _evaluate_and_execute_strategy(
         signer_key_registry=program.signer_key_registry,
         program=program,
         reservation_coordinator=reservation_coordinator,
+        cloud_wallet_scoped_list_cache=cloud_wallet_scoped_list_cache,
     )
     result.strategy_planned += int(offer_execution["planned_count"])
     result.strategy_executed += int(offer_execution["executed_count"])
@@ -4046,6 +4089,7 @@ def _process_single_market(
     now: datetime,
     state_dir: Path,
     reservation_coordinator: AssetReservationCoordinator | None = None,
+    cloud_wallet_scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> _MarketCycleResult:
     result = _MarketCycleResult()
     _log_market_decision(
@@ -4173,6 +4217,7 @@ def _process_single_market(
                 resolved_asset_id=resolved_base_asset_id,
                 base_unit_mojo_multiplier=_base_unit_mojo_multiplier_for_market(market=market),
                 canonical_asset_id=str(market.base_asset),
+                scoped_list_cache=cloud_wallet_scoped_list_cache,
             )
             cloud_wallet_scan_empty = len(wallet_coins) == 0
             bucket_counts = compute_bucket_counts_from_coins(
@@ -4286,6 +4331,7 @@ def _process_single_market(
                 dexie_size_by_offer_id=dexie_size_by_offer_id,
                 result=result,
                 reservation_coordinator=reservation_coordinator,
+                cloud_wallet_scoped_list_cache=cloud_wallet_scoped_list_cache,
             )
         )
     except Exception as exc:
@@ -4352,6 +4398,7 @@ def _process_single_market_with_store(
     now: datetime,
     state_dir: Path,
     reservation_coordinator: AssetReservationCoordinator | None = None,
+    cloud_wallet_scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> _MarketCycleResult:
     """Run one market cycle with a thread-local SQLite connection."""
     store = SqliteStore(db_path)
@@ -4369,6 +4416,7 @@ def _process_single_market_with_store(
             now=now,
             state_dir=state_dir,
             reservation_coordinator=reservation_coordinator,
+            cloud_wallet_scoped_list_cache=cloud_wallet_scoped_list_cache,
         )
     finally:
         store.close()
@@ -4478,6 +4526,14 @@ def run_once(
 
         selected_markets = enabled_markets
         markets_attempted = len(selected_markets)
+        cloud_wallet_scoped_list_cache: CloudWalletAssetScopedListCache | None = None
+        if _cloud_wallet_configured(program):
+            try:
+                cloud_wallet_scoped_list_cache = CloudWalletAssetScopedListCache(
+                    _new_cloud_wallet_adapter_for_daemon(program)
+                )
+            except Exception:
+                cloud_wallet_scoped_list_cache = None
         if bool(getattr(program, "runtime_parallel_markets", False)) and len(selected_markets) > 1:
             max_workers = max(1, len(selected_markets))
             _daemon_logger.info(
@@ -4501,6 +4557,7 @@ def run_once(
                         now=now,
                         state_dir=state_dir,
                         reservation_coordinator=reservation_coordinator,
+                        cloud_wallet_scoped_list_cache=cloud_wallet_scoped_list_cache,
                     ): market
                     for market in selected_markets
                 }
@@ -4557,6 +4614,7 @@ def run_once(
                         now=now,
                         state_dir=state_dir,
                         reservation_coordinator=reservation_coordinator,
+                        cloud_wallet_scoped_list_cache=cloud_wallet_scoped_list_cache,
                     )
                 except Exception as exc:
                     cycle_error_count += 1

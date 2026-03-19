@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+from greenfloor.config import io as config_io
 from greenfloor.config.models import MarketConfig, MarketInventoryConfig
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon import main as daemon_main
@@ -1173,7 +1174,7 @@ def test_reconcile_offer_states_resolves_quote_asset_before_dexie_fetch(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(daemon_main, "_default_cats_config_path", lambda: cats)
+    monkeypatch.setattr(config_io, "default_cats_config_path", lambda: cats)
     captured: dict[str, str] = {}
 
     class _FakeDexie:
@@ -1199,6 +1200,50 @@ def test_reconcile_offer_states_resolves_quote_asset_before_dexie_fetch(
         "offered": "asset",
         "requested": "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d",
     }
+
+
+def test_reconcile_offer_states_resolves_base_asset_before_dexie_fetch(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    store = daemon_main.SqliteStore(tmp_path / "state.db")
+    market = _market()
+    market.base_asset = "BYC"
+    hex_id = "a" * 64
+    cats = tmp_path / "cats.yaml"
+    cats.write_text(
+        "\n".join(
+            [
+                "cats:",
+                "  - base_symbol: BYC",
+                f"    asset_id: {hex_id}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config_io, "default_cats_config_path", lambda: cats)
+    captured: dict[str, str] = {}
+
+    class _FakeDexie:
+        def get_offers(self, offered: str, requested: str) -> list[dict[str, Any]]:
+            captured["offered"] = offered
+            captured["requested"] = requested
+            return []
+
+    try:
+        result = daemon_main._MarketCycleResult()
+        daemon_main._reconcile_offer_states(
+            market=market,
+            network="mainnet",
+            dexie=cast(Any, _FakeDexie()),
+            store=store,
+            now=datetime.now(UTC),
+            result=result,
+        )
+    finally:
+        store.close()
+
+    assert captured == {"offered": hex_id, "requested": "xch"}
 
 
 def test_reconcile_offer_states_dexie_fallback_status_does_not_mark_mempool(
@@ -1261,7 +1306,7 @@ def test_resolve_quote_asset_for_offer_maps_symbol_from_cats(monkeypatch, tmp_pa
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(daemon_main, "_default_cats_config_path", lambda: cats)
+    monkeypatch.setattr(config_io, "default_cats_config_path", lambda: cats)
 
     resolved = daemon_main._resolve_quote_asset_for_offer(
         quote_asset="wUSDC.b",
@@ -2241,6 +2286,80 @@ def test_cloud_wallet_spendable_base_unit_coin_amounts_revalidates_direct_coin_l
         canonical_asset_id="BYC",
     )
     assert got == [10]
+
+
+def test_cloud_wallet_spendable_base_unit_coin_amounts_reuses_scoped_list_cache() -> None:
+    calls = {"n": 0}
+
+    class _FakeCloudWallet:
+        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
+            calls["n"] += 1
+            _ = include_pending
+            return [
+                {"amount": 10000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
+                {"amount": 20000, "state": "SETTLED", "asset": None},
+            ]
+
+    fake = cast(Any, _FakeCloudWallet())
+    cache = daemon_main.CloudWalletAssetScopedListCache(fake)
+    first = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
+        wallet=fake,
+        resolved_asset_id="Asset_byc",
+        base_unit_mojo_multiplier=1000,
+        canonical_asset_id="BYC",
+        scoped_list_cache=cache,
+    )
+    second = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
+        wallet=fake,
+        resolved_asset_id="Asset_byc",
+        base_unit_mojo_multiplier=1000,
+        canonical_asset_id="BYC",
+        scoped_list_cache=cache,
+    )
+    assert first == second == [10, 20]
+    assert calls["n"] == 1
+
+
+def test_cloud_wallet_asset_scoped_list_cache_dedupes_list_coins_calls() -> None:
+    calls = {"n": 0}
+
+    class _FakeCloudWallet:
+        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
+            calls["n"] += 1
+            _ = include_pending
+            return [
+                {"amount": 10000, "state": "SETTLED", "asset": {"id": asset_id}},
+            ]
+
+    fake = cast(Any, _FakeCloudWallet())
+    cache = daemon_main.CloudWalletAssetScopedListCache(fake)
+    first = cache.list_coins_scoped(resolved_asset_id="Asset_byc")
+    second = cache.list_coins_scoped(resolved_asset_id="Asset_byc")
+    cache.list_coins_scoped(resolved_asset_id="Asset_other")
+    assert calls["n"] == 2
+    assert first is second
+
+
+def test_cloud_wallet_asset_scoped_list_cache_serializes_concurrent_first_fetch() -> None:
+    calls = {"n": 0}
+
+    class _FakeCloudWallet:
+        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
+            calls["n"] += 1
+            _ = asset_id, include_pending
+            return []
+
+    cache = daemon_main.CloudWalletAssetScopedListCache(cast(Any, _FakeCloudWallet()))
+
+    def _worker() -> None:
+        cache.list_coins_scoped(resolved_asset_id="Asset_shared")
+
+    threads = [threading.Thread(target=_worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert calls["n"] == 1
 
 
 def test_cloud_wallet_spendable_profiles_by_asset_falls_back_to_wallet_asset_spendable() -> None:
