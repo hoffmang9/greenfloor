@@ -287,6 +287,10 @@ def test_execute_strategy_actions_posts_and_persists_offer_ids(monkeypatch) -> N
     assert len(dexie.posted) == 2
     assert len(store.offer_states) == 2
     assert all(s["offer_id"] == "offer-123" for s in store.offer_states)
+    first_item = result["items"][0]
+    assert isinstance(first_item.get("offer_create_ms"), int)
+    assert isinstance(first_item.get("offer_publish_ms"), int)
+    assert isinstance(first_item.get("offer_total_ms"), int)
 
 
 def test_execute_strategy_actions_retries_then_succeeds(monkeypatch) -> None:
@@ -1833,6 +1837,119 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservati
     assert any(event["event_type"] == "offer_parallel_fallback" for event in store.audit_events)
 
 
+def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worker_failures(
+    monkeypatch, tmp_path
+) -> None:
+    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    monkeypatch.setenv("GREENFLOOR_OFFER_POST_MAX_ATTEMPTS", "1")
+    monkeypatch.setenv("GREENFLOOR_OFFER_POST_BACKOFF_MS", "0")
+    monkeypatch.setenv("GREENFLOOR_OFFER_POST_COOLDOWN_SECONDS", "60")
+
+    class _FakeCloudWallet:
+        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
+            _ = asset_id, include_pending
+            return [{"amount": 20_000, "state": "SETTLED", "asset": {"id": "asset_global"}}]
+
+    monkeypatch.setattr(
+        daemon_main,
+        "_new_cloud_wallet_adapter_for_daemon",
+        lambda _program: _FakeCloudWallet(),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
+    )
+    monkeypatch.setattr(
+        daemon_main,
+        "_execute_single_cloud_wallet_action",
+        lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
+    )
+
+    _Program = _ParallelCloudWalletProgram
+
+    market = _market()
+    db_path = tmp_path / "reservations.sqlite"
+    coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
+    dexie = _FakeDexie(post_result={"success": True, "id": "unused"})
+    store = _FakeStore()
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=2,
+            pair="usdc",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="no_active_offer_reseed",
+            side="sell",
+        )
+    ]
+    result = _execute_strategy_actions(
+        market=market,
+        strategy_actions=actions,
+        runtime_dry_run=False,
+        xch_price_usd=30.0,
+        dexie=cast(Any, dexie),
+        store=cast(Any, store),
+        publish_venue="dexie",
+        program=_Program(),
+        reservation_coordinator=coordinator,
+    )
+    assert result["executed_count"] == 0
+    assert all(
+        str(item.get("reason", "")).startswith("parallel_offer_worker_error:")
+        for item in result["items"]
+    )
+    remaining_ms = daemon_main._cooldown_remaining_ms(
+        daemon_main._POST_COOLDOWN_UNTIL,
+        f"dexie:{market.market_id}",
+    )
+    assert remaining_ms > 0
+
+
+def test_execute_strategy_actions_cloud_wallet_nonparallel_converts_worker_exception_to_skip(
+    monkeypatch,
+) -> None:
+    class _Program(_CloudWalletProgram):
+        runtime_offer_parallelism_enabled = False
+
+    dexie = _FakeDexie(post_result={"success": True, "id": "unused"})
+    store = _FakeStore()
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=1,
+            pair="usdc",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="no_active_offer_reseed",
+            side="sell",
+        )
+    ]
+    monkeypatch.setattr(
+        daemon_main,
+        "_execute_single_cloud_wallet_action",
+        lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
+    )
+
+    result = _execute_strategy_actions(
+        market=_market(),
+        strategy_actions=actions,
+        runtime_dry_run=False,
+        xch_price_usd=30.0,
+        dexie=cast(Any, dexie),
+        store=cast(Any, store),
+        publish_venue="dexie",
+        program=_Program(),
+        reservation_coordinator=None,
+    )
+    assert result["executed_count"] == 0
+    assert len(result["items"]) == 1
+    assert str(result["items"][0]["reason"]).startswith("cloud_wallet_action_error:")
+
+
 def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservation(
     monkeypatch, tmp_path
 ) -> None:
@@ -2124,6 +2241,52 @@ def test_cloud_wallet_spendable_base_unit_coin_amounts_revalidates_direct_coin_l
         canonical_asset_id="BYC",
     )
     assert got == [10]
+
+
+def test_cloud_wallet_spendable_profiles_by_asset_falls_back_to_wallet_asset_spendable() -> None:
+    class _FakeCloudWallet:
+        vault_id = "Wallet_1"
+
+        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
+            _ = asset_id, include_pending
+            raise TimeoutError("The read operation timed out")
+
+        def _graphql(self, *, query: str, variables: dict[str, Any]):
+            _ = query
+            if variables.get("assetId") != "Asset_byc":
+                return {"wallet": {"asset": None}}
+            return {
+                "wallet": {
+                    "asset": {
+                        "totalAmount": 200000,
+                        "spendableAmount": 77000,
+                        "lockedAmount": 123000,
+                    }
+                }
+            }
+
+    profiles = daemon_main._cloud_wallet_spendable_profiles_by_asset(
+        wallet=cast(Any, _FakeCloudWallet()),
+        asset_ids={"Asset_byc"},
+    )
+    assert profiles["Asset_byc"]["total"] == 77000
+    assert profiles["Asset_byc"]["max_single"] == 0
+    assert profiles["Asset_byc"]["max_single_known"] == 0
+
+
+def test_single_input_preferred_skip_reason_ignores_unknown_max_single() -> None:
+    reason = daemon_main._single_input_preferred_skip_reason(
+        requested_amounts={"Asset_byc": 10000},
+        spendable_profiles={
+            "Asset_byc": {
+                "total": 77000,
+                "max_single": 0,
+                "coin_count": 0,
+                "max_single_known": 0,
+            }
+        },
+    )
+    assert reason is None
 
 
 def test_select_spendable_coins_for_target_amount_prefers_exact() -> None:

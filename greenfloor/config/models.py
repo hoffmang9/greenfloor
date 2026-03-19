@@ -60,6 +60,14 @@ class ProgramConfig:
     cloud_wallet_kms_key_id: str = ""
     cloud_wallet_kms_region: str = ""
     cloud_wallet_kms_public_key_hex: str = ""
+    runtime_cloud_wallet_offer_artifact_timeout_seconds: int = 30
+    runtime_cloud_wallet_bootstrap_signature_wait_timeout_seconds: int = 45
+    runtime_cloud_wallet_bootstrap_signature_warning_interval_seconds: int = 30
+    runtime_cloud_wallet_bootstrap_wait_timeout_seconds: int = 120
+    runtime_cloud_wallet_bootstrap_wait_mempool_warning_seconds: int = 30
+    runtime_cloud_wallet_bootstrap_wait_confirmation_warning_seconds: int = 60
+    runtime_cloud_wallet_create_signature_wait_timeout_seconds: int = 120
+    runtime_cloud_wallet_create_signature_warning_interval_seconds: int = 60
     app_log_level: str = "INFO"
     app_log_level_was_missing: bool = False
     signer_key_registry: dict[str, SignerKeyConfig] = field(default_factory=dict)
@@ -348,6 +356,30 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         cloud_wallet_kms_key_id=str(cloud_wallet.get("kms_key_id", "")).strip(),
         cloud_wallet_kms_region=str(cloud_wallet.get("kms_region", "")).strip(),
         cloud_wallet_kms_public_key_hex=str(cloud_wallet.get("kms_public_key_hex", "")).strip(),
+        runtime_cloud_wallet_offer_artifact_timeout_seconds=max(
+            5, int(runtime.get("cloud_wallet_offer_artifact_timeout_seconds", 30))
+        ),
+        runtime_cloud_wallet_bootstrap_signature_wait_timeout_seconds=max(
+            5, int(runtime.get("cloud_wallet_bootstrap_signature_wait_timeout_seconds", 45))
+        ),
+        runtime_cloud_wallet_bootstrap_signature_warning_interval_seconds=max(
+            5, int(runtime.get("cloud_wallet_bootstrap_signature_warning_interval_seconds", 30))
+        ),
+        runtime_cloud_wallet_bootstrap_wait_timeout_seconds=max(
+            10, int(runtime.get("cloud_wallet_bootstrap_wait_timeout_seconds", 120))
+        ),
+        runtime_cloud_wallet_bootstrap_wait_mempool_warning_seconds=max(
+            10, int(runtime.get("cloud_wallet_bootstrap_wait_mempool_warning_seconds", 30))
+        ),
+        runtime_cloud_wallet_bootstrap_wait_confirmation_warning_seconds=max(
+            10, int(runtime.get("cloud_wallet_bootstrap_wait_confirmation_warning_seconds", 60))
+        ),
+        runtime_cloud_wallet_create_signature_wait_timeout_seconds=max(
+            5, int(runtime.get("cloud_wallet_create_signature_wait_timeout_seconds", 120))
+        ),
+        runtime_cloud_wallet_create_signature_warning_interval_seconds=max(
+            5, int(runtime.get("cloud_wallet_create_signature_warning_interval_seconds", 60))
+        ),
         app_log_level=app_log_level,
         app_log_level_was_missing=app_log_level_was_missing,
         signer_key_registry=key_registry,

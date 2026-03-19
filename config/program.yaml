@@ -17,7 +17,8 @@ keys:
       keyring_yaml_path: "~/.chia_keys/keyring.yaml"
 
 runtime:
-  loop_interval_seconds: 30
+  loop_interval_seconds: 15
+  parallel_markets: true
   dry_run: false
 
 cloud_wallet:

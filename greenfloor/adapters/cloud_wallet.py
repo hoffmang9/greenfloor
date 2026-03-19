@@ -3,8 +3,10 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import random
 import re
+import socket
 import string
 import time
 import urllib.error
@@ -670,6 +672,32 @@ query getSignatureRequest($id: ID!) {
         return "rate limit" in normalized or "too many requests" in normalized
 
     @staticmethod
+    def _is_transient_http_status(code: int) -> bool:
+        return int(code) in {502, 503, 504}
+
+    @staticmethod
+    def _is_transient_error_message(message: str) -> bool:
+        normalized = str(message or "").strip().lower()
+        transient_markers = (
+            "timed out",
+            "timeout",
+            "temporary unavailable",
+            "temporarily unavailable",
+            "bad gateway",
+            "gateway timeout",
+            "service unavailable",
+            "connection reset",
+            "connection refused",
+        )
+        return any(marker in normalized for marker in transient_markers)
+
+    @staticmethod
+    def _is_transient_url_error(reason: object) -> bool:
+        if isinstance(reason, TimeoutError | socket.timeout):
+            return True
+        return CloudWalletAdapter._is_transient_error_message(str(reason or ""))
+
+    @staticmethod
     def _backoff_seconds_for_attempt(
         *, attempt_index: int, retry_after_seconds: int | None
     ) -> float:
@@ -681,22 +709,30 @@ query getSignatureRequest($id: ID!) {
 
     def _graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps({"query": query, "variables": variables}, separators=(",", ":"))
-        headers = self._build_auth_headers(body)
-        req = urllib.request.Request(
-            self._graphql_url,
-            data=body.encode("utf-8"),
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": "greenfloor/0.1",
-                **headers,
-            },
+        max_attempts = max(
+            1, int(os.getenv("GREENFLOOR_CLOUD_WALLET_MAX_ATTEMPTS", "3").strip() or "3")
         )
-        max_attempts = 5
+        request_timeout_seconds = max(
+            5,
+            int(os.getenv("GREENFLOOR_CLOUD_WALLET_HTTP_TIMEOUT_SECONDS", "10").strip() or "10"),
+        )
         for attempt in range(max_attempts):
+            # Build fresh auth headers per attempt. Cloud Wallet rejects replayed
+            # nonces, so retries must not reuse the same signed request headers.
+            headers = self._build_auth_headers(body)
+            req = urllib.request.Request(
+                self._graphql_url,
+                data=body.encode("utf-8"),
+                method="POST",
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "User-Agent": "greenfloor/0.1",
+                    **headers,
+                },
+            )
             try:
-                with urllib.request.urlopen(req, timeout=30) as resp:
+                with urllib.request.urlopen(req, timeout=request_timeout_seconds) as resp:
                     payload = json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as exc:
                 raw = exc.read().decode("utf-8", errors="replace").strip()
@@ -719,12 +755,46 @@ query getSignatureRequest($id: ID!) {
                     )
                     time.sleep(sleep_seconds)
                     continue
+                if self._is_transient_http_status(int(exc.code)) and attempt < (max_attempts - 1):
+                    sleep_seconds = self._backoff_seconds_for_attempt(
+                        attempt_index=attempt,
+                        retry_after_seconds=retry_after_seconds,
+                    )
+                    logger.warning(
+                        "cloud_wallet_transient_http_error http_status=%s attempt=%s/%s sleep_seconds=%.1f",
+                        exc.code,
+                        attempt + 1,
+                        max_attempts,
+                        sleep_seconds,
+                    )
+                    time.sleep(sleep_seconds)
+                    continue
                 message = f"cloud_wallet_http_error:{exc.code}"
                 if snippet:
                     message = f"{message}:{snippet}"
                 raise RuntimeError(message) from exc
-            except urllib.error.URLError as exc:
-                raise RuntimeError(f"cloud_wallet_network_error:{exc.reason}") from exc
+            except (urllib.error.URLError, TimeoutError) as exc:
+                reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+                is_transient = (
+                    self._is_transient_url_error(exc.reason)
+                    if isinstance(exc, urllib.error.URLError)
+                    else True
+                )
+                if is_transient and attempt < (max_attempts - 1):
+                    sleep_seconds = self._backoff_seconds_for_attempt(
+                        attempt_index=attempt,
+                        retry_after_seconds=None,
+                    )
+                    logger.warning(
+                        "cloud_wallet_transient_network_error attempt=%s/%s sleep_seconds=%.1f reason=%s",
+                        attempt + 1,
+                        max_attempts,
+                        sleep_seconds,
+                        reason,
+                    )
+                    time.sleep(sleep_seconds)
+                    continue
+                raise RuntimeError(f"cloud_wallet_network_error:{reason}") from exc
             if not isinstance(payload, dict):
                 raise RuntimeError("cloud_wallet_invalid_response")
             errors = payload.get("errors")

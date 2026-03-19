@@ -331,6 +331,123 @@ def test_cloud_wallet_graphql_retries_rate_limit_error_payload(monkeypatch, tmp_
     assert sleeps == [2.0, 2.0]
 
 
+def test_cloud_wallet_graphql_retries_transient_http_503(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    sleeps: list[float] = []
+    calls = {"n": 0}
+
+    def _fake_sleep(seconds: float) -> None:
+        sleeps.append(float(seconds))
+
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise urllib.error.HTTPError(
+                req.full_url,
+                503,
+                "service unavailable",
+                Message(),
+                io.BytesIO(b"<html><h1>503 Service Temporarily Unavailable</h1></html>"),
+            )
+        return _FakeHttpResponse({"data": {"ok": True}})
+
+    monkeypatch.setattr("time.sleep", _fake_sleep)
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    payload = adapter._graphql(query="query test {}", variables={})
+    assert payload == {"ok": True}
+    assert calls["n"] == 3
+    assert sleeps == [1.0, 2.0]
+
+
+def test_cloud_wallet_graphql_retries_transient_network_timeout(
+    monkeypatch, tmp_path: Path
+) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    sleeps: list[float] = []
+    calls = {"n": 0}
+
+    def _fake_sleep(seconds: float) -> None:
+        sleeps.append(float(seconds))
+
+    def _fake_urlopen(_req, timeout=0):
+        _ = timeout
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.URLError(TimeoutError("The read operation timed out"))
+        return _FakeHttpResponse({"data": {"ok": True}})
+
+    monkeypatch.setattr("time.sleep", _fake_sleep)
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    payload = adapter._graphql(query="query test {}", variables={})
+    assert payload == {"ok": True}
+    assert calls["n"] == 2
+    assert sleeps == [1.0]
+
+
+def test_cloud_wallet_graphql_retries_direct_timeout_error(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_adapter(tmp_path)
+    monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
+    sleeps: list[float] = []
+    calls = {"n": 0}
+
+    def _fake_sleep(seconds: float) -> None:
+        sleeps.append(float(seconds))
+
+    def _fake_urlopen(_req, timeout=0):
+        _ = timeout
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise TimeoutError("The read operation timed out")
+        return _FakeHttpResponse({"data": {"ok": True}})
+
+    monkeypatch.setattr("time.sleep", _fake_sleep)
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    payload = adapter._graphql(query="query test {}", variables={})
+    assert payload == {"ok": True}
+    assert calls["n"] == 2
+    assert sleeps == [1.0]
+
+
+def test_cloud_wallet_graphql_refreshes_auth_headers_on_retry(monkeypatch, tmp_path: Path) -> None:
+    adapter = _build_adapter(tmp_path)
+    header_calls: list[str] = []
+    calls = {"n": 0}
+
+    def _fake_build_auth_headers(_body: str) -> dict[str, str]:
+        nonce = f"n-{len(header_calls)}"
+        header_calls.append(nonce)
+        return {
+            "chia-user-key-id": "key-1",
+            "chia-signature": "sig",
+            "chia-nonce": nonce,
+            "chia-timestamp": "123",
+        }
+
+    def _fake_urlopen(req, timeout=0):
+        _ = timeout
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.HTTPError(
+                req.full_url,
+                503,
+                "service unavailable",
+                Message(),
+                io.BytesIO(b"<html><h1>503 Service Temporarily Unavailable</h1></html>"),
+            )
+        return _FakeHttpResponse({"data": {"ok": True}})
+
+    monkeypatch.setattr(adapter, "_build_auth_headers", _fake_build_auth_headers)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    payload = adapter._graphql(query="query test {}", variables={})
+    assert payload == {"ok": True}
+    assert calls["n"] == 2
+    assert header_calls == ["n-0", "n-1"]
+
+
 def test_cloud_wallet_get_signature_request_handles_non_dict(monkeypatch, tmp_path: Path) -> None:
     adapter = _build_adapter(tmp_path)
     monkeypatch.setattr(adapter, "_build_auth_headers", lambda _body: {})
