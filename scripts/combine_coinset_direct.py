@@ -187,6 +187,18 @@ def _resolve_cat_asset_id_for_coin_ids(
         return None, {"ok": False, "reason": "no_coin_ids_requested"}
     attempts = max(1, int(max_attempts))
 
+    def _cat_coin_id_hex(cat: Any) -> str:
+        coin = getattr(cat, "coin", None)
+        if coin is None:
+            return ""
+        raw_coin_id = getattr(coin, "coin_id", None)
+        if callable(raw_coin_id):
+            raw_coin_id = raw_coin_id()
+        try:
+            return normalize_hex_id(sdk.to_hex(raw_coin_id))
+        except Exception:
+            return ""
+
     cats: list[Any] = []
     last_exception: str | None = None
     for attempt in range(1, attempts + 1):
@@ -200,22 +212,14 @@ def _resolve_cat_asset_id_for_coin_ids(
         except Exception as exc:  # noqa: BLE001
             cats = []
             last_exception = str(exc)
-        resolved_ids = {
-            normalize_hex_id(sdk.to_hex(cat.coin.coin_id))
-            for cat in cats
-            if normalize_hex_id(sdk.to_hex(cat.coin.coin_id))
-        }
+        resolved_ids = {_cat_coin_id_hex(cat) for cat in cats if _cat_coin_id_hex(cat)}
         missing_ids = sorted(requested_set - resolved_ids)
         if not last_exception and not missing_ids:
             break
         if attempt < attempts:
             sleep_fn(max(0.0, float(retry_sleep_seconds)))
     else:
-        resolved_ids = {
-            normalize_hex_id(sdk.to_hex(cat.coin.coin_id))
-            for cat in cats
-            if normalize_hex_id(sdk.to_hex(cat.coin.coin_id))
-        }
+        resolved_ids = {_cat_coin_id_hex(cat) for cat in cats if _cat_coin_id_hex(cat)}
         missing_ids = sorted(requested_set - resolved_ids)
         payload: dict[str, Any] = {
             "ok": False,
