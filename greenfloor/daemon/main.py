@@ -116,9 +116,7 @@ class CloudWalletAssetScopedListCache:
             return []
         with self._lock:
             if key not in self._by_asset:
-                self._by_asset[key] = self._wallet.list_coins(
-                    asset_id=resolved_asset_id, include_pending=True
-                )
+                self._by_asset[key] = self._wallet.list_coins(asset_id=resolved_asset_id)
             return self._by_asset[key]
 
 
@@ -1642,11 +1640,11 @@ query walletAssetAmounts($walletId: ID!, $assetId: ID!) {
             if scoped_list_cache is not None:
                 coins = scoped_list_cache.list_coins_scoped(resolved_asset_id=requested_asset_id)
             else:
-                coins = wallet.list_coins(asset_id=requested_asset_id, include_pending=True)
+                coins = wallet.list_coins(asset_id=requested_asset_id)
         except TypeError:
             # Backward-compatible fallback for adapters/test doubles that do
             # not yet accept an `asset_id` keyword.
-            coins = wallet.list_coins(include_pending=True)
+            coins = wallet.list_coins()
         except Exception as exc:
             _daemon_logger.warning(
                 "cloud_wallet_inventory_lookup_failed asset_id=%s error=%s",
@@ -1727,7 +1725,7 @@ def _cloud_wallet_spendable_base_unit_coin_amounts(
         if scoped_list_cache is not None:
             coins = scoped_list_cache.list_coins_scoped(resolved_asset_id=resolved_asset_id)
         else:
-            coins = wallet.list_coins(asset_id=resolved_asset_id, include_pending=True)
+            coins = wallet.list_coins(asset_id=resolved_asset_id)
     except Exception:
         return []
     amounts_base_units: list[int] = []

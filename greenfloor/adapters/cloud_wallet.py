@@ -83,13 +83,24 @@ class CloudWalletAdapter:
         self,
         *,
         asset_id: str | None = None,
-        include_pending: bool = True,
+        include_pending: bool = False,
+        min_amount_mojos: int | None = 1000,
     ) -> list[dict[str, Any]]:
-        # Upstream Cloud Wallet can mis-resolve `node.asset` on asset-scoped coin
-        # queries, including falling back to XCH for rows that were already
-        # selected by the requested CAT scope. Match the first-party UI here:
-        # when `asset_id` is provided, trust the query scope and omit row asset
-        # metadata instead of importing misleading fallback values.
+        """List wallet coins via Cloud Wallet GraphQL.
+
+        Defaults match ent-wallet hotwallet-style filtering for faster queries:
+        ``includePending=false`` (SETTLED-only) and ``minAmount=1000`` when set.
+        One CAT unit is exactly 1000 mojos (``AGENTS.md`` CAT discipline); for
+        XCH, 1000 mojos only drops sub-dust outputs. Pass
+        ``include_pending=True`` and/or ``min_amount_mojos=None`` where pending
+        or sub-unit coins must be visible (coin-ops, pre-offer balance checks).
+
+        Upstream Cloud Wallet can mis-resolve ``node.asset`` on asset-scoped coin
+        queries, including falling back to XCH for rows that were already
+        selected by the requested CAT scope. Match the first-party UI here:
+        when ``asset_id`` is provided, trust the query scope and omit row
+        asset metadata instead of importing misleading fallback values.
+        """
         asset_fields = ""
         if not asset_id:
             asset_fields = """
@@ -98,11 +109,12 @@ class CloudWalletAdapter:
           type
         }"""
         query = f"""
-query listCoins($walletId: ID!, $includePending: Boolean, $after: String, $assetId: ID) {{
+query listCoins($walletId: ID!, $includePending: Boolean, $after: String, $assetId: ID, $minAmount: BigInt) {{
   coins(
     walletId: $walletId
     assetId: $assetId
     includePending: $includePending
+    minAmount: $minAmount
     excludeAmounts: []
     excludeCoins: []
     sortKey: AMOUNT
@@ -136,6 +148,7 @@ query listCoins($walletId: ID!, $includePending: Boolean, $after: String, $asset
                 "assetId": asset_id,
                 "includePending": bool(include_pending),
                 "after": after,
+                "minAmount": (str(int(min_amount_mojos)) if min_amount_mojos is not None else None),
             }
             payload = self._graphql(query=query, variables=variables)
             coins_payload = payload.get("coins") or {}
