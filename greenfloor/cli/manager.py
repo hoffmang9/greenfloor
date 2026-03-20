@@ -19,79 +19,27 @@ from typing import Any
 
 import yaml
 
+import greenfloor.asset_label_catalog as _asset_label_catalog
+import greenfloor.cloud_wallet_offer_runtime as cwr
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter, extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
+from greenfloor.asset_label_catalog import (
+    _dexie_lookup_token_for_cat_id,
+    _dexie_lookup_token_for_symbol,
+    _is_hex_asset_id,
+    _normalize_hex_asset_id,
+)
 from greenfloor.cli.offer_builder_sdk import build_offer_text
-from greenfloor.cloud_wallet_offer_runtime import (
-    _require_cloud_wallet_config as _shared_require_cloud_wallet_config,
+from greenfloor.coinset_runtime import (
+    CoinsetFeeLookupPreflightError as _CoinsetFeeLookupPreflightError,
 )
-from greenfloor.cloud_wallet_offer_runtime import (
-    build_and_post_offer_cloud_wallet as _shared_build_and_post_offer_cloud_wallet,
+from greenfloor.coinset_runtime import (
+    _resolve_taker_or_coin_operation_fee,
 )
-from greenfloor.cloud_wallet_offer_runtime import (
-    call_with_moderate_retry as _shared_call_with_moderate_retry,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    cloud_wallet_create_offer_phase as _shared_cloud_wallet_create_offer_phase,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    cloud_wallet_post_offer_phase as _shared_cloud_wallet_post_offer_phase,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    cloud_wallet_wait_offer_artifact_phase as _shared_cloud_wallet_wait_offer_artifact_phase,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    dexie_offer_view_url as _shared_dexie_offer_view_url,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    ensure_offer_bootstrap_denominations as _shared_ensure_offer_bootstrap_denominations,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    log_signed_offer_artifact as _shared_log_signed_offer_artifact,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    normalize_offer_side as _shared_normalize_offer_side,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    poll_offer_artifact_by_signature_request as _shared_poll_offer_artifact_by_signature_request,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    poll_offer_artifact_until_available as _shared_poll_offer_artifact_until_available,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    poll_signature_request_until_not_unsigned as _shared_poll_signature_request_until_not_unsigned,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    post_dexie_offer_with_invalid_offer_retry as _shared_post_dexie_offer_with_invalid_offer_retry,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    recent_market_resolved_asset_id_hints as _shared_recent_market_resolved_asset_id_hints,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    resolve_cloud_wallet_asset_id as _shared_resolve_cloud_wallet_asset_id,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    resolve_cloud_wallet_offer_asset_ids as _shared_resolve_cloud_wallet_offer_asset_ids,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    resolve_maker_offer_fee as _shared_resolve_maker_offer_fee,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    resolve_offer_expiry_for_market as _shared_resolve_offer_expiry_for_market,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    seed_cloud_wallet_assets_cache as _shared_seed_cloud_wallet_assets_cache,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    verify_dexie_offer_visible_by_id as _shared_verify_dexie_offer_visible_by_id,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    verify_offer_text_for_dexie as _shared_verify_offer_text_for_dexie,
-)
-from greenfloor.cloud_wallet_offer_runtime import (
-    wallet_get_wallet_offers as _shared_wallet_get_wallet_offers,
+from greenfloor.coinset_runtime import (
+    resolve_maker_offer_fee as _resolve_maker_offer_fee,
 )
 from greenfloor.config.io import (
     default_cats_config_path as _default_cats_config_path_shared,
@@ -108,7 +56,11 @@ from greenfloor.config.io import (
     write_yaml,
 )
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
-from greenfloor.hex_utils import is_hex_id, normalize_hex_id
+from greenfloor.hex_utils import (
+    canonical_is_xch,
+    default_mojo_multiplier_for_asset,
+    normalize_hex_id,
+)
 from greenfloor.keys.onboarding import (
     KeyOnboardingSelection,
     determine_onboarding_branch,
@@ -122,8 +74,37 @@ from greenfloor.logging_setup import (
     normalize_log_level_name,
     warn_if_log_level_auto_healed,
 )
+from greenfloor.moderate_retry import call_with_moderate_retry
 from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
 from greenfloor.storage.sqlite import SqliteStore
+
+# Test monkeypatch targets (resolve_cloud_wallet_asset_id reads via cwr import).
+_local_catalog_label_hints_for_asset_id = (
+    _asset_label_catalog._local_catalog_label_hints_for_asset_id
+)
+
+_shared_require_cloud_wallet_config = cwr._require_cloud_wallet_config
+_shared_build_and_post_offer_cloud_wallet = cwr.build_and_post_offer_cloud_wallet
+_shared_call_with_moderate_retry = call_with_moderate_retry
+_shared_cloud_wallet_create_offer_phase = cwr.cloud_wallet_create_offer_phase
+_shared_cloud_wallet_post_offer_phase = cwr.cloud_wallet_post_offer_phase
+_shared_cloud_wallet_wait_offer_artifact_phase = cwr.cloud_wallet_wait_offer_artifact_phase
+_shared_dexie_offer_view_url = cwr.dexie_offer_view_url
+_shared_ensure_offer_bootstrap_denominations = cwr.ensure_offer_bootstrap_denominations
+_shared_log_signed_offer_artifact = cwr.log_signed_offer_artifact
+_shared_normalize_offer_side = cwr.normalize_offer_side
+_shared_poll_offer_artifact_by_signature_request = cwr.poll_offer_artifact_by_signature_request
+_shared_poll_offer_artifact_until_available = cwr.poll_offer_artifact_until_available
+_shared_poll_signature_request_until_not_unsigned = cwr.poll_signature_request_until_not_unsigned
+_shared_post_dexie_offer_with_invalid_offer_retry = cwr.post_dexie_offer_with_invalid_offer_retry
+_shared_recent_market_resolved_asset_id_hints = cwr.recent_market_resolved_asset_id_hints
+_shared_resolve_cloud_wallet_asset_id = cwr.resolve_cloud_wallet_asset_id
+_shared_resolve_cloud_wallet_offer_asset_ids = cwr.resolve_cloud_wallet_offer_asset_ids
+_shared_resolve_offer_expiry_for_market = cwr.resolve_offer_expiry_for_market
+_shared_seed_cloud_wallet_assets_cache = cwr.seed_cloud_wallet_assets_cache
+_shared_verify_dexie_offer_visible_by_id = cwr.verify_dexie_offer_visible_by_id
+_shared_verify_offer_text_for_dexie = cwr.verify_offer_text_for_dexie
+_shared_wallet_get_wallet_offers = cwr.wallet_get_wallet_offers
 
 _TEST_PHASE_OFFER_EXPIRY_MINUTES = 5
 _MANAGER_SERVICE_NAME = "manager"
@@ -224,182 +205,11 @@ def _format_json_output(payload: object) -> str:
     return json.dumps(payload, indent=2)
 
 
-class _CoinsetFeeLookupPreflightError(RuntimeError):
-    def __init__(
-        self,
-        *,
-        failure_kind: str,
-        detail: str,
-        diagnostics: dict[str, str],
-    ) -> None:
-        self.failure_kind = failure_kind
-        self.detail = detail
-        self.diagnostics = diagnostics
-        super().__init__(f"{failure_kind}:{detail}")
-
-
 _require_cloud_wallet_config = _shared_require_cloud_wallet_config
 
 
 def _new_cloud_wallet_adapter(program) -> CloudWalletAdapter:
     return CloudWalletAdapter(_require_cloud_wallet_config(program))
-
-
-def _canonical_is_xch(asset_id: str) -> bool:
-    value = asset_id.strip().lower()
-    return value in {"xch", "txch"}
-
-
-def _default_mojo_multiplier_for_asset(asset_id: str) -> int:
-    return 1_000_000_000_000 if _canonical_is_xch(asset_id) else 1000
-
-
-def _canonical_is_cloud_global_id(asset_id: str) -> bool:
-    return asset_id.strip().startswith("Asset_")
-
-
-def _is_hex_asset_id(value: str) -> bool:
-    return is_hex_id(value)
-
-
-def _normalize_label(value: str) -> str:
-    return "".join(ch for ch in value.strip().lower() if ch.isalnum())
-
-
-def _label_tokens(value: str) -> list[str]:
-    tokens: list[str] = []
-    current: list[str] = []
-    for ch in value.strip().lower():
-        if ch.isalnum():
-            current.append(ch)
-        else:
-            if current:
-                tokens.append("".join(current))
-                current = []
-    if current:
-        tokens.append("".join(current))
-    return tokens
-
-
-def _labels_match(left: str, right: str) -> bool:
-    a = _normalize_label(left)
-    b = _normalize_label(right)
-    if not a or not b:
-        return False
-    if a == b:
-        return True
-    # Keep fuzzy matching conservative; require meaningful overlap length.
-    if len(a) >= 5 and a in b:
-        return True
-    if len(b) >= 5 and b in a:
-        return True
-    left_tokens = {token for token in _label_tokens(left) if len(token) >= 3}
-    right_tokens = {token for token in _label_tokens(right) if len(token) >= 3}
-    if left_tokens and right_tokens and len(left_tokens & right_tokens) >= 2:
-        return True
-    return False
-
-
-def _wallet_label_matches_asset_ref(
-    *,
-    cat_assets: list[dict[str, str]],
-    label: str,
-) -> list[str]:
-    target = label.strip()
-    if not target:
-        return []
-    matches: list[str] = []
-    for cat in cat_assets:
-        asset_id = cat.get("asset_id", "").strip()
-        if not asset_id:
-            continue
-        display_name = cat.get("display_name", "").strip()
-        symbol = cat.get("symbol", "").strip()
-        if _labels_match(display_name, target) or _labels_match(symbol, target):
-            matches.append(asset_id)
-    return sorted(set(matches))
-
-
-def _local_catalog_label_hints_for_asset_id(*, canonical_asset_id: str) -> list[str]:
-    """Best-effort local label hints when Dexie metadata is unavailable."""
-    canonical = canonical_asset_id.strip().lower()
-    if not canonical:
-        return []
-    repo_root = Path(__file__).resolve().parents[2]
-    cats_path = repo_root / "config" / "cats.yaml"
-    markets_path = repo_root / "config" / "markets.yaml"
-    try:
-        cats_payload = load_yaml(cats_path) if cats_path.exists() else {}
-        markets_payload = load_yaml(markets_path) if markets_path.exists() else {}
-    except Exception:
-        return []
-    hints: list[str] = []
-    cats_rows = cats_payload.get("cats") if isinstance(cats_payload, dict) else None
-    if isinstance(cats_rows, list):
-        for row in cats_rows:
-            if not isinstance(row, dict):
-                continue
-            row_asset_id = str(row.get("asset_id", "")).strip().lower()
-            if row_asset_id != canonical:
-                continue
-            for key in ("base_symbol", "name"):
-                value = str(row.get(key, "")).strip()
-                if value:
-                    hints.append(value)
-            aliases = row.get("aliases")
-            if isinstance(aliases, list):
-                for alias in aliases:
-                    value = str(alias).strip()
-                    if value:
-                        hints.append(value)
-    assets_rows = markets_payload.get("assets") if isinstance(markets_payload, dict) else None
-    if isinstance(assets_rows, list):
-        for row in assets_rows:
-            if not isinstance(row, dict):
-                continue
-            row_asset_id = str(row.get("asset_id", "")).strip().lower()
-            if row_asset_id != canonical:
-                continue
-            for key in ("base_symbol", "name"):
-                value = str(row.get(key, "")).strip()
-                if value:
-                    hints.append(value)
-    markets_rows = markets_payload.get("markets") if isinstance(markets_payload, dict) else None
-    if isinstance(markets_rows, list):
-        for row in markets_rows:
-            if not isinstance(row, dict):
-                continue
-            base_asset = str(row.get("base_asset", "")).strip().lower()
-            if base_asset != canonical:
-                continue
-            base_symbol = str(row.get("base_symbol", "")).strip()
-            if base_symbol:
-                hints.append(base_symbol)
-    return sorted(set(hints))
-
-
-def _dexie_lookup_token_for_cat_id(*, canonical_cat_id_hex: str, network: str) -> dict | None:
-    base_url = _resolve_dexie_base_url(network, None)
-    adapter = DexieAdapter(base_url)
-    return adapter.lookup_token_by_cat_id(canonical_cat_id_hex)
-
-
-def _dexie_lookup_token_for_symbol(*, asset_ref: str, network: str) -> dict | None:
-    base_url = _resolve_dexie_base_url(network, None)
-    adapter = DexieAdapter(base_url)
-    return adapter.lookup_token_by_symbol(asset_ref, label_matcher=_labels_match)
-
-
-def _normalize_hex_asset_id(asset_id: str) -> str:
-    result = normalize_hex_id(asset_id)
-    if result:
-        return result
-    # Fallback: return stripped/lowered even if not valid 64-char hex,
-    # since callers may pass shorter strings that get validated later.
-    normalized = str(asset_id).strip().lower()
-    if normalized.startswith("0x"):
-        normalized = normalized[2:]
-    return normalized
 
 
 def _try_parse_optional_float(raw: str | None) -> float | None:
@@ -1055,176 +865,6 @@ def _poll_offer_artifact_by_signature_request(
     )
 
 
-def _coinset_base_url(*, network: str) -> str:
-    base = os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip()
-    if not base:
-        return ""
-    if is_testnet(network):
-        allow_mainnet = os.getenv("GREENFLOOR_ALLOW_MAINNET_COINSET_FOR_TESTNET11", "").strip()
-        if (
-            "coinset.org" in base
-            and "testnet11.api.coinset.org" not in base
-            and allow_mainnet != "1"
-        ):
-            raise RuntimeError("coinset_base_url_mainnet_not_allowed_for_testnet11")
-    return base
-
-
-def _coinset_adapter(*, network: str) -> CoinsetAdapter:
-    base_url = _coinset_base_url(network=network)
-    require_testnet11 = is_testnet(network)
-    try:
-        return CoinsetAdapter(
-            base_url or None, network=network, require_testnet11=require_testnet11
-        )
-    except TypeError as exc:
-        # Test doubles in deterministic unit tests may not accept the newer kwarg.
-        if "require_testnet11" not in str(exc):
-            raise
-        return CoinsetAdapter(base_url or None, network=network)
-
-
-def _coinset_fee_lookup_preflight(
-    *,
-    network: str,
-    fee_cost: int = 1_000_000,
-    spend_count: int | None = None,
-) -> dict[str, str]:
-    try:
-        coinset = _coinset_adapter(network=network)
-    except Exception as exc:
-        raise _CoinsetFeeLookupPreflightError(
-            failure_kind="endpoint_validation_failed",
-            detail=str(exc),
-            diagnostics={
-                "coinset_network": network.strip().lower(),
-                "coinset_base_url": os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip(),
-            },
-        ) from exc
-    diagnostics = {
-        "coinset_network": str(getattr(coinset, "network", network.strip().lower())),
-        "coinset_base_url": str(
-            getattr(coinset, "base_url", os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip())
-        ),
-    }
-    try:
-        try:
-            payload = coinset.get_fee_estimate(
-                target_times=[300, 600, 1200],
-                cost=max(1, int(fee_cost)),
-                spend_count=spend_count,
-            )
-        except TypeError as exc:
-            if "unexpected keyword argument" not in str(exc):
-                raise
-            payload = coinset.get_fee_estimate(target_times=[300, 600, 1200])
-    except Exception as exc:
-        raise _CoinsetFeeLookupPreflightError(
-            failure_kind="endpoint_validation_failed",
-            detail=str(exc),
-            diagnostics=diagnostics,
-        ) from exc
-
-    if not bool(payload.get("success", False)):
-        detail = str(
-            payload.get("error")
-            or payload.get("message")
-            or payload.get("reason")
-            or "coinset_fee_estimate_unsuccessful"
-        )
-        raise _CoinsetFeeLookupPreflightError(
-            failure_kind="temporary_fee_advice_unavailable",
-            detail=detail,
-            diagnostics=diagnostics,
-        )
-
-    try:
-        recommended = coinset.get_conservative_fee_estimate(
-            cost=max(1, int(fee_cost)),
-            spend_count=spend_count,
-        )
-    except TypeError as exc:
-        if "unexpected keyword argument" not in str(exc):
-            raise
-        recommended = coinset.get_conservative_fee_estimate()
-    if recommended is None:
-        raise _CoinsetFeeLookupPreflightError(
-            failure_kind="temporary_fee_advice_unavailable",
-            detail="coinset_conservative_fee_unavailable",
-            diagnostics=diagnostics,
-        )
-    diagnostics["recommended_fee_mojos"] = str(int(recommended))
-    return diagnostics
-
-
-def _resolve_operation_fee(
-    *,
-    role: str,
-    network: str,
-    minimum_fee_mojos: int = 0,
-    fee_cost: int = 1_000_000,
-    spend_count: int | None = None,
-) -> tuple[int, str]:
-    if role == "maker_create_offer":
-        return 0, "maker_default_zero"
-    if role != "taker_or_coin_operation":
-        raise ValueError(f"unsupported fee role: {role}")
-    if int(minimum_fee_mojos) < 0:
-        raise ValueError("minimum_fee_mojos must be >= 0")
-
-    minimum_fee = int(minimum_fee_mojos)
-    max_attempts = int(os.getenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "4"))
-    coinset = _coinset_adapter(network=network)
-    for attempt in range(max_attempts):
-        advised = None
-        try:
-            try:
-                advised = coinset.get_conservative_fee_estimate(
-                    cost=max(1, int(fee_cost)),
-                    spend_count=spend_count,
-                )
-            except TypeError as exc:
-                if "unexpected keyword argument" not in str(exc):
-                    raise
-                advised = coinset.get_conservative_fee_estimate()
-        except Exception:
-            advised = None
-        if advised is not None:
-            advised_fee = int(advised)
-            if advised_fee < minimum_fee:
-                return minimum_fee, "coinset_conservative_minimum_floor"
-            return advised_fee, "coinset_conservative"
-        if attempt < max_attempts - 1:
-            sleep_seconds = min(8.0, 0.5 * (2**attempt))
-            time.sleep(sleep_seconds)
-
-    return minimum_fee, "config_minimum_fee_fallback"
-
-
-def _resolve_taker_or_coin_operation_fee(
-    *,
-    network: str,
-    minimum_fee_mojos: int = 0,
-    fee_cost: int = 1_000_000,
-    spend_count: int | None = None,
-) -> tuple[int, str]:
-    _coinset_fee_lookup_preflight(
-        network=network,
-        fee_cost=fee_cost,
-        spend_count=spend_count,
-    )
-    return _resolve_operation_fee(
-        role="taker_or_coin_operation",
-        network=network,
-        minimum_fee_mojos=minimum_fee_mojos,
-        fee_cost=fee_cost,
-        spend_count=spend_count,
-    )
-
-
-_resolve_maker_offer_fee = _shared_resolve_maker_offer_fee
-
-
 def _poll_signature_request_until_not_unsigned(
     *,
     wallet: CloudWalletAdapter,
@@ -1445,7 +1085,7 @@ def _coin_op_min_amount_mojos(*, canonical_asset_id: str) -> int:
     # bug documented in docs/ent-wallet-upstream-byc-coin-query-issue.md.
     # Ignore sub-1-CAT dust during local split/combine candidate selection so
     # tiny stray rows do not get pulled into operational coin management.
-    if _canonical_is_xch(canonical_asset_id):
+    if canonical_is_xch(canonical_asset_id):
         return 0
     return 1000
 
@@ -2452,13 +2092,13 @@ def _build_and_post_offer(
     base_unit_mojo_multiplier = int(
         pricing.get(
             "base_unit_mojo_multiplier",
-            _default_mojo_multiplier_for_asset(str(market.base_asset)),
+            default_mojo_multiplier_for_asset(str(market.base_asset)),
         )
     )
     quote_unit_mojo_multiplier = int(
         pricing.get(
             "quote_unit_mojo_multiplier",
-            _default_mojo_multiplier_for_asset(str(default_quote_asset)),
+            default_mojo_multiplier_for_asset(str(default_quote_asset)),
         )
     )
     expiry_unit, expiry_value = _resolve_offer_expiry_for_market(market)

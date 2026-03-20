@@ -1,5 +1,14 @@
 # Progress Log
 
+## 2026-03-19 (modularization: shared catalog/coinset/retry, signing CLVM split, remove `old/`)
+
+- **Removed** legacy `old/` tree; dropped `old/**` excludes from ruff/prettier/yamllint/pre-commit; **AGENTS.md** no longer points contributors at `old/*.py` (use git history when needed).
+- **New shared modules:** `greenfloor/asset_label_catalog.py` (Dexie + label matching + local YAML hints), `greenfloor/coinset_runtime.py` (Coinset adapter + fee preflight/resolution), `greenfloor/moderate_retry.py` (`call_with_moderate_retry`, rate-limit parse, `poll_with_exponential_backoff_until`).
+- **`cloud_wallet_offer_runtime`:** imports shared modules; offer-artifact polls use the shared backoff helper; duplicate blocks deleted.
+- **`cli/manager`:** namespace `import greenfloor.cloud_wallet_offer_runtime as cwr` + explicit `_shared_*` aliases; duplicate catalog/coinset/fee implementations removed; **hex_utils** `canonical_is_xch` / `default_mojo_multiplier_for_asset` used directly; re-exports `_local_catalog_label_hints_for_asset_id` for tests.
+- **`signing`:** `greenfloor/signing_clvm.py` for CLVM/AGG_SIG extraction; `_coinset_adapter` from `coinset_runtime`; tests patch `greenfloor.coinset_runtime.CoinsetAdapter` where appropriate.
+- **`daemon`:** removed unused `DaemonRunState` dataclass; **`CloudWalletAssetScopedListCache`** moved to `greenfloor/daemon/cloud_wallet_list_cache.py`.
+
 ## 2026-03-19 (post-#56 through `feat/cloud-wallet-asset-cache-and-seed-cli`: CW resilience, combine fixes, asset cache)
 
 Reviewed `main` from **`178121c`** (`feat: vault coinset scanner with CAT filters and dust combine`, #56) through branch tip **`73e478d`** (`feat/cloud-wallet-asset-cache-and-seed-cli`). Summary of merged / branch-only work in range `178121c..HEAD`:

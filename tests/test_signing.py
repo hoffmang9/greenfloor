@@ -445,7 +445,7 @@ def test_signing_uses_testnet11_coinset_adapter_network(monkeypatch) -> None:
         Address = _FakeAddress
 
     monkeypatch.setattr(signing_mod, "_import_sdk", lambda: _FakeSdk)
-    monkeypatch.setattr(signing_mod, "CoinsetAdapter", _FakeAdapter)
+    monkeypatch.setattr("greenfloor.coinset_runtime.CoinsetAdapter", _FakeAdapter)
     monkeypatch.delenv("GREENFLOOR_COINSET_BASE_URL", raising=False)
 
     result = signing_mod.build_signed_spend_bundle(
