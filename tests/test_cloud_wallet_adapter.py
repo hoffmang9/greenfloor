@@ -194,6 +194,8 @@ def test_cloud_wallet_list_coins_omits_row_asset_for_asset_scoped_queries(
     def _fake_graphql(*, query, variables):
         queries.append(query)
         assert variables["assetId"] == "Asset_byc"
+        assert variables["includePending"] is False
+        assert variables["minAmount"] == "1000"
         return {
             "coins": {
                 "pageInfo": {"hasNextPage": False, "endCursor": ""},
@@ -216,6 +218,8 @@ def test_cloud_wallet_list_coins_keeps_row_asset_for_unscoped_queries(
     def _fake_graphql(*, query, variables):
         queries.append(query)
         assert variables["assetId"] is None
+        assert variables["includePending"] is False
+        assert variables["minAmount"] == "1000"
         return {
             "coins": {
                 "pageInfo": {"hasNextPage": False, "endCursor": ""},
@@ -227,6 +231,27 @@ def test_cloud_wallet_list_coins_keeps_row_asset_for_unscoped_queries(
     coins = adapter.list_coins()
     assert len(coins) == 1
     assert "asset {" in queries[0]
+
+
+def test_cloud_wallet_list_coins_opt_out_pending_and_min_filter(
+    monkeypatch, tmp_path: Path
+) -> None:
+    adapter = _build_adapter(tmp_path)
+    captured: dict[str, Any] = {}
+
+    def _fake_graphql(*, query, variables):
+        captured["variables"] = dict(variables)
+        return {
+            "coins": {
+                "pageInfo": {"hasNextPage": False, "endCursor": ""},
+                "edges": [],
+            }
+        }
+
+    monkeypatch.setattr(adapter, "_graphql", _fake_graphql)
+    adapter.list_coins(include_pending=True, min_amount_mojos=None)
+    assert captured["variables"]["includePending"] is True
+    assert captured["variables"]["minAmount"] is None
 
 
 def test_cloud_wallet_get_chia_usd_quote_reads_numeric_price(monkeypatch, tmp_path: Path) -> None:

@@ -26,6 +26,10 @@ Reviewed `main` from **`178121c`** (`feat: vault coinset scanner with CAT filter
 
 **Net:** ~2.4k insertions / ~436 deletions across 20 files (diffstat `178121c..HEAD`). Operational focus: **Vault API instability** (timeouts, 504/503), **deterministic combine + reconciliation**, and **fewer redundant `resolveWalletAssets` calls** via disk cache + explicit seed command.
 
+- **Follow-up (same day): Dexie offered-side symbol resolution + cycle-scoped Cloud Wallet `listCoins` cache**
+  - `resolve_trade_asset_for_dexie` in `greenfloor/config/io.py` (shared with `resolve_quote_asset_for_offer`); daemon `_reconcile_offer_states` uses it for `market.base_asset` before `get_offers`.
+  - `CloudWalletAssetScopedListCache`: one GraphQL `listCoins(asset_id=…)` per resolved asset per `run_once` cycle (thread-safe); wired into inventory spendable amounts and parallel-offer reservation profiling. Split/combine paths still call `list_coins` directly for freshness.
+
 ## 2026-03-12 (Auto-increment scan mode + John-Deere production validation request)
 
 - Extended `scripts/list_vault_coins_coinset.py` incremental workflow with `--auto-increment`:

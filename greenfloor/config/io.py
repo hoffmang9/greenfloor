@@ -114,12 +114,13 @@ def default_state_dir_path() -> Path:
     return Path("~/.greenfloor/state").expanduser()
 
 
-def resolve_quote_asset_for_offer(*, quote_asset: str, network: str) -> str:
-    """Resolve a quote asset identifier to its canonical form for offer building.
+def resolve_trade_asset_for_dexie(*, asset: str, network: str) -> str:
+    """Resolve a base or quote asset id for Dexie list/fetch APIs.
 
-    Handles xch/txch network mapping and cats.yaml symbol lookup.
+    Handles xch/txch network mapping and cats.yaml symbol lookup (same rules
+    as offer building for the quote side).
     """
-    normalized = quote_asset.strip().lower()
+    normalized = asset.strip().lower()
     if normalized in {"xch", "txch", "1"}:
         return "txch" if is_testnet(network) else "xch"
     if is_hex_id(normalized):
@@ -127,16 +128,16 @@ def resolve_quote_asset_for_offer(*, quote_asset: str, network: str) -> str:
 
     cats_path = default_cats_config_path()
     if cats_path is None:
-        return quote_asset
+        return asset
     try:
         raw = load_yaml(cats_path)
     except Exception:
-        return quote_asset
+        return asset
     if not isinstance(raw, dict):
-        return quote_asset
+        return asset
     cats = raw.get("cats", [])
     if not isinstance(cats, list):
-        return quote_asset
+        return asset
     for item in cats:
         if not isinstance(item, dict):
             continue
@@ -146,4 +147,12 @@ def resolve_quote_asset_for_offer(*, quote_asset: str, network: str) -> str:
         asset_id = str(item.get("asset_id", "")).strip().lower()
         if is_hex_id(asset_id):
             return asset_id
-    return quote_asset
+    return asset
+
+
+def resolve_quote_asset_for_offer(*, quote_asset: str, network: str) -> str:
+    """Resolve a quote asset identifier to its canonical form for offer building.
+
+    Handles xch/txch network mapping and cats.yaml symbol lookup.
+    """
+    return resolve_trade_asset_for_dexie(asset=quote_asset, network=network)
