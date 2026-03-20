@@ -13,7 +13,7 @@ import time
 import urllib.parse
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -49,6 +49,7 @@ from greenfloor.core.inventory import compute_bucket_counts_from_coins
 from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert, utcnow
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
 from greenfloor.core.strategy import MarketState, PlannedAction, StrategyConfig, evaluate_market
+from greenfloor.daemon.cloud_wallet_list_cache import CloudWalletAssetScopedListCache
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient, capture_coinset_websocket_once
 from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.hex_utils import default_mojo_multiplier_for_asset, is_hex_id
@@ -59,23 +60,6 @@ from greenfloor.logging_setup import (
 )
 from greenfloor.notify.pushover import send_pushover_alert
 from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
-
-
-@dataclass
-class DaemonRunState:
-    """Mutable state carried across daemon loop iterations.
-
-    Bundling this avoids module-level mutable globals and makes the daemon
-    reentrant for testing.
-    """
-
-    post_cooldown_until: dict[str, float] = field(default_factory=dict)
-    cancel_cooldown_until: dict[str, float] = field(default_factory=dict)
-    disabled_market_next_log_at: dict[str, float] = field(default_factory=dict)
-    disabled_market_startup_logged: bool = False
-    watched_coin_ids_by_market: dict[str, set[str]] = field(default_factory=dict)
-    watched_coin_ids_lock: threading.Lock = field(default_factory=threading.Lock)
-
 
 _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS = 500
 _POST_COOLDOWN_UNTIL: dict[str, float] = {}
@@ -95,29 +79,6 @@ _CLOUD_WALLET_SPENDABLE_STATES = {
     "AVAILABLE",
     "SETTLED",
 }
-
-
-class CloudWalletAssetScopedListCache:
-    """Per-daemon-cycle cache of Cloud Wallet asset-scoped ``list_coins`` results.
-
-    Within one ``run_once`` cycle, the same resolved asset id is fetched at most
-    once (thread-safe for parallel markets). Coin split/combine paths still call
-    ``list_coins`` directly so they see fresh spendable state.
-    """
-
-    def __init__(self, wallet: CloudWalletAdapter) -> None:
-        self._wallet = wallet
-        self._lock = threading.Lock()
-        self._by_asset: dict[str, list[dict[str, Any]]] = {}
-
-    def list_coins_scoped(self, *, resolved_asset_id: str) -> list[dict[str, Any]]:
-        key = str(resolved_asset_id).strip().lower()
-        if not key:
-            return []
-        with self._lock:
-            if key not in self._by_asset:
-                self._by_asset[key] = self._wallet.list_coins(asset_id=resolved_asset_id)
-            return self._by_asset[key]
 
 
 def _cloud_wallet_coin_matches_asset_scope(*, coin: dict[str, Any], scoped_asset_id: str) -> bool:

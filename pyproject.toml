@@ -36,7 +36,7 @@ include = ["greenfloor*"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["old", "chia-wallet-sdk"]
+extend-exclude = ["chia-wallet-sdk"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W"]

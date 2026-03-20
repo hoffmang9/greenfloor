@@ -4,9 +4,11 @@ This guide explains how this repo submits Chia offers to a Splash server, includ
 
 **As of:** 2026-02-19
 
+> **Note (2026-03-19):** The historical `old/` directory (including `old/common.py`) was removed from this repository. Splash-related behavior now lives in the main package (e.g. adapters and manager/daemon flows). Use `git log -- old/` if you need the previous script text.
+
 ## What This Repo Actually Does
 
-Offer submission is centralized in `old/common.py`:
+Offer submission was historically centralized in `old/common.py` (removed); the patterns below described that layout:
 
 - Function: `post_offer_to_splash(offer_text: str)`
 - Transport: HTTP `POST`

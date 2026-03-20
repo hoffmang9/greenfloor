@@ -2607,7 +2607,7 @@ def test_resolve_taker_or_coin_operation_fee_uses_coinset_value(monkeypatch) -> 
         def get_conservative_fee_estimate():
             return 15
 
-    monkeypatch.setattr("greenfloor.cli.manager.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setattr("greenfloor.coinset_runtime.CoinsetAdapter", _FakeCoinset)
     monkeypatch.setenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "1")
     fee, source = manager_mod._resolve_taker_or_coin_operation_fee(
         network="mainnet",
@@ -2631,7 +2631,7 @@ def test_resolve_taker_or_coin_operation_fee_applies_minimum_floor(monkeypatch) 
         def get_conservative_fee_estimate():
             return 2
 
-    monkeypatch.setattr("greenfloor.cli.manager.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setattr("greenfloor.coinset_runtime.CoinsetAdapter", _FakeCoinset)
     monkeypatch.setenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "1")
     fee, source = manager_mod._resolve_taker_or_coin_operation_fee(
         network="mainnet",
@@ -2660,7 +2660,7 @@ def test_resolve_taker_or_coin_operation_fee_falls_back_to_config_minimum(monkey
                 return 1
             return None
 
-    monkeypatch.setattr("greenfloor.cli.manager.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setattr("greenfloor.coinset_runtime.CoinsetAdapter", _FakeCoinset)
     monkeypatch.setenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "1")
     monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
 
@@ -2682,7 +2682,7 @@ def test_resolve_taker_or_coin_operation_fee_fails_on_endpoint_preflight(monkeyp
             _ = target_times
             raise RuntimeError("coinset_network_error:timed_out")
 
-    monkeypatch.setattr("greenfloor.cli.manager.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setattr("greenfloor.coinset_runtime.CoinsetAdapter", _FakeCoinset)
     try:
         manager_mod._resolve_taker_or_coin_operation_fee(network="mainnet", minimum_fee_mojos=0)
     except manager_mod._CoinsetFeeLookupPreflightError as exc:
@@ -2704,7 +2704,7 @@ def test_resolve_taker_or_coin_operation_fee_fails_on_temporary_advice_unavailab
             _ = target_times
             return {"success": False, "error": "backend_overloaded"}
 
-    monkeypatch.setattr("greenfloor.cli.manager.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setattr("greenfloor.coinset_runtime.CoinsetAdapter", _FakeCoinset)
     try:
         manager_mod._resolve_taker_or_coin_operation_fee(network="mainnet", minimum_fee_mojos=0)
     except manager_mod._CoinsetFeeLookupPreflightError as exc:

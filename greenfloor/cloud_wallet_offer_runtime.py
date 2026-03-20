@@ -5,8 +5,6 @@ import datetime as dt
 import importlib
 import json
 import logging
-import os
-import re
 import sys
 import time
 import urllib.parse
@@ -18,20 +16,35 @@ from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConf
 from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
+from greenfloor.asset_label_catalog import (
+    _canonical_is_cloud_global_id,
+    _dexie_lookup_token_for_cat_id,
+    _dexie_lookup_token_for_symbol,
+    _is_hex_asset_id,
+    _local_catalog_label_hints_for_asset_id,
+    _wallet_label_matches_asset_ref,
+)
 from greenfloor.cloud_wallet_asset_cache import (
     load_wallet_assets_edges,
     save_wallet_assets_edges,
     wallet_assets_cache_path,
 )
-from greenfloor.config.io import is_testnet, load_yaml
+from greenfloor.coinset_runtime import (
+    _resolve_taker_or_coin_operation_fee,
+    resolve_maker_offer_fee,
+)
+from greenfloor.config.io import is_testnet
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.hex_utils import (
     canonical_is_xch,
     default_mojo_multiplier_for_asset,
-    is_hex_id,
     normalize_hex_id,
 )
 from greenfloor.logging_setup import initialize_service_file_logging
+from greenfloor.moderate_retry import (
+    call_with_moderate_retry,
+    poll_with_exponential_backoff_until,
+)
 from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
 from greenfloor.storage.sqlite import SqliteStore
 
@@ -297,171 +310,6 @@ def verify_offer_text_for_dexie(offer_text: str) -> str | None:
     except Exception as exc:
         return f"wallet_sdk_offer_validate_failed:{exc}"
     return None
-
-
-class _CoinsetFeeLookupPreflightError(RuntimeError):
-    def __init__(
-        self,
-        *,
-        failure_kind: str,
-        detail: str,
-        diagnostics: dict[str, str],
-    ) -> None:
-        self.failure_kind = failure_kind
-        self.detail = detail
-        self.diagnostics = diagnostics
-        super().__init__(f"{failure_kind}:{detail}")
-
-
-def _canonical_is_cloud_global_id(asset_id: str) -> bool:
-    return asset_id.strip().startswith("Asset_")
-
-
-def _is_hex_asset_id(value: str) -> bool:
-    return is_hex_id(value)
-
-
-def _normalize_label(value: str) -> str:
-    return "".join(ch for ch in value.strip().lower() if ch.isalnum())
-
-
-def _label_tokens(value: str) -> list[str]:
-    tokens: list[str] = []
-    current: list[str] = []
-    for ch in value.strip().lower():
-        if ch.isalnum():
-            current.append(ch)
-        else:
-            if current:
-                tokens.append("".join(current))
-                current = []
-    if current:
-        tokens.append("".join(current))
-    return tokens
-
-
-def _labels_match(left: str, right: str) -> bool:
-    a = _normalize_label(left)
-    b = _normalize_label(right)
-    if not a or not b:
-        return False
-    if a == b:
-        return True
-    if len(a) >= 5 and a in b:
-        return True
-    if len(b) >= 5 and b in a:
-        return True
-    left_tokens = {token for token in _label_tokens(left) if len(token) >= 3}
-    right_tokens = {token for token in _label_tokens(right) if len(token) >= 3}
-    return bool(left_tokens and right_tokens and len(left_tokens & right_tokens) >= 2)
-
-
-def _wallet_label_matches_asset_ref(
-    *,
-    cat_assets: list[dict[str, str]],
-    label: str,
-) -> list[str]:
-    target = label.strip()
-    if not target:
-        return []
-    matches: list[str] = []
-    for cat in cat_assets:
-        asset_id = cat.get("asset_id", "").strip()
-        if not asset_id:
-            continue
-        display_name = cat.get("display_name", "").strip()
-        symbol = cat.get("symbol", "").strip()
-        if _labels_match(display_name, target) or _labels_match(symbol, target):
-            matches.append(asset_id)
-    return sorted(set(matches))
-
-
-def _resolve_dexie_base_url(network: str, explicit_base_url: str | None = None) -> str:
-    if explicit_base_url and explicit_base_url.strip():
-        return explicit_base_url.strip().rstrip("/")
-    network_l = network.strip().lower()
-    if network_l in {"mainnet", ""}:
-        return "https://api.dexie.space"
-    if is_testnet(network_l):
-        return "https://api-testnet.dexie.space"
-    raise ValueError(f"unsupported network for dexie posting: {network}")
-
-
-def _dexie_lookup_token_for_cat_id(*, canonical_cat_id_hex: str, network: str) -> dict | None:
-    adapter = DexieAdapter(_resolve_dexie_base_url(network, None))
-    return adapter.lookup_token_by_cat_id(canonical_cat_id_hex)
-
-
-def _dexie_lookup_token_for_symbol(*, asset_ref: str, network: str) -> dict | None:
-    adapter = DexieAdapter(_resolve_dexie_base_url(network, None))
-    return adapter.lookup_token_by_symbol(asset_ref, label_matcher=_labels_match)
-
-
-def _normalize_hex_asset_id(asset_id: str) -> str:
-    result = normalize_hex_id(asset_id)
-    if result:
-        return result
-    normalized = str(asset_id).strip().lower()
-    if normalized.startswith("0x"):
-        normalized = normalized[2:]
-    return normalized
-
-
-def _local_catalog_label_hints_for_asset_id(*, canonical_asset_id: str) -> list[str]:
-    canonical = canonical_asset_id.strip().lower()
-    if not canonical:
-        return []
-    repo_root = Path(__file__).resolve().parents[1]
-    cats_path = repo_root / "config" / "cats.yaml"
-    markets_path = repo_root / "config" / "markets.yaml"
-    try:
-        cats_payload = load_yaml(cats_path) if cats_path.exists() else {}
-        markets_payload = load_yaml(markets_path) if markets_path.exists() else {}
-    except Exception:
-        return []
-    hints: list[str] = []
-    cats_rows = cats_payload.get("cats") if isinstance(cats_payload, dict) else None
-    if isinstance(cats_rows, list):
-        for row in cats_rows:
-            if not isinstance(row, dict):
-                continue
-            row_asset_id = str(row.get("asset_id", "")).strip().lower()
-            if row_asset_id != canonical:
-                continue
-            for key in ("base_symbol", "name"):
-                value = str(row.get(key, "")).strip()
-                if value:
-                    hints.append(value)
-            aliases = row.get("aliases")
-            if isinstance(aliases, list):
-                for alias in aliases:
-                    value = str(alias).strip()
-                    if value:
-                        hints.append(value)
-    assets_rows = markets_payload.get("assets") if isinstance(markets_payload, dict) else None
-    if isinstance(assets_rows, list):
-        for row in assets_rows:
-            if not isinstance(row, dict):
-                continue
-            row_asset_id = str(row.get("asset_id", "")).strip().lower()
-            if row_asset_id != canonical:
-                continue
-            for key in ("base_symbol", "name"):
-                value = str(row.get(key, "")).strip()
-                if value:
-                    hints.append(value)
-    markets_rows = markets_payload.get("markets") if isinstance(markets_payload, dict) else None
-    if isinstance(markets_rows, list):
-        for row in markets_rows:
-            if not isinstance(row, dict):
-                continue
-            base_asset = str(row.get("base_asset", "")).strip().lower()
-            if base_asset != canonical:
-                continue
-            base_symbol = str(row.get("base_symbol", "")).strip()
-            if base_symbol:
-                hints.append(base_symbol)
-    return sorted(set(hints))
 
 
 def _wallet_asset_edges_for_resolve(
@@ -878,55 +726,6 @@ def _safe_int(value: object) -> int | None:
         return None
 
 
-def _cloud_wallet_rate_limit_retry_seconds(error_text: str) -> float | None:
-    match = re.search(r"try again in (\d+) seconds", error_text, flags=re.IGNORECASE)
-    if not match:
-        return None
-    try:
-        return float(int(match.group(1)))
-    except (TypeError, ValueError):
-        return None
-
-
-def call_with_moderate_retry(
-    *,
-    action: str,
-    call: collections.abc.Callable[[], Any],
-    elapsed_seconds: int = 0,
-    events: list[dict[str, str]] | None = None,
-    max_attempts: int = 4,
-    sleep_fn: collections.abc.Callable[[float], None] | None = None,
-):
-    if sleep_fn is None:
-        sleep_fn = time.sleep
-    attempt = 0
-    sleep_seconds = 0.5
-    while True:
-        try:
-            return call()
-        except Exception as exc:
-            attempt += 1
-            error_text = str(exc)
-            rate_limit_wait = _cloud_wallet_rate_limit_retry_seconds(error_text)
-            if rate_limit_wait is not None:
-                sleep_seconds = max(sleep_seconds, min(30.0, rate_limit_wait + 0.25))
-            if attempt >= max_attempts:
-                raise RuntimeError(f"{action}_retry_exhausted:{exc}") from exc
-            if events is not None:
-                events.append(
-                    {
-                        "event": "poll_retry",
-                        "action": action,
-                        "attempt": str(attempt),
-                        "elapsed_seconds": str(elapsed_seconds),
-                        "wait_reason": "transient_poll_failure",
-                        "error": error_text,
-                    }
-                )
-            sleep_fn(sleep_seconds)
-            sleep_seconds = min(8.0, sleep_seconds * 2.0)
-
-
 def post_dexie_offer_with_invalid_offer_retry(
     *,
     dexie: DexieAdapter,
@@ -1186,10 +985,8 @@ def poll_offer_artifact_until_available(
         sleep_fn = time.sleep
     if monotonic_fn is None:
         monotonic_fn = time.monotonic
-    start = monotonic_fn()
-    sleep_seconds = 2.0
-    while True:
-        elapsed = int(monotonic_fn() - start)
+
+    def _on_tick(elapsed: int) -> str | None:
         wallet_payload = retry_fn(
             action="wallet_get_wallet",
             call=lambda: wallet_get_wallet_offers_fn(
@@ -1210,10 +1007,18 @@ def poll_offer_artifact_until_available(
             )
             if offer_text:
                 return offer_text
-        if elapsed >= timeout_seconds:
-            raise RuntimeError("cloud_wallet_offer_artifact_timeout")
-        sleep_fn(sleep_seconds)
-        sleep_seconds = min(20.0, sleep_seconds * 1.5)
+        return None
+
+    return poll_with_exponential_backoff_until(
+        monotonic_fn=monotonic_fn,
+        sleep_fn=sleep_fn,
+        timeout_seconds=timeout_seconds,
+        initial_sleep=2.0,
+        max_sleep=20.0,
+        sleep_multiplier=1.5,
+        on_tick=_on_tick,
+        timeout_error="cloud_wallet_offer_artifact_timeout",
+    )
 
 
 def poll_offer_artifact_by_signature_request(
@@ -1233,10 +1038,8 @@ def poll_offer_artifact_by_signature_request(
         sleep_fn = time.sleep
     if monotonic_fn is None:
         monotonic_fn = time.monotonic
-    start = monotonic_fn()
-    sleep_seconds = 2.0
-    while True:
-        elapsed = int(monotonic_fn() - start)
+
+    def _on_tick(elapsed: int) -> str | None:
         payload = retry_fn(
             action="wallet_get_signature_request_offer",
             call=lambda: wallet.get_signature_request_offer(
@@ -1264,173 +1067,18 @@ def poll_offer_artifact_by_signature_request(
             and created_at_gte_min
         ):
             return bech32
-        if elapsed >= timeout_seconds:
-            raise RuntimeError("cloud_wallet_offer_artifact_timeout")
-        sleep_fn(sleep_seconds)
-        sleep_seconds = min(20.0, sleep_seconds * 1.5)
+        return None
 
-
-def _coinset_base_url(*, network: str) -> str:
-    base = os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip()
-    if not base:
-        return ""
-    if is_testnet(network):
-        allow_mainnet = os.getenv("GREENFLOOR_ALLOW_MAINNET_COINSET_FOR_TESTNET11", "").strip()
-        if (
-            "coinset.org" in base
-            and "testnet11.api.coinset.org" not in base
-            and allow_mainnet != "1"
-        ):
-            raise RuntimeError("coinset_base_url_mainnet_not_allowed_for_testnet11")
-    return base
-
-
-def _coinset_adapter(*, network: str) -> CoinsetAdapter:
-    base_url = _coinset_base_url(network=network)
-    require_testnet11 = is_testnet(network)
-    try:
-        return CoinsetAdapter(
-            base_url or None, network=network, require_testnet11=require_testnet11
-        )
-    except TypeError as exc:
-        if "require_testnet11" not in str(exc):
-            raise
-        return CoinsetAdapter(base_url or None, network=network)
-
-
-def _coinset_fee_lookup_preflight(
-    *,
-    network: str,
-    fee_cost: int = 1_000_000,
-    spend_count: int | None = None,
-) -> dict[str, str]:
-    try:
-        coinset = _coinset_adapter(network=network)
-    except Exception as exc:
-        raise _CoinsetFeeLookupPreflightError(
-            failure_kind="endpoint_validation_failed",
-            detail=str(exc),
-            diagnostics={
-                "coinset_network": network.strip().lower(),
-                "coinset_base_url": os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip(),
-            },
-        ) from exc
-    diagnostics = {
-        "coinset_network": str(getattr(coinset, "network", network.strip().lower())),
-        "coinset_base_url": str(
-            getattr(coinset, "base_url", os.getenv("GREENFLOOR_COINSET_BASE_URL", "").strip())
-        ),
-    }
-    try:
-        try:
-            payload = coinset.get_fee_estimate(
-                target_times=[300, 600, 1200],
-                cost=max(1, int(fee_cost)),
-                spend_count=spend_count,
-            )
-        except TypeError as exc:
-            if "unexpected keyword argument" not in str(exc):
-                raise
-            payload = coinset.get_fee_estimate(target_times=[300, 600, 1200])
-    except Exception as exc:
-        raise _CoinsetFeeLookupPreflightError(
-            failure_kind="endpoint_validation_failed",
-            detail=str(exc),
-            diagnostics=diagnostics,
-        ) from exc
-    if not bool(payload.get("success", False)):
-        detail = str(
-            payload.get("error")
-            or payload.get("message")
-            or payload.get("reason")
-            or "coinset_fee_estimate_unsuccessful"
-        )
-        raise _CoinsetFeeLookupPreflightError(
-            failure_kind="temporary_fee_advice_unavailable",
-            detail=detail,
-            diagnostics=diagnostics,
-        )
-    try:
-        recommended = coinset.get_conservative_fee_estimate(
-            cost=max(1, int(fee_cost)),
-            spend_count=spend_count,
-        )
-    except TypeError as exc:
-        if "unexpected keyword argument" not in str(exc):
-            raise
-        recommended = coinset.get_conservative_fee_estimate()
-    if recommended is None:
-        raise _CoinsetFeeLookupPreflightError(
-            failure_kind="temporary_fee_advice_unavailable",
-            detail="coinset_conservative_fee_unavailable",
-            diagnostics=diagnostics,
-        )
-    diagnostics["recommended_fee_mojos"] = str(int(recommended))
-    return diagnostics
-
-
-def _resolve_operation_fee(
-    *,
-    role: str,
-    network: str,
-    minimum_fee_mojos: int = 0,
-    fee_cost: int = 1_000_000,
-    spend_count: int | None = None,
-) -> tuple[int, str]:
-    if role == "maker_create_offer":
-        return 0, "maker_default_zero"
-    if role != "taker_or_coin_operation":
-        raise ValueError(f"unsupported fee role: {role}")
-    minimum_fee = int(minimum_fee_mojos)
-    max_attempts = int(os.getenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "4"))
-    coinset = _coinset_adapter(network=network)
-    for attempt in range(max_attempts):
-        advised = None
-        try:
-            try:
-                advised = coinset.get_conservative_fee_estimate(
-                    cost=max(1, int(fee_cost)),
-                    spend_count=spend_count,
-                )
-            except TypeError as exc:
-                if "unexpected keyword argument" not in str(exc):
-                    raise
-                advised = coinset.get_conservative_fee_estimate()
-        except Exception:
-            advised = None
-        if advised is not None:
-            advised_fee = int(advised)
-            if advised_fee < minimum_fee:
-                return minimum_fee, "coinset_conservative_minimum_floor"
-            return advised_fee, "coinset_conservative"
-        if attempt < max_attempts - 1:
-            time.sleep(min(8.0, 0.5 * (2**attempt)))
-    return minimum_fee, "config_minimum_fee_fallback"
-
-
-def _resolve_taker_or_coin_operation_fee(
-    *,
-    network: str,
-    minimum_fee_mojos: int = 0,
-    fee_cost: int = 1_000_000,
-    spend_count: int | None = None,
-) -> tuple[int, str]:
-    _coinset_fee_lookup_preflight(
-        network=network,
-        fee_cost=fee_cost,
-        spend_count=spend_count,
+    return poll_with_exponential_backoff_until(
+        monotonic_fn=monotonic_fn,
+        sleep_fn=sleep_fn,
+        timeout_seconds=timeout_seconds,
+        initial_sleep=2.0,
+        max_sleep=20.0,
+        sleep_multiplier=1.5,
+        on_tick=_on_tick,
+        timeout_error="cloud_wallet_offer_artifact_timeout",
     )
-    return _resolve_operation_fee(
-        role="taker_or_coin_operation",
-        network=network,
-        minimum_fee_mojos=minimum_fee_mojos,
-        fee_cost=fee_cost,
-        spend_count=spend_count,
-    )
-
-
-def resolve_maker_offer_fee(*, network: str) -> tuple[int, str]:
-    return _resolve_operation_fee(role="maker_create_offer", network=network)
 
 
 def poll_signature_request_until_not_unsigned(

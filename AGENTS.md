@@ -67,6 +67,6 @@ Severity tags:
 
 ## Review and Decisions
 
-- `[MUST]` Before major behavior changes, read markdown docs in `docs/` and review legacy behavior in `old/*.py`.
+- `[MUST]` Before major behavior changes, read markdown docs in `docs/` and review git history or archived notes for legacy behavior when relevant.
 - `[MUST]` Record major milestones in `docs/progress.md`.
 - `[MUST]` Add a decision note in `docs/decisions/` for non-trivial architecture or policy changes.
