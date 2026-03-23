@@ -571,7 +571,8 @@ def _combine_cat_dust(
     rows: list[CoinRow],
     requested_cat_ids: set[str],
 ) -> dict[str, Any]:
-    threshold = max(1, int(args.dust_threshold_mojos))
+    # CAT denomination floor: never plan combines that can create sub-unit CAT outputs.
+    threshold = max(1000, int(args.dust_threshold_mojos))
     max_inputs = max(2, int(args.combine_max_inputs))
     fee_mojos = max(0, int(args.combine_fee_mojos))
     dry_run = bool(args.combine_dry_run)
@@ -626,18 +627,60 @@ def _combine_cat_dust(
             )
             continue
 
-        input_coin_global_ids = [global_map[row.coin_id] for row in dust_rows]
+        candidate_inputs = [
+            {
+                "coin_name": row.coin_id,
+                "coin_global_id": global_map[row.coin_id],
+                "amount": int(row.amount),
+            }
+            for row in dust_rows
+        ]
+        # Build batches whose summed input amount is guaranteed to be >= CAT floor.
+        # Greedy largest-first keeps batch count low and avoids emitting new dust.
+        remaining = sorted(candidate_inputs, key=lambda item: int(item["amount"]))
         batch_plans: list[dict[str, Any]] = []
-        for offset in range(0, len(input_coin_global_ids), max_inputs):
-            batch = input_coin_global_ids[offset : offset + max_inputs]
-            if len(batch) <= 1:
-                continue
+        while len(remaining) >= 2:
+            pool = remaining[-max_inputs:]
+            selected: list[dict[str, Any]] = []
+            selected_total = 0
+            for item in reversed(pool):
+                selected.append(item)
+                selected_total += int(item["amount"])
+                if len(selected) >= 2 and selected_total >= threshold:
+                    break
+            if len(selected) < 2 or selected_total < threshold:
+                break
+            selected_ids = {str(item["coin_global_id"]) for item in selected}
+            remaining = [
+                item for item in remaining if str(item["coin_global_id"]) not in selected_ids
+            ]
             batch_plans.append(
                 {
-                    "input_coin_ids": batch,
-                    "input_coin_count": len(batch),
+                    "input_coin_ids": [str(item["coin_global_id"]) for item in selected],
+                    "input_coin_count": len(selected),
+                    "input_amount_total": int(selected_total),
+                    "input_coin_names": [str(item["coin_name"]) for item in selected],
                 }
             )
+        if remaining:
+            operations.append(
+                {
+                    "cat_asset_id": asset_id_hex,
+                    "asset_global_id": asset_global_id,
+                    "status": "skipped",
+                    "reason": "remaining_dust_below_cat_floor",
+                    "threshold_mojos": int(threshold),
+                    "remaining_coin_count": len(remaining),
+                    "remaining_total_mojos": int(
+                        sum(int(item.get("amount", 0)) for item in remaining)
+                    ),
+                    "remaining_coin_names_sample": [
+                        str(item.get("coin_name", "")) for item in remaining[:25]
+                    ],
+                }
+            )
+        if not batch_plans:
+            continue
 
         if dry_run:
             operations.append(

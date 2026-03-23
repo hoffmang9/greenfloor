@@ -269,6 +269,178 @@ def test_run_preflight_only_does_not_broadcast(monkeypatch) -> None:
     assert called["broadcast"] == 0
 
 
+def test_run_rejects_cat_total_below_minimum_mojos(monkeypatch) -> None:
+    mod = _load_script_module()
+    parser = mod._build_parser()
+    args = parser.parse_args(_required_argv())
+
+    class _FakeCoinset:
+        network = "mainnet"
+        base_url = "https://api.coinset.org"
+
+        def __init__(self, *args, **kwargs) -> None:
+            _ = args, kwargs
+
+        @staticmethod
+        def get_coin_records_by_names(*, coin_names_hex: list[str], include_spent_coins: bool):
+            _ = include_spent_coins
+            rows = []
+            # Total=900 mojos (< 1000 CAT floor)
+            amounts = [400, 500]
+            for idx, name in enumerate(coin_names_hex):
+                raw = name.replace("0x", "")
+                rows.append(
+                    {
+                        "coin": {
+                            "name": f"0x{raw}",
+                            "amount": amounts[idx % len(amounts)],
+                        },
+                        "spent_block_index": 0,
+                    }
+                )
+            return rows
+
+        @staticmethod
+        def get_blockchain_state():
+            return {"peak_height": 1}
+
+    class _FakeWallet:
+        @staticmethod
+        def get_vault_custody_snapshot():
+            return {"vaultLauncherId": "0x" + ("c" * 64)}
+
+    def _fake_wallet_factory(_config):
+        return _FakeWallet()
+
+    monkeypatch.setattr(
+        mod,
+        "_resolve_cat_asset_id_for_coin_ids",
+        lambda **_kwargs: ("d" * 64, {"ok": True, "asset_id": "d" * 64}),
+    )
+
+    called = {"broadcast": 0}
+
+    def _broadcast(_payload: dict[str, Any]) -> dict[str, Any]:
+        called["broadcast"] += 1
+        return {"status": "executed", "reason": "unexpected"}
+
+    exit_code, payload = mod.run(
+        args,
+        coinset_factory=_FakeCoinset,
+        cloud_wallet_factory=_fake_wallet_factory,
+        sign_and_broadcast_fn=_broadcast,
+        kms_pubkey_resolver=lambda *_args: "02" + ("1" * 64),
+        kms_signer=lambda *_args: "f" * 128,
+    )
+    assert exit_code == 1
+    assert payload["status"] == "error"
+    assert payload["reason"] == "cat_total_below_minimum_mojos"
+    assert payload["minimum_mojos"] == 1000
+    assert payload["total_amount"] == 900
+    assert called["broadcast"] == 0
+
+
+def test_run_requires_stepwise_when_coin_count_exceeds_max_inputs() -> None:
+    mod = _load_script_module()
+    parser = mod._build_parser()
+    args = parser.parse_args(
+        _required_argv() + ["--coin-name", "0x" + ("c" * 64), "--max-input-coins", "2"]
+    )
+
+    exit_code, payload = mod.run(args)
+    assert exit_code == 1
+    assert payload["status"] == "error"
+    assert payload["reason"] == "input_count_exceeds_single_spendbundle_limit"
+
+
+def test_run_stepwise_allows_sub_cat_outputs_only_with_override(monkeypatch) -> None:
+    mod = _load_script_module()
+    parser = mod._build_parser()
+    args = parser.parse_args(
+        _required_argv()
+        + [
+            "--coin-name",
+            "0x" + ("c" * 64),
+            "--coin-name",
+            "0x" + ("d" * 64),
+            "--max-input-coins",
+            "2",
+            "--stepwise-combine",
+            "--allow-sub-cat-output",
+        ]
+    )
+
+    class _FakeCoinset:
+        network = "mainnet"
+        base_url = "https://api.coinset.org"
+
+        def __init__(self, *args, **kwargs) -> None:
+            _ = args, kwargs
+
+        @staticmethod
+        def get_coin_records_by_names(*, coin_names_hex: list[str], include_spent_coins: bool):
+            _ = include_spent_coins
+            rows = []
+            for name in coin_names_hex:
+                raw = name.replace("0x", "")
+                rows.append(
+                    {
+                        "coin": {
+                            "name": f"0x{raw}",
+                            "amount": 200,
+                        },
+                        "spent_block_index": 0,
+                    }
+                )
+            return rows
+
+        @staticmethod
+        def get_blockchain_state():
+            return {"peak_height": 1}
+
+    class _FakeWallet:
+        @staticmethod
+        def get_vault_custody_snapshot():
+            return {"vaultLauncherId": "0x" + ("c" * 64)}
+
+    def _fake_wallet_factory(_config):
+        return _FakeWallet()
+
+    monkeypatch.setattr(
+        mod,
+        "_resolve_cat_asset_id_for_coin_ids",
+        lambda **_kwargs: ("d" * 64, {"ok": True, "asset_id": "d" * 64}),
+    )
+    monkeypatch.setattr(
+        mod,
+        "_wait_until_inputs_spent",
+        lambda **_kwargs: {"status": "spent", "poll_count": 1, "elapsed_seconds": 0},
+    )
+
+    called = {"broadcast": 0}
+
+    def _broadcast(_payload: dict[str, Any]) -> dict[str, Any]:
+        called["broadcast"] += 1
+        return {
+            "status": "executed",
+            "reason": "submitted",
+            "operation_id": f"op-{called['broadcast']}",
+        }
+
+    exit_code, payload = mod.run(
+        args,
+        coinset_factory=_FakeCoinset,
+        cloud_wallet_factory=_fake_wallet_factory,
+        sign_and_broadcast_fn=_broadcast,
+        kms_pubkey_resolver=lambda *_args: "02" + ("1" * 64),
+        kms_signer=lambda *_args: "f" * 128,
+    )
+    assert exit_code == 0
+    assert payload["status"] == "ok"
+    assert payload["stepwise_chunk_count"] == 2
+    assert called["broadcast"] == 2
+
+
 def test_wait_until_inputs_spent_uses_additive_warning_cadence() -> None:
     mod = _load_script_module()
 

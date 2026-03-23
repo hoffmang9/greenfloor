@@ -36,6 +36,7 @@ _AGG_SIG_ADDITIONAL_DATA_BY_NETWORK: dict[str, bytes] = {
 }
 
 _XCH_LIKE_ASSETS: frozenset[str] = frozenset({"", "xch", "txch", "1"})
+_MIN_CAT_OUTPUT_MOJOS = 1000
 logger = logging.getLogger("greenfloor.signing")
 
 
@@ -1661,6 +1662,10 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
         if amount <= 0:
             return None, "invalid_output_amount"
         output_amounts.append(amount)
+    if asset_id not in _XCH_LIKE_ASSETS and any(
+        int(amount) < _MIN_CAT_OUTPUT_MOJOS for amount in output_amounts
+    ):
+        return None, "cat_output_below_minimum_mojos"
     fee_mojos = int(payload.get("fee_mojos", 0))
     if fee_mojos < 0:
         return None, "invalid_fee_mojos"
@@ -1825,6 +1830,12 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
         offered_change = offered_total - target_total
         if asset_id in _XCH_LIKE_ASSETS:
             offered_change -= fee_mojos
+        if (
+            asset_id not in _XCH_LIKE_ASSETS
+            and offered_change > 0
+            and offered_change < _MIN_CAT_OUTPUT_MOJOS
+        ):
+            return None, "cat_change_below_minimum_mojos"
         if offered_change > 0:
             actions.append(
                 sdk.Action.send(asset_sdk_id, receive_puzzle_hash, int(offered_change), None)

@@ -3824,6 +3824,33 @@ def _execute_coin_ops_cloud_wallet_kms_only(
                     selected_coin_id = str(selected_coin.get("id", "")).strip()
                     if not selected_coin_id:
                         break
+                    selected_amount = int(selected_coin.get("amount", 0))
+                    selected_remainder = int(selected_amount - required_amount)
+                    min_cat_mojos = _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
+                    if (
+                        min_cat_mojos > 0
+                        and selected_remainder > 0
+                        and selected_remainder < int(min_cat_mojos)
+                    ):
+                        items.append(
+                            {
+                                "op_type": op_type,
+                                "size_base_units": size_base_units,
+                                "op_count": op_count,
+                                "status": "skipped",
+                                "reason": "split_would_create_sub_cat_change",
+                                "operation_id": None,
+                                "data": {
+                                    "selected_coin_id": selected_coin_id,
+                                    "selected_amount_mojos": int(selected_amount),
+                                    "required_amount_mojos": int(required_amount),
+                                    "remainder_mojos": int(selected_remainder),
+                                    "minimum_allowed_mojos": int(min_cat_mojos),
+                                },
+                            }
+                        )
+                        split_submitted = True
+                        break
                     attempted_coin_ids.add(selected_coin_id)
                     try:
                         result = cloud_wallet.split_coins(

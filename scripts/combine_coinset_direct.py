@@ -13,6 +13,8 @@ from greenfloor.adapters.kms_signer import get_public_key_compressed_hex, sign_d
 from greenfloor.hex_utils import normalize_hex_id
 from greenfloor.signing import sign_and_broadcast_mixed_split
 
+_MIN_CAT_OUTPUT_MOJOS = 1000
+
 
 @dataclass(frozen=True, slots=True)
 class InputCoin:
@@ -50,6 +52,32 @@ def _normalize_coin_names(values: list[str]) -> list[str]:
 def _select_input_coin_ids(coin_ids: list[str], max_input_coins: int) -> list[str]:
     max_inputs = max(2, int(max_input_coins))
     return list(coin_ids[:max_inputs])
+
+
+def _min_coin_count_for_target_mojos(*, amounts: list[int], target_mojos: int) -> int | None:
+    running = 0
+    for idx, amount in enumerate(
+        sorted((int(a) for a in amounts if int(a) > 0), reverse=True), start=1
+    ):
+        running += int(amount)
+        if running >= int(target_mojos):
+            return idx
+    return None
+
+
+def _partition_stepwise_chunks(coin_ids: list[str], *, max_input_coins: int) -> list[list[str]]:
+    max_inputs = max(2, int(max_input_coins))
+    remaining = list(coin_ids)
+    chunks: list[list[str]] = []
+    while len(remaining) >= 2:
+        take = min(max_inputs, len(remaining))
+        if len(remaining) - take == 1:
+            take = max(2, take - 1)
+        chunk = list(remaining[:take])
+        remaining = remaining[take:]
+        if len(chunk) >= 2:
+            chunks.append(chunk)
+    return chunks
 
 
 def _to_coinset_hex(value: str) -> str:
@@ -564,6 +592,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "--coin-name", action="append", default=[], help="Coin name hex (repeat or CSV)."
     )
     parser.add_argument("--max-input-coins", type=int, default=10)
+    parser.add_argument(
+        "--stepwise-combine",
+        action="store_true",
+        help=(
+            "Allow multiple sequential combine submissions when more than --max-input-coins "
+            "are provided. Each chunk is submitted and verified separately."
+        ),
+    )
+    parser.add_argument(
+        "--allow-sub-cat-output",
+        action="store_true",
+        help=(
+            "Override CAT floor guard for this script only. Allows intermediate combines "
+            "that may output <1000 mojos (useful for stepwise cleanup of many tiny inputs)."
+        ),
+    )
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument(
         "--debug-broadcast-diagnostics",
@@ -647,12 +691,15 @@ def run(
     missing_flags = _validate_required_args(args)
     coin_names_raw = _parse_csv_values(list(args.coin_name))
     normalized_coin_names = _normalize_coin_names(coin_names_raw)
-    selected_coin_ids = _select_input_coin_ids(normalized_coin_names, int(args.max_input_coins))
+    max_input_coins = max(2, int(args.max_input_coins))
+    selected_coin_ids = _select_input_coin_ids(normalized_coin_names, max_input_coins)
     payload: dict[str, Any] = {
         "network": str(args.network).strip(),
         "requested_coin_count": len(normalized_coin_names),
         "selected_input_coin_ids": selected_coin_ids,
-        "max_input_coins": max(2, int(args.max_input_coins)),
+        "max_input_coins": max_input_coins,
+        "stepwise_combine": bool(args.stepwise_combine),
+        "allow_sub_cat_output": bool(args.allow_sub_cat_output),
     }
     if missing_flags:
         payload["status"] = "error"
@@ -667,6 +714,13 @@ def run(
         payload["status"] = "error"
         payload["reason"] = "at_least_two_selected_inputs_required"
         return 1, payload
+    if len(normalized_coin_names) > max_input_coins and not bool(args.stepwise_combine):
+        payload["status"] = "error"
+        payload["reason"] = "input_count_exceeds_single_spendbundle_limit"
+        payload["operator_guidance"] = (
+            "pass --stepwise-combine to run sequential combine chunks, or provide fewer --coin-name values"
+        )
+        return 1, payload
 
     require_testnet11 = str(args.network).strip().lower() in {"testnet", "testnet11"}
     coinset = coinset_factory(
@@ -675,10 +729,17 @@ def run(
         require_testnet11=require_testnet11,
     )
 
+    execution_coin_ids = (
+        list(normalized_coin_names) if bool(args.stepwise_combine) else list(selected_coin_ids)
+    )
     resolved_inputs, input_issues = _resolve_input_coins(
-        coinset=coinset, coin_ids=selected_coin_ids
+        coinset=coinset, coin_ids=execution_coin_ids
     )
     total_amount = sum(int(coin.amount) for coin in resolved_inputs)
+    min_inputs_for_floor = _min_coin_count_for_target_mojos(
+        amounts=[int(coin.amount) for coin in resolved_inputs],
+        target_mojos=_MIN_CAT_OUTPUT_MOJOS,
+    )
     asset_id, asset_check = _resolve_cat_asset_id_for_coin_ids(
         network=coinset.network,
         coin_ids=[coin.coin_id for coin in resolved_inputs],
@@ -704,6 +765,7 @@ def run(
         "resolved_inputs": [
             {"coin_id": coin.coin_id, "amount": coin.amount} for coin in resolved_inputs
         ],
+        "minimum_inputs_needed_for_cat_floor": min_inputs_for_floor,
     }
     payload["asset_resolution"] = asset_check
     payload["preflight"] = preflight
@@ -728,47 +790,150 @@ def run(
         payload["status"] = "error"
         payload["reason"] = "invalid_total_amount"
         return 1, payload
-
-    signing_payload = _build_signing_payload(
-        args=args,
-        selected_coin_ids=[coin.coin_id for coin in resolved_inputs],
-        asset_id=asset_id,
-        output_amount=total_amount,
-    )
-    payload["signing_plan"] = {
-        "asset_id": asset_id,
-        "input_coin_count": len(resolved_inputs),
-        "output_amount": total_amount,
-        "fee_mojos": 0,
-    }
-    broadcast = sign_and_broadcast_fn(signing_payload)
-    payload["broadcast"] = broadcast
-    if str(broadcast.get("status", "")).strip().lower() != "executed":
-        if bool(args.debug_broadcast_diagnostics):
-            payload["broadcast_diagnostics"] = _build_broadcast_diagnostics(
-                signing_payload=signing_payload,
-                coinset=coinset,
-                input_coin_ids=[coin.coin_id for coin in resolved_inputs],
-            )
+    if total_amount < _MIN_CAT_OUTPUT_MOJOS and not bool(args.allow_sub_cat_output):
         payload["status"] = "error"
-        payload["reason"] = f"broadcast_failed:{broadcast.get('reason', 'unknown')}"
+        payload["reason"] = "cat_total_below_minimum_mojos"
+        payload["minimum_mojos"] = int(_MIN_CAT_OUTPUT_MOJOS)
+        payload["total_amount"] = int(total_amount)
+        payload["operator_guidance"] = (
+            "select more/larger inputs, or pass --allow-sub-cat-output (combine script override only) "
+            "for intermediate stepwise combines"
+        )
         return 1, payload
+    if not bool(args.stepwise_combine):
+        signing_payload = _build_signing_payload(
+            args=args,
+            selected_coin_ids=[coin.coin_id for coin in resolved_inputs],
+            asset_id=asset_id,
+            output_amount=total_amount,
+        )
+        payload["signing_plan"] = {
+            "asset_id": asset_id,
+            "input_coin_count": len(resolved_inputs),
+            "output_amount": total_amount,
+            "fee_mojos": 0,
+        }
+        broadcast = sign_and_broadcast_fn(signing_payload)
+        payload["broadcast"] = broadcast
+        if str(broadcast.get("status", "")).strip().lower() != "executed":
+            if bool(args.debug_broadcast_diagnostics):
+                payload["broadcast_diagnostics"] = _build_broadcast_diagnostics(
+                    signing_payload=signing_payload,
+                    coinset=coinset,
+                    input_coin_ids=[coin.coin_id for coin in resolved_inputs],
+                )
+            payload["status"] = "error"
+            payload["reason"] = f"broadcast_failed:{broadcast.get('reason', 'unknown')}"
+            return 1, payload
 
-    verification = _wait_until_inputs_spent(
-        coinset=coinset,
-        input_coin_ids=[coin.coin_id for coin in resolved_inputs],
-        timeout_seconds=max(1, int(args.verify_timeout_seconds)),
-        poll_seconds=max(1, int(args.verify_poll_seconds)),
-        warning_interval_seconds=max(1, int(args.verify_warning_interval_seconds)),
-        sleep_fn=sleep_fn,
-        monotonic_fn=monotonic_fn,
+        verification = _wait_until_inputs_spent(
+            coinset=coinset,
+            input_coin_ids=[coin.coin_id for coin in resolved_inputs],
+            timeout_seconds=max(1, int(args.verify_timeout_seconds)),
+            poll_seconds=max(1, int(args.verify_poll_seconds)),
+            warning_interval_seconds=max(1, int(args.verify_warning_interval_seconds)),
+            sleep_fn=sleep_fn,
+            monotonic_fn=monotonic_fn,
+        )
+        payload["verification"] = verification
+        if str(verification.get("status", "")).strip().lower() != "spent":
+            payload["status"] = "error"
+            payload["reason"] = "verification_timeout"
+            return 1, payload
+        payload["status"] = "ok"
+        return 0, payload
+
+    # Stepwise mode: split inputs into <= max_input_coins chunks and combine each chunk.
+    stepwise_chunks = _partition_stepwise_chunks(
+        [coin.coin_id for coin in resolved_inputs], max_input_coins=max_input_coins
     )
-    payload["verification"] = verification
-    if str(verification.get("status", "")).strip().lower() != "spent":
+    stepwise_chunk_coin_ids = {coin_id for chunk in stepwise_chunks for coin_id in chunk}
+    stepwise_leftovers = [
+        coin.coin_id for coin in resolved_inputs if coin.coin_id not in stepwise_chunk_coin_ids
+    ]
+    if stepwise_leftovers:
+        payload["stepwise_leftover_coin_ids"] = stepwise_leftovers
+        payload["stepwise_leftover_count"] = len(stepwise_leftovers)
+    if not stepwise_chunks:
         payload["status"] = "error"
-        payload["reason"] = "verification_timeout"
+        payload["reason"] = "stepwise_no_valid_chunks"
         return 1, payload
+    step_results: list[dict[str, Any]] = []
+    for chunk_index, chunk_coin_ids in enumerate(stepwise_chunks, start=1):
+        chunk_resolved, chunk_issues = _resolve_input_coins(
+            coinset=coinset, coin_ids=chunk_coin_ids
+        )
+        chunk_total = sum(int(coin.amount) for coin in chunk_resolved)
+        if chunk_issues:
+            payload["status"] = "error"
+            payload["reason"] = "stepwise_input_validation_failed"
+            payload["stepwise_results"] = step_results
+            payload["failed_chunk"] = {
+                "index": chunk_index,
+                "chunk_coin_ids": chunk_coin_ids,
+                "issues": chunk_issues,
+            }
+            return 1, payload
+        if chunk_total < _MIN_CAT_OUTPUT_MOJOS and not bool(args.allow_sub_cat_output):
+            payload["status"] = "error"
+            payload["reason"] = "stepwise_chunk_total_below_minimum_mojos"
+            payload["minimum_mojos"] = int(_MIN_CAT_OUTPUT_MOJOS)
+            payload["stepwise_results"] = step_results
+            payload["failed_chunk"] = {
+                "index": chunk_index,
+                "chunk_coin_ids": chunk_coin_ids,
+                "chunk_total_mojos": int(chunk_total),
+                "operator_guidance": (
+                    "pass --allow-sub-cat-output to permit intermediate dust outputs in stepwise mode"
+                ),
+            }
+            return 1, payload
+        signing_payload = _build_signing_payload(
+            args=args,
+            selected_coin_ids=[coin.coin_id for coin in chunk_resolved],
+            asset_id=asset_id,
+            output_amount=chunk_total,
+        )
+        broadcast = sign_and_broadcast_fn(signing_payload)
+        chunk_payload: dict[str, Any] = {
+            "index": chunk_index,
+            "input_coin_count": len(chunk_resolved),
+            "input_coin_ids": [coin.coin_id for coin in chunk_resolved],
+            "output_amount": int(chunk_total),
+            "broadcast": broadcast,
+        }
+        if str(broadcast.get("status", "")).strip().lower() != "executed":
+            if bool(args.debug_broadcast_diagnostics):
+                chunk_payload["broadcast_diagnostics"] = _build_broadcast_diagnostics(
+                    signing_payload=signing_payload,
+                    coinset=coinset,
+                    input_coin_ids=[coin.coin_id for coin in chunk_resolved],
+                )
+            step_results.append(chunk_payload)
+            payload["status"] = "error"
+            payload["reason"] = f"stepwise_broadcast_failed:{broadcast.get('reason', 'unknown')}"
+            payload["stepwise_results"] = step_results
+            return 1, payload
+        verification = _wait_until_inputs_spent(
+            coinset=coinset,
+            input_coin_ids=[coin.coin_id for coin in chunk_resolved],
+            timeout_seconds=max(1, int(args.verify_timeout_seconds)),
+            poll_seconds=max(1, int(args.verify_poll_seconds)),
+            warning_interval_seconds=max(1, int(args.verify_warning_interval_seconds)),
+            sleep_fn=sleep_fn,
+            monotonic_fn=monotonic_fn,
+        )
+        chunk_payload["verification"] = verification
+        step_results.append(chunk_payload)
+        if str(verification.get("status", "")).strip().lower() != "spent":
+            payload["status"] = "error"
+            payload["reason"] = "stepwise_verification_timeout"
+            payload["stepwise_results"] = step_results
+            return 1, payload
+
     payload["status"] = "ok"
+    payload["stepwise_results"] = step_results
+    payload["stepwise_chunk_count"] = len(step_results)
     return 0, payload
 
 

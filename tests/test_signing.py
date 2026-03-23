@@ -797,6 +797,23 @@ def test_broadcast_spend_bundle_falls_back_to_structured_payload(monkeypatch) ->
     assert result["operation_id"] == ("77" * 32)
 
 
+def test_build_mixed_split_rejects_sub_unit_cat_outputs() -> None:
+    spend_bundle_hex, err = signing_mod._build_mixed_split_spend_bundle(
+        {
+            "key_id": "key-1",
+            "network": "mainnet",
+            "receive_address": "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w",
+            "keyring_yaml_path": "/tmp/keyring.yaml",
+            "asset_id": "a" * 64,
+            "selected_coin_ids": ["b" * 64, "c" * 64],
+            "output_amounts_base_units": [999],
+            "fee_mojos": 0,
+        }
+    )
+    assert spend_bundle_hex is None
+    assert err == "cat_output_below_minimum_mojos"
+
+
 def test_infer_vault_nonce_for_p2_hash_matches_nonzero_nonce() -> None:
     class _MemberConfig:
         def __init__(self) -> None:
