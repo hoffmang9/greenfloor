@@ -17,6 +17,7 @@ import yaml
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.cloud_wallet_offer_runtime import poll_signature_request_until_not_unsigned
+from greenfloor.constants import MIN_CAT_OUTPUT_MOJOS
 from greenfloor.hex_utils import is_hex_id, normalize_hex_id
 
 
@@ -571,7 +572,10 @@ def _combine_cat_dust(
     rows: list[CoinRow],
     requested_cat_ids: set[str],
 ) -> dict[str, Any]:
-    threshold = max(1, int(args.dust_threshold_mojos))
+    requested_threshold = max(1, int(args.dust_threshold_mojos))
+    # CAT denomination floor: never plan combines that can create sub-unit CAT outputs.
+    threshold = max(MIN_CAT_OUTPUT_MOJOS, requested_threshold)
+    threshold_raised = threshold != requested_threshold
     max_inputs = max(2, int(args.combine_max_inputs))
     fee_mojos = max(0, int(args.combine_fee_mojos))
     dry_run = bool(args.combine_dry_run)
@@ -626,18 +630,63 @@ def _combine_cat_dust(
             )
             continue
 
-        input_coin_global_ids = [global_map[row.coin_id] for row in dust_rows]
+        candidate_inputs = [
+            {
+                "coin_name": row.coin_id,
+                "coin_global_id": global_map[row.coin_id],
+                "amount": int(row.amount),
+            }
+            for row in dust_rows
+        ]
+        # Build batches whose summed input amount is guaranteed to be >= CAT floor.
+        # Greedy largest-first keeps batch count low and avoids emitting new dust.
+        remaining = sorted(candidate_inputs, key=lambda item: int(item["amount"]))
         batch_plans: list[dict[str, Any]] = []
-        for offset in range(0, len(input_coin_global_ids), max_inputs):
-            batch = input_coin_global_ids[offset : offset + max_inputs]
-            if len(batch) <= 1:
-                continue
+        while len(remaining) >= 2:
+            pool = remaining[-max_inputs:]
+            selected: list[dict[str, Any]] = []
+            selected_total = 0
+            for item in reversed(pool):
+                selected.append(item)
+                selected_total += int(item["amount"])
+                if len(selected) >= 2 and selected_total >= threshold:
+                    break
+            if len(selected) < 2 or selected_total < threshold:
+                break
+            selected_ids = {str(item["coin_global_id"]) for item in selected}
+            remaining = [
+                item for item in remaining if str(item["coin_global_id"]) not in selected_ids
+            ]
             batch_plans.append(
                 {
-                    "input_coin_ids": batch,
-                    "input_coin_count": len(batch),
+                    "input_coin_ids": [str(item["coin_global_id"]) for item in selected],
+                    "input_coin_count": len(selected),
+                    "input_amount_total": int(selected_total),
+                    "input_coin_names": [str(item["coin_name"]) for item in selected],
                 }
             )
+        if remaining:
+            operations.append(
+                {
+                    "cat_asset_id": asset_id_hex,
+                    "asset_global_id": asset_global_id,
+                    "status": "skipped",
+                    "reason": "remaining_dust_below_cat_floor",
+                    "requested_threshold_mojos": int(requested_threshold),
+                    "effective_threshold_mojos": int(threshold),
+                    "threshold_was_raised_to_cat_floor": bool(threshold_raised),
+                    "threshold_mojos": int(threshold),
+                    "remaining_coin_count": len(remaining),
+                    "remaining_total_mojos": int(
+                        sum(int(item.get("amount", 0)) for item in remaining)
+                    ),
+                    "remaining_coin_names_sample": [
+                        str(item.get("coin_name", "")) for item in remaining[:25]
+                    ],
+                }
+            )
+        if not batch_plans:
+            continue
 
         if dry_run:
             operations.append(
@@ -646,6 +695,9 @@ def _combine_cat_dust(
                     "asset_global_id": asset_global_id,
                     "status": "dry_run",
                     "fee_mojos": fee_mojos,
+                    "requested_threshold_mojos": int(requested_threshold),
+                    "effective_threshold_mojos": int(threshold),
+                    "threshold_was_raised_to_cat_floor": bool(threshold_raised),
                     "dust_coin_count": len(dust_rows),
                     "batches": batch_plans,
                 }
@@ -700,12 +752,23 @@ def _combine_cat_dust(
                 "asset_global_id": asset_global_id,
                 "status": "submitted",
                 "fee_mojos": fee_mojos,
+                "requested_threshold_mojos": int(requested_threshold),
+                "effective_threshold_mojos": int(threshold),
+                "threshold_was_raised_to_cat_floor": bool(threshold_raised),
                 "dust_coin_count": len(dust_rows),
                 "submitted_batches": submitted_batches,
             }
         )
 
     return {
+        "requested_threshold_mojos": int(requested_threshold),
+        "effective_threshold_mojos": int(threshold),
+        "threshold_was_raised_to_cat_floor": bool(threshold_raised),
+        "threshold_adjustment_note": (
+            "requested dust threshold was raised to CAT floor (1000 mojos)"
+            if threshold_raised
+            else None
+        ),
         "threshold_mojos": threshold,
         "combine_max_inputs": max_inputs,
         "combine_fee_mojos": fee_mojos,

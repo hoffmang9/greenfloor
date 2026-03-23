@@ -19,6 +19,7 @@ keys:
 runtime:
   loop_interval_seconds: 15
   parallel_markets: true
+  market_slot_count: 4
   dry_run: false
 
 cloud_wallet:

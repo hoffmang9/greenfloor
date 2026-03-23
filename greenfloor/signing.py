@@ -19,6 +19,7 @@ import greenfloor.signing_clvm as _signing_clvm
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.coinset_runtime import _coinset_adapter
+from greenfloor.constants import MIN_CAT_OUTPUT_MOJOS
 from greenfloor.hex_utils import normalize_hex_id
 from greenfloor.signing_clvm import (
     _extract_required_bls_targets_for_coin_spend,
@@ -1661,6 +1662,13 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
         if amount <= 0:
             return None, "invalid_output_amount"
         output_amounts.append(amount)
+    allow_sub_cat_output = bool(payload.get("allow_sub_cat_output", False))
+    if (
+        not allow_sub_cat_output
+        and asset_id not in _XCH_LIKE_ASSETS
+        and any(int(amount) < MIN_CAT_OUTPUT_MOJOS for amount in output_amounts)
+    ):
+        return None, "cat_output_below_minimum_mojos"
     fee_mojos = int(payload.get("fee_mojos", 0))
     if fee_mojos < 0:
         return None, "invalid_fee_mojos"
@@ -1825,6 +1833,13 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
         offered_change = offered_total - target_total
         if asset_id in _XCH_LIKE_ASSETS:
             offered_change -= fee_mojos
+        if (
+            not allow_sub_cat_output
+            and asset_id not in _XCH_LIKE_ASSETS
+            and offered_change > 0
+            and offered_change < MIN_CAT_OUTPUT_MOJOS
+        ):
+            return None, "cat_change_below_minimum_mojos"
         if offered_change > 0:
             actions.append(
                 sdk.Action.send(asset_sdk_id, receive_puzzle_hash, int(offered_change), None)

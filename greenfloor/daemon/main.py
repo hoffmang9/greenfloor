@@ -13,7 +13,7 @@ import time
 import urllib.parse
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -79,6 +79,8 @@ _CLOUD_WALLET_SPENDABLE_STATES = {
     "AVAILABLE",
     "SETTLED",
 }
+_GLOBAL_STALE_OPEN_SWEEP_MAX_OFFERS_PER_MARKET = 3
+_GLOBAL_STALE_OPEN_SWEEP_MAX_OFFER_CHECKS = 60
 
 
 def _cloud_wallet_coin_matches_asset_scope(*, coin: dict[str, Any], scoped_asset_id: str) -> bool:
@@ -2864,6 +2866,175 @@ class _MarketCycleResult:
     cancel_triggered: bool = False
     cancel_planned: int = 0
     cancel_executed: int = 0
+    immediate_requeue_requested: bool = False
+    immediate_requeue_signals: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _MarketDispatchState:
+    cursor: int = 0
+    immediate_requeue_ids: deque[str] = field(default_factory=deque)
+
+
+def _enqueue_immediate_requeue_market(dispatch_state: _MarketDispatchState, market_id: str) -> None:
+    clean_market_id = str(market_id).strip()
+    if not clean_market_id:
+        return
+    deduped_existing = deque(
+        mid for mid in dispatch_state.immediate_requeue_ids if mid != clean_market_id
+    )
+    deduped_existing.appendleft(clean_market_id)
+    dispatch_state.immediate_requeue_ids = deduped_existing
+
+
+def _select_market_batch(
+    *,
+    enabled_markets: list[Any],
+    slot_count: int,
+    dispatch_state: _MarketDispatchState,
+) -> tuple[list[Any], list[str]]:
+    enabled_by_id: dict[str, Any] = {
+        str(getattr(market, "market_id", "")).strip(): market for market in enabled_markets
+    }
+    enabled_ids = [market_id for market_id in enabled_by_id if market_id]
+    if not enabled_ids:
+        dispatch_state.immediate_requeue_ids = deque()
+        dispatch_state.cursor = 0
+        return [], []
+
+    max_slots = max(1, int(slot_count))
+    if max_slots >= len(enabled_ids):
+        # Keep only currently enabled markets in the requeue deque.
+        dispatch_state.immediate_requeue_ids = deque(
+            mid for mid in dispatch_state.immediate_requeue_ids if mid in enabled_by_id
+        )
+        return [enabled_by_id[mid] for mid in enabled_ids], []
+
+    selected_ids: list[str] = []
+    selected_set: set[str] = set()
+    retained_requeues: deque[str] = deque()
+    consumed_requeues: list[str] = []
+    for market_id in list(dispatch_state.immediate_requeue_ids):
+        if market_id not in enabled_by_id:
+            continue
+        if market_id in selected_set:
+            continue
+        if len(selected_ids) < max_slots:
+            selected_ids.append(market_id)
+            selected_set.add(market_id)
+            consumed_requeues.append(market_id)
+        else:
+            retained_requeues.append(market_id)
+    dispatch_state.immediate_requeue_ids = retained_requeues
+
+    round_robin_slots = max_slots - len(selected_ids)
+    if round_robin_slots > 0:
+        total_enabled = len(enabled_ids)
+        start_idx = dispatch_state.cursor % total_enabled
+        last_rr_idx: int | None = None
+        for step in range(total_enabled):
+            idx = (start_idx + step) % total_enabled
+            market_id = enabled_ids[idx]
+            if market_id in selected_set:
+                continue
+            selected_ids.append(market_id)
+            selected_set.add(market_id)
+            last_rr_idx = idx
+            if len(selected_ids) >= max_slots:
+                break
+        if last_rr_idx is not None:
+            dispatch_state.cursor = (last_rr_idx + 1) % total_enabled
+
+    selected_markets = [
+        enabled_by_id[market_id] for market_id in selected_ids if market_id in enabled_by_id
+    ]
+    return selected_markets, consumed_requeues
+
+
+def _detect_stale_open_offers_for_requeue(
+    *,
+    store: SqliteStore,
+    dexie: DexieAdapter,
+    enabled_market_ids: set[str],
+    per_market_limit: int = _GLOBAL_STALE_OPEN_SWEEP_MAX_OFFERS_PER_MARKET,
+    max_offer_checks: int = _GLOBAL_STALE_OPEN_SWEEP_MAX_OFFER_CHECKS,
+) -> dict[str, Any]:
+    if not enabled_market_ids:
+        return {
+            "checked_offer_count": 0,
+            "requeue_market_ids": [],
+            "hits": [],
+        }
+    rows = store.list_offer_states(limit=5000)
+    tracked_states = {
+        OfferLifecycleState.OPEN.value,
+        OfferLifecycleState.REFRESH_DUE.value,
+    }
+    offer_ids_by_market: dict[str, list[str]] = {}
+    for row in rows:
+        market_id = str(row.get("market_id", "")).strip()
+        if market_id not in enabled_market_ids:
+            continue
+        state = str(row.get("state", "")).strip().lower()
+        if state not in tracked_states:
+            continue
+        offer_id = str(row.get("offer_id", "")).strip()
+        if not offer_id:
+            continue
+        market_offer_ids = offer_ids_by_market.setdefault(market_id, [])
+        if offer_id in market_offer_ids:
+            continue
+        if len(market_offer_ids) >= max(1, int(per_market_limit)):
+            continue
+        market_offer_ids.append(offer_id)
+
+    checked_offer_count = 0
+    requeue_market_ids: set[str] = set()
+    hits: list[dict[str, str]] = []
+    for market_id, offer_ids in offer_ids_by_market.items():
+        for offer_id in offer_ids:
+            if checked_offer_count >= max(1, int(max_offer_checks)):
+                return {
+                    "checked_offer_count": checked_offer_count,
+                    "requeue_market_ids": sorted(requeue_market_ids),
+                    "hits": hits,
+                    "truncated": True,
+                }
+            checked_offer_count += 1
+            try:
+                payload = dexie.get_offer(offer_id, timeout=5)
+                offer = payload.get("offer") if isinstance(payload, dict) else None
+                if not isinstance(offer, dict):
+                    continue
+                status = int(offer.get("status", -1))
+                if status in {4, 6}:
+                    reason = "tx_confirmed" if status == 4 else "offer_expired"
+                    requeue_market_ids.add(market_id)
+                    hits.append(
+                        {
+                            "market_id": market_id,
+                            "offer_id": offer_id,
+                            "reason": reason,
+                        }
+                    )
+            except Exception as exc:  # pragma: no cover - network dependent
+                if _is_dexie_offer_missing_error(exc):
+                    requeue_market_ids.add(market_id)
+                    hits.append(
+                        {
+                            "market_id": market_id,
+                            "offer_id": offer_id,
+                            "reason": "offer_missing_404",
+                        }
+                    )
+                continue
+
+    return {
+        "checked_offer_count": checked_offer_count,
+        "requeue_market_ids": sorted(requeue_market_ids),
+        "hits": hits,
+        "truncated": False,
+    }
 
 
 def _reconcile_offer_states(
@@ -2947,6 +3118,8 @@ def _reconcile_offer_states(
         except Exception as exc:  # pragma: no cover - network dependent
             if _is_dexie_offer_missing_error(exc):
                 transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.EXPIRED)
+                result.immediate_requeue_requested = True
+                result.immediate_requeue_signals.append(OfferSignal.EXPIRED.value)
                 missing_watched_offer_ids.add(watched_offer_id)
                 _log_market_decision(
                     market.market_id,
@@ -3075,6 +3248,9 @@ def _reconcile_offer_states(
             },
             market_id=market.market_id,
         )
+        if transition.signal in {OfferSignal.EXPIRED, OfferSignal.TX_CONFIRMED}:
+            result.immediate_requeue_requested = True
+            result.immediate_requeue_signals.append(transition.signal.value)
     return augmented_offers, dexie_size_by_offer_id, dexie_fetch_error, offers
 
 
@@ -3824,6 +4000,36 @@ def _execute_coin_ops_cloud_wallet_kms_only(
                     selected_coin_id = str(selected_coin.get("id", "")).strip()
                     if not selected_coin_id:
                         break
+                    selected_amount = int(selected_coin.get("amount", 0))
+                    selected_remainder = int(selected_amount - required_amount)
+                    min_cat_mojos = _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
+                    if (
+                        min_cat_mojos > 0
+                        and selected_remainder > 0
+                        and selected_remainder < int(min_cat_mojos)
+                    ):
+                        items.append(
+                            {
+                                "op_type": op_type,
+                                "size_base_units": size_base_units,
+                                "op_count": op_count,
+                                "status": "skipped",
+                                "reason": "split_would_create_sub_cat_change",
+                                "operation_id": None,
+                                "data": {
+                                    "selected_coin_id": selected_coin_id,
+                                    "selected_amount_mojos": int(selected_amount),
+                                    "required_amount_mojos": int(required_amount),
+                                    "remainder_mojos": int(selected_remainder),
+                                    "minimum_allowed_mojos": int(min_cat_mojos),
+                                },
+                            }
+                        )
+                        # Intentional: treat this op as "handled" for this cycle so
+                        # we do not churn through alternate candidates and risk
+                        # repeatedly planning dust-producing splits in one pass.
+                        split_submitted = True
+                        break
                     attempted_coin_ids.add(selected_coin_id)
                     try:
                         result = cloud_wallet.split_coins(
@@ -4392,6 +4598,7 @@ def run_once(
     use_websocket_capture: bool = False,
     program=None,
     testnet_markets_path: Path | None = None,
+    market_dispatch_state: _MarketDispatchState | None = None,
 ) -> int:
     if program is None:
         program = load_program_config(program_path)
@@ -4483,8 +4690,69 @@ def run_once(
             _DISABLED_MARKET_NEXT_LOG_AT.pop(market.market_id, None)
             enabled_markets.append(market)
 
-        selected_markets = enabled_markets
+        stale_open_sweep_payload: dict[str, Any] = {
+            "checked_offer_count": 0,
+            "requeue_market_ids": [],
+            "hits": [],
+            "truncated": False,
+        }
+        if enabled_markets:
+            stale_open_sweep_payload = _detect_stale_open_offers_for_requeue(
+                store=store,
+                dexie=dexie,
+                enabled_market_ids={
+                    str(getattr(market, "market_id", "")).strip() for market in enabled_markets
+                },
+            )
+            stale_requeues = [
+                str(mid).strip()
+                for mid in stale_open_sweep_payload.get("requeue_market_ids", [])
+                if str(mid).strip()
+            ]
+            if market_dispatch_state is not None:
+                for market_id in stale_requeues:
+                    _enqueue_immediate_requeue_market(market_dispatch_state, market_id)
+            if stale_requeues:
+                store.add_audit_event(
+                    "stale_open_offer_requeue_detected",
+                    {
+                        "market_ids": stale_requeues,
+                        "checked_offer_count": int(
+                            stale_open_sweep_payload.get("checked_offer_count", 0)
+                        ),
+                        "truncated": bool(stale_open_sweep_payload.get("truncated", False)),
+                        "hits": list(stale_open_sweep_payload.get("hits", []))[:50],
+                    },
+                )
+
+        configured_market_slot_count = int(getattr(program, "runtime_market_slot_count", 0))
+        consumed_immediate_requeues: list[str] = []
+        if (
+            market_dispatch_state is not None
+            and configured_market_slot_count > 0
+            and len(enabled_markets) > configured_market_slot_count
+        ):
+            selected_markets, consumed_immediate_requeues = _select_market_batch(
+                enabled_markets=enabled_markets,
+                slot_count=configured_market_slot_count,
+                dispatch_state=market_dispatch_state,
+            )
+            _daemon_logger.info(
+                "market_slot_dispatch enabled=true slot_count=%s selected=%s enabled=%s immediate_requeue_consumed=%s cursor=%s pending_requeues=%s",
+                configured_market_slot_count,
+                len(selected_markets),
+                len(enabled_markets),
+                len(consumed_immediate_requeues),
+                market_dispatch_state.cursor,
+                len(market_dispatch_state.immediate_requeue_ids),
+            )
+        else:
+            selected_markets = enabled_markets
+            if market_dispatch_state is not None and enabled_markets:
+                # Keep scheduler cursor bounded even when slot dispatch is disabled.
+                market_dispatch_state.cursor %= len(enabled_markets)
         markets_attempted = len(selected_markets)
+        immediate_requeue_market_ids: list[str] = []
         cloud_wallet_scoped_list_cache: CloudWalletAssetScopedListCache | None = None
         if _cloud_wallet_configured(program):
             try:
@@ -4552,6 +4820,8 @@ def run_once(
                         cancel_triggered_count += 1
                     cancel_planned_total += mr.cancel_planned
                     cancel_executed_total += mr.cancel_executed
+                    if mr.immediate_requeue_requested and market_id:
+                        immediate_requeue_market_ids.append(market_id)
         else:
             _daemon_logger.info(
                 "market_parallel_dispatch enabled=false workers=1 markets=%s",
@@ -4599,13 +4869,35 @@ def run_once(
                     cancel_triggered_count += 1
                 cancel_planned_total += mr.cancel_planned
                 cancel_executed_total += mr.cancel_executed
+                if mr.immediate_requeue_requested and market_id:
+                    immediate_requeue_market_ids.append(market_id)
+        deduped_requeue_market_ids = sorted({mid for mid in immediate_requeue_market_ids if mid})
+        if market_dispatch_state is not None:
+            for market_id in deduped_requeue_market_ids:
+                _enqueue_immediate_requeue_market(market_dispatch_state, market_id)
         duration_ms = int((time.monotonic() - started_at) * 1000)
         store.add_audit_event(
             "daemon_cycle_summary",
             {
                 "duration_ms": duration_ms,
+                "enabled_markets": len(enabled_markets),
                 "markets_attempted": markets_attempted,
                 "markets_processed": markets_processed,
+                "runtime_market_slot_count": configured_market_slot_count,
+                "stale_open_sweep_checked_offer_count": int(
+                    stale_open_sweep_payload.get("checked_offer_count", 0)
+                ),
+                "stale_open_sweep_requeue_market_ids": list(
+                    stale_open_sweep_payload.get("requeue_market_ids", [])
+                ),
+                "stale_open_sweep_requeue_count": len(
+                    list(stale_open_sweep_payload.get("requeue_market_ids", []))
+                ),
+                "stale_open_sweep_truncated": bool(
+                    stale_open_sweep_payload.get("truncated", False)
+                ),
+                "immediate_requeue_market_ids": deduped_requeue_market_ids,
+                "immediate_requeue_count": len(deduped_requeue_market_ids),
                 "error_count": cycle_error_count,
                 "strategy_planned_total": strategy_planned_total,
                 "strategy_executed_total": strategy_executed_total,
@@ -4630,6 +4922,7 @@ def _run_loop(
     state_dir: Path,
 ) -> int:
     current_program = load_program_config(program_path)
+    market_dispatch_state = _MarketDispatchState()
     _initialize_daemon_file_logging(
         current_program.home_dir, log_level=getattr(current_program, "app_log_level", "INFO")
     )
@@ -4734,6 +5027,7 @@ def _run_loop(
                 state_dir=state_dir,
                 poll_coinset_mempool=False,
                 program=current_program,
+                market_dispatch_state=market_dispatch_state,
             )
             if _consume_reload_marker(state_dir):
                 _log_daemon_event(level=logging.INFO, payload={"event": "config_reloaded"})

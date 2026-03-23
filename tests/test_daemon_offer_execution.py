@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -1155,6 +1156,53 @@ def test_reconcile_offer_states_expires_watched_offer_on_direct_dexie_404(tmp_pa
     assert transitions[0]["payload"]["offer_id"] == "offer-50"
     assert transitions[0]["payload"]["signal_source"] == "dexie_get_offer_404"
     assert transitions[0]["payload"]["dexie_error"] == "HTTP Error 404: Not Found"
+    assert result.immediate_requeue_requested is True
+    assert "expired" in result.immediate_requeue_signals
+
+
+def test_reconcile_offer_states_requests_immediate_requeue_on_tx_confirmed(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "state.sqlite"
+    store = SqliteStore(db_path)
+    market = _market()
+    try:
+        store.upsert_offer_state(
+            offer_id="offer-confirmed",
+            market_id=market.market_id,
+            state="open",
+            last_seen_status=0,
+        )
+
+        class _FakeDexie:
+            def get_offers(self, offered: str, requested: str) -> list[dict[str, Any]]:
+                _ = offered, requested
+                return [{"id": "offer-confirmed", "status": 4}]
+
+            def get_offer(self, offer_id: str, *, timeout: int = 20) -> dict[str, Any]:
+                _ = offer_id, timeout
+                raise RuntimeError("unexpected_get_offer_call")
+
+        result = daemon_main._MarketCycleResult()
+        daemon_main._reconcile_offer_states(
+            market=market,
+            network="mainnet",
+            dexie=cast(Any, _FakeDexie()),
+            store=store,
+            now=datetime.now(UTC),
+            result=result,
+        )
+
+        rows = {
+            r["offer_id"]: r for r in store.list_offer_states(market_id=market.market_id, limit=20)
+        }
+    finally:
+        store.close()
+
+    assert rows["offer-confirmed"]["state"] == "tx_block_confirmed"
+    assert rows["offer-confirmed"]["last_seen_status"] == 4
+    assert result.immediate_requeue_requested is True
+    assert "tx_confirmed" in result.immediate_requeue_signals
 
 
 def test_reconcile_offer_states_resolves_quote_asset_before_dexie_fetch(
@@ -1287,6 +1335,93 @@ def test_reconcile_offer_states_dexie_fallback_status_does_not_mark_mempool(
 
     assert rows["offer-open"]["state"] == "open"
     assert rows["offer-open"]["last_seen_status"] == 5
+
+
+def test_select_market_batch_prioritizes_immediate_requeue_then_round_robin() -> None:
+    @dataclass
+    class _Market:
+        market_id: str
+        enabled: bool = True
+
+    markets = [_Market("m1"), _Market("m2"), _Market("m3"), _Market("m4")]
+    state = daemon_main._MarketDispatchState()
+    daemon_main._enqueue_immediate_requeue_market(state, "m3")
+
+    selected, consumed = daemon_main._select_market_batch(
+        enabled_markets=markets,
+        slot_count=2,
+        dispatch_state=state,
+    )
+    assert [m.market_id for m in selected] == ["m3", "m1"]
+    assert consumed == ["m3"]
+    assert list(state.immediate_requeue_ids) == []
+
+    selected_next, consumed_next = daemon_main._select_market_batch(
+        enabled_markets=markets,
+        slot_count=2,
+        dispatch_state=state,
+    )
+    assert [m.market_id for m in selected_next] == ["m2", "m3"]
+    assert consumed_next == []
+
+
+def test_detect_stale_open_offers_for_requeue_marks_expired_status(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "state.db")
+    try:
+        store.upsert_offer_state(
+            offer_id="offer-expired",
+            market_id="m1",
+            state="open",
+            last_seen_status=0,
+        )
+
+        class _FakeDexie:
+            @staticmethod
+            def get_offer(offer_id: str, *, timeout: int = 5) -> dict[str, Any]:
+                _ = timeout
+                assert offer_id == "offer-expired"
+                return {"offer": {"id": offer_id, "status": 6}}
+
+        payload = daemon_main._detect_stale_open_offers_for_requeue(
+            store=store,
+            dexie=cast(Any, _FakeDexie()),
+            enabled_market_ids={"m1"},
+        )
+    finally:
+        store.close()
+
+    assert payload["checked_offer_count"] == 1
+    assert payload["requeue_market_ids"] == ["m1"]
+    assert payload["hits"][0]["reason"] == "offer_expired"
+
+
+def test_detect_stale_open_offers_for_requeue_marks_missing_404(tmp_path: Path) -> None:
+    store = SqliteStore(tmp_path / "state.db")
+    try:
+        store.upsert_offer_state(
+            offer_id="offer-missing",
+            market_id="m2",
+            state="open",
+            last_seen_status=0,
+        )
+
+        class _FakeDexie:
+            @staticmethod
+            def get_offer(offer_id: str, *, timeout: int = 5) -> dict[str, Any]:
+                _ = offer_id, timeout
+                raise RuntimeError("HTTP Error 404: Not Found")
+
+        payload = daemon_main._detect_stale_open_offers_for_requeue(
+            store=store,
+            dexie=cast(Any, _FakeDexie()),
+            enabled_market_ids={"m2"},
+        )
+    finally:
+        store.close()
+
+    assert payload["checked_offer_count"] == 1
+    assert payload["requeue_market_ids"] == ["m2"]
+    assert payload["hits"][0]["reason"] == "offer_missing_404"
 
 
 def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:

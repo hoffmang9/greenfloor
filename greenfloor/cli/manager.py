@@ -2690,6 +2690,7 @@ def _coin_split(
             "split_buffer_count": int(entry.split_buffer_count),
             "required_count": required_count,
         }
+    min_coin_amount_mojos = _coin_op_min_amount_mojos(canonical_asset_id=str(market.base_asset))
     if amount_per_coin <= 0:
         raise ValueError("amount_per_coin must be positive")
     if number_of_coins <= 0:
@@ -2700,7 +2701,6 @@ def _coin_split(
     split_gate: dict[str, int | bool | str] | None = None
     stop_reason = "single_pass"
     unresolved_coin_ids: list[str] = []
-    min_coin_amount_mojos = _coin_op_min_amount_mojos(canonical_asset_id=str(market.base_asset))
 
     for iteration in range(1, max_iterations + 1):
         wallet_coins = wallet.list_coins(include_pending=True)
