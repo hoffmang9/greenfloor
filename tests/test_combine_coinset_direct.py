@@ -418,9 +418,11 @@ def test_run_stepwise_allows_sub_cat_outputs_only_with_override(monkeypatch) -> 
     )
 
     called = {"broadcast": 0}
+    seen_allow_flags: list[bool] = []
 
     def _broadcast(_payload: dict[str, Any]) -> dict[str, Any]:
         called["broadcast"] += 1
+        seen_allow_flags.append(bool(_payload.get("allow_sub_cat_output", False)))
         return {
             "status": "executed",
             "reason": "submitted",
@@ -439,6 +441,93 @@ def test_run_stepwise_allows_sub_cat_outputs_only_with_override(monkeypatch) -> 
     assert payload["status"] == "ok"
     assert payload["stepwise_chunk_count"] == 2
     assert called["broadcast"] == 2
+    assert seen_allow_flags == [True, True]
+
+
+def test_run_stepwise_marks_ok_with_leftovers(monkeypatch) -> None:
+    mod = _load_script_module()
+    parser = mod._build_parser()
+    args = parser.parse_args(
+        _required_argv()
+        + [
+            "--coin-name",
+            "0x" + ("c" * 64),
+            "--max-input-coins",
+            "2",
+            "--stepwise-combine",
+        ]
+    )
+
+    class _FakeCoinset:
+        network = "mainnet"
+        base_url = "https://api.coinset.org"
+
+        def __init__(self, *args, **kwargs) -> None:
+            _ = args, kwargs
+
+        @staticmethod
+        def get_coin_records_by_names(*, coin_names_hex: list[str], include_spent_coins: bool):
+            _ = include_spent_coins
+            rows = []
+            for name in coin_names_hex:
+                raw = name.replace("0x", "")
+                rows.append(
+                    {
+                        "coin": {
+                            "name": f"0x{raw}",
+                            "amount": 1000,
+                        },
+                        "spent_block_index": 0,
+                    }
+                )
+            return rows
+
+        @staticmethod
+        def get_blockchain_state():
+            return {"peak_height": 1}
+
+    class _FakeWallet:
+        @staticmethod
+        def get_vault_custody_snapshot():
+            return {"vaultLauncherId": "0x" + ("c" * 64)}
+
+    def _fake_wallet_factory(_config):
+        return _FakeWallet()
+
+    monkeypatch.setattr(
+        mod,
+        "_resolve_cat_asset_id_for_coin_ids",
+        lambda **_kwargs: ("d" * 64, {"ok": True, "asset_id": "d" * 64}),
+    )
+    monkeypatch.setattr(
+        mod,
+        "_wait_until_inputs_spent",
+        lambda **_kwargs: {"status": "spent", "poll_count": 1, "elapsed_seconds": 0},
+    )
+
+    called = {"broadcast": 0}
+
+    def _broadcast(_payload: dict[str, Any]) -> dict[str, Any]:
+        called["broadcast"] += 1
+        return {
+            "status": "executed",
+            "reason": "submitted",
+            "operation_id": f"op-{called['broadcast']}",
+        }
+
+    exit_code, payload = mod.run(
+        args,
+        coinset_factory=_FakeCoinset,
+        cloud_wallet_factory=_fake_wallet_factory,
+        sign_and_broadcast_fn=_broadcast,
+        kms_pubkey_resolver=lambda *_args: "02" + ("1" * 64),
+        kms_signer=lambda *_args: "f" * 128,
+    )
+    assert exit_code == 0
+    assert payload["status"] == "ok_with_leftovers"
+    assert payload["warning"] == "stepwise_leftovers_not_processed"
+    assert payload["stepwise_leftover_count"] == 1
+    assert called["broadcast"] == 1
 
 
 def test_wait_until_inputs_spent_uses_additive_warning_cadence() -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from types import SimpleNamespace
 from typing import Any
 
 import greenfloor.signing as signing_mod
@@ -812,6 +813,39 @@ def test_build_mixed_split_rejects_sub_unit_cat_outputs() -> None:
     )
     assert spend_bundle_hex is None
     assert err == "cat_output_below_minimum_mojos"
+
+
+def test_build_mixed_split_allow_sub_cat_output_bypasses_floor_guard(monkeypatch) -> None:
+    class _Sdk:
+        class Address:
+            @staticmethod
+            def decode(_value: str):
+                return SimpleNamespace(puzzle_hash=b"\x11" * 32)
+
+    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: _Sdk)
+    monkeypatch.setattr(
+        signing_mod,
+        "_resolve_requested_cat_coins_for_mixed_split",
+        lambda **_kwargs: ([], "sentinel_requested_coin_resolution_error"),
+    )
+
+    spend_bundle_hex, err = signing_mod._build_mixed_split_spend_bundle(
+        {
+            "key_id": "key-1",
+            "network": "mainnet",
+            "receive_address": "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w",
+            "keyring_yaml_path": "/tmp/keyring.yaml",
+            "asset_id": "a" * 64,
+            "selected_coin_ids": ["b" * 64, "c" * 64],
+            "output_amounts_base_units": [999],
+            "fee_mojos": 0,
+            "allow_sub_cat_output": True,
+        }
+    )
+    # The override should bypass the minimum-output guard; deeper validation
+    # can still fail based on runtime environment and available wallet context.
+    assert spend_bundle_hex is None
+    assert err == "sentinel_requested_coin_resolution_error"
 
 
 def test_infer_vault_nonce_for_p2_hash_matches_nonzero_nonce() -> None:

@@ -1,5 +1,22 @@
 # Progress Log
 
+## 2026-03-23 (PR review follow-up: CAT floor override wiring + stepwise/operator clarity)
+
+- Addressed review gap in `scripts/combine_coinset_direct.py` / `greenfloor/signing.py` where `--allow-sub-cat-output` previously bypassed only script-level checks:
+  - signing payload now carries `allow_sub_cat_output`,
+  - `_build_mixed_split_spend_bundle(...)` honors that override for CAT output/change floor guards.
+- Improved operator visibility for stepwise combine outcomes:
+  - stepwise runs now return `status: "ok_with_leftovers"` plus `warning: "stepwise_leftovers_not_processed"` when one coin is intentionally left out,
+  - CLI `--stepwise-combine` help text now documents this status behavior.
+- Reduced floor-constant drift risk:
+  - added shared `greenfloor/constants.py` with `MIN_CAT_OUTPUT_MOJOS`,
+  - switched signing + combine + vault coinset dust planning codepaths to this shared constant.
+- Made dust-threshold floor raises explicit in `scripts/list_vault_coins_coinset.py` output:
+  - emits requested vs effective threshold and a `threshold_was_raised_to_cat_floor` indicator.
+- Added/updated deterministic tests:
+  - `tests/test_signing.py`: override bypasses CAT floor pre-check path,
+  - `tests/test_combine_coinset_direct.py`: override is propagated into broadcast payload; leftovers are surfaced with `ok_with_leftovers`.
+
 ## 2026-03-19 (modularization: shared catalog/coinset/retry, signing CLVM split, remove `old/`)
 
 - **Removed** legacy `old/` tree; dropped `old/**` excludes from ruff/prettier/yamllint/pre-commit; **AGENTS.md** no longer points contributors at `old/*.py` (use git history when needed).

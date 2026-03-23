@@ -10,10 +10,9 @@ from typing import Any
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.adapters.kms_signer import get_public_key_compressed_hex, sign_digest
+from greenfloor.constants import MIN_CAT_OUTPUT_MOJOS
 from greenfloor.hex_utils import normalize_hex_id
 from greenfloor.signing import sign_and_broadcast_mixed_split
-
-_MIN_CAT_OUTPUT_MOJOS = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -410,6 +409,8 @@ def _build_signing_payload(
         "selected_coin_ids": list(selected_coin_ids),
         "output_amounts_base_units": [int(output_amount)],
         "fee_mojos": 0,
+        # Script-only override: allows stepwise dust consolidation workflows.
+        "allow_sub_cat_output": bool(getattr(args, "allow_sub_cat_output", False)),
         "cloud_wallet_base_url": str(args.cloud_wallet_base_url).strip(),
         "cloud_wallet_user_key_id": str(args.cloud_wallet_user_key_id).strip(),
         "cloud_wallet_private_key_pem_path": str(args.cloud_wallet_private_key_pem_path).strip(),
@@ -597,7 +598,9 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Allow multiple sequential combine submissions when more than --max-input-coins "
-            "are provided. Each chunk is submitted and verified separately."
+            "are provided. Each chunk is submitted and verified separately; if one input "
+            "must be left behind to keep valid chunk sizing, status is returned as "
+            "'ok_with_leftovers'."
         ),
     )
     parser.add_argument(
@@ -738,7 +741,7 @@ def run(
     total_amount = sum(int(coin.amount) for coin in resolved_inputs)
     min_inputs_for_floor = _min_coin_count_for_target_mojos(
         amounts=[int(coin.amount) for coin in resolved_inputs],
-        target_mojos=_MIN_CAT_OUTPUT_MOJOS,
+        target_mojos=MIN_CAT_OUTPUT_MOJOS,
     )
     asset_id, asset_check = _resolve_cat_asset_id_for_coin_ids(
         network=coinset.network,
@@ -790,10 +793,10 @@ def run(
         payload["status"] = "error"
         payload["reason"] = "invalid_total_amount"
         return 1, payload
-    if total_amount < _MIN_CAT_OUTPUT_MOJOS and not bool(args.allow_sub_cat_output):
+    if total_amount < MIN_CAT_OUTPUT_MOJOS and not bool(args.allow_sub_cat_output):
         payload["status"] = "error"
         payload["reason"] = "cat_total_below_minimum_mojos"
-        payload["minimum_mojos"] = int(_MIN_CAT_OUTPUT_MOJOS)
+        payload["minimum_mojos"] = int(MIN_CAT_OUTPUT_MOJOS)
         payload["total_amount"] = int(total_amount)
         payload["operator_guidance"] = (
             "select more/larger inputs, or pass --allow-sub-cat-output (combine script override only) "
@@ -874,10 +877,11 @@ def run(
                 "issues": chunk_issues,
             }
             return 1, payload
-        if chunk_total < _MIN_CAT_OUTPUT_MOJOS and not bool(args.allow_sub_cat_output):
+        # Re-resolve before each chunk because previous submissions mutate chain state.
+        if chunk_total < MIN_CAT_OUTPUT_MOJOS and not bool(args.allow_sub_cat_output):
             payload["status"] = "error"
             payload["reason"] = "stepwise_chunk_total_below_minimum_mojos"
-            payload["minimum_mojos"] = int(_MIN_CAT_OUTPUT_MOJOS)
+            payload["minimum_mojos"] = int(MIN_CAT_OUTPUT_MOJOS)
             payload["stepwise_results"] = step_results
             payload["failed_chunk"] = {
                 "index": chunk_index,
@@ -931,7 +935,11 @@ def run(
             payload["stepwise_results"] = step_results
             return 1, payload
 
-    payload["status"] = "ok"
+    if stepwise_leftovers:
+        payload["status"] = "ok_with_leftovers"
+        payload["warning"] = "stepwise_leftovers_not_processed"
+    else:
+        payload["status"] = "ok"
     payload["stepwise_results"] = step_results
     payload["stepwise_chunk_count"] = len(step_results)
     return 0, payload
