@@ -29,7 +29,8 @@ class _FakeHttpResponse:
 
 
 def _write_pem(tmp_path: Path) -> Path:
-    pem_path = tmp_path / "cloud-wallet-key.pem"
+    pem_path = tmp_path / ".greenfloor" / "keys" / "cloud-wallet-key.pem"
+    pem_path.parent.mkdir(parents=True, exist_ok=True)
     pem_path.write_text(
         "\n".join(
             [
@@ -41,6 +42,32 @@ def _write_pem(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return pem_path
+
+
+def test_cloud_wallet_adapter_rejects_pem_outside_dot_greenfloor(tmp_path: Path) -> None:
+    pem_path = tmp_path / "outside.pem"
+    pem_path.write_text(
+        "\n".join(
+            [
+                "-----BEGIN PRIVATE KEY-----",
+                "not-a-real-key",
+                "-----END PRIVATE KEY-----",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        ValueError, match="cloud_wallet_private_key_pem_path_must_be_under_dot_greenfloor"
+    ):
+        CloudWalletAdapter(
+            CloudWalletConfig(
+                base_url="https://wallet.example.com",
+                user_key_id="key-1",
+                private_key_pem_path=str(pem_path),
+                vault_id="Wallet_123",
+                network="mainnet",
+            )
+        )
 
 
 def _build_adapter(tmp_path: Path) -> CloudWalletAdapter:

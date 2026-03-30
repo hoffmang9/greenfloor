@@ -630,6 +630,83 @@ def test_run_loop_logs_when_missing_log_level_is_auto_healed(monkeypatch, tmp_pa
     assert "program config missing app.log_level; wrote default INFO" in log_text
 
 
+def test_run_loop_orders_reload_marker_log_sleep_then_reload(monkeypatch, tmp_path: Path) -> None:
+    import greenfloor.daemon.main as daemon_mod
+
+    home = tmp_path / "home"
+    home.mkdir(parents=True, exist_ok=True)
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program, home)
+    _write_markets(markets)
+
+    sequence: list[str] = []
+    real_load_program_config = daemon_mod.load_program_config
+    load_calls = {"count": 0}
+
+    class _FakeWsClient:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        def start(self) -> None:
+            return
+
+        def stop(self, **_kwargs) -> None:
+            return
+
+    def _fake_load_program_config(path: Path):
+        load_calls["count"] += 1
+        sequence.append(f"load_program:{load_calls['count']}")
+        if load_calls["count"] == 1:
+            return real_load_program_config(path)
+        raise KeyboardInterrupt
+
+    def _fake_run_once(**_kwargs):
+        sequence.append("run_once")
+        return 0
+
+    def _fake_consume_reload_marker(_state_dir: Path) -> bool:
+        sequence.append("consume_reload_marker")
+        return True
+
+    def _fake_log_daemon_event(*, level: int, payload: dict[str, object]) -> None:
+        _ = level
+        sequence.append(f"log_event:{payload.get('event')}")
+
+    def _fake_sleep(_seconds: float) -> None:
+        sequence.append("sleep")
+
+    monkeypatch.setattr("greenfloor.daemon.main.CoinsetWebsocketClient", _FakeWsClient)
+    monkeypatch.setattr("greenfloor.daemon.main.load_program_config", _fake_load_program_config)
+    monkeypatch.setattr("greenfloor.daemon.main.run_once", _fake_run_once)
+    monkeypatch.setattr(
+        "greenfloor.daemon.main._consume_reload_marker", _fake_consume_reload_marker
+    )
+    monkeypatch.setattr("greenfloor.daemon.main._log_daemon_event", _fake_log_daemon_event)
+    monkeypatch.setattr("greenfloor.daemon.main.time.sleep", _fake_sleep)
+
+    code = _run_loop(
+        program_path=program,
+        markets_path=markets,
+        allowed_keys=None,
+        db_path_override=str(tmp_path / "state.sqlite"),
+        coinset_base_url="https://coinset.org",
+        state_dir=home / "state",
+    )
+
+    assert code == 0
+    assert sequence[0] == "load_program:1"
+    assert "run_once" in sequence
+    assert "consume_reload_marker" in sequence
+    assert "log_event:config_reloaded" in sequence
+    assert "sleep" in sequence
+    assert "load_program:2" in sequence
+    assert sequence.index("run_once") < sequence.index("consume_reload_marker")
+    assert sequence.index("consume_reload_marker") < sequence.index("log_event:config_reloaded")
+    assert sequence.index("log_event:config_reloaded") < sequence.index("sleep")
+    assert sequence.index("sleep") < sequence.index("load_program:2")
+
+
 def test_run_loop_websocket_callbacks_use_callback_thread_store(
     monkeypatch, tmp_path: Path
 ) -> None:

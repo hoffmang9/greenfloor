@@ -1,4 +1,4 @@
-"""Coinset adapter construction and fee resolution shared by CLI, daemon signing, and cloud runtime."""
+"""Coinset adapter construction and fee resolution shared runtime helpers."""
 
 from __future__ import annotations
 

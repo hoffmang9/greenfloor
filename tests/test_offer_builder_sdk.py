@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import greenfloor.offer_builder as offer_builder
 from greenfloor.cli import offer_builder_sdk
 
 
@@ -72,34 +73,33 @@ class _FakeSdk:
 
 
 def test_build_offer_success_with_wallet_sdk_types() -> None:
-    offer = offer_builder_sdk._build_offer({"spend_bundle_hex": "aa"}, _FakeSdk)
+    offer = offer_builder._build_offer({"spend_bundle_hex": "aa"}, _FakeSdk)
     assert offer == "offer1fake"
 
 
 def test_build_offer_rejects_missing_coin_backed_inputs() -> None:
     try:
-        offer_builder_sdk._build_offer({"size_base_units": 10}, _FakeSdk)
+        offer_builder._build_offer({"size_base_units": 10}, _FakeSdk)
         raise AssertionError("expected ValueError")
     except ValueError as exc:
         assert str(exc) == "missing_receive_address"
 
 
 def test_build_offer_calls_coin_backed_signing(monkeypatch) -> None:
-    monkeypatch.setattr(offer_builder_sdk, "_build_coin_backed_spend_bundle_hex", lambda _: "aa")
-    offer = offer_builder_sdk._build_offer({"size_base_units": 10}, _FakeSdk)
+    monkeypatch.setattr(offer_builder, "_build_coin_backed_spend_bundle_hex", lambda _: "aa")
+    offer = offer_builder._build_offer({"size_base_units": 10}, _FakeSdk)
     assert offer == "offer1fake"
 
 
 def test_build_offer_public_api(monkeypatch) -> None:
-    monkeypatch.setattr(offer_builder_sdk, "_import_sdk", lambda: _FakeSdk)
-    monkeypatch.setattr(offer_builder_sdk, "_build_coin_backed_spend_bundle_hex", lambda _: "aa")
-    offer = offer_builder_sdk.build_offer({"size_base_units": 10})
+    monkeypatch.setattr(offer_builder, "_import_sdk", lambda: _FakeSdk)
+    monkeypatch.setattr(offer_builder, "_build_coin_backed_spend_bundle_hex", lambda _: "aa")
+    offer = offer_builder.build_offer({"size_base_units": 10})
     assert offer == "offer1fake"
 
 
 def test_main_outputs_executed_json(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(offer_builder_sdk, "_import_sdk", lambda: _FakeSdk)
-    monkeypatch.setattr(offer_builder_sdk, "_build_coin_backed_spend_bundle_hex", lambda _: "aa")
+    monkeypatch.setattr(offer_builder_sdk, "build_offer", lambda _payload: "offer1fake")
     monkeypatch.setattr(
         offer_builder_sdk.sys,
         "stdin",
@@ -131,7 +131,7 @@ def test_coin_backed_signing_uses_signing_module(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(signing_mod, "build_signed_spend_bundle", _fake_build)
-    result = offer_builder_sdk._build_coin_backed_spend_bundle_hex(
+    result = offer_builder._build_coin_backed_spend_bundle_hex(
         {
             "receive_address": "xch1abc",
             "key_id": "k1",

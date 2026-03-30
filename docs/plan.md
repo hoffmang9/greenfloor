@@ -52,7 +52,6 @@ Operator output/coin-op behavior notes:
 - `CoinsetAdapter` defaults to mainnet endpoints and routes to testnet11 endpoints when `network=testnet11`; optional override: `GREENFLOOR_COINSET_BASE_URL`.
 - `WalletAdapter` (daemon coin-op path) calls `signing.sign_and_broadcast()` directly.
 - `offer_builder_sdk` (manager offer-build path) calls `signing.build_signed_spend_bundle()` directly.
-- One env-var escape hatch each: `GREENFLOOR_WALLET_EXECUTOR_CMD` (WalletAdapter), `GREENFLOOR_OFFER_BUILDER_CMD` (manager).
 - No intermediate subprocess layers. See `AGENTS.md` for the design discipline rules.
 
 ## Offer File Contract

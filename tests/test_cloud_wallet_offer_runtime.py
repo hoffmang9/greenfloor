@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
-from greenfloor.cloud_wallet_offer_runtime import (
+from greenfloor.runtime.offer_execution import (
     build_and_post_offer_cloud_wallet,
     cloud_wallet_create_offer_phase,
     cloud_wallet_post_offer_phase,
@@ -61,11 +61,11 @@ def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypat
         return None
 
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
         _fake_lookup_by_cat,
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_symbol",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_symbol",
         lambda *, asset_ref, network: (
             {"id": quote_cat, "code": "wUSDC.b"} if asset_ref == "wUSDC.b" else None
         ),
@@ -122,11 +122,11 @@ def test_resolve_cloud_wallet_offer_asset_ids_uses_global_hints_without_label_ma
             }
 
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
         lambda **_: None,
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
         lambda **_: [],
     )
 
@@ -499,6 +499,88 @@ def test_cloud_wallet_create_offer_phase_always_disables_split_input_coins() -> 
     assert payload["signature_request_id"] == "sr-1"
     assert captured["split_input_coins"] is False
     assert captured["split_input_coins_fee"] == 0
+
+
+def test_cloud_wallet_create_offer_phase_continues_when_list_coins_504() -> None:
+    class _Wallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        @staticmethod
+        def list_coins(*, asset_id=None, include_pending=True):
+            _ = asset_id, include_pending
+            raise RuntimeError("cloud_wallet_http_error:504:Gateway Timeout")
+
+        @staticmethod
+        def create_offer(**_kwargs):
+            return {"signature_request_id": "sr-1", "status": "SUBMITTED"}
+
+    class _Market:
+        pricing = {
+            "base_unit_mojo_multiplier": 1000,
+            "quote_unit_mojo_multiplier": 1000,
+        }
+
+    payload = cloud_wallet_create_offer_phase(
+        wallet=cast(CloudWalletAdapter, _Wallet()),
+        market=_Market(),
+        size_base_units=1,
+        quote_price=1.0,
+        resolved_base_asset_id="Asset_base",
+        resolved_quote_asset_id="Asset_quote",
+        offer_fee_mojos=0,
+        split_input_coins_fee=0,
+        expiry_unit="minutes",
+        expiry_value=10,
+        action_side="sell",
+        wallet_get_wallet_offers_fn=lambda *_args, **_kwargs: {"offers": []},
+        poll_signature_request_until_not_unsigned_fn=lambda **_kwargs: ("SUBMITTED", []),
+    )
+    assert payload["signature_request_id"] == "sr-1"
+    assert payload["signature_state"] == "SUBMITTED"
+
+
+def test_cloud_wallet_create_offer_phase_raises_non_transient_list_coins_error() -> None:
+    class _Wallet:
+        vault_id = "wallet-1"
+        network = "mainnet"
+
+        @staticmethod
+        def list_coins(*, asset_id=None, include_pending=True):
+            _ = asset_id, include_pending
+            raise RuntimeError("cloud_wallet_http_error:400:bad request")
+
+        @staticmethod
+        def create_offer(**_kwargs):
+            raise AssertionError(
+                "create_offer should not run when list_coins has non-transient error"
+            )
+
+    class _Market:
+        pricing = {
+            "base_unit_mojo_multiplier": 1000,
+            "quote_unit_mojo_multiplier": 1000,
+        }
+
+    try:
+        cloud_wallet_create_offer_phase(
+            wallet=cast(CloudWalletAdapter, _Wallet()),
+            market=_Market(),
+            size_base_units=1,
+            quote_price=1.0,
+            resolved_base_asset_id="Asset_base",
+            resolved_quote_asset_id="Asset_quote",
+            offer_fee_mojos=0,
+            split_input_coins_fee=0,
+            expiry_unit="minutes",
+            expiry_value=10,
+            action_side="sell",
+            wallet_get_wallet_offers_fn=lambda *_args, **_kwargs: {"offers": []},
+            poll_signature_request_until_not_unsigned_fn=lambda **_kwargs: ("SUBMITTED", []),
+        )
+        raise AssertionError("expected list_coins non-transient error")
+    except RuntimeError as exc:
+        assert "cloud_wallet_http_error:400" in str(exc)
 
 
 def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(

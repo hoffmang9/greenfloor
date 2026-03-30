@@ -47,9 +47,14 @@ class CloudWalletAdapter:
         self._base_url = config.base_url.rstrip("/")
         self._graphql_url = f"{self._base_url}/graphql"
         self._user_key_id = config.user_key_id
-        self._private_key_pem = (
-            Path(config.private_key_pem_path).expanduser().read_text(encoding="utf-8")
-        )
+        pem_path = Path(config.private_key_pem_path).expanduser().resolve()
+        if ".greenfloor" not in pem_path.parts:
+            raise ValueError("cloud_wallet_private_key_pem_path_must_be_under_dot_greenfloor")
+        if not pem_path.is_file():
+            raise FileNotFoundError(
+                f"cloud_wallet_private_key_pem_path_not_found:{os.fspath(pem_path)}"
+            )
+        self._private_key_pem_path = os.fspath(pem_path)
         self._vault_id = config.vault_id
         self._network = config.network
         self._kms_key_id = (config.kms_key_id or "").strip() or None
@@ -943,34 +948,24 @@ query getSignatureRequest($id: ID!) {
 
     def _sign_canonical_with_openssl(self, canonical: str) -> str:
         import subprocess
-        import tempfile
 
-        with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as key_fp:
-            key_fp.write(self._private_key_pem)
-            key_path = key_fp.name
-        try:
-            completed = subprocess.run(
-                [
-                    "openssl",
-                    "dgst",
-                    "-sha256",
-                    "-sign",
-                    key_path,
-                ],
-                input=canonical.encode("utf-8"),
-                capture_output=True,
-                check=False,
+        completed = subprocess.run(
+            [
+                "openssl",
+                "dgst",
+                "-sha256",
+                "-sign",
+                self._private_key_pem_path,
+            ],
+            input=canonical.encode("utf-8"),
+            capture_output=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"cloud_wallet_signature_failed:{completed.stderr.decode('utf-8', errors='replace').strip()}"
             )
-            if completed.returncode != 0:
-                raise RuntimeError(
-                    f"cloud_wallet_signature_failed:{completed.stderr.decode('utf-8', errors='replace').strip()}"
-                )
-            return base64.b64encode(completed.stdout).decode("ascii")
-        finally:
-            try:
-                Path(key_path).unlink(missing_ok=True)
-            except Exception:
-                pass
+        return base64.b64encode(completed.stdout).decode("ascii")
 
     @staticmethod
     def _random_nonce(length: int) -> str:

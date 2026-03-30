@@ -115,8 +115,6 @@ pre-commit run --all-files
 
 Operator overrides (all optional):
 
-- `GREENFLOOR_WALLET_EXECUTOR_CMD` — override the default in-process signing path with an external executor subprocess for daemon coin-op execution.
-- `GREENFLOOR_OFFER_BUILDER_CMD` — override the default in-process offer builder with an external subprocess for manager offer construction.
 - `GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON` — JSON map for key ID -> fingerprint; normally injected from `program.yaml` signer key registry by daemon path.
 - `GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT` — integer derivation depth scan limit for matching selected coin puzzle hashes (default `200`).
 - `GREENFLOOR_COINSET_BASE_URL` — custom Coinset API base URL for coin queries and `push_tx`; when unset, `CoinsetAdapter` defaults to mainnet and can be forced to testnet11 by network selection.

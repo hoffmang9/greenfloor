@@ -18,9 +18,9 @@ from typing import Any
 import greenfloor.signing_clvm as _signing_clvm
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter
-from greenfloor.coinset_runtime import _coinset_adapter
 from greenfloor.constants import MIN_CAT_OUTPUT_MOJOS
 from greenfloor.hex_utils import normalize_hex_id
+from greenfloor.runtime.offer_execution import _coinset_adapter
 from greenfloor.signing_clvm import (
     _extract_required_bls_targets_for_coin_spend,
 )

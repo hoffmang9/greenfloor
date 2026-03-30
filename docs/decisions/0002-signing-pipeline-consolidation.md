@@ -28,3 +28,12 @@ Older intermediate wrappers remain in-repo for compatibility and migration safet
 - Fewer environment-variable override points are required for normal operation.
 - Future signing work should extend existing layers instead of adding new default chain stages without a new architecture decision.
 - Coin lookup, chain-history reads, and transaction submission are handled via the Coinset adapter boundary (`greenfloor/adapters/coinset.py`) rather than direct SDK RPC client calls in signing/wallet paths.
+
+## Canonical Signing APIs
+
+To avoid signing-path drift, the canonical in-process entrypoints are:
+
+- `greenfloor.signing.sign_and_broadcast` for wallet/coin-op execution.
+- `greenfloor.signing.build_signed_spend_bundle` for offer construction paths.
+
+New signing integrations should route through these APIs instead of introducing alternate signing stacks.
