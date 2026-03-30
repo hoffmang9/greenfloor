@@ -29,10 +29,6 @@ from greenfloor.cloud_wallet_asset_cache import (
     save_wallet_assets_edges,
     wallet_assets_cache_path,
 )
-from greenfloor.coinset_runtime import (
-    _resolve_taker_or_coin_operation_fee,
-    resolve_maker_offer_fee,
-)
 from greenfloor.config.io import is_testnet
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.hex_utils import (
@@ -46,6 +42,13 @@ from greenfloor.moderate_retry import (
     poll_with_exponential_backoff_until,
 )
 from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
+from greenfloor.offer_decode import (
+    extract_coin_id_hints_from_offer_text as _extract_coin_id_hints_from_offer_text,
+)
+from greenfloor.runtime.coinset_runtime import (
+    _resolve_taker_or_coin_operation_fee,
+    resolve_maker_offer_fee,
+)
 from greenfloor.storage.sqlite import SqliteStore
 
 _MANAGER_SERVICE_NAME = "manager"
@@ -214,41 +217,6 @@ def _offer_has_duplicate_spent_coin_ids(sdk: object, offer_text: str) -> bool:
     return False
 
 
-def _extract_coin_id_hints_from_offer_text(offer_text: str) -> list[str]:
-    try:
-        sdk = importlib.import_module("chia_wallet_sdk")
-    except Exception:
-        return []
-    decode_offer = getattr(sdk, "decode_offer", None)
-    if not callable(decode_offer):
-        return []
-    try:
-        spend_bundle = decode_offer(offer_text)
-    except Exception:
-        return []
-    coin_spends = getattr(spend_bundle, "coin_spends", None) or []
-    hints: list[str] = []
-    for coin_spend in coin_spends:
-        coin = getattr(coin_spend, "coin", None)
-        if coin is None:
-            continue
-        coin_id_fn = getattr(coin, "coin_id", None)
-        if not callable(coin_id_fn):
-            continue
-        try:
-            coin_id_obj = coin_id_fn()
-            to_hex = getattr(sdk, "to_hex", None)
-            if not callable(to_hex):
-                continue
-            coin_id_hex = str(to_hex(coin_id_obj)).strip().lower()
-        except Exception:
-            continue
-        normalized = normalize_hex_id(coin_id_hex)
-        if normalized:
-            hints.append(normalized)
-    return list(dict.fromkeys(hints))
-
-
 def log_signed_offer_artifact(
     *,
     offer_text: str,
@@ -259,7 +227,7 @@ def log_signed_offer_artifact(
 ) -> None:
     coin_id_hints = _extract_coin_id_hints_from_offer_text(offer_text)
     coin_id = coin_id_hints[0] if coin_id_hints else ""
-    _runtime_logger.info("signed_offer_file:%s", offer_text)
+    _runtime_logger.debug("signed_offer_file:%s", offer_text)
     _runtime_logger.info(
         "signed_offer_metadata:ticker=%s coinid=%s amount=%s trading_pair=%s expiry=%s",
         ticker,
@@ -847,6 +815,28 @@ def is_transient_dexie_visibility_404_error(error: str) -> bool:
     return (
         "dexie_get_offer_error" in normalized and "404" in normalized
     ) or "dexie_http_error:404" in normalized
+
+
+def _is_transient_cloud_wallet_list_coins_error(error: str) -> bool:
+    normalized = str(error).strip().lower()
+    if not normalized:
+        return False
+    transient_markers = (
+        "cloud_wallet_http_error:504",
+        "cloud_wallet_http_error:503",
+        "cloud_wallet_network_error",
+        "http error 504",
+        "http error 503",
+        "gateway timeout",
+        "service unavailable",
+        "timed out",
+        "timeout",
+        "temporary failure",
+        "connection reset",
+        "connection refused",
+        "remote end closed connection",
+    )
+    return any(marker in normalized for marker in transient_markers)
 
 
 def _coinset_coin_url(*, coin_name: str, network: str = "mainnet") -> str:
@@ -1658,18 +1648,33 @@ def cloud_wallet_create_offer_phase(
         spend_asset_id = str(resolved_base_asset_id).strip()
         required_spendable_amount = int(offer_amount)
     if hasattr(wallet, "list_coins") and spend_asset_id:
-        asset_scoped_coins = wallet.list_coins(asset_id=spend_asset_id, include_pending=True)
-        spendable_amount = sum(
-            int(coin.get("amount", 0))
-            for coin in asset_scoped_coins
-            if isinstance(coin, dict) and _is_spendable_coin(coin)
-        )
-        if spendable_amount < required_spendable_amount:
-            raise RuntimeError(
-                "cloud_wallet_offer_insufficient_spendable_balance:"
-                f"side={side}:required={required_spendable_amount}:"
-                f"available={spendable_amount}:asset_id={spend_asset_id}"
+        try:
+            asset_scoped_coins = wallet.list_coins(asset_id=spend_asset_id, include_pending=True)
+        except Exception as exc:
+            if _is_transient_cloud_wallet_list_coins_error(str(exc)):
+                _runtime_logger.warning(
+                    "cloud_wallet_create_offer_precheck_skipped_due_to_transient_list_coins_error "
+                    "side=%s asset_id=%s required_amount=%s error=%s",
+                    side,
+                    spend_asset_id,
+                    int(required_spendable_amount),
+                    str(exc),
+                )
+                asset_scoped_coins = []
+            else:
+                raise
+        if asset_scoped_coins:
+            spendable_amount = sum(
+                int(coin.get("amount", 0))
+                for coin in asset_scoped_coins
+                if isinstance(coin, dict) and _is_spendable_coin(coin)
             )
+            if spendable_amount < required_spendable_amount:
+                raise RuntimeError(
+                    "cloud_wallet_offer_insufficient_spendable_balance:"
+                    f"side={side}:required={required_spendable_amount}:"
+                    f"available={spendable_amount}:asset_id={spend_asset_id}"
+                )
     expires_at = (
         dt.datetime.now(dt.UTC) + dt.timedelta(**{expiry_unit: int(expiry_value)})
     ).isoformat()

@@ -34,7 +34,10 @@ def test_verify_offer_text_for_dexie_reports_missing_validators(monkeypatch) -> 
             raise ImportError("disable native path for this test")
         return __import__(name)
 
-    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        _import_module,
+    )
 
     class _Sdk:
         pass

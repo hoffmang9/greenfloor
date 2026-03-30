@@ -1,0 +1,39 @@
+"""Single runtime composition root for offer execution orchestration."""
+
+from __future__ import annotations
+
+import greenfloor.runtime.cloud_wallet_offer_runtime as _cwr
+import greenfloor.runtime.coinset_runtime as _coinset
+
+# Cloud-wallet orchestration API
+build_and_post_offer_cloud_wallet = _cwr.build_and_post_offer_cloud_wallet
+is_transient_dexie_visibility_404_error = _cwr.is_transient_dexie_visibility_404_error
+resolve_cloud_wallet_offer_asset_ids = _cwr.resolve_cloud_wallet_offer_asset_ids
+
+# Manager-shared hooks (kept stable for existing monkeypatch targets)
+_require_cloud_wallet_config = _cwr._require_cloud_wallet_config
+cloud_wallet_create_offer_phase = _cwr.cloud_wallet_create_offer_phase
+cloud_wallet_post_offer_phase = _cwr.cloud_wallet_post_offer_phase
+cloud_wallet_wait_offer_artifact_phase = _cwr.cloud_wallet_wait_offer_artifact_phase
+dexie_offer_view_url = _cwr.dexie_offer_view_url
+ensure_offer_bootstrap_denominations = _cwr.ensure_offer_bootstrap_denominations
+log_signed_offer_artifact = _cwr.log_signed_offer_artifact
+normalize_offer_side = _cwr.normalize_offer_side
+poll_offer_artifact_by_signature_request = _cwr.poll_offer_artifact_by_signature_request
+poll_offer_artifact_until_available = _cwr.poll_offer_artifact_until_available
+poll_signature_request_until_not_unsigned = _cwr.poll_signature_request_until_not_unsigned
+post_dexie_offer_with_invalid_offer_retry = _cwr.post_dexie_offer_with_invalid_offer_retry
+recent_market_resolved_asset_id_hints = _cwr.recent_market_resolved_asset_id_hints
+resolve_cloud_wallet_asset_id = _cwr.resolve_cloud_wallet_asset_id
+resolve_offer_expiry_for_market = _cwr.resolve_offer_expiry_for_market
+seed_cloud_wallet_assets_cache = _cwr.seed_cloud_wallet_assets_cache
+verify_dexie_offer_visible_by_id = _cwr.verify_dexie_offer_visible_by_id
+verify_offer_text_for_dexie = _cwr.verify_offer_text_for_dexie
+wallet_get_wallet_offers = _cwr.wallet_get_wallet_offers
+
+# Coinset runtime helpers used by manager/signing
+CoinsetFeeLookupPreflightError = _coinset.CoinsetFeeLookupPreflightError
+_CoinsetFeeLookupPreflightError = _coinset._CoinsetFeeLookupPreflightError
+_coinset_adapter = _coinset._coinset_adapter
+_resolve_taker_or_coin_operation_fee = _coinset._resolve_taker_or_coin_operation_fee
+resolve_maker_offer_fee = _coinset.resolve_maker_offer_fee

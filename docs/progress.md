@@ -1,5 +1,22 @@
 # Progress Log
 
+## 2026-03-30 (audit follow-up: daemon/CLI boundary + offer log level + retry tests + subprocess override policy)
+
+- Removed daemon -> CLI import boundary violation: daemon offer building now imports shared `greenfloor/offer_builder.py` instead of `greenfloor.cli.offer_builder_sdk`.
+- Kept full offer artifact logging capability but moved the full `offer1...` line to DEBUG level (`signed_offer_file`) while retaining INFO-level metadata logs.
+- Added deterministic retry/backoff test coverage in `tests/test_moderate_retry.py` for `cloud_wallet_rate_limit_retry_seconds`, `call_with_moderate_retry`, and `poll_with_exponential_backoff_until`.
+- Added architecture decision `docs/decisions/0004-subprocess-override-threat-model.md` documenting trust assumptions and safe-use constraints for `GREENFLOOR_OFFER_BUILDER_CMD` and `GREENFLOOR_WALLET_EXECUTOR_CMD`.
+- Introduced `greenfloor.runtime.offer_execution` as a single runtime composition root and moved daemon/manager/signing runtime imports to it; recorded rationale in `docs/decisions/0005-runtime-composition-root.md`.
+- Completed phase-2 caller migration to the runtime root by switching remaining tests/scripts from `greenfloor.cloud_wallet_offer_runtime` to `greenfloor.runtime.offer_execution`; runtime orchestration entrypoint is now centralized for in-repo callers.
+- Removed legacy implementation modules by relocating runtime implementations to `greenfloor/runtime/cloud_wallet_offer_runtime.py` and `greenfloor/runtime/coinset_runtime.py`; deleted top-level `greenfloor/cloud_wallet_offer_runtime.py` and `greenfloor/coinset_runtime.py`.
+- Removed subprocess escape hatches from offer-builder and wallet execution paths (`GREENFLOOR_OFFER_BUILDER_CMD`, `GREENFLOOR_WALLET_EXECUTOR_CMD`) so these flows are now strictly in-process.
+- Collapsed remaining offer-builder duplication: `greenfloor/cli/offer_builder_sdk.py` now delegates shared logic to `greenfloor/offer_builder.py` while keeping CLI contract behavior stable.
+- Added canonical signing API guidance to decision `0002` and included a lightweight `signing_entrypoint` field in wallet coin-op execution item output for audit/debug visibility.
+- Simplified offer-builder ownership further: app/runtime paths now import `greenfloor/offer_builder.py` directly, while `greenfloor/cli/offer_builder_sdk.py` is reduced to a minimal CLI `main()` wrapper only.
+- Expanded dispatch-gate branch coverage in `tests/test_manager_post_offer.py` for `_use_local_offer_build_path_for_size` (default/invalid/non-positive threshold behavior) and cloud-wallet-not-configured routing.
+- Added explicit daemon loop sequencing coverage in `tests/test_daemon_websocket_runtime.py` to assert reload-marker consume/log ordering occurs before sleep and config reload.
+- Hardened Cloud Wallet PEM handling: adapter now requires `cloud_wallet.private_key_pem_path` to reside under a `.greenfloor` directory and signs directly with that path (no temporary PEM file copy for OpenSSL signing).
+
 ## 2026-03-23 (PR review follow-up: CAT floor override wiring + stepwise/operator clarity)
 
 - Addressed review gap in `scripts/combine_coinset_direct.py` / `greenfloor/signing.py` where `--allow-sub-cat-output` previously bypassed only script-level checks:

@@ -386,17 +386,13 @@ def test_execute_strategy_actions_applies_post_cooldown_after_retry_exhaust(monk
 
 
 def test_build_offer_for_action_direct_builder_call(monkeypatch) -> None:
-    monkeypatch.delenv("GREENFLOOR_OFFER_BUILDER_CMD", raising=False)
     captured = {}
 
     def _fake_build_offer(payload):
         captured["payload"] = payload
         return f"offer1direct-{payload['size_base_units']}"
 
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_builder_sdk.build_offer",
-        _fake_build_offer,
-    )
+    monkeypatch.setattr("greenfloor.offer_builder.build_offer", _fake_build_offer)
     action = PlannedAction(
         size=10,
         repeat=1,

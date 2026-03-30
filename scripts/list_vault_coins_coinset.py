@@ -16,9 +16,9 @@ import yaml
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter
-from greenfloor.cloud_wallet_offer_runtime import poll_signature_request_until_not_unsigned
 from greenfloor.constants import MIN_CAT_OUTPUT_MOJOS
 from greenfloor.hex_utils import is_hex_id, normalize_hex_id
+from greenfloor.runtime.offer_execution import poll_signature_request_until_not_unsigned
 
 
 def _import_sdk() -> Any:

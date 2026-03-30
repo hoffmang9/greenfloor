@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import collections.abc
 import datetime as dt
-import importlib
 import json
 import logging
 import math
@@ -20,7 +19,7 @@ from typing import Any
 import yaml
 
 import greenfloor.asset_label_catalog as _asset_label_catalog
-import greenfloor.cloud_wallet_offer_runtime as cwr
+import greenfloor.runtime.offer_execution as cwr
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter, extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter
@@ -30,16 +29,6 @@ from greenfloor.asset_label_catalog import (
     _dexie_lookup_token_for_symbol,
     _is_hex_asset_id,
     _normalize_hex_asset_id,
-)
-from greenfloor.cli.offer_builder_sdk import build_offer_text
-from greenfloor.coinset_runtime import (
-    CoinsetFeeLookupPreflightError as _CoinsetFeeLookupPreflightError,
-)
-from greenfloor.coinset_runtime import (
-    _resolve_taker_or_coin_operation_fee,
-)
-from greenfloor.coinset_runtime import (
-    resolve_maker_offer_fee as _resolve_maker_offer_fee,
 )
 from greenfloor.config.io import (
     default_cats_config_path as _default_cats_config_path_shared,
@@ -56,11 +45,7 @@ from greenfloor.config.io import (
     write_yaml,
 )
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
-from greenfloor.hex_utils import (
-    canonical_is_xch,
-    default_mojo_multiplier_for_asset,
-    normalize_hex_id,
-)
+from greenfloor.hex_utils import canonical_is_xch, default_mojo_multiplier_for_asset
 from greenfloor.keys.onboarding import (
     KeyOnboardingSelection,
     determine_onboarding_branch,
@@ -76,6 +61,17 @@ from greenfloor.logging_setup import (
 )
 from greenfloor.moderate_retry import call_with_moderate_retry
 from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
+from greenfloor.offer_builder import build_offer_text
+from greenfloor.offer_decode import (
+    extract_coin_id_hints_from_offer_text as _extract_coin_id_hints_from_offer_text,
+)
+from greenfloor.runtime.offer_execution import (
+    _CoinsetFeeLookupPreflightError,
+    _resolve_taker_or_coin_operation_fee,
+)
+from greenfloor.runtime.offer_execution import (
+    resolve_maker_offer_fee as _resolve_maker_offer_fee,
+)
 from greenfloor.storage.sqlite import SqliteStore
 
 # Test monkeypatch targets (resolve_cloud_wallet_asset_id reads via cwr import).
@@ -128,42 +124,6 @@ def _warn_if_log_level_auto_healed(*, program, program_path: Path) -> None:
     warn_if_log_level_auto_healed(
         program_obj=program, program_path=program_path, logger=_manager_logger
     )
-
-
-def _extract_coin_id_hints_from_offer_text(offer_text: str) -> list[str]:
-    try:
-        sdk = importlib.import_module("chia_wallet_sdk")
-    except Exception:
-        return []
-    decode_offer = getattr(sdk, "decode_offer", None)
-    if not callable(decode_offer):
-        return []
-    try:
-        spend_bundle = decode_offer(offer_text)
-    except Exception:
-        return []
-    coin_spends = getattr(spend_bundle, "coin_spends", None) or []
-    hints: list[str] = []
-    for coin_spend in coin_spends:
-        coin = getattr(coin_spend, "coin", None)
-        if coin is None:
-            continue
-        coin_id_fn = getattr(coin, "coin_id", None)
-        if not callable(coin_id_fn):
-            continue
-        try:
-            coin_id_obj = coin_id_fn()
-            to_hex = getattr(sdk, "to_hex", None)
-            if not callable(to_hex):
-                continue
-            coin_id_hex = str(to_hex(coin_id_obj)).strip().lower()
-        except Exception:
-            continue
-        normalized = normalize_hex_id(coin_id_hex)
-        if normalized:
-            hints.append(normalized)
-    # Stable order, unique values.
-    return list(dict.fromkeys(hints))
 
 
 _log_signed_offer_artifact = _shared_log_signed_offer_artifact

@@ -122,7 +122,8 @@ def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypat
         "greenfloor.cli.manager._dexie_lookup_token_for_cat_id", _fake_lookup_by_cat
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id", _fake_lookup_by_cat
+        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        _fake_lookup_by_cat,
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._dexie_lookup_token_for_symbol",
@@ -131,7 +132,7 @@ def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypat
         ),
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_symbol",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_symbol",
         lambda *, asset_ref, network: (
             {"id": quote_cat, "code": "wUSDC.b"} if asset_ref == "wUSDC.b" else None
         ),
@@ -188,14 +189,15 @@ def test_resolve_cloud_wallet_asset_id_uses_local_catalog_hints_when_dexie_missi
 
     monkeypatch.setattr("greenfloor.cli.manager._dexie_lookup_token_for_cat_id", lambda **_: None)
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id", lambda **_: None
+        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        lambda **_: None,
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._local_catalog_label_hints_for_asset_id",
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == base_cat else [],
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == base_cat else [],
     )
 
@@ -247,13 +249,14 @@ def test_resolve_cloud_wallet_offer_asset_ids_uses_global_hints_without_label_ma
 
     monkeypatch.setattr("greenfloor.cli.manager._dexie_lookup_token_for_cat_id", lambda **_: None)
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id", lambda **_: None
+        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        lambda **_: None,
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._local_catalog_label_hints_for_asset_id", lambda **_: []
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
         lambda **_: [],
     )
 
@@ -314,13 +317,14 @@ def test_resolve_cloud_wallet_asset_id_uses_identifier_lookup(monkeypatch) -> No
 
     monkeypatch.setattr("greenfloor.cli.manager._dexie_lookup_token_for_cat_id", lambda **_: None)
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id", lambda **_: None
+        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        lambda **_: None,
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._local_catalog_label_hints_for_asset_id", lambda **_: []
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
         lambda **_: [],
     )
 
@@ -371,7 +375,7 @@ def test_resolve_cloud_wallet_asset_id_identifier_miss_falls_through(monkeypatch
         ),
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
         lambda *, canonical_cat_id_hex, network: (
             {"ticker_id": f"{cat_hex}_xch", "base_code": "ECO.181.2022"}
             if canonical_cat_id_hex == cat_hex
@@ -425,7 +429,7 @@ def test_resolve_cloud_wallet_asset_id_identifier_error_falls_through(monkeypatc
         ),
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
         lambda *, canonical_cat_id_hex, network: (
             {"ticker_id": f"{cat_hex}_xch", "base_code": "ECO.181.2022"}
             if canonical_cat_id_hex == cat_hex
@@ -1507,7 +1511,10 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
             raise ImportError("disable native path for this test")
         return __import__(name)
 
-    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        _import_module,
+    )
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_offer_text_for_request",
@@ -1628,12 +1635,11 @@ def test_build_and_post_offer_dry_run_returns_nonzero_when_build_fails(
 
 
 def test_build_offer_text_for_request_direct_call(monkeypatch) -> None:
-    """Verify that _build_offer_text_for_request calls offer_builder_sdk.build_offer directly."""
+    """Verify that _build_offer_text_for_request calls shared offer_builder.build_offer."""
     from greenfloor.cli import manager
 
-    monkeypatch.delenv("GREENFLOOR_OFFER_BUILDER_CMD", raising=False)
     monkeypatch.setattr(
-        "greenfloor.cli.offer_builder_sdk.build_offer",
+        "greenfloor.offer_builder.build_offer",
         lambda _payload: "offer1direct",
     )
     result = manager._build_offer_text_for_request({"test": True})
@@ -1646,7 +1652,10 @@ def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypa
             raise ImportError("disable native path for this test")
         return __import__(name)
 
-    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        _import_module,
+    )
 
     class _ConditionWithExpiry:
         @staticmethod
@@ -1699,7 +1708,10 @@ def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> 
             raise ImportError("disable native path for this test")
         return __import__(name)
 
-    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        _import_module,
+    )
 
     class _ConditionWithExpiry:
         @staticmethod
@@ -1755,7 +1767,10 @@ def test_verify_offer_text_for_dexie_rejects_offer_without_expiration_condition(
             raise ImportError("disable native path for this test")
         return __import__(name)
 
-    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        _import_module,
+    )
 
     class _ConditionNoExpiry:
         @staticmethod
@@ -1803,7 +1818,10 @@ def test_verify_offer_text_for_dexie_extracts_expiry_from_coin_spend_program(
             raise ImportError("disable native path for this test")
         return __import__(name)
 
-    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        _import_module,
+    )
 
     class _ConditionWithExpiry:
         @staticmethod
@@ -1858,7 +1876,10 @@ def test_verify_offer_text_for_dexie_rejects_duplicate_spent_coin_ids(
             raise ImportError("disable native path for this test")
         return __import__(name)
 
-    monkeypatch.setattr("greenfloor.cli.manager.importlib.import_module", _import_module)
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        _import_module,
+    )
 
     class _ConditionWithExpiry:
         @staticmethod
@@ -2446,7 +2467,7 @@ def test_coins_list_cat_id_works_when_dexie_metadata_absent(
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == cat_id else [],
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == cat_id else [],
     )
     monkeypatch.setattr(
@@ -2454,7 +2475,7 @@ def test_coins_list_cat_id_works_when_dexie_metadata_absent(
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("dexie should not be called")),
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("dexie should not be called")),
     )
     code = _coins_list(program_path=program, asset=None, vault_id=None, cat_id=cat_id)
@@ -2572,7 +2593,7 @@ def test_resolve_cloud_wallet_asset_id_hex_without_dexie_uses_local_catalog_hint
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == base_cat else [],
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == base_cat else [],
     )
     monkeypatch.setattr(
@@ -2580,7 +2601,7 @@ def test_resolve_cloud_wallet_asset_id_hex_without_dexie_uses_local_catalog_hint
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("dexie should not be called")),
     )
     monkeypatch.setattr(
-        "greenfloor.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("dexie should not be called")),
     )
 
@@ -2607,7 +2628,7 @@ def test_resolve_taker_or_coin_operation_fee_uses_coinset_value(monkeypatch) -> 
         def get_conservative_fee_estimate():
             return 15
 
-    monkeypatch.setattr("greenfloor.coinset_runtime.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setattr("greenfloor.runtime.coinset_runtime.CoinsetAdapter", _FakeCoinset)
     monkeypatch.setenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "1")
     fee, source = manager_mod._resolve_taker_or_coin_operation_fee(
         network="mainnet",
@@ -2631,7 +2652,7 @@ def test_resolve_taker_or_coin_operation_fee_applies_minimum_floor(monkeypatch) 
         def get_conservative_fee_estimate():
             return 2
 
-    monkeypatch.setattr("greenfloor.coinset_runtime.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setattr("greenfloor.runtime.coinset_runtime.CoinsetAdapter", _FakeCoinset)
     monkeypatch.setenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "1")
     fee, source = manager_mod._resolve_taker_or_coin_operation_fee(
         network="mainnet",
@@ -2660,7 +2681,7 @@ def test_resolve_taker_or_coin_operation_fee_falls_back_to_config_minimum(monkey
                 return 1
             return None
 
-    monkeypatch.setattr("greenfloor.coinset_runtime.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setattr("greenfloor.runtime.coinset_runtime.CoinsetAdapter", _FakeCoinset)
     monkeypatch.setenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "1")
     monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
 
@@ -2682,7 +2703,7 @@ def test_resolve_taker_or_coin_operation_fee_fails_on_endpoint_preflight(monkeyp
             _ = target_times
             raise RuntimeError("coinset_network_error:timed_out")
 
-    monkeypatch.setattr("greenfloor.coinset_runtime.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setattr("greenfloor.runtime.coinset_runtime.CoinsetAdapter", _FakeCoinset)
     try:
         manager_mod._resolve_taker_or_coin_operation_fee(network="mainnet", minimum_fee_mojos=0)
     except manager_mod._CoinsetFeeLookupPreflightError as exc:
@@ -2704,7 +2725,7 @@ def test_resolve_taker_or_coin_operation_fee_fails_on_temporary_advice_unavailab
             _ = target_times
             return {"success": False, "error": "backend_overloaded"}
 
-    monkeypatch.setattr("greenfloor.coinset_runtime.CoinsetAdapter", _FakeCoinset)
+    monkeypatch.setattr("greenfloor.runtime.coinset_runtime.CoinsetAdapter", _FakeCoinset)
     try:
         manager_mod._resolve_taker_or_coin_operation_fee(network="mainnet", minimum_fee_mojos=0)
     except manager_mod._CoinsetFeeLookupPreflightError as exc:
@@ -4719,6 +4740,86 @@ def test_build_and_post_offer_uses_local_path_for_large_size_when_cloud_wallet_c
     assert local_builder_calls[0] == 1
 
 
+def test_build_and_post_offer_uses_local_path_when_cloud_wallet_not_configured(
+    monkeypatch, tmp_path: Path
+) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    _write_program(program)
+    _write_markets(markets)
+
+    cloud_dispatched = [False]
+    local_builder_calls = [0]
+
+    def _fake_cloud_wallet(**kwargs):
+        _ = kwargs
+        cloud_dispatched[0] = True
+        return 0, {}
+
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_and_post_offer_cloud_wallet",
+        _fake_cloud_wallet,
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager._build_offer_text_for_request", lambda payload: "offer1abc"
+    )
+
+    class _FakeDexie:
+        def __init__(self, _base_url: str):
+            pass
+
+        def post_offer(self, offer: str, *, drop_only: bool, claim_rewards: bool | None):
+            _ = offer, drop_only, claim_rewards
+            local_builder_calls[0] += 1
+            return {"success": True, "id": "local-no-cw"}
+
+    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
+
+    code = _build_and_post_offer(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        size_base_units=10,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 0
+    assert cloud_dispatched[0] is False
+    assert local_builder_calls[0] == 1
+
+
+def test_use_local_offer_build_path_for_size_defaults_and_boundaries(monkeypatch) -> None:
+    monkeypatch.delenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", raising=False)
+    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=99) is False
+    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=100) is True
+    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=101) is True
+
+
+def test_use_local_offer_build_path_for_size_invalid_threshold_uses_default(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "not-an-int")
+    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=99) is False
+    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=100) is True
+
+
+def test_use_local_offer_build_path_for_size_non_positive_threshold_disables_local_path(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "0")
+    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=100) is False
+    monkeypatch.setenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "-5")
+    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=1000) is False
+
+
 def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured(
     monkeypatch, tmp_path: Path
 ) -> None:
@@ -4852,6 +4953,7 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     _write_markets_with_ladder(markets_path)
     prog, mkt = _load_program_and_market(program_path, markets_path)
     prog.home_dir = str(tmp_path)
+    prog.app_log_level = "DEBUG"
     reset_concurrent_log_handlers(module=manager_mod)
 
     class _FakeWallet:

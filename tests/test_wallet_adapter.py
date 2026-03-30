@@ -1,5 +1,4 @@
 import os
-import sys
 from pathlib import Path
 
 from greenfloor.adapters.wallet import WalletAdapter
@@ -99,54 +98,8 @@ def test_wallet_adapter_non_dry_run_requires_signer_selection(tmp_path: Path) ->
     assert result["items"][0]["reason"] == "missing_signer_selection"
 
 
-def test_wallet_adapter_non_dry_run_uses_external_executor(tmp_path: Path) -> None:
-    from greenfloor.core.coin_ops import CoinOpPlan
-    from greenfloor.keys.onboarding import KeyOnboardingSelection, save_key_onboarding_selection
-
-    onboarding_path = tmp_path / "key_onboarding.json"
-    save_key_onboarding_selection(
-        onboarding_path,
-        KeyOnboardingSelection(
-            selected_source="chia_keys",
-            key_id="fingerprint:123456789",
-            network="testnet11",
-            chia_keys_dir=str(tmp_path / ".chia_keys"),
-            keyring_yaml_path=str(tmp_path / ".chia_keys/keyring.yaml"),
-        ),
-    )
-    script = tmp_path / "exec.py"
-    script.write_text(
-        (
-            "import json,sys\n"
-            "_ = json.loads(sys.stdin.read())\n"
-            'print(json.dumps({"status":"executed","reason":"executor_success","operation_id":"tx-1"}))\n'
-        ),
-        encoding="utf-8",
-    )
-
-    old_cmd = os.getenv("GREENFLOOR_WALLET_EXECUTOR_CMD")
-    try:
-        os.environ["GREENFLOOR_WALLET_EXECUTOR_CMD"] = f"{sys.executable} {script}"
-        adapter = WalletAdapter()
-        result = adapter.execute_coin_ops(
-            plans=[CoinOpPlan(op_type="combine", size_base_units=50, op_count=1, reason="r")],
-            dry_run=False,
-            key_id="fingerprint:123456789",
-            network="testnet11",
-            onboarding_selection_path=onboarding_path,
-        )
-        assert result["executed_count"] == 1
-        assert result["items"][0]["status"] == "executed"
-        assert result["items"][0]["operation_id"] == "tx-1"
-    finally:
-        if old_cmd is None:
-            os.environ.pop("GREENFLOOR_WALLET_EXECUTOR_CMD", None)
-        else:
-            os.environ["GREENFLOOR_WALLET_EXECUTOR_CMD"] = old_cmd
-
-
 def test_wallet_adapter_non_dry_run_direct_signing(tmp_path: Path, monkeypatch) -> None:
-    """When no GREENFLOOR_WALLET_EXECUTOR_CMD is set, uses signing.sign_and_broadcast directly."""
+    """Uses signing.sign_and_broadcast directly for non-dry-run execution."""
     from greenfloor.core.coin_ops import CoinOpPlan
     from greenfloor.keys.onboarding import KeyOnboardingSelection, save_key_onboarding_selection
 
@@ -161,8 +114,6 @@ def test_wallet_adapter_non_dry_run_direct_signing(tmp_path: Path, monkeypatch) 
             keyring_yaml_path=str(tmp_path / ".chia_keys/keyring.yaml"),
         ),
     )
-
-    monkeypatch.delenv("GREENFLOOR_WALLET_EXECUTOR_CMD", raising=False)
 
     import greenfloor.signing as signing_mod
 

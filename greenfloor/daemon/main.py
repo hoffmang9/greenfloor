@@ -30,11 +30,6 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.price import PriceAdapter, XchPriceProvider
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
-from greenfloor.cloud_wallet_offer_runtime import (
-    build_and_post_offer_cloud_wallet,
-    is_transient_dexie_visibility_404_error,
-    resolve_cloud_wallet_offer_asset_ids,
-)
 from greenfloor.config.io import (
     default_cats_config_path,
     default_state_dir_path,
@@ -59,6 +54,11 @@ from greenfloor.logging_setup import (
     warn_if_log_level_auto_healed,
 )
 from greenfloor.notify.pushover import send_pushover_alert
+from greenfloor.runtime.offer_execution import (
+    build_and_post_offer_cloud_wallet,
+    is_transient_dexie_visibility_404_error,
+    resolve_cloud_wallet_offer_asset_ids,
+)
 from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
 
 _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS = 500
@@ -1445,7 +1445,7 @@ def _build_offer_for_action(
     network: str,
     keyring_yaml_path: str,
 ) -> dict[str, Any]:
-    from greenfloor.cli.offer_builder_sdk import build_offer_text
+    from greenfloor.offer_builder import build_offer_text
 
     side = _normalize_offer_side(getattr(action, "side", "sell"))
     if side == "buy":

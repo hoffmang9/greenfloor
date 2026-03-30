@@ -179,8 +179,6 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - `offer_parallelism_enabled` (default: `false`)
   - `offer_parallelism_max_workers` (default: `4`, min `1`)
   - `reservation_ttl_seconds` (default: `300`, min `30`)
-- Offer-builder override command:
-  - `GREENFLOOR_OFFER_BUILDER_CMD`
 - Coinset endpoint override (coin reads + chain history + tx submit):
   - `GREENFLOOR_COINSET_BASE_URL`
   - Default behavior: mainnet endpoint when unset; testnet11 endpoint when market/network is `testnet11`.

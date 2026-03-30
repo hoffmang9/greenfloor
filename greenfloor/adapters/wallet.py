@@ -3,8 +3,6 @@ from __future__ import annotations
 import importlib
 import json
 import os
-import shlex
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +19,7 @@ class CoinOpExecutionItem:
     status: str
     reason: str
     operation_id: str | None
+    signing_entrypoint: str | None = None
 
 
 class WalletAdapter:
@@ -151,6 +150,7 @@ class WalletAdapter:
                     "status": i.status,
                     "reason": i.reason,
                     "operation_id": i.operation_id,
+                    "signing_entrypoint": i.signing_entrypoint,
                 }
                 for i in items
             ],
@@ -185,12 +185,7 @@ class WalletAdapter:
         if signer_fingerprint is not None:
             payload["key_id_fingerprint_map"] = {str(key_id): str(int(signer_fingerprint))}
 
-        # External executor override (subprocess escape hatch for operators)
-        cmd_raw = os.getenv("GREENFLOOR_WALLET_EXECUTOR_CMD", "").strip()
-        if cmd_raw:
-            return self._execute_via_subprocess(cmd_raw, payload, plan)
-
-        # Default: direct in-process signing + broadcast
+        # Direct in-process signing + broadcast
         from greenfloor.signing import sign_and_broadcast
 
         result = sign_and_broadcast(payload)
@@ -202,66 +197,7 @@ class WalletAdapter:
             status=status if status in {"executed", "skipped"} else "executed",
             reason=str(result.get("reason", "unknown")),
             operation_id=result.get("operation_id"),
-        )
-
-    def _execute_via_subprocess(
-        self,
-        cmd_raw: str,
-        payload: dict,
-        plan: CoinOpPlan,
-    ) -> CoinOpExecutionItem:
-        try:
-            completed = subprocess.run(
-                shlex.split(cmd_raw),
-                input=json.dumps(payload),
-                capture_output=True,
-                check=False,
-                text=True,
-                timeout=120,
-            )
-        except Exception as exc:
-            return CoinOpExecutionItem(
-                op_type=plan.op_type,
-                size_base_units=plan.size_base_units,
-                op_count=plan.op_count,
-                status="skipped",
-                reason=f"executor_spawn_error:{exc}",
-                operation_id=None,
-            )
-
-        if completed.returncode != 0:
-            err = completed.stderr.strip() or completed.stdout.strip() or "unknown_error"
-            return CoinOpExecutionItem(
-                op_type=plan.op_type,
-                size_base_units=plan.size_base_units,
-                op_count=plan.op_count,
-                status="skipped",
-                reason=f"executor_failed:{err}",
-                operation_id=None,
-            )
-
-        try:
-            body = json.loads(completed.stdout.strip() or "{}")
-        except json.JSONDecodeError:
-            return CoinOpExecutionItem(
-                op_type=plan.op_type,
-                size_base_units=plan.size_base_units,
-                op_count=plan.op_count,
-                status="skipped",
-                reason="executor_invalid_json",
-                operation_id=None,
-            )
-
-        status = str(body.get("status", "executed")).strip()
-        reason = str(body.get("reason", "executor_success")).strip()
-        operation_id = body.get("operation_id")
-        return CoinOpExecutionItem(
-            op_type=plan.op_type,
-            size_base_units=plan.size_base_units,
-            op_count=plan.op_count,
-            status=status if status in {"executed", "skipped"} else "executed",
-            reason=reason,
-            operation_id=str(operation_id) if operation_id is not None else None,
+            signing_entrypoint="sign_and_broadcast",
         )
 
     def list_asset_coins_base_units(
