@@ -3853,7 +3853,7 @@ def _execute_coin_ops_cloud_wallet_kms_only(
                     continue
                 required_amount = amount_per_coin_mojos * op_count
                 coins = cloud_wallet.list_coins(
-                    asset_id=resolved_base_asset_id, include_pending=True
+                    asset_id=resolved_base_asset_id,
                 )
                 spendable = _spendable_asset_scoped_coins(coins)
                 if not spendable:
@@ -3873,7 +3873,7 @@ def _execute_coin_ops_cloud_wallet_kms_only(
                 for attempt_index in range(2):
                     # Re-read before each attempt to avoid selecting stale now-locked coins.
                     fresh = cloud_wallet.list_coins(
-                        asset_id=resolved_base_asset_id, include_pending=True
+                        asset_id=resolved_base_asset_id,
                     )
                     candidate_spendable = [
                         coin
@@ -4147,7 +4147,7 @@ def _execute_coin_ops_cloud_wallet_kms_only(
                 )
                 exact_bucket_coin_ids: list[str] = []
                 for coin in _spendable_asset_scoped_coins(
-                    cloud_wallet.list_coins(asset_id=resolved_base_asset_id, include_pending=True)
+                    cloud_wallet.list_coins(asset_id=resolved_base_asset_id)
                 ):
                     coin_id = str(coin.get("id", "")).strip()
                     if not coin_id or coin_id.lower() in watched_coin_ids:
