@@ -1169,14 +1169,18 @@ def wait_for_mempool_then_confirmation(
     sleep_seconds = 2.0
     next_mempool_warning = mempool_warning_seconds
     next_confirmation_warning = confirmation_warning_seconds
-    target_asset = (
-        asset_id.strip().lower() if isinstance(asset_id, str) and asset_id.strip() else None
-    )
+    target_asset_raw = asset_id.strip() if isinstance(asset_id, str) and asset_id.strip() else None
+    target_asset = target_asset_raw.lower() if target_asset_raw else None
     while True:
         elapsed = int(time.monotonic() - start)
+        list_coins_call: collections.abc.Callable[[], list[dict[str, Any]]]
+        if target_asset_raw is not None:
+            list_coins_call = lambda: wallet.list_coins(asset_id=target_asset_raw)
+        else:
+            list_coins_call = wallet.list_coins
         coins = call_with_moderate_retry(
             action="wallet_list_coins",
-            call=lambda: wallet.list_coins(include_pending=True),
+            call=list_coins_call,
             elapsed_seconds=elapsed,
             events=events,
         )
@@ -1418,7 +1422,7 @@ def ensure_offer_bootstrap_denominations(
             "reason": "wallet_list_coins_unavailable_for_bootstrap",
             "fallback_to_cloud_wallet_offer_split": True,
         }
-    asset_scoped_coins = wallet.list_coins(asset_id=split_asset_id, include_pending=True)
+    asset_scoped_coins = wallet.list_coins(asset_id=split_asset_id)
     spendable_asset_coins = [coin for coin in asset_scoped_coins if is_spendable_coin_fn(coin)]
     bootstrap_plan = plan_bootstrap_mixed_outputs_fn(
         sell_ladder=ladder_for_split,
@@ -1546,7 +1550,7 @@ def ensure_offer_bootstrap_denominations(
             "signature_wait_events": signature_events,
             "wait_events": wait_events,
         }
-    refreshed_asset_coins = wallet.list_coins(asset_id=split_asset_id, include_pending=True)
+    refreshed_asset_coins = wallet.list_coins(asset_id=split_asset_id)
     refreshed_spendable = [coin for coin in refreshed_asset_coins if is_spendable_coin_fn(coin)]
     remaining_plan = plan_bootstrap_mixed_outputs_fn(
         sell_ladder=ladder_for_split,
@@ -1640,41 +1644,11 @@ def cloud_wallet_create_offer_phase(
     if side == "buy":
         offered = [{"assetId": resolved_quote_asset_id, "amount": request_amount}]
         requested = [{"assetId": resolved_base_asset_id, "amount": offer_amount}]
-        spend_asset_id = str(resolved_quote_asset_id).strip()
-        required_spendable_amount = int(request_amount)
     else:
         offered = [{"assetId": resolved_base_asset_id, "amount": offer_amount}]
         requested = [{"assetId": resolved_quote_asset_id, "amount": request_amount}]
-        spend_asset_id = str(resolved_base_asset_id).strip()
-        required_spendable_amount = int(offer_amount)
-    if hasattr(wallet, "list_coins") and spend_asset_id:
-        try:
-            asset_scoped_coins = wallet.list_coins(asset_id=spend_asset_id, include_pending=True)
-        except Exception as exc:
-            if _is_transient_cloud_wallet_list_coins_error(str(exc)):
-                _runtime_logger.warning(
-                    "cloud_wallet_create_offer_precheck_skipped_due_to_transient_list_coins_error "
-                    "side=%s asset_id=%s required_amount=%s error=%s",
-                    side,
-                    spend_asset_id,
-                    int(required_spendable_amount),
-                    str(exc),
-                )
-                asset_scoped_coins = []
-            else:
-                raise
-        if asset_scoped_coins:
-            spendable_amount = sum(
-                int(coin.get("amount", 0))
-                for coin in asset_scoped_coins
-                if isinstance(coin, dict) and _is_spendable_coin(coin)
-            )
-            if spendable_amount < required_spendable_amount:
-                raise RuntimeError(
-                    "cloud_wallet_offer_insufficient_spendable_balance:"
-                    f"side={side}:required={required_spendable_amount}:"
-                    f"available={spendable_amount}:asset_id={spend_asset_id}"
-                )
+    # Do not pre-read list_coins here: create_offer enforces spendability and this
+    # precheck adds an extra high-frequency DB query per offer attempt.
     expires_at = (
         dt.datetime.now(dt.UTC) + dt.timedelta(**{expiry_unit: int(expiry_value)})
     ).isoformat()

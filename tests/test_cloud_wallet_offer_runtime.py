@@ -413,22 +413,14 @@ def test_is_transient_dexie_visibility_404_error_matches_common_404_shapes() -> 
     assert not is_transient_dexie_visibility_404_error("dexie_network_error:timed out")
 
 
-def test_cloud_wallet_create_offer_phase_rejects_insufficient_spendable_balance() -> None:
+def test_cloud_wallet_create_offer_phase_propagates_create_offer_balance_error() -> None:
     class _Wallet:
         vault_id = "wallet-1"
         network = "mainnet"
 
         @staticmethod
-        def list_coins(*, asset_id=None, include_pending=True):
-            _ = asset_id, include_pending
-            return [
-                {"id": "coin-a", "amount": 10_000, "state": "SETTLED"},
-                {"id": "coin-b", "amount": 10_000, "state": "SETTLED"},
-            ]
-
-        @staticmethod
         def create_offer(**_kwargs):
-            raise AssertionError("create_offer must not run when spendable balance is insufficient")
+            raise RuntimeError("cloud_wallet_offer_insufficient_spendable_balance:available=1000:required=5000")
 
     class _Market:
         pricing = {
@@ -457,16 +449,18 @@ def test_cloud_wallet_create_offer_phase_rejects_insufficient_spendable_balance(
         assert "cloud_wallet_offer_insufficient_spendable_balance" in str(exc)
 
 
-def test_cloud_wallet_create_offer_phase_always_disables_split_input_coins() -> None:
+def test_cloud_wallet_create_offer_phase_always_disables_split_input_coins_without_list_coins_precheck() -> None:
     captured: dict[str, Any] = {}
+    list_coins_calls = 0
 
     class _Wallet:
         vault_id = "wallet-1"
         network = "mainnet"
 
-        @staticmethod
-        def list_coins(*, asset_id=None, include_pending=True):
+        def list_coins(self, *, asset_id=None, include_pending=False):
+            nonlocal list_coins_calls
             _ = asset_id, include_pending
+            list_coins_calls += 1
             return [{"id": "coin-a", "amount": 500_000, "state": "SETTLED"}]
 
         @staticmethod
@@ -499,17 +493,21 @@ def test_cloud_wallet_create_offer_phase_always_disables_split_input_coins() -> 
     assert payload["signature_request_id"] == "sr-1"
     assert captured["split_input_coins"] is False
     assert captured["split_input_coins_fee"] == 0
+    assert list_coins_calls == 0
 
 
-def test_cloud_wallet_create_offer_phase_continues_when_list_coins_504() -> None:
+def test_cloud_wallet_create_offer_phase_does_not_call_list_coins_precheck() -> None:
+    list_coins_calls = 0
+
     class _Wallet:
         vault_id = "wallet-1"
         network = "mainnet"
 
-        @staticmethod
-        def list_coins(*, asset_id=None, include_pending=True):
+        def list_coins(self, *, asset_id=None, include_pending=False):
+            nonlocal list_coins_calls
             _ = asset_id, include_pending
-            raise RuntimeError("cloud_wallet_http_error:504:Gateway Timeout")
+            list_coins_calls += 1
+            raise RuntimeError("list_coins should not be called during create-offer phase")
 
         @staticmethod
         def create_offer(**_kwargs):
@@ -538,49 +536,7 @@ def test_cloud_wallet_create_offer_phase_continues_when_list_coins_504() -> None
     )
     assert payload["signature_request_id"] == "sr-1"
     assert payload["signature_state"] == "SUBMITTED"
-
-
-def test_cloud_wallet_create_offer_phase_raises_non_transient_list_coins_error() -> None:
-    class _Wallet:
-        vault_id = "wallet-1"
-        network = "mainnet"
-
-        @staticmethod
-        def list_coins(*, asset_id=None, include_pending=True):
-            _ = asset_id, include_pending
-            raise RuntimeError("cloud_wallet_http_error:400:bad request")
-
-        @staticmethod
-        def create_offer(**_kwargs):
-            raise AssertionError(
-                "create_offer should not run when list_coins has non-transient error"
-            )
-
-    class _Market:
-        pricing = {
-            "base_unit_mojo_multiplier": 1000,
-            "quote_unit_mojo_multiplier": 1000,
-        }
-
-    try:
-        cloud_wallet_create_offer_phase(
-            wallet=cast(CloudWalletAdapter, _Wallet()),
-            market=_Market(),
-            size_base_units=1,
-            quote_price=1.0,
-            resolved_base_asset_id="Asset_base",
-            resolved_quote_asset_id="Asset_quote",
-            offer_fee_mojos=0,
-            split_input_coins_fee=0,
-            expiry_unit="minutes",
-            expiry_value=10,
-            action_side="sell",
-            wallet_get_wallet_offers_fn=lambda *_args, **_kwargs: {"offers": []},
-            poll_signature_request_until_not_unsigned_fn=lambda **_kwargs: ("SUBMITTED", []),
-        )
-        raise AssertionError("expected list_coins non-transient error")
-    except RuntimeError as exc:
-        assert "cloud_wallet_http_error:400" in str(exc)
+    assert list_coins_calls == 0
 
 
 def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(
@@ -688,9 +644,12 @@ def test_bootstrap_uses_cloud_wallet_split_without_keyring() -> None:
         change_amount = 0
         deficits: list[Any] = [_Deficit()]
 
+    list_coins_include_pending_values: list[bool] = []
+
     class _Wallet:
-        def list_coins(self, *, asset_id: str, include_pending: bool = True):
-            _ = asset_id, include_pending
+        def list_coins(self, *, asset_id: str, include_pending: bool = False):
+            _ = asset_id
+            list_coins_include_pending_values.append(bool(include_pending))
             return [{"id": "coin-1", "amount": "20"}]
 
     split_calls: list[dict[str, Any]] = []
@@ -719,3 +678,71 @@ def test_bootstrap_uses_cloud_wallet_split_without_keyring() -> None:
     assert result["signature_request_id"] == "SignatureRequest_1"
     assert split_calls and split_calls[0]["coin_ids"] == ["coin-1"]
     assert int(split_calls[0]["amount_per_coin"]) == 10
+    assert list_coins_include_pending_values == [False, False]
+
+
+def test_wait_for_mempool_then_confirmation_uses_settled_only_coin_scans() -> None:
+    from greenfloor.runtime.cloud_wallet_offer_runtime import wait_for_mempool_then_confirmation
+
+    list_coins_include_pending_values: list[bool] = []
+    list_coins_asset_ids: list[str | None] = []
+
+    class _Wallet:
+        @staticmethod
+        def list_coins(*, asset_id: str | None = None, include_pending: bool = False):
+            list_coins_asset_ids.append(asset_id)
+            list_coins_include_pending_values.append(bool(include_pending))
+            return [
+                {
+                    "id": "Coin_new",
+                    "name": "coin-new",
+                    "state": "SETTLED",
+                    "asset": {"id": "Asset_test"},
+                }
+            ]
+
+    events = wait_for_mempool_then_confirmation(
+        wallet=cast(CloudWalletAdapter, _Wallet()),
+        network="mainnet",
+        initial_coin_ids=set(),
+        asset_id="Asset_test",
+        mempool_warning_seconds=30,
+        confirmation_warning_seconds=60,
+        timeout_seconds=10,
+    )
+
+    assert list_coins_include_pending_values == [False]
+    assert list_coins_asset_ids == ["Asset_test"]
+    assert any(str(event.get("event", "")).strip() == "confirmed" for event in events)
+
+
+def test_wait_for_mempool_then_confirmation_uses_unscoped_scan_without_asset_id() -> None:
+    from greenfloor.runtime.cloud_wallet_offer_runtime import wait_for_mempool_then_confirmation
+
+    list_coins_asset_ids: list[str | None] = []
+
+    class _Wallet:
+        @staticmethod
+        def list_coins(*, asset_id: str | None = None, include_pending: bool = False):
+            _ = include_pending
+            list_coins_asset_ids.append(asset_id)
+            return [
+                {
+                    "id": "Coin_new",
+                    "name": "coin-new",
+                    "state": "SETTLED",
+                    "asset": {"id": "Asset_test"},
+                }
+            ]
+
+    events = wait_for_mempool_then_confirmation(
+        wallet=cast(CloudWalletAdapter, _Wallet()),
+        network="mainnet",
+        initial_coin_ids=set(),
+        mempool_warning_seconds=30,
+        confirmation_warning_seconds=60,
+        timeout_seconds=10,
+    )
+
+    assert list_coins_asset_ids == [None]
+    assert any(str(event.get("event", "")).strip() == "confirmed" for event in events)
