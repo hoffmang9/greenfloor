@@ -2415,8 +2415,107 @@ def test_cloud_wallet_spendable_base_unit_coin_amounts_revalidates_direct_coin_l
         resolved_asset_id="Asset_byc",
         base_unit_mojo_multiplier=1000,
         canonical_asset_id="BYC",
+        revalidate_coin_records=True,
     )
     assert got == [10]
+
+
+def test_cloud_wallet_spendable_base_unit_coin_amounts_skips_direct_lookup_by_default() -> None:
+    class _FakeCloudWallet:
+        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
+            _ = asset_id, include_pending
+            return [
+                {
+                    "id": "usable",
+                    "amount": 10_000,
+                    "state": "SETTLED",
+                    "isLocked": False,
+                    "isLinkedToOpenOffer": False,
+                    "asset": None,
+                },
+                {
+                    "id": "locked",
+                    "amount": 20_000,
+                    "state": "SETTLED",
+                    "isLocked": True,
+                    "isLinkedToOpenOffer": False,
+                    "asset": None,
+                },
+                {
+                    "id": "linked",
+                    "amount": 30_000,
+                    "state": "SETTLED",
+                    "isLocked": False,
+                    "isLinkedToOpenOffer": True,
+                    "asset": None,
+                },
+            ]
+
+        def get_coin_record(self, *, coin_id: str):
+            raise AssertionError(f"unexpected get_coin_record call for {coin_id}")
+
+    got = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
+        wallet=cast(Any, _FakeCloudWallet()),
+        resolved_asset_id="Asset_byc",
+        base_unit_mojo_multiplier=1000,
+        canonical_asset_id="BYC",
+    )
+    assert got == [10]
+
+
+def test_inventory_scan_avoids_per_coin_coin_record_reads() -> None:
+    lookups: list[str] = []
+
+    class _FakeCloudWallet:
+        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
+            _ = asset_id, include_pending
+            return [
+                {
+                    "id": "coin-1",
+                    "amount": 10_000,
+                    "state": "SETTLED",
+                    "isLocked": False,
+                    "isLinkedToOpenOffer": False,
+                    "asset": None,
+                },
+                {
+                    "id": "coin-2",
+                    "amount": 20_000,
+                    "state": "SETTLED",
+                    "isLocked": False,
+                    "isLinkedToOpenOffer": True,
+                    "asset": None,
+                },
+                {
+                    "id": "coin-3",
+                    "amount": 30_000,
+                    "state": "SETTLED",
+                    "isLocked": True,
+                    "isLinkedToOpenOffer": False,
+                    "asset": None,
+                },
+            ]
+
+        def get_coin_record(self, *, coin_id: str):
+            lookups.append(coin_id)
+            return {
+                "id": coin_id,
+                "state": "SETTLED",
+                "isLocked": False,
+                "isLinkedToOpenOffer": False,
+                "asset": {"id": "Asset_byc"},
+            }
+
+    got = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
+        wallet=cast(Any, _FakeCloudWallet()),
+        resolved_asset_id="Asset_byc",
+        base_unit_mojo_multiplier=1000,
+        canonical_asset_id="BYC",
+    )
+    assert got == [10]
+    # Load guardrail: inventory scan should not fan out per-coin GraphQL
+    # getCoinRecord calls; that fanout multiplies SQL load in ent-wallet.
+    assert lookups == []
 
 
 def test_cloud_wallet_spendable_base_unit_coin_amounts_reuses_scoped_list_cache() -> None:

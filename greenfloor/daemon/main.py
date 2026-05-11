@@ -115,6 +115,10 @@ def _coin_op_target_amount_allowed(*, amount_mojos: int, canonical_asset_id: str
     return int(amount_mojos) >= _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
 
 
+def _coin_row_is_unlocked_and_unlinked(*, coin: dict[str, Any]) -> bool:
+    return not bool(coin.get("isLocked")) and not bool(coin.get("isLinkedToOpenOffer"))
+
+
 def _coin_matches_direct_spendable_lookup(
     *,
     wallet: Any,
@@ -135,8 +139,12 @@ def _coin_matches_direct_spendable_lookup(
     # record before coin-op selection until upstream fixes the scoped query.
     fallback_result = bool(
         str(coin.get("state", "")).strip().upper() in _CLOUD_WALLET_SPENDABLE_STATES
-        and not bool(coin.get("isLocked"))
+        and _coin_row_is_unlocked_and_unlinked(coin=coin)
     )
+    if not fallback_result:
+        if cache is not None:
+            cache[coin_id] = False
+        return False
     try:
         coin_record = get_coin_record(coin_id=coin_id)
     except Exception:
@@ -1679,6 +1687,7 @@ def _cloud_wallet_spendable_base_unit_coin_amounts(
     base_unit_mojo_multiplier: int,
     canonical_asset_id: str,
     scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
+    revalidate_coin_records: bool = False,
 ) -> list[int]:
     target_asset = str(resolved_asset_id).strip().lower()
     if not target_asset:
@@ -1703,7 +1712,9 @@ def _cloud_wallet_spendable_base_unit_coin_amounts(
             continue
         if not _coin_meets_coin_op_min_amount(coin, canonical_asset_id=canonical_asset_id):
             continue
-        if not _coin_matches_direct_spendable_lookup(
+        if not _coin_row_is_unlocked_and_unlinked(coin=coin):
+            continue
+        if revalidate_coin_records and not _coin_matches_direct_spendable_lookup(
             wallet=wallet,
             coin=coin,
             scoped_asset_id=target_asset,
@@ -3754,6 +3765,8 @@ def _execute_coin_ops_cloud_wallet_kms_only(
             if not _cloud_wallet_coin_matches_asset_scope(coin=coin, scoped_asset_id=target_asset):
                 continue
             if not _coin_meets_coin_op_min_amount(coin, canonical_asset_id=canonical_asset_id):
+                continue
+            if not _coin_row_is_unlocked_and_unlinked(coin=coin):
                 continue
             if not _coin_matches_direct_spendable_lookup(
                 wallet=cloud_wallet,

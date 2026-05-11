@@ -138,6 +138,7 @@ query listCoins($walletId: ID!, $includePending: Boolean, $after: String, $asset
         amount
         state
         isLocked
+        isLinkedToOpenOffer
         puzzleHash
         parentCoinName{asset_fields}
       }}
