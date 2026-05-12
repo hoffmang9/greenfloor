@@ -1175,7 +1175,10 @@ def wait_for_mempool_then_confirmation(
         elapsed = int(time.monotonic() - start)
         list_coins_call: collections.abc.Callable[[], list[dict[str, Any]]]
         if target_asset_raw is not None:
-            list_coins_call = lambda: wallet.list_coins(asset_id=target_asset_raw)
+
+            def list_coins_call() -> list[dict[str, Any]]:
+                return wallet.list_coins(asset_id=target_asset_raw)
+
         else:
             list_coins_call = wallet.list_coins
         coins = call_with_moderate_retry(

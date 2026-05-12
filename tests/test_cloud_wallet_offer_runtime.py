@@ -420,7 +420,9 @@ def test_cloud_wallet_create_offer_phase_propagates_create_offer_balance_error()
 
         @staticmethod
         def create_offer(**_kwargs):
-            raise RuntimeError("cloud_wallet_offer_insufficient_spendable_balance:available=1000:required=5000")
+            raise RuntimeError(
+                "cloud_wallet_offer_insufficient_spendable_balance:available=1000:required=5000"
+            )
 
     class _Market:
         pricing = {
@@ -449,7 +451,9 @@ def test_cloud_wallet_create_offer_phase_propagates_create_offer_balance_error()
         assert "cloud_wallet_offer_insufficient_spendable_balance" in str(exc)
 
 
-def test_cloud_wallet_create_offer_phase_always_disables_split_input_coins_without_list_coins_precheck() -> None:
+def test_cloud_wallet_create_offer_phase_always_disables_split_input_coins_without_list_coins_precheck() -> (
+    None
+):
     captured: dict[str, Any] = {}
     list_coins_calls = 0
 
