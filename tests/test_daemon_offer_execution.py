@@ -2374,41 +2374,93 @@ def test_cloud_wallet_spendable_base_unit_coin_amounts_filters_and_converts() ->
     assert got == [10, 20]
 
 
-def test_cloud_wallet_spendable_base_unit_coin_amounts_revalidates_direct_coin_lookup() -> None:
+def test_cloud_wallet_spendable_base_unit_coin_amounts_revalidates_with_scoped_refresh() -> None:
     class _FakeCloudWallet:
+        def __init__(self) -> None:
+            self.calls = 0
+
         def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
             _ = asset_id, include_pending
+            self.calls += 1
+            if self.calls == 1:
+                return [
+                    {"id": "good", "amount": 10000, "state": "SETTLED", "asset": None},
+                    {"id": "wrong-asset", "amount": 10000, "state": "SETTLED", "asset": None},
+                    {"id": "locked", "amount": 10000, "state": "SETTLED", "asset": None},
+                ]
             return [
-                {"id": "good", "amount": 10000, "state": "SETTLED", "asset": None},
-                {"id": "wrong-asset", "amount": 10000, "state": "SETTLED", "asset": None},
-                {"id": "locked", "amount": 10000, "state": "SETTLED", "asset": None},
-            ]
-
-        def get_coin_record(self, *, coin_id: str):
-            records = {
-                "good": {
+                {
                     "id": "good",
+                    "amount": 10000,
                     "state": "SETTLED",
                     "isLocked": False,
                     "isLinkedToOpenOffer": False,
                     "asset": {"id": "Asset_byc"},
                 },
-                "wrong-asset": {
+                {
                     "id": "wrong-asset",
+                    "amount": 10000,
                     "state": "SETTLED",
                     "isLocked": False,
                     "isLinkedToOpenOffer": False,
                     "asset": {"id": "Asset_xch"},
                 },
-                "locked": {
+                {
                     "id": "locked",
+                    "amount": 10000,
                     "state": "SETTLED",
                     "isLocked": True,
                     "isLinkedToOpenOffer": False,
                     "asset": {"id": "Asset_byc"},
                 },
-            }
-            return records[coin_id]
+            ]
+
+        def get_coin_record(self, *, coin_id: str):
+            raise AssertionError(f"unexpected get_coin_record call for {coin_id}")
+
+    got = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
+        wallet=cast(Any, _FakeCloudWallet()),
+        resolved_asset_id="Asset_byc",
+        base_unit_mojo_multiplier=1000,
+        canonical_asset_id="BYC",
+        revalidate_coin_records=True,
+    )
+    assert got == [10]
+
+
+def test_cloud_wallet_spendable_base_unit_coin_amounts_skips_direct_lookup_by_default() -> None:
+    class _FakeCloudWallet:
+        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
+            _ = asset_id, include_pending
+            return [
+                {
+                    "id": "usable",
+                    "amount": 10_000,
+                    "state": "SETTLED",
+                    "isLocked": False,
+                    "isLinkedToOpenOffer": False,
+                    "asset": None,
+                },
+                {
+                    "id": "locked",
+                    "amount": 20_000,
+                    "state": "SETTLED",
+                    "isLocked": True,
+                    "isLinkedToOpenOffer": False,
+                    "asset": None,
+                },
+                {
+                    "id": "linked",
+                    "amount": 30_000,
+                    "state": "SETTLED",
+                    "isLocked": False,
+                    "isLinkedToOpenOffer": True,
+                    "asset": None,
+                },
+            ]
+
+        def get_coin_record(self, *, coin_id: str):
+            raise AssertionError(f"unexpected get_coin_record call for {coin_id}")
 
     got = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
         wallet=cast(Any, _FakeCloudWallet()),
@@ -2417,6 +2469,61 @@ def test_cloud_wallet_spendable_base_unit_coin_amounts_revalidates_direct_coin_l
         canonical_asset_id="BYC",
     )
     assert got == [10]
+
+
+def test_inventory_scan_avoids_per_coin_coin_record_reads() -> None:
+    lookups: list[str] = []
+
+    class _FakeCloudWallet:
+        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
+            _ = asset_id, include_pending
+            return [
+                {
+                    "id": "coin-1",
+                    "amount": 10_000,
+                    "state": "SETTLED",
+                    "isLocked": False,
+                    "isLinkedToOpenOffer": False,
+                    "asset": None,
+                },
+                {
+                    "id": "coin-2",
+                    "amount": 20_000,
+                    "state": "SETTLED",
+                    "isLocked": False,
+                    "isLinkedToOpenOffer": True,
+                    "asset": None,
+                },
+                {
+                    "id": "coin-3",
+                    "amount": 30_000,
+                    "state": "SETTLED",
+                    "isLocked": True,
+                    "isLinkedToOpenOffer": False,
+                    "asset": None,
+                },
+            ]
+
+        def get_coin_record(self, *, coin_id: str):
+            lookups.append(coin_id)
+            return {
+                "id": coin_id,
+                "state": "SETTLED",
+                "isLocked": False,
+                "isLinkedToOpenOffer": False,
+                "asset": {"id": "Asset_byc"},
+            }
+
+    got = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
+        wallet=cast(Any, _FakeCloudWallet()),
+        resolved_asset_id="Asset_byc",
+        base_unit_mojo_multiplier=1000,
+        canonical_asset_id="BYC",
+    )
+    assert got == [10]
+    # Load guardrail: inventory scan should not fan out per-coin GraphQL
+    # getCoinRecord calls; that fanout multiplies SQL load in ent-wallet.
+    assert lookups == []
 
 
 def test_cloud_wallet_spendable_base_unit_coin_amounts_reuses_scoped_list_cache() -> None:
@@ -2812,40 +2919,46 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_revalidates_coin_identity(
     class _FakeCloudWallet:
         def __init__(self) -> None:
             self.split_calls: list[list[str]] = []
+            self.list_calls = 0
 
         def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
             _ = asset_id, include_pending
+            self.list_calls += 1
+            if self.list_calls % 2 == 1:
+                return [
+                    {"id": "wrong-asset", "amount": 100_000, "state": "SETTLED", "asset": None},
+                    {"id": "locked", "amount": 90_000, "state": "SETTLED", "asset": None},
+                    {"id": "good", "amount": 80_000, "state": "SETTLED", "asset": None},
+                ]
             return [
-                {"id": "wrong-asset", "amount": 100_000, "state": "SETTLED", "asset": None},
-                {"id": "locked", "amount": 90_000, "state": "SETTLED", "asset": None},
-                {"id": "good", "amount": 80_000, "state": "SETTLED", "asset": None},
-            ]
-
-        def get_coin_record(self, *, coin_id: str):
-            records = {
-                "wrong-asset": {
+                {
                     "id": "wrong-asset",
+                    "amount": 100_000,
                     "state": "SETTLED",
                     "isLocked": False,
                     "isLinkedToOpenOffer": False,
                     "asset": {"id": "Asset_xch"},
                 },
-                "locked": {
+                {
                     "id": "locked",
+                    "amount": 90_000,
                     "state": "SETTLED",
                     "isLocked": True,
                     "isLinkedToOpenOffer": False,
                     "asset": {"id": "Asset_byc"},
                 },
-                "good": {
+                {
                     "id": "good",
+                    "amount": 80_000,
                     "state": "SETTLED",
                     "isLocked": False,
                     "isLinkedToOpenOffer": False,
                     "asset": {"id": "Asset_byc"},
                 },
-            }
-            return records[coin_id]
+            ]
+
+        def get_coin_record(self, *, coin_id: str):
+            raise AssertionError(f"unexpected get_coin_record call for {coin_id}")
 
         def split_coins(self, *, coin_ids, amount_per_coin, number_of_coins, fee):
             _ = amount_per_coin, number_of_coins, fee

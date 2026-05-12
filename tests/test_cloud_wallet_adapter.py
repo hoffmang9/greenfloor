@@ -234,6 +234,7 @@ def test_cloud_wallet_list_coins_omits_row_asset_for_asset_scoped_queries(
     coins = adapter.list_coins(asset_id="Asset_byc")
     assert len(coins) == 1
     assert "asset {" not in queries[0]
+    assert "isLinkedToOpenOffer" in queries[0]
 
 
 def test_cloud_wallet_list_coins_keeps_row_asset_for_unscoped_queries(
