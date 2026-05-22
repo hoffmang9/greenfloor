@@ -1,5 +1,32 @@
 # Progress Log
 
+## 2026-05-21 (greenfloor-signer Phase 4: pre-split vault CAT offers)
+
+- Added `offer/presplit.rs` implementing ent-wallet-style pre-split: vault-signed split tx mints `P2_CONDITIONS_OR_SINGLETON` presplit CAT coins; final offer bundle spends via CONDITIONS MIPS path (no vault singleton, fast-forward safe).
+- Extended `create-offer` CLI: `--split-input-coins`, `--broadcast-split`, `--presplit-coin-ids`, `--expires-at`.
+- When input exceeds offer amount, `--split-input-coins` builds both split and offer bundles; optional broadcast waits for presplit coin confirmation before assembling offer.
+- `--presplit-coin-ids` builds offer from an existing presplit coin (post-split step). Single source cat required for split tx.
+- Unit tests for presplit gating, puzzle hash derivation, and fixed settlement conditions.
+
+## 2026-05-21 (greenfloor-signer Phase 3: vault CAT offer builder)
+
+- Added `offer/build.rs` with `build_vault_cat_offer()` using `Offer::from_input_spend_bundle` + `encode_offer` (offer-compression feature on `chia-sdk-driver`).
+- Refactored shared vault CAT spend materialization into `materialize_vault_cat_finished_spends()` (used by mixed-split and offers).
+- New CLI command: `create-offer` for vault-signed CAT→XCH/CAT offers (no pre-split; inputs must cover offer amount). Vault local path supports CAT offer side only, matching Python `signing.py`.
+- `cargo build` and `cargo test` pass for `greenfloor-signer`.
+
+## 2026-05-21 (greenfloor-signer Phase 2: vault CAT spend orchestration)
+
+- Added coinset-backed CAT discovery, vault singleton resolution, and KMS-signed vault spend append to `greenfloor-signer`.
+- New CLI commands: `split-cat`, `send-cat`, `combine-cat` (with optional `--broadcast`) for vault-owned CAT mixed-split spends without fees.
+- Mirrors Python `signing.py` vault path: MIPS inner spends, mode-23 message relay, SECP256R1 fast-forward KMS signing, infinity BLS aggregate.
+
+## 2026-05-21 (greenfloor-signer Phase 1: vault-info foundation)
+
+- Added `greenfloor-signer/` Rust CLI crate backed by `chia-wallet-sdk` path deps.
+- Phase 1 delivers `vault-info`: loads `program.yaml` `cloud_wallet` block, fetches custody snapshot via GraphQL (chia-user-key PEM auth), derives vault puzzle hashes (inner/custody/recovery/P2 singleton), resolves KMS P-256 public key, and validates KMS pubkey matches the sole SECP256R1 custody key.
+- CI builds and tests `greenfloor-signer` alongside `greenfloor-native`.
+
 ## 2026-03-30 (audit follow-up: daemon/CLI boundary + offer log level + retry tests + subprocess override policy)
 
 - Removed daemon -> CLI import boundary violation: daemon offer building now imports shared `greenfloor/offer_builder.py` instead of `greenfloor.cli.offer_builder_sdk`.
