@@ -66,6 +66,11 @@ jobs:
             --manifest-path greenfloor-native/Cargo.toml \
             --out ./.cache/wheelhouse/greenfloor-native
 
+      - name: Build and test greenfloor-signer
+        run: |
+          cargo build --manifest-path greenfloor-signer/Cargo.toml
+          cargo test --manifest-path greenfloor-signer/Cargo.toml
+
       - name: Save greenfloor-native wheel cache
         if: steps.cache-native-wheel.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
