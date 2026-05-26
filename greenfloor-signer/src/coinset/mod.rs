@@ -1,17 +1,26 @@
+mod backend;
+mod presplit;
+
+pub use backend::{LiveCoinset, OfferCoinsetBackend};
+pub use presplit::{fetch_presplit_cat_by_id, wait_for_unspent_cat};
+
 use chia_protocol::{Bytes32, Coin, CoinSpend, SpendBundle};
+use chia_puzzle_types::cat::CatArgs;
 use chia_puzzle_types::Proof;
-use chia_sdk_coinset::{ChiaRpcClient, CoinRecord, GetCoinRecordResponse, GetCoinRecordsResponse, GetPuzzleAndSolutionResponse};
+use chia_sdk_coinset::{
+    ChiaRpcClient, CoinRecord, GetCoinRecordResponse, GetCoinRecordsResponse,
+    GetPuzzleAndSolutionResponse,
+};
 
 pub use chia_sdk_coinset::CoinsetClient;
 use chia_sdk_driver::{Cat, Puzzle, Vault, VaultInfo};
 use chia_sdk_utils::Address;
 use chia_traits::Streamable;
-use clvmr::{Allocator, serde::node_from_bytes};
-use chia_puzzle_types::cat::CatArgs;
+use clvm_utils::TreeHash;
+use clvmr::{serde::node_from_bytes, Allocator};
 
 use crate::error::{SignerError, SignerResult};
 use crate::vault::members::hex_to_bytes32;
-use clvm_utils::TreeHash;
 
 pub const MIN_CAT_OUTPUT_MOJOS: u64 = 1000;
 
@@ -23,20 +32,72 @@ pub fn client_for_network(network: &str) -> SignerResult<CoinsetClient> {
     }
 }
 
+pub fn decode_receive_address(receive_address: &str) -> SignerResult<Bytes32> {
+    Address::decode(receive_address)
+        .map_err(|err| SignerError::Other(format!("invalid receive address: {err}")))
+        .map(|address| address.puzzle_hash)
+}
+
+#[derive(Debug, Clone)]
+pub struct SelectedCats {
+    pub selected: Vec<Cat>,
+    pub offered_total: u64,
+    pub change_amount: u64,
+}
+
+pub(crate) async fn select_cats_for_spend(
+    client: &CoinsetClient,
+    receive_address: &str,
+    asset_id: Bytes32,
+    explicit_coin_ids: &[Bytes32],
+    target_amount: u64,
+) -> SignerResult<SelectedCats> {
+    let cats = if explicit_coin_ids.is_empty() {
+        list_unspent_cats(client, receive_address, asset_id).await?
+    } else {
+        list_unspent_cats_by_ids(client, explicit_coin_ids).await?
+    };
+    finalize_selected_cats(cats, explicit_coin_ids, target_amount)
+}
+
+pub(crate) fn finalize_selected_cats(
+    cats: Vec<Cat>,
+    explicit_coin_ids: &[Bytes32],
+    target_amount: u64,
+) -> SignerResult<SelectedCats> {
+    if cats.is_empty() {
+        return Err(SignerError::NoUnspentCatCoins);
+    }
+    let selected = if explicit_coin_ids.is_empty() {
+        select_cats_smallest_first(cats, target_amount)
+    } else {
+        cats
+    };
+    if selected.is_empty() {
+        return Err(SignerError::InsufficientCatCoins);
+    }
+    let offered_total: u64 = selected.iter().map(|cat| cat.coin.amount).sum();
+    if offered_total < target_amount {
+        return Err(SignerError::InsufficientCatCoins);
+    }
+    Ok(SelectedCats {
+        change_amount: offered_total - target_amount,
+        selected,
+        offered_total,
+    })
+}
+
 pub async fn list_unspent_cats(
     client: &CoinsetClient,
     receive_address: &str,
     asset_id: Bytes32,
 ) -> SignerResult<Vec<Cat>> {
-    let puzzle_hash = Address::decode(receive_address)
-        .map_err(|err| SignerError::Other(format!("invalid receive address: {err}")))?
-        .puzzle_hash;
-    let cat_outer_puzzle_hash =
-        CatArgs::curry_tree_hash(asset_id, puzzle_hash.into()).into();
+    let puzzle_hash = decode_receive_address(receive_address)?;
+    let cat_outer_puzzle_hash = CatArgs::curry_tree_hash(asset_id, puzzle_hash.into()).into();
     let response = client
         .get_coin_records_by_puzzle_hash(cat_outer_puzzle_hash, None, None, Some(false), None)
         .await
-        .map_err(coinset_err)?;
+        .map_err(SignerError::from)?;
     let records = coin_records_from_response(response)?;
     let mut cats = Vec::new();
     for record in records {
@@ -59,7 +120,7 @@ pub async fn list_unspent_cats_by_ids(
         let response = client
             .get_coin_record_by_name(*coin_id)
             .await
-            .map_err(coinset_err)?;
+            .map_err(SignerError::from)?;
         let Some(record) = response.coin_record else {
             continue;
         };
@@ -81,7 +142,7 @@ pub async fn fetch_latest_vault(
     let response = client
         .get_coin_records_by_parent_ids(vec![launcher_id], None, None, Some(true), None)
         .await
-        .map_err(coinset_err)?;
+        .map_err(SignerError::from)?;
     let launcher_children = coin_records_from_response(response)?;
     let Some(first_child) = launcher_children.first() else {
         return Err(SignerError::VaultSingletonNotFound);
@@ -90,7 +151,7 @@ pub async fn fetch_latest_vault(
     let leaf_response = client
         .get_coin_records_by_puzzle_hash(singleton_puzzle_hash, None, None, Some(false), None)
         .await
-        .map_err(coinset_err)?;
+        .map_err(SignerError::from)?;
     let mut leaf_candidates = coin_records_from_response(leaf_response)?;
     if leaf_candidates.is_empty() {
         return Err(SignerError::VaultSingletonNotFound);
@@ -101,7 +162,7 @@ pub async fn fetch_latest_vault(
     let parent_response = client
         .get_coin_record_by_name(parent_id)
         .await
-        .map_err(coinset_err)?;
+        .map_err(SignerError::from)?;
     let Some(parent_record) = parent_response.coin_record else {
         return Err(SignerError::VaultSingletonNotFound);
     };
@@ -129,10 +190,15 @@ pub async fn broadcast_spend_bundle(
     client: &CoinsetClient,
     spend_bundle: SpendBundle,
 ) -> SignerResult<String> {
-    let response = client.push_tx(spend_bundle).await.map_err(coinset_err)?;
+    let response = client
+        .push_tx(spend_bundle)
+        .await
+        .map_err(SignerError::from)?;
     if !response.success {
         return Err(SignerError::Coinset(
-            response.error.unwrap_or_else(|| "push_tx failed".to_string()),
+            response
+                .error
+                .unwrap_or_else(|| "push_tx failed".to_string()),
         ));
     }
     Ok(response.status)
@@ -153,11 +219,14 @@ pub fn select_cats_smallest_first(cats: Vec<Cat>, target_total: u64) -> Vec<Cat>
     Vec::new()
 }
 
-async fn cat_from_record(client: &CoinsetClient, record: &CoinRecord) -> SignerResult<Option<Cat>> {
+pub(crate) async fn cat_from_record(
+    client: &CoinsetClient,
+    record: &CoinRecord,
+) -> SignerResult<Option<Cat>> {
     let parent_response: GetCoinRecordResponse = client
         .get_coin_record_by_name(record.coin.parent_coin_info)
         .await
-        .map_err(coinset_err)?;
+        .map_err(SignerError::from)?;
     let Some(parent_record) = parent_response.coin_record else {
         return Ok(None);
     };
@@ -170,11 +239,19 @@ async fn cat_from_record(client: &CoinsetClient, record: &CoinRecord) -> SignerR
             Some(parent_record.spent_block_index),
         )
         .await
-        .map_err(coinset_err)?;
+        .map_err(SignerError::from)?;
     let Some(parent_spend) = solution_response.coin_solution else {
         return Ok(None);
     };
     parse_cat_from_parent_spend(record.coin, &parent_spend)
+}
+
+pub fn cat_from_parent_spend(coin: Coin, parent_spend: &CoinSpend) -> SignerResult<Option<Cat>> {
+    parse_cat_from_parent_spend(coin, parent_spend)
+}
+
+pub fn require_cat_from_parent_spend(coin: Coin, parent_spend: &CoinSpend) -> SignerResult<Cat> {
+    cat_from_parent_spend(coin, parent_spend)?.ok_or(SignerError::PresplitCoinNotFound)
 }
 
 fn parse_cat_from_parent_spend(coin: Coin, parent_spend: &CoinSpend) -> SignerResult<Option<Cat>> {
@@ -210,10 +287,6 @@ fn coin_records_from_response(response: GetCoinRecordsResponse) -> SignerResult<
     Ok(response.coin_records.unwrap_or_default())
 }
 
-fn coinset_err(err: reqwest::Error) -> SignerError {
-    SignerError::Coinset(err.to_string())
-}
-
 pub fn parse_coin_ids(raw_values: &[String]) -> SignerResult<Vec<Bytes32>> {
     raw_values
         .iter()
@@ -226,9 +299,6 @@ pub fn spend_bundle_hex(spend_bundle: &SpendBundle) -> SignerResult<String> {
         SignerError::Other(format!("failed to serialize spend bundle: {err}"))
     })?))
 }
-
-const PRESPLIT_CONFIRM_TIMEOUT_SECS: u64 = 120;
-const PRESPLIT_POLL_INTERVAL_SECS: u64 = 2;
 
 #[cfg(test)]
 mod tests {
@@ -255,29 +325,5 @@ mod tests {
             None,
             CatInfo::new(Bytes32::new([0x01; 32]), None, Bytes32::default()),
         )
-    }
-}
-
-pub async fn wait_for_unspent_cat(
-    client: &CoinsetClient,
-    coin_id: Bytes32,
-) -> SignerResult<Cat> {
-    let started = std::time::Instant::now();
-    loop {
-        let response: GetCoinRecordResponse = client
-            .get_coin_record_by_name(coin_id)
-            .await
-            .map_err(coinset_err)?;
-        if let Some(record) = response.coin_record {
-            if !record.spent {
-                if let Some(cat) = cat_from_record(client, &record).await? {
-                    return Ok(cat);
-                }
-            }
-        }
-        if started.elapsed().as_secs() >= PRESPLIT_CONFIRM_TIMEOUT_SECS {
-            return Err(SignerError::PresplitCoinConfirmationTimeout);
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(PRESPLIT_POLL_INTERVAL_SECS)).await;
     }
 }

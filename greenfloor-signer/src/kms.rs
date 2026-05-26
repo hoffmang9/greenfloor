@@ -1,4 +1,4 @@
-use aws_sdk_kms::{Client, primitives::Blob};
+use aws_sdk_kms::{primitives::Blob, Client};
 use sha2::{Digest, Sha256};
 
 use crate::error::{SignerError, SignerResult};
@@ -19,9 +19,8 @@ pub async fn get_public_key_compressed_hex(key_id: &str, region: &str) -> Signer
 }
 
 pub async fn sign_digest(key_id: &str, region: &str, message_hex: &str) -> SignerResult<String> {
-    let message_bytes = hex::decode(normalize_hex(message_hex)).map_err(|err| {
-        SignerError::Kms(format!("invalid message hex: {err}"))
-    })?;
+    let message_bytes = hex::decode(normalize_hex(message_hex))
+        .map_err(|err| SignerError::Kms(format!("invalid message hex: {err}")))?;
     let digest = Sha256::digest(&message_bytes);
     let client = kms_client(region).await?;
     let response = client
@@ -53,7 +52,9 @@ pub fn der_spki_to_compressed_p256(der: &[u8]) -> SignerResult<[u8; 33]> {
     let (idx, algo_len) = read_der_tag_length(der, idx)?;
     let idx = idx + algo_len;
     if der.get(idx) != Some(&0x03) {
-        return Err(SignerError::Kms("expected BIT STRING tag (0x03)".to_string()));
+        return Err(SignerError::Kms(
+            "expected BIT STRING tag (0x03)".to_string(),
+        ));
     }
     let (idx, bs_len) = read_der_tag_length(der, idx)?;
     if der.get(idx) != Some(&0x00) {
@@ -71,7 +72,11 @@ pub fn der_spki_to_compressed_p256(der: &[u8]) -> SignerResult<[u8; 33]> {
     }
     let x = &point[1..33];
     let y = &point[33..65];
-    let prefix = if y[y.len() - 1] % 2 == 0 { 0x02 } else { 0x03 };
+    let prefix = if y[y.len() - 1].is_multiple_of(2) {
+        0x02
+    } else {
+        0x03
+    };
     let mut compressed = [0u8; 33];
     compressed[0] = prefix;
     compressed[1..].copy_from_slice(x);
@@ -133,9 +138,7 @@ fn read_der_integer(data: &[u8], offset: usize) -> SignerResult<(Vec<u8>, usize)
 
 pub fn normalize_hex(value: &str) -> String {
     let raw = value.trim().trim_start_matches("0x").to_ascii_lowercase();
-    raw.chars()
-        .filter(|ch| ch.is_ascii_hexdigit())
-        .collect()
+    raw.chars().filter(|ch| ch.is_ascii_hexdigit()).collect()
 }
 
 #[cfg(test)]

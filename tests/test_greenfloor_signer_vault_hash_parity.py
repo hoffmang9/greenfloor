@@ -1,18 +1,18 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
-# Golden vectors shared with greenfloor-signer/src/test_support/golden.rs
-LAUNCHER_ID_HEX = "aa" * 32
-CUSTODY_KEY_HEX = "02" * 33
-RECOVERY_KEY_HEX = (
-    "ab3cb61463a695fa094f7c30526c8097fb813a0c5fa67bab261a7cd354cb6363"
-    "b2d726218135b25b814f94df4749fc58"
-)
-INNER_PUZZLE_HASH_HEX = "c0c282903488033a205e05e42546471e140d3d2c29099588465d0e93c5a11902"
-P2_SINGLETON_MESSAGE_HASH_HEX = "4141f038995622a43f2d567b8011c43819c81085066b143d942e990b8036cf6c"
-CUSTODY_HASH_HEX = "a0b54784e43c1a53dac6ff8855b28741470df65399a9a6cafbb80c046e4c487c"
-RECOVERY_HASH_HEX = "dcea66a7f4d21d7dfa01b5c8d4cdf1d7df4c53d3b0532ba03f0dd0ecab629107"
+# Expected hash vectors are canonical in tests/fixtures/vault_hash_golden.json
+# (mirrored by greenfloor-signer/src/test_support/golden.rs during migration).
+FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "vault_hash_golden.json"
+
+
+def _load_golden_fixture() -> dict[str, str]:
+    with FIXTURE_PATH.open(encoding="utf-8") as handle:
+        return json.load(handle)
 
 
 def _require_sdk():
@@ -23,13 +23,13 @@ def _require_sdk():
     return sdk
 
 
-def _compute_vault_hashes() -> dict[str, bytes]:
+def _compute_vault_hashes(fixture: dict[str, str]) -> dict[str, bytes]:
     sdk = _require_sdk()
     clvm = sdk.Clvm()
     member_config = sdk.MemberConfig()
-    launcher_id = bytes.fromhex(LAUNCHER_ID_HEX)
-    custody_key = bytes.fromhex(CUSTODY_KEY_HEX)
-    recovery_key = bytes.fromhex(RECOVERY_KEY_HEX)
+    launcher_id = bytes.fromhex(fixture["launcher_id"])
+    custody_key = bytes.fromhex(fixture["custody_key"])
+    recovery_key = bytes.fromhex(fixture["recovery_key"])
 
     custody_hash = bytes(
         sdk.r1_member_hash(member_config, sdk.R1PublicKey.from_bytes(custody_key), True)
@@ -79,8 +79,9 @@ def _compute_vault_hashes() -> dict[str, bytes]:
 
 
 def test_greenfloor_signer_vault_hash_parity_matches_python_sdk() -> None:
-    hashes = _compute_vault_hashes()
-    assert hashes["inner_puzzle_hash"].hex() == INNER_PUZZLE_HASH_HEX
-    assert hashes["p2_singleton_message_hash"].hex() == P2_SINGLETON_MESSAGE_HASH_HEX
-    assert hashes["custody_hash"].hex() == CUSTODY_HASH_HEX
-    assert hashes["recovery_hash"].hex() == RECOVERY_HASH_HEX
+    fixture = _load_golden_fixture()
+    hashes = _compute_vault_hashes(fixture)
+    assert hashes["inner_puzzle_hash"].hex() == fixture["inner_puzzle_hash"]
+    assert hashes["p2_singleton_message_hash"].hex() == fixture["p2_singleton_message_hash"]
+    assert hashes["custody_hash"].hex() == fixture["custody_hash"]
+    assert hashes["recovery_hash"].hex() == fixture["recovery_hash"]

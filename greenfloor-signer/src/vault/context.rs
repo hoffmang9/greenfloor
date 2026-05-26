@@ -1,13 +1,13 @@
 use chia_protocol::Bytes32;
-use clvm_utils::{TreeHash, tree_hash_pair};
+use clvm_utils::{tree_hash_pair, TreeHash};
 use serde::Serialize;
 use serde_json::Value;
 
 use crate::error::{SignerError, SignerResult};
 use crate::vault::members::{
-    MemberConfig, WalletKey, bytes32_to_hex, force_1_of_2_restriction, hex_to_bytes32,
-    member_hash_for_key, m_of_n_hash, prevent_vault_side_effects_restriction, singleton_member_hash,
-    timelock_restriction, tree_hash_nil, tree_hash_to_hex,
+    bytes32_to_hex, force_1_of_2_restriction, hex_to_bytes32, m_of_n_hash, member_hash_for_key,
+    prevent_vault_side_effects_restriction, singleton_member_hash, timelock_restriction,
+    tree_hash_nil, tree_hash_to_hex, MemberConfig, WalletKey,
 };
 
 #[derive(Debug, Clone)]
@@ -101,11 +101,7 @@ pub fn compute_vault_hashes(snapshot: &VaultCustodySnapshot) -> SignerResult<Vau
     let custody_hash = if custody_hashes.len() == 1 {
         custody_hashes[0]
     } else {
-        m_of_n_hash(
-            &member_config,
-            snapshot.custody_threshold,
-            custody_hashes,
-        )
+        m_of_n_hash(&member_config, snapshot.custody_threshold, custody_hashes)
     };
 
     let timelock = timelock_restriction(snapshot.recovery_clawback_timelock);
@@ -163,12 +159,12 @@ pub fn compute_vault_hashes(snapshot: &VaultCustodySnapshot) -> SignerResult<Vau
     })
 }
 
-pub fn compute_vault_context(
+pub fn compute_vault_context_from_hashes(
     snapshot: &VaultCustodySnapshot,
+    hashes: &VaultComputedHashes,
     kms_public_key_hex: &str,
     network: &str,
 ) -> SignerResult<VaultContext> {
-    let hashes = compute_vault_hashes(snapshot)?;
     let secp256r1_custody_keys = snapshot
         .custody_keys
         .iter()
@@ -177,8 +173,8 @@ pub fn compute_vault_context(
         .collect::<Vec<_>>();
 
     let normalized_kms = crate::kms::normalize_hex(kms_public_key_hex);
-    let kms_custody_key_match = secp256r1_custody_keys.len() == 1
-        && normalized_kms == secp256r1_custody_keys[0];
+    let kms_custody_key_match =
+        secp256r1_custody_keys.len() == 1 && normalized_kms == secp256r1_custody_keys[0];
 
     if secp256r1_custody_keys.len() != 1 {
         return Err(SignerError::VaultSecp256r1KeyCount(
@@ -206,6 +202,15 @@ pub fn compute_vault_context(
         kms_custody_key_match,
         network: network.to_string(),
     })
+}
+
+pub fn compute_vault_context(
+    snapshot: &VaultCustodySnapshot,
+    kms_public_key_hex: &str,
+    network: &str,
+) -> SignerResult<VaultContext> {
+    let hashes = compute_vault_hashes(snapshot)?;
+    compute_vault_context_from_hashes(snapshot, &hashes, kms_public_key_hex, network)
 }
 
 fn extract_wallet_keys(connection: Option<&Value>) -> Vec<WalletKey> {
@@ -296,12 +301,15 @@ mod tests {
     #[test]
     fn compute_vault_hashes_match_python_golden_vectors() {
         use crate::test_support::golden::{
-            CUSTODY_HASH_HEX, INNER_PUZZLE_HASH_HEX, P2_SINGLETON_MESSAGE_HASH_HEX, RECOVERY_HASH_HEX,
-            golden_snapshot,
+            golden_snapshot, CUSTODY_HASH_HEX, INNER_PUZZLE_HASH_HEX,
+            P2_SINGLETON_MESSAGE_HASH_HEX, RECOVERY_HASH_HEX,
         };
 
         let hashes = compute_vault_hashes(&golden_snapshot()).expect("hashes");
-        assert_eq!(tree_hash_to_hex(hashes.inner_puzzle_hash), INNER_PUZZLE_HASH_HEX);
+        assert_eq!(
+            tree_hash_to_hex(hashes.inner_puzzle_hash),
+            INNER_PUZZLE_HASH_HEX
+        );
         assert_eq!(
             tree_hash_to_hex(hashes.p2_singleton_message_hash),
             P2_SINGLETON_MESSAGE_HASH_HEX

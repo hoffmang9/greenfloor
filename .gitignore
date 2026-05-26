@@ -25,6 +25,7 @@ htmlcov/
 # Runtime/state artifacts
 .greenfloor/
 .tmp-artifacts/
+.tmp_coinset*.json
 logs/
 db/
 state/

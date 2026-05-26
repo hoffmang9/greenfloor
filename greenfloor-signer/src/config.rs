@@ -55,8 +55,10 @@ pub fn load_cloud_wallet_config(path: &Path) -> SignerResult<CloudWalletConfig> 
 
     let base_url = require_field(cloud_wallet.base_url, "cloud_wallet.base_url")?;
     let user_key_id = require_field(cloud_wallet.user_key_id, "cloud_wallet.user_key_id")?;
-    let private_key_pem_path =
-        require_field(cloud_wallet.private_key_pem_path, "cloud_wallet.private_key_pem_path")?;
+    let private_key_pem_path = require_field(
+        cloud_wallet.private_key_pem_path,
+        "cloud_wallet.private_key_pem_path",
+    )?;
     let vault_id = require_field(cloud_wallet.vault_id, "cloud_wallet.vault_id")?;
     let kms_key_id = require_field(cloud_wallet.kms_key_id, "cloud_wallet.kms_key_id")?;
 

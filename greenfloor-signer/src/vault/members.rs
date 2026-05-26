@@ -1,17 +1,17 @@
 use chia_bls::PublicKey;
 use chia_protocol::Bytes32;
-use chia_sdk_driver::{MofN, Restriction, RestrictionKind, mips_puzzle_hash};
+use chia_puzzles::PREVENT_MULTIPLE_CREATE_COINS_HASH;
+use chia_sdk_driver::{mips_puzzle_hash, MofN, Restriction, RestrictionKind};
 use chia_sdk_types::{
-    Mod,
     puzzles::{
-        BlsMember, BlsMemberPuzzleAssert, Force1of2RestrictedVariable, K1Member, K1MemberPuzzleAssert,
-        PasskeyMember, PasskeyMemberPuzzleAssert, PreventConditionOpcode, R1Member,
-        R1MemberPuzzleAssert, SingletonMember, SingletonMemberWithMode, Timelock,
+        BlsMember, BlsMemberPuzzleAssert, Force1of2RestrictedVariable, K1Member,
+        K1MemberPuzzleAssert, PasskeyMember, PasskeyMemberPuzzleAssert, PreventConditionOpcode,
+        R1Member, R1MemberPuzzleAssert, SingletonMember, SingletonMemberWithMode, Timelock,
     },
+    Mod,
 };
 use chia_secp::{K1PublicKey, R1PublicKey};
-use chia_puzzles::PREVENT_MULTIPLE_CREATE_COINS_HASH;
-use clvm_utils::{TreeHash, tree_hash_atom};
+use clvm_utils::{tree_hash_atom, TreeHash};
 
 use crate::error::{SignerError, SignerResult};
 
@@ -82,7 +82,11 @@ pub fn p2_conditions_or_singleton_puzzle_hash(
     }
 }
 
-pub fn r1_member_hash(config: &MemberConfig, public_key: R1PublicKey, fast_forward: bool) -> TreeHash {
+pub fn r1_member_hash(
+    config: &MemberConfig,
+    public_key: R1PublicKey,
+    fast_forward: bool,
+) -> TreeHash {
     member_hash(
         config,
         if fast_forward {
@@ -93,7 +97,11 @@ pub fn r1_member_hash(config: &MemberConfig, public_key: R1PublicKey, fast_forwa
     )
 }
 
-pub fn k1_member_hash(config: &MemberConfig, public_key: K1PublicKey, fast_forward: bool) -> TreeHash {
+pub fn k1_member_hash(
+    config: &MemberConfig,
+    public_key: K1PublicKey,
+    fast_forward: bool,
+) -> TreeHash {
     member_hash(
         config,
         if fast_forward {
@@ -104,7 +112,11 @@ pub fn k1_member_hash(config: &MemberConfig, public_key: K1PublicKey, fast_forwa
     )
 }
 
-pub fn bls_member_hash(config: &MemberConfig, public_key: PublicKey, fast_forward: bool) -> TreeHash {
+pub fn bls_member_hash(
+    config: &MemberConfig,
+    public_key: PublicKey,
+    fast_forward: bool,
+) -> TreeHash {
     member_hash(
         config,
         if fast_forward {
@@ -288,7 +300,7 @@ pub fn hex_to_bytes32(value: &str) -> SignerResult<Bytes32> {
 
 pub fn hex_to_bytes(value: &str) -> SignerResult<Vec<u8>> {
     let normalized = crate::kms::normalize_hex(value);
-    if normalized.is_empty() || normalized.len() % 2 != 0 {
+    if normalized.is_empty() || !normalized.len().is_multiple_of(2) {
         return Err(SignerError::Other(format!("invalid hex: {value}")));
     }
     hex::decode(normalized).map_err(|err| SignerError::Other(format!("invalid hex: {err}")))
