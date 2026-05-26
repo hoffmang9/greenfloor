@@ -1,13 +1,16 @@
 pub mod context;
+pub mod materialize;
 pub mod members;
+pub mod messages;
+pub mod mixed_split;
+pub mod session;
 pub mod spend;
 
 pub use context::{
-    VaultComputedHashes, VaultContext, VaultCustodySnapshot, compute_vault_context,
-    compute_vault_hashes,
+    compute_vault_context, compute_vault_context_from_hashes, compute_vault_hashes,
+    VaultComputedHashes, VaultContext, VaultCustodySnapshot,
 };
-pub use spend::{
-    MixedSplitRequest, MixedSplitResult, VaultSpendContext,
-    build_and_optionally_broadcast_vault_cat_mixed_split, build_vault_spend_context,
-    materialize_vault_cat_finished_spends, resolve_vault_spend_context,
+pub use mixed_split::{
+    build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,
 };
+pub use spend::{build_vault_spend_context_from_hashes, KmsSigner, VaultSpendContext};

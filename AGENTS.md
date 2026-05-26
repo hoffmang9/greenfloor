@@ -31,7 +31,8 @@ Severity tags:
 - `[MUST]` `greenfloor/core`: deterministic policy only (no IO).
 - `[MUST]` `greenfloor/config`: parse/validate config, resolve paths, resolve quote assets.
 - `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet, notifications).
-- `[MUST]` `greenfloor/signing.py`: unified signing entry point (coin discovery, spend-bundle construction, broadcast).
+- `[MUST]` `greenfloor/signing.py`: legacy Python signing entry point during Rust migration (see ADR 0006).
+- `[MUST]` `greenfloor-signer/`: canonical vault KMS signing implementation; new vault spend/offer logic lands here first.
 - `[MUST]` `greenfloor/cli/manager.py`: operator CLI commands.
 - `[MUST]` `greenfloor/cli/offer_builder_sdk.py`: offer text construction.
 - `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`, `greenfloor/config/io.py`.
@@ -40,7 +41,7 @@ Severity tags:
 ## Design Constraints
 
 - `[MUST]` Prefer direct function calls within the package; do not spawn subprocesses for same-env Python calls unless isolation/security is documented in `docs/decisions/`.
-- `[MUST]` Signing/execution path is 2 layers max: adapter -> `greenfloor/signing.py`.
+- `[MUST]` Signing/execution path is adapter -> canonical signer (`greenfloor-signer` for vault KMS; `greenfloor/signing.py` until cutover).
 - `[MUST]` Avoid unnecessary indirection layers (`executor`, `worker`, `engine`, etc.).
 - `[MUST]` Keep one distinct responsibility per file; merge pass-through modules into functions.
 - `[MUST]` Eliminate duplicated logic blocks (>10 lines) by extracting shared helpers.

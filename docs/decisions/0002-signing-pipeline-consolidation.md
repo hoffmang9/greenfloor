@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted (implementation layer superseded by [0006-rust-signer-canonical-path.md](./0006-rust-signer-canonical-path.md))
 
 ## Decision
 
@@ -37,3 +37,6 @@ To avoid signing-path drift, the canonical in-process entrypoints are:
 - `greenfloor.signing.build_signed_spend_bundle` for offer construction paths.
 
 New signing integrations should route through these APIs instead of introducing alternate signing stacks.
+
+**Update (2026-05):** ADR 0006 makes `greenfloor-signer` the canonical vault signing
+implementation. Python APIs above are migration wrappers until Rust paths replace them.

@@ -1,5 +1,15 @@
 # Progress Log
 
+## 2026-05-26 (greenfloor-signer quality fixes + Rust canonical path ADR)
+
+- Added ADR 0006: `greenfloor-signer` is the canonical vault KMS signing implementation; Python `signing.py` is legacy during migration.
+- Fixed presplit offer nonce to derive once from source offer coin ids (ent-wallet parity); removed placeholder nonce bug.
+- Refactored offer orchestration (`OfferPlan`, `PresplitOfferBinding`, `VaultSession`, shared CAT parsing, `KmsSigner`, mode-23 message module).
+- Collapsed CLI mixed-split commands into `mixed-cat` with aliases (`split-cat`, `send-cat`, `combine-cat`).
+- Offer results use `execution_mode` (`direct` / `presplit_new` / `presplit_existing`); presplit step-two requires `--offer-coin-ids` for nonce.
+- Shared vault hash golden vectors in `tests/fixtures/vault_hash_golden.json`.
+- Simulator presplit+offer test now validates puzzle-hash binding and executes atomic take on simulator.
+
 ## 2026-05-21 (greenfloor-signer Phase 4: pre-split vault CAT offers)
 
 - Added `offer/presplit.rs` implementing ent-wallet-style pre-split: vault-signed split tx mints `P2_CONDITIONS_OR_SINGLETON` presplit CAT coins; final offer bundle spends via CONDITIONS MIPS path (no vault singleton, fast-forward safe).

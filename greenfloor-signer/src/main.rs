@@ -1,14 +1,18 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use greenfloor_signer::{
-    CreateOfferRequest, MixedSplitRequest, build_and_optionally_broadcast_vault_cat_mixed_split,
-    build_vault_cat_offer, load_cloud_wallet_config, parse_coin_ids, resolve_vault_context,
-};
 use greenfloor_signer::vault::members::hex_to_bytes32;
+use greenfloor_signer::{
+    build_and_optionally_broadcast_vault_cat_mixed_split, build_vault_cat_offer,
+    load_cloud_wallet_config, parse_coin_ids, resolve_vault_context, CreateOfferRequest,
+    MixedSplitRequest,
+};
 
 #[derive(Debug, Parser)]
-#[command(name = "greenfloor-signer", about = "Local Chia vault signing backed by chia-wallet-sdk")]
+#[command(
+    name = "greenfloor-signer",
+    about = "Local Chia vault signing backed by chia-wallet-sdk"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -23,8 +27,12 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Split vault-owned CAT coins into multiple outputs at the receive address.
-    SplitCat {
+    /// Vault CAT mixed split (aliases: split-cat, send-cat, combine-cat).
+    #[command(
+        name = "mixed-cat",
+        visible_aliases = ["split-cat", "send-cat", "combine-cat"]
+    )]
+    MixedCat {
         #[arg(long, default_value = "config/program.yaml")]
         config: PathBuf,
         #[arg(long)]
@@ -33,44 +41,6 @@ enum Commands {
         asset_id: String,
         #[arg(long, value_delimiter = ',')]
         output_amounts: Vec<u64>,
-        #[arg(long, value_delimiter = ',')]
-        coin_ids: Vec<String>,
-        #[arg(long)]
-        allow_sub_cat_output: bool,
-        #[arg(long)]
-        broadcast: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Send a single CAT output amount using vault KMS signing.
-    SendCat {
-        #[arg(long, default_value = "config/program.yaml")]
-        config: PathBuf,
-        #[arg(long)]
-        receive_address: String,
-        #[arg(long)]
-        asset_id: String,
-        #[arg(long)]
-        amount: u64,
-        #[arg(long, value_delimiter = ',')]
-        coin_ids: Vec<String>,
-        #[arg(long)]
-        allow_sub_cat_output: bool,
-        #[arg(long)]
-        broadcast: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Combine vault-owned CAT coins into one output (plus optional change).
-    CombineCat {
-        #[arg(long, default_value = "config/program.yaml")]
-        config: PathBuf,
-        #[arg(long)]
-        receive_address: String,
-        #[arg(long)]
-        asset_id: String,
-        #[arg(long)]
-        target_amount: u64,
         #[arg(long, value_delimiter = ',')]
         coin_ids: Vec<String>,
         #[arg(long)]
@@ -98,6 +68,10 @@ enum Commands {
         offer_coin_ids: Vec<String>,
         #[arg(long, value_delimiter = ',')]
         presplit_coin_ids: Vec<String>,
+        /// When selected CAT inputs exceed `--offer-amount`, split vault inputs before
+        /// building the offer. If selected inputs already equal `--offer-amount` exactly,
+        /// execution uses the direct offer path (no presplit spend) and `execution_mode`
+        /// is `direct` even when this flag is set.
         #[arg(long)]
         split_input_coins: bool,
         #[arg(long)]
@@ -124,14 +98,17 @@ async fn run() -> Result<(), greenfloor_signer::Error> {
             let cloud_wallet = load_cloud_wallet_config(&config)?;
             let context = resolve_vault_context(cloud_wallet).await?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&context).map_err(|err| {
-                    greenfloor_signer::Error::Other(format!("json encode failed: {err}"))
-                })?);
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&context).map_err(|err| {
+                        greenfloor_signer::Error::Other(format!("json encode failed: {err}"))
+                    })?
+                );
             } else {
                 print_vault_info(&context);
             }
         }
-        Commands::SplitCat {
+        Commands::MixedCat {
             config,
             receive_address,
             asset_id,
@@ -146,60 +123,6 @@ async fn run() -> Result<(), greenfloor_signer::Error> {
                 receive_address,
                 asset_id,
                 output_amounts,
-                coin_ids,
-                allow_sub_cat_output,
-                broadcast,
-            )
-            .await?;
-            print_mixed_split_result(&result, json)?;
-        }
-        Commands::SendCat {
-            config,
-            receive_address,
-            asset_id,
-            amount,
-            coin_ids,
-            allow_sub_cat_output,
-            broadcast,
-            json,
-        } => {
-            let result = run_mixed_split(
-                &config,
-                receive_address,
-                asset_id,
-                vec![amount],
-                coin_ids,
-                allow_sub_cat_output,
-                broadcast,
-            )
-            .await?;
-            print_mixed_split_result(&result, json)?;
-        }
-        Commands::CombineCat {
-            config,
-            receive_address,
-            asset_id,
-            target_amount,
-            coin_ids,
-            allow_sub_cat_output,
-            broadcast,
-            json,
-        } => {
-            if coin_ids.is_empty() {
-                return Err(greenfloor_signer::Error::Other(
-                    "combine-cat requires --coin-ids with at least two coin ids".to_string(),
-                ));
-            }
-            if coin_ids.len() < 2 {
-                return Err(greenfloor_signer::Error::Other(
-                    "combine-cat requires at least two --coin-ids".to_string(),
-                ));
-            }
-            let result = run_mixed_split(
-                &config,
-                receive_address,
-                asset_id,
-                vec![target_amount],
                 coin_ids,
                 allow_sub_cat_output,
                 broadcast,
@@ -255,7 +178,7 @@ async fn run() -> Result<(), greenfloor_signer::Error> {
 }
 
 async fn run_mixed_split(
-    config_path: &PathBuf,
+    config_path: &Path,
     receive_address: String,
     asset_id: String,
     output_amounts: Vec<u64>,
@@ -313,9 +236,12 @@ fn print_mixed_split_result(
     json: bool,
 ) -> Result<(), greenfloor_signer::Error> {
     if json {
-        println!("{}", serde_json::to_string_pretty(result).map_err(|err| {
-            greenfloor_signer::Error::Other(format!("json encode failed: {err}"))
-        })?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(result).map_err(|err| {
+                greenfloor_signer::Error::Other(format!("json encode failed: {err}"))
+            })?
+        );
         return Ok(());
     }
     println!("offered_total: {}", result.offered_total);
@@ -337,12 +263,15 @@ fn print_create_offer_result(
     json: bool,
 ) -> Result<(), greenfloor_signer::Error> {
     if json {
-        println!("{}", serde_json::to_string_pretty(result).map_err(|err| {
-            greenfloor_signer::Error::Other(format!("json encode failed: {err}"))
-        })?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(result).map_err(|err| {
+                greenfloor_signer::Error::Other(format!("json encode failed: {err}"))
+            })?
+        );
         return Ok(());
     }
-    println!("needs_presplit: {}", result.needs_presplit);
+    println!("execution_mode: {}", result.execution_mode);
     if let Some(split_hex) = &result.split_spend_bundle_hex {
         println!("split_spend_bundle_hex: {split_hex}");
     }

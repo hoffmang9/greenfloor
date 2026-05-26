@@ -1,11 +1,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
 use openssl::sign::Signer;
 use rand::distr::{Alphanumeric, SampleString};
-use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -106,9 +106,7 @@ impl CloudWalletClient {
             .await
             .map_err(|err| SignerError::Graphql(format!("read body failed: {err}")))?;
         if !status.is_success() {
-            return Err(SignerError::Graphql(format!(
-                "HTTP {status}: {text}"
-            )));
+            return Err(SignerError::Graphql(format!("HTTP {status}: {text}")));
         }
         let payload: GraphqlResponse = serde_json::from_str(&text).map_err(|err| {
             SignerError::Graphql(format!("decode response failed: {err}; body={text}"))
@@ -126,7 +124,10 @@ impl CloudWalletClient {
             .ok_or_else(|| SignerError::Graphql("missing data".to_string()))
     }
 
-    fn build_auth_headers(&self, raw_body: &str) -> SignerResult<Vec<(reqwest::header::HeaderName, HeaderValue)>> {
+    fn build_auth_headers(
+        &self,
+        raw_body: &str,
+    ) -> SignerResult<Vec<(reqwest::header::HeaderName, HeaderValue)>> {
         let nonce = random_nonce(10);
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -150,9 +151,8 @@ impl CloudWalletClient {
             ),
             (
                 reqwest::header::HeaderName::from_static("chia-nonce"),
-                HeaderValue::from_str(&nonce).map_err(|err| {
-                    SignerError::Other(format!("invalid nonce header: {err}"))
-                })?,
+                HeaderValue::from_str(&nonce)
+                    .map_err(|err| SignerError::Other(format!("invalid nonce header: {err}")))?,
             ),
             (
                 reqwest::header::HeaderName::from_static("chia-timestamp"),
@@ -182,12 +182,10 @@ fn sign_canonical(pem_path: &std::path::Path, canonical: &str) -> SignerResult<S
             pem_path.display()
         ))
     })?;
-    let key = PKey::private_key_from_pem(&pem).map_err(|err| {
-        SignerError::Other(format!("failed to parse cloud wallet PEM: {err}"))
-    })?;
-    let mut signer = Signer::new(MessageDigest::sha256(), &key).map_err(|err| {
-        SignerError::Other(format!("failed to create signer: {err}"))
-    })?;
+    let key = PKey::private_key_from_pem(&pem)
+        .map_err(|err| SignerError::Other(format!("failed to parse cloud wallet PEM: {err}")))?;
+    let mut signer = Signer::new(MessageDigest::sha256(), &key)
+        .map_err(|err| SignerError::Other(format!("failed to create signer: {err}")))?;
     signer
         .update(canonical.as_bytes())
         .map_err(|err| SignerError::Other(format!("failed to update signer: {err}")))?;

@@ -95,8 +95,39 @@ pub enum SignerError {
     #[error("timeout waiting for presplit coin confirmation")]
     PresplitCoinConfirmationTimeout,
 
+    #[error("presplit offer step requires --offer-coin-ids of original source coins")]
+    PresplitOfferRequiresSourceCoinIds,
+
+    #[error("presplit coin amount {coin} does not match offer amount {offer}")]
+    PresplitCoinAmountMismatch { coin: u64, offer: u64 },
+
+    #[error("presplit coin asset id does not match offer asset id")]
+    PresplitCoinAssetMismatch,
+
+    #[error("presplit offer path supports exactly one presplit coin")]
+    PresplitOfferRequiresSingleCoin,
+
+    #[error("presplit coin p2 puzzle hash does not match offer binding")]
+    PresplitCoinPuzzleHashMismatch,
+
     #[error("{0}")]
     Other(String),
 }
 
 pub type SignerResult<T> = Result<T, SignerError>;
+
+pub fn driver_error(err: chia_sdk_driver::DriverError) -> SignerError {
+    SignerError::Driver(err.to_string())
+}
+
+impl From<chia_sdk_driver::DriverError> for SignerError {
+    fn from(err: chia_sdk_driver::DriverError) -> Self {
+        driver_error(err)
+    }
+}
+
+impl From<reqwest::Error> for SignerError {
+    fn from(err: reqwest::Error) -> Self {
+        SignerError::Coinset(err.to_string())
+    }
+}
