@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import collections.abc
-import datetime as dt
 import json
 import logging
 import math
 import os
 import sys
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -18,17 +15,20 @@ from typing import Any
 
 import yaml
 
-import greenfloor.asset_label_catalog as _asset_label_catalog
-import greenfloor.runtime.offer_execution as cwr
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
-from greenfloor.adapters.coinset import CoinsetAdapter, extract_coinset_tx_ids_from_offer_payload
+from greenfloor.adapters.coinset import extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter
-from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.asset_label_catalog import (
     _dexie_lookup_token_for_cat_id,
     _dexie_lookup_token_for_symbol,
     _is_hex_asset_id,
     _normalize_hex_asset_id,
+)
+from greenfloor.cli.offer_build_post import (
+    build_and_post_offer_cli as _build_and_post_offer,
+)
+from greenfloor.cli.offer_build_post import (
+    resolve_market_for_build as _resolve_market_for_build,
 )
 from greenfloor.config.io import (
     default_cats_config_path as _default_cats_config_path_shared,
@@ -41,11 +41,10 @@ from greenfloor.config.io import (
     load_markets_config_with_optional_overlay,
     load_program_config,
     load_yaml,
-    resolve_quote_asset_for_offer,
     write_yaml,
 )
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
-from greenfloor.hex_utils import canonical_is_xch, default_mojo_multiplier_for_asset
+from greenfloor.hex_utils import canonical_is_xch
 from greenfloor.keys.onboarding import (
     KeyOnboardingSelection,
     determine_onboarding_branch,
@@ -55,55 +54,31 @@ from greenfloor.keys.onboarding import (
 from greenfloor.keys.router import resolve_market_key
 from greenfloor.logging_setup import (
     ALLOWED_LOG_LEVELS,
-    initialize_service_file_logging,
     normalize_log_level_name,
     warn_if_log_level_auto_healed,
 )
-from greenfloor.moderate_retry import call_with_moderate_retry
-from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
-from greenfloor.offer_builder import build_offer_text
 from greenfloor.offer_decode import (
     extract_coin_id_hints_from_offer_text as _extract_coin_id_hints_from_offer_text,
 )
-from greenfloor.runtime.offer_execution import (
-    _CoinsetFeeLookupPreflightError,
-    _resolve_taker_or_coin_operation_fee,
+from greenfloor.runtime.cloud_wallet.adapter import _require_cloud_wallet_config
+from greenfloor.runtime.cloud_wallet.assets import (
+    resolve_cloud_wallet_asset_id,
+    seed_cloud_wallet_assets_cache,
 )
-from greenfloor.runtime.offer_execution import (
-    resolve_maker_offer_fee as _resolve_maker_offer_fee,
+from greenfloor.runtime.cloud_wallet.coins import coin_asset_id, is_spendable_coin, safe_int
+from greenfloor.runtime.cloud_wallet.polling import (
+    poll_signature_request_until_not_unsigned,
+    wait_for_mempool_then_confirmation,
+)
+from greenfloor.runtime.coinset_runtime import (
+    CoinsetFeeLookupPreflightError as _CoinsetFeeLookupPreflightError,
+)
+from greenfloor.runtime.coinset_runtime import (
+    _resolve_taker_or_coin_operation_fee,
 )
 from greenfloor.storage.sqlite import SqliteStore
 
-# Test monkeypatch targets (resolve_cloud_wallet_asset_id reads via cwr import).
-_local_catalog_label_hints_for_asset_id = (
-    _asset_label_catalog._local_catalog_label_hints_for_asset_id
-)
-
-_shared_require_cloud_wallet_config = cwr._require_cloud_wallet_config
-_shared_build_and_post_offer_cloud_wallet = cwr.build_and_post_offer_cloud_wallet
-_shared_call_with_moderate_retry = call_with_moderate_retry
-_shared_cloud_wallet_create_offer_phase = cwr.cloud_wallet_create_offer_phase
-_shared_cloud_wallet_post_offer_phase = cwr.cloud_wallet_post_offer_phase
-_shared_cloud_wallet_wait_offer_artifact_phase = cwr.cloud_wallet_wait_offer_artifact_phase
-_shared_dexie_offer_view_url = cwr.dexie_offer_view_url
-_shared_ensure_offer_bootstrap_denominations = cwr.ensure_offer_bootstrap_denominations
-_shared_log_signed_offer_artifact = cwr.log_signed_offer_artifact
-_shared_normalize_offer_side = cwr.normalize_offer_side
-_shared_poll_offer_artifact_by_signature_request = cwr.poll_offer_artifact_by_signature_request
-_shared_poll_offer_artifact_until_available = cwr.poll_offer_artifact_until_available
-_shared_poll_signature_request_until_not_unsigned = cwr.poll_signature_request_until_not_unsigned
-_shared_post_dexie_offer_with_invalid_offer_retry = cwr.post_dexie_offer_with_invalid_offer_retry
-_shared_recent_market_resolved_asset_id_hints = cwr.recent_market_resolved_asset_id_hints
-_shared_resolve_cloud_wallet_asset_id = cwr.resolve_cloud_wallet_asset_id
-_shared_resolve_cloud_wallet_offer_asset_ids = cwr.resolve_cloud_wallet_offer_asset_ids
-_shared_resolve_offer_expiry_for_market = cwr.resolve_offer_expiry_for_market
-_shared_seed_cloud_wallet_assets_cache = cwr.seed_cloud_wallet_assets_cache
-_shared_verify_dexie_offer_visible_by_id = cwr.verify_dexie_offer_visible_by_id
-_shared_verify_offer_text_for_dexie = cwr.verify_offer_text_for_dexie
-_shared_wallet_get_wallet_offers = cwr.wallet_get_wallet_offers
-
 _TEST_PHASE_OFFER_EXPIRY_MINUTES = 5
-_MANAGER_SERVICE_NAME = "manager"
 _DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS = 4
 _DEXIE_INVALID_OFFER_RETRY_INITIAL_DELAY_SECONDS = 1.0
 
@@ -111,23 +86,10 @@ _DEXIE_INVALID_OFFER_RETRY_INITIAL_DELAY_SECONDS = 1.0
 _manager_logger = logging.getLogger("greenfloor.manager")
 
 
-def _initialize_manager_file_logging(home_dir: str, *, log_level: str | None) -> None:
-    initialize_service_file_logging(
-        service_name=_MANAGER_SERVICE_NAME,
-        home_dir=home_dir,
-        log_level=log_level,
-        service_logger=_manager_logger,
-    )
-
-
 def _warn_if_log_level_auto_healed(*, program, program_path: Path) -> None:
     warn_if_log_level_auto_healed(
         program_obj=program, program_path=program_path, logger=_manager_logger
     )
-
-
-_log_signed_offer_artifact = _shared_log_signed_offer_artifact
-_verify_offer_text_for_dexie = _shared_verify_offer_text_for_dexie
 
 
 def _default_program_config_path() -> str:
@@ -163,9 +125,6 @@ def _format_json_output(payload: object) -> str:
     if _JSON_OUTPUT_COMPACT:
         return json.dumps(payload, separators=(",", ":"))
     return json.dumps(payload, indent=2)
-
-
-_require_cloud_wallet_config = _shared_require_cloud_wallet_config
 
 
 def _new_cloud_wallet_adapter(program) -> CloudWalletAdapter:
@@ -560,7 +519,7 @@ def _resolve_cloud_wallet_asset_id(
     allow_dexie_lookup: bool = True,
     program_home_dir: str | None = None,
 ) -> str:
-    return _shared_resolve_cloud_wallet_asset_id(
+    return resolve_cloud_wallet_asset_id(
         wallet=wallet,
         canonical_asset_id=canonical_asset_id,
         symbol_hint=symbol_hint,
@@ -570,413 +529,11 @@ def _resolve_cloud_wallet_asset_id(
     )
 
 
-_resolve_cloud_wallet_offer_asset_ids = _shared_resolve_cloud_wallet_offer_asset_ids
-_recent_market_resolved_asset_id_hints = _shared_recent_market_resolved_asset_id_hints
-
-
-def _parse_iso8601(value: str) -> dt.datetime | None:
-    raw = value.strip()
-    if not raw:
-        return None
-    normalized = raw.replace("Z", "+00:00")
-    try:
-        parsed = dt.datetime.fromisoformat(normalized)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=dt.UTC)
-    return parsed.astimezone(dt.UTC)
-
-
-_wallet_get_wallet_offers = _shared_wallet_get_wallet_offers
-
-
 def _dexie_offer_status(payload: dict[str, Any]) -> int | None:
     raw_status = payload.get("status")
     if raw_status is None and isinstance(payload.get("offer"), dict):
         raw_status = payload["offer"].get("status")
-    return _safe_int(raw_status)
-
-
-def _safe_int(value: object) -> int | None:
-    try:
-        return int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-
-
-def _call_with_moderate_retry(
-    *,
-    action: str,
-    call: collections.abc.Callable[[], Any],
-    elapsed_seconds: int = 0,
-    events: list[dict[str, str]] | None = None,
-    max_attempts: int = 4,
-):
-    return _shared_call_with_moderate_retry(
-        action=action,
-        call=call,
-        elapsed_seconds=elapsed_seconds,
-        events=events,
-        max_attempts=max_attempts,
-        sleep_fn=time.sleep,
-    )
-
-
-def _post_dexie_offer_with_invalid_offer_retry(
-    *,
-    dexie: DexieAdapter,
-    offer_text: str,
-    drop_only: bool,
-    claim_rewards: bool,
-) -> dict[str, Any]:
-    return _shared_post_dexie_offer_with_invalid_offer_retry(
-        dexie=dexie,
-        offer_text=offer_text,
-        drop_only=drop_only,
-        claim_rewards=claim_rewards,
-        sleep_fn=time.sleep,
-    )
-
-
-def _verify_dexie_offer_visible_by_id(
-    *,
-    dexie: DexieAdapter,
-    offer_id: str,
-    max_attempts: int = 4,
-    delay_seconds: float = 1.5,
-    expected_offered_asset_id: str | None = None,
-    expected_offered_symbol: str | None = None,
-    expected_requested_asset_id: str | None = None,
-    expected_requested_symbol: str | None = None,
-) -> str | None:
-    return _shared_verify_dexie_offer_visible_by_id(
-        dexie=dexie,
-        offer_id=offer_id,
-        max_attempts=max_attempts,
-        delay_seconds=delay_seconds,
-        expected_offered_asset_id=expected_offered_asset_id,
-        expected_offered_symbol=expected_offered_symbol,
-        expected_requested_asset_id=expected_requested_asset_id,
-        expected_requested_symbol=expected_requested_symbol,
-        sleep_fn=time.sleep,
-    )
-
-
-def _coinset_coin_url(*, coin_name: str, network: str = "mainnet") -> str:
-    base = "https://testnet11.coinset.org" if is_testnet(network) else "https://coinset.org"
-    return f"{base}/coin/{coin_name.strip()}"
-
-
-def _coinset_reconcile_coin_state(*, network: str, coin_name: str) -> dict[str, str]:
-    adapter = CoinsetAdapter(None, network=network)
-    try:
-        record = _call_with_moderate_retry(
-            action="coinset_get_coin_record_by_name",
-            call=lambda: adapter.get_coin_record_by_name(coin_name_hex=coin_name),
-        )
-    except Exception as exc:
-        return {"reconcile": "error", "error": str(exc)}
-    if not isinstance(record, dict):
-        return {"reconcile": "not_found"}
-    confirmed_height = _safe_int(record.get("confirmed_block_index"))
-    spent_height = _safe_int(record.get("spent_block_index"))
-    return {
-        "reconcile": "ok",
-        "confirmed_block_index": str(confirmed_height if confirmed_height is not None else -1),
-        "spent_block_index": str(spent_height if spent_height is not None else -1),
-        "coinbase": str(bool(record.get("coinbase", False))).lower(),
-    }
-
-
-def _coinset_peak_height(*, network: str) -> int | None:
-    adapter = CoinsetAdapter(None, network=network)
-    state = _call_with_moderate_retry(
-        action="coinset_get_blockchain_state",
-        call=adapter.get_blockchain_state,
-    )
-    if not isinstance(state, dict):
-        return None
-    candidates = [
-        state.get("peak_height"),
-        state.get("peakHeight"),
-    ]
-    peak = state.get("peak")
-    if isinstance(peak, dict):
-        candidates.extend([peak.get("height"), peak.get("peak_height")])
-    for candidate in candidates:
-        parsed = _safe_int(candidate)
-        if parsed is not None and parsed >= 0:
-            return parsed
-    return None
-
-
-def _watch_reorg_risk_with_coinset(
-    *,
-    network: str,
-    confirmed_block_index: int,
-    additional_blocks: int,
-    warning_interval_seconds: int,
-    timeout_seconds: int = 60 * 60,
-) -> list[dict[str, str]]:
-    events: list[dict[str, str]] = []
-    target_height = int(confirmed_block_index) + int(additional_blocks)
-    events.append(
-        {
-            "event": "reorg_watch_started",
-            "confirmed_block_index": str(confirmed_block_index),
-            "target_height": str(target_height),
-        }
-    )
-    start = time.monotonic()
-    next_warning = warning_interval_seconds
-    sleep_seconds = 8.0
-    while True:
-        elapsed = int(time.monotonic() - start)
-        peak_height = _coinset_peak_height(network=network)
-        if peak_height is None:
-            events.append(
-                {
-                    "event": "reorg_watch_skipped",
-                    "reason": "coinset_peak_height_unavailable",
-                    "elapsed_seconds": str(elapsed),
-                }
-            )
-            return events
-        remaining = target_height - peak_height
-        if remaining <= 0:
-            events.append(
-                {
-                    "event": "reorg_watch_complete",
-                    "peak_height": str(peak_height),
-                    "target_height": str(target_height),
-                    "elapsed_seconds": str(elapsed),
-                }
-            )
-            return events
-        if elapsed >= timeout_seconds:
-            events.append(
-                {
-                    "event": "reorg_watch_timeout",
-                    "peak_height": str(peak_height),
-                    "target_height": str(target_height),
-                    "remaining_blocks": str(remaining),
-                    "elapsed_seconds": str(elapsed),
-                }
-            )
-            return events
-        if elapsed >= next_warning:
-            events.append(
-                {
-                    "event": "reorg_watch_warning",
-                    "peak_height": str(peak_height),
-                    "target_height": str(target_height),
-                    "remaining_blocks": str(remaining),
-                    "elapsed_seconds": str(elapsed),
-                }
-            )
-            next_warning += warning_interval_seconds
-        time.sleep(sleep_seconds)
-        sleep_seconds = min(20.0, sleep_seconds * 1.5)
-
-
-def _poll_offer_artifact_until_available(
-    *,
-    wallet: CloudWalletAdapter,
-    known_markers: set[str],
-    timeout_seconds: int,
-    min_created_at: dt.datetime | None = None,
-    require_open_state: bool = False,
-    states: tuple[str, ...] | None = ("OPEN", "PENDING"),
-    prefer_newest: bool = True,
-) -> str:
-    return _shared_poll_offer_artifact_until_available(
-        wallet=wallet,
-        known_markers=known_markers,
-        timeout_seconds=timeout_seconds,
-        min_created_at=min_created_at,
-        require_open_state=require_open_state,
-        states=states,
-        prefer_newest=prefer_newest,
-        wallet_get_wallet_offers_fn=_wallet_get_wallet_offers,
-        retry_fn=_call_with_moderate_retry,
-        sleep_fn=time.sleep,
-        monotonic_fn=time.monotonic,
-    )
-
-
-def _poll_offer_artifact_by_signature_request(
-    *,
-    wallet: CloudWalletAdapter,
-    signature_request_id: str,
-    known_markers: set[str],
-    timeout_seconds: int,
-    min_created_at: dt.datetime | None = None,
-) -> str:
-    return _shared_poll_offer_artifact_by_signature_request(
-        wallet=wallet,
-        signature_request_id=signature_request_id,
-        known_markers=known_markers,
-        timeout_seconds=timeout_seconds,
-        min_created_at=min_created_at,
-        retry_fn=_call_with_moderate_retry,
-        sleep_fn=time.sleep,
-        monotonic_fn=time.monotonic,
-    )
-
-
-def _poll_signature_request_until_not_unsigned(
-    *,
-    wallet: CloudWalletAdapter,
-    signature_request_id: str,
-    timeout_seconds: int,
-    warning_interval_seconds: int,
-) -> tuple[str, list[dict[str, str]]]:
-    return _shared_poll_signature_request_until_not_unsigned(
-        wallet=wallet,
-        signature_request_id=signature_request_id,
-        timeout_seconds=timeout_seconds,
-        warning_interval_seconds=warning_interval_seconds,
-        retry_fn=_call_with_moderate_retry,
-        sleep_fn=time.sleep,
-        monotonic_fn=time.monotonic,
-    )
-
-
-def _wait_for_mempool_then_confirmation(
-    *,
-    wallet: CloudWalletAdapter,
-    network: str,
-    initial_coin_ids: set[str],
-    asset_id: str | None = None,
-    mempool_warning_seconds: int,
-    confirmation_warning_seconds: int,
-    timeout_seconds: int | None = None,
-) -> list[dict[str, str]]:
-    events: list[dict[str, str]] = []
-    start = time.monotonic()
-    seen_pending = False
-    next_heartbeat = 5
-    sleep_seconds = 2.0
-    next_mempool_warning = mempool_warning_seconds
-    next_confirmation_warning = confirmation_warning_seconds
-    target_asset = (
-        asset_id.strip().lower() if isinstance(asset_id, str) and asset_id.strip() else None
-    )
-    while True:
-        elapsed = int(time.monotonic() - start)
-        coins = _call_with_moderate_retry(
-            action="wallet_list_coins",
-            call=lambda: wallet.list_coins(include_pending=True),
-            elapsed_seconds=elapsed,
-            events=events,
-        )
-        pending = [
-            c
-            for c in coins
-            if target_asset is None or _coin_asset_id(c).lower() == target_asset
-            if str(c.get("id", "")).strip() not in initial_coin_ids
-            if str(c.get("state", "")).strip().upper() in {"PENDING", "MEMPOOL"}
-        ]
-        confirmed = [
-            c
-            for c in coins
-            if target_asset is None or _coin_asset_id(c).lower() == target_asset
-            if str(c.get("id", "")).strip() not in initial_coin_ids
-            if str(c.get("state", "")).strip().upper() not in {"PENDING", "MEMPOOL"}
-        ]
-        if pending and not seen_pending:
-            seen_pending = True
-            sample = str(pending[0].get("name", pending[0].get("id", ""))).strip()
-            sample_id = str(pending[0].get("id", "")).strip()
-            coinset_url = _coinset_coin_url(coin_name=sample, network=network)
-            reconcile = _coinset_reconcile_coin_state(network=network, coin_name=sample)
-            events.append(
-                {
-                    "event": "in_mempool",
-                    "coin_id": sample_id,
-                    "coin_name": sample,
-                    "coinset_url": coinset_url,
-                    "elapsed_seconds": str(elapsed),
-                    "wait_reason": "waiting_for_mempool_admission",
-                    **reconcile,
-                }
-            )
-            # Keep terminal output readable when heartbeat dots were emitted.
-            if next_heartbeat > 5:
-                print("", file=sys.stderr, flush=True)
-            print(f"in mempool: {coinset_url}", file=sys.stderr, flush=True)
-        if confirmed:
-            sample_confirmed = str(confirmed[0].get("name", confirmed[0].get("id", ""))).strip()
-            confirmation_reconcile = _coinset_reconcile_coin_state(
-                network=network, coin_name=sample_confirmed
-            )
-            confirmed_height = _safe_int(confirmation_reconcile.get("confirmed_block_index"))
-            events.append(
-                {
-                    "event": "confirmed",
-                    "coin_name": sample_confirmed,
-                    "coinset_url": _coinset_coin_url(coin_name=sample_confirmed, network=network),
-                    "elapsed_seconds": str(elapsed),
-                    "wait_reason": "waiting_for_confirmation",
-                    **confirmation_reconcile,
-                }
-            )
-            if confirmed_height is not None and confirmed_height >= 0:
-                events.extend(
-                    _watch_reorg_risk_with_coinset(
-                        network=network,
-                        confirmed_block_index=confirmed_height,
-                        additional_blocks=6,
-                        warning_interval_seconds=15 * 60,
-                    )
-                )
-            if next_heartbeat > 5:
-                print("", file=sys.stderr, flush=True)
-            return events
-
-        if elapsed >= next_heartbeat:
-            print(".", end="", file=sys.stderr, flush=True)
-            next_heartbeat += 5
-        if timeout_seconds is not None and timeout_seconds > 0 and elapsed >= timeout_seconds:
-            raise RuntimeError("confirmation_wait_timeout")
-        if not seen_pending and elapsed >= next_mempool_warning:
-            events.append(
-                {
-                    "event": "mempool_wait_warning",
-                    "elapsed_seconds": str(elapsed),
-                }
-            )
-            next_mempool_warning += mempool_warning_seconds
-        if seen_pending and elapsed >= next_confirmation_warning:
-            events.append(
-                {
-                    "event": "confirmation_wait_warning",
-                    "elapsed_seconds": str(elapsed),
-                }
-            )
-            next_confirmation_warning += confirmation_warning_seconds
-        time.sleep(sleep_seconds)
-        sleep_seconds = min(20.0, sleep_seconds * 1.5)
-
-
-def _is_spendable_coin(coin: dict) -> bool:
-    if bool(coin.get("isLocked", False)):
-        return False
-    coin_state = str(coin.get("state", "")).strip().upper()
-    if not coin_state:
-        return False
-    if coin_state in {
-        "PENDING",
-        "MEMPOOL",
-        "SPENT",
-        "SPENDING",
-        "LOCKED",
-        "RESERVED",
-        "UNCONFIRMED",
-    }:
-        return False
-    return coin_state in {"CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE", "SETTLED"}
+    return safe_int(raw_status)
 
 
 def _wallet_asset_amounts_for_scope(
@@ -1031,15 +588,6 @@ query walletAssetAmounts($walletId: ID!, $first: Int) {
     return None, None, None
 
 
-def _coin_asset_id(coin: dict) -> str:
-    asset_raw = coin.get("asset")
-    if isinstance(asset_raw, dict):
-        return str(asset_raw.get("id", "xch")).strip() or "xch"
-    if isinstance(asset_raw, str):
-        return asset_raw.strip() or "xch"
-    return "xch"
-
-
 def _coin_op_min_amount_mojos(*, canonical_asset_id: str) -> int:
     # Temporary workaround for the upstream Cloud Wallet / ent-wallet asset-scope
     # bug documented in docs/ent-wallet-upstream-byc-coin-query-issue.md.
@@ -1080,9 +628,9 @@ def _coin_matches_direct_spendable_lookup(
             result = False
         else:
             result = (
-                _is_spendable_coin(coin_record)
+                is_spendable_coin(coin_record)
                 and not bool(coin_record.get("isLinkedToOpenOffer"))
-                and _coin_asset_id(coin_record).strip().lower()
+                and coin_asset_id(coin_record).strip().lower()
                 == str(scoped_asset_id).strip().lower()
             )
     if cache is not None:
@@ -1102,8 +650,8 @@ def _evaluate_denomination_readiness(
     spendable = [
         c
         for c in coins
-        if _is_spendable_coin(c)
-        and _coin_asset_id(c).lower() == asset_id.strip().lower()
+        if is_spendable_coin(c)
+        and coin_asset_id(c).lower() == asset_id.strip().lower()
         and int(c.get("amount", 0)) == int(size_base_units)
     ]
     current_count = len(spendable)
@@ -1170,7 +718,7 @@ def _coin_id_asset_lookup(wallet_coins: list[dict]) -> dict[str, str]:
         coin_id = str(coin.get("id", "")).strip()
         if not coin_id:
             continue
-        lookup[coin_id] = _coin_asset_id(coin).strip().lower()
+        lookup[coin_id] = coin_asset_id(coin).strip().lower()
     return lookup
 
 
@@ -1272,9 +820,6 @@ def _resolve_coin_op_fee(
         return None
 
 
-_normalize_offer_side = _shared_normalize_offer_side
-
-
 def _effective_coin_split_fee_for_asset(
     *,
     canonical_asset_id: str,
@@ -1304,7 +849,7 @@ def _coin_op_build_iteration_payload(
     wait_events: list[dict[str, str]] = []
     final_signature_state = initial_signature_state
     if not no_wait:
-        final_signature_state, signature_events = _poll_signature_request_until_not_unsigned(
+        final_signature_state, signature_events = poll_signature_request_until_not_unsigned(
             wallet=wallet,
             signature_request_id=signature_request_id,
             timeout_seconds=15 * 60,
@@ -1312,10 +857,11 @@ def _coin_op_build_iteration_payload(
         )
         wait_events.extend(signature_events)
         wait_events.extend(
-            _wait_for_mempool_then_confirmation(
+            wait_for_mempool_then_confirmation(
                 wallet=wallet,
                 network=network,
                 initial_coin_ids=existing_coin_ids,
+                include_pending=True,
                 mempool_warning_seconds=5 * 60,
                 confirmation_warning_seconds=15 * 60,
             )
@@ -1432,7 +978,7 @@ def _evaluate_coin_split_gate(
     size_base_units: int,
     required_count: int,
 ) -> dict[str, int | bool | str]:
-    spendable_asset_coins = [coin for coin in asset_scoped_coins if _is_spendable_coin(coin)]
+    spendable_asset_coins = [coin for coin in asset_scoped_coins if is_spendable_coin(coin)]
     denom_coins = [
         coin for coin in spendable_asset_coins if int(coin.get("amount", 0)) == int(size_base_units)
     ]
@@ -1685,9 +1231,6 @@ def _resolve_dexie_base_url(network: str, explicit_base_url: str | None) -> str:
     raise ValueError(f"unsupported network for dexie posting: {network}")
 
 
-_dexie_offer_view_url = _shared_dexie_offer_view_url
-
-
 def _resolve_splash_base_url(explicit_base_url: str | None) -> str:
     if explicit_base_url and explicit_base_url.strip():
         return explicit_base_url.strip().rstrip("/")
@@ -1743,30 +1286,6 @@ def _resolve_market_denomination_entry(market, *, size_base_units: int):
     )
 
 
-_resolve_offer_expiry_for_market = _shared_resolve_offer_expiry_for_market
-
-
-def _use_local_offer_build_path_for_size(*, size_base_units: int) -> bool:
-    """Use local offer generation for larger sizes by default.
-
-    Rationale: Cloud Wallet `create_offer` artifacts for larger maker sizes have
-    repeatedly failed Dexie validation in production, while local build artifacts
-    for equivalent offers are valid.
-    """
-    raw_threshold = os.getenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "100").strip()
-    try:
-        threshold = int(raw_threshold)
-    except ValueError:
-        threshold = 100
-    if threshold <= 0:
-        return False
-    return int(size_base_units) >= threshold
-
-
-def _kms_offer_signing_configured(program: Any) -> bool:
-    return bool(str(getattr(program, "cloud_wallet_kms_key_id", "")).strip())
-
-
 def _select_offer_coin_ids_for_target_amount(
     *, wallet_coins: list[dict[str, Any]], target_amount: int
 ) -> list[str]:
@@ -1774,7 +1293,7 @@ def _select_offer_coin_ids_for_target_amount(
         return []
     spendable_rows: list[tuple[int, str]] = []
     for coin in wallet_coins:
-        if not _is_spendable_coin(coin):
+        if not is_spendable_coin(coin):
             continue
         coin_name = str(coin.get("name", "")).strip()
         if not _is_hex_asset_id(coin_name):
@@ -1800,508 +1319,6 @@ def _select_offer_coin_ids_for_target_amount(
         if running_total >= target_amount:
             return selected_coin_ids
     return []
-
-
-def _resolve_quote_asset_for_local_offer_build(*, quote_asset: str, network: str) -> str:
-    return resolve_quote_asset_for_offer(quote_asset=quote_asset, network=network)
-
-
-def _build_offer_text_for_request(payload: dict) -> str:
-    return build_offer_text(payload)
-
-
-def _bootstrap_fee_cost_for_output_count(output_count: int) -> int:
-    count = max(1, int(output_count))
-    # Heuristic cost model for Coinset fee advice:
-    # - 1_000_000 baseline for a simple bootstrap spend
-    # - +250_000 per extra output to bias fee advice upward as fanout grows
-    # This is intentionally conservative (not a CLVM consensus constant) and
-    # should be tuned empirically from observed mempool/confirmation behavior.
-    return 1_000_000 + max(0, count - 1) * 250_000
-
-
-def _resolve_bootstrap_split_fee(
-    *,
-    network: str,
-    minimum_fee_mojos: int,
-    output_count: int,
-) -> tuple[int, str, str | None]:
-    fee_cost = _bootstrap_fee_cost_for_output_count(output_count)
-    spend_count = max(1, int(output_count))
-    try:
-        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(
-            network=network,
-            minimum_fee_mojos=minimum_fee_mojos,
-            fee_cost=fee_cost,
-            spend_count=spend_count,
-        )
-        return int(fee_mojos), fee_source, None
-    except Exception as exc:
-        # Preserve the existing fee policy contract: fallback honors
-        # `coin_ops.minimum_fee_mojos` exactly, and an explicit zero config
-        # value means "allow zero-fee fallback when fee advice is unavailable".
-        fallback_fee = max(0, int(minimum_fee_mojos))
-        return fallback_fee, "config_minimum_fee_fallback", str(exc)
-
-
-def _ensure_offer_bootstrap_denominations(
-    *,
-    program: Any,
-    market: Any,
-    wallet: CloudWalletAdapter,
-    resolved_base_asset_id: str,
-    resolved_quote_asset_id: str,
-    quote_price: float,
-    action_side: str = "sell",
-    **kwargs: Any,
-) -> dict[str, Any]:
-    return _shared_ensure_offer_bootstrap_denominations(
-        program=program,
-        market=market,
-        wallet=wallet,
-        resolved_base_asset_id=resolved_base_asset_id,
-        resolved_quote_asset_id=resolved_quote_asset_id,
-        quote_price=quote_price,
-        action_side=action_side,
-        plan_bootstrap_mixed_outputs_fn=plan_bootstrap_mixed_outputs,
-        resolve_bootstrap_split_fee_fn=_resolve_bootstrap_split_fee,
-        wait_for_mempool_then_confirmation_fn=_wait_for_mempool_then_confirmation,
-        is_spendable_coin_fn=_is_spendable_coin,
-        **kwargs,
-    )
-
-
-def _cloud_wallet_create_offer_phase(
-    *,
-    wallet: CloudWalletAdapter,
-    market,
-    size_base_units: int,
-    quote_price: float,
-    resolved_base_asset_id: str,
-    resolved_quote_asset_id: str,
-    offer_fee_mojos: int,
-    split_input_coins_fee: int,
-    expiry_unit: str,
-    expiry_value: int,
-    action_side: str = "sell",
-    **kwargs: Any,
-) -> dict[str, Any]:
-    return _shared_cloud_wallet_create_offer_phase(
-        wallet=wallet,
-        market=market,
-        size_base_units=size_base_units,
-        quote_price=quote_price,
-        resolved_base_asset_id=resolved_base_asset_id,
-        resolved_quote_asset_id=resolved_quote_asset_id,
-        offer_fee_mojos=offer_fee_mojos,
-        split_input_coins_fee=split_input_coins_fee,
-        expiry_unit=expiry_unit,
-        expiry_value=expiry_value,
-        action_side=action_side,
-        wallet_get_wallet_offers_fn=_wallet_get_wallet_offers,
-        poll_signature_request_until_not_unsigned_fn=_poll_signature_request_until_not_unsigned,
-        **kwargs,
-    )
-
-
-def _cloud_wallet_wait_offer_artifact_phase(
-    *,
-    wallet: CloudWalletAdapter,
-    known_markers: set[str],
-    offer_request_started_at: dt.datetime,
-    signature_request_id: str = "",
-    timeout_seconds: int = 15 * 60,
-) -> str:
-    return _shared_cloud_wallet_wait_offer_artifact_phase(
-        wallet=wallet,
-        known_markers=known_markers,
-        offer_request_started_at=offer_request_started_at,
-        signature_request_id=signature_request_id,
-        timeout_seconds=timeout_seconds,
-        poll_offer_artifact_until_available_fn=_poll_offer_artifact_until_available,
-        poll_offer_artifact_by_signature_request_fn=_poll_offer_artifact_by_signature_request,
-    )
-
-
-def _cloud_wallet_post_offer_phase(
-    *,
-    publish_venue: str,
-    dexie: DexieAdapter | None,
-    splash: SplashAdapter | None,
-    offer_text: str,
-    drop_only: bool,
-    claim_rewards: bool,
-    market,
-    expected_offered_asset_id: str,
-    expected_offered_symbol: str,
-    expected_requested_asset_id: str,
-    expected_requested_symbol: str,
-    sleep_fn: collections.abc.Callable[[float], None] | None = None,
-) -> dict[str, Any]:
-    return _shared_cloud_wallet_post_offer_phase(
-        publish_venue=publish_venue,
-        dexie=dexie,
-        splash=splash,
-        offer_text=offer_text,
-        drop_only=drop_only,
-        claim_rewards=claim_rewards,
-        market=market,
-        expected_offered_asset_id=expected_offered_asset_id,
-        expected_offered_symbol=expected_offered_symbol,
-        expected_requested_asset_id=expected_requested_asset_id,
-        expected_requested_symbol=expected_requested_symbol,
-        post_dexie_offer_with_invalid_offer_retry_fn=_post_dexie_offer_with_invalid_offer_retry,
-        verify_dexie_offer_visible_by_id_fn=_verify_dexie_offer_visible_by_id,
-        sleep_fn=sleep_fn,
-    )
-
-
-def _build_and_post_offer_cloud_wallet(
-    *,
-    program,
-    market,
-    key_id: str = "",
-    keyring_yaml_path: str = "",
-    size_base_units: int,
-    repeat: int,
-    publish_venue: str,
-    dexie_base_url: str,
-    splash_base_url: str,
-    drop_only: bool,
-    claim_rewards: bool,
-    quote_price: float,
-    dry_run: bool,
-    action_side: str = "sell",
-    offer_artifact_timeout_seconds: int = 15 * 60,
-) -> tuple[int, dict[str, Any]]:
-    _ = key_id, keyring_yaml_path
-    return _shared_build_and_post_offer_cloud_wallet(
-        program=program,
-        market=market,
-        size_base_units=size_base_units,
-        repeat=repeat,
-        publish_venue=publish_venue,
-        dexie_base_url=dexie_base_url,
-        splash_base_url=splash_base_url,
-        drop_only=drop_only,
-        claim_rewards=claim_rewards,
-        quote_price=quote_price,
-        dry_run=dry_run,
-        action_side=action_side,
-        offer_artifact_timeout_seconds=offer_artifact_timeout_seconds,
-        wallet_factory=_new_cloud_wallet_adapter,
-        dexie_adapter_cls=DexieAdapter,
-        splash_adapter_cls=SplashAdapter,
-        initialize_manager_file_logging_fn=_initialize_manager_file_logging,
-        recent_market_resolved_asset_id_hints_fn=_recent_market_resolved_asset_id_hints,
-        resolve_cloud_wallet_offer_asset_ids_fn=_resolve_cloud_wallet_offer_asset_ids,
-        resolve_maker_offer_fee_fn=_resolve_maker_offer_fee,
-        resolve_offer_expiry_for_market_fn=_resolve_offer_expiry_for_market,
-        ensure_offer_bootstrap_denominations_fn=_ensure_offer_bootstrap_denominations,
-        cloud_wallet_create_offer_phase_fn=_cloud_wallet_create_offer_phase,
-        cloud_wallet_wait_offer_artifact_phase_fn=_cloud_wallet_wait_offer_artifact_phase,
-        log_signed_offer_artifact_fn=_log_signed_offer_artifact,
-        verify_offer_text_for_dexie_fn=_verify_offer_text_for_dexie,
-        cloud_wallet_post_offer_phase_fn=_cloud_wallet_post_offer_phase,
-        dexie_offer_view_url_fn=_dexie_offer_view_url,
-    )
-
-
-def _build_and_post_offer(
-    *,
-    program_path: Path,
-    markets_path: Path,
-    testnet_markets_path: Path | None = None,
-    network: str,
-    market_id: str | None,
-    pair: str | None,
-    size_base_units: int,
-    repeat: int,
-    publish_venue: str,
-    dexie_base_url: str,
-    splash_base_url: str,
-    drop_only: bool,
-    claim_rewards: bool,
-    dry_run: bool,
-) -> int:
-    if size_base_units <= 0:
-        raise ValueError("size_base_units must be positive")
-    if repeat <= 0:
-        raise ValueError("repeat must be positive")
-
-    program = load_program_config(program_path)
-    markets = load_markets_config_with_optional_overlay(
-        path=markets_path,
-        overlay_path=testnet_markets_path,
-    )
-    market = _resolve_market_for_build(
-        markets,
-        market_id=market_id,
-        pair=pair,
-        network=network,
-    )
-    signer_key = program.signer_key_registry.get(market.signer_key_id)
-    # Normalize optional keyring path to a concrete string for downstream paths
-    # (pyright and runtime callers) that treat this as a non-optional value.
-    keyring_yaml_path = str(signer_key.keyring_yaml_path or "") if signer_key is not None else ""
-    pricing = dict(getattr(market, "pricing", {}) or {})
-    default_quote_asset = _resolve_quote_asset_for_local_offer_build(
-        quote_asset=str(market.quote_asset),
-        network=network,
-    )
-    base_unit_mojo_multiplier = int(
-        pricing.get(
-            "base_unit_mojo_multiplier",
-            default_mojo_multiplier_for_asset(str(market.base_asset)),
-        )
-    )
-    quote_unit_mojo_multiplier = int(
-        pricing.get(
-            "quote_unit_mojo_multiplier",
-            default_mojo_multiplier_for_asset(str(default_quote_asset)),
-        )
-    )
-    expiry_unit, expiry_value = _resolve_offer_expiry_for_market(market)
-    quote_price = pricing.get("fixed_quote_per_base")
-    if quote_price is None:
-        min_q = pricing.get("min_price_quote_per_base")
-        max_q = pricing.get("max_price_quote_per_base")
-        if min_q is not None and max_q is not None:
-            quote_price = (float(min_q) + float(max_q)) / 2.0
-        elif min_q is not None:
-            quote_price = float(min_q)
-        elif max_q is not None:
-            quote_price = float(max_q)
-    if quote_price is None:
-        raise ValueError(
-            "market pricing must define fixed_quote_per_base or min/max_price_quote_per_base for offer build"
-        )
-
-    cloud_wallet_configured = (
-        bool(program.cloud_wallet_base_url)
-        and bool(program.cloud_wallet_user_key_id)
-        and bool(program.cloud_wallet_private_key_pem_path)
-        and bool(program.cloud_wallet_vault_id)
-    )
-    kms_configured = _kms_offer_signing_configured(program)
-    # KMS runs always use the cloud wallet path: the cloud wallet's createOffer builds
-    # the complete vault spend bundle (CAT + vault singleton) and _auto_sign_if_kms signs
-    # the resulting signature request. The local build path cannot produce a valid vault
-    # offer because it omits the vault singleton spend required by SingletonMember.
-    use_cloud_wallet_offer_generation = cloud_wallet_configured and (
-        kms_configured or not _use_local_offer_build_path_for_size(size_base_units=size_base_units)
-    )
-    if use_cloud_wallet_offer_generation:
-        _initialize_manager_file_logging(program.home_dir, log_level=program.app_log_level)
-        _warn_if_log_level_auto_healed(program=program, program_path=program_path)
-        exit_code, _ = _build_and_post_offer_cloud_wallet(
-            program=program,
-            market=market,
-            key_id=str(market.signer_key_id),
-            keyring_yaml_path=keyring_yaml_path,
-            size_base_units=size_base_units,
-            repeat=repeat,
-            publish_venue=publish_venue,
-            dexie_base_url=dexie_base_url,
-            splash_base_url=splash_base_url,
-            drop_only=drop_only,
-            claim_rewards=claim_rewards,
-            quote_price=float(quote_price),
-            dry_run=bool(dry_run),
-        )
-        return exit_code
-
-    selected_offer_coin_ids: list[str] = []
-
-    debug_dry_run_offer_capture_dir = os.getenv(
-        "GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", ""
-    ).strip()
-    capture_dir_path = (
-        Path(debug_dry_run_offer_capture_dir).expanduser()
-        if debug_dry_run_offer_capture_dir
-        else None
-    )
-    if dry_run and capture_dir_path is not None:
-        capture_dir_path.mkdir(parents=True, exist_ok=True)
-
-    post_results: list[dict] = []
-    built_offers_preview: list[dict[str, str]] = []
-    dexie = DexieAdapter(dexie_base_url) if (not dry_run and publish_venue == "dexie") else None
-    splash = SplashAdapter(splash_base_url) if (not dry_run and publish_venue == "splash") else None
-    publish_failures = 0
-    for index in range(repeat):
-        resolved_quote_asset = _resolve_quote_asset_for_local_offer_build(
-            quote_asset=str(market.quote_asset),
-            network=network,
-        )
-        payload = {
-            "market_id": market.market_id,
-            "base_asset": market.base_asset,
-            "base_symbol": market.base_symbol,
-            "quote_asset": resolved_quote_asset,
-            "quote_asset_type": market.quote_asset_type,
-            "receive_address": market.receive_address,
-            "size_base_units": int(size_base_units),
-            "pair": str(resolved_quote_asset).strip().lower(),
-            "reason": "manual_build_and_post",
-            "xch_price_usd": None,
-            "expiry_unit": expiry_unit,
-            "expiry_value": int(expiry_value),
-            "quote_price_quote_per_base": float(quote_price),
-            "base_unit_mojo_multiplier": int(base_unit_mojo_multiplier),
-            "quote_unit_mojo_multiplier": int(quote_unit_mojo_multiplier),
-            "fee_mojos": 0,
-            "dry_run": bool(dry_run),
-            "key_id": market.signer_key_id,
-            "keyring_yaml_path": keyring_yaml_path,
-            "network": network,
-            "asset_id": market.base_asset,
-            "offer_coin_ids": selected_offer_coin_ids,
-            "cloud_wallet_base_url": str(program.cloud_wallet_base_url or "").strip(),
-            "cloud_wallet_user_key_id": str(program.cloud_wallet_user_key_id or "").strip(),
-            "cloud_wallet_private_key_pem_path": str(
-                program.cloud_wallet_private_key_pem_path or ""
-            ).strip(),
-            "cloud_wallet_vault_id": str(program.cloud_wallet_vault_id or "").strip(),
-            "cloud_wallet_kms_key_id": str(program.cloud_wallet_kms_key_id or "").strip(),
-            "cloud_wallet_kms_region": str(program.cloud_wallet_kms_region or "").strip(),
-            "cloud_wallet_kms_public_key_hex": str(
-                program.cloud_wallet_kms_public_key_hex or ""
-            ).strip(),
-        }
-        try:
-            offer_text = _build_offer_text_for_request(payload)
-        except Exception as exc:
-            publish_failures += 1
-            post_results.append(
-                {
-                    "venue": publish_venue,
-                    "result": {
-                        "success": False,
-                        "error": f"offer_builder_failed:{exc}",
-                    },
-                }
-            )
-            continue
-        if dry_run:
-            preview_item: dict[str, str] = {
-                "offer_prefix": offer_text[:24],
-                "offer_length": str(len(offer_text)),
-            }
-            if capture_dir_path is not None:
-                capture_file = capture_dir_path / f"{market.market_id}-dry-run-{index + 1}.offer"
-                capture_file.write_text(offer_text, encoding="utf-8")
-                preview_item["offer_capture_path"] = str(capture_file)
-            built_offers_preview.append(preview_item)
-        else:
-            if publish_venue == "dexie":
-                assert dexie is not None
-                verify_error = _verify_offer_text_for_dexie(offer_text)
-                if verify_error:
-                    publish_failures += 1
-                    post_results.append(
-                        {
-                            "venue": "dexie",
-                            "result": {"success": False, "error": verify_error},
-                        }
-                    )
-                    continue
-                result = dexie.post_offer(
-                    offer_text,
-                    drop_only=drop_only,
-                    claim_rewards=claim_rewards,
-                )
-                success_value = result.get("success")
-                if success_value is False:
-                    publish_failures += 1
-                result_payload = dict(result)
-                offer_id = str(result_payload.get("id", "")).strip()
-                if offer_id:
-                    result_payload["offer_view_url"] = _dexie_offer_view_url(
-                        dexie_base_url=dexie_base_url,
-                        offer_id=offer_id,
-                    )
-                post_results.append({"venue": "dexie", "result": result_payload})
-            else:
-                assert splash is not None
-                result = splash.post_offer(offer_text)
-                success_value = result.get("success")
-                if success_value is False:
-                    publish_failures += 1
-                post_results.append({"venue": "splash", "result": result})
-
-    publish_attempts = len(post_results)
-    print(
-        _format_json_output(
-            {
-                "market_id": market.market_id,
-                "pair": f"{market.base_asset}:{market.quote_asset}",
-                "network": network,
-                "size_base_units": size_base_units,
-                "repeat": repeat,
-                "publish_venue": publish_venue,
-                "dexie_base_url": dexie_base_url,
-                "splash_base_url": splash_base_url if publish_venue == "splash" else None,
-                "drop_only": drop_only,
-                "claim_rewards": claim_rewards,
-                "dry_run": dry_run,
-                "publish_attempts": publish_attempts,
-                "publish_failures": publish_failures,
-                "built_offers_preview": built_offers_preview,
-                "results": post_results,
-            }
-        )
-    )
-    return 0 if publish_failures == 0 else 2
-
-
-def _resolve_market_for_build(
-    markets,
-    *,
-    market_id: str | None,
-    pair: str | None,
-    network: str,
-):
-    if bool(market_id) == bool(pair):
-        raise ValueError("provide exactly one of --market-id or --pair")
-    if market_id:
-        selected = next((m for m in markets.markets if m.market_id == market_id), None)
-        if selected is None:
-            raise ValueError(f"market_id not found: {market_id}")
-        return selected
-
-    assert pair is not None
-    raw = pair.strip()
-    sep = ":" if ":" in raw else "/" if "/" in raw else ""
-    if not sep:
-        raise ValueError("pair must be in base:quote or base/quote format")
-    base_raw, quote_raw = [p.strip().lower() for p in raw.split(sep, 1)]
-    if not base_raw or not quote_raw:
-        raise ValueError("pair base and quote must be non-empty")
-    network_l = network.strip().lower()
-    candidates = []
-    for market in markets.markets:
-        if not market.enabled:
-            continue
-        base_matches = {
-            str(market.base_asset).strip().lower(),
-            str(market.base_symbol).strip().lower(),
-        }
-        quote_match = str(market.quote_asset).strip().lower()
-        quote_matches = {quote_match}
-        if is_testnet(network_l):
-            if quote_match == "xch":
-                quote_matches.add("txch")
-            elif quote_match == "txch":
-                quote_matches.add("xch")
-        if base_raw in base_matches and quote_raw in quote_matches:
-            candidates.append(market)
-    if not candidates:
-        raise ValueError(f"no enabled market found for pair: {pair}")
-    if len(candidates) > 1:
-        ids = ", ".join(sorted(m.market_id for m in candidates))
-        raise ValueError(f"pair is ambiguous; use --market-id (candidates: {ids})")
-    return candidates[0]
 
 
 def _coins_list(
@@ -2354,7 +1371,7 @@ def _coins_list(
     for coin in coins:
         coin_state = str(coin.get("state", "")).strip().upper()
         pending = coin_state in {"PENDING", "MEMPOOL"}
-        spendable = _is_spendable_coin(coin)
+        spendable = is_spendable_coin(coin)
         asset_raw = coin.get("asset")
         # Asset-scoped queries now intentionally omit `coin.asset` because the
         # upstream resolver can report a bogus fallback asset. Preserve missing
@@ -2490,7 +1507,7 @@ def _seed_wallet_assets_cache(
             )
         )
     try:
-        payload = _shared_seed_cloud_wallet_assets_cache(
+        payload = seed_cloud_wallet_assets_cache(
             wallet=wallet,
             program_home_dir=str(program.home_dir),
         )
@@ -2672,7 +1689,7 @@ def _coin_split(
         spendable_asset_coin_ids = {
             str(c.get("id", "")).strip()
             for c in asset_scoped_coins
-            if _is_spendable_coin(c)
+            if is_spendable_coin(c)
             and _coin_meets_coin_op_min_amount(c, canonical_asset_id=str(market.base_asset))
             and str(c.get("id", "")).strip()
         }
@@ -2706,7 +1723,7 @@ def _coin_split(
             spendable_asset_coins = [
                 c
                 for c in asset_scoped_coins
-                if _is_spendable_coin(c)
+                if is_spendable_coin(c)
                 and _coin_meets_coin_op_min_amount(c, canonical_asset_id=str(market.base_asset))
             ]
             if not spendable_asset_coins:
@@ -2965,7 +1982,7 @@ def _coin_combine(
             eligible_asset_coins = [
                 c
                 for c in asset_scoped_coins
-                if _is_spendable_coin(c)
+                if is_spendable_coin(c)
                 and _coin_meets_coin_op_min_amount(c, canonical_asset_id=combine_canonical_asset_id)
                 and _coin_matches_direct_spendable_lookup(
                     wallet=wallet,
@@ -3707,7 +2724,7 @@ def _offers_cancel(
                         include_pending=True,
                     )
                     spendable_market_coins = [
-                        coin for coin in market_coins if _is_spendable_coin(coin)
+                        coin for coin in market_coins if is_spendable_coin(coin)
                     ]
                     if not spendable_market_coins:
                         raise RuntimeError("no_spendable_market_coins_for_onchain_refresh")

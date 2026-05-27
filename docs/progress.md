@@ -1,5 +1,34 @@
 # Progress Log
 
+## 2026-05-26 (offer runtime modularization — F1–F14)
+
+- Deleted `greenfloor/runtime/cloud_wallet_offer_runtime.py` (~2,259 lines); split into focused modules under `greenfloor/runtime/` and `greenfloor/runtime/cloud_wallet/`.
+- Shared orchestration: `offer_orchestration.py` (bootstrap → create → verify → publish), `offer_publish.py` (venue-neutral helpers).
+- Canonical pricing/expiry model: `OfferBuildContext` + `prepare_offer_build_context()` in `offer_build_context.py`.
+- Unified dispatch: `OfferPostRequest` in `offer_post_request.py` for CLI (`offer_build_post.py`) and daemon (`_managed_offer_post`); `parse_managed_offer_post_result()` for daemon result shaping.
+- Backends: `offer_runtime.py` (vault KMS signer), `cloud_wallet/build_post.py` (Cloud Wallet), `local_offer.py` (legacy BLS CLI path); all take `build_ctx` only at the orchestrator boundary.
+- Routing: `offer_execution_backend()` and `managed_offer_execution_backend()` in `config/models.py`.
+- Extracted `greenfloor/cli/offer_build_post.py` from `manager.py`; manager re-exports `build_and_post_offer_cli` as `_build_and_post_offer`.
+- Test decomposition: `test_manager_post_offer.py` slimmed; added `test_offer_cli_dispatch.py`, `test_offer_cloud_wallet_post_{success,failures}.py`, `test_offer_post_request.py`, and related focused modules.
+- Recorded in ADR 0008; updated ADR 0005 composition-root consequences.
+
+## 2026-05-26 (Rust signer PyO3 migration — vault offers via coinset MSP)
+
+- Added ADR 0007: vault KMS signing, offers, bootstrap, and asset resolution run through
+  in-process `greenfloor_signer` (PyO3) backed by `greenfloor-signer`; chain IO via
+  `api-msp.coinset.org`; vault metadata from `program.yaml` `signer:` + `vault:` blocks.
+- Replaced `greenfloor-signer/src/cloud_wallet.rs` GraphQL client with `coinset/msp.rs`.
+- Added `greenfloor-signer-pyo3` crate (`resolve_vault_context`, `build_vault_cat_offer`,
+  `build_mixed_split`, `resolve_offer_asset_ids`); CI builds wheel before pytest.
+- Python vault paths in `signing.py` delegate to `greenfloor/adapters/rust_signer.py`;
+  signer offer build/post lives in `greenfloor/runtime/offer_runtime.py` (Cloud Wallet phases in `greenfloor/runtime/cloud_wallet/`).
+- Golden offer fixtures exported to `tests/fixtures/signer/` from Rust simulator tests.
+- Manager and daemon route KMS-configured installs to the local signer path (no Cloud Wallet
+  offer fallback when `signer.kms_key_id` and `vault.launcher_id` are set).
+- Refactored offer orchestration: shared `offer_orchestration.py` loop, venue-neutral
+  `offer_publish.py`, `OfferPostRequest` dispatch, canonical `offer_execution_backend()` /
+  `managed_offer_execution_backend()` routing gates (ADR 0008).
+
 ## 2026-05-26 (greenfloor-signer quality fixes + Rust canonical path ADR)
 
 - Added ADR 0006: `greenfloor-signer` is the canonical vault KMS signing implementation; Python `signing.py` is legacy during migration.

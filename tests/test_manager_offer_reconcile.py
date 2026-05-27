@@ -7,54 +7,13 @@ from pathlib import Path
 
 from greenfloor.cli.manager import _offers_reconcile, _offers_status
 from greenfloor.storage.sqlite import SqliteStore
-
-
-def _write_program(path: Path) -> None:
-    path.write_text(
-        "\n".join(
-            [
-                "app:",
-                '  network: "mainnet"',
-                '  home_dir: "~/.greenfloor"',
-                "runtime:",
-                "  loop_interval_seconds: 30",
-                "chain_signals:",
-                "  tx_block_trigger:",
-                "    webhook_enabled: true",
-                '    webhook_listen_addr: "127.0.0.1:8787"',
-                "dev:",
-                "  python:",
-                '    min_version: "3.11"',
-                "notifications:",
-                "  low_inventory_alerts:",
-                "    enabled: true",
-                '    threshold_mode: "absolute_base_units"',
-                "    default_threshold_base_units: 0",
-                "    dedup_cooldown_seconds: 60",
-                "    clear_hysteresis_percent: 10",
-                "  providers:",
-                "    - type: pushover",
-                "      enabled: true",
-                '      user_key_env: "PUSHOVER_USER_KEY"',
-                '      app_token_env: "PUSHOVER_APP_TOKEN"',
-                '      recipient_key_env: "PUSHOVER_RECIPIENT_KEY"',
-                "venues:",
-                "  dexie:",
-                '    api_base: "https://api.dexie.space"',
-                "  splash:",
-                '    api_base: "http://localhost:4000"',
-                "  offer_publish:",
-                '    provider: "dexie"',
-            ]
-        ),
-        encoding="utf-8",
-    )
+from tests.helpers.offer_runtime_fixtures import write_manager_program
 
 
 def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
-    _write_program(program)
+    write_manager_program(program, tmp_path=tmp_path)
     confirmed_tx_id = "a" * 64
     store = SqliteStore(db_path)
     try:
@@ -124,7 +83,7 @@ def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path,
 def test_offers_status_reports_compact_summary(tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
-    _write_program(program)
+    write_manager_program(program, tmp_path=tmp_path)
     store = SqliteStore(db_path)
     try:
         store.upsert_offer_state(
@@ -165,7 +124,7 @@ def test_offers_status_reports_compact_summary(tmp_path: Path, capsys) -> None:
 def test_offers_reconcile_coinset_signal_matrix(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
-    _write_program(program)
+    write_manager_program(program, tmp_path=tmp_path)
     tx_confirmed = "c" * 64
     tx_mempool = "d" * 64
     tx_no_signal = "e" * 64
@@ -239,7 +198,7 @@ def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(
 ) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
-    _write_program(program)
+    write_manager_program(program, tmp_path=tmp_path)
     store = SqliteStore(db_path)
     try:
         store.upsert_offer_state(
@@ -295,7 +254,7 @@ def test_offers_reconcile_reads_nested_dexie_offer_payload_shape(
 ) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
-    _write_program(program)
+    write_manager_program(program, tmp_path=tmp_path)
     tx_id = "f" * 64
     store = SqliteStore(db_path)
     try:

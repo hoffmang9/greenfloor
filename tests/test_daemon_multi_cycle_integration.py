@@ -9,7 +9,7 @@ from greenfloor.daemon.main import run_once
 from greenfloor.storage.sqlite import SqliteStore
 
 
-def _write_program(path: Path, home_dir: Path) -> None:
+def write_program(path: Path, home_dir: Path) -> None:
     path.write_text(
         "\n".join(
             [
@@ -63,7 +63,7 @@ def _write_program(path: Path, home_dir: Path) -> None:
     )
 
 
-def _write_markets(path: Path) -> None:
+def write_markets(path: Path) -> None:
     path.write_text(
         "\n".join(
             [
@@ -108,8 +108,8 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
     db_path = tmp_path / "state.sqlite"
-    _write_program(program, home)
-    _write_markets(markets)
+    write_program(program, home)
+    write_markets(markets)
 
     class _FakePriceAdapter:
         prices = [30.0, 40.0]

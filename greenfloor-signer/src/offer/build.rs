@@ -1,5 +1,5 @@
 use crate::coinset::{self, LiveCoinset, OfferCoinsetBackend};
-use crate::config::CloudWalletConfig;
+use crate::config::SignerConfig;
 use crate::error::SignerResult;
 use crate::offer::assemble::{
     execute_direct_offer, execute_existing_presplit_offer, execute_presplit_new_offer,
@@ -11,14 +11,14 @@ use crate::vault::session::resolve_vault_session;
 use crate::vault::spend::VaultSpendContext;
 
 pub async fn build_vault_cat_offer(
-    config: CloudWalletConfig,
+    config: SignerConfig,
     request: CreateOfferRequest,
 ) -> SignerResult<CreateOfferResult> {
     let input = OfferInput::try_from(request)?;
     validate_offer_input(&input)?;
 
+    let coinset = coinset::client_for_config(&config)?;
     let mut session = resolve_vault_session(config).await?;
-    let coinset = coinset::client_for_network(&session.spend.network)?;
     let backend = LiveCoinset(&coinset);
     build_vault_cat_offer_with_spend(&mut session.spend, &backend, input).await
 }

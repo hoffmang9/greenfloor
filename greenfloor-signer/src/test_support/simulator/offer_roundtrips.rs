@@ -17,14 +17,14 @@ use crate::offer::types::{CreateOfferRequest, OfferExecutionMode, OfferInput};
 use crate::vault::materialize::materialize_vault_cat_finished_spends_with_vault;
 
 #[derive(Debug, Clone, Copy)]
-enum OfferRoundtripScenario {
+pub enum OfferRoundtripScenario {
     Direct,
     PresplitNew { broadcast_split: bool },
     PresplitExisting,
 }
 
 impl OfferRoundtripScenario {
-    fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Self::Direct => "direct",
             Self::PresplitNew {
@@ -226,6 +226,46 @@ async fn run_offer_roundtrip(scenario: OfferRoundtripScenario) {
     }
 
     take_atomic_offer_on_sim(&mut harness, &offer_from_result(&result));
+}
+
+pub async fn export_offer_fixture(
+    scenario: OfferRoundtripScenario,
+) -> crate::offer::CreateOfferResult {
+    let mut harness = SimulatorVaultHarness::new();
+    let offer_amount = 1_000;
+    let source_cat = match scenario {
+        OfferRoundtripScenario::Direct => harness.fund_vault_cat(offer_amount),
+        _ => harness.fund_vault_cat(5_000),
+    };
+
+    let (presplit_cat, source_coin_id) =
+        if matches!(scenario, OfferRoundtripScenario::PresplitExisting) {
+            let (presplit_cat, source_coin_id) =
+                split_presplit_cat_on_sim(&mut harness, source_cat, offer_amount).await;
+            (Some(presplit_cat), Some(source_coin_id))
+        } else {
+            (None, None)
+        };
+
+    let coinset = SimulatorOfferCoinset::new(&harness.chain);
+    if let Some(presplit_cat) = presplit_cat {
+        coinset.register_cat(presplit_cat);
+    } else {
+        coinset.register_cat(source_cat);
+    }
+
+    let request = build_request(
+        &harness,
+        scenario,
+        offer_amount,
+        &source_cat,
+        presplit_cat.as_ref(),
+        source_coin_id,
+    );
+    let input = OfferInput::try_from(request).expect("offer input");
+    build_vault_cat_offer_with_spend(&mut harness.vault_ctx, &coinset, input)
+        .await
+        .unwrap_or_else(|err| panic!("{} offer: {err}", scenario.name()))
 }
 
 #[tokio::test]

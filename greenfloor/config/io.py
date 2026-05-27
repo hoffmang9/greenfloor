@@ -9,6 +9,7 @@ import yaml
 from greenfloor.config.models import (
     MarketsConfig,
     ProgramConfig,
+    invalidate_signer_runtime_cache,
     parse_markets_config,
     parse_program_config,
 )
@@ -54,6 +55,7 @@ def write_yaml(path: Path, data: dict[str, Any]) -> None:
 def load_program_config(path: Path) -> ProgramConfig:
     raw = load_yaml(path)
     config = parse_program_config(raw)
+    invalidate_signer_runtime_cache(home_dir=config.home_dir)
     if config.app_log_level_was_missing:
         app = raw.get("app")
         if isinstance(app, dict):

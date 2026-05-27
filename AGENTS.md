@@ -34,7 +34,9 @@ Severity tags:
 - `[MUST]` `greenfloor/signing.py`: legacy Python signing entry point during Rust migration (see ADR 0006).
 - `[MUST]` `greenfloor-signer/`: canonical vault KMS signing implementation; new vault spend/offer logic lands here first.
 - `[MUST]` `greenfloor/cli/manager.py`: operator CLI commands.
-- `[MUST]` `greenfloor/cli/offer_builder_sdk.py`: offer text construction.
+- `[MUST]` `greenfloor/cli/offer_build_post.py`: manager `build-and-post-offer` command implementation.
+- `[MUST]` `greenfloor/offer_builder.py`: canonical local BLS offer text construction; `greenfloor/cli/offer_builder_sdk.py` is a stdin/stdout CLI wrapper only.
+- `[MUST]` `greenfloor/runtime/offer_execution.py`: composition root for offer build/post runtime; import orchestration helpers here (see ADR 0005, ADR 0008).
 - `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`, `greenfloor/config/io.py`.
 - `[MUST]` Import direction: daemon never imports CLI; CLI never imports daemon. Shared logic belongs in shared modules.
 

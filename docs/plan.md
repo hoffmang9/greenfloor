@@ -21,7 +21,7 @@ Ten core commands are in scope. Do not add commands without explicit need tied t
 2. `config-validate` — validate program + markets config and key routing.
 3. `doctor` — readiness check (config, key routing, DB, env overrides).
 4. `keys-onboard` — interactive key selection and onboarding persistence.
-5. `build-and-post-offer` — build offer via Cloud Wallet or local `chia-wallet-sdk` and post to venue (Dexie or Splash).
+5. `build-and-post-offer` — build offer via vault KMS signer, Cloud Wallet, or local BLS (`offer_execution_backend()` routing) and post to venue (Dexie or Splash).
 6. `offers-status` — compact view of current offer states and recent events.
 7. `offers-reconcile` — refresh offer states using venue payloads plus Coinset tx-signal state (websocket/mempool) and flag orphaned/unknown.
 8. `coins-list` — list Vault coin inventory with spendability/lock state (Cloud Wallet).
@@ -45,14 +45,16 @@ Operator output/coin-op behavior notes:
 - `coin-split`/`coin-combine` accept `--size-base-units` to derive denomination parameters from the market ladder configuration automatically.
 - `coins-list` output hex coin names are accepted by `coin-split`/`coin-combine` `--coin-id` and resolved to Cloud Wallet `Coin_*` GraphQL IDs internally.
 
-## Signing Architecture
+## Signing and Offer Build Architecture
 
-- All signing logic lives in `greenfloor/signing.py` — a single module handling coin discovery, coin selection, additions planning, spend-bundle construction, AGG_SIG signing, and broadcast.
 - Coin discovery, chain-history reads (CAT parent lineage), and `push_tx` broadcast use `greenfloor/adapters/coinset.py` (`CoinsetAdapter`) as the side-effect boundary.
 - `CoinsetAdapter` defaults to mainnet endpoints and routes to testnet11 endpoints when `network=testnet11`; optional override: `GREENFLOOR_COINSET_BASE_URL`.
 - `WalletAdapter` (daemon coin-op path) calls `signing.sign_and_broadcast()` directly.
-- `offer_builder_sdk` (manager offer-build path) calls `signing.build_signed_spend_bundle()` directly.
-- No intermediate subprocess layers. See `AGENTS.md` for the design discipline rules.
+- Local BLS offer text construction lives in `greenfloor/offer_builder.py` (canonical); `greenfloor/cli/offer_builder_sdk.py` is a thin stdin/stdout wrapper for external tooling only.
+- Offer build/post orchestration (bootstrap → create → verify → publish) lives under `greenfloor/runtime/` with composition root `greenfloor/runtime/offer_execution.py` (see ADR 0005, ADR 0008).
+- Routing gates: `offer_execution_backend()` and `managed_offer_execution_backend()` in `greenfloor/config/models.py` select signer, Cloud Wallet, or local BLS paths.
+- Vault KMS installs use `greenfloor/runtime/offer_runtime.py` (Rust signer via PyO3); Cloud Wallet installs use `greenfloor/runtime/cloud_wallet/`.
+- No intermediate subprocess layers for in-process Python paths. See `AGENTS.md` for design discipline rules.
 
 ## Offer File Contract
 
@@ -96,11 +98,12 @@ Operator output/coin-op behavior notes:
 - [x] XCH strategy is price-gated: no XCH offer planning when price snapshot is unavailable/invalid.
 - [x] Home-dir bootstrap implemented via `greenfloor-manager bootstrap-home`.
 - [x] P1: Wire `strategy_actions_planned` outputs into daemon offer execution path.
-- [x] P1-followup: In-process `chia-wallet-sdk` offer construction via `greenfloor/cli/offer_builder_sdk.py`.
+- [x] P1-followup: In-process `chia-wallet-sdk` offer construction via `greenfloor/offer_builder.py`.
 - [x] P2: Policy-gated cancel execution for unstable-leg markets on strong price moves.
 - [x] P3: Runbook-level operator docs (`docs/runbook.md`).
 - [x] Manager CLI simplification pass completed (historical). Current v1 core CLI surface is 10 commands (`bootstrap-home`, `config-validate`, `doctor`, `keys-onboard`, `build-and-post-offer`, `offers-status`, `offers-reconcile`, `coins-list`, `coin-split`, `coin-combine`); non-essential commands (metrics, config history, ladder/bucket tuning, etc.) remain deferred until after live proof milestones.
-- [x] Offer builder subprocess boundary eliminated — manager calls `offer_builder_sdk.build_offer()` directly.
+- [x] Offer builder subprocess boundary eliminated — manager calls `greenfloor.offer_builder.build_offer()` directly.
+- [x] Offer runtime modularization — monolithic `cloud_wallet_offer_runtime.py` replaced by `greenfloor/runtime/*` modules and `OfferPostRequest` dispatch (ADR 0008).
 
 ## Remaining Gaps Before First Production-Like User Test
 

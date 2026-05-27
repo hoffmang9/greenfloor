@@ -38,8 +38,8 @@ pub enum SignerError {
     #[error("vault single secp256r1 custody key required, found {0}")]
     VaultSecp256r1KeyCount(usize),
 
-    #[error("missing cloud wallet field: {0}")]
-    MissingCloudWalletField(&'static str),
+    #[error("missing config field: {0}")]
+    MissingConfigField(&'static str),
 
     #[error("kms error: {0}")]
     Kms(String),
@@ -129,5 +129,46 @@ impl From<chia_sdk_driver::DriverError> for SignerError {
 impl From<reqwest::Error> for SignerError {
     fn from(err: reqwest::Error) -> Self {
         SignerError::Coinset(err.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SignerError;
+
+    #[test]
+    fn signer_error_display_messages_are_stable() {
+        let cases: Vec<(SignerError, &str)> = vec![
+            (
+                SignerError::VaultLauncherIdInvalid,
+                "vault launcher id missing or invalid",
+            ),
+            (
+                SignerError::InsufficientCatCoins,
+                "insufficient cat coins",
+            ),
+            (
+                SignerError::OfferInputRequiresPresplit,
+                "offer input exceeds offer amount; enable split-input-coins or specify exact coin",
+            ),
+            (
+                SignerError::PresplitCoinConfirmationTimeout,
+                "timeout waiting for presplit coin confirmation",
+            ),
+            (
+                SignerError::KmsPublicKeyMismatch {
+                    kms: "aa".to_string(),
+                    custody: "bb".to_string(),
+                },
+                "kms public key mismatch: kms=aa custody=bb",
+            ),
+            (
+                SignerError::MissingConfigField("signer"),
+                "missing config field: signer",
+            ),
+        ];
+        for (err, expected) in cases {
+            assert_eq!(err.to_string(), expected);
+        }
     }
 }

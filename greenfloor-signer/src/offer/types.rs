@@ -1,15 +1,18 @@
 use chia_protocol::Bytes32;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::error::{SignerError, SignerResult};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct CreateOfferRequest {
     pub receive_address: String,
     pub offer_asset_id: String,
     pub offer_amount: u64,
     pub request_asset_id: String,
     pub request_amount: u64,
+    #[serde(default, deserialize_with = "deserialize_coin_ids", serialize_with = "serialize_coin_ids")]
     pub offer_coin_ids: Vec<Bytes32>,
+    #[serde(default, deserialize_with = "deserialize_coin_ids", serialize_with = "serialize_coin_ids")]
     pub presplit_coin_ids: Vec<Bytes32>,
     pub split_input_coins: bool,
     pub broadcast_split: bool,
@@ -101,6 +104,41 @@ impl TryFrom<CreateOfferRequest> for OfferInput {
             })
         }
     }
+}
+
+pub(crate) fn deserialize_coin_ids<'de, D>(deserializer: D) -> Result<Vec<Bytes32>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw: Vec<String> = Vec::deserialize(deserializer)?;
+    raw.into_iter()
+        .map(|value| {
+            crate::vault::members::hex_to_bytes32(&value).map_err(serde::de::Error::custom)
+        })
+        .collect()
+}
+
+pub(crate) fn deserialize_bytes32<'de, D>(deserializer: D) -> Result<Bytes32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = String::deserialize(deserializer)?;
+    crate::vault::members::hex_to_bytes32(&raw).map_err(serde::de::Error::custom)
+}
+
+pub(crate) fn serialize_coin_ids<S>(values: &[Bytes32], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    let encoded: Vec<String> = values.iter().map(|value| hex::encode(value)).collect();
+    encoded.serialize(serializer)
+}
+
+pub(crate) fn serialize_bytes32<S>(value: &Bytes32, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&hex::encode(value))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

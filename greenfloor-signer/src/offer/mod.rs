@@ -1,5 +1,6 @@
 pub mod assemble;
 pub mod build;
+pub mod invariants;
 pub mod plan;
 pub mod presplit;
 pub mod types;

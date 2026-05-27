@@ -10,7 +10,7 @@ from greenfloor.storage.sqlite import SqliteStore
 from tests.logging_helpers import reset_concurrent_log_handlers
 
 
-def _write_program(path: Path, home_dir: Path, *, parallel_markets: bool = False) -> None:
+def write_program(path: Path, home_dir: Path, *, parallel_markets: bool = False) -> None:
     path.write_text(
         "\n".join(
             [
@@ -69,12 +69,12 @@ def _write_program(path: Path, home_dir: Path, *, parallel_markets: bool = False
 
 
 def _write_program_without_log_level(path: Path, home_dir: Path) -> None:
-    _write_program(path, home_dir)
+    write_program(path, home_dir)
     text = path.read_text(encoding="utf-8")
     path.write_text(text.replace("  log_level: INFO\n", ""), encoding="utf-8")
 
 
-def _write_markets(path: Path) -> None:
+def write_markets(path: Path) -> None:
     path.write_text(
         "\n".join(
             [
@@ -160,8 +160,8 @@ def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path) -
     home.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, home)
-    _write_markets(markets)
+    write_program(program, home)
+    write_markets(markets)
     reset_concurrent_log_handlers(module=daemon_mod)
 
     calls: dict[str, int] = {"start": 0, "stop": 0, "run_once": 0}
@@ -212,7 +212,7 @@ def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path
     state_dir.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, home, parallel_markets=True)
+    write_program(program, home, parallel_markets=True)
     _write_markets_two(markets)
     db_path = tmp_path / "state.sqlite"
 
@@ -273,7 +273,7 @@ def test_run_once_parallel_market_failure_isolated(monkeypatch, tmp_path: Path) 
     state_dir.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, home, parallel_markets=True)
+    write_program(program, home, parallel_markets=True)
     _write_markets_two(markets)
     db_path = tmp_path / "state.sqlite"
 
@@ -337,7 +337,7 @@ def test_run_once_sequential_market_failure_isolated(monkeypatch, tmp_path: Path
     state_dir.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, home, parallel_markets=False)
+    write_program(program, home, parallel_markets=False)
     _write_markets_two(markets)
     db_path = tmp_path / "state.sqlite"
 
@@ -401,8 +401,8 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(monkeypatch, tmp_path:
     state_dir.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, home, parallel_markets=True)
-    _write_markets(markets)  # first cycle has one enabled market
+    write_program(program, home, parallel_markets=True)
+    write_markets(markets)  # first cycle has one enabled market
     db_path = tmp_path / "state.sqlite"
 
     class _FakePriceAdapter:
@@ -490,8 +490,8 @@ def test_run_once_uses_websocket_capture_when_enabled(monkeypatch, tmp_path: Pat
     state_dir.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, home)
-    _write_markets(markets)
+    write_program(program, home)
+    write_markets(markets)
 
     class _FakePriceAdapter:
         async def get_xch_price(self) -> float:
@@ -540,8 +540,8 @@ def test_run_loop_refreshes_log_level_without_restart(monkeypatch, tmp_path: Pat
     home.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, home)
-    _write_markets(markets)
+    write_program(program, home)
+    write_markets(markets)
 
     calls: dict[str, int] = {"run_once": 0}
     seen_levels: list[str] = []
@@ -597,7 +597,7 @@ def test_run_loop_logs_when_missing_log_level_is_auto_healed(monkeypatch, tmp_pa
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
     _write_program_without_log_level(program, home)
-    _write_markets(markets)
+    write_markets(markets)
     reset_concurrent_log_handlers(module=daemon_mod)
 
     class _FakeWsClient:
@@ -637,8 +637,8 @@ def test_run_loop_orders_reload_marker_log_sleep_then_reload(monkeypatch, tmp_pa
     home.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, home)
-    _write_markets(markets)
+    write_program(program, home)
+    write_markets(markets)
 
     sequence: list[str] = []
     real_load_program_config = daemon_mod.load_program_config
@@ -714,8 +714,8 @@ def test_run_loop_websocket_callbacks_use_callback_thread_store(
     home.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program(program, home)
-    _write_markets(markets)
+    write_program(program, home)
+    write_markets(markets)
 
     ws_errors: list[Exception] = []
 
@@ -797,7 +797,7 @@ def test_main_once_exits_with_lock_conflict(monkeypatch, tmp_path: Path, capsys)
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
-    _write_program(program, home)
+    write_program(program, home)
     reset_concurrent_log_handlers(module=daemon_mod)
     state_dir = tmp_path / "state"
     with daemon_mod._acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):

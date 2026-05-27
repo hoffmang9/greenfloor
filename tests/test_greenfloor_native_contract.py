@@ -3,7 +3,9 @@ from __future__ import annotations
 import sys
 
 import greenfloor.signing as signing_mod
-from greenfloor.cli.manager import _verify_offer_text_for_dexie
+from greenfloor.runtime.offer_publish import (
+    verify_offer_text_for_dexie as _verify_offer_text_for_dexie,
+)
 
 
 def test_verify_offer_text_for_dexie_uses_greenfloor_native_when_sdk_lacks_validate(
@@ -35,7 +37,7 @@ def test_verify_offer_text_for_dexie_reports_missing_validators(monkeypatch) -> 
         return __import__(name)
 
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        "greenfloor.runtime.offer_publish.importlib.import_module",
         _import_module,
     )
 

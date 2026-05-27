@@ -13,6 +13,13 @@ class LadderDeficit:
 
 
 @dataclass(frozen=True, slots=True)
+class BootstrapLadderEntry:
+    size_base_units: int
+    target_count: int
+    split_buffer_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class BootstrapPlan:
     source_coin_id: str
     source_amount: int

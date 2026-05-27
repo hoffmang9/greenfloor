@@ -3,17 +3,19 @@ use chia_puzzle_types::Memos;
 use chia_sdk_driver::{Action, Cat, Id, Relation, SpendContext, Spends};
 
 use crate::coinset::{self, LiveCoinset, OfferCoinsetBackend, MIN_CAT_OUTPUT_MOJOS};
-use crate::config::CloudWalletConfig;
+use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::vault::materialize::materialize_vault_cat_finished_spends;
 use crate::vault::session::resolve_vault_spend_context;
 use crate::vault::spend::VaultSpendContext;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct MixedSplitRequest {
     pub receive_address: String,
+    #[serde(deserialize_with = "crate::offer::types::deserialize_bytes32", serialize_with = "crate::offer::types::serialize_bytes32")]
     pub asset_id: Bytes32,
     pub output_amounts: Vec<u64>,
+    #[serde(default, deserialize_with = "crate::offer::types::deserialize_coin_ids", serialize_with = "crate::offer::types::serialize_coin_ids")]
     pub coin_ids: Vec<Bytes32>,
     pub allow_sub_cat_output: bool,
     pub fee_mojos: u64,
@@ -51,14 +53,14 @@ pub(crate) fn validate_mixed_split_request(request: &MixedSplitRequest) -> Signe
 }
 
 pub async fn build_and_optionally_broadcast_vault_cat_mixed_split(
-    config: CloudWalletConfig,
+    config: SignerConfig,
     request: MixedSplitRequest,
     broadcast: bool,
 ) -> SignerResult<MixedSplitResult> {
     validate_mixed_split_request(&request)?;
 
+    let client = coinset::client_for_config(&config)?;
     let mut vault_ctx = resolve_vault_spend_context(config).await?;
-    let client = coinset::client_for_network(&vault_ctx.network)?;
     let backend = LiveCoinset(&client);
     let receive_puzzle_hash = coinset::decode_receive_address(&request.receive_address)?;
 
