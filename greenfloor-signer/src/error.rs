@@ -56,6 +56,48 @@ pub enum SignerError {
     #[error("insufficient cat coins")]
     InsufficientCatCoins,
 
+    #[error("derivation scan failed for selected coin")]
+    MissingSigningKeyForSelectedCoins,
+
+    #[error("no unspent xch coins")]
+    NoUnspentXchCoins,
+
+    #[error("insufficient offered total for mixed split")]
+    InsufficientOfferedTotalForMixedSplit,
+
+    #[error("insufficient xch fee balance for mixed split")]
+    InsufficientXchFeeBalanceForMixedSplit,
+
+    #[error("no unspent offer xch coins")]
+    NoUnspentOfferXchCoins,
+
+    #[error("insufficient offer xch coins")]
+    InsufficientOfferXchCoins,
+
+    #[error("no unspent offer cat coins")]
+    NoUnspentOfferCatCoins,
+
+    #[error("insufficient offer cat coins")]
+    InsufficientOfferCatCoins,
+
+    #[error("insufficient offer coin total")]
+    InsufficientOfferCoinTotal,
+
+    #[error("unsupported operation type")]
+    UnsupportedOperationType,
+
+    #[error("invalid plan values")]
+    InvalidPlanValues,
+
+    #[error("insufficient selected coin total")]
+    InsufficientSelectedCoinTotal,
+
+    #[error("xch coin selection failed")]
+    XchCoinSelectionFailed,
+
+    #[error("unsupported network for signing")]
+    UnsupportedNetworkForSigning,
+
     #[error("cat output below minimum mojos")]
     CatOutputBelowMinimum,
 
@@ -116,6 +158,68 @@ pub enum SignerError {
 
 pub type SignerResult<T> = Result<T, SignerError>;
 
+/// Stable snake_case reasons consumed by Python ``bls_signing``.
+pub fn mixed_split_reason(err: SignerError) -> String {
+    match err {
+        SignerError::MissingOutputAmounts => "missing_output_amounts".into(),
+        SignerError::InvalidOutputAmount => "invalid_output_amount".into(),
+        SignerError::CatOutputBelowMinimum => "cat_output_below_minimum_mojos".into(),
+        SignerError::CatChangeBelowMinimum => "cat_change_below_minimum_mojos".into(),
+        SignerError::NoUnspentXchCoins => "no_unspent_xch_coins_for_mixed_split".into(),
+        SignerError::InsufficientCatCoins => "insufficient_cat_coins_for_mixed_split".into(),
+        SignerError::InsufficientOfferedTotalForMixedSplit => {
+            "insufficient_offered_total_for_mixed_split".into()
+        }
+        SignerError::InsufficientXchFeeBalanceForMixedSplit => {
+            "insufficient_xch_fee_balance_for_mixed_split".into()
+        }
+        SignerError::MissingSigningKeyForSelectedCoins => {
+            "derivation_scan_failed_for_selected_coin".into()
+        }
+        SignerError::UnsupportedNetworkForSigning => "unsupported_network_for_signing".into(),
+        SignerError::Driver(message) => format!("build_mixed_split_spend_bundle_error:{message}"),
+        SignerError::Coinset(message) => format!("push_tx_error:{message}"),
+        other => format!("build_mixed_split_spend_bundle_error:{other}"),
+    }
+}
+
+/// Stable snake_case reasons consumed by Python ``bls_signing`` offer path.
+pub fn offer_reason(err: SignerError) -> String {
+    match err {
+        SignerError::InvalidOutputAmount => "invalid_offer_or_request_amount".into(),
+        SignerError::NoUnspentOfferXchCoins => "no_unspent_offer_xch_coins".into(),
+        SignerError::InsufficientOfferXchCoins => "offer_coin_selection_failed".into(),
+        SignerError::NoUnspentOfferCatCoins => "no_unspent_offer_cat_coins".into(),
+        SignerError::InsufficientOfferCatCoins => "insufficient_offer_cat_coins".into(),
+        SignerError::InsufficientOfferCoinTotal => "insufficient_offer_coin_total".into(),
+        SignerError::MissingSigningKeyForSelectedCoins => {
+            "derivation_scan_failed_for_selected_coin".into()
+        }
+        SignerError::UnsupportedNetworkForSigning => "unsupported_network_for_signing".into(),
+        SignerError::Driver(message) => format!("build_offer_spend_bundle_error:{message}"),
+        SignerError::Coinset(message) => format!("build_offer_spend_bundle_error:{message}"),
+        other => format!("build_offer_spend_bundle_error:{other}"),
+    }
+}
+
+/// Stable snake_case reasons consumed by Python ``bls_signing`` XCH split/combine path.
+pub fn xch_coin_op_reason(err: SignerError) -> String {
+    match err {
+        SignerError::NoUnspentXchCoins => "no_unspent_xch_coins".into(),
+        SignerError::XchCoinSelectionFailed => "coin_selection_failed".into(),
+        SignerError::UnsupportedOperationType => "unsupported_operation_type".into(),
+        SignerError::InvalidPlanValues => "invalid_plan_values".into(),
+        SignerError::InsufficientSelectedCoinTotal => "insufficient_selected_coin_total".into(),
+        SignerError::MissingSigningKeyForSelectedCoins => {
+            "derivation_scan_failed_for_selected_coin".into()
+        }
+        SignerError::UnsupportedNetworkForSigning => "unsupported_network_for_signing".into(),
+        SignerError::Driver(message) => format!("build_spend_bundle_error:{message}"),
+        SignerError::Coinset(message) => format!("build_spend_bundle_error:{message}"),
+        other => format!("build_spend_bundle_error:{other}"),
+    }
+}
+
 pub fn driver_error(err: chia_sdk_driver::DriverError) -> SignerError {
     SignerError::Driver(err.to_string())
 }
@@ -170,5 +274,45 @@ mod tests {
         for (err, expected) in cases {
             assert_eq!(err.to_string(), expected);
         }
+    }
+
+    #[test]
+    fn xch_coin_op_reason_maps_stable_python_codes() {
+        assert_eq!(
+            super::xch_coin_op_reason(SignerError::NoUnspentXchCoins),
+            "no_unspent_xch_coins"
+        );
+        assert_eq!(
+            super::xch_coin_op_reason(SignerError::InsufficientSelectedCoinTotal),
+            "insufficient_selected_coin_total"
+        );
+    }
+
+    #[test]
+    fn offer_reason_maps_stable_python_codes() {
+        assert_eq!(
+            super::offer_reason(SignerError::NoUnspentOfferCatCoins),
+            "no_unspent_offer_cat_coins"
+        );
+        assert_eq!(
+            super::offer_reason(SignerError::InvalidOutputAmount),
+            "invalid_offer_or_request_amount"
+        );
+    }
+
+    #[test]
+    fn mixed_split_reason_maps_stable_python_codes() {
+        assert_eq!(
+            super::mixed_split_reason(SignerError::MissingOutputAmounts),
+            "missing_output_amounts"
+        );
+        assert_eq!(
+            super::mixed_split_reason(SignerError::NoUnspentXchCoins),
+            "no_unspent_xch_coins_for_mixed_split"
+        );
+        assert_eq!(
+            super::mixed_split_reason(SignerError::CatOutputBelowMinimum),
+            "cat_output_below_minimum_mojos"
+        );
     }
 }

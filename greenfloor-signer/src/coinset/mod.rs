@@ -1,6 +1,7 @@
 mod backend;
 mod msp;
 mod presplit;
+mod xch;
 
 pub use backend::{LiveCoinset, OfferCoinsetBackend};
 pub use msp::{
@@ -90,6 +91,13 @@ pub(crate) fn finalize_selected_cats(
         selected,
         offered_total,
     })
+}
+
+pub async fn list_unspent_xch(
+    client: &CoinsetClient,
+    receive_address: &str,
+) -> SignerResult<Vec<Coin>> {
+    xch::list_unspent_xch(client, receive_address).await
 }
 
 pub async fn list_unspent_cats(

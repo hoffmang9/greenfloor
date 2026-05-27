@@ -3,11 +3,15 @@ extern crate greenfloor_signer as signer_core;
 use std::path::Path;
 use std::sync::OnceLock;
 
+use chia_bls::SecretKey;
 use signer_core::{
-    build_and_optionally_broadcast_vault_cat_mixed_split, build_vault_cat_offer,
-    load_signer_config, resolve_offer_asset_ids, resolve_vault_context, CreateOfferRequest,
-    MixedSplitRequest,
+    broadcast_bls_spend_bundle, build_and_optionally_broadcast_vault_cat_mixed_split,
+    build_bls_mixed_split_spend_bundle, build_bls_offer_spend_bundle,
+    build_bls_xch_coin_op_spend_bundle, build_vault_cat_offer, load_signer_config,
+    resolve_offer_asset_ids, resolve_vault_context, BlsMixedSplitRequest, BlsOfferRequest,
+    BlsXchCoinOpRequest, CreateOfferRequest, MixedSplitRequest,
 };
+use signer_core::error::{mixed_split_reason, offer_reason, xch_coin_op_reason};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
@@ -41,6 +45,13 @@ fn request_dict_to_json(request: &Bound<'_, PyDict>) -> PyResult<serde_json::Val
     let raw = dumps.call1((request,))?;
     let raw_str: String = raw.extract()?;
     serde_json::from_str(&raw_str).map_err(to_py_err)
+}
+
+fn parse_master_sk_bytes(master_sk_bytes: &[u8]) -> PyResult<SecretKey> {
+    let bytes: [u8; 32] = master_sk_bytes
+        .try_into()
+        .map_err(|_| PyValueError::new_err("master_sk must be exactly 32 bytes"))?;
+    SecretKey::from_bytes(&bytes).map_err(to_py_err)
 }
 
 #[pyfunction]
@@ -103,6 +114,116 @@ fn build_mixed_split_py(config_path: &str, request: &Bound<'_, PyDict>) -> PyRes
 }
 
 #[pyfunction]
+#[pyo3(name = "build_bls_mixed_split")]
+fn build_bls_mixed_split_py(
+    network: &str,
+    master_sk_bytes: &[u8],
+    request: &Bound<'_, PyDict>,
+) -> PyResult<Py<PyAny>> {
+    let master_sk = parse_master_sk_bytes(master_sk_bytes)?;
+    let payload = request_dict_to_json(request)?;
+    let split_request: BlsMixedSplitRequest =
+        serde_json::from_value(payload).map_err(to_py_err)?;
+    Python::attach(|py| {
+        let dict = PyDict::new(py);
+        match runtime().block_on(build_bls_mixed_split_spend_bundle(
+            network,
+            &master_sk,
+            split_request,
+        )) {
+            Ok(result) => {
+                dict.set_item("spend_bundle_hex", result.spend_bundle_hex)?;
+                if !result.selected_coin_ids.is_empty() {
+                    dict.set_item("selected_coin_ids", result.selected_coin_ids)?;
+                }
+            }
+            Err(err) => {
+                dict.set_item("error", mixed_split_reason(err))?;
+            }
+        }
+        Ok(dict.into())
+    })
+}
+
+#[pyfunction]
+#[pyo3(name = "build_bls_offer")]
+fn build_bls_offer_py(
+    network: &str,
+    master_sk_bytes: &[u8],
+    request: &Bound<'_, PyDict>,
+) -> PyResult<Py<PyAny>> {
+    let master_sk = parse_master_sk_bytes(master_sk_bytes)?;
+    let payload = request_dict_to_json(request)?;
+    let offer_request: BlsOfferRequest = serde_json::from_value(payload).map_err(to_py_err)?;
+    Python::attach(|py| {
+        let dict = PyDict::new(py);
+        match runtime().block_on(build_bls_offer_spend_bundle(
+            network,
+            &master_sk,
+            offer_request,
+        )) {
+            Ok(result) => {
+                dict.set_item("spend_bundle_hex", result.spend_bundle_hex)?;
+            }
+            Err(err) => {
+                dict.set_item("error", offer_reason(err))?;
+            }
+        }
+        Ok(dict.into())
+    })
+}
+
+#[pyfunction]
+#[pyo3(name = "build_bls_xch_coin_op")]
+fn build_bls_xch_coin_op_py(
+    network: &str,
+    master_sk_bytes: &[u8],
+    request: &Bound<'_, PyDict>,
+) -> PyResult<Py<PyAny>> {
+    let master_sk = parse_master_sk_bytes(master_sk_bytes)?;
+    let payload = request_dict_to_json(request)?;
+    let coin_op_request: BlsXchCoinOpRequest =
+        serde_json::from_value(payload).map_err(to_py_err)?;
+    Python::attach(|py| {
+        let dict = PyDict::new(py);
+        match runtime().block_on(build_bls_xch_coin_op_spend_bundle(
+            network,
+            &master_sk,
+            coin_op_request,
+        )) {
+            Ok(result) => {
+                dict.set_item("spend_bundle_hex", result.spend_bundle_hex)?;
+            }
+            Err(err) => {
+                dict.set_item("error", xch_coin_op_reason(err))?;
+            }
+        }
+        Ok(dict.into())
+    })
+}
+
+#[pyfunction]
+#[pyo3(name = "broadcast_bls_spend_bundle")]
+fn broadcast_bls_spend_bundle_py(network: &str, spend_bundle_hex: &str) -> PyResult<Py<PyAny>> {
+    Python::attach(|py| {
+        let dict = PyDict::new(py);
+        match runtime().block_on(broadcast_bls_spend_bundle(network, spend_bundle_hex)) {
+            Ok(status) => {
+                dict.set_item("status", "executed")?;
+                dict.set_item("reason", status)?;
+                dict.set_item("operation_id", py.None())?;
+            }
+            Err(err) => {
+                dict.set_item("status", "skipped")?;
+                dict.set_item("reason", mixed_split_reason(err))?;
+                dict.set_item("operation_id", py.None())?;
+            }
+        }
+        Ok(dict.into())
+    })
+}
+
+#[pyfunction]
 #[pyo3(name = "resolve_offer_asset_ids")]
 fn resolve_offer_asset_ids_py(
     config_path: &str,
@@ -126,6 +247,10 @@ fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(resolve_vault_context_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_vault_cat_offer_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_mixed_split_py, m)?)?;
+    m.add_function(wrap_pyfunction!(build_bls_mixed_split_py, m)?)?;
+    m.add_function(wrap_pyfunction!(build_bls_offer_py, m)?)?;
+    m.add_function(wrap_pyfunction!(build_bls_xch_coin_op_py, m)?)?;
+    m.add_function(wrap_pyfunction!(broadcast_bls_spend_bundle_py, m)?)?;
     m.add_function(wrap_pyfunction!(resolve_offer_asset_ids_py, m)?)?;
     Ok(())
 }

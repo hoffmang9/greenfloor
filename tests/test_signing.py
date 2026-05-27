@@ -115,11 +115,16 @@ def test_build_signed_spend_bundle_invalid_plan() -> None:
     assert result["reason"] == "invalid_plan"
 
 
-def test_build_signed_spend_bundle_sdk_import_error(monkeypatch) -> None:
+def test_build_signed_spend_bundle_signer_import_error(monkeypatch) -> None:
     def _fail_import():
-        raise ImportError("no chia_wallet_sdk")
+        raise ImportError("no greenfloor_signer")
 
-    monkeypatch.setattr(signing_mod, "_import_sdk", _fail_import)
+    monkeypatch.setattr(
+        signing_mod,
+        "_load_master_private_key",
+        lambda *_args, **_kwargs: (b"\x01" * 32, None),
+    )
+    monkeypatch.setattr(signing_mod, "_import_greenfloor_signer", _fail_import)
     result = signing_mod.build_signed_spend_bundle(
         {
             "key_id": "k1",
@@ -131,12 +136,20 @@ def test_build_signed_spend_bundle_sdk_import_error(monkeypatch) -> None:
         }
     )
     assert result["status"] == "skipped"
-    assert "wallet_sdk_import_error" in result["reason"]
+    assert result["reason"] == "signing_failed:greenfloor_signer_import_error:no greenfloor_signer"
 
 
 def test_build_signed_spend_bundle_no_coins(monkeypatch) -> None:
-    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: object())
-    monkeypatch.setattr(signing_mod, "_list_unspent_xch_coins", lambda **_kw: [])
+    monkeypatch.setattr(
+        signing_mod,
+        "_load_master_private_key",
+        lambda *_args, **_kwargs: (b"\x01" * 32, None),
+    )
+    monkeypatch.setattr(
+        signing_mod,
+        "_execute_bls_xch_coin_op_rust",
+        lambda **_kw: (None, "no_unspent_xch_coins"),
+    )
     result = signing_mod.build_signed_spend_bundle(
         {
             "key_id": "k1",
@@ -148,7 +161,7 @@ def test_build_signed_spend_bundle_no_coins(monkeypatch) -> None:
         }
     )
     assert result["status"] == "skipped"
-    assert result["reason"] == "no_unspent_xch_coins"
+    assert result["reason"] == "signing_failed:no_unspent_xch_coins"
 
 
 def test_build_signed_spend_bundle_offer_missing_request_asset_id() -> None:
@@ -174,13 +187,17 @@ def test_build_signed_spend_bundle_offer_missing_request_asset_id() -> None:
 def test_build_signed_spend_bundle_offer_delegates_to_offer_builder(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: object())
+    monkeypatch.setattr(
+        signing_mod,
+        "_load_master_private_key",
+        lambda *_args, **_kwargs: (b"\x01" * 32, None),
+    )
 
-    def _fake_build_offer_spend_bundle(**kwargs):
+    def _fake_execute_bls_offer_rust(**kwargs):
         captured.update(kwargs)
         return ("aabb", None)
 
-    monkeypatch.setattr(signing_mod, "_build_offer_spend_bundle", _fake_build_offer_spend_bundle)
+    monkeypatch.setattr(signing_mod, "_execute_bls_offer_rust", _fake_execute_bls_offer_rust)
     result = signing_mod.build_signed_spend_bundle(
         {
             "key_id": "k1",
@@ -204,10 +221,14 @@ def test_build_signed_spend_bundle_offer_delegates_to_offer_builder(monkeypatch)
 
 
 def test_build_signed_spend_bundle_offer_propagates_missing_agg_sig_targets(monkeypatch) -> None:
-    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: object())
     monkeypatch.setattr(
         signing_mod,
-        "_build_offer_spend_bundle",
+        "_load_master_private_key",
+        lambda *_args, **_kwargs: (b"\x01" * 32, None),
+    )
+    monkeypatch.setattr(
+        signing_mod,
+        "_execute_bls_offer_rust",
         lambda **_kw: (None, "no_agg_sig_targets_found"),
     )
     result = signing_mod.build_signed_spend_bundle(
@@ -253,7 +274,7 @@ def test_sign_and_broadcast_propagates_signing_failure(monkeypatch) -> None:
 def test_sign_and_broadcast_calls_broadcast(monkeypatch) -> None:
     broadcast_called = {}
 
-    def _fake_broadcast(*, sdk, spend_bundle_hex, network):
+    def _fake_broadcast(*, spend_bundle_hex, network):
         broadcast_called["hex"] = spend_bundle_hex
         broadcast_called["network"] = network
         return {"status": "executed", "reason": "submitted", "operation_id": "tx-abc"}
@@ -271,8 +292,7 @@ def test_sign_and_broadcast_calls_broadcast(monkeypatch) -> None:
     class _FakeSdk:
         pass
 
-    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: _FakeSdk)
-    monkeypatch.setattr(signing_mod, "_broadcast_spend_bundle", _fake_broadcast)
+    monkeypatch.setattr(signing_mod, "_broadcast_bls_mixed_split_rust", _fake_broadcast)
 
     result = signing_mod.sign_and_broadcast(
         {
@@ -317,17 +337,12 @@ def test_sign_and_broadcast_mixed_split_calls_broadcast(monkeypatch) -> None:
         signing_mod, "_build_mixed_split_spend_bundle", lambda _payload: ("aabb", None)
     )
 
-    class _FakeSdk:
-        pass
-
-    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: _FakeSdk)
-
-    def _fake_broadcast(*, sdk, spend_bundle_hex, network):
+    def _fake_broadcast(*, spend_bundle_hex, network):
         broadcast_called["hex"] = spend_bundle_hex
         broadcast_called["network"] = network
         return {"status": "executed", "reason": "submitted", "operation_id": "tx-mixed"}
 
-    monkeypatch.setattr(signing_mod, "_broadcast_spend_bundle", _fake_broadcast)
+    monkeypatch.setattr(signing_mod, "_broadcast_bls_mixed_split_rust", _fake_broadcast)
     result = signing_mod.sign_and_broadcast_mixed_split(
         {
             "key_id": "k1",
@@ -380,30 +395,6 @@ def test_coin_id_set_accepts_hex_with_or_without_prefix() -> None:
     assert ids == {("ab" * 32), ("cd" * 32)}
 
 
-def test_build_additions_from_plan_split() -> None:
-    additions, error = signing_mod._build_additions_from_plan(
-        plan={"op_type": "split", "size_base_units": 10, "op_count": 2},
-        selected_coins=[{"amount": 25}],
-        receive_address="xch1addr",
-    )
-    assert error is None
-    assert additions is not None
-    assert len(additions) == 3
-    assert additions[0] == {"address": "xch1addr", "amount": 10}
-    assert additions[1] == {"address": "xch1addr", "amount": 10}
-    assert additions[2] == {"address": "xch1addr", "amount": 5}
-
-
-def test_build_additions_from_plan_insufficient() -> None:
-    additions, error = signing_mod._build_additions_from_plan(
-        plan={"op_type": "split", "size_base_units": 100, "op_count": 2},
-        selected_coins=[{"amount": 10}],
-        receive_address="xch1addr",
-    )
-    assert additions is None
-    assert error == "insufficient_selected_coin_total"
-
-
 def test_parse_fingerprint_direct_integer() -> None:
     assert signing_mod._parse_fingerprint("123456") == 123456
 
@@ -416,38 +407,20 @@ def test_parse_fingerprint_unknown_returns_none() -> None:
     assert signing_mod._parse_fingerprint("unknown_key") is None
 
 
-def test_signing_uses_testnet11_coinset_adapter_network(monkeypatch) -> None:
-    captured = {}
+def test_signing_split_path_passes_testnet11_network_to_rust(monkeypatch) -> None:
+    captured: dict[str, str] = {}
 
-    class _FakeAdapter:
-        def __init__(self, base_url=None, *, network="mainnet", require_testnet11=False) -> None:
-            captured["base_url"] = base_url
-            captured["network"] = network
-            captured["require_testnet11"] = require_testnet11
+    monkeypatch.setattr(
+        signing_mod,
+        "_load_master_private_key",
+        lambda *_args, **_kwargs: (b"\x01" * 32, None),
+    )
 
-        def get_coin_records_by_puzzle_hash(
-            self, *, puzzle_hash_hex: str, include_spent_coins: bool
-        ):
-            _ = puzzle_hash_hex
-            _ = include_spent_coins
-            return []
+    def _fake_execute(*, network: str, **_kwargs):
+        captured["network"] = network
+        return None, "no_unspent_xch_coins"
 
-    class _FakeAddressObj:
-        def __init__(self) -> None:
-            self.puzzle_hash = b"\x11" * 32
-
-    class _FakeAddress:
-        @staticmethod
-        def decode(value: str):
-            _ = value
-            return _FakeAddressObj()
-
-    class _FakeSdk:
-        Address = _FakeAddress
-
-    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: _FakeSdk)
-    monkeypatch.setattr("greenfloor.runtime.coinset_runtime.CoinsetAdapter", _FakeAdapter)
-    monkeypatch.delenv("GREENFLOOR_COINSET_BASE_URL", raising=False)
+    monkeypatch.setattr(signing_mod, "_execute_bls_xch_coin_op_rust", _fake_execute)
 
     result = signing_mod.build_signed_spend_bundle(
         {
@@ -460,10 +433,8 @@ def test_signing_uses_testnet11_coinset_adapter_network(monkeypatch) -> None:
         }
     )
     assert result["status"] == "skipped"
-    assert result["reason"] == "no_unspent_xch_coins"
+    assert result["reason"] == "signing_failed:no_unspent_xch_coins"
     assert captured["network"] == "testnet11"
-    assert captured["base_url"] is None
-    assert captured["require_testnet11"] is True
 
 
 def test_from_input_spend_bundle_xch_calls_greenfloor_native(monkeypatch) -> None:
@@ -816,17 +787,15 @@ def test_build_mixed_split_rejects_sub_unit_cat_outputs() -> None:
 
 
 def test_build_mixed_split_allow_sub_cat_output_bypasses_floor_guard(monkeypatch) -> None:
-    class _Sdk:
-        class Address:
-            @staticmethod
-            def decode(_value: str):
-                return SimpleNamespace(puzzle_hash=b"\x11" * 32)
-
-    monkeypatch.setattr(signing_mod, "_import_sdk", lambda: _Sdk)
     monkeypatch.setattr(
         signing_mod,
-        "_resolve_requested_cat_coins_for_mixed_split",
-        lambda **_kwargs: ([], "sentinel_requested_coin_resolution_error"),
+        "_load_master_private_key",
+        lambda *_args, **_kwargs: (b"\x01" * 32, None),
+    )
+    monkeypatch.setattr(
+        signing_mod,
+        "_execute_bls_mixed_split_rust",
+        lambda **_kwargs: (None, "sentinel_requested_coin_resolution_error"),
     )
 
     spend_bundle_hex, err = signing_mod._build_mixed_split_spend_bundle(

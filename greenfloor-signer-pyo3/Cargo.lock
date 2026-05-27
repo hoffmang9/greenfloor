@@ -1680,6 +1680,7 @@ dependencies = [
  "chia-puzzles",
  "chia-sdk-coinset",
  "chia-sdk-driver",
+ "chia-sdk-signer",
  "chia-sdk-types",
  "chia-sdk-utils",
  "chia-secp",
@@ -1704,6 +1705,7 @@ dependencies = [
 name = "greenfloor-signer-pyo3"
 version = "0.1.0"
 dependencies = [
+ "chia-bls 0.36.1",
  "greenfloor-signer",
  "pyo3",
  "serde_json",

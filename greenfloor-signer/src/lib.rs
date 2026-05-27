@@ -1,3 +1,4 @@
+pub mod bls;
 pub mod coinset;
 pub mod config;
 pub mod error;
@@ -25,6 +26,12 @@ pub use coinset::parse_coin_ids;
 pub use config::{load_cloud_wallet_config, load_signer_config};
 pub use error::SignerError as Error;
 pub use offer::{build_vault_cat_offer, CreateOfferRequest, CreateOfferResult};
+pub use bls::{
+    broadcast_bls_spend_bundle, build_bls_mixed_split_spend_bundle, build_bls_offer_spend_bundle,
+    build_bls_xch_coin_op_spend_bundle, list_cat_coin_summaries, list_cat_coin_summaries_by_ids,
+    list_xch_coin_summaries, BlsMixedSplitRequest, BlsMixedSplitResult, BlsOfferRequest,
+    BlsOfferResult, BlsXchCoinOpRequest, BlsXchCoinOpResult, CoinRecordSummary,
+};
 pub use vault::{
     build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,
 };

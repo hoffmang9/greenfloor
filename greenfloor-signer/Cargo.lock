@@ -1764,6 +1764,7 @@ dependencies = [
  "chia-puzzles",
  "chia-sdk-coinset",
  "chia-sdk-driver",
+ "chia-sdk-signer",
  "chia-sdk-test",
  "chia-sdk-types",
  "chia-sdk-utils",

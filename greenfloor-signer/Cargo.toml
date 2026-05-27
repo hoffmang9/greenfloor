@@ -25,6 +25,7 @@ chia-puzzle-types = "0.36.1"
 chia-puzzles = "0.20.3"
 chia-sdk-coinset = { path = "../chia-wallet-sdk/crates/chia-sdk-coinset" }
 chia-sdk-driver = { path = "../chia-wallet-sdk/crates/chia-sdk-driver", features = ["offer-compression"] }
+chia-sdk-signer = { path = "../chia-wallet-sdk/crates/chia-sdk-signer" }
 chia-sdk-types = { path = "../chia-wallet-sdk/crates/chia-sdk-types" }
 chia-sdk-utils = { path = "../chia-wallet-sdk/crates/chia-sdk-utils" }
 chia-secp = "0.36.1"
