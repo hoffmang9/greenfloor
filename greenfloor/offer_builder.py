@@ -10,7 +10,7 @@ def _import_sdk() -> Any:
 
 
 def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
-    from greenfloor.signing import build_signed_spend_bundle
+    from greenfloor.adapters.bls_signing import build_signed_spend_bundle
 
     receive_address = str(payload.get("receive_address", "")).strip()
     key_id = str(payload.get("key_id", "")).strip()
@@ -117,8 +117,14 @@ def _build_offer(payload: dict[str, Any], sdk: Any) -> str:
     spend_bundle_hex = str(payload.get("spend_bundle_hex", "")).strip()
     if not spend_bundle_hex:
         spend_bundle_hex = _build_coin_backed_spend_bundle_hex(payload)
-    spend_bundle = sdk.SpendBundle.from_bytes(sdk.from_hex(spend_bundle_hex))
-    return str(sdk.encode_offer(spend_bundle))
+    raw_hex = spend_bundle_hex[2:] if spend_bundle_hex.lower().startswith("0x") else spend_bundle_hex
+    try:
+        import greenfloor_native
+
+        return str(greenfloor_native.encode_offer(bytes.fromhex(raw_hex)))
+    except ImportError:
+        spend_bundle = sdk.SpendBundle.from_bytes(bytes.fromhex(raw_hex))
+        return str(sdk.encode_offer(spend_bundle))
 
 
 def build_offer(payload: dict[str, Any]) -> str:

@@ -44,6 +44,7 @@ from greenfloor.config.models import (
     ProgramConfig,
     cloud_wallet_offer_path_configured,
     managed_offer_execution_backend,
+    signer_offer_path_configured,
 )
 from greenfloor.core.coin_ops import BucketSpec, CoinOpPlan, plan_coin_ops
 from greenfloor.core.coin_ops_policy import (
@@ -75,6 +76,12 @@ from greenfloor.runtime.cloud_wallet.coin_ops_daemon_execution import (
     DaemonCoinOpExecContext,
     execute_daemon_combine_plan,
     execute_daemon_split_plan,
+)
+from greenfloor.runtime.signer_coin_ops import resolve_signer_asset_id
+from greenfloor.runtime.signer_coin_ops_daemon_execution import (
+    SignerDaemonCoinOpExecContext,
+    execute_signer_daemon_combine_plan,
+    execute_signer_daemon_split_plan,
 )
 from greenfloor.runtime.cloud_wallet.coin_ops_models import (
     CoinOpSelectionMode,
@@ -3269,14 +3276,22 @@ def _plan_and_execute_coin_ops(
             max_daily_fee_budget_mojos=program.coin_ops_max_daily_fee_budget_mojos,
         )
         if executable_plans:
-            execution = _execute_coin_ops_cloud_wallet_kms_only(
-                market=market,
-                program=program,
-                plans=executable_plans,
-                wallet=wallet,
-                signer_selection=signer_selection,
-                state_dir=state_dir,
-            )
+            if signer_offer_path_configured(program):
+                execution = _execute_coin_ops_signer(
+                    market=market,
+                    program=program,
+                    plans=executable_plans,
+                    signer_selection=signer_selection,
+                )
+            else:
+                execution = _execute_coin_ops_cloud_wallet_kms_only(
+                    market=market,
+                    program=program,
+                    plans=executable_plans,
+                    wallet=wallet,
+                    signer_selection=signer_selection,
+                    state_dir=state_dir,
+                )
             _log_market_decision(
                 market.market_id,
                 "coin_ops_executed",
@@ -3400,6 +3415,133 @@ def _plan_and_execute_coin_ops(
             )
     else:
         _log_market_decision(market.market_id, "coin_ops_no_plans")
+
+
+def _execute_coin_ops_signer(
+    *,
+    market: Any,
+    program: Any,
+    plans: list[CoinOpPlan],
+    signer_selection: Any,
+) -> dict[str, Any]:
+    receive_address = str(getattr(market, "receive_address", "")).strip()
+    if not receive_address:
+        return {
+            "dry_run": bool(program.runtime_dry_run),
+            "planned_count": len(plans),
+            "executed_count": 0,
+            "status": "skipped",
+            "items": [
+                {
+                    "op_type": plan.op_type,
+                    "size_base_units": plan.size_base_units,
+                    "op_count": plan.op_count,
+                    "status": "skipped",
+                    "reason": "signer_coin_ops_missing_receive_address",
+                    "operation_id": None,
+                }
+                for plan in plans
+            ],
+        }
+
+    resolved_base_asset_id = resolve_signer_asset_id(
+        program,
+        canonical_asset_id=str(getattr(market, "base_asset", "")).strip(),
+        symbol_hint=str(getattr(market, "base_symbol", "")).strip() or None,
+    )
+    base_unit_mojo_multiplier = _base_unit_mojo_multiplier_for_market(market=market)
+    combine_input_cap = _combine_input_coin_cap()
+    exec_ctx = SignerDaemonCoinOpExecContext(
+        program=program,
+        market=market,
+        receive_address=receive_address,
+        resolved_base_asset_id=resolved_base_asset_id,
+        base_unit_mojo_multiplier=base_unit_mojo_multiplier,
+        combine_input_cap=combine_input_cap,
+        watched_coin_ids=_watched_coin_ids_for_market(
+            market_id=str(getattr(market, "market_id", "")).strip()
+        ),
+        logger=_daemon_logger,
+    )
+    items: list[dict[str, Any]] = []
+    executed_count = 0
+    for plan in plans:
+        op_type = str(plan.op_type)
+        op_count = int(plan.op_count)
+        size_base_units = int(plan.size_base_units)
+        if op_count <= 0 or size_base_units <= 0:
+            items.append(
+                {
+                    "op_type": op_type,
+                    "size_base_units": size_base_units,
+                    "op_count": op_count,
+                    "status": "skipped",
+                    "reason": "invalid_plan",
+                    "operation_id": None,
+                }
+            )
+            continue
+        if bool(program.runtime_dry_run):
+            items.append(
+                {
+                    "op_type": op_type,
+                    "size_base_units": size_base_units,
+                    "op_count": op_count,
+                    "status": "planned",
+                    "reason": "dry_run:signer",
+                    "operation_id": None,
+                }
+            )
+            continue
+        try:
+            if op_type == "split":
+                split_items, split_executed = execute_signer_daemon_split_plan(
+                    plan=plan, ctx=exec_ctx
+                )
+                items.extend(split_items)
+                executed_count += split_executed
+                continue
+            if op_type == "combine":
+                combine_items, combine_executed = execute_signer_daemon_combine_plan(
+                    plan=plan, ctx=exec_ctx
+                )
+                items.extend(combine_items)
+                executed_count += combine_executed
+                continue
+            items.append(
+                {
+                    "op_type": op_type,
+                    "size_base_units": size_base_units,
+                    "op_count": op_count,
+                    "status": "skipped",
+                    "reason": "invalid_plan",
+                    "operation_id": None,
+                }
+            )
+        except Exception as exc:
+            items.append(
+                {
+                    "op_type": op_type,
+                    "size_base_units": size_base_units,
+                    "op_count": op_count,
+                    "status": "skipped",
+                    "reason": f"signer_coin_op_error:{exc}",
+                    "operation_id": None,
+                }
+            )
+
+    return {
+        "dry_run": bool(program.runtime_dry_run),
+        "planned_count": len(plans),
+        "executed_count": executed_count,
+        "status": "signer",
+        "signer_selection": {
+            "selected_source": "signer_registry",
+            "key_id": str(getattr(signer_selection, "key_id", "")).strip(),
+            "network": str(getattr(program, "app_network", "")).strip(),
+        },
+        "items": items,
+    }
 
 
 def _execute_coin_ops_cloud_wallet_kms_only(

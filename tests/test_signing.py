@@ -4,7 +4,7 @@ import hashlib
 from types import SimpleNamespace
 from typing import Any
 
-import greenfloor.signing as signing_mod
+import greenfloor.adapters.bls_signing as signing_mod
 
 
 def test_extract_required_bls_targets_for_conditions_agg_sig_me() -> None:

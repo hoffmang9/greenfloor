@@ -11,6 +11,7 @@ from greenfloor.config.models import (
     VaultConfig,
     VaultWalletKeyConfig,
     cloud_wallet_offer_path_configured,
+    coin_ops_execution_backend,
     managed_offer_execution_backend,
     offer_execution_backend,
     signer_offer_path_configured,
@@ -53,6 +54,18 @@ def test_signer_offer_path_requires_kms_and_vault() -> None:
     assert signer_offer_path_configured(program) is True
     program_no_vault = replace(program, vault_config=None, signer_kms_key_id="arn:x")
     assert signer_offer_path_configured(program_no_vault) is False
+
+
+def test_coin_ops_execution_backend_prefers_signer() -> None:
+    program = _program_with_signer()
+    program = replace(
+        program,
+        cloud_wallet_base_url="https://api.vault.chia.net",
+        cloud_wallet_user_key_id="user",
+        cloud_wallet_private_key_pem_path="/Users/me/.greenfloor/key.pem",
+        cloud_wallet_vault_id="wallet123",
+    )
+    assert coin_ops_execution_backend(program) == "signer"
 
 
 def test_offer_execution_backend_prefers_signer_over_cloud_wallet() -> None:

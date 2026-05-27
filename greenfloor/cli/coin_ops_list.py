@@ -8,13 +8,82 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.asset_label_catalog import _is_hex_asset_id
-from greenfloor.config.io import load_program_config
+from greenfloor.config.io import load_markets_config, load_program_config
+from greenfloor.config.models import ProgramConfig, coin_ops_execution_backend
 from greenfloor.runtime.cloud_wallet import assets as cloud_wallet_assets
 from greenfloor.runtime.cloud_wallet.adapter import format_json_output
 from greenfloor.runtime.cloud_wallet.coin_ops_runtime import wallet_with_optional_vault_override
 from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
+from greenfloor.runtime.signer_coin_ops import (
+    list_signer_asset_coins,
+    resolve_signer_asset_id,
+)
 
 coin_ops_logger = logging.getLogger("greenfloor.manager")
+
+
+def _coins_list_signer(
+    *,
+    program: Any,
+    asset: str | None,
+    cat_id: str | None,
+) -> int:
+    assert isinstance(program, ProgramConfig)
+    markets_path = program.home_dir / "config" / "markets.yaml"
+    markets = load_markets_config(markets_path)
+    market = next(iter(markets.markets.values()), None)
+    if market is None:
+        raise ValueError("no markets configured")
+    receive_address = str(market.receive_address).strip()
+    if not receive_address:
+        raise ValueError("market missing receive_address for signer coin list")
+
+    canonical_filter = None
+    if cat_id and cat_id.strip():
+        canonical_filter = cat_id.strip().lower()
+    elif asset and asset.strip():
+        canonical_filter = asset.strip()
+    resolved_asset_filter: str | None = None
+    if canonical_filter:
+        resolved_asset_filter = resolve_signer_asset_id(
+            program, canonical_asset_id=canonical_filter, symbol_hint=canonical_filter
+        )
+    list_asset_id = resolved_asset_filter or str(market.base_asset)
+    coins = list_signer_asset_coins(
+        program=program,
+        receive_address=receive_address,
+        asset_id=list_asset_id,
+    )
+    items = []
+    for coin in coins:
+        coin_state = str(coin.get("state", "CONFIRMED")).strip().upper()
+        items.append(
+            {
+                "coin_id": str(coin.get("name", coin.get("id", ""))).strip(),
+                "amount": int(coin.get("amount", 0)),
+                "state": coin_state,
+                "pending": coin_state in {"PENDING", "MEMPOOL"},
+                "spendable": is_spendable_coin(coin),
+                "asset": resolved_asset_filter or list_asset_id,
+                "reported_asset": resolved_asset_filter,
+                "scoped_asset": resolved_asset_filter,
+            }
+        )
+    spendable = [c for c in items if bool(c.get("spendable"))]
+    print(
+        format_json_output(
+            {
+                "execution_backend": "signer",
+                "receive_address": receive_address,
+                "resolved_asset_id": resolved_asset_filter,
+                "coins": items,
+                "coin_count": len(items),
+                "spendable_coin_count": len(spendable),
+                "spendable_amount": sum(int(c["amount"]) for c in spendable),
+            }
+        )
+    )
+    return 0
 
 
 def coins_list(
@@ -25,6 +94,8 @@ def coins_list(
     cat_id: str | None = None,
 ) -> int:
     program = load_program_config(program_path)
+    if coin_ops_execution_backend(program) == "signer":
+        return _coins_list_signer(program=program, asset=asset, cat_id=cat_id)
     wallet = wallet_with_optional_vault_override(program, vault_id=vault_id)
 
     resolved_asset_filter: str | None = None
