@@ -427,7 +427,6 @@ def test_cloud_wallet_post_offer_phase_verifies_dexie_visibility(monkeypatch) ->
         pass
 
     dexie = _Dexie()
-    market = type("Market", (), {"base_asset": "asset"})()
     result = post_offer_phase(
         publish_venue="dexie",
         dexie=cast(Any, dexie),
@@ -435,7 +434,6 @@ def test_cloud_wallet_post_offer_phase_verifies_dexie_visibility(monkeypatch) ->
         offer_text="offer1abc",
         drop_only=False,
         claim_rewards=False,
-        market=market,
         expected_offered_asset_id="asset",
         expected_offered_symbol="asset",
         expected_requested_asset_id="xch",
@@ -460,7 +458,6 @@ def test_cloud_wallet_post_offer_phase_fails_after_repeated_transient_dexie_404(
 
     dexie = _Dexie()
     post_calls = {"count": 0}
-    market = type("Market", (), {"base_asset": "asset"})()
     result = post_offer_phase(
         publish_venue="dexie",
         dexie=cast(Any, dexie),
@@ -468,7 +465,6 @@ def test_cloud_wallet_post_offer_phase_fails_after_repeated_transient_dexie_404(
         offer_text="offer1abc",
         drop_only=False,
         claim_rewards=False,
-        market=market,
         expected_offered_asset_id="asset",
         expected_offered_symbol="asset",
         expected_requested_asset_id="xch",

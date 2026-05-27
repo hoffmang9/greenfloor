@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
-from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.config.models import MarketConfig, MarketLadderEntry, ProgramConfig
 from greenfloor.runtime.cloud_wallet.assets import resolve_cloud_wallet_offer_asset_ids
 from greenfloor.runtime.cloud_wallet.bootstrap import ensure_offer_bootstrap_denominations
 from greenfloor.runtime.cloud_wallet.phases import (
@@ -13,12 +14,42 @@ from greenfloor.runtime.cloud_wallet.phases import (
     cloud_wallet_wait_offer_artifact_phase,
 )
 from greenfloor.runtime.cloud_wallet.polling import wait_for_mempool_then_confirmation
+from greenfloor.runtime.offer_build_context import OfferBuildContext, prepare_offer_build_context
 from greenfloor.runtime.offer_execution import build_and_post_offer_cloud_wallet
 from greenfloor.runtime.offer_publish import (
     is_transient_dexie_visibility_404_error,
     post_offer_phase,
 )
 from tests.helpers.cloud_wallet_offer_deps import cloud_wallet_test_deps
+from tests.helpers.config_fixtures import (
+    minimal_market_config,
+    minimal_market_with_sell_ladder,
+    minimal_program_config,
+)
+
+
+def _cloud_wallet_test_program(tmp_path: Path) -> ProgramConfig:
+    return replace(minimal_program_config(home_dir=str(tmp_path)), app_log_level="INFO")
+
+
+def _cloud_wallet_test_market() -> MarketConfig:
+    return replace(
+        minimal_market_config(),
+        base_asset="base-asset",
+        quote_asset="quote-asset",
+        base_symbol="BASE",
+        pricing={"fixed_quote_per_base": 1.5},
+    )
+
+
+def _cloud_wallet_test_build_ctx(tmp_path: Path) -> OfferBuildContext:
+    return prepare_offer_build_context(
+        program=_cloud_wallet_test_program(tmp_path),
+        market=_cloud_wallet_test_market(),
+        program_path=Path(str(tmp_path)) / "program.yaml",
+        network="mainnet",
+        keyring_yaml_path="",
+    )
 
 
 def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypatch) -> None:
@@ -149,34 +180,13 @@ def test_resolve_cloud_wallet_offer_asset_ids_uses_global_hints_without_label_ma
 
 
 def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path: Path) -> None:
-    class _Program:
-        home_dir = str(tmp_path)
-        app_network = "mainnet"
-        app_log_level = "INFO"
-        runtime_offer_bootstrap_signature_wait_timeout_seconds = 45
-        runtime_offer_bootstrap_signature_warning_interval_seconds = 30
-        runtime_offer_bootstrap_wait_timeout_seconds = 120
-        runtime_offer_bootstrap_wait_mempool_warning_seconds = 30
-        runtime_offer_bootstrap_wait_confirmation_warning_seconds = 60
-        runtime_cloud_wallet_create_signature_wait_timeout_seconds = 120
-        runtime_cloud_wallet_create_signature_warning_interval_seconds = 60
-        runtime_cloud_wallet_offer_artifact_timeout_seconds = 30
-
-    class _Market:
-        market_id = "m1"
-        base_asset = "base-asset"
-        quote_asset = "quote-asset"
-        base_symbol = "BASE"
-        cloud_wallet_base_global_id = ""
-        cloud_wallet_quote_global_id = ""
-
     class _Wallet:
         vault_id = "wallet-1"
         network = "mainnet"
 
     exit_code, payload = build_and_post_offer_cloud_wallet(
-        program=cast(ProgramConfig, _Program()),
-        market=cast(MarketConfig, _Market()),
+        program=_cloud_wallet_test_program(tmp_path),
+        market=_cloud_wallet_test_market(),
         size_base_units=5,
         repeat=1,
         publish_venue="dexie",
@@ -184,14 +194,13 @@ def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path:
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=1.5,
+        build_ctx=_cloud_wallet_test_build_ctx(tmp_path),
         dry_run=True,
         deps=cloud_wallet_test_deps(
             wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
             recent_market_resolved_asset_id_hints_fn=lambda **kwargs: (None, None),
             resolve_cloud_wallet_offer_asset_ids_fn=lambda **kwargs: ("Asset_base", "Asset_quote"),
             resolve_maker_offer_fee_fn=lambda **kwargs: (0, "test"),
-            resolve_offer_expiry_for_market_fn=lambda _market: ("minutes", 30),
             ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
                 "status": "skipped",
                 "reason": "dry_run",
@@ -226,27 +235,6 @@ def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path:
 
 
 def test_build_and_post_offer_cloud_wallet_emits_timing_diagnostics(tmp_path: Path) -> None:
-    class _Program:
-        home_dir = str(tmp_path)
-        app_network = "mainnet"
-        app_log_level = "INFO"
-        runtime_offer_bootstrap_signature_wait_timeout_seconds = 45
-        runtime_offer_bootstrap_signature_warning_interval_seconds = 30
-        runtime_offer_bootstrap_wait_timeout_seconds = 120
-        runtime_offer_bootstrap_wait_mempool_warning_seconds = 30
-        runtime_offer_bootstrap_wait_confirmation_warning_seconds = 60
-        runtime_cloud_wallet_create_signature_wait_timeout_seconds = 120
-        runtime_cloud_wallet_create_signature_warning_interval_seconds = 60
-        runtime_cloud_wallet_offer_artifact_timeout_seconds = 30
-
-    class _Market:
-        market_id = "m1"
-        base_asset = "base-asset"
-        quote_asset = "quote-asset"
-        base_symbol = "BASE"
-        cloud_wallet_base_global_id = ""
-        cloud_wallet_quote_global_id = ""
-
     class _Wallet:
         vault_id = "wallet-1"
         network = "mainnet"
@@ -256,8 +244,8 @@ def test_build_and_post_offer_cloud_wallet_emits_timing_diagnostics(tmp_path: Pa
             pass
 
     exit_code, payload = build_and_post_offer_cloud_wallet(
-        program=cast(ProgramConfig, _Program()),
-        market=cast(MarketConfig, _Market()),
+        program=_cloud_wallet_test_program(tmp_path),
+        market=_cloud_wallet_test_market(),
         size_base_units=5,
         repeat=1,
         publish_venue="dexie",
@@ -265,7 +253,7 @@ def test_build_and_post_offer_cloud_wallet_emits_timing_diagnostics(tmp_path: Pa
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=1.5,
+        build_ctx=_cloud_wallet_test_build_ctx(tmp_path),
         dry_run=False,
         deps=cloud_wallet_test_deps(
             wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
@@ -273,7 +261,6 @@ def test_build_and_post_offer_cloud_wallet_emits_timing_diagnostics(tmp_path: Pa
             recent_market_resolved_asset_id_hints_fn=lambda **kwargs: (None, None),
             resolve_cloud_wallet_offer_asset_ids_fn=lambda **kwargs: ("Asset_base", "Asset_quote"),
             resolve_maker_offer_fee_fn=lambda **kwargs: (0, "test"),
-            resolve_offer_expiry_for_market_fn=lambda _market: ("minutes", 30),
             ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
                 "status": "skipped",
                 "reason": "already_ready",
@@ -362,7 +349,6 @@ def test_cloud_wallet_post_offer_phase_fails_after_repeated_dexie_404_visibility
         offer_text="offer1abc",
         drop_only=True,
         claim_rewards=False,
-        market=object(),
         expected_offered_asset_id="asset_a",
         expected_offered_symbol="A",
         expected_requested_asset_id="asset_b",
@@ -401,7 +387,6 @@ def test_cloud_wallet_post_offer_phase_retries_transient_dexie_404_until_visible
         offer_text="offer1abc",
         drop_only=True,
         claim_rewards=False,
-        market=object(),
         expected_offered_asset_id="asset_a",
         expected_offered_symbol="A",
         expected_requested_asset_id="asset_b",
@@ -437,16 +422,18 @@ def test_cloud_wallet_create_offer_phase_propagates_create_offer_balance_error()
                 "cloud_wallet_offer_insufficient_spendable_balance:available=1000:required=5000"
             )
 
-    class _Market:
-        pricing = {
+    market = replace(
+        minimal_market_config(),
+        pricing={
             "base_unit_mojo_multiplier": 1000,
             "quote_unit_mojo_multiplier": 1_000_000_000_000,
-        }
+        },
+    )
 
     try:
         cloud_wallet_create_offer_phase(
             wallet=cast(CloudWalletAdapter, _Wallet()),
-            market=_Market(),
+            market=market,
             size_base_units=50,
             quote_price=2.94117647,
             resolved_base_asset_id="Asset_base",
@@ -485,15 +472,17 @@ def test_cloud_wallet_create_offer_phase_always_disables_split_input_coins_witho
             captured.update(kwargs)
             return {"signature_request_id": "sr-1", "status": "SUBMITTED"}
 
-    class _Market:
-        pricing = {
+    market = replace(
+        minimal_market_config(),
+        pricing={
             "base_unit_mojo_multiplier": 1000,
             "quote_unit_mojo_multiplier": 1000,
-        }
+        },
+    )
 
     payload = cloud_wallet_create_offer_phase(
         wallet=cast(CloudWalletAdapter, _Wallet()),
-        market=_Market(),
+        market=market,
         size_base_units=1,
         quote_price=1.0,
         resolved_base_asset_id="Asset_base",
@@ -530,15 +519,17 @@ def test_cloud_wallet_create_offer_phase_does_not_call_list_coins_precheck() -> 
         def create_offer(**_kwargs):
             return {"signature_request_id": "sr-1", "status": "SUBMITTED"}
 
-    class _Market:
-        pricing = {
+    market = replace(
+        minimal_market_config(),
+        pricing={
             "base_unit_mojo_multiplier": 1000,
             "quote_unit_mojo_multiplier": 1000,
-        }
+        },
+    )
 
     payload = cloud_wallet_create_offer_phase(
         wallet=cast(CloudWalletAdapter, _Wallet()),
-        market=_Market(),
+        market=market,
         size_base_units=1,
         quote_price=1.0,
         resolved_base_asset_id="Asset_base",
@@ -559,27 +550,6 @@ def test_cloud_wallet_create_offer_phase_does_not_call_list_coins_precheck() -> 
 def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(
     tmp_path: Path,
 ) -> None:
-    class _Program:
-        home_dir = str(tmp_path)
-        app_network = "mainnet"
-        app_log_level = "INFO"
-        runtime_offer_bootstrap_signature_wait_timeout_seconds = 45
-        runtime_offer_bootstrap_signature_warning_interval_seconds = 30
-        runtime_offer_bootstrap_wait_timeout_seconds = 120
-        runtime_offer_bootstrap_wait_mempool_warning_seconds = 30
-        runtime_offer_bootstrap_wait_confirmation_warning_seconds = 60
-        runtime_cloud_wallet_create_signature_wait_timeout_seconds = 120
-        runtime_cloud_wallet_create_signature_warning_interval_seconds = 60
-        runtime_cloud_wallet_offer_artifact_timeout_seconds = 30
-
-    class _Market:
-        market_id = "m1"
-        base_asset = "base-asset"
-        quote_asset = "quote-asset"
-        base_symbol = "BASE"
-        cloud_wallet_base_global_id = ""
-        cloud_wallet_quote_global_id = ""
-
     class _Wallet:
         vault_id = "wallet-1"
         network = "mainnet"
@@ -589,8 +559,8 @@ def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(
             pass
 
     code, payload = build_and_post_offer_cloud_wallet(
-        program=cast(ProgramConfig, _Program()),
-        market=cast(MarketConfig, _Market()),
+        program=_cloud_wallet_test_program(tmp_path),
+        market=_cloud_wallet_test_market(),
         size_base_units=5,
         repeat=1,
         publish_venue="dexie",
@@ -598,7 +568,7 @@ def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=1.5,
+        build_ctx=_cloud_wallet_test_build_ctx(tmp_path),
         dry_run=False,
         deps=cloud_wallet_test_deps(
             wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
@@ -606,7 +576,6 @@ def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(
             recent_market_resolved_asset_id_hints_fn=lambda **kwargs: (None, None),
             resolve_cloud_wallet_offer_asset_ids_fn=lambda **kwargs: ("Asset_base", "Asset_quote"),
             resolve_maker_offer_fee_fn=lambda **kwargs: (0, "test"),
-            resolve_offer_expiry_for_market_fn=lambda _market: ("minutes", 30),
             ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
                 "status": "executed",
                 "reason": "bootstrap_submitted",
@@ -629,28 +598,34 @@ def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(
 
 
 def test_bootstrap_uses_cloud_wallet_split_without_keyring() -> None:
-    class _Program:
-        app_network = "mainnet"
-        coin_ops_minimum_fee_mojos = 10
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "UserAuthKey_1"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "Wallet_1"
-        cloud_wallet_kms_key_id = "arn:aws:kms:us-west-2:123:key/1"
-        cloud_wallet_kms_region = "us-west-2"
-        cloud_wallet_kms_public_key_hex = "02" + ("00" * 32)
-
-    class _LadderEntry:
-        size_base_units = 10
-        target_count = 1
-        split_buffer_count = 1
-
-    class _Market:
-        base_asset = "cat-asset"
-        quote_asset = "wUSDC.b"
-        receive_address = "xch1test"
-        ladders = {"sell": [_LadderEntry()]}
-        pricing = {}
+    program = replace(
+        minimal_program_config(),
+        coin_ops_minimum_fee_mojos=10,
+        cloud_wallet_base_url="https://api.vault.chia.net",
+        cloud_wallet_user_key_id="UserAuthKey_1",
+        cloud_wallet_private_key_pem_path="/tmp/key.pem",
+        cloud_wallet_vault_id="Wallet_1",
+        cloud_wallet_kms_key_id="arn:aws:kms:us-west-2:123:key/1",
+        cloud_wallet_kms_region="us-west-2",
+        cloud_wallet_kms_public_key_hex="02" + ("00" * 32),
+    )
+    market = replace(
+        minimal_market_with_sell_ladder(size_base_units=10, target_count=1),
+        base_asset="cat-asset",
+        quote_asset="wUSDC.b",
+        receive_address="xch1test",
+        pricing={},
+        ladders={
+            "sell": [
+                MarketLadderEntry(
+                    size_base_units=10,
+                    target_count=1,
+                    split_buffer_count=1,
+                    combine_when_excess_factor=2.0,
+                )
+            ]
+        },
+    )
 
     class _Deficit:
         size_base_units = 10
@@ -681,8 +656,8 @@ def test_bootstrap_uses_cloud_wallet_split_without_keyring() -> None:
         return {"signature_request_id": "SignatureRequest_1", "status": "SUBMITTED"}
 
     result = ensure_offer_bootstrap_denominations(
-        program=cast(ProgramConfig, _Program()),
-        market=cast(MarketConfig, _Market()),
+        program=program,
+        market=market,
         wallet=cast(Any, _Wallet()),
         resolved_base_asset_id="Asset_cat",
         resolved_quote_asset_id="Asset_quote",

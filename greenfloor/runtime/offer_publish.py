@@ -414,7 +414,6 @@ def post_offer_phase(
     offer_text: str,
     drop_only: bool,
     claim_rewards: bool,
-    market: Any,
     expected_offered_asset_id: str,
     expected_offered_symbol: str,
     expected_requested_asset_id: str,
@@ -424,7 +423,6 @@ def post_offer_phase(
     verify_dexie_offer_visible_by_id_fn: collections.abc.Callable[..., str | None] | None = None,
     sleep_fn: collections.abc.Callable[[float], None] | None = None,
 ) -> dict[str, Any]:
-    _ = market
     if post_dexie_offer_with_invalid_offer_retry_fn is None:
         post_dexie_offer_with_invalid_offer_retry_fn = post_dexie_offer_with_invalid_offer_retry
     if verify_dexie_offer_visible_by_id_fn is None:

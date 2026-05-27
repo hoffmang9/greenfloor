@@ -39,10 +39,10 @@ from greenfloor.config.io import (
     resolve_trade_asset_for_dexie,
 )
 from greenfloor.config.models import (
+    MarketConfig,
     ProgramConfig,
     cloud_wallet_offer_path_configured,
     offer_execution_backend,
-    prepare_signer_runtime,
 )
 from greenfloor.core.coin_ops import BucketSpec, CoinOpPlan, plan_coin_ops
 from greenfloor.core.fee_budget import partition_plans_by_budget, projected_coin_ops_fee_mojos
@@ -63,10 +63,12 @@ from greenfloor.notify.pushover import send_pushover_alert
 from greenfloor.runtime.cloud_wallet.assets import (
     resolve_cloud_wallet_offer_asset_ids,
 )
-from greenfloor.runtime.offer_execution import (
-    build_and_post_offer_cloud_wallet,
-    build_and_post_offer_signer,
+from greenfloor.runtime.offer_build_context import (
+    default_program_config_path,
+    prepare_offer_build_context,
 )
+from greenfloor.runtime.offer_execution import build_daemon_action_offer_payload
+from greenfloor.runtime.offer_post_request import OfferPostRequest, parse_managed_offer_post_result
 from greenfloor.runtime.offer_publish import (
     is_transient_dexie_visibility_404_error,
     resolve_quote_price_for_market,
@@ -1491,11 +1493,12 @@ def _inject_reseed_action_if_no_active_offers(
 
 def _build_offer_for_action(
     *,
-    market,
-    action,
+    program: ProgramConfig,
+    market: MarketConfig,
+    action: Any,
     xch_price_usd: float | None,
-    network: str,
-    keyring_yaml_path: str,
+    program_path: Path | None = None,
+    keyring_yaml_path: str | None = None,
 ) -> dict[str, Any]:
     from greenfloor.offer_builder import build_offer_text
 
@@ -1506,52 +1509,28 @@ def _build_offer_for_action(
             "reason": "offer_builder_failed:buy_side_requires_cloud_wallet_path",
             "offer": None,
         }
-    pricing = _market_pricing(market)
+    resolved_keyring_yaml_path = keyring_yaml_path
+    resolved_program_path = default_program_config_path(program, program_path)
     try:
-        quote_price = resolve_quote_price_for_market(market)
+        build_ctx = prepare_offer_build_context(
+            program=program,
+            market=market,
+            program_path=resolved_program_path,
+            network=program.app_network,
+            keyring_yaml_path=resolved_keyring_yaml_path,
+            action_side=side,
+        )
     except Exception as exc:
         return {
             "status": "skipped",
             "reason": f"offer_builder_failed:{exc}",
             "offer": None,
         }
-    resolved_quote_asset = _resolve_quote_asset_for_offer(
-        quote_asset=str(market.quote_asset),
-        network=network,
+    payload = build_daemon_action_offer_payload(
+        build_ctx,
+        action=action,
+        xch_price_usd=xch_price_usd,
     )
-    payload = {
-        "market_id": market.market_id,
-        "base_asset": market.base_asset,
-        "base_symbol": market.base_symbol,
-        "quote_asset": resolved_quote_asset,
-        "quote_asset_type": market.quote_asset_type,
-        "receive_address": market.receive_address,
-        "size_base_units": int(action.size),
-        "pair": action.pair,
-        "reason": action.reason,
-        "side": side,
-        "xch_price_usd": xch_price_usd,
-        "target_spread_bps": action.target_spread_bps,
-        "expiry_unit": action.expiry_unit,
-        "expiry_value": int(action.expiry_value),
-        "quote_price_quote_per_base": quote_price,
-        "base_unit_mojo_multiplier": int(
-            pricing.get(
-                "base_unit_mojo_multiplier",
-                default_mojo_multiplier_for_asset(str(market.base_asset)),
-            )
-        ),
-        "quote_unit_mojo_multiplier": int(
-            pricing.get(
-                "quote_unit_mojo_multiplier",
-                default_mojo_multiplier_for_asset(str(resolved_quote_asset)),
-            )
-        ),
-        "key_id": market.signer_key_id,
-        "keyring_yaml_path": keyring_yaml_path,
-        "network": network,
-        "asset_id": market.base_asset,
-    }
     try:
         offer = build_offer_text(payload)
     except Exception as exc:
@@ -2013,101 +1992,49 @@ def _resolve_cloud_wallet_offer_asset_ids_for_reservation(
 
 def _managed_offer_post(
     *,
-    program: Any,
-    market: Any,
+    program: ProgramConfig,
+    market: MarketConfig,
     size_base_units: int,
     publish_venue: str,
     runtime_dry_run: bool,
     side: str = "sell",
-    build_and_post_fn: Callable[..., tuple[int, dict[str, Any]]] | None = None,
+    program_path: Path | None = None,
 ) -> dict[str, Any]:
-    backend: str | None = None
-    if isinstance(program, ProgramConfig):
-        backend = offer_execution_backend(program, size_base_units=size_base_units)
-        if backend == "signer":
-            prepare_signer_runtime(program)
-            if build_and_post_fn is None:
-                build_and_post_fn = build_and_post_offer_signer
-        elif backend == "cloud_wallet":
-            if build_and_post_fn is None:
-                build_and_post_fn = build_and_post_offer_cloud_wallet
-        else:
-            return {
-                "success": False,
-                "error": "managed_offer_post_requires_signer_or_cloud_wallet_backend",
-            }
-    elif build_and_post_fn is None:
+    backend = offer_execution_backend(program, size_base_units=size_base_units)
+    if backend not in ("signer", "cloud_wallet"):
         return {
             "success": False,
-            "error": "managed_offer_post_requires_program_config",
+            "error": "managed_offer_post_requires_signer_or_cloud_wallet_backend",
         }
 
-    quote_price = resolve_quote_price_for_market(market)
-    build_kwargs: dict[str, Any] = {
-        "program": program,
-        "market": market,
-        "size_base_units": size_base_units,
-        "repeat": 1,
-        "publish_venue": publish_venue,
-        "dexie_base_url": str(program.dexie_api_base),
-        "splash_base_url": str(program.splash_api_base),
-        "drop_only": True,
-        "claim_rewards": False,
-        "quote_price": quote_price,
-        "dry_run": runtime_dry_run,
-        "action_side": side,
-    }
-    if backend == "cloud_wallet":
-        build_kwargs["offer_artifact_timeout_seconds"] = int(
-            program.runtime_cloud_wallet_offer_artifact_timeout_seconds
-        )
-    build_kwargs["emit_output"] = False
-    build_kwargs["persist_results"] = False
-    exit_code, payload = build_and_post_fn(**build_kwargs)
-    results = payload.get("results", [])
-    result = (
-        results[0].get("result", {})
-        if isinstance(results, list) and results and isinstance(results[0], dict)
-        else {}
+    build_ctx = prepare_offer_build_context(
+        program=program,
+        market=market,
+        program_path=default_program_config_path(program, program_path),
+        network=program.app_network,
+        action_side=side,
     )
-    timing_payload = result.get("timing_ms", {}) if isinstance(result, dict) else {}
-
-    def _opt_int(key: str) -> int | None:
-        v = timing_payload.get(key) if isinstance(timing_payload, dict) else None
-        return int(v) if v is not None else None
-
-    create_ms = _opt_int("create_total_ms")
-    publish_ms = _opt_int("publish_ms")
-    total_ms = _opt_int("total_ms")
-    create_phase_ms = _opt_int("create_phase_ms")
-    artifact_wait_ms = _opt_int("artifact_wait_ms")
-    if exit_code != 0:
-        error = str(result.get("error", "")).strip() if isinstance(result, dict) else ""
-        return {
-            "success": False,
-            "error": error or f"managed_offer_post_exit_code:{exit_code}",
-            "offer_create_ms": create_ms,
-            "offer_publish_ms": publish_ms,
-            "offer_total_ms": total_ms,
-            "offer_create_phase_ms": create_phase_ms,
-            "offer_artifact_wait_ms": artifact_wait_ms,
-        }
-    if not isinstance(results, list) or not results:
-        return {"success": False, "error": "managed_offer_post_missing_results"}
-    result = results[0].get("result", {}) if isinstance(results[0], dict) else {}
-    if not isinstance(result, dict):
-        result = {}
-    success = bool(result.get("success", False)) and int(payload.get("publish_failures", 1)) == 0
-    return {
-        "success": success,
-        "offer_id": str(result.get("id", "")).strip() or None,
-        "error": str(result.get("error", "")).strip() if not success else "",
-        "offer_create_ms": create_ms,
-        "offer_publish_ms": publish_ms,
-        "offer_total_ms": total_ms,
-        "offer_create_phase_ms": create_phase_ms,
-        "offer_artifact_wait_ms": artifact_wait_ms,
-    }
+    request = OfferPostRequest(
+        build_ctx=build_ctx,
+        size_base_units=size_base_units,
+        repeat=1,
+        publish_venue=publish_venue,
+        dexie_base_url=str(program.dexie_api_base),
+        splash_base_url=str(program.splash_api_base),
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=runtime_dry_run,
+    )
+    offer_artifact_timeout_seconds = (
+        int(program.runtime_cloud_wallet_offer_artifact_timeout_seconds)
+        if backend == "cloud_wallet"
+        else None
+    )
+    exit_code, payload = request.run_managed(
+        backend,
+        offer_artifact_timeout_seconds=offer_artifact_timeout_seconds,
+    )
+    return parse_managed_offer_post_result(exit_code, payload)
 
 
 def _resolve_coinset_ws_url(*, program, coinset_base_url: str) -> str:
@@ -2313,24 +2240,26 @@ def _execute_cloud_wallet_action_with_retry(
 
 def _execute_single_local_action(
     *,
-    market: Any,
+    program: ProgramConfig,
+    market: MarketConfig,
     action: Any,
     xch_price_usd: float | None,
-    app_network: str,
     keyring_yaml_path: str,
     dexie: DexieAdapter,
     splash: SplashAdapter | None,
     publish_venue: str,
     store: SqliteStore,
+    program_path: Path | None = None,
 ) -> dict[str, Any]:
     """Execute a single strategy action via the local build+sign+post path."""
     action_started = time.monotonic()
     build_started = action_started
     built = _build_offer_for_action(
+        program=program,
         market=market,
         action=action,
         xch_price_usd=xch_price_usd,
-        network=app_network,
+        program_path=program_path,
         keyring_yaml_path=keyring_yaml_path,
     )
     build_ms = int((time.monotonic() - build_started) * 1000)
@@ -2779,17 +2708,26 @@ def _execute_strategy_actions(
                         "offer_id": None,
                     }
             else:
-                item = _execute_single_local_action(
-                    market=market,
-                    action=action,
-                    xch_price_usd=xch_price_usd,
-                    app_network=app_network,
-                    keyring_yaml_path=keyring_yaml_path,
-                    dexie=dexie,
-                    splash=splash,
-                    publish_venue=publish_venue,
-                    store=store,
-                )
+                if program is None or not isinstance(program, ProgramConfig):
+                    item = {
+                        "size": action.size,
+                        "side": _normalize_offer_side(getattr(action, "side", "sell")),
+                        "status": "skipped",
+                        "reason": "local_offer_post_requires_program_config",
+                        "offer_id": None,
+                    }
+                else:
+                    item = _execute_single_local_action(
+                        program=program,
+                        market=market,
+                        action=action,
+                        xch_price_usd=xch_price_usd,
+                        keyring_yaml_path=keyring_yaml_path,
+                        dexie=dexie,
+                        splash=splash,
+                        publish_venue=publish_venue,
+                        store=store,
+                    )
             if item.get("status") == "executed":
                 executed_count += 1
             _log_offer_action_timing(str(getattr(market, "market_id", "")), item)

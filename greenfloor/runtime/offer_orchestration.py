@@ -11,9 +11,9 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
-from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
+from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_publish import (
     dexie_offer_view_url,
     expected_publish_asset_fields,
@@ -211,8 +211,7 @@ def _append_post_failure(
 
 def execute_build_and_post_offer(
     *,
-    program: ProgramConfig,
-    market: MarketConfig,
+    build_ctx: OfferBuildContext,
     size_base_units: int,
     repeat: int,
     publish_venue: str,
@@ -220,9 +219,7 @@ def execute_build_and_post_offer(
     splash_base_url: str,
     drop_only: bool,
     claim_rewards: bool,
-    quote_price: float,
     dry_run: bool,
-    action_side: str,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
     bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]] | None,
@@ -233,8 +230,10 @@ def execute_build_and_post_offer(
     post_deps: OfferPostDeps | None = None,
 ) -> tuple[int, dict[str, Any], list[OfferPostPersistRecord]]:
     resolved_post_deps = post_deps or default_offer_post_deps()
-
-    side = normalize_offer_side(action_side)
+    program = build_ctx.program
+    market = build_ctx.market
+    quote_price = float(build_ctx.quote_price)
+    side = normalize_offer_side(build_ctx.action_side)
     post_results: list[dict[str, Any]] = []
     built_offers_preview: list[dict[str, str]] = []
     bootstrap_actions: list[dict[str, Any]] = []
@@ -380,7 +379,6 @@ def execute_build_and_post_offer(
             offer_text=offer_text,
             drop_only=drop_only,
             claim_rewards=claim_rewards,
-            market=market,
             **asset_fields,
         )
         publish_ms = int((time.monotonic() - publish_started) * 1000)
@@ -448,8 +446,7 @@ def execute_build_and_post_offer(
 
 def build_and_post_offer(
     *,
-    program: ProgramConfig,
-    market: MarketConfig,
+    build_ctx: OfferBuildContext,
     size_base_units: int,
     repeat: int,
     publish_venue: str,
@@ -457,9 +454,7 @@ def build_and_post_offer(
     splash_base_url: str,
     drop_only: bool,
     claim_rewards: bool,
-    quote_price: float,
     dry_run: bool,
-    action_side: str,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
     bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]] | None,
@@ -472,9 +467,9 @@ def build_and_post_offer(
     persist_results: bool = True,
 ) -> tuple[int, dict[str, Any]]:
     resolved_post_deps = post_deps or default_offer_post_deps()
+    program = build_ctx.program
     exit_code, payload, persist_records = execute_build_and_post_offer(
-        program=program,
-        market=market,
+        build_ctx=build_ctx,
         size_base_units=size_base_units,
         repeat=repeat,
         publish_venue=publish_venue,
@@ -482,9 +477,7 @@ def build_and_post_offer(
         splash_base_url=splash_base_url,
         drop_only=drop_only,
         claim_rewards=claim_rewards,
-        quote_price=quote_price,
         dry_run=dry_run,
-        action_side=action_side,
         resolved_base_asset_id=resolved_base_asset_id,
         resolved_quote_asset_id=resolved_quote_asset_id,
         bootstrap_phase_fn=bootstrap_phase_fn,

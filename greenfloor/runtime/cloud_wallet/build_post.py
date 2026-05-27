@@ -10,6 +10,7 @@ from greenfloor.runtime.cloud_wallet.deps import (
     CloudWalletOfferDeps,
     default_cloud_wallet_offer_deps,
 )
+from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import (
     BootstrapPolicy,
     OfferCreateFailure,
@@ -29,9 +30,8 @@ def build_and_post_offer_cloud_wallet(
     splash_base_url: str,
     drop_only: bool,
     claim_rewards: bool,
-    quote_price: float,
+    build_ctx: OfferBuildContext,
     dry_run: bool,
-    action_side: str = "sell",
     offer_artifact_timeout_seconds: int | None = None,
     emit_output: bool = True,
     persist_results: bool = True,
@@ -62,7 +62,8 @@ def build_and_post_offer_cloud_wallet(
             program_home_dir=str(program.home_dir),
         )
     )
-    expiry_unit, expiry_value = resolved_deps.resolve_offer_expiry_for_market_fn(market)
+    expiry_unit = build_ctx.expiry_unit
+    expiry_value = int(build_ctx.expiry_value)
     offer_fee_mojos, _ = resolved_deps.post_deps.resolve_maker_offer_fee_fn(
         network=program.app_network
     )
@@ -153,8 +154,7 @@ def build_and_post_offer_cloud_wallet(
         )
 
     return build_and_post_offer(
-        program=program,
-        market=market,
+        build_ctx=build_ctx,
         size_base_units=size_base_units,
         repeat=repeat,
         publish_venue=publish_venue,
@@ -162,9 +162,7 @@ def build_and_post_offer_cloud_wallet(
         splash_base_url=splash_base_url,
         drop_only=drop_only,
         claim_rewards=claim_rewards,
-        quote_price=quote_price,
         dry_run=dry_run,
-        action_side=action_side,
         resolved_base_asset_id=resolved_base_asset_id,
         resolved_quote_asset_id=resolved_quote_asset_id,
         bootstrap_phase_fn=bootstrap,

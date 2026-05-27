@@ -6,6 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.runtime.offer_build_context import OfferBuildContext, prepare_offer_build_context
 from tests.helpers.config_fixtures import minimal_market_config, minimal_program_config
 
 
@@ -90,6 +91,24 @@ def program_config_for_local_offer(*, home_dir: str = "/tmp/gf") -> ProgramConfi
 
 def market_config_for_local_offer() -> MarketConfig:
     return minimal_market_config()
+
+
+def offer_build_context_for_program_market(
+    *,
+    program: ProgramConfig,
+    market: MarketConfig,
+    program_path: Path,
+    keyring_yaml_path: str = "",
+    action_side: str = "sell",
+) -> OfferBuildContext:
+    return prepare_offer_build_context(
+        program=program,
+        market=market,
+        program_path=program_path,
+        network=program.app_network,
+        keyring_yaml_path=keyring_yaml_path,
+        action_side=action_side,
+    )
 
 
 def write_markets(path: Path) -> None:

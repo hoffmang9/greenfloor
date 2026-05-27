@@ -14,6 +14,7 @@ from greenfloor.hex_utils import canonical_is_xch, default_mojo_multiplier_for_a
 from greenfloor.offer_bootstrap import BootstrapLadderEntry, plan_bootstrap_mixed_outputs
 from greenfloor.runtime.cloud_wallet.bootstrap import resolve_bootstrap_split_fee
 from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
+from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import (
     BootstrapPolicy,
     OfferCreateFailure,
@@ -22,10 +23,7 @@ from greenfloor.runtime.offer_orchestration import (
     build_and_post_offer,
     default_offer_post_deps,
 )
-from greenfloor.runtime.offer_publish import (
-    normalize_offer_side,
-    resolve_offer_expiry_for_market,
-)
+from greenfloor.runtime.offer_publish import normalize_offer_side
 
 _runtime_logger = logging.getLogger("greenfloor.manager")
 
@@ -437,7 +435,6 @@ def signer_create_offer_phase(
 class SignerOfferDeps:
     post_deps: OfferPostDeps
     resolve_signer_offer_asset_ids_fn: collections.abc.Callable[..., tuple[str, str]]
-    resolve_offer_expiry_for_market_fn: collections.abc.Callable[..., tuple[str, int]]
     signer_bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]]
     signer_create_offer_phase_fn: collections.abc.Callable[..., dict[str, Any]]
 
@@ -446,7 +443,6 @@ def default_signer_offer_deps(*, post_deps: OfferPostDeps | None = None) -> Sign
     return SignerOfferDeps(
         post_deps=post_deps or default_offer_post_deps(),
         resolve_signer_offer_asset_ids_fn=signer_resolve_offer_asset_ids,
-        resolve_offer_expiry_for_market_fn=resolve_offer_expiry_for_market,
         signer_bootstrap_phase_fn=signer_bootstrap_phase,
         signer_create_offer_phase_fn=signer_create_offer_phase,
     )
@@ -463,9 +459,8 @@ def build_and_post_offer_signer(
     splash_base_url: str,
     drop_only: bool,
     claim_rewards: bool,
-    quote_price: float,
+    build_ctx: OfferBuildContext,
     dry_run: bool,
-    action_side: str = "sell",
     deps: SignerOfferDeps | None = None,
     emit_output: bool = True,
     persist_results: bool = True,
@@ -480,7 +475,8 @@ def build_and_post_offer_signer(
             quote_asset_id=str(market.quote_asset),
         )
     )
-    expiry_unit, expiry_value = resolved_deps.resolve_offer_expiry_for_market_fn(market)
+    expiry_unit = build_ctx.expiry_unit
+    expiry_value = int(build_ctx.expiry_value)
 
     def bootstrap(**kwargs: Any) -> dict[str, Any]:
         return resolved_deps.signer_bootstrap_phase_fn(
@@ -527,8 +523,7 @@ def build_and_post_offer_signer(
         )
 
     return build_and_post_offer(
-        program=program,
-        market=market,
+        build_ctx=build_ctx,
         size_base_units=size_base_units,
         repeat=repeat,
         publish_venue=publish_venue,
@@ -536,9 +531,7 @@ def build_and_post_offer_signer(
         splash_base_url=splash_base_url,
         drop_only=drop_only,
         claim_rewards=claim_rewards,
-        quote_price=quote_price,
         dry_run=dry_run,
-        action_side=action_side,
         resolved_base_asset_id=resolved_base_asset_id,
         resolved_quote_asset_id=resolved_quote_asset_id,
         bootstrap_phase_fn=bootstrap,

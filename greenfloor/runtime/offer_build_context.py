@@ -15,6 +15,18 @@ from greenfloor.runtime.offer_publish import (
 )
 
 
+def keyring_yaml_path_for_market(program: ProgramConfig, market: MarketConfig) -> str:
+    signer_key = program.signer_key_registry.get(market.signer_key_id)
+    return str(signer_key.keyring_yaml_path or "") if signer_key is not None else ""
+
+
+def default_program_config_path(
+    program: ProgramConfig,
+    program_path: Path | None = None,
+) -> Path:
+    return program_path or Path(str(program.home_dir)) / "config" / "program.yaml"
+
+
 @dataclass(frozen=True, slots=True)
 class OfferBuildContext:
     program: ProgramConfig
@@ -37,7 +49,7 @@ def prepare_offer_build_context(
     market: MarketConfig,
     program_path: Path,
     network: str,
-    keyring_yaml_path: str,
+    keyring_yaml_path: str | None = None,
     action_side: str = "sell",
 ) -> OfferBuildContext:
     pricing = dict(market.pricing or {})
@@ -59,12 +71,17 @@ def prepare_offer_build_context(
     )
     expiry_unit, expiry_value = resolve_offer_expiry_for_market(market)
     quote_price = resolve_quote_price_for_market(market)
+    resolved_keyring_yaml_path = (
+        keyring_yaml_path_for_market(program, market)
+        if keyring_yaml_path is None
+        else keyring_yaml_path
+    )
     return OfferBuildContext(
         program=program,
         market=market,
         program_path=program_path,
         network=network,
-        keyring_yaml_path=keyring_yaml_path,
+        keyring_yaml_path=resolved_keyring_yaml_path,
         resolved_quote_asset=resolved_quote_asset,
         expiry_unit=expiry_unit,
         expiry_value=int(expiry_value),

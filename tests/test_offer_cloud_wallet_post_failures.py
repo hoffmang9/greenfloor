@@ -14,6 +14,7 @@ from tests.helpers.cloud_wallet_offer_deps import cloud_wallet_test_deps
 from tests.helpers.config_fixtures import minimal_market_config
 from tests.helpers.offer_runtime_fixtures import (
     load_program_and_market,
+    offer_build_context_for_program_market,
     write_manager_program,
     write_manager_program_with_cloud_wallet,
     write_markets_with_ladder,
@@ -98,7 +99,11 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_offer_not_visible(
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=7.75,
+        build_ctx=offer_build_context_for_program_market(
+            program=prog,
+            market=mkt,
+            program_path=program_path,
+        ),
         dry_run=False,
     )
 
@@ -195,7 +200,11 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_visible_offer_size_m
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=7.75,
+        build_ctx=offer_build_context_for_program_market(
+            program=prog,
+            market=mkt,
+            program_path=program_path,
+        ),
         dry_run=False,
     )
 
@@ -269,7 +278,11 @@ def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=0.003,
+        build_ctx=offer_build_context_for_program_market(
+            program=prog,
+            market=mkt,
+            program_path=program_path,
+        ),
         dry_run=False,
     )
     assert code == 2
@@ -355,7 +368,11 @@ def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=0.003,
+        build_ctx=offer_build_context_for_program_market(
+            program=prog,
+            market=mkt,
+            program_path=program_path,
+        ),
         dry_run=False,
     )
     assert code == 2
@@ -451,7 +468,11 @@ def test_build_and_post_offer_cloud_wallet_passes_min_created_at_to_artifact_pol
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=7.75,
+        build_ctx=offer_build_context_for_program_market(
+            program=program,
+            market=market,
+            program_path=program_path,
+        ),
         dry_run=False,
     )
     assert code == 0

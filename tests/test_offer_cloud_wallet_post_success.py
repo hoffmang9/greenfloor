@@ -13,6 +13,7 @@ from greenfloor.runtime.offer_publish import initialize_manager_file_logging
 from tests.helpers.cloud_wallet_offer_deps import cloud_wallet_test_deps
 from tests.helpers.offer_runtime_fixtures import (
     load_program_and_market,
+    offer_build_context_for_program_market,
     write_manager_program_with_cloud_wallet,
     write_markets_with_ladder,
 )
@@ -112,7 +113,11 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=0.003,
+        build_ctx=offer_build_context_for_program_market(
+            program=prog,
+            market=mkt,
+            program_path=program_path,
+        ),
         dry_run=False,
     )
     assert code == 0
@@ -227,7 +232,11 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=7.75,
+        build_ctx=offer_build_context_for_program_market(
+            program=prog,
+            market=mkt,
+            program_path=program_path,
+        ),
         dry_run=False,
     )
     assert code == 0
@@ -320,9 +329,13 @@ def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=0.003,
+        build_ctx=offer_build_context_for_program_market(
+            program=prog,
+            market=mkt,
+            program_path=program_path,
+            action_side="buy",
+        ),
         dry_run=False,
-        action_side="buy",
     )
     assert code == 0
     _ = capsys.readouterr()
@@ -409,7 +422,11 @@ def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=0.003,
+        build_ctx=offer_build_context_for_program_market(
+            program=prog,
+            market=mkt,
+            program_path=program_path,
+        ),
         dry_run=True,
     )
     assert code == 0
@@ -500,7 +517,11 @@ def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
         splash_base_url="http://localhost:4000",
         drop_only=True,
         claim_rewards=False,
-        quote_price=0.003,
+        build_ctx=offer_build_context_for_program_market(
+            program=prog,
+            market=mkt,
+            program_path=program_path,
+        ),
         dry_run=False,
     )
 

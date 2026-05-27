@@ -1,11 +1,28 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
-from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.config.models import MarketLadderEntry, ProgramConfig
 from greenfloor.runtime.cloud_wallet.bootstrap import ensure_offer_bootstrap_denominations
+from tests.helpers.config_fixtures import (
+    minimal_market_config,
+    minimal_market_with_sell_ladder,
+    minimal_program_config,
+)
+
+
+def _bootstrap_test_program() -> ProgramConfig:
+    return replace(
+        minimal_program_config(),
+        coin_ops_minimum_fee_mojos=0,
+        cloud_wallet_base_url="https://api.vault.chia.net",
+        cloud_wallet_user_key_id="k",
+        cloud_wallet_private_key_pem_path="/tmp/key.pem",
+        cloud_wallet_vault_id="Wallet_abc",
+    )
 
 
 def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
@@ -13,28 +30,6 @@ def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
 ) -> None:
     keyring_path = tmp_path / "keyring.yaml"
     keyring_path.write_text("keys: []\n", encoding="utf-8")
-
-    class _Program:
-        app_network = "mainnet"
-        coin_ops_minimum_fee_mojos = 0
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "k"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-        cloud_wallet_kms_key_id = ""
-        cloud_wallet_kms_region = ""
-        cloud_wallet_kms_public_key_hex = ""
-
-    class _LadderEntry:
-        size_base_units = 1
-        target_count = 2
-        split_buffer_count = 0
-
-    class _Market:
-        ladders = {"sell": [_LadderEntry()]}
-        receive_address = "xch1test"
-        base_asset = "xch"
-        pricing = {}
 
     class _Wallet:
         @staticmethod
@@ -60,8 +55,12 @@ def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
     _plan.deficits = [_Deficit()]
 
     result = ensure_offer_bootstrap_denominations(
-        program=cast(ProgramConfig, _Program()),
-        market=cast(MarketConfig, _Market()),
+        program=_bootstrap_test_program(),
+        market=minimal_market_with_sell_ladder(
+            base_asset="xch",
+            receive_address="xch1test",
+            pricing={},
+        ),
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="xch",
         resolved_quote_asset_id="wusdc",
@@ -85,28 +84,6 @@ def test_ensure_offer_bootstrap_denominations_reports_fee_balance_guidance(
 ) -> None:
     keyring_path = tmp_path / "keyring.yaml"
     keyring_path.write_text("keys: []\n", encoding="utf-8")
-
-    class _Program:
-        app_network = "mainnet"
-        coin_ops_minimum_fee_mojos = 0
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "k"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-        cloud_wallet_kms_key_id = ""
-        cloud_wallet_kms_region = ""
-        cloud_wallet_kms_public_key_hex = ""
-
-    class _LadderEntry:
-        size_base_units = 1
-        target_count = 2
-        split_buffer_count = 0
-
-    class _Market:
-        ladders = {"sell": [_LadderEntry()]}
-        receive_address = "xch1test"
-        base_asset = "xch"
-        pricing = {}
 
     class _Wallet:
         @staticmethod
@@ -135,8 +112,12 @@ def test_ensure_offer_bootstrap_denominations_reports_fee_balance_guidance(
         raise RuntimeError("insufficient_xch_fee_balance_for_mixed_split:required=100:available=0")
 
     result = ensure_offer_bootstrap_denominations(
-        program=cast(ProgramConfig, _Program()),
-        market=cast(MarketConfig, _Market()),
+        program=_bootstrap_test_program(),
+        market=minimal_market_with_sell_ladder(
+            base_asset="xch",
+            receive_address="xch1test",
+            pricing={},
+        ),
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="xch",
         resolved_quote_asset_id="wusdc",
@@ -159,29 +140,6 @@ def test_ensure_offer_bootstrap_denominations_buy_waits_on_quote_asset(
     wait_asset_ids: list[str] = []
     list_asset_ids: list[str | None] = []
 
-    class _Program:
-        app_network = "mainnet"
-        coin_ops_minimum_fee_mojos = 0
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "k"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-        cloud_wallet_kms_key_id = ""
-        cloud_wallet_kms_region = ""
-        cloud_wallet_kms_public_key_hex = ""
-
-    class _LadderEntry:
-        size_base_units = 10
-        target_count = 1
-        split_buffer_count = 0
-
-    class _Market:
-        ladders = {"buy": [_LadderEntry()]}
-        receive_address = "xch1test"
-        base_asset = "base_asset"
-        quote_asset = "quote_asset"
-        pricing = {"quote_unit_mojo_multiplier": 1000}
-
     class _Wallet:
         @staticmethod
         def list_coins(*, asset_id=None, include_pending=False):
@@ -203,9 +161,27 @@ def test_ensure_offer_bootstrap_denominations_buy_waits_on_quote_asset(
         change_amount = 40_000
         deficits = [_Deficit()]
 
+    buy_market = replace(
+        minimal_market_config(),
+        receive_address="xch1test",
+        base_asset="base_asset",
+        quote_asset="quote_asset",
+        pricing={"quote_unit_mojo_multiplier": 1000},
+        ladders={
+            "buy": [
+                MarketLadderEntry(
+                    size_base_units=10,
+                    target_count=1,
+                    split_buffer_count=0,
+                    combine_when_excess_factor=2.0,
+                )
+            ]
+        },
+    )
+
     result = ensure_offer_bootstrap_denominations(
-        program=cast(ProgramConfig, _Program()),
-        market=cast(MarketConfig, _Market()),
+        program=_bootstrap_test_program(),
+        market=buy_market,
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="Asset_base",
         resolved_quote_asset_id="Asset_quote",

@@ -3,85 +3,70 @@
 from __future__ import annotations
 
 import collections.abc
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import OfferCreateFailure, OfferCreateOutcome
 from greenfloor.runtime.offer_publish import normalize_offer_side
 
 
-@dataclass(frozen=True, slots=True)
-class LocalOfferBuildParams:
-    program: ProgramConfig
-    market: MarketConfig
-    program_path: Path
-    network: str
-    resolved_quote_asset: str
-    expiry_unit: str
-    expiry_value: int
-    base_unit_mojo_multiplier: int
-    quote_unit_mojo_multiplier: int
-    keyring_yaml_path: str
-    dry_run: bool
-    action_side: str = "sell"
-    capture_dir_path: Path | None = None
-
-
-def local_offer_params_from_context(
+def build_daemon_action_offer_payload(
     build_ctx: OfferBuildContext,
     *,
-    dry_run: bool,
-    capture_dir_path: Path | None = None,
-) -> LocalOfferBuildParams:
-    return LocalOfferBuildParams(
-        program=build_ctx.program,
-        market=build_ctx.market,
-        program_path=build_ctx.program_path,
-        network=build_ctx.network,
-        resolved_quote_asset=build_ctx.resolved_quote_asset,
-        expiry_unit=build_ctx.expiry_unit,
-        expiry_value=build_ctx.expiry_value,
-        base_unit_mojo_multiplier=build_ctx.base_unit_mojo_multiplier,
-        quote_unit_mojo_multiplier=build_ctx.quote_unit_mojo_multiplier,
-        keyring_yaml_path=build_ctx.keyring_yaml_path,
-        dry_run=bool(dry_run),
-        action_side=build_ctx.action_side,
-        capture_dir_path=capture_dir_path,
+    action: Any,
+    xch_price_usd: float | None,
+) -> dict[str, Any]:
+    side = normalize_offer_side(getattr(action, "side", "sell"))
+    payload = build_local_offer_payload(
+        build_ctx,
+        size_base_units=int(action.size),
+        quote_price=float(build_ctx.quote_price),
     )
+    payload.update(
+        {
+            "pair": action.pair,
+            "reason": action.reason,
+            "side": side,
+            "xch_price_usd": xch_price_usd,
+            "target_spread_bps": action.target_spread_bps,
+            "expiry_unit": action.expiry_unit,
+            "expiry_value": int(action.expiry_value),
+        }
+    )
+    return payload
 
 
 def build_local_offer_payload(
-    params: LocalOfferBuildParams,
+    build_ctx: OfferBuildContext,
     *,
     size_base_units: int,
     quote_price: float,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
-    program = params.program
-    market = params.market
+    program = build_ctx.program
+    market = build_ctx.market
     return {
         "market_id": market.market_id,
         "base_asset": market.base_asset,
         "base_symbol": market.base_symbol,
-        "quote_asset": params.resolved_quote_asset,
+        "quote_asset": build_ctx.resolved_quote_asset,
         "quote_asset_type": market.quote_asset_type,
         "receive_address": market.receive_address,
         "size_base_units": int(size_base_units),
-        "pair": str(params.resolved_quote_asset).strip().lower(),
+        "pair": str(build_ctx.resolved_quote_asset).strip().lower(),
         "reason": "manual_build_and_post",
         "xch_price_usd": None,
-        "expiry_unit": params.expiry_unit,
-        "expiry_value": int(params.expiry_value),
+        "expiry_unit": build_ctx.expiry_unit,
+        "expiry_value": int(build_ctx.expiry_value),
         "quote_price_quote_per_base": float(quote_price),
-        "base_unit_mojo_multiplier": int(params.base_unit_mojo_multiplier),
-        "quote_unit_mojo_multiplier": int(params.quote_unit_mojo_multiplier),
+        "base_unit_mojo_multiplier": int(build_ctx.base_unit_mojo_multiplier),
+        "quote_unit_mojo_multiplier": int(build_ctx.quote_unit_mojo_multiplier),
         "fee_mojos": 0,
-        "dry_run": bool(params.dry_run),
+        "dry_run": bool(dry_run),
         "key_id": market.signer_key_id,
-        "keyring_yaml_path": params.keyring_yaml_path,
-        "network": params.network,
+        "keyring_yaml_path": build_ctx.keyring_yaml_path,
+        "network": build_ctx.network,
         "asset_id": market.base_asset,
         "offer_coin_ids": [],
         "cloud_wallet_base_url": str(program.cloud_wallet_base_url or "").strip(),
@@ -95,14 +80,16 @@ def build_local_offer_payload(
         "cloud_wallet_kms_public_key_hex": str(
             program.cloud_wallet_kms_public_key_hex or ""
         ).strip(),
-        "program_config_path": str(params.program_path),
+        "program_config_path": str(build_ctx.program_path),
         "program_home_dir": str(program.home_dir),
     }
 
 
 def make_local_offer_create_fn(
-    params: LocalOfferBuildParams,
+    build_ctx: OfferBuildContext,
     *,
+    dry_run: bool,
+    capture_dir_path: Path | None = None,
     build_offer_text_fn: collections.abc.Callable[[dict[str, Any]], str],
 ) -> collections.abc.Callable[..., OfferCreateOutcome]:
     offer_iteration = [0]
@@ -111,9 +98,10 @@ def make_local_offer_create_fn(
         index = offer_iteration[0]
         offer_iteration[0] += 1
         payload = build_local_offer_payload(
-            params,
+            build_ctx,
             size_base_units=int(kwargs["size_base_units"]),
             quote_price=float(kwargs["quote_price"]),
+            dry_run=dry_run,
         )
         try:
             offer_text = build_offer_text_fn(payload)
@@ -121,17 +109,17 @@ def make_local_offer_create_fn(
             raise OfferCreateFailure(f"offer_builder_failed:{exc}") from exc
 
         extra: dict[str, Any] = {}
-        if params.dry_run and params.capture_dir_path is not None:
+        if dry_run and capture_dir_path is not None:
             capture_file = (
-                params.capture_dir_path / f"{params.market.market_id}-dry-run-{index + 1}.offer"
+                capture_dir_path / f"{build_ctx.market.market_id}-dry-run-{index + 1}.offer"
             )
             capture_file.write_text(offer_text, encoding="utf-8")
             extra["dry_run_preview"] = {"offer_capture_path": str(capture_file)}
 
         return OfferCreateOutcome(
             offer_text=offer_text,
-            expires_at=f"{int(params.expiry_value)} {params.expiry_unit}",
-            side=normalize_offer_side(kwargs.get("action_side", params.action_side)),
+            expires_at=f"{int(build_ctx.expiry_value)} {build_ctx.expiry_unit}",
+            side=normalize_offer_side(kwargs.get("action_side", build_ctx.action_side)),
             extra=extra,
         )
 

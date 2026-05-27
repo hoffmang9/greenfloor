@@ -29,7 +29,7 @@ def test_build_and_post_offer_dispatches_to_cloud_wallet_when_configured(
         return 0, {}
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_and_post_offer_cloud_wallet",
+        "greenfloor.runtime.offer_post_request.build_and_post_offer_cloud_wallet",
         _fake_cloud_wallet,
     )
 
@@ -71,7 +71,7 @@ def test_build_and_post_offer_dry_run_uses_cloud_wallet_when_configured(
         return 0, {"dry_run": True, "results": [], "built_offers_preview": []}
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_and_post_offer_cloud_wallet",
+        "greenfloor.runtime.offer_post_request.build_and_post_offer_cloud_wallet",
         _fake_cloud_wallet,
     )
 
@@ -114,7 +114,7 @@ def test_build_and_post_offer_uses_local_path_for_large_size_when_cloud_wallet_c
         return 0, {}
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_and_post_offer_cloud_wallet",
+        "greenfloor.runtime.offer_post_request.build_and_post_offer_cloud_wallet",
         _fake_cloud_wallet,
     )
     monkeypatch.setattr(
@@ -171,7 +171,7 @@ def test_build_and_post_offer_uses_local_path_when_cloud_wallet_not_configured(
         return 0, {}
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_and_post_offer_cloud_wallet",
+        "greenfloor.runtime.offer_post_request.build_and_post_offer_cloud_wallet",
         _fake_cloud_wallet,
     )
     monkeypatch.setattr(
@@ -229,7 +229,7 @@ def test_build_and_post_offer_uses_signer_path_for_kms_configured(
         return 0, {}
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_and_post_offer_signer",
+        "greenfloor.runtime.offer_post_request.build_and_post_offer_signer",
         _fake_signer,
     )
     monkeypatch.setattr(
@@ -241,10 +241,6 @@ def test_build_and_post_offer_uses_signer_path_for_kms_configured(
     monkeypatch.setattr(
         "greenfloor.cli.offer_build_post.offer_execution_backend",
         lambda _program, **kwargs: "signer",
-    )
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.prepare_signer_runtime",
-        lambda _program: "/tmp/signer.yaml",
     )
 
     code = _build_and_post_offer(
@@ -285,7 +281,7 @@ def test_build_and_post_offer_uses_signer_path_for_kms_configured_large_size(
         return 0, {}
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_and_post_offer_signer",
+        "greenfloor.runtime.offer_post_request.build_and_post_offer_signer",
         _fake_signer,
     )
     monkeypatch.setattr(
@@ -297,10 +293,6 @@ def test_build_and_post_offer_uses_signer_path_for_kms_configured_large_size(
     monkeypatch.setattr(
         "greenfloor.cli.offer_build_post.offer_execution_backend",
         lambda _program, **kwargs: "signer",
-    )
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.prepare_signer_runtime",
-        lambda _program: "/tmp/signer.yaml",
     )
 
     code = _build_and_post_offer(

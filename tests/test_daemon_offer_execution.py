@@ -25,6 +25,7 @@ from greenfloor.daemon.main import (
 )
 from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.storage.sqlite import SqliteStore
+from tests.helpers.config_fixtures import minimal_program_config
 
 
 class _FakeDexie:
@@ -237,6 +238,7 @@ def test_execute_strategy_actions_skips_when_builder_skips(monkeypatch) -> None:
         xch_price_usd=32.0,
         dexie=cast(Any, dexie),
         store=cast(Any, store),
+        program=minimal_program_config(),
     )
 
     assert result["planned_count"] == 1
@@ -282,6 +284,7 @@ def test_execute_strategy_actions_posts_and_persists_offer_ids(monkeypatch) -> N
         xch_price_usd=32.0,
         dexie=cast(Any, dexie),
         store=cast(Any, store),
+        program=minimal_program_config(),
     )
 
     assert result["planned_count"] == 2
@@ -339,6 +342,7 @@ def test_execute_strategy_actions_retries_then_succeeds(monkeypatch) -> None:
         xch_price_usd=30.0,
         dexie=cast(Any, dexie),
         store=cast(Any, store),
+        program=minimal_program_config(),
     )
     assert result["executed_count"] == 1
     assert dexie.calls == 2
@@ -378,6 +382,7 @@ def test_execute_strategy_actions_applies_post_cooldown_after_retry_exhaust(monk
         xch_price_usd=30.0,
         dexie=cast(Any, dexie),
         store=cast(Any, store),
+        program=minimal_program_config(),
     )
     assert result["executed_count"] == 0
     assert dexie.calls == 2
@@ -404,10 +409,10 @@ def test_build_offer_for_action_direct_builder_call(monkeypatch) -> None:
     )
 
     built = daemon_main._build_offer_for_action(
+        program=minimal_program_config(),
         market=_market(),
         action=action,
         xch_price_usd=31.5,
-        network="mainnet",
         keyring_yaml_path="/tmp/keyring.yaml",
     )
 

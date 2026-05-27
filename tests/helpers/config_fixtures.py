@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from greenfloor.config.models import MarketConfig, MarketInventoryConfig, ProgramConfig
+from dataclasses import replace
+
+from greenfloor.config.models import (
+    MarketConfig,
+    MarketInventoryConfig,
+    MarketLadderEntry,
+    ProgramConfig,
+)
 
 
 def minimal_program_config(*, home_dir: str = "/tmp/gf-test") -> ProgramConfig:
@@ -50,4 +57,27 @@ def minimal_market_config(*, market_id: str = "m1") -> MarketConfig:
         mode="sell_only",
         signer_key_id="k1",
         inventory=MarketInventoryConfig(low_watermark_base_units=10),
+    )
+
+
+def minimal_market_with_sell_ladder(
+    *,
+    market_id: str = "m1",
+    size_base_units: int = 1,
+    target_count: int = 2,
+    **overrides: object,
+) -> MarketConfig:
+    return replace(
+        minimal_market_config(market_id=market_id),
+        ladders={
+            "sell": [
+                MarketLadderEntry(
+                    size_base_units=size_base_units,
+                    target_count=target_count,
+                    split_buffer_count=0,
+                    combine_when_excess_factor=2.0,
+                )
+            ]
+        },
+        **overrides,
     )

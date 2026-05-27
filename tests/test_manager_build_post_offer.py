@@ -717,9 +717,9 @@ def test_local_offer_create_fn_delegates_to_offer_builder(monkeypatch) -> None:
         network="mainnet",
         keyring_yaml_path="/tmp/keyring.yaml",
     )
-    params = offer_build_post.local_offer_params_from_context(build_ctx, dry_run=False)
     create_fn = make_local_offer_create_fn(
-        params,
+        build_ctx,
+        dry_run=False,
         build_offer_text_fn=offer_build_post.build_offer_text,
     )
     outcome = create_fn(size_base_units=1, quote_price=0.5, action_side="sell")

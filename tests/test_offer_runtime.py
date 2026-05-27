@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import MagicMock
@@ -10,10 +11,12 @@ import pytest
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.runtime.offer_runtime import signer_create_offer_phase
+from tests.helpers.config_fixtures import minimal_market_config
 
 
-def _sample_market(*, base_multiplier: int = 1000, quote_multiplier: int = 1000) -> SimpleNamespace:
-    return SimpleNamespace(
+def _sample_market(*, base_multiplier: int = 1000, quote_multiplier: int = 1000) -> MarketConfig:
+    return replace(
+        minimal_market_config(),
         receive_address="txch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqstg4h8",
         pricing={
             "base_unit_mojo_multiplier": base_multiplier,
@@ -44,7 +47,7 @@ def test_signer_create_offer_phase_buy_side_swaps_legs(monkeypatch) -> None:
     market = _sample_market()
     result = signer_create_offer_phase(
         program=program,
-        market=cast(MarketConfig, market),
+        market=market,
         size_base_units=10,
         quote_price=2.0,
         resolved_base_asset_id="basecat",
@@ -85,7 +88,7 @@ def test_signer_create_offer_phase_sell_side_keeps_legs(monkeypatch) -> None:
     market = _sample_market()
     signer_create_offer_phase(
         program=program,
-        market=cast(MarketConfig, market),
+        market=market,
         size_base_units=5,
         quote_price=1.5,
         resolved_base_asset_id="basecat",
@@ -114,7 +117,7 @@ def test_signer_create_offer_phase_requires_offer_text(monkeypatch) -> None:
     with pytest.raises(RuntimeError, match="missing_offer_text"):
         signer_create_offer_phase(
             program=cast(ProgramConfig, SimpleNamespace()),
-            market=cast(MarketConfig, _sample_market()),
+            market=_sample_market(),
             size_base_units=1,
             quote_price=1.0,
             resolved_base_asset_id="basecat",
