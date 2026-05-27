@@ -11,52 +11,22 @@ env:
   PYTHON_VERSION: "3.11"
 
 jobs:
-  # Wheel caches are keyed by runner.os and runner.arch so x86_64 and ARM64
-  # runners maintain separate wheelhouses. rust-signer validates Rust and
-  # populates Ubuntu x86_64 wheels; ARM/macOS matrix legs ensure their own
-  # platform wheels on cache miss without duplicating Ubuntu x86_64 builds.
-  rust-signer:
-    name: Rust signer test and Ubuntu x86_64 wheels
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - uses: ./.github/actions/rust-cache-greenfloor
-
-      - name: Build and test greenfloor-signer
-        run: |
-          cargo build --manifest-path greenfloor-signer/Cargo.toml
-          cargo test --manifest-path greenfloor-signer/Cargo.toml
-
-      - uses: ./.github/actions/greenfloor-maturin-wheels
-        with:
-          operation: ensure
-          rust-already-configured: "true"
-
   lint-type-test:
     name: Lint, Type, Test (${{ matrix.os }})
-    # Every matrix leg waits for rust-signer so a Rust test failure blocks all platforms.
-    needs: rust-signer
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
+            run_rust_tests: true
             run_sdk_integration: true
-            build_wheels_on_miss: false
           - os: ubuntu-24.04-arm
+            run_rust_tests: false
             run_sdk_integration: false
-            build_wheels_on_miss: true
           - os: macos-14
+            run_rust_tests: false
             run_sdk_integration: false
-            build_wheels_on_miss: true
 
     steps:
       - uses: actions/checkout@v4
@@ -95,10 +65,20 @@ jobs:
           path: .venv
           key: venv-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
 
+      - uses: ./.github/actions/rust-cache-greenfloor
+        if: matrix.run_rust_tests
+
+      - name: Build and test greenfloor-signer
+        if: matrix.run_rust_tests
+        run: |
+          cargo build --manifest-path greenfloor-signer/Cargo.toml
+          cargo test --manifest-path greenfloor-signer/Cargo.toml
+
       - uses: ./.github/actions/greenfloor-maturin-wheels
         with:
           operation: ensure-and-install
-          build-on-cache-miss: ${{ matrix.build_wheels_on_miss }}
+          build-on-cache-miss: "true"
+          rust-already-configured: ${{ matrix.run_rust_tests }}
 
       - name: Cache pre-commit environment
         uses: actions/cache@v4
@@ -126,6 +106,7 @@ jobs:
           source-path: ./chia-wallet-sdk/pyo3
           cache-key-prefix: sdk-wheelhouse
           wheelhouse-subdir: chia-wallet-sdk
+          rust-already-configured: ${{ matrix.run_rust_tests }}
 
       - name: Pytest (greenfloor-native + chia-wallet-sdk offer round-trip on Ubuntu)
         if: matrix.run_sdk_integration
