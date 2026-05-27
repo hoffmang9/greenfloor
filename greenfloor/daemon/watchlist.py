@@ -1,9 +1,12 @@
 """Daemon offer watchlist, active-offer counting, and Dexie size maps."""
+
 from __future__ import annotations
+
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+
 from greenfloor.adapters.coinset import extract_coin_ids_from_offer_payload
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.core.strategy import StrategyConfig
@@ -29,6 +32,8 @@ class _OfferExecutionMetadata:
     side: str | None
     reason: str
     created_at: str
+
+
 def _is_recent_mempool_observed_offer_state(
     *,
     offer_state: dict[str, Any],
@@ -53,6 +58,8 @@ def _is_recent_mempool_observed_offer_state(
         updated_at = updated_at.replace(tzinfo=UTC)
     age_seconds = (clock - updated_at).total_seconds()
     return 0 <= age_seconds <= float(max_age_seconds)
+
+
 def _strategy_target_counts_by_size(strategy_config: StrategyConfig) -> dict[int, int]:
     if strategy_config.target_counts_by_size:
         return {
@@ -65,6 +72,8 @@ def _strategy_target_counts_by_size(strategy_config: StrategyConfig) -> dict[int
         10: int(strategy_config.tens_target),
         100: int(strategy_config.hundreds_target),
     }
+
+
 def _recent_offer_sizes_by_offer_id(*, store: SqliteStore, market_id: str) -> dict[str, int]:
     events = store.list_recent_audit_events(
         event_types=["strategy_offer_execution"],
@@ -97,11 +106,15 @@ def _recent_offer_sizes_by_offer_id(*, store: SqliteStore, market_id: str) -> di
             if offer_id not in size_by_offer_id:
                 size_by_offer_id[offer_id] = size
     return size_by_offer_id
+
+
 def _parse_offer_side_metadata(value: Any) -> str | None:
     side = str(value or "").strip().lower()
     if side in {"buy", "sell"}:
         return side
     return None
+
+
 def _recent_offer_metadata_by_offer_id(
     *, store: SqliteStore, market_id: str
 ) -> dict[str, _OfferExecutionMetadata]:
@@ -144,6 +157,8 @@ def _recent_offer_metadata_by_offer_id(
                     created_at=created_at,
                 )
     return metadata_by_offer_id
+
+
 def _parse_event_created_at(value: Any) -> datetime | None:
     raw = str(value or "").strip()
     if not raw:
@@ -156,6 +171,8 @@ def _parse_event_created_at(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
     return parsed
+
+
 def _is_stale_pending_visibility_offer(
     *,
     offer_id: str,
@@ -182,6 +199,8 @@ def _is_stale_pending_visibility_offer(
     if created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=UTC)
     return (clock - created_at).total_seconds() > float(max_age_seconds)
+
+
 def _is_dexie_offer_missing_error(error: Exception) -> bool:
     raw = str(error).strip()
     if not raw:
@@ -190,6 +209,8 @@ def _is_dexie_offer_missing_error(error: Exception) -> bool:
     return is_transient_dexie_visibility_404_error(raw) or (
         "http error 404" in normalized and "not found" in normalized
     )
+
+
 def _recent_executed_offer_ids(*, store: SqliteStore, market_id: str) -> set[str]:
     events = store.list_recent_audit_events(
         event_types=["strategy_offer_execution"],
@@ -216,6 +237,8 @@ def _recent_executed_offer_ids(*, store: SqliteStore, market_id: str) -> set[str
             if item_offer_id:
                 offer_ids.add(item_offer_id)
     return offer_ids
+
+
 def _watchlist_offer_ids_from_store(
     *, store: SqliteStore, market_id: str, clock: datetime
 ) -> set[str]:
@@ -235,9 +258,13 @@ def _watchlist_offer_ids_from_store(
         ):
             offer_ids.add(offer_id)
     return offer_ids
+
+
 def _set_watched_coin_ids_for_market(*, market_id: str, coin_ids: set[str]) -> None:
     with _WATCHED_COIN_IDS_LOCK:
         _WATCHED_COIN_IDS_BY_MARKET[market_id] = set(coin_ids)
+
+
 def _match_watched_coin_ids(*, observed_coin_ids: list[str]) -> dict[str, list[str]]:
     normalized = {
         str(coin_id).strip().lower() for coin_id in observed_coin_ids if str(coin_id).strip()
@@ -251,9 +278,13 @@ def _match_watched_coin_ids(*, observed_coin_ids: list[str]) -> dict[str, list[s
             if intersection:
                 matches[market_id] = intersection
     return matches
+
+
 def _watched_coin_ids_for_market(*, market_id: str) -> set[str]:
     with _WATCHED_COIN_IDS_LOCK:
         return set(_WATCHED_COIN_IDS_BY_MARKET.get(market_id, set()))
+
+
 def _update_market_coin_watchlist_from_dexie(
     *,
     market,
@@ -287,6 +318,8 @@ def _update_market_coin_watchlist_from_dexie(
         },
         market_id=market.market_id,
     )
+
+
 def _build_dexie_size_by_offer_id(
     offers: list[dict[str, Any]], base_asset_id: str
 ) -> dict[str, int]:
@@ -315,6 +348,8 @@ def _build_dexie_size_by_offer_id(
             if size > 0:
                 result[offer_id] = size
     return result
+
+
 def _active_offer_state_summary(
     *,
     store: SqliteStore,
@@ -346,6 +381,8 @@ def _active_offer_state_summary(
         state_counts,
         _recent_offer_metadata_by_offer_id(store=store, market_id=market_id),
     )
+
+
 def _active_offer_counts_by_size(
     *,
     store: SqliteStore,
@@ -386,6 +423,8 @@ def _active_offer_counts_by_size(
         else:
             active_unmapped_offer_ids += 1
     return active_counts_by_size, state_counts, active_unmapped_offer_ids
+
+
 def _active_offer_counts_by_size_and_side(
     *,
     store: SqliteStore,

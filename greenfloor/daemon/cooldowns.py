@@ -80,18 +80,36 @@ class ManagedUpstreamTransientError(Exception):
 
 
 def is_transient_managed_upstream_error(exc: BaseException) -> bool:
-    if isinstance(exc, ManagedUpstreamTransientError):
-        return True
-    return _is_transient_managed_upstream_error_text(str(exc))
+    return isinstance(exc, ManagedUpstreamTransientError)
+
+
+def strategy_action_item_transient_upstream(item: dict[str, Any]) -> bool:
+    return item.get("transient_upstream") is True
 
 
 def is_transient_managed_upstream_reason(reason: str) -> bool:
-    return _is_transient_managed_upstream_error_text(reason)
+    normalized = str(reason or "").strip()
+    if normalized == "managed_offer_transient_upstream":
+        return True
+    if normalized.startswith("managed_offer_post_failed:"):
+        return _is_transient_managed_upstream_error_text(normalized.split(":", 1)[1])
+    if normalized.startswith("parallel_offer_worker_error:"):
+        return _is_transient_managed_upstream_error_text(normalized.split(":", 1)[1])
+    return _is_transient_managed_upstream_error_text(normalized)
+
+
+def transient_managed_upstream_error_from_text(
+    error_text: str,
+) -> ManagedUpstreamTransientError | None:
+    if _is_transient_managed_upstream_error_text(error_text):
+        return ManagedUpstreamTransientError(error_text)
+    return None
 
 
 def raise_if_transient_managed_upstream_error(error_text: str) -> None:
-    if _is_transient_managed_upstream_error_text(error_text):
-        raise ManagedUpstreamTransientError(error_text)
+    transient = transient_managed_upstream_error_from_text(error_text)
+    if transient is not None:
+        raise transient
 
 
 def _managed_offer_reason_is_503(reason_text: str) -> bool:

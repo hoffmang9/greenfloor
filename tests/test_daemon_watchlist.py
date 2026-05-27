@@ -1,9 +1,20 @@
 from __future__ import annotations
 
-from tests.helpers.daemon_test_fixtures import *  # noqa: F403
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
+
+from greenfloor.daemon.testing import (
+    active_offer_counts_by_size,
+    active_offer_counts_by_size_and_side,
+    build_dexie_size_by_offer_id,
+    match_watched_coin_ids,
+    update_market_coin_watchlist_from_dexie,
+)
+from tests.helpers.daemon_test_fixtures import FakeStore, market_config
+
 
 def test_active_offer_counts_by_size_uses_offer_state_and_size_mapping() -> None:
-    store = _FakeStore()
+    store = FakeStore()
     now = datetime.now(UTC)
     store.offer_states = [
         {"offer_id": "one-1", "market_id": "m1", "state": "open"},
@@ -52,7 +63,7 @@ def test_active_offer_counts_by_size_counts_cli_posted_offer() -> None:
     active_counts_by_size[100]. This caused the daemon to post a duplicate
     100-unit offer on every cycle.
     """
-    store = _FakeStore()
+    store = FakeStore()
     now = datetime.now(UTC)
     store.offer_states = [
         {"offer_id": "cli-hundred-1", "market_id": "m1", "state": "open"},
@@ -93,7 +104,7 @@ def test_active_offer_counts_by_size_counts_cli_posted_offer() -> None:
 
 
 def test_active_offer_counts_by_size_and_side_unknown_metadata_stays_unmapped() -> None:
-    store = _FakeStore()
+    store = FakeStore()
     now = datetime.now(UTC)
     store.offer_states = [
         {"offer_id": "offer-unknown-side", "market_id": "m1", "state": "open"},
@@ -114,7 +125,7 @@ def test_active_offer_counts_by_size_and_side_unknown_metadata_stays_unmapped() 
 
 
 def test_active_offer_counts_by_size_and_side_malformed_side_stays_unmapped() -> None:
-    store = _FakeStore()
+    store = FakeStore()
     now = datetime.now(UTC)
     store.offer_states = [
         {"offer_id": "offer-bad-side", "market_id": "m1", "state": "open"},
@@ -155,7 +166,7 @@ def test_active_offer_counts_by_size_and_side_malformed_side_stays_unmapped() ->
 
 
 def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers() -> None:
-    store = _FakeStore()
+    store = FakeStore()
     now = datetime.now(UTC)
     store.offer_states = [{"offer_id": "offer-1", "market_id": "m1", "state": "open"}]
     store.audit_events = [
@@ -165,7 +176,7 @@ def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers()
             "payload": {"offer_id": "offer-1"},
         }
     ]
-    market = _market()
+    market = market_config()
     offers = [
         {"id": "offer-1", "involved_coins": ["0x" + ("a" * 64)]},
         {"id": "offer-2", "involved_coins": ["0x" + ("b" * 64)]},
@@ -204,7 +215,7 @@ def test_active_offer_counts_by_size_uses_dexie_hint_for_beyond_cap_offer() -> N
     individually from dexie.get_offer() and passes the result as dexie_size_by_offer_id.
     The ownership gate ensures only our own offers are in the DB, so this lookup is safe.
     """
-    store = _FakeStore()
+    store = FakeStore()
     now = datetime.now(UTC)
     store.offer_states = [
         {"offer_id": "beyond-cap-hundred", "market_id": "m1", "state": "open"},
@@ -237,7 +248,7 @@ def test_active_offer_counts_by_size_foreign_offer_stays_unmapped() -> None:
     keeping counts conservative and leaving a visible signal in the strategy_state_source
     log.
     """
-    store = _FakeStore()
+    store = FakeStore()
     now = datetime.now(UTC)
     store.offer_states = [
         # Our offer, correctly mapped via audit event.
@@ -264,7 +275,7 @@ def test_active_offer_counts_by_size_foreign_offer_stays_unmapped() -> None:
 
 
 def test_active_offer_counts_by_size_tracks_non_legacy_size() -> None:
-    store = _FakeStore()
+    store = FakeStore()
     now = datetime.now(UTC)
     store.offer_states = [
         {"offer_id": "ours-50", "market_id": "m1", "state": "open"},
@@ -287,7 +298,7 @@ def test_active_offer_counts_by_size_tracks_non_legacy_size() -> None:
 
 
 def test_active_offer_counts_excludes_stale_pending_visibility_offer() -> None:
-    store = _FakeStore()
+    store = FakeStore()
     now = datetime.now(UTC)
     stale_created_at = (now - timedelta(minutes=5)).isoformat()
     store.offer_states = [
@@ -322,7 +333,7 @@ def test_active_offer_counts_excludes_stale_pending_visibility_offer() -> None:
 
 
 def test_active_offer_counts_keeps_pending_visibility_offer_when_seen_on_dexie() -> None:
-    store = _FakeStore()
+    store = FakeStore()
     now = datetime.now(UTC)
     stale_created_at = (now - timedelta(minutes=5)).isoformat()
     store.offer_states = [
@@ -361,7 +372,7 @@ def test_active_offer_counts_keeps_pending_when_no_dexie_snapshot() -> None:
     _is_stale_pending_visibility_offer returns False unconditionally, so the
     offer is not evicted regardless of age.
     """
-    store = _FakeStore()
+    store = FakeStore()
     now = datetime.now(UTC)
     very_old = (now - timedelta(hours=1)).isoformat()
     store.offer_states = [
@@ -393,5 +404,3 @@ def test_active_offer_counts_keeps_pending_when_no_dexie_snapshot() -> None:
     )
     assert counts == {50: 1}
     assert unmapped == 0
-
-

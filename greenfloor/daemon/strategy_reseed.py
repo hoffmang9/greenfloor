@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from greenfloor.core.strategy import PlannedAction, StrategyConfig
 from greenfloor.daemon import strategy_state

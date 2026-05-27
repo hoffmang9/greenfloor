@@ -269,17 +269,20 @@ def _taker_fields(
     return "none", "none"
 
 
-def _signal_for_state_change(*, old_state: str, new_state: str, changed: bool) -> str | None:
-    if not changed:
-        return None
-    if new_state == OfferLifecycleState.TX_BLOCK_CONFIRMED.value:
-        return OfferSignal.TX_CONFIRMED.value
-    if new_state == OfferLifecycleState.EXPIRED.value:
-        return OfferSignal.EXPIRED.value
-    if new_state == OfferLifecycleState.MEMPOOL_OBSERVED.value:
-        return OfferSignal.MEMPOOL_SEEN.value
-    _ = old_state
-    return None
+@dataclass(frozen=True, slots=True)
+class ReconcileOfferRowOutcome:
+    offer_id: str
+    market_id: str
+    last_seen_status: int | None
+    transition: CycleOfferTransition
+
+    def to_result(self) -> ReconcileOfferResult:
+        return reconcile_result_from_transition(
+            offer_id=self.offer_id,
+            market_id=self.market_id,
+            transition=self.transition,
+            last_seen_status=self.last_seen_status,
+        )
 
 
 def reconcile_result_from_transition(
@@ -390,7 +393,7 @@ def reconcile_offer_row(
     target_venue: str,
     dexie_adapter: DexieAdapter | None,
     get_tx_signal_state: Callable[[list[str]], dict[str, dict[str, Any]]],
-) -> ReconcileOfferResult:
+) -> ReconcileOfferRowOutcome:
     offer_id = str(row["offer_id"])
     market_value = str(row["market_id"])
     current_state = str(row["state"])
@@ -409,11 +412,11 @@ def reconcile_offer_row(
             coinset_confirmed_tx_ids=[],
             coinset_mempool_tx_ids=[],
         )
-        return reconcile_result_from_transition(
+        return ReconcileOfferRowOutcome(
             offer_id=offer_id,
             market_id=market_value,
-            transition=transition,
             last_seen_status=status,
+            transition=transition,
         )
 
     assert dexie_adapter is not None
@@ -459,11 +462,11 @@ def reconcile_offer_row(
             coinset_mempool_tx_ids=[],
         )
 
-    return reconcile_result_from_transition(
+    return ReconcileOfferRowOutcome(
         offer_id=offer_id,
         market_id=market_value,
-        transition=transition,
         last_seen_status=status,
+        transition=transition,
     )
 
 
@@ -474,34 +477,18 @@ class ReconcileBatchResult:
     changed_count: int
 
 
-def persist_reconcile_result(
+def persist_reconcile_outcome(
     *,
     store: SqliteStore,
-    result: ReconcileOfferResult,
+    outcome: ReconcileOfferRowOutcome,
     target_venue: str,
 ) -> None:
-    transition = CycleOfferTransition(
-        old_state=result.old_state,
-        new_state=result.new_state,
-        reason=result.reason,
-        signal_source=result.signal_source,
-        signal=_signal_for_state_change(
-            old_state=result.old_state,
-            new_state=result.new_state,
-            changed=result.changed,
-        ),
-        changed=result.changed,
-        immediate_requeue=False,
-        coinset_tx_ids=result.coinset_tx_ids,
-        coinset_confirmed_tx_ids=result.coinset_confirmed_tx_ids,
-        coinset_mempool_tx_ids=result.coinset_mempool_tx_ids,
-    )
     persist_offer_lifecycle_transition(
         store=store,
-        offer_id=result.offer_id,
-        market_id=result.market_id,
-        transition=transition,
-        last_seen_status=result.last_seen_status,
+        offer_id=outcome.offer_id,
+        market_id=outcome.market_id,
+        transition=outcome.transition,
+        last_seen_status=outcome.last_seen_status,
         venue=target_venue,
         action="offers_reconcile",
     )
@@ -521,13 +508,14 @@ def reconcile_offers(
     reconciled = 0
     changed = 0
     for row in rows:
-        result = reconcile_offer_row(
+        outcome = reconcile_offer_row(
             row=row,
             target_venue=target_venue,
             dexie_adapter=dexie_adapter,
             get_tx_signal_state=store.get_tx_signal_state,
         )
-        persist_reconcile_result(store=store, result=result, target_venue=target_venue)
+        persist_reconcile_outcome(store=store, outcome=outcome, target_venue=target_venue)
+        result = outcome.to_result()
         reconciled += 1
         changed += int(result.changed)
         items.append(

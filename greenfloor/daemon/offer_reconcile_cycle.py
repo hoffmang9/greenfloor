@@ -17,6 +17,7 @@ from greenfloor.daemon.watchlist import (
     _watchlist_offer_ids_from_store,
 )
 from greenfloor.runtime.offer_reconciliation import (
+    CycleOfferTransition,
     persist_offer_lifecycle_transition,
     resolve_missing_watched_offer_transition,
     resolve_watched_offer_transition,
@@ -30,13 +31,16 @@ class _CycleReconcileResult(Protocol):
     immediate_requeue_signals: list[str]
 
 
-def _persist_cycle_offer_transition(
+def _apply_cycle_transition(
     *,
+    store: SqliteStore,
     market: Any,
     offer_id: str,
-    transition: Any,
-    store: SqliteStore,
-    dexie_status: int | None,
+    transition: CycleOfferTransition,
+    result: _CycleReconcileResult,
+    state_by_offer_id: dict[str, str],
+    last_seen_status: int | None,
+    dexie_status: int | None = None,
     dexie_error: str | None = None,
 ) -> None:
     _log_market_decision(
@@ -54,10 +58,16 @@ def _persist_cycle_offer_transition(
         offer_id=offer_id,
         market_id=market.market_id,
         transition=transition,
-        last_seen_status=dexie_status,
+        last_seen_status=last_seen_status,
         action="reconcile_coins_and_offers",
         dexie_error=dexie_error,
     )
+    if transition.changed:
+        state_by_offer_id[offer_id] = transition.new_state
+    if transition.immediate_requeue:
+        result.immediate_requeue_requested = True
+        if transition.signal is not None:
+            result.immediate_requeue_signals.append(transition.signal)
 
 
 def reconcile_market_cycle_offers(
@@ -142,20 +152,16 @@ def reconcile_market_cycle_offers(
                     current_state=current_state,
                 )
                 missing_watched_offer_ids.add(watched_offer_id)
-                if transition.immediate_requeue:
-                    result.immediate_requeue_requested = True
-                    if transition.signal is not None:
-                        result.immediate_requeue_signals.append(transition.signal)
-                _persist_cycle_offer_transition(
+                _apply_cycle_transition(
+                    store=store,
                     market=market,
                     offer_id=watched_offer_id,
                     transition=transition,
-                    store=store,
-                    dexie_status=None,
+                    result=result,
+                    state_by_offer_id=state_by_offer_id,
+                    last_seen_status=None,
                     dexie_error=str(exc),
                 )
-                if transition.changed:
-                    state_by_offer_id[watched_offer_id] = transition.new_state
             continue
 
     for beyond_offer_id in beyond_cap_ids - missing_watched_offer_ids:
@@ -193,15 +199,14 @@ def reconcile_market_cycle_offers(
             coinset_tx_ids=coinset_tx_ids,
             get_tx_signal_state=store.get_tx_signal_state,
         )
-        _persist_cycle_offer_transition(
+        _apply_cycle_transition(
+            store=store,
             market=market,
             offer_id=offer_id,
             transition=transition,
-            store=store,
+            result=result,
+            state_by_offer_id=state_by_offer_id,
+            last_seen_status=status,
             dexie_status=status,
         )
-        if transition.immediate_requeue:
-            result.immediate_requeue_requested = True
-            if transition.signal is not None:
-                result.immediate_requeue_signals.append(transition.signal)
     return augmented_offers, dexie_size_by_offer_id, dexie_fetch_error, offers

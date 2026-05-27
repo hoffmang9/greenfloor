@@ -1,9 +1,12 @@
 """Daemon strategy action dispatch (managed signer + local fallback)."""
+
 from __future__ import annotations
+
 import concurrent.futures
 import time
 from pathlib import Path
 from typing import Any
+
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import (
@@ -15,25 +18,32 @@ from greenfloor.config.models import (
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon.cooldowns import (
-    PENDING_VISIBILITY_REASON,
     _POST_COOLDOWN_UNTIL,
+    PENDING_VISIBILITY_REASON,
+    ManagedUpstreamTransientError,
     _cooldown_remaining_ms,
-    is_transient_managed_upstream_error,
-    is_transient_managed_upstream_reason,
-    raise_if_transient_managed_upstream_error,
     _post_offer_with_retry,
     _post_retry_config,
     _set_cooldown,
+    is_transient_managed_upstream_error,
+    raise_if_transient_managed_upstream_error,
+    strategy_action_item_transient_upstream,
 )
 from greenfloor.daemon.inventory_scan import _coinset_spendable_profiles_by_asset
 from greenfloor.daemon.market_helpers import _normalize_offer_side, _resolve_quote_asset_for_offer
-from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision, _log_offer_action_timing
+from greenfloor.daemon.market_logging import (
+    _log_market_decision,
+    _log_offer_action_timing,
+)
 from greenfloor.daemon.reservations import (
     AssetReservationCoordinator,
     ReservationContentionError,
     ReservationStorageError,
 )
-from greenfloor.runtime.offer_build_context import default_program_config_path, prepare_offer_build_context
+from greenfloor.runtime.offer_build_context import (
+    default_program_config_path,
+    prepare_offer_build_context,
+)
 from greenfloor.runtime.offer_execution import build_daemon_action_offer_payload
 from greenfloor.runtime.offer_post_request import OfferPostRequest, parse_managed_offer_post_result
 from greenfloor.runtime.offer_publish import (
@@ -43,6 +53,7 @@ from greenfloor.runtime.offer_publish import (
 )
 from greenfloor.runtime.offer_runtime import signer_resolve_offer_asset_ids
 from greenfloor.storage.sqlite import SqliteStore
+
 
 def _action_item(
     action: Any,
@@ -60,6 +71,14 @@ def _action_item(
         "offer_id": offer_id,
         **extra,
     }
+
+
+def _is_transient_managed_worker_error(exc: BaseException) -> bool:
+    if isinstance(exc, ManagedUpstreamTransientError):
+        return True
+    return isinstance(exc, TimeoutError)
+
+
 def _parallel_offer_worker_error_item(*, exc: Exception) -> dict[str, Any]:
     return {
         "size": 0,
@@ -67,7 +86,10 @@ def _parallel_offer_worker_error_item(*, exc: Exception) -> dict[str, Any]:
         "status": "skipped",
         "reason": f"parallel_offer_worker_error:{exc}",
         "offer_id": None,
+        "transient_upstream": _is_transient_managed_worker_error(exc),
     }
+
+
 def _can_parallelize_managed_offers(
     *,
     program: ProgramConfig | None,
@@ -116,6 +138,8 @@ def _expiry_seconds_for_action(action: PlannedAction) -> int | None:
     if unit_seconds is None:
         return None
     return value * unit_seconds
+
+
 def _build_offer_for_action(
     *,
     program: ProgramConfig,
@@ -155,6 +179,8 @@ def _build_offer_for_action(
     except Exception as exc:
         return {"status": "skipped", "reason": f"offer_builder_failed:{exc}", "offer": None}
     return {"status": "executed", "reason": "offer_builder_success", "offer": offer}
+
+
 def _reservation_wallet_id(program: ProgramConfig) -> str:
     vault = program.vault_config
     if vault is not None:
@@ -162,6 +188,8 @@ def _reservation_wallet_id(program: ProgramConfig) -> str:
         if launcher_id:
             return launcher_id
     return "signer"
+
+
 def _reservation_request_for_managed_offer(
     *,
     market: Any,
@@ -196,6 +224,8 @@ def _reservation_request_for_managed_offer(
     if fee_asset and int(fee_amount_mojos) > 0:
         request[fee_asset] = int(request.get(fee_asset, 0)) + int(fee_amount_mojos)
     return request
+
+
 def _resolve_signer_offer_asset_ids_for_reservation(
     *,
     program: ProgramConfig,
@@ -216,6 +246,8 @@ def _resolve_signer_offer_asset_ids_for_reservation(
         quote_asset_id=str(quote_asset).strip(),
     )
     return resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id
+
+
 def _managed_offer_post(
     *,
     program: ProgramConfig,
@@ -252,7 +284,14 @@ def _managed_offer_post(
         dry_run=runtime_dry_run,
     )
     exit_code, payload = request.run_managed(backend)
-    return parse_managed_offer_post_result(exit_code, payload)
+    result = parse_managed_offer_post_result(exit_code, payload)
+    if not bool(result.get("success", False)):
+        error_text = str(result.get("error", "")).strip()
+        if error_text:
+            raise_if_transient_managed_upstream_error(error_text)
+    return result
+
+
 def _execute_single_managed_action(
     *,
     program: ProgramConfig,
@@ -309,7 +348,6 @@ def _execute_single_managed_action(
             **timing_fields,
         )
     error_text = str(managed_post.get("error", "unknown")).strip()
-    raise_if_transient_managed_upstream_error(error_text)
     return _action_item(
         action,
         status="skipped",
@@ -317,6 +355,8 @@ def _execute_single_managed_action(
         offer_id=None,
         **timing_fields,
     )
+
+
 def _execute_managed_action_with_retry(
     *,
     program: ProgramConfig,
@@ -349,6 +389,8 @@ def _execute_managed_action_with_retry(
                 sleep_seconds = (backoff_ms * (2**attempt_index)) / 1000.0
                 time.sleep(float(sleep_seconds))
     raise RuntimeError(str(last_exc or "managed_action_retry_exhausted"))
+
+
 def _execute_single_local_action(
     *,
     program: ProgramConfig,
@@ -438,13 +480,19 @@ def _execute_single_local_action(
         offer_publish_ms=publish_ms,
         offer_total_ms=int((time.monotonic() - action_started) * 1000),
     )
+
+
 def _expand_strategy_actions(strategy_actions: list[Any]) -> list[Any]:
     expanded_actions: list[Any] = []
     for action in strategy_actions:
         expanded_actions.extend(action for _ in range(int(action.repeat)))
     return expanded_actions
+
+
 def _managed_skip_item(*, action: Any, reason: str) -> dict[str, Any]:
     return _action_item(action, status="skipped", reason=reason, offer_id=None)
+
+
 def _single_input_preferred_skip_reason(
     *,
     requested_amounts: dict[str, int],
@@ -478,6 +526,8 @@ def _single_input_preferred_skip_reason(
             f":available={primary_total}"
         )
     return None
+
+
 def _prepare_parallel_managed_submission(
     *,
     market: Any,
@@ -517,6 +567,8 @@ def _prepare_parallel_managed_submission(
     if single_input_skip_reason:
         return None, None, _managed_skip_item(action=action, reason=single_input_skip_reason)
     return requested_amounts, available_amounts, None
+
+
 def _strategy_action_result(
     *,
     planned_count: int,
@@ -528,6 +580,8 @@ def _strategy_action_result(
         "executed_count": executed_count,
         "items": items,
     }
+
+
 def _execute_actions_parallel(
     *,
     program: ProgramConfig,
@@ -694,7 +748,7 @@ def _execute_actions_parallel(
         1
         for _submit_idx, item in submitted_items
         if str(item.get("status", "")).strip().lower() == "skipped"
-        and is_transient_managed_upstream_reason(str(item.get("reason", "")))
+        and strategy_action_item_transient_upstream(item)
     )
     total_parallel = len(submitted_items)
     if (
@@ -716,6 +770,8 @@ def _execute_actions_parallel(
         executed_count=executed_count,
         items=items,
     )
+
+
 def _execute_actions_sequential(
     *,
     program: ProgramConfig | None,
@@ -757,6 +813,7 @@ def _execute_actions_sequential(
                     status="skipped",
                     reason=f"managed_action_error:{exc}",
                     offer_id=None,
+                    transient_upstream=_is_transient_managed_worker_error(exc),
                 )
         elif program is None:
             item = _action_item(
@@ -786,6 +843,8 @@ def _execute_actions_sequential(
         executed_count=executed_count,
         items=items,
     )
+
+
 def _execute_strategy_actions(
     *,
     market: MarketConfig,

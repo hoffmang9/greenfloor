@@ -1,11 +1,19 @@
 from __future__ import annotations
 
-from tests.helpers.daemon_test_fixtures import *  # noqa: F403
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, cast
+
+from greenfloor.config import io as config_io
+from greenfloor.daemon.testing import MarketCycleResult, reconcile_market_cycle_offers
+from greenfloor.storage.sqlite import SqliteStore
+from tests.helpers.daemon_test_fixtures import market_config
+
 
 def test_reconcile_offer_states_expires_watched_offer_on_direct_dexie_404(tmp_path: Path) -> None:
     db_path = tmp_path / "state.sqlite"
     store = SqliteStore(db_path)
-    market = _market()
+    market = market_config()
     now = datetime.now(UTC)
     try:
         store.upsert_offer_state(
@@ -77,7 +85,7 @@ def test_reconcile_offer_states_requests_immediate_requeue_on_tx_confirmed(
 ) -> None:
     db_path = tmp_path / "state.sqlite"
     store = SqliteStore(db_path)
-    market = _market()
+    market = market_config()
     try:
         store.upsert_offer_state(
             offer_id="offer-confirmed",
@@ -121,7 +129,7 @@ def test_reconcile_offer_states_resolves_quote_asset_before_dexie_fetch(
     monkeypatch, tmp_path: Path
 ) -> None:
     store = SqliteStore(tmp_path / "state.db")
-    market = _market()
+    market = market_config()
     market.quote_asset = "wUSDC.b"
     cats = tmp_path / "cats.yaml"
     cats.write_text(
@@ -167,7 +175,7 @@ def test_reconcile_offer_states_resolves_base_asset_before_dexie_fetch(
     tmp_path: Path,
 ) -> None:
     store = SqliteStore(tmp_path / "state.db")
-    market = _market()
+    market = market_config()
     market.base_asset = "BYC"
     hex_id = "a" * 64
     cats = tmp_path / "cats.yaml"
@@ -211,7 +219,7 @@ def test_reconcile_offer_states_dexie_fallback_status_does_not_mark_mempool(
 ) -> None:
     db_path = tmp_path / "state.sqlite"
     store = SqliteStore(db_path)
-    market = _market()
+    market = market_config()
     try:
         store.upsert_offer_state(
             offer_id="offer-open",
@@ -247,5 +255,3 @@ def test_reconcile_offer_states_dexie_fallback_status_does_not_mark_mempool(
 
     assert rows["offer-open"]["state"] == "open"
     assert rows["offer-open"]["last_seen_status"] == 5
-
-

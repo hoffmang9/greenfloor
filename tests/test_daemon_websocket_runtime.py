@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from greenfloor.daemon.main import _run_loop, run_once
+from greenfloor.daemon.testing import main, run_loop, run_once
 from greenfloor.storage.sqlite import SqliteStore
 from tests.logging_helpers import reset_concurrent_log_handlers
 
@@ -154,7 +154,7 @@ def _write_markets_two(path: Path) -> None:
 
 
 def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path) -> None:
-    import greenfloor.daemon.main as daemon_mod
+    from greenfloor.daemon.testing import main as daemon_mod
 
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
@@ -182,10 +182,10 @@ def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path) -
         run_once_kwargs.update(kwargs)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("greenfloor.daemon.main.CoinsetWebsocketClient", _FakeWsClient)
-    monkeypatch.setattr("greenfloor.daemon.main.run_once", _fake_run_once)
+    monkeypatch.setattr(main, "CoinsetWebsocketClient", _FakeWsClient)
+    monkeypatch.setattr(main, "run_once", _fake_run_once)
 
-    code = _run_loop(
+    code = run_loop(
         program_path=program,
         markets_path=markets,
         allowed_keys=None,
@@ -205,7 +205,7 @@ def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path) -
 
 
 def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path) -> None:
-    import greenfloor.daemon.main as daemon_mod
+    from greenfloor.daemon.testing import main as daemon_mod
 
     home = tmp_path / "home"
     state_dir = home / "state"
@@ -244,10 +244,10 @@ def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path
         assert both_started.wait(timeout=1.0)
         return daemon_mod._MarketCycleResult()
 
-    monkeypatch.setattr("greenfloor.daemon.main.PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
         "greenfloor.daemon.main._process_single_market_with_store", _fake_process_single_market
     )
@@ -266,7 +266,7 @@ def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path
 
 
 def test_run_once_parallel_market_failure_isolated(monkeypatch, tmp_path: Path) -> None:
-    import greenfloor.daemon.main as daemon_mod
+    from greenfloor.daemon.testing import main as daemon_mod
 
     home = tmp_path / "home"
     state_dir = home / "state"
@@ -298,10 +298,10 @@ def test_run_once_parallel_market_failure_isolated(monkeypatch, tmp_path: Path) 
             raise RuntimeError("boom")
         return daemon_mod._MarketCycleResult(strategy_planned=2, strategy_executed=1)
 
-    monkeypatch.setattr("greenfloor.daemon.main.PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
         "greenfloor.daemon.main._process_single_market_with_store", _fake_process_single_market
     )
@@ -330,7 +330,7 @@ def test_run_once_parallel_market_failure_isolated(monkeypatch, tmp_path: Path) 
 
 
 def test_run_once_sequential_market_failure_isolated(monkeypatch, tmp_path: Path) -> None:
-    import greenfloor.daemon.main as daemon_mod
+    from greenfloor.daemon.testing import main as daemon_mod
 
     home = tmp_path / "home"
     state_dir = home / "state"
@@ -362,10 +362,10 @@ def test_run_once_sequential_market_failure_isolated(monkeypatch, tmp_path: Path
             raise RuntimeError("boom-sequential")
         return daemon_mod._MarketCycleResult(strategy_planned=2, strategy_executed=1)
 
-    monkeypatch.setattr("greenfloor.daemon.main.PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
         "greenfloor.daemon.main._process_single_market", _fake_process_single_market
     )
@@ -394,7 +394,7 @@ def test_run_once_sequential_market_failure_isolated(monkeypatch, tmp_path: Path
 
 
 def test_run_once_parallel_picks_up_new_market_next_cycle(monkeypatch, tmp_path: Path) -> None:
-    import greenfloor.daemon.main as daemon_mod
+    from greenfloor.daemon.testing import main as daemon_mod
 
     home = tmp_path / "home"
     state_dir = home / "state"
@@ -433,10 +433,10 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(monkeypatch, tmp_path:
         parallel_seen.append(str(market.market_id))
         return daemon_mod._MarketCycleResult()
 
-    monkeypatch.setattr("greenfloor.daemon.main.PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
         "greenfloor.daemon.main._process_single_market", _fake_process_single_market
     )
@@ -516,10 +516,10 @@ def test_run_once_uses_websocket_capture_when_enabled(monkeypatch, tmp_path: Pat
     def _fake_capture(**_kwargs) -> None:
         capture_calls["n"] += 1
 
-    monkeypatch.setattr("greenfloor.daemon.main.PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main._run_coinset_signal_capture_once", _fake_capture)
+    monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr(main, "_run_coinset_signal_capture_once", _fake_capture)
 
     code = run_once(
         program_path=program,
@@ -570,12 +570,12 @@ def test_run_loop_refreshes_log_level_without_restart(monkeypatch, tmp_path: Pat
             return 0
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("greenfloor.daemon.main.CoinsetWebsocketClient", _FakeWsClient)
-    monkeypatch.setattr("greenfloor.daemon.main._initialize_daemon_file_logging", _fake_initialize)
-    monkeypatch.setattr("greenfloor.daemon.main.run_once", _fake_run_once)
-    monkeypatch.setattr("greenfloor.daemon.main.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr(main, "CoinsetWebsocketClient", _FakeWsClient)
+    monkeypatch.setattr(main, "_initialize_daemon_file_logging", _fake_initialize)
+    monkeypatch.setattr(main, "run_once", _fake_run_once)
+    monkeypatch.setattr(main.time, "sleep", lambda _seconds: None)
 
-    code = _run_loop(
+    code = run_loop(
         program_path=program,
         markets_path=markets,
         allowed_keys=None,
@@ -590,7 +590,7 @@ def test_run_loop_refreshes_log_level_without_restart(monkeypatch, tmp_path: Pat
 
 
 def test_run_loop_logs_when_missing_log_level_is_auto_healed(monkeypatch, tmp_path: Path) -> None:
-    import greenfloor.daemon.main as daemon_mod
+    from greenfloor.daemon.testing import main as daemon_mod
 
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
@@ -613,10 +613,10 @@ def test_run_loop_logs_when_missing_log_level_is_auto_healed(monkeypatch, tmp_pa
     def _fake_run_once(**_kwargs):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("greenfloor.daemon.main.CoinsetWebsocketClient", _FakeWsClient)
-    monkeypatch.setattr("greenfloor.daemon.main.run_once", _fake_run_once)
+    monkeypatch.setattr(main, "CoinsetWebsocketClient", _FakeWsClient)
+    monkeypatch.setattr(main, "run_once", _fake_run_once)
 
-    code = _run_loop(
+    code = run_loop(
         program_path=program,
         markets_path=markets,
         allowed_keys=None,
@@ -631,7 +631,7 @@ def test_run_loop_logs_when_missing_log_level_is_auto_healed(monkeypatch, tmp_pa
 
 
 def test_run_loop_orders_reload_marker_log_sleep_then_reload(monkeypatch, tmp_path: Path) -> None:
-    import greenfloor.daemon.main as daemon_mod
+    from greenfloor.daemon.testing import main as daemon_mod
 
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
@@ -676,16 +676,16 @@ def test_run_loop_orders_reload_marker_log_sleep_then_reload(monkeypatch, tmp_pa
     def _fake_sleep(_seconds: float) -> None:
         sequence.append("sleep")
 
-    monkeypatch.setattr("greenfloor.daemon.main.CoinsetWebsocketClient", _FakeWsClient)
-    monkeypatch.setattr("greenfloor.daemon.main.load_program_config", _fake_load_program_config)
-    monkeypatch.setattr("greenfloor.daemon.main.run_once", _fake_run_once)
+    monkeypatch.setattr(main, "CoinsetWebsocketClient", _FakeWsClient)
+    monkeypatch.setattr(main, "load_program_config", _fake_load_program_config)
+    monkeypatch.setattr(main, "run_once", _fake_run_once)
     monkeypatch.setattr(
         "greenfloor.daemon.main._consume_reload_marker", _fake_consume_reload_marker
     )
-    monkeypatch.setattr("greenfloor.daemon.main._log_daemon_event", _fake_log_daemon_event)
-    monkeypatch.setattr("greenfloor.daemon.main.time.sleep", _fake_sleep)
+    monkeypatch.setattr(main, "_log_daemon_event", _fake_log_daemon_event)
+    monkeypatch.setattr(main.time, "sleep", _fake_sleep)
 
-    code = _run_loop(
+    code = run_loop(
         program_path=program,
         markets_path=markets,
         allowed_keys=None,
@@ -764,11 +764,11 @@ def test_run_loop_websocket_callbacks_use_callback_thread_store(
     def _fake_run_once(**_kwargs):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("greenfloor.daemon.main.SqliteStore", _ThreadBoundStore)
-    monkeypatch.setattr("greenfloor.daemon.main.CoinsetWebsocketClient", _FakeWsClient)
-    monkeypatch.setattr("greenfloor.daemon.main.run_once", _fake_run_once)
+    monkeypatch.setattr(main, "SqliteStore", _ThreadBoundStore)
+    monkeypatch.setattr(main, "CoinsetWebsocketClient", _FakeWsClient)
+    monkeypatch.setattr(main, "run_once", _fake_run_once)
 
-    code = _run_loop(
+    code = run_loop(
         program_path=program,
         markets_path=markets,
         allowed_keys=None,
@@ -782,7 +782,7 @@ def test_run_loop_websocket_callbacks_use_callback_thread_store(
 
 
 def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:
-    import greenfloor.daemon.main as daemon_mod
+    from greenfloor.daemon.testing import main as daemon_mod
 
     state_dir = tmp_path / "state"
     with daemon_mod._acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
@@ -792,7 +792,7 @@ def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:
 
 
 def test_main_once_exits_with_lock_conflict(monkeypatch, tmp_path: Path, capsys) -> None:
-    import greenfloor.daemon.main as daemon_mod
+    from greenfloor.daemon.testing import main as daemon_mod
 
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)

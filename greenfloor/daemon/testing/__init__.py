@@ -1,0 +1,121 @@
+"""Stable public hooks for daemon unit and integration tests.
+
+Production orchestration should import implementation modules directly. Tests should
+prefer imports from this package so refactors do not require wide private-symbol churn.
+
+Canonical monkeypatch targets (module-qualified paths):
+
+- ``greenfloor.daemon.testing.main`` — cycle orchestration (`run_once`, `run_loop`, adapters)
+- ``greenfloor.daemon.testing.inventory_scan`` — coinset adapter factory
+- ``greenfloor.daemon.testing.strategy_dispatch`` — managed/local offer dispatch
+- ``greenfloor.daemon.testing.strategy_state`` — reseed policy
+- ``greenfloor.daemon.testing.cooldowns`` — post/cancel cooldown globals
+- ``greenfloor.daemon.testing.cancel_policy`` — cancel policy entry
+"""
+
+from __future__ import annotations
+
+from greenfloor.daemon.testing.cancel_policy import execute_cancel_policy
+from greenfloor.daemon.testing.cooldowns import (
+    CANCEL_COOLDOWN_UNTIL,
+    PENDING_VISIBILITY_REASON,
+    POST_COOLDOWN_UNTIL,
+    cancel_retry_config,
+    cooldown_remaining_ms,
+    cooldowns,
+    post_retry_config,
+    set_cooldown,
+)
+from greenfloor.daemon.testing.helpers import PlannedAction, drop_zero_repeat_strategy_actions
+from greenfloor.daemon.testing.inventory_scan import (
+    CoinsetAdapter,
+    coinset_spendable_base_unit_coin_amounts,
+    inventory_scan,
+)
+from greenfloor.daemon.testing.main import (
+    MarketCycleResult,
+    MarketDispatchState,
+    consume_reload_marker,
+    detect_stale_open_offers_for_requeue,
+    enqueue_immediate_requeue_market,
+    main,
+    run_loop,
+    run_once,
+    select_market_batch,
+)
+from greenfloor.daemon.testing.market_helpers import resolve_quote_asset_for_offer
+from greenfloor.daemon.testing.reconcile import reconcile_market_cycle_offers
+from greenfloor.daemon.testing.reservations import (
+    AssetReservationCoordinator,
+    ReservationContentionError,
+    ReservationStorageError,
+)
+from greenfloor.daemon.testing.strategy_dispatch import (
+    build_offer_for_action,
+    execute_single_local_action,
+    execute_strategy_actions,
+    expand_strategy_actions,
+    single_input_preferred_skip_reason,
+    strategy_dispatch,
+)
+from greenfloor.daemon.testing.strategy_state import (
+    evaluate_reseed_candidates,
+    inject_reseed_action_if_no_active_offers,
+    strategy_config_from_market,
+    strategy_state,
+)
+from greenfloor.daemon.testing.watchlist import (
+    active_offer_counts_by_size,
+    active_offer_counts_by_size_and_side,
+    build_dexie_size_by_offer_id,
+    match_watched_coin_ids,
+    set_watched_coin_ids_for_market,
+    update_market_coin_watchlist_from_dexie,
+)
+
+__all__ = [
+    "AssetReservationCoordinator",
+    "CoinsetAdapter",
+    "MarketCycleResult",
+    "MarketDispatchState",
+    "PENDING_VISIBILITY_REASON",
+    "PlannedAction",
+    "POST_COOLDOWN_UNTIL",
+    "CANCEL_COOLDOWN_UNTIL",
+    "ReservationContentionError",
+    "ReservationStorageError",
+    "active_offer_counts_by_size",
+    "active_offer_counts_by_size_and_side",
+    "build_dexie_size_by_offer_id",
+    "build_offer_for_action",
+    "cancel_retry_config",
+    "coinset_spendable_base_unit_coin_amounts",
+    "consume_reload_marker",
+    "cooldown_remaining_ms",
+    "cooldowns",
+    "detect_stale_open_offers_for_requeue",
+    "drop_zero_repeat_strategy_actions",
+    "enqueue_immediate_requeue_market",
+    "evaluate_reseed_candidates",
+    "execute_cancel_policy",
+    "execute_single_local_action",
+    "execute_strategy_actions",
+    "expand_strategy_actions",
+    "inject_reseed_action_if_no_active_offers",
+    "inventory_scan",
+    "main",
+    "match_watched_coin_ids",
+    "post_retry_config",
+    "reconcile_market_cycle_offers",
+    "resolve_quote_asset_for_offer",
+    "run_loop",
+    "run_once",
+    "select_market_batch",
+    "set_cooldown",
+    "set_watched_coin_ids_for_market",
+    "single_input_preferred_skip_reason",
+    "strategy_config_from_market",
+    "strategy_dispatch",
+    "strategy_state",
+    "update_market_coin_watchlist_from_dexie",
+]
