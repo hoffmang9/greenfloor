@@ -11,7 +11,7 @@ import json
 import os
 from typing import Any
 
-from greenfloor.hex_utils import is_xch_like_asset_id
+from greenfloor.hex_utils import canonical_is_xch
 
 
 def _hex_to_bytes(value: str) -> bytes:
@@ -257,7 +257,7 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
             "spend_bundle_hex": spend_bundle_hex,
         }
 
-    if not is_xch_like_asset_id(asset_id):
+    if not canonical_is_xch(asset_id):
         return {"status": "skipped", "reason": "asset_not_supported_yet"}
 
     size_base_units = int(plan.get("size_base_units", 0))

@@ -23,14 +23,20 @@ def is_hex_id(value: str) -> bool:
 
 
 def canonical_is_xch(asset_id: str) -> bool:
-    """Return True if *asset_id* refers to the native XCH/TXCH coin."""
+    """Return True when *asset_id* is an explicit native XCH/TXCH symbol.
+
+    Use for policy, catalog, coin listing, and Python gates that must not treat a
+    missing asset id as XCH. Empty string returns False.
+    """
     return str(asset_id or "").strip().lower() in _XCH_ASSET_SYMBOLS
 
 
 def is_xch_like_asset_id(asset_id: str) -> bool:
-    """Return True when *asset_id* is native XCH/TXCH for BLS signer paths.
+    """Return True when *asset_id* should follow the Rust signer XCH code path.
 
-    Matches ``greenfloor_signer`` ``coinset::is_xch_like_asset`` (includes empty id).
+    Matches ``greenfloor_signer::coinset::is_xch_like_asset``: empty/whitespace is
+    treated as XCH-like so payloads omitted by callers still reach the native path.
+    Do not use for Python-only scope gates (use :func:`canonical_is_xch` instead).
     """
     normalized = str(asset_id or "").strip().lower()
     return not normalized or normalized in _XCH_ASSET_SYMBOLS

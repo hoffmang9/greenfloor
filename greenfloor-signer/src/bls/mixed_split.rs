@@ -7,14 +7,12 @@ use chia_sdk_utils::select_coins;
 use serde::{Deserialize, Serialize};
 
 use crate::bls::coins::cat_asset_bytes;
-use crate::bls::select::{
-    select_cats_explicit_sum, select_cats_smallest_for_amount, select_xch_for_amount,
-};
+use crate::bls::select::select_xch_for_amount;
 use crate::bls::spend::build_signed_standard_spend;
 use crate::coinset::is_xch_like_asset;
 use crate::coinset::{
-    broadcast_spend_bundle, client_for_network, list_unspent_xch, BroadcastSpendBundleResult,
-    MIN_CAT_OUTPUT_MOJOS,
+    broadcast_spend_bundle, client_for_network, list_and_select_cats, list_unspent_xch,
+    BroadcastSpendBundleResult, CatSelectionMode, MIN_CAT_OUTPUT_MOJOS,
 };
 use crate::error::{SignerError, SignerResult};
 
@@ -87,26 +85,22 @@ pub async fn build_bls_mixed_split_spend_bundle(
         .await?;
     } else {
         let asset_bytes = cat_asset_bytes(&asset_raw)?;
-        if !explicit_coin_ids.is_empty() {
-            offered_cats = select_cats_explicit_sum(
-                &client,
-                &explicit_coin_ids,
-                target_total,
-                SignerError::InsufficientCatCoins,
-            )
-            .await?;
+        let cat_mode = if explicit_coin_ids.is_empty() {
+            CatSelectionMode::SmallestFirst
         } else {
-            offered_cats = select_cats_smallest_for_amount(
-                &client,
-                receive_address,
-                asset_bytes,
-                &[],
-                target_total,
-                SignerError::InsufficientCatCoins,
-                SignerError::InsufficientCatCoins,
-            )
-            .await?;
-        }
+            CatSelectionMode::ExplicitSum
+        };
+        offered_cats = list_and_select_cats(
+            &client,
+            receive_address,
+            asset_bytes,
+            &explicit_coin_ids,
+            target_total,
+            cat_mode,
+            SignerError::InsufficientCatCoins,
+            SignerError::InsufficientCatCoins,
+        )
+        .await?;
         if fee_mojos > 0 {
             let xch_coins = list_unspent_xch(&client, receive_address).await?;
             let available: u64 = xch_coins.iter().map(|coin| coin.amount).sum();

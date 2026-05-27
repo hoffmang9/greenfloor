@@ -7,11 +7,11 @@ use clvmr::Allocator;
 use serde::{Deserialize, Serialize};
 
 use crate::bls::coins::cat_asset_bytes;
-use crate::bls::select::{select_cats_smallest_for_amount, select_xch_for_amount};
+use crate::bls::select::select_xch_for_amount;
 use crate::bls::spend::{add_coins_to_spends, synthetic_keys_for_coins};
 use crate::bls::signing::sign_coin_spends;
 use crate::coinset::is_xch_like_asset;
-use crate::coinset::client_for_network;
+use crate::coinset::{client_for_network, list_and_select_cats, CatSelectionMode};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::plan::build_requested_payments;
 use crate::offer::types::OfferTerms;
@@ -60,12 +60,13 @@ pub async fn build_bls_offer_spend_bundle(
         (offered_xch, Vec::new())
     } else {
         let asset_bytes = cat_asset_bytes(&offer_asset_raw)?;
-        let offered_cats = select_cats_smallest_for_amount(
+        let offered_cats = list_and_select_cats(
             &client,
             receive_address,
             asset_bytes,
             &explicit_coin_ids,
             request.offer_amount,
+            CatSelectionMode::SmallestFirst,
             SignerError::NoUnspentOfferCatCoins,
             SignerError::InsufficientOfferCatCoins,
         )
@@ -75,9 +76,6 @@ pub async fn build_bls_offer_spend_bundle(
 
     let offered_total: u64 = offered_xch.iter().map(|c| c.amount).sum::<u64>()
         + offered_cats.iter().map(|cat| cat.coin.amount).sum::<u64>();
-    if offered_total < request.offer_amount {
-        return Err(SignerError::InsufficientOfferCoinTotal);
-    }
     let change_amount = offered_total.saturating_sub(request.offer_amount);
 
     let offered_coin_ids: Vec<_> = offered_xch

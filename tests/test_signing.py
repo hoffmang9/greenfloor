@@ -112,6 +112,21 @@ def test_build_signed_spend_bundle_unsupported_asset() -> None:
     assert result["reason"] == "asset_not_supported_yet"
 
 
+def test_build_signed_spend_bundle_empty_asset_id_not_treated_as_xch() -> None:
+    result = signing_mod.build_signed_spend_bundle(
+        {
+            "key_id": "k1",
+            "network": "mainnet",
+            "receive_address": "xch1abc",
+            "keyring_yaml_path": "/tmp/k.yaml",
+            "asset_id": "",
+            "plan": {"op_type": "split", "size_base_units": 10, "op_count": 1},
+        }
+    )
+    assert result["status"] == "skipped"
+    assert result["reason"] == "asset_not_supported_yet"
+
+
 def test_build_signed_spend_bundle_invalid_plan(monkeypatch) -> None:
     monkeypatch.setattr(
         signing_mod,

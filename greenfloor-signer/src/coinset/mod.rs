@@ -1,8 +1,11 @@
 mod asset;
 mod backend;
+mod cat_select;
 mod msp;
 mod presplit;
 mod xch;
+
+pub(crate) use cat_select::{finalize_selected_cats, list_and_select_cats, CatSelectionMode};
 
 pub use asset::is_xch_like_asset;
 
@@ -67,33 +70,6 @@ pub(crate) async fn select_cats_for_spend(
         list_unspent_cats_by_ids(client, explicit_coin_ids).await?
     };
     finalize_selected_cats(cats, explicit_coin_ids, target_amount)
-}
-
-pub(crate) fn finalize_selected_cats(
-    cats: Vec<Cat>,
-    explicit_coin_ids: &[Bytes32],
-    target_amount: u64,
-) -> SignerResult<SelectedCats> {
-    if cats.is_empty() {
-        return Err(SignerError::NoUnspentCatCoins);
-    }
-    let selected = if explicit_coin_ids.is_empty() {
-        select_cats_smallest_first(cats, target_amount)
-    } else {
-        cats
-    };
-    if selected.is_empty() {
-        return Err(SignerError::InsufficientCatCoins);
-    }
-    let offered_total: u64 = selected.iter().map(|cat| cat.coin.amount).sum();
-    if offered_total < target_amount {
-        return Err(SignerError::InsufficientCatCoins);
-    }
-    Ok(SelectedCats {
-        change_amount: offered_total - target_amount,
-        selected,
-        offered_total,
-    })
 }
 
 pub async fn list_unspent_xch(
@@ -330,11 +306,20 @@ pub fn spend_bundle_hex(spend_bundle: &SpendBundle) -> SignerResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chia_protocol::{Bytes32, Coin};
-    use chia_sdk_driver::{Cat, CatInfo};
 
     #[test]
     fn select_cats_smallest_first_accumulates_until_target() {
+        use chia_protocol::{Bytes32, Coin};
+        use chia_sdk_driver::{Cat, CatInfo};
+
+        fn cat_with_amount(amount: u64) -> Cat {
+            Cat::new(
+                Coin::new(Bytes32::new([amount as u8; 32]), Bytes32::default(), amount),
+                None,
+                CatInfo::new(Bytes32::new([0x01; 32]), None, Bytes32::default()),
+            )
+        }
+
         let cats = vec![
             cat_with_amount(5000),
             cat_with_amount(1000),
@@ -345,13 +330,4 @@ mod tests {
         assert_eq!(selected[0].coin.amount, 1000);
         assert_eq!(selected[1].coin.amount, 3000);
     }
-
-    fn cat_with_amount(amount: u64) -> Cat {
-        Cat::new(
-            Coin::new(Bytes32::new([amount as u8; 32]), Bytes32::default(), amount),
-            None,
-            CatInfo::new(Bytes32::new([0x01; 32]), None, Bytes32::default()),
-        )
-    }
-
 }
