@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from greenfloor.cli.manager import _build_and_post_offer
+from greenfloor.cli.offer_build_post import build_and_post_offer_cli
 from tests.helpers.fake_adapters import FakeDexie
 from tests.helpers.offer_runtime_fixtures import (
     write_manager_program,
@@ -12,7 +12,7 @@ from tests.helpers.offer_runtime_fixtures import (
 )
 
 
-def test_build_and_post_offer_dispatches_to_cloud_wallet_when_configured(
+def testbuild_and_post_offer_cli_dispatches_to_cloud_wallet_when_configured(
     monkeypatch, tmp_path: Path
 ) -> None:
     program = tmp_path / "program.yaml"
@@ -33,7 +33,7 @@ def test_build_and_post_offer_dispatches_to_cloud_wallet_when_configured(
         _fake_cloud_wallet,
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -53,7 +53,7 @@ def test_build_and_post_offer_dispatches_to_cloud_wallet_when_configured(
     assert captured_dry_run == [False]
 
 
-def test_build_and_post_offer_dry_run_uses_cloud_wallet_when_configured(
+def testbuild_and_post_offer_cli_dry_run_uses_cloud_wallet_when_configured(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
@@ -75,7 +75,7 @@ def test_build_and_post_offer_dry_run_uses_cloud_wallet_when_configured(
         _fake_cloud_wallet,
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -97,7 +97,7 @@ def test_build_and_post_offer_dry_run_uses_cloud_wallet_when_configured(
     assert payload["dry_run"] is True
 
 
-def test_build_and_post_offer_uses_local_path_for_large_size_when_cloud_wallet_configured(
+def testbuild_and_post_offer_cli_uses_local_path_for_large_size_when_cloud_wallet_configured(
     monkeypatch, tmp_path: Path
 ) -> None:
     program = tmp_path / "program.yaml"
@@ -134,7 +134,7 @@ def test_build_and_post_offer_uses_local_path_for_large_size_when_cloud_wallet_c
         "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie", lambda _offer: None
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -154,7 +154,7 @@ def test_build_and_post_offer_uses_local_path_for_large_size_when_cloud_wallet_c
     assert local_builder_calls[0] == 1
 
 
-def test_build_and_post_offer_uses_local_path_when_cloud_wallet_not_configured(
+def testbuild_and_post_offer_cli_uses_local_path_when_cloud_wallet_not_configured(
     monkeypatch, tmp_path: Path
 ) -> None:
     program = tmp_path / "program.yaml"
@@ -191,7 +191,7 @@ def test_build_and_post_offer_uses_local_path_when_cloud_wallet_not_configured(
         "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie", lambda _offer: None
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -211,7 +211,7 @@ def test_build_and_post_offer_uses_local_path_when_cloud_wallet_not_configured(
     assert local_builder_calls[0] == 1
 
 
-def test_build_and_post_offer_uses_signer_path_for_kms_configured(
+def testbuild_and_post_offer_cli_uses_signer_path_for_kms_configured(
     monkeypatch, tmp_path: Path
 ) -> None:
     """KMS-configured runs must use the local Rust signer path for all sizes."""
@@ -243,7 +243,7 @@ def test_build_and_post_offer_uses_signer_path_for_kms_configured(
         lambda _program, **kwargs: "signer",
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -263,7 +263,7 @@ def test_build_and_post_offer_uses_signer_path_for_kms_configured(
     assert local_builder_calls[0] == 0
 
 
-def test_build_and_post_offer_uses_signer_path_for_kms_configured_large_size(
+def testbuild_and_post_offer_cli_uses_signer_path_for_kms_configured_large_size(
     monkeypatch, tmp_path: Path
 ) -> None:
     """KMS-configured runs use signer path even for size >= 100."""
@@ -295,7 +295,7 @@ def test_build_and_post_offer_uses_signer_path_for_kms_configured_large_size(
         lambda _program, **kwargs: "signer",
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",

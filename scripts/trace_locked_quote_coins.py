@@ -35,10 +35,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from greenfloor.cli.manager import (  # noqa: E402
-    _new_cloud_wallet_adapter,
+from greenfloor.cli.coin_ops import (  # noqa: E402
+    resolve_cloud_wallet_asset_id_for_wallet,
+)
+from greenfloor.runtime.cloud_wallet.adapter import (  # noqa: E402
     _require_cloud_wallet_config,
-    _resolve_cloud_wallet_asset_id,
+    new_cloud_wallet_adapter,
 )
 from greenfloor.config.io import load_program_config  # noqa: E402
 
@@ -578,7 +580,7 @@ def main() -> int:
     args = parser.parse_args()
 
     program = load_program_config(Path(args.program_config))
-    wallet = _new_cloud_wallet_adapter(program)
+    wallet = new_cloud_wallet_adapter(program)
     if args.vault_id.strip() and args.vault_id.strip() != wallet.vault_id:
         cfg = _require_cloud_wallet_config(program)
         cfg = cfg.__class__(
@@ -595,7 +597,7 @@ def main() -> int:
 
         wallet = CloudWalletAdapter(cfg)
 
-    quote_asset_id = _resolve_cloud_wallet_asset_id(
+    quote_asset_id = resolve_cloud_wallet_asset_id_for_wallet(
         wallet=wallet,
         canonical_asset_id=args.quote,
         symbol_hint=args.quote,

@@ -45,6 +45,11 @@ from greenfloor.config.models import (
     managed_offer_execution_backend,
 )
 from greenfloor.core.coin_ops import BucketSpec, CoinOpPlan, plan_coin_ops
+from greenfloor.core.coin_ops_policy import (
+    coin_meets_coin_op_min_amount as _coin_meets_coin_op_min_amount,
+    coin_op_min_amount_mojos as _coin_op_min_amount_mojos,
+    coin_op_target_amount_allowed as _coin_op_target_amount_allowed,
+)
 from greenfloor.core.fee_budget import partition_plans_by_budget, projected_coin_ops_fee_mojos
 from greenfloor.core.inventory import compute_bucket_counts_from_coins
 from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert, utcnow
@@ -110,24 +115,6 @@ def _cloud_wallet_coin_matches_asset_scope(*, coin: dict[str, Any], scoped_asset
     # Asset-scoped Cloud Wallet coin queries can omit per-row asset metadata.
     # When that happens, trust the requested scope rather than discarding rows.
     return True
-
-
-def _coin_op_min_amount_mojos(*, canonical_asset_id: str) -> int:
-    if str(canonical_asset_id).strip().lower() == "xch":
-        return 0
-    return 1000
-
-
-def _coin_meets_coin_op_min_amount(coin: dict[str, Any], *, canonical_asset_id: str) -> bool:
-    try:
-        amount = int(coin.get("amount", 0))
-    except (TypeError, ValueError):
-        return False
-    return amount >= _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
-
-
-def _coin_op_target_amount_allowed(*, amount_mojos: int, canonical_asset_id: str) -> bool:
-    return int(amount_mojos) >= _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
 
 
 def _coin_row_is_unlocked_and_unlinked(*, coin: dict[str, Any]) -> bool:

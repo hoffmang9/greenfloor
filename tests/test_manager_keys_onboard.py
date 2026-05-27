@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from greenfloor.cli.manager import _keys_onboard
+from greenfloor.cli.keys_onboard import keys_onboard
 
 
 def _copy_program_config(tmp_path: Path) -> Path:
@@ -15,7 +15,7 @@ def _copy_program_config(tmp_path: Path) -> Path:
     return program
 
 
-def test_keys_onboard_import_words_accepts_24_word_secret(
+def testkeys_onboard_import_words_accepts_24_word_secret(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = _copy_program_config(tmp_path)
@@ -27,7 +27,7 @@ def test_keys_onboard_import_words_accepts_24_word_secret(
     responses = iter(["1", mnemonic_24])
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(responses))
 
-    code = _keys_onboard(
+    code = keys_onboard(
         program_path=program,
         key_id="key-main-1",
         state_dir=state_dir,
@@ -41,7 +41,7 @@ def test_keys_onboard_import_words_accepts_24_word_secret(
     assert (state_dir / "key_onboarding.json").exists()
 
 
-def test_keys_onboard_import_words_rejects_non_12_or_24_word_secret(
+def testkeys_onboard_import_words_rejects_non_12_or_24_word_secret(
     monkeypatch, tmp_path: Path
 ) -> None:
     program = _copy_program_config(tmp_path)
@@ -54,7 +54,7 @@ def test_keys_onboard_import_words_rejects_non_12_or_24_word_secret(
     monkeypatch.setattr("builtins.input", lambda _prompt="": next(responses))
 
     with pytest.raises(ValueError, match="mnemonic must contain 12 or 24 words"):
-        _keys_onboard(
+        keys_onboard(
             program_path=program,
             key_id="key-main-1",
             state_dir=state_dir,

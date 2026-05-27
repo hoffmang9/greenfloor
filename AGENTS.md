@@ -29,11 +29,17 @@ Severity tags:
 ## Architecture Boundaries
 
 - `[MUST]` `greenfloor/core`: deterministic policy only (no IO).
+- `[MUST]` `greenfloor/core/coin_ops_policy.py`: coin-op minimum-amount policy shared by CLI and daemon.
 - `[MUST]` `greenfloor/config`: parse/validate config, resolve paths, resolve quote assets.
 - `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet, notifications).
 - `[MUST]` `greenfloor/signing.py`: legacy Python signing entry point during Rust migration (see ADR 0006).
 - `[MUST]` `greenfloor-signer/`: canonical vault KMS signing implementation; new vault spend/offer logic lands here first.
-- `[MUST]` `greenfloor/cli/manager.py`: operator CLI commands.
+- `[MUST]` `greenfloor/cli/manager.py`: operator CLI router (argparse + dispatch).
+- `[MUST]` `greenfloor/cli/coin_ops.py`: Cloud Wallet coin list/split/combine CLI commands.
+- `[MUST]` `greenfloor/cli/cats.py`: local CAT catalog CLI commands.
+- `[MUST]` `greenfloor/cli/offers_lifecycle.py`: offer reconcile/status/cancel CLI commands.
+- `[MUST]` `greenfloor/cli/manager_setup.py`: config validate, doctor, bootstrap-home, set-log-level.
+- `[MUST]` `greenfloor/cli/keys_onboard.py`: keys-onboard CLI command.
 - `[MUST]` `greenfloor/cli/offer_build_post.py`: manager `build-and-post-offer` command implementation.
 - `[MUST]` `greenfloor/offer_builder.py`: canonical local BLS offer text construction; `greenfloor/cli/offer_builder_sdk.py` is a stdin/stdout CLI wrapper only.
 - `[MUST]` `greenfloor/runtime/offer_execution.py`: composition root for offer build/post runtime; import orchestration helpers here (see ADR 0005, ADR 0008).

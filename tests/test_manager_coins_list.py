@@ -7,9 +7,7 @@ from typing import cast
 import pytest
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
-from greenfloor.cli.manager import (
-    _coins_list,
-)
+from greenfloor.cli.coin_ops import coins_list
 from greenfloor.runtime.cloud_wallet.assets import (
     resolve_cloud_wallet_asset_id,
 )
@@ -42,8 +40,8 @@ def test_coins_list_returns_minimal_fields(monkeypatch, tmp_path: Path, capsys) 
                 }
             ]
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
-    code = _coins_list(program_path=program, asset=None, vault_id=None)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
+    code = coins_list(program_path=program, asset=None, vault_id=None)
     assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["count"] == 1
@@ -73,12 +71,12 @@ def test_coins_list_resolves_asset_filter_before_listing(
             calls["list_asset_id"] = asset_id
             return []
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
+        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_resolved",
     )
-    code = _coins_list(program_path=program, asset="BYC", vault_id=None)
+    code = coins_list(program_path=program, asset="BYC", vault_id=None)
     assert code == 0
     assert calls["list_asset_id"] == "Asset_resolved"
     payload = json.loads(capsys.readouterr().out.strip())
@@ -117,16 +115,16 @@ def test_coins_list_keeps_asset_scoped_rows_when_wallet_reports_mixed_asset_meta
                 },
             ]
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._manager_logger.warning",
+        "greenfloor.cli.coin_ops.coin_ops_logger.warning",
         lambda *args, **kwargs: warning_calls.append(args),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
+        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_kg8byr1jz72w12g9tjchiypp",
     )
-    code = _coins_list(program_path=program, asset="BYC", vault_id=None)
+    code = coins_list(program_path=program, asset="BYC", vault_id=None)
     assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["count"] == 2
@@ -196,16 +194,16 @@ def test_coins_list_keeps_asset_totals_when_scoped_rows_omit_reported_asset(
                 }
             }
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._manager_logger.warning",
+        "greenfloor.cli.coin_ops.coin_ops_logger.warning",
         lambda *args, **kwargs: warning_calls.append(args),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
+        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_kg8byr1jz72w12g9tjchiypp",
     )
-    code = _coins_list(program_path=program, asset="BYC", vault_id=None)
+    code = coins_list(program_path=program, asset="BYC", vault_id=None)
     assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["count"] == 2
@@ -277,12 +275,12 @@ def test_coins_list_keeps_row_level_spendability_separate_from_wallet_asset_tota
                 }
             }
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
+        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_kg8",
     )
-    code = _coins_list(program_path=program, asset="BYC", vault_id=None)
+    code = coins_list(program_path=program, asset="BYC", vault_id=None)
     assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["asset_total_amount"] == 20480
@@ -346,16 +344,16 @@ def test_coins_list_warns_when_item_amount_sum_differs_from_wallet_asset_total(
                 }
             }
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._manager_logger.warning",
+        "greenfloor.cli.coin_ops.coin_ops_logger.warning",
         lambda *args, **kwargs: warning_calls.append(args),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
+        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_kg8",
     )
-    code = _coins_list(program_path=program, asset="BYC", vault_id=None)
+    code = coins_list(program_path=program, asset="BYC", vault_id=None)
     assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["item_amount_sum"] == 20000
@@ -396,13 +394,13 @@ def test_coins_list_cat_id_uses_wallet_resolution_without_dexie(
             calls["list_asset_id"] = asset_id
             return []
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     resolver_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
+        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
         lambda **kwargs: resolver_calls.append(kwargs) or "Asset_resolved",
     )
-    code = _coins_list(program_path=program, asset="BYC", vault_id=None, cat_id=cat_id)
+    code = coins_list(program_path=program, asset="BYC", vault_id=None, cat_id=cat_id)
     assert code == 0
     assert calls["list_asset_id"] == "Asset_resolved"
     assert len(resolver_calls) == 1
@@ -429,10 +427,10 @@ def test_coins_list_rejects_non_hex_cat_id(monkeypatch, tmp_path: Path) -> None:
             _ = asset_id, include_pending
             return []
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
 
     with pytest.raises(ValueError, match="--cat-id must be a 64-character hex CAT asset id"):
-        _coins_list(program_path=program, asset=None, vault_id=None, cat_id="not-a-cat-id")
+        coins_list(program_path=program, asset=None, vault_id=None, cat_id="not-a-cat-id")
 
 
 def test_coins_list_cat_id_works_when_dexie_metadata_absent(
@@ -474,21 +472,21 @@ def test_coins_list_cat_id_works_when_dexie_metadata_absent(
             return []
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager._new_cloud_wallet_adapter", lambda _program: _FakeWallet()
+        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter", lambda _program: _FakeWallet()
     )
     monkeypatch.setattr(
         "greenfloor.asset_label_catalog._local_catalog_label_hints_for_asset_id",
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == cat_id else [],
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("dexie should not be called")),
     )
     monkeypatch.setattr(
         "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("dexie should not be called")),
     )
-    code = _coins_list(program_path=program, asset=None, vault_id=None, cat_id=cat_id)
+    code = coins_list(program_path=program, asset=None, vault_id=None, cat_id=cat_id)
     assert code == 0
     assert calls["list_asset_id"] == "Asset_carbon"
     payload = json.loads(capsys.readouterr().out.strip())
@@ -537,15 +535,15 @@ def test_coins_list_vault_id_override_uses_override_wallet_end_to_end(
             ]
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager._new_cloud_wallet_adapter", lambda _program: _BaseWallet()
+        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter", lambda _program: _BaseWallet()
     )
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _OverrideWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _OverrideWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
+        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
         lambda **kw: (resolver_wallet_ids.append(kw["wallet"].vault_id) or "Asset_resolved"),
     )
 
-    code = _coins_list(
+    code = coins_list(
         program_path=program,
         asset="BYC",
         vault_id="Wallet_override",
@@ -603,7 +601,7 @@ def test_resolve_cloud_wallet_asset_id_hex_without_dexie_uses_local_catalog_hint
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == base_cat else [],
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("dexie should not be called")),
     )
     monkeypatch.setattr(

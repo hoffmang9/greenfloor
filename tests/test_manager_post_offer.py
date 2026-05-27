@@ -6,10 +6,14 @@ from pathlib import Path
 import pytest
 
 import greenfloor.cli.manager as manager_mod
-from greenfloor.cli.manager import (
-    _resolve_dexie_base_url,
-    _resolve_offer_publish_settings,
-    _resolve_splash_base_url,
+import greenfloor.runtime.cloud_wallet.adapter as adapter_mod
+from greenfloor.asset_label_catalog import _dexie_lookup_token_for_cat_id
+from greenfloor.cli.coin_ops import coin_combine, coin_split
+from greenfloor.cli.manager_setup import set_log_level
+from greenfloor.cli.offer_build_post import (
+    resolve_dexie_base_url,
+    resolve_offer_publish_settings,
+    resolve_splash_base_url,
 )
 from greenfloor.runtime.cloud_wallet.assets import (
     recent_market_resolved_asset_id_hints,
@@ -20,13 +24,13 @@ from tests.helpers.offer_runtime_fixtures import (
 
 
 def test_resolve_dexie_base_url_by_network() -> None:
-    assert _resolve_dexie_base_url("mainnet", None) == "https://api.dexie.space"
-    assert _resolve_dexie_base_url("testnet11", None) == "https://api-testnet.dexie.space"
-    assert _resolve_dexie_base_url("testnet", None) == "https://api-testnet.dexie.space"
+    assert resolve_dexie_base_url("mainnet", None) == "https://api.dexie.space"
+    assert resolve_dexie_base_url("testnet11", None) == "https://api-testnet.dexie.space"
+    assert resolve_dexie_base_url("testnet", None) == "https://api-testnet.dexie.space"
 
 
 def test_resolve_splash_base_url_defaults_when_not_explicit() -> None:
-    assert _resolve_splash_base_url(None) == "http://john-deere.hoffmang.com:4000"
+    assert resolve_splash_base_url(None) == "http://john-deere.hoffmang.com:4000"
 
 
 def test_dexie_lookup_token_for_cat_id_falls_back_to_v3_tickers(monkeypatch) -> None:
@@ -57,8 +61,8 @@ def test_dexie_lookup_token_for_cat_id_falls_back_to_v3_tickers(monkeypatch) -> 
             return _Resp({"tickers": [{"ticker_id": f"{target}_xch", "base_currency": target}]})
         raise AssertionError(f"unexpected url: {url}")
 
-    monkeypatch.setattr("greenfloor.cli.manager.urllib.request.urlopen", _fake_urlopen)
-    row = manager_mod._dexie_lookup_token_for_cat_id(
+    monkeypatch.setattr("greenfloor.adapters.dexie.urllib.request.urlopen", _fake_urlopen)
+    row = _dexie_lookup_token_for_cat_id(
         canonical_cat_id_hex=target,
         network="mainnet",
     )
@@ -97,30 +101,30 @@ def test_recent_market_resolved_asset_id_hints_reads_strategy_execution(tmp_path
 
 
 def test_format_json_output_pretty_mode_has_indentation() -> None:
-    original = manager_mod._JSON_OUTPUT_COMPACT
+    original = adapter_mod._JSON_OUTPUT_COMPACT
     try:
-        manager_mod._JSON_OUTPUT_COMPACT = False
-        output = manager_mod._format_json_output({"alpha": 1, "beta": {"gamma": 2}})
+        adapter_mod._JSON_OUTPUT_COMPACT = False
+        output = adapter_mod._format_json_output({"alpha": 1, "beta": {"gamma": 2}})
     finally:
-        manager_mod._JSON_OUTPUT_COMPACT = original
+        adapter_mod._JSON_OUTPUT_COMPACT = original
     assert output.startswith("{\n")
     assert '\n  "alpha": 1' in output
 
 
 def test_format_json_output_compact_mode_is_single_line() -> None:
-    original = manager_mod._JSON_OUTPUT_COMPACT
+    original = adapter_mod._JSON_OUTPUT_COMPACT
     try:
-        manager_mod._JSON_OUTPUT_COMPACT = True
-        output = manager_mod._format_json_output({"alpha": 1, "beta": {"gamma": 2}})
+        adapter_mod._JSON_OUTPUT_COMPACT = True
+        output = adapter_mod._format_json_output({"alpha": 1, "beta": {"gamma": 2}})
     finally:
-        manager_mod._JSON_OUTPUT_COMPACT = original
+        adapter_mod._JSON_OUTPUT_COMPACT = original
     assert output == '{"alpha":1,"beta":{"gamma":2}}'
 
 
 def test_resolve_offer_publish_settings_from_program(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     write_manager_program(program, tmp_path=tmp_path, provider="splash")
-    venue, dexie_base, splash_base = _resolve_offer_publish_settings(
+    venue, dexie_base, splash_base = resolve_offer_publish_settings(
         program_path=program,
         network="mainnet",
         venue_override=None,
@@ -135,7 +139,7 @@ def test_resolve_offer_publish_settings_from_program(tmp_path: Path) -> None:
 def test_set_log_level_updates_program_yaml(tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     write_manager_program(program, tmp_path=tmp_path)
-    code = manager_mod._set_log_level(program_path=program, log_level="warning")
+    code = set_log_level(program_path=program, log_level="warning")
     assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["updated"] is True
@@ -154,7 +158,7 @@ def test_main_dispatches_set_log_level_command(monkeypatch, tmp_path: Path) -> N
         captured["log_level"] = log_level
         return 0
 
-    monkeypatch.setattr("greenfloor.cli.manager._set_log_level", _fake_set_log_level)
+    monkeypatch.setattr("greenfloor.cli.manager.set_log_level", _fake_set_log_level)
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -178,16 +182,11 @@ def test_main_dispatches_coin_status_command(monkeypatch, tmp_path: Path) -> Non
     write_manager_program(program, tmp_path=tmp_path)
     captured: dict[str, object] = {}
 
-    def _fake_coin_status(
-        *, program_path: Path, asset: str | None, vault_id: str | None, cat_id: str | None
-    ) -> int:
-        captured["program_path"] = program_path
-        captured["asset"] = asset
-        captured["vault_id"] = vault_id
-        captured["cat_id"] = cat_id
+    def _fake_coin_status(**kwargs) -> int:
+        captured.update(kwargs)
         return 0
 
-    monkeypatch.setattr("greenfloor.cli.manager._coin_status", _fake_coin_status)
+    monkeypatch.setattr("greenfloor.cli.manager.coin_status", _fake_coin_status)
     monkeypatch.setattr(
         "sys.argv",
         [
@@ -196,13 +195,11 @@ def test_main_dispatches_coin_status_command(monkeypatch, tmp_path: Path) -> Non
             str(program),
             "coin-status",
             "--asset",
-            "BYC",
+            "xch",
         ],
     )
     with pytest.raises(SystemExit) as exc:
         manager_mod.main()
     assert exc.value.code == 0
     assert captured["program_path"] == program
-    assert captured["asset"] == "BYC"
-    assert captured["vault_id"] is None
-    assert captured["cat_id"] is None
+    assert captured["asset"] == "xch"

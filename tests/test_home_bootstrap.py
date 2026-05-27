@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from greenfloor.cli.manager import _bootstrap_home
+from greenfloor.cli.manager_setup import bootstrap_home
 
 
 def _write_templates(root: Path) -> tuple[Path, Path, Path, Path]:
@@ -107,7 +107,7 @@ def test_bootstrap_home_creates_layout_and_seed_configs(tmp_path: Path) -> None:
         tmp_path
     )
 
-    code = _bootstrap_home(
+    code = bootstrap_home(
         home_dir=home_dir,
         program_template=program_template,
         markets_template=markets_template,
@@ -152,7 +152,7 @@ def test_bootstrap_home_without_force_keeps_existing_seeded_config(tmp_path: Pat
         encoding="utf-8",
     )
 
-    code = _bootstrap_home(
+    code = bootstrap_home(
         home_dir=home_dir,
         program_template=program_template,
         markets_template=markets_template,
@@ -176,7 +176,7 @@ def test_bootstrap_home_can_seed_optional_testnet_markets(tmp_path: Path) -> Non
         tmp_path
     )
 
-    code = _bootstrap_home(
+    code = bootstrap_home(
         home_dir=home_dir,
         program_template=program_template,
         markets_template=markets_template,

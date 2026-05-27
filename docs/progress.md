@@ -8,7 +8,12 @@
 - Unified dispatch: `OfferPostRequest` in `offer_post_request.py` for CLI (`offer_build_post.py`) and daemon (`_managed_offer_post`); `parse_managed_offer_post_result()` for daemon result shaping.
 - Backends: `offer_runtime.py` (vault KMS signer), `cloud_wallet/build_post.py` (Cloud Wallet), `local_offer.py` (legacy BLS CLI path); all take `build_ctx` only at the orchestrator boundary.
 - Routing: `offer_execution_backend()` and `managed_offer_execution_backend()` in `config/models.py`.
-- Extracted `greenfloor/cli/offer_build_post.py` from `manager.py`; manager re-exports `build_and_post_offer_cli` as `_build_and_post_offer`.
+## CLI modularization (2026-05-27)
+
+- Split `greenfloor/cli/manager.py` into focused modules: `coin_ops.py`, `cats.py`, `offers_lifecycle.py`, `manager_setup.py`, `keys_onboard.py`.
+- Extracted shared coin-op minimum-amount policy to `greenfloor/core/coin_ops_policy.py` and coin ID resolution helpers to `greenfloor/runtime/cloud_wallet/coins.py`.
+- Moved offer publish settings helpers into `greenfloor/cli/offer_build_post.py`.
+- `manager.py` is now argparse + dispatch only (~400 lines).
 - Test decomposition: `test_manager_post_offer.py` slimmed; added `test_offer_cli_dispatch.py`, `test_offer_cloud_wallet_post_{success,failures}.py`, `test_offer_post_request.py`, and related focused modules.
 - Recorded in ADR 0008; updated ADR 0005 composition-root consequences.
 

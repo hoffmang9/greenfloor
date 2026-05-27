@@ -6,9 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from greenfloor.cli.manager import (
-    _build_and_post_offer,
-)
+from greenfloor.cli.offer_build_post import build_and_post_offer_cli
 from tests.helpers.fake_adapters import FakeDexie
 from tests.helpers.offer_runtime_fixtures import (
     write_manager_program,
@@ -45,7 +43,7 @@ def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, c
         lambda _offer: None,
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -94,7 +92,7 @@ def test_build_and_post_offer_local_path_persists_sqlite_audit_record(
         lambda _offer: None,
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -156,7 +154,7 @@ def test_build_and_post_offer_uses_market_configured_expiry_override(
         "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie", lambda _offer: None
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -197,7 +195,7 @@ def test_build_and_post_offer_dry_run_builds_but_does_not_post(
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FailDexie)
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -234,7 +232,7 @@ def test_build_and_post_offer_dry_run_can_capture_full_offer_text(
     )
     monkeypatch.setenv("GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", str(capture_dir))
     try:
-        code = _build_and_post_offer(
+        code = build_and_post_offer_cli(
             program_path=program,
             markets_path=markets,
             network="mainnet",
@@ -278,7 +276,7 @@ def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Pat
         lambda _offer: None,
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -321,7 +319,7 @@ def test_build_and_post_offer_accepts_txch_pair_on_testnet11(
         lambda _offer: None,
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="testnet11",
@@ -352,7 +350,7 @@ def test_build_and_post_offer_rejects_txch_pair_on_mainnet(tmp_path: Path) -> No
     write_markets(markets)
 
     try:
-        _build_and_post_offer(
+        build_and_post_offer_cli(
             program_path=program,
             markets_path=markets,
             network="mainnet",
@@ -380,7 +378,7 @@ def test_build_and_post_offer_pair_ambiguous_requires_market_id(
     write_manager_program(program, tmp_path=tmp_path)
     write_markets_with_duplicate_pair(markets)
     try:
-        _build_and_post_offer(
+        build_and_post_offer_cli(
             program_path=program,
             markets_path=markets,
             network="mainnet",
@@ -406,7 +404,7 @@ def test_build_and_post_offer_rejects_unknown_market(monkeypatch, tmp_path: Path
     write_manager_program(program, tmp_path=tmp_path)
     write_markets(markets)
     try:
-        _build_and_post_offer(
+        build_and_post_offer_cli(
             program_path=program,
             markets_path=markets,
             network="mainnet",
@@ -452,7 +450,7 @@ def test_build_and_post_offer_posts_to_splash_when_selected(
         lambda _offer: None,
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -490,7 +488,7 @@ def test_build_and_post_offer_returns_nonzero_when_offer_verification_fails(
         lambda _offer: "wallet_sdk_offer_verify_false",
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -580,7 +578,7 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -631,7 +629,7 @@ def test_build_and_post_offer_returns_nonzero_when_publish_fails(
         lambda _offer: None,
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -669,7 +667,7 @@ def test_build_and_post_offer_dry_run_returns_nonzero_when_build_fails(
         _raise_build_error,
     )
 
-    code = _build_and_post_offer(
+    code = build_and_post_offer_cli(
         program_path=program,
         markets_path=markets,
         network="testnet11",

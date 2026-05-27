@@ -72,6 +72,48 @@ def resolve_market_for_build(
     return candidates[0]
 
 
+def resolve_dexie_base_url(network: str, explicit_base_url: str | None) -> str:
+    if explicit_base_url and explicit_base_url.strip():
+        return explicit_base_url.strip().rstrip("/")
+    network_l = network.strip().lower()
+    if network_l in {"mainnet", ""}:
+        return "https://api.dexie.space"
+    if is_testnet(network_l):
+        return "https://api-testnet.dexie.space"
+    raise ValueError(f"unsupported network for dexie posting: {network}")
+
+
+def resolve_splash_base_url(explicit_base_url: str | None) -> str:
+    if explicit_base_url and explicit_base_url.strip():
+        return explicit_base_url.strip().rstrip("/")
+    return "http://john-deere.hoffmang.com:4000"
+
+
+def resolve_offer_publish_settings(
+    *,
+    program_path: Path,
+    network: str,
+    venue_override: str | None,
+    dexie_base_url: str | None,
+    splash_base_url: str | None,
+) -> tuple[str, str, str]:
+    program = load_program_config(program_path)
+    venue = (venue_override or program.offer_publish_venue).strip().lower()
+    if venue not in {"dexie", "splash"}:
+        raise ValueError("offer publish venue must be dexie or splash")
+    if dexie_base_url and dexie_base_url.strip():
+        dexie_base = dexie_base_url.strip().rstrip("/")
+    elif is_testnet(network):
+        dexie_base = resolve_dexie_base_url(network, None)
+    else:
+        dexie_base = str(program.dexie_api_base).strip().rstrip("/")
+    if splash_base_url and splash_base_url.strip():
+        splash_base = splash_base_url.strip().rstrip("/")
+    else:
+        splash_base = str(program.splash_api_base).strip().rstrip("/")
+    return venue, dexie_base, splash_base
+
+
 def build_and_post_offer_cli(
     *,
     program_path: Path,
