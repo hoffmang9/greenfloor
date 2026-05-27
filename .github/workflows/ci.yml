@@ -47,13 +47,14 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
+          key: venv-v2-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
 
       - name: Create venv and install dev dependencies
         run: |
           if [ ! -d .venv/bin ]; then
             python -m venv .venv
           fi
+          export PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH"
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
@@ -63,7 +64,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
+          key: venv-v2-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
 
       - uses: ./.github/actions/rust-cache-greenfloor
         if: matrix.run_rust_tests
