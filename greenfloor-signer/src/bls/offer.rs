@@ -1,17 +1,18 @@
 use chia_bls::SecretKey;
-use chia_protocol::SpendBundle;
+use chia_protocol::{Bytes32, Coin};
 use chia_puzzle_types::Memos;
 use chia_puzzles::SETTLEMENT_PAYMENT_HASH;
-use chia_sdk_driver::{Action, AssetInfo, Id, Offer, Relation, SpendContext, Spends};
+use chia_sdk_driver::{Action, AssetInfo, Cat, Id, Offer, SpendContext};
+use crate::coinset::CoinsetClient;
 use clvmr::Allocator;
 use serde::{Deserialize, Serialize};
 
 use crate::bls::coins::cat_asset_bytes;
-use crate::bls::select::select_xch_for_amount;
-use crate::bls::spend::{add_coins_to_spends, synthetic_keys_for_coins};
-use crate::bls::signing::sign_coin_spends;
+use crate::bls::spend::build_signed_spend;
 use crate::coinset::is_xch_like_asset;
-use crate::coinset::{client_for_network, list_and_select_cats, CatSelectionMode};
+use crate::coinset::{
+    client_for_network, list_and_select_cats, select_xch_for_amount, CatSelectionMode,
+};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::plan::build_requested_payments;
 use crate::offer::types::OfferTerms;
@@ -32,6 +33,42 @@ pub struct BlsOfferResult {
     pub spend_bundle_hex: String,
 }
 
+async fn select_offer_inputs(
+    client: &CoinsetClient,
+    receive_address: &str,
+    offer_asset_raw: &str,
+    explicit_coin_ids: &[Bytes32],
+    offer_amount: u64,
+) -> SignerResult<(Vec<Coin>, Vec<Cat>, u64)> {
+    if is_xch_like_asset(offer_asset_raw) {
+        let offered_xch = select_xch_for_amount(
+            client,
+            receive_address,
+            explicit_coin_ids,
+            offer_amount,
+            SignerError::NoUnspentOfferXchCoins,
+            SignerError::InsufficientOfferXchCoins,
+        )
+        .await?;
+        let offered_total: u64 = offered_xch.iter().map(|c| c.amount).sum();
+        return Ok((offered_xch, Vec::new(), offered_total.saturating_sub(offer_amount)));
+    }
+    let asset_bytes = cat_asset_bytes(offer_asset_raw)?;
+    let offered_cats = list_and_select_cats(
+        client,
+        receive_address,
+        asset_bytes,
+        explicit_coin_ids,
+        offer_amount,
+        CatSelectionMode::SmallestFirst,
+        SignerError::NoUnspentOfferCatCoins,
+        SignerError::InsufficientOfferCatCoins,
+    )
+    .await?;
+    let offered_total: u64 = offered_cats.iter().map(|cat| cat.coin.amount).sum();
+    Ok((Vec::new(), offered_cats, offered_total.saturating_sub(offer_amount)))
+}
+
 pub async fn build_bls_offer_spend_bundle(
     network: &str,
     master_sk: &SecretKey,
@@ -47,62 +84,14 @@ pub async fn build_bls_offer_spend_bundle(
     let offer_asset_raw = request.offer_asset_id.trim().to_lowercase();
     let explicit_coin_ids = crate::coinset::parse_coin_ids(&request.offer_coin_ids)?;
 
-    let (offered_xch, offered_cats) = if is_xch_like_asset(&offer_asset_raw) {
-        let offered_xch = select_xch_for_amount(
-            &client,
-            receive_address,
-            &explicit_coin_ids,
-            request.offer_amount,
-            SignerError::NoUnspentOfferXchCoins,
-            SignerError::InsufficientOfferXchCoins,
-        )
-        .await?;
-        (offered_xch, Vec::new())
-    } else {
-        let asset_bytes = cat_asset_bytes(&offer_asset_raw)?;
-        let offered_cats = list_and_select_cats(
-            &client,
-            receive_address,
-            asset_bytes,
-            &explicit_coin_ids,
-            request.offer_amount,
-            CatSelectionMode::SmallestFirst,
-            SignerError::NoUnspentOfferCatCoins,
-            SignerError::InsufficientOfferCatCoins,
-        )
-        .await?;
-        (Vec::new(), offered_cats)
-    };
-
-    let offered_total: u64 = offered_xch.iter().map(|c| c.amount).sum::<u64>()
-        + offered_cats.iter().map(|cat| cat.coin.amount).sum::<u64>();
-    let change_amount = offered_total.saturating_sub(request.offer_amount);
-
-    let offered_coin_ids: Vec<_> = offered_xch
-        .iter()
-        .map(|coin| coin.coin_id())
-        .chain(offered_cats.iter().map(|cat| cat.coin.coin_id()))
-        .collect();
-    let offer_nonce = Offer::nonce(offered_coin_ids.clone());
-
-    let keys = synthetic_keys_for_coins(master_sk, &offered_xch, &offered_cats)?;
-
-    let terms = OfferTerms {
-        receive_address: receive_address.to_string(),
-        offer_asset_id: offer_asset_raw.clone(),
-        offer_amount: request.offer_amount,
-        request_asset_id: request.request_asset_id.trim().to_lowercase(),
-        request_amount: request.request_amount,
-        expires_at: None,
-    };
-
-    let mut ctx = SpendContext::new();
-    let requested_payments =
-        build_requested_payments(&mut ctx, &terms, receive_puzzle_hash, offer_nonce)?;
-    let requested_asset_info = AssetInfo::new();
-
-    let mut spends = Spends::new(receive_puzzle_hash);
-    add_coins_to_spends(&mut spends, offered_xch, offered_cats);
+    let (offered_xch, offered_cats, change_amount) = select_offer_inputs(
+        &client,
+        receive_address,
+        &offer_asset_raw,
+        &explicit_coin_ids,
+        request.offer_amount,
+    )
+    .await?;
 
     let offer_id = if is_xch_like_asset(&offer_asset_raw) {
         Id::Xch
@@ -124,17 +113,43 @@ pub async fn build_bls_offer_spend_bundle(
         ));
     }
 
-    spends.conditions.required = spends.conditions.required.extend(
-        requested_payments
-            .assertions(&mut ctx, &requested_asset_info)
-            .map_err(SignerError::from)?,
-    );
+    let offered_coin_ids: Vec<_> = offered_xch
+        .iter()
+        .map(|coin| coin.coin_id())
+        .chain(offered_cats.iter().map(|cat| cat.coin.coin_id()))
+        .collect();
+    let offer_nonce = Offer::nonce(offered_coin_ids);
 
-    let deltas = spends.apply(&mut ctx, &actions)?;
-    spends.finish_with_keys(&mut ctx, &deltas, Relation::None, &keys.synthetic_pks)?;
-    let coin_spends = ctx.take();
-    let signature = sign_coin_spends(network, &coin_spends, &keys.synthetic_sks)?;
-    let input_spend_bundle = SpendBundle::new(coin_spends, signature);
+    let terms = OfferTerms {
+        receive_address: receive_address.to_string(),
+        offer_asset_id: offer_asset_raw,
+        offer_amount: request.offer_amount,
+        request_asset_id: request.request_asset_id.trim().to_lowercase(),
+        request_amount: request.request_amount,
+        expires_at: None,
+    };
+
+    let mut payments_ctx = SpendContext::new();
+    let requested_payments =
+        build_requested_payments(&mut payments_ctx, &terms, receive_puzzle_hash, offer_nonce)?;
+    let requested_asset_info = AssetInfo::new();
+
+    let (input_spend_bundle, mut ctx) = build_signed_spend(
+        network,
+        receive_puzzle_hash,
+        offered_xch,
+        offered_cats,
+        actions,
+        master_sk,
+        |spends, ctx| {
+            spends.conditions.required = spends.conditions.required.clone().extend(
+                requested_payments
+                    .assertions(ctx, &requested_asset_info)
+                    .map_err(SignerError::from)?,
+            );
+            Ok(())
+        },
+    )?;
 
     let mut allocator = Allocator::new();
     let offer = Offer::from_input_spend_bundle(

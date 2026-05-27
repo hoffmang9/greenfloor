@@ -2,11 +2,10 @@ use chia_bls::SecretKey;
 use chia_protocol::Bytes32;
 use chia_puzzle_types::Memos;
 use chia_sdk_driver::{Action, Id};
-use chia_sdk_utils::select_coins;
 use serde::{Deserialize, Serialize};
 
 use crate::bls::spend::build_signed_standard_spend;
-use crate::coinset::{client_for_network, decode_receive_address, list_unspent_xch};
+use crate::coinset::{client_for_network, decode_receive_address, select_xch_for_amount};
 use crate::error::{SignerError, SignerResult};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -68,11 +67,6 @@ pub async fn build_bls_xch_coin_op_spend_bundle(
     let receive_address = request.receive_address.trim();
     let receive_puzzle_hash = decode_receive_address(receive_address)?;
 
-    let xch_coins = list_unspent_xch(&client, receive_address).await?;
-    if xch_coins.is_empty() {
-        return Err(SignerError::NoUnspentXchCoins);
-    }
-
     let mut target_total = request.target_total_base_units;
     if target_total == 0 {
         target_total = request
@@ -80,8 +74,15 @@ pub async fn build_bls_xch_coin_op_spend_bundle(
             .saturating_mul(u64::from(request.op_count));
     }
 
-    let selected =
-        select_coins(xch_coins, target_total).map_err(|_| SignerError::XchCoinSelectionFailed)?;
+    let selected = select_xch_for_amount(
+        &client,
+        receive_address,
+        &[],
+        target_total,
+        SignerError::NoUnspentXchCoins,
+        SignerError::XchCoinSelectionFailed,
+    )
+    .await?;
     let selected_total: u64 = selected.iter().map(|coin| coin.amount).sum::<u64>();
     let outputs = plan_xch_additions(
         &request.op_type,

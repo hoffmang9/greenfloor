@@ -112,6 +112,15 @@ def test_build_signed_spend_bundle_unsupported_asset() -> None:
     assert result["reason"] == "asset_not_supported_yet"
 
 
+def test_canonical_is_xch_requires_explicit_symbol() -> None:
+    from greenfloor.hex_utils import canonical_is_xch
+
+    assert canonical_is_xch("xch")
+    assert canonical_is_xch("TXCH")
+    assert not canonical_is_xch("")
+    assert not canonical_is_xch("a" * 64)
+
+
 def test_build_signed_spend_bundle_empty_asset_id_not_treated_as_xch() -> None:
     result = signing_mod.build_signed_spend_bundle(
         {

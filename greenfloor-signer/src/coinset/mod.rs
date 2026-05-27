@@ -5,7 +5,9 @@ mod msp;
 mod presplit;
 mod xch;
 
-pub(crate) use cat_select::{finalize_selected_cats, list_and_select_cats, CatSelectionMode};
+pub(crate) use cat_select::{
+    finalize_selected_cats, list_and_select_cats, select_xch_for_amount, CatSelectionMode,
+};
 
 pub use asset::is_xch_like_asset;
 

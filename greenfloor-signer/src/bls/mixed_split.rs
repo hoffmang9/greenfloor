@@ -7,12 +7,11 @@ use chia_sdk_utils::select_coins;
 use serde::{Deserialize, Serialize};
 
 use crate::bls::coins::cat_asset_bytes;
-use crate::bls::select::select_xch_for_amount;
 use crate::bls::spend::build_signed_standard_spend;
 use crate::coinset::is_xch_like_asset;
 use crate::coinset::{
     broadcast_spend_bundle, client_for_network, list_and_select_cats, list_unspent_xch,
-    BroadcastSpendBundleResult, CatSelectionMode, MIN_CAT_OUTPUT_MOJOS,
+    select_xch_for_amount, BroadcastSpendBundleResult, CatSelectionMode, MIN_CAT_OUTPUT_MOJOS,
 };
 use crate::error::{SignerError, SignerResult};
 
@@ -115,12 +114,6 @@ pub async fn build_bls_mixed_split_spend_bundle(
     let offered_total: u64 = offered_xch.iter().map(|c| c.amount).sum::<u64>()
         + offered_cats.iter().map(|cat| cat.coin.amount).sum::<u64>();
     let fee_xch_total: u64 = fee_xch.iter().map(|c| c.amount).sum::<u64>();
-    if offered_total < target_total {
-        return Err(SignerError::InsufficientOfferedTotalForMixedSplit);
-    }
-    if !is_xch_like_asset(&asset_raw) && fee_mojos > fee_xch_total {
-        return Err(SignerError::InsufficientXchFeeBalanceForMixedSplit);
-    }
 
     for coin in &offered_xch {
         selected_coin_ids.push(format!("0x{}", hex::encode(coin.coin_id())));

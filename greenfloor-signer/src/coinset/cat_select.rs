@@ -1,11 +1,14 @@
-//! CAT coin listing and selection (shared by vault and BLS paths).
+//! Coin listing and selection (CAT + XCH; shared by vault and BLS paths).
 
-use chia_protocol::Bytes32;
+use std::collections::HashSet;
+
+use chia_protocol::{Bytes32, Coin};
 use chia_sdk_driver::Cat;
+use chia_sdk_utils::select_coins;
 
 use super::{
-    list_unspent_cats, list_unspent_cats_by_ids, select_cats_smallest_first, CoinsetClient,
-    SelectedCats,
+    list_unspent_cats, list_unspent_cats_by_ids, list_unspent_xch, select_cats_smallest_first,
+    CoinsetClient, SelectedCats,
 };
 use crate::error::{SignerError, SignerResult};
 
@@ -91,6 +94,25 @@ pub(crate) fn finalize_selected_cats(
         selected,
         offered_total,
     })
+}
+
+pub(crate) async fn select_xch_for_amount(
+    client: &CoinsetClient,
+    receive_address: &str,
+    explicit_coin_ids: &[Bytes32],
+    amount: u64,
+    empty_err: SignerError,
+    select_failed: SignerError,
+) -> SignerResult<Vec<Coin>> {
+    let mut xch_coins = list_unspent_xch(client, receive_address).await?;
+    if !explicit_coin_ids.is_empty() {
+        let allowed: HashSet<Bytes32> = explicit_coin_ids.iter().copied().collect();
+        xch_coins.retain(|coin| allowed.contains(&coin.coin_id()));
+    }
+    if xch_coins.is_empty() {
+        return Err(empty_err);
+    }
+    select_coins(xch_coins, amount).map_err(|_| select_failed)
 }
 
 #[cfg(test)]
@@ -191,5 +213,19 @@ mod tests {
         assert_eq!(selected.selected.len(), 2);
         assert_eq!(selected.offered_total, 1100);
         assert_eq!(selected.change_amount, 100);
+    }
+
+    #[test]
+    fn select_xch_for_amount_filters_by_explicit_ids() {
+        use chia_protocol::Coin;
+
+        let coin_a = Coin::new(Bytes32::new([1; 32]), Bytes32::default(), 500);
+        let coin_b = Coin::new(Bytes32::new([2; 32]), Bytes32::default(), 600);
+        let mut xch_coins = vec![coin_a, coin_b];
+        let allowed: HashSet<Bytes32> = [coin_a.coin_id()].into_iter().collect();
+        xch_coins.retain(|coin| allowed.contains(&coin.coin_id()));
+        let selected = select_coins(xch_coins, 400).expect("subset selection");
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].amount, 500);
     }
 }

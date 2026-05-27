@@ -2,7 +2,6 @@ mod coins;
 mod keys;
 mod mixed_split;
 mod offer;
-mod select;
 mod signing;
 mod spend;
 mod xch_coin_op;
@@ -14,7 +13,7 @@ pub use coins::{
 pub use crate::coinset::is_xch_like_asset;
 pub use keys::synthetic_secret_keys_for_puzzle_hashes;
 pub use spend::{
-    add_coins_to_spends, build_signed_standard_spend, synthetic_keys_for_coins,
+    add_coins_to_spends, build_signed_spend, build_signed_standard_spend, synthetic_keys_for_coins,
     synthetic_keys_for_puzzle_hashes, SyntheticKeys,
 };
 pub use mixed_split::{
