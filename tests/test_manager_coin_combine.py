@@ -3,9 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from greenfloor.cli.manager import (
-    _coin_combine,
-)
+from greenfloor.cli.coin_ops import coin_combine
 from tests.helpers.offer_runtime_fixtures import (
     write_manager_program_with_cloud_wallet,
     write_markets,
@@ -42,12 +40,12 @@ def test_coin_combine_with_coin_ids_resolves_to_global_ids(
             calls["combine"] = (number_of_coins, fee, largest_first, asset_id, input_coin_ids)
             return {"signature_request_id": "sr-2", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (7, "coinset_conservative"),
     )
-    code = _coin_combine(
+    code = coin_combine(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -83,12 +81,12 @@ def test_coin_combine_returns_structured_error_when_coin_id_not_found(
             _ = include_pending, asset_id
             return [{"id": "Coin_known", "name": "known-coin-name"}]
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
     )
-    code = _coin_combine(
+    code = coin_combine(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -133,12 +131,12 @@ def test_coin_combine_rejects_mixed_asset_coin_ids_before_api_call(
             _ = number_of_coins, fee, largest_first, asset_id, input_coin_ids
             raise AssertionError("combine_coins should not be called for mixed assets")
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
     )
-    code = _coin_combine(
+    code = coin_combine(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -193,12 +191,12 @@ def test_coin_combine_uses_market_ladder_threshold_when_size_is_provided(
             calls["combine"] = (number_of_coins, fee, largest_first, asset_id, input_coin_ids)
             return {"signature_request_id": "sr-2", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (77, "coinset_conservative"),
     )
-    code = _coin_combine(
+    code = coin_combine(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -279,12 +277,12 @@ def test_coin_combine_ladder_threshold_uses_ceil(monkeypatch, tmp_path: Path, ca
             calls["combine"] = (number_of_coins, fee, largest_first, asset_id, input_coin_ids)
             return {"signature_request_id": "sr-2", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (77, "coinset_conservative"),
     )
-    code = _coin_combine(
+    code = coin_combine(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -332,16 +330,16 @@ def test_coin_combine_auto_selection_ignores_cat_dust_under_one_unit(
             calls["combine"] = (number_of_coins, fee, largest_first, asset_id, input_coin_ids)
             return {"signature_request_id": "sr-combine", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
+        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_split_base",
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (77, "coinset_conservative"),
     )
-    code = _coin_combine(
+    code = coin_combine(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -426,16 +424,16 @@ def test_coin_combine_auto_selection_directly_filters_cross_asset_scoped_rows(
             calls["combine"] = (number_of_coins, fee, largest_first, asset_id, input_coin_ids)
             return {"signature_request_id": "sr-combine", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
+        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_split_base",
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (77, "coinset_conservative"),
     )
-    code = _coin_combine(
+    code = coin_combine(
         program_path=program,
         markets_path=markets,
         network="mainnet",
@@ -490,22 +488,22 @@ def test_coin_combine_until_ready_with_coin_ids_stops_with_requires_new_coin_sel
         def combine_coins(*, number_of_coins, fee, largest_first, asset_id, input_coin_ids=None):
             return {"signature_request_id": "sr-combine", "status": "SIGNED"}
 
-    monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager.poll_signature_request_until_not_unsigned",
+        "greenfloor.runtime.cloud_wallet.polling.poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SIGNED", []),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager.wait_for_mempool_then_confirmation",
+        "greenfloor.runtime.cloud_wallet.polling.wait_for_mempool_then_confirmation",
         lambda **kwargs: [],
     )
 
     # Provide explicit coin IDs so loop cannot auto-select new candidates
-    code = _coin_combine(
+    code = coin_combine(
         program_path=program,
         markets_path=markets,
         network="mainnet",

@@ -4,9 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from greenfloor.cli.manager import (
-    _offers_cancel,
-)
+from greenfloor.cli.offers_lifecycle import offers_cancel
 from tests.helpers.offer_runtime_fixtures import (
     write_manager_program_with_cloud_wallet,
     write_markets,
@@ -47,10 +45,11 @@ def test_offers_cancel_cancel_open_uses_cloud_wallet(monkeypatch, tmp_path: Path
             return {"signature_request_id": f"SignatureRequest_{offer_id}", "status": "SUBMITTED"}
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager._new_cloud_wallet_adapter", lambda _p: _FakeWallet()
+        "greenfloor.cli.offers_lifecycle.cloud_wallet_adapter.new_cloud_wallet_adapter",
+        lambda _p: _FakeWallet(),
     )
 
-    code = _offers_cancel(
+    code = offers_cancel(
         program_path=program,
         offer_ids=[],
         cancel_open=True,
@@ -98,10 +97,11 @@ def test_offers_cancel_pending_offer_uses_off_chain_cancel(
             return {"signature_request_id": "", "status": ""}
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager._new_cloud_wallet_adapter", lambda _p: _FakeWallet()
+        "greenfloor.cli.offers_lifecycle.cloud_wallet_adapter.new_cloud_wallet_adapter",
+        lambda _p: _FakeWallet(),
     )
 
-    code = _offers_cancel(
+    code = offers_cancel(
         program_path=program,
         offer_ids=["Offer_pending"],
         cancel_open=False,
@@ -187,20 +187,23 @@ def test_offers_cancel_can_submit_onchain_refresh_after_offchain(
             )
             return {"signature_request_id": "SignatureRequest_refresh", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.cli.manager.load_program_config", lambda _p: _Program())
     monkeypatch.setattr(
-        "greenfloor.cli.manager._new_cloud_wallet_adapter", lambda _p: _FakeWallet()
+        "greenfloor.cli.offers_lifecycle.load_program_config", lambda _p: _Program()
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.offers_lifecycle.cloud_wallet_adapter.new_cloud_wallet_adapter",
+        lambda _p: _FakeWallet(),
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
         lambda **_kw: "Asset_a1",
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_taker_or_coin_operation_fee",
+        "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda **_kw: (0, "coinset_conservative"),
     )
 
-    code = _offers_cancel(
+    code = offers_cancel(
         program_path=program,
         offer_ids=["Offer_pending"],
         cancel_open=False,
@@ -237,9 +240,11 @@ def test_offers_cancel_submit_onchain_requires_market_selection(
         cloud_wallet_base_url = "https://wallet.example.com"
         signer_key_registry = {}
 
-    monkeypatch.setattr("greenfloor.cli.manager.load_program_config", lambda _p: _Program())
     monkeypatch.setattr(
-        "greenfloor.cli.manager._new_cloud_wallet_adapter",
+        "greenfloor.cli.offers_lifecycle.load_program_config", lambda _p: _Program()
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.offers_lifecycle.cloud_wallet_adapter.new_cloud_wallet_adapter",
         lambda _p: type(
             "_Wallet",
             (),
@@ -248,7 +253,7 @@ def test_offers_cancel_submit_onchain_requires_market_selection(
     )
 
     try:
-        _offers_cancel(
+        offers_cancel(
             program_path=program,
             offer_ids=["Offer_pending"],
             cancel_open=False,

@@ -8,6 +8,11 @@ from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConf
 _JSON_OUTPUT_COMPACT = False
 
 
+def set_json_output_compact(compact: bool) -> None:
+    global _JSON_OUTPUT_COMPACT
+    _JSON_OUTPUT_COMPACT = bool(compact)
+
+
 class SupportsWalletAssetsSeed(Protocol):
     """Minimal Cloud Wallet shape for ``seed_cloud_wallet_assets_cache``."""
 
@@ -20,10 +25,13 @@ class SupportsWalletAssetsSeed(Protocol):
     def _graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]: ...
 
 
-def _format_json_output(payload: object) -> str:
+def format_json_output(payload: object) -> str:
     if _JSON_OUTPUT_COMPACT:
         return json.dumps(payload, separators=(",", ":"))
     return json.dumps(payload, indent=2)
+
+
+_format_json_output = format_json_output
 
 
 def _require_cloud_wallet_config(program: Any) -> CloudWalletConfig:

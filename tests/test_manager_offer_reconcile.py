@@ -5,7 +5,7 @@ import urllib.error
 from email.message import Message
 from pathlib import Path
 
-from greenfloor.cli.manager import _offers_reconcile, _offers_status
+from greenfloor.cli.offers_lifecycle import offers_reconcile, offers_status
 from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.offer_runtime_fixtures import write_manager_program
 
@@ -49,9 +49,9 @@ def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path,
                 fp=None,
             )
 
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexie)
 
-    code = _offers_reconcile(
+    code = offers_reconcile(
         program_path=program,
         state_db=str(db_path),
         market_id=None,
@@ -106,7 +106,7 @@ def test_offers_status_reports_compact_summary(tmp_path: Path, capsys) -> None:
     finally:
         store.close()
 
-    code = _offers_status(
+    code = offers_status(
         program_path=program,
         state_db=str(db_path),
         market_id="m1",
@@ -162,8 +162,8 @@ def test_offers_reconcile_coinset_signal_matrix(monkeypatch, tmp_path: Path, cap
                 return {"id": offer_id}
             raise RuntimeError("unexpected_offer_id")
 
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
-    code = _offers_reconcile(
+    monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexie)
+    code = offers_reconcile(
         program_path=program,
         state_db=str(db_path),
         market_id=None,
@@ -227,8 +227,8 @@ def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(
                 return {"id": offer_id, "status": 3}
             raise RuntimeError("unexpected_offer_id")
 
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
-    code = _offers_reconcile(
+    monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexie)
+    code = offers_reconcile(
         program_path=program,
         state_db=str(db_path),
         market_id=None,
@@ -283,8 +283,8 @@ def test_offers_reconcile_reads_nested_dexie_offer_payload_shape(
                 },
             }
 
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
-    code = _offers_reconcile(
+    monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexie)
+    code = offers_reconcile(
         program_path=program,
         state_db=str(db_path),
         market_id=None,

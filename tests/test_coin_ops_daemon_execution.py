@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from greenfloor.config.models import MarketConfig, MarketInventoryConfig
+from greenfloor.core.coin_ops import CoinOpPlan
+from greenfloor.runtime.cloud_wallet.coin_ops_daemon_execution import (
+    DaemonCoinOpExecContext,
+    execute_daemon_split_plan,
+)
+
+
+def _market() -> MarketConfig:
+    return MarketConfig(
+        market_id="m1",
+        enabled=True,
+        base_asset="asset",
+        base_symbol="BYC",
+        quote_asset="xch",
+        quote_asset_type="unstable",
+        receive_address="xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
+        mode="sell_only",
+        signer_key_id="key-main-1",
+        inventory=MarketInventoryConfig(low_watermark_base_units=100),
+        pricing={
+            "fixed_quote_per_base": 0.5,
+            "base_unit_mojo_multiplier": 1000,
+            "quote_unit_mojo_multiplier": 1000,
+        },
+    )
+
+
+class _Program:
+    coin_ops_split_fee_mojos = 0
+
+
+def test_execute_daemon_split_plan_retry_disables_combine_prereq() -> None:
+    """After a spendable retry, attempt 2 must not submit combine-for-split."""
+
+    class _FakeCloudWallet:
+        def __init__(self) -> None:
+            self.combine_calls = 0
+            self.split_calls = 0
+
+        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
+            _ = asset_id, include_pending
+            return [
+                {"id": "Coin_a", "amount": 25_000, "state": "SETTLED"},
+                {"id": "Coin_b", "amount": 8_000, "state": "SETTLED"},
+                {"id": "Coin_c", "amount": 12_000, "state": "SETTLED"},
+            ]
+
+        def split_coins(
+            self,
+            *,
+            coin_ids: list[str],
+            amount_per_coin: int,
+            number_of_coins: int,
+            fee: int,
+        ) -> dict[str, Any]:
+            _ = amount_per_coin, number_of_coins, fee
+            self.split_calls += 1
+            assert coin_ids == ["Coin_a"]
+            raise RuntimeError("Some selected coins are not spendable")
+
+        def combine_coins(self, **_kwargs: Any) -> dict[str, Any]:
+            self.combine_calls += 1
+            raise AssertionError("combine should not run on split retry")
+
+    wallet = _FakeCloudWallet()
+    ctx = DaemonCoinOpExecContext(
+        cloud_wallet=wallet,  # type: ignore[arg-type]
+        market=_market(),
+        program=_Program(),  # type: ignore[arg-type]
+        resolved_base_asset_id="Asset_byc",
+        base_unit_mojo_multiplier=1000,
+        combine_input_cap=10,
+        spendable_coins=lambda coins: list(coins),
+        watched_coin_ids=set(),
+        logger=logging.getLogger("test.coin_ops_daemon_execution"),
+    )
+    plan = CoinOpPlan(op_type="split", size_base_units=10, op_count=2, reason="r")
+
+    items, executed_count = execute_daemon_split_plan(plan=plan, ctx=ctx)
+
+    assert wallet.split_calls == 1
+    assert wallet.combine_calls == 0
+    assert executed_count == 0
+    assert len(items) == 1
+    assert items[0]["status"] == "skipped"
+    assert items[0]["reason"] == "no_spendable_split_coin_meets_required_amount"

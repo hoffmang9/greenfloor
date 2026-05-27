@@ -17,6 +17,23 @@ from greenfloor.storage.sqlite import SqliteStore
 
 _runtime_logger = logging.getLogger("greenfloor.manager")
 
+RESOLVE_WALLET_ASSETS_QUERY = """
+query resolveWalletAssets($walletId: ID!) {
+  wallet(id: $walletId) {
+    assets {
+      edges {
+        node {
+          assetId
+          type
+          displayName
+          symbol
+        }
+      }
+    }
+  }
+}
+"""
+
 
 def _wallet_asset_edges_for_resolve(
     *,
@@ -38,23 +55,9 @@ def _wallet_asset_edges_for_resolve(
                 wallet.vault_id,
             )
             return cached
-    query = """
-query resolveWalletAssets($walletId: ID!) {
-  wallet(id: $walletId) {
-    assets {
-      edges {
-        node {
-          assetId
-          type
-          displayName
-          symbol
-        }
-      }
-    }
-  }
-}
-"""
-    payload = wallet._graphql(query=query, variables={"walletId": wallet.vault_id})
+    payload = wallet._graphql(
+        query=RESOLVE_WALLET_ASSETS_QUERY, variables={"walletId": wallet.vault_id}
+    )
     wallet_payload = payload.get("wallet") or {}
     assets_payload = wallet_payload.get("assets") or {}
     raw_edges = assets_payload.get("edges") or []
@@ -87,23 +90,7 @@ def seed_cloud_wallet_assets_cache(
     if not base:
         raise ValueError("wallet API base_url is missing")
     vault_id = str(wallet.vault_id).strip()
-    query = """
-query resolveWalletAssets($walletId: ID!) {
-  wallet(id: $walletId) {
-    assets {
-      edges {
-        node {
-          assetId
-          type
-          displayName
-          symbol
-        }
-      }
-    }
-  }
-}
-"""
-    payload = wallet._graphql(query=query, variables={"walletId": vault_id})
+    payload = wallet._graphql(query=RESOLVE_WALLET_ASSETS_QUERY, variables={"walletId": vault_id})
     wallet_payload = payload.get("wallet") or {}
     assets_payload = wallet_payload.get("assets") or {}
     raw_edges = assets_payload.get("edges") or []
@@ -353,3 +340,145 @@ def recent_market_resolved_asset_id_hints(
         if base_hint.startswith("Asset_") and quote_hint.startswith("Asset_"):
             return base_hint, quote_hint
     return None, None
+
+
+def wallet_asset_amounts_for_scope(
+    *,
+    wallet: CloudWalletAdapter,
+    asset_id: str,
+    first: int = 100,
+) -> tuple[int | None, int | None, int | None]:
+    """Return (total, spendable, locked) for one asset via wallet assets listing."""
+    if not hasattr(wallet, "_graphql"):
+        return None, None, None
+    query = """
+query walletAssetAmounts($walletId: ID!, $first: Int) {
+  wallet(id: $walletId) {
+    assets(first: $first) {
+      edges {
+        node {
+          assetId
+          totalAmount
+          spendableAmount
+          lockedAmount
+        }
+      }
+    }
+  }
+}
+"""
+    try:
+        payload = wallet._graphql(
+            query=query,
+            variables={"walletId": wallet.vault_id, "first": int(first)},
+        )
+    except Exception:
+        return None, None, None
+    wallet_payload = payload.get("wallet") or {}
+    assets_payload = wallet_payload.get("assets") or {}
+    edges = assets_payload.get("edges") or []
+    target = asset_id.strip()
+    for edge in edges:
+        node = edge.get("node") if isinstance(edge, dict) else None
+        if not isinstance(node, dict):
+            continue
+        node_asset_id = str(node.get("assetId", "")).strip()
+        if node_asset_id != target:
+            continue
+        try:
+            total_amount = int(node.get("totalAmount", 0))
+            spendable_amount = int(node.get("spendableAmount", 0))
+            locked_amount = int(node.get("lockedAmount", 0))
+        except (TypeError, ValueError):
+            return None, None, None
+        return total_amount, spendable_amount, locked_amount
+    return None, None, None
+
+
+def wallet_asset_amounts_for_asset_id(
+    *,
+    wallet: CloudWalletAdapter,
+    asset_id: str,
+) -> tuple[int | None, int | None, int | None]:
+    """Return (total, spendable, locked) for one asset via direct asset lookup."""
+    if not hasattr(wallet, "_graphql"):
+        return None, None, None
+    query = """
+query walletAssetAmountsById($walletId: ID!, $assetId: ID!) {
+  wallet(id: $walletId) {
+    asset(assetId: $assetId) {
+      totalAmount
+      spendableAmount
+      lockedAmount
+    }
+  }
+}
+"""
+    try:
+        payload = wallet._graphql(
+            query=query,
+            variables={"walletId": wallet.vault_id, "assetId": asset_id.strip()},
+        )
+    except Exception:
+        return None, None, None
+    wallet_payload = payload.get("wallet") if isinstance(payload, dict) else None
+    if not isinstance(wallet_payload, dict):
+        return None, None, None
+    asset_payload = wallet_payload.get("asset")
+    if not isinstance(asset_payload, dict):
+        return None, None, None
+    try:
+        total_amount = int(asset_payload.get("totalAmount", 0))
+        spendable_amount = int(asset_payload.get("spendableAmount", 0))
+        locked_amount = int(asset_payload.get("lockedAmount", 0))
+    except (TypeError, ValueError):
+        return None, None, None
+    return total_amount, spendable_amount, locked_amount
+
+
+def wallet_asset_amount_rows(
+    *,
+    wallet: CloudWalletAdapter,
+    first: int = 100,
+) -> list[dict[str, int | str]]:
+    """Return wallet asset totals as normalized rows for operator scripts."""
+    if not hasattr(wallet, "_graphql"):
+        return []
+    query = """
+query walletAssetAmounts($walletId: ID!, $first: Int) {
+  wallet(id: $walletId) {
+    assets(first: $first) {
+      edges {
+        node {
+          assetId
+          totalAmount
+          spendableAmount
+          lockedAmount
+        }
+      }
+    }
+  }
+}
+"""
+    try:
+        payload = wallet._graphql(
+            query=query,
+            variables={"walletId": wallet.vault_id, "first": int(first)},
+        )
+    except Exception:
+        return []
+    edges = ((payload.get("wallet") or {}).get("assets") or {}).get("edges") or []
+    rows: list[dict[str, int | str]] = []
+    for edge in edges:
+        node = edge.get("node") if isinstance(edge, dict) else None
+        if not isinstance(node, dict):
+            continue
+        rows.append(
+            {
+                "asset_id": str(node.get("assetId", "")).strip(),
+                "total": int(node.get("totalAmount", 0) or 0),
+                "spendable": int(node.get("spendableAmount", 0) or 0),
+                "locked": int(node.get("lockedAmount", 0) or 0),
+            }
+        )
+    return rows

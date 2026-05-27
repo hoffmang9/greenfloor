@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from greenfloor.cli.manager import _cats_add, _cats_delete, _load_cats_catalog
+from greenfloor.cli.cats import cats_add, cats_delete, load_cats_catalog
 
 
 def test_cats_add_manual_without_dexie_lookup(tmp_path: Path) -> None:
     cats_path = tmp_path / "cats.yaml"
-    code = _cats_add(
+    code = cats_add(
         cats_path=cats_path,
         network="mainnet",
         cat_id="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
@@ -22,7 +22,7 @@ def test_cats_add_manual_without_dexie_lookup(tmp_path: Path) -> None:
         replace=False,
     )
     assert code == 0
-    payload = _load_cats_catalog(cats_path)
+    payload = load_cats_catalog(cats_path)
     rows = payload["cats"]
     assert len(rows) == 1
     row = rows[0]
@@ -57,14 +57,14 @@ def test_cats_add_uses_dexie_lookup_when_available(tmp_path: Path, monkeypatch) 
         }
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager._dexie_lookup_token_for_symbol",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_symbol",
         _fake_lookup_by_ticker,
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         _fake_lookup_by_id,
     )
-    code = _cats_add(
+    code = cats_add(
         cats_path=cats_path,
         network="mainnet",
         cat_id=None,
@@ -79,7 +79,7 @@ def test_cats_add_uses_dexie_lookup_when_available(tmp_path: Path, monkeypatch) 
         replace=False,
     )
     assert code == 0
-    row = _load_cats_catalog(cats_path)["cats"][0]
+    row = load_cats_catalog(cats_path)["cats"][0]
     assert row["name"] == "Test CAT"
     assert row["base_symbol"] == "TCAT"
     assert row["asset_id"] == cat_id
@@ -90,7 +90,7 @@ def test_cats_add_uses_dexie_lookup_when_available(tmp_path: Path, monkeypatch) 
 def test_cats_add_replace_required_for_existing_asset(tmp_path: Path) -> None:
     cats_path = tmp_path / "cats.yaml"
     cat_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    first = _cats_add(
+    first = cats_add(
         cats_path=cats_path,
         network="mainnet",
         cat_id=cat_id,
@@ -105,7 +105,7 @@ def test_cats_add_replace_required_for_existing_asset(tmp_path: Path) -> None:
         replace=False,
     )
     assert first == 0
-    second = _cats_add(
+    second = cats_add(
         cats_path=cats_path,
         network="mainnet",
         cat_id=cat_id,
@@ -120,7 +120,7 @@ def test_cats_add_replace_required_for_existing_asset(tmp_path: Path) -> None:
         replace=False,
     )
     assert second == 2
-    third = _cats_add(
+    third = cats_add(
         cats_path=cats_path,
         network="mainnet",
         cat_id=cat_id,
@@ -135,13 +135,13 @@ def test_cats_add_replace_required_for_existing_asset(tmp_path: Path) -> None:
         replace=True,
     )
     assert third == 0
-    assert _load_cats_catalog(cats_path)["cats"][0]["name"] == "Updated Name"
+    assert load_cats_catalog(cats_path)["cats"][0]["name"] == "Updated Name"
 
 
 def test_cats_delete_by_cat_id(tmp_path: Path) -> None:
     cats_path = tmp_path / "cats.yaml"
     cat_id = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-    added = _cats_add(
+    added = cats_add(
         cats_path=cats_path,
         network="mainnet",
         cat_id=cat_id,
@@ -156,7 +156,7 @@ def test_cats_delete_by_cat_id(tmp_path: Path) -> None:
         replace=False,
     )
     assert added == 0
-    deleted = _cats_delete(
+    deleted = cats_delete(
         cats_path=cats_path,
         network="mainnet",
         cat_id=cat_id,
@@ -166,13 +166,13 @@ def test_cats_delete_by_cat_id(tmp_path: Path) -> None:
         preflight_only=False,
     )
     assert deleted == 0
-    assert _load_cats_catalog(cats_path)["cats"] == []
+    assert load_cats_catalog(cats_path)["cats"] == []
 
 
 def test_cats_delete_by_ticker_uses_local_catalog_match(tmp_path: Path) -> None:
     cats_path = tmp_path / "cats.yaml"
     cat_id = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-    added = _cats_add(
+    added = cats_add(
         cats_path=cats_path,
         network="mainnet",
         cat_id=cat_id,
@@ -187,7 +187,7 @@ def test_cats_delete_by_ticker_uses_local_catalog_match(tmp_path: Path) -> None:
         replace=False,
     )
     assert added == 0
-    deleted = _cats_delete(
+    deleted = cats_delete(
         cats_path=cats_path,
         network="mainnet",
         cat_id=None,
@@ -197,13 +197,13 @@ def test_cats_delete_by_ticker_uses_local_catalog_match(tmp_path: Path) -> None:
         preflight_only=False,
     )
     assert deleted == 0
-    assert _load_cats_catalog(cats_path)["cats"] == []
+    assert load_cats_catalog(cats_path)["cats"] == []
 
 
 def test_cats_delete_requires_confirmation_when_not_yes(tmp_path: Path, monkeypatch) -> None:
     cats_path = tmp_path / "cats.yaml"
     cat_id = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-    added = _cats_add(
+    added = cats_add(
         cats_path=cats_path,
         network="mainnet",
         cat_id=cat_id,
@@ -218,8 +218,8 @@ def test_cats_delete_requires_confirmation_when_not_yes(tmp_path: Path, monkeypa
         replace=False,
     )
     assert added == 0
-    monkeypatch.setattr("greenfloor.cli.manager._prompt_yes_no", lambda *args, **kwargs: False)
-    deleted = _cats_delete(
+    monkeypatch.setattr("greenfloor.cli.prompts.prompt_yes_no", lambda *args, **kwargs: False)
+    deleted = cats_delete(
         cats_path=cats_path,
         network="mainnet",
         cat_id=cat_id,
@@ -229,13 +229,13 @@ def test_cats_delete_requires_confirmation_when_not_yes(tmp_path: Path, monkeypa
         preflight_only=False,
     )
     assert deleted == 2
-    assert len(_load_cats_catalog(cats_path)["cats"]) == 1
+    assert len(load_cats_catalog(cats_path)["cats"]) == 1
 
 
 def test_cats_delete_preflight_only_does_not_delete(tmp_path: Path) -> None:
     cats_path = tmp_path / "cats.yaml"
     cat_id = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-    added = _cats_add(
+    added = cats_add(
         cats_path=cats_path,
         network="mainnet",
         cat_id=cat_id,
@@ -250,7 +250,7 @@ def test_cats_delete_preflight_only_does_not_delete(tmp_path: Path) -> None:
         replace=False,
     )
     assert added == 0
-    deleted = _cats_delete(
+    deleted = cats_delete(
         cats_path=cats_path,
         network="mainnet",
         cat_id=cat_id,
@@ -260,4 +260,4 @@ def test_cats_delete_preflight_only_does_not_delete(tmp_path: Path) -> None:
         preflight_only=True,
     )
     assert deleted == 0
-    assert len(_load_cats_catalog(cats_path)["cats"]) == 1
+    assert len(load_cats_catalog(cats_path)["cats"]) == 1

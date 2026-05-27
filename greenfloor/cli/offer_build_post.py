@@ -10,11 +10,12 @@ from greenfloor.config.io import (
     is_testnet,
     load_markets_config_with_optional_overlay,
     load_program_config,
+    resolve_market_for_build,
 )
-from greenfloor.config.models import MarketsConfig, offer_execution_backend
+from greenfloor.config.models import offer_execution_backend
 from greenfloor.logging_setup import warn_if_log_level_auto_healed
 from greenfloor.offer_builder import build_offer_text
-from greenfloor.runtime.cloud_wallet.adapter import _format_json_output
+from greenfloor.runtime.cloud_wallet.adapter import format_json_output
 from greenfloor.runtime.offer_build_context import prepare_offer_build_context
 from greenfloor.runtime.offer_execution import default_offer_post_deps
 from greenfloor.runtime.offer_post_request import OfferPostRequest
@@ -23,53 +24,46 @@ from greenfloor.runtime.offer_publish import initialize_manager_file_logging
 _manager_logger = logging.getLogger("greenfloor.manager")
 
 
-def resolve_market_for_build(
-    markets: MarketsConfig,
-    *,
-    market_id: str | None,
-    pair: str | None,
-    network: str,
-):
-    if bool(market_id) == bool(pair):
-        raise ValueError("provide exactly one of --market-id or --pair")
-    if market_id:
-        selected = next((m for m in markets.markets if m.market_id == market_id), None)
-        if selected is None:
-            raise ValueError(f"market_id not found: {market_id}")
-        return selected
-
-    assert pair is not None
-    raw = pair.strip()
-    sep = ":" if ":" in raw else "/" if "/" in raw else ""
-    if not sep:
-        raise ValueError("pair must be in base:quote or base/quote format")
-    base_raw, quote_raw = [p.strip().lower() for p in raw.split(sep, 1)]
-    if not base_raw or not quote_raw:
-        raise ValueError("pair base and quote must be non-empty")
+def resolve_dexie_base_url(network: str, explicit_base_url: str | None) -> str:
+    if explicit_base_url and explicit_base_url.strip():
+        return explicit_base_url.strip().rstrip("/")
     network_l = network.strip().lower()
-    candidates = []
-    for market in markets.markets:
-        if not market.enabled:
-            continue
-        base_matches = {
-            str(market.base_asset).strip().lower(),
-            str(market.base_symbol).strip().lower(),
-        }
-        quote_match = str(market.quote_asset).strip().lower()
-        quote_matches = {quote_match}
-        if is_testnet(network_l):
-            if quote_match == "xch":
-                quote_matches.add("txch")
-            elif quote_match == "txch":
-                quote_matches.add("xch")
-        if base_raw in base_matches and quote_raw in quote_matches:
-            candidates.append(market)
-    if not candidates:
-        raise ValueError(f"no enabled market found for pair: {pair}")
-    if len(candidates) > 1:
-        ids = ", ".join(sorted(m.market_id for m in candidates))
-        raise ValueError(f"pair is ambiguous; use --market-id (candidates: {ids})")
-    return candidates[0]
+    if network_l in {"mainnet", ""}:
+        return "https://api.dexie.space"
+    if is_testnet(network_l):
+        return "https://api-testnet.dexie.space"
+    raise ValueError(f"unsupported network for dexie posting: {network}")
+
+
+def resolve_splash_base_url(explicit_base_url: str | None) -> str:
+    if explicit_base_url and explicit_base_url.strip():
+        return explicit_base_url.strip().rstrip("/")
+    return "http://john-deere.hoffmang.com:4000"
+
+
+def resolve_offer_publish_settings(
+    *,
+    program_path: Path,
+    network: str,
+    venue_override: str | None,
+    dexie_base_url: str | None,
+    splash_base_url: str | None,
+) -> tuple[str, str, str]:
+    program = load_program_config(program_path)
+    venue = (venue_override or program.offer_publish_venue).strip().lower()
+    if venue not in {"dexie", "splash"}:
+        raise ValueError("offer publish venue must be dexie or splash")
+    if dexie_base_url and dexie_base_url.strip():
+        dexie_base = dexie_base_url.strip().rstrip("/")
+    elif is_testnet(network):
+        dexie_base = resolve_dexie_base_url(network, None)
+    else:
+        dexie_base = str(program.dexie_api_base).strip().rstrip("/")
+    if splash_base_url and splash_base_url.strip():
+        splash_base = splash_base_url.strip().rstrip("/")
+    else:
+        splash_base = str(program.splash_api_base).strip().rstrip("/")
+    return venue, dexie_base, splash_base
 
 
 def build_and_post_offer_cli(
@@ -147,6 +141,6 @@ def build_and_post_offer_cli(
         backend,
         capture_dir_path=capture_dir_path,
         build_offer_text_fn=build_offer_text,
-        post_deps=default_offer_post_deps(format_output_fn=_format_json_output),
+        post_deps=default_offer_post_deps(format_output_fn=format_json_output),
         path_extra_fields={"local_cli_path": True},
     )

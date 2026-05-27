@@ -24,6 +24,9 @@ from greenfloor.daemon.main import (
     _update_market_coin_watchlist_from_dexie,
 )
 from greenfloor.daemon.reservations import AssetReservationCoordinator
+from greenfloor.runtime.cloud_wallet.coin_ops_planning import (
+    select_spendable_coins_for_target_amount,
+)
 from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.config_fixtures import minimal_program_config
 
@@ -2660,7 +2663,7 @@ def test_select_spendable_coins_for_target_amount_prefers_exact() -> None:
         {"id": "c2", "amount": 2000},
         {"id": "c3b", "amount": 3000},
     ]
-    coin_ids, total, exact = daemon_main._select_spendable_coins_for_target_amount(
+    coin_ids, total, exact = select_spendable_coins_for_target_amount(
         coins=coins,
         target_amount=10_000,
     )
@@ -2675,7 +2678,7 @@ def test_select_spendable_coins_for_target_amount_uses_change_when_needed() -> N
         {"id": "c3a", "amount": 3000},
         {"id": "c3b", "amount": 3000},
     ]
-    coin_ids, total, exact = daemon_main._select_spendable_coins_for_target_amount(
+    coin_ids, total, exact = select_spendable_coins_for_target_amount(
         coins=coins,
         target_amount=10_000,
     )

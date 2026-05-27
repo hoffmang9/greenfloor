@@ -35,12 +35,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from greenfloor.cli.manager import (  # noqa: E402
-    _new_cloud_wallet_adapter,
-    _require_cloud_wallet_config,
-    _resolve_cloud_wallet_asset_id,
-)
 from greenfloor.config.io import load_program_config  # noqa: E402
+from greenfloor.runtime.cloud_wallet import assets as cloud_wallet_assets  # noqa: E402
+from greenfloor.runtime.cloud_wallet.adapter import (  # noqa: E402
+    _require_cloud_wallet_config,
+    new_cloud_wallet_adapter,
+)
 
 
 def _graphql_with_retry(
@@ -87,40 +87,17 @@ def _coin_hex(value: Any) -> str:
 
 
 def _wallet_asset_row(*, wallet: Any, asset_id: str) -> dict[str, int] | None:
-    query = """
-query walletAssetAmounts($walletId: ID!, $first: Int) {
-  wallet(id: $walletId) {
-    assets(first: $first) {
-      edges {
-        node {
-          assetId
-          totalAmount
-          spendableAmount
-          lockedAmount
-        }
-      }
-    }
-  }
-}
-"""
-    payload = _graphql_with_retry(
+    total, spendable, locked = cloud_wallet_assets.wallet_asset_amounts_for_scope(
         wallet=wallet,
-        query=query,
-        variables={"walletId": wallet.vault_id, "first": 100},
+        asset_id=asset_id,
     )
-    edges = ((payload.get("wallet") or {}).get("assets") or {}).get("edges") or []
-    for edge in edges:
-        node = edge.get("node") if isinstance(edge, dict) else None
-        if not isinstance(node, dict):
-            continue
-        if str(node.get("assetId", "")).strip() != asset_id:
-            continue
-        return {
-            "total": int(node.get("totalAmount", 0) or 0),
-            "spendable": int(node.get("spendableAmount", 0) or 0),
-            "locked": int(node.get("lockedAmount", 0) or 0),
-        }
-    return None
+    if total is None and spendable is None and locked is None:
+        return None
+    return {
+        "total": int(total or 0),
+        "spendable": int(spendable or 0),
+        "locked": int(locked or 0),
+    }
 
 
 def _fetch_quote_coins(*, wallet: Any, asset_id: str) -> list[dict[str, Any]]:
@@ -578,7 +555,7 @@ def main() -> int:
     args = parser.parse_args()
 
     program = load_program_config(Path(args.program_config))
-    wallet = _new_cloud_wallet_adapter(program)
+    wallet = new_cloud_wallet_adapter(program)
     if args.vault_id.strip() and args.vault_id.strip() != wallet.vault_id:
         cfg = _require_cloud_wallet_config(program)
         cfg = cfg.__class__(
@@ -595,7 +572,7 @@ def main() -> int:
 
         wallet = CloudWalletAdapter(cfg)
 
-    quote_asset_id = _resolve_cloud_wallet_asset_id(
+    quote_asset_id = cloud_wallet_assets.resolve_cloud_wallet_asset_id(
         wallet=wallet,
         canonical_asset_id=args.quote,
         symbol_hint=args.quote,

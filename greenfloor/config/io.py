@@ -7,6 +7,7 @@ from typing import Any
 import yaml
 
 from greenfloor.config.models import (
+    MarketConfig,
     MarketsConfig,
     ProgramConfig,
     invalidate_signer_runtime_cache,
@@ -158,3 +159,72 @@ def resolve_quote_asset_for_offer(*, quote_asset: str, network: str) -> str:
     Handles xch/txch network mapping and cats.yaml symbol lookup.
     """
     return resolve_trade_asset_for_dexie(asset=quote_asset, network=network)
+
+
+def resolve_state_db_path(
+    *,
+    program_home_dir: str | None = None,
+    program_config_path: Path | None = None,
+    explicit_db_path: str | None = None,
+) -> Path:
+    """Return the SQLite state DB path for daemon or CLI callers."""
+    if explicit_db_path and str(explicit_db_path).strip():
+        return Path(explicit_db_path).expanduser()
+    if program_home_dir is not None:
+        return (Path(program_home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
+    if program_config_path is not None:
+        program = load_program_config(program_config_path)
+        return (Path(program.home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
+    raise ValueError(
+        "resolve_state_db_path requires program_home_dir or program_config_path "
+        "when explicit_db_path is not set"
+    )
+
+
+def resolve_market_for_build(
+    markets: MarketsConfig,
+    *,
+    market_id: str | None,
+    pair: str | None,
+    network: str,
+) -> MarketConfig:
+    if bool(market_id) == bool(pair):
+        raise ValueError("provide exactly one of --market-id or --pair")
+    if market_id:
+        selected = next((m for m in markets.markets if m.market_id == market_id), None)
+        if selected is None:
+            raise ValueError(f"market_id not found: {market_id}")
+        return selected
+
+    assert pair is not None
+    raw = pair.strip()
+    sep = ":" if ":" in raw else "/" if "/" in raw else ""
+    if not sep:
+        raise ValueError("pair must be in base:quote or base/quote format")
+    base_raw, quote_raw = [p.strip().lower() for p in raw.split(sep, 1)]
+    if not base_raw or not quote_raw:
+        raise ValueError("pair base and quote must be non-empty")
+    network_l = network.strip().lower()
+    candidates: list[MarketConfig] = []
+    for market in markets.markets:
+        if not market.enabled:
+            continue
+        base_matches = {
+            str(market.base_asset).strip().lower(),
+            str(market.base_symbol).strip().lower(),
+        }
+        quote_match = str(market.quote_asset).strip().lower()
+        quote_matches = {quote_match}
+        if is_testnet(network_l):
+            if quote_match == "xch":
+                quote_matches.add("txch")
+            elif quote_match == "txch":
+                quote_matches.add("xch")
+        if base_raw in base_matches and quote_raw in quote_matches:
+            candidates.append(market)
+    if not candidates:
+        raise ValueError(f"no enabled market found for pair: {pair}")
+    if len(candidates) > 1:
+        ids = ", ".join(sorted(m.market_id for m in candidates))
+        raise ValueError(f"pair is ambiguous; use --market-id (candidates: {ids})")
+    return candidates[0]
