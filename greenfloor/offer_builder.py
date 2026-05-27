@@ -2,11 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-
-def _import_sdk() -> Any:
-    import chia_wallet_sdk as sdk  # type: ignore
-
-    return sdk
+from greenfloor.adapters.native_offer import encode_offer_from_spend_bundle_hex
 
 
 def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
@@ -113,26 +109,19 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
     return spend_bundle_hex
 
 
-def _build_offer(payload: dict[str, Any], sdk: Any) -> str:
+def _build_offer(payload: dict[str, Any]) -> str:
     spend_bundle_hex = str(payload.get("spend_bundle_hex", "")).strip()
     if not spend_bundle_hex:
         spend_bundle_hex = _build_coin_backed_spend_bundle_hex(payload)
     raw_hex = (
         spend_bundle_hex[2:] if spend_bundle_hex.lower().startswith("0x") else spend_bundle_hex
     )
-    from greenfloor.adapters.native_offer import encode_offer_from_spend_bundle_hex
-
-    offer_text = encode_offer_from_spend_bundle_hex(raw_hex)
-    if offer_text is not None:
-        return offer_text
-    spend_bundle = sdk.SpendBundle.from_bytes(bytes.fromhex(raw_hex))
-    return str(sdk.encode_offer(spend_bundle))
+    return encode_offer_from_spend_bundle_hex(raw_hex)
 
 
 def build_offer(payload: dict[str, Any]) -> str:
     """Build an offer text string from payload. Raises on failure."""
-    sdk = _import_sdk()
-    return _build_offer(payload, sdk)
+    return _build_offer(payload)
 
 
 def build_offer_text(payload: dict[str, Any]) -> str:

@@ -10,19 +10,9 @@ def _import_greenfloor_native() -> Any:
     return importlib.import_module("greenfloor_native")
 
 
-def encode_offer_from_spend_bundle_hex(raw_hex: str) -> str | None:
-    """Return offer1... text when native encode succeeds, else None (caller uses SDK fallback)."""
-    try:
-        native = _import_greenfloor_native()
-    except ImportError:
-        return None
-    encode = getattr(native, "encode_offer", None)
-    if not callable(encode):
-        return None
-    try:
-        return str(encode(bytes.fromhex(raw_hex)))
-    except Exception:
-        return None
+def encode_offer_from_spend_bundle_hex(raw_hex: str) -> str:
+    """Encode a spend bundle hex string to offer1... via ``greenfloor_native``."""
+    return str(_import_greenfloor_native().encode_offer(bytes.fromhex(raw_hex)))
 
 
 def _as_bytes(value: Any) -> bytes:

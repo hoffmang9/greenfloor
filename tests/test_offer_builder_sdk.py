@@ -6,102 +6,34 @@ import greenfloor.offer_builder as offer_builder
 from greenfloor.cli import offer_builder_sdk
 
 
-class _FakeAddressObj:
-    def __init__(self, puzzle_hash: bytes) -> None:
-        self.puzzle_hash = puzzle_hash
-
-
-class _FakeAddress:
-    @staticmethod
-    def decode(value: str) -> _FakeAddressObj:
-        if not value.startswith("xch1"):
-            raise ValueError("bad_address")
-        return _FakeAddressObj(b"\x11" * 32)
-
-
-class _FakeCoin:
-    def __init__(self, parent_coin_info: bytes, puzzle_hash: bytes, amount: int) -> None:
-        self.parent_coin_info = parent_coin_info
-        self.puzzle_hash = puzzle_hash
-        self.amount = amount
-
-
-class _FakeCoinSpend:
-    def __init__(self, coin: _FakeCoin, puzzle_reveal: bytes, solution: bytes) -> None:
-        self.coin = coin
-        self.puzzle_reveal = puzzle_reveal
-        self.solution = solution
-
-
-class _FakeSignature:
-    @staticmethod
-    def infinity() -> str:
-        return "sig"
-
-
-class _FakeSpendBundle:
-    def __init__(self, coin_spends, aggregated_signature) -> None:
-        self.coin_spends = coin_spends
-        self.aggregated_signature = aggregated_signature
-
-    @staticmethod
-    def from_bytes(value: bytes) -> _FakeSpendBundle:
-        if value != b"\xaa":
-            raise ValueError("bad_spend_bundle_bytes")
-        coin = _FakeCoin(b"\x01" * 32, b"\x02" * 32, 10)
-        return _FakeSpendBundle([_FakeCoinSpend(coin, b"\x80", b"\x80")], "sig")
-
-
-class _FakeSdk:
-    Address = _FakeAddress
-    Coin = _FakeCoin
-    CoinSpend = _FakeCoinSpend
-    Signature = _FakeSignature
-    SpendBundle = _FakeSpendBundle
-
-    @staticmethod
-    def from_hex(value: str) -> bytes:
-        if value != "aa":
-            raise ValueError("bad_hex")
-        return b"\xaa"
-
-    @staticmethod
-    def encode_offer(spend_bundle: _FakeSpendBundle) -> str:
-        assert len(spend_bundle.coin_spends) == 1
-        assert spend_bundle.coin_spends[0].coin.amount == 10
-        return "offer1fake"
-
-
-def test_encode_offer_from_spend_bundle_hex_returns_none_without_encode(monkeypatch) -> None:
+def test_encode_offer_from_spend_bundle_hex_calls_native(monkeypatch) -> None:
     from greenfloor.adapters import native_offer
 
-    class _Native:
-        pass
-
-    monkeypatch.setattr(native_offer, "_import_greenfloor_native", lambda: _Native())
-    assert native_offer.encode_offer_from_spend_bundle_hex("aa") is None
-
-
-def test_encode_offer_from_spend_bundle_hex_returns_none_on_encode_error(monkeypatch) -> None:
-    from greenfloor.adapters import native_offer
+    captured: dict[str, bytes] = {}
 
     class _Native:
         @staticmethod
-        def encode_offer(_raw: bytes) -> str:
-            raise ValueError("unexpected end of buffer")
+        def encode_offer(raw: bytes) -> str:
+            captured["raw"] = raw
+            return "offer1native"
 
     monkeypatch.setattr(native_offer, "_import_greenfloor_native", lambda: _Native())
-    assert native_offer.encode_offer_from_spend_bundle_hex("aa") is None
+    assert native_offer.encode_offer_from_spend_bundle_hex("aabb") == "offer1native"
+    assert captured["raw"] == bytes.fromhex("aabb")
 
 
-def test_build_offer_success_with_wallet_sdk_types() -> None:
-    offer = offer_builder._build_offer({"spend_bundle_hex": "aa"}, _FakeSdk)
-    assert offer == "offer1fake"
+def test_build_offer_encodes_spend_bundle_hex(monkeypatch) -> None:
+    def _fake_encode(raw_hex: str) -> str:
+        assert raw_hex == "aa"
+        return "offer1fake"
+
+    monkeypatch.setattr(offer_builder, "encode_offer_from_spend_bundle_hex", _fake_encode)
+    assert offer_builder._build_offer({"spend_bundle_hex": "aa"}) == "offer1fake"
 
 
 def test_build_offer_rejects_missing_coin_backed_inputs() -> None:
     try:
-        offer_builder._build_offer({"size_base_units": 10}, _FakeSdk)
+        offer_builder._build_offer({"size_base_units": 10})
         raise AssertionError("expected ValueError")
     except ValueError as exc:
         assert str(exc) == "missing_receive_address"
@@ -109,13 +41,14 @@ def test_build_offer_rejects_missing_coin_backed_inputs() -> None:
 
 def test_build_offer_calls_coin_backed_signing(monkeypatch) -> None:
     monkeypatch.setattr(offer_builder, "_build_coin_backed_spend_bundle_hex", lambda _: "aa")
-    offer = offer_builder._build_offer({"size_base_units": 10}, _FakeSdk)
+    monkeypatch.setattr(offer_builder, "encode_offer_from_spend_bundle_hex", lambda _: "offer1fake")
+    offer = offer_builder._build_offer({"size_base_units": 10})
     assert offer == "offer1fake"
 
 
 def test_build_offer_public_api(monkeypatch) -> None:
-    monkeypatch.setattr(offer_builder, "_import_sdk", lambda: _FakeSdk)
     monkeypatch.setattr(offer_builder, "_build_coin_backed_spend_bundle_hex", lambda _: "aa")
+    monkeypatch.setattr(offer_builder, "encode_offer_from_spend_bundle_hex", lambda _: "offer1fake")
     offer = offer_builder.build_offer({"size_base_units": 10})
     assert offer == "offer1fake"
 
