@@ -45,7 +45,8 @@ def test_offers_cancel_cancel_open_uses_cloud_wallet(monkeypatch, tmp_path: Path
             return {"signature_request_id": f"SignatureRequest_{offer_id}", "status": "SUBMITTED"}
 
     monkeypatch.setattr(
-        "greenfloor.cli.offers_lifecycle.cloud_wallet_adapter.new_cloud_wallet_adapter", lambda _p: _FakeWallet()
+        "greenfloor.cli.offers_lifecycle.cloud_wallet_adapter.new_cloud_wallet_adapter",
+        lambda _p: _FakeWallet(),
     )
 
     code = offers_cancel(
@@ -96,7 +97,8 @@ def test_offers_cancel_pending_offer_uses_off_chain_cancel(
             return {"signature_request_id": "", "status": ""}
 
     monkeypatch.setattr(
-        "greenfloor.cli.offers_lifecycle.cloud_wallet_adapter.new_cloud_wallet_adapter", lambda _p: _FakeWallet()
+        "greenfloor.cli.offers_lifecycle.cloud_wallet_adapter.new_cloud_wallet_adapter",
+        lambda _p: _FakeWallet(),
     )
 
     code = offers_cancel(
@@ -185,9 +187,12 @@ def test_offers_cancel_can_submit_onchain_refresh_after_offchain(
             )
             return {"signature_request_id": "SignatureRequest_refresh", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.cli.offers_lifecycle.load_program_config", lambda _p: _Program())
     monkeypatch.setattr(
-        "greenfloor.cli.offers_lifecycle.cloud_wallet_adapter.new_cloud_wallet_adapter", lambda _p: _FakeWallet()
+        "greenfloor.cli.offers_lifecycle.load_program_config", lambda _p: _Program()
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.offers_lifecycle.cloud_wallet_adapter.new_cloud_wallet_adapter",
+        lambda _p: _FakeWallet(),
     )
     monkeypatch.setattr(
         "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
@@ -235,7 +240,9 @@ def test_offers_cancel_submit_onchain_requires_market_selection(
         cloud_wallet_base_url = "https://wallet.example.com"
         signer_key_registry = {}
 
-    monkeypatch.setattr("greenfloor.cli.offers_lifecycle.load_program_config", lambda _p: _Program())
+    monkeypatch.setattr(
+        "greenfloor.cli.offers_lifecycle.load_program_config", lambda _p: _Program()
+    )
     monkeypatch.setattr(
         "greenfloor.cli.offers_lifecycle.cloud_wallet_adapter.new_cloud_wallet_adapter",
         lambda _p: type(

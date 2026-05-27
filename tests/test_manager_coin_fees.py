@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import greenfloor.cli.coin_ops as coin_ops_mod
-from greenfloor.cli.coin_ops import coin_combine, coin_split
+from greenfloor.cli.coin_ops_combine import coin_combine
+from greenfloor.cli.coin_ops_split import coin_split
 from greenfloor.runtime.coinset_runtime import (
     CoinsetFeeLookupPreflightError,
+)
+from greenfloor.runtime.coinset_runtime import (
     _resolve_taker_or_coin_operation_fee as resolve_taker_or_coin_operation_fee,
 )
 from tests.helpers.offer_runtime_fixtures import (
@@ -134,28 +136,6 @@ def test_resolve_taker_or_coin_operation_fee_fails_on_temporary_advice_unavailab
         assert "backend_overloaded" in exc.detail
     else:
         raise AssertionError("expected _CoinsetFeeLookupPreflightError")
-
-
-def test_effective_coin_split_fee_for_cat_keeps_default_fee() -> None:
-    fee, source = coin_ops_mod.effective_coin_split_fee_for_asset(
-        canonical_asset_id="a1",
-        resolved_asset_id="Asset_cat_a1",
-        fee_mojos=42,
-        fee_source="coinset_conservative",
-    )
-    assert fee == 42
-    assert source == "coinset_conservative"
-
-
-def test_effective_coin_split_fee_for_xch_keeps_default_fee() -> None:
-    fee, source = coin_ops_mod.effective_coin_split_fee_for_asset(
-        canonical_asset_id="xch",
-        resolved_asset_id="Asset_xch",
-        fee_mojos=42,
-        fee_source="coinset_conservative",
-    )
-    assert fee == 42
-    assert source == "coinset_conservative"
 
 
 def test_resolve_maker_offer_fee_is_zero() -> None:
@@ -382,7 +362,7 @@ def test_coin_combine_distinguishes_temporary_fee_advice_unavailability(
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (_ for _ in ()).throw(
-            coin_ops_mod.CoinsetFeeLookupPreflightError(
+            CoinsetFeeLookupPreflightError(
                 failure_kind="temporary_fee_advice_unavailable",
                 detail="backend_overloaded",
                 diagnostics={

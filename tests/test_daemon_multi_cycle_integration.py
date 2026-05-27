@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from greenfloor.cli.offers_lifecycle import offers_reconcile
+from greenfloor.config.io import load_program_config
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon.main import run_once
+from greenfloor.runtime.offer_reconciliation import reconcile_offers
 from greenfloor.storage.sqlite import SqliteStore
 
 
@@ -181,7 +182,7 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
     monkeypatch.setattr("greenfloor.daemon.main.CoinsetAdapter", _FakeCoinsetAdapter)
     monkeypatch.setattr("greenfloor.daemon.main.WalletAdapter", _FakeWalletAdapter)
     monkeypatch.setattr("greenfloor.daemon.main.DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr("greenfloor.cli.offers_lifecycle.DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr("greenfloor.daemon.main.evaluate_market", _fake_evaluate_market)
     monkeypatch.setattr(
         "greenfloor.daemon.main._build_offer_for_action",
@@ -225,14 +226,18 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
         == 0
     )
 
-    reconcile_code = offers_reconcile(
-        program_path=program,
-        state_db=str(db_path),
-        market_id="m1",
-        limit=50,
-        venue="dexie",
-    )
-    assert reconcile_code == 0
+    program_cfg = load_program_config(program)
+    store = SqliteStore(db_path)
+    try:
+        reconcile_offers(
+            store=store,
+            dexie_api_base=program_cfg.dexie_api_base,
+            target_venue="dexie",
+            market_id="m1",
+            limit=50,
+        )
+    finally:
+        store.close()
 
     store = SqliteStore(db_path)
     try:

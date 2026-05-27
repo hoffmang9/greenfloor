@@ -25,10 +25,13 @@ class SupportsWalletAssetsSeed(Protocol):
     def _graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]: ...
 
 
-def _format_json_output(payload: object) -> str:
+def format_json_output(payload: object) -> str:
     if _JSON_OUTPUT_COMPACT:
         return json.dumps(payload, separators=(",", ":"))
     return json.dumps(payload, indent=2)
+
+
+_format_json_output = format_json_output
 
 
 def _require_cloud_wallet_config(program: Any) -> CloudWalletConfig:

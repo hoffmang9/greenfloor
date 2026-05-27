@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import greenfloor.cli.coin_ops as coin_ops_mod
-from greenfloor.cli.coin_ops import coin_split
+from greenfloor.cli.coin_ops_split import coin_split
+from greenfloor.runtime.coinset_runtime import CoinsetFeeLookupPreflightError
 from tests.helpers.offer_runtime_fixtures import (
     write_manager_program,
     write_manager_program_with_cloud_wallet,
@@ -264,7 +264,7 @@ def test_coin_split_distinguishes_coinset_endpoint_preflight_failure(
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (_ for _ in ()).throw(
-            coin_ops_mod.CoinsetFeeLookupPreflightError(
+            CoinsetFeeLookupPreflightError(
                 failure_kind="endpoint_validation_failed",
                 detail="coinset_network_error:timed_out",
                 diagnostics={

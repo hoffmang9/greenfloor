@@ -11,7 +11,7 @@ from greenfloor.keys.onboarding import (
     discover_chia_keys,
     save_key_onboarding_selection,
 )
-from greenfloor.runtime.cloud_wallet.adapter import _format_json_output as format_json_output
+from greenfloor.runtime.cloud_wallet.adapter import format_json_output
 
 
 def keys_onboard(

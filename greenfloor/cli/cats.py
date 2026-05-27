@@ -8,7 +8,7 @@ from typing import Any
 from greenfloor import asset_label_catalog
 from greenfloor.cli.prompts import prompt_yes_no
 from greenfloor.config.io import load_yaml, write_yaml
-from greenfloor.runtime.cloud_wallet.adapter import _format_json_output as format_json_output
+from greenfloor.runtime.cloud_wallet.adapter import format_json_output
 
 
 def coerce_optional_str(raw: object) -> str | None:
@@ -55,9 +55,7 @@ def derive_cat_metadata_from_dexie_row(row: dict[str, Any]) -> dict[str, Any]:
         if asset_label_catalog._is_hex_asset_id(normalized):
             cat_id = normalized
             break
-    symbol = (
-        coerce_optional_str(row.get("code") or row.get("base_code") or row.get("symbol")) or ""
-    )
+    symbol = coerce_optional_str(row.get("code") or row.get("base_code") or row.get("symbol")) or ""
     name = (
         coerce_optional_str(
             row.get("name")
@@ -113,10 +111,14 @@ def cats_add(
                 network=network,
             )
         if dexie_row is None and ref_ticker:
-            dexie_row = asset_label_catalog._dexie_lookup_token_for_symbol(asset_ref=ref_ticker, network=network)
+            dexie_row = asset_label_catalog._dexie_lookup_token_for_symbol(
+                asset_ref=ref_ticker, network=network
+            )
         if dexie_row is not None:
             inferred = derive_cat_metadata_from_dexie_row(dexie_row)
-            inferred_cat_id = asset_label_catalog._normalize_hex_asset_id(str(inferred.get("asset_id", "")))
+            inferred_cat_id = asset_label_catalog._normalize_hex_asset_id(
+                str(inferred.get("asset_id", ""))
+            )
             if inferred_cat_id and asset_label_catalog._is_hex_asset_id(inferred_cat_id):
                 enriched = asset_label_catalog._dexie_lookup_token_for_cat_id(
                     canonical_cat_id_hex=inferred_cat_id,
@@ -132,7 +134,9 @@ def cats_add(
                         dexie_row["id"] = inferred_cat_id
 
     dexie_meta = derive_cat_metadata_from_dexie_row(dexie_row or {})
-    resolved_asset_id = ref_cat_id or asset_label_catalog._normalize_hex_asset_id(str(dexie_meta.get("asset_id", "")))
+    resolved_asset_id = ref_cat_id or asset_label_catalog._normalize_hex_asset_id(
+        str(dexie_meta.get("asset_id", ""))
+    )
     if not asset_label_catalog._is_hex_asset_id(resolved_asset_id):
         print(format_json_output({"added": False, "error": "cat_id_required_and_must_be_64_hex"}))
         return 2
@@ -194,7 +198,8 @@ def cats_add(
             idx
             for idx, row in enumerate(rows)
             if isinstance(row, dict)
-            and asset_label_catalog._normalize_hex_asset_id(str(row.get("asset_id", ""))) == resolved_asset_id
+            and asset_label_catalog._normalize_hex_asset_id(str(row.get("asset_id", "")))
+            == resolved_asset_id
         ),
         None,
     )
@@ -290,7 +295,9 @@ def cats_delete(
             ):
                 ticker_matches.append(row)
         if len(ticker_matches) == 1:
-            target_asset_id = asset_label_catalog._normalize_hex_asset_id(str(ticker_matches[0].get("asset_id", "")))
+            target_asset_id = asset_label_catalog._normalize_hex_asset_id(
+                str(ticker_matches[0].get("asset_id", ""))
+            )
         elif len(ticker_matches) > 1:
             print(
                 format_json_output(
@@ -304,15 +311,17 @@ def cats_delete(
             return 2
 
     if not target_asset_id and use_dexie_lookup and ref_ticker:
-        dexie_row = asset_label_catalog._dexie_lookup_token_for_symbol(asset_ref=ref_ticker, network=network)
+        dexie_row = asset_label_catalog._dexie_lookup_token_for_symbol(
+            asset_ref=ref_ticker, network=network
+        )
         if dexie_row is not None:
             inferred = derive_cat_metadata_from_dexie_row(dexie_row)
-            target_asset_id = asset_label_catalog._normalize_hex_asset_id(str(inferred.get("asset_id", "")))
+            target_asset_id = asset_label_catalog._normalize_hex_asset_id(
+                str(inferred.get("asset_id", ""))
+            )
 
     if not asset_label_catalog._is_hex_asset_id(target_asset_id):
-        print(
-            format_json_output({"deleted": False, "error": "cat_id_required_and_must_be_64_hex"})
-        )
+        print(format_json_output({"deleted": False, "error": "cat_id_required_and_must_be_64_hex"}))
         return 2
 
     delete_index = next(
@@ -320,7 +329,8 @@ def cats_delete(
             idx
             for idx, row in enumerate(rows)
             if isinstance(row, dict)
-            and asset_label_catalog._normalize_hex_asset_id(str(row.get("asset_id", ""))) == target_asset_id
+            and asset_label_catalog._normalize_hex_asset_id(str(row.get("asset_id", "")))
+            == target_asset_id
         ),
         None,
     )

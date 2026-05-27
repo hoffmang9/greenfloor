@@ -5,7 +5,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-import greenfloor.cli.manager as manager_mod
+from greenfloor.config.io import load_program_config
 from greenfloor.runtime.cloud_wallet.phases import (
     cloud_wallet_wait_offer_artifact_phase,
 )
@@ -426,7 +426,7 @@ def test_build_and_post_offer_cloud_wallet_passes_min_created_at_to_artifact_pol
         def get_offer(offer_id: str) -> dict[str, object]:
             return {"success": True, "offer": {"id": str(offer_id), "status": 0}}
 
-    program = manager_mod.load_program_config(program_path)
+    program = load_program_config(program_path)
     program.home_dir = str(tmp_path)
     deps = cloud_wallet_test_deps(
         wallet_factory=lambda _p: _FakeWallet(),

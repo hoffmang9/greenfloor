@@ -8,7 +8,6 @@ import pytest
 import greenfloor.cli.manager as manager_mod
 import greenfloor.runtime.cloud_wallet.adapter as adapter_mod
 from greenfloor.asset_label_catalog import _dexie_lookup_token_for_cat_id
-from greenfloor.cli.coin_ops import coin_combine, coin_split
 from greenfloor.cli.manager_setup import set_log_level
 from greenfloor.cli.offer_build_post import (
     resolve_dexie_base_url,
@@ -104,7 +103,7 @@ def test_format_json_output_pretty_mode_has_indentation() -> None:
     original = adapter_mod._JSON_OUTPUT_COMPACT
     try:
         adapter_mod._JSON_OUTPUT_COMPACT = False
-        output = adapter_mod._format_json_output({"alpha": 1, "beta": {"gamma": 2}})
+        output = adapter_mod.format_json_output({"alpha": 1, "beta": {"gamma": 2}})
     finally:
         adapter_mod._JSON_OUTPUT_COMPACT = original
     assert output.startswith("{\n")
@@ -115,7 +114,7 @@ def test_format_json_output_compact_mode_is_single_line() -> None:
     original = adapter_mod._JSON_OUTPUT_COMPACT
     try:
         adapter_mod._JSON_OUTPUT_COMPACT = True
-        output = adapter_mod._format_json_output({"alpha": 1, "beta": {"gamma": 2}})
+        output = adapter_mod.format_json_output({"alpha": 1, "beta": {"gamma": 2}})
     finally:
         adapter_mod._JSON_OUTPUT_COMPACT = original
     assert output == '{"alpha":1,"beta":{"gamma":2}}'

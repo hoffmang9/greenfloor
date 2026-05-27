@@ -61,7 +61,6 @@ def _default_cats_config_path() -> str:
 
 
 def main() -> None:
-
     parser = argparse.ArgumentParser(description="GreenFloor manager CLI")
     parser.add_argument("--program-config", default=_default_program_config_path())
     parser.add_argument("--markets-config", default=_default_markets_config_path())

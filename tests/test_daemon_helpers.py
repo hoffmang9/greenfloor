@@ -23,6 +23,7 @@ from greenfloor.daemon.main import (
     _set_cooldown,
     _should_log_disabled_market,
 )
+from greenfloor.runtime.cloud_wallet.coins import coin_matches_direct_spendable_lookup
 
 # ---------------------------------------------------------------------------
 # _env_int
@@ -349,11 +350,12 @@ def test_direct_spendable_lookup_fails_open_on_lookup_exception() -> None:
             raise TimeoutError("The read operation timed out")
 
     coin = {"id": "coin-1", "state": "SETTLED", "isLocked": False}
-    assert daemon_main._coin_matches_direct_spendable_lookup(
+    assert coin_matches_direct_spendable_lookup(
         wallet=_Wallet(),
         coin=coin,
         scoped_asset_id="asset-1",
         cache={},
+        fail_open_on_lookup_error=True,
     )
 
 
@@ -370,9 +372,10 @@ def test_direct_spendable_lookup_accepts_missing_asset_metadata() -> None:
             }
 
     coin = {"id": "coin-1", "state": "SETTLED", "isLocked": False}
-    assert daemon_main._coin_matches_direct_spendable_lookup(
+    assert coin_matches_direct_spendable_lookup(
         wallet=_Wallet(),
         coin=coin,
         scoped_asset_id="asset-1",
         cache={},
+        fail_open_on_lookup_error=True,
     )

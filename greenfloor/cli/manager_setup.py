@@ -11,6 +11,7 @@ from greenfloor.config.io import (
     load_markets_config_with_optional_overlay,
     load_program_config,
     load_yaml,
+    resolve_state_db_path,
     write_yaml,
 )
 from greenfloor.keys.router import resolve_market_key
@@ -18,7 +19,7 @@ from greenfloor.logging_setup import (
     ALLOWED_LOG_LEVELS,
     normalize_log_level_name,
 )
-from greenfloor.runtime.cloud_wallet.adapter import _format_json_output as format_json_output
+from greenfloor.runtime.cloud_wallet.adapter import format_json_output
 from greenfloor.storage.sqlite import SqliteStore
 
 
@@ -68,13 +69,6 @@ def set_log_level(*, program_path: Path, log_level: str) -> int:
         )
     )
     return 0
-
-
-def resolve_db_path(program_config_path: Path, explicit_db_path: str | None) -> Path:
-    if explicit_db_path:
-        return Path(explicit_db_path).expanduser()
-    program = load_program_config(program_config_path)
-    return (Path(program.home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
 
 
 def bootstrap_home(
@@ -216,7 +210,10 @@ def doctor(
         except Exception as exc:
             problems.append(f"market_key_error:{market.market_id}:{exc}")
 
-    db_path = resolve_db_path(program_path, state_db)
+    db_path = resolve_state_db_path(
+        program_config_path=program_path,
+        explicit_db_path=state_db,
+    )
     try:
         store = SqliteStore(db_path)
         store.add_audit_event("doctor_ping", {"ok": True})

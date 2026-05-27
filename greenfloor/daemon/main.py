@@ -36,6 +36,7 @@ from greenfloor.config.io import (
     load_markets_config_with_optional_overlay,
     load_program_config,
     resolve_quote_asset_for_offer,
+    resolve_state_db_path,
     resolve_trade_asset_for_dexie,
 )
 from greenfloor.config.models import (
@@ -46,8 +47,9 @@ from greenfloor.config.models import (
 )
 from greenfloor.core.coin_ops import BucketSpec, CoinOpPlan, plan_coin_ops
 from greenfloor.core.coin_ops_policy import (
-    coin_meets_coin_op_min_amount as _coin_meets_coin_op_min_amount,
     coin_op_min_amount_mojos as _coin_op_min_amount_mojos,
+)
+from greenfloor.core.coin_ops_policy import (
     coin_op_target_amount_allowed as _coin_op_target_amount_allowed,
 )
 from greenfloor.core.fee_budget import partition_plans_by_budget, projected_coin_ops_fee_mojos
@@ -67,6 +69,15 @@ from greenfloor.logging_setup import (
 from greenfloor.notify.pushover import send_pushover_alert
 from greenfloor.runtime.cloud_wallet.assets import (
     resolve_cloud_wallet_offer_asset_ids,
+    wallet_asset_amounts_for_asset_id,
+)
+from greenfloor.runtime.cloud_wallet.coin_ops_execution import combine_coins_with_retry
+from greenfloor.runtime.cloud_wallet.coins import (
+    cloud_wallet_coin_matches_asset_scope,
+    coin_matches_scoped_spendable_filters,
+    filter_spendable_scoped_coins,
+    is_spendable_coin,
+    refresh_scoped_spendable_coin_rows,
 )
 from greenfloor.runtime.offer_build_context import (
     default_program_config_path,
@@ -92,142 +103,8 @@ _DISABLED_MARKET_NEXT_LOG_AT: dict[str, float] = {}
 _DISABLED_MARKET_STARTUP_LOGGED = False
 _WATCHED_COIN_IDS_BY_MARKET: dict[str, set[str]] = {}
 _WATCHED_COIN_IDS_LOCK = threading.Lock()
-_CLOUD_WALLET_SPENDABLE_STATES = {
-    "CONFIRMED",
-    "UNSPENT",
-    "SPENDABLE",
-    "AVAILABLE",
-    "SETTLED",
-}
 _GLOBAL_STALE_OPEN_SWEEP_MAX_OFFERS_PER_MARKET = 3
 _GLOBAL_STALE_OPEN_SWEEP_MAX_OFFER_CHECKS = 60
-
-
-def _cloud_wallet_coin_matches_asset_scope(*, coin: dict[str, Any], scoped_asset_id: str) -> bool:
-    target_asset = str(scoped_asset_id).strip().lower()
-    if not target_asset:
-        return False
-    asset_payload = coin.get("asset")
-    if isinstance(asset_payload, dict):
-        coin_asset_id = str(asset_payload.get("id", "")).strip().lower()
-        if coin_asset_id:
-            return coin_asset_id == target_asset
-    # Asset-scoped Cloud Wallet coin queries can omit per-row asset metadata.
-    # When that happens, trust the requested scope rather than discarding rows.
-    return True
-
-
-def _coin_row_is_unlocked_and_unlinked(*, coin: dict[str, Any]) -> bool:
-    return not bool(coin.get("isLocked")) and not bool(coin.get("isLinkedToOpenOffer"))
-
-
-def _coin_row_matches_scoped_spendable_filters(
-    *,
-    coin: dict[str, Any],
-    scoped_asset_id: str,
-    canonical_asset_id: str,
-) -> bool:
-    state = str(coin.get("state", "")).strip().upper()
-    if state not in _CLOUD_WALLET_SPENDABLE_STATES:
-        return False
-    if not _cloud_wallet_coin_matches_asset_scope(coin=coin, scoped_asset_id=scoped_asset_id):
-        return False
-    if not _coin_meets_coin_op_min_amount(coin, canonical_asset_id=canonical_asset_id):
-        return False
-    if not _coin_row_is_unlocked_and_unlinked(coin=coin):
-        return False
-    return True
-
-
-def _refresh_scoped_spendable_coin_rows(
-    *,
-    wallet: Any,
-    resolved_asset_id: str,
-    canonical_asset_id: str,
-) -> dict[str, dict[str, Any]] | None:
-    scoped_asset_id = str(resolved_asset_id).strip().lower()
-    if not scoped_asset_id:
-        return None
-    try:
-        refreshed = wallet.list_coins(asset_id=resolved_asset_id)
-    except Exception:
-        # Fail-open on scoped refresh errors so transient Cloud Wallet read
-        # timeouts do not collapse scoped inventories to zero.
-        return None
-    spendable_by_id: dict[str, dict[str, Any]] = {}
-    for coin in refreshed:
-        if not isinstance(coin, dict):
-            continue
-        coin_id = str(coin.get("id", "")).strip()
-        if not coin_id:
-            continue
-        if not _coin_row_matches_scoped_spendable_filters(
-            coin=coin,
-            scoped_asset_id=scoped_asset_id,
-            canonical_asset_id=canonical_asset_id,
-        ):
-            continue
-        spendable_by_id[coin_id] = coin
-    return spendable_by_id
-
-
-def _coin_matches_direct_spendable_lookup(
-    *,
-    wallet: Any,
-    coin: dict[str, Any],
-    scoped_asset_id: str,
-    cache: dict[str, bool] | None = None,
-) -> bool:
-    get_coin_record = getattr(wallet, "get_coin_record", None)
-    if not callable(get_coin_record):
-        return True
-    coin_id = str(coin.get("id", "")).strip()
-    if not coin_id:
-        return False
-    if cache is not None and coin_id in cache:
-        return bool(cache[coin_id])
-    # Temporary upstream defense: asset-scoped Cloud Wallet coin queries can
-    # leak cross-asset rows into CAT inventories. Re-check the exact coin
-    # record before coin-op selection until upstream fixes the scoped query.
-    fallback_result = bool(
-        str(coin.get("state", "")).strip().upper() in _CLOUD_WALLET_SPENDABLE_STATES
-        and _coin_row_is_unlocked_and_unlinked(coin=coin)
-    )
-    if not fallback_result:
-        if cache is not None:
-            cache[coin_id] = False
-        return False
-    try:
-        coin_record = get_coin_record(coin_id=coin_id)
-    except Exception:
-        # Fail-open on lookup errors so transient Cloud Wallet read timeouts do
-        # not collapse scoped inventories to zero.
-        result = fallback_result
-    else:
-        if not isinstance(coin_record, dict):
-            result = fallback_result
-        else:
-            state = str(coin_record.get("state", coin.get("state", ""))).strip().upper()
-            asset_payload = coin_record.get("asset")
-            asset_id = (
-                str(asset_payload.get("id", "")).strip().lower()
-                if isinstance(asset_payload, dict)
-                else ""
-            )
-            base_match = bool(
-                state in _CLOUD_WALLET_SPENDABLE_STATES
-                and not bool(coin_record.get("isLocked"))
-                and not bool(coin_record.get("isLinkedToOpenOffer"))
-            )
-            # Some coin-record lookups omit asset metadata despite scoped query
-            # context. When asset id is missing, trust the scoped list row.
-            result = base_match and (
-                asset_id == str(scoped_asset_id).strip().lower() if asset_id else True
-            )
-    if cache is not None:
-        cache[coin_id] = result
-    return result
-
 
 _DAEMON_INSTANCE_LOCK_FILENAME = "daemon.lock"
 
@@ -372,12 +249,6 @@ def _acquire_daemon_instance_lock(*, state_dir: Path, mode: str):
         lock_file.close()
 
 
-def _resolve_db_path(program_home_dir: str, explicit_db_path: str | None) -> Path:
-    if explicit_db_path:
-        return Path(explicit_db_path).expanduser()
-    return (Path(program_home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
-
-
 def _cancel_move_threshold_bps(*, market: Any | None = None) -> int:
     pricing = dict(getattr(market, "pricing", {}) or {}) if market is not None else {}
     threshold_raw = pricing.get("cancel_move_threshold_bps")
@@ -431,20 +302,9 @@ def _cancel_retry_config() -> tuple[int, int, int]:
     return attempts, backoff_ms, cooldown_seconds
 
 
-def _combine_retry_config() -> tuple[int, int]:
-    attempts = _env_int("GREENFLOOR_COIN_OPS_COMBINE_MAX_ATTEMPTS", 3, minimum=1)
-    backoff_ms = _env_int("GREENFLOOR_COIN_OPS_COMBINE_BACKOFF_MS", 1000, minimum=0)
-    return attempts, backoff_ms
-
-
 def _combine_input_coin_cap() -> int:
     # Keep CAT parent lookup fan-out bounded when Cloud Wallet resolves many input coins.
     return _env_int("GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP", 5, minimum=2)
-
-
-def _is_cloud_wallet_rate_limited_error(exc: Exception) -> bool:
-    text = str(exc).strip().lower()
-    return "status not ok: 429" in text or " 429" in text or text.endswith(":429")
 
 
 def _is_transient_cloud_wallet_upstream_error_text(error_text: str) -> bool:
@@ -534,27 +394,6 @@ def _cloud_wallet_market_health_payload(
         "last_cloud_wallet_success_at": last_success_at,
         "last_cloud_wallet_success_age_seconds": last_success_age_seconds,
     }
-
-
-def _combine_coins_with_retry(
-    *,
-    cloud_wallet: CloudWalletAdapter,
-    combine_kwargs: dict[str, Any],
-) -> dict[str, Any]:
-    attempts_max, backoff_ms = _combine_retry_config()
-    last_exc: Exception | None = None
-    for attempt in range(1, attempts_max + 1):
-        try:
-            return cloud_wallet.combine_coins(**combine_kwargs)
-        except Exception as exc:
-            last_exc = exc
-            if attempt >= attempts_max or not _is_cloud_wallet_rate_limited_error(exc):
-                raise
-            if backoff_ms > 0:
-                time.sleep((backoff_ms * (2 ** (attempt - 1))) / 1000.0)
-    if last_exc is not None:
-        raise last_exc
-    raise RuntimeError("combine_coins_failed_without_exception")
 
 
 def _cooldown_remaining_ms(cooldowns: dict[str, float], key: str) -> int:
@@ -1584,43 +1423,6 @@ def _cloud_wallet_spendable_profiles_by_asset(
     if not requested_asset_ids:
         return profiles
 
-    def _wallet_asset_amounts_for_scope(
-        *, scoped_asset_id: str
-    ) -> tuple[int | None, int | None, int | None]:
-        if not hasattr(wallet, "_graphql"):
-            return None, None, None
-        query = """
-query walletAssetAmounts($walletId: ID!, $assetId: ID!) {
-  wallet(id: $walletId) {
-    asset(assetId: $assetId) {
-      totalAmount
-      spendableAmount
-      lockedAmount
-    }
-  }
-}
-"""
-        try:
-            payload = wallet._graphql(  # noqa: SLF001
-                query=query,
-                variables={"walletId": wallet.vault_id, "assetId": scoped_asset_id},
-            )
-        except Exception:
-            return None, None, None
-        wallet_payload = payload.get("wallet") if isinstance(payload, dict) else None
-        if not isinstance(wallet_payload, dict):
-            return None, None, None
-        asset_payload = wallet_payload.get("asset")
-        if not isinstance(asset_payload, dict):
-            return None, None, None
-        try:
-            total_amount = int(asset_payload.get("totalAmount", 0))
-            spendable_amount = int(asset_payload.get("spendableAmount", 0))
-            locked_amount = int(asset_payload.get("lockedAmount", 0))
-        except (TypeError, ValueError):
-            return None, None, None
-        return total_amount, spendable_amount, locked_amount
-
     # Query each requested asset directly. Some wallet backends can return
     # incomplete/unhelpful results for broad unfiltered inventory reads, while
     # asset-scoped reads remain accurate.
@@ -1642,8 +1444,9 @@ query walletAssetAmounts($walletId: ID!, $assetId: ID!) {
                 requested_asset_id,
                 exc,
             )
-            _total_amount, spendable_amount, _locked_amount = _wallet_asset_amounts_for_scope(
-                scoped_asset_id=requested_asset_id
+            _total_amount, spendable_amount, _locked_amount = wallet_asset_amounts_for_asset_id(
+                wallet=wallet,
+                asset_id=requested_asset_id,
             )
             if spendable_amount is not None and spendable_amount > 0:
                 profile["total"] = max(int(profile.get("total", 0)), int(spendable_amount))
@@ -1658,10 +1461,9 @@ query walletAssetAmounts($walletId: ID!, $assetId: ID!) {
         for coin in coins:
             if not isinstance(coin, dict):
                 continue
-            state = str(coin.get("state", "")).strip().upper()
-            if state not in _CLOUD_WALLET_SPENDABLE_STATES:
+            if not is_spendable_coin(coin):
                 continue
-            if not _cloud_wallet_coin_matches_asset_scope(
+            if not cloud_wallet_coin_matches_asset_scope(
                 coin=coin,
                 scoped_asset_id=requested_asset_id_lower,
             ):
@@ -1677,8 +1479,9 @@ query walletAssetAmounts($walletId: ID!, $assetId: ID!) {
             if amount > int(profile.get("max_single", 0)):
                 profile["max_single"] = amount
         if int(profile.get("total", 0)) <= 0:
-            _total_amount, spendable_amount, _locked_amount = _wallet_asset_amounts_for_scope(
-                scoped_asset_id=requested_asset_id
+            _total_amount, spendable_amount, _locked_amount = wallet_asset_amounts_for_asset_id(
+                wallet=wallet,
+                asset_id=requested_asset_id,
             )
             if spendable_amount is not None and spendable_amount > 0:
                 profile["total"] = int(spendable_amount)
@@ -1723,7 +1526,7 @@ def _cloud_wallet_spendable_base_unit_coin_amounts(
     amounts_base_units: list[int] = []
     refreshed_spendable_rows: dict[str, dict[str, Any]] | None = None
     if revalidate_coin_records:
-        refreshed_spendable_rows = _refresh_scoped_spendable_coin_rows(
+        refreshed_spendable_rows = refresh_scoped_spendable_coin_rows(
             wallet=wallet,
             resolved_asset_id=resolved_asset_id,
             canonical_asset_id=canonical_asset_id,
@@ -1731,7 +1534,7 @@ def _cloud_wallet_spendable_base_unit_coin_amounts(
     for coin in coins:
         if not isinstance(coin, dict):
             continue
-        if not _coin_row_matches_scoped_spendable_filters(
+        if not coin_matches_scoped_spendable_filters(
             coin=coin,
             scoped_asset_id=target_asset,
             canonical_asset_id=canonical_asset_id,
@@ -3735,34 +3538,13 @@ def _execute_coin_ops_cloud_wallet_kms_only(
     combine_input_cap = _combine_input_coin_cap()
 
     def _spendable_asset_scoped_coins(coins: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        scoped: list[dict[str, Any]] = []
-        target_asset = str(resolved_base_asset_id).strip().lower()
-        canonical_asset_id = str(getattr(market, "base_asset", "")).strip()
-        refreshed_spendable_rows = _refresh_scoped_spendable_coin_rows(
+        return filter_spendable_scoped_coins(
+            coins=coins,
             wallet=cloud_wallet,
             resolved_asset_id=resolved_base_asset_id,
-            canonical_asset_id=canonical_asset_id,
+            canonical_asset_id=str(getattr(market, "base_asset", "")).strip(),
+            refresh_rows=True,
         )
-        for coin in coins:
-            if not isinstance(coin, dict):
-                continue
-            coin_id = str(coin.get("id", "")).strip()
-            if not coin_id:
-                continue
-            candidate_coin = coin
-            if refreshed_spendable_rows is not None:
-                refreshed_coin = refreshed_spendable_rows.get(coin_id)
-                if refreshed_coin is None:
-                    continue
-                candidate_coin = refreshed_coin
-            if not _coin_row_matches_scoped_spendable_filters(
-                coin=candidate_coin,
-                scoped_asset_id=target_asset,
-                canonical_asset_id=canonical_asset_id,
-            ):
-                continue
-            scoped.append(candidate_coin)
-        return scoped
 
     for plan in plans:
         op_type = str(plan.op_type)
@@ -3916,7 +3698,7 @@ def _execute_coin_ops_cloud_wallet_kms_only(
                                         "submitted capped progress combine; next cycle likely needs only 2-coin combine",
                                     )
                                 try:
-                                    combine_result = _combine_coins_with_retry(
+                                    combine_result = combine_coins_with_retry(
                                         cloud_wallet=cloud_wallet,
                                         combine_kwargs={
                                             "number_of_coins": len(combine_input_coin_ids),
@@ -4158,7 +3940,7 @@ def _execute_coin_ops_cloud_wallet_kms_only(
                         }
                     )
                     continue
-                result = _combine_coins_with_retry(
+                result = combine_coins_with_retry(
                     cloud_wallet=cloud_wallet,
                     combine_kwargs={
                         "number_of_coins": len(combine_input_coin_ids),
@@ -4606,7 +4388,10 @@ def run_once(
         overlay_path=testnet_markets_path,
     )
     _log_disabled_markets_startup_once(markets=list(markets.markets))
-    db_path = _resolve_db_path(program.home_dir, db_path_override)
+    db_path = resolve_state_db_path(
+        program_home_dir=program.home_dir,
+        explicit_db_path=db_path_override,
+    )
     store = SqliteStore(db_path)
     started_at = time.monotonic()
 
@@ -4931,7 +4716,10 @@ def _run_loop(
         os.fspath(program_path),
         os.fspath(markets_path),
     )
-    db_path = _resolve_db_path(current_program.home_dir, db_path_override)
+    db_path = resolve_state_db_path(
+        program_home_dir=current_program.home_dir,
+        explicit_db_path=db_path_override,
+    )
     coinset = _build_coinset_adapter(program=current_program, coinset_base_url=coinset_base_url)
     ws_url = _resolve_coinset_ws_url(program=current_program, coinset_base_url=coinset_base_url)
 

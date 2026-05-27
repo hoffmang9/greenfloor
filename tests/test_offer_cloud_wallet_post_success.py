@@ -4,7 +4,7 @@ import datetime as dt
 import json
 from pathlib import Path
 
-import greenfloor.cli.manager as manager_mod
+import greenfloor.cli.offer_build_post as offer_build_post_mod
 from greenfloor.runtime.cloud_wallet.phases import (
     cloud_wallet_create_offer_phase,
 )
@@ -32,7 +32,7 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     prog, mkt = load_program_and_market(program_path, markets_path)
     prog.home_dir = str(tmp_path)
     prog.app_log_level = "DEBUG"
-    reset_concurrent_log_handlers(module=manager_mod)
+    reset_concurrent_log_handlers(module=offer_build_post_mod)
     initialize_manager_file_logging(str(tmp_path), log_level="DEBUG")
 
     class _FakeWallet:

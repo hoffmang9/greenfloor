@@ -2,90 +2,24 @@
 
 from __future__ import annotations
 
-import urllib.error
-import urllib.parse
 from pathlib import Path
 from typing import Any
 
-from greenfloor.adapters.coinset import extract_coinset_tx_ids_from_offer_payload
-from greenfloor.adapters.dexie import DexieAdapter
-from greenfloor.cli.manager_setup import resolve_db_path
-from greenfloor.cli.offer_build_post import resolve_market_for_build
 from greenfloor.config.io import (
     load_markets_config_with_optional_overlay,
     load_program_config,
+    resolve_market_for_build,
+    resolve_state_db_path,
 )
-from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
-from greenfloor.offer_decode import extract_coin_id_hints_from_offer_text
-from greenfloor.runtime import coinset_runtime
 from greenfloor.runtime.cloud_wallet import adapter as cloud_wallet_adapter
-from greenfloor.runtime.cloud_wallet import assets as cloud_wallet_assets
-from greenfloor.runtime.cloud_wallet.adapter import (
-    _format_json_output as format_json_output,
+from greenfloor.runtime.cloud_wallet.adapter import format_json_output
+from greenfloor.runtime.cloud_wallet.coin_ops_refresh import execute_offer_onchain_refresh_split
+from greenfloor.runtime.cloud_wallet.offers import (
+    cloud_wallet_offer_ui_url,
+    select_offers_for_cancel,
 )
-from greenfloor.runtime.cloud_wallet.coins import (
-    is_spendable_coin,
-    resolve_coin_global_ids,
-    safe_int,
-)
+from greenfloor.runtime.offer_reconciliation import reconcile_offers
 from greenfloor.storage.sqlite import SqliteStore
-
-
-def resolve_cloud_wallet_asset_id_for_wallet(
-    *,
-    wallet,
-    canonical_asset_id: str,
-    symbol_hint: str | None = None,
-    program_home_dir: str | None = None,
-) -> str:
-    return cloud_wallet_assets.resolve_cloud_wallet_asset_id(
-        wallet=wallet,
-        canonical_asset_id=canonical_asset_id,
-        symbol_hint=symbol_hint,
-        program_home_dir=program_home_dir,
-    )
-
-
-def dexie_offer_status(payload: dict[str, Any]) -> int | None:
-    raw_status = payload.get("status")
-    if raw_status is None and isinstance(payload.get("offer"), dict):
-        raw_status = payload["offer"].get("status")
-    return safe_int(raw_status)
-
-
-def reconciled_state_from_dexie_status(
-    *,
-    status: int,
-    current_state: str,
-) -> str:
-    if status == 4:
-        transition = apply_offer_signal(
-            OfferLifecycleState.OPEN,
-            OfferSignal.TX_CONFIRMED,
-        )
-        return transition.new_state.value
-    if status == 6:
-        transition = apply_offer_signal(
-            OfferLifecycleState.OPEN,
-            OfferSignal.EXPIRED,
-        )
-        return transition.new_state.value
-    if status == 3:
-        return "cancelled"
-    if status in {0, 1, 2, 5}:
-        if current_state in {
-            OfferLifecycleState.TX_BLOCK_CONFIRMED.value,
-            OfferLifecycleState.EXPIRED.value,
-            "cancelled",
-        }:
-            return current_state
-        # Dexie status alone is not sufficient evidence of a mempool take.
-        # Only Coinset mempool tx signals should move an offer to
-        # `mempool_observed`; otherwise preserve the current state.
-        return current_state
-    # Preserve state for unrecognized Dexie statuses instead of creating an
-    # orphan classification.
-    return current_state
 
 
 def offers_reconcile(
@@ -96,191 +30,27 @@ def offers_reconcile(
     limit: int,
     venue: str | None,
 ) -> int:
-    db_path = resolve_db_path(program_path, state_db)
+    db_path = resolve_state_db_path(program_config_path=program_path, explicit_db_path=state_db)
     store = SqliteStore(db_path)
     try:
         program = load_program_config(program_path)
         target_venue = str(venue or program.offer_publish_venue).strip().lower()
-        rows = store.list_offer_states(market_id=market_id, limit=limit)
-        items: list[dict] = []
-        reconciled = 0
-        changed = 0
-        for row in rows:
-            offer_id = str(row["offer_id"])
-            market_value = str(row["market_id"])
-            current_state = str(row["state"])
-            taker_signal = "none"
-            taker_diagnostic = "none"
-            signal_source = "none"
-            coinset_tx_ids: list[str] = []
-            coinset_confirmed_tx_ids: list[str] = []
-            coinset_mempool_tx_ids: list[str] = []
-            if target_venue != "dexie":
-                next_state = "reconcile_unsupported_venue"
-                reason = f"unsupported_venue:{target_venue}"
-                status = None
-                changed_flag = next_state != current_state
-            else:
-                adapter = DexieAdapter(program.dexie_api_base)
-                status: int | None
-                reason = "ok"
-                try:
-                    payload = adapter.get_offer(offer_id)
-                    status = dexie_offer_status(payload)
-                    coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(payload)
-                    if coinset_tx_ids:
-                        signal_by_tx_id = store.get_tx_signal_state(coinset_tx_ids)
-                        for tx_id in coinset_tx_ids:
-                            signal = signal_by_tx_id.get(tx_id, {})
-                            if signal.get("tx_block_confirmed_at"):
-                                coinset_confirmed_tx_ids.append(tx_id)
-                                continue
-                            if signal.get("mempool_observed_at"):
-                                coinset_mempool_tx_ids.append(tx_id)
-                    if coinset_confirmed_tx_ids and status != 3 and current_state != "cancelled":
-                        transition = apply_offer_signal(
-                            OfferLifecycleState.OPEN,
-                            OfferSignal.TX_CONFIRMED,
-                        )
-                        next_state = transition.new_state.value
-                        reason = "coinset_tx_block_webhook_confirmed"
-                        signal_source = "coinset_webhook"
-                    elif coinset_mempool_tx_ids:
-                        if current_state in {
-                            OfferLifecycleState.TX_BLOCK_CONFIRMED.value,
-                            OfferLifecycleState.EXPIRED.value,
-                            "cancelled",
-                        }:
-                            next_state = current_state
-                        else:
-                            transition = apply_offer_signal(
-                                OfferLifecycleState.OPEN,
-                                OfferSignal.MEMPOOL_SEEN,
-                            )
-                            next_state = transition.new_state.value
-                        reason = "coinset_mempool_observed"
-                        signal_source = "coinset_mempool"
-                    if status is None:
-                        if not coinset_tx_ids:
-                            next_state = current_state
-                            reason = "missing_status"
-                        elif signal_source == "none":
-                            next_state = current_state
-                            reason = "coinset_signal_unavailable_for_offer"
-                    else:
-                        if signal_source == "none":
-                            next_state = reconciled_state_from_dexie_status(
-                                status=status,
-                                current_state=current_state,
-                            )
-                            signal_source = "dexie_status_fallback"
-                except urllib.error.HTTPError as exc:
-                    status = None
-                    if int(getattr(exc, "code", 0)) == 404:
-                        transition = apply_offer_signal(
-                            OfferLifecycleState.OPEN,
-                            OfferSignal.EXPIRED,
-                        )
-                        if current_state in {
-                            OfferLifecycleState.TX_BLOCK_CONFIRMED.value,
-                            OfferLifecycleState.EXPIRED.value,
-                            "cancelled",
-                        }:
-                            next_state = current_state
-                        else:
-                            next_state = transition.new_state.value
-                        reason = "dexie_offer_not_found"
-                    else:
-                        next_state = current_state
-                        reason = f"dexie_http_error:{exc.code}"
-                except Exception as exc:
-                    status = None
-                    next_state = current_state
-                    reason = f"dexie_lookup_error:{exc}"
-                changed_flag = next_state != current_state
-            if (
-                coinset_confirmed_tx_ids
-                and status != 3
-                and current_state != "cancelled"
-                and next_state == OfferLifecycleState.TX_BLOCK_CONFIRMED.value
-            ):
-                taker_signal = "coinset_tx_block_webhook"
-                taker_diagnostic = "coinset_tx_block_confirmed"
-            elif coinset_mempool_tx_ids:
-                taker_diagnostic = "coinset_mempool_observed"
-            elif status in {4, 5}:
-                taker_diagnostic = "dexie_status_pattern_fallback"
-            store.upsert_offer_state(
-                offer_id=offer_id,
-                market_id=market_value,
-                state=next_state,
-                last_seen_status=status,
-            )
-            store.add_audit_event(
-                "offer_reconciliation",
-                {
-                    "offer_id": offer_id,
-                    "market_id": market_value,
-                    "venue": target_venue,
-                    "old_state": current_state,
-                    "new_state": next_state,
-                    "changed": changed_flag,
-                    "last_seen_status": status,
-                    "reason": reason,
-                    "taker_signal": taker_signal,
-                    "taker_diagnostic": taker_diagnostic,
-                    "signal_source": signal_source,
-                    "coinset_tx_ids": coinset_tx_ids,
-                    "coinset_confirmed_tx_ids": coinset_confirmed_tx_ids,
-                    "coinset_mempool_tx_ids": coinset_mempool_tx_ids,
-                },
-                market_id=market_value,
-            )
-            if taker_signal != "none":
-                store.add_audit_event(
-                    "taker_detection",
-                    {
-                        "offer_id": offer_id,
-                        "market_id": market_value,
-                        "venue": target_venue,
-                        "signal": taker_signal,
-                        "advisory_diagnostic": taker_diagnostic,
-                        "old_state": current_state,
-                        "new_state": next_state,
-                        "last_seen_status": status,
-                        "signal_source": signal_source,
-                        "coinset_confirmed_tx_ids": coinset_confirmed_tx_ids,
-                    },
-                    market_id=market_value,
-                )
-            reconciled += 1
-            changed += int(changed_flag)
-            items.append(
-                {
-                    "offer_id": offer_id,
-                    "market_id": market_value,
-                    "old_state": current_state,
-                    "new_state": next_state,
-                    "changed": changed_flag,
-                    "last_seen_status": status,
-                    "reason": reason,
-                    "taker_signal": taker_signal,
-                    "taker_diagnostic": taker_diagnostic,
-                    "signal_source": signal_source,
-                    "coinset_tx_ids": coinset_tx_ids,
-                    "coinset_confirmed_tx_ids": coinset_confirmed_tx_ids,
-                    "coinset_mempool_tx_ids": coinset_mempool_tx_ids,
-                }
-            )
+        batch = reconcile_offers(
+            store=store,
+            dexie_api_base=program.dexie_api_base,
+            target_venue=target_venue,
+            market_id=market_id,
+            limit=limit,
+        )
         print(
             format_json_output(
                 {
                     "state_db": str(db_path),
                     "venue": target_venue,
                     "market_id": market_id,
-                    "reconciled_count": reconciled,
-                    "changed_count": changed,
-                    "items": items,
+                    "reconciled_count": batch.reconciled_count,
+                    "changed_count": batch.changed_count,
+                    "items": batch.items,
                 }
             )
         )
@@ -297,7 +67,7 @@ def offers_status(
     limit: int,
     events_limit: int,
 ) -> int:
-    db_path = resolve_db_path(program_path, state_db)
+    db_path = resolve_state_db_path(program_config_path=program_path, explicit_db_path=state_db)
     store = SqliteStore(db_path)
     try:
         offers = store.list_offer_states(market_id=market_id, limit=limit)
@@ -333,26 +103,6 @@ def offers_status(
     return 0
 
 
-def cloud_wallet_offer_ui_url(
-    *, cloud_wallet_base_url: str, vault_id: str, wallet_offer_id: str
-) -> str:
-    raw = str(cloud_wallet_base_url).strip()
-    if not raw:
-        return ""
-    parsed = urllib.parse.urlparse(raw)
-    if not parsed.scheme or not parsed.netloc:
-        return ""
-    host = parsed.netloc
-    if host.startswith("api."):
-        host = host[4:]
-    base = f"{parsed.scheme}://{host}"
-    clean_vault = str(vault_id).strip()
-    clean_offer = str(wallet_offer_id).strip()
-    if not clean_vault or not clean_offer:
-        return ""
-    return f"{base}/wallet/{clean_vault}/offers/{clean_offer}"
-
-
 def offers_cancel(
     *,
     program_path: Path,
@@ -381,31 +131,11 @@ def offers_cancel(
             network=program.app_network,
         )
     requested_ids = [str(value).strip() for value in offer_ids if str(value).strip()]
-    selected_offers: list[dict[str, str]] = []
-    wallet_payload = wallet.get_wallet()
-    offers = wallet_payload.get("offers", [])
-    for row in offers if isinstance(offers, list) else []:
-        if not isinstance(row, dict):
-            continue
-        selected_offers.append(
-            {
-                "wallet_offer_id": str(row.get("id", "")).strip(),
-                "offer_id": str(row.get("offerId", "")).strip(),
-                "state": str(row.get("state", "")).strip(),
-                "expires_at": str(row.get("expiresAt", "")).strip(),
-                "bech32": str(row.get("bech32", "")).strip(),
-            }
-        )
-    selected_offers = [row for row in selected_offers if row["offer_id"]]
-    if cancel_open:
-        selected_offers = [
-            row for row in selected_offers if str(row.get("state", "")).upper() == "OPEN"
-        ]
-    elif requested_ids:
-        requested_set = set(requested_ids)
-        selected_offers = [row for row in selected_offers if row["offer_id"] in requested_set]
-    else:
-        raise ValueError("provide at least one --offer-id or pass --cancel-open")
+    selected_offers = select_offers_for_cancel(
+        wallet=wallet,
+        offer_ids=requested_ids,
+        cancel_open=cancel_open,
+    )
 
     items: list[dict[str, Any]] = []
     failures = 0
@@ -456,70 +186,15 @@ def offers_cancel(
                         "signature_state": "",
                     }
                 else:
-                    resolved_asset_id = resolve_cloud_wallet_asset_id_for_wallet(
+                    assert onchain_market is not None
+                    refresh = execute_offer_onchain_refresh_split(
                         wallet=wallet,
-                        canonical_asset_id=onchain_market.base_asset,  # type: ignore[union-attr]
-                        symbol_hint=onchain_market.base_symbol,  # type: ignore[union-attr]
-                        program_home_dir=str(program.home_dir),
+                        market=onchain_market,
+                        program=program,
+                        offer_bech32=str(row.get("bech32", "")).strip(),
                     )
-                    market_coins = wallet.list_coins(
-                        asset_id=resolved_asset_id,
-                        include_pending=True,
-                    )
-                    spendable_market_coins = [
-                        coin for coin in market_coins if is_spendable_coin(coin)
-                    ]
-                    if not spendable_market_coins:
-                        raise RuntimeError("no_spendable_market_coins_for_onchain_refresh")
-                    coin_id_hints = extract_coin_id_hints_from_offer_text(
-                        str(row.get("bech32", "")).strip()
-                    )
-                    resolved_coin_ids, _ = resolve_coin_global_ids(
-                        spendable_market_coins, coin_id_hints
-                    )
-                    target_coin: dict[str, Any] | None = None
-                    if resolved_coin_ids:
-                        for coin in spendable_market_coins:
-                            if str(coin.get("id", "")).strip() == resolved_coin_ids[0]:
-                                target_coin = coin
-                                break
-                    if target_coin is None:
-                        target_coin = sorted(
-                            spendable_market_coins,
-                            key=lambda c: int(c.get("amount", 0)),
-                        )[0]
-                    refresh_fee_mojos, refresh_fee_source = (
-                        coinset_runtime._resolve_taker_or_coin_operation_fee(
-                            network=program.app_network,
-                            minimum_fee_mojos=0,
-                        )
-                    )
-                    refresh_result = wallet.split_coins(
-                        coin_ids=[str(target_coin.get("id", "")).strip()],
-                        amount_per_coin=int(target_coin.get("amount", 0)),
-                        number_of_coins=1,
-                        fee=int(refresh_fee_mojos),
-                    )
-                    refresh_signature_request_id = str(
-                        refresh_result.get("signature_request_id", "")
-                    ).strip()
-                    item["result"]["onchain_refresh"] = {
-                        "status": ("executed" if refresh_signature_request_id else "skipped"),
-                        "reason": (
-                            "cloud_wallet_split_submitted"
-                            if refresh_signature_request_id
-                            else "missing_signature_request_id"
-                        ),
-                        "signature_request_id": refresh_signature_request_id or None,
-                        "signature_state": str(refresh_result.get("status", "")).strip(),
-                        "coin_id": str(target_coin.get("id", "")).strip(),
-                        "coin_name": str(target_coin.get("name", "")).strip(),
-                        "amount": int(target_coin.get("amount", 0)),
-                        "asset_id": resolved_asset_id,
-                        "fee_mojos": int(refresh_fee_mojos),
-                        "fee_source": refresh_fee_source,
-                    }
-                    if not refresh_signature_request_id:
+                    item["result"]["onchain_refresh"] = refresh
+                    if not refresh.get("signature_request_id"):
                         failures += 1
                         item["result"]["success"] = False
                         item["result"]["error"] = (

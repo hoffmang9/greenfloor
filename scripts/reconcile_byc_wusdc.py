@@ -26,14 +26,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from greenfloor.cli.coin_ops import (  # noqa: E402
-    resolve_cloud_wallet_asset_id_for_wallet,
-)
+from greenfloor.config.io import load_program_config  # noqa: E402
+from greenfloor.runtime.cloud_wallet import assets as cloud_wallet_assets  # noqa: E402
 from greenfloor.runtime.cloud_wallet.adapter import (  # noqa: E402
     _require_cloud_wallet_config,
     new_cloud_wallet_adapter,
 )
-from greenfloor.config.io import load_program_config  # noqa: E402
 
 
 def _graphql_with_retry(
@@ -54,42 +52,9 @@ def _graphql_with_retry(
 
 
 def _wallet_asset_rows(*, wallet: Any) -> list[dict[str, Any]]:
-    query = """
-query walletAssetAmounts($walletId: ID!, $first: Int) {
-  wallet(id: $walletId) {
-    assets(first: $first) {
-      edges {
-        node {
-          assetId
-          totalAmount
-          spendableAmount
-          lockedAmount
-        }
-      }
-    }
-  }
-}
-"""
-    payload = _graphql_with_retry(
-        wallet=wallet,
-        query=query,
-        variables={"walletId": wallet.vault_id, "first": 100},
-    )
-    edges = ((payload.get("wallet") or {}).get("assets") or {}).get("edges") or []
-    rows: list[dict[str, Any]] = []
-    for edge in edges:
-        node = edge.get("node") if isinstance(edge, dict) else None
-        if not isinstance(node, dict):
-            continue
-        rows.append(
-            {
-                "asset_id": str(node.get("assetId", "")).strip(),
-                "total": int(node.get("totalAmount", 0) or 0),
-                "spendable": int(node.get("spendableAmount", 0) or 0),
-                "locked": int(node.get("lockedAmount", 0) or 0),
-            }
-        )
-    return rows
+    from greenfloor.runtime.cloud_wallet.assets import wallet_asset_amount_rows
+
+    return wallet_asset_amount_rows(wallet=wallet)
 
 
 def _coins_summary(*, wallet: Any, asset_id: str) -> dict[str, int]:
@@ -242,13 +207,13 @@ def main() -> int:
 
         wallet = CloudWalletAdapter(cfg)
 
-    byc_asset_id = resolve_cloud_wallet_asset_id_for_wallet(
+    byc_asset_id = cloud_wallet_assets.resolve_cloud_wallet_asset_id(
         wallet=wallet,
         canonical_asset_id=args.byc,
         symbol_hint=args.byc,
         program_home_dir=str(program.home_dir),
     )
-    quote_asset_id = resolve_cloud_wallet_asset_id_for_wallet(
+    quote_asset_id = cloud_wallet_assets.resolve_cloud_wallet_asset_id(
         wallet=wallet,
         canonical_asset_id=args.quote,
         symbol_hint=args.quote,

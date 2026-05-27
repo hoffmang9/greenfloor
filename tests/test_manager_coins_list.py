@@ -117,7 +117,7 @@ def test_coins_list_keeps_asset_scoped_rows_when_wallet_reports_mixed_asset_meta
 
     monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.coin_ops.coin_ops_logger.warning",
+        "greenfloor.cli.coin_ops_list.coin_ops_logger.warning",
         lambda *args, **kwargs: warning_calls.append(args),
     )
     monkeypatch.setattr(
@@ -196,7 +196,7 @@ def test_coins_list_keeps_asset_totals_when_scoped_rows_omit_reported_asset(
 
     monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.coin_ops.coin_ops_logger.warning",
+        "greenfloor.cli.coin_ops_list.coin_ops_logger.warning",
         lambda *args, **kwargs: warning_calls.append(args),
     )
     monkeypatch.setattr(
@@ -346,7 +346,7 @@ def test_coins_list_warns_when_item_amount_sum_differs_from_wallet_asset_total(
 
     monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.coin_ops.coin_ops_logger.warning",
+        "greenfloor.cli.coin_ops_list.coin_ops_logger.warning",
         lambda *args, **kwargs: warning_calls.append(args),
     )
     monkeypatch.setattr(
@@ -472,7 +472,8 @@ def test_coins_list_cat_id_works_when_dexie_metadata_absent(
             return []
 
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter", lambda _program: _FakeWallet()
+        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
+        lambda _program: _FakeWallet(),
     )
     monkeypatch.setattr(
         "greenfloor.asset_label_catalog._local_catalog_label_hints_for_asset_id",
@@ -535,9 +536,12 @@ def test_coins_list_vault_id_override_uses_override_wallet_end_to_end(
             ]
 
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter", lambda _program: _BaseWallet()
+        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
+        lambda _program: _BaseWallet(),
     )
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _OverrideWallet)
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _OverrideWallet
+    )
     monkeypatch.setattr(
         "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
         lambda **kw: (resolver_wallet_ids.append(kw["wallet"].vault_id) or "Asset_resolved"),
