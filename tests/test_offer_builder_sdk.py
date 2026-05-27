@@ -82,6 +82,18 @@ def test_encode_offer_from_spend_bundle_hex_returns_none_without_encode(monkeypa
     assert native_offer.encode_offer_from_spend_bundle_hex("aa") is None
 
 
+def test_encode_offer_from_spend_bundle_hex_returns_none_on_encode_error(monkeypatch) -> None:
+    from greenfloor.adapters import native_offer
+
+    class _Native:
+        @staticmethod
+        def encode_offer(_raw: bytes) -> str:
+            raise ValueError("unexpected end of buffer")
+
+    monkeypatch.setattr(native_offer, "_import_greenfloor_native", lambda: _Native())
+    assert native_offer.encode_offer_from_spend_bundle_hex("aa") is None
+
+
 def test_build_offer_success_with_wallet_sdk_types() -> None:
     offer = offer_builder._build_offer({"spend_bundle_hex": "aa"}, _FakeSdk)
     assert offer == "offer1fake"
