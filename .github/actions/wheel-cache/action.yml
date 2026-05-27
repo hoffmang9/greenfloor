@@ -1,0 +1,116 @@
+name: Wheel cache
+description: Ensure a platform wheel is cached, or install it from the local wheelhouse.
+
+inputs:
+  operation:
+    description: ensure (restore, build on miss, save) or install
+    required: true
+  wheelhouse-subdir:
+    description: Directory under .cache/wheelhouse/
+    required: true
+  builder:
+    description: maturin or pip; required for ensure
+    required: false
+    default: ""
+  tree-path:
+    description: Git tree path for cache keys; required for ensure
+    required: false
+    default: ""
+  source-path:
+    description: Cargo manifest (maturin) or package path (pip); required for ensure
+    required: false
+    default: ""
+  cache-key-prefix:
+    description: Prefix for the GitHub Actions cache key; required for ensure
+    required: false
+    default: ""
+  setup-rust-on-miss:
+    description: When ensure misses the cache, install Rust and restore Cargo caches before building
+    required: false
+    default: "false"
+  build-on-cache-miss:
+    description: When false, ensure fails instead of building wheels locally on a cache miss
+    required: false
+    default: "true"
+
+outputs:
+  cache-hit:
+    description: Whether the wheel cache restore hit during ensure
+    value: ${{ steps.restore.outputs.cache-hit }}
+  tree-sha:
+    description: Git tree SHA used for the cache key during ensure
+    value: ${{ steps.tree.outputs.sha }}
+
+runs:
+  using: composite
+  steps:
+    - id: tree
+      if: inputs.operation == 'ensure'
+      shell: bash
+      run: |
+        echo "sha=$(git rev-parse HEAD:${{ inputs.tree-path }})" >> "$GITHUB_OUTPUT"
+
+    - id: restore
+      if: inputs.operation == 'ensure'
+      uses: actions/cache/restore@v4
+      with:
+        path: .cache/wheelhouse/${{ inputs.wheelhouse-subdir }}
+        key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.tree.outputs.sha }}
+
+    - uses: ./.github/actions/rust-cache-greenfloor
+      if: |
+        inputs.operation == 'ensure'
+        && steps.restore.outputs.cache-hit != 'true'
+        && inputs.build-on-cache-miss == 'true'
+        && inputs.setup-rust-on-miss == 'true'
+
+    - name: Fail on wheel cache miss
+      if: |
+        inputs.operation == 'ensure'
+        && steps.restore.outputs.cache-hit != 'true'
+        && inputs.build-on-cache-miss != 'true'
+      shell: bash
+      run: |
+        echo "Wheel cache miss for ${{ inputs.wheelhouse-subdir }} on ${{ runner.os }} ${{ runner.arch }}." >&2
+        echo "Expected an upstream job to populate this platform wheelhouse." >&2
+        exit 1
+
+    - name: Build wheel (cache miss)
+      if: |
+        inputs.operation == 'ensure'
+        && steps.restore.outputs.cache-hit != 'true'
+        && inputs.build-on-cache-miss == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        wheelhouse=".cache/wheelhouse/${{ inputs.wheelhouse-subdir }}"
+        mkdir -p "$wheelhouse"
+
+        if [ "${{ inputs.builder }}" = "maturin" ]; then
+          python -m pip install maturin
+          python -m maturin build \
+            --manifest-path "${{ inputs.source-path }}" \
+            --out "$wheelhouse"
+        elif [ "${{ inputs.builder }}" = "pip" ]; then
+          python -m pip wheel \
+            --wheel-dir "$wheelhouse" \
+            "${{ inputs.source-path }}"
+        else
+          echo "Unsupported builder: ${{ inputs.builder }}" >&2
+          exit 1
+        fi
+
+    - name: Save wheel cache
+      if: |
+        inputs.operation == 'ensure'
+        && steps.restore.outputs.cache-hit != 'true'
+        && inputs.build-on-cache-miss == 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: .cache/wheelhouse/${{ inputs.wheelhouse-subdir }}
+        key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.tree.outputs.sha }}
+
+    - name: Install wheel
+      if: inputs.operation == 'install'
+      shell: bash
+      run: python -m pip install ".cache/wheelhouse/${{ inputs.wheelhouse-subdir }}"/*.whl

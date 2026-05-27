@@ -1,0 +1,17 @@
+name: GreenFloor Rust cache
+description: Install the stable Rust toolchain and restore GreenFloor Cargo caches.
+
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: |
+          greenfloor-signer -> target
+          greenfloor-native -> target
+          greenfloor-signer-pyo3 -> target
+        cache-workspace-crates: true
