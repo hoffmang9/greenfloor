@@ -34,26 +34,14 @@ jobs:
           cargo build --manifest-path greenfloor-signer/Cargo.toml
           cargo test --manifest-path greenfloor-signer/Cargo.toml
 
-      - uses: ./.github/actions/wheel-cache
+      - uses: ./.github/actions/greenfloor-maturin-wheels
         with:
           operation: ensure
-          builder: maturin
-          tree-path: greenfloor-native
-          source-path: greenfloor-native/Cargo.toml
-          cache-key-prefix: native-wheelhouse
-          wheelhouse-subdir: greenfloor-native
-
-      - uses: ./.github/actions/wheel-cache
-        with:
-          operation: ensure
-          builder: maturin
-          tree-path: greenfloor-signer-pyo3
-          source-path: greenfloor-signer-pyo3/Cargo.toml
-          cache-key-prefix: signer-pyo3-wheelhouse
-          wheelhouse-subdir: greenfloor-signer-pyo3
+          rust-already-configured: "true"
 
   lint-type-test:
     name: Lint, Type, Test (${{ matrix.os }})
+    # Every matrix leg waits for rust-signer so a Rust test failure blocks all platforms.
     needs: rust-signer
     runs-on: ${{ matrix.os }}
     env:
@@ -109,37 +97,10 @@ jobs:
           path: .venv
           key: ${{ env.VENV_CACHE_KEY }}
 
-      - uses: ./.github/actions/wheel-cache
+      - uses: ./.github/actions/greenfloor-maturin-wheels
         with:
-          operation: ensure
-          builder: maturin
-          tree-path: greenfloor-native
-          source-path: greenfloor-native/Cargo.toml
-          cache-key-prefix: native-wheelhouse
-          wheelhouse-subdir: greenfloor-native
+          operation: ensure-and-install
           build-on-cache-miss: ${{ matrix.build_wheels_on_miss }}
-          setup-rust-on-miss: ${{ matrix.build_wheels_on_miss }}
-
-      - uses: ./.github/actions/wheel-cache
-        with:
-          operation: ensure
-          builder: maturin
-          tree-path: greenfloor-signer-pyo3
-          source-path: greenfloor-signer-pyo3/Cargo.toml
-          cache-key-prefix: signer-pyo3-wheelhouse
-          wheelhouse-subdir: greenfloor-signer-pyo3
-          build-on-cache-miss: ${{ matrix.build_wheels_on_miss }}
-          setup-rust-on-miss: ${{ matrix.build_wheels_on_miss }}
-
-      - uses: ./.github/actions/wheel-cache
-        with:
-          operation: install
-          wheelhouse-subdir: greenfloor-native
-
-      - uses: ./.github/actions/wheel-cache
-        with:
-          operation: install
-          wheelhouse-subdir: greenfloor-signer-pyo3
 
       - name: Cache pre-commit environment
         uses: actions/cache@v4
@@ -161,18 +122,11 @@ jobs:
       - uses: ./.github/actions/wheel-cache
         if: matrix.run_sdk_integration
         with:
-          operation: ensure
+          operation: ensure-and-install
           builder: pip
           tree-path: chia-wallet-sdk
           source-path: ./chia-wallet-sdk/pyo3
           cache-key-prefix: sdk-wheelhouse
-          wheelhouse-subdir: chia-wallet-sdk
-          setup-rust-on-miss: "true"
-
-      - uses: ./.github/actions/wheel-cache
-        if: matrix.run_sdk_integration
-        with:
-          operation: install
           wheelhouse-subdir: chia-wallet-sdk
 
       - name: Pytest (greenfloor-native + chia-wallet-sdk offer round-trip on Ubuntu)
