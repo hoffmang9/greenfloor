@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 
 @runtime_checkable
@@ -119,7 +119,7 @@ def _list_unspent_cat_coins(
         receive_address=receive_address,
         asset_id=asset_id,
     )
-    return [_summary_to_cat(summary) for summary in summaries]
+    return [cast(CatLike, _summary_to_cat(summary)) for summary in summaries]
 
 
 def _list_unspent_cat_coins_by_ids(
@@ -131,4 +131,4 @@ def _list_unspent_cat_coins_by_ids(
     """Resolve CAT coins by id as summary-derived stand-ins (``sdk`` is ignored)."""
     _ = sdk
     summaries = _fetch_cat_summaries_by_ids(network=network, coin_ids=coin_ids)
-    return [_summary_to_cat(summary) for summary in summaries]
+    return [cast(CatLike, _summary_to_cat(summary)) for summary in summaries]

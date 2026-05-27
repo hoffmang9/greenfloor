@@ -356,6 +356,7 @@ def execute_combine_cli(
     max_iterations: int,
 ) -> int:
     requested_asset_id = asset_id.strip() if asset_id else None
+
     def build_run(setup: CoinOpSetup) -> _CoinOpCliRun:
         resolved_count, denomination_target, combine_canonical_asset_id = _resolve_combine_targets(
             market=setup.market,

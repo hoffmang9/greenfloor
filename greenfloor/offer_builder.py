@@ -117,7 +117,9 @@ def _build_offer(payload: dict[str, Any], sdk: Any) -> str:
     spend_bundle_hex = str(payload.get("spend_bundle_hex", "")).strip()
     if not spend_bundle_hex:
         spend_bundle_hex = _build_coin_backed_spend_bundle_hex(payload)
-    raw_hex = spend_bundle_hex[2:] if spend_bundle_hex.lower().startswith("0x") else spend_bundle_hex
+    raw_hex = (
+        spend_bundle_hex[2:] if spend_bundle_hex.lower().startswith("0x") else spend_bundle_hex
+    )
     from greenfloor.adapters.native_offer import encode_offer_from_spend_bundle_hex
 
     offer_text = encode_offer_from_spend_bundle_hex(raw_hex)

@@ -46,7 +46,7 @@ from greenfloor.config.models import (
     managed_offer_execution_backend,
     signer_offer_path_configured,
 )
-from greenfloor.core.coin_ops import BucketSpec, CoinOpPlan, plan_coin_ops
+from greenfloor.core.coin_ops import BucketSpec, plan_coin_ops
 from greenfloor.core.coin_ops_policy import (
     coin_op_min_amount_mojos as _coin_op_min_amount_mojos,
 )

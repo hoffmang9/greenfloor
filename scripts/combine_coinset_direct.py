@@ -205,8 +205,7 @@ def _resolve_cat_asset_id_for_coin_ids(
     retry_sleep_seconds: float = 1.0,
     sleep_fn: Any = time.sleep,
 ) -> tuple[str | None, dict[str, Any]]:
-    from greenfloor.adapters import bls_cat_coins
-    from greenfloor.adapters import bls_signing
+    from greenfloor.adapters import bls_cat_coins, bls_signing
 
     sdk = bls_signing._import_sdk()  # noqa: SLF001
     requested_ids = [coin_id for coin_id in coin_ids if coin_id]

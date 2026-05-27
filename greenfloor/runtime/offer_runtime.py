@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from greenfloor.adapters import rust_signer
-from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.hex_utils import canonical_is_xch, default_mojo_multiplier_for_asset
 from greenfloor.offer_bootstrap import BootstrapLadderEntry, plan_bootstrap_mixed_outputs

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from greenfloor.adapters import bls_signing
-from greenfloor.adapters import rust_signer
+from greenfloor.adapters import bls_signing, rust_signer
 
 __all__ = [
     "build_signed_spend_bundle",

@@ -32,7 +32,6 @@ from greenfloor.runtime.cloud_wallet.coin_ops_planning import (
     plan_auto_combine_inputs,
     plan_auto_split_selection,
 )
-
 from greenfloor.runtime.coin_ops_backend import (
     build_coin_op_backend,
     resolve_coin_op_base_asset_id,
@@ -66,9 +65,7 @@ class DaemonCoinOpExecContext:
         spendable = self.backend.filter_spendable(
             coins,
             canonical_asset_id=canonical_asset_id,
-            min_coin_amount_mojos=coin_op_min_amount_mojos(
-                canonical_asset_id=canonical_asset_id
-            ),
+            min_coin_amount_mojos=coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id),
             mode=CoinOpSelectionMode.DAEMON,
         )
         return spendable
@@ -399,9 +396,7 @@ def execute_daemon_combine_plan(
         )
         return _ledger_rows(items), 0
 
-    operation_id = str(
-        result.get("signature_request_id") or result.get("operation_id", "")
-    ).strip()
+    operation_id = str(result.get("signature_request_id") or result.get("operation_id", "")).strip()
     if not operation_id:
         items.append(
             daemon_coin_op_skipped(

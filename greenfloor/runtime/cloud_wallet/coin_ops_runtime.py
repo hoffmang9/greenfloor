@@ -22,6 +22,11 @@ from greenfloor.runtime.cloud_wallet.adapter import (
     _require_cloud_wallet_config as require_cloud_wallet_config,
 )
 from greenfloor.runtime.cloud_wallet.coin_op_errors import coin_op_error_payload
+from greenfloor.runtime.cloud_wallet.coin_ops_models import (
+    DenominationTarget,
+    denomination_target_payload,
+)
+from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
 from greenfloor.runtime.coin_ops_backend import (
     CloudWalletCoinOpBackend,
     CoinOpBackend,
@@ -32,11 +37,6 @@ from greenfloor.runtime.coin_ops_backend import (
     resolve_signer_asset_id,
     scope_payload,
 )
-from greenfloor.runtime.cloud_wallet.coin_ops_models import (
-    DenominationTarget,
-    denomination_target_payload,
-)
-from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
 from greenfloor.runtime.coinset_runtime import CoinsetFeeLookupPreflightError
 
 
@@ -538,8 +538,6 @@ def run_coin_op_iteration_loop(
     readiness_asset_id: str,
     run_step: Callable[[int, list[dict[str, Any]], set[str]], CoinOpStepOutcome],
 ) -> CoinOpLoopResult:
-    from greenfloor.runtime.coin_ops_backend import SignerCoinOpBackend
-
     backend = setup.backend
     if isinstance(backend, SignerCoinOpBackend):
         backend.no_wait = no_wait

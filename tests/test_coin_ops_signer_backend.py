@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
-
 from types import SimpleNamespace
+from typing import Any
 
 from greenfloor.config.models import MarketConfig, MarketInventoryConfig
 from greenfloor.core.coin_ops import CoinOpPlan

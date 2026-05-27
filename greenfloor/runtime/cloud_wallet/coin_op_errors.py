@@ -29,13 +29,9 @@ def coin_op_unresolved_error_payload(
     scope: CoinOpScope,
     unresolved_coin_ids: list[str],
 ) -> dict[str, object]:
-    guidance = (
-        "run greenfloor-manager coins-list and pass coin_id values from output"
-    )
+    guidance = "run greenfloor-manager coins-list and pass coin_id values from output"
     if scope.execution_backend == "cloud_wallet":
-        guidance += (
-            "; manager accepts hex coin names and resolves them to Cloud Wallet Coin_* ids"
-        )
+        guidance += "; manager accepts hex coin names and resolves them to Cloud Wallet Coin_* ids"
     return coin_op_error_payload(
         scope=scope,
         error="coin_id_resolution_failed",

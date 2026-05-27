@@ -23,10 +23,10 @@ from greenfloor.daemon.main import (
     _strategy_config_from_market,
     _update_market_coin_watchlist_from_dexie,
 )
+from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.runtime.cloud_wallet.coin_ops_daemon_execution import (
     execute_managed_coin_op_plans,
 )
-from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.runtime.cloud_wallet.coin_ops_planning import (
     select_spendable_coins_for_target_amount,
 )
@@ -2795,6 +2795,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_submits(monkeypatch) -> No
 
     class _FakeCloudWallet:
         vault_id = "vault-1"
+
         def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
             _ = asset_id, include_pending
             return [
@@ -2851,6 +2852,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_retries_on_not_spendable(
 
     class _FakeCloudWallet:
         vault_id = "vault-1"
+
         def __init__(self) -> None:
             self.split_calls: list[list[str]] = []
 
@@ -2913,6 +2915,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_ignores_asset_mismatch(
 
     class _FakeCloudWallet:
         vault_id = "vault-1"
+
         def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
             _ = asset_id, include_pending
             return [
@@ -2954,6 +2957,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_revalidates_coin_identity(
 
     class _FakeCloudWallet:
         vault_id = "vault-1"
+
         def __init__(self) -> None:
             self.split_calls: list[list[str]] = []
             self.list_calls = 0
@@ -3035,6 +3039,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_requires_sufficient_amount
 
     class _FakeCloudWallet:
         vault_id = "vault-1"
+
         def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
             _ = asset_id, include_pending
             return [
@@ -3153,6 +3158,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_combine_cap_submits_progre
 
     class _FakeCloudWallet:
         vault_id = "vault-1"
+
         def __init__(self) -> None:
             self.combine_calls: list[dict[str, Any]] = []
 
@@ -3231,6 +3237,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_ignores_sub_cat_dust_on_sc
 
     class _FakeCloudWallet:
         vault_id = "vault-1"
+
         def __init__(self) -> None:
             self.combine_calls: list[dict[str, Any]] = []
 
@@ -3311,6 +3318,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_split_rejects_sub_minimum_cat_ou
 
     class _FakeCloudWallet:
         vault_id = "vault-1"
+
         def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
             _ = asset_id, include_pending
             return [
@@ -3361,6 +3369,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_skips_single_output_split(
 
     class _FakeCloudWallet:
         vault_id = "vault-1"
+
         def split_coins(self, *, coin_ids, amount_per_coin, number_of_coins, fee):
             raise AssertionError("single-output split should be skipped")
 
@@ -3399,6 +3408,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_combine_retries_on_429(
 
     class _FakeCloudWallet:
         vault_id = "vault-1"
+
         def __init__(self) -> None:
             self.combine_calls = 0
 
@@ -3450,6 +3460,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_combine_applies_input_coin_cap(
 
     class _FakeCloudWallet:
         vault_id = "vault-1"
+
         def __init__(self) -> None:
             self.last_number_of_coins: int | None = None
             self.last_input_coin_ids: list[str] | None = None
@@ -3507,6 +3518,7 @@ def test_execute_coin_ops_cloud_wallet_kms_only_combine_excludes_watched_coin_id
 
     class _FakeCloudWallet:
         vault_id = "vault-1"
+
         def __init__(self) -> None:
             self.last_input_coin_ids: list[str] | None = None
 

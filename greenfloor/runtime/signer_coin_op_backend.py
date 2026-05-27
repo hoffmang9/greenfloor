@@ -205,7 +205,9 @@ class SignerCoinOpBackend:
         output_amounts = [base] * output_count
         output_amounts[-1] += remainder
         existing_ids = {
-            str(c.get("id", c.get("name", ""))).strip() for c in coins if c.get("id") or c.get("name")
+            str(c.get("id", c.get("name", ""))).strip()
+            for c in coins
+            if c.get("id") or c.get("name")
         }
         return self._execute_mixed_split(
             output_amounts=output_amounts,

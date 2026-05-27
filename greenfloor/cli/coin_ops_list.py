@@ -20,7 +20,7 @@ coin_ops_logger = logging.getLogger("greenfloor.manager")
 
 
 def _resolve_coins_list_market(program: ProgramConfig) -> Any:
-    markets_path = program.home_dir / "config" / "markets.yaml"
+    markets_path = Path(program.home_dir) / "config" / "markets.yaml"
     markets = load_markets_config(markets_path)
     enabled = [market for market in markets.markets if market.enabled]
     candidates = enabled or list(markets.markets)
