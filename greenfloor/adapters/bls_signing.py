@@ -11,26 +11,8 @@ import json
 import os
 from typing import Any
 
-import greenfloor.signing_clvm as _signing_clvm
 from greenfloor.constants import MIN_CAT_OUTPUT_MOJOS
-from greenfloor.hex_utils import normalize_hex_id
-from greenfloor.runtime.coinset_runtime import _coinset_adapter
-from greenfloor.signing_clvm import (
-    _extract_required_bls_targets_for_coin_spend,
-)
-
-_domain_bytes_for_agg_sig_kind = _signing_clvm._domain_bytes_for_agg_sig_kind
-_extract_required_bls_targets_for_conditions = (
-    _signing_clvm._extract_required_bls_targets_for_conditions
-)
-
-_AGG_SIG_ADDITIONAL_DATA_BY_NETWORK: dict[str, bytes] = {
-    # Match chia-wallet-sdk consensus constants for AGG_SIG_ME domain separation.
-    "mainnet": bytes.fromhex("ccd5bb71183532bff220ba46c268991a3ff07eb358e8255a65c30a2dce0e5fbb"),
-    "testnet11": bytes.fromhex("37a90eb5185a9c4439a91ddc98bbadce7b4feba060d50116a067de66bf236615"),
-}
-
-_XCH_LIKE_ASSETS: frozenset[str] = frozenset({"", "xch", "txch", "1"})
+from greenfloor.hex_utils import is_xch_like_asset_id
 
 
 def _hex_to_bytes(value: str) -> bytes:
@@ -40,6 +22,18 @@ def _hex_to_bytes(value: str) -> bytes:
     if len(raw) % 2:
         raw = f"0{raw}"
     return bytes.fromhex(raw)
+
+
+def _import_sdk() -> Any:
+    return importlib.import_module("chia_wallet_sdk")
+
+
+def _import_greenfloor_native() -> Any:
+    return importlib.import_module("greenfloor_native")
+
+
+def _import_greenfloor_signer() -> Any:
+    return importlib.import_module("greenfloor_signer")
 
 
 def _parse_fingerprint(key_id: str) -> int | None:
@@ -63,18 +57,6 @@ def _parse_fingerprint(key_id: str) -> int | None:
     return None
 
 
-def _import_sdk() -> Any:
-    return importlib.import_module("chia_wallet_sdk")
-
-
-def _import_greenfloor_native() -> Any:
-    return importlib.import_module("greenfloor_native")
-
-
-def _import_greenfloor_signer() -> Any:
-    return importlib.import_module("greenfloor_signer")
-
-
 def _as_bytes(value: Any) -> bytes:
     if isinstance(value, bytes | bytearray | memoryview):
         return bytes(value)
@@ -91,11 +73,6 @@ def _as_bytes(value: Any) -> bytes:
             return bytes(raw)
         raise TypeError("__bytes__ did not return bytes-compatible data")
     raise TypeError("value cannot be converted to bytes")
-
-
-# ---------------------------------------------------------------------------
-# Key loading
-# ---------------------------------------------------------------------------
 
 
 def _load_master_private_key(keyring_yaml_path: str, key_id: str) -> tuple[Any | None, str | None]:
@@ -144,23 +121,6 @@ def _load_master_private_key(keyring_yaml_path: str, key_id: str) -> tuple[Any |
         return None, f"mnemonic_to_master_key_error:{exc}"
 
 
-def _normalize_hex_32(value: str) -> str:
-    return normalize_hex_id(value)
-
-
-def _normalize_hex_any(value: str) -> str:
-    raw = value.strip().lower()
-    if raw.startswith("0x"):
-        raw = raw[2:]
-    if not raw:
-        return ""
-    if len(raw) % 2 != 0:
-        return ""
-    if not all(ch in "0123456789abcdef" for ch in raw):
-        return ""
-    return raw
-
-
 def _from_input_spend_bundle_xch(
     *,
     sdk: Any,
@@ -181,35 +141,23 @@ def _from_input_spend_bundle_xch(
     return sdk.SpendBundle.from_bytes(spend_bundle_bytes)
 
 
-def _execute_bls_offer_rust(
-    *,
+def _call_signer_build(
+    method_name: str,
     network: str,
     master_sk_bytes: bytes,
-    receive_address: str,
-    offer_asset_id: str,
-    offer_amount: int,
-    request_asset_id: str,
-    request_amount: int,
-    offer_coin_ids: list[str],
+    request: dict[str, Any],
 ) -> tuple[str | None, str | None]:
     try:
         signer = _import_greenfloor_signer()
+        build = getattr(signer, method_name)
     except Exception as exc:
         return None, f"greenfloor_signer_import_error:{exc}"
-    request = {
-        "receive_address": receive_address,
-        "offer_asset_id": offer_asset_id,
-        "offer_amount": offer_amount,
-        "request_asset_id": request_asset_id,
-        "request_amount": request_amount,
-        "offer_coin_ids": offer_coin_ids,
-    }
     try:
-        result = signer.build_bls_offer(network, master_sk_bytes, request)
+        result = build(network, master_sk_bytes, request)
     except Exception as exc:
-        return None, f"build_offer_spend_bundle_error:{exc}"
+        return None, f"{method_name}_error:{exc}"
     if not isinstance(result, dict):
-        return None, "invalid_bls_offer_response"
+        return None, f"invalid_{method_name}_response"
     error = result.get("error")
     if error:
         return None, str(error)
@@ -217,137 +165,6 @@ def _execute_bls_offer_rust(
     if not isinstance(spend_bundle_hex, str) or not spend_bundle_hex.strip():
         return None, "missing_spend_bundle_hex"
     return spend_bundle_hex, None
-
-
-def _execute_bls_xch_coin_op_rust(
-    *,
-    network: str,
-    master_sk_bytes: bytes,
-    receive_address: str,
-    op_type: str,
-    size_base_units: int,
-    op_count: int,
-    target_total_base_units: int,
-) -> tuple[str | None, str | None]:
-    try:
-        signer = _import_greenfloor_signer()
-    except Exception as exc:
-        return None, f"greenfloor_signer_import_error:{exc}"
-    request = {
-        "receive_address": receive_address,
-        "op_type": op_type,
-        "size_base_units": size_base_units,
-        "op_count": op_count,
-        "target_total_base_units": target_total_base_units,
-    }
-    try:
-        result = signer.build_bls_xch_coin_op(network, master_sk_bytes, request)
-    except Exception as exc:
-        return None, f"build_spend_bundle_error:{exc}"
-    if not isinstance(result, dict):
-        return None, "invalid_bls_xch_coin_op_response"
-    error = result.get("error")
-    if error:
-        return None, str(error)
-    spend_bundle_hex = result.get("spend_bundle_hex")
-    if not isinstance(spend_bundle_hex, str) or not spend_bundle_hex.strip():
-        return None, "missing_spend_bundle_hex"
-    return spend_bundle_hex, None
-
-
-# ---------------------------------------------------------------------------
-# Broadcast
-# ---------------------------------------------------------------------------
-
-
-def _broadcast_spend_bundle(*, sdk: Any, spend_bundle_hex: str, network: str) -> dict[str, Any]:
-    try:
-        raw_hex = (
-            spend_bundle_hex[2:] if spend_bundle_hex.lower().startswith("0x") else spend_bundle_hex
-        )
-        spend_bundle_bytes = bytes.fromhex(raw_hex)
-    except ValueError:
-        return {
-            "status": "skipped",
-            "reason": "invalid_spend_bundle_hex",
-            "operation_id": None,
-        }
-
-    try:
-        spend_bundle = sdk.SpendBundle.from_bytes(spend_bundle_bytes)
-    except Exception as exc:
-        return {
-            "status": "skipped",
-            "reason": f"spend_bundle_decode_error:{exc}",
-            "operation_id": None,
-        }
-
-    coinset = _coinset_adapter(network=network)
-    try:
-        response = coinset.push_tx(spend_bundle_hex=spend_bundle_hex)
-    except Exception as exc:
-        return {
-            "status": "skipped",
-            "reason": f"push_tx_error:{exc}",
-            "operation_id": None,
-        }
-    if not bool(response.get("success", False)):
-        # Some Coinset/full-node frontends reject hex-string spend bundles and
-        # require structured SpendBundle JSON payloads.
-        error_text = str(response.get("error") or "").strip().lower()
-        if "expected struct spendbundle" in error_text or "invalid type: string" in error_text:
-            try:
-                structured_bundle = _spend_bundle_to_coinset_json(
-                    sdk=sdk, spend_bundle=spend_bundle
-                )
-                response = coinset.push_tx_structured(spend_bundle=structured_bundle)
-            except Exception as exc:
-                return {
-                    "status": "skipped",
-                    "reason": f"push_tx_structured_error:{exc}",
-                    "operation_id": None,
-                }
-    if not bool(response.get("success", False)):
-        err = response.get("error") or "push_tx_rejected"
-        return {"status": "skipped", "reason": str(err), "operation_id": None}
-    tx_id = sdk.to_hex(spend_bundle.hash())
-    return {
-        "status": "executed",
-        "reason": str(response.get("status", "submitted")),
-        "operation_id": tx_id,
-    }
-
-
-def _as_0x_hex(value: Any) -> str:
-    if isinstance(value, bytes | bytearray | memoryview):
-        return f"0x{bytes(value).hex()}"
-    as_bytes = bytes(value)
-    return f"0x{as_bytes.hex()}"
-
-
-def _spend_bundle_to_coinset_json(*, sdk: Any, spend_bundle: Any) -> dict[str, Any]:
-    coin_spends_payload: list[dict[str, Any]] = []
-    coin_spends = getattr(spend_bundle, "coin_spends", None) or []
-    for coin_spend in coin_spends:
-        coin = getattr(coin_spend, "coin", None)
-        if coin is None:
-            continue
-        coin_spends_payload.append(
-            {
-                "coin": {
-                    "parent_coin_info": _as_0x_hex(coin.parent_coin_info),
-                    "puzzle_hash": _as_0x_hex(coin.puzzle_hash),
-                    "amount": int(coin.amount),
-                },
-                "puzzle_reveal": _as_0x_hex(coin_spend.puzzle_reveal),
-                "solution": _as_0x_hex(coin_spend.solution),
-            }
-        )
-    aggregated_signature = _as_0x_hex(spend_bundle.aggregated_signature.to_bytes())
-    return {
-        "coin_spends": coin_spends_payload,
-        "aggregated_signature": aggregated_signature,
-    }
 
 
 def _coin_id_set(raw_values: Any) -> set[str]:
@@ -355,62 +172,12 @@ def _coin_id_set(raw_values: Any) -> set[str]:
         return set()
     values: set[str] = set()
     for value in raw_values:
-        parsed = _normalize_hex_any(str(value))
-        if parsed:
-            values.add(parsed)
+        raw = str(value).strip().lower()
+        if raw.startswith("0x"):
+            raw = raw[2:]
+        if raw and all(ch in "0123456789abcdef" for ch in raw):
+            values.add(raw)
     return values
-
-
-def _insufficient_xch_fee_balance_error(
-    *, xch_coins: list[Any], required_fee_mojos: int
-) -> str | None:
-    if int(required_fee_mojos) <= 0:
-        return None
-    available = sum(int(getattr(coin, "amount", 0)) for coin in xch_coins)
-    if available < int(required_fee_mojos):
-        return (
-            "insufficient_xch_fee_balance_for_mixed_split:"
-            f"required={int(required_fee_mojos)}:available={available}"
-        )
-    return None
-
-
-def _execute_bls_mixed_split_rust(
-    *,
-    network: str,
-    master_sk_bytes: bytes,
-    receive_address: str,
-    asset_id: str,
-    output_amounts: list[int],
-    coin_ids: list[str],
-    allow_sub_cat_output: bool,
-    fee_mojos: int,
-) -> tuple[str | None, str | None]:
-    try:
-        signer = _import_greenfloor_signer()
-    except Exception as exc:
-        return None, f"greenfloor_signer_import_error:{exc}"
-    request = {
-        "receive_address": receive_address,
-        "asset_id": asset_id,
-        "output_amounts": output_amounts,
-        "coin_ids": coin_ids,
-        "allow_sub_cat_output": allow_sub_cat_output,
-        "fee_mojos": fee_mojos,
-    }
-    try:
-        result = signer.build_bls_mixed_split(network, master_sk_bytes, request)
-    except Exception as exc:
-        return None, f"build_mixed_split_spend_bundle_error:{exc}"
-    if not isinstance(result, dict):
-        return None, "invalid_bls_mixed_split_response"
-    error = result.get("error")
-    if error:
-        return None, str(error)
-    spend_bundle_hex = result.get("spend_bundle_hex")
-    if not isinstance(spend_bundle_hex, str) or not spend_bundle_hex.strip():
-        return None, "missing_spend_bundle_hex"
-    return spend_bundle_hex, None
 
 
 def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None, str | None]:
@@ -438,7 +205,7 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
     allow_sub_cat_output = bool(payload.get("allow_sub_cat_output", False))
     if (
         not allow_sub_cat_output
-        and asset_id not in _XCH_LIKE_ASSETS
+        and not is_xch_like_asset_id(asset_id)
         and any(int(amount) < MIN_CAT_OUTPUT_MOJOS for amount in output_amounts)
     ):
         return None, "cat_output_below_minimum_mojos"
@@ -452,20 +219,23 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
     if master_private_key is None:
         return None, "key_secrets_unavailable"
 
-    requested_coin_ids = sorted(_coin_id_set(payload.get("selected_coin_ids", [])))
-    return _execute_bls_mixed_split_rust(
-        network=network,
-        master_sk_bytes=bytes(master_private_key),
-        receive_address=receive_address,
-        asset_id=asset_id,
-        output_amounts=output_amounts,
-        coin_ids=requested_coin_ids,
-        allow_sub_cat_output=allow_sub_cat_output,
-        fee_mojos=fee_mojos,
+    request = {
+        "receive_address": receive_address,
+        "asset_id": asset_id,
+        "output_amounts": output_amounts,
+        "coin_ids": sorted(_coin_id_set(payload.get("selected_coin_ids", []))),
+        "allow_sub_cat_output": allow_sub_cat_output,
+        "fee_mojos": fee_mojos,
+    }
+    return _call_signer_build(
+        "build_bls_mixed_split",
+        network,
+        bytes(master_private_key),
+        request,
     )
 
 
-def _broadcast_bls_mixed_split_rust(*, network: str, spend_bundle_hex: str) -> dict[str, Any]:
+def _broadcast_bls_spend_bundle_rust(*, network: str, spend_bundle_hex: str) -> dict[str, Any]:
     try:
         signer = _import_greenfloor_signer()
         result = signer.broadcast_bls_spend_bundle(network, spend_bundle_hex)
@@ -492,22 +262,14 @@ def sign_and_broadcast_mixed_split(payload: dict[str, Any]) -> dict[str, Any]:
     spend_bundle_hex, error = _build_mixed_split_spend_bundle(payload)
     if spend_bundle_hex is None:
         return {"status": "skipped", "reason": f"signing_failed:{error}", "operation_id": None}
-    return _broadcast_bls_mixed_split_rust(
+    return _broadcast_bls_spend_bundle_rust(
         network=str(payload.get("network", "")).strip(),
         spend_bundle_hex=spend_bundle_hex,
     )
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
 def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
-    """Build a signed spend bundle: coin discovery -> selection -> signing.
-
-    Returns dict with 'status', 'reason', and 'spend_bundle_hex' on success.
-    """
+    """Build a signed spend bundle: coin discovery -> selection -> signing."""
     key_id = str(payload.get("key_id", "")).strip()
     network = str(payload.get("network", "")).strip()
     receive_address = str(payload.get("receive_address", "")).strip()
@@ -543,15 +305,19 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
             return {"status": "skipped", "reason": f"signing_failed:{key_error}"}
         if master_private_key is None:
             return {"status": "skipped", "reason": "signing_failed:key_secrets_unavailable"}
-        spend_bundle_hex, error = _execute_bls_offer_rust(
-            network=network,
-            master_sk_bytes=bytes(master_private_key),
-            receive_address=receive_address,
-            offer_asset_id=offer_asset_id,
-            offer_amount=offer_amount,
-            request_asset_id=request_asset_id,
-            request_amount=request_amount,
-            offer_coin_ids=offer_coin_ids,
+        request = {
+            "receive_address": receive_address,
+            "offer_asset_id": offer_asset_id,
+            "offer_amount": offer_amount,
+            "request_asset_id": request_asset_id,
+            "request_amount": request_amount,
+            "offer_coin_ids": offer_coin_ids,
+        }
+        spend_bundle_hex, error = _call_signer_build(
+            "build_bls_offer",
+            network,
+            bytes(master_private_key),
+            request,
         )
         if spend_bundle_hex is None:
             return {"status": "skipped", "reason": f"signing_failed:{error}"}
@@ -561,7 +327,7 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
             "spend_bundle_hex": spend_bundle_hex,
         }
 
-    if asset_id not in _XCH_LIKE_ASSETS:
+    if not is_xch_like_asset_id(asset_id):
         return {"status": "skipped", "reason": "asset_not_supported_yet"}
 
     size_base_units = int(plan.get("size_base_units", 0))
@@ -569,10 +335,6 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
     target_total = int(plan.get("target_total_base_units", 0))
     if target_total <= 0 and size_base_units > 0 and op_count > 0:
         target_total = size_base_units * op_count
-        plan = dict(plan)
-        plan["target_total_base_units"] = target_total
-    if op_type not in {"split", "combine"} or target_total <= 0:
-        return {"status": "skipped", "reason": "invalid_plan"}
 
     master_private_key, key_error = _load_master_private_key(keyring_yaml_path, key_id)
     if key_error:
@@ -580,14 +342,18 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
     if master_private_key is None:
         return {"status": "skipped", "reason": "signing_failed:key_secrets_unavailable"}
 
-    spend_bundle_hex, error = _execute_bls_xch_coin_op_rust(
-        network=network,
-        master_sk_bytes=bytes(master_private_key),
-        receive_address=receive_address,
-        op_type=op_type,
-        size_base_units=size_base_units,
-        op_count=op_count,
-        target_total_base_units=target_total,
+    request = {
+        "receive_address": receive_address,
+        "op_type": op_type,
+        "size_base_units": size_base_units,
+        "op_count": op_count,
+        "target_total_base_units": target_total,
+    }
+    spend_bundle_hex, error = _call_signer_build(
+        "build_bls_xch_coin_op",
+        network,
+        bytes(master_private_key),
+        request,
     )
     if spend_bundle_hex is None:
         return {"status": "skipped", "reason": f"signing_failed:{error}"}
@@ -600,10 +366,7 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def sign_and_broadcast(payload: dict[str, Any]) -> dict[str, Any]:
-    """Build, sign, and broadcast a spend bundle.
-
-    Used by the daemon coin-op execution path (WalletAdapter).
-    """
+    """Build, sign, and broadcast a spend bundle (daemon coin-op path)."""
     result = build_signed_spend_bundle(payload)
     if result.get("status") != "executed":
         return {
@@ -613,7 +376,7 @@ def sign_and_broadcast(payload: dict[str, Any]) -> dict[str, Any]:
         }
 
     spend_bundle_hex = str(result.get("spend_bundle_hex", ""))
-    return _broadcast_bls_mixed_split_rust(
+    return _broadcast_bls_spend_bundle_rust(
         network=str(payload.get("network", "")).strip(),
         spend_bundle_hex=spend_bundle_hex,
     )

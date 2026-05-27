@@ -1,5 +1,6 @@
 extern crate greenfloor_signer as signer_core;
 
+use std::future::Future;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -7,14 +8,16 @@ use chia_bls::SecretKey;
 use signer_core::{
     broadcast_bls_spend_bundle, build_and_optionally_broadcast_vault_cat_mixed_split,
     build_bls_mixed_split_spend_bundle, build_bls_offer_spend_bundle,
-    build_bls_xch_coin_op_spend_bundle, build_vault_cat_offer, load_signer_config,
-    resolve_offer_asset_ids, resolve_vault_context, BlsMixedSplitRequest, BlsOfferRequest,
-    BlsXchCoinOpRequest, CreateOfferRequest, MixedSplitRequest,
+    build_bls_xch_coin_op_spend_bundle, build_vault_cat_offer, list_cat_coin_summaries,
+    list_cat_coin_summaries_by_ids, load_signer_config, resolve_offer_asset_ids,
+    resolve_vault_context, BlsMixedSplitRequest, BlsMixedSplitResult, BlsOfferRequest,
+    BlsOfferResult, BlsXchCoinOpRequest, BlsXchCoinOpResult, CreateOfferRequest,
+    MixedSplitRequest,
 };
-use signer_core::error::{mixed_split_reason, offer_reason, xch_coin_op_reason};
+use signer_core::error::{bls_reason, broadcast_reason, BlsOp};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyModule};
+use pyo3::types::{PyDict, PyList, PyModule};
 
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
@@ -52,6 +55,29 @@ fn parse_master_sk_bytes(master_sk_bytes: &[u8]) -> PyResult<SecretKey> {
         .try_into()
         .map_err(|_| PyValueError::new_err("master_sk must be exactly 32 bytes"))?;
     SecretKey::from_bytes(&bytes).map_err(to_py_err)
+}
+
+fn block_on_signer<F, T>(future: F) -> Result<T, signer_core::Error>
+where
+    F: Future<Output = Result<T, signer_core::Error>>,
+{
+    runtime().block_on(future)
+}
+
+fn bls_build_dict_py<T>(
+    py: Python<'_>,
+    op: BlsOp,
+    result: Result<T, signer_core::Error>,
+    fill_ok: impl FnOnce(&Bound<'_, PyDict>, T) -> PyResult<()>,
+) -> PyResult<Py<PyAny>> {
+    let dict = PyDict::new(py);
+    match result {
+        Ok(value) => fill_ok(&dict, value)?,
+        Err(err) => {
+            dict.set_item("error", bls_reason(err, op))?;
+        }
+    }
+    Ok(dict.into())
 }
 
 #[pyfunction]
@@ -120,28 +146,23 @@ fn build_bls_mixed_split_py(
     master_sk_bytes: &[u8],
     request: &Bound<'_, PyDict>,
 ) -> PyResult<Py<PyAny>> {
-    let master_sk = parse_master_sk_bytes(master_sk_bytes)?;
-    let payload = request_dict_to_json(request)?;
-    let split_request: BlsMixedSplitRequest =
-        serde_json::from_value(payload).map_err(to_py_err)?;
     Python::attach(|py| {
-        let dict = PyDict::new(py);
-        match runtime().block_on(build_bls_mixed_split_spend_bundle(
+        let master_sk = parse_master_sk_bytes(master_sk_bytes)?;
+        let payload = request_dict_to_json(request)?;
+        let split_request: BlsMixedSplitRequest =
+            serde_json::from_value(payload).map_err(to_py_err)?;
+        let result = block_on_signer(build_bls_mixed_split_spend_bundle(
             network,
             &master_sk,
             split_request,
-        )) {
-            Ok(result) => {
-                dict.set_item("spend_bundle_hex", result.spend_bundle_hex)?;
-                if !result.selected_coin_ids.is_empty() {
-                    dict.set_item("selected_coin_ids", result.selected_coin_ids)?;
-                }
+        ));
+        bls_build_dict_py(py, BlsOp::MixedSplit, result, |dict, built| {
+            dict.set_item("spend_bundle_hex", built.spend_bundle_hex)?;
+            if !built.selected_coin_ids.is_empty() {
+                dict.set_item("selected_coin_ids", built.selected_coin_ids)?;
             }
-            Err(err) => {
-                dict.set_item("error", mixed_split_reason(err))?;
-            }
-        }
-        Ok(dict.into())
+            Ok(())
+        })
     })
 }
 
@@ -152,24 +173,19 @@ fn build_bls_offer_py(
     master_sk_bytes: &[u8],
     request: &Bound<'_, PyDict>,
 ) -> PyResult<Py<PyAny>> {
-    let master_sk = parse_master_sk_bytes(master_sk_bytes)?;
-    let payload = request_dict_to_json(request)?;
-    let offer_request: BlsOfferRequest = serde_json::from_value(payload).map_err(to_py_err)?;
     Python::attach(|py| {
-        let dict = PyDict::new(py);
-        match runtime().block_on(build_bls_offer_spend_bundle(
+        let master_sk = parse_master_sk_bytes(master_sk_bytes)?;
+        let payload = request_dict_to_json(request)?;
+        let offer_request: BlsOfferRequest = serde_json::from_value(payload).map_err(to_py_err)?;
+        let result = block_on_signer(build_bls_offer_spend_bundle(
             network,
             &master_sk,
             offer_request,
-        )) {
-            Ok(result) => {
-                dict.set_item("spend_bundle_hex", result.spend_bundle_hex)?;
-            }
-            Err(err) => {
-                dict.set_item("error", offer_reason(err))?;
-            }
-        }
-        Ok(dict.into())
+        ));
+        bls_build_dict_py(py, BlsOp::Offer, result, |dict, built| {
+            dict.set_item("spend_bundle_hex", built.spend_bundle_hex)?;
+            Ok(())
+        })
     })
 }
 
@@ -180,26 +196,69 @@ fn build_bls_xch_coin_op_py(
     master_sk_bytes: &[u8],
     request: &Bound<'_, PyDict>,
 ) -> PyResult<Py<PyAny>> {
-    let master_sk = parse_master_sk_bytes(master_sk_bytes)?;
-    let payload = request_dict_to_json(request)?;
-    let coin_op_request: BlsXchCoinOpRequest =
-        serde_json::from_value(payload).map_err(to_py_err)?;
     Python::attach(|py| {
-        let dict = PyDict::new(py);
-        match runtime().block_on(build_bls_xch_coin_op_spend_bundle(
+        let master_sk = parse_master_sk_bytes(master_sk_bytes)?;
+        let payload = request_dict_to_json(request)?;
+        let coin_op_request: BlsXchCoinOpRequest =
+            serde_json::from_value(payload).map_err(to_py_err)?;
+        let result = block_on_signer(build_bls_xch_coin_op_spend_bundle(
             network,
             &master_sk,
             coin_op_request,
-        )) {
-            Ok(result) => {
-                dict.set_item("spend_bundle_hex", result.spend_bundle_hex)?;
-            }
-            Err(err) => {
-                dict.set_item("error", xch_coin_op_reason(err))?;
-            }
-        }
-        Ok(dict.into())
+        ));
+        bls_build_dict_py(py, BlsOp::XchCoinOp, result, |dict, built| {
+            dict.set_item("spend_bundle_hex", built.spend_bundle_hex)?;
+            Ok(())
+        })
     })
+}
+
+#[pyfunction]
+#[pyo3(name = "list_bls_cat_coins")]
+fn list_bls_cat_coins_py(
+    network: &str,
+    receive_address: &str,
+    asset_id: &str,
+) -> PyResult<Py<PyAny>> {
+    Python::attach(|py| {
+        let summaries = runtime()
+            .block_on(list_cat_coin_summaries(network, receive_address, asset_id))
+            .map_err(to_py_err)?;
+        summaries_to_py_list(py, summaries)
+    })
+}
+
+#[pyfunction]
+#[pyo3(name = "list_bls_cat_coins_by_ids")]
+fn list_bls_cat_coins_by_ids_py(network: &str, coin_ids: Vec<String>) -> PyResult<Py<PyAny>> {
+    Python::attach(|py| {
+        let summaries = runtime()
+            .block_on(list_cat_coin_summaries_by_ids(network, &coin_ids))
+            .map_err(to_py_err)?;
+        summaries_to_py_list(py, summaries)
+    })
+}
+
+fn summaries_to_py_list(
+    py: Python<'_>,
+    summaries: Vec<signer_core::CoinRecordSummary>,
+) -> PyResult<Py<PyAny>> {
+    let list = PyList::empty(py);
+    for summary in summaries {
+        let dict = PyDict::new(py);
+        dict.set_item("coin_id", summary.coin_id)?;
+        dict.set_item("parent_coin_info", summary.parent_coin_info)?;
+        dict.set_item("puzzle_hash", summary.puzzle_hash)?;
+        dict.set_item("amount", summary.amount)?;
+        if let Some(p2) = summary.p2_puzzle_hash {
+            dict.set_item("p2_puzzle_hash", p2)?;
+        }
+        if let Some(asset_id) = summary.asset_id {
+            dict.set_item("asset_id", asset_id)?;
+        }
+        list.append(dict)?;
+    }
+    Ok(list.into())
 }
 
 #[pyfunction]
@@ -208,14 +267,14 @@ fn broadcast_bls_spend_bundle_py(network: &str, spend_bundle_hex: &str) -> PyRes
     Python::attach(|py| {
         let dict = PyDict::new(py);
         match runtime().block_on(broadcast_bls_spend_bundle(network, spend_bundle_hex)) {
-            Ok(status) => {
+            Ok(result) => {
                 dict.set_item("status", "executed")?;
-                dict.set_item("reason", status)?;
-                dict.set_item("operation_id", py.None())?;
+                dict.set_item("reason", result.status)?;
+                dict.set_item("operation_id", result.operation_id)?;
             }
             Err(err) => {
                 dict.set_item("status", "skipped")?;
-                dict.set_item("reason", mixed_split_reason(err))?;
+                dict.set_item("reason", broadcast_reason(err))?;
                 dict.set_item("operation_id", py.None())?;
             }
         }
@@ -250,6 +309,8 @@ fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_bls_mixed_split_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_bls_offer_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_bls_xch_coin_op_py, m)?)?;
+    m.add_function(wrap_pyfunction!(list_bls_cat_coins_py, m)?)?;
+    m.add_function(wrap_pyfunction!(list_bls_cat_coins_by_ids_py, m)?)?;
     m.add_function(wrap_pyfunction!(broadcast_bls_spend_bundle_py, m)?)?;
     m.add_function(wrap_pyfunction!(resolve_offer_asset_ids_py, m)?)?;
     Ok(())

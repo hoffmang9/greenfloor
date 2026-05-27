@@ -1,20 +1,19 @@
 use std::collections::HashSet;
 
-use chia_bls::{PublicKey, SecretKey};
+use chia_bls::SecretKey;
 use chia_protocol::{Bytes32, Coin, SpendBundle};
-use chia_traits::Streamable;
 use chia_puzzle_types::Memos;
-use chia_sdk_driver::{Action, Cat, Id, Relation, SpendContext, Spends};
+use chia_sdk_driver::{Action, Cat, Id};
+use chia_traits::Streamable;
 use chia_sdk_utils::select_coins;
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use crate::bls::coins::{cat_asset_bytes, is_xch_like_asset};
-use crate::bls::keys::synthetic_secret_keys_for_puzzle_hashes;
-use crate::bls::signing::sign_coin_spends;
+use crate::bls::coins::cat_asset_bytes;
+use crate::coinset::is_xch_like_asset;
+use crate::bls::spend::build_signed_standard_spend;
 use crate::coinset::{
     broadcast_spend_bundle, client_for_network, list_unspent_cats, list_unspent_cats_by_ids,
-    list_unspent_xch, select_cats_smallest_first, MIN_CAT_OUTPUT_MOJOS,
+    list_unspent_xch, select_cats_smallest_first, BroadcastSpendBundleResult, MIN_CAT_OUTPUT_MOJOS,
 };
 use crate::error::{SignerError, SignerResult};
 
@@ -85,7 +84,7 @@ pub async fn build_bls_mixed_split_spend_bundle(
         }
         let required_total = target_total.saturating_add(fee_mojos);
         offered_xch = select_coins(xch_coins, required_total)
-            .map_err(|_| SignerError::InsufficientCatCoins)?;
+            .map_err(|_| SignerError::XchCoinSelectionFailed)?;
     } else {
         let asset_bytes = cat_asset_bytes(&asset_raw)?;
         if !explicit_coin_ids.is_empty() {
@@ -132,19 +131,6 @@ pub async fn build_bls_mixed_split_spend_bundle(
         selected_coin_ids.push(format!("0x{}", hex::encode(coin.coin_id())));
     }
 
-    let required_puzzle_hashes: HashSet<Bytes32> = offered_xch
-        .iter()
-        .map(|coin| coin.puzzle_hash)
-        .chain(offered_cats.iter().map(|cat| cat.info.p2_puzzle_hash))
-        .chain(fee_xch.iter().map(|coin| coin.puzzle_hash))
-        .collect();
-    let synthetic_sks =
-        synthetic_secret_keys_for_puzzle_hashes(master_sk, &required_puzzle_hashes, None)?;
-    let synthetic_pks: IndexMap<Bytes32, PublicKey> = synthetic_sks
-        .iter()
-        .map(|(puzzle_hash, sk)| (*puzzle_hash, sk.public_key()))
-        .collect();
-
     let asset_id = if is_xch_like_asset(&asset_raw) {
         Id::Xch
     } else {
@@ -189,22 +175,16 @@ pub async fn build_bls_mixed_split_spend_bundle(
         ));
     }
 
-    let mut ctx = SpendContext::new();
-    let mut spends = Spends::new(receive_puzzle_hash);
-    for coin in offered_xch {
-        spends.add(coin);
-    }
-    for cat in offered_cats {
-        spends.add(cat);
-    }
-    for coin in fee_xch {
-        spends.add(coin);
-    }
-    let deltas = spends.apply(&mut ctx, &actions)?;
-    spends.finish_with_keys(&mut ctx, &deltas, Relation::None, &synthetic_pks)?;
-    let coin_spends = ctx.take();
-    let signature = sign_coin_spends(network, &coin_spends, &synthetic_sks)?;
-    let spend_bundle = SpendBundle::new(coin_spends, signature);
+    let mut input_xch = offered_xch;
+    input_xch.extend(fee_xch);
+    let spend_bundle = build_signed_standard_spend(
+        network,
+        receive_puzzle_hash,
+        input_xch,
+        offered_cats,
+        actions,
+        master_sk,
+    )?;
     Ok(BlsMixedSplitResult {
         spend_bundle_hex: crate::coinset::spend_bundle_hex(&spend_bundle)?,
         selected_coin_ids,
@@ -214,11 +194,12 @@ pub async fn build_bls_mixed_split_spend_bundle(
 pub async fn broadcast_bls_spend_bundle(
     network: &str,
     spend_bundle_hex: &str,
-) -> SignerResult<String> {
+) -> SignerResult<BroadcastSpendBundleResult> {
     let client = client_for_network(network)?;
     let raw = spend_bundle_hex.trim().trim_start_matches("0x");
     let bytes = hex::decode(raw).map_err(|err| SignerError::Other(format!("invalid hex: {err}")))?;
     let spend_bundle =
-        SpendBundle::from_bytes(&bytes).map_err(|err| SignerError::Other(err.to_string()))?;
+        SpendBundle::from_bytes(&bytes)
+            .map_err(|err: chia_traits::Error| SignerError::Other(err.to_string()))?;
     broadcast_spend_bundle(&client, spend_bundle).await
 }

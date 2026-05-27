@@ -337,3 +337,35 @@ pub(crate) fn sample_create_offer_request(
         expires_at: None,
     }
 }
+
+#[cfg(test)]
+mod coinset_parse_tests {
+    use chia_protocol::CoinSpend;
+
+    use super::SimulatorVaultHarness;
+    use crate::coinset;
+
+    /// Regression guard: CAT discovery must use ``Puzzle::parse`` + ``Cat::parse_children``
+    /// (``coinset::parse_cat_from_parent_spend``), not ``Program::parse_child_cats``.
+    #[tokio::test]
+    async fn cat_from_parent_spend_resolves_cat_via_parse_children_on_simulator() {
+        let mut harness = SimulatorVaultHarness::new();
+        harness.mint_vault();
+        let cat = harness.fund_vault_cat(5_000);
+        let coin_id = cat.coin.coin_id();
+        let sim = harness.chain.sim.lock().expect("sim lock");
+        let parent = sim
+            .coin_spend(cat.coin.parent_coin_info)
+            .expect("parent spend");
+        let parent_spend = CoinSpend {
+            coin: parent.coin,
+            puzzle_reveal: parent.puzzle_reveal.clone(),
+            solution: parent.solution.clone(),
+        };
+        drop(sim);
+        let resolved = coinset::require_cat_from_parent_spend(cat.coin, &parent_spend)
+            .expect("resolve cat");
+        assert_eq!(resolved.coin.coin_id(), coin_id);
+        assert_eq!(resolved.coin.amount, 5_000);
+    }
+}

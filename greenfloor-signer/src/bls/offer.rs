@@ -1,24 +1,24 @@
 use std::collections::HashSet;
 
-use chia_bls::{PublicKey, SecretKey};
+use chia_bls::SecretKey;
 use chia_protocol::{Bytes32, Coin, SpendBundle};
 use chia_puzzle_types::Memos;
 use chia_puzzles::SETTLEMENT_PAYMENT_HASH;
 use chia_sdk_driver::{Action, AssetInfo, Cat, Id, Offer, Relation, SpendContext, Spends};
 use chia_sdk_utils::select_coins;
 use clvmr::Allocator;
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use crate::bls::coins::{cat_asset_bytes, is_xch_like_asset};
-use crate::bls::keys::synthetic_secret_keys_for_puzzle_hashes;
+use crate::bls::coins::cat_asset_bytes;
+use crate::bls::spend::{add_coins_to_spends, synthetic_keys_for_coins};
 use crate::bls::signing::sign_coin_spends;
+use crate::coinset::is_xch_like_asset;
 use crate::coinset::{
     client_for_network, list_unspent_cats, list_unspent_cats_by_ids, list_unspent_xch,
     select_cats_smallest_first,
 };
 use crate::error::{SignerError, SignerResult};
-use crate::offer::plan::{build_requested_payments, is_xch_like};
+use crate::offer::plan::build_requested_payments;
 use crate::offer::types::OfferTerms;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -96,17 +96,7 @@ pub async fn build_bls_offer_spend_bundle(
         .collect();
     let offer_nonce = Offer::nonce(offered_coin_ids.clone());
 
-    let required_puzzle_hashes: HashSet<Bytes32> = offered_xch
-        .iter()
-        .map(|coin| coin.puzzle_hash)
-        .chain(offered_cats.iter().map(|cat| cat.info.p2_puzzle_hash))
-        .collect();
-    let synthetic_sks =
-        synthetic_secret_keys_for_puzzle_hashes(master_sk, &required_puzzle_hashes, None)?;
-    let synthetic_pks: IndexMap<Bytes32, PublicKey> = synthetic_sks
-        .iter()
-        .map(|(puzzle_hash, sk)| (*puzzle_hash, sk.public_key()))
-        .collect();
+    let keys = synthetic_keys_for_coins(master_sk, &offered_xch, &offered_cats)?;
 
     let terms = OfferTerms {
         receive_address: receive_address.to_string(),
@@ -123,14 +113,9 @@ pub async fn build_bls_offer_spend_bundle(
     let requested_asset_info = AssetInfo::new();
 
     let mut spends = Spends::new(receive_puzzle_hash);
-    for coin in offered_xch {
-        spends.add(coin);
-    }
-    for cat in offered_cats {
-        spends.add(cat);
-    }
+    add_coins_to_spends(&mut spends, offered_xch, offered_cats);
 
-    let offer_id = if is_xch_like(&offer_asset_raw) {
+    let offer_id = if is_xch_like_asset(&offer_asset_raw) {
         Id::Xch
     } else {
         Id::Existing(cat_asset_bytes(&offer_asset_raw)?)
@@ -157,9 +142,9 @@ pub async fn build_bls_offer_spend_bundle(
     );
 
     let deltas = spends.apply(&mut ctx, &actions)?;
-    spends.finish_with_keys(&mut ctx, &deltas, Relation::None, &synthetic_pks)?;
+    spends.finish_with_keys(&mut ctx, &deltas, Relation::None, &keys.synthetic_pks)?;
     let coin_spends = ctx.take();
-    let signature = sign_coin_spends(network, &coin_spends, &synthetic_sks)?;
+    let signature = sign_coin_spends(network, &coin_spends, &keys.synthetic_sks)?;
     let input_spend_bundle = SpendBundle::new(coin_spends, signature);
 
     let mut allocator = Allocator::new();

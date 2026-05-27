@@ -13,7 +13,7 @@ use crate::offer::presplit::{
 use crate::offer::types::{OfferInput, OfferTerms};
 use crate::vault::members::hex_to_bytes32;
 
-const XCH_LIKE_ASSETS: [&str; 4] = ["", "xch", "txch", "1"];
+use crate::coinset::is_xch_like_asset;
 
 pub(crate) enum OfferPlan {
     ExistingPresplit {
@@ -154,8 +154,7 @@ pub(crate) fn build_requested_payments(
 }
 
 pub(crate) fn is_xch_like(asset_id: &str) -> bool {
-    let normalized = asset_id.trim().to_ascii_lowercase();
-    XCH_LIKE_ASSETS.contains(&normalized.as_str())
+    is_xch_like_asset(asset_id)
 }
 
 #[cfg(test)]

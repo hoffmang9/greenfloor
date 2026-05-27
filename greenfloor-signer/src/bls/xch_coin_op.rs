@@ -1,15 +1,11 @@
-use std::collections::HashSet;
-
-use chia_bls::{PublicKey, SecretKey};
-use chia_protocol::{Bytes32, Coin, SpendBundle};
+use chia_bls::SecretKey;
+use chia_protocol::Bytes32;
 use chia_puzzle_types::Memos;
-use chia_sdk_driver::{Action, Id, Relation, SpendContext, Spends};
+use chia_sdk_driver::{Action, Id};
 use chia_sdk_utils::select_coins;
-use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-use crate::bls::keys::synthetic_secret_keys_for_puzzle_hashes;
-use crate::bls::signing::sign_coin_spends;
+use crate::bls::spend::build_signed_standard_spend;
 use crate::coinset::{client_for_network, decode_receive_address, list_unspent_xch};
 use crate::error::{SignerError, SignerResult};
 
@@ -84,7 +80,8 @@ pub async fn build_bls_xch_coin_op_spend_bundle(
             .saturating_mul(u64::from(request.op_count));
     }
 
-    let selected = select_coins(xch_coins, target_total).map_err(|_| SignerError::XchCoinSelectionFailed)?;
+    let selected =
+        select_coins(xch_coins, target_total).map_err(|_| SignerError::XchCoinSelectionFailed)?;
     let selected_total: u64 = selected.iter().map(|coin| coin.amount).sum::<u64>();
     let outputs = plan_xch_additions(
         &request.op_type,
@@ -95,29 +92,18 @@ pub async fn build_bls_xch_coin_op_spend_bundle(
         selected_total,
     )?;
 
-    let required_puzzle_hashes: HashSet<Bytes32> =
-        selected.iter().map(|coin| coin.puzzle_hash).collect();
-    let synthetic_sks =
-        synthetic_secret_keys_for_puzzle_hashes(master_sk, &required_puzzle_hashes, None)?;
-    let synthetic_pks: IndexMap<Bytes32, PublicKey> = synthetic_sks
-        .iter()
-        .map(|(puzzle_hash, sk)| (*puzzle_hash, sk.public_key()))
-        .collect();
-
-    let mut ctx = SpendContext::new();
-    let mut spends = Spends::new(receive_puzzle_hash);
-    for coin in selected {
-        spends.add(coin);
-    }
     let actions: Vec<Action> = outputs
         .into_iter()
         .map(|(puzzle_hash, amount)| Action::send(Id::Xch, puzzle_hash, amount, Memos::None))
         .collect();
-    let deltas = spends.apply(&mut ctx, &actions)?;
-    spends.finish_with_keys(&mut ctx, &deltas, Relation::None, &synthetic_pks)?;
-    let coin_spends = ctx.take();
-    let signature = sign_coin_spends(network, &coin_spends, &synthetic_sks)?;
-    let spend_bundle = SpendBundle::new(coin_spends, signature);
+    let spend_bundle = build_signed_standard_spend(
+        network,
+        receive_puzzle_hash,
+        selected,
+        Vec::new(),
+        actions,
+        master_sk,
+    )?;
     Ok(BlsXchCoinOpResult {
         spend_bundle_hex: crate::coinset::spend_bundle_hex(&spend_bundle)?,
     })

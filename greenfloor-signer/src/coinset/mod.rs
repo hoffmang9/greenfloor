@@ -1,7 +1,10 @@
+mod asset;
 mod backend;
 mod msp;
 mod presplit;
 mod xch;
+
+pub use asset::is_xch_like_asset;
 
 pub use backend::{LiveCoinset, OfferCoinsetBackend};
 pub use msp::{
@@ -199,10 +202,18 @@ pub async fn fetch_latest_vault(
     ))
 }
 
+#[derive(Debug, Clone)]
+pub struct BroadcastSpendBundleResult {
+    pub status: String,
+    pub operation_id: String,
+}
+
 pub async fn broadcast_spend_bundle(
     client: &CoinsetClient,
     spend_bundle: SpendBundle,
-) -> SignerResult<String> {
+) -> SignerResult<BroadcastSpendBundleResult> {
+    let operation_id = format!("0x{}", hex::encode(spend_bundle.hash()));
+    // Coinset RPC expects structured SpendBundle JSON (not a hex string).
     let response = client
         .push_tx(spend_bundle)
         .await
@@ -214,7 +225,10 @@ pub async fn broadcast_spend_bundle(
                 .unwrap_or_else(|| "push_tx failed".to_string()),
         ));
     }
-    Ok(response.status)
+    Ok(BroadcastSpendBundleResult {
+        status: response.status,
+        operation_id,
+    })
 }
 
 pub fn select_cats_smallest_first(cats: Vec<Cat>, target_total: u64) -> Vec<Cat> {
@@ -339,4 +353,5 @@ mod tests {
             CatInfo::new(Bytes32::new([0x01; 32]), None, Bytes32::default()),
         )
     }
+
 }

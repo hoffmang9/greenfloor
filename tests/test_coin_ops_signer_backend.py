@@ -101,7 +101,7 @@ def test_signer_daemon_split_submits(monkeypatch) -> None:
     program = _SignerProgram()
 
     monkeypatch.setattr(
-        "greenfloor.runtime.coin_ops_backend.prepare_signer_runtime",
+        "greenfloor.runtime.signer_coin_op_backend.prepare_signer_runtime",
         lambda _program: "/tmp/signer.yaml",
     )
     monkeypatch.setattr(
@@ -109,20 +109,20 @@ def test_signer_daemon_split_submits(monkeypatch) -> None:
         lambda *_args, **_kwargs: {"base_asset_id": "asset_byc", "quote_asset_id": "xch"},
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.coin_ops_backend.list_unspent_coins_by_receive_address",
+        "greenfloor.runtime.signer_coin_op_backend.list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"id": "coin_a", "name": "coin_a", "amount": 50_000, "state": "CONFIRMED"},
         ],
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.coin_ops_backend.rust_signer.build_mixed_split",
+        "greenfloor.runtime.signer_coin_op_backend.rust_signer.build_mixed_split",
         lambda *_args, **_kwargs: {
             "spend_bundle_hex": "0x" + ("ab" * 64),
             "broadcast_status": "submitted",
         },
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.coin_ops_backend._operation_id_from_spend_bundle_hex",
+        "greenfloor.runtime.signer_coin_op_backend._operation_id_from_spend_bundle_hex",
         lambda _hex: "op-split-1",
     )
 
@@ -163,7 +163,7 @@ def test_signer_daemon_split_skips_combine_prereq_when_only_small_coins(monkeypa
         return {"operation_id": "should-not-run"}
 
     monkeypatch.setattr(
-        "greenfloor.runtime.coin_ops_backend.list_unspent_coins_by_receive_address",
+        "greenfloor.runtime.signer_coin_op_backend.list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"id": "small_a", "name": "small_a", "amount": 8_000, "state": "CONFIRMED"},
             {"id": "small_b", "name": "small_b", "amount": 12_000, "state": "CONFIRMED"},
@@ -207,7 +207,7 @@ def test_signer_daemon_combine_submits(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        "greenfloor.runtime.coin_ops_backend.list_unspent_coins_by_receive_address",
+        "greenfloor.runtime.signer_coin_op_backend.list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"id": "c1", "name": "c1", "amount": 1_000, "state": "CONFIRMED"},
             {"id": "c2", "name": "c2", "amount": 1_000, "state": "CONFIRMED"},

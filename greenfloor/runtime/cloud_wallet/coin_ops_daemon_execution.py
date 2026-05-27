@@ -34,10 +34,10 @@ from greenfloor.runtime.cloud_wallet.coin_ops_planning import (
 )
 
 from greenfloor.runtime.coin_ops_backend import (
-    CoinOpBackend,
     build_coin_op_backend,
     resolve_coin_op_base_asset_id,
 )
+from greenfloor.runtime.coin_ops_scope import CoinOpBackend
 
 __all__ = [
     "DaemonCoinOpExecContext",

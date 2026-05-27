@@ -6,12 +6,14 @@ from typing import Any
 
 from greenfloor.adapters import bls_signing
 from greenfloor.adapters import rust_signer
+from greenfloor.adapters.bls_cat_coins import (
+    _list_unspent_cat_coins,
+    _list_unspent_cat_coins_by_ids,
+)
 from greenfloor.adapters.bls_signing import (
     _build_mixed_split_spend_bundle,
     _from_input_spend_bundle_xch,
     _import_sdk,
-    _list_unspent_cat_coins,
-    _list_unspent_cat_coins_by_ids,
 )
 from greenfloor.runtime.coinset_runtime import _coinset_adapter
 

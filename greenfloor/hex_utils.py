@@ -27,6 +27,15 @@ def canonical_is_xch(asset_id: str) -> bool:
     return str(asset_id or "").strip().lower() in _XCH_ASSET_SYMBOLS
 
 
+def is_xch_like_asset_id(asset_id: str) -> bool:
+    """Return True when *asset_id* is native XCH/TXCH for BLS signer paths.
+
+    Matches ``greenfloor_signer`` ``coinset::is_xch_like_asset`` (includes empty id).
+    """
+    normalized = str(asset_id or "").strip().lower()
+    return not normalized or normalized in _XCH_ASSET_SYMBOLS
+
+
 def default_mojo_multiplier_for_asset(asset_id: str) -> int:
     """Return the canonical mojo-per-unit multiplier for *asset_id*.
 

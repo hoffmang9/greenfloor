@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from greenfloor.runtime.coin_ops_backend import CoinOpScope, scope_payload
+from greenfloor.runtime.coin_ops_scope import CoinOpScope, scope_payload
 
 
 def coin_op_error_payload(

@@ -17,6 +17,8 @@ pub struct CoinRecordSummary {
     pub amount: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub p2_puzzle_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<String>,
 }
 
 pub async fn list_xch_coin_summaries(
@@ -57,6 +59,7 @@ fn coin_summary_from_coin(coin: Coin) -> CoinRecordSummary {
         puzzle_hash: puzzle_hash.clone(),
         amount: coin.amount,
         p2_puzzle_hash: Some(puzzle_hash),
+        asset_id: None,
     }
 }
 
@@ -67,14 +70,8 @@ fn cat_summary_from_cat(cat: Cat) -> CoinRecordSummary {
         puzzle_hash: format!("0x{}", hex::encode(cat.coin.puzzle_hash)),
         amount: cat.coin.amount,
         p2_puzzle_hash: Some(format!("0x{}", hex::encode(cat.info.p2_puzzle_hash))),
+        asset_id: Some(format!("0x{}", hex::encode(cat.info.asset_id))),
     }
-}
-
-pub fn is_xch_like_asset(asset_id: &str) -> bool {
-    matches!(
-        asset_id.trim().to_lowercase().as_str(),
-        "" | "xch" | "txch" | "1"
-    )
 }
 
 pub fn cat_asset_bytes(asset_id: &str) -> SignerResult<Bytes32> {
