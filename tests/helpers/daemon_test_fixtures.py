@@ -49,9 +49,9 @@ def execute_local_strategy_actions(
             publish_venue=publish_venue,
             store=store,
         )
-        if item.get("status") == "executed":
+        if item.is_executed:
             executed_count += 1
-        items.append(item)
+        items.append(item.to_audit_dict())
     return {
         "planned_count": len(expanded),
         "executed_count": executed_count,

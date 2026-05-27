@@ -115,14 +115,8 @@ def is_parallel_dispatch_transient_error(exc: BaseException) -> bool:
     return kind in {"upstream", "reservation_contention"}
 
 
-# Backward-compatible alias for retry checks.
-is_transient_managed_upstream_error = is_managed_upstream_transient_error
-
-
-def strategy_action_item_transient_upstream(item: StrategyActionItem | dict[str, Any]) -> bool:
-    if isinstance(item, StrategyActionItem):
-        return item.transient_upstream
-    return item.get("transient_upstream") is True
+def strategy_action_item_transient_upstream(item: StrategyActionItem) -> bool:
+    return item.transient_upstream
 
 
 def transient_managed_upstream_error_from_text(

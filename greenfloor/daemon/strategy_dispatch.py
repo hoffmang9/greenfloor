@@ -60,7 +60,7 @@ def _action_item(
     reason: str,
     offer_id: str | None = None,
     **extra: Any,
-) -> dict[str, Any]:
+) -> StrategyActionItem:
     transient_upstream = bool(extra.pop("transient_upstream", False))
     return StrategyActionItem.from_action(
         action,
@@ -70,14 +70,14 @@ def _action_item(
         offer_id=offer_id,
         transient_upstream=transient_upstream,
         **extra,
-    ).to_audit_dict()
+    )
 
 
-def _parallel_offer_worker_error_item(*, exc: Exception) -> dict[str, Any]:
+def _parallel_offer_worker_error_item(*, exc: Exception) -> StrategyActionItem:
     return StrategyActionItem.from_worker_error(
         exc=exc,
         transient_upstream=is_managed_worker_transient_error(exc),
-    ).to_audit_dict()
+    )
 
 
 def _can_parallelize_managed_offers(
@@ -278,7 +278,7 @@ def _execute_single_managed_action(
     publish_venue: str,
     runtime_dry_run: bool,
     dexie: DexieAdapter,
-) -> dict[str, Any]:
+) -> StrategyActionItem:
     """Execute a single strategy action via the managed signer path."""
     managed_post = _managed_offer_post(
         program=program,
@@ -343,7 +343,7 @@ def _execute_managed_action_with_retry(
     publish_venue: str,
     runtime_dry_run: bool,
     dexie: DexieAdapter,
-) -> dict[str, Any]:
+) -> StrategyActionItem:
     """Execute a single managed action with transient-error retries."""
     attempts_max, backoff_ms, _ = _post_retry_config()
     last_exc: Exception | None = None
@@ -381,7 +381,7 @@ def _execute_single_local_action(
     publish_venue: str,
     store: SqliteStore,
     program_path: Path | None = None,
-) -> dict[str, Any]:
+) -> StrategyActionItem:
     """Execute a single strategy action via the local build+sign+post path."""
     action_started = time.monotonic()
     build_started = action_started
@@ -467,7 +467,7 @@ def _expand_strategy_actions(strategy_actions: list[Any]) -> list[Any]:
     return expanded_actions
 
 
-def _managed_skip_item(*, action: Any, reason: str) -> dict[str, Any]:
+def _managed_skip_item(*, action: Any, reason: str) -> StrategyActionItem:
     return _action_item(action, status="skipped", reason=reason, offer_id=None)
 
 
@@ -515,7 +515,7 @@ def _prepare_parallel_managed_submission(
     resolved_quote_asset_id: str,
     resolved_xch_asset_id: str,
     fee_amount_mojos: int,
-) -> tuple[dict[str, int] | None, dict[str, int] | None, dict[str, Any] | None]:
+) -> tuple[dict[str, int] | None, dict[str, int] | None, StrategyActionItem | None]:
     requested_amounts = _reservation_request_for_managed_offer(
         market=market,
         action=action,
@@ -551,12 +551,12 @@ def _strategy_action_result(
     *,
     planned_count: int,
     executed_count: int,
-    items: list[dict[str, Any]],
+    items: list[StrategyActionItem],
 ) -> dict[str, Any]:
     return {
         "planned_count": planned_count,
         "executed_count": executed_count,
-        "items": items,
+        "items": [item.to_audit_dict() for item in items],
     }
 
 
@@ -570,7 +570,7 @@ def _execute_actions_parallel(
     dexie: DexieAdapter,
     reservation_coordinator: AssetReservationCoordinator,
 ) -> dict[str, Any]:
-    items: list[dict[str, Any]] = []
+    items: list[StrategyActionItem] = []
     executed_count = 0
     resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id = (
         _resolve_signer_offer_asset_ids_for_reservation(
@@ -626,7 +626,7 @@ def _execute_actions_parallel(
         requested_amounts: dict[str, int],
         available_amounts: dict[str, int],
         queued_at_monotonic: float,
-    ) -> dict[str, Any]:
+    ) -> StrategyActionItem:
         queue_wait_ms = int((time.monotonic() - queued_at_monotonic) * 1000)
         _log_market_decision(
             str(market.market_id),
@@ -645,14 +645,13 @@ def _execute_actions_parallel(
         )
         acquire_ms = int((time.monotonic() - acquire_started) * 1000)
         if not acquired.ok or not acquired.reservation_id:
-            return {
-                **_managed_skip_item(
-                    action=action,
-                    reason=str(acquired.error or "reservation_rejected"),
-                ),
-                "queue_wait_ms": queue_wait_ms,
-                "reservation_acquire_ms": acquire_ms,
-            }
+            return _managed_skip_item(
+                action=action,
+                reason=str(acquired.error or "reservation_rejected"),
+            ).with_extra(
+                queue_wait_ms=queue_wait_ms,
+                reservation_acquire_ms=acquire_ms,
+            )
         reservation_id = str(acquired.reservation_id)
         reserved_at = time.monotonic()
         _log_market_decision(
@@ -674,11 +673,7 @@ def _execute_actions_parallel(
             )
         except Exception as exc:
             item = _parallel_offer_worker_error_item(exc=exc)
-        release_status = (
-            "released_success"
-            if str(item.get("status", "")).strip().lower() == "executed"
-            else "released_failed"
-        )
+        release_status = "released_success" if item.is_executed else "released_failed"
         reservation_coordinator.release(reservation_id=reservation_id, status=release_status)
         reservation_hold_ms = int((time.monotonic() - reserved_at) * 1000)
         _log_market_decision(
@@ -689,14 +684,15 @@ def _execute_actions_parallel(
             release_status=release_status,
             reservation_hold_ms=reservation_hold_ms,
         )
-        item["reservation_id"] = reservation_id
-        item["queue_wait_ms"] = queue_wait_ms
-        item["reservation_acquire_ms"] = acquire_ms
-        item["reservation_hold_ms"] = reservation_hold_ms
-        return item
+        return item.with_extra(
+            reservation_id=reservation_id,
+            queue_wait_ms=queue_wait_ms,
+            reservation_acquire_ms=acquire_ms,
+            reservation_hold_ms=reservation_hold_ms,
+        )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-        future_to_submission: dict[concurrent.futures.Future[dict[str, Any]], int] = {}
+        future_to_submission: dict[concurrent.futures.Future[StrategyActionItem], int] = {}
         for submit_index, action, requested_amounts, available_amounts in submissions:
             future = pool.submit(
                 _run_parallel_submission,
@@ -707,7 +703,7 @@ def _execute_actions_parallel(
                 queued_at_monotonic=time.monotonic(),
             )
             future_to_submission[future] = submit_index
-        submitted_items: list[tuple[int, dict[str, Any]]] = []
+        submitted_items: list[tuple[int, StrategyActionItem]] = []
         for future in concurrent.futures.as_completed(future_to_submission):
             submit_index = future_to_submission[future]
             try:
@@ -717,7 +713,7 @@ def _execute_actions_parallel(
             submitted_items.append((submit_index, item))
         for _, item in sorted(submitted_items, key=lambda pair: pair[0]):
             _log_offer_action_timing(str(market.market_id), item)
-            if item.get("status") == "executed":
+            if item.is_executed:
                 executed_count += 1
             items.append(item)
 
@@ -725,7 +721,7 @@ def _execute_actions_parallel(
     transient_parallel_failures = sum(
         1
         for _submit_idx, item in submitted_items
-        if str(item.get("status", "")).strip().lower() == "skipped"
+        if item.status.strip().lower() == "skipped"
         and strategy_action_item_transient_upstream(item)
     )
     total_parallel = len(submitted_items)
@@ -763,7 +759,7 @@ def _execute_actions_sequential(
     store: SqliteStore,
     keyring_yaml_path: str,
 ) -> dict[str, Any]:
-    items: list[dict[str, Any]] = []
+    items: list[StrategyActionItem] = []
     executed_count = 0
     for action in expanded_actions:
         if runtime_dry_run:
@@ -812,7 +808,7 @@ def _execute_actions_sequential(
                 publish_venue=publish_venue,
                 store=store,
             )
-        if item.get("status") == "executed":
+        if item.is_executed:
             executed_count += 1
         _log_offer_action_timing(str(market.market_id), item)
         items.append(item)

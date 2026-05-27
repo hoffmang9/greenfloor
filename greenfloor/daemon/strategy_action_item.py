@@ -29,6 +29,23 @@ class StrategyActionItem:
         payload.update(self.extra)
         return payload
 
+    def with_extra(self, **kwargs: Any) -> StrategyActionItem:
+        if not kwargs:
+            return self
+        return StrategyActionItem(
+            size=self.size,
+            side=self.side,
+            status=self.status,
+            reason=self.reason,
+            offer_id=self.offer_id,
+            transient_upstream=self.transient_upstream,
+            extra={**self.extra, **kwargs},
+        )
+
+    @property
+    def is_executed(self) -> bool:
+        return self.status.strip().lower() == "executed"
+
     @classmethod
     def from_action(
         cls,

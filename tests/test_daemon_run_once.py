@@ -5,15 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from greenfloor.daemon.testing import main, run_loop, run_once
+from greenfloor.daemon.testing import main, run_once
 from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.daemon_websocket_fixtures import (
     write_markets,
     write_markets_two,
     write_program,
-    write_program_without_log_level,
 )
 from tests.logging_helpers import reset_concurrent_log_handlers
+
 
 def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path) -> None:
     from greenfloor.daemon.testing import main as daemon_mod
