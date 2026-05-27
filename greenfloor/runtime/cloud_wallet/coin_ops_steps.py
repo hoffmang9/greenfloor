@@ -24,6 +24,7 @@ from greenfloor.runtime.cloud_wallet.coin_ops_models import (
 from greenfloor.runtime.cloud_wallet.coin_ops_planning import (
     CombineInputSelectionMode,
     SplitCoinPlan,
+    SplitPlanningProfile,
     SplitSkipPlan,
     plan_auto_combine_inputs,
     plan_auto_split_selection,
@@ -145,10 +146,8 @@ def run_coin_split_step(
             candidate_spendable=spendable_asset_coins,
             required_amount_mojos=params.amount_per_coin * params.number_of_coins,
             canonical_asset_id=canonical_asset_id,
-            allow_combine_prereq=False,
+            profile=SplitPlanningProfile.CLI_AUTO,
             combine_input_cap=0,
-            enforce_required_amount=False,
-            check_sub_cat_change=False,
         )
         if isinstance(selection, SplitSkipPlan):
             raise RuntimeError("coin_split_failed:missing_selected_coin_id")

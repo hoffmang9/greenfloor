@@ -1,4 +1,22 @@
-"""Shared coin split/combine planning used by CLI steps and daemon execution."""
+"""Shared coin split/combine planning used by CLI steps and daemon execution.
+
+``SplitPlanningProfile`` controls auto-select behavior in
+``plan_auto_split_selection()``:
+
++---------------+-------------------------------+--------------------+------------------------------------------------------------------------------+
+| Profile       | Required amount               | Sub-CAT dust guard | Combine-for-split prereq                                                     |
++===============+===============================+====================+==============================================================================+
+| ``CLI_AUTO``  | off (largest min-amount coin) | off                | off                                                                          |
++---------------+-------------------------------+--------------------+------------------------------------------------------------------------------+
+| ``DAEMON_AUTO`` | on                          | on                 | on (first attempt only; caller passes ``allow_combine_prereq=False`` on retry) |
++---------------+-------------------------------+--------------------+------------------------------------------------------------------------------+
+
+CLI split is operator-driven: auto-select picks the largest spendable coin meeting
+min amount; the operator (or explicit ``--coin-id``) owns total-value checks.
+Daemon split is ladder-driven and must enforce total required value, avoid
+sub-CAT change dust, and may submit a combine-for-split prereq on the first
+attempt only.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +25,7 @@ from enum import StrEnum
 from typing import Any
 
 from greenfloor.core.coin_ops_policy import coin_op_min_amount_mojos
-from greenfloor.runtime.cloud_wallet.coin_ops_models import (
+from greenfloor.runtime.cloud_wallet.coin_ops_selection import (
     select_exact_amount_coin_ids,
     select_largest_spendable_coin,
     split_would_create_sub_cat_change,
@@ -95,6 +113,34 @@ class CombineInputSelectionMode(StrEnum):
     EXACT_AMOUNT = "exact_amount"
 
 
+class SplitPlanningProfile(StrEnum):
+    """Named split auto-select behavior for CLI vs daemon."""
+
+    CLI_AUTO = "cli_auto"
+    DAEMON_AUTO = "daemon_auto"
+
+
+@dataclass(frozen=True, slots=True)
+class _SplitPlanningBehavior:
+    enforce_required_amount: bool
+    check_sub_cat_change: bool
+    default_allow_combine_prereq: bool
+
+
+_SPLIT_PLANNING_BEHAVIOR: dict[SplitPlanningProfile, _SplitPlanningBehavior] = {
+    SplitPlanningProfile.CLI_AUTO: _SplitPlanningBehavior(
+        enforce_required_amount=False,
+        check_sub_cat_change=False,
+        default_allow_combine_prereq=False,
+    ),
+    SplitPlanningProfile.DAEMON_AUTO: _SplitPlanningBehavior(
+        enforce_required_amount=True,
+        check_sub_cat_change=True,
+        default_allow_combine_prereq=True,
+    ),
+}
+
+
 @dataclass(frozen=True, slots=True)
 class SplitCombinePrereqPlan:
     input_coin_ids: list[str]
@@ -163,12 +209,20 @@ def plan_auto_split_selection(
     candidate_spendable: list[dict],
     required_amount_mojos: int,
     canonical_asset_id: str,
-    allow_combine_prereq: bool,
+    profile: SplitPlanningProfile,
     combine_input_cap: int,
-    enforce_required_amount: bool,
-    check_sub_cat_change: bool,
+    allow_combine_prereq: bool | None = None,
 ) -> SplitAutoSelectPlan:
     """Plan the next auto-selected split action from filtered spendable coins."""
+    behavior = _SPLIT_PLANNING_BEHAVIOR[profile]
+    resolve_allow_combine_prereq = (
+        allow_combine_prereq
+        if allow_combine_prereq is not None
+        else behavior.default_allow_combine_prereq
+    )
+    enforce_required_amount = behavior.enforce_required_amount
+    check_sub_cat_change = behavior.check_sub_cat_change
+
     if enforce_required_amount and required_amount_mojos > 0:
         large_enough = [
             coin
@@ -211,7 +265,7 @@ def plan_auto_split_selection(
         return SplitCoinPlan(coin_id=selected_coin_id, selected_amount_mojos=selected_amount)
 
     if (
-        allow_combine_prereq
+        resolve_allow_combine_prereq
         and enforce_required_amount
         and required_amount_mojos > 0
         and sum(int(coin.get("amount", 0)) for coin in candidate_spendable) >= required_amount_mojos
@@ -236,8 +290,8 @@ def plan_auto_combine_inputs(
     exclude_coin_ids: set[str] | None = None,
     max_count: int | None = None,
 ) -> list[str]:
-    capped_count = min(int(number_of_coins), int(max_count)) if max_count is not None else int(
-        number_of_coins
+    capped_count = (
+        min(int(number_of_coins), int(max_count)) if max_count is not None else int(number_of_coins)
     )
     if selection_mode == CombineInputSelectionMode.EXACT_AMOUNT:
         if target_amount_mojos is None:

@@ -4,20 +4,24 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from greenfloor.cli.prompts import prompt_yes_no
+from greenfloor.config.models import MarketConfig
 from greenfloor.core.coin_ops_policy import coin_op_min_amount_mojos
 from greenfloor.runtime.cloud_wallet.adapter import format_json_output
 from greenfloor.runtime.cloud_wallet.coin_op_errors import coin_op_unresolved_error_payload
 from greenfloor.runtime.cloud_wallet.coin_ops_models import (
     CombineDenominationTarget,
+    DenominationTarget,
     SplitDenominationTarget,
 )
 from greenfloor.runtime.cloud_wallet.coin_ops_runtime import (
     CoinOpIterationNeedsConfirmation,
     CoinOpLoopResult,
     CoinOpSetup,
+    CoinOpSetupResult,
     CoinOpStepOutcome,
     coin_op_result_payload,
     coin_op_setup,
@@ -30,6 +34,22 @@ from greenfloor.runtime.cloud_wallet.coin_ops_steps import (
     run_coin_combine_step,
     run_coin_split_step,
 )
+
+
+@dataclass(slots=True)
+class _CoinOpCliRun:
+    denomination_target: DenominationTarget
+    readiness_asset_id: str
+    run_step: Callable[[int, list[dict], set[str]], CoinOpStepOutcome]
+    extra_payload: dict[str, object]
+
+
+@dataclass(slots=True)
+class _CoinOpCliLoopComplete:
+    setup: CoinOpSetup
+    loop_result: CoinOpLoopResult
+    denomination_target: DenominationTarget
+    extra_payload: dict[str, object]
 
 
 def _finish_coin_op_cli(
@@ -55,16 +75,90 @@ def _finish_coin_op_cli(
             )
         return loop_result.early_return_code
 
-    final_readiness = loop_result.final_readiness
     print(format_json_output(success_payload))
-    if until_ready and final_readiness is not None and not bool(final_readiness["ready"]):
+    readiness = success_payload.get("denomination_readiness")
+    if until_ready and isinstance(readiness, dict) and not bool(readiness.get("ready", False)):
         return 2
     return 0
 
 
+def _run_coin_op_cli(
+    *,
+    setup_result: CoinOpSetupResult,
+    network: str,
+    no_wait: bool,
+    until_ready: bool,
+    max_iterations: int,
+    coin_ids: list[str],
+    build_run: Callable[[CoinOpSetup], _CoinOpCliRun],
+) -> int | _CoinOpCliLoopComplete:
+    if setup_result.error_payload is not None:
+        print(format_json_output(setup_result.error_payload))
+        return 2
+    setup = setup_result.setup
+    assert setup is not None
+
+    cli_run = build_run(setup)
+    loop_result = run_coin_op_iteration_loop(
+        wallet=setup.wallet,
+        network=network,
+        no_wait=no_wait,
+        until_ready=until_ready,
+        max_iterations=max_iterations,
+        coin_ids=coin_ids,
+        denomination_target=cli_run.denomination_target,
+        readiness_asset_id=cli_run.readiness_asset_id,
+        run_step=cli_run.run_step,
+    )
+    if loop_result.early_return_code is not None:
+        return _finish_coin_op_cli(
+            setup=setup,
+            loop_result=loop_result,
+            until_ready=until_ready,
+            success_payload={},
+        )
+    return _CoinOpCliLoopComplete(
+        setup=setup,
+        loop_result=loop_result,
+        denomination_target=cli_run.denomination_target,
+        extra_payload=cli_run.extra_payload,
+    )
+
+
+def _build_success_payload(
+    *,
+    complete: _CoinOpCliLoopComplete,
+    coin_ids: list[str],
+    until_ready: bool,
+    max_iterations: int,
+    final_readiness: dict[str, int | bool | str] | None,
+    extra_fields: dict[str, object] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        **coin_op_result_payload(
+            market=complete.setup.market,
+            selected_venue=complete.setup.selected_venue,
+            wallet=complete.setup.wallet,
+            coin_ids=coin_ids,
+            denomination_target=complete.denomination_target,
+            until_ready=until_ready,
+            max_iterations=max_iterations,
+            stop_reason=complete.loop_result.stop_reason,
+            final_readiness=final_readiness,
+            operations=complete.loop_result.operations,
+            fee_mojos=complete.setup.fee_mojos,
+            fee_source=complete.setup.fee_source,
+        ),
+        **complete.extra_payload,
+    }
+    if extra_fields is not None:
+        payload.update(extra_fields)
+    return payload
+
+
 def _resolve_split_targets(
     *,
-    market,
+    market: MarketConfig,
     amount_per_coin: int,
     number_of_coins: int,
     size_base_units: int | None,
@@ -97,7 +191,7 @@ def _resolve_split_targets(
 
 def _resolve_combine_targets(
     *,
-    market,
+    market: MarketConfig,
     number_of_coins: int,
     size_base_units: int | None,
     requested_asset_id: str | None,
@@ -172,83 +266,76 @@ def execute_split_cli(
     force_split_when_ready: bool,
     prompt_for_override: bool | None,
 ) -> int:
-    setup_result = coin_op_setup(
-        program_path=program_path,
-        markets_path=markets_path,
-        testnet_markets_path=testnet_markets_path,
-        network=network,
-        market_id=market_id,
-        pair=pair,
-        venue=venue,
-    )
-    if setup_result.error_payload is not None:
-        print(format_json_output(setup_result.error_payload))
-        return 2
-    setup = setup_result.setup
-    assert setup is not None
+    def build_run(setup: CoinOpSetup) -> _CoinOpCliRun:
+        resolved_amount, resolved_count, denomination_target = _resolve_split_targets(
+            market=setup.market,
+            amount_per_coin=amount_per_coin,
+            number_of_coins=number_of_coins,
+            size_base_units=size_base_units,
+        )
+        step_params = CoinSplitStepParams(
+            wallet=setup.wallet,
+            market=setup.market,
+            selected_venue=setup.selected_venue,
+            resolved_asset_id=setup.resolved_asset_id,
+            explicit_coin_ids=coin_ids,
+            amount_per_coin=resolved_amount,
+            number_of_coins=resolved_count,
+            fee_mojos=setup.fee_mojos,
+            denomination_target=denomination_target,
+            min_coin_amount_mojos=coin_op_min_amount_mojos(
+                canonical_asset_id=str(setup.market.base_asset)
+            ),
+            allow_lock_all_spendable=allow_lock_all_spendable,
+            force_split_when_ready=force_split_when_ready,
+        )
+        return _CoinOpCliRun(
+            denomination_target=denomination_target,
+            readiness_asset_id=str(setup.market.base_asset),
+            run_step=_build_split_run_step(
+                step_params=step_params,
+                prompt_for_override=prompt_for_override,
+            ),
+            extra_payload={
+                "amount_per_coin": resolved_amount,
+                "number_of_coins": resolved_count,
+                "resolved_asset_id": setup.resolved_asset_id,
+            },
+        )
 
-    resolved_amount, resolved_count, denomination_target = _resolve_split_targets(
-        market=setup.market,
-        amount_per_coin=amount_per_coin,
-        number_of_coins=number_of_coins,
-        size_base_units=size_base_units,
-    )
-    step_params = CoinSplitStepParams(
-        wallet=setup.wallet,
-        market=setup.market,
-        selected_venue=setup.selected_venue,
-        resolved_asset_id=setup.resolved_asset_id,
-        explicit_coin_ids=coin_ids,
-        amount_per_coin=resolved_amount,
-        number_of_coins=resolved_count,
-        fee_mojos=setup.fee_mojos,
-        denomination_target=denomination_target,
-        min_coin_amount_mojos=coin_op_min_amount_mojos(
-            canonical_asset_id=str(setup.market.base_asset)
+    result = _run_coin_op_cli(
+        setup_result=coin_op_setup(
+            program_path=program_path,
+            markets_path=markets_path,
+            testnet_markets_path=testnet_markets_path,
+            network=network,
+            market_id=market_id,
+            pair=pair,
+            venue=venue,
         ),
-        allow_lock_all_spendable=allow_lock_all_spendable,
-        force_split_when_ready=force_split_when_ready,
-    )
-    loop_result = run_coin_op_iteration_loop(
-        wallet=setup.wallet,
         network=network,
         no_wait=no_wait,
         until_ready=until_ready,
         max_iterations=max_iterations,
         coin_ids=coin_ids,
-        denomination_target=denomination_target,
-        readiness_asset_id=str(setup.market.base_asset),
-        run_step=_build_split_run_step(
-            step_params=step_params,
-            prompt_for_override=prompt_for_override,
-        ),
+        build_run=build_run,
     )
-    final_readiness = loop_result.final_readiness or loop_result.split_gate
-    success_payload = {
-        **coin_op_result_payload(
-            market=setup.market,
-            selected_venue=setup.selected_venue,
-            wallet=setup.wallet,
+    if isinstance(result, int):
+        return result
+
+    final_readiness = result.loop_result.final_readiness or result.loop_result.split_gate
+    return _finish_coin_op_cli(
+        setup=result.setup,
+        loop_result=result.loop_result,
+        until_ready=until_ready,
+        success_payload=_build_success_payload(
+            complete=result,
             coin_ids=coin_ids,
-            denomination_target=denomination_target,
             until_ready=until_ready,
             max_iterations=max_iterations,
-            stop_reason=loop_result.stop_reason,
             final_readiness=final_readiness,
-            operations=loop_result.operations,
-            fee_mojos=setup.fee_mojos,
-            fee_source=setup.fee_source,
+            extra_fields={"split_gate": result.loop_result.split_gate},
         ),
-        "amount_per_coin": resolved_amount,
-        "number_of_coins": resolved_count,
-        "resolved_asset_id": setup.resolved_asset_id,
-        "split_gate": loop_result.split_gate,
-    }
-    return _finish_coin_op_cli(
-        setup=setup,
-        loop_result=loop_result,
-        until_ready=until_ready,
-        success_payload=success_payload,
     )
 
 
@@ -270,85 +357,79 @@ def execute_combine_cli(
     max_iterations: int,
 ) -> int:
     requested_asset_id = asset_id.strip() if asset_id else None
-    setup_result = coin_op_setup(
-        program_path=program_path,
-        markets_path=markets_path,
-        testnet_markets_path=testnet_markets_path,
-        network=network,
-        market_id=market_id,
-        pair=pair,
-        venue=venue,
-        canonical_asset_id_override=requested_asset_id,
-    )
-    if setup_result.error_payload is not None:
-        print(format_json_output(setup_result.error_payload))
-        return 2
-    setup = setup_result.setup
-    assert setup is not None
 
-    resolved_count, denomination_target, combine_canonical_asset_id = _resolve_combine_targets(
-        market=setup.market,
-        number_of_coins=number_of_coins,
-        size_base_units=size_base_units,
-        requested_asset_id=requested_asset_id,
-    )
-    step_params = CoinCombineStepParams(
-        wallet=setup.wallet,
-        market=setup.market,
-        selected_venue=setup.selected_venue,
-        resolved_asset_id=setup.resolved_asset_id,
-        combine_canonical_asset_id=combine_canonical_asset_id,
-        explicit_coin_ids=coin_ids,
-        number_of_coins=resolved_count,
-        fee_mojos=setup.fee_mojos,
-        denomination_target=denomination_target,
-        min_coin_amount_mojos=coin_op_min_amount_mojos(
-            canonical_asset_id=combine_canonical_asset_id
+    def build_run(setup: CoinOpSetup) -> _CoinOpCliRun:
+        resolved_count, denomination_target, combine_canonical_asset_id = _resolve_combine_targets(
+            market=setup.market,
+            number_of_coins=number_of_coins,
+            size_base_units=size_base_units,
+            requested_asset_id=requested_asset_id,
+        )
+        step_params = CoinCombineStepParams(
+            wallet=setup.wallet,
+            market=setup.market,
+            selected_venue=setup.selected_venue,
+            resolved_asset_id=setup.resolved_asset_id,
+            combine_canonical_asset_id=combine_canonical_asset_id,
+            explicit_coin_ids=coin_ids,
+            number_of_coins=resolved_count,
+            fee_mojos=setup.fee_mojos,
+            denomination_target=denomination_target,
+            min_coin_amount_mojos=coin_op_min_amount_mojos(
+                canonical_asset_id=combine_canonical_asset_id
+            ),
+        )
+
+        def run_step(
+            iteration: int,
+            wallet_coins: list[dict],
+            existing_coin_ids: set[str],
+        ) -> CoinOpStepOutcome:
+            _ = iteration, existing_coin_ids
+            step_result = run_coin_combine_step(params=step_params, wallet_coins=wallet_coins)
+            return CoinOpStepOutcome(step=step_result.step)
+
+        return _CoinOpCliRun(
+            denomination_target=denomination_target,
+            readiness_asset_id=setup.resolved_asset_id,
+            run_step=run_step,
+            extra_payload={
+                "asset_id": requested_asset_id or str(setup.market.base_asset).strip(),
+                "resolved_asset_id": setup.resolved_asset_id,
+                "number_of_coins": resolved_count,
+            },
+        )
+
+    result = _run_coin_op_cli(
+        setup_result=coin_op_setup(
+            program_path=program_path,
+            markets_path=markets_path,
+            testnet_markets_path=testnet_markets_path,
+            network=network,
+            market_id=market_id,
+            pair=pair,
+            venue=venue,
+            canonical_asset_id_override=requested_asset_id,
         ),
-    )
-
-    def run_step(
-        iteration: int,
-        wallet_coins: list[dict],
-        existing_coin_ids: set[str],
-    ) -> CoinOpStepOutcome:
-        _ = iteration, existing_coin_ids
-        step_result = run_coin_combine_step(params=step_params, wallet_coins=wallet_coins)
-        return CoinOpStepOutcome(step=step_result.step)
-
-    loop_result = run_coin_op_iteration_loop(
-        wallet=setup.wallet,
         network=network,
         no_wait=no_wait,
         until_ready=until_ready,
         max_iterations=max_iterations,
         coin_ids=coin_ids,
-        denomination_target=denomination_target,
-        readiness_asset_id=setup.resolved_asset_id,
-        run_step=run_step,
+        build_run=build_run,
     )
-    success_payload = {
-        **coin_op_result_payload(
-            market=setup.market,
-            selected_venue=setup.selected_venue,
-            wallet=setup.wallet,
+    if isinstance(result, int):
+        return result
+
+    return _finish_coin_op_cli(
+        setup=result.setup,
+        loop_result=result.loop_result,
+        until_ready=until_ready,
+        success_payload=_build_success_payload(
+            complete=result,
             coin_ids=coin_ids,
-            denomination_target=denomination_target,
             until_ready=until_ready,
             max_iterations=max_iterations,
-            stop_reason=loop_result.stop_reason,
-            final_readiness=loop_result.final_readiness,
-            operations=loop_result.operations,
-            fee_mojos=setup.fee_mojos,
-            fee_source=setup.fee_source,
+            final_readiness=result.loop_result.final_readiness,
         ),
-        "asset_id": requested_asset_id or str(setup.market.base_asset).strip(),
-        "resolved_asset_id": setup.resolved_asset_id,
-        "number_of_coins": resolved_count,
-    }
-    return _finish_coin_op_cli(
-        setup=setup,
-        loop_result=loop_result,
-        until_ready=until_ready,
-        success_payload=success_payload,
     )

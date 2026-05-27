@@ -14,22 +14,26 @@ from greenfloor.core.coin_ops_policy import (
     coin_op_min_amount_mojos,
     coin_op_target_amount_allowed,
 )
+from greenfloor.runtime.cloud_wallet.coin_ops_daemon_ledger import (
+    DaemonCoinOpLedgerItem,
+    daemon_coin_op_executed,
+    daemon_coin_op_skipped,
+)
 from greenfloor.runtime.cloud_wallet.coin_ops_execution import combine_coins_with_retry
 from greenfloor.runtime.cloud_wallet.coin_ops_planning import (
-    SplitCombinePrereqPlan,
-    SplitCoinPlan,
-    SplitSkipPlan,
     CombineInputSelectionMode,
+    SplitCoinPlan,
+    SplitCombinePrereqPlan,
+    SplitPlanningProfile,
+    SplitSkipPlan,
     plan_auto_combine_inputs,
     plan_auto_split_selection,
-    select_spendable_coins_for_target_amount,
 )
 
 __all__ = [
     "DaemonCoinOpExecContext",
     "execute_daemon_combine_plan",
     "execute_daemon_split_plan",
-    "select_spendable_coins_for_target_amount",
 ]
 
 
@@ -46,25 +50,8 @@ class DaemonCoinOpExecContext:
     logger: logging.Logger
 
 
-def _daemon_skip_item(
-    *,
-    op_type: str,
-    size_base_units: int,
-    op_count: int,
-    reason: str,
-    data: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    item: dict[str, Any] = {
-        "op_type": op_type,
-        "size_base_units": size_base_units,
-        "op_count": op_count,
-        "status": "skipped",
-        "reason": reason,
-        "operation_id": None,
-    }
-    if data is not None:
-        item["data"] = data
-    return item
+def _ledger_rows(items: list[DaemonCoinOpLedgerItem]) -> list[dict[str, Any]]:
+    return [item.to_dict() for item in items]
 
 
 def _submit_combine_prereq_for_split(
@@ -103,44 +90,41 @@ def _submit_combine_prereq_for_split(
             },
         )
     except Exception as exc:
-        return (
+        return _ledger_rows(
             [
-                _daemon_skip_item(
+                daemon_coin_op_skipped(
                     op_type=op_type,
                     size_base_units=size_base_units,
                     op_count=op_count,
                     reason=f"cloud_wallet_coin_op_error:{exc}:combine_for_split_prereq",
                 )
-            ],
-            0,
-        )
+            ]
+        ), 0
     combine_sig_id = str(combine_result.get("signature_request_id", "")).strip()
     if not combine_sig_id:
-        return (
+        return _ledger_rows(
             [
-                _daemon_skip_item(
+                daemon_coin_op_skipped(
                     op_type=op_type,
                     size_base_units=size_base_units,
                     op_count=op_count,
                     reason="combine_missing_signature_request_id_for_split_prereq",
                 )
-            ],
-            0,
-        )
-    return (
+            ]
+        ), 0
+    return _ledger_rows(
         [
-            {
-                "op_type": "combine",
-                "size_base_units": size_base_units,
-                "op_count": len(prereq.input_coin_ids),
-                "status": "executed",
-                "reason": (
+            daemon_coin_op_executed(
+                op_type="combine",
+                size_base_units=size_base_units,
+                op_count=len(prereq.input_coin_ids),
+                reason=(
                     "cloud_wallet_kms_combine_submitted_for_split_prereq_exact"
                     if prereq.exact_match
                     else "cloud_wallet_kms_combine_submitted_for_split_prereq_with_change"
                 ),
-                "operation_id": combine_sig_id,
-                "data": {
+                operation_id=combine_sig_id,
+                data={
                     "target_amount": required_amount,
                     "selected_total": int(prereq.selected_total),
                     "exact_match": bool(prereq.exact_match),
@@ -155,10 +139,9 @@ def _submit_combine_prereq_for_split(
                         else ""
                     ),
                 },
-            }
-        ],
-        1,
-    )
+            )
+        ]
+    ), 1
 
 
 def execute_daemon_split_plan(
@@ -169,19 +152,19 @@ def execute_daemon_split_plan(
     op_type = str(plan.op_type)
     op_count = int(plan.op_count)
     size_base_units = int(plan.size_base_units)
-    items: list[dict[str, Any]] = []
+    items: list[DaemonCoinOpLedgerItem] = []
     executed_count = 0
 
     if op_count == 1:
         items.append(
-            _daemon_skip_item(
+            daemon_coin_op_skipped(
                 op_type=op_type,
                 size_base_units=size_base_units,
                 op_count=op_count,
                 reason="split_single_coin_noop_skipped",
             )
         )
-        return items, executed_count
+        return _ledger_rows(items), executed_count
 
     amount_per_coin_mojos = size_base_units * ctx.base_unit_mojo_multiplier
     canonical_asset_id = str(ctx.market.base_asset).strip()
@@ -190,7 +173,7 @@ def execute_daemon_split_plan(
         canonical_asset_id=canonical_asset_id,
     ):
         items.append(
-            _daemon_skip_item(
+            daemon_coin_op_skipped(
                 op_type=op_type,
                 size_base_units=size_base_units,
                 op_count=op_count,
@@ -203,20 +186,20 @@ def execute_daemon_split_plan(
                 },
             )
         )
-        return items, executed_count
+        return _ledger_rows(items), executed_count
 
     required_amount = amount_per_coin_mojos * op_count
     coins = ctx.cloud_wallet.list_coins(asset_id=ctx.resolved_base_asset_id)
     if not ctx.spendable_coins(coins):
         items.append(
-            _daemon_skip_item(
+            daemon_coin_op_skipped(
                 op_type=op_type,
                 size_base_units=size_base_units,
                 op_count=op_count,
                 reason="no_spendable_split_coin_available",
             )
         )
-        return items, executed_count
+        return _ledger_rows(items), executed_count
 
     attempted_coin_ids: set[str] = set()
     split_submitted = False
@@ -231,10 +214,9 @@ def execute_daemon_split_plan(
             candidate_spendable=candidate_spendable,
             required_amount_mojos=required_amount,
             canonical_asset_id=canonical_asset_id,
-            allow_combine_prereq=(attempt_index == 0),
+            profile=SplitPlanningProfile.DAEMON_AUTO,
             combine_input_cap=ctx.combine_input_cap,
-            enforce_required_amount=True,
-            check_sub_cat_change=True,
+            allow_combine_prereq=(attempt_index == 0),
         )
         if isinstance(selection, SplitCombinePrereqPlan):
             return _submit_combine_prereq_for_split(
@@ -249,7 +231,7 @@ def execute_daemon_split_plan(
             if selection.reason == "no_spendable_split_coin_meets_required_amount":
                 break
             items.append(
-                _daemon_skip_item(
+                daemon_coin_op_skipped(
                     op_type=op_type,
                     size_base_units=size_base_units,
                     op_count=op_count,
@@ -257,7 +239,7 @@ def execute_daemon_split_plan(
                     data=selection.data,
                 )
             )
-            return items, executed_count
+            return _ledger_rows(items), executed_count
         assert isinstance(selection, SplitCoinPlan)
         selected_coin_id = selection.coin_id
         attempted_coin_ids.add(selected_coin_id)
@@ -273,7 +255,7 @@ def execute_daemon_split_plan(
             if "Some selected coins are not spendable" in error_text and attempt_index == 0:
                 continue
             items.append(
-                _daemon_skip_item(
+                daemon_coin_op_skipped(
                     op_type=op_type,
                     size_base_units=size_base_units,
                     op_count=op_count,
@@ -282,28 +264,27 @@ def execute_daemon_split_plan(
                     ),
                 )
             )
-            return items, executed_count
+            return _ledger_rows(items), executed_count
 
         signature_request_id = str(result.get("signature_request_id", "")).strip()
         if not signature_request_id:
             items.append(
-                _daemon_skip_item(
+                daemon_coin_op_skipped(
                     op_type=op_type,
                     size_base_units=size_base_units,
                     op_count=op_count,
                     reason="split_missing_signature_request_id",
                 )
             )
-            return items, executed_count
+            return _ledger_rows(items), executed_count
         items.append(
-            {
-                "op_type": op_type,
-                "size_base_units": size_base_units,
-                "op_count": op_count,
-                "status": "executed",
-                "reason": "cloud_wallet_kms_split_submitted",
-                "operation_id": signature_request_id,
-            }
+            daemon_coin_op_executed(
+                op_type=op_type,
+                size_base_units=size_base_units,
+                op_count=op_count,
+                reason="cloud_wallet_kms_split_submitted",
+                operation_id=signature_request_id,
+            )
         )
         split_submitted = True
         executed_count = 1
@@ -311,14 +292,14 @@ def execute_daemon_split_plan(
 
     if not split_submitted:
         items.append(
-            _daemon_skip_item(
+            daemon_coin_op_skipped(
                 op_type=op_type,
                 size_base_units=size_base_units,
                 op_count=op_count,
                 reason="no_spendable_split_coin_meets_required_amount",
             )
         )
-    return items, executed_count
+    return _ledger_rows(items), executed_count
 
 
 def execute_daemon_combine_plan(
@@ -333,14 +314,14 @@ def execute_daemon_combine_plan(
     capped_number_of_coins = min(requested_number_of_coins, ctx.combine_input_cap)
     target_coin_amount_mojos = size_base_units * ctx.base_unit_mojo_multiplier
     canonical_asset_id = str(ctx.market.base_asset).strip()
-    items: list[dict[str, Any]] = []
+    items: list[DaemonCoinOpLedgerItem] = []
 
     if not coin_op_target_amount_allowed(
         amount_mojos=target_coin_amount_mojos,
         canonical_asset_id=canonical_asset_id,
     ):
         items.append(
-            _daemon_skip_item(
+            daemon_coin_op_skipped(
                 op_type=op_type,
                 size_base_units=size_base_units,
                 op_count=op_count,
@@ -353,7 +334,7 @@ def execute_daemon_combine_plan(
                 },
             )
         )
-        return items, 0
+        return _ledger_rows(items), 0
 
     combine_input_coin_ids = plan_auto_combine_inputs(
         spendable_coins=ctx.spendable_coins(
@@ -367,14 +348,14 @@ def execute_daemon_combine_plan(
     )
     if len(combine_input_coin_ids) < 2:
         items.append(
-            _daemon_skip_item(
+            daemon_coin_op_skipped(
                 op_type=op_type,
                 size_base_units=size_base_units,
                 op_count=op_count,
                 reason="no_spendable_combine_coin_available",
             )
         )
-        return items, 0
+        return _ledger_rows(items), 0
 
     try:
         result = combine_coins_with_retry(
@@ -389,42 +370,41 @@ def execute_daemon_combine_plan(
         )
     except Exception as exc:
         items.append(
-            _daemon_skip_item(
+            daemon_coin_op_skipped(
                 op_type=op_type,
                 size_base_units=size_base_units,
                 op_count=op_count,
                 reason=f"cloud_wallet_coin_op_error:{exc}",
             )
         )
-        return items, 0
+        return _ledger_rows(items), 0
 
     signature_request_id = str(result.get("signature_request_id", "")).strip()
     if not signature_request_id:
         items.append(
-            _daemon_skip_item(
+            daemon_coin_op_skipped(
                 op_type=op_type,
                 size_base_units=size_base_units,
                 op_count=op_count,
                 reason="combine_missing_signature_request_id",
             )
         )
-        return items, 0
+        return _ledger_rows(items), 0
 
     items.append(
-        {
-            "op_type": op_type,
-            "size_base_units": size_base_units,
-            "op_count": op_count,
-            "status": "executed",
-            "reason": "cloud_wallet_kms_combine_submitted",
-            "operation_id": signature_request_id,
-            "data": {
+        daemon_coin_op_executed(
+            op_type=op_type,
+            size_base_units=size_base_units,
+            op_count=op_count,
+            reason="cloud_wallet_kms_combine_submitted",
+            operation_id=signature_request_id,
+            data={
                 "requested_number_of_coins": int(requested_number_of_coins),
                 "submitted_number_of_coins": int(len(combine_input_coin_ids)),
                 "input_coin_cap_applied": bool(capped_number_of_coins < requested_number_of_coins),
                 "input_coin_cap": int(ctx.combine_input_cap),
                 "input_coin_ids": combine_input_coin_ids,
             },
-        }
+        )
     )
-    return items, 1
+    return _ledger_rows(items), 1
