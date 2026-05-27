@@ -134,7 +134,7 @@ class OfferPostRequest:
         self,
         *,
         capture_dir_path: Path | None,
-        build_offer_text_fn: collections.abc.Callable[[dict[str, Any]], str],
+        build_offer_fn: collections.abc.Callable[[dict[str, Any]], str],
         post_deps: OfferPostDeps,
         path_label: str = "local",
         path_extra_fields: dict[str, Any] | None = None,
@@ -158,7 +158,7 @@ class OfferPostRequest:
                 self.build_ctx,
                 dry_run=self.dry_run,
                 capture_dir_path=capture_dir_path,
-                build_offer_text_fn=build_offer_text_fn,
+                build_offer_fn=build_offer_fn,
             ),
             bootstrap_policy=BootstrapPolicy(allow_split_fallback=False),
             path_label=path_label,
@@ -173,7 +173,7 @@ class OfferPostRequest:
         backend: OfferExecutionBackend,
         *,
         capture_dir_path: Path | None,
-        build_offer_text_fn: collections.abc.Callable[[dict[str, Any]], str],
+        build_offer_fn: collections.abc.Callable[[dict[str, Any]], str],
         post_deps: OfferPostDeps,
         path_extra_fields: dict[str, Any] | None = None,
     ) -> int:
@@ -184,7 +184,7 @@ class OfferPostRequest:
         else:
             exit_code, _ = self.run_local_bls(
                 capture_dir_path=capture_dir_path,
-                build_offer_text_fn=build_offer_text_fn,
+                build_offer_fn=build_offer_fn,
                 post_deps=post_deps,
                 path_extra_fields=path_extra_fields,
             )

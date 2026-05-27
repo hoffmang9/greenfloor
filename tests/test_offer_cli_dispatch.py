@@ -118,7 +118,7 @@ def testbuild_and_post_offer_cli_uses_local_path_for_large_size_when_cloud_walle
         _fake_cloud_wallet,
     )
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text", lambda payload: "offer1abc"
+        "greenfloor.cli.offer_build_post.build_offer", lambda payload: "offer1abc"
     )
 
     class _FakeDexie(FakeDexie):
@@ -175,7 +175,7 @@ def testbuild_and_post_offer_cli_uses_local_path_when_cloud_wallet_not_configure
         _fake_cloud_wallet,
     )
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text", lambda payload: "offer1abc"
+        "greenfloor.cli.offer_build_post.build_offer", lambda payload: "offer1abc"
     )
 
     class _FakeDexie(FakeDexie):
@@ -233,7 +233,7 @@ def testbuild_and_post_offer_cli_uses_signer_path_for_kms_configured(
         _fake_signer,
     )
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda payload: (
             local_builder_calls.__setitem__(0, local_builder_calls[0] + 1) or "offer1abc"
         ),
@@ -285,7 +285,7 @@ def testbuild_and_post_offer_cli_uses_signer_path_for_kms_configured_large_size(
         _fake_signer,
     )
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda payload: (
             local_builder_calls.__setitem__(0, local_builder_calls[0] + 1) or "offer1abc"
         ),

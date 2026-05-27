@@ -34,7 +34,7 @@ def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, c
             return super().get_offer(offer_id)
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1abc",
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
@@ -83,7 +83,7 @@ def test_build_and_post_offer_local_path_persists_sqlite_audit_record(
     write_markets(markets)
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1abc",
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", FakeDexie)
@@ -148,7 +148,7 @@ def test_build_and_post_offer_uses_market_configured_expiry_override(
         captured_payload.update(payload)
         return "offer1expiryoverride"
 
-    monkeypatch.setattr("greenfloor.cli.offer_build_post.build_offer_text", _fake_build)
+    monkeypatch.setattr("greenfloor.cli.offer_build_post.build_offer", _fake_build)
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
         "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie", lambda _offer: None
@@ -190,7 +190,7 @@ def test_build_and_post_offer_dry_run_builds_but_does_not_post(
             raise AssertionError("DexieAdapter should not be constructed in dry_run")
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1dryrun",
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FailDexie)
@@ -227,7 +227,7 @@ def test_build_and_post_offer_dry_run_can_capture_full_offer_text(
     capture_dir = tmp_path / "offer-capture"
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1captureme",
     )
     monkeypatch.setenv("GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", str(capture_dir))
@@ -267,7 +267,7 @@ def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Pat
         offer_id = "offer-xyz"
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1pair",
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
@@ -310,7 +310,7 @@ def test_build_and_post_offer_accepts_txch_pair_on_testnet11(
         offer_id = "offer-txch"
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1pair",
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
@@ -441,7 +441,7 @@ def test_build_and_post_offer_posts_to_splash_when_selected(
             return {"success": True, "id": "splash-1"}
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1pair",
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.SplashAdapter", _FakeSplash)
@@ -480,7 +480,7 @@ def test_build_and_post_offer_returns_nonzero_when_offer_verification_fails(
     write_markets(markets)
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1bad",
     )
     monkeypatch.setattr(
@@ -573,7 +573,7 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
     )
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1noexpiry",
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
@@ -620,7 +620,7 @@ def test_build_and_post_offer_returns_nonzero_when_publish_fails(
             return {"success": False, "error": "dexie_http_error:500"}
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1abc",
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
@@ -663,7 +663,7 @@ def test_build_and_post_offer_dry_run_returns_nonzero_when_build_fails(
         raise RuntimeError("signing_failed:no_agg_sig_targets_found")
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         _raise_build_error,
     )
 
@@ -701,7 +701,7 @@ def test_local_offer_create_fn_delegates_to_offer_builder(monkeypatch) -> None:
     )
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer_text",
+        "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1direct",
     )
     market = replace(
@@ -718,7 +718,7 @@ def test_local_offer_create_fn_delegates_to_offer_builder(monkeypatch) -> None:
     create_fn = make_local_offer_create_fn(
         build_ctx,
         dry_run=False,
-        build_offer_text_fn=offer_build_post.build_offer_text,
+        build_offer_fn=offer_build_post.build_offer,
     )
     outcome = create_fn(size_base_units=1, quote_price=0.5, action_side="sell")
     assert outcome.offer_text == "offer1direct"

@@ -11,7 +11,7 @@ use crate::bls::coins::cat_asset_bytes;
 use crate::bls::spend::build_signed_spend;
 use crate::coinset::is_xch_like_asset;
 use crate::coinset::{
-    client_for_network, list_and_select_cats, select_xch_for_amount, CatSelectionMode,
+    client_for_network, list_and_select_cats, select_xch_for_amount, CoinSelectionMode,
 };
 use crate::error::{SignerError, SignerResult};
 use crate::offer::plan::build_requested_payments;
@@ -60,7 +60,7 @@ async fn select_offer_inputs(
         asset_bytes,
         explicit_coin_ids,
         offer_amount,
-        CatSelectionMode::SmallestFirst,
+        CoinSelectionMode::SmallestFirst,
         SignerError::NoUnspentOfferCatCoins,
         SignerError::InsufficientOfferCatCoins,
     )

@@ -6,7 +6,7 @@ mod presplit;
 mod xch;
 
 pub(crate) use coin_select::{
-    finalize_selected_cats, list_and_select_cats, select_xch_for_amount, CatSelectionMode,
+    finalize_selected_cats, list_and_select_cats, select_xch_for_amount, CoinSelectionMode,
 };
 
 pub use asset::is_xch_like_asset;

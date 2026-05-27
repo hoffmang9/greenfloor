@@ -120,10 +120,5 @@ def _build_offer(payload: dict[str, Any]) -> str:
 
 
 def build_offer(payload: dict[str, Any]) -> str:
-    """Build an offer text string from payload. Raises on failure."""
+    """Build an offer1... string from payload. Raises on failure."""
     return _build_offer(payload)
-
-
-def build_offer_text(payload: dict[str, Any]) -> str:
-    """Build an offer1... string via in-process offer construction."""
-    return build_offer(payload)

@@ -11,7 +11,7 @@ use crate::bls::spend::build_signed_standard_spend;
 use crate::coinset::is_xch_like_asset;
 use crate::coinset::{
     broadcast_spend_bundle, client_for_network, list_and_select_cats, list_unspent_xch,
-    select_xch_for_amount, BroadcastSpendBundleResult, CatSelectionMode, MIN_CAT_OUTPUT_MOJOS,
+    select_xch_for_amount, BroadcastSpendBundleResult, CoinSelectionMode, MIN_CAT_OUTPUT_MOJOS,
 };
 use crate::error::{SignerError, SignerResult};
 
@@ -84,7 +84,7 @@ pub async fn build_bls_mixed_split_spend_bundle(
         .await?;
     } else {
         let asset_bytes = cat_asset_bytes(&asset_raw)?;
-        let cat_mode = CatSelectionMode::from_explicit_ids(&explicit_coin_ids);
+        let cat_mode = CoinSelectionMode::from_explicit_ids(&explicit_coin_ids);
         offered_cats = list_and_select_cats(
             &client,
             receive_address,

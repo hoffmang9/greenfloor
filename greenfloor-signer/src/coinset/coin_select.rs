@@ -14,20 +14,20 @@ use crate::error::{SignerError, SignerResult};
 
 /// How to reduce a CAT list to the coins that cover *target_amount*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CatSelectionMode {
+pub enum CoinSelectionMode {
     /// Smallest-first subset until the running total reaches the target.
     SmallestFirst,
     /// Use every listed coin; fail when the sum is below the target.
     ExplicitSum,
 }
 
-impl CatSelectionMode {
+impl CoinSelectionMode {
     /// Wallet listing uses smallest-first; explicit coin ids use the full set.
     pub fn from_explicit_ids(explicit_coin_ids: &[Bytes32]) -> Self {
         if explicit_coin_ids.is_empty() {
-            CatSelectionMode::SmallestFirst
+            CoinSelectionMode::SmallestFirst
         } else {
-            CatSelectionMode::ExplicitSum
+            CoinSelectionMode::ExplicitSum
         }
     }
 }
@@ -36,7 +36,7 @@ impl CatSelectionMode {
 pub(crate) fn select_cats_from_list(
     cats: Vec<Cat>,
     target_amount: u64,
-    mode: CatSelectionMode,
+    mode: CoinSelectionMode,
     empty_list_err: SignerError,
     insufficient_err: SignerError,
 ) -> SignerResult<Vec<Cat>> {
@@ -44,8 +44,8 @@ pub(crate) fn select_cats_from_list(
         return Err(empty_list_err);
     }
     let selected = match mode {
-        CatSelectionMode::SmallestFirst => select_cats_smallest_first(cats, target_amount),
-        CatSelectionMode::ExplicitSum => cats,
+        CoinSelectionMode::SmallestFirst => select_cats_smallest_first(cats, target_amount),
+        CoinSelectionMode::ExplicitSum => cats,
     };
     if selected.is_empty() {
         return Err(insufficient_err);
@@ -64,7 +64,7 @@ pub(crate) async fn list_and_select_cats(
     asset_id: Bytes32,
     explicit_coin_ids: &[Bytes32],
     target_amount: u64,
-    mode: CatSelectionMode,
+    mode: CoinSelectionMode,
     empty_list_err: SignerError,
     insufficient_err: SignerError,
 ) -> SignerResult<Vec<Cat>> {
@@ -87,7 +87,7 @@ pub(crate) fn finalize_selected_cats(
     explicit_coin_ids: &[Bytes32],
     target_amount: u64,
 ) -> SignerResult<SelectedCats> {
-    let mode = CatSelectionMode::from_explicit_ids(explicit_coin_ids);
+    let mode = CoinSelectionMode::from_explicit_ids(explicit_coin_ids);
     let selected = select_cats_from_list(
         cats,
         target_amount,
@@ -146,7 +146,7 @@ mod tests {
         let selected = select_cats_from_list(
             cats,
             2500,
-            CatSelectionMode::SmallestFirst,
+            CoinSelectionMode::SmallestFirst,
             SignerError::NoUnspentCatCoins,
             SignerError::InsufficientCatCoins,
         )
@@ -161,7 +161,7 @@ mod tests {
         let err = select_cats_from_list(
             vec![],
             1000,
-            CatSelectionMode::SmallestFirst,
+            CoinSelectionMode::SmallestFirst,
             SignerError::NoUnspentCatCoins,
             SignerError::InsufficientCatCoins,
         )
@@ -174,7 +174,7 @@ mod tests {
         let err = select_cats_from_list(
             vec![cat_with_amount(500)],
             1000,
-            CatSelectionMode::SmallestFirst,
+            CoinSelectionMode::SmallestFirst,
             SignerError::NoUnspentCatCoins,
             SignerError::InsufficientCatCoins,
         )
@@ -187,7 +187,7 @@ mod tests {
         let selected = select_cats_from_list(
             vec![cat_with_amount(700), cat_with_amount(400)],
             1000,
-            CatSelectionMode::ExplicitSum,
+            CoinSelectionMode::ExplicitSum,
             SignerError::NoUnspentCatCoins,
             SignerError::InsufficientCatCoins,
         )
@@ -204,7 +204,7 @@ mod tests {
         let err = select_cats_from_list(
             vec![cat_with_amount(400)],
             1000,
-            CatSelectionMode::ExplicitSum,
+            CoinSelectionMode::ExplicitSum,
             SignerError::NoUnspentCatCoins,
             SignerError::InsufficientCatCoins,
         )

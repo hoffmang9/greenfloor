@@ -1328,7 +1328,7 @@ def _build_offer_for_action(
     program_path: Path | None = None,
     keyring_yaml_path: str | None = None,
 ) -> dict[str, Any]:
-    from greenfloor.offer_builder import build_offer_text
+    from greenfloor.offer_builder import build_offer
 
     side = _normalize_offer_side(getattr(action, "side", "sell"))
     if side == "buy":
@@ -1360,7 +1360,7 @@ def _build_offer_for_action(
         xch_price_usd=xch_price_usd,
     )
     try:
-        offer = build_offer_text(payload)
+        offer = build_offer(payload)
     except Exception as exc:
         return {"status": "skipped", "reason": f"offer_builder_failed:{exc}", "offer": None}
     return {"status": "executed", "reason": "offer_builder_success", "offer": offer}
