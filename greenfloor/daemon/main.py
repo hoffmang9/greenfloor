@@ -60,11 +60,16 @@ from greenfloor.logging_setup import (
     warn_if_log_level_auto_healed,
 )
 from greenfloor.notify.pushover import send_pushover_alert
+from greenfloor.runtime.cloud_wallet.assets import (
+    resolve_cloud_wallet_offer_asset_ids,
+)
 from greenfloor.runtime.offer_execution import (
     build_and_post_offer_cloud_wallet,
     build_and_post_offer_signer,
+)
+from greenfloor.runtime.offer_publish import (
     is_transient_dexie_visibility_404_error,
-    resolve_cloud_wallet_offer_asset_ids,
+    resolve_quote_price_for_market,
     verify_offer_visible_on_dexie,
 )
 from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
@@ -1484,25 +1489,6 @@ def _inject_reseed_action_if_no_active_offers(
     return reseed_actions
 
 
-def _resolve_quote_price_quote_per_base(market) -> float:
-    pricing = _market_pricing(market)
-    quote_price = pricing.get("fixed_quote_per_base")
-    if quote_price is None:
-        min_q = pricing.get("min_price_quote_per_base")
-        max_q = pricing.get("max_price_quote_per_base")
-        if min_q is not None and max_q is not None:
-            quote_price = (float(min_q) + float(max_q)) / 2.0
-        elif min_q is not None:
-            quote_price = float(min_q)
-        elif max_q is not None:
-            quote_price = float(max_q)
-    if quote_price is None:
-        raise ValueError(
-            "market pricing must define fixed_quote_per_base or min/max_price_quote_per_base"
-        )
-    return float(quote_price)
-
-
 def _build_offer_for_action(
     *,
     market,
@@ -1522,7 +1508,7 @@ def _build_offer_for_action(
         }
     pricing = _market_pricing(market)
     try:
-        quote_price = _resolve_quote_price_quote_per_base(market)
+        quote_price = resolve_quote_price_for_market(market)
     except Exception as exc:
         return {
             "status": "skipped",
@@ -1970,7 +1956,7 @@ def _reservation_request_for_cloud_offer_with_assets(
     quote_amount = int(
         round(
             float(action.size)
-            * float(_resolve_quote_price_quote_per_base(market))
+            * float(resolve_quote_price_for_market(market))
             * float(quote_multiplier)
         )
     )
@@ -2056,7 +2042,7 @@ def _managed_offer_post(
             "error": "managed_offer_post_requires_program_config",
         }
 
-    quote_price = _resolve_quote_price_quote_per_base(market)
+    quote_price = resolve_quote_price_for_market(market)
     build_kwargs: dict[str, Any] = {
         "program": program,
         "market": market,

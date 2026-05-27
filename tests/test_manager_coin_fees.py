@@ -1,31 +1,16 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
-from typing import Any, cast
-
-import pytest
-import yaml
 
 import greenfloor.cli.manager as manager_mod
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
-
 from greenfloor.cli.manager import (
     _coin_combine,
     _coin_split,
-    _coins_list,
 )
-from greenfloor.runtime.cloud_wallet.assets import (
-    resolve_cloud_wallet_asset_id,
-)
-
 from tests.helpers.offer_runtime_fixtures import (
+    write_manager_program_with_cloud_wallet,
     write_markets,
-    write_markets_with_duplicate_pair,
-    write_markets_with_ladder,
-    write_program,
-    write_program_with_cloud_wallet,
 )
 
 
@@ -52,6 +37,7 @@ def test_resolve_taker_or_coin_operation_fee_uses_coinset_value(monkeypatch) -> 
     assert fee == 15
     assert source == "coinset_conservative"
 
+
 def test_resolve_taker_or_coin_operation_fee_applies_minimum_floor(monkeypatch) -> None:
     class _FakeCoinset:
         def __init__(self, _arg, *, network: str):
@@ -74,6 +60,7 @@ def test_resolve_taker_or_coin_operation_fee_applies_minimum_floor(monkeypatch) 
     )
     assert fee == 5
     assert source == "coinset_conservative_minimum_floor"
+
 
 def test_resolve_taker_or_coin_operation_fee_falls_back_to_config_minimum(monkeypatch) -> None:
     class _FakeCoinset:
@@ -105,6 +92,7 @@ def test_resolve_taker_or_coin_operation_fee_falls_back_to_config_minimum(monkey
     assert fee == 0
     assert source == "config_minimum_fee_fallback"
 
+
 def test_resolve_taker_or_coin_operation_fee_fails_on_endpoint_preflight(monkeypatch) -> None:
     class _FakeCoinset:
         def __init__(self, _arg, *, network: str):
@@ -123,6 +111,7 @@ def test_resolve_taker_or_coin_operation_fee_fails_on_endpoint_preflight(monkeyp
         assert "coinset_network_error" in exc.detail
     else:
         raise AssertionError("expected _CoinsetFeeLookupPreflightError")
+
 
 def test_resolve_taker_or_coin_operation_fee_fails_on_temporary_advice_unavailable(
     monkeypatch,
@@ -145,6 +134,7 @@ def test_resolve_taker_or_coin_operation_fee_fails_on_temporary_advice_unavailab
     else:
         raise AssertionError("expected _CoinsetFeeLookupPreflightError")
 
+
 def test_effective_coin_split_fee_for_cat_keeps_default_fee() -> None:
     fee, source = manager_mod._effective_coin_split_fee_for_asset(
         canonical_asset_id="a1",
@@ -154,6 +144,7 @@ def test_effective_coin_split_fee_for_cat_keeps_default_fee() -> None:
     )
     assert fee == 42
     assert source == "coinset_conservative"
+
 
 def test_effective_coin_split_fee_for_xch_keeps_default_fee() -> None:
     fee, source = manager_mod._effective_coin_split_fee_for_asset(
@@ -165,6 +156,7 @@ def test_effective_coin_split_fee_for_xch_keeps_default_fee() -> None:
     assert fee == 42
     assert source == "coinset_conservative"
 
+
 def test_resolve_maker_offer_fee_is_zero() -> None:
     from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
 
@@ -172,10 +164,11 @@ def test_resolve_maker_offer_fee_is_zero() -> None:
     assert fee == 0
     assert source == "maker_default_zero"
 
+
 def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     calls = {}
@@ -226,10 +219,11 @@ def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys
     assert payload["coin_selection_mode"] == "explicit"
     assert payload["resolved_asset_id"] == "Asset_split_base"
 
+
 def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     calls = {}
@@ -280,12 +274,13 @@ def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, caps
     assert payload["asset_id"] == "xch"
     assert payload["resolved_asset_id"] == "Asset_huun64oh7dbt9f1f9ie8khuw"
 
+
 def test_coin_split_returns_structured_error_when_fee_resolution_fails(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeWallet:
@@ -323,12 +318,13 @@ def test_coin_split_returns_structured_error_when_fee_resolution_fails(
     assert payload["error"].startswith("fee_resolution_failed:")
     assert "coin_ops.minimum_fee_mojos" in payload["operator_guidance"]
 
+
 def test_coin_combine_returns_structured_error_when_fee_resolution_fails(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeWallet:
@@ -366,12 +362,13 @@ def test_coin_combine_returns_structured_error_when_fee_resolution_fails(
     assert payload["error"].startswith("fee_resolution_failed:")
     assert "coin_ops.minimum_fee_mojos" in payload["operator_guidance"]
 
+
 def test_coin_combine_distinguishes_temporary_fee_advice_unavailability(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeWallet:
@@ -411,4 +408,3 @@ def test_coin_combine_distinguishes_temporary_fee_advice_unavailability(
     assert payload["error"] == "coinset_fee_preflight_failed:temporary_fee_advice_unavailable"
     assert payload["coinset_fee_lookup"]["failure_kind"] == "temporary_fee_advice_unavailable"
     assert "temporarily unavailable" in payload["operator_guidance"]
-

@@ -1,31 +1,17 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
-from typing import Any, cast
-
-import pytest
-import yaml
 
 import greenfloor.cli.manager as manager_mod
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
-
 from greenfloor.cli.manager import (
-    _coin_combine,
     _coin_split,
-    _coins_list,
 )
-from greenfloor.runtime.cloud_wallet.assets import (
-    resolve_cloud_wallet_asset_id,
-)
-
 from tests.helpers.offer_runtime_fixtures import (
+    write_manager_program,
+    write_manager_program_with_cloud_wallet,
     write_markets,
-    write_markets_with_duplicate_pair,
     write_markets_with_ladder,
-    write_program,
-    write_program_with_cloud_wallet,
 )
 
 
@@ -34,7 +20,7 @@ def test_coin_split_auto_selects_largest_spendable_asset_coin(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     calls: dict[str, tuple[list[str], int, int, int] | None] = {"split": None}
@@ -89,12 +75,13 @@ def test_coin_split_auto_selects_largest_spendable_asset_coin(
     assert payload["coin_selection_mode"] == "adapter_auto_select"
     assert payload["resolved_asset_id"] == "Asset_split_base"
 
+
 def test_coin_split_guardrail_blocks_when_it_would_lock_all_spendable_coins(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     split_called = [False]
@@ -146,12 +133,13 @@ def test_coin_split_guardrail_blocks_when_it_would_lock_all_spendable_coins(
     assert payload["spendable_asset_coin_count"] == 1
     assert payload["selected_spendable_coin_count"] == 1
 
+
 def test_coin_split_guardrail_override_allows_lock_all_spendable(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     calls: dict[str, tuple[list[str], int, int, int] | None] = {"split": None}
@@ -202,12 +190,13 @@ def test_coin_split_guardrail_override_allows_lock_all_spendable(
     assert payload["coin_selection_mode"] == "adapter_auto_select"
     assert payload["resolved_asset_id"] == "Asset_split_base"
 
+
 def test_coin_split_guardrail_prompt_override_allows_continue(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     calls: dict[str, tuple[list[str], int, int, int] | None] = {"split": None}
@@ -258,12 +247,13 @@ def test_coin_split_guardrail_prompt_override_allows_continue(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["resolved_asset_id"] == "Asset_split_base"
 
+
 def test_coin_split_distinguishes_coinset_endpoint_preflight_failure(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeWallet:
@@ -304,12 +294,13 @@ def test_coin_split_distinguishes_coinset_endpoint_preflight_failure(
     assert payload["coinset_fee_lookup"]["failure_kind"] == "endpoint_validation_failed"
     assert "endpoint routing" in payload["operator_guidance"]
 
+
 def test_coin_split_returns_structured_error_when_coin_id_not_found(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeWallet:
@@ -345,12 +336,13 @@ def test_coin_split_returns_structured_error_when_coin_id_not_found(
     assert payload["error"] == "coin_id_resolution_failed"
     assert payload["unknown_coin_ids"] == ["missing-coin-name"]
 
+
 def test_coin_split_uses_market_ladder_target_when_size_is_provided(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program, provider="splash")
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="splash")
     write_markets_with_ladder(markets)
     calls = {}
 
@@ -394,12 +386,13 @@ def test_coin_split_uses_market_ladder_target_when_size_is_provided(
     assert payload["venue"] == "splash"
     assert payload["denomination_target"]["required_count"] == 4
 
+
 def test_coin_split_until_ready_ignores_unknown_states_and_string_asset(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program, provider="dexie")
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="dexie")
     write_markets_with_ladder(markets)
 
     class _FakeWallet:
@@ -463,10 +456,11 @@ def test_coin_split_until_ready_ignores_unknown_states_and_string_asset(
     assert payload["error"] == "no_spendable_split_coin_available"
     assert payload["resolved_asset_id"] == "a1"
 
+
 def test_coin_split_until_ready_requires_size_base_units(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program(program)
+    write_manager_program(program, tmp_path=tmp_path)
     write_markets(markets)
     try:
         _coin_split(
@@ -487,10 +481,11 @@ def test_coin_split_until_ready_requires_size_base_units(tmp_path: Path) -> None
     else:
         raise AssertionError("expected ValueError")
 
+
 def test_coin_split_until_ready_disallows_no_wait(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program(program)
+    write_manager_program(program, tmp_path=tmp_path)
     write_markets_with_ladder(markets)
     try:
         _coin_split(
@@ -511,10 +506,11 @@ def test_coin_split_until_ready_disallows_no_wait(tmp_path: Path) -> None:
     else:
         raise AssertionError("expected ValueError")
 
+
 def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program, provider="dexie")
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="dexie")
     write_markets_with_ladder(markets)
 
     class _FakeWallet:
@@ -592,12 +588,13 @@ def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, c
     assert payload["denomination_readiness"]["ready"] is False
     assert len(payload["operations"]) == 1
 
+
 def test_coin_split_until_ready_succeeds_when_denominations_met(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program, provider="dexie")
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="dexie")
     write_markets_with_ladder(markets)
 
     class _FakeWallet:
@@ -668,12 +665,13 @@ def test_coin_split_until_ready_succeeds_when_denominations_met(
     assert payload["denomination_readiness"]["ready"] is True
     assert payload["split_gate"]["reserve_ready"] is True
 
+
 def test_coin_split_gate_ready_skips_split_in_non_interactive_mode(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program, provider="dexie")
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="dexie")
     write_markets_with_ladder(markets)
 
     split_called = [False]
@@ -738,4 +736,3 @@ def test_coin_split_gate_ready_skips_split_in_non_interactive_mode(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["stop_reason"] == "ready"
     assert payload["split_gate"]["ready"] is True
-

@@ -14,7 +14,7 @@ from greenfloor.cloud_wallet_asset_cache import (
     wallet_assets_cache_path,
     wallet_assets_cache_ttl_seconds,
 )
-from greenfloor.runtime.offer_execution import seed_cloud_wallet_assets_cache
+from greenfloor.runtime.cloud_wallet.assets import seed_cloud_wallet_assets_cache
 
 
 def test_wallet_assets_cache_round_trip(tmp_path: Path) -> None:

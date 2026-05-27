@@ -1,40 +1,11 @@
 from __future__ import annotations
 
-import datetime as dt
-import json
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
-import greenfloor.cli.manager as manager_mod
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
-from greenfloor.cli.manager import _build_and_post_offer
+from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.runtime.cloud_wallet.bootstrap import ensure_offer_bootstrap_denominations
-from greenfloor.runtime.cloud_wallet.deps import default_cloud_wallet_offer_deps
-from greenfloor.runtime.cloud_wallet.phases import (
-    cloud_wallet_create_offer_phase,
-    cloud_wallet_wait_offer_artifact_phase,
-)
-from greenfloor.runtime.offer_execution import build_and_post_offer_cloud_wallet
-
-from tests.helpers.offer_runtime_fixtures import (
-    write_markets,
-    write_markets_with_duplicate_pair,
-    write_markets_with_ladder,
-    write_program,
-    write_program_with_cloud_wallet,
-)
-
-from tests.helpers.cloud_wallet_offer_deps import cloud_wallet_test_deps
-from tests.logging_helpers import reset_concurrent_log_handlers
-
-from tests.helpers.offer_runtime_fixtures import (
-    write_markets,
-    write_markets_with_duplicate_pair,
-    write_markets_with_ladder,
-    write_program,
-    write_program_with_cloud_wallet,
-)
 
 
 def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
@@ -63,6 +34,7 @@ def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
         ladders = {"sell": [_LadderEntry()]}
         receive_address = "xch1test"
         base_asset = "xch"
+        pricing = {}
 
     class _Wallet:
         @staticmethod
@@ -88,8 +60,8 @@ def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
     _plan.deficits = [_Deficit()]
 
     result = ensure_offer_bootstrap_denominations(
-        program=_Program(),
-        market=_Market(),
+        program=cast(ProgramConfig, _Program()),
+        market=cast(MarketConfig, _Market()),
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="xch",
         resolved_quote_asset_id="wusdc",
@@ -106,6 +78,7 @@ def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
     assert result["reason"] == "bootstrap_wait_failed"
     assert result["wait_error"] == "confirmation_wait_timeout"
     assert result["fallback_to_cloud_wallet_offer_split"] is True
+
 
 def test_ensure_offer_bootstrap_denominations_reports_fee_balance_guidance(
     monkeypatch, tmp_path: Path
@@ -133,6 +106,7 @@ def test_ensure_offer_bootstrap_denominations_reports_fee_balance_guidance(
         ladders = {"sell": [_LadderEntry()]}
         receive_address = "xch1test"
         base_asset = "xch"
+        pricing = {}
 
     class _Wallet:
         @staticmethod
@@ -161,8 +135,8 @@ def test_ensure_offer_bootstrap_denominations_reports_fee_balance_guidance(
         raise RuntimeError("insufficient_xch_fee_balance_for_mixed_split:required=100:available=0")
 
     result = ensure_offer_bootstrap_denominations(
-        program=_Program(),
-        market=_Market(),
+        program=cast(ProgramConfig, _Program()),
+        market=cast(MarketConfig, _Market()),
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="xch",
         resolved_quote_asset_id="wusdc",
@@ -175,6 +149,7 @@ def test_ensure_offer_bootstrap_denominations_reports_fee_balance_guidance(
     assert "insufficient_xch_fee_balance_for_mixed_split" in str(
         result.get("reason", "") or result.get("error", "")
     )
+
 
 def test_ensure_offer_bootstrap_denominations_buy_waits_on_quote_asset(
     monkeypatch, tmp_path: Path
@@ -229,8 +204,8 @@ def test_ensure_offer_bootstrap_denominations_buy_waits_on_quote_asset(
         deficits = [_Deficit()]
 
     result = ensure_offer_bootstrap_denominations(
-        program=_Program(),
-        market=_Market(),
+        program=cast(ProgramConfig, _Program()),
+        market=cast(MarketConfig, _Market()),
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="Asset_base",
         resolved_quote_asset_id="Asset_quote",
@@ -238,14 +213,12 @@ def test_ensure_offer_bootstrap_denominations_buy_waits_on_quote_asset(
         action_side="buy",
         plan_bootstrap_mixed_outputs_fn=lambda **_k: _Plan(),
         resolve_bootstrap_split_fee_fn=lambda **_k: (0, "coinset_conservative", None),
-        wait_for_mempool_then_confirmation_fn=lambda **kwargs: wait_asset_ids.append(
-            str(kwargs.get("asset_id"))
-        )
-        or [],
+        wait_for_mempool_then_confirmation_fn=lambda **kwargs: (
+            wait_asset_ids.append(str(kwargs.get("asset_id"))) or []
+        ),
         split_coins_fn=lambda **_kw: {"signature_request_id": "sr-1", "status": "SUBMITTED"},
         poll_signature_request_until_not_unsigned_fn=lambda **_kw: ("SUBMITTED", []),
     )
     assert result["status"] == "executed"
     assert wait_asset_ids == ["Asset_quote"]
     assert list_asset_ids[0] == "Asset_quote"
-

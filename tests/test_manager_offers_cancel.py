@@ -1,34 +1,21 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
-from typing import Any, cast
-
-import pytest
-import yaml
-
-import greenfloor.cli.manager as manager_mod
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
+from typing import Any
 
 from greenfloor.cli.manager import (
-    _build_and_post_offer,
     _offers_cancel,
 )
-
 from tests.helpers.offer_runtime_fixtures import (
+    write_manager_program_with_cloud_wallet,
     write_markets,
-    write_markets_with_duplicate_pair,
-    write_markets_with_ladder,
-    write_program,
-    write_program_with_cloud_wallet,
 )
 
-from tests.logging_helpers import reset_concurrent_log_handlers
 
 def test_offers_cancel_cancel_open_uses_cloud_wallet(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
 
     cancelled: list[tuple[str, bool]] = []
 
@@ -79,11 +66,12 @@ def test_offers_cancel_cancel_open_uses_cloud_wallet(monkeypatch, tmp_path: Path
         == "https://wallet.example.com/wallet/wallet-1/offers/WalletOffer_1"
     )
 
+
 def test_offers_cancel_pending_offer_uses_off_chain_cancel(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
 
     cancelled: list[tuple[str, bool]] = []
 
@@ -128,12 +116,13 @@ def test_offers_cancel_pending_offer_uses_off_chain_cancel(
     assert payload["items"][0]["result"]["success"] is True
     assert payload["items"][0]["result"]["reason"] == "cancel_off_chain_requested"
 
+
 def test_offers_cancel_can_submit_onchain_refresh_after_offchain(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     cancelled: list[tuple[str, bool]] = []
@@ -234,12 +223,13 @@ def test_offers_cancel_can_submit_onchain_refresh_after_offchain(
         == "SignatureRequest_refresh"
     )
 
+
 def test_offers_cancel_submit_onchain_requires_market_selection(
     monkeypatch, tmp_path: Path
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _Program:
@@ -270,4 +260,3 @@ def test_offers_cancel_submit_onchain_requires_market_selection(
         raise AssertionError("expected ValueError")
     except ValueError as exc:
         assert str(exc) == "provide exactly one of --market-id or --pair"
-

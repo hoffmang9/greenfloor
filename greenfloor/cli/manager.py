@@ -9,7 +9,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,12 @@ from greenfloor.asset_label_catalog import (
     _is_hex_asset_id,
     _normalize_hex_asset_id,
 )
+from greenfloor.cli.offer_build_post import (
+    build_and_post_offer_cli as _build_and_post_offer,
+)
+from greenfloor.cli.offer_build_post import (
+    resolve_market_for_build as _resolve_market_for_build,
+)
 from greenfloor.config.io import (
     default_cats_config_path as _default_cats_config_path_shared,
 )
@@ -35,12 +41,10 @@ from greenfloor.config.io import (
     load_markets_config_with_optional_overlay,
     load_program_config,
     load_yaml,
-    resolve_quote_asset_for_offer,
     write_yaml,
 )
-from greenfloor.config.models import offer_execution_backend, prepare_signer_runtime
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
-from greenfloor.hex_utils import canonical_is_xch, default_mojo_multiplier_for_asset
+from greenfloor.hex_utils import canonical_is_xch
 from greenfloor.keys.onboarding import (
     KeyOnboardingSelection,
     determine_onboarding_branch,
@@ -50,25 +54,18 @@ from greenfloor.keys.onboarding import (
 from greenfloor.keys.router import resolve_market_key
 from greenfloor.logging_setup import (
     ALLOWED_LOG_LEVELS,
-    initialize_service_file_logging,
     normalize_log_level_name,
     warn_if_log_level_auto_healed,
 )
-from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
-from greenfloor.offer_builder import build_offer_text
 from greenfloor.offer_decode import (
     extract_coin_id_hints_from_offer_text as _extract_coin_id_hints_from_offer_text,
 )
 from greenfloor.runtime.cloud_wallet.adapter import _require_cloud_wallet_config
 from greenfloor.runtime.cloud_wallet.assets import (
     resolve_cloud_wallet_asset_id,
-)
-from greenfloor.runtime.cloud_wallet.bootstrap import (
-    ensure_offer_bootstrap_denominations,
-    resolve_bootstrap_split_fee,
+    seed_cloud_wallet_assets_cache,
 )
 from greenfloor.runtime.cloud_wallet.coins import coin_asset_id, is_spendable_coin, safe_int
-from greenfloor.runtime.cloud_wallet.deps import default_cloud_wallet_offer_deps
 from greenfloor.runtime.cloud_wallet.polling import (
     poll_signature_request_until_not_unsigned,
     wait_for_mempool_then_confirmation,
@@ -79,39 +76,14 @@ from greenfloor.runtime.coinset_runtime import (
 from greenfloor.runtime.coinset_runtime import (
     _resolve_taker_or_coin_operation_fee,
 )
-from greenfloor.runtime.offer_execution import (
-    build_and_post_offer_cloud_wallet,
-    build_and_post_offer_signer,
-    seed_cloud_wallet_assets_cache,
-)
-from greenfloor.runtime.offer_orchestration import (
-    BootstrapPolicy,
-    OfferCreateFailure,
-    OfferCreateOutcome,
-    build_and_post_offer,
-    default_offer_post_deps,
-)
-from greenfloor.runtime.offer_publish import (
-    resolve_offer_expiry_for_market,
-)
 from greenfloor.storage.sqlite import SqliteStore
 
 _TEST_PHASE_OFFER_EXPIRY_MINUTES = 5
-_MANAGER_SERVICE_NAME = "manager"
 _DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS = 4
 _DEXIE_INVALID_OFFER_RETRY_INITIAL_DELAY_SECONDS = 1.0
 
 
 _manager_logger = logging.getLogger("greenfloor.manager")
-
-
-def _initialize_manager_file_logging(home_dir: str, *, log_level: str | None) -> None:
-    initialize_service_file_logging(
-        service_name=_MANAGER_SERVICE_NAME,
-        home_dir=home_dir,
-        log_level=log_level,
-        service_logger=_manager_logger,
-    )
 
 
 def _warn_if_log_level_auto_healed(*, program, program_path: Path) -> None:
@@ -1347,308 +1319,6 @@ def _select_offer_coin_ids_for_target_amount(
         if running_total >= target_amount:
             return selected_coin_ids
     return []
-
-
-def _resolve_quote_asset_for_local_offer_build(*, quote_asset: str, network: str) -> str:
-    return resolve_quote_asset_for_offer(quote_asset=quote_asset, network=network)
-
-
-def _build_offer_text_for_request(payload: dict) -> str:
-    return build_offer_text(payload)
-
-
-def _ensure_offer_bootstrap_denominations(
-    *,
-    program: Any,
-    market: Any,
-    wallet: CloudWalletAdapter,
-    resolved_base_asset_id: str,
-    resolved_quote_asset_id: str,
-    quote_price: float,
-    action_side: str = "sell",
-    **kwargs: Any,
-) -> dict[str, Any]:
-    return ensure_offer_bootstrap_denominations(
-        program=program,
-        market=market,
-        wallet=wallet,
-        resolved_base_asset_id=resolved_base_asset_id,
-        resolved_quote_asset_id=resolved_quote_asset_id,
-        quote_price=quote_price,
-        action_side=action_side,
-        plan_bootstrap_mixed_outputs_fn=plan_bootstrap_mixed_outputs,
-        resolve_bootstrap_split_fee_fn=resolve_bootstrap_split_fee,
-        wait_for_mempool_then_confirmation_fn=lambda **kwargs: wait_for_mempool_then_confirmation(
-            include_pending=True, **kwargs
-        ),
-        is_spendable_coin_fn=is_spendable_coin,
-        **kwargs,
-    )
-
-
-def _build_and_post_offer(
-    *,
-    program_path: Path,
-    markets_path: Path,
-    testnet_markets_path: Path | None = None,
-    network: str,
-    market_id: str | None,
-    pair: str | None,
-    size_base_units: int,
-    repeat: int,
-    publish_venue: str,
-    dexie_base_url: str,
-    splash_base_url: str,
-    drop_only: bool,
-    claim_rewards: bool,
-    dry_run: bool,
-) -> int:
-    if size_base_units <= 0:
-        raise ValueError("size_base_units must be positive")
-    if repeat <= 0:
-        raise ValueError("repeat must be positive")
-
-    program = load_program_config(program_path)
-    markets = load_markets_config_with_optional_overlay(
-        path=markets_path,
-        overlay_path=testnet_markets_path,
-    )
-    market = _resolve_market_for_build(
-        markets,
-        market_id=market_id,
-        pair=pair,
-        network=network,
-    )
-    signer_key = program.signer_key_registry.get(market.signer_key_id)
-    # Normalize optional keyring path to a concrete string for downstream paths
-    # (pyright and runtime callers) that treat this as a non-optional value.
-    keyring_yaml_path = str(signer_key.keyring_yaml_path or "") if signer_key is not None else ""
-    pricing = dict(getattr(market, "pricing", {}) or {})
-    default_quote_asset = _resolve_quote_asset_for_local_offer_build(
-        quote_asset=str(market.quote_asset),
-        network=network,
-    )
-    base_unit_mojo_multiplier = int(
-        pricing.get(
-            "base_unit_mojo_multiplier",
-            default_mojo_multiplier_for_asset(str(market.base_asset)),
-        )
-    )
-    quote_unit_mojo_multiplier = int(
-        pricing.get(
-            "quote_unit_mojo_multiplier",
-            default_mojo_multiplier_for_asset(str(default_quote_asset)),
-        )
-    )
-    expiry_unit, expiry_value = resolve_offer_expiry_for_market(market)
-    quote_price = pricing.get("fixed_quote_per_base")
-    if quote_price is None:
-        min_q = pricing.get("min_price_quote_per_base")
-        max_q = pricing.get("max_price_quote_per_base")
-        if min_q is not None and max_q is not None:
-            quote_price = (float(min_q) + float(max_q)) / 2.0
-        elif min_q is not None:
-            quote_price = float(min_q)
-        elif max_q is not None:
-            quote_price = float(max_q)
-    if quote_price is None:
-        raise ValueError(
-            "market pricing must define fixed_quote_per_base or min/max_price_quote_per_base for offer build"
-        )
-
-    _initialize_manager_file_logging(program.home_dir, log_level=program.app_log_level)
-    _warn_if_log_level_auto_healed(program=program, program_path=program_path)
-
-    backend = offer_execution_backend(program, size_base_units=size_base_units)
-    if backend == "signer":
-        prepare_signer_runtime(program)
-        exit_code, _ = build_and_post_offer_signer(
-            program=program,
-            market=market,
-            size_base_units=size_base_units,
-            repeat=repeat,
-            publish_venue=publish_venue,
-            dexie_base_url=dexie_base_url,
-            splash_base_url=splash_base_url,
-            drop_only=drop_only,
-            claim_rewards=claim_rewards,
-            quote_price=float(quote_price),
-            dry_run=bool(dry_run),
-        )
-        return exit_code
-    if backend == "cloud_wallet":
-        cloud_wallet_deps = replace(
-            default_cloud_wallet_offer_deps(),
-            ensure_offer_bootstrap_denominations_fn=_ensure_offer_bootstrap_denominations,
-        )
-        exit_code, _ = build_and_post_offer_cloud_wallet(
-            program=program,
-            market=market,
-            size_base_units=size_base_units,
-            repeat=repeat,
-            publish_venue=publish_venue,
-            dexie_base_url=dexie_base_url,
-            splash_base_url=splash_base_url,
-            drop_only=drop_only,
-            claim_rewards=claim_rewards,
-            quote_price=float(quote_price),
-            dry_run=bool(dry_run),
-            deps=cloud_wallet_deps,
-        )
-        return exit_code
-
-    selected_offer_coin_ids: list[str] = []
-    resolved_quote_asset = _resolve_quote_asset_for_local_offer_build(
-        quote_asset=str(market.quote_asset),
-        network=network,
-    )
-    debug_dry_run_offer_capture_dir = os.getenv(
-        "GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", ""
-    ).strip()
-    capture_dir_path = (
-        Path(debug_dry_run_offer_capture_dir).expanduser()
-        if debug_dry_run_offer_capture_dir
-        else None
-    )
-    if dry_run and capture_dir_path is not None:
-        capture_dir_path.mkdir(parents=True, exist_ok=True)
-
-    offer_iteration = [0]
-
-    def _local_bootstrap(**_kwargs: Any) -> dict[str, Any]:
-        return {"status": "skipped", "reason": "already_ready"}
-
-    def _local_create(**kwargs: Any) -> OfferCreateOutcome:
-        index = offer_iteration[0]
-        offer_iteration[0] += 1
-        payload = {
-            "market_id": market.market_id,
-            "base_asset": market.base_asset,
-            "base_symbol": market.base_symbol,
-            "quote_asset": resolved_quote_asset,
-            "quote_asset_type": market.quote_asset_type,
-            "receive_address": market.receive_address,
-            "size_base_units": int(kwargs["size_base_units"]),
-            "pair": str(resolved_quote_asset).strip().lower(),
-            "reason": "manual_build_and_post",
-            "xch_price_usd": None,
-            "expiry_unit": expiry_unit,
-            "expiry_value": int(expiry_value),
-            "quote_price_quote_per_base": float(kwargs["quote_price"]),
-            "base_unit_mojo_multiplier": int(base_unit_mojo_multiplier),
-            "quote_unit_mojo_multiplier": int(quote_unit_mojo_multiplier),
-            "fee_mojos": 0,
-            "dry_run": bool(dry_run),
-            "key_id": market.signer_key_id,
-            "keyring_yaml_path": keyring_yaml_path,
-            "network": network,
-            "asset_id": market.base_asset,
-            "offer_coin_ids": selected_offer_coin_ids,
-            "cloud_wallet_base_url": str(program.cloud_wallet_base_url or "").strip(),
-            "cloud_wallet_user_key_id": str(program.cloud_wallet_user_key_id or "").strip(),
-            "cloud_wallet_private_key_pem_path": str(
-                program.cloud_wallet_private_key_pem_path or ""
-            ).strip(),
-            "cloud_wallet_vault_id": str(program.cloud_wallet_vault_id or "").strip(),
-            "cloud_wallet_kms_key_id": str(program.cloud_wallet_kms_key_id or "").strip(),
-            "cloud_wallet_kms_region": str(program.cloud_wallet_kms_region or "").strip(),
-            "cloud_wallet_kms_public_key_hex": str(
-                program.cloud_wallet_kms_public_key_hex or ""
-            ).strip(),
-            "program_config_path": str(program_path),
-            "program_home_dir": str(program.home_dir),
-        }
-        try:
-            offer_text = _build_offer_text_for_request(payload)
-        except Exception as exc:
-            raise OfferCreateFailure(f"offer_builder_failed:{exc}") from exc
-
-        extra: dict[str, Any] = {}
-        if dry_run and capture_dir_path is not None:
-            capture_file = capture_dir_path / f"{market.market_id}-dry-run-{index + 1}.offer"
-            capture_file.write_text(offer_text, encoding="utf-8")
-            extra["dry_run_preview"] = {"offer_capture_path": str(capture_file)}
-
-        return OfferCreateOutcome(
-            offer_text=offer_text,
-            expires_at=f"{int(expiry_value)} {expiry_unit}",
-            side="sell",
-            extra=extra,
-        )
-
-    exit_code, _ = build_and_post_offer(
-        program=program,
-        market=market,
-        size_base_units=size_base_units,
-        repeat=repeat,
-        publish_venue=publish_venue,
-        dexie_base_url=dexie_base_url,
-        splash_base_url=splash_base_url,
-        drop_only=drop_only,
-        claim_rewards=claim_rewards,
-        quote_price=float(quote_price),
-        dry_run=bool(dry_run),
-        action_side="sell",
-        resolved_base_asset_id=str(market.base_asset),
-        resolved_quote_asset_id=resolved_quote_asset,
-        bootstrap_phase_fn=_local_bootstrap,
-        create_offer_fn=_local_create,
-        bootstrap_policy=BootstrapPolicy(allow_split_fallback=False),
-        path_label="local",
-        path_extra_fields={"local_cli_path": True},
-        post_deps=default_offer_post_deps(format_output_fn=_format_json_output),
-        persist_results=False,
-    )
-    return exit_code
-
-
-def _resolve_market_for_build(
-    markets,
-    *,
-    market_id: str | None,
-    pair: str | None,
-    network: str,
-):
-    if bool(market_id) == bool(pair):
-        raise ValueError("provide exactly one of --market-id or --pair")
-    if market_id:
-        selected = next((m for m in markets.markets if m.market_id == market_id), None)
-        if selected is None:
-            raise ValueError(f"market_id not found: {market_id}")
-        return selected
-
-    assert pair is not None
-    raw = pair.strip()
-    sep = ":" if ":" in raw else "/" if "/" in raw else ""
-    if not sep:
-        raise ValueError("pair must be in base:quote or base/quote format")
-    base_raw, quote_raw = [p.strip().lower() for p in raw.split(sep, 1)]
-    if not base_raw or not quote_raw:
-        raise ValueError("pair base and quote must be non-empty")
-    network_l = network.strip().lower()
-    candidates = []
-    for market in markets.markets:
-        if not market.enabled:
-            continue
-        base_matches = {
-            str(market.base_asset).strip().lower(),
-            str(market.base_symbol).strip().lower(),
-        }
-        quote_match = str(market.quote_asset).strip().lower()
-        quote_matches = {quote_match}
-        if is_testnet(network_l):
-            if quote_match == "xch":
-                quote_matches.add("txch")
-            elif quote_match == "txch":
-                quote_matches.add("xch")
-        if base_raw in base_matches and quote_raw in quote_matches:
-            candidates.append(market)
-    if not candidates:
-        raise ValueError(f"no enabled market found for pair: {pair}")
-    if len(candidates) > 1:
-        ids = ", ".join(sorted(m.market_id for m in candidates))
-        raise ValueError(f"pair is ambiguous; use --market-id (candidates: {ids})")
-    return candidates[0]
 
 
 def _coins_list(

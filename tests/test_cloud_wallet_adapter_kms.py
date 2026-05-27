@@ -1,24 +1,18 @@
 from __future__ import annotations
 
-import io
 import json
-import logging
-import urllib.error
-from email.message import Message
 from pathlib import Path
 from typing import Any
 
 import pytest
-
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 
 from tests.helpers.cloud_wallet_adapter_fixtures import (
     FAKE_KMS_PUBKEY_HEX,
     FakeHttpResponse,
     build_adapter,
     build_kms_adapter,
-    write_pem,
 )
+
 
 def test_kms_configured_returns_false_without_kms(tmp_path: Path) -> None:
     adapter = build_adapter(tmp_path)
@@ -211,8 +205,10 @@ def test_create_offer_with_kms_auto_sign_wiring(monkeypatch, tmp_path: Path) -> 
     monkeypatch.setattr(
         adapter,
         "_auto_sign_if_kms",
-        lambda result: auto_sign_calls.append(dict(result))
-        or {"signature_request_id": result["signature_request_id"], "status": "SIGNED"},
+        lambda result: (
+            auto_sign_calls.append(dict(result))
+            or {"signature_request_id": result["signature_request_id"], "status": "SIGNED"}
+        ),
     )
 
     result = adapter.create_offer(
@@ -248,8 +244,10 @@ def test_combine_coins_with_kms_auto_sign_wiring(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr(
         adapter,
         "_auto_sign_if_kms",
-        lambda result: auto_sign_calls.append(dict(result))
-        or {"signature_request_id": result["signature_request_id"], "status": "SIGNED"},
+        lambda result: (
+            auto_sign_calls.append(dict(result))
+            or {"signature_request_id": result["signature_request_id"], "status": "SIGNED"}
+        ),
     )
 
     result = adapter.combine_coins(number_of_coins=2, fee=0)
@@ -278,8 +276,10 @@ def test_cancel_offer_with_kms_auto_sign_wiring(monkeypatch, tmp_path: Path) -> 
     monkeypatch.setattr(
         adapter,
         "_auto_sign_if_kms",
-        lambda result: auto_sign_calls.append(dict(result))
-        or {"signature_request_id": result["signature_request_id"], "status": "SIGNED"},
+        lambda result: (
+            auto_sign_calls.append(dict(result))
+            or {"signature_request_id": result["signature_request_id"], "status": "SIGNED"}
+        ),
     )
 
     result = adapter.cancel_offer(offer_id="Offer_abc")

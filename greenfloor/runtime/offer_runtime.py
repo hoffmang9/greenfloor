@@ -156,7 +156,7 @@ def _wait_for_coinset_confirmation(
 def signer_bootstrap_phase(
     *,
     program: ProgramConfig,
-    market: Any,
+    market: MarketConfig,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
     quote_price: float,
@@ -181,12 +181,12 @@ def signer_bootstrap_phase(
         is_spendable_coin_fn = is_spendable_coin
 
     side = normalize_offer_side(action_side)
-    ladders = getattr(market, "ladders", {}) or {}
+    ladders = market.ladders or {}
     side_ladder = list(ladders.get(side, []) or []) if isinstance(ladders, dict) else []
     if not side_ladder:
         return {"status": "skipped", "reason": f"missing_{side}_ladder"}
 
-    pricing = dict(getattr(market, "pricing", {}) or {})
+    pricing = dict(market.pricing or {})
     quote_unit_multiplier = int(
         pricing.get(
             "quote_unit_mojo_multiplier",
@@ -216,7 +216,7 @@ def signer_bootstrap_phase(
     if not split_asset_id:
         return {"status": "skipped", "reason": f"missing_{side}_asset_for_bootstrap"}
 
-    receive_address = str(getattr(market, "receive_address", "")).strip()
+    receive_address = str(market.receive_address or "").strip()
     if not receive_address:
         return {"status": "skipped", "reason": "missing_receive_address_for_bootstrap"}
 
@@ -352,7 +352,7 @@ def signer_bootstrap_phase(
 def signer_create_offer_phase(
     *,
     program: ProgramConfig,
-    market: Any,
+    market: MarketConfig,
     size_base_units: int,
     quote_price: float,
     resolved_base_asset_id: str,
@@ -401,7 +401,7 @@ def signer_create_offer_phase(
 
     expires_at_dt = dt.datetime.now(dt.UTC) + dt.timedelta(**{expiry_unit: int(expiry_value)})
     expires_at_unix = int(expires_at_dt.timestamp())
-    receive_address = str(getattr(market, "receive_address", "")).strip()
+    receive_address = str(market.receive_address or "").strip()
     if not receive_address:
         raise ValueError("market.receive_address is required for signer offer build")
 

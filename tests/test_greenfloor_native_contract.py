@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 
 import greenfloor.signing as signing_mod
-from greenfloor.runtime.offer_execution import (
+from greenfloor.runtime.offer_publish import (
     verify_offer_text_for_dexie as _verify_offer_text_for_dexie,
 )
 

@@ -3,26 +3,21 @@ from __future__ import annotations
 import datetime as dt
 import json
 from pathlib import Path
-from typing import Any, cast
 
 import greenfloor.cli.manager as manager_mod
-from greenfloor.runtime.cloud_wallet.bootstrap import ensure_offer_bootstrap_denominations
-from greenfloor.runtime.cloud_wallet.deps import default_cloud_wallet_offer_deps
 from greenfloor.runtime.cloud_wallet.phases import (
     cloud_wallet_create_offer_phase,
-    cloud_wallet_wait_offer_artifact_phase,
 )
 from greenfloor.runtime.offer_execution import build_and_post_offer_cloud_wallet
 from greenfloor.runtime.offer_publish import initialize_manager_file_logging
 from tests.helpers.cloud_wallet_offer_deps import cloud_wallet_test_deps
 from tests.helpers.offer_runtime_fixtures import (
     load_program_and_market,
-    write_markets,
+    write_manager_program_with_cloud_wallet,
     write_markets_with_ladder,
-    write_program,
-    write_program_with_cloud_wallet,
 )
 from tests.logging_helpers import reset_concurrent_log_handlers
+
 
 def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     monkeypatch, tmp_path: Path, capsys
@@ -31,7 +26,7 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
 
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program_path)
+    write_manager_program_with_cloud_wallet(program_path, tmp_path=tmp_path)
     write_markets_with_ladder(markets_path)
     prog, mkt = load_program_and_market(program_path, markets_path)
     prog.home_dir = str(tmp_path)
@@ -87,10 +82,12 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
         def get_offer(offer_id: str) -> dict[str, object]:
             return {"success": True, "offer": {"id": str(offer_id), "status": 0}}
 
-
     deps = cloud_wallet_test_deps(
         wallet_factory=lambda _p: _FakeWallet(_p),
-        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
+        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
+            "status": "skipped",
+            "reason": "already_ready",
+        },
         cloud_wallet_create_offer_phase_fn=lambda **kwargs: {
             "known_offer_markers": set(),
             "offer_request_started_at": dt.datetime.now(dt.UTC),
@@ -149,12 +146,13 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     assert "amount=10" in log_text
     assert "trading_pair=A1:xch" in log_text
 
+
 def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_override(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program_path)
+    write_manager_program_with_cloud_wallet(program_path, tmp_path=tmp_path)
     write_markets_with_ladder(markets_path)
     prog, mkt = load_program_and_market(program_path, markets_path)
     prog.home_dir = str(tmp_path)
@@ -209,12 +207,14 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
 
     deps = cloud_wallet_test_deps(
         wallet_factory=lambda _p: _FakeWallet(_p),
-        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
+        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
+            "status": "skipped",
+            "reason": "already_ready",
+        },
         cloud_wallet_create_offer_phase_fn=cloud_wallet_create_offer_phase,
         cloud_wallet_wait_offer_artifact_phase_fn=lambda **kwargs: "offer1cwexpiry",
         verify_offer_text_for_dexie_fn=lambda _offer: None,
         dexie_adapter_cls=_FakeDexie,
-        initialize_manager_file_logging_fn=lambda *a, **k: None,
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
@@ -240,6 +240,7 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["publish_failures"] == 0
 
+
 def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
@@ -247,7 +248,7 @@ def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
 
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program_path)
+    write_manager_program_with_cloud_wallet(program_path, tmp_path=tmp_path)
     write_markets_with_ladder(markets_path)
     prog, mkt = load_program_and_market(program_path, markets_path)
     prog.home_dir = str(tmp_path)
@@ -289,10 +290,12 @@ def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
         def get_offer(offer_id: str) -> dict[str, object]:
             return {"success": True, "offer": {"id": str(offer_id), "status": 0}}
 
-
     deps = cloud_wallet_test_deps(
         wallet_factory=lambda _p: _FakeWallet(_p),
-        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
+        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
+            "status": "skipped",
+            "reason": "already_ready",
+        },
         cloud_wallet_create_offer_phase_fn=lambda **kwargs: {
             "known_offer_markers": set(),
             "offer_request_started_at": dt.datetime.now(dt.UTC),
@@ -305,7 +308,6 @@ def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
         cloud_wallet_wait_offer_artifact_phase_fn=lambda **kwargs: "offer1buyaudit",
         verify_offer_text_for_dexie_fn=lambda _offer: None,
         dexie_adapter_cls=_FakeDexie,
-        initialize_manager_file_logging_fn=lambda *a, **k: None,
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
@@ -339,12 +341,13 @@ def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
     assert len(event_items) == 1
     assert event_items[0]["side"] == "buy"
 
+
 def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program_path)
+    write_manager_program_with_cloud_wallet(program_path, tmp_path=tmp_path)
     write_markets_with_ladder(markets_path)
     prog, mkt = load_program_and_market(program_path, markets_path)
 
@@ -376,10 +379,12 @@ def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
         def __init__(self, _base_url: str):
             raise AssertionError("DexieAdapter must not be constructed in dry_run")
 
-
     deps = cloud_wallet_test_deps(
         wallet_factory=lambda _p: _FakeWallet(_p),
-        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
+        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
+            "status": "skipped",
+            "reason": "already_ready",
+        },
         cloud_wallet_create_offer_phase_fn=lambda **kwargs: {
             "known_offer_markers": set(),
             "offer_request_started_at": dt.datetime.now(dt.UTC),
@@ -392,7 +397,6 @@ def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
         cloud_wallet_wait_offer_artifact_phase_fn=lambda **kwargs: "offer1dryruncloudwallet",
         verify_offer_text_for_dexie_fn=lambda _offer: None,
         dexie_adapter_cls=_FailDexie,
-        initialize_manager_file_logging_fn=lambda *a, **k: None,
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
@@ -416,12 +420,13 @@ def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
     assert payload["results"] == []
     assert len(payload["built_offers_preview"]) == 1
 
+
 def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program_path)
+    write_manager_program_with_cloud_wallet(program_path, tmp_path=tmp_path)
     write_markets_with_ladder(markets_path)
     prog, mkt = load_program_and_market(program_path, markets_path)
     prog.home_dir = str(tmp_path)
@@ -483,7 +488,6 @@ def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
         cloud_wallet_wait_offer_artifact_phase_fn=lambda **kwargs: "offer1bootstrapfee",
         verify_offer_text_for_dexie_fn=lambda _offer: None,
         dexie_adapter_cls=_FakeDexie,
-        initialize_manager_file_logging_fn=lambda *a, **k: None,
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
@@ -504,4 +508,3 @@ def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
     assert create_offer_calls == [0]
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["bootstrap_actions"][0]["status"] == "failed"
-

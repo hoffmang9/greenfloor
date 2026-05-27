@@ -4,6 +4,7 @@ import collections.abc
 from typing import Any
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
+from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.hex_utils import default_mojo_multiplier_for_asset
 from greenfloor.offer_bootstrap import BootstrapLadderEntry, plan_bootstrap_mixed_outputs
 from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
@@ -54,8 +55,8 @@ def resolve_bootstrap_split_fee(
 
 def ensure_offer_bootstrap_denominations(
     *,
-    program: Any,
-    market: Any,
+    program: ProgramConfig,
+    market: MarketConfig,
     wallet: CloudWalletAdapter,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
@@ -92,12 +93,12 @@ def ensure_offer_bootstrap_denominations(
         is_spendable_coin_fn = is_spendable_coin
 
     side = normalize_offer_side(action_side)
-    ladders = getattr(market, "ladders", {}) or {}
+    ladders = market.ladders or {}
     side_ladder = list(ladders.get(side, []) or []) if isinstance(ladders, dict) else []
     if not side_ladder:
         return {"status": "skipped", "reason": f"missing_{side}_ladder"}
 
-    pricing = dict(getattr(market, "pricing", {}) or {})
+    pricing = dict(market.pricing or {})
     quote_unit_multiplier = int(
         pricing.get(
             "quote_unit_mojo_multiplier",
@@ -303,3 +304,16 @@ def ensure_offer_bootstrap_denominations(
         "signature_wait_events": signature_events,
         "wait_events": wait_events,
     }
+
+
+def configured_ensure_offer_bootstrap_denominations(**kwargs: Any) -> dict[str, Any]:
+    """Default bootstrap wiring for cloud-wallet offer build-and-post."""
+    return ensure_offer_bootstrap_denominations(
+        plan_bootstrap_mixed_outputs_fn=plan_bootstrap_mixed_outputs,
+        resolve_bootstrap_split_fee_fn=resolve_bootstrap_split_fee,
+        wait_for_mempool_then_confirmation_fn=lambda **wait_kwargs: wait_for_mempool_then_confirmation(
+            include_pending=True, **wait_kwargs
+        ),
+        is_spendable_coin_fn=is_spendable_coin,
+        **kwargs,
+    )

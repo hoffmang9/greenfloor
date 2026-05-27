@@ -17,7 +17,6 @@ from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
 from greenfloor.runtime.offer_publish import (
     dexie_offer_view_url,
     expected_publish_asset_fields,
-    initialize_manager_file_logging,
     log_signed_offer_artifact,
     normalize_offer_side,
     post_offer_phase,
@@ -105,7 +104,6 @@ def _iteration_timing_payload(
 
 @dataclass(frozen=True, slots=True)
 class OfferPostDeps:
-    initialize_manager_file_logging_fn: collections.abc.Callable[..., None]
     resolve_maker_offer_fee_fn: collections.abc.Callable[..., tuple[int, str]]
     log_signed_offer_artifact_fn: collections.abc.Callable[..., None]
     verify_offer_text_for_dexie_fn: collections.abc.Callable[[str], str | None]
@@ -121,7 +119,6 @@ def default_offer_post_deps(
     format_output_fn: collections.abc.Callable[[object], str] | None = None,
 ) -> OfferPostDeps:
     return OfferPostDeps(
-        initialize_manager_file_logging_fn=initialize_manager_file_logging,
         resolve_maker_offer_fee_fn=resolve_maker_offer_fee,
         log_signed_offer_artifact_fn=log_signed_offer_artifact,
         verify_offer_text_for_dexie_fn=verify_offer_text_for_dexie,
@@ -228,7 +225,7 @@ def execute_build_and_post_offer(
     action_side: str,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
-    bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]],
+    bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]] | None,
     create_offer_fn: collections.abc.Callable[..., OfferCreateOutcome],
     bootstrap_policy: BootstrapPolicy,
     path_label: str,
@@ -261,6 +258,9 @@ def execute_build_and_post_offer(
         started_ms = int(time.monotonic() * 1000)
         bootstrap_result: dict[str, Any] = {"status": "skipped", "reason": "dry_run"}
         if dry_run:
+            bootstrap_actions.append(dict(bootstrap_result))
+        elif bootstrap_phase_fn is None:
+            bootstrap_result = {"status": "skipped", "reason": "already_ready"}
             bootstrap_actions.append(dict(bootstrap_result))
         else:
             bootstrap_result = bootstrap_phase_fn(
@@ -462,7 +462,7 @@ def build_and_post_offer(
     action_side: str,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
-    bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]],
+    bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]] | None,
     create_offer_fn: collections.abc.Callable[..., OfferCreateOutcome],
     bootstrap_policy: BootstrapPolicy,
     path_label: str,

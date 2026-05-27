@@ -1,24 +1,13 @@
 from __future__ import annotations
 
-import io
-import json
-import logging
-import urllib.error
-from email.message import Message
 from pathlib import Path
 from typing import Any
 
-import pytest
-
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
-
 from tests.helpers.cloud_wallet_adapter_fixtures import (
-    FAKE_KMS_PUBKEY_HEX,
     FakeHttpResponse,
     build_adapter,
-    build_kms_adapter,
-    write_pem,
 )
+
 
 def test_cloud_wallet_list_coins_paginates_and_accumulates(monkeypatch, tmp_path: Path) -> None:
     adapter = build_adapter(tmp_path)
@@ -156,4 +145,3 @@ def test_cloud_wallet_list_coins_opt_out_pending_and_min_filter(
     adapter.list_coins(include_pending=True, min_amount_mojos=None)
     assert captured["variables"]["includePending"] is True
     assert captured["variables"]["minAmount"] is None
-

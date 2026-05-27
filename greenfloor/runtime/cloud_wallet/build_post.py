@@ -39,13 +39,13 @@ def build_and_post_offer_cloud_wallet(
 ) -> tuple[int, dict[str, Any]]:
     resolved_deps = deps or default_cloud_wallet_offer_deps()
     resolved_artifact_timeout_seconds = (
-        int(getattr(program, "runtime_cloud_wallet_offer_artifact_timeout_seconds", 30))
+        int(program.runtime_cloud_wallet_offer_artifact_timeout_seconds)
         if offer_artifact_timeout_seconds is None
         else int(offer_artifact_timeout_seconds)
     )
     wallet = resolved_deps.wallet_factory(program)
-    cfg_base_global = str(getattr(market, "cloud_wallet_base_global_id", "")).strip()
-    cfg_quote_global = str(getattr(market, "cloud_wallet_quote_global_id", "")).strip()
+    cfg_base_global = str(market.cloud_wallet_base_global_id or "").strip()
+    cfg_quote_global = str(market.cloud_wallet_quote_global_id or "").strip()
     db_base_hint, db_quote_hint = resolved_deps.recent_market_resolved_asset_id_hints_fn(
         program_home_dir=str(program.home_dir),
         market_id=str(market.market_id),
@@ -55,8 +55,8 @@ def build_and_post_offer_cloud_wallet(
             wallet=wallet,
             base_asset_id=str(market.base_asset),
             quote_asset_id=str(market.quote_asset),
-            base_symbol_hint=str(getattr(market, "base_symbol", "") or ""),
-            quote_symbol_hint=str(getattr(market, "quote_asset", "") or ""),
+            base_symbol_hint=str(market.base_symbol or ""),
+            quote_symbol_hint=str(market.quote_asset or ""),
             base_global_id_hint=cfg_base_global or db_base_hint,
             quote_global_id_hint=cfg_quote_global or db_quote_hint,
             program_home_dir=str(program.home_dir),

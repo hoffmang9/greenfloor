@@ -15,7 +15,7 @@ from greenfloor.runtime.cloud_wallet.assets import (
     recent_market_resolved_asset_id_hints,
 )
 from tests.helpers.offer_runtime_fixtures import (
-    write_program,
+    write_manager_program,
 )
 
 
@@ -119,7 +119,7 @@ def test_format_json_output_compact_mode_is_single_line() -> None:
 
 def test_resolve_offer_publish_settings_from_program(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
-    write_program(program, provider="splash")
+    write_manager_program(program, tmp_path=tmp_path, provider="splash")
     venue, dexie_base, splash_base = _resolve_offer_publish_settings(
         program_path=program,
         network="mainnet",
@@ -134,7 +134,7 @@ def test_resolve_offer_publish_settings_from_program(tmp_path: Path) -> None:
 
 def test_set_log_level_updates_program_yaml(tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
-    write_program(program)
+    write_manager_program(program, tmp_path=tmp_path)
     code = manager_mod._set_log_level(program_path=program, log_level="warning")
     assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
@@ -146,7 +146,7 @@ def test_set_log_level_updates_program_yaml(tmp_path: Path, capsys) -> None:
 
 def test_main_dispatches_set_log_level_command(monkeypatch, tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
-    write_program(program)
+    write_manager_program(program, tmp_path=tmp_path)
     captured: dict[str, object] = {}
 
     def _fake_set_log_level(*, program_path: Path, log_level: str) -> int:
@@ -175,7 +175,7 @@ def test_main_dispatches_set_log_level_command(monkeypatch, tmp_path: Path) -> N
 
 def test_main_dispatches_coin_status_command(monkeypatch, tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
-    write_program(program)
+    write_manager_program(program, tmp_path=tmp_path)
     captured: dict[str, object] = {}
 
     def _fake_coin_status(

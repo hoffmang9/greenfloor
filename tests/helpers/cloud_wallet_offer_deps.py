@@ -13,7 +13,6 @@ def cloud_wallet_test_deps(**kwargs: Any) -> CloudWalletOfferDeps:
     """Build CloudWalletOfferDeps for tests with optional field overrides."""
     base = default_cloud_wallet_offer_deps()
     post_fields = {
-        "initialize_manager_file_logging_fn",
         "resolve_maker_offer_fee_fn",
         "log_signed_offer_artifact_fn",
         "verify_offer_text_for_dexie_fn",

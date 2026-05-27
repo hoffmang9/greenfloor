@@ -1,31 +1,15 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
-from typing import Any, cast
-
-import pytest
-import yaml
-
-import greenfloor.cli.manager as manager_mod
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
 
 from greenfloor.cli.manager import (
     _coin_combine,
-    _coin_split,
-    _coins_list,
 )
-from greenfloor.runtime.cloud_wallet.assets import (
-    resolve_cloud_wallet_asset_id,
-)
-
 from tests.helpers.offer_runtime_fixtures import (
+    write_manager_program_with_cloud_wallet,
     write_markets,
-    write_markets_with_duplicate_pair,
     write_markets_with_ladder,
-    write_program,
-    write_program_with_cloud_wallet,
 )
 
 
@@ -34,7 +18,7 @@ def test_coin_combine_with_coin_ids_resolves_to_global_ids(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     calls = {}
@@ -79,12 +63,13 @@ def test_coin_combine_with_coin_ids_resolves_to_global_ids(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["waited"] is False
 
+
 def test_coin_combine_returns_structured_error_when_coin_id_not_found(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeWallet:
@@ -120,12 +105,13 @@ def test_coin_combine_returns_structured_error_when_coin_id_not_found(
     assert payload["error"] == "coin_id_resolution_failed"
     assert payload["unknown_coin_ids"] == ["missing-coin-name"]
 
+
 def test_coin_combine_rejects_mixed_asset_coin_ids_before_api_call(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeWallet:
@@ -173,12 +159,13 @@ def test_coin_combine_rejects_mixed_asset_coin_ids_before_api_call(
         {"coin_id": "Coin_cat", "coin_asset_id": "asset_cat"}
     ]
 
+
 def test_coin_combine_uses_market_ladder_threshold_when_size_is_provided(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program, provider="splash")
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="splash")
     write_markets_with_ladder(markets)
     calls = {}
 
@@ -236,10 +223,11 @@ def test_coin_combine_uses_market_ladder_threshold_when_size_is_provided(
     assert payload["venue"] == "splash"
     assert payload["denomination_target"]["combine_threshold_count"] == 6
 
+
 def test_coin_combine_ladder_threshold_uses_ceil(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program, provider="dexie")
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="dexie")
     markets.write_text(
         "\n".join(
             [
@@ -311,12 +299,13 @@ def test_coin_combine_ladder_threshold_uses_ceil(monkeypatch, tmp_path: Path, ca
     assert code == 0
     assert calls["combine"][0] == 5
 
+
 def test_coin_combine_auto_selection_ignores_cat_dust_under_one_unit(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
     calls = {}
 
@@ -375,12 +364,13 @@ def test_coin_combine_auto_selection_ignores_cat_dust_under_one_unit(
     assert payload["coin_selection_mode"] == "adapter_auto_select"
     assert payload["resolved_asset_id"] == "Asset_split_base"
 
+
 def test_coin_combine_auto_selection_directly_filters_cross_asset_scoped_rows(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
     calls = {}
 
@@ -467,12 +457,13 @@ def test_coin_combine_auto_selection_directly_filters_cross_asset_scoped_rows(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["coin_selection_mode"] == "adapter_auto_select"
 
+
 def test_coin_combine_until_ready_with_coin_ids_stops_with_requires_new_coin_selection(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program, provider="dexie")
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="dexie")
     write_markets_with_ladder(markets)
 
     class _FakeWallet:
@@ -532,4 +523,3 @@ def test_coin_combine_until_ready_with_coin_ids_stops_with_requires_new_coin_sel
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["stop_reason"] == "requires_new_coin_selection"
     assert payload["denomination_readiness"]["ready"] is False
-

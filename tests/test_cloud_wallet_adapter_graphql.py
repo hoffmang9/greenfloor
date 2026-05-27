@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import json
 import logging
 import urllib.error
 from email.message import Message
@@ -10,15 +9,11 @@ from typing import Any
 
 import pytest
 
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
-
 from tests.helpers.cloud_wallet_adapter_fixtures import (
-    FAKE_KMS_PUBKEY_HEX,
     FakeHttpResponse,
     build_adapter,
-    build_kms_adapter,
-    write_pem,
 )
+
 
 def test_cloud_wallet_graphql_ok_log_includes_operation_and_duration(
     monkeypatch, tmp_path: Path, caplog: pytest.LogCaptureFixture

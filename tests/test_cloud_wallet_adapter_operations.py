@@ -2,23 +2,17 @@ from __future__ import annotations
 
 import io
 import json
-import logging
 import urllib.error
 from email.message import Message
 from pathlib import Path
-from typing import Any
 
 import pytest
 
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
-
 from tests.helpers.cloud_wallet_adapter_fixtures import (
-    FAKE_KMS_PUBKEY_HEX,
     FakeHttpResponse,
     build_adapter,
-    build_kms_adapter,
-    write_pem,
 )
+
 
 def test_cloud_wallet_get_chia_usd_quote_reads_numeric_price(monkeypatch, tmp_path: Path) -> None:
     adapter = build_adapter(tmp_path)
@@ -549,4 +543,3 @@ def test_cloud_wallet_combine_coins_optional_fields_default_none(
     assert variables["targetAmount"] is None
     assert variables["inputCoinIds"] is None
     assert variables["assetId"] is None
-

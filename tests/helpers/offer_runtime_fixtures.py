@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+
+from greenfloor.config.models import MarketConfig, ProgramConfig
+from tests.helpers.config_fixtures import minimal_market_config, minimal_program_config
 
 
 def write_program(path: Path, *, provider: str = "dexie", home_dir: str | None = None) -> None:
@@ -51,6 +55,41 @@ def write_program(path: Path, *, provider: str = "dexie", home_dir: str | None =
         ),
         encoding="utf-8",
     )
+
+
+def write_manager_program(path: Path, *, tmp_path: Path, provider: str = "dexie") -> None:
+    """Write program.yaml with home_dir under tmp_path for manager CLI tests."""
+    write_program(path, provider=provider, home_dir=str(tmp_path))
+
+
+def write_manager_program_with_cloud_wallet(
+    path: Path,
+    *,
+    tmp_path: Path,
+    provider: str = "dexie",
+    with_kms: bool = False,
+) -> None:
+    """Write cloud-wallet program.yaml with home_dir under tmp_path."""
+    write_program_with_cloud_wallet(
+        path,
+        provider=provider,
+        with_kms=with_kms,
+        home_dir=str(tmp_path),
+    )
+
+
+def program_config_for_local_offer(*, home_dir: str = "/tmp/gf") -> ProgramConfig:
+    return replace(
+        minimal_program_config(home_dir=home_dir),
+        cloud_wallet_base_url="https://wallet.example",
+        cloud_wallet_user_key_id="user-1",
+        cloud_wallet_private_key_pem_path="/tmp/.greenfloor/key.pem",
+        cloud_wallet_vault_id="Wallet_1",
+    )
+
+
+def market_config_for_local_offer() -> MarketConfig:
+    return minimal_market_config()
 
 
 def write_markets(path: Path) -> None:

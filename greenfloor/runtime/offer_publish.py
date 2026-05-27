@@ -11,6 +11,7 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
+from greenfloor.config.models import MarketConfig
 from greenfloor.hex_utils import normalize_hex_id
 from greenfloor.logging_setup import initialize_service_file_logging
 from greenfloor.offer_decode import (
@@ -54,8 +55,8 @@ def dexie_offer_view_url(*, dexie_base_url: str, offer_id: str) -> str:
     return f"https://{host}/offers/{urllib.parse.quote(clean_offer_id)}"
 
 
-def resolve_offer_expiry_for_market(market: Any) -> tuple[str, int]:
-    pricing = dict(getattr(market, "pricing", {}) or {})
+def resolve_offer_expiry_for_market(market: MarketConfig) -> tuple[str, int]:
+    pricing = dict(market.pricing or {})
     value_raw = pricing.get("strategy_offer_expiry_minutes")
     try:
         value = int(value_raw or 0)
@@ -64,6 +65,26 @@ def resolve_offer_expiry_for_market(market: Any) -> tuple[str, int]:
     if value > 0:
         return "minutes", value
     return "minutes", 10
+
+
+def resolve_quote_price_for_market(market: MarketConfig) -> float:
+    pricing = dict(market.pricing or {})
+    quote_price = pricing.get("fixed_quote_per_base")
+    if quote_price is None:
+        min_q = pricing.get("min_price_quote_per_base")
+        max_q = pricing.get("max_price_quote_per_base")
+        if min_q is not None and max_q is not None:
+            quote_price = (float(min_q) + float(max_q)) / 2.0
+        elif min_q is not None:
+            quote_price = float(min_q)
+        elif max_q is not None:
+            quote_price = float(max_q)
+    if quote_price is None:
+        raise ValueError(
+            "market pricing must define fixed_quote_per_base or "
+            "min/max_price_quote_per_base for offer build"
+        )
+    return float(quote_price)
 
 
 def log_signed_offer_artifact(
@@ -456,7 +477,7 @@ def post_offer_phase(
 def expected_publish_asset_fields(
     *,
     side: str,
-    market: Any,
+    market: MarketConfig,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
 ) -> dict[str, str]:
@@ -464,13 +485,13 @@ def expected_publish_asset_fields(
     if is_buy:
         return {
             "expected_offered_asset_id": str(resolved_quote_asset_id),
-            "expected_offered_symbol": str(getattr(market, "quote_asset", "")),
+            "expected_offered_symbol": str(market.quote_asset),
             "expected_requested_asset_id": str(resolved_base_asset_id),
-            "expected_requested_symbol": str(getattr(market, "base_symbol", "")),
+            "expected_requested_symbol": str(market.base_symbol),
         }
     return {
         "expected_offered_asset_id": str(resolved_base_asset_id),
-        "expected_offered_symbol": str(getattr(market, "base_symbol", "")),
+        "expected_offered_symbol": str(market.base_symbol),
         "expected_requested_asset_id": str(resolved_quote_asset_id),
-        "expected_requested_symbol": str(getattr(market, "quote_asset", "")),
+        "expected_requested_symbol": str(market.quote_asset),
     }

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from greenfloor.runtime.cloud_wallet.assets import (
-    resolve_cloud_wallet_offer_asset_ids,
-    seed_cloud_wallet_assets_cache,
-)
 from greenfloor.runtime.cloud_wallet.build_post import build_and_post_offer_cloud_wallet
 from greenfloor.runtime.cloud_wallet.deps import (
     CloudWalletOfferDeps,
     default_cloud_wallet_offer_deps,
 )
+from greenfloor.runtime.local_offer import (
+    LocalOfferBuildParams,
+    local_offer_params_from_context,
+    make_local_offer_create_fn,
+)
+from greenfloor.runtime.offer_build_context import OfferBuildContext, prepare_offer_build_context
 from greenfloor.runtime.offer_orchestration import (
     BootstrapPolicy,
     OfferCreateFailure,
@@ -22,11 +24,6 @@ from greenfloor.runtime.offer_orchestration import (
     execute_build_and_post_offer,
     persist_offer_post_records,
 )
-from greenfloor.runtime.offer_publish import (
-    is_transient_dexie_visibility_404_error,
-    verify_offer_text_for_dexie,
-    verify_offer_visible_on_dexie,
-)
 from greenfloor.runtime.offer_runtime import (
     SignerOfferDeps,
     build_and_post_offer_signer,
@@ -36,11 +33,13 @@ from greenfloor.runtime.offer_runtime import (
 __all__ = [
     "BootstrapPolicy",
     "CloudWalletOfferDeps",
+    "OfferBuildContext",
     "OfferCreateFailure",
     "OfferCreateOutcome",
     "OfferPostDeps",
     "OfferPostPersistRecord",
     "SignerOfferDeps",
+    "LocalOfferBuildParams",
     "build_and_post_offer",
     "build_and_post_offer_cloud_wallet",
     "build_and_post_offer_signer",
@@ -48,10 +47,8 @@ __all__ = [
     "default_offer_post_deps",
     "default_signer_offer_deps",
     "execute_build_and_post_offer",
-    "is_transient_dexie_visibility_404_error",
+    "local_offer_params_from_context",
+    "make_local_offer_create_fn",
     "persist_offer_post_records",
-    "resolve_cloud_wallet_offer_asset_ids",
-    "seed_cloud_wallet_assets_cache",
-    "verify_offer_text_for_dexie",
-    "verify_offer_visible_on_dexie",
+    "prepare_offer_build_context",
 ]

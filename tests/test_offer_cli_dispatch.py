@@ -3,14 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import greenfloor.cli.manager as manager_mod
 from greenfloor.cli.manager import _build_and_post_offer
-
 from tests.helpers.fake_adapters import FakeDexie
 from tests.helpers.offer_runtime_fixtures import (
+    write_manager_program,
+    write_manager_program_with_cloud_wallet,
     write_markets,
-    write_program,
-    write_program_with_cloud_wallet,
 )
 
 
@@ -19,7 +17,7 @@ def test_build_and_post_offer_dispatches_to_cloud_wallet_when_configured(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     dispatched = [False]
@@ -31,7 +29,7 @@ def test_build_and_post_offer_dispatches_to_cloud_wallet_when_configured(
         return 0, {}
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager.build_and_post_offer_cloud_wallet",
+        "greenfloor.cli.offer_build_post.build_and_post_offer_cloud_wallet",
         _fake_cloud_wallet,
     )
 
@@ -60,7 +58,7 @@ def test_build_and_post_offer_dry_run_uses_cloud_wallet_when_configured(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     dispatched = [False]
@@ -73,7 +71,7 @@ def test_build_and_post_offer_dry_run_uses_cloud_wallet_when_configured(
         return 0, {"dry_run": True, "results": [], "built_offers_preview": []}
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager.build_and_post_offer_cloud_wallet",
+        "greenfloor.cli.offer_build_post.build_and_post_offer_cloud_wallet",
         _fake_cloud_wallet,
     )
 
@@ -104,7 +102,7 @@ def test_build_and_post_offer_uses_local_path_for_large_size_when_cloud_wallet_c
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     write_markets(markets)
 
     cloud_dispatched = [False]
@@ -116,11 +114,11 @@ def test_build_and_post_offer_uses_local_path_for_large_size_when_cloud_wallet_c
         return 0, {}
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager.build_and_post_offer_cloud_wallet",
+        "greenfloor.cli.offer_build_post.build_and_post_offer_cloud_wallet",
         _fake_cloud_wallet,
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._build_offer_text_for_request", lambda payload: "offer1abc"
+        "greenfloor.cli.offer_build_post.build_offer_text", lambda payload: "offer1abc"
     )
 
     class _FakeDexie(FakeDexie):
@@ -161,7 +159,7 @@ def test_build_and_post_offer_uses_local_path_when_cloud_wallet_not_configured(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program(program)
+    write_manager_program(program, tmp_path=tmp_path)
     write_markets(markets)
 
     cloud_dispatched = [False]
@@ -173,11 +171,11 @@ def test_build_and_post_offer_uses_local_path_when_cloud_wallet_not_configured(
         return 0, {}
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager.build_and_post_offer_cloud_wallet",
+        "greenfloor.cli.offer_build_post.build_and_post_offer_cloud_wallet",
         _fake_cloud_wallet,
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._build_offer_text_for_request", lambda payload: "offer1abc"
+        "greenfloor.cli.offer_build_post.build_offer_text", lambda payload: "offer1abc"
     )
 
     class _FakeDexie(FakeDexie):
@@ -219,7 +217,7 @@ def test_build_and_post_offer_uses_signer_path_for_kms_configured(
     """KMS-configured runs must use the local Rust signer path for all sizes."""
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program, with_kms=True)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, with_kms=True)
     write_markets(markets)
 
     signer_dispatched = [False]
@@ -231,20 +229,21 @@ def test_build_and_post_offer_uses_signer_path_for_kms_configured(
         return 0, {}
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager.build_and_post_offer_signer",
+        "greenfloor.cli.offer_build_post.build_and_post_offer_signer",
         _fake_signer,
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._build_offer_text_for_request",
+        "greenfloor.cli.offer_build_post.build_offer_text",
         lambda payload: (
             local_builder_calls.__setitem__(0, local_builder_calls[0] + 1) or "offer1abc"
         ),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager.offer_execution_backend", lambda _program, **kwargs: "signer"
+        "greenfloor.cli.offer_build_post.offer_execution_backend",
+        lambda _program, **kwargs: "signer",
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager.prepare_signer_runtime",
+        "greenfloor.cli.offer_build_post.prepare_signer_runtime",
         lambda _program: "/tmp/signer.yaml",
     )
 
@@ -274,7 +273,7 @@ def test_build_and_post_offer_uses_signer_path_for_kms_configured_large_size(
     """KMS-configured runs use signer path even for size >= 100."""
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program_with_cloud_wallet(program, with_kms=True)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, with_kms=True)
     write_markets(markets)
 
     signer_dispatched = [False]
@@ -286,20 +285,21 @@ def test_build_and_post_offer_uses_signer_path_for_kms_configured_large_size(
         return 0, {}
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager.build_and_post_offer_signer",
+        "greenfloor.cli.offer_build_post.build_and_post_offer_signer",
         _fake_signer,
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._build_offer_text_for_request",
+        "greenfloor.cli.offer_build_post.build_offer_text",
         lambda payload: (
             local_builder_calls.__setitem__(0, local_builder_calls[0] + 1) or "offer1abc"
         ),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager.offer_execution_backend", lambda _program, **kwargs: "signer"
+        "greenfloor.cli.offer_build_post.offer_execution_backend",
+        lambda _program, **kwargs: "signer",
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager.prepare_signer_runtime",
+        "greenfloor.cli.offer_build_post.prepare_signer_runtime",
         lambda _program: "/tmp/signer.yaml",
     )
 

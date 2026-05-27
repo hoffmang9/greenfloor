@@ -1,39 +1,16 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
-from greenfloor.config.models import MarketConfig, MarketInventoryConfig, ProgramConfig
+from greenfloor.config.models import MarketConfig, MarketInventoryConfig
 from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert
+from tests.helpers.config_fixtures import minimal_program_config
 
 
-def _program() -> ProgramConfig:
-    return ProgramConfig(
-        app_network="mainnet",
-        home_dir="~/.greenfloor",
-        runtime_loop_interval_seconds=30,
+def _program():
+    return replace(
+        minimal_program_config(home_dir="~/.greenfloor"),
         runtime_dry_run=True,
-        tx_block_trigger_mode="websocket",
-        tx_block_websocket_url="wss://coinset.org/ws",
-        tx_block_websocket_reconnect_interval_seconds=30,
-        tx_block_fallback_poll_interval_seconds=60,
-        tx_block_webhook_enabled=True,
-        tx_block_webhook_listen_addr="127.0.0.1:8787",
-        dexie_api_base="https://api.dexie.space",
-        splash_api_base="http://localhost:4000",
-        offer_publish_venue="dexie",
-        coin_ops_max_operations_per_run=20,
-        coin_ops_max_daily_fee_budget_mojos=0,
-        coin_ops_minimum_fee_mojos=0,
-        coin_ops_split_fee_mojos=0,
-        coin_ops_combine_fee_mojos=0,
-        python_min_version="3.11",
         low_inventory_enabled=True,
-        low_inventory_threshold_mode="absolute_base_units",
-        low_inventory_default_threshold_base_units=0,
-        low_inventory_dedup_cooldown_seconds=3600,
-        low_inventory_clear_hysteresis_percent=10,
-        pushover_enabled=False,
-        pushover_user_key_env="PUSHOVER_USER_KEY",
-        pushover_app_token_env="PUSHOVER_APP_TOKEN",
-        pushover_recipient_key_env="PUSHOVER_RECIPIENT_KEY",
     )
 
 

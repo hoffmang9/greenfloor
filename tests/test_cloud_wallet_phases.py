@@ -1,40 +1,9 @@
 from __future__ import annotations
 
-import datetime as dt
-import json
-from dataclasses import replace
-from pathlib import Path
 from typing import Any, cast
 
-import greenfloor.cli.manager as manager_mod
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
-from greenfloor.cli.manager import _build_and_post_offer
-from greenfloor.runtime.cloud_wallet.bootstrap import ensure_offer_bootstrap_denominations
-from greenfloor.runtime.cloud_wallet.deps import default_cloud_wallet_offer_deps
-from greenfloor.runtime.cloud_wallet.phases import (
-    cloud_wallet_create_offer_phase,
-    cloud_wallet_wait_offer_artifact_phase,
-)
-from greenfloor.runtime.offer_execution import build_and_post_offer_cloud_wallet
-
-from tests.helpers.offer_runtime_fixtures import (
-    write_markets,
-    write_markets_with_duplicate_pair,
-    write_markets_with_ladder,
-    write_program,
-    write_program_with_cloud_wallet,
-)
-
-from tests.helpers.cloud_wallet_offer_deps import cloud_wallet_test_deps
-from tests.logging_helpers import reset_concurrent_log_handlers
-
-from tests.helpers.offer_runtime_fixtures import (
-    write_markets,
-    write_markets_with_duplicate_pair,
-    write_markets_with_ladder,
-    write_program,
-    write_program_with_cloud_wallet,
-)
+from greenfloor.runtime.cloud_wallet.phases import cloud_wallet_create_offer_phase
 
 
 def test_cloud_wallet_create_offer_phase_returns_structured_intermediate(monkeypatch) -> None:
@@ -75,6 +44,7 @@ def test_cloud_wallet_create_offer_phase_returns_structured_intermediate(monkeyp
     assert isinstance(payload["wait_events"], list)
     assert wallet.calls == 1
 
+
 def test_cloud_wallet_create_offer_phase_buy_side_swaps_offer_legs(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
@@ -106,4 +76,3 @@ def test_cloud_wallet_create_offer_phase_buy_side_swaps_offer_legs(monkeypatch) 
     assert payload["side"] == "buy"
     assert captured["offered"] == [{"assetId": "Asset_quote", "amount": 9990}]
     assert captured["requested"] == [{"assetId": "Asset_base", "amount": 10000}]
-

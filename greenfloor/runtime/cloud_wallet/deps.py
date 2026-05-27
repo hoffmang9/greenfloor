@@ -12,7 +12,9 @@ from greenfloor.runtime.cloud_wallet.assets import (
     recent_market_resolved_asset_id_hints,
     resolve_cloud_wallet_offer_asset_ids,
 )
-from greenfloor.runtime.cloud_wallet.bootstrap import ensure_offer_bootstrap_denominations
+from greenfloor.runtime.cloud_wallet.bootstrap import (
+    configured_ensure_offer_bootstrap_denominations,
+)
 from greenfloor.runtime.cloud_wallet.phases import (
     cloud_wallet_create_offer_phase,
     cloud_wallet_wait_offer_artifact_phase,
@@ -42,7 +44,7 @@ def default_cloud_wallet_offer_deps() -> CloudWalletOfferDeps:
         recent_market_resolved_asset_id_hints_fn=recent_market_resolved_asset_id_hints,
         resolve_cloud_wallet_offer_asset_ids_fn=resolve_cloud_wallet_offer_asset_ids,
         resolve_offer_expiry_for_market_fn=resolve_offer_expiry_for_market,
-        ensure_offer_bootstrap_denominations_fn=ensure_offer_bootstrap_denominations,
+        ensure_offer_bootstrap_denominations_fn=configured_ensure_offer_bootstrap_denominations,
         cloud_wallet_create_offer_phase_fn=cloud_wallet_create_offer_phase,
         cloud_wallet_wait_offer_artifact_phase_fn=cloud_wallet_wait_offer_artifact_phase,
     )

@@ -1,37 +1,26 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import pytest
-import yaml
 
-import greenfloor.cli.manager as manager_mod
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
-
 from greenfloor.cli.manager import (
-    _coin_combine,
-    _coin_split,
     _coins_list,
 )
 from greenfloor.runtime.cloud_wallet.assets import (
     resolve_cloud_wallet_asset_id,
 )
-
 from tests.helpers.offer_runtime_fixtures import (
-    write_markets,
-    write_markets_with_duplicate_pair,
-    write_markets_with_ladder,
-    write_program,
-    write_program_with_cloud_wallet,
+    write_manager_program_with_cloud_wallet,
 )
 
 
 def test_coins_list_returns_minimal_fields(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
 
     class _FakeWallet:
         vault_id = "wallet-1"
@@ -62,11 +51,12 @@ def test_coins_list_returns_minimal_fields(monkeypatch, tmp_path: Path, capsys) 
     assert payload["items"][0]["pending"] is True
     assert payload["items"][0]["spendable"] is False
 
+
 def test_coins_list_resolves_asset_filter_before_listing(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
 
     calls = {"list_asset_id": None}
 
@@ -94,11 +84,12 @@ def test_coins_list_resolves_asset_filter_before_listing(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["count"] == 0
 
+
 def test_coins_list_keeps_asset_scoped_rows_when_wallet_reports_mixed_asset_metadata(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     warning_calls: list[tuple[object, ...]] = []
 
     class _FakeWallet:
@@ -154,11 +145,12 @@ def test_coins_list_keeps_asset_scoped_rows_when_wallet_reports_mixed_asset_meta
     assert warning_calls
     assert "coins_list_mixed_asset_metadata" in str(warning_calls[0][0])
 
+
 def test_coins_list_keeps_asset_totals_when_scoped_rows_omit_reported_asset(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     warning_calls: list[tuple[object, ...]] = []
 
     class _FakeWallet:
@@ -227,11 +219,12 @@ def test_coins_list_keeps_asset_totals_when_scoped_rows_omit_reported_asset(
     assert payload["warnings"] == []
     assert warning_calls == []
 
+
 def test_coins_list_keeps_row_level_spendability_separate_from_wallet_asset_totals(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
 
     class _FakeWallet:
         vault_id = "wallet-1"
@@ -300,11 +293,12 @@ def test_coins_list_keeps_row_level_spendability_separate_from_wallet_asset_tota
     spendable_total = sum(int(item["amount"]) for item in payload["items"] if item["spendable"])
     assert spendable_total == 20480
 
+
 def test_coins_list_warns_when_item_amount_sum_differs_from_wallet_asset_total(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     warning_calls: list[tuple[object, ...]] = []
 
     class _FakeWallet:
@@ -379,11 +373,12 @@ def test_coins_list_warns_when_item_amount_sum_differs_from_wallet_asset_total(
     assert warning_calls
     assert "coins_list_amount_mismatch" in str(warning_calls[0][0])
 
+
 def test_coins_list_cat_id_uses_wallet_resolution_without_dexie(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
 
     calls = {"list_asset_id": None}
     cat_id = "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
@@ -413,13 +408,14 @@ def test_coins_list_cat_id_uses_wallet_resolution_without_dexie(
     assert len(resolver_calls) == 1
     assert resolver_calls[0]["canonical_asset_id"] == cat_id
     assert resolver_calls[0]["allow_dexie_lookup"] is False
-    assert str(resolver_calls[0].get("program_home_dir", "")).endswith(".greenfloor")
+    assert resolver_calls[0]["program_home_dir"] == str(tmp_path)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["count"] == 0
 
+
 def test_coins_list_rejects_non_hex_cat_id(monkeypatch, tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
 
     class _FakeWallet:
         vault_id = "wallet-1"
@@ -438,11 +434,12 @@ def test_coins_list_rejects_non_hex_cat_id(monkeypatch, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="--cat-id must be a 64-character hex CAT asset id"):
         _coins_list(program_path=program, asset=None, vault_id=None, cat_id="not-a-cat-id")
 
+
 def test_coins_list_cat_id_works_when_dexie_metadata_absent(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     cat_id = "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
     calls = {"list_asset_id": None}
 
@@ -498,11 +495,12 @@ def test_coins_list_cat_id_works_when_dexie_metadata_absent(
     assert payload["vault_id"] == "wallet-1"
     assert payload["count"] == 0
 
+
 def test_coins_list_vault_id_override_uses_override_wallet_end_to_end(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
-    write_program_with_cloud_wallet(program)
+    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
     resolver_wallet_ids: list[str] = []
     override_init: dict[str, str] = {}
     list_calls = {"asset_id": None}
@@ -562,6 +560,7 @@ def test_coins_list_vault_id_override_uses_override_wallet_end_to_end(
     assert payload["count"] == 1
     assert payload["items"][0]["coin_id"] == "coin-override-1"
 
+
 def test_resolve_cloud_wallet_asset_id_hex_without_dexie_uses_local_catalog_hints(
     monkeypatch,
 ) -> None:
@@ -619,4 +618,3 @@ def test_resolve_cloud_wallet_asset_id_hex_without_dexie_uses_local_catalog_hint
         allow_dexie_lookup=False,
     )
     assert resolved == "Asset_carbon"
-

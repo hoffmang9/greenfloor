@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from greenfloor.config.models import ProgramConfig
+from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.runtime.offer_runtime import signer_create_offer_phase
 
 
@@ -44,7 +44,7 @@ def test_signer_create_offer_phase_buy_side_swaps_legs(monkeypatch) -> None:
     market = _sample_market()
     result = signer_create_offer_phase(
         program=program,
-        market=market,
+        market=cast(MarketConfig, market),
         size_base_units=10,
         quote_price=2.0,
         resolved_base_asset_id="basecat",
@@ -85,7 +85,7 @@ def test_signer_create_offer_phase_sell_side_keeps_legs(monkeypatch) -> None:
     market = _sample_market()
     signer_create_offer_phase(
         program=program,
-        market=market,
+        market=cast(MarketConfig, market),
         size_base_units=5,
         quote_price=1.5,
         resolved_base_asset_id="basecat",
@@ -114,7 +114,7 @@ def test_signer_create_offer_phase_requires_offer_text(monkeypatch) -> None:
     with pytest.raises(RuntimeError, match="missing_offer_text"):
         signer_create_offer_phase(
             program=cast(ProgramConfig, SimpleNamespace()),
-            market=_sample_market(),
+            market=cast(MarketConfig, _sample_market()),
             size_base_units=1,
             quote_price=1.0,
             resolved_base_asset_id="basecat",
