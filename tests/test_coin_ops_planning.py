@@ -81,9 +81,7 @@ def test_daemon_auto_profile_rejects_sub_cat_change_dust() -> None:
     selection = plan_auto_split_selection(
         candidate_spendable=_coins(("Coin_cat", 10_500)),
         required_amount_mojos=10_000,
-        canonical_asset_id=(
-            "0000000000000000000000000000000000000000000000000000000000000001"
-        ),
+        canonical_asset_id=("0000000000000000000000000000000000000000000000000000000000000001"),
         profile=SplitPlanningProfile.DAEMON_AUTO,
         combine_input_cap=10,
         allow_combine_prereq=False,
