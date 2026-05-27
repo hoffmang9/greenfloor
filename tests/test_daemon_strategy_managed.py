@@ -1,33 +1,22 @@
 from __future__ import annotations
 
-import threading
-from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
-
-import pytest
 
 from greenfloor.config.models import ProgramConfig
 from greenfloor.core.strategy import PlannedAction
-from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.daemon.testing import (
     PENDING_VISIBILITY_REASON,
     POST_COOLDOWN_UNTIL,
-    coinset_spendable_base_unit_coin_amounts,
-    cooldown_remaining_ms,
     execute_strategy_actions,
-    inventory_scan,
-    single_input_preferred_skip_reason,
     strategy_dispatch,
 )
-from greenfloor.runtime.coin_ops.planning import select_spendable_coins_for_target_amount
-from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.daemon_test_fixtures import (
     FakeDexie,
     FakeStore,
     market_config,
     signer_program_config,
 )
+
 
 def test_execute_strategy_actions_uses_signer_managed_path_when_configured(monkeypatch) -> None:
     POST_COOLDOWN_UNTIL.clear()
@@ -39,7 +28,6 @@ def test_execute_strategy_actions_uses_signer_managed_path_when_configured(monke
 
     def program_factory() -> ProgramConfig:
         return signer_program_config()
-
 
     dexie = FakeDexie(post_result={"success": True, "id": "offer-1"})
     dexie.visible_offer_ids = {"offer-fallback-1"}
@@ -82,7 +70,6 @@ def test_execute_strategy_actions_signer_managed_requires_dexie_visibility(monke
 
     def program_factory() -> ProgramConfig:
         return signer_program_config()
-
 
     class _DexieNon404:
         def get_offer(self, offer_id: str) -> dict[str, Any]:
@@ -137,7 +124,6 @@ def test_execute_strategy_actions_signer_managed_accepts_transient_dexie_http_40
     def program_factory() -> ProgramConfig:
         return signer_program_config()
 
-
     class _Dexie404:
         def get_offer(self, offer_id: str) -> dict[str, Any]:
             _ = offer_id
@@ -186,7 +172,6 @@ def test_execute_strategy_actions_preserves_planned_size_order(monkeypatch) -> N
 
     def program_factory() -> ProgramConfig:
         return signer_program_config()
-
 
     dexie = FakeDexie(post_result={"success": True, "id": "offer-1"})
     dexie.visible_offer_ids = {"offer-100", "offer-10", "offer-1"}
@@ -254,7 +239,6 @@ def test_execute_strategy_actions_signer_managed_failure_skips_without_builder(m
     def program_factory() -> ProgramConfig:
         return signer_program_config()
 
-
     dexie = FakeDexie(post_result={"success": True, "id": "offer-1"})
     store = FakeStore()
     actions = [
@@ -284,5 +268,3 @@ def test_execute_strategy_actions_signer_managed_failure_skips_without_builder(m
     assert result["items"][0]["status"] == "skipped"
     assert result["items"][0]["reason"] == "managed_offer_post_failed:vault_signing_unavailable"
     assert calls["builder"] == 0
-
-

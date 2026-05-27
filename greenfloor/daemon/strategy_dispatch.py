@@ -20,12 +20,13 @@ from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon.cooldowns import (
     _POST_COOLDOWN_UNTIL,
     PENDING_VISIBILITY_REASON,
-    ManagedUpstreamTransientError,
     _cooldown_remaining_ms,
     _post_offer_with_retry,
     _post_retry_config,
     _set_cooldown,
-    is_transient_managed_upstream_error,
+    is_managed_upstream_transient_error,
+    is_managed_worker_transient_error,
+    is_parallel_dispatch_transient_error,
     raise_if_transient_managed_upstream_error,
     strategy_action_item_transient_upstream,
 )
@@ -35,11 +36,8 @@ from greenfloor.daemon.market_logging import (
     _log_market_decision,
     _log_offer_action_timing,
 )
-from greenfloor.daemon.reservations import (
-    AssetReservationCoordinator,
-    ReservationContentionError,
-    ReservationStorageError,
-)
+from greenfloor.daemon.reservations import AssetReservationCoordinator
+from greenfloor.daemon.strategy_action_item import StrategyActionItem
 from greenfloor.runtime.offer_build_context import (
     default_program_config_path,
     prepare_offer_build_context,
@@ -63,31 +61,23 @@ def _action_item(
     offer_id: str | None = None,
     **extra: Any,
 ) -> dict[str, Any]:
-    return {
-        "size": action.size,
-        "side": _normalize_offer_side(getattr(action, "side", "sell")),
-        "status": status,
-        "reason": reason,
-        "offer_id": offer_id,
+    transient_upstream = bool(extra.pop("transient_upstream", False))
+    return StrategyActionItem.from_action(
+        action,
+        status=status,
+        reason=reason,
+        side=_normalize_offer_side(getattr(action, "side", "sell")),
+        offer_id=offer_id,
+        transient_upstream=transient_upstream,
         **extra,
-    }
-
-
-def _is_transient_managed_worker_error(exc: BaseException) -> bool:
-    if isinstance(exc, ManagedUpstreamTransientError):
-        return True
-    return isinstance(exc, TimeoutError)
+    ).to_audit_dict()
 
 
 def _parallel_offer_worker_error_item(*, exc: Exception) -> dict[str, Any]:
-    return {
-        "size": 0,
-        "side": "sell",
-        "status": "skipped",
-        "reason": f"parallel_offer_worker_error:{exc}",
-        "offer_id": None,
-        "transient_upstream": _is_transient_managed_worker_error(exc),
-    }
+    return StrategyActionItem.from_worker_error(
+        exc=exc,
+        transient_upstream=is_managed_worker_transient_error(exc),
+    ).to_audit_dict()
 
 
 def _can_parallelize_managed_offers(
@@ -103,18 +93,6 @@ def _can_parallelize_managed_offers(
         and not runtime_dry_run
         and reservation_coordinator is not None
     )
-
-
-def _is_transient_parallel_dispatch_error(exc: BaseException) -> bool:
-    if isinstance(exc, ReservationContentionError):
-        return True
-    if isinstance(exc, ReservationStorageError):
-        return False
-    if isinstance(exc, concurrent.futures.TimeoutError):
-        return True
-    if is_transient_managed_upstream_error(exc):
-        return True
-    return False
 
 
 def _expiry_seconds_for_action(action: PlannedAction) -> int | None:
@@ -383,7 +361,7 @@ def _execute_managed_action_with_retry(
             last_exc = exc
             if attempt_index >= (
                 max(1, int(attempts_max)) - 1
-            ) or not is_transient_managed_upstream_error(exc):
+            ) or not is_managed_upstream_transient_error(exc):
                 raise
             if backoff_ms > 0:
                 sleep_seconds = (backoff_ms * (2**attempt_index)) / 1000.0
@@ -813,7 +791,7 @@ def _execute_actions_sequential(
                     status="skipped",
                     reason=f"managed_action_error:{exc}",
                     offer_id=None,
-                    transient_upstream=_is_transient_managed_worker_error(exc),
+                    transient_upstream=is_managed_worker_transient_error(exc),
                 )
         elif program is None:
             item = _action_item(
@@ -886,7 +864,7 @@ def _execute_strategy_actions(
                 reservation_coordinator=reservation_coordinator,
             )
         except Exception as exc:
-            if not _is_transient_parallel_dispatch_error(exc):
+            if not is_parallel_dispatch_transient_error(exc):
                 raise
             store.add_audit_event(
                 "offer_parallel_fallback",

@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
-import pytest
-
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon.testing import (
     POST_COOLDOWN_UNTIL,
@@ -23,6 +21,7 @@ from tests.helpers.daemon_test_fixtures import (
     execute_local_strategy_actions,
     market_config,
 )
+
 
 def test_execute_strategy_actions_dry_run_plans_without_posting() -> None:
     dexie = FakeDexie(post_result={"success": True, "id": "offer-1"})
@@ -533,5 +532,3 @@ def test_drop_zero_repeat_strategy_actions_filters_zero_repeat_actions() -> None
 
     assert len(filtered) == 1
     assert filtered[0].repeat == 1
-
-

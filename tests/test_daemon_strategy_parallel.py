@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-import pytest
-
 from greenfloor.config.models import ProgramConfig
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon.reservations import AssetReservationCoordinator
@@ -23,6 +21,7 @@ from tests.helpers.daemon_test_fixtures import (
     market_config,
     signer_program_config,
 )
+
 
 def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worker_failures(
     monkeypatch, tmp_path
@@ -299,5 +298,3 @@ def test_select_spendable_coins_for_target_amount_uses_change_when_needed() -> N
     assert exact is False
     assert total == 11_000
     assert set(coin_ids) == {"c5", "c3a", "c3b"}
-
-

@@ -13,6 +13,7 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
+from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
 _PENDING_VISIBILITY_REASON = "managed_offer_post_success_dexie_visibility_pending"
 PENDING_VISIBILITY_REASON = _PENDING_VISIBILITY_REASON
@@ -79,23 +80,49 @@ class ManagedUpstreamTransientError(Exception):
     """Transient managed-offer or signer upstream failure (timeouts, HTTP 502/503/504)."""
 
 
-def is_transient_managed_upstream_error(exc: BaseException) -> bool:
+def classify_managed_transient_error(exc: BaseException) -> str | None:
+    """Classify managed-offer transient failures.
+
+    Returns ``upstream`` for retryable signer/network failures, ``reservation_contention``
+    for lease contention, or ``None`` for non-transient errors.
+    """
+    from greenfloor.daemon.reservations import ReservationContentionError, ReservationStorageError
+
+    if isinstance(exc, ReservationStorageError):
+        return None
+    if isinstance(exc, ReservationContentionError):
+        return "reservation_contention"
+    if isinstance(exc, ManagedUpstreamTransientError):
+        return "upstream"
+    if isinstance(exc, TimeoutError):
+        return "upstream"
+    return None
+
+
+def is_managed_upstream_transient_error(exc: BaseException) -> bool:
+    """Typed upstream transients eligible for managed-post retry."""
     return isinstance(exc, ManagedUpstreamTransientError)
 
 
-def strategy_action_item_transient_upstream(item: dict[str, Any]) -> bool:
+def is_managed_worker_transient_error(exc: BaseException) -> bool:
+    """Worker failures that should trigger parallel post cooldown aggregation."""
+    return classify_managed_transient_error(exc) == "upstream"
+
+
+def is_parallel_dispatch_transient_error(exc: BaseException) -> bool:
+    """Parallel dispatch failures eligible for sequential fallback."""
+    kind = classify_managed_transient_error(exc)
+    return kind in {"upstream", "reservation_contention"}
+
+
+# Backward-compatible alias for retry checks.
+is_transient_managed_upstream_error = is_managed_upstream_transient_error
+
+
+def strategy_action_item_transient_upstream(item: StrategyActionItem | dict[str, Any]) -> bool:
+    if isinstance(item, StrategyActionItem):
+        return item.transient_upstream
     return item.get("transient_upstream") is True
-
-
-def is_transient_managed_upstream_reason(reason: str) -> bool:
-    normalized = str(reason or "").strip()
-    if normalized == "managed_offer_transient_upstream":
-        return True
-    if normalized.startswith("managed_offer_post_failed:"):
-        return _is_transient_managed_upstream_error_text(normalized.split(":", 1)[1])
-    if normalized.startswith("parallel_offer_worker_error:"):
-        return _is_transient_managed_upstream_error_text(normalized.split(":", 1)[1])
-    return _is_transient_managed_upstream_error_text(normalized)
 
 
 def transient_managed_upstream_error_from_text(

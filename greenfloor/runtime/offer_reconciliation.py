@@ -146,6 +146,28 @@ def _apply_dexie_status_fallback(
     return next_state, reason, signal_source
 
 
+def _taker_fields(
+    *,
+    coinset_confirmed_tx_ids: list[str],
+    coinset_mempool_tx_ids: list[str],
+    status: int | None,
+    current_state: str,
+    next_state: str,
+) -> tuple[str, str]:
+    if (
+        coinset_confirmed_tx_ids
+        and status != 3
+        and current_state != "cancelled"
+        and next_state == OfferLifecycleState.TX_BLOCK_CONFIRMED.value
+    ):
+        return "coinset_tx_block_webhook", "coinset_tx_block_confirmed"
+    if coinset_mempool_tx_ids:
+        return "none", "coinset_mempool_observed"
+    if status in {4, 5}:
+        return "none", "dexie_status_pattern_fallback"
+    return "none", "none"
+
+
 @dataclass(frozen=True, slots=True)
 class CycleOfferTransition:
     old_state: str
@@ -158,6 +180,15 @@ class CycleOfferTransition:
     coinset_tx_ids: list[str]
     coinset_confirmed_tx_ids: list[str]
     coinset_mempool_tx_ids: list[str]
+
+    def taker_fields(self, *, last_seen_status: int | None) -> tuple[str, str]:
+        return _taker_fields(
+            coinset_confirmed_tx_ids=self.coinset_confirmed_tx_ids,
+            coinset_mempool_tx_ids=self.coinset_mempool_tx_ids,
+            status=last_seen_status,
+            current_state=self.old_state,
+            next_state=self.new_state,
+        )
 
 
 def resolve_missing_watched_offer_transition(*, current_state: str) -> CycleOfferTransition:
@@ -247,28 +278,6 @@ def resolve_watched_offer_transition(
     )
 
 
-def _taker_fields(
-    *,
-    coinset_confirmed_tx_ids: list[str],
-    coinset_mempool_tx_ids: list[str],
-    status: int | None,
-    current_state: str,
-    next_state: str,
-) -> tuple[str, str]:
-    if (
-        coinset_confirmed_tx_ids
-        and status != 3
-        and current_state != "cancelled"
-        and next_state == OfferLifecycleState.TX_BLOCK_CONFIRMED.value
-    ):
-        return "coinset_tx_block_webhook", "coinset_tx_block_confirmed"
-    if coinset_mempool_tx_ids:
-        return "none", "coinset_mempool_observed"
-    if status in {4, 5}:
-        return "none", "dexie_status_pattern_fallback"
-    return "none", "none"
-
-
 @dataclass(frozen=True, slots=True)
 class ReconcileOfferRowOutcome:
     offer_id: str
@@ -292,13 +301,7 @@ def reconcile_result_from_transition(
     transition: CycleOfferTransition,
     last_seen_status: int | None,
 ) -> ReconcileOfferResult:
-    taker_signal, taker_diagnostic = _taker_fields(
-        coinset_confirmed_tx_ids=transition.coinset_confirmed_tx_ids,
-        coinset_mempool_tx_ids=transition.coinset_mempool_tx_ids,
-        status=last_seen_status,
-        current_state=transition.old_state,
-        next_state=transition.new_state,
-    )
+    taker_signal, taker_diagnostic = transition.taker_fields(last_seen_status=last_seen_status)
     return ReconcileOfferResult(
         offer_id=offer_id,
         market_id=market_id,
@@ -333,13 +336,7 @@ def persist_offer_lifecycle_transition(
         state=transition.new_state,
         last_seen_status=last_seen_status,
     )
-    taker_signal, taker_diagnostic = _taker_fields(
-        coinset_confirmed_tx_ids=transition.coinset_confirmed_tx_ids,
-        coinset_mempool_tx_ids=transition.coinset_mempool_tx_ids,
-        status=last_seen_status,
-        current_state=transition.old_state,
-        next_state=transition.new_state,
-    )
+    taker_signal, taker_diagnostic = transition.taker_fields(last_seen_status=last_seen_status)
     payload: dict[str, Any] = {
         "offer_id": offer_id,
         "market_id": market_id,

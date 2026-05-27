@@ -3,7 +3,6 @@ from __future__ import annotations
 import threading
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -27,6 +26,7 @@ from tests.helpers.daemon_test_fixtures import (
     market_config,
     signer_program_config,
 )
+
 
 def test_execute_strategy_actions_parallel_signer_managed_reservation_contention(
     monkeypatch,

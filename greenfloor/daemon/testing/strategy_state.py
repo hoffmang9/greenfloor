@@ -8,6 +8,8 @@ from greenfloor.daemon.strategy_reseed import (
 )
 from greenfloor.daemon.strategy_state import (
     _strategy_config_from_market as strategy_config_from_market,
+)
+from greenfloor.daemon.strategy_state import (
     evaluate_reseed_candidates,
 )
 
