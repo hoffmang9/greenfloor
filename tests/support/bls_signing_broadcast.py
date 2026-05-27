@@ -1,4 +1,9 @@
-"""Test-only broadcast helpers for BLS signing (structured Coinset push_tx fallback)."""
+"""Test-only broadcast helpers for BLS signing.
+
+Production broadcast uses ``CoinsetAdapter.push_tx`` (Rust hex path). Some test
+Coinset backends reject hex bundles and accept JSON spend bundles instead; this
+module falls back to ``push_tx_structured`` only in that case.
+"""
 
 from __future__ import annotations
 

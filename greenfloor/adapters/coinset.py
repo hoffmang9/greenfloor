@@ -167,11 +167,13 @@ class CoinsetAdapter:
                 resolved_base_url = self.MAINNET_BASE_URL
         self.base_url = resolved_base_url.rstrip("/")
 
-    def _post_json_once(
-        self, endpoint: str, body: dict[str, Any], *, base_url: str
-    ) -> dict[str, Any]:
-        url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
-        data = json.dumps(body).encode("utf-8")
+    def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
+        request_body = dict(body)
+        if self.network == "testnet11":
+            # Force testnet selection for shared/multiplexed Coinset backends.
+            request_body.setdefault("network", "testnet11")
+        url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        data = json.dumps(request_body).encode("utf-8")
         req = urllib.request.Request(
             url,
             data=data,
@@ -197,13 +199,6 @@ class CoinsetAdapter:
         if isinstance(payload, dict):
             return payload
         raise RuntimeError("coinset_invalid_response_payload")
-
-    def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
-        request_body = dict(body)
-        if self.network == "testnet11":
-            # Force testnet selection for shared/multiplexed Coinset backends.
-            request_body.setdefault("network", "testnet11")
-        return self._post_json_once(endpoint, request_body, base_url=self.base_url)
 
     def get_all_mempool_tx_ids(self) -> list[str]:
         payload = self._post_json("get_all_mempool_tx_ids", {})
@@ -382,6 +377,7 @@ class CoinsetAdapter:
         return payload
 
     def push_tx_structured(self, *, spend_bundle: dict[str, Any]) -> dict[str, Any]:
+        """Test-only fallback when a Coinset endpoint rejects hex-encoded bundles."""
         payload = self._post_json("push_tx", {"spend_bundle": spend_bundle})
         if not isinstance(payload, dict):
             return {"success": False, "error": "invalid_response_payload"}

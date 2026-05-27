@@ -26,14 +26,6 @@ from greenfloor.runtime.coin_ops_backend import (
 )
 
 
-@dataclass
-class CoinOpDeps:
-    """Test/DI seam for coin-op setup."""
-
-
-DEFAULT_COIN_OP_DEPS = CoinOpDeps()
-
-
 def as_wait_events(value: object) -> list[dict[str, str]]:
     if not isinstance(value, list):
         return []
@@ -181,9 +173,7 @@ def coin_op_setup(
     pair: str | None,
     venue: str | None,
     canonical_asset_id_override: str | None = None,
-    deps: CoinOpDeps = DEFAULT_COIN_OP_DEPS,
 ) -> CoinOpSetupResult:
-    _ = deps
     program = load_program_config(program_path)
     selected_venue = resolve_venue_for_coin_prep(venue_override=venue)
     markets = load_markets_config_with_optional_overlay(

@@ -69,9 +69,7 @@ def bootstrap_blocks_offer(
     )
     bootstrap_ready = bool(bootstrap_result.get("ready", False))
     if bootstrap_status == "failed":
-        if policy.allow_split_fallback and bootstrap_result.get(
-            "fallback_to_cloud_wallet_offer_split"
-        ):
+        if policy.allow_split_fallback and bootstrap_result.get("fallback_to_presplit_path"):
             return False, None
         return True, f"bootstrap_failed:{bootstrap_reason}"
     if bootstrap_status == "executed" and not bootstrap_ready:

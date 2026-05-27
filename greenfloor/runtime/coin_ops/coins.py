@@ -106,7 +106,7 @@ def coin_row_is_unlocked_and_unlinked(*, coin: dict) -> bool:
     return not bool(coin.get("isLocked")) and not bool(coin.get("isLinkedToOpenOffer"))
 
 
-def cloud_wallet_coin_matches_asset_scope(*, coin: dict, scoped_asset_id: str) -> bool:
+def coin_matches_scoped_asset_id(*, coin: dict, scoped_asset_id: str) -> bool:
     target_asset = str(scoped_asset_id).strip().lower()
     if not target_asset:
         return False
@@ -115,7 +115,7 @@ def cloud_wallet_coin_matches_asset_scope(*, coin: dict, scoped_asset_id: str) -
         row_asset_id = str(asset_payload.get("id", "")).strip().lower()
         if row_asset_id:
             return row_asset_id == target_asset
-    # Asset-scoped Cloud Wallet coin queries can omit per-row asset metadata.
+    # Asset-scoped coin queries can omit per-row asset metadata.
     return True
 
 
@@ -131,7 +131,7 @@ def coin_matches_scoped_spendable_filters(
         return False
     if not coin_row_is_unlocked_and_unlinked(coin=coin):
         return False
-    if not cloud_wallet_coin_matches_asset_scope(coin=coin, scoped_asset_id=scoped_asset_id):
+    if not coin_matches_scoped_asset_id(coin=coin, scoped_asset_id=scoped_asset_id):
         return False
     return coin_meets_coin_op_min_amount(coin, canonical_asset_id=canonical_asset_id)
 
@@ -227,7 +227,7 @@ def coin_matches_direct_spendable_lookup(
     fallback_result = bool(
         is_spendable_coin(coin)
         and coin_row_is_unlocked_and_unlinked(coin=coin)
-        and cloud_wallet_coin_matches_asset_scope(coin=coin, scoped_asset_id=scoped_asset_id)
+        and coin_matches_scoped_asset_id(coin=coin, scoped_asset_id=scoped_asset_id)
     )
     if not fallback_result and not fail_open_on_lookup_error:
         if cache is not None:

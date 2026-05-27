@@ -172,10 +172,7 @@ class OfferPostRequest:
     def run_managed(
         self,
         backend: OfferExecutionBackend,
-        *,
-        offer_artifact_timeout_seconds: int | None = None,
     ) -> tuple[int, dict[str, Any]]:
-        _ = offer_artifact_timeout_seconds
         if backend == "bls":
             raise ValueError("managed offer post does not support bls backend")
         if backend != "signer":

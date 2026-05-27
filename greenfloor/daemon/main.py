@@ -778,6 +778,49 @@ def _normalize_offer_side(value: Any) -> str:
     return "buy" if side == "buy" else "sell"
 
 
+def _action_item(
+    action: Any,
+    *,
+    status: str,
+    reason: str,
+    offer_id: str | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    return {
+        "size": action.size,
+        "side": _normalize_offer_side(getattr(action, "side", "sell")),
+        "status": status,
+        "reason": reason,
+        "offer_id": offer_id,
+        **extra,
+    }
+
+
+def _parallel_offer_worker_error_item(*, exc: Exception) -> dict[str, Any]:
+    return {
+        "size": 0,
+        "side": "sell",
+        "status": "skipped",
+        "reason": f"parallel_offer_worker_error:{exc}",
+        "offer_id": None,
+    }
+
+
+def _can_parallelize_managed_offers(
+    *,
+    program: ProgramConfig | None,
+    runtime_dry_run: bool,
+    reservation_coordinator: AssetReservationCoordinator | None,
+) -> bool:
+    return (
+        program is not None
+        and signer_offer_path_configured(program)
+        and bool(program.runtime_offer_parallelism_enabled)
+        and not runtime_dry_run
+        and reservation_coordinator is not None
+    )
+
+
 def _parse_offer_side_metadata(value: Any) -> str | None:
     side = str(value or "").strip().lower()
     if side in {"buy", "sell"}:
@@ -1358,12 +1401,6 @@ def _build_offer_for_action(
     return {"status": "executed", "reason": "offer_builder_success", "offer": offer}
 
 
-def _managed_offer_backend_for_program(program: Any, *, size_base_units: int) -> str | None:
-    if isinstance(program, ProgramConfig):
-        return managed_offer_execution_backend(program, size_base_units=size_base_units)
-    return None
-
-
 def _reservation_wallet_id(program: ProgramConfig) -> str:
     vault = program.vault_config
     if vault is not None:
@@ -1560,12 +1597,6 @@ def _reservation_request_for_cloud_offer_with_assets(
     return request
 
 
-def _estimate_cloud_offer_fee_reservation_mojos(*, program: Any) -> int:
-    _ = program
-    # Offer files must always be created with zero fees. Fees are only used
-    # for coin split/combine operations outside offer creation.
-    return 0
-
 
 def _resolve_signer_offer_asset_ids_for_reservation(
     *,
@@ -1624,10 +1655,7 @@ def _managed_offer_post(
         claim_rewards=False,
         dry_run=runtime_dry_run,
     )
-    exit_code, payload = request.run_managed(
-        backend,
-        offer_artifact_timeout_seconds=None,
-    )
+    exit_code, payload = request.run_managed(backend)
     return parse_managed_offer_post_result(exit_code, payload)
 
 
@@ -1723,8 +1751,8 @@ def _run_coinset_signal_capture_once(
 
 def _execute_single_managed_action(
     *,
-    program: Any,
-    market: Any,
+    program: ProgramConfig,
+    market: MarketConfig,
     action: Any,
     publish_venue: str,
     runtime_dry_run: bool,
@@ -1755,46 +1783,42 @@ def _execute_single_managed_action(
             )
             if not visible:
                 if is_transient_dexie_visibility_404_error(visibility_error or ""):
-                    return {
-                        "size": action.size,
-                        "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                        "status": "executed",
-                        "reason": _PENDING_VISIBILITY_REASON,
-                        "offer_id": managed_offer_id or None,
+                    return _action_item(
+                        action,
+                        status="executed",
+                        reason=_PENDING_VISIBILITY_REASON,
+                        offer_id=managed_offer_id or None,
                         **timing_fields,
-                    }
-                return {
-                    "size": action.size,
-                    "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                    "status": "skipped",
-                    "reason": (f"managed_offer_post_not_visible_on_dexie:{visibility_error}"),
-                    "offer_id": managed_offer_id or None,
+                    )
+                return _action_item(
+                    action,
+                    status="skipped",
+                    reason=f"managed_offer_post_not_visible_on_dexie:{visibility_error}",
+                    offer_id=managed_offer_id or None,
                     **timing_fields,
-                }
-        return {
-            "size": action.size,
-            "side": _normalize_offer_side(getattr(action, "side", "sell")),
-            "status": "executed",
-            "reason": "managed_offer_post_success",
-            "offer_id": managed_offer_id or None,
+                )
+        return _action_item(
+            action,
+            status="executed",
+            reason="managed_offer_post_success",
+            offer_id=managed_offer_id or None,
             **timing_fields,
-        }
-    return {
-        "size": action.size,
-        "side": _normalize_offer_side(getattr(action, "side", "sell")),
-        "status": "skipped",
-        "reason": (
+        )
+    return _action_item(
+        action,
+        status="skipped",
+        reason=(
             f"managed_offer_post_failed:{str(managed_post.get('error', 'unknown')).strip()}"
         ),
-        "offer_id": None,
+        offer_id=None,
         **timing_fields,
-    }
+    )
 
 
 def _execute_managed_action_with_retry(
     *,
-    program: Any,
-    market: Any,
+    program: ProgramConfig,
+    market: MarketConfig,
     action: Any,
     publish_venue: str,
     runtime_dry_run: bool,
@@ -1852,30 +1876,28 @@ def _execute_single_local_action(
     build_ms = int((time.monotonic() - build_started) * 1000)
     if built.get("status") != "executed":
         built_reason = str(built.get("reason", "offer_builder_skipped"))
-        return {
-            "size": action.size,
-            "side": _normalize_offer_side(getattr(action, "side", "sell")),
-            "status": "skipped",
-            "reason": built_reason,
-            "offer_id": None,
-            "offer_create_ms": build_ms,
-            "offer_publish_ms": None,
-            "offer_total_ms": int((time.monotonic() - action_started) * 1000),
-        }
+        return _action_item(
+            action,
+            status="skipped",
+            reason=built_reason,
+            offer_id=None,
+            offer_create_ms=build_ms,
+            offer_publish_ms=None,
+            offer_total_ms=int((time.monotonic() - action_started) * 1000),
+        )
     _, _, cooldown_seconds = _post_retry_config()
     cooldown_key = f"{publish_venue}:{market.market_id}"
     remaining_ms = _cooldown_remaining_ms(_POST_COOLDOWN_UNTIL, cooldown_key)
     if remaining_ms > 0:
-        return {
-            "size": action.size,
-            "side": _normalize_offer_side(getattr(action, "side", "sell")),
-            "status": "skipped",
-            "reason": f"post_cooldown_active:{remaining_ms}ms",
-            "offer_id": None,
-            "offer_create_ms": build_ms,
-            "offer_publish_ms": None,
-            "offer_total_ms": int((time.monotonic() - action_started) * 1000),
-        }
+        return _action_item(
+            action,
+            status="skipped",
+            reason=f"post_cooldown_active:{remaining_ms}ms",
+            offer_id=None,
+            offer_create_ms=build_ms,
+            offer_publish_ms=None,
+            offer_total_ms=int((time.monotonic() - action_started) * 1000),
+        )
     offer_text = str(built["offer"])
     publish_started = time.monotonic()
     post_result, attempt_count, post_error = _post_offer_with_retry(
@@ -1895,29 +1917,27 @@ def _execute_single_local_action(
             state=OfferLifecycleState.OPEN.value,
             last_seen_status=0,
         )
-        return {
-            "size": action.size,
-            "side": _normalize_offer_side(getattr(action, "side", "sell")),
-            "status": "executed",
-            "reason": f"{publish_venue}_post_success",
-            "offer_id": offer_id,
-            "attempts": attempt_count,
-            "offer_create_ms": build_ms,
-            "offer_publish_ms": publish_ms,
-            "offer_total_ms": int((time.monotonic() - action_started) * 1000),
-        }
+        return _action_item(
+            action,
+            status="executed",
+            reason=f"{publish_venue}_post_success",
+            offer_id=offer_id,
+            attempts=attempt_count,
+            offer_create_ms=build_ms,
+            offer_publish_ms=publish_ms,
+            offer_total_ms=int((time.monotonic() - action_started) * 1000),
+        )
     _set_cooldown(_POST_COOLDOWN_UNTIL, cooldown_key, cooldown_seconds)
-    return {
-        "size": action.size,
-        "side": _normalize_offer_side(getattr(action, "side", "sell")),
-        "status": "skipped",
-        "reason": f"{publish_venue}_post_retry_exhausted:{post_error}",
-        "offer_id": offer_id or None,
-        "attempts": attempt_count,
-        "offer_create_ms": build_ms,
-        "offer_publish_ms": publish_ms,
-        "offer_total_ms": int((time.monotonic() - action_started) * 1000),
-    }
+    return _action_item(
+        action,
+        status="skipped",
+        reason=f"{publish_venue}_post_retry_exhausted:{post_error}",
+        offer_id=offer_id or None,
+        attempts=attempt_count,
+        offer_create_ms=build_ms,
+        offer_publish_ms=publish_ms,
+        offer_total_ms=int((time.monotonic() - action_started) * 1000),
+    )
 
 
 def _expand_strategy_actions(strategy_actions: list[Any]) -> list[Any]:
@@ -1928,13 +1948,7 @@ def _expand_strategy_actions(strategy_actions: list[Any]) -> list[Any]:
 
 
 def _managed_skip_item(*, action: Any, reason: str) -> dict[str, Any]:
-    return {
-        "size": action.size,
-        "side": _normalize_offer_side(getattr(action, "side", "sell")),
-        "status": "skipped",
-        "reason": reason,
-        "offer_id": None,
-    }
+    return _action_item(action, status="skipped", reason=reason, offer_id=None)
 
 
 def _single_input_preferred_skip_reason(
@@ -2013,10 +2027,290 @@ def _prepare_parallel_managed_submission(
     return requested_amounts, available_amounts, None
 
 
+def _strategy_action_result(
+    *,
+    planned_count: int,
+    executed_count: int,
+    items: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "planned_count": planned_count,
+        "executed_count": executed_count,
+        "items": items,
+    }
+
+
+def _execute_actions_parallel(
+    *,
+    program: ProgramConfig,
+    market: MarketConfig,
+    expanded_actions: list[Any],
+    publish_venue: str,
+    runtime_dry_run: bool,
+    dexie: DexieAdapter,
+    reservation_coordinator: AssetReservationCoordinator,
+) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    executed_count = 0
+    resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id = (
+        _resolve_signer_offer_asset_ids_for_reservation(
+            program=program,
+            market=market,
+        )
+    )
+    # Offer files must always use zero fees; fees apply only to coin split/combine.
+    fee_amount_mojos = 0
+    wallet_id = _reservation_wallet_id(program)
+    reservation_coordinator.try_acquire(
+        market_id=str(market.market_id),
+        wallet_id=wallet_id,
+        requested_amounts={},
+        available_amounts={},
+    )
+    submissions: list[tuple[int, Any, dict[str, int], dict[str, int]]] = []
+    for submit_index, action in enumerate(expanded_actions):
+        requested_amounts, available_amounts, skip_item = _prepare_parallel_managed_submission(
+            market=market,
+            action=action,
+            program=program,
+            resolved_base_asset_id=resolved_base_asset_id,
+            resolved_quote_asset_id=resolved_quote_asset_id,
+            resolved_xch_asset_id=resolved_xch_asset_id,
+            fee_amount_mojos=fee_amount_mojos,
+        )
+        if skip_item is not None:
+            items.append(skip_item)
+            continue
+        assert requested_amounts is not None
+        assert available_amounts is not None
+        submissions.append((submit_index, action, requested_amounts, available_amounts))
+
+    if not submissions:
+        return _strategy_action_result(
+            planned_count=len(expanded_actions),
+            executed_count=executed_count,
+            items=items,
+        )
+
+    max_workers = min(
+        len(submissions),
+        max(1, int(program.runtime_offer_parallelism_max_workers)),
+    )
+    _log_market_decision(
+        str(market.market_id),
+        "parallel_offer_dispatch",
+        planned_count=len(expanded_actions),
+        queued_count=len(submissions),
+        workers=max_workers,
+    )
+
+    def _run_parallel_submission(
+        *,
+        submit_index: int,
+        action: Any,
+        requested_amounts: dict[str, int],
+        available_amounts: dict[str, int],
+        queued_at_monotonic: float,
+    ) -> dict[str, Any]:
+        queue_wait_ms = int((time.monotonic() - queued_at_monotonic) * 1000)
+        _log_market_decision(
+            str(market.market_id),
+            "parallel_offer_queue_wait",
+            submit_index=submit_index,
+            size=int(getattr(action, "size", 0)),
+            side=_normalize_offer_side(getattr(action, "side", "sell")),
+            queue_wait_ms=queue_wait_ms,
+        )
+        acquire_started = time.monotonic()
+        acquired = reservation_coordinator.try_acquire(
+            market_id=str(market.market_id),
+            wallet_id=wallet_id,
+            requested_amounts=requested_amounts,
+            available_amounts=available_amounts,
+        )
+        acquire_ms = int((time.monotonic() - acquire_started) * 1000)
+        if not acquired.ok or not acquired.reservation_id:
+            return {
+                **_managed_skip_item(
+                    action=action,
+                    reason=str(acquired.error or "reservation_rejected"),
+                ),
+                "queue_wait_ms": queue_wait_ms,
+                "reservation_acquire_ms": acquire_ms,
+            }
+        reservation_id = str(acquired.reservation_id)
+        reserved_at = time.monotonic()
+        _log_market_decision(
+            str(market.market_id),
+            "parallel_offer_reservation_acquired",
+            submit_index=submit_index,
+            reservation_id=reservation_id,
+            queue_wait_ms=queue_wait_ms,
+            reservation_acquire_ms=acquire_ms,
+        )
+        try:
+            item = _execute_managed_action_with_retry(
+                program=program,
+                market=market,
+                action=action,
+                publish_venue=publish_venue,
+                runtime_dry_run=runtime_dry_run,
+                dexie=dexie,
+            )
+        except Exception as exc:
+            item = _parallel_offer_worker_error_item(exc=exc)
+        release_status = (
+            "released_success"
+            if str(item.get("status", "")).strip().lower() == "executed"
+            else "released_failed"
+        )
+        reservation_coordinator.release(reservation_id=reservation_id, status=release_status)
+        reservation_hold_ms = int((time.monotonic() - reserved_at) * 1000)
+        _log_market_decision(
+            str(market.market_id),
+            "parallel_offer_reservation_released",
+            submit_index=submit_index,
+            reservation_id=reservation_id,
+            release_status=release_status,
+            reservation_hold_ms=reservation_hold_ms,
+        )
+        item["reservation_id"] = reservation_id
+        item["queue_wait_ms"] = queue_wait_ms
+        item["reservation_acquire_ms"] = acquire_ms
+        item["reservation_hold_ms"] = reservation_hold_ms
+        return item
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+        future_to_submission: dict[concurrent.futures.Future[dict[str, Any]], int] = {}
+        for submit_index, action, requested_amounts, available_amounts in submissions:
+            future = pool.submit(
+                _run_parallel_submission,
+                submit_index=submit_index,
+                action=action,
+                requested_amounts=requested_amounts,
+                available_amounts=available_amounts,
+                queued_at_monotonic=time.monotonic(),
+            )
+            future_to_submission[future] = submit_index
+        submitted_items: list[tuple[int, dict[str, Any]]] = []
+        for future in concurrent.futures.as_completed(future_to_submission):
+            submit_index = future_to_submission[future]
+            try:
+                item = future.result()
+            except Exception as exc:
+                item = _parallel_offer_worker_error_item(exc=exc)
+            submitted_items.append((submit_index, item))
+        for _, item in sorted(submitted_items, key=lambda pair: pair[0]):
+            _log_offer_action_timing(str(market.market_id), item)
+            if item.get("status") == "executed":
+                executed_count += 1
+            items.append(item)
+
+    _, _, cooldown_seconds = _post_retry_config()
+    transient_parallel_failures = sum(
+        1
+        for _submit_idx, item in submitted_items
+        if str(item.get("status", "")).strip().lower() == "skipped"
+        and _is_transient_managed_upstream_error_text(str(item.get("reason", "")))
+    )
+    total_parallel = len(submitted_items)
+    if (
+        total_parallel > 0
+        and cooldown_seconds > 0
+        and transient_parallel_failures >= max(2, (total_parallel + 1) // 2)
+    ):
+        cooldown_key = f"{publish_venue}:{market.market_id}"
+        _set_cooldown(_POST_COOLDOWN_UNTIL, cooldown_key, cooldown_seconds)
+        _log_market_decision(
+            str(market.market_id),
+            "parallel_offer_transient_cooldown",
+            transient_failures=transient_parallel_failures,
+            total_parallel=total_parallel,
+            cooldown_seconds=cooldown_seconds,
+        )
+    return _strategy_action_result(
+        planned_count=len(expanded_actions),
+        executed_count=executed_count,
+        items=items,
+    )
+
+
+def _execute_actions_sequential(
+    *,
+    program: ProgramConfig | None,
+    market: MarketConfig,
+    expanded_actions: list[Any],
+    runtime_dry_run: bool,
+    xch_price_usd: float | None,
+    dexie: DexieAdapter,
+    splash: SplashAdapter | None,
+    publish_venue: str,
+    store: SqliteStore,
+    keyring_yaml_path: str,
+) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    executed_count = 0
+    for action in expanded_actions:
+        if runtime_dry_run:
+            items.append(_action_item(action, status="planned", reason="dry_run", offer_id=None))
+            continue
+        backend = (
+            managed_offer_execution_backend(program, size_base_units=int(action.size))
+            if program is not None
+            else None
+        )
+        if backend is not None:
+            assert program is not None
+            try:
+                item = _execute_managed_action_with_retry(
+                    program=program,
+                    market=market,
+                    action=action,
+                    publish_venue=publish_venue,
+                    runtime_dry_run=runtime_dry_run,
+                    dexie=dexie,
+                )
+            except Exception as exc:
+                item = _action_item(
+                    action,
+                    status="skipped",
+                    reason=f"managed_action_error:{exc}",
+                    offer_id=None,
+                )
+        elif program is None:
+            item = _action_item(
+                action,
+                status="skipped",
+                reason="local_offer_post_requires_program_config",
+                offer_id=None,
+            )
+        else:
+            item = _execute_single_local_action(
+                program=program,
+                market=market,
+                action=action,
+                xch_price_usd=xch_price_usd,
+                keyring_yaml_path=keyring_yaml_path,
+                dexie=dexie,
+                splash=splash,
+                publish_venue=publish_venue,
+                store=store,
+            )
+        if item.get("status") == "executed":
+            executed_count += 1
+        _log_offer_action_timing(str(market.market_id), item)
+        items.append(item)
+    return _strategy_action_result(
+        planned_count=len(expanded_actions),
+        executed_count=executed_count,
+        items=items,
+    )
+
+
 def _execute_strategy_actions(
     *,
-    market,
-    strategy_actions: list,
+    market: MarketConfig,
+    strategy_actions: list[PlannedAction],
     runtime_dry_run: bool,
     xch_price_usd: float | None,
     dexie: DexieAdapter,
@@ -2025,297 +2319,56 @@ def _execute_strategy_actions(
     store: SqliteStore,
     app_network: str = "mainnet",
     signer_key_registry: dict[str, Any] | None = None,
-    program: Any | None = None,
+    program: ProgramConfig | None = None,
     reservation_coordinator: AssetReservationCoordinator | None = None,
 ) -> dict[str, Any]:
-    items: list[dict[str, Any]] = []
-    executed_count = 0
-    signer_key_id = str(getattr(market, "signer_key_id", "") or "").strip()
+    _ = app_network
+    signer_key_id = str(market.signer_key_id or "").strip()
     signer_key = (signer_key_registry or {}).get(signer_key_id)
     if isinstance(signer_key, dict):
         keyring_yaml_path = str(signer_key.get("keyring_yaml_path", "") or "").strip()
     else:
         keyring_yaml_path = str(getattr(signer_key, "keyring_yaml_path", "") or "").strip()
     expanded_actions = _expand_strategy_actions(strategy_actions)
-    can_parallelize_managed_offers = (
-        isinstance(program, ProgramConfig)
-        and signer_offer_path_configured(program)
-        and bool(getattr(program, "runtime_offer_parallelism_enabled", False))
-        and not runtime_dry_run
-        and reservation_coordinator is not None
-    )
-    if can_parallelize_managed_offers:
+    if _can_parallelize_managed_offers(
+        program=program,
+        runtime_dry_run=runtime_dry_run,
+        reservation_coordinator=reservation_coordinator,
+    ):
+        assert program is not None
+        assert reservation_coordinator is not None
         try:
-            assert program is not None
-            assert reservation_coordinator is not None
-            resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id = (
-                _resolve_signer_offer_asset_ids_for_reservation(
-                    program=program,
-                    market=market,
-                )
+            return _execute_actions_parallel(
+                program=program,
+                market=market,
+                expanded_actions=expanded_actions,
+                publish_venue=publish_venue,
+                runtime_dry_run=runtime_dry_run,
+                dexie=dexie,
+                reservation_coordinator=reservation_coordinator,
             )
-            fee_amount_mojos = _estimate_cloud_offer_fee_reservation_mojos(program=program)
-            wallet_id = _reservation_wallet_id(program)
-            reservation_coordinator.try_acquire(
-                market_id=str(market.market_id),
-                wallet_id=wallet_id,
-                requested_amounts={},
-                available_amounts={},
-            )
-            submissions: list[tuple[int, Any, dict[str, int], dict[str, int]]] = []
-            for submit_index, action in enumerate(expanded_actions):
-                requested_amounts, available_amounts, skip_item = (
-                    _prepare_parallel_managed_submission(
-                        market=market,
-                        action=action,
-                        program=program,
-                        resolved_base_asset_id=resolved_base_asset_id,
-                        resolved_quote_asset_id=resolved_quote_asset_id,
-                        resolved_xch_asset_id=resolved_xch_asset_id,
-                        fee_amount_mojos=fee_amount_mojos,
-                    )
-                )
-                if skip_item is not None:
-                    items.append(skip_item)
-                    continue
-                assert requested_amounts is not None
-                assert available_amounts is not None
-                submissions.append((submit_index, action, requested_amounts, available_amounts))
-
-            if submissions:
-                coordinator = reservation_coordinator
-                assert coordinator is not None
-                max_workers = min(
-                    len(submissions),
-                    max(1, int(getattr(program, "runtime_offer_parallelism_max_workers", 4))),
-                )
-                _log_market_decision(
-                    str(getattr(market, "market_id", "")),
-                    "parallel_offer_dispatch",
-                    planned_count=len(expanded_actions),
-                    queued_count=len(submissions),
-                    workers=max_workers,
-                )
-
-                def _run_parallel_submission(
-                    *,
-                    submit_index: int,
-                    action: Any,
-                    requested_amounts: dict[str, int],
-                    available_amounts: dict[str, int],
-                    queued_at_monotonic: float,
-                ) -> dict[str, Any]:
-                    queue_wait_ms = int((time.monotonic() - queued_at_monotonic) * 1000)
-                    _log_market_decision(
-                        str(getattr(market, "market_id", "")),
-                        "parallel_offer_queue_wait",
-                        submit_index=submit_index,
-                        size=int(getattr(action, "size", 0)),
-                        side=_normalize_offer_side(getattr(action, "side", "sell")),
-                        queue_wait_ms=queue_wait_ms,
-                    )
-                    acquire_started = time.monotonic()
-                    acquired = coordinator.try_acquire(
-                        market_id=str(market.market_id),
-                        wallet_id=wallet_id,
-                        requested_amounts=requested_amounts,
-                        available_amounts=available_amounts,
-                    )
-                    acquire_ms = int((time.monotonic() - acquire_started) * 1000)
-                    if not acquired.ok or not acquired.reservation_id:
-                        return {
-                            **_managed_skip_item(
-                                action=action,
-                                reason=str(acquired.error or "reservation_rejected"),
-                            ),
-                            "queue_wait_ms": queue_wait_ms,
-                            "reservation_acquire_ms": acquire_ms,
-                        }
-                    reservation_id = str(acquired.reservation_id)
-                    reserved_at = time.monotonic()
-                    _log_market_decision(
-                        str(getattr(market, "market_id", "")),
-                        "parallel_offer_reservation_acquired",
-                        submit_index=submit_index,
-                        reservation_id=reservation_id,
-                        queue_wait_ms=queue_wait_ms,
-                        reservation_acquire_ms=acquire_ms,
-                    )
-                    try:
-                        item = _execute_managed_action_with_retry(
-                            program=program,
-                            market=market,
-                            action=action,
-                            publish_venue=publish_venue,
-                            runtime_dry_run=runtime_dry_run,
-                            dexie=dexie,
-                        )
-                    except Exception as exc:
-                        item = {
-                            "size": 0,
-                            "side": "sell",
-                            "status": "skipped",
-                            "reason": f"parallel_offer_worker_error:{exc}",
-                            "offer_id": None,
-                        }
-                    release_status = (
-                        "released_success"
-                        if str(item.get("status", "")).strip().lower() == "executed"
-                        else "released_failed"
-                    )
-                    coordinator.release(reservation_id=reservation_id, status=release_status)
-                    reservation_hold_ms = int((time.monotonic() - reserved_at) * 1000)
-                    _log_market_decision(
-                        str(getattr(market, "market_id", "")),
-                        "parallel_offer_reservation_released",
-                        submit_index=submit_index,
-                        reservation_id=reservation_id,
-                        release_status=release_status,
-                        reservation_hold_ms=reservation_hold_ms,
-                    )
-                    item["reservation_id"] = reservation_id
-                    item["queue_wait_ms"] = queue_wait_ms
-                    item["reservation_acquire_ms"] = acquire_ms
-                    item["reservation_hold_ms"] = reservation_hold_ms
-                    return item
-
-                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-                    future_to_submission: dict[concurrent.futures.Future[dict[str, Any]], int] = {}
-                    for submit_index, action, requested_amounts, available_amounts in submissions:
-                        future = pool.submit(
-                            _run_parallel_submission,
-                            submit_index=submit_index,
-                            action=action,
-                            requested_amounts=requested_amounts,
-                            available_amounts=available_amounts,
-                            queued_at_monotonic=time.monotonic(),
-                        )
-                        future_to_submission[future] = submit_index
-                    submitted_items: list[tuple[int, dict[str, Any]]] = []
-                    for future in concurrent.futures.as_completed(future_to_submission):
-                        submit_index = future_to_submission[future]
-                        try:
-                            item = future.result()
-                        except Exception as exc:
-                            item = {
-                                "size": 0,
-                                "side": "sell",
-                                "status": "skipped",
-                                "reason": f"parallel_offer_worker_error:{exc}",
-                                "offer_id": None,
-                            }
-                        submitted_items.append((submit_index, item))
-                    for _, item in sorted(submitted_items, key=lambda pair: pair[0]):
-                        _log_offer_action_timing(str(getattr(market, "market_id", "")), item)
-                        if item.get("status") == "executed":
-                            executed_count += 1
-                        items.append(item)
-                _, _, cooldown_seconds = _post_retry_config()
-                transient_parallel_failures = sum(
-                    1
-                    for _submit_idx, item in submitted_items
-                    if str(item.get("status", "")).strip().lower() == "skipped"
-                    and _is_transient_managed_upstream_error_text(str(item.get("reason", "")))
-                )
-                total_parallel = len(submitted_items)
-                if (
-                    total_parallel > 0
-                    and cooldown_seconds > 0
-                    and transient_parallel_failures >= max(2, (total_parallel + 1) // 2)
-                ):
-                    cooldown_key = f"{publish_venue}:{market.market_id}"
-                    _set_cooldown(_POST_COOLDOWN_UNTIL, cooldown_key, cooldown_seconds)
-                    _log_market_decision(
-                        str(getattr(market, "market_id", "")),
-                        "parallel_offer_transient_cooldown",
-                        transient_failures=transient_parallel_failures,
-                        total_parallel=total_parallel,
-                        cooldown_seconds=cooldown_seconds,
-                    )
-            return {
-                "planned_count": len(expanded_actions),
-                "executed_count": executed_count,
-                "items": items,
-            }
         except Exception as exc:
             store.add_audit_event(
                 "offer_parallel_fallback",
                 {
-                    "market_id": str(getattr(market, "market_id", "")),
+                    "market_id": str(market.market_id),
                     "error": str(exc),
                     "reason": "reservation_parallel_path_failed",
                 },
-                market_id=str(getattr(market, "market_id", "")),
+                market_id=str(market.market_id),
             )
-            can_parallelize_managed_offers = False
-    if not can_parallelize_managed_offers:
-        for action in expanded_actions:
-            if runtime_dry_run:
-                items.append(
-                    {
-                        "size": action.size,
-                        "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                        "status": "planned",
-                        "reason": "dry_run",
-                        "offer_id": None,
-                    }
-                )
-                continue
-            backend = (
-                _managed_offer_backend_for_program(
-                    program, size_base_units=int(getattr(action, "size", 0))
-                )
-                if program is not None
-                else None
-            )
-            if backend is not None:
-                try:
-                    item = _execute_managed_action_with_retry(
-                        program=program,
-                        market=market,
-                        action=action,
-                        publish_venue=publish_venue,
-                        runtime_dry_run=runtime_dry_run,
-                        dexie=dexie,
-                    )
-                except Exception as exc:
-                    item = {
-                        "size": action.size,
-                        "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                        "status": "skipped",
-                        "reason": f"managed_action_error:{exc}",
-                        "offer_id": None,
-                    }
-            else:
-                if program is None or not isinstance(program, ProgramConfig):
-                    item = {
-                        "size": action.size,
-                        "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                        "status": "skipped",
-                        "reason": "local_offer_post_requires_program_config",
-                        "offer_id": None,
-                    }
-                else:
-                    item = _execute_single_local_action(
-                        program=program,
-                        market=market,
-                        action=action,
-                        xch_price_usd=xch_price_usd,
-                        keyring_yaml_path=keyring_yaml_path,
-                        dexie=dexie,
-                        splash=splash,
-                        publish_venue=publish_venue,
-                        store=store,
-                    )
-            if item.get("status") == "executed":
-                executed_count += 1
-            _log_offer_action_timing(str(getattr(market, "market_id", "")), item)
-            items.append(item)
-    return {
-        "planned_count": len(expanded_actions),
-        "executed_count": executed_count,
-        "items": items,
-    }
+    return _execute_actions_sequential(
+        program=program,
+        market=market,
+        expanded_actions=expanded_actions,
+        runtime_dry_run=runtime_dry_run,
+        xch_price_usd=xch_price_usd,
+        dexie=dexie,
+        splash=splash,
+        publish_venue=publish_venue,
+        store=store,
+        keyring_yaml_path=keyring_yaml_path,
+    )
 
 
 def _execute_cancel_policy_for_market(
