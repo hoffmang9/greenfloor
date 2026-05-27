@@ -1488,6 +1488,7 @@ def test_execute_strategy_actions_uses_cloud_wallet_path_when_configured(monkeyp
 
 def test_execute_strategy_actions_cloud_wallet_requires_dexie_visibility(monkeypatch) -> None:
     daemon_main._POST_COOLDOWN_UNTIL.clear()
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
         daemon_main,
         "_managed_offer_post",
@@ -1539,6 +1540,7 @@ def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
     active-offer reader keeps it in scope until the grace period expires.
     """
     daemon_main._POST_COOLDOWN_UNTIL.clear()
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
         daemon_main,
         "_managed_offer_post",

@@ -6,8 +6,8 @@ from typing import Any
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
 from greenfloor.hex_utils import default_mojo_multiplier_for_asset
 from greenfloor.offer_bootstrap import BootstrapLadderEntry, plan_bootstrap_mixed_outputs
+from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
 from greenfloor.runtime.cloud_wallet.polling import (
-    _is_spendable_coin,
     poll_signature_request_until_not_unsigned,
     wait_for_mempool_then_confirmation,
 )
@@ -18,7 +18,7 @@ from greenfloor.runtime.offer_publish import normalize_offer_side
 _BootstrapLadderEntry = BootstrapLadderEntry
 
 
-def _bootstrap_fee_cost_for_output_count(output_count: int) -> int:
+def bootstrap_fee_cost_for_output_count(output_count: int) -> int:
     count = max(1, int(output_count))
     # Heuristic cost model for Coinset fee advice:
     # - 1_000_000 baseline for a simple bootstrap spend
@@ -28,13 +28,13 @@ def _bootstrap_fee_cost_for_output_count(output_count: int) -> int:
     return 1_000_000 + max(0, count - 1) * 250_000
 
 
-def _resolve_bootstrap_split_fee(
+def resolve_bootstrap_split_fee(
     *,
     network: str,
     minimum_fee_mojos: int,
     output_count: int,
 ) -> tuple[int, str, str | None]:
-    fee_cost = _bootstrap_fee_cost_for_output_count(output_count)
+    fee_cost = bootstrap_fee_cost_for_output_count(output_count)
     spend_count = max(1, int(output_count))
     try:
         fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(
@@ -81,7 +81,7 @@ def ensure_offer_bootstrap_denominations(
     if plan_bootstrap_mixed_outputs_fn is None:
         plan_bootstrap_mixed_outputs_fn = plan_bootstrap_mixed_outputs
     if resolve_bootstrap_split_fee_fn is None:
-        resolve_bootstrap_split_fee_fn = _resolve_bootstrap_split_fee
+        resolve_bootstrap_split_fee_fn = resolve_bootstrap_split_fee
     if split_coins_fn is None:
         split_coins_fn = getattr(wallet, "split_coins", None)
     if poll_signature_request_until_not_unsigned_fn is None:
@@ -89,7 +89,7 @@ def ensure_offer_bootstrap_denominations(
     if wait_for_mempool_then_confirmation_fn is None:
         wait_for_mempool_then_confirmation_fn = wait_for_mempool_then_confirmation
     if is_spendable_coin_fn is None:
-        is_spendable_coin_fn = _is_spendable_coin
+        is_spendable_coin_fn = is_spendable_coin
 
     side = normalize_offer_side(action_side)
     ladders = getattr(market, "ladders", {}) or {}
@@ -303,3 +303,8 @@ def ensure_offer_bootstrap_denominations(
         "signature_wait_events": signature_events,
         "wait_events": wait_events,
     }
+
+
+# Backward-compatible aliases for legacy imports.
+_bootstrap_fee_cost_for_output_count = bootstrap_fee_cost_for_output_count
+_resolve_bootstrap_split_fee = resolve_bootstrap_split_fee

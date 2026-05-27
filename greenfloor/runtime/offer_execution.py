@@ -15,6 +15,7 @@ from greenfloor.runtime.offer_orchestration import OfferPostDeps, default_offer_
 from greenfloor.runtime.offer_publish import (
     is_transient_dexie_visibility_404_error,
     verify_offer_text_for_dexie,
+    verify_offer_visible_on_dexie,
 )
 from greenfloor.runtime.offer_runtime import (
     SignerOfferDeps,
@@ -35,4 +36,5 @@ __all__ = [
     "resolve_cloud_wallet_offer_asset_ids",
     "seed_cloud_wallet_assets_cache",
     "verify_offer_text_for_dexie",
+    "verify_offer_visible_on_dexie",
 ]

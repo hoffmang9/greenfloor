@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from greenfloor.runtime.cloud_wallet.adapter import _format_json_output
 from greenfloor.runtime.cloud_wallet.deps import (
     CloudWalletOfferDeps,
     default_cloud_wallet_offer_deps,
@@ -14,7 +13,6 @@ from greenfloor.runtime.offer_orchestration import (
     BootstrapPolicy,
     OfferCreateFailure,
     OfferCreateOutcome,
-    OfferPostDeps,
     build_and_post_offer,
 )
 
@@ -34,6 +32,8 @@ def build_and_post_offer_cloud_wallet(
     dry_run: bool,
     action_side: str = "sell",
     offer_artifact_timeout_seconds: int = 15 * 60,
+    emit_output: bool = True,
+    persist_results: bool = True,
     deps: CloudWalletOfferDeps | None = None,
 ) -> tuple[int, dict[str, Any]]:
     resolved_deps = deps or default_cloud_wallet_offer_deps()
@@ -57,7 +57,9 @@ def build_and_post_offer_cloud_wallet(
         )
     )
     expiry_unit, expiry_value = resolved_deps.resolve_offer_expiry_for_market_fn(market)
-    offer_fee_mojos, _ = resolved_deps.resolve_maker_offer_fee_fn(network=program.app_network)
+    offer_fee_mojos, _ = resolved_deps.post_deps.resolve_maker_offer_fee_fn(
+        network=program.app_network
+    )
     bootstrap_signature_wait_timeout_seconds = int(
         program.runtime_offer_bootstrap_signature_wait_timeout_seconds
     )
@@ -163,15 +165,7 @@ def build_and_post_offer_cloud_wallet(
         create_offer_fn=create,
         bootstrap_policy=BootstrapPolicy(allow_split_fallback=True),
         path_label="cloud_wallet",
-        post_deps=OfferPostDeps(
-            initialize_manager_file_logging_fn=resolved_deps.initialize_manager_file_logging_fn,
-            resolve_maker_offer_fee_fn=resolved_deps.resolve_maker_offer_fee_fn,
-            log_signed_offer_artifact_fn=resolved_deps.log_signed_offer_artifact_fn,
-            verify_offer_text_for_dexie_fn=resolved_deps.verify_offer_text_for_dexie_fn,
-            post_offer_phase_fn=resolved_deps.post_offer_phase_fn,
-            dexie_offer_view_url_fn=resolved_deps.dexie_offer_view_url_fn,
-            dexie_adapter_cls=resolved_deps.dexie_adapter_cls,
-            splash_adapter_cls=resolved_deps.splash_adapter_cls,
-            format_output_fn=_format_json_output,
-        ),
+        post_deps=resolved_deps.post_deps,
+        emit_output=emit_output,
+        persist_results=persist_results,
     )

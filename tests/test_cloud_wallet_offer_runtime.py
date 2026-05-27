@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
 from greenfloor.runtime.cloud_wallet.assets import resolve_cloud_wallet_offer_asset_ids
 from greenfloor.runtime.cloud_wallet.bootstrap import ensure_offer_bootstrap_denominations
-from greenfloor.runtime.cloud_wallet.deps import default_cloud_wallet_offer_deps
 from greenfloor.runtime.cloud_wallet.phases import (
     cloud_wallet_create_offer_phase,
     cloud_wallet_wait_offer_artifact_phase,
@@ -19,6 +17,7 @@ from greenfloor.runtime.offer_execution import (
     is_transient_dexie_visibility_404_error,
 )
 from greenfloor.runtime.offer_publish import post_offer_phase
+from tests.helpers.cloud_wallet_offer_deps import cloud_wallet_test_deps
 
 
 def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypatch) -> None:
@@ -183,8 +182,7 @@ def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path:
         claim_rewards=False,
         quote_price=1.5,
         dry_run=True,
-        deps=replace(
-            default_cloud_wallet_offer_deps(),
+        deps=cloud_wallet_test_deps(
             wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
             initialize_manager_file_logging_fn=lambda *args, **kwargs: None,
             recent_market_resolved_asset_id_hints_fn=lambda **kwargs: (None, None),
@@ -263,8 +261,7 @@ def test_build_and_post_offer_cloud_wallet_emits_timing_diagnostics(tmp_path: Pa
         claim_rewards=False,
         quote_price=1.5,
         dry_run=False,
-        deps=replace(
-            default_cloud_wallet_offer_deps(),
+        deps=cloud_wallet_test_deps(
             wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
             dexie_adapter_cls=_Dexie,  # type: ignore[arg-type]
             initialize_manager_file_logging_fn=lambda *args, **kwargs: None,
@@ -595,8 +592,7 @@ def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(
         claim_rewards=False,
         quote_price=1.5,
         dry_run=False,
-        deps=replace(
-            default_cloud_wallet_offer_deps(),
+        deps=cloud_wallet_test_deps(
             wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
             dexie_adapter_cls=_Dexie,  # type: ignore[arg-type]
             initialize_manager_file_logging_fn=lambda *args, **kwargs: None,
@@ -725,6 +721,12 @@ def test_wait_for_mempool_then_confirmation_uses_settled_only_coin_scans() -> No
         mempool_warning_seconds=30,
         confirmation_warning_seconds=60,
         timeout_seconds=10,
+        sleep_fn=lambda _seconds: None,
+        coinset_reconcile_fn=lambda **_kwargs: {
+            "reconcile": "ok",
+            "confirmed_block_index": "10",
+        },
+        reorg_watch_fn=lambda **_kwargs: [{"event": "reorg_watch_complete"}],
     )
 
     assert list_coins_include_pending_values == [False]
@@ -756,6 +758,12 @@ def test_wait_for_mempool_then_confirmation_uses_unscoped_scan_without_asset_id(
         mempool_warning_seconds=30,
         confirmation_warning_seconds=60,
         timeout_seconds=10,
+        sleep_fn=lambda _seconds: None,
+        coinset_reconcile_fn=lambda **_kwargs: {
+            "reconcile": "ok",
+            "confirmed_block_index": "10",
+        },
+        reorg_watch_fn=lambda **_kwargs: [{"event": "reorg_watch_complete"}],
     )
 
     assert list_coins_asset_ids == [None]

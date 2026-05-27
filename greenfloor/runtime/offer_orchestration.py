@@ -132,6 +132,54 @@ def default_offer_post_deps(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class OfferPostPersistRecord:
+    offer_id: str
+    market_id: str
+    side: str
+    size_base_units: int
+    publish_venue: str
+    resolved_base_asset_id: str
+    resolved_quote_asset_id: str
+    created_extra: dict[str, Any]
+
+
+def persist_offer_post_records(
+    store: SqliteStore,
+    records: list[OfferPostPersistRecord],
+) -> None:
+    for record in records:
+        store.upsert_offer_state(
+            offer_id=record.offer_id,
+            market_id=record.market_id,
+            state=OfferLifecycleState.OPEN.value,
+            last_seen_status=None,
+        )
+        audit_item: dict[str, Any] = {
+            "size": int(record.size_base_units),
+            "side": record.side,
+            "status": "executed",
+            "reason": f"{record.publish_venue}_post_success",
+            "offer_id": record.offer_id,
+            "attempts": 1,
+        }
+        audit_event: dict[str, Any] = {
+            "market_id": record.market_id,
+            "planned_count": 1,
+            "executed_count": 1,
+            "items": [audit_item],
+            "venue": record.publish_venue,
+            "resolved_base_asset_id": record.resolved_base_asset_id,
+            "resolved_quote_asset_id": record.resolved_quote_asset_id,
+        }
+        audit_event.update(record.created_extra)
+        store.add_audit_event(
+            "strategy_offer_execution",
+            audit_event,
+            market_id=record.market_id,
+        )
+
+
 def _append_post_failure(
     post_results: list[dict[str, Any]],
     *,
@@ -163,7 +211,7 @@ def _append_post_failure(
     post_results.append({"venue": publish_venue, "result": result})
 
 
-def build_and_post_offer(
+def execute_build_and_post_offer(
     *,
     program: Any,
     market: Any,
@@ -185,18 +233,14 @@ def build_and_post_offer(
     path_label: str,
     path_extra_fields: dict[str, Any] | None = None,
     post_deps: OfferPostDeps | None = None,
-) -> tuple[int, dict[str, Any]]:
+) -> tuple[int, dict[str, Any], list[OfferPostPersistRecord]]:
     resolved_post_deps = post_deps or default_offer_post_deps()
 
     side = normalize_offer_side(action_side)
-    resolved_post_deps.initialize_manager_file_logging_fn(
-        program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
-    )
-    db_path = (Path(program.home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
-    store = SqliteStore(db_path)
     post_results: list[dict[str, Any]] = []
     built_offers_preview: list[dict[str, str]] = []
     bootstrap_actions: list[dict[str, Any]] = []
+    persist_records: list[OfferPostPersistRecord] = []
     publish_failures = 0
     offer_fee_mojos, offer_fee_source = resolved_post_deps.resolve_maker_offer_fee_fn(
         network=program.app_network
@@ -354,34 +398,17 @@ def build_and_post_offer(
                 offer_id=offer_id,
             )
         if offer_id and bool(result.get("success", False)):
-            store.upsert_offer_state(
-                offer_id=offer_id,
-                market_id=str(market.market_id),
-                state=OfferLifecycleState.OPEN.value,
-                last_seen_status=None,
-            )
-            audit_item: dict[str, Any] = {
-                "size": int(size_base_units),
-                "side": side,
-                "status": "executed",
-                "reason": f"{publish_venue}_post_success",
-                "offer_id": offer_id,
-                "attempts": 1,
-            }
-            audit_event: dict[str, Any] = {
-                "market_id": str(market.market_id),
-                "planned_count": 1,
-                "executed_count": 1,
-                "items": [audit_item],
-                "venue": publish_venue,
-                "resolved_base_asset_id": resolved_base_asset_id,
-                "resolved_quote_asset_id": resolved_quote_asset_id,
-            }
-            audit_event.update(created.extra)
-            store.add_audit_event(
-                "strategy_offer_execution",
-                audit_event,
-                market_id=str(market.market_id),
+            persist_records.append(
+                OfferPostPersistRecord(
+                    offer_id=offer_id,
+                    market_id=str(market.market_id),
+                    side=side,
+                    size_base_units=int(size_base_units),
+                    publish_venue=publish_venue,
+                    resolved_base_asset_id=resolved_base_asset_id,
+                    resolved_quote_asset_id=resolved_quote_asset_id,
+                    created_extra=dict(created.extra),
+                )
             )
         post_results.append({"venue": publish_venue, "result": result_payload})
 
@@ -410,6 +437,67 @@ def build_and_post_offer(
     }
     if path_extra_fields:
         payload.update(path_extra_fields)
-    print(resolved_post_deps.format_output_fn(payload))
-    store.close()
-    return (0 if publish_failures == 0 else 2), payload
+    return (0 if publish_failures == 0 else 2), payload, persist_records
+
+
+def build_and_post_offer(
+    *,
+    program: Any,
+    market: Any,
+    size_base_units: int,
+    repeat: int,
+    publish_venue: str,
+    dexie_base_url: str,
+    splash_base_url: str,
+    drop_only: bool,
+    claim_rewards: bool,
+    quote_price: float,
+    dry_run: bool,
+    action_side: str,
+    resolved_base_asset_id: str,
+    resolved_quote_asset_id: str,
+    bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]],
+    create_offer_fn: collections.abc.Callable[..., OfferCreateOutcome],
+    bootstrap_policy: BootstrapPolicy,
+    path_label: str,
+    path_extra_fields: dict[str, Any] | None = None,
+    post_deps: OfferPostDeps | None = None,
+    emit_output: bool = True,
+    persist_results: bool = True,
+) -> tuple[int, dict[str, Any]]:
+    resolved_post_deps = post_deps or default_offer_post_deps()
+    resolved_post_deps.initialize_manager_file_logging_fn(
+        program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
+    )
+    exit_code, payload, persist_records = execute_build_and_post_offer(
+        program=program,
+        market=market,
+        size_base_units=size_base_units,
+        repeat=repeat,
+        publish_venue=publish_venue,
+        dexie_base_url=dexie_base_url,
+        splash_base_url=splash_base_url,
+        drop_only=drop_only,
+        claim_rewards=claim_rewards,
+        quote_price=quote_price,
+        dry_run=dry_run,
+        action_side=action_side,
+        resolved_base_asset_id=resolved_base_asset_id,
+        resolved_quote_asset_id=resolved_quote_asset_id,
+        bootstrap_phase_fn=bootstrap_phase_fn,
+        create_offer_fn=create_offer_fn,
+        bootstrap_policy=bootstrap_policy,
+        path_label=path_label,
+        path_extra_fields=path_extra_fields,
+        post_deps=resolved_post_deps,
+    )
+    if persist_results and persist_records:
+        db_path = (Path(program.home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
+        store = SqliteStore(db_path)
+        try:
+            persist_offer_post_records(store, persist_records)
+        finally:
+            store.close()
+    if emit_output:
+        print(resolved_post_deps.format_output_fn(payload))
+    return exit_code, payload

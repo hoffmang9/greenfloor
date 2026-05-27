@@ -361,6 +361,30 @@ def is_transient_dexie_visibility_404_error(error: str) -> bool:
     ) or "dexie_http_error:404" in normalized
 
 
+def verify_offer_visible_on_dexie(
+    *,
+    dexie: DexieAdapter,
+    offer_id: str,
+    max_attempts: int = 4,
+    delay_seconds: float = 1.5,
+    sleep_fn: collections.abc.Callable[[float], None] | None = None,
+) -> tuple[bool, str]:
+    """Return *(visible, error)* after polling Dexie for a freshly posted offer id."""
+    clean_offer_id = str(offer_id).strip()
+    if not clean_offer_id:
+        return False, "missing_offer_id"
+    visibility_error = verify_dexie_offer_visible_by_id(
+        dexie=dexie,
+        offer_id=clean_offer_id,
+        max_attempts=max_attempts,
+        delay_seconds=delay_seconds,
+        sleep_fn=sleep_fn,
+    )
+    if visibility_error is None:
+        return True, ""
+    return False, visibility_error
+
+
 def post_offer_phase(
     *,
     publish_venue: str,

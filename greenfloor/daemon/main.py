@@ -62,7 +62,10 @@ from greenfloor.logging_setup import (
 from greenfloor.notify.pushover import send_pushover_alert
 from greenfloor.runtime.cloud_wallet.assets import resolve_cloud_wallet_offer_asset_ids
 from greenfloor.runtime.cloud_wallet.build_post import build_and_post_offer_cloud_wallet
-from greenfloor.runtime.offer_publish import is_transient_dexie_visibility_404_error
+from greenfloor.runtime.offer_publish import (
+    is_transient_dexie_visibility_404_error,
+    verify_offer_visible_on_dexie,
+)
 from greenfloor.runtime.offer_runtime import build_and_post_offer_signer
 from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
 
@@ -2119,34 +2122,6 @@ def _managed_offer_post(
     }
 
 
-def _verify_offer_visible_on_dexie(
-    *,
-    dexie: DexieAdapter,
-    offer_id: str,
-    attempts: int = 4,
-    delay_seconds: float = 1.5,
-) -> tuple[bool, str]:
-    clean_offer_id = str(offer_id).strip()
-    if not clean_offer_id:
-        return False, "missing_offer_id"
-    for attempt in range(1, max(1, int(attempts)) + 1):
-        try:
-            payload = dexie.get_offer(clean_offer_id)
-        except Exception as exc:
-            if attempt >= attempts:
-                return False, f"dexie_get_offer_error:{exc}"
-            time.sleep(delay_seconds)
-            continue
-        offer_payload = payload.get("offer") if isinstance(payload, dict) else None
-        if isinstance(offer_payload, dict):
-            confirmed_id = str(offer_payload.get("id", "")).strip()
-            if confirmed_id == clean_offer_id:
-                return True, ""
-        if attempt < attempts:
-            time.sleep(delay_seconds)
-    return False, "dexie_offer_not_visible_after_publish"
-
-
 def _resolve_coinset_ws_url(*, program, coinset_base_url: str) -> str:
     configured = str(getattr(program, "tx_block_websocket_url", "")).strip()
     if configured:
@@ -2265,7 +2240,7 @@ def _execute_single_cloud_wallet_action(
     if bool(cloud_wallet_post.get("success", False)):
         cloud_wallet_offer_id = str(cloud_wallet_post.get("offer_id", "")).strip()
         if publish_venue == "dexie" and cloud_wallet_offer_id:
-            visible, visibility_error = _verify_offer_visible_on_dexie(
+            visible, visibility_error = verify_offer_visible_on_dexie(
                 dexie=dexie,
                 offer_id=cloud_wallet_offer_id,
             )

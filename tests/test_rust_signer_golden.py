@@ -4,23 +4,24 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "signer"
 
 
-def _require_native():
+def _require_native() -> Any:
     try:
-        import greenfloor_native  # type: ignore
+        import greenfloor_native  # type: ignore[import-not-found]
     except ImportError:
         pytest.skip("greenfloor_native not installed")
     return greenfloor_native
 
 
-def _require_signer():
+def _require_signer() -> Any:
     try:
-        import greenfloor_signer  # type: ignore
+        import greenfloor_signer  # type: ignore[import-not-found]
     except ImportError:
         pytest.skip("greenfloor_signer not installed")
     return greenfloor_signer
@@ -70,6 +71,6 @@ vault:
 """.strip(),
         encoding="utf-8",
     )
-    context = signer.resolve_vault_context(str(program))  # type: ignore[attr-defined]
+    context = signer.resolve_vault_context(str(program))
     assert context["launcher_id"] == "aa" * 32
     assert context["custody_threshold"] == 1

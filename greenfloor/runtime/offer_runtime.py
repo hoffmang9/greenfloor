@@ -12,8 +12,8 @@ from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.config.models import ProgramConfig, prepare_signer_runtime
 from greenfloor.hex_utils import canonical_is_xch, default_mojo_multiplier_for_asset
 from greenfloor.offer_bootstrap import BootstrapLadderEntry, plan_bootstrap_mixed_outputs
-from greenfloor.runtime.cloud_wallet.bootstrap import _resolve_bootstrap_split_fee
-from greenfloor.runtime.cloud_wallet.polling import _is_spendable_coin
+from greenfloor.runtime.cloud_wallet.bootstrap import resolve_bootstrap_split_fee
+from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
 from greenfloor.runtime.offer_orchestration import (
     BootstrapPolicy,
     OfferCreateFailure,
@@ -172,13 +172,13 @@ def signer_bootstrap_phase(
     if plan_bootstrap_mixed_outputs_fn is None:
         plan_bootstrap_mixed_outputs_fn = plan_bootstrap_mixed_outputs
     if resolve_bootstrap_split_fee_fn is None:
-        resolve_bootstrap_split_fee_fn = _resolve_bootstrap_split_fee
+        resolve_bootstrap_split_fee_fn = resolve_bootstrap_split_fee
     if list_bootstrap_coins_fn is None:
         list_bootstrap_coins_fn = _list_coinset_bootstrap_coins
     if wait_for_confirmation_fn is None:
         wait_for_confirmation_fn = _wait_for_coinset_confirmation
     if is_spendable_coin_fn is None:
-        is_spendable_coin_fn = _is_spendable_coin
+        is_spendable_coin_fn = is_spendable_coin
 
     side = normalize_offer_side(action_side)
     ladders = getattr(market, "ladders", {}) or {}

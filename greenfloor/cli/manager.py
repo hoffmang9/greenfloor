@@ -65,12 +65,13 @@ from greenfloor.runtime.cloud_wallet.adapter import _require_cloud_wallet_config
 from greenfloor.runtime.cloud_wallet.assets import (
     resolve_cloud_wallet_asset_id,
 )
-from greenfloor.runtime.cloud_wallet.bootstrap import ensure_offer_bootstrap_denominations
+from greenfloor.runtime.cloud_wallet.bootstrap import (
+    ensure_offer_bootstrap_denominations,
+    resolve_bootstrap_split_fee,
+)
+from greenfloor.runtime.cloud_wallet.coins import coin_asset_id, is_spendable_coin, safe_int
 from greenfloor.runtime.cloud_wallet.deps import default_cloud_wallet_offer_deps
 from greenfloor.runtime.cloud_wallet.polling import (
-    _coin_asset_id,
-    _is_spendable_coin,
-    _safe_int,
     poll_signature_request_until_not_unsigned,
     wait_for_mempool_then_confirmation,
 )
@@ -96,7 +97,8 @@ from greenfloor.runtime.offer_publish import (
 )
 from greenfloor.storage.sqlite import SqliteStore
 
-# Test monkeypatch targets (resolve_cloud_wallet_asset_id reads via cwr import).
+# Backward-compatible alias for tests that monkeypatch manager imports.
+_is_spendable_coin = is_spendable_coin
 _local_catalog_label_hints_for_asset_id = (
     _asset_label_catalog._local_catalog_label_hints_for_asset_id
 )
@@ -566,7 +568,7 @@ def _dexie_offer_status(payload: dict[str, Any]) -> int | None:
     raw_status = payload.get("status")
     if raw_status is None and isinstance(payload.get("offer"), dict):
         raw_status = payload["offer"].get("status")
-    return _safe_int(raw_status)
+    return safe_int(raw_status)
 
 
 def _wallet_asset_amounts_for_scope(
@@ -661,9 +663,9 @@ def _coin_matches_direct_spendable_lookup(
             result = False
         else:
             result = (
-                _is_spendable_coin(coin_record)
+                is_spendable_coin(coin_record)
                 and not bool(coin_record.get("isLinkedToOpenOffer"))
-                and _coin_asset_id(coin_record).strip().lower()
+                and coin_asset_id(coin_record).strip().lower()
                 == str(scoped_asset_id).strip().lower()
             )
     if cache is not None:
@@ -683,8 +685,8 @@ def _evaluate_denomination_readiness(
     spendable = [
         c
         for c in coins
-        if _is_spendable_coin(c)
-        and _coin_asset_id(c).lower() == asset_id.strip().lower()
+        if is_spendable_coin(c)
+        and coin_asset_id(c).lower() == asset_id.strip().lower()
         and int(c.get("amount", 0)) == int(size_base_units)
     ]
     current_count = len(spendable)
@@ -751,7 +753,7 @@ def _coin_id_asset_lookup(wallet_coins: list[dict]) -> dict[str, str]:
         coin_id = str(coin.get("id", "")).strip()
         if not coin_id:
             continue
-        lookup[coin_id] = _coin_asset_id(coin).strip().lower()
+        lookup[coin_id] = coin_asset_id(coin).strip().lower()
     return lookup
 
 
@@ -1011,7 +1013,7 @@ def _evaluate_coin_split_gate(
     size_base_units: int,
     required_count: int,
 ) -> dict[str, int | bool | str]:
-    spendable_asset_coins = [coin for coin in asset_scoped_coins if _is_spendable_coin(coin)]
+    spendable_asset_coins = [coin for coin in asset_scoped_coins if is_spendable_coin(coin)]
     denom_coins = [
         coin for coin in spendable_asset_coins if int(coin.get("amount", 0)) == int(size_base_units)
     ]
@@ -1326,7 +1328,7 @@ def _select_offer_coin_ids_for_target_amount(
         return []
     spendable_rows: list[tuple[int, str]] = []
     for coin in wallet_coins:
-        if not _is_spendable_coin(coin):
+        if not is_spendable_coin(coin):
             continue
         coin_name = str(coin.get("name", "")).strip()
         if not _is_hex_asset_id(coin_name):
@@ -1362,40 +1364,6 @@ def _build_offer_text_for_request(payload: dict) -> str:
     return build_offer_text(payload)
 
 
-def _bootstrap_fee_cost_for_output_count(output_count: int) -> int:
-    count = max(1, int(output_count))
-    # Heuristic cost model for Coinset fee advice:
-    # - 1_000_000 baseline for a simple bootstrap spend
-    # - +250_000 per extra output to bias fee advice upward as fanout grows
-    # This is intentionally conservative (not a CLVM consensus constant) and
-    # should be tuned empirically from observed mempool/confirmation behavior.
-    return 1_000_000 + max(0, count - 1) * 250_000
-
-
-def _resolve_bootstrap_split_fee(
-    *,
-    network: str,
-    minimum_fee_mojos: int,
-    output_count: int,
-) -> tuple[int, str, str | None]:
-    fee_cost = _bootstrap_fee_cost_for_output_count(output_count)
-    spend_count = max(1, int(output_count))
-    try:
-        fee_mojos, fee_source = _resolve_taker_or_coin_operation_fee(
-            network=network,
-            minimum_fee_mojos=minimum_fee_mojos,
-            fee_cost=fee_cost,
-            spend_count=spend_count,
-        )
-        return int(fee_mojos), fee_source, None
-    except Exception as exc:
-        # Preserve the existing fee policy contract: fallback honors
-        # `coin_ops.minimum_fee_mojos` exactly, and an explicit zero config
-        # value means "allow zero-fee fallback when fee advice is unavailable".
-        fallback_fee = max(0, int(minimum_fee_mojos))
-        return fallback_fee, "config_minimum_fee_fallback", str(exc)
-
-
 def _ensure_offer_bootstrap_denominations(
     *,
     program: Any,
@@ -1416,11 +1384,11 @@ def _ensure_offer_bootstrap_denominations(
         quote_price=quote_price,
         action_side=action_side,
         plan_bootstrap_mixed_outputs_fn=plan_bootstrap_mixed_outputs,
-        resolve_bootstrap_split_fee_fn=_resolve_bootstrap_split_fee,
+        resolve_bootstrap_split_fee_fn=resolve_bootstrap_split_fee,
         wait_for_mempool_then_confirmation_fn=lambda **kwargs: wait_for_mempool_then_confirmation(
             include_pending=True, **kwargs
         ),
-        is_spendable_coin_fn=_is_spendable_coin,
+        is_spendable_coin_fn=is_spendable_coin,
         **kwargs,
     )
 
@@ -1851,7 +1819,7 @@ def _coins_list(
     for coin in coins:
         coin_state = str(coin.get("state", "")).strip().upper()
         pending = coin_state in {"PENDING", "MEMPOOL"}
-        spendable = _is_spendable_coin(coin)
+        spendable = is_spendable_coin(coin)
         asset_raw = coin.get("asset")
         # Asset-scoped queries now intentionally omit `coin.asset` because the
         # upstream resolver can report a bogus fallback asset. Preserve missing
@@ -2169,7 +2137,7 @@ def _coin_split(
         spendable_asset_coin_ids = {
             str(c.get("id", "")).strip()
             for c in asset_scoped_coins
-            if _is_spendable_coin(c)
+            if is_spendable_coin(c)
             and _coin_meets_coin_op_min_amount(c, canonical_asset_id=str(market.base_asset))
             and str(c.get("id", "")).strip()
         }
@@ -2203,7 +2171,7 @@ def _coin_split(
             spendable_asset_coins = [
                 c
                 for c in asset_scoped_coins
-                if _is_spendable_coin(c)
+                if is_spendable_coin(c)
                 and _coin_meets_coin_op_min_amount(c, canonical_asset_id=str(market.base_asset))
             ]
             if not spendable_asset_coins:
@@ -2462,7 +2430,7 @@ def _coin_combine(
             eligible_asset_coins = [
                 c
                 for c in asset_scoped_coins
-                if _is_spendable_coin(c)
+                if is_spendable_coin(c)
                 and _coin_meets_coin_op_min_amount(c, canonical_asset_id=combine_canonical_asset_id)
                 and _coin_matches_direct_spendable_lookup(
                     wallet=wallet,
@@ -3204,7 +3172,7 @@ def _offers_cancel(
                         include_pending=True,
                     )
                     spendable_market_coins = [
-                        coin for coin in market_coins if _is_spendable_coin(coin)
+                        coin for coin in market_coins if is_spendable_coin(coin)
                     ]
                     if not spendable_market_coins:
                         raise RuntimeError("no_spendable_market_coins_for_onchain_refresh")
