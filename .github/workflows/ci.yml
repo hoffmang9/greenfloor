@@ -44,8 +44,6 @@ jobs:
     # Every matrix leg waits for rust-signer so a Rust test failure blocks all platforms.
     needs: rust-signer
     runs-on: ${{ matrix.os }}
-    env:
-      VENV_CACHE_KEY: venv-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
     strategy:
       fail-fast: false
       matrix:
@@ -79,7 +77,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .venv
-          key: ${{ env.VENV_CACHE_KEY }}
+          key: venv-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
 
       - name: Create venv and install dev dependencies
         run: |
@@ -95,7 +93,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .venv
-          key: ${{ env.VENV_CACHE_KEY }}
+          key: venv-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
 
       - uses: ./.github/actions/greenfloor-maturin-wheels
         with:
