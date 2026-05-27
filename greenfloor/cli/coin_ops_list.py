@@ -14,12 +14,21 @@ from greenfloor.runtime.cloud_wallet import assets as cloud_wallet_assets
 from greenfloor.runtime.cloud_wallet.adapter import format_json_output
 from greenfloor.runtime.cloud_wallet.coin_ops_runtime import wallet_with_optional_vault_override
 from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
-from greenfloor.runtime.signer_coin_ops import (
-    list_signer_asset_coins,
-    resolve_signer_asset_id,
-)
+from greenfloor.runtime.coin_ops_backend import build_coin_op_backend, resolve_signer_asset_id
 
 coin_ops_logger = logging.getLogger("greenfloor.manager")
+
+
+def _resolve_coins_list_market(program: ProgramConfig) -> Any:
+    markets_path = program.home_dir / "config" / "markets.yaml"
+    markets = load_markets_config(markets_path)
+    enabled = [market for market in markets.markets if market.enabled]
+    candidates = enabled or list(markets.markets)
+    if not candidates:
+        raise ValueError("no markets configured")
+    if len(candidates) == 1:
+        return candidates[0]
+    return min(candidates, key=lambda market: str(market.market_id))
 
 
 def _coins_list_signer(
@@ -29,11 +38,7 @@ def _coins_list_signer(
     cat_id: str | None,
 ) -> int:
     assert isinstance(program, ProgramConfig)
-    markets_path = program.home_dir / "config" / "markets.yaml"
-    markets = load_markets_config(markets_path)
-    market = next(iter(markets.markets.values()), None)
-    if market is None:
-        raise ValueError("no markets configured")
+    market = _resolve_coins_list_market(program)
     receive_address = str(market.receive_address).strip()
     if not receive_address:
         raise ValueError("market missing receive_address for signer coin list")
@@ -49,11 +54,13 @@ def _coins_list_signer(
             program, canonical_asset_id=canonical_filter, symbol_hint=canonical_filter
         )
     list_asset_id = resolved_asset_filter or str(market.base_asset)
-    coins = list_signer_asset_coins(
+    backend = build_coin_op_backend(
         program=program,
-        receive_address=receive_address,
-        asset_id=list_asset_id,
+        market=market,
+        selected_venue=None,
+        resolved_asset_id=list_asset_id,
     )
+    coins = backend.list_asset_scoped_coins()
     items = []
     for coin in coins:
         coin_state = str(coin.get("state", "CONFIRMED")).strip().upper()
@@ -74,6 +81,7 @@ def _coins_list_signer(
         format_json_output(
             {
                 "execution_backend": "signer",
+                "market_id": market.market_id,
                 "receive_address": receive_address,
                 "resolved_asset_id": resolved_asset_filter,
                 "coins": items,

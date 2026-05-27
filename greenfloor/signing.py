@@ -4,13 +4,28 @@ from __future__ import annotations
 
 from typing import Any
 
-from greenfloor.adapters import bls_signing as _bls
+from greenfloor.adapters import bls_signing
 from greenfloor.adapters import rust_signer
+from greenfloor.adapters.bls_signing import (
+    _build_mixed_split_spend_bundle,
+    _from_input_spend_bundle_xch,
+    _import_sdk,
+    _list_unspent_cat_coins,
+    _list_unspent_cat_coins_by_ids,
+)
+from greenfloor.runtime.coinset_runtime import _coinset_adapter
 
-for _name in dir(_bls):
-    if _name.startswith("__"):
-        continue
-    globals()[_name] = getattr(_bls, _name)
+__all__ = [
+    "build_signed_spend_bundle",
+    "sign_and_broadcast",
+    "sign_and_broadcast_mixed_split",
+    "_build_mixed_split_spend_bundle",
+    "_coinset_adapter",
+    "_from_input_spend_bundle_xch",
+    "_import_sdk",
+    "_list_unspent_cat_coins",
+    "_list_unspent_cat_coins_by_ids",
+]
 
 
 def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
@@ -23,14 +38,14 @@ def build_signed_spend_bundle(payload: dict[str, Any]) -> dict[str, Any]:
             "reason": "signing_success",
             "spend_bundle_hex": spend_bundle_hex,
         }
-    return _bls.build_signed_spend_bundle(payload)
+    return bls_signing.build_signed_spend_bundle(payload)
 
 
 def sign_and_broadcast_mixed_split(payload: dict[str, Any]) -> dict[str, Any]:
     if rust_signer.is_vault_kms_payload(payload):
         return rust_signer.sign_and_broadcast_vault_mixed_split(payload)
-    return _bls.sign_and_broadcast_mixed_split(payload)
+    return bls_signing.sign_and_broadcast_mixed_split(payload)
 
 
 def sign_and_broadcast(payload: dict[str, Any]) -> dict[str, Any]:
-    return _bls.sign_and_broadcast(payload)
+    return bls_signing.sign_and_broadcast(payload)

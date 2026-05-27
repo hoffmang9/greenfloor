@@ -8,8 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from greenfloor.cli.prompts import prompt_yes_no
-from greenfloor.config.io import load_program_config
-from greenfloor.config.models import MarketConfig, coin_ops_execution_backend
+from greenfloor.config.models import MarketConfig
 from greenfloor.core.coin_ops_policy import coin_op_min_amount_mojos
 from greenfloor.runtime.cloud_wallet.adapter import format_json_output
 from greenfloor.runtime.cloud_wallet.coin_op_errors import coin_op_unresolved_error_payload
@@ -34,19 +33,6 @@ from greenfloor.runtime.cloud_wallet.coin_ops_steps import (
     CoinSplitStepParams,
     run_coin_combine_step,
     run_coin_split_step,
-)
-from greenfloor.runtime.signer_coin_ops_runtime import (
-    SignerCoinOpSetup,
-    SignerCoinOpSetupResult,
-    run_signer_coin_op_iteration_loop,
-    signer_coin_op_result_payload,
-    signer_coin_op_setup,
-)
-from greenfloor.runtime.signer_coin_ops_steps import (
-    SignerCoinCombineStepParams,
-    SignerCoinSplitStepParams,
-    run_signer_coin_combine_step,
-    run_signer_coin_split_step,
 )
 
 
@@ -80,9 +66,7 @@ def _finish_coin_op_cli(
             print(
                 format_json_output(
                     coin_op_unresolved_error_payload(
-                        market=setup.market,
-                        selected_venue=setup.selected_venue,
-                        wallet=setup.wallet,
+                        scope=setup.backend.scope,
                         unresolved_coin_ids=loop_result.unresolved_coin_ids,
                     )
                 )
@@ -114,7 +98,7 @@ def _run_coin_op_cli(
 
     cli_run = build_run(setup)
     loop_result = run_coin_op_iteration_loop(
-        wallet=setup.wallet,
+        setup=setup,
         network=network,
         no_wait=no_wait,
         until_ready=until_ready,
@@ -150,9 +134,7 @@ def _build_success_payload(
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         **coin_op_result_payload(
-            market=complete.setup.market,
-            selected_venue=complete.setup.selected_venue,
-            wallet=complete.setup.wallet,
+            setup=complete.setup,
             coin_ids=coin_ids,
             denomination_target=complete.denomination_target,
             until_ready=until_ready,
@@ -160,8 +142,6 @@ def _build_success_payload(
             stop_reason=complete.loop_result.stop_reason,
             final_readiness=final_readiness,
             operations=complete.loop_result.operations,
-            fee_mojos=complete.setup.fee_mojos,
-            fee_source=complete.setup.fee_source,
         ),
         **complete.extra_payload,
     }
@@ -260,82 +240,6 @@ def _build_split_run_step(
     return run_step
 
 
-def _build_signer_split_run_step(
-    *,
-    step_params: SignerCoinSplitStepParams,
-    prompt_for_override: bool | None,
-) -> Callable[[int, list[dict], set[str]], CoinOpStepOutcome]:
-    def run_step(
-        iteration: int,
-        wallet_coins: list[dict],
-        existing_coin_ids: set[str],
-    ) -> CoinOpStepOutcome:
-        _ = iteration, existing_coin_ids
-        while True:
-            step_result = run_signer_coin_split_step(
-                params=step_params, asset_scoped_coins=wallet_coins
-            )
-            step = step_result.step
-            if isinstance(step, CoinOpIterationNeedsConfirmation):
-                if prompt_yes_no(step.message, prompt_for_override=prompt_for_override):
-                    if step.override == "force_split_when_ready":
-                        step_params.force_split_when_ready = True
-                    elif step.override == "allow_lock_all_spendable":
-                        step_params.allow_lock_all_spendable = True
-                    continue
-                return CoinOpStepOutcome(step=step.decline_step, split_gate=step_result.split_gate)
-            return CoinOpStepOutcome(step=step, split_gate=step_result.split_gate)
-
-    return run_step
-
-
-def _run_signer_coin_op_cli(
-    *,
-    setup_result: SignerCoinOpSetupResult,
-    no_wait: bool,
-    until_ready: bool,
-    max_iterations: int,
-    coin_ids: list[str],
-    build_run: Callable[[SignerCoinOpSetup], _CoinOpCliRun],
-) -> int | _CoinOpCliLoopComplete:
-    if setup_result.error_payload is not None:
-        print(format_json_output(setup_result.error_payload))
-        return 2
-    setup = setup_result.setup
-    assert setup is not None
-    cli_run = build_run(setup)
-    loop_result = run_signer_coin_op_iteration_loop(
-        setup=setup,
-        no_wait=no_wait,
-        until_ready=until_ready,
-        max_iterations=max_iterations,
-        coin_ids=coin_ids,
-        denomination_target=cli_run.denomination_target,
-        readiness_asset_id=cli_run.readiness_asset_id,
-        run_step=cli_run.run_step,
-    )
-    if loop_result.early_return_code is not None:
-        if loop_result.error_payload is not None:
-            print(format_json_output(loop_result.error_payload))
-        elif loop_result.unresolved_coin_ids:
-            print(
-                format_json_output(
-                    {
-                        "error": "unresolved_coin_ids",
-                        "unresolved_coin_ids": loop_result.unresolved_coin_ids,
-                        "execution_backend": "signer",
-                    }
-                )
-            )
-        return loop_result.early_return_code
-    return _CoinOpCliLoopComplete(
-        setup=setup,  # type: ignore[arg-type]
-        loop_result=loop_result,
-        denomination_target=cli_run.denomination_target,
-        extra_payload=cli_run.extra_payload,
-    )
-
-
 def execute_split_cli(
     *,
     program_path: Path,
@@ -356,88 +260,6 @@ def execute_split_cli(
     force_split_when_ready: bool,
     prompt_for_override: bool | None,
 ) -> int:
-    program = load_program_config(program_path)
-    if coin_ops_execution_backend(program) == "signer":
-
-        def build_signer_run(setup: SignerCoinOpSetup) -> _CoinOpCliRun:
-            resolved_amount, resolved_count, denomination_target = _resolve_split_targets(
-                market=setup.market,
-                amount_per_coin=amount_per_coin,
-                number_of_coins=number_of_coins,
-                size_base_units=size_base_units,
-            )
-            step_params = SignerCoinSplitStepParams(
-                program=setup.program,
-                market=setup.market,
-                selected_venue=setup.selected_venue,
-                receive_address=setup.receive_address,
-                resolved_asset_id=setup.resolved_asset_id,
-                explicit_coin_ids=coin_ids,
-                amount_per_coin=resolved_amount,
-                number_of_coins=resolved_count,
-                denomination_target=denomination_target,
-                min_coin_amount_mojos=coin_op_min_amount_mojos(
-                    canonical_asset_id=str(setup.market.base_asset)
-                ),
-                allow_lock_all_spendable=allow_lock_all_spendable,
-                force_split_when_ready=force_split_when_ready,
-                no_wait=no_wait,
-            )
-            return _CoinOpCliRun(
-                denomination_target=denomination_target,
-                readiness_asset_id=setup.resolved_asset_id,
-                run_step=_build_signer_split_run_step(
-                    step_params=step_params,
-                    prompt_for_override=prompt_for_override,
-                ),
-                extra_payload={
-                    "execution_backend": "signer",
-                    "amount_per_coin": resolved_amount,
-                    "number_of_coins": resolved_count,
-                    "resolved_asset_id": setup.resolved_asset_id,
-                },
-            )
-
-        result = _run_signer_coin_op_cli(
-            setup_result=signer_coin_op_setup(
-                program_path=program_path,
-                markets_path=markets_path,
-                testnet_markets_path=testnet_markets_path,
-                network=network,
-                market_id=market_id,
-                pair=pair,
-                venue=venue,
-            ),
-            no_wait=no_wait,
-            until_ready=until_ready,
-            max_iterations=max_iterations,
-            coin_ids=coin_ids,
-            build_run=build_signer_run,
-        )
-        if isinstance(result, int):
-            return result
-        final_readiness = result.loop_result.final_readiness or result.loop_result.split_gate
-        setup = result.setup
-        assert isinstance(setup, SignerCoinOpSetup)
-        print(
-            format_json_output(
-                signer_coin_op_result_payload(
-                    setup=setup,
-                    coin_ids=coin_ids,
-                    denomination_target=result.denomination_target,
-                    until_ready=until_ready,
-                    max_iterations=max_iterations,
-                    stop_reason=result.loop_result.stop_reason,
-                    final_readiness=final_readiness,
-                    operations=result.loop_result.operations,
-                )
-                | {"split_gate": result.loop_result.split_gate}
-            )
-        )
-        if until_ready and isinstance(final_readiness, dict) and not bool(final_readiness.get("ready")):
-            return 2
-        return 0
-
     def build_run(setup: CoinOpSetup) -> _CoinOpCliRun:
         resolved_amount, resolved_count, denomination_target = _resolve_split_targets(
             market=setup.market,
@@ -446,7 +268,7 @@ def execute_split_cli(
             size_base_units=size_base_units,
         )
         step_params = CoinSplitStepParams(
-            wallet=setup.wallet,
+            backend=setup.backend,
             market=setup.market,
             selected_venue=setup.selected_venue,
             resolved_asset_id=setup.resolved_asset_id,
@@ -461,9 +283,14 @@ def execute_split_cli(
             allow_lock_all_spendable=allow_lock_all_spendable,
             force_split_when_ready=force_split_when_ready,
         )
+        readiness_asset_id = (
+            setup.resolved_asset_id
+            if setup.backend.scope.execution_backend == "signer"
+            else str(setup.market.base_asset)
+        )
         return _CoinOpCliRun(
             denomination_target=denomination_target,
-            readiness_asset_id=str(setup.market.base_asset),
+            readiness_asset_id=readiness_asset_id,
             run_step=_build_split_run_step(
                 step_params=step_params,
                 prompt_for_override=prompt_for_override,
@@ -529,91 +356,6 @@ def execute_combine_cli(
     max_iterations: int,
 ) -> int:
     requested_asset_id = asset_id.strip() if asset_id else None
-    program = load_program_config(program_path)
-    if coin_ops_execution_backend(program) == "signer":
-
-        def build_signer_run(setup: SignerCoinOpSetup) -> _CoinOpCliRun:
-            resolved_count, denomination_target, combine_canonical_asset_id = _resolve_combine_targets(
-                market=setup.market,
-                number_of_coins=number_of_coins,
-                size_base_units=size_base_units,
-                requested_asset_id=requested_asset_id,
-            )
-            step_params = SignerCoinCombineStepParams(
-                program=setup.program,
-                market=setup.market,
-                selected_venue=setup.selected_venue,
-                receive_address=setup.receive_address,
-                resolved_asset_id=setup.resolved_asset_id,
-                combine_canonical_asset_id=combine_canonical_asset_id,
-                explicit_coin_ids=coin_ids,
-                number_of_coins=resolved_count,
-                denomination_target=denomination_target,
-                min_coin_amount_mojos=coin_op_min_amount_mojos(
-                    canonical_asset_id=combine_canonical_asset_id
-                ),
-                no_wait=no_wait,
-            )
-            return _CoinOpCliRun(
-                denomination_target=denomination_target,
-                readiness_asset_id=setup.resolved_asset_id,
-                run_step=lambda iteration, wallet_coins, existing_coin_ids: CoinOpStepOutcome(
-                    step=run_signer_coin_combine_step(
-                        params=step_params,
-                        asset_scoped_coins=wallet_coins,
-                    ).step
-                ),
-                extra_payload={
-                    "execution_backend": "signer",
-                    "asset_id": requested_asset_id or str(setup.market.base_asset).strip(),
-                    "resolved_asset_id": setup.resolved_asset_id,
-                    "number_of_coins": resolved_count,
-                },
-            )
-
-        result = _run_signer_coin_op_cli(
-            setup_result=signer_coin_op_setup(
-                program_path=program_path,
-                markets_path=markets_path,
-                testnet_markets_path=testnet_markets_path,
-                network=network,
-                market_id=market_id,
-                pair=pair,
-                venue=venue,
-                canonical_asset_id_override=requested_asset_id,
-            ),
-            no_wait=no_wait,
-            until_ready=until_ready,
-            max_iterations=max_iterations,
-            coin_ids=coin_ids,
-            build_run=build_signer_run,
-        )
-        if isinstance(result, int):
-            return result
-        setup = result.setup
-        assert isinstance(setup, SignerCoinOpSetup)
-        print(
-            format_json_output(
-                signer_coin_op_result_payload(
-                    setup=setup,
-                    coin_ids=coin_ids,
-                    denomination_target=result.denomination_target,
-                    until_ready=until_ready,
-                    max_iterations=max_iterations,
-                    stop_reason=result.loop_result.stop_reason,
-                    final_readiness=result.loop_result.final_readiness,
-                    operations=result.loop_result.operations,
-                )
-            )
-        )
-        if (
-            until_ready
-            and isinstance(result.loop_result.final_readiness, dict)
-            and not bool(result.loop_result.final_readiness.get("ready"))
-        ):
-            return 2
-        return 0
-
     def build_run(setup: CoinOpSetup) -> _CoinOpCliRun:
         resolved_count, denomination_target, combine_canonical_asset_id = _resolve_combine_targets(
             market=setup.market,
@@ -622,7 +364,7 @@ def execute_combine_cli(
             requested_asset_id=requested_asset_id,
         )
         step_params = CoinCombineStepParams(
-            wallet=setup.wallet,
+            backend=setup.backend,
             market=setup.market,
             selected_venue=setup.selected_venue,
             resolved_asset_id=setup.resolved_asset_id,
@@ -645,9 +387,14 @@ def execute_combine_cli(
             step_result = run_coin_combine_step(params=step_params, wallet_coins=wallet_coins)
             return CoinOpStepOutcome(step=step_result.step)
 
+        readiness_asset_id = (
+            setup.resolved_asset_id
+            if setup.backend.scope.execution_backend == "signer"
+            else str(setup.market.base_asset)
+        )
         return _CoinOpCliRun(
             denomination_target=denomination_target,
-            readiness_asset_id=setup.resolved_asset_id,
+            readiness_asset_id=readiness_asset_id,
             run_step=run_step,
             extra_payload={
                 "asset_id": requested_asset_id or str(setup.market.base_asset).strip(),
