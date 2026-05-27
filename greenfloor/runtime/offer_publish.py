@@ -376,10 +376,11 @@ def verify_dexie_offer_visible_by_id(
 
 
 def is_transient_dexie_visibility_404_error(error: str) -> bool:
-    normalized = str(error).strip().lower()
-    return (
-        "dexie_get_offer_error" in normalized and "404" in normalized
-    ) or "dexie_http_error:404" in normalized
+    from greenfloor.core.cycle_managed import (
+        is_transient_dexie_visibility_404_error as is_transient,
+    )
+
+    return is_transient(error)
 
 
 def verify_offer_visible_on_dexie(

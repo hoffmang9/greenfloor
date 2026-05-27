@@ -1,16 +1,61 @@
 # Progress Log
 
+## 2026-05-27 (Rust cycle kernel step 4 — per-market phase runner)
+
+- Added `greenfloor-signer/src/cycle/market.rs`: cycle phase enum/order, `MarketCycleResultState` merge helpers, inventory fallback gating, inventory scan source resolution, tracked-size resolution, and two-sided offer count aggregation.
+- Exposed market-phase helpers via PyO3; Python `greenfloor/core/cycle_market.py` is the policy surface.
+- Extracted `greenfloor/daemon/market_cycle.py` from `main.py`: setup → reconcile → inventory → strategy → cancel → coin-ops phase runners; `main.py` delegates per-market execution and re-exports `_MarketCycleResult` / `_process_single_market*` for test patch points.
+- `main.py` is now ~850 lines (orchestration glue only); per-market IO remains in Python adapters.
+
+**Line counts after step 4:**
+
+| Module                                   | Lines |          Exit target |
+| ---------------------------------------- | ----: | -------------------: |
+| `greenfloor/daemon/main.py`              |  ~852 |                 ~400 |
+| `greenfloor/daemon/strategy_dispatch.py` |  ~840 |                 ~400 |
+| `greenfloor/daemon/market_cycle.py`      |  ~683 | (IO glue; no target) |
+
+**Best next step (step 5):** extract the **strategy action execution plan** from `strategy_dispatch.py` into Rust (`greenfloor-signer/src/cycle/execution.rs`). Move pure branching that remains in `_execute_actions_parallel`, `_execute_actions_sequential`, and `_prepare_parallel_managed_submission` — reservation grouping, parallel vs sequential gating, retry scheduling inputs, and per-action outcome shaping — into deterministic structs. Python keeps reservation SQLite IO, Dexie visibility polling, offer build/post, and thread-pool dispatch only. This is the highest-leverage hunk: `strategy_dispatch.py` is still ~840 lines despite step 2 moving managed _decisions_ to Rust; most of what remains is orchestration loops that can become thin interpreters over Rust outputs.
+
+Secondary follow-ups after step 5:
+
+- **`main.py` cycle runner extraction** — move `run_once` / `_run_loop` (~430 lines) into a dedicated daemon module once strategy dispatch is slim; main retains CLI entrypoint and instance lock only.
+- **`market_cycle.py` strategy phase** — move two-sided action planning and reseed injection (`strategy_state.py`, `strategy_reseed.py`) into Rust `cycle/strategy.rs` extensions to shrink the strategy phase further.
+- **`greenfloor/storage/sqlite.py`** (~690 lines) — defer until daemon glue hits exit criteria; schema/query helpers are not on the critical offer-post path.
+
+## 2026-05-27 (Rust cycle kernel step 3 — main market cycle orchestration)
+
+- Added `greenfloor-signer/src/cycle/orchestration.rs`: market batch selection (immediate requeue + round-robin), immediate-requeue deque shaping, stale-open sweep candidate filtering and Dexie hit classification, disabled-market log throttling, slot-dispatch gating, and CAT inventory fallback gating.
+- Exposed orchestration helpers via PyO3; Python `greenfloor/core/cycle_orchestration.py` is the policy surface.
+- `greenfloor/daemon/main.py` delegates batch selection, stale sweep decisions, disabled-market throttling, and slot-dispatch gates to Rust; Python retains SQLite/Dexie IO, per-market cycle execution, and CLI entrypoints.
+- Canonical cycle phase order documented as `reconcile → inventory → strategy → cancel → coin_ops`.
+
+## 2026-05-27 (Rust cycle kernel step 2 — managed dispatch path)
+
+- Added `greenfloor-signer/src/cycle/managed.rs`: transient-error classification, managed-post outcome decisions, Dexie visibility gating, parallel submission gating, reservation release status, retry backoff/sleep policy, and parallel transient cooldown threshold.
+- Exposed managed-path helpers via PyO3; Python `greenfloor/core/cycle_managed.py` is the deterministic policy surface.
+- `greenfloor/daemon/cooldowns.py` and `greenfloor/daemon/strategy_dispatch.py` delegate managed-path decisions to Rust; Python retains reservation SQLite IO, Dexie visibility polling, and offer post execution.
+- `greenfloor/runtime/offer_publish.py` re-exports Dexie 404 transient detection from the Rust-backed core helper.
+
+## 2026-05-27 (Rust cycle kernel — strategy, lifecycle, dispatch)
+
+- Added `greenfloor-signer/src/cycle/` as the first daemon migration hunk per the extraction plan in this log: pure decision logic for strategy evaluation, offer lifecycle transitions, action expansion, reservation request shaping, and single-input combine gating.
+- Exposed cycle kernel via PyO3 (`evaluate_market`, `apply_offer_signal`, `expand_strategy_actions`, `expiry_seconds_for_action`, `reservation_request_for_managed_offer`, `single_input_preferred_skip_reason`).
+- Python `greenfloor/core/strategy.py`, `offer_lifecycle.py`, and new `cycle_dispatch.py` delegate to Rust; `strategy_dispatch.py` imports core helpers (removed ~80 lines of duplicated pure logic).
+
 ## 2026-05-27 (daemon Rust extraction plan — main / strategy_dispatch)
 
 Large Python daemon modules remain intentionally unsplit pending Rust migration (see ADR 0006 signer canonical path). Extraction order:
 
-1. **`greenfloor-signer` cycle kernel (first)** — pure decision structs for strategy action expansion, reservation request shaping, and offer lifecycle transition inputs. Python keeps IO adapters only.
-2. **`strategy_dispatch` managed path (second)** — parallel reservation acquire/release, managed offer post retry classification, and transient-error typing move to Rust; Python retains Dexie visibility polling and audit persistence calls.
-3. **`main` market cycle orchestration (third)** — batch selection, per-market cycle ordering (reconcile → inventory → strategy → cancel → coin-ops), and immediate-requeue bookkeeping move to Rust; Python retains SQLite store, websocket callbacks, and CLI entrypoints.
+1. **`greenfloor-signer` cycle kernel (first)** ✅ — pure decision structs for strategy action expansion, reservation request shaping, and offer lifecycle transition inputs. Python keeps IO adapters only.
+2. **`strategy_dispatch` managed path (second)** ✅ — parallel reservation acquire/release decisions, managed offer post retry classification, and transient-error typing in Rust; Python retains Dexie visibility polling and audit persistence calls.
+3. **`main` market cycle orchestration (third)** ✅ — batch selection, stale sweep classification, disabled-market throttling, slot-dispatch gating, and immediate-requeue bookkeeping in Rust; Python retains SQLite/Dexie IO.
+4. **Per-market phase runner (fourth)** ✅ — inventory source selection, tracked sizes, result-state merges, and phase ordering in Rust; Python IO extracted to `market_cycle.py`.
+5. **Strategy action execution plan (fifth — next)** — parallel vs sequential batch planning, reservation grouping, and retry scheduling structs in Rust (`cycle/execution.rs`); Python retains thread pools, reservation SQLite, and offer build/post only.
 
-**Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch.py` each under ~400 lines of Python glue; no new Python modules added for decomposition (Rust crates absorb complexity instead).
+**Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch.py` each under ~400 lines of Python glue; Rust crates absorb complexity; Python keeps SQLite, Dexie, websocket, and CLI.
 
-**Tracking:** milestone checkpoints recorded here; implementation starts after Cloud Wallet retirement PR merges.
+**Tracking:** milestone checkpoints recorded here; step 5 is the recommended next hunk (see step 4 entry above).
 
 ## 2026-05-26 (offer runtime modularization — F1–F14)
 

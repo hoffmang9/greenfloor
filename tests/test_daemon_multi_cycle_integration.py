@@ -188,7 +188,7 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
     monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr(main, "evaluate_market", _fake_evaluate_market)
+    monkeypatch.setattr("greenfloor.daemon.market_cycle.evaluate_market", _fake_evaluate_market)
     monkeypatch.setattr(
         strategy_state,
         "evaluate_reseed_candidates",

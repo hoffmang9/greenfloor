@@ -13,7 +13,6 @@ from greenfloor.core.strategy import StrategyConfig
 from greenfloor.daemon.cooldowns import PENDING_VISIBILITY_REASON
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.market_logging import _daemon_logger
-from greenfloor.runtime.offer_publish import is_transient_dexie_visibility_404_error
 from greenfloor.storage.sqlite import SqliteStore
 
 _ACTIVE_OFFER_STATES_FOR_RESEED = {
@@ -202,13 +201,9 @@ def _is_stale_pending_visibility_offer(
 
 
 def _is_dexie_offer_missing_error(error: Exception) -> bool:
-    raw = str(error).strip()
-    if not raw:
-        return False
-    normalized = raw.lower()
-    return is_transient_dexie_visibility_404_error(raw) or (
-        "http error 404" in normalized and "not found" in normalized
-    )
+    from greenfloor.core.cycle_orchestration import is_dexie_offer_missing_error_text
+
+    return is_dexie_offer_missing_error_text(str(error))
 
 
 def _recent_executed_offer_ids(*, store: SqliteStore, market_id: str) -> set[str]:

@@ -13,9 +13,6 @@ from greenfloor.daemon.main import (
     _enqueue_immediate_requeue_market as enqueue_immediate_requeue_market,
 )
 from greenfloor.daemon.main import (
-    _MarketCycleResult as MarketCycleResult,
-)
-from greenfloor.daemon.main import (
     _MarketDispatchState as MarketDispatchState,
 )
 from greenfloor.daemon.main import (
@@ -27,9 +24,13 @@ from greenfloor.daemon.main import (
 from greenfloor.daemon.main import (
     run_once,
 )
+from greenfloor.daemon.market_cycle import MarketCycleResult
+
+_MarketCycleResult = MarketCycleResult
 
 __all__ = [
     "MarketCycleResult",
+    "_MarketCycleResult",
     "MarketDispatchState",
     "consume_reload_marker",
     "detect_stale_open_offers_for_requeue",

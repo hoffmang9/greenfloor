@@ -15,11 +15,26 @@ from greenfloor.config.models import (
     managed_offer_execution_backend,
     signer_offer_path_configured,
 )
+from greenfloor.core.cycle_dispatch import (
+    expand_strategy_actions,
+    reservation_request_for_managed_offer,
+)
+from greenfloor.core.cycle_managed import (
+    can_parallelize_managed_offers,
+    classify_dexie_visibility_outcome,
+    classify_managed_post_result,
+    count_parallel_transient_failures,
+    managed_retry_sleep_ms,
+    parallel_max_workers,
+    prepare_parallel_managed_submission_decision,
+    reservation_release_status,
+    should_apply_parallel_transient_cooldown,
+    should_retry_managed_post,
+)
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon.cooldowns import (
     _POST_COOLDOWN_UNTIL,
-    PENDING_VISIBILITY_REASON,
     _cooldown_remaining_ms,
     _post_offer_with_retry,
     _post_retry_config,
@@ -28,7 +43,6 @@ from greenfloor.daemon.cooldowns import (
     is_managed_worker_transient_error,
     is_parallel_dispatch_transient_error,
     raise_if_transient_managed_upstream_error,
-    strategy_action_item_transient_upstream,
 )
 from greenfloor.daemon.inventory_scan import _coinset_spendable_profiles_by_asset
 from greenfloor.daemon.market_helpers import _normalize_offer_side, _resolve_quote_asset_for_offer
@@ -45,7 +59,6 @@ from greenfloor.runtime.offer_build_context import (
 from greenfloor.runtime.offer_execution import build_daemon_action_offer_payload
 from greenfloor.runtime.offer_post_request import OfferPostRequest, parse_managed_offer_post_result
 from greenfloor.runtime.offer_publish import (
-    is_transient_dexie_visibility_404_error,
     resolve_quote_price_for_market,
     verify_offer_visible_on_dexie,
 )
@@ -80,42 +93,41 @@ def _parallel_offer_worker_error_item(*, exc: Exception) -> StrategyActionItem:
     )
 
 
+def _action_item_from_managed_outcome(
+    action: Any,
+    outcome: dict[str, Any],
+    *,
+    offer_id: str | None = None,
+    **extra: Any,
+) -> StrategyActionItem:
+    resolved_offer_id = offer_id
+    if resolved_offer_id is None:
+        raw_offer_id = outcome.get("offer_id")
+        resolved_offer_id = str(raw_offer_id).strip() if raw_offer_id else None
+    return _action_item(
+        action,
+        status=str(outcome["status"]),
+        reason=str(outcome["reason"]),
+        offer_id=resolved_offer_id or None,
+        transient_upstream=bool(outcome.get("transient_upstream", False)),
+        **extra,
+    )
+
+
 def _can_parallelize_managed_offers(
     *,
     program: ProgramConfig | None,
     runtime_dry_run: bool,
     reservation_coordinator: AssetReservationCoordinator | None,
 ) -> bool:
-    return (
-        program is not None
-        and signer_offer_path_configured(program)
-        and bool(program.runtime_offer_parallelism_enabled)
-        and not runtime_dry_run
-        and reservation_coordinator is not None
+    return can_parallelize_managed_offers(
+        signer_path_configured=program is not None and signer_offer_path_configured(program),
+        parallelism_enabled=bool(program.runtime_offer_parallelism_enabled)
+        if program is not None
+        else False,
+        runtime_dry_run=runtime_dry_run,
+        has_coordinator=reservation_coordinator is not None,
     )
-
-
-def _expiry_seconds_for_action(action: PlannedAction) -> int | None:
-    unit = str(action.expiry_unit or "").strip().lower()
-    try:
-        value = int(action.expiry_value)
-    except (TypeError, ValueError):
-        return None
-    if value <= 0:
-        return None
-    unit_seconds = {
-        "second": 1,
-        "seconds": 1,
-        "minute": 60,
-        "minutes": 60,
-        "hour": 60 * 60,
-        "hours": 60 * 60,
-        "day": 24 * 60 * 60,
-        "days": 24 * 60 * 60,
-    }.get(unit)
-    if unit_seconds is None:
-        return None
-    return value * unit_seconds
 
 
 def _build_offer_for_action(
@@ -180,28 +192,17 @@ def _reservation_request_for_managed_offer(
     pricing = market.pricing or {}
     base_multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))
     quote_multiplier = int(pricing.get("quote_unit_mojo_multiplier", 1000))
-    base_asset_id = str(resolved_base_asset_id or "").strip()
-    quote_asset_id = str(resolved_quote_asset_id or "").strip()
-    if not base_asset_id or not quote_asset_id:
-        return {}
-    side = _normalize_offer_side(getattr(action, "side", "sell"))
-    base_amount = int(action.size) * base_multiplier
-    quote_amount = int(
-        round(
-            float(action.size)
-            * float(resolve_quote_price_for_market(market))
-            * float(quote_multiplier)
-        )
+    return reservation_request_for_managed_offer(
+        side=_normalize_offer_side(getattr(action, "side", "sell")),
+        size_base_units=int(action.size),
+        base_asset_id=str(resolved_base_asset_id or "").strip(),
+        quote_asset_id=str(resolved_quote_asset_id or "").strip(),
+        base_unit_mojo_multiplier=base_multiplier,
+        quote_unit_mojo_multiplier=quote_multiplier,
+        quote_price=float(resolve_quote_price_for_market(market)),
+        fee_asset_id=str(fee_asset_id or "").strip(),
+        fee_amount_mojos=int(fee_amount_mojos),
     )
-    offer_asset_id = quote_asset_id if side == "buy" else base_asset_id
-    offer_amount = quote_amount if side == "buy" else base_amount
-    if offer_amount <= 0:
-        return {}
-    request: dict[str, int] = {offer_asset_id: offer_amount}
-    fee_asset = str(fee_asset_id or "").strip()
-    if fee_asset and int(fee_amount_mojos) > 0:
-        request[fee_asset] = int(request.get(fee_asset, 0)) + int(fee_amount_mojos)
-    return request
 
 
 def _resolve_signer_offer_asset_ids_for_reservation(
@@ -295,42 +296,31 @@ def _execute_single_managed_action(
         "offer_create_phase_ms": managed_post.get("offer_create_phase_ms"),
         "offer_artifact_wait_ms": managed_post.get("offer_artifact_wait_ms"),
     }
-    if bool(managed_post.get("success", False)):
+    post_outcome = classify_managed_post_result(
+        success=bool(managed_post.get("success", False)),
+        error_text=str(managed_post.get("error", "unknown")),
+        offer_id=str(managed_post.get("offer_id", "")),
+        publish_venue=publish_venue,
+    )
+    if post_outcome.get("status") == "pending_visibility":
         managed_offer_id = str(managed_post.get("offer_id", "")).strip()
-        if publish_venue == "dexie" and managed_offer_id:
-            visible, visibility_error = verify_offer_visible_on_dexie(
-                dexie=dexie,
-                offer_id=managed_offer_id,
-            )
-            if not visible:
-                if is_transient_dexie_visibility_404_error(visibility_error or ""):
-                    return _action_item(
-                        action,
-                        status="executed",
-                        reason=PENDING_VISIBILITY_REASON,
-                        offer_id=managed_offer_id or None,
-                        **timing_fields,
-                    )
-                return _action_item(
-                    action,
-                    status="skipped",
-                    reason=f"managed_offer_post_not_visible_on_dexie:{visibility_error}",
-                    offer_id=managed_offer_id or None,
-                    **timing_fields,
-                )
-        return _action_item(
+        visible, visibility_error = verify_offer_visible_on_dexie(
+            dexie=dexie,
+            offer_id=managed_offer_id,
+        )
+        visibility_outcome = classify_dexie_visibility_outcome(
+            visible=visible,
+            visibility_error=visibility_error or "",
+        )
+        return _action_item_from_managed_outcome(
             action,
-            status="executed",
-            reason="managed_offer_post_success",
+            visibility_outcome,
             offer_id=managed_offer_id or None,
             **timing_fields,
         )
-    error_text = str(managed_post.get("error", "unknown")).strip()
-    return _action_item(
+    return _action_item_from_managed_outcome(
         action,
-        status="skipped",
-        reason=f"managed_offer_post_failed:{error_text}",
-        offer_id=None,
+        post_outcome,
         **timing_fields,
     )
 
@@ -359,13 +349,18 @@ def _execute_managed_action_with_retry(
             )
         except Exception as exc:
             last_exc = exc
-            if attempt_index >= (
-                max(1, int(attempts_max)) - 1
-            ) or not is_managed_upstream_transient_error(exc):
+            if not should_retry_managed_post(
+                attempt_index=attempt_index,
+                attempts_max=int(attempts_max),
+                is_upstream_transient=is_managed_upstream_transient_error(exc),
+            ):
                 raise
-            if backoff_ms > 0:
-                sleep_seconds = (backoff_ms * (2**attempt_index)) / 1000.0
-                time.sleep(float(sleep_seconds))
+            sleep_ms = managed_retry_sleep_ms(
+                attempt_index=attempt_index,
+                backoff_ms=int(backoff_ms),
+            )
+            if sleep_ms > 0:
+                time.sleep(float(sleep_ms) / 1000.0)
     raise RuntimeError(str(last_exc or "managed_action_retry_exhausted"))
 
 
@@ -460,50 +455,8 @@ def _execute_single_local_action(
     )
 
 
-def _expand_strategy_actions(strategy_actions: list[Any]) -> list[Any]:
-    expanded_actions: list[Any] = []
-    for action in strategy_actions:
-        expanded_actions.extend(action for _ in range(int(action.repeat)))
-    return expanded_actions
-
-
 def _managed_skip_item(*, action: Any, reason: str) -> StrategyActionItem:
     return _action_item(action, status="skipped", reason=reason, offer_id=None)
-
-
-def _single_input_preferred_skip_reason(
-    *,
-    requested_amounts: dict[str, int],
-    spendable_profiles: dict[str, dict[str, int]],
-) -> str | None:
-    # Prefer single-input offers on our side: if aggregate balance is
-    # sufficient but no single spendable coin can satisfy the offered
-    # amount, defer posting and let coin-ops combine first.
-    primary_request_candidates = [
-        (asset_id, int(amount))
-        for asset_id, amount in requested_amounts.items()
-        if str(asset_id).strip() and int(amount) > 0
-    ]
-    if not primary_request_candidates:
-        return None
-    primary_asset_id, primary_needed = max(
-        primary_request_candidates, key=lambda pair: int(pair[1])
-    )
-    primary_profile = spendable_profiles.get(str(primary_asset_id), {})
-    primary_total = int(primary_profile.get("total", 0))
-    primary_max = int(primary_profile.get("max_single", 0))
-    primary_max_known = bool(int(primary_profile.get("max_single_known", 0)))
-    if not primary_max_known:
-        return None
-    if primary_total >= primary_needed and primary_max < primary_needed:
-        return (
-            "single_input_preferred_requires_combine"
-            f":asset_id={primary_asset_id}"
-            f":needed={primary_needed}"
-            f":max_single={primary_max}"
-            f":available={primary_total}"
-        )
-    return None
 
 
 def _prepare_parallel_managed_submission(
@@ -524,26 +477,25 @@ def _prepare_parallel_managed_submission(
         fee_asset_id=resolved_xch_asset_id,
         fee_amount_mojos=fee_amount_mojos,
     )
-    if not requested_amounts:
-        return (
-            None,
-            None,
-            _managed_skip_item(action=action, reason="reservation_invalid_request"),
-        )
     spendable_profiles = _coinset_spendable_profiles_by_asset(
         program=program,
         market=market,
         asset_ids=set(requested_amounts.keys()),
     )
-    available_amounts = {
-        asset_id: int(profile.get("total", 0)) for asset_id, profile in spendable_profiles.items()
-    }
-    single_input_skip_reason = _single_input_preferred_skip_reason(
+    decision = prepare_parallel_managed_submission_decision(
         requested_amounts=requested_amounts,
         spendable_profiles=spendable_profiles,
     )
-    if single_input_skip_reason:
-        return None, None, _managed_skip_item(action=action, reason=single_input_skip_reason)
+    if decision.get("decision") == "skip":
+        return (
+            None,
+            None,
+            _managed_skip_item(action=action, reason=str(decision.get("reason", "skipped"))),
+        )
+    available_amounts = {
+        str(asset_id): int(amount)
+        for asset_id, amount in dict(decision.get("available_amounts", {})).items()
+    }
     return requested_amounts, available_amounts, None
 
 
@@ -607,9 +559,9 @@ def _execute_actions_parallel(
             items=items,
         )
 
-    max_workers = min(
-        len(submissions),
-        max(1, int(program.runtime_offer_parallelism_max_workers)),
+    max_workers = parallel_max_workers(
+        submission_count=len(submissions),
+        configured_max=int(program.runtime_offer_parallelism_max_workers),
     )
     _log_market_decision(
         str(market.market_id),
@@ -673,7 +625,7 @@ def _execute_actions_parallel(
             )
         except Exception as exc:
             item = _parallel_offer_worker_error_item(exc=exc)
-        release_status = "released_success" if item.is_executed else "released_failed"
+        release_status = reservation_release_status(is_executed=item.is_executed)
         reservation_coordinator.release(reservation_id=reservation_id, status=release_status)
         reservation_hold_ms = int((time.monotonic() - reserved_at) * 1000)
         _log_market_decision(
@@ -718,17 +670,20 @@ def _execute_actions_parallel(
             items.append(item)
 
     _, _, cooldown_seconds = _post_retry_config()
-    transient_parallel_failures = sum(
-        1
-        for _submit_idx, item in submitted_items
-        if item.status.strip().lower() == "skipped"
-        and strategy_action_item_transient_upstream(item)
+    transient_parallel_failures = count_parallel_transient_failures(
+        [
+            {
+                "status": item.status,
+                "transient_upstream": item.transient_upstream,
+            }
+            for _submit_idx, item in submitted_items
+        ]
     )
     total_parallel = len(submitted_items)
-    if (
-        total_parallel > 0
-        and cooldown_seconds > 0
-        and transient_parallel_failures >= max(2, (total_parallel + 1) // 2)
+    if should_apply_parallel_transient_cooldown(
+        transient_failures=transient_parallel_failures,
+        total_parallel=total_parallel,
+        cooldown_seconds=int(cooldown_seconds),
     ):
         cooldown_key = f"{publish_venue}:{market.market_id}"
         _set_cooldown(_POST_COOLDOWN_UNTIL, cooldown_key, cooldown_seconds)
@@ -841,7 +796,7 @@ def _execute_strategy_actions(
         keyring_yaml_path = str(signer_key.get("keyring_yaml_path", "") or "").strip()
     else:
         keyring_yaml_path = str(getattr(signer_key, "keyring_yaml_path", "") or "").strip()
-    expanded_actions = _expand_strategy_actions(strategy_actions)
+    expanded_actions = expand_strategy_actions(strategy_actions)
     if _can_parallelize_managed_offers(
         program=program,
         runtime_dry_run=runtime_dry_run,

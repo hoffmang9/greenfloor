@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
+
+from greenfloor.adapters import cycle_kernel
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,36 +42,59 @@ class PlannedAction:
     side: str = "sell"
 
 
-_DEFAULT_OFFER_EXPIRY_MINUTES = 10
-
-
-def _strategy_target_counts(config: StrategyConfig) -> list[tuple[int, int]]:
-    if config.target_counts_by_size:
-        return sorted(
-            (
-                (int(size), int(target))
-                for size, target in config.target_counts_by_size.items()
-                if int(size) > 0 and int(target) >= 0
-            ),
-            key=lambda entry: entry[0],
-        )
-    return [
-        (1, int(config.ones_target)),
-        (10, int(config.tens_target)),
-        (100, int(config.hundreds_target)),
-    ]
-
-
-def _state_count_for_size(state: MarketState, size: int) -> int:
+def _market_state_payload(state: MarketState) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ones": int(state.ones),
+        "tens": int(state.tens),
+        "hundreds": int(state.hundreds),
+    }
+    if state.xch_price_usd is not None:
+        payload["xch_price_usd"] = float(state.xch_price_usd)
     if state.bucket_counts_by_size is not None:
-        return int(state.bucket_counts_by_size.get(size, 0))
-    if size == 1:
-        return int(state.ones)
-    if size == 10:
-        return int(state.tens)
-    if size == 100:
-        return int(state.hundreds)
-    return 0
+        payload["bucket_counts_by_size"] = {
+            str(size): int(count) for size, count in state.bucket_counts_by_size.items()
+        }
+    return payload
+
+
+def _strategy_config_payload(config: StrategyConfig) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "pair": str(config.pair),
+        "ones_target": int(config.ones_target),
+        "tens_target": int(config.tens_target),
+        "hundreds_target": int(config.hundreds_target),
+    }
+    if config.target_spread_bps is not None:
+        payload["target_spread_bps"] = int(config.target_spread_bps)
+    if config.min_xch_price_usd is not None:
+        payload["min_xch_price_usd"] = float(config.min_xch_price_usd)
+    if config.max_xch_price_usd is not None:
+        payload["max_xch_price_usd"] = float(config.max_xch_price_usd)
+    if config.offer_expiry_minutes is not None:
+        payload["offer_expiry_minutes"] = int(config.offer_expiry_minutes)
+    if config.target_counts_by_size is not None:
+        payload["target_counts_by_size"] = {
+            str(size): int(target) for size, target in config.target_counts_by_size.items()
+        }
+    return payload
+
+
+def _planned_action_from_payload(payload: dict[str, Any]) -> PlannedAction:
+    return PlannedAction(
+        size=int(payload["size"]),
+        repeat=int(payload["repeat"]),
+        pair=str(payload["pair"]),
+        expiry_unit=str(payload["expiry_unit"]),
+        expiry_value=int(payload["expiry_value"]),
+        cancel_after_create=bool(payload["cancel_after_create"]),
+        reason=str(payload["reason"]),
+        target_spread_bps=(
+            int(payload["target_spread_bps"])
+            if payload.get("target_spread_bps") is not None
+            else None
+        ),
+        side=str(payload.get("side", "sell")),
+    )
 
 
 def evaluate_market(
@@ -77,37 +103,8 @@ def evaluate_market(
     clock: datetime,
 ) -> list[PlannedAction]:
     _ = clock
-    pair = config.pair.lower()
-    if pair == "xch":
-        if state.xch_price_usd is None:
-            return []
-        if state.xch_price_usd <= 0:
-            return []
-        if config.min_xch_price_usd is not None and state.xch_price_usd < config.min_xch_price_usd:
-            return []
-        if config.max_xch_price_usd is not None and state.xch_price_usd > config.max_xch_price_usd:
-            return []
-    expiry_minutes = (
-        int(config.offer_expiry_minutes)
-        if config.offer_expiry_minutes is not None and int(config.offer_expiry_minutes) > 0
-        else _DEFAULT_OFFER_EXPIRY_MINUTES
+    raw_actions = cycle_kernel.evaluate_market(
+        state=_market_state_payload(state),
+        config=_strategy_config_payload(config),
     )
-
-    actions: list[PlannedAction] = []
-    for size, target in _strategy_target_counts(config):
-        current = _state_count_for_size(state, size)
-        if current < target:
-            actions.append(
-                PlannedAction(
-                    size=size,
-                    repeat=target - current,
-                    side="sell",
-                    pair=pair,
-                    expiry_unit="minutes",
-                    expiry_value=expiry_minutes,
-                    cancel_after_create=True,
-                    reason="below_target",
-                    target_spread_bps=config.target_spread_bps,
-                )
-            )
-    return actions
+    return [_planned_action_from_payload(item) for item in raw_actions]

@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import greenfloor.daemon.strategy_dispatch as strategy_dispatch
+from greenfloor.core.cycle_dispatch import (
+    expand_strategy_actions,
+    single_input_preferred_skip_reason,
+)
 from greenfloor.daemon.strategy_dispatch import (
     _build_offer_for_action as build_offer_for_action,
 )
@@ -11,12 +15,6 @@ from greenfloor.daemon.strategy_dispatch import (
 )
 from greenfloor.daemon.strategy_dispatch import (
     _execute_strategy_actions as execute_strategy_actions,
-)
-from greenfloor.daemon.strategy_dispatch import (
-    _expand_strategy_actions as expand_strategy_actions,
-)
-from greenfloor.daemon.strategy_dispatch import (
-    _single_input_preferred_skip_reason as single_input_preferred_skip_reason,
 )
 
 __all__ = [

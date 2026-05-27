@@ -13,6 +13,7 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
+from greenfloor.core.cycle_managed import is_transient_managed_upstream_error_text
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
 _PENDING_VISIBILITY_REASON = "managed_offer_post_success_dexie_visibility_pending"
@@ -54,26 +55,7 @@ def _combine_input_coin_cap() -> int:
 
 
 def _is_transient_managed_upstream_error_text(error_text: str) -> bool:
-    normalized = str(error_text or "").strip().lower()
-    transient_markers = (
-        "timed out",
-        "timeout",
-        "temporary unavailable",
-        "temporarily unavailable",
-        "bad gateway",
-        "gateway timeout",
-        "service unavailable",
-        "connection reset",
-        "connection refused",
-        "managed_offer_http_error:502",
-        "managed_offer_http_error:503",
-        "managed_offer_http_error:504",
-        "managed_offer_network_error",
-        "signer_http_error:502",
-        "signer_http_error:503",
-        "signer_http_error:504",
-    )
-    return any(marker in normalized for marker in transient_markers)
+    return is_transient_managed_upstream_error_text(error_text)
 
 
 class ManagedUpstreamTransientError(Exception):
@@ -81,38 +63,31 @@ class ManagedUpstreamTransientError(Exception):
 
 
 def classify_managed_transient_error(exc: BaseException) -> str | None:
-    """Classify managed-offer transient failures.
+    """Classify managed-offer transient failures."""
+    from greenfloor.core.cycle_managed import classify_managed_transient_error as classify
 
-    Returns ``upstream`` for retryable signer/network failures, ``reservation_contention``
-    for lease contention, or ``None`` for non-transient errors.
-    """
-    from greenfloor.daemon.reservations import ReservationContentionError, ReservationStorageError
-
-    if isinstance(exc, ReservationStorageError):
-        return None
-    if isinstance(exc, ReservationContentionError):
-        return "reservation_contention"
-    if isinstance(exc, ManagedUpstreamTransientError):
-        return "upstream"
-    if isinstance(exc, TimeoutError):
-        return "upstream"
-    return None
+    return classify(exc)
 
 
 def is_managed_upstream_transient_error(exc: BaseException) -> bool:
     """Typed upstream transients eligible for managed-post retry."""
-    return isinstance(exc, ManagedUpstreamTransientError)
+    from greenfloor.core.cycle_managed import is_managed_upstream_transient_error as is_upstream
+
+    return is_upstream(exc)
 
 
 def is_managed_worker_transient_error(exc: BaseException) -> bool:
     """Worker failures that should trigger parallel post cooldown aggregation."""
-    return classify_managed_transient_error(exc) == "upstream"
+    from greenfloor.core.cycle_managed import is_managed_worker_transient_error as is_worker
+
+    return is_worker(exc)
 
 
 def is_parallel_dispatch_transient_error(exc: BaseException) -> bool:
     """Parallel dispatch failures eligible for sequential fallback."""
-    kind = classify_managed_transient_error(exc)
-    return kind in {"upstream", "reservation_contention"}
+    from greenfloor.core.cycle_managed import is_parallel_dispatch_transient_error as is_parallel
+
+    return is_parallel(exc)
 
 
 def strategy_action_item_transient_upstream(item: StrategyActionItem) -> bool:
