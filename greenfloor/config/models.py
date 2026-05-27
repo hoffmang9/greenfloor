@@ -7,9 +7,9 @@ from typing import Any, Literal
 
 from greenfloor.logging_setup import normalize_log_level_name
 
-OfferExecutionBackend = Literal["signer", "cloud_wallet", "bls"]
-ManagedOfferExecutionBackend = Literal["signer", "cloud_wallet"]
-CoinOpsExecutionBackend = Literal["signer", "cloud_wallet"]
+OfferExecutionBackend = Literal["signer", "bls"]
+ManagedOfferExecutionBackend = Literal["signer"]
+CoinOpsExecutionBackend = Literal["signer"]
 
 _CANONICAL_CAT_UNIT_MOJOS = 1000
 _CANONICAL_XCH_UNIT_MOJOS = 1_000_000_000_000
@@ -131,15 +131,6 @@ def ensure_signer_config_path(program: ProgramConfig) -> str:
     return prepare_signer_runtime(program)
 
 
-def cloud_wallet_offer_path_configured(program: ProgramConfig) -> bool:
-    return bool(
-        str(program.cloud_wallet_base_url).strip()
-        and str(program.cloud_wallet_user_key_id).strip()
-        and str(program.cloud_wallet_private_key_pem_path).strip()
-        and str(program.cloud_wallet_vault_id).strip()
-    )
-
-
 def signer_offer_path_configured(program: ProgramConfig) -> bool:
     if not str(program.signer_kms_key_id).strip():
         return False
@@ -150,11 +141,7 @@ def signer_offer_path_configured(program: ProgramConfig) -> bool:
 def coin_ops_execution_backend(program: ProgramConfig) -> CoinOpsExecutionBackend:
     if signer_offer_path_configured(program):
         return "signer"
-    if cloud_wallet_offer_path_configured(program):
-        return "cloud_wallet"
-    raise ValueError(
-        "coin ops require signer (signer.kms_key_id + vault.launcher_id) or cloud_wallet config"
-    )
+    raise ValueError("coin ops require signer.kms_key_id and vault.launcher_id in program config")
 
 
 def offer_execution_backend(
@@ -165,19 +152,6 @@ def offer_execution_backend(
 ) -> OfferExecutionBackend:
     if signer_offer_path_configured(program):
         return "signer"
-    if cloud_wallet_offer_path_configured(program):
-        threshold = local_build_min_size_base_units
-        if threshold is None:
-            import os
-
-            raw = os.getenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "100").strip()
-            try:
-                threshold = int(raw)
-            except ValueError:
-                threshold = 100
-        if threshold > 0 and int(size_base_units) >= threshold:
-            return "bls"
-        return "cloud_wallet"
     return "bls"
 
 
@@ -192,7 +166,7 @@ def managed_offer_execution_backend(
         size_base_units=size_base_units,
         local_build_min_size_base_units=local_build_min_size_base_units,
     )
-    if backend in ("signer", "cloud_wallet"):
+    if backend == "signer":
         return backend
     return None
 
@@ -232,21 +206,7 @@ class ProgramConfig:
     runtime_offer_parallelism_enabled: bool = False
     runtime_offer_parallelism_max_workers: int = 4
     runtime_reservation_ttl_seconds: int = 300
-    cloud_wallet_base_url: str = ""
-    cloud_wallet_user_key_id: str = ""
-    cloud_wallet_private_key_pem_path: str = ""
-    cloud_wallet_vault_id: str = ""
-    cloud_wallet_kms_key_id: str = ""
-    cloud_wallet_kms_region: str = ""
-    cloud_wallet_kms_public_key_hex: str = ""
-    runtime_cloud_wallet_offer_artifact_timeout_seconds: int = 30
-    runtime_offer_bootstrap_signature_wait_timeout_seconds: int = 45
-    runtime_offer_bootstrap_signature_warning_interval_seconds: int = 30
     runtime_offer_bootstrap_wait_timeout_seconds: int = 120
-    runtime_offer_bootstrap_wait_mempool_warning_seconds: int = 30
-    runtime_offer_bootstrap_wait_confirmation_warning_seconds: int = 60
-    runtime_cloud_wallet_create_signature_wait_timeout_seconds: int = 120
-    runtime_cloud_wallet_create_signature_warning_interval_seconds: int = 60
     app_log_level: str = "INFO"
     app_log_level_was_missing: bool = False
     signer_key_registry: dict[str, SignerKeyConfig] = field(default_factory=dict)
@@ -287,8 +247,6 @@ class MarketConfig:
     inventory: MarketInventoryConfig
     pricing: dict[str, Any] = field(default_factory=dict)
     ladders: dict[str, list[MarketLadderEntry]] = field(default_factory=dict)
-    cloud_wallet_base_global_id: str = ""
-    cloud_wallet_quote_global_id: str = ""
 
 
 @dataclass(slots=True)
@@ -536,24 +494,14 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
     if offer_publish_venue not in {"dexie", "splash"}:
         raise ValueError("venues.offer_publish.provider must be one of: dexie, splash")
 
-    cloud_wallet = raw.get("cloud_wallet", {})
-    if cloud_wallet is None:
-        cloud_wallet = {}
-    if not isinstance(cloud_wallet, dict):
-        raise ValueError("cloud_wallet must be a mapping")
+    if raw.get("cloud_wallet") not in (None, {}):
+        raise ValueError(
+            "cloud_wallet config is removed; use signer: and vault: blocks instead "
+            "(see config/program.yaml)"
+        )
 
     signer_fields = _parse_signer_section(raw.get("signer"))
     vault_config = _parse_vault_config(raw.get("vault"))
-    # KMS signing uses signer: only; cloud_wallet.kms_* is legacy fallback at parse time.
-    if not signer_fields["kms_key_id"]:
-        signer_fields = {
-            **signer_fields,
-            "kms_key_id": str(cloud_wallet.get("kms_key_id", "")).strip(),
-            "kms_region": signer_fields["kms_region"]
-            or str(cloud_wallet.get("kms_region", "")).strip(),
-            "kms_public_key_hex": signer_fields["kms_public_key_hex"]
-            or str(cloud_wallet.get("kms_public_key_hex", "")).strip(),
-        }
 
     coin_ops_minimum_fee_mojos = int(coin_ops.get("minimum_fee_mojos", 10_000_000))
     if coin_ops_minimum_fee_mojos < 0:
@@ -621,56 +569,12 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         pushover_user_key_env=str(_req(pushover, "user_key_env")),
         pushover_app_token_env=str(_req(pushover, "app_token_env")),
         pushover_recipient_key_env=str(_req(pushover, "recipient_key_env")),
-        cloud_wallet_base_url=str(cloud_wallet.get("base_url", "")).strip(),
-        cloud_wallet_user_key_id=str(cloud_wallet.get("user_key_id", "")).strip(),
-        cloud_wallet_private_key_pem_path=str(cloud_wallet.get("private_key_pem_path", "")).strip(),
-        cloud_wallet_vault_id=str(cloud_wallet.get("vault_id", "")).strip(),
-        cloud_wallet_kms_key_id=str(cloud_wallet.get("kms_key_id", "")).strip(),
-        cloud_wallet_kms_region=str(cloud_wallet.get("kms_region", "")).strip(),
-        cloud_wallet_kms_public_key_hex=str(cloud_wallet.get("kms_public_key_hex", "")).strip(),
-        runtime_cloud_wallet_offer_artifact_timeout_seconds=max(
-            5, int(runtime.get("cloud_wallet_offer_artifact_timeout_seconds", 30))
-        ),
-        runtime_offer_bootstrap_signature_wait_timeout_seconds=_runtime_timeout_seconds(
-            runtime,
-            neutral_key="offer_bootstrap_signature_wait_timeout_seconds",
-            legacy_key="cloud_wallet_bootstrap_signature_wait_timeout_seconds",
-            default=45,
-            minimum=5,
-        ),
-        runtime_offer_bootstrap_signature_warning_interval_seconds=_runtime_timeout_seconds(
-            runtime,
-            neutral_key="offer_bootstrap_signature_warning_interval_seconds",
-            legacy_key="cloud_wallet_bootstrap_signature_warning_interval_seconds",
-            default=30,
-            minimum=5,
-        ),
         runtime_offer_bootstrap_wait_timeout_seconds=_runtime_timeout_seconds(
             runtime,
             neutral_key="offer_bootstrap_wait_timeout_seconds",
             legacy_key="cloud_wallet_bootstrap_wait_timeout_seconds",
             default=120,
             minimum=10,
-        ),
-        runtime_offer_bootstrap_wait_mempool_warning_seconds=_runtime_timeout_seconds(
-            runtime,
-            neutral_key="offer_bootstrap_wait_mempool_warning_seconds",
-            legacy_key="cloud_wallet_bootstrap_wait_mempool_warning_seconds",
-            default=30,
-            minimum=10,
-        ),
-        runtime_offer_bootstrap_wait_confirmation_warning_seconds=_runtime_timeout_seconds(
-            runtime,
-            neutral_key="offer_bootstrap_wait_confirmation_warning_seconds",
-            legacy_key="cloud_wallet_bootstrap_wait_confirmation_warning_seconds",
-            default=60,
-            minimum=10,
-        ),
-        runtime_cloud_wallet_create_signature_wait_timeout_seconds=max(
-            5, int(runtime.get("cloud_wallet_create_signature_wait_timeout_seconds", 120))
-        ),
-        runtime_cloud_wallet_create_signature_warning_interval_seconds=max(
-            5, int(runtime.get("cloud_wallet_create_signature_warning_interval_seconds", 60))
         ),
         app_log_level=app_log_level,
         app_log_level_was_missing=app_log_level_was_missing,
@@ -747,10 +651,6 @@ def parse_markets_config(raw: dict[str, Any]) -> MarketsConfig:
                 inventory=inv,
                 pricing=pricing,
                 ladders=ladders,
-                cloud_wallet_base_global_id=str(row.get("cloud_wallet_base_global_id", "")).strip(),
-                cloud_wallet_quote_global_id=str(
-                    row.get("cloud_wallet_quote_global_id", "")
-                ).strip(),
             )
         )
     return MarketsConfig(markets=markets)

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
@@ -20,11 +19,6 @@ def write_program(path: Path, *, provider: str = "dexie", home_dir: str | None =
                 f'  home_dir: "{home_yaml}"',
                 "runtime:",
                 "  loop_interval_seconds: 30",
-                "cloud_wallet:",
-                '  base_url: ""',
-                '  user_key_id: ""',
-                '  private_key_pem_path: ""',
-                '  vault_id: ""',
                 "chain_signals:",
                 "  tx_block_trigger:",
                 "    webhook_enabled: true",
@@ -63,30 +57,45 @@ def write_manager_program(path: Path, *, tmp_path: Path, provider: str = "dexie"
     write_program(path, provider=provider, home_dir=str(tmp_path))
 
 
-def write_manager_program_with_cloud_wallet(
+def write_manager_program_with_signer(
     path: Path,
     *,
     tmp_path: Path,
     provider: str = "dexie",
-    with_kms: bool = False,
 ) -> None:
-    """Write cloud-wallet program.yaml with home_dir under tmp_path."""
-    write_program_with_cloud_wallet(
-        path,
-        provider=provider,
-        with_kms=with_kms,
-        home_dir=str(tmp_path),
-    )
+    """Write signer-backed program.yaml with home_dir under tmp_path."""
+    write_program(path, provider=provider, home_dir=str(tmp_path))
+    text = path.read_text(encoding="utf-8")
+    if "signer:" not in text:
+        text = text.replace(
+            "chain_signals:",
+            "\n".join(
+                [
+                    "signer:",
+                    '  kms_key_id: "arn:aws:kms:us-west-2:123:key/demo"',
+                    '  kms_region: "us-west-2"',
+                    '  kms_public_key_hex: "02abc123"',
+                    "vault:",
+                    '  launcher_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+                    "  custody_threshold: 1",
+                    "  recovery_threshold: 1",
+                    "  recovery_clawback_timelock: 3600",
+                    "  custody_keys:",
+                    '    - public_key_hex: "020202020202020202020202020202020202020202020202020202020202020202"',
+                    "      curve: SECP256R1",
+                    "  recovery_keys:",
+                    '    - public_key_hex: "ab3cb61463a695fa094f7c30526c8097fb813a0c5fa67bab261a7cd354cb6363b2d726218135b25b814f94df4749fc58"',
+                    "      curve: BLS12_381",
+                    "",
+                    "chain_signals:",
+                ]
+            ),
+        )
+    path.write_text(text, encoding="utf-8")
 
 
 def program_config_for_local_offer(*, home_dir: str = "/tmp/gf") -> ProgramConfig:
-    return replace(
-        minimal_program_config(home_dir=home_dir),
-        cloud_wallet_base_url="https://wallet.example",
-        cloud_wallet_user_key_id="user-1",
-        cloud_wallet_private_key_pem_path="/tmp/.greenfloor/key.pem",
-        cloud_wallet_vault_id="Wallet_1",
-    )
+    return minimal_program_config(home_dir=home_dir)
 
 
 def market_config_for_local_offer() -> MarketConfig:
@@ -165,54 +174,6 @@ def write_markets_with_ladder(path: Path) -> None:
         ),
         encoding="utf-8",
     )
-
-
-def write_program_with_cloud_wallet(
-    path: Path,
-    *,
-    provider: str = "dexie",
-    with_kms: bool = False,
-    home_dir: str | None = None,
-) -> None:
-    """Write a program.yaml with valid Cloud Wallet credentials populated."""
-    write_program(path, provider=provider, home_dir=home_dir)
-    text = path.read_text(encoding="utf-8")
-    text = text.replace('  base_url: ""', '  base_url: "https://wallet.example.com"')
-    text = text.replace('  user_key_id: ""', '  user_key_id: "key-1"')
-    text = text.replace('  private_key_pem_path: ""', '  private_key_pem_path: "/tmp/key.pem"')
-    text = text.replace('  vault_id: ""', '  vault_id: "wallet-1"')
-    if with_kms:
-        text = text.replace(
-            '  kms_key_id: ""', '  kms_key_id: "arn:aws:kms:us-west-2:123:key/demo"'
-        )
-        text = text.replace('  kms_region: ""', '  kms_region: "us-west-2"')
-        text = text.replace('  kms_public_key_hex: ""', '  kms_public_key_hex: "02abc123"')
-        if "signer:" not in text:
-            text = text.replace(
-                "coin_ops:",
-                "\n".join(
-                    [
-                        "signer:",
-                        '  kms_key_id: "arn:aws:kms:us-west-2:123:key/demo"',
-                        '  kms_region: "us-west-2"',
-                        '  kms_public_key_hex: "02abc123"',
-                        "vault:",
-                        '  launcher_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
-                        "  custody_threshold: 1",
-                        "  recovery_threshold: 1",
-                        "  recovery_clawback_timelock: 3600",
-                        "  custody_keys:",
-                        '    - public_key_hex: "020202020202020202020202020202020202020202020202020202020202020202"',
-                        "      curve: SECP256R1",
-                        "  recovery_keys:",
-                        '    - public_key_hex: "ab3cb61463a695fa094f7c30526c8097fb813a0c5fa67bab261a7cd354cb6363b2d726218135b25b814f94df4749fc58"',
-                        "      curve: BLS12_381",
-                        "",
-                        "coin_ops:",
-                    ]
-                ),
-            )
-    path.write_text(text, encoding="utf-8")
 
 
 def write_markets_with_duplicate_pair(path: Path) -> None:

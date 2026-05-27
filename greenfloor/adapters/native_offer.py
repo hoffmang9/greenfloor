@@ -1,4 +1,4 @@
-"""Native (``greenfloor_native``) offer helpers — not part of the BLS Rust signer path."""
+"""Offer codec helpers via ``greenfloor_signer`` (merged from greenfloor-native)."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import importlib
 from typing import Any
 
 
-def _import_greenfloor_native() -> Any:
-    return importlib.import_module("greenfloor_native")
+def _import_greenfloor_signer() -> Any:
+    return importlib.import_module("greenfloor_signer")
 
 
 def encode_offer_from_spend_bundle_hex(raw_hex: str) -> str:
-    """Encode a spend bundle hex string to offer1... via ``greenfloor_native``."""
-    return str(_import_greenfloor_native().encode_offer(bytes.fromhex(raw_hex)))
+    """Encode a spend bundle hex string to offer1... via ``greenfloor_signer``."""
+    return str(_import_greenfloor_signer().encode_offer(bytes.fromhex(raw_hex)))
 
 
 def _as_bytes(value: Any) -> bytes:
@@ -39,14 +39,14 @@ def from_input_spend_bundle_xch(
     input_spend_bundle: Any,
     requested_payments_xch: list[Any],
 ) -> Any:
-    native = _import_greenfloor_native()
+    signer = _import_greenfloor_signer()
     requested: list[tuple[bytes, list[tuple[bytes, int]]]] = []
     for notarized_payment in requested_payments_xch:
         payments: list[tuple[bytes, int]] = []
         for payment in notarized_payment.payments:
             payments.append((_as_bytes(payment.puzzle_hash), int(payment.amount)))
         requested.append((_as_bytes(notarized_payment.nonce), payments))
-    spend_bundle_bytes = native.from_input_spend_bundle_xch(
+    spend_bundle_bytes = signer.from_input_spend_bundle_xch(
         input_spend_bundle.to_bytes(),
         requested,
     )

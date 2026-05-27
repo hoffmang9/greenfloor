@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from greenfloor.config.models import MarketConfig, MarketInventoryConfig
-from greenfloor.daemon.main import _execute_cancel_policy_for_market
+from greenfloor.daemon.testing import CANCEL_COOLDOWN_UNTIL, execute_cancel_policy
 from greenfloor.storage.sqlite import SqliteStore
 
 
@@ -52,10 +52,8 @@ def _market(quote_asset_type: str, *, stable_vs_unstable: bool = False) -> Marke
 
 
 def test_cancel_policy_skips_non_unstable_market() -> None:
-    import greenfloor.daemon.main as daemon_main
-
-    daemon_main._CANCEL_COOLDOWN_UNTIL.clear()
-    out = _execute_cancel_policy_for_market(
+    CANCEL_COOLDOWN_UNTIL.clear()
+    out = execute_cancel_policy(
         market=_market("stable"),
         offers=[{"id": "o1", "status": 0}],
         runtime_dry_run=False,
@@ -70,10 +68,8 @@ def test_cancel_policy_skips_non_unstable_market() -> None:
 
 
 def test_cancel_policy_requires_strong_price_move() -> None:
-    import greenfloor.daemon.main as daemon_main
-
-    daemon_main._CANCEL_COOLDOWN_UNTIL.clear()
-    out = _execute_cancel_policy_for_market(
+    CANCEL_COOLDOWN_UNTIL.clear()
+    out = execute_cancel_policy(
         market=_market("unstable", stable_vs_unstable=True),
         offers=[{"id": "o1", "status": 0}],
         runtime_dry_run=False,
@@ -88,12 +84,10 @@ def test_cancel_policy_requires_strong_price_move() -> None:
 
 
 def test_cancel_policy_uses_market_specific_threshold_when_present() -> None:
-    import greenfloor.daemon.main as daemon_main
-
-    daemon_main._CANCEL_COOLDOWN_UNTIL.clear()
+    CANCEL_COOLDOWN_UNTIL.clear()
     market = _market("unstable", stable_vs_unstable=True)
     market.pricing["cancel_move_threshold_bps"] = 100
-    out = _execute_cancel_policy_for_market(
+    out = execute_cancel_policy(
         market=market,
         offers=[{"id": "o1", "status": 0}],
         runtime_dry_run=True,
@@ -108,12 +102,10 @@ def test_cancel_policy_uses_market_specific_threshold_when_present() -> None:
 
 
 def test_cancel_policy_dry_run_marks_planned_only() -> None:
-    import greenfloor.daemon.main as daemon_main
-
-    daemon_main._CANCEL_COOLDOWN_UNTIL.clear()
+    CANCEL_COOLDOWN_UNTIL.clear()
     dexie = _FakeDexie({"success": True})
     store = _FakeStore()
-    out = _execute_cancel_policy_for_market(
+    out = execute_cancel_policy(
         market=_market("unstable", stable_vs_unstable=True),
         offers=[{"id": "o1", "status": 0}, {"id": "o2", "status": 4}],
         runtime_dry_run=True,
@@ -131,12 +123,10 @@ def test_cancel_policy_dry_run_marks_planned_only() -> None:
 
 
 def test_cancel_policy_executes_and_persists_cancelled_state() -> None:
-    import greenfloor.daemon.main as daemon_main
-
-    daemon_main._CANCEL_COOLDOWN_UNTIL.clear()
+    CANCEL_COOLDOWN_UNTIL.clear()
     dexie = _FakeDexie({"success": True})
     store = _FakeStore()
-    out = _execute_cancel_policy_for_market(
+    out = execute_cancel_policy(
         market=_market("unstable", stable_vs_unstable=True),
         offers=[{"id": "o1", "status": 0}],
         runtime_dry_run=False,
@@ -154,15 +144,13 @@ def test_cancel_policy_executes_and_persists_cancelled_state() -> None:
 
 
 def test_cancel_policy_retry_exhaust_sets_cooldown(monkeypatch) -> None:
-    import greenfloor.daemon.main as daemon_main
-
-    daemon_main._CANCEL_COOLDOWN_UNTIL.clear()
+    CANCEL_COOLDOWN_UNTIL.clear()
     monkeypatch.setenv("GREENFLOOR_OFFER_CANCEL_MAX_ATTEMPTS", "2")
     monkeypatch.setenv("GREENFLOOR_OFFER_CANCEL_BACKOFF_MS", "0")
     monkeypatch.setenv("GREENFLOOR_OFFER_CANCEL_COOLDOWN_SECONDS", "60")
     dexie = _FakeDexie({"success": False, "error": "dexie_down"})
     store = _FakeStore()
-    out = _execute_cancel_policy_for_market(
+    out = execute_cancel_policy(
         market=_market("unstable", stable_vs_unstable=True),
         offers=[{"id": "o1", "status": 0}, {"id": "o2", "status": 0}],
         runtime_dry_run=False,
@@ -178,10 +166,8 @@ def test_cancel_policy_retry_exhaust_sets_cooldown(monkeypatch) -> None:
 
 
 def test_cancel_policy_skips_when_market_not_flagged_stable_vs_unstable() -> None:
-    import greenfloor.daemon.main as daemon_main
-
-    daemon_main._CANCEL_COOLDOWN_UNTIL.clear()
-    out = _execute_cancel_policy_for_market(
+    CANCEL_COOLDOWN_UNTIL.clear()
+    out = execute_cancel_policy(
         market=_market("unstable", stable_vs_unstable=False),
         offers=[{"id": "o1", "status": 0}],
         runtime_dry_run=False,

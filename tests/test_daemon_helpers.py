@@ -8,22 +8,26 @@ from typing import Any
 
 from greenfloor.daemon import main as daemon_main
 from greenfloor.daemon.main import (
-    _abs_move_bps,
-    _cancel_retry_config,
-    _cloud_wallet_configured,
-    _cloud_wallet_market_health_payload,
-    _cooldown_remaining_ms,
+    _DISABLED_MARKET_NEXT_LOG_AT,
     _disabled_market_log_interval_seconds,
     _env_int,
     _log_disabled_markets_startup_once,
-    _market_pricing,
-    _post_retry_config,
-    _resolve_quote_asset_for_offer,
-    _retry_with_backoff,
-    _set_cooldown,
     _should_log_disabled_market,
 )
-from greenfloor.runtime.cloud_wallet.coins import coin_matches_direct_spendable_lookup
+from greenfloor.daemon.market_helpers import (
+    _abs_move_bps,
+    _market_pricing,
+    _resolve_quote_asset_for_offer,
+)
+from greenfloor.daemon.market_logging import _daemon_logger
+from greenfloor.daemon.testing import (
+    cancel_retry_config,
+    cooldown_remaining_ms,
+    cooldowns,
+    post_retry_config,
+    set_cooldown,
+)
+from greenfloor.runtime.coin_ops.coins import coin_matches_direct_spendable_lookup
 
 # ---------------------------------------------------------------------------
 # _env_int
@@ -51,43 +55,43 @@ def test_env_int_returns_default_for_invalid(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _cooldown_remaining_ms / _set_cooldown
+# cooldown_remaining_ms / set_cooldown
 # ---------------------------------------------------------------------------
 
 
 def test_cooldown_remaining_ms_zero_when_not_set() -> None:
-    assert _cooldown_remaining_ms({}, "key") == 0
+    assert cooldown_remaining_ms({}, "key") == 0
 
 
 def test_cooldown_remaining_ms_positive_when_future() -> None:
     cooldowns: dict[str, float] = {"key": time.monotonic() + 5.0}
-    remaining = _cooldown_remaining_ms(cooldowns, "key")
+    remaining = cooldown_remaining_ms(cooldowns, "key")
     assert remaining > 0
     assert remaining <= 5000
 
 
-def test_set_cooldown_creates_deadline() -> None:
+def testset_cooldown_creates_deadline() -> None:
     cooldowns: dict[str, float] = {}
-    _set_cooldown(cooldowns, "key", 10)
+    set_cooldown(cooldowns, "key", 10)
     assert "key" in cooldowns
     assert cooldowns["key"] > time.monotonic()
 
 
-def test_set_cooldown_ignores_non_positive() -> None:
+def testset_cooldown_ignores_non_positive() -> None:
     cooldowns: dict[str, float] = {}
-    _set_cooldown(cooldowns, "key", 0)
+    set_cooldown(cooldowns, "key", 0)
     assert "key" not in cooldowns
-    _set_cooldown(cooldowns, "key", -1)
+    set_cooldown(cooldowns, "key", -1)
     assert "key" not in cooldowns
 
 
 # ---------------------------------------------------------------------------
-# _retry_with_backoff
+# retry_with_backoff
 # ---------------------------------------------------------------------------
 
 
 def test_retry_with_backoff_succeeds_first_try() -> None:
-    result, attempts, error = _retry_with_backoff(
+    result, attempts, error = cooldowns._retry_with_backoff(
         action_fn=lambda: {"success": True, "id": "x"},
         is_success=lambda r: bool(r.get("success")),
         default_error="fail",
@@ -107,7 +111,7 @@ def test_retry_with_backoff_retries_then_succeeds() -> None:
             return {"success": False, "error": "transient"}
         return {"success": True}
 
-    result, attempts, error = _retry_with_backoff(
+    result, attempts, error = cooldowns._retry_with_backoff(
         action_fn=_action,
         is_success=lambda r: bool(r.get("success")),
         default_error="fail",
@@ -119,7 +123,7 @@ def test_retry_with_backoff_retries_then_succeeds() -> None:
 
 
 def test_retry_with_backoff_exhausts_attempts() -> None:
-    result, attempts, error = _retry_with_backoff(
+    result, attempts, error = cooldowns._retry_with_backoff(
         action_fn=lambda: {"success": False, "error": "permanent"},
         is_success=lambda r: bool(r.get("success")),
         default_error="fail",
@@ -134,7 +138,7 @@ def test_retry_with_backoff_handles_exception() -> None:
     def _action() -> dict[str, Any]:
         raise RuntimeError("boom")
 
-    result, attempts, error = _retry_with_backoff(
+    result, attempts, error = cooldowns._retry_with_backoff(
         action_fn=_action,
         is_success=lambda r: bool(r.get("success")),
         default_error="op_failed",
@@ -145,25 +149,25 @@ def test_retry_with_backoff_handles_exception() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _post_retry_config / _cancel_retry_config
+# post_retry_config / cancel_retry_config
 # ---------------------------------------------------------------------------
 
 
-def test_post_retry_config_defaults(monkeypatch) -> None:
+def testpost_retry_config_defaults(monkeypatch) -> None:
     monkeypatch.delenv("GREENFLOOR_OFFER_POST_MAX_ATTEMPTS", raising=False)
     monkeypatch.delenv("GREENFLOOR_OFFER_POST_BACKOFF_MS", raising=False)
     monkeypatch.delenv("GREENFLOOR_OFFER_POST_COOLDOWN_SECONDS", raising=False)
-    attempts, backoff_ms, cooldown = _post_retry_config()
+    attempts, backoff_ms, cooldown = post_retry_config()
     assert attempts == 2
     assert backoff_ms == 250
     assert cooldown == 30
 
 
-def test_cancel_retry_config_respects_env(monkeypatch) -> None:
+def testcancel_retry_config_respects_env(monkeypatch) -> None:
     monkeypatch.setenv("GREENFLOOR_OFFER_CANCEL_MAX_ATTEMPTS", "5")
     monkeypatch.setenv("GREENFLOOR_OFFER_CANCEL_BACKOFF_MS", "100")
     monkeypatch.setenv("GREENFLOOR_OFFER_CANCEL_COOLDOWN_SECONDS", "60")
-    attempts, backoff_ms, cooldown = _cancel_retry_config()
+    attempts, backoff_ms, cooldown = cancel_retry_config()
     assert attempts == 5
     assert backoff_ms == 100
     assert cooldown == 60
@@ -181,7 +185,7 @@ def test_disabled_market_log_interval_applies_minimum(monkeypatch) -> None:
 
 def test_should_log_disabled_market_throttles(monkeypatch) -> None:
     monkeypatch.setenv("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS", "3600")
-    daemon_main._DISABLED_MARKET_NEXT_LOG_AT.clear()
+    _DISABLED_MARKET_NEXT_LOG_AT.clear()
     assert _should_log_disabled_market(market_id="m-disabled", now_monotonic=100.0) is True
     assert _should_log_disabled_market(market_id="m-disabled", now_monotonic=200.0) is False
     assert _should_log_disabled_market(market_id="m-disabled", now_monotonic=3701.0) is True
@@ -189,7 +193,7 @@ def test_should_log_disabled_market_throttles(monkeypatch) -> None:
 
 def test_log_disabled_markets_startup_once_logs_and_seeds_throttle(monkeypatch) -> None:
     monkeypatch.setenv("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS", "3600")
-    daemon_main._DISABLED_MARKET_NEXT_LOG_AT.clear()
+    _DISABLED_MARKET_NEXT_LOG_AT.clear()
     daemon_main._DISABLED_MARKET_STARTUP_LOGGED = False
 
     class _Market:
@@ -198,7 +202,7 @@ def test_log_disabled_markets_startup_once_logs_and_seeds_throttle(monkeypatch) 
             self.enabled = enabled
 
     logged: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(daemon_main._daemon_logger, "info", lambda *args: logged.append(args))
+    monkeypatch.setattr(_daemon_logger, "info", lambda *args: logged.append(args))
 
     _log_disabled_markets_startup_once(
         markets=[_Market("enabled-market", True), _Market("disabled-market", False)]
@@ -209,22 +213,22 @@ def test_log_disabled_markets_startup_once_logs_and_seeds_throttle(monkeypatch) 
 
     assert len(logged) == 1
     assert "disabled_markets_startup" in str(logged[0][0])
-    assert "disabled-market" in daemon_main._DISABLED_MARKET_NEXT_LOG_AT
+    assert "disabled-market" in _DISABLED_MARKET_NEXT_LOG_AT
     daemon_main._DISABLED_MARKET_STARTUP_LOGGED = False
 
 
-def test_cloud_wallet_market_health_payload_tracks_503_and_last_success() -> None:
+def test_managed_offer_market_health_payload_tracks_503_and_last_success() -> None:
     # Clear any leftover in-memory state from prior test runs.
-    daemon_main._CLOUD_WALLET_HEALTH_WINDOW.pop("m1-health-test", None)
+    cooldowns._MANAGED_OFFER_HEALTH_WINDOW.pop("m1-health-test", None)
 
     success_time = datetime(2026, 3, 19, 2, 50, 0, tzinfo=UTC)
-    _cloud_wallet_market_health_payload(
+    cooldowns._managed_offer_market_health_payload(
         market_id="m1-health-test",
         current_items=[
-            {"status": "executed", "reason": "cloud_wallet_post_success"},
+            {"status": "executed", "reason": "managed_offer_post_success"},
             {
                 "status": "skipped",
-                "reason": "cloud_wallet_action_error:cloud_wallet_http_error:503:<html>...</html>",
+                "reason": "managed_offer_action_error:managed_offer_http_error:503:<html>...</html>",
             },
         ],
         now=success_time,
@@ -232,12 +236,12 @@ def test_cloud_wallet_market_health_payload_tracks_503_and_last_success() -> Non
     )
 
     now = datetime(2026, 3, 19, 3, 0, 0, tzinfo=UTC)
-    payload = _cloud_wallet_market_health_payload(
+    payload = cooldowns._managed_offer_market_health_payload(
         market_id="m1-health-test",
         current_items=[
             {
                 "status": "skipped",
-                "reason": "cloud_wallet_action_error:cloud_wallet_http_error:503:<html>...</html>",
+                "reason": "managed_offer_action_error:managed_offer_http_error:503:<html>...</html>",
             }
         ],
         now=now,
@@ -246,10 +250,10 @@ def test_cloud_wallet_market_health_payload_tracks_503_and_last_success() -> Non
     assert payload["market_id"] == "m1-health-test"
     assert payload["rolling_window_events"] == 2
     assert payload["rolling_503_count"] == 2
-    assert payload["last_cloud_wallet_success_at"] == "2026-03-19T02:50:00+00:00"
-    assert payload["last_cloud_wallet_success_age_seconds"] == 600
+    assert payload["last_managed_offer_success_at"] == "2026-03-19T02:50:00+00:00"
+    assert payload["last_managed_offer_success_age_seconds"] == 600
 
-    daemon_main._CLOUD_WALLET_HEALTH_WINDOW.pop("m1-health-test", None)
+    cooldowns._MANAGED_OFFER_HEALTH_WINDOW.pop("m1-health-test", None)
 
 
 # ---------------------------------------------------------------------------
@@ -271,31 +275,6 @@ def test_abs_move_bps_returns_none_for_none_inputs() -> None:
 def test_abs_move_bps_returns_none_for_non_positive() -> None:
     assert _abs_move_bps(0.0, 100.0) is None
     assert _abs_move_bps(100.0, 0.0) is None
-
-
-# ---------------------------------------------------------------------------
-# _cloud_wallet_configured
-# ---------------------------------------------------------------------------
-
-
-def test_cloud_wallet_configured_true() -> None:
-    class _Prog:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "key-1"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-
-    assert _cloud_wallet_configured(_Prog()) is True
-
-
-def test_cloud_wallet_configured_false_when_empty() -> None:
-    class _Prog:
-        cloud_wallet_base_url = ""
-        cloud_wallet_user_key_id = "key-1"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-
-    assert _cloud_wallet_configured(_Prog()) is False
 
 
 # ---------------------------------------------------------------------------

@@ -1757,6 +1757,7 @@ dependencies = [
  "aws-config",
  "aws-sdk-kms",
  "base64",
+ "bip39",
  "chia-bls 0.36.1",
  "chia-consensus",
  "chia-protocol",

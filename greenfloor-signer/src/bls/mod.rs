@@ -1,4 +1,5 @@
 mod coins;
+mod keyring;
 mod keys;
 mod mixed_split;
 mod offer;
@@ -11,6 +12,7 @@ pub use coins::{
     list_xch_coin_summaries, CoinRecordSummary,
 };
 pub use crate::coinset::is_xch_like_asset;
+pub use keyring::load_bls_master_secret_key;
 pub use keys::synthetic_secret_keys_for_puzzle_hashes;
 pub use spend::{
     add_coins_to_spends, build_signed_spend, build_signed_standard_spend, synthetic_keys_for_coins,

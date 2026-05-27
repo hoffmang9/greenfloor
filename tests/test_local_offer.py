@@ -11,7 +11,7 @@ from tests.helpers.offer_runtime_fixtures import (
 )
 
 
-def test_build_local_offer_payload_includes_expiry_and_cloud_wallet_fields() -> None:
+def test_build_local_offer_payload_includes_expiry() -> None:
     market = replace(
         market_config_for_local_offer(),
         pricing={"fixed_quote_per_base": 0.5, "strategy_offer_expiry_minutes": 12},
@@ -27,4 +27,3 @@ def test_build_local_offer_payload_includes_expiry_and_cloud_wallet_fields() -> 
     assert payload["expiry_unit"] == "minutes"
     assert payload["expiry_value"] == 12
     assert payload["quote_price_quote_per_base"] == 0.5
-    assert payload["cloud_wallet_base_url"] == "https://wallet.example"

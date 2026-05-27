@@ -4,13 +4,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-import pytest
-
 from greenfloor.config.models import (
     ProgramConfig,
     VaultConfig,
     VaultWalletKeyConfig,
-    cloud_wallet_offer_path_configured,
     coin_ops_execution_backend,
     managed_offer_execution_backend,
     offer_execution_backend,
@@ -58,97 +55,26 @@ def test_signer_offer_path_requires_kms_and_vault() -> None:
 
 def test_coin_ops_execution_backend_prefers_signer() -> None:
     program = _program_with_signer()
-    program = replace(
-        program,
-        cloud_wallet_base_url="https://api.vault.chia.net",
-        cloud_wallet_user_key_id="user",
-        cloud_wallet_private_key_pem_path="/Users/me/.greenfloor/key.pem",
-        cloud_wallet_vault_id="wallet123",
-    )
     assert coin_ops_execution_backend(program) == "signer"
 
 
-def test_offer_execution_backend_prefers_signer_over_cloud_wallet() -> None:
+def test_offer_execution_backend_prefers_signer_when_configured() -> None:
     program = _program_with_signer()
-    program = replace(
-        program,
-        cloud_wallet_base_url="https://api.vault.chia.net",
-        cloud_wallet_user_key_id="user",
-        cloud_wallet_private_key_pem_path="/Users/me/.greenfloor/key.pem",
-        cloud_wallet_vault_id="wallet123",
-    )
-    assert cloud_wallet_offer_path_configured(program) is True
     assert offer_execution_backend(program, size_base_units=50) == "signer"
     assert managed_offer_execution_backend(program, size_base_units=50) == "signer"
 
 
-def test_managed_offer_execution_backend_excludes_bls(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "1000")
-    program = replace(
-        _program_with_signer(kms_key_id=""),
-        cloud_wallet_base_url="https://api.vault.chia.net",
-        cloud_wallet_user_key_id="user",
-        cloud_wallet_private_key_pem_path="/Users/me/.greenfloor/key.pem",
-        cloud_wallet_vault_id="wallet123",
-    )
-    assert managed_offer_execution_backend(program, size_base_units=50) == "cloud_wallet"
+def test_managed_offer_execution_backend_none_without_signer() -> None:
+    program = replace(_program_with_signer(kms_key_id=""), vault_config=None)
+    assert offer_execution_backend(program, size_base_units=50) == "bls"
+    assert managed_offer_execution_backend(program, size_base_units=50) is None
     assert managed_offer_execution_backend(program, size_base_units=5000) is None
 
 
-def test_offer_execution_backend_cloud_wallet_when_no_signer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "1000")
-    program = replace(
-        _program_with_signer(kms_key_id=""),
-        cloud_wallet_base_url="https://api.vault.chia.net",
-        cloud_wallet_user_key_id="user",
-        cloud_wallet_private_key_pem_path="/Users/me/.greenfloor/key.pem",
-        cloud_wallet_vault_id="wallet123",
-    )
-    assert offer_execution_backend(program, size_base_units=50) == "cloud_wallet"
+def test_offer_execution_backend_bls_when_no_signer() -> None:
+    program = replace(_program_with_signer(kms_key_id=""), vault_config=None)
+    assert offer_execution_backend(program, size_base_units=50) == "bls"
     assert offer_execution_backend(program, size_base_units=5000) == "bls"
-
-
-def _cloud_wallet_only_program(*, kms_key_id: str = "") -> ProgramConfig:
-    return replace(
-        _program_with_signer(kms_key_id=kms_key_id),
-        cloud_wallet_base_url="https://api.vault.chia.net",
-        cloud_wallet_user_key_id="user",
-        cloud_wallet_private_key_pem_path="/Users/me/.greenfloor/key.pem",
-        cloud_wallet_vault_id="wallet123",
-    )
-
-
-def test_offer_execution_backend_local_build_threshold_defaults_and_boundaries(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    program = _cloud_wallet_only_program()
-    monkeypatch.delenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", raising=False)
-    assert offer_execution_backend(program, size_base_units=99) == "cloud_wallet"
-    assert offer_execution_backend(program, size_base_units=100) == "bls"
-    assert offer_execution_backend(program, size_base_units=101) == "bls"
-
-
-def test_offer_execution_backend_local_build_invalid_threshold_uses_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    program = _cloud_wallet_only_program()
-    monkeypatch.setenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "not-an-int")
-    assert offer_execution_backend(program, size_base_units=99) == "cloud_wallet"
-    assert offer_execution_backend(program, size_base_units=100) == "bls"
-
-
-def test_offer_execution_backend_non_positive_threshold_disables_local_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    program = _cloud_wallet_only_program()
-    monkeypatch.setenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "0")
-    assert offer_execution_backend(program, size_base_units=100) == "cloud_wallet"
-    monkeypatch.setenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "-5")
-    assert offer_execution_backend(program, size_base_units=1000) == "cloud_wallet"
 
 
 def test_invalidate_signer_runtime_cache_clears_entries() -> None:

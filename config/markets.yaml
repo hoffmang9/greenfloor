@@ -11,8 +11,6 @@ markets:
     quote_asset_type: unstable
     signer_key_id: "key-main-1"
     receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
-    cloud_wallet_base_global_id: "Asset_ymgm3ygl5om7ia4u9llk3iu7"
-    cloud_wallet_quote_global_id: "Asset_huun64oh7dbt9f1f9ie8khuw"
     pricing:
       side: "sell"
       min_price_quote_per_base: 0.0031
@@ -55,8 +53,6 @@ markets:
     quote_asset_type: stable
     signer_key_id: "key-main-1"
     receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
-    cloud_wallet_base_global_id: "Asset_ymgm3ygl5om7ia4u9llk3iu7"
-    cloud_wallet_quote_global_id: "Asset_cxc7mql006dp2w3kigqlj58t"
     pricing:
       side: "sell"
       fixed_quote_per_base: 7.75
@@ -94,8 +90,6 @@ markets:
     quote_asset_type: unstable
     signer_key_id: "key-main-1"
     receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
-    cloud_wallet_base_global_id: "Asset_wjfkwih7s6c1y6rlswnznr6p"
-    cloud_wallet_quote_global_id: "Asset_huun64oh7dbt9f1f9ie8khuw"
     pricing:
       side: "sell"
       min_price_quote_per_base: 0.0027
@@ -138,8 +132,6 @@ markets:
     quote_asset_type: stable
     signer_key_id: "key-main-1"
     receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
-    cloud_wallet_base_global_id: "Asset_wjfkwih7s6c1y6rlswnznr6p"
-    cloud_wallet_quote_global_id: "Asset_cxc7mql006dp2w3kigqlj58t"
     pricing:
       side: "sell"
       fixed_quote_per_base: 6.75
@@ -177,8 +169,6 @@ markets:
     quote_asset_type: unstable
     signer_key_id: "key-main-1"
     receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
-    cloud_wallet_base_global_id: "Asset_s1ifxnpgnf8n3hsd6wlb04q5"
-    cloud_wallet_quote_global_id: "Asset_huun64oh7dbt9f1f9ie8khuw"
     pricing:
       side: "sell"
       min_price_quote_per_base: 0.0030
@@ -220,8 +210,6 @@ markets:
     quote_asset_type: stable
     signer_key_id: "key-main-1"
     receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
-    cloud_wallet_base_global_id: "Asset_s1ifxnpgnf8n3hsd6wlb04q5"
-    cloud_wallet_quote_global_id: "Asset_cxc7mql006dp2w3kigqlj58t"
     pricing:
       side: "sell"
       fixed_quote_per_base: 7.50
@@ -259,8 +247,6 @@ markets:
     quote_asset_type: unstable
     signer_key_id: "key-main-1"
     receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
-    cloud_wallet_base_global_id: "Asset_e3jexei5nswyy916lg77vabz"
-    cloud_wallet_quote_global_id: "Asset_huun64oh7dbt9f1f9ie8khuw"
     pricing:
       side: "sell"
       min_price_quote_per_base: 0.0027
@@ -303,8 +289,6 @@ markets:
     quote_asset_type: stable
     signer_key_id: "key-main-1"
     receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
-    cloud_wallet_base_global_id: "Asset_e3jexei5nswyy916lg77vabz"
-    cloud_wallet_quote_global_id: "Asset_cxc7mql006dp2w3kigqlj58t"
     pricing:
       side: "sell"
       fixed_quote_per_base: 6.75
@@ -342,8 +326,6 @@ markets:
     quote_asset_type: stable
     signer_key_id: "key-main-1"
     receive_address: "xch1u3tytpv45sj0h4lpwmtkyzh2ggvw4x7jccyxzu995p2aj40wzcxqvymyn3"
-    cloud_wallet_base_global_id: "Asset_aihyg9ncps0bqdkyw9j7i8x2"
-    cloud_wallet_quote_global_id: "Asset_cxc7mql006dp2w3kigqlj58t"
     pricing:
       side: "sell"
       fixed_quote_per_base: 6.5

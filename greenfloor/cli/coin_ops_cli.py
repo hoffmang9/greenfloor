@@ -10,14 +10,13 @@ from pathlib import Path
 from greenfloor.cli.prompts import prompt_yes_no
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.coin_ops_policy import coin_op_min_amount_mojos
-from greenfloor.runtime.cloud_wallet.adapter import format_json_output
-from greenfloor.runtime.cloud_wallet.coin_op_errors import coin_op_unresolved_error_payload
-from greenfloor.runtime.cloud_wallet.coin_ops_models import (
+from greenfloor.runtime.coin_ops.errors import coin_op_unresolved_error_payload
+from greenfloor.runtime.coin_ops.models import (
     CombineDenominationTarget,
     DenominationTarget,
     SplitDenominationTarget,
 )
-from greenfloor.runtime.cloud_wallet.coin_ops_runtime import (
+from greenfloor.runtime.coin_ops.runtime import (
     CoinOpIterationNeedsConfirmation,
     CoinOpLoopResult,
     CoinOpSetup,
@@ -28,12 +27,13 @@ from greenfloor.runtime.cloud_wallet.coin_ops_runtime import (
     resolve_market_denomination_entry,
     run_coin_op_iteration_loop,
 )
-from greenfloor.runtime.cloud_wallet.coin_ops_steps import (
+from greenfloor.runtime.coin_ops.steps import (
     CoinCombineStepParams,
     CoinSplitStepParams,
     run_coin_combine_step,
     run_coin_split_step,
 )
+from greenfloor.runtime.json_output import format_json_output
 
 
 @dataclass(slots=True)

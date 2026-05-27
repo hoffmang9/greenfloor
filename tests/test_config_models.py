@@ -181,17 +181,6 @@ def test_parse_markets_config_stable_quote_validates_present_strategy_fields() -
         parse_markets_config({"markets": [row]})
 
 
-def test_parse_markets_config_reads_cloud_wallet_global_ids() -> None:
-    row = _base_market_row()
-    row["cloud_wallet_base_global_id"] = "Asset_base123"
-    row["cloud_wallet_quote_global_id"] = "Asset_quote456"
-
-    out = parse_markets_config({"markets": [row]})
-
-    assert out.markets[0].cloud_wallet_base_global_id == "Asset_base123"
-    assert out.markets[0].cloud_wallet_quote_global_id == "Asset_quote456"
-
-
 def test_parse_markets_config_defaults_cat_unit_multipliers_to_1000() -> None:
     row = _base_market_row()
     row["base_asset"] = "BYC"
@@ -288,7 +277,7 @@ def test_parse_program_config_explicit_websocket_url_preserved() -> None:
     assert cfg.tx_block_websocket_url == "wss://custom.example.com/ws"
 
 
-def test_parse_program_config_cloud_wallet_fields() -> None:
+def test_parse_program_config_rejects_cloud_wallet_block() -> None:
     raw = _base_program_raw()
     raw["cloud_wallet"] = {
         "base_url": "https://api.vault.chia.net",
@@ -296,18 +285,28 @@ def test_parse_program_config_cloud_wallet_fields() -> None:
         "private_key_pem_path": "/tmp/key.pem",
         "vault_id": "Wallet_abc",
     }
-    cfg = parse_program_config(raw)
-    assert cfg.cloud_wallet_base_url == "https://api.vault.chia.net"
-    assert cfg.cloud_wallet_user_key_id == "uk-123"
-    assert cfg.cloud_wallet_private_key_pem_path == "/tmp/key.pem"
-    assert cfg.cloud_wallet_vault_id == "Wallet_abc"
+    with pytest.raises(ValueError, match="cloud_wallet config is removed"):
+        parse_program_config(raw)
 
 
-def test_parse_program_config_cloud_wallet_defaults_empty() -> None:
+@pytest.mark.parametrize(
+    "cloud_wallet_value",
+    [
+        {"base_url": "https://example.com"},
+        "bad",
+    ],
+)
+def test_parse_program_config_rejects_any_cloud_wallet_value(cloud_wallet_value: object) -> None:
+    raw = _base_program_raw()
+    raw["cloud_wallet"] = cloud_wallet_value
+    with pytest.raises(ValueError, match="cloud_wallet config is removed"):
+        parse_program_config(raw)
+
+
+def test_parse_program_config_runtime_offer_fields_default_without_legacy_keys() -> None:
     raw = _base_program_raw()
     cfg = parse_program_config(raw)
-    assert cfg.cloud_wallet_base_url == ""
-    assert cfg.cloud_wallet_vault_id == ""
+    assert cfg.runtime_offer_bootstrap_wait_timeout_seconds == 120
 
 
 def test_parse_program_config_log_level_missing_defaults_to_info() -> None:
@@ -435,20 +434,6 @@ def test_parse_program_config_fallback_poll_interval_negative() -> None:
     raw["chain_signals"]["tx_block_trigger"]["fallback_poll_interval_seconds"] = -5
     with pytest.raises(ValueError, match="fallback_poll_interval_seconds must be >= 0"):
         parse_program_config(raw)
-
-
-def test_parse_program_config_cloud_wallet_not_a_dict() -> None:
-    raw = _base_program_raw()
-    raw["cloud_wallet"] = "bad"
-    with pytest.raises(ValueError, match="cloud_wallet must be a mapping"):
-        parse_program_config(raw)
-
-
-def test_parse_program_config_cloud_wallet_none_treated_as_empty() -> None:
-    raw = _base_program_raw()
-    raw["cloud_wallet"] = None
-    cfg = parse_program_config(raw)
-    assert cfg.cloud_wallet_base_url == ""
 
 
 # ---------------------------------------------------------------------------

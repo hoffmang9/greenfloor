@@ -41,10 +41,9 @@ Severity tags:
 - `[MUST]` `greenfloor/cli/manager_setup.py`: config validate, doctor, bootstrap-home, set-log-level.
 - `[MUST]` `greenfloor/cli/keys_onboard.py`: keys-onboard CLI command.
 - `[MUST]` `greenfloor/cli/offer_build_post.py`: manager `build-and-post-offer` command implementation.
-- `[MUST]` `greenfloor/runtime/cloud_wallet/coin_ops_runtime.py`: shared coin-op orchestration for CLI and offer-cancel refresh.
-- `[MUST]` `greenfloor/runtime/cloud_wallet/coin_ops_steps.py`: split/combine iteration step bodies.
-- `[MUST]` `greenfloor/runtime/cloud_wallet/coin_ops_execution.py`: combine retry helper shared by daemon and runtime.
-- `[MUST]` `greenfloor/runtime/cloud_wallet/offers.py`: Cloud Wallet offer listing/cancel selection helpers.
+- `[MUST]` `greenfloor/runtime/coin_ops/runtime.py`: shared coin-op orchestration for CLI and daemon.
+- `[MUST]` `greenfloor/runtime/coin_ops/steps.py`: split/combine iteration step bodies.
+- `[MUST]` `greenfloor/runtime/offers_cancel.py`: venue offer cancel selection and Dexie execution.
 - `[MUST]` `greenfloor/runtime/offer_reconciliation.py`: offer reconciliation against Dexie/Coinset signals.
 - `[MUST]` `greenfloor/offer_builder.py`: canonical local BLS offer text construction; `greenfloor/cli/offer_builder_sdk.py` is a stdin/stdout CLI wrapper only.
 - `[MUST]` `greenfloor/runtime/offer_execution.py`: composition root for offer build/post runtime; import orchestration helpers here (see ADR 0005, ADR 0008).

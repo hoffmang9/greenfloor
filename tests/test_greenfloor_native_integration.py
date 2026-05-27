@@ -5,9 +5,9 @@ import os
 import pytest
 
 
-def _require_native_integration_enabled() -> None:
-    if os.getenv("GREENFLOOR_RUN_NATIVE_INTEGRATION_TESTS", "").strip() != "1":
-        pytest.skip("set GREENFLOOR_RUN_NATIVE_INTEGRATION_TESTS=1 to run greenfloor-native tests")
+def _require_signer_integration_enabled() -> None:
+    if os.getenv("GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS", "").strip() != "1":
+        pytest.skip("set GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS=1 to run greenfloor-signer tests")
 
 
 def _require_importable_modules():
@@ -16,26 +16,26 @@ def _require_importable_modules():
     except Exception:
         pytest.skip("chia_wallet_sdk import unavailable")
     try:
-        import greenfloor_native as native  # type: ignore
+        import greenfloor_signer as signer  # type: ignore
     except Exception:
-        pytest.skip("greenfloor_native import unavailable")
-    return sdk, native
+        pytest.skip("greenfloor_signer import unavailable")
+    return sdk, signer
 
 
-def test_greenfloor_native_validate_offer_rejects_garbage() -> None:
-    _require_native_integration_enabled()
-    _sdk, native = _require_importable_modules()
+def test_greenfloor_signer_validate_offer_rejects_garbage() -> None:
+    _require_signer_integration_enabled()
+    _sdk, signer = _require_importable_modules()
     with pytest.raises(ValueError):
-        native.validate_offer("not-an-offer")
+        signer.validate_offer("not-an-offer")
 
 
-def test_greenfloor_native_from_input_spend_bundle_xch_round_trip_offer() -> None:
-    _require_native_integration_enabled()
-    sdk, native = _require_importable_modules()
+def test_greenfloor_signer_from_input_spend_bundle_xch_round_trip_offer() -> None:
+    _require_signer_integration_enabled()
+    sdk, signer = _require_importable_modules()
 
     # Minimal synthesized offer request: empty maker input bundle + one XCH request leg.
     input_spend_bundle = sdk.SpendBundle([], sdk.Signature.infinity())
-    offer_spend_bundle_bytes = native.from_input_spend_bundle_xch(
+    offer_spend_bundle_bytes = signer.from_input_spend_bundle_xch(
         input_spend_bundle.to_bytes(),
         [(bytes([3]) * 32, [(bytes([4]) * 32, 42)])],
     )
@@ -43,4 +43,4 @@ def test_greenfloor_native_from_input_spend_bundle_xch_round_trip_offer() -> Non
 
     offer_text = encode_offer_from_spend_bundle_hex(offer_spend_bundle_bytes.hex())
     assert offer_text.startswith("offer1")
-    native.validate_offer(offer_text)
+    signer.validate_offer(offer_text)

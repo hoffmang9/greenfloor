@@ -1,3 +1,4 @@
+---
 name: GreenFloor Rust cache
 description: Install the stable Rust toolchain and restore GreenFloor Cargo caches.
 
@@ -12,6 +13,5 @@ runs:
       with:
         workspaces: |
           greenfloor-signer -> target
-          greenfloor-native -> target
           greenfloor-signer-pyo3 -> target
         cache-workspace-crates: true

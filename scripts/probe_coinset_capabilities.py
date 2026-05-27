@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter
+from greenfloor.config.launcher import launcher_id_from_program_config
 from greenfloor.hex_utils import normalize_hex_id
 
 
@@ -45,25 +45,6 @@ def _read_launcher_id_file(path: str) -> str:
     return normalize_hex_id(file_path.read_text(encoding="utf-8").strip()) or ""
 
 
-def _launcher_from_cloud_wallet(args: argparse.Namespace) -> str:
-    wallet = CloudWalletAdapter(
-        CloudWalletConfig(
-            base_url=args.cloud_wallet_base_url,
-            user_key_id=args.cloud_wallet_user_key_id,
-            private_key_pem_path=args.cloud_wallet_private_key_pem_path,
-            vault_id=args.vault_id,
-            network=args.network,
-        )
-    )
-    snapshot = wallet.get_vault_custody_snapshot()
-    launcher = (
-        normalize_hex_id(snapshot.get("vaultLauncherId")) if isinstance(snapshot, dict) else ""
-    )
-    if not launcher:
-        raise RuntimeError("vault_launcher_id_missing_from_cloud_wallet_snapshot")
-    return launcher
-
-
 def _coin_id_from_record(record: dict[str, Any]) -> str:
     coin = record.get("coin")
     if not isinstance(coin, dict):
@@ -98,6 +79,11 @@ def main() -> int:
     parser.add_argument("--coinset-base-url", default="")
     parser.add_argument("--launcher-id", default="")
     parser.add_argument("--launcher-id-file", default="")
+    parser.add_argument(
+        "--program-config",
+        default="",
+        help="Path to program.yaml used to resolve vault.launcher_id when --launcher-id is omitted.",
+    )
     parser.add_argument("--nonce", type=int, default=0, help="Member nonce to probe (default 0).")
     parser.add_argument(
         "--height-window",
@@ -105,10 +91,6 @@ def main() -> int:
         default=50000,
         help="Probe range window in blocks from chain peak (default 50000).",
     )
-    parser.add_argument("--cloud-wallet-base-url", default="")
-    parser.add_argument("--cloud-wallet-user-key-id", default="")
-    parser.add_argument("--cloud-wallet-private-key-pem-path", default="")
-    parser.add_argument("--vault-id", default="")
     args = parser.parse_args()
 
     launcher_id = normalize_hex_id(args.launcher_id)
@@ -118,18 +100,11 @@ def main() -> int:
         if launcher_id:
             launcher_source = "file"
     if not launcher_id:
-        required = [
-            args.cloud_wallet_base_url,
-            args.cloud_wallet_user_key_id,
-            args.cloud_wallet_private_key_pem_path,
-            args.vault_id,
-        ]
-        if any(not str(v).strip() for v in required):
-            raise ValueError(
-                "launcher-id, launcher-id-file, or full Cloud Wallet auth args are required"
-            )
-        launcher_id = _launcher_from_cloud_wallet(args)
-        launcher_source = "cloud_wallet"
+        program_config = str(args.program_config).strip()
+        if not program_config:
+            raise ValueError("launcher-id, launcher-id-file, or --program-config is required")
+        launcher_id = launcher_id_from_program_config(program_config)
+        launcher_source = "program_config"
 
     require_testnet11 = str(args.network).strip().lower() in {"testnet", "testnet11"}
     adapter = CoinsetAdapter(

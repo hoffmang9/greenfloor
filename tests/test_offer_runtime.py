@@ -104,6 +104,46 @@ def test_signer_create_offer_phase_sell_side_keeps_legs(monkeypatch) -> None:
     assert captured["request_amount"] == 7_500
 
 
+def test_signer_create_offer_phase_cat_cat_sell_passes_both_cat_ids(monkeypatch) -> None:
+    captured: dict = {}
+
+    def _fake_build(_config_path: str, request: dict) -> dict:
+        captured.update(request)
+        return {"offer": "offer1catcat", "execution_mode": "direct"}
+
+    monkeypatch.setattr(
+        "greenfloor.adapters.rust_signer.build_vault_cat_offer",
+        _fake_build,
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.offer_runtime.prepare_signer_runtime",
+        lambda _program: "/tmp/signer.yaml",
+    )
+
+    program = cast(ProgramConfig, SimpleNamespace())
+    market = _sample_market()
+    signer_create_offer_phase(
+        program=program,
+        market=market,
+        size_base_units=10,
+        quote_price=2.0,
+        resolved_base_asset_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        resolved_quote_asset_id="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        expiry_unit="hours",
+        expiry_value=1,
+        action_side="sell",
+    )
+
+    assert captured["offer_asset_id"] == (
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    )
+    assert captured["request_asset_id"] == (
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    )
+    assert captured["offer_amount"] == 10_000
+    assert captured["request_amount"] == 20_000
+
+
 def test_signer_create_offer_phase_requires_offer_text(monkeypatch) -> None:
     monkeypatch.setattr(
         "greenfloor.adapters.rust_signer.build_vault_cat_offer",

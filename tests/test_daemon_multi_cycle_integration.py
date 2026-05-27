@@ -5,7 +5,14 @@ from pathlib import Path
 
 from greenfloor.config.io import load_program_config
 from greenfloor.core.strategy import PlannedAction
-from greenfloor.daemon.main import run_once
+from greenfloor.daemon.testing import (
+    CANCEL_COOLDOWN_UNTIL,
+    POST_COOLDOWN_UNTIL,
+    main,
+    run_once,
+    strategy_dispatch,
+    strategy_state,
+)
 from greenfloor.runtime.offer_reconciliation import reconcile_offers
 from greenfloor.storage.sqlite import SqliteStore
 
@@ -99,10 +106,8 @@ def write_markets(path: Path) -> None:
 def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
     monkeypatch, tmp_path: Path
 ) -> None:
-    import greenfloor.daemon.main as daemon_main
-
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
-    daemon_main._CANCEL_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
+    CANCEL_COOLDOWN_UNTIL.clear()
     home = tmp_path / "home"
     state_dir = home / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -178,14 +183,20 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
             ]
         return []
 
-    monkeypatch.setattr("greenfloor.daemon.main.PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.CoinsetAdapter", _FakeCoinsetAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr("greenfloor.daemon.inventory_scan.CoinsetAdapter", _FakeCoinsetAdapter)
+    monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.evaluate_market", _fake_evaluate_market)
+    monkeypatch.setattr(main, "evaluate_market", _fake_evaluate_market)
     monkeypatch.setattr(
-        "greenfloor.daemon.main._build_offer_for_action",
+        strategy_state,
+        "evaluate_reseed_candidates",
+        lambda **_kwargs: _fake_evaluate_market(),
+    )
+    monkeypatch.setattr(
+        strategy_dispatch,
+        "_build_offer_for_action",
         lambda **_kwargs: {
             "status": "executed",
             "reason": "offer_builder_success",
@@ -193,7 +204,8 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
         },
     )
     monkeypatch.setattr(
-        "greenfloor.daemon.main.utcnow",
+        main,
+        "utcnow",
         lambda: datetime(2026, 2, 20, 12, 0, tzinfo=UTC),
     )
 
@@ -251,7 +263,6 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
             event_types=[
                 "strategy_offer_execution",
                 "offer_cancel_policy",
-                "offer_reconciliation",
                 "offer_lifecycle_transition",
                 "daemon_cycle_summary",
             ],
@@ -275,8 +286,8 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
         if isinstance(e["payload"], dict)
     )
     assert any(
-        e["payload"].get("new_state") == "cancelled"
-        for e in by_type.get("offer_reconciliation", [])
+        e["payload"].get("new_state") == "tx_block_confirmed"
+        for e in by_type.get("offer_lifecycle_transition", [])
         if isinstance(e["payload"], dict)
     )
     assert any(

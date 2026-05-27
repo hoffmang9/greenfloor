@@ -30,15 +30,9 @@ def _required_argv() -> list[str]:
         "/tmp/keyring.yaml",
         "--receive-address",
         "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2u30w",
-        "--cloud-wallet-base-url",
-        "https://wallet.example",
-        "--cloud-wallet-user-key-id",
-        "user-key",
-        "--cloud-wallet-private-key-pem-path",
-        "/tmp/key.pem",
-        "--vault-id",
-        "Vault_123",
-        "--cloud-wallet-kms-key-id",
+        "--launcher-id",
+        "0x" + ("c" * 64),
+        "--signer-kms-key-id",
         "arn:aws:kms:us-west-2:123:key/abc",
     ]
 
@@ -146,7 +140,7 @@ def test_resolve_cat_asset_id_retries_until_all_inputs_present(monkeypatch) -> N
     import greenfloor.adapters.bls_cat_coins as bls_cat_coins_mod
     import greenfloor.adapters.bls_signing as bls_signing_mod
 
-    monkeypatch.setattr(bls_signing_mod, "_import_sdk", _import_sdk)
+    bls_signing_mod._import_sdk = _import_sdk  # type: ignore[attr-defined]
     monkeypatch.setattr(
         bls_cat_coins_mod, "_list_unspent_cat_coins_by_ids", _list_unspent_cat_coins_by_ids
     )
@@ -188,7 +182,7 @@ def test_resolve_cat_asset_id_reports_missing_coin_ids(monkeypatch) -> None:
     import greenfloor.adapters.bls_cat_coins as bls_cat_coins_mod
     import greenfloor.adapters.bls_signing as bls_signing_mod
 
-    monkeypatch.setattr(bls_signing_mod, "_import_sdk", _import_sdk)
+    bls_signing_mod._import_sdk = _import_sdk  # type: ignore[attr-defined]
     monkeypatch.setattr(
         bls_cat_coins_mod, "_list_unspent_cat_coins_by_ids", _list_unspent_cat_coins_by_ids
     )
@@ -238,14 +232,6 @@ def test_run_preflight_only_does_not_broadcast(monkeypatch) -> None:
         def get_blockchain_state():
             return {"peak_height": 1}
 
-    class _FakeWallet:
-        @staticmethod
-        def get_vault_custody_snapshot():
-            return {"vaultLauncherId": "0x" + ("c" * 64)}
-
-    def _fake_wallet_factory(_config):
-        return _FakeWallet()
-
     monkeypatch.setattr(
         mod,
         "_resolve_cat_asset_id_for_coin_ids",
@@ -261,7 +247,6 @@ def test_run_preflight_only_does_not_broadcast(monkeypatch) -> None:
     exit_code, payload = mod.run(
         args,
         coinset_factory=_FakeCoinset,
-        cloud_wallet_factory=_fake_wallet_factory,
         sign_and_broadcast_fn=_broadcast,
         kms_pubkey_resolver=lambda *_args: "02" + ("1" * 64),
         kms_signer=lambda *_args: "f" * 128,
@@ -306,14 +291,6 @@ def test_run_rejects_cat_total_below_minimum_mojos(monkeypatch) -> None:
         def get_blockchain_state():
             return {"peak_height": 1}
 
-    class _FakeWallet:
-        @staticmethod
-        def get_vault_custody_snapshot():
-            return {"vaultLauncherId": "0x" + ("c" * 64)}
-
-    def _fake_wallet_factory(_config):
-        return _FakeWallet()
-
     monkeypatch.setattr(
         mod,
         "_resolve_cat_asset_id_for_coin_ids",
@@ -329,7 +306,6 @@ def test_run_rejects_cat_total_below_minimum_mojos(monkeypatch) -> None:
     exit_code, payload = mod.run(
         args,
         coinset_factory=_FakeCoinset,
-        cloud_wallet_factory=_fake_wallet_factory,
         sign_and_broadcast_fn=_broadcast,
         kms_pubkey_resolver=lambda *_args: "02" + ("1" * 64),
         kms_signer=lambda *_args: "f" * 128,
@@ -400,14 +376,6 @@ def test_run_stepwise_allows_sub_cat_outputs_only_with_override(monkeypatch) -> 
         def get_blockchain_state():
             return {"peak_height": 1}
 
-    class _FakeWallet:
-        @staticmethod
-        def get_vault_custody_snapshot():
-            return {"vaultLauncherId": "0x" + ("c" * 64)}
-
-    def _fake_wallet_factory(_config):
-        return _FakeWallet()
-
     monkeypatch.setattr(
         mod,
         "_resolve_cat_asset_id_for_coin_ids",
@@ -434,7 +402,6 @@ def test_run_stepwise_allows_sub_cat_outputs_only_with_override(monkeypatch) -> 
     exit_code, payload = mod.run(
         args,
         coinset_factory=_FakeCoinset,
-        cloud_wallet_factory=_fake_wallet_factory,
         sign_and_broadcast_fn=_broadcast,
         kms_pubkey_resolver=lambda *_args: "02" + ("1" * 64),
         kms_signer=lambda *_args: "f" * 128,
@@ -488,14 +455,6 @@ def test_run_stepwise_marks_ok_with_leftovers(monkeypatch) -> None:
         def get_blockchain_state():
             return {"peak_height": 1}
 
-    class _FakeWallet:
-        @staticmethod
-        def get_vault_custody_snapshot():
-            return {"vaultLauncherId": "0x" + ("c" * 64)}
-
-    def _fake_wallet_factory(_config):
-        return _FakeWallet()
-
     monkeypatch.setattr(
         mod,
         "_resolve_cat_asset_id_for_coin_ids",
@@ -520,7 +479,6 @@ def test_run_stepwise_marks_ok_with_leftovers(monkeypatch) -> None:
     exit_code, payload = mod.run(
         args,
         coinset_factory=_FakeCoinset,
-        cloud_wallet_factory=_fake_wallet_factory,
         sign_and_broadcast_fn=_broadcast,
         kms_pubkey_resolver=lambda *_args: "02" + ("1" * 64),
         kms_signer=lambda *_args: "f" * 128,
@@ -615,14 +573,6 @@ def test_run_includes_broadcast_diagnostics_on_failure_when_flagged(monkeypatch)
         def get_blockchain_state():
             return {"peak_height": 1}
 
-    class _FakeWallet:
-        @staticmethod
-        def get_vault_custody_snapshot():
-            return {"vaultLauncherId": "0x" + ("c" * 64)}
-
-    def _fake_wallet_factory(_config):
-        return _FakeWallet()
-
     monkeypatch.setattr(
         mod,
         "_resolve_cat_asset_id_for_coin_ids",
@@ -640,7 +590,6 @@ def test_run_includes_broadcast_diagnostics_on_failure_when_flagged(monkeypatch)
     exit_code, payload = mod.run(
         args,
         coinset_factory=_FakeCoinset,
-        cloud_wallet_factory=_fake_wallet_factory,
         sign_and_broadcast_fn=_broadcast,
         kms_pubkey_resolver=lambda *_args: "02" + ("1" * 64),
         kms_signer=lambda *_args: "f" * 128,

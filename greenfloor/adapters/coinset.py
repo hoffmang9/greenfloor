@@ -1,5 +1,15 @@
+"""Coinset adapter: query helpers in Python, mutations via Rust signer bindings.
+
+Read-only Coinset HTTP calls (coin lookups, offer payload parsing) live here and
+use ``_post_json`` against the configured MSP base URL. Transaction push and fee
+estimation for signed spend bundles are delegated to ``greenfloor_native`` /
+``greenfloor-signer-pyo3`` so mutation paths share the same Rust IO stack as the
+signer.
+"""
+
 from __future__ import annotations
 
+import importlib
 import json
 import urllib.error
 import urllib.parse
@@ -119,6 +129,30 @@ def extract_coin_ids_from_offer_payload(payload: dict[str, Any]) -> list[str]:
     return coin_ids
 
 
+_COINSET_SIGNER_INSTALL_HINT = (
+    "Install the greenfloor_signer extension (for example: "
+    "`maturin develop -m greenfloor-signer-pyo3` from the repo root)."
+)
+
+
+def _import_greenfloor_signer() -> Any:
+    try:
+        return importlib.import_module("greenfloor_signer")
+    except ImportError as exc:
+        raise RuntimeError(
+            f"greenfloor_signer_required_for_coinset_io: {_COINSET_SIGNER_INSTALL_HINT} "
+            f"Original error: {exc}"
+        ) from exc
+
+
+def _require_rust_coinset(name: str, *args: Any, **kwargs: Any) -> Any:
+    signer = _import_greenfloor_signer()
+    fn = getattr(signer, name, None)
+    if not callable(fn):
+        raise RuntimeError(f"greenfloor_signer_missing_coinset_fn:{name}")
+    return fn(*args, **kwargs)
+
+
 class CoinsetAdapter:
     MAINNET_BASE_URL = "https://api.coinset.org"
     TESTNET11_BASE_URL = "https://testnet11.api.coinset.org"
@@ -142,11 +176,13 @@ class CoinsetAdapter:
                 resolved_base_url = self.MAINNET_BASE_URL
         self.base_url = resolved_base_url.rstrip("/")
 
-    def _post_json_once(
-        self, endpoint: str, body: dict[str, Any], *, base_url: str
-    ) -> dict[str, Any]:
-        url = f"{base_url.rstrip('/')}/{endpoint.lstrip('/')}"
-        data = json.dumps(body).encode("utf-8")
+    def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
+        request_body = dict(body)
+        if self.network == "testnet11":
+            # Force testnet selection for shared/multiplexed Coinset backends.
+            request_body.setdefault("network", "testnet11")
+        url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        data = json.dumps(request_body).encode("utf-8")
         req = urllib.request.Request(
             url,
             data=data,
@@ -172,13 +208,6 @@ class CoinsetAdapter:
         if isinstance(payload, dict):
             return payload
         raise RuntimeError("coinset_invalid_response_payload")
-
-    def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
-        request_body = dict(body)
-        if self.network == "testnet11":
-            # Force testnet selection for shared/multiplexed Coinset backends.
-            request_body.setdefault("network", "testnet11")
-        return self._post_json_once(endpoint, request_body, base_url=self.base_url)
 
     def get_all_mempool_tx_ids(self) -> list[str]:
         payload = self._post_json("get_all_mempool_tx_ids", {})
@@ -346,12 +375,18 @@ class CoinsetAdapter:
         return coin_solution
 
     def push_tx(self, *, spend_bundle_hex: str) -> dict[str, Any]:
-        payload = self._post_json("push_tx", {"spend_bundle": spend_bundle_hex})
+        payload = _require_rust_coinset(
+            "coinset_push_tx",
+            self.network,
+            self.base_url,
+            spend_bundle_hex,
+        )
         if not isinstance(payload, dict):
-            return {"success": False, "error": "invalid_response_payload"}
+            raise RuntimeError("coinset_push_tx_invalid_response")
         return payload
 
     def push_tx_structured(self, *, spend_bundle: dict[str, Any]) -> dict[str, Any]:
+        """Test-only fallback when a Coinset endpoint rejects hex-encoded bundles."""
         payload = self._post_json("push_tx", {"spend_bundle": spend_bundle})
         if not isinstance(payload, dict):
             return {"success": False, "error": "invalid_response_payload"}
@@ -364,18 +399,20 @@ class CoinsetAdapter:
         cost: int = 1_000_000,
         spend_count: int | None = None,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {
-            "target_times": target_times or [60, 300, 600],
-            "cost": int(cost),
-        }
-        if spend_count is not None and int(spend_count) > 0:
-            body["spend_count"] = int(spend_count)
-        payload = self._post_json(
-            "get_fee_estimate",
-            body,
+        resolved_target_times = target_times or [60, 300, 600]
+        spend_count_opt = (
+            int(spend_count) if spend_count is not None and int(spend_count) > 0 else None
+        )
+        payload = _require_rust_coinset(
+            "coinset_get_fee_estimate",
+            self.network,
+            self.base_url,
+            [int(value) for value in resolved_target_times],
+            int(cost),
+            spend_count_opt,
         )
         if not isinstance(payload, dict):
-            return {"success": False, "error": "invalid_response_payload"}
+            raise RuntimeError("coinset_get_fee_estimate_invalid_response")
         return payload
 
     def get_conservative_fee_estimate(
@@ -384,33 +421,19 @@ class CoinsetAdapter:
         cost: int = 1_000_000,
         spend_count: int | None = None,
     ) -> int | None:
-        payload = self.get_fee_estimate(
-            target_times=[300, 600, 1200],
-            cost=int(cost),
-            spend_count=spend_count,
+        spend_count_opt = (
+            int(spend_count) if spend_count is not None and int(spend_count) > 0 else None
         )
-        if not payload.get("success", False):
-            return None
-        estimates = payload.get("estimates")
-        if isinstance(estimates, list) and estimates:
-            valid = []
-            for value in estimates:
-                try:
-                    parsed = int(value)
-                except (TypeError, ValueError):
-                    continue
-                if parsed >= 0:
-                    valid.append(parsed)
-            if valid:
-                return max(valid)
-        fee = payload.get("fee_estimate")
-        if fee is None:
-            return None
-        try:
-            parsed_fee = int(fee)
-        except (TypeError, ValueError):
-            return None
-        return parsed_fee if parsed_fee >= 0 else None
+        fee = _require_rust_coinset(
+            "coinset_get_conservative_fee_estimate",
+            self.network,
+            self.base_url,
+            int(cost),
+            spend_count_opt,
+        )
+        if isinstance(fee, int) and fee >= 0:
+            return fee
+        return None
 
     def get_blockchain_state(self) -> dict[str, Any] | None:
         payload = self._post_json("get_blockchain_state", {})

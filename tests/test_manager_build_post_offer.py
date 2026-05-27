@@ -563,7 +563,7 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
             return {"success": True, "id": "should-not-post"}
 
     def _import_module(name: str):
-        if name == "greenfloor_native":
+        if name == "greenfloor_signer":
             raise ImportError("disable native path for this test")
         return __import__(name)
 

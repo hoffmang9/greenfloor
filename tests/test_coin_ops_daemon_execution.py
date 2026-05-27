@@ -6,11 +6,11 @@ from typing import Any
 
 from greenfloor.config.models import MarketConfig, MarketInventoryConfig
 from greenfloor.core.coin_ops import CoinOpPlan
-from greenfloor.runtime.cloud_wallet.coin_ops_daemon_execution import (
+from greenfloor.runtime.coin_ops.daemon_execution import (
     DaemonCoinOpExecContext,
     execute_daemon_split_plan,
 )
-from greenfloor.runtime.cloud_wallet.coin_ops_models import CoinOpSelectionMode
+from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode
 from greenfloor.runtime.coin_ops_backend import CoinOpScope
 
 
@@ -121,7 +121,7 @@ def test_execute_daemon_split_plan_retry_disables_combine_prereq() -> None:
         scope=CoinOpScope(
             market=market,
             selected_venue=None,
-            execution_backend="cloud_wallet",
+            execution_backend="signer",
         ),
         wallet=wallet,
     )

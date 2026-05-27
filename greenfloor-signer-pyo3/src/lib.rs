@@ -8,10 +8,12 @@ use chia_bls::SecretKey;
 use signer_core::{
     broadcast_bls_spend_bundle, build_and_optionally_broadcast_vault_cat_mixed_split,
     build_bls_mixed_split_spend_bundle, build_bls_offer_spend_bundle,
-    build_bls_xch_coin_op_spend_bundle, build_vault_cat_offer, list_cat_coin_summaries,
-    list_cat_coin_summaries_by_ids, load_signer_config, resolve_offer_asset_ids,
-    resolve_vault_context, BlsMixedSplitRequest, BlsMixedSplitResult, BlsOfferRequest,
-    BlsOfferResult, BlsXchCoinOpRequest, BlsXchCoinOpResult, CreateOfferRequest,
+    build_bls_xch_coin_op_spend_bundle, build_vault_cat_offer, encode_offer_from_spend_bundle_bytes,
+    from_input_spend_bundle_bytes, from_input_spend_bundle_xch_bytes, get_conservative_fee_estimate,
+    get_fee_estimate, list_cat_coin_summaries, list_cat_coin_summaries_by_ids,
+    load_bls_master_secret_key, load_signer_config, push_tx_hex, resolve_offer_asset_ids,
+    resolve_vault_context, validate_offer_text, BlsMixedSplitRequest, BlsMixedSplitResult,
+    BlsOfferRequest, BlsOfferResult, BlsXchCoinOpRequest, BlsXchCoinOpResult, CreateOfferRequest,
     MixedSplitRequest,
 };
 use signer_core::error::{bls_reason, broadcast_reason, BlsOp};
@@ -301,6 +303,117 @@ fn resolve_offer_asset_ids_py(
     })
 }
 
+#[pyfunction]
+#[pyo3(name = "validate_offer")]
+fn validate_offer_py(offer: &str) -> PyResult<()> {
+    validate_offer_text(offer).map_err(to_py_err)
+}
+
+#[pyfunction]
+#[pyo3(name = "encode_offer")]
+fn encode_offer_py(spend_bundle_bytes: &[u8]) -> PyResult<String> {
+    encode_offer_from_spend_bundle_bytes(spend_bundle_bytes).map_err(to_py_err)
+}
+
+#[pyfunction]
+#[pyo3(name = "from_input_spend_bundle")]
+fn from_input_spend_bundle_py(
+    spend_bundle_bytes: &[u8],
+    requested_payments_xch: Vec<(Vec<u8>, Vec<(Vec<u8>, u64)>)>,
+    requested_payments_cats: Vec<(Vec<u8>, Vec<u8>, Vec<(Vec<u8>, u64)>)>,
+) -> PyResult<Vec<u8>> {
+    from_input_spend_bundle_bytes(
+        spend_bundle_bytes,
+        requested_payments_xch,
+        requested_payments_cats,
+    )
+    .map_err(to_py_err)
+}
+
+#[pyfunction]
+#[pyo3(name = "from_input_spend_bundle_xch")]
+fn from_input_spend_bundle_xch_py(
+    spend_bundle_bytes: &[u8],
+    requested_payments_xch: Vec<(Vec<u8>, Vec<(Vec<u8>, u64)>)>,
+) -> PyResult<Vec<u8>> {
+    from_input_spend_bundle_xch_bytes(spend_bundle_bytes, requested_payments_xch).map_err(to_py_err)
+}
+
+#[pyfunction]
+#[pyo3(name = "load_bls_master_sk")]
+fn load_bls_master_sk_py(key_id: &str) -> PyResult<Py<PyAny>> {
+    Python::attach(|py| {
+        let dict = PyDict::new(py);
+        match load_bls_master_secret_key(key_id) {
+            Ok(sk) => {
+                dict.set_item("master_sk_bytes", sk.to_bytes().to_vec())?;
+            }
+            Err(err) => {
+                dict.set_item("error", bls_reason(err, BlsOp::KeyLoad))?;
+            }
+        }
+        Ok(dict.into())
+    })
+}
+
+#[pyfunction]
+#[pyo3(name = "coinset_push_tx")]
+fn coinset_push_tx_py(
+    network: &str,
+    base_url: &str,
+    spend_bundle_hex: &str,
+) -> PyResult<Py<PyAny>> {
+    let base = base_url.trim();
+    let base_opt = if base.is_empty() { None } else { Some(base) };
+    let payload = runtime()
+        .block_on(push_tx_hex(network, base_opt, spend_bundle_hex))
+        .map_err(to_py_err)?;
+    Python::attach(|py| dict_from_json_value(py, payload))
+}
+
+#[pyfunction]
+#[pyo3(name = "coinset_get_fee_estimate")]
+fn coinset_get_fee_estimate_py(
+    network: &str,
+    base_url: &str,
+    target_times: Vec<u64>,
+    cost: u64,
+    spend_count: Option<u64>,
+) -> PyResult<Py<PyAny>> {
+    let base = base_url.trim();
+    let base_opt = if base.is_empty() { None } else { Some(base) };
+    let payload = runtime()
+        .block_on(get_fee_estimate(
+            network,
+            base_opt,
+            target_times,
+            cost,
+            spend_count,
+        ))
+        .map_err(to_py_err)?;
+    Python::attach(|py| dict_from_json_value(py, payload))
+}
+
+#[pyfunction]
+#[pyo3(name = "coinset_get_conservative_fee_estimate")]
+fn coinset_get_conservative_fee_estimate_py(
+    network: &str,
+    base_url: &str,
+    cost: u64,
+    spend_count: Option<u64>,
+) -> PyResult<Option<u64>> {
+    let base = base_url.trim();
+    let base_opt = if base.is_empty() { None } else { Some(base) };
+    runtime()
+        .block_on(get_conservative_fee_estimate(
+            network,
+            base_opt,
+            cost,
+            spend_count,
+        ))
+        .map_err(to_py_err)
+}
+
 #[pymodule]
 fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(resolve_vault_context_py, m)?)?;
@@ -313,5 +426,13 @@ fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(list_bls_cat_coins_by_ids_py, m)?)?;
     m.add_function(wrap_pyfunction!(broadcast_bls_spend_bundle_py, m)?)?;
     m.add_function(wrap_pyfunction!(resolve_offer_asset_ids_py, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_offer_py, m)?)?;
+    m.add_function(wrap_pyfunction!(encode_offer_py, m)?)?;
+    m.add_function(wrap_pyfunction!(from_input_spend_bundle_py, m)?)?;
+    m.add_function(wrap_pyfunction!(from_input_spend_bundle_xch_py, m)?)?;
+    m.add_function(wrap_pyfunction!(load_bls_master_sk_py, m)?)?;
+    m.add_function(wrap_pyfunction!(coinset_push_tx_py, m)?)?;
+    m.add_function(wrap_pyfunction!(coinset_get_fee_estimate_py, m)?)?;
+    m.add_function(wrap_pyfunction!(coinset_get_conservative_fee_estimate_py, m)?)?;
     Ok(())
 }

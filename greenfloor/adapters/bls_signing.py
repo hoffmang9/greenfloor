@@ -1,14 +1,12 @@
 """BLS keyring signing: thin Python wrappers over ``greenfloor_signer`` Rust paths.
 
-Offer, mixed-split, and XCH split/combine spend bundles are built in ``greenfloor-signer``.
-Key loading (mnemonic/env maps) stays here. Vault KMS uses ``greenfloor.adapters.rust_signer``.
+Offer, mixed-split, XCH split/combine spend bundles and key loading run in ``greenfloor-signer``.
+Vault KMS uses ``greenfloor.adapters.rust_signer``.
 """
 
 from __future__ import annotations
 
 import importlib
-import json
-import os
 from typing import Any
 
 from greenfloor.hex_utils import canonical_is_xch
@@ -23,58 +21,28 @@ def _hex_to_bytes(value: str) -> bytes:
     return bytes.fromhex(raw)
 
 
-def _import_sdk() -> Any:
-    return importlib.import_module("chia_wallet_sdk")
-
-
 def _import_greenfloor_signer() -> Any:
     return importlib.import_module("greenfloor_signer")
 
 
-def _load_master_private_key(keyring_yaml_path: str, key_id: str) -> tuple[Any | None, str | None]:
+def _load_master_private_key(
+    keyring_yaml_path: str, key_id: str
+) -> tuple[bytes | None, str | None]:
     _ = keyring_yaml_path
-    key_id_trimmed = key_id.strip()
-    secret_key_hex_map_raw = os.getenv("GREENFLOOR_KEY_ID_SECRET_KEY_HEX_MAP_JSON", "").strip()
-    if secret_key_hex_map_raw:
-        try:
-            secret_key_map = json.loads(secret_key_hex_map_raw)
-        except json.JSONDecodeError:
-            return None, "invalid_key_id_secret_key_hex_map_json"
-        if isinstance(secret_key_map, dict):
-            secret_key_hex_raw = str(secret_key_map.get(key_id_trimmed, "")).strip()
-            if secret_key_hex_raw:
-                try:
-                    return _hex_to_bytes(secret_key_hex_raw), None
-                except Exception as exc:
-                    return None, f"invalid_secret_key_hex_for_key_id:{exc}"
-
-    mnemonic_map_raw = os.getenv("GREENFLOOR_KEY_ID_MNEMONIC_MAP_JSON", "").strip()
-    mnemonic = ""
-    if mnemonic_map_raw:
-        try:
-            mnemonic_map = json.loads(mnemonic_map_raw)
-        except json.JSONDecodeError:
-            return None, "invalid_key_id_mnemonic_map_json"
-        if isinstance(mnemonic_map, dict):
-            mnemonic = str(mnemonic_map.get(key_id_trimmed, "")).strip()
-    if not mnemonic:
-        mnemonic = os.getenv("GREENFLOOR_WALLET_MNEMONIC", "").strip()
-    if not mnemonic:
-        mnemonic = os.getenv("TESTNET_WALLET_MNEMONIC", "").strip()
-    if not mnemonic:
-        return None, "missing_mnemonic_for_key_id"
-
     try:
-        sdk = _import_sdk()
+        signer = _import_greenfloor_signer()
+        result = signer.load_bls_master_sk(str(key_id).strip())
     except Exception as exc:
-        return None, f"wallet_sdk_import_error:{exc}"
-    try:
-        mnemonic_obj = sdk.Mnemonic(mnemonic)
-        seed = mnemonic_obj.to_seed("")
-        master_sk = sdk.SecretKey.from_seed(seed)
-        return master_sk.to_bytes(), None
-    except Exception as exc:
-        return None, f"mnemonic_to_master_key_error:{exc}"
+        return None, f"greenfloor_signer_import_error:{exc}"
+    if not isinstance(result, dict):
+        return None, "invalid_load_bls_master_sk_response"
+    error = result.get("error")
+    if error:
+        return None, str(error)
+    raw = result.get("master_sk_bytes")
+    if not isinstance(raw, bytes | bytearray | memoryview):
+        return None, "missing_master_sk_bytes"
+    return bytes(raw), None
 
 
 def _call_signer_build(

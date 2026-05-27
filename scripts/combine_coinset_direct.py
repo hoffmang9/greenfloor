@@ -7,9 +7,9 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.adapters.kms_signer import get_public_key_compressed_hex, sign_digest
+from greenfloor.config.launcher import launcher_id_from_program_config
 from greenfloor.constants import MIN_CAT_OUTPUT_MOJOS
 from greenfloor.hex_utils import normalize_hex_id
 from greenfloor.signing import sign_and_broadcast_mixed_split
@@ -326,7 +326,6 @@ def _preflight_checks(
     selected_coin_ids: list[str],
     total_amount: int,
     asset_id: str | None,
-    cloud_wallet_factory: Any = CloudWalletAdapter,
     kms_pubkey_resolver: Any = get_public_key_compressed_hex,
     kms_signer: Any = sign_digest,
 ) -> dict[str, Any]:
@@ -342,34 +341,27 @@ def _preflight_checks(
     except Exception as exc:  # noqa: BLE001
         checks["coinset"] = {"ok": False, "reason": str(exc), "base_url": coinset.base_url}
 
-    try:
-        wallet = cloud_wallet_factory(
-            CloudWalletConfig(
-                base_url=str(args.cloud_wallet_base_url).strip(),
-                user_key_id=str(args.cloud_wallet_user_key_id).strip(),
-                private_key_pem_path=str(args.cloud_wallet_private_key_pem_path).strip(),
-                vault_id=str(args.vault_id).strip(),
-                network=str(args.network).strip(),
-                kms_key_id=str(args.cloud_wallet_kms_key_id).strip() or None,
-                kms_region=str(args.cloud_wallet_kms_region).strip() or None,
-                kms_public_key_hex=str(args.cloud_wallet_kms_public_key_hex).strip() or None,
-            )
-        )
-        snapshot = wallet.get_vault_custody_snapshot()
-        launcher_id = (
-            normalize_hex_id(snapshot.get("vaultLauncherId")) if isinstance(snapshot, dict) else ""
-        )
-        checks["cloud_wallet_snapshot"] = {
+    launcher_id = normalize_hex_id(str(getattr(args, "launcher_id", "")))
+    if not launcher_id and str(getattr(args, "program_config", "")).strip():
+        try:
+            launcher_id = launcher_id_from_program_config(str(args.program_config).strip())
+        except Exception as exc:  # noqa: BLE001
+            checks["vault_context"] = {"ok": False, "reason": str(exc)}
+        else:
+            checks["vault_context"] = {
+                "ok": bool(launcher_id),
+                "launcher_id": launcher_id or None,
+            }
+    else:
+        checks["vault_context"] = {
             "ok": bool(launcher_id),
             "launcher_id": launcher_id or None,
         }
-    except Exception as exc:  # noqa: BLE001
-        checks["cloud_wallet_snapshot"] = {"ok": False, "reason": str(exc)}
 
     try:
         checks["kms_resolution"] = _kms_resolution_check(
-            kms_key_id=str(args.cloud_wallet_kms_key_id).strip(),
-            kms_region=str(args.cloud_wallet_kms_region).strip() or "us-west-2",
+            kms_key_id=str(args.signer_kms_key_id).strip(),
+            kms_region=str(args.signer_kms_region).strip() or "us-west-2",
             kms_live_probe=bool(args.kms_live_probe),
             live_probe_message_hex=str(args.kms_live_probe_message_hex).strip(),
             kms_pubkey_resolver=kms_pubkey_resolver,
@@ -411,16 +403,6 @@ def _build_signing_payload(
         "fee_mojos": 0,
         # Script-only override: allows stepwise dust consolidation workflows.
         "allow_sub_cat_output": bool(getattr(args, "allow_sub_cat_output", False)),
-        "cloud_wallet_base_url": str(args.cloud_wallet_base_url).strip(),
-        "cloud_wallet_user_key_id": str(args.cloud_wallet_user_key_id).strip(),
-        "cloud_wallet_private_key_pem_path": str(args.cloud_wallet_private_key_pem_path).strip(),
-        "cloud_wallet_vault_id": str(args.vault_id).strip(),
-        "cloud_wallet_kms_key_id": str(args.cloud_wallet_kms_key_id).strip(),
-        "cloud_wallet_kms_region": str(args.cloud_wallet_kms_region).strip(),
-        "cloud_wallet_kms_public_key_hex": str(args.cloud_wallet_kms_public_key_hex).strip(),
-        "cloud_wallet_vault_nonce_probe_max": max(
-            0, int(getattr(args, "cloud_wallet_vault_nonce_probe_max", 2048))
-        ),
     }
 
 
@@ -617,7 +599,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "On broadcast failure, rebuild bundle and include tx/mempool/coin-state diagnostics "
-            "to compare with Cloud Wallet combine behavior."
+            "to compare with direct Coinset combine behavior."
         ),
     )
     parser.add_argument("--kms-live-probe", action="store_true")
@@ -631,19 +613,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--key-id", default="")
     parser.add_argument("--keyring-yaml-path", default="")
     parser.add_argument("--receive-address", default="")
-    parser.add_argument("--cloud-wallet-base-url", default="")
-    parser.add_argument("--cloud-wallet-user-key-id", default="")
-    parser.add_argument("--cloud-wallet-private-key-pem-path", default="")
-    parser.add_argument("--vault-id", default="")
-    parser.add_argument("--cloud-wallet-kms-key-id", default="")
-    parser.add_argument("--cloud-wallet-kms-region", default="us-west-2")
-    parser.add_argument("--cloud-wallet-kms-public-key-hex", default="")
     parser.add_argument(
-        "--cloud-wallet-vault-nonce-probe-max",
-        type=int,
-        default=2048,
-        help="Maximum singleton nonce to probe for vault CAT p2 hash matching (default 2048).",
+        "--program-config",
+        default="",
+        help="Path to program.yaml for vault launcher preflight.",
     )
+    parser.add_argument(
+        "--launcher-id",
+        default="",
+        help="Optional vault launcher id hex for preflight when program config is not used.",
+    )
+    parser.add_argument("--signer-kms-key-id", default="")
+    parser.add_argument("--signer-kms-region", default="us-west-2")
     parser.add_argument("--verify-timeout-seconds", type=int, default=15 * 60)
     parser.add_argument("--verify-poll-seconds", type=int, default=8)
     parser.add_argument("--verify-warning-interval-seconds", type=int, default=5 * 60)
@@ -668,12 +649,10 @@ def _validate_required_args(args: argparse.Namespace) -> list[str]:
         "--key-id": args.key_id,
         "--keyring-yaml-path": args.keyring_yaml_path,
         "--receive-address": args.receive_address,
-        "--cloud-wallet-base-url": args.cloud_wallet_base_url,
-        "--cloud-wallet-user-key-id": args.cloud_wallet_user_key_id,
-        "--cloud-wallet-private-key-pem-path": args.cloud_wallet_private_key_pem_path,
-        "--vault-id": args.vault_id,
-        "--cloud-wallet-kms-key-id": args.cloud_wallet_kms_key_id,
+        "--signer-kms-key-id": args.signer_kms_key_id,
     }
+    if not str(args.launcher_id).strip() and not str(args.program_config).strip():
+        missing.append("--program-config or --launcher-id")
     for flag, value in required.items():
         if not str(value).strip():
             missing.append(flag)
@@ -684,7 +663,6 @@ def run(
     args: argparse.Namespace,
     *,
     coinset_factory: Any = CoinsetAdapter,
-    cloud_wallet_factory: Any = CloudWalletAdapter,
     sign_and_broadcast_fn: Any = sign_and_broadcast_mixed_split,
     kms_pubkey_resolver: Any = get_public_key_compressed_hex,
     kms_signer: Any = sign_digest,
@@ -756,7 +734,6 @@ def run(
         selected_coin_ids=[coin.coin_id for coin in resolved_inputs],
         total_amount=total_amount,
         asset_id=asset_id,
-        cloud_wallet_factory=cloud_wallet_factory,
         kms_pubkey_resolver=kms_pubkey_resolver,
         kms_signer=kms_signer,
     )

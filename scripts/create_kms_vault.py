@@ -10,19 +10,19 @@ Reads configuration from environment variables only (commonly loaded from .env).
 This script does not read config/program.yaml.
 
 Env vars (required -- set in .env):
-    GREENFLOOR_CLOUD_WALLET_BASE_URL
+    GREENFLOOR_ENT_WALLET_BASE_URL (or legacy GREENFLOOR_CLOUD_WALLET_BASE_URL)
         ent-wallet GraphQL API origin.
         Find at: https://vault.chia.net/settings.json -> GRAPHQL_URI
-    GREENFLOOR_CLOUD_WALLET_USER_KEY_ID
+    GREENFLOOR_ENT_WALLET_USER_KEY_ID (or legacy GREENFLOOR_CLOUD_WALLET_USER_KEY_ID)
         API key identifier.
         Find at: https://vault.chia.net -> Settings -> API Keys -> Key Id
-    GREENFLOOR_CLOUD_WALLET_PRIVATE_KEY_PEM_PATH
+    GREENFLOOR_ENT_WALLET_PRIVATE_KEY_PEM_PATH (or legacy GREENFLOOR_CLOUD_WALLET_PRIVATE_KEY_PEM_PATH)
         Local path to the downloaded API private key PEM file.
         Find at: https://vault.chia.net -> Settings -> API Keys -> download PEM
-    GREENFLOOR_CLOUD_WALLET_KMS_KEY_ID
+    GREENFLOOR_SIGNER_KMS_KEY_ID (or legacy GREENFLOOR_CLOUD_WALLET_KMS_KEY_ID)
         AWS KMS key ARN for the P-256 custody key.
         Find at: AWS Console -> KMS -> Customer managed keys -> copy ARN
-    GREENFLOOR_CLOUD_WALLET_KMS_REGION
+    GREENFLOOR_SIGNER_KMS_REGION (or legacy GREENFLOOR_CLOUD_WALLET_KMS_REGION)
         AWS region where the KMS key lives (e.g. us-west-2).
 
     AWS credentials -- via ~/.aws/credentials, AWS_PROFILE, or env vars.
@@ -41,17 +41,27 @@ import textwrap
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
+from greenfloor.adapters.ent_wallet_graphql import EntWalletGraphqlClient
 from greenfloor.adapters.kms_signer import get_public_key_compressed_hex
 
 DEFAULT_VAULT_NAME = "greenfloor-kms-vault"
 DEFAULT_RECOVERY_TIMELOCK = 1800
 
 
-def _require_env(name: str) -> str:
-    val = os.environ.get(name, "").strip()
+def _env(name: str, *, legacy: str = "") -> str:
+    value = os.environ.get(name, "").strip()
+    if value:
+        return value
+    if legacy:
+        return os.environ.get(legacy, "").strip()
+    return ""
+
+
+def _require_env(name: str, *, legacy: str = "") -> str:
+    val = _env(name, legacy=legacy)
     if not val:
-        print(f"ERROR: required env var {name} is not set", file=sys.stderr)
+        labels = name if not legacy else f"{name} (or {legacy})"
+        print(f"ERROR: required env var {labels} is not set", file=sys.stderr)
         sys.exit(1)
     return val
 
@@ -69,7 +79,7 @@ def _generate_bls_recovery_key() -> tuple[str, str]:
 
 
 def _create_signer(
-    adapter: CloudWalletAdapter,
+    client: EntWalletGraphqlClient,
     *,
     name: str,
     key_hex: str,
@@ -92,7 +102,7 @@ mutation CreateSigner($input: CreateSignerInput!) {
   }
 }
 """
-    resp = adapter._graphql(
+    resp = client.graphql(
         query=mutation,
         variables={
             "input": {
@@ -110,11 +120,11 @@ mutation CreateSigner($input: CreateSignerInput!) {
         pk_id = node.get("id", "")
     if not signer_id or not pk_id:
         raise RuntimeError(f"createSigner failed for {name}: {json.dumps(resp)}")
-    return signer_id, pk_id
+    return str(signer_id), str(pk_id)
 
 
 def _create_vault_wallet(
-    adapter: CloudWalletAdapter,
+    client: EntWalletGraphqlClient,
     *,
     name: str,
     signer_ids: list[str],
@@ -134,7 +144,7 @@ mutation CreateWallet($input: CreateWalletInput!) {
   }
 }
 """
-    resp = adapter._graphql(
+    resp = client.graphql(
         query=mutation,
         variables={
             "input": {
@@ -160,61 +170,67 @@ mutation CreateWallet($input: CreateWalletInput!) {
     wallet_id = ((resp.get("createWallet") or {}).get("wallet") or {}).get("id", "")
     if not wallet_id:
         raise RuntimeError(f"createWallet failed: {json.dumps(resp)}")
-    return wallet_id
+    return str(wallet_id)
 
 
 def main() -> None:
-    base_url = _require_env("GREENFLOOR_CLOUD_WALLET_BASE_URL")
-    user_key_id = _require_env("GREENFLOOR_CLOUD_WALLET_USER_KEY_ID")
-    pem_path = _require_env("GREENFLOOR_CLOUD_WALLET_PRIVATE_KEY_PEM_PATH")
+    base_url = _require_env(
+        "GREENFLOOR_ENT_WALLET_BASE_URL",
+        legacy="GREENFLOOR_CLOUD_WALLET_BASE_URL",
+    )
+    user_key_id = _require_env(
+        "GREENFLOOR_ENT_WALLET_USER_KEY_ID",
+        legacy="GREENFLOOR_CLOUD_WALLET_USER_KEY_ID",
+    )
+    pem_path = _require_env(
+        "GREENFLOOR_ENT_WALLET_PRIVATE_KEY_PEM_PATH",
+        legacy="GREENFLOOR_CLOUD_WALLET_PRIVATE_KEY_PEM_PATH",
+    )
 
-    kms_key_id = _require_env("GREENFLOOR_CLOUD_WALLET_KMS_KEY_ID")
-    kms_region = _require_env("GREENFLOOR_CLOUD_WALLET_KMS_REGION")
+    kms_key_id = _require_env(
+        "GREENFLOOR_SIGNER_KMS_KEY_ID",
+        legacy="GREENFLOOR_CLOUD_WALLET_KMS_KEY_ID",
+    )
+    kms_region = _require_env(
+        "GREENFLOOR_SIGNER_KMS_REGION",
+        legacy="GREENFLOOR_CLOUD_WALLET_KMS_REGION",
+    )
     vault_name = os.environ.get("GREENFLOOR_VAULT_NAME", "").strip() or DEFAULT_VAULT_NAME
     recovery_timelock = int(
         os.environ.get("GREENFLOOR_RECOVERY_TIMELOCK", "").strip() or DEFAULT_RECOVERY_TIMELOCK
     )
 
-    # Adapter with empty vault_id (no vault exists yet; only used for auth + _graphql)
-    config = CloudWalletConfig(
+    client = EntWalletGraphqlClient(
         base_url=base_url,
         user_key_id=user_key_id,
         private_key_pem_path=pem_path,
-        vault_id="",
-        network="mainnet",
     )
-    adapter = CloudWalletAdapter(config)
 
-    # 1. Extract KMS P-256 public key
     print(f"Fetching P-256 public key from KMS key {kms_key_id} ...")
     custody_pubkey_hex = get_public_key_compressed_hex(kms_key_id, kms_region)
     print(f"  Compressed P-256 public key: {custody_pubkey_hex}")
 
-    # 2. Generate 24-word BLS recovery mnemonic
     print("Generating 24-word BLS recovery mnemonic ...")
     mnemonic_words, recovery_pubkey_hex = _generate_bls_recovery_key()
     print(f"  BLS recovery public key: {recovery_pubkey_hex}")
 
-    # 3. Create custody signer (KMS P-256)
     print("Creating custody signer (SECP256R1) ...")
     custody_signer_id, custody_pk_id = _create_signer(
-        adapter, name=f"{vault_name}-custody-kms", key_hex=custody_pubkey_hex, curve="SECP256R1"
+        client, name=f"{vault_name}-custody-kms", key_hex=custody_pubkey_hex, curve="SECP256R1"
     )
     print(f"  Custody signer ID: {custody_signer_id}")
     print(f"  Custody public key ID: {custody_pk_id}")
 
-    # 4. Create recovery signer (BLS)
     print("Creating recovery signer (BLS12_381) ...")
     recovery_signer_id, recovery_pk_id = _create_signer(
-        adapter, name=f"{vault_name}-recovery-bls", key_hex=recovery_pubkey_hex, curve="BLS12_381"
+        client, name=f"{vault_name}-recovery-bls", key_hex=recovery_pubkey_hex, curve="BLS12_381"
     )
     print(f"  Recovery signer ID: {recovery_signer_id}")
     print(f"  Recovery public key ID: {recovery_pk_id}")
 
-    # 5. Create vault wallet
     print(f"Creating vault wallet '{vault_name}' (recovery timelock: {recovery_timelock}s) ...")
     wallet_id = _create_vault_wallet(
-        adapter,
+        client,
         name=vault_name,
         signer_ids=[custody_signer_id, recovery_signer_id],
         custody_threshold=1,
@@ -225,7 +241,6 @@ def main() -> None:
     )
     print(f"  Vault wallet ID: {wallet_id}")
 
-    # 6. Print summary
     print("\n" + "=" * 60)
     print("VAULT CREATION SUCCESSFUL")
     print("=" * 60)
@@ -237,11 +252,13 @@ def main() -> None:
         Custody pubkey  : {custody_pubkey_hex}
         Recovery timelock: {recovery_timelock}s ({recovery_timelock // 60} min)
 
-        Add to your program.yaml cloud_wallet section:
-          vault_id: "{wallet_id}"
-          kms_key_id: "{kms_key_id}"
-          kms_region: "{kms_region}"
-          kms_public_key_hex: "{custody_pubkey_hex}"
+        Add to your program.yaml signer/vault sections:
+          signer:
+            kms_key_id: "{kms_key_id}"
+            kms_region: "{kms_region}"
+            kms_public_key_hex: "{custody_pubkey_hex}"
+          vault:
+            launcher_id: "<resolve from vault singleton after funding>"
     """)
     )
 

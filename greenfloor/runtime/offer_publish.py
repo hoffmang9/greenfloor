@@ -214,7 +214,7 @@ def _offer_has_duplicate_spent_coin_ids(sdk: object, offer_text: str) -> bool:
 def verify_offer_text_for_dexie(offer_text: str) -> str | None:
     native_validated = False
     try:
-        native = importlib.import_module("greenfloor_native")
+        native = importlib.import_module("greenfloor_signer")
     except Exception:
         native = None
     else:
