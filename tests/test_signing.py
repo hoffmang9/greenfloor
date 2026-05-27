@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import greenfloor.adapters.bls_signing as signing_mod
+import greenfloor.adapters.native_offer as native_offer_mod
 import greenfloor.signing_clvm as signing_clvm_mod
 from tests.support import bls_signing_broadcast as broadcast_support
 
@@ -395,15 +396,21 @@ def test_coin_id_set_accepts_hex_with_or_without_prefix() -> None:
 
 
 def test_parse_fingerprint_direct_integer() -> None:
-    assert signing_mod._parse_fingerprint("123456") == 123456
+    from tests.support.bls_signing_keys import parse_fingerprint
+
+    assert parse_fingerprint("123456") == 123456
 
 
 def test_parse_fingerprint_prefix() -> None:
-    assert signing_mod._parse_fingerprint("fingerprint:789") == 789
+    from tests.support.bls_signing_keys import parse_fingerprint
+
+    assert parse_fingerprint("fingerprint:789") == 789
 
 
 def test_parse_fingerprint_unknown_returns_none() -> None:
-    assert signing_mod._parse_fingerprint("unknown_key") is None
+    from tests.support.bls_signing_keys import parse_fingerprint
+
+    assert parse_fingerprint("unknown_key") is None
 
 
 def test_signing_split_path_passes_testnet11_network_to_rust(monkeypatch) -> None:
@@ -467,9 +474,9 @@ def test_from_input_spend_bundle_xch_calls_greenfloor_native(monkeypatch) -> Non
         nonce = b"\x22" * 32
         payments = [_Payment()]
 
-    monkeypatch.setattr(signing_mod, "_import_greenfloor_native", lambda: _Native)
+    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_native", lambda: _Native)
 
-    result = signing_mod._from_input_spend_bundle_xch(
+    result = native_offer_mod.from_input_spend_bundle_xch(
         sdk=_Sdk,
         input_spend_bundle=_InputSpendBundle(),
         requested_payments_xch=[_NotarizedPayment()],
@@ -515,9 +522,9 @@ def test_from_input_spend_bundle_xch_supports_sdk_byte_wrapper_types(monkeypatch
         nonce = _ByteWrapper(b"\xaa" * 32)
         payments = [_Payment()]
 
-    monkeypatch.setattr(signing_mod, "_import_greenfloor_native", lambda: _Native)
+    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_native", lambda: _Native)
 
-    result = signing_mod._from_input_spend_bundle_xch(
+    result = native_offer_mod.from_input_spend_bundle_xch(
         sdk=_Sdk,
         input_spend_bundle=_InputSpendBundle(),
         requested_payments_xch=[_NotarizedPayment()],
@@ -550,10 +557,10 @@ def test_from_input_spend_bundle_xch_propagates_native_errors(monkeypatch) -> No
         nonce = b"\x22" * 32
         payments = [_Payment()]
 
-    monkeypatch.setattr(signing_mod, "_import_greenfloor_native", lambda: _Native)
+    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_native", lambda: _Native)
 
     try:
-        signing_mod._from_input_spend_bundle_xch(
+        native_offer_mod.from_input_spend_bundle_xch(
             sdk=_Sdk,
             input_spend_bundle=_InputSpendBundle(),
             requested_payments_xch=[_NotarizedPayment()],
@@ -770,7 +777,20 @@ def test_broadcast_spend_bundle_falls_back_to_structured_payload(monkeypatch) ->
     assert result["operation_id"] == ("77" * 32)
 
 
-def test_build_mixed_split_rejects_sub_unit_cat_outputs() -> None:
+def test_build_mixed_split_rejects_sub_unit_cat_outputs(monkeypatch) -> None:
+    monkeypatch.setattr(
+        signing_mod,
+        "_load_master_private_key",
+        lambda *_args, **_kwargs: (b"\x01" * 32, None),
+    )
+
+    class _Signer:
+        @staticmethod
+        def build_bls_mixed_split(_network: str, _sk: bytes, _request: dict) -> dict:
+            return {"error": "cat_output_below_minimum_mojos"}
+
+    monkeypatch.setattr(signing_mod, "_import_greenfloor_signer", lambda: _Signer())
+
     spend_bundle_hex, err = signing_mod._build_mixed_split_spend_bundle(
         {
             "key_id": "key-1",

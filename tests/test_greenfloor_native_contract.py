@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-import greenfloor.signing as signing_mod
+import greenfloor.adapters.native_offer as native_offer_mod
 from greenfloor.runtime.offer_publish import (
     verify_offer_text_for_dexie as _verify_offer_text_for_dexie,
 )
@@ -81,9 +81,9 @@ def test_from_input_spend_bundle_xch_contract_bytes_in_bytes_out(monkeypatch) ->
         nonce = b"\x22" * 32
         payments = [_Payment()]
 
-    monkeypatch.setattr(signing_mod, "_import_greenfloor_native", lambda: _Native)
+    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_native", lambda: _Native)
 
-    result = signing_mod._from_input_spend_bundle_xch(
+    result = native_offer_mod.from_input_spend_bundle_xch(
         sdk=_Sdk,
         input_spend_bundle=_InputSpendBundle(),
         requested_payments_xch=[_NotarizedPayment()],

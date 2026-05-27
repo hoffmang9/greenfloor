@@ -35,7 +35,7 @@ pub(crate) fn validate_offer_input(input: &OfferInput) -> SignerResult<()> {
     if terms.offer_amount == 0 || terms.request_amount == 0 {
         return Err(SignerError::InvalidOutputAmount);
     }
-    if is_xch_like(&terms.offer_asset_id) {
+    if is_xch_like_asset(&terms.offer_asset_id) {
         return Err(SignerError::Other(
             "vault local offer path supports CAT offer side only".to_string(),
         ));
@@ -125,7 +125,7 @@ pub(crate) fn build_requested_payments(
     offer_nonce: Bytes32,
 ) -> SignerResult<RequestedPayments> {
     let mut requested_payments = RequestedPayments::new();
-    if is_xch_like(&terms.request_asset_id) {
+    if is_xch_like_asset(&terms.request_asset_id) {
         requested_payments.xch.push(NotarizedPayment::new(
             offer_nonce,
             vec![Payment::new(
@@ -153,10 +153,6 @@ pub(crate) fn build_requested_payments(
     Ok(requested_payments)
 }
 
-pub(crate) fn is_xch_like(asset_id: &str) -> bool {
-    is_xch_like_asset(asset_id)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,9 +160,9 @@ mod tests {
 
     #[test]
     fn recognizes_xch_like_assets() {
-        assert!(is_xch_like("xch"));
-        assert!(is_xch_like("TXCH"));
-        assert!(!is_xch_like("aa".repeat(32).as_str()));
+        assert!(is_xch_like_asset("xch"));
+        assert!(is_xch_like_asset("TXCH"));
+        assert!(!is_xch_like_asset("aa".repeat(32).as_str()));
     }
 
     #[test]

@@ -1,22 +1,17 @@
-use std::collections::HashSet;
-
 use chia_bls::SecretKey;
-use chia_protocol::{Bytes32, Coin, SpendBundle};
+use chia_protocol::SpendBundle;
 use chia_puzzle_types::Memos;
 use chia_puzzles::SETTLEMENT_PAYMENT_HASH;
-use chia_sdk_driver::{Action, AssetInfo, Cat, Id, Offer, Relation, SpendContext, Spends};
-use chia_sdk_utils::select_coins;
+use chia_sdk_driver::{Action, AssetInfo, Id, Offer, Relation, SpendContext, Spends};
 use clvmr::Allocator;
 use serde::{Deserialize, Serialize};
 
 use crate::bls::coins::cat_asset_bytes;
+use crate::bls::select::{select_cats_smallest_for_amount, select_xch_for_amount};
 use crate::bls::spend::{add_coins_to_spends, synthetic_keys_for_coins};
 use crate::bls::signing::sign_coin_spends;
 use crate::coinset::is_xch_like_asset;
-use crate::coinset::{
-    client_for_network, list_unspent_cats, list_unspent_cats_by_ids, list_unspent_xch,
-    select_cats_smallest_first,
-};
+use crate::coinset::client_for_network;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::plan::build_requested_payments;
 use crate::offer::types::OfferTerms;
@@ -52,35 +47,31 @@ pub async fn build_bls_offer_spend_bundle(
     let offer_asset_raw = request.offer_asset_id.trim().to_lowercase();
     let explicit_coin_ids = crate::coinset::parse_coin_ids(&request.offer_coin_ids)?;
 
-    let mut offered_xch: Vec<Coin> = Vec::new();
-    let mut offered_cats: Vec<Cat> = Vec::new();
-
-    if is_xch_like_asset(&offer_asset_raw) {
-        let mut xch_coins = list_unspent_xch(&client, receive_address).await?;
-        if !explicit_coin_ids.is_empty() {
-            let allowed: HashSet<Bytes32> = explicit_coin_ids.iter().copied().collect();
-            xch_coins.retain(|coin| allowed.contains(&coin.coin_id()));
-        }
-        if xch_coins.is_empty() {
-            return Err(SignerError::NoUnspentOfferXchCoins);
-        }
-        offered_xch = select_coins(xch_coins, request.offer_amount)
-            .map_err(|_| SignerError::InsufficientOfferXchCoins)?;
+    let (offered_xch, offered_cats) = if is_xch_like_asset(&offer_asset_raw) {
+        let offered_xch = select_xch_for_amount(
+            &client,
+            receive_address,
+            &explicit_coin_ids,
+            request.offer_amount,
+            SignerError::NoUnspentOfferXchCoins,
+            SignerError::InsufficientOfferXchCoins,
+        )
+        .await?;
+        (offered_xch, Vec::new())
     } else {
         let asset_bytes = cat_asset_bytes(&offer_asset_raw)?;
-        let cats = if explicit_coin_ids.is_empty() {
-            list_unspent_cats(&client, receive_address, asset_bytes).await?
-        } else {
-            list_unspent_cats_by_ids(&client, &explicit_coin_ids).await?
-        };
-        if cats.is_empty() {
-            return Err(SignerError::NoUnspentOfferCatCoins);
-        }
-        offered_cats = select_cats_smallest_first(cats, request.offer_amount);
-        if offered_cats.is_empty() {
-            return Err(SignerError::InsufficientOfferCatCoins);
-        }
-    }
+        let offered_cats = select_cats_smallest_for_amount(
+            &client,
+            receive_address,
+            asset_bytes,
+            &explicit_coin_ids,
+            request.offer_amount,
+            SignerError::NoUnspentOfferCatCoins,
+            SignerError::InsufficientOfferCatCoins,
+        )
+        .await?;
+        (Vec::new(), offered_cats)
+    };
 
     let offered_total: u64 = offered_xch.iter().map(|c| c.amount).sum::<u64>()
         + offered_cats.iter().map(|cat| cat.coin.amount).sum::<u64>();
@@ -89,7 +80,7 @@ pub async fn build_bls_offer_spend_bundle(
     }
     let change_amount = offered_total.saturating_sub(request.offer_amount);
 
-    let offered_coin_ids: Vec<Bytes32> = offered_xch
+    let offered_coin_ids: Vec<_> = offered_xch
         .iter()
         .map(|coin| coin.coin_id())
         .chain(offered_cats.iter().map(|cat| cat.coin.coin_id()))

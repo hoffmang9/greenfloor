@@ -2,6 +2,7 @@ mod coins;
 mod keys;
 mod mixed_split;
 mod offer;
+mod select;
 mod signing;
 mod spend;
 mod xch_coin_op;

@@ -11,7 +11,6 @@ import json
 import os
 from typing import Any
 
-from greenfloor.constants import MIN_CAT_OUTPUT_MOJOS
 from greenfloor.hex_utils import is_xch_like_asset_id
 
 
@@ -28,51 +27,8 @@ def _import_sdk() -> Any:
     return importlib.import_module("chia_wallet_sdk")
 
 
-def _import_greenfloor_native() -> Any:
-    return importlib.import_module("greenfloor_native")
-
-
 def _import_greenfloor_signer() -> Any:
     return importlib.import_module("greenfloor_signer")
-
-
-def _parse_fingerprint(key_id: str) -> int | None:
-    raw = key_id.strip()
-    if raw.isdigit():
-        return int(raw)
-    if raw.startswith("fingerprint:") and raw.removeprefix("fingerprint:").isdigit():
-        return int(raw.removeprefix("fingerprint:"))
-    mapping_raw = os.getenv("GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON", "").strip()
-    if mapping_raw:
-        try:
-            mapping = json.loads(mapping_raw)
-        except json.JSONDecodeError:
-            return None
-        if isinstance(mapping, dict):
-            mapped = mapping.get(raw)
-            if isinstance(mapped, int):
-                return mapped
-            if isinstance(mapped, str) and mapped.isdigit():
-                return int(mapped)
-    return None
-
-
-def _as_bytes(value: Any) -> bytes:
-    if isinstance(value, bytes | bytearray | memoryview):
-        return bytes(value)
-    to_bytes = getattr(value, "to_bytes", None)
-    if callable(to_bytes):
-        raw = to_bytes()
-        if isinstance(raw, bytes | bytearray | memoryview):
-            return bytes(raw)
-        raise TypeError("to_bytes did not return bytes-compatible data")
-    to_dunder_bytes = getattr(value, "__bytes__", None)
-    if callable(to_dunder_bytes):
-        raw = to_dunder_bytes()
-        if isinstance(raw, bytes | bytearray | memoryview):
-            return bytes(raw)
-        raise TypeError("__bytes__ did not return bytes-compatible data")
-    raise TypeError("value cannot be converted to bytes")
 
 
 def _load_master_private_key(keyring_yaml_path: str, key_id: str) -> tuple[Any | None, str | None]:
@@ -119,26 +75,6 @@ def _load_master_private_key(keyring_yaml_path: str, key_id: str) -> tuple[Any |
         return master_sk.to_bytes(), None
     except Exception as exc:
         return None, f"mnemonic_to_master_key_error:{exc}"
-
-
-def _from_input_spend_bundle_xch(
-    *,
-    sdk: Any,
-    input_spend_bundle: Any,
-    requested_payments_xch: list[Any],
-) -> Any:
-    native = _import_greenfloor_native()
-    requested: list[tuple[bytes, list[tuple[bytes, int]]]] = []
-    for notarized_payment in requested_payments_xch:
-        payments: list[tuple[bytes, int]] = []
-        for payment in notarized_payment.payments:
-            payments.append((_as_bytes(payment.puzzle_hash), int(payment.amount)))
-        requested.append((_as_bytes(notarized_payment.nonce), payments))
-    spend_bundle_bytes = native.from_input_spend_bundle_xch(
-        input_spend_bundle.to_bytes(),
-        requested,
-    )
-    return sdk.SpendBundle.from_bytes(spend_bundle_bytes)
 
 
 def _call_signer_build(
@@ -203,12 +139,6 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
             return None, "invalid_output_amount"
         output_amounts.append(amount)
     allow_sub_cat_output = bool(payload.get("allow_sub_cat_output", False))
-    if (
-        not allow_sub_cat_output
-        and not is_xch_like_asset_id(asset_id)
-        and any(int(amount) < MIN_CAT_OUTPUT_MOJOS for amount in output_amounts)
-    ):
-        return None, "cat_output_below_minimum_mojos"
     fee_mojos = int(payload.get("fee_mojos", 0))
     if fee_mojos < 0:
         return None, "invalid_fee_mojos"

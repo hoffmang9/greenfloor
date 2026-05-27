@@ -10,10 +10,10 @@ from greenfloor.adapters.bls_cat_coins import (
     _list_unspent_cat_coins,
     _list_unspent_cat_coins_by_ids,
 )
-from greenfloor.adapters.bls_signing import (
-    _build_mixed_split_spend_bundle,
-    _from_input_spend_bundle_xch,
-    _import_sdk,
+from greenfloor.adapters.bls_signing import _build_mixed_split_spend_bundle, _import_sdk
+from greenfloor.adapters.native_offer import (
+    _import_greenfloor_native,
+    from_input_spend_bundle_xch as _from_input_spend_bundle_xch,
 )
 from greenfloor.runtime.coinset_runtime import _coinset_adapter
 

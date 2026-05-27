@@ -1,7 +1,5 @@
-use std::collections::HashSet;
-
 use chia_bls::SecretKey;
-use chia_protocol::{Bytes32, Coin, SpendBundle};
+use chia_protocol::{Coin, SpendBundle};
 use chia_puzzle_types::Memos;
 use chia_sdk_driver::{Action, Cat, Id};
 use chia_traits::Streamable;
@@ -9,11 +7,14 @@ use chia_sdk_utils::select_coins;
 use serde::{Deserialize, Serialize};
 
 use crate::bls::coins::cat_asset_bytes;
-use crate::coinset::is_xch_like_asset;
+use crate::bls::select::{
+    select_cats_explicit_sum, select_cats_smallest_for_amount, select_xch_for_amount,
+};
 use crate::bls::spend::build_signed_standard_spend;
+use crate::coinset::is_xch_like_asset;
 use crate::coinset::{
-    broadcast_spend_bundle, client_for_network, list_unspent_cats, list_unspent_cats_by_ids,
-    list_unspent_xch, select_cats_smallest_first, BroadcastSpendBundleResult, MIN_CAT_OUTPUT_MOJOS,
+    broadcast_spend_bundle, client_for_network, list_unspent_xch, BroadcastSpendBundleResult,
+    MIN_CAT_OUTPUT_MOJOS,
 };
 use crate::error::{SignerError, SignerResult};
 
@@ -74,31 +75,37 @@ pub async fn build_bls_mixed_split_spend_bundle(
     let mut selected_coin_ids: Vec<String> = Vec::new();
 
     if is_xch_like_asset(&asset_raw) {
-        let mut xch_coins = list_unspent_xch(&client, receive_address).await?;
-        if !explicit_coin_ids.is_empty() {
-            let allowed: HashSet<Bytes32> = explicit_coin_ids.iter().copied().collect();
-            xch_coins.retain(|coin| allowed.contains(&coin.coin_id()));
-        }
-        if xch_coins.is_empty() {
-            return Err(SignerError::NoUnspentXchCoins);
-        }
         let required_total = target_total.saturating_add(fee_mojos);
-        offered_xch = select_coins(xch_coins, required_total)
-            .map_err(|_| SignerError::XchCoinSelectionFailed)?;
+        offered_xch = select_xch_for_amount(
+            &client,
+            receive_address,
+            &explicit_coin_ids,
+            required_total,
+            SignerError::NoUnspentXchCoins,
+            SignerError::XchCoinSelectionFailed,
+        )
+        .await?;
     } else {
         let asset_bytes = cat_asset_bytes(&asset_raw)?;
         if !explicit_coin_ids.is_empty() {
-            offered_cats = list_unspent_cats_by_ids(&client, &explicit_coin_ids).await?;
-            let offered_total: u64 = offered_cats.iter().map(|cat| cat.coin.amount).sum();
-            if offered_total < target_total {
-                return Err(SignerError::InsufficientCatCoins);
-            }
+            offered_cats = select_cats_explicit_sum(
+                &client,
+                &explicit_coin_ids,
+                target_total,
+                SignerError::InsufficientCatCoins,
+            )
+            .await?;
         } else {
-            let cats = list_unspent_cats(&client, receive_address, asset_bytes).await?;
-            offered_cats = select_cats_smallest_first(cats, target_total);
-            if offered_cats.is_empty() {
-                return Err(SignerError::InsufficientCatCoins);
-            }
+            offered_cats = select_cats_smallest_for_amount(
+                &client,
+                receive_address,
+                asset_bytes,
+                &[],
+                target_total,
+                SignerError::InsufficientCatCoins,
+                SignerError::InsufficientCatCoins,
+            )
+            .await?;
         }
         if fee_mojos > 0 {
             let xch_coins = list_unspent_xch(&client, receive_address).await?;
