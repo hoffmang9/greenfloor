@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
+from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.runtime.cloud_wallet.assets import resolve_cloud_wallet_offer_asset_ids
 from greenfloor.runtime.cloud_wallet.bootstrap import ensure_offer_bootstrap_denominations
 from greenfloor.runtime.cloud_wallet.phases import (
@@ -171,8 +172,8 @@ def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path:
         network = "mainnet"
 
     exit_code, payload = build_and_post_offer_cloud_wallet(
-        program=_Program(),
-        market=_Market(),
+        program=cast(ProgramConfig, _Program()),
+        market=cast(MarketConfig, _Market()),
         size_base_units=5,
         repeat=1,
         publish_venue="dexie",
@@ -250,8 +251,8 @@ def test_build_and_post_offer_cloud_wallet_emits_timing_diagnostics(tmp_path: Pa
             pass
 
     exit_code, payload = build_and_post_offer_cloud_wallet(
-        program=_Program(),
-        market=_Market(),
+        program=cast(ProgramConfig, _Program()),
+        market=cast(MarketConfig, _Market()),
         size_base_units=5,
         repeat=1,
         publish_venue="dexie",
@@ -581,8 +582,8 @@ def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(
             pass
 
     code, payload = build_and_post_offer_cloud_wallet(
-        program=_Program(),
-        market=_Market(),
+        program=cast(ProgramConfig, _Program()),
+        market=cast(MarketConfig, _Market()),
         size_base_units=5,
         repeat=1,
         publish_venue="dexie",

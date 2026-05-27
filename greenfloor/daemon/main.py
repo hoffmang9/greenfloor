@@ -60,13 +60,13 @@ from greenfloor.logging_setup import (
     warn_if_log_level_auto_healed,
 )
 from greenfloor.notify.pushover import send_pushover_alert
-from greenfloor.runtime.cloud_wallet.assets import resolve_cloud_wallet_offer_asset_ids
-from greenfloor.runtime.cloud_wallet.build_post import build_and_post_offer_cloud_wallet
-from greenfloor.runtime.offer_publish import (
+from greenfloor.runtime.offer_execution import (
+    build_and_post_offer_cloud_wallet,
+    build_and_post_offer_signer,
     is_transient_dexie_visibility_404_error,
+    resolve_cloud_wallet_offer_asset_ids,
     verify_offer_visible_on_dexie,
 )
-from greenfloor.runtime.offer_runtime import build_and_post_offer_signer
 from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
 
 _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS = 500
@@ -2075,6 +2075,8 @@ def _managed_offer_post(
         build_kwargs["offer_artifact_timeout_seconds"] = int(
             program.runtime_cloud_wallet_offer_artifact_timeout_seconds
         )
+    build_kwargs["emit_output"] = False
+    build_kwargs["persist_results"] = False
     exit_code, payload = build_and_post_fn(**build_kwargs)
     results = payload.get("results", [])
     result = (

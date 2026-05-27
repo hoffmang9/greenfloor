@@ -9,7 +9,7 @@ from typing import Any
 
 from greenfloor.adapters import rust_signer
 from greenfloor.adapters.coinset import CoinsetAdapter
-from greenfloor.config.models import ProgramConfig, prepare_signer_runtime
+from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.hex_utils import canonical_is_xch, default_mojo_multiplier_for_asset
 from greenfloor.offer_bootstrap import BootstrapLadderEntry, plan_bootstrap_mixed_outputs
 from greenfloor.runtime.cloud_wallet.bootstrap import resolve_bootstrap_split_fee
@@ -455,7 +455,7 @@ def default_signer_offer_deps(*, post_deps: OfferPostDeps | None = None) -> Sign
 def build_and_post_offer_signer(
     *,
     program: ProgramConfig,
-    market: Any,
+    market: MarketConfig,
     size_base_units: int,
     repeat: int,
     publish_venue: str,
@@ -466,10 +466,10 @@ def build_and_post_offer_signer(
     quote_price: float,
     dry_run: bool,
     action_side: str = "sell",
-    offer_artifact_timeout_seconds: int | None = None,
     deps: SignerOfferDeps | None = None,
+    emit_output: bool = True,
+    persist_results: bool = True,
 ) -> tuple[int, dict[str, Any]]:
-    _ = offer_artifact_timeout_seconds
     resolved_deps = deps or default_signer_offer_deps()
 
     prepare_signer_runtime(program)
@@ -547,4 +547,6 @@ def build_and_post_offer_signer(
         path_label="signer",
         path_extra_fields={"signer_path": True},
         post_deps=resolved_deps.post_deps,
+        emit_output=emit_output,
+        persist_results=persist_results,
     )

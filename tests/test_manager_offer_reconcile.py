@@ -9,7 +9,7 @@ from greenfloor.cli.manager import _offers_reconcile, _offers_status
 from greenfloor.storage.sqlite import SqliteStore
 
 
-def _write_program(path: Path) -> None:
+def write_program(path: Path) -> None:
     path.write_text(
         "\n".join(
             [
@@ -54,7 +54,7 @@ def _write_program(path: Path) -> None:
 def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
-    _write_program(program)
+    write_program(program)
     confirmed_tx_id = "a" * 64
     store = SqliteStore(db_path)
     try:
@@ -124,7 +124,7 @@ def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path,
 def test_offers_status_reports_compact_summary(tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
-    _write_program(program)
+    write_program(program)
     store = SqliteStore(db_path)
     try:
         store.upsert_offer_state(
@@ -165,7 +165,7 @@ def test_offers_status_reports_compact_summary(tmp_path: Path, capsys) -> None:
 def test_offers_reconcile_coinset_signal_matrix(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
-    _write_program(program)
+    write_program(program)
     tx_confirmed = "c" * 64
     tx_mempool = "d" * 64
     tx_no_signal = "e" * 64
@@ -239,7 +239,7 @@ def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(
 ) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
-    _write_program(program)
+    write_program(program)
     store = SqliteStore(db_path)
     try:
         store.upsert_offer_state(
@@ -295,7 +295,7 @@ def test_offers_reconcile_reads_nested_dexie_offer_payload_shape(
 ) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
-    _write_program(program)
+    write_program(program)
     tx_id = "f" * 64
     store = SqliteStore(db_path)
     try:

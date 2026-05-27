@@ -11,10 +11,6 @@ from greenfloor.config.io import is_testnet
 from greenfloor.moderate_retry import call_with_moderate_retry
 from greenfloor.runtime.cloud_wallet.coins import coin_asset_id, safe_int
 
-# Backward-compatible aliases for legacy imports and test monkeypatch targets.
-_coin_asset_id = coin_asset_id
-_safe_int = safe_int
-
 
 def coinset_coin_url(*, coin_name: str, network: str = "mainnet") -> str:
     base = "https://testnet11.coinset.org" if is_testnet(network) else "https://coinset.org"
@@ -128,13 +124,6 @@ def watch_reorg_risk_with_coinset(
             next_warning += warning_interval_seconds
         time.sleep(sleep_seconds)
         sleep_seconds = min(20.0, sleep_seconds * 1.5)
-
-
-# Backward-compatible aliases for legacy imports and test monkeypatch targets.
-_coinset_coin_url = coinset_coin_url
-_coinset_reconcile_coin_state = coinset_reconcile_coin_state
-_coinset_peak_height = coinset_peak_height
-_watch_reorg_risk_with_coinset = watch_reorg_risk_with_coinset
 
 
 def wait_for_mempool_then_confirmation(

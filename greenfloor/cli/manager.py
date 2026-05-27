@@ -15,11 +15,9 @@ from typing import Any
 
 import yaml
 
-import greenfloor.asset_label_catalog as _asset_label_catalog
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter
-from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.asset_label_catalog import (
     _dexie_lookup_token_for_cat_id,
     _dexie_lookup_token_for_symbol,
@@ -82,26 +80,21 @@ from greenfloor.runtime.coinset_runtime import (
     _resolve_taker_or_coin_operation_fee,
 )
 from greenfloor.runtime.offer_execution import (
-    build_and_post_offer_cloud_wallet as _build_and_post_offer_cloud_wallet_runtime,
-)
-from greenfloor.runtime.offer_execution import (
-    build_and_post_offer_signer as _build_and_post_offer_signer_runtime,
-)
-from greenfloor.runtime.offer_execution import (
+    build_and_post_offer_cloud_wallet,
+    build_and_post_offer_signer,
     seed_cloud_wallet_assets_cache,
 )
+from greenfloor.runtime.offer_orchestration import (
+    BootstrapPolicy,
+    OfferCreateFailure,
+    OfferCreateOutcome,
+    build_and_post_offer,
+    default_offer_post_deps,
+)
 from greenfloor.runtime.offer_publish import (
-    dexie_offer_view_url,
     resolve_offer_expiry_for_market,
-    verify_offer_text_for_dexie,
 )
 from greenfloor.storage.sqlite import SqliteStore
-
-# Backward-compatible alias for tests that monkeypatch manager imports.
-_is_spendable_coin = is_spendable_coin
-_local_catalog_label_hints_for_asset_id = (
-    _asset_label_catalog._local_catalog_label_hints_for_asset_id
-)
 
 _TEST_PHASE_OFFER_EXPIRY_MINUTES = 5
 _MANAGER_SERVICE_NAME = "manager"
@@ -1393,78 +1386,6 @@ def _ensure_offer_bootstrap_denominations(
     )
 
 
-def _build_and_post_offer_signer(
-    *,
-    program,
-    market,
-    size_base_units: int,
-    repeat: int,
-    publish_venue: str,
-    dexie_base_url: str,
-    splash_base_url: str,
-    drop_only: bool,
-    claim_rewards: bool,
-    quote_price: float,
-    dry_run: bool,
-    action_side: str = "sell",
-) -> tuple[int, dict[str, Any]]:
-    return _build_and_post_offer_signer_runtime(
-        program=program,
-        market=market,
-        size_base_units=size_base_units,
-        repeat=repeat,
-        publish_venue=publish_venue,
-        dexie_base_url=dexie_base_url,
-        splash_base_url=splash_base_url,
-        drop_only=drop_only,
-        claim_rewards=claim_rewards,
-        quote_price=quote_price,
-        dry_run=dry_run,
-        action_side=action_side,
-    )
-
-
-def _build_and_post_offer_cloud_wallet(
-    *,
-    program,
-    market,
-    key_id: str = "",
-    keyring_yaml_path: str = "",
-    size_base_units: int,
-    repeat: int,
-    publish_venue: str,
-    dexie_base_url: str,
-    splash_base_url: str,
-    drop_only: bool,
-    claim_rewards: bool,
-    quote_price: float,
-    dry_run: bool,
-    action_side: str = "sell",
-    offer_artifact_timeout_seconds: int = 15 * 60,
-) -> tuple[int, dict[str, Any]]:
-    _ = key_id, keyring_yaml_path
-    deps = replace(
-        default_cloud_wallet_offer_deps(),
-        ensure_offer_bootstrap_denominations_fn=_ensure_offer_bootstrap_denominations,
-    )
-    return _build_and_post_offer_cloud_wallet_runtime(
-        program=program,
-        market=market,
-        size_base_units=size_base_units,
-        repeat=repeat,
-        publish_venue=publish_venue,
-        dexie_base_url=dexie_base_url,
-        splash_base_url=splash_base_url,
-        drop_only=drop_only,
-        claim_rewards=claim_rewards,
-        quote_price=quote_price,
-        dry_run=dry_run,
-        action_side=action_side,
-        offer_artifact_timeout_seconds=offer_artifact_timeout_seconds,
-        deps=deps,
-    )
-
-
 def _build_and_post_offer(
     *,
     program_path: Path,
@@ -1535,12 +1456,13 @@ def _build_and_post_offer(
             "market pricing must define fixed_quote_per_base or min/max_price_quote_per_base for offer build"
         )
 
+    _initialize_manager_file_logging(program.home_dir, log_level=program.app_log_level)
+    _warn_if_log_level_auto_healed(program=program, program_path=program_path)
+
     backend = offer_execution_backend(program, size_base_units=size_base_units)
     if backend == "signer":
         prepare_signer_runtime(program)
-        _initialize_manager_file_logging(program.home_dir, log_level=program.app_log_level)
-        _warn_if_log_level_auto_healed(program=program, program_path=program_path)
-        exit_code, _ = _build_and_post_offer_signer(
+        exit_code, _ = build_and_post_offer_signer(
             program=program,
             market=market,
             size_base_units=size_base_units,
@@ -1555,13 +1477,13 @@ def _build_and_post_offer(
         )
         return exit_code
     if backend == "cloud_wallet":
-        _initialize_manager_file_logging(program.home_dir, log_level=program.app_log_level)
-        _warn_if_log_level_auto_healed(program=program, program_path=program_path)
-        exit_code, _ = _build_and_post_offer_cloud_wallet(
+        cloud_wallet_deps = replace(
+            default_cloud_wallet_offer_deps(),
+            ensure_offer_bootstrap_denominations_fn=_ensure_offer_bootstrap_denominations,
+        )
+        exit_code, _ = build_and_post_offer_cloud_wallet(
             program=program,
             market=market,
-            key_id=str(market.signer_key_id),
-            keyring_yaml_path=keyring_yaml_path,
             size_base_units=size_base_units,
             repeat=repeat,
             publish_venue=publish_venue,
@@ -1571,11 +1493,15 @@ def _build_and_post_offer(
             claim_rewards=claim_rewards,
             quote_price=float(quote_price),
             dry_run=bool(dry_run),
+            deps=cloud_wallet_deps,
         )
         return exit_code
 
     selected_offer_coin_ids: list[str] = []
-
+    resolved_quote_asset = _resolve_quote_asset_for_local_offer_build(
+        quote_asset=str(market.quote_asset),
+        network=network,
+    )
     debug_dry_run_offer_capture_dir = os.getenv(
         "GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", ""
     ).strip()
@@ -1587,16 +1513,14 @@ def _build_and_post_offer(
     if dry_run and capture_dir_path is not None:
         capture_dir_path.mkdir(parents=True, exist_ok=True)
 
-    post_results: list[dict] = []
-    built_offers_preview: list[dict[str, str]] = []
-    dexie = DexieAdapter(dexie_base_url) if (not dry_run and publish_venue == "dexie") else None
-    splash = SplashAdapter(splash_base_url) if (not dry_run and publish_venue == "splash") else None
-    publish_failures = 0
-    for index in range(repeat):
-        resolved_quote_asset = _resolve_quote_asset_for_local_offer_build(
-            quote_asset=str(market.quote_asset),
-            network=network,
-        )
+    offer_iteration = [0]
+
+    def _local_bootstrap(**_kwargs: Any) -> dict[str, Any]:
+        return {"status": "skipped", "reason": "already_ready"}
+
+    def _local_create(**kwargs: Any) -> OfferCreateOutcome:
+        index = offer_iteration[0]
+        offer_iteration[0] += 1
         payload = {
             "market_id": market.market_id,
             "base_asset": market.base_asset,
@@ -1604,13 +1528,13 @@ def _build_and_post_offer(
             "quote_asset": resolved_quote_asset,
             "quote_asset_type": market.quote_asset_type,
             "receive_address": market.receive_address,
-            "size_base_units": int(size_base_units),
+            "size_base_units": int(kwargs["size_base_units"]),
             "pair": str(resolved_quote_asset).strip().lower(),
             "reason": "manual_build_and_post",
             "xch_price_usd": None,
             "expiry_unit": expiry_unit,
             "expiry_value": int(expiry_value),
-            "quote_price_quote_per_base": float(quote_price),
+            "quote_price_quote_per_base": float(kwargs["quote_price"]),
             "base_unit_mojo_multiplier": int(base_unit_mojo_multiplier),
             "quote_unit_mojo_multiplier": int(quote_unit_mojo_multiplier),
             "fee_mojos": 0,
@@ -1637,87 +1561,45 @@ def _build_and_post_offer(
         try:
             offer_text = _build_offer_text_for_request(payload)
         except Exception as exc:
-            publish_failures += 1
-            post_results.append(
-                {
-                    "venue": publish_venue,
-                    "result": {
-                        "success": False,
-                        "error": f"offer_builder_failed:{exc}",
-                    },
-                }
-            )
-            continue
-        if dry_run:
-            preview_item: dict[str, str] = {
-                "offer_prefix": offer_text[:24],
-                "offer_length": str(len(offer_text)),
-            }
-            if capture_dir_path is not None:
-                capture_file = capture_dir_path / f"{market.market_id}-dry-run-{index + 1}.offer"
-                capture_file.write_text(offer_text, encoding="utf-8")
-                preview_item["offer_capture_path"] = str(capture_file)
-            built_offers_preview.append(preview_item)
-        else:
-            if publish_venue == "dexie":
-                assert dexie is not None
-                verify_error = verify_offer_text_for_dexie(offer_text)
-                if verify_error:
-                    publish_failures += 1
-                    post_results.append(
-                        {
-                            "venue": "dexie",
-                            "result": {"success": False, "error": verify_error},
-                        }
-                    )
-                    continue
-                result = dexie.post_offer(
-                    offer_text,
-                    drop_only=drop_only,
-                    claim_rewards=claim_rewards,
-                )
-                success_value = result.get("success")
-                if success_value is False:
-                    publish_failures += 1
-                result_payload = dict(result)
-                offer_id = str(result_payload.get("id", "")).strip()
-                if offer_id:
-                    result_payload["offer_view_url"] = dexie_offer_view_url(
-                        dexie_base_url=dexie_base_url,
-                        offer_id=offer_id,
-                    )
-                post_results.append({"venue": "dexie", "result": result_payload})
-            else:
-                assert splash is not None
-                result = splash.post_offer(offer_text)
-                success_value = result.get("success")
-                if success_value is False:
-                    publish_failures += 1
-                post_results.append({"venue": "splash", "result": result})
+            raise OfferCreateFailure(f"offer_builder_failed:{exc}") from exc
 
-    publish_attempts = len(post_results)
-    print(
-        _format_json_output(
-            {
-                "market_id": market.market_id,
-                "pair": f"{market.base_asset}:{market.quote_asset}",
-                "network": network,
-                "size_base_units": size_base_units,
-                "repeat": repeat,
-                "publish_venue": publish_venue,
-                "dexie_base_url": dexie_base_url,
-                "splash_base_url": splash_base_url if publish_venue == "splash" else None,
-                "drop_only": drop_only,
-                "claim_rewards": claim_rewards,
-                "dry_run": dry_run,
-                "publish_attempts": publish_attempts,
-                "publish_failures": publish_failures,
-                "built_offers_preview": built_offers_preview,
-                "results": post_results,
-            }
+        extra: dict[str, Any] = {}
+        if dry_run and capture_dir_path is not None:
+            capture_file = capture_dir_path / f"{market.market_id}-dry-run-{index + 1}.offer"
+            capture_file.write_text(offer_text, encoding="utf-8")
+            extra["dry_run_preview"] = {"offer_capture_path": str(capture_file)}
+
+        return OfferCreateOutcome(
+            offer_text=offer_text,
+            expires_at=f"{int(expiry_value)} {expiry_unit}",
+            side="sell",
+            extra=extra,
         )
+
+    exit_code, _ = build_and_post_offer(
+        program=program,
+        market=market,
+        size_base_units=size_base_units,
+        repeat=repeat,
+        publish_venue=publish_venue,
+        dexie_base_url=dexie_base_url,
+        splash_base_url=splash_base_url,
+        drop_only=drop_only,
+        claim_rewards=claim_rewards,
+        quote_price=float(quote_price),
+        dry_run=bool(dry_run),
+        action_side="sell",
+        resolved_base_asset_id=str(market.base_asset),
+        resolved_quote_asset_id=resolved_quote_asset,
+        bootstrap_phase_fn=_local_bootstrap,
+        create_offer_fn=_local_create,
+        bootstrap_policy=BootstrapPolicy(allow_split_fallback=False),
+        path_label="local",
+        path_extra_fields={"local_cli_path": True},
+        post_deps=default_offer_post_deps(format_output_fn=_format_json_output),
+        persist_results=False,
     )
-    return 0 if publish_failures == 0 else 2
+    return exit_code
 
 
 def _resolve_market_for_build(

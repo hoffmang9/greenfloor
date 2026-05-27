@@ -303,8 +303,3 @@ def ensure_offer_bootstrap_denominations(
         "signature_wait_events": signature_events,
         "wait_events": wait_events,
     }
-
-
-# Backward-compatible aliases for legacy imports.
-_bootstrap_fee_cost_for_output_count = bootstrap_fee_cost_for_output_count
-_resolve_bootstrap_split_fee = resolve_bootstrap_split_fee

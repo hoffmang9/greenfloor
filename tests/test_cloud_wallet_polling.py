@@ -203,11 +203,11 @@ def test_wait_for_mempool_emits_in_mempool_event_with_coinset_url(monkeypatch) -
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling._coinset_reconcile_coin_state",
+        "greenfloor.runtime.cloud_wallet.polling.mempool.coinset_reconcile_coin_state",
         lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling._watch_reorg_risk_with_coinset",
+        "greenfloor.runtime.cloud_wallet.polling.mempool.watch_reorg_risk_with_coinset",
         lambda **kwargs: [{"event": "reorg_watch_complete"}],
     )
 
@@ -239,11 +239,11 @@ def test_wait_for_mempool_returns_when_confirmed_coin_appears(monkeypatch) -> No
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling._coinset_reconcile_coin_state",
+        "greenfloor.runtime.cloud_wallet.polling.mempool.coinset_reconcile_coin_state",
         lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling._watch_reorg_risk_with_coinset",
+        "greenfloor.runtime.cloud_wallet.polling.mempool.watch_reorg_risk_with_coinset",
         lambda **kwargs: [{"event": "reorg_watch_complete"}],
     )
 
@@ -280,11 +280,11 @@ def test_wait_for_mempool_emits_warning_when_no_mempool_entry(monkeypatch) -> No
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling._coinset_reconcile_coin_state",
+        "greenfloor.runtime.cloud_wallet.polling.mempool.coinset_reconcile_coin_state",
         lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling._watch_reorg_risk_with_coinset",
+        "greenfloor.runtime.cloud_wallet.polling.mempool.watch_reorg_risk_with_coinset",
         lambda **kwargs: [{"event": "reorg_watch_complete"}],
     )
 
@@ -324,11 +324,11 @@ def test_wait_for_mempool_ignores_coins_in_initial_set(monkeypatch) -> None:
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling._coinset_reconcile_coin_state",
+        "greenfloor.runtime.cloud_wallet.polling.mempool.coinset_reconcile_coin_state",
         lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling._watch_reorg_risk_with_coinset",
+        "greenfloor.runtime.cloud_wallet.polling.mempool.watch_reorg_risk_with_coinset",
         lambda **kwargs: [{"event": "reorg_watch_complete"}],
     )
 
@@ -373,11 +373,11 @@ def test_wait_for_mempool_filters_to_requested_asset(monkeypatch) -> None:
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling._coinset_reconcile_coin_state",
+        "greenfloor.runtime.cloud_wallet.polling.mempool.coinset_reconcile_coin_state",
         lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling._watch_reorg_risk_with_coinset",
+        "greenfloor.runtime.cloud_wallet.polling.mempool.watch_reorg_risk_with_coinset",
         lambda **kwargs: [{"event": "reorg_watch_complete"}],
     )
 
@@ -397,7 +397,7 @@ def test_wait_for_mempool_filters_to_requested_asset(monkeypatch) -> None:
 def test_watch_reorg_risk_waits_until_additional_blocks(monkeypatch) -> None:
     import time as time_module
 
-    from greenfloor.runtime.cloud_wallet.polling import _watch_reorg_risk_with_coinset
+    from greenfloor.runtime.cloud_wallet.polling import watch_reorg_risk_with_coinset
 
     peak_seq = iter([100, 102, 106])
     elapsed_seq = iter([0.0, 0.0, 10.0, 20.0])
@@ -408,7 +408,7 @@ def test_watch_reorg_risk_waits_until_additional_blocks(monkeypatch) -> None:
         lambda **kwargs: next(peak_seq),
     )
 
-    events = _watch_reorg_risk_with_coinset(
+    events = watch_reorg_risk_with_coinset(
         network="mainnet",
         confirmed_block_index=100,
         additional_blocks=6,
@@ -421,7 +421,7 @@ def test_watch_reorg_risk_waits_until_additional_blocks(monkeypatch) -> None:
 def test_watch_reorg_risk_times_out_when_chain_stalls(monkeypatch) -> None:
     import time as time_module
 
-    from greenfloor.runtime.cloud_wallet.polling import _watch_reorg_risk_with_coinset
+    from greenfloor.runtime.cloud_wallet.polling import watch_reorg_risk_with_coinset
 
     elapsed_seq = iter([0.0, 0.0, 61.0])
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
@@ -430,7 +430,7 @@ def test_watch_reorg_risk_times_out_when_chain_stalls(monkeypatch) -> None:
         "greenfloor.runtime.cloud_wallet.polling.mempool.coinset_peak_height", lambda **kwargs: 100
     )
 
-    events = _watch_reorg_risk_with_coinset(
+    events = watch_reorg_risk_with_coinset(
         network="mainnet",
         confirmed_block_index=100,
         additional_blocks=6,

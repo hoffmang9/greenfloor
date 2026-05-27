@@ -104,7 +104,3 @@ def is_transient_cloud_wallet_list_coins_error(error: str) -> bool:
         "remote end closed connection",
     )
     return any(marker in normalized for marker in transient_markers)
-
-
-# Backward-compatible alias for legacy imports and test monkeypatch targets.
-_is_transient_cloud_wallet_list_coins_error = is_transient_cloud_wallet_list_coins_error

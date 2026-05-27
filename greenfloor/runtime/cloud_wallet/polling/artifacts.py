@@ -10,7 +10,6 @@ from greenfloor.moderate_retry import (
     call_with_moderate_retry,
     poll_with_exponential_backoff_until,
 )
-
 from greenfloor.runtime.cloud_wallet.polling.common import (
     parse_iso8601,
     pick_new_offer_artifact,

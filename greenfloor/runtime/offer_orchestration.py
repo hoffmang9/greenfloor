@@ -11,6 +11,7 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
+from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
 from greenfloor.runtime.offer_publish import (
@@ -213,8 +214,8 @@ def _append_post_failure(
 
 def execute_build_and_post_offer(
     *,
-    program: Any,
-    market: Any,
+    program: ProgramConfig,
+    market: MarketConfig,
     size_base_units: int,
     repeat: int,
     publish_venue: str,
@@ -331,6 +332,19 @@ def execute_build_and_post_offer(
             )
             continue
 
+        if dry_run:
+            preview_item: dict[str, str] = {
+                "offer_prefix": offer_text[:24],
+                "offer_length": str(len(offer_text)),
+            }
+            dry_run_preview = created.extra.get("dry_run_preview")
+            if isinstance(dry_run_preview, dict):
+                preview_item.update(
+                    {str(key): str(value) for key, value in dry_run_preview.items()}
+                )
+            built_offers_preview.append(preview_item)
+            continue
+
         resolved_post_deps.log_signed_offer_artifact_fn(
             offer_text=offer_text,
             ticker=str(market.base_symbol),
@@ -349,14 +363,6 @@ def execute_build_and_post_offer(
                 create_phase_ms=created.create_phase_ms,
                 artifact_wait_ms=created.artifact_wait_ms,
                 create_total_ms=created.create_total_ms,
-            )
-            continue
-        if dry_run:
-            built_offers_preview.append(
-                {
-                    "offer_prefix": offer_text[:24],
-                    "offer_length": str(len(offer_text)),
-                }
             )
             continue
 
@@ -442,8 +448,8 @@ def execute_build_and_post_offer(
 
 def build_and_post_offer(
     *,
-    program: Any,
-    market: Any,
+    program: ProgramConfig,
+    market: MarketConfig,
     size_base_units: int,
     repeat: int,
     publish_venue: str,
@@ -466,9 +472,6 @@ def build_and_post_offer(
     persist_results: bool = True,
 ) -> tuple[int, dict[str, Any]]:
     resolved_post_deps = post_deps or default_offer_post_deps()
-    resolved_post_deps.initialize_manager_file_logging_fn(
-        program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
-    )
     exit_code, payload, persist_records = execute_build_and_post_offer(
         program=program,
         market=market,

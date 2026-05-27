@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.runtime.cloud_wallet.deps import (
     CloudWalletOfferDeps,
     default_cloud_wallet_offer_deps,
@@ -19,8 +20,8 @@ from greenfloor.runtime.offer_orchestration import (
 
 def build_and_post_offer_cloud_wallet(
     *,
-    program: Any,
-    market: Any,
+    program: ProgramConfig,
+    market: MarketConfig,
     size_base_units: int,
     repeat: int,
     publish_venue: str,
@@ -31,12 +32,17 @@ def build_and_post_offer_cloud_wallet(
     quote_price: float,
     dry_run: bool,
     action_side: str = "sell",
-    offer_artifact_timeout_seconds: int = 15 * 60,
+    offer_artifact_timeout_seconds: int | None = None,
     emit_output: bool = True,
     persist_results: bool = True,
     deps: CloudWalletOfferDeps | None = None,
 ) -> tuple[int, dict[str, Any]]:
     resolved_deps = deps or default_cloud_wallet_offer_deps()
+    resolved_artifact_timeout_seconds = (
+        int(getattr(program, "runtime_cloud_wallet_offer_artifact_timeout_seconds", 30))
+        if offer_artifact_timeout_seconds is None
+        else int(offer_artifact_timeout_seconds)
+    )
     wallet = resolved_deps.wallet_factory(program)
     cfg_base_global = str(getattr(market, "cloud_wallet_base_global_id", "")).strip()
     cfg_quote_global = str(getattr(market, "cloud_wallet_quote_global_id", "")).strip()
@@ -116,7 +122,7 @@ def build_and_post_offer_cloud_wallet(
                 known_markers=set(create_phase["known_offer_markers"]),
                 offer_request_started_at=create_phase["offer_request_started_at"],
                 signature_request_id=str(create_phase["signature_request_id"]).strip(),
-                timeout_seconds=int(offer_artifact_timeout_seconds),
+                timeout_seconds=resolved_artifact_timeout_seconds,
             )
         except RuntimeError as exc:
             artifact_wait_ms = int((time.monotonic() - wait_started) * 1000)
