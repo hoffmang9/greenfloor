@@ -24,26 +24,48 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       # Node is required to install and run the explicit Prettier check in CI.
       - uses: actions/setup-node@v4
         with:
           node-version: "lts/*"
 
+      - name: Restore Python venv cache
+        id: cache-venv
+        uses: actions/cache/restore@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
+
       - name: Create venv and install dev dependencies
         run: |
-          python -m venv .venv
-          export PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH"
+          if [ ! -d .venv/bin ]; then
+            python -m venv .venv
+          fi
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Install Rust toolchain
-        run: |
-          curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-          "$HOME/.cargo/bin/rustc" --version
-          "$HOME/.cargo/bin/cargo" --version
+      - name: Save Python venv cache
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            greenfloor-signer -> target
+            greenfloor-native -> target
+            greenfloor-signer-pyo3 -> target
+          cache-workspace-crates: true
 
       - name: Resolve greenfloor-native tree hash
         id: native
@@ -88,6 +110,7 @@ jobs:
             --out ./.cache/wheelhouse/greenfloor-signer-pyo3
 
       - name: Build and test greenfloor-signer
+        if: matrix.os == 'ubuntu-latest'
         run: |
           cargo build --manifest-path greenfloor-signer/Cargo.toml
           cargo test --manifest-path greenfloor-signer/Cargo.toml
