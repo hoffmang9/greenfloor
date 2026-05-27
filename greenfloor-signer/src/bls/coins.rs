@@ -1,12 +1,11 @@
 use chia_protocol::{Bytes32, Coin};
-use chia_sdk_coinset::CoinsetClient;
 use chia_sdk_driver::Cat;
 use serde::Serialize;
 
 use crate::coinset::{
     client_for_network, list_unspent_cats, list_unspent_cats_by_ids, list_unspent_xch,
 };
-use crate::error::{SignerError, SignerResult};
+use crate::error::SignerResult;
 use crate::vault::members::hex_to_bytes32;
 
 #[derive(Debug, Clone, Serialize)]

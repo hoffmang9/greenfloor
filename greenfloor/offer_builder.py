@@ -122,7 +122,7 @@ def _build_offer(payload: dict[str, Any], sdk: Any) -> str:
         import greenfloor_native
 
         return str(greenfloor_native.encode_offer(bytes.fromhex(raw_hex)))
-    except ImportError:
+    except (ImportError, AttributeError):
         spend_bundle = sdk.SpendBundle.from_bytes(bytes.fromhex(raw_hex))
         return str(sdk.encode_offer(spend_bundle))
 

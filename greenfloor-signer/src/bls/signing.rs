@@ -1,4 +1,4 @@
-use chia_bls::{PublicKey, SecretKey, Signature, sign};
+use chia_bls::{SecretKey, Signature, sign};
 use chia_protocol::{Bytes32, CoinSpend};
 use chia_sdk_signer::{AggSigConstants, RequiredSignature};
 use chia_sdk_types::MAINNET_CONSTANTS;

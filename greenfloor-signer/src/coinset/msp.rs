@@ -4,7 +4,6 @@ use serde::Deserialize;
 
 use crate::coinset::is_xch_like_asset;
 use crate::error::{SignerError, SignerResult};
-use crate::vault::members::hex_to_bytes32;
 
 pub const DEFAULT_MSP_BASE_URL: &str = "https://api-msp.coinset.org";
 
@@ -152,13 +151,10 @@ async fn resolve_one_asset(msp: &MspCoinset, raw: &str) -> SignerResult<String> 
     Err(SignerError::Other(format!("asset_resolution_failed:{raw}")))
 }
 
-pub fn launcher_id_from_singleton_info(info: &SingletonInfo) -> SignerResult<Bytes32> {
-    hex_to_bytes32(&info.launcher_id)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vault::members::hex_to_bytes32;
 
     #[test]
     fn normalize_asset_id_accepts_xch_and_hex() {

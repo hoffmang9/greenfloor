@@ -117,8 +117,8 @@ def test_main_outputs_executed_json(monkeypatch, capsys) -> None:
 
 
 def test_coin_backed_signing_uses_signing_module(monkeypatch) -> None:
-    """Verify _build_coin_backed_spend_bundle_hex delegates to signing.build_signed_spend_bundle."""
-    import greenfloor.signing as signing_mod
+    """Verify _build_coin_backed_spend_bundle_hex delegates to bls_signing.build_signed_spend_bundle."""
+    import greenfloor.adapters.bls_signing as bls_signing_mod
 
     captured = {}
 
@@ -130,7 +130,7 @@ def test_coin_backed_signing_uses_signing_module(monkeypatch) -> None:
             "spend_bundle_hex": "deadbeef",
         }
 
-    monkeypatch.setattr(signing_mod, "build_signed_spend_bundle", _fake_build)
+    monkeypatch.setattr(bls_signing_mod, "build_signed_spend_bundle", _fake_build)
     result = offer_builder._build_coin_backed_spend_bundle_hex(
         {
             "receive_address": "xch1abc",
