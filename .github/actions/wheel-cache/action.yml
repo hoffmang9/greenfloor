@@ -24,10 +24,6 @@ inputs:
     description: Prefix for the GitHub Actions cache key; required for ensure and ensure-and-install
     required: false
     default: ""
-  build-on-cache-miss:
-    description: When false, ensure fails instead of building wheels locally on a cache miss
-    required: false
-    default: "true"
   rust-already-configured:
     description: Skip Rust toolchain and Cargo cache setup on a build; the caller already configured Rust
     required: false
@@ -45,7 +41,7 @@ runs:
   using: composite
   steps:
     - name: Validate ensure inputs
-      if: contains(fromJSON('["ensure", "ensure-and-install"]'), inputs.operation)
+      if: inputs.operation == 'ensure' || inputs.operation == 'ensure-and-install'
       shell: bash
       run: |
         set -euo pipefail
@@ -67,13 +63,13 @@ runs:
         fi
 
     - id: tree
-      if: contains(fromJSON('["ensure", "ensure-and-install"]'), inputs.operation)
+      if: inputs.operation == 'ensure' || inputs.operation == 'ensure-and-install'
       shell: bash
       run: |
         echo "sha=$(git rev-parse HEAD:${{ inputs.tree-path }})" >> "$GITHUB_OUTPUT"
 
     - id: restore
-      if: contains(fromJSON('["ensure", "ensure-and-install"]'), inputs.operation)
+      if: inputs.operation == 'ensure' || inputs.operation == 'ensure-and-install'
       uses: actions/cache/restore@v4
       with:
         path: .cache/wheelhouse/${{ inputs.wheelhouse-subdir }}
@@ -81,27 +77,14 @@ runs:
 
     - uses: ./.github/actions/rust-cache-greenfloor
       if: |
-        contains(fromJSON('["ensure", "ensure-and-install"]'), inputs.operation)
+        (inputs.operation == 'ensure' || inputs.operation == 'ensure-and-install')
         && steps.restore.outputs.cache-hit != 'true'
-        && inputs.build-on-cache-miss == 'true'
         && inputs.rust-already-configured != 'true'
-
-    - name: Fail on wheel cache miss
-      if: |
-        contains(fromJSON('["ensure", "ensure-and-install"]'), inputs.operation)
-        && steps.restore.outputs.cache-hit != 'true'
-        && inputs.build-on-cache-miss != 'true'
-      shell: bash
-      run: |
-        echo "Wheel cache miss for ${{ inputs.wheelhouse-subdir }} on ${{ runner.os }} ${{ runner.arch }}." >&2
-        echo "Expected an upstream job to populate this platform wheelhouse." >&2
-        exit 1
 
     - name: Build wheel (cache miss)
       if: |
-        contains(fromJSON('["ensure", "ensure-and-install"]'), inputs.operation)
+        (inputs.operation == 'ensure' || inputs.operation == 'ensure-and-install')
         && steps.restore.outputs.cache-hit != 'true'
-        && inputs.build-on-cache-miss == 'true'
       shell: bash
       run: |
         set -euo pipefail
@@ -121,15 +104,14 @@ runs:
 
     - name: Save wheel cache
       if: |
-        contains(fromJSON('["ensure", "ensure-and-install"]'), inputs.operation)
+        (inputs.operation == 'ensure' || inputs.operation == 'ensure-and-install')
         && steps.restore.outputs.cache-hit != 'true'
-        && inputs.build-on-cache-miss == 'true'
       uses: actions/cache/save@v4
       with:
         path: .cache/wheelhouse/${{ inputs.wheelhouse-subdir }}
         key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.tree.outputs.sha }}
 
     - name: Install wheel
-      if: contains(fromJSON('["install", "ensure-and-install"]'), inputs.operation)
+      if: inputs.operation == 'install' || inputs.operation == 'ensure-and-install'
       shell: bash
       run: python -m pip install ".cache/wheelhouse/${{ inputs.wheelhouse-subdir }}"/*.whl

@@ -5,10 +5,6 @@ inputs:
   operation:
     description: ensure or ensure-and-install
     required: true
-  build-on-cache-miss:
-    description: When false, fail on cache miss instead of building wheels locally
-    required: false
-    default: "true"
   rust-already-configured:
     description: Skip Rust setup on a local wheel build; the caller already configured Rust
     required: false
@@ -25,7 +21,6 @@ runs:
         source-path: greenfloor-native/Cargo.toml
         cache-key-prefix: native-wheelhouse
         wheelhouse-subdir: greenfloor-native
-        build-on-cache-miss: ${{ inputs.build-on-cache-miss }}
         rust-already-configured: ${{ inputs.rust-already-configured }}
 
     - uses: ./.github/actions/wheel-cache
@@ -36,5 +31,4 @@ runs:
         source-path: greenfloor-signer-pyo3/Cargo.toml
         cache-key-prefix: signer-pyo3-wheelhouse
         wheelhouse-subdir: greenfloor-signer-pyo3
-        build-on-cache-miss: ${{ inputs.build-on-cache-miss }}
         rust-already-configured: ${{ inputs.rust-already-configured }}

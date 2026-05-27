@@ -54,6 +54,7 @@ jobs:
           if [ ! -d .venv/bin ]; then
             python -m venv .venv
           fi
+          # GITHUB_PATH only affects later steps; export PATH is required here.
           export PATH="$GITHUB_WORKSPACE/.venv/bin:$PATH"
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
           python -m pip install --upgrade pip
@@ -78,7 +79,6 @@ jobs:
       - uses: ./.github/actions/greenfloor-maturin-wheels
         with:
           operation: ensure-and-install
-          build-on-cache-miss: "true"
           rust-already-configured: ${{ matrix.run_rust_tests }}
 
       - name: Cache pre-commit environment
