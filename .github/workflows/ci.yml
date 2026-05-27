@@ -7,14 +7,70 @@ name: CI
     branches:
       - main
 
+env:
+  PYTHON_VERSION: "3.11"
+
 jobs:
+  rust-signer:
+    name: Rust signer test and Ubuntu wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            greenfloor-signer -> target
+            greenfloor-native -> target
+            greenfloor-signer-pyo3 -> target
+          cache-workspace-crates: true
+
+      - name: Build and test greenfloor-signer
+        run: |
+          cargo build --manifest-path greenfloor-signer/Cargo.toml
+          cargo test --manifest-path greenfloor-signer/Cargo.toml
+
+      - uses: ./.github/actions/maturin-wheel
+        with:
+          operation: restore-build
+          crate-tree-path: greenfloor-native
+          manifest-path: greenfloor-native/Cargo.toml
+          cache-key-prefix: native-wheelhouse
+          wheelhouse-subdir: greenfloor-native
+
+      - uses: ./.github/actions/maturin-wheel
+        with:
+          operation: restore-build
+          crate-tree-path: greenfloor-signer-pyo3
+          manifest-path: greenfloor-signer-pyo3/Cargo.toml
+          cache-key-prefix: signer-pyo3-wheelhouse
+          wheelhouse-subdir: greenfloor-signer-pyo3
+
   lint-type-test:
     name: Lint, Type, Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      VENV_CACHE_KEY: venv-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-14]
+        include:
+          - os: ubuntu-latest
+            run_sdk_integration: true
+          - os: ubuntu-24.04-arm
+            run_sdk_integration: false
+          - os: macos-14
+            run_sdk_integration: false
 
     steps:
       - uses: actions/checkout@v4
@@ -23,9 +79,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: pyproject.toml
+          python-version: ${{ env.PYTHON_VERSION }}
 
       # Node is required to install and run the explicit Prettier check in CI.
       - uses: actions/setup-node@v4
@@ -37,7 +91,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
+          key: ${{ env.VENV_CACHE_KEY }}
 
       - name: Create venv and install dev dependencies
         run: |
@@ -53,13 +107,37 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .venv
-          key: venv-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
+          key: ${{ env.VENV_CACHE_KEY }}
+
+      - uses: ./.github/actions/maturin-wheel
+        id: native-wheel
+        with:
+          operation: restore
+          crate-tree-path: greenfloor-native
+          manifest-path: greenfloor-native/Cargo.toml
+          cache-key-prefix: native-wheelhouse
+          wheelhouse-subdir: greenfloor-native
+
+      - uses: ./.github/actions/maturin-wheel
+        id: signer-pyo3-wheel
+        with:
+          operation: restore
+          crate-tree-path: greenfloor-signer-pyo3
+          manifest-path: greenfloor-signer-pyo3/Cargo.toml
+          cache-key-prefix: signer-pyo3-wheelhouse
+          wheelhouse-subdir: greenfloor-signer-pyo3
 
       - uses: dtolnay/rust-toolchain@stable
+        if: |
+          steps.native-wheel.outputs.cache-hit != 'true'
+          || steps.signer-pyo3-wheel.outputs.cache-hit != 'true'
         with:
           toolchain: stable
 
       - uses: Swatinem/rust-cache@v2
+        if: |
+          steps.native-wheel.outputs.cache-hit != 'true'
+          || steps.signer-pyo3-wheel.outputs.cache-hit != 'true'
         with:
           workspaces: |
             greenfloor-signer -> target
@@ -67,75 +145,41 @@ jobs:
             greenfloor-signer-pyo3 -> target
           cache-workspace-crates: true
 
-      - name: Resolve greenfloor-native tree hash
-        id: native
-        run: |
-          echo "sha=$(git rev-parse HEAD:greenfloor-native)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore greenfloor-native wheel cache
-        id: cache-native-wheel
-        uses: actions/cache/restore@v4
+      - uses: ./.github/actions/maturin-wheel
+        if: steps.native-wheel.outputs.cache-hit != 'true'
         with:
-          path: ./.cache/wheelhouse/greenfloor-native
-          key: native-wheelhouse-${{ runner.os }}-${{ runner.arch }}-${{ steps.native.outputs.sha }}
+          operation: build
+          crate-tree-path: greenfloor-native
+          manifest-path: greenfloor-native/Cargo.toml
+          cache-key-prefix: native-wheelhouse
+          wheelhouse-subdir: greenfloor-native
+          tree-sha: ${{ steps.native-wheel.outputs.tree-sha }}
 
-      - name: Build greenfloor-native wheel (cache miss)
-        if: steps.cache-native-wheel.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p ./.cache/wheelhouse/greenfloor-native
-          python -m pip install maturin
-          python -m maturin build \
-            --manifest-path greenfloor-native/Cargo.toml \
-            --out ./.cache/wheelhouse/greenfloor-native
-
-      - name: Resolve greenfloor-signer-pyo3 tree hash
-        id: signer_pyo3
-        run: |
-          echo "sha=$(git rev-parse HEAD:greenfloor-signer-pyo3)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore greenfloor-signer-pyo3 wheel cache
-        id: cache-signer-pyo3-wheel
-        uses: actions/cache/restore@v4
+      - uses: ./.github/actions/maturin-wheel
+        if: steps.signer-pyo3-wheel.outputs.cache-hit != 'true'
         with:
-          path: ./.cache/wheelhouse/greenfloor-signer-pyo3
-          key: signer-pyo3-wheelhouse-${{ runner.os }}-${{ runner.arch }}-${{ steps.signer_pyo3.outputs.sha }}
+          operation: build
+          crate-tree-path: greenfloor-signer-pyo3
+          manifest-path: greenfloor-signer-pyo3/Cargo.toml
+          cache-key-prefix: signer-pyo3-wheelhouse
+          wheelhouse-subdir: greenfloor-signer-pyo3
+          tree-sha: ${{ steps.signer-pyo3-wheel.outputs.tree-sha }}
 
-      - name: Build greenfloor-signer-pyo3 wheel (cache miss)
-        if: steps.cache-signer-pyo3-wheel.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p ./.cache/wheelhouse/greenfloor-signer-pyo3
-          python -m pip install maturin
-          python -m maturin build \
-            --manifest-path greenfloor-signer-pyo3/Cargo.toml \
-            --out ./.cache/wheelhouse/greenfloor-signer-pyo3
-
-      - name: Build and test greenfloor-signer
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          cargo build --manifest-path greenfloor-signer/Cargo.toml
-          cargo test --manifest-path greenfloor-signer/Cargo.toml
-
-      - name: Save greenfloor-signer-pyo3 wheel cache
-        if: steps.cache-signer-pyo3-wheel.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+      - uses: ./.github/actions/maturin-wheel
         with:
-          path: ./.cache/wheelhouse/greenfloor-signer-pyo3
-          key: signer-pyo3-wheelhouse-${{ runner.os }}-${{ runner.arch }}-${{ steps.signer_pyo3.outputs.sha }}
+          operation: install
+          crate-tree-path: greenfloor-native
+          manifest-path: greenfloor-native/Cargo.toml
+          cache-key-prefix: native-wheelhouse
+          wheelhouse-subdir: greenfloor-native
 
-      - name: Install greenfloor-signer-pyo3 wheel
-        run: |
-          python -m pip install ./.cache/wheelhouse/greenfloor-signer-pyo3/*.whl
-
-      - name: Save greenfloor-native wheel cache
-        if: steps.cache-native-wheel.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+      - uses: ./.github/actions/maturin-wheel
         with:
-          path: ./.cache/wheelhouse/greenfloor-native
-          key: native-wheelhouse-${{ runner.os }}-${{ runner.arch }}-${{ steps.native.outputs.sha }}
-
-      - name: Install greenfloor-native wheel
-        run: |
-          python -m pip install ./.cache/wheelhouse/greenfloor-native/*.whl
+          operation: install
+          crate-tree-path: greenfloor-signer-pyo3
+          manifest-path: greenfloor-signer-pyo3/Cargo.toml
+          cache-key-prefix: signer-pyo3-wheelhouse
+          wheelhouse-subdir: greenfloor-signer-pyo3
 
       - name: Cache pre-commit environment
         uses: actions/cache@v4
@@ -154,39 +198,15 @@ jobs:
       - name: "Test suite (pytest)"
         run: pytest -v --tb=short
 
-      - name: Resolve chia-wallet-sdk pinned commit
-        if: matrix.os == 'ubuntu-latest'
-        id: sdk
-        run: |
-          echo "sha=$(git rev-parse HEAD:chia-wallet-sdk)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore chia-wallet-sdk wheelhouse cache
-        if: matrix.os == 'ubuntu-latest'
-        id: cache-sdk-wheelhouse
-        uses: actions/cache/restore@v4
+      - uses: ./.github/actions/pip-wheel
+        if: matrix.run_sdk_integration
         with:
-          path: ./.cache/wheelhouse/chia-wallet-sdk
-          key: sdk-wheelhouse-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.sha }}
-
-      - name: Build chia-wallet-sdk wheel (cache miss)
-        if: matrix.os == 'ubuntu-latest' && steps.cache-sdk-wheelhouse.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p ./.cache/wheelhouse/chia-wallet-sdk
-          python -m pip wheel \
-            --wheel-dir ./.cache/wheelhouse/chia-wallet-sdk \
-            ./chia-wallet-sdk/pyo3
-
-      - name: Save chia-wallet-sdk wheelhouse cache
-        if: matrix.os == 'ubuntu-latest' && steps.cache-sdk-wheelhouse.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ./.cache/wheelhouse/chia-wallet-sdk
-          key: sdk-wheelhouse-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.sha }}
-
-      - name: Install chia-wallet-sdk for native integration tests
-        if: matrix.os == 'ubuntu-latest'
-        run: python -m pip install ./.cache/wheelhouse/chia-wallet-sdk/*.whl
+          operation: restore-build-install
+          tree-path: chia-wallet-sdk
+          package-path: ./chia-wallet-sdk/pyo3
+          cache-key-prefix: sdk-wheelhouse
+          wheelhouse-subdir: chia-wallet-sdk
 
       - name: Pytest (greenfloor-native + chia-wallet-sdk offer round-trip on Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.run_sdk_integration
         run: GREENFLOOR_RUN_NATIVE_INTEGRATION_TESTS=1 pytest -vv -s tests/test_greenfloor_native_integration.py
