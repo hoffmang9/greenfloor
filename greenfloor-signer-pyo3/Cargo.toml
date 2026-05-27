@@ -8,6 +8,7 @@ name = "greenfloor_signer"
 crate-type = ["cdylib"]
 
 [dependencies]
+chia-bls = "0.36.1"
 greenfloor-signer = { path = "../greenfloor-signer" }
 pyo3 = { version = "0.28.2", features = ["extension-module"] }
 serde_json = "1"

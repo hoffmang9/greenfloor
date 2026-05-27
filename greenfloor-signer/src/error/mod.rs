@@ -1,3 +1,9 @@
+mod bls;
+
+pub use bls::{
+    bls_reason, broadcast_reason, mixed_split_reason, offer_reason, xch_coin_op_reason, BlsOp,
+};
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -55,6 +61,42 @@ pub enum SignerError {
 
     #[error("insufficient cat coins")]
     InsufficientCatCoins,
+
+    #[error("derivation scan failed for selected coin")]
+    MissingSigningKeyForSelectedCoins,
+
+    #[error("no unspent xch coins")]
+    NoUnspentXchCoins,
+
+    #[error("insufficient xch fee balance for mixed split")]
+    InsufficientXchFeeBalanceForMixedSplit,
+
+    #[error("no unspent offer xch coins")]
+    NoUnspentOfferXchCoins,
+
+    #[error("insufficient offer xch coins")]
+    InsufficientOfferXchCoins,
+
+    #[error("no unspent offer cat coins")]
+    NoUnspentOfferCatCoins,
+
+    #[error("insufficient offer cat coins")]
+    InsufficientOfferCatCoins,
+
+    #[error("unsupported operation type")]
+    UnsupportedOperationType,
+
+    #[error("invalid plan values")]
+    InvalidPlanValues,
+
+    #[error("insufficient selected coin total")]
+    InsufficientSelectedCoinTotal,
+
+    #[error("xch coin selection failed")]
+    XchCoinSelectionFailed,
+
+    #[error("unsupported network for signing")]
+    UnsupportedNetworkForSigning,
 
     #[error("cat output below minimum mojos")]
     CatOutputBelowMinimum,

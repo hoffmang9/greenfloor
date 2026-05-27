@@ -90,7 +90,7 @@ def make_local_offer_create_fn(
     *,
     dry_run: bool,
     capture_dir_path: Path | None = None,
-    build_offer_text_fn: collections.abc.Callable[[dict[str, Any]], str],
+    build_offer_fn: collections.abc.Callable[[dict[str, Any]], str],
 ) -> collections.abc.Callable[..., OfferCreateOutcome]:
     offer_iteration = [0]
 
@@ -104,7 +104,7 @@ def make_local_offer_create_fn(
             dry_run=dry_run,
         )
         try:
-            offer_text = build_offer_text_fn(payload)
+            offer_text = build_offer_fn(payload)
         except Exception as exc:
             raise OfferCreateFailure(f"offer_builder_failed:{exc}") from exc
 

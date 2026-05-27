@@ -143,11 +143,12 @@ def test_resolve_cat_asset_id_retries_until_all_inputs_present(monkeypatch) -> N
             ),
         ]
 
-    import greenfloor.signing as signing_mod
+    import greenfloor.adapters.bls_cat_coins as bls_cat_coins_mod
+    import greenfloor.adapters.bls_signing as bls_signing_mod
 
-    monkeypatch.setattr(signing_mod, "_import_sdk", _import_sdk)
+    monkeypatch.setattr(bls_signing_mod, "_import_sdk", _import_sdk)
     monkeypatch.setattr(
-        signing_mod, "_list_unspent_cat_coins_by_ids", _list_unspent_cat_coins_by_ids
+        bls_cat_coins_mod, "_list_unspent_cat_coins_by_ids", _list_unspent_cat_coins_by_ids
     )
     sleeps: list[float] = []
     resolved_asset, check = mod._resolve_cat_asset_id_for_coin_ids(
@@ -184,11 +185,12 @@ def test_resolve_cat_asset_id_reports_missing_coin_ids(monkeypatch) -> None:
             )
         ]
 
-    import greenfloor.signing as signing_mod
+    import greenfloor.adapters.bls_cat_coins as bls_cat_coins_mod
+    import greenfloor.adapters.bls_signing as bls_signing_mod
 
-    monkeypatch.setattr(signing_mod, "_import_sdk", _import_sdk)
+    monkeypatch.setattr(bls_signing_mod, "_import_sdk", _import_sdk)
     monkeypatch.setattr(
-        signing_mod, "_list_unspent_cat_coins_by_ids", _list_unspent_cat_coins_by_ids
+        bls_cat_coins_mod, "_list_unspent_cat_coins_by_ids", _list_unspent_cat_coins_by_ids
     )
     resolved_asset, check = mod._resolve_cat_asset_id_for_coin_ids(
         network="mainnet",

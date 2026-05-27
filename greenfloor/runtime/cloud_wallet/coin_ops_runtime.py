@@ -21,15 +21,22 @@ from greenfloor.runtime.cloud_wallet import polling as cloud_wallet_polling
 from greenfloor.runtime.cloud_wallet.adapter import (
     _require_cloud_wallet_config as require_cloud_wallet_config,
 )
-from greenfloor.runtime.cloud_wallet.coin_op_errors import (
-    coin_op_base_payload,
-    coin_op_error_payload,
-)
+from greenfloor.runtime.cloud_wallet.coin_op_errors import coin_op_error_payload
 from greenfloor.runtime.cloud_wallet.coin_ops_models import (
     DenominationTarget,
     denomination_target_payload,
 )
 from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
+from greenfloor.runtime.coin_ops_backend import (
+    CloudWalletCoinOpBackend,
+    CoinOpBackend,
+    CoinOpScope,
+    SignerCoinOpBackend,
+    build_coin_op_backend,
+    resolve_coin_op_base_asset_id,
+    resolve_signer_asset_id,
+    scope_payload,
+)
 from greenfloor.runtime.coinset_runtime import CoinsetFeeLookupPreflightError
 
 
@@ -158,9 +165,12 @@ def resolve_coin_op_fee(
         )
         return CoinOpFeeResult(
             error_payload=coin_op_error_payload(
-                market=market,
-                selected_venue=selected_venue,
-                wallet=wallet,
+                scope=CoinOpScope(
+                    market=market,
+                    selected_venue=selected_venue,
+                    execution_backend="cloud_wallet",
+                    vault_id=str(wallet.vault_id),
+                ),
                 error=f"coinset_fee_preflight_failed:{exc.failure_kind}",
                 operator_guidance=operator_guidance,
                 coinset_fee_lookup={
@@ -174,9 +184,12 @@ def resolve_coin_op_fee(
     except Exception as exc:
         return CoinOpFeeResult(
             error_payload=coin_op_error_payload(
-                market=market,
-                selected_venue=selected_venue,
-                wallet=wallet,
+                scope=CoinOpScope(
+                    market=market,
+                    selected_venue=selected_venue,
+                    execution_backend="cloud_wallet",
+                    vault_id=str(wallet.vault_id),
+                ),
                 error=f"fee_resolution_failed:{exc}",
                 operator_guidance=(
                     "set coin_ops.minimum_fee_mojos in program config (can be 0) "
@@ -290,9 +303,7 @@ def evaluate_coin_split_gate(
 
 def coin_op_result_payload(
     *,
-    market: MarketConfig,
-    selected_venue: str | None,
-    wallet: CloudWalletAdapter,
+    setup: CoinOpSetup,
     coin_ids: list[str],
     denomination_target: DenominationTarget,
     until_ready: bool,
@@ -300,11 +311,9 @@ def coin_op_result_payload(
     stop_reason: str,
     final_readiness: dict[str, int | bool | str] | None,
     operations: list[dict[str, object]],
-    fee_mojos: int,
-    fee_source: str,
 ) -> dict[str, object]:
     return {
-        **coin_op_base_payload(market, selected_venue, wallet),
+        **scope_payload(setup.backend.scope),
         "coin_selection_mode": "explicit" if coin_ids else "adapter_auto_select",
         "denomination_target": denomination_target_payload(denomination_target),
         "until_ready": until_ready,
@@ -322,8 +331,8 @@ def coin_op_result_payload(
         "wait_events": (
             as_wait_events(operations[-1].get("wait_events", [])) if operations else []
         ),
-        "fee_mojos": fee_mojos,
-        "fee_source": fee_source,
+        "fee_mojos": setup.fee_mojos,
+        "fee_source": setup.fee_source,
     }
 
 
@@ -357,11 +366,17 @@ def resolve_market_denomination_entry(
 class CoinOpSetup:
     program: ProgramConfig
     market: MarketConfig
-    wallet: CloudWalletAdapter
+    backend: CoinOpBackend
     resolved_asset_id: str
     fee_mojos: int
     fee_source: str
     selected_venue: str | None
+
+    @property
+    def wallet(self) -> CloudWalletAdapter:
+        if not isinstance(self.backend, CloudWalletCoinOpBackend):
+            raise AttributeError("wallet is only available for cloud_wallet coin-op backend")
+        return self.backend.wallet
 
 
 @dataclass(slots=True)
@@ -394,33 +409,66 @@ def coin_op_setup(
         pair=pair,
         network=network,
     )
-    wallet = deps.new_cloud_wallet_adapter(program)
     canonical = canonical_asset_id_override or str(market.base_asset)
     hint = canonical_asset_id_override or str(market.base_symbol)
-    resolved_asset_id = deps.resolve_cloud_wallet_asset_id(
-        wallet=wallet,
-        canonical_asset_id=canonical,
-        symbol_hint=hint,
-        program_home_dir=str(program.home_dir),
-    )
-    fee_result = resolve_coin_op_fee(
-        network=network,
-        minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
-        market=market,
-        selected_venue=selected_venue,
-        wallet=wallet,
-        deps=deps,
-    )
-    if not fee_result.ok:
-        return CoinOpSetupResult(error_payload=fee_result.error_payload)
+    try:
+        if canonical_asset_id_override:
+            from greenfloor.config.models import coin_ops_execution_backend
+
+            if coin_ops_execution_backend(program) == "signer":
+                resolved_asset_id = resolve_signer_asset_id(
+                    program, canonical_asset_id=canonical, symbol_hint=hint
+                )
+            else:
+                wallet = deps.new_cloud_wallet_adapter(program)
+                resolved_asset_id = deps.resolve_cloud_wallet_asset_id(
+                    wallet=wallet,
+                    canonical_asset_id=canonical,
+                    symbol_hint=hint,
+                    program_home_dir=str(program.home_dir),
+                )
+        else:
+            resolved_asset_id = resolve_coin_op_base_asset_id(
+                program=program, market=market, deps=deps
+            )
+        backend = build_coin_op_backend(
+            program=program,
+            market=market,
+            selected_venue=selected_venue,
+            resolved_asset_id=resolved_asset_id,
+            deps=deps,
+        )
+    except ValueError as exc:
+        return CoinOpSetupResult(
+            error_payload={
+                "error": str(exc),
+                "market_id": market.market_id,
+            }
+        )
+    if isinstance(backend, CloudWalletCoinOpBackend):
+        fee_result = resolve_coin_op_fee(
+            network=network,
+            minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
+            market=market,
+            selected_venue=selected_venue,
+            wallet=backend.wallet,
+            deps=deps,
+        )
+        if not fee_result.ok:
+            return CoinOpSetupResult(error_payload=fee_result.error_payload)
+        fee_mojos = fee_result.fee_mojos
+        fee_source = fee_result.fee_source
+    else:
+        fee_mojos = 0
+        fee_source = "signer_vault_no_fee"
     return CoinOpSetupResult(
         setup=CoinOpSetup(
             program=program,
             market=market,
-            wallet=wallet,
+            backend=backend,
             resolved_asset_id=resolved_asset_id,
-            fee_mojos=fee_result.fee_mojos,
-            fee_source=fee_result.fee_source,
+            fee_mojos=fee_mojos,
+            fee_source=fee_source,
             selected_venue=selected_venue,
         )
     )
@@ -480,7 +528,7 @@ class CoinOpLoopResult:
 
 def run_coin_op_iteration_loop(
     *,
-    wallet: CloudWalletAdapter,
+    setup: CoinOpSetup,
     network: str,
     no_wait: bool,
     until_ready: bool,
@@ -489,8 +537,10 @@ def run_coin_op_iteration_loop(
     denomination_target: DenominationTarget,
     readiness_asset_id: str,
     run_step: Callable[[int, list[dict[str, Any]], set[str]], CoinOpStepOutcome],
-    deps: CoinOpDeps = DEFAULT_COIN_OP_DEPS,
 ) -> CoinOpLoopResult:
+    backend = setup.backend
+    if isinstance(backend, SignerCoinOpBackend):
+        backend.no_wait = no_wait
     operations: list[dict[str, object]] = []
     final_readiness: dict[str, int | bool | str] | None = None
     split_gate: dict[str, int | bool | str] | None = None
@@ -498,8 +548,12 @@ def run_coin_op_iteration_loop(
     unresolved_coin_ids: list[str] = []
 
     for iteration in range(1, max_iterations + 1):
-        wallet_coins = wallet.list_coins(include_pending=True)
-        existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
+        wallet_coins = backend.list_wallet_coins()
+        existing_coin_ids = {
+            str(c.get("id", c.get("name", ""))).strip()
+            for c in wallet_coins
+            if str(c.get("id", c.get("name", ""))).strip()
+        }
         outcome = run_step(iteration, wallet_coins, existing_coin_ids)
         if outcome.split_gate is not None:
             split_gate = outcome.split_gate
@@ -523,18 +577,16 @@ def run_coin_op_iteration_loop(
                 "coin_op_iteration_needs_confirmation must be handled before the loop"
             )
 
-        iteration_payload, final_readiness = coin_op_build_iteration_payload(
-            wallet=wallet,
-            signature_request_id=step.signature_request_id,
-            initial_signature_state=step.initial_signature_state,
+        iteration_payload, final_readiness = backend.build_iteration_payload(
+            operation_id=step.signature_request_id,
+            operation_state=step.initial_signature_state,
             no_wait=no_wait,
             network=network,
             existing_coin_ids=existing_coin_ids,
             iteration=iteration,
-            denomination_target=denomination_target,
             readiness_asset_id=readiness_asset_id,
             readiness_kwargs=step.readiness_kwargs,
-            deps=deps,
+            denomination_target=denomination_target,
         )
         operations.append(iteration_payload)
 

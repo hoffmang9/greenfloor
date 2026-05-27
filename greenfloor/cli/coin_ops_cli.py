@@ -66,9 +66,7 @@ def _finish_coin_op_cli(
             print(
                 format_json_output(
                     coin_op_unresolved_error_payload(
-                        market=setup.market,
-                        selected_venue=setup.selected_venue,
-                        wallet=setup.wallet,
+                        scope=setup.backend.scope,
                         unresolved_coin_ids=loop_result.unresolved_coin_ids,
                     )
                 )
@@ -100,7 +98,7 @@ def _run_coin_op_cli(
 
     cli_run = build_run(setup)
     loop_result = run_coin_op_iteration_loop(
-        wallet=setup.wallet,
+        setup=setup,
         network=network,
         no_wait=no_wait,
         until_ready=until_ready,
@@ -136,9 +134,7 @@ def _build_success_payload(
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         **coin_op_result_payload(
-            market=complete.setup.market,
-            selected_venue=complete.setup.selected_venue,
-            wallet=complete.setup.wallet,
+            setup=complete.setup,
             coin_ids=coin_ids,
             denomination_target=complete.denomination_target,
             until_ready=until_ready,
@@ -146,8 +142,6 @@ def _build_success_payload(
             stop_reason=complete.loop_result.stop_reason,
             final_readiness=final_readiness,
             operations=complete.loop_result.operations,
-            fee_mojos=complete.setup.fee_mojos,
-            fee_source=complete.setup.fee_source,
         ),
         **complete.extra_payload,
     }
@@ -274,7 +268,7 @@ def execute_split_cli(
             size_base_units=size_base_units,
         )
         step_params = CoinSplitStepParams(
-            wallet=setup.wallet,
+            backend=setup.backend,
             market=setup.market,
             selected_venue=setup.selected_venue,
             resolved_asset_id=setup.resolved_asset_id,
@@ -289,9 +283,14 @@ def execute_split_cli(
             allow_lock_all_spendable=allow_lock_all_spendable,
             force_split_when_ready=force_split_when_ready,
         )
+        readiness_asset_id = (
+            setup.resolved_asset_id
+            if setup.backend.scope.execution_backend == "signer"
+            else str(setup.market.base_asset)
+        )
         return _CoinOpCliRun(
             denomination_target=denomination_target,
-            readiness_asset_id=str(setup.market.base_asset),
+            readiness_asset_id=readiness_asset_id,
             run_step=_build_split_run_step(
                 step_params=step_params,
                 prompt_for_override=prompt_for_override,
@@ -366,7 +365,7 @@ def execute_combine_cli(
             requested_asset_id=requested_asset_id,
         )
         step_params = CoinCombineStepParams(
-            wallet=setup.wallet,
+            backend=setup.backend,
             market=setup.market,
             selected_venue=setup.selected_venue,
             resolved_asset_id=setup.resolved_asset_id,
@@ -389,9 +388,14 @@ def execute_combine_cli(
             step_result = run_coin_combine_step(params=step_params, wallet_coins=wallet_coins)
             return CoinOpStepOutcome(step=step_result.step)
 
+        readiness_asset_id = (
+            setup.resolved_asset_id
+            if setup.backend.scope.execution_backend == "signer"
+            else str(setup.market.base_asset)
+        )
         return _CoinOpCliRun(
             denomination_target=denomination_target,
-            readiness_asset_id=setup.resolved_asset_id,
+            readiness_asset_id=readiness_asset_id,
             run_step=run_step,
             extra_payload={
                 "asset_id": requested_asset_id or str(setup.market.base_asset).strip(),

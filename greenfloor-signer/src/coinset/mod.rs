@@ -1,6 +1,15 @@
+mod asset;
 mod backend;
+mod coin_select;
 mod msp;
 mod presplit;
+mod xch;
+
+pub(crate) use coin_select::{
+    finalize_selected_cats, list_and_select_cats, select_xch_for_amount, CoinSelectionMode,
+};
+
+pub use asset::is_xch_like_asset;
 
 pub use backend::{LiveCoinset, OfferCoinsetBackend};
 pub use msp::{
@@ -65,31 +74,11 @@ pub(crate) async fn select_cats_for_spend(
     finalize_selected_cats(cats, explicit_coin_ids, target_amount)
 }
 
-pub(crate) fn finalize_selected_cats(
-    cats: Vec<Cat>,
-    explicit_coin_ids: &[Bytes32],
-    target_amount: u64,
-) -> SignerResult<SelectedCats> {
-    if cats.is_empty() {
-        return Err(SignerError::NoUnspentCatCoins);
-    }
-    let selected = if explicit_coin_ids.is_empty() {
-        select_cats_smallest_first(cats, target_amount)
-    } else {
-        cats
-    };
-    if selected.is_empty() {
-        return Err(SignerError::InsufficientCatCoins);
-    }
-    let offered_total: u64 = selected.iter().map(|cat| cat.coin.amount).sum();
-    if offered_total < target_amount {
-        return Err(SignerError::InsufficientCatCoins);
-    }
-    Ok(SelectedCats {
-        change_amount: offered_total - target_amount,
-        selected,
-        offered_total,
-    })
+pub async fn list_unspent_xch(
+    client: &CoinsetClient,
+    receive_address: &str,
+) -> SignerResult<Vec<Coin>> {
+    xch::list_unspent_xch(client, receive_address).await
 }
 
 pub async fn list_unspent_cats(
@@ -191,10 +180,18 @@ pub async fn fetch_latest_vault(
     ))
 }
 
+#[derive(Debug, Clone)]
+pub struct BroadcastSpendBundleResult {
+    pub status: String,
+    pub operation_id: String,
+}
+
 pub async fn broadcast_spend_bundle(
     client: &CoinsetClient,
     spend_bundle: SpendBundle,
-) -> SignerResult<String> {
+) -> SignerResult<BroadcastSpendBundleResult> {
+    let operation_id = format!("0x{}", hex::encode(spend_bundle.hash()));
+    // Coinset RPC expects structured SpendBundle JSON (not a hex string).
     let response = client
         .push_tx(spend_bundle)
         .await
@@ -206,7 +203,10 @@ pub async fn broadcast_spend_bundle(
                 .unwrap_or_else(|| "push_tx failed".to_string()),
         ));
     }
-    Ok(response.status)
+    Ok(BroadcastSpendBundleResult {
+        status: response.status,
+        operation_id,
+    })
 }
 
 pub fn select_cats_smallest_first(cats: Vec<Cat>, target_total: u64) -> Vec<Cat> {
@@ -308,11 +308,20 @@ pub fn spend_bundle_hex(spend_bundle: &SpendBundle) -> SignerResult<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chia_protocol::{Bytes32, Coin};
-    use chia_sdk_driver::{Cat, CatInfo};
 
     #[test]
     fn select_cats_smallest_first_accumulates_until_target() {
+        use chia_protocol::{Bytes32, Coin};
+        use chia_sdk_driver::{Cat, CatInfo};
+
+        fn cat_with_amount(amount: u64) -> Cat {
+            Cat::new(
+                Coin::new(Bytes32::new([amount as u8; 32]), Bytes32::default(), amount),
+                None,
+                CatInfo::new(Bytes32::new([0x01; 32]), None, Bytes32::default()),
+            )
+        }
+
         let cats = vec![
             cat_with_amount(5000),
             cat_with_amount(1000),
@@ -322,13 +331,5 @@ mod tests {
         assert_eq!(selected.len(), 2);
         assert_eq!(selected[0].coin.amount, 1000);
         assert_eq!(selected[1].coin.amount, 3000);
-    }
-
-    fn cat_with_amount(amount: u64) -> Cat {
-        Cat::new(
-            Coin::new(Bytes32::new([amount as u8; 32]), Bytes32::default(), amount),
-            None,
-            CatInfo::new(Bytes32::new([0x01; 32]), None, Bytes32::default()),
-        )
     }
 }

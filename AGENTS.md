@@ -16,8 +16,8 @@ Severity tags:
 
 - `[MUST]` Work at a senior-developer standard: explicit tradeoffs and maintainable design.
 - `[MUST]` If behavior or requirements are unclear, ask before coding.
-- `[MUST]` Use `chia-wallet-sdk` (repo submodule) for blockchain sync, signing, and offer encode/decode.
-- `[MUST]` Treat offers as `offer1...` Bech32m strings from `chia-wallet-sdk` contracts.
+- `[MUST]` Use `chia-wallet-sdk` (repo submodule) for blockchain sync, signing, and offer validation contracts.
+- `[MUST]` Treat offers as `offer1...` Bech32m strings. Python `offer_builder` encodes spend bundles via `greenfloor_native` (same `chia-sdk-driver` `encode_offer` as the SDK bindings).
 - `[MUST]` Fix the primary path; do not add fallback execution paths to hide correctness gaps.
 - `[SHOULD]` Temporary sdk symbol-rename shims are allowed only during explicit migrations and must be removed once the pinned baseline stabilizes.
 - `[MUST]` Network symbol discipline: mainnet uses `xch`, testnet11 uses `txch` in examples, defaults, runbooks, workflows, and operator commands.

@@ -9,6 +9,7 @@ from greenfloor.logging_setup import normalize_log_level_name
 
 OfferExecutionBackend = Literal["signer", "cloud_wallet", "bls"]
 ManagedOfferExecutionBackend = Literal["signer", "cloud_wallet"]
+CoinOpsExecutionBackend = Literal["signer", "cloud_wallet"]
 
 _CANONICAL_CAT_UNIT_MOJOS = 1000
 _CANONICAL_XCH_UNIT_MOJOS = 1_000_000_000_000
@@ -144,6 +145,16 @@ def signer_offer_path_configured(program: ProgramConfig) -> bool:
         return False
     vault = program.vault_config
     return vault is not None and bool(str(vault.launcher_id).strip())
+
+
+def coin_ops_execution_backend(program: ProgramConfig) -> CoinOpsExecutionBackend:
+    if signer_offer_path_configured(program):
+        return "signer"
+    if cloud_wallet_offer_path_configured(program):
+        return "cloud_wallet"
+    raise ValueError(
+        "coin ops require signer (signer.kms_key_id + vault.launcher_id) or cloud_wallet config"
+    )
 
 
 def offer_execution_backend(

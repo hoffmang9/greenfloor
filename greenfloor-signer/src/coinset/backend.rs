@@ -74,6 +74,8 @@ impl OfferCoinsetBackend for LiveCoinset<'_> {
     }
 
     async fn broadcast_spend_bundle(&self, spend_bundle: SpendBundle) -> SignerResult<String> {
-        broadcast_spend_bundle(self.0, spend_bundle).await
+        Ok(broadcast_spend_bundle(self.0, spend_bundle)
+            .await?
+            .status)
     }
 }

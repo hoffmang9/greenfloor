@@ -39,7 +39,8 @@ def test_greenfloor_native_from_input_spend_bundle_xch_round_trip_offer() -> Non
         input_spend_bundle.to_bytes(),
         [(bytes([3]) * 32, [(bytes([4]) * 32, 42)])],
     )
-    offer_spend_bundle = sdk.SpendBundle.from_bytes(offer_spend_bundle_bytes)
-    offer_text = sdk.encode_offer(offer_spend_bundle)
+    from greenfloor.adapters.native_offer import encode_offer_from_spend_bundle_hex
 
+    offer_text = encode_offer_from_spend_bundle_hex(offer_spend_bundle_bytes.hex())
+    assert offer_text.startswith("offer1")
     native.validate_offer(offer_text)

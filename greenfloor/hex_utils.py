@@ -23,7 +23,11 @@ def is_hex_id(value: str) -> bool:
 
 
 def canonical_is_xch(asset_id: str) -> bool:
-    """Return True if *asset_id* refers to the native XCH/TXCH coin."""
+    """Return True when *asset_id* is native XCH/TXCH (``xch``, ``txch``, or ``1``).
+
+    Empty or whitespace returns False. Rust ``is_xch_like_asset`` also treats empty as
+    XCH-like for signer payloads; use that only at the FFI boundary, not here.
+    """
     return str(asset_id or "").strip().lower() in _XCH_ASSET_SYMBOLS
 
 

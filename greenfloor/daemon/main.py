@@ -44,8 +44,9 @@ from greenfloor.config.models import (
     ProgramConfig,
     cloud_wallet_offer_path_configured,
     managed_offer_execution_backend,
+    signer_offer_path_configured,
 )
-from greenfloor.core.coin_ops import BucketSpec, CoinOpPlan, plan_coin_ops
+from greenfloor.core.coin_ops import BucketSpec, plan_coin_ops
 from greenfloor.core.coin_ops_policy import (
     coin_op_min_amount_mojos as _coin_op_min_amount_mojos,
 )
@@ -72,13 +73,7 @@ from greenfloor.runtime.cloud_wallet.assets import (
     wallet_asset_amounts_for_asset_id,
 )
 from greenfloor.runtime.cloud_wallet.coin_ops_daemon_execution import (
-    DaemonCoinOpExecContext,
-    execute_daemon_combine_plan,
-    execute_daemon_split_plan,
-)
-from greenfloor.runtime.cloud_wallet.coin_ops_models import (
-    CoinOpSelectionMode,
-    filter_spendable_for_coin_ops,
+    execute_managed_coin_op_plans,
 )
 from greenfloor.runtime.cloud_wallet.coins import (
     cloud_wallet_coin_matches_asset_scope,
@@ -1333,7 +1328,7 @@ def _build_offer_for_action(
     program_path: Path | None = None,
     keyring_yaml_path: str | None = None,
 ) -> dict[str, Any]:
-    from greenfloor.offer_builder import build_offer_text
+    from greenfloor.offer_builder import build_offer
 
     side = _normalize_offer_side(getattr(action, "side", "sell"))
     if side == "buy":
@@ -1365,7 +1360,7 @@ def _build_offer_for_action(
         xch_price_usd=xch_price_usd,
     )
     try:
-        offer = build_offer_text(payload)
+        offer = build_offer(payload)
     except Exception as exc:
         return {"status": "skipped", "reason": f"offer_builder_failed:{exc}", "offer": None}
     return {"status": "executed", "reason": "offer_builder_success", "offer": offer}
@@ -3269,13 +3264,29 @@ def _plan_and_execute_coin_ops(
             max_daily_fee_budget_mojos=program.coin_ops_max_daily_fee_budget_mojos,
         )
         if executable_plans:
-            execution = _execute_coin_ops_cloud_wallet_kms_only(
+            execution = execute_managed_coin_op_plans(
                 market=market,
                 program=program,
                 plans=executable_plans,
-                wallet=wallet,
                 signer_selection=signer_selection,
-                state_dir=state_dir,
+                base_unit_mojo_multiplier=_base_unit_mojo_multiplier_for_market(market=market),
+                combine_input_cap=_combine_input_coin_cap(),
+                watched_coin_ids=_watched_coin_ids_for_market(
+                    market_id=str(getattr(market, "market_id", "")).strip()
+                ),
+                logger=_daemon_logger,
+                cloud_wallet_configured=_cloud_wallet_configured(program),
+                cloud_wallet_base_asset_resolver=(
+                    None
+                    if signer_offer_path_configured(program)
+                    else (
+                        lambda: _resolve_cloud_wallet_offer_asset_ids_for_reservation(
+                            program=program,
+                            market=market,
+                            wallet=_new_cloud_wallet_adapter_for_daemon(program),
+                        )[0]
+                    )
+                ),
             )
             _log_market_decision(
                 market.market_id,
@@ -3400,166 +3411,6 @@ def _plan_and_execute_coin_ops(
             )
     else:
         _log_market_decision(market.market_id, "coin_ops_no_plans")
-
-
-def _execute_coin_ops_cloud_wallet_kms_only(
-    *,
-    market: Any,
-    program: Any,
-    plans: list[CoinOpPlan],
-    wallet: WalletAdapter,
-    signer_selection: Any,
-    state_dir: Path,
-) -> dict[str, Any]:
-    _ = wallet, state_dir
-    if not _cloud_wallet_configured(program):
-        return {
-            "dry_run": bool(program.runtime_dry_run),
-            "planned_count": len(plans),
-            "executed_count": 0,
-            "status": "skipped",
-            "signer_selection": None,
-            "items": [
-                {
-                    "op_type": plan.op_type,
-                    "size_base_units": plan.size_base_units,
-                    "op_count": plan.op_count,
-                    "status": "skipped",
-                    "reason": "cloud_wallet_required_for_coin_ops",
-                    "operation_id": None,
-                }
-                for plan in plans
-            ],
-        }
-
-    if not str(getattr(program, "cloud_wallet_kms_key_id", "")).strip():
-        return {
-            "dry_run": bool(program.runtime_dry_run),
-            "planned_count": len(plans),
-            "executed_count": 0,
-            "status": "skipped",
-            "signer_selection": None,
-            "items": [
-                {
-                    "op_type": plan.op_type,
-                    "size_base_units": plan.size_base_units,
-                    "op_count": plan.op_count,
-                    "status": "skipped",
-                    "reason": "cloud_wallet_kms_required_for_coin_ops",
-                    "operation_id": None,
-                }
-                for plan in plans
-            ],
-        }
-
-    cloud_wallet = _new_cloud_wallet_adapter_for_daemon(program)
-    resolved_base_asset_id, _, _ = _resolve_cloud_wallet_offer_asset_ids_for_reservation(
-        program=program,
-        market=market,
-        wallet=cloud_wallet,
-    )
-
-    base_unit_mojo_multiplier = _base_unit_mojo_multiplier_for_market(market=market)
-    items: list[dict[str, Any]] = []
-    executed_count = 0
-    combine_input_cap = _combine_input_coin_cap()
-    exec_ctx = DaemonCoinOpExecContext(
-        cloud_wallet=cloud_wallet,
-        market=market,
-        program=program,
-        resolved_base_asset_id=resolved_base_asset_id,
-        base_unit_mojo_multiplier=base_unit_mojo_multiplier,
-        combine_input_cap=combine_input_cap,
-        watched_coin_ids=_watched_coin_ids_for_market(
-            market_id=str(getattr(market, "market_id", "")).strip()
-        ),
-        spendable_coins=lambda coins: filter_spendable_for_coin_ops(
-            coins=coins,
-            wallet=cloud_wallet,
-            resolved_asset_id=resolved_base_asset_id,
-            canonical_asset_id=str(getattr(market, "base_asset", "")).strip(),
-            mode=CoinOpSelectionMode.DAEMON,
-        ),
-        logger=_daemon_logger,
-    )
-
-    for plan in plans:
-        op_type = str(plan.op_type)
-        op_count = int(plan.op_count)
-        size_base_units = int(plan.size_base_units)
-        if op_count <= 0 or size_base_units <= 0:
-            items.append(
-                {
-                    "op_type": op_type,
-                    "size_base_units": size_base_units,
-                    "op_count": op_count,
-                    "status": "skipped",
-                    "reason": "invalid_plan",
-                    "operation_id": None,
-                }
-            )
-            continue
-        if bool(program.runtime_dry_run):
-            items.append(
-                {
-                    "op_type": op_type,
-                    "size_base_units": size_base_units,
-                    "op_count": op_count,
-                    "status": "planned",
-                    "reason": "dry_run:cloud_wallet_kms",
-                    "operation_id": None,
-                }
-            )
-            continue
-
-        try:
-            if op_type == "split":
-                split_items, split_executed = execute_daemon_split_plan(plan=plan, ctx=exec_ctx)
-                items.extend(split_items)
-                executed_count += split_executed
-                continue
-            if op_type == "combine":
-                combine_items, combine_executed = execute_daemon_combine_plan(
-                    plan=plan, ctx=exec_ctx
-                )
-                items.extend(combine_items)
-                executed_count += combine_executed
-                continue
-
-            items.append(
-                {
-                    "op_type": op_type,
-                    "size_base_units": size_base_units,
-                    "op_count": op_count,
-                    "status": "skipped",
-                    "reason": "invalid_plan",
-                    "operation_id": None,
-                }
-            )
-        except Exception as exc:
-            items.append(
-                {
-                    "op_type": op_type,
-                    "size_base_units": size_base_units,
-                    "op_count": op_count,
-                    "status": "skipped",
-                    "reason": f"cloud_wallet_coin_op_error:{exc}",
-                    "operation_id": None,
-                }
-            )
-
-    return {
-        "dry_run": bool(program.runtime_dry_run),
-        "planned_count": len(plans),
-        "executed_count": executed_count,
-        "status": "cloud_wallet_kms",
-        "signer_selection": {
-            "selected_source": "signer_registry",
-            "key_id": str(getattr(signer_selection, "key_id", "")).strip(),
-            "network": str(getattr(program, "app_network", "")).strip(),
-        },
-        "items": items,
-    }
 
 
 def _process_single_market(

@@ -205,9 +205,9 @@ def _resolve_cat_asset_id_for_coin_ids(
     retry_sleep_seconds: float = 1.0,
     sleep_fn: Any = time.sleep,
 ) -> tuple[str | None, dict[str, Any]]:
-    import greenfloor.signing as signing_mod
+    from greenfloor.adapters import bls_cat_coins, bls_signing
 
-    sdk = signing_mod._import_sdk()  # noqa: SLF001
+    sdk = bls_signing._import_sdk()  # noqa: SLF001
     requested_ids = [coin_id for coin_id in coin_ids if coin_id]
     requested_set = set(requested_ids)
     if not requested_ids:
@@ -230,7 +230,7 @@ def _resolve_cat_asset_id_for_coin_ids(
     last_exception: str | None = None
     for attempt in range(1, attempts + 1):
         try:
-            cats = signing_mod._list_unspent_cat_coins_by_ids(  # noqa: SLF001
+            cats = bls_cat_coins._list_unspent_cat_coins_by_ids(  # noqa: SLF001
                 sdk=sdk,
                 network=network,
                 coin_ids=requested_ids,
@@ -449,11 +449,11 @@ def _build_broadcast_diagnostics(
     coinset: CoinsetAdapter,
     input_coin_ids: list[str],
 ) -> dict[str, Any]:
-    import greenfloor.signing as signing_mod
+    from greenfloor.adapters import bls_signing
 
     diagnostics: dict[str, Any] = {}
     try:
-        spend_bundle_hex, bundle_error = signing_mod._build_mixed_split_spend_bundle(
+        spend_bundle_hex, bundle_error = bls_signing._build_mixed_split_spend_bundle(
             signing_payload
         )  # noqa: SLF001
     except Exception as exc:  # noqa: BLE001
@@ -467,7 +467,7 @@ def _build_broadcast_diagnostics(
     diagnostics["spend_bundle_hex_length"] = len(str(spend_bundle_hex))
 
     try:
-        sdk = signing_mod._import_sdk()  # noqa: SLF001
+        sdk = bls_signing._import_sdk()  # noqa: SLF001
         raw_hex = (
             spend_bundle_hex[2:]
             if str(spend_bundle_hex).lower().startswith("0x")

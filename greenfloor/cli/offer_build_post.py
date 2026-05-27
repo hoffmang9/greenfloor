@@ -14,7 +14,7 @@ from greenfloor.config.io import (
 )
 from greenfloor.config.models import offer_execution_backend
 from greenfloor.logging_setup import warn_if_log_level_auto_healed
-from greenfloor.offer_builder import build_offer_text
+from greenfloor.offer_builder import build_offer
 from greenfloor.runtime.cloud_wallet.adapter import format_json_output
 from greenfloor.runtime.offer_build_context import prepare_offer_build_context
 from greenfloor.runtime.offer_execution import default_offer_post_deps
@@ -140,7 +140,7 @@ def build_and_post_offer_cli(
     return request.run_cli(
         backend,
         capture_dir_path=capture_dir_path,
-        build_offer_text_fn=build_offer_text,
+        build_offer_fn=build_offer,
         post_deps=default_offer_post_deps(format_output_fn=format_json_output),
         path_extra_fields={"local_cli_path": True},
     )

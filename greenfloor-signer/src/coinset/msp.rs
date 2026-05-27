@@ -2,8 +2,8 @@ use chia_protocol::Bytes32;
 use chia_sdk_coinset::{ChiaRpcClient, CoinRecord, CoinsetClient};
 use serde::Deserialize;
 
+use crate::coinset::is_xch_like_asset;
 use crate::error::{SignerError, SignerResult};
-use crate::vault::members::hex_to_bytes32;
 
 pub const DEFAULT_MSP_BASE_URL: &str = "https://api-msp.coinset.org";
 
@@ -131,8 +131,8 @@ pub async fn resolve_offer_asset_ids(
     let resolved_base = resolve_one_asset(msp, base_asset).await?;
     let resolved_quote = resolve_one_asset(msp, quote_asset).await?;
     if resolved_base == resolved_quote
-        && !is_xch_like(&resolved_base)
-        && !is_xch_like(&resolved_quote)
+        && !is_xch_like_asset(&resolved_base)
+        && !is_xch_like_asset(&resolved_quote)
     {
         return Err(SignerError::Other(
             "resolved_assets_collide_for_non_xch_pair".to_string(),
@@ -151,17 +151,10 @@ async fn resolve_one_asset(msp: &MspCoinset, raw: &str) -> SignerResult<String> 
     Err(SignerError::Other(format!("asset_resolution_failed:{raw}")))
 }
 
-fn is_xch_like(asset_id: &str) -> bool {
-    matches!(asset_id.trim().to_lowercase().as_str(), "" | "xch" | "txch" | "1")
-}
-
-pub fn launcher_id_from_singleton_info(info: &SingletonInfo) -> SignerResult<Bytes32> {
-    hex_to_bytes32(&info.launcher_id)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vault::members::hex_to_bytes32;
 
     #[test]
     fn normalize_asset_id_accepts_xch_and_hex() {

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import importlib
 from pathlib import Path
 from typing import Any
@@ -72,3 +73,153 @@ def program_config_path_from_payload(payload: dict[str, Any]) -> str | None:
     if home:
         return str(Path(home).expanduser() / "config" / "program.yaml")
     return None
+
+
+def is_vault_kms_payload(payload: dict[str, Any]) -> bool:
+    """True when payload should use vault KMS signing (Rust signer)."""
+    if bool(str(payload.get("cloud_wallet_kms_key_id", "")).strip()):
+        return True
+    return bool(str(payload.get("signer_kms_key_id", "")).strip())
+
+
+def expires_at_unix_from_payload(payload: dict[str, Any]) -> int | None:
+    expiry_unit = str(payload.get("expiry_unit", "")).strip()
+    try:
+        expiry_value = int(payload.get("expiry_value", 0) or 0)
+    except (TypeError, ValueError):
+        expiry_value = 0
+    if not expiry_unit or expiry_value <= 0:
+        return None
+    expires_at = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
+        **{expiry_unit: expiry_value}
+    )
+    return int(expires_at.timestamp())
+
+
+def vault_offer_request_from_payload(
+    payload: dict[str, Any], plan: dict[str, Any]
+) -> dict[str, Any]:
+    offer_asset_id = str(plan.get("offer_asset_id", payload.get("asset_id", ""))).strip().lower()
+    request_asset_id = str(plan.get("request_asset_id", "")).strip().lower()
+    raw_offer_coin_ids = plan.get("offer_coin_ids", [])
+    offer_coin_ids = (
+        [str(value).strip().lower() for value in raw_offer_coin_ids if str(value).strip()]
+        if isinstance(raw_offer_coin_ids, list)
+        else []
+    )
+    raw_presplit_coin_ids = payload.get("presplit_coin_ids", plan.get("presplit_coin_ids", []))
+    presplit_coin_ids = (
+        [str(value).strip().lower() for value in raw_presplit_coin_ids if str(value).strip()]
+        if isinstance(raw_presplit_coin_ids, list)
+        else []
+    )
+    request: dict[str, Any] = {
+        "receive_address": str(payload.get("receive_address", "")).strip(),
+        "offer_asset_id": offer_asset_id,
+        "offer_amount": int(plan.get("offer_amount", 0)),
+        "request_asset_id": request_asset_id,
+        "request_amount": int(plan.get("request_amount", 0)),
+        "offer_coin_ids": offer_coin_ids,
+        "presplit_coin_ids": presplit_coin_ids,
+        "split_input_coins": bool(payload.get("split_input_coins", True)),
+        "broadcast_split": bool(payload.get("broadcast_split", False)),
+    }
+    expires_at = expires_at_unix_from_payload({**payload, **plan})
+    if expires_at is not None:
+        request["expires_at"] = expires_at
+    return request
+
+
+def vault_mixed_split_request_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_outputs = payload.get("output_amounts_base_units", [])
+    output_amounts: list[int] = []
+    if isinstance(raw_outputs, list):
+        for value in raw_outputs:
+            output_amounts.append(int(value))
+    raw_coin_ids = payload.get("selected_coin_ids", [])
+    coin_ids: list[str] = []
+    if isinstance(raw_coin_ids, list):
+        for value in raw_coin_ids:
+            clean = str(value).strip().lower()
+            if clean.startswith("0x"):
+                clean = clean[2:]
+            if clean:
+                coin_ids.append(clean)
+    return {
+        "receive_address": str(payload.get("receive_address", "")).strip(),
+        "asset_id": str(payload.get("asset_id", "")).strip().lower(),
+        "output_amounts": output_amounts,
+        "coin_ids": coin_ids,
+        "allow_sub_cat_output": bool(payload.get("allow_sub_cat_output", False)),
+        "fee_mojos": int(payload.get("fee_mojos", 0)),
+    }
+
+
+def build_vault_offer_from_payload(payload: dict[str, Any]) -> tuple[str | None, str | None]:
+    program_path = program_config_path_from_payload(payload)
+    if not program_path:
+        return None, "missing_program_config_path"
+    plan = payload.get("plan") or {}
+    if not isinstance(plan, dict):
+        return None, "missing_plan"
+    try:
+        result = build_vault_cat_offer(
+            program_path,
+            vault_offer_request_from_payload(payload, plan),
+        )
+    except ImportError as exc:
+        return None, str(exc)
+    except Exception as exc:
+        return None, f"rust_signer_offer_failed:{exc}"
+    spend_bundle_hex = str(result.get("spend_bundle_hex", "")).strip()
+    if not spend_bundle_hex:
+        return None, "missing_spend_bundle_hex"
+    return spend_bundle_hex, None
+
+
+def sign_and_broadcast_vault_mixed_split(payload: dict[str, Any]) -> dict[str, Any]:
+    program_path = program_config_path_from_payload(payload)
+    if not program_path:
+        return {
+            "status": "skipped",
+            "reason": "missing_program_config_path",
+            "operation_id": None,
+        }
+    request = vault_mixed_split_request_from_payload(payload)
+    request["broadcast"] = True
+    try:
+        result = build_mixed_split(program_path, request)
+    except ImportError as exc:
+        return {"status": "skipped", "reason": str(exc), "operation_id": None}
+    except Exception as exc:
+        return {
+            "status": "skipped",
+            "reason": f"rust_signer_mixed_split_failed:{exc}",
+            "operation_id": None,
+        }
+    spend_bundle_hex = str(result.get("spend_bundle_hex", "")).strip()
+    if not spend_bundle_hex:
+        return {
+            "status": "skipped",
+            "reason": "missing_spend_bundle_hex",
+            "operation_id": None,
+        }
+    try:
+        sdk = importlib.import_module("chia_wallet_sdk")
+        raw_hex = (
+            spend_bundle_hex[2:] if spend_bundle_hex.lower().startswith("0x") else spend_bundle_hex
+        )
+        spend_bundle = sdk.SpendBundle.from_bytes(bytes.fromhex(raw_hex))
+        operation_id = sdk.to_hex(spend_bundle.hash())
+    except Exception as exc:
+        return {
+            "status": "skipped",
+            "reason": f"spend_bundle_decode_error:{exc}",
+            "operation_id": None,
+        }
+    broadcast_status = str(result.get("broadcast_status", "")).strip() or "submitted"
+    return {
+        "status": "executed",
+        "reason": broadcast_status,
+        "operation_id": operation_id,
+    }

@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.coin_ops_policy import coin_meets_coin_op_min_amount
 from greenfloor.runtime.cloud_wallet.coin_op_errors import (
@@ -14,12 +13,10 @@ from greenfloor.runtime.cloud_wallet.coin_op_errors import (
     coin_split_lockup_guardrail_error_payload,
     coin_split_no_spendable_error_payload,
 )
-from greenfloor.runtime.cloud_wallet.coin_ops_execution import combine_coins_with_retry
 from greenfloor.runtime.cloud_wallet.coin_ops_models import (
     CoinOpSelectionMode,
     CombineDenominationTarget,
     SplitDenominationTarget,
-    filter_spendable_for_coin_ops,
 )
 from greenfloor.runtime.cloud_wallet.coin_ops_planning import (
     CombineInputSelectionMode,
@@ -36,15 +33,13 @@ from greenfloor.runtime.cloud_wallet.coin_ops_runtime import (
     CoinOpIterationSkipLoop,
     evaluate_coin_split_gate,
 )
-from greenfloor.runtime.cloud_wallet.coins import (
-    classify_resolved_coin_ids_by_asset,
-    resolve_coin_global_ids,
-)
+from greenfloor.runtime.cloud_wallet.coins import classify_resolved_coin_ids_by_asset
+from greenfloor.runtime.coin_ops_backend import CoinOpBackend
 
 
 @dataclass(slots=True)
 class CoinSplitStepParams:
-    wallet: CloudWalletAdapter
+    backend: CoinOpBackend
     market: MarketConfig
     selected_venue: str | None
     resolved_asset_id: str
@@ -74,20 +69,19 @@ def run_coin_split_step(
     params: CoinSplitStepParams,
     wallet_coins: list[dict[str, Any]],
 ) -> CoinSplitStepResult:
-    asset_scoped_coins = params.wallet.list_coins(
-        asset_id=params.resolved_asset_id,
-        include_pending=True,
-    )
+    scope = params.backend.scope
+    asset_scoped_coins = params.backend.list_asset_scoped_coins()
     canonical_asset_id = str(params.market.base_asset)
-    spendable_scoped = filter_spendable_for_coin_ops(
-        coins=asset_scoped_coins,
-        wallet=params.wallet,
-        resolved_asset_id=params.resolved_asset_id,
+    spendable_scoped = params.backend.filter_spendable(
+        asset_scoped_coins,
         canonical_asset_id=canonical_asset_id,
+        min_coin_amount_mojos=params.min_coin_amount_mojos,
         mode=CoinOpSelectionMode.CLI,
     )
     spendable_asset_coin_ids = {
-        str(c.get("id", "")).strip() for c in spendable_scoped if str(c.get("id", "")).strip()
+        str(c.get("id", c.get("name", ""))).strip()
+        for c in spendable_scoped
+        if str(c.get("id", c.get("name", ""))).strip()
     }
     split_gate: dict[str, int | bool | str] | None = None
     if params.denomination_target is not None:
@@ -110,7 +104,7 @@ def run_coin_split_step(
                 split_gate=split_gate,
             )
     if params.explicit_coin_ids:
-        resolved_coin_ids, unresolved_coin_ids = resolve_coin_global_ids(
+        resolved_coin_ids, unresolved_coin_ids = params.backend.resolve_coin_ids(
             wallet_coins, params.explicit_coin_ids
         )
         if unresolved_coin_ids:
@@ -132,9 +126,7 @@ def run_coin_split_step(
                 step=CoinOpIterationEarlyExit(
                     return_code=2,
                     error_payload=coin_split_no_spendable_error_payload(
-                        market=params.market,
-                        selected_venue=params.selected_venue,
-                        wallet=params.wallet,
+                        scope=scope,
                         canonical_asset_id=canonical_asset_id,
                         resolved_asset_id=params.resolved_asset_id,
                         min_coin_amount_mojos=params.min_coin_amount_mojos,
@@ -169,9 +161,7 @@ def run_coin_split_step(
                 decline_step=CoinOpIterationEarlyExit(
                     return_code=2,
                     error_payload=coin_split_lockup_guardrail_error_payload(
-                        market=params.market,
-                        selected_venue=params.selected_venue,
-                        wallet=params.wallet,
+                        scope=scope,
                         resolved_asset_id=params.resolved_asset_id,
                         spendable_asset_coin_ids=spendable_asset_coin_ids,
                         selected_coin_ids=resolved_coin_ids,
@@ -181,22 +171,25 @@ def run_coin_split_step(
             split_gate=split_gate,
         )
 
-    split_result = params.wallet.split_coins(
+    split_result = params.backend.split_coins(
         coin_ids=resolved_coin_ids,
         amount_per_coin=params.amount_per_coin,
         number_of_coins=params.number_of_coins,
-        fee=params.fee_mojos,
+        fee_mojos=params.fee_mojos,
+        initial_coin_ids=spendable_asset_coin_ids,
     )
-    signature_request_id = split_result["signature_request_id"]
-    if not signature_request_id:
-        raise RuntimeError("coin_split_failed:missing_signature_request_id")
+    operation_id = str(
+        split_result.get("signature_request_id") or split_result.get("operation_id", "")
+    ).strip()
+    if not operation_id:
+        raise RuntimeError("coin_split_failed:missing_operation_id")
 
     readiness_kwargs: dict[str, int] = {}
     if params.denomination_target is not None:
         readiness_kwargs = params.denomination_target.split_readiness_kwargs()
     return CoinSplitStepResult(
         step=CoinOpIterationExecuteResult(
-            signature_request_id=signature_request_id,
+            signature_request_id=operation_id,
             initial_signature_state=str(split_result.get("status", "UNKNOWN")),
             readiness_kwargs=readiness_kwargs,
         ),
@@ -206,7 +199,7 @@ def run_coin_split_step(
 
 @dataclass(slots=True)
 class CoinCombineStepParams:
-    wallet: CloudWalletAdapter
+    backend: CoinOpBackend
     market: MarketConfig
     selected_venue: str | None
     resolved_asset_id: str
@@ -229,9 +222,10 @@ def run_coin_combine_step(
     params: CoinCombineStepParams,
     wallet_coins: list[dict[str, Any]],
 ) -> CoinCombineStepResult:
+    scope = params.backend.scope
     resolved_input_coin_ids: list[str] | None = None
     if params.explicit_coin_ids:
-        resolved_input_coin_ids, unresolved_coin_ids = resolve_coin_global_ids(
+        resolved_input_coin_ids, unresolved_coin_ids = params.backend.resolve_coin_ids(
             wallet_coins, params.explicit_coin_ids
         )
         if unresolved_coin_ids:
@@ -245,43 +239,38 @@ def run_coin_combine_step(
             raise ValueError(
                 "when --coin-id is provided, --input-coin-count must match the number of --coin-id values"
             )
-        unresolved_coin_ids, mismatched_coin_ids = classify_resolved_coin_ids_by_asset(
-            wallet_coins=wallet_coins,
-            resolved_coin_ids=resolved_input_coin_ids,
-            expected_asset_id=params.resolved_asset_id,
-        )
-        if unresolved_coin_ids:
-            return CoinCombineStepResult(
-                step=CoinOpIterationEarlyExit(
-                    return_code=2,
-                    unresolved_coin_ids=unresolved_coin_ids,
-                ),
+        if scope.execution_backend == "cloud_wallet":
+            unresolved_coin_ids, mismatched_coin_ids = classify_resolved_coin_ids_by_asset(
+                wallet_coins=wallet_coins,
+                resolved_coin_ids=resolved_input_coin_ids,
+                expected_asset_id=params.resolved_asset_id,
             )
-        if mismatched_coin_ids:
-            return CoinCombineStepResult(
-                step=CoinOpIterationEarlyExit(
-                    return_code=2,
-                    error_payload=coin_combine_asset_mismatch_error_payload(
-                        market=params.market,
-                        selected_venue=params.selected_venue,
-                        wallet=params.wallet,
-                        resolved_asset_id=params.resolved_asset_id,
-                        mismatched_coin_ids=mismatched_coin_ids,
+            if unresolved_coin_ids:
+                return CoinCombineStepResult(
+                    step=CoinOpIterationEarlyExit(
+                        return_code=2,
+                        unresolved_coin_ids=unresolved_coin_ids,
                     ),
-                ),
-            )
+                )
+            if mismatched_coin_ids:
+                return CoinCombineStepResult(
+                    step=CoinOpIterationEarlyExit(
+                        return_code=2,
+                        error_payload=coin_combine_asset_mismatch_error_payload(
+                            scope=scope,
+                            resolved_asset_id=params.resolved_asset_id,
+                            mismatched_coin_ids=mismatched_coin_ids,
+                        ),
+                    ),
+                )
     elif params.min_coin_amount_mojos > 0:
-        asset_scoped_coins = params.wallet.list_coins(
-            asset_id=params.resolved_asset_id,
-            include_pending=True,
-        )
-        spendable_scoped = filter_spendable_for_coin_ops(
-            coins=asset_scoped_coins,
-            wallet=params.wallet,
-            resolved_asset_id=params.resolved_asset_id,
+        asset_scoped_coins = params.backend.list_asset_scoped_coins()
+        spendable_scoped = params.backend.filter_spendable(
+            asset_scoped_coins,
             canonical_asset_id=params.combine_canonical_asset_id,
+            min_coin_amount_mojos=params.min_coin_amount_mojos,
             mode=CoinOpSelectionMode.CLI,
-            verify_direct_spendable_lookup=True,
+            verify_direct_spendable_lookup=(scope.execution_backend == "cloud_wallet"),
         )
         resolved_input_coin_ids = plan_auto_combine_inputs(
             spendable_coins=spendable_scoped,
@@ -293,9 +282,7 @@ def run_coin_combine_step(
                 step=CoinOpIterationEarlyExit(
                     return_code=2,
                     error_payload=coin_combine_insufficient_coins_error_payload(
-                        market=params.market,
-                        selected_venue=params.selected_venue,
-                        wallet=params.wallet,
+                        scope=scope,
                         combine_canonical_asset_id=params.combine_canonical_asset_id,
                         resolved_asset_id=params.resolved_asset_id,
                         required_coin_count=int(params.number_of_coins),
@@ -305,26 +292,24 @@ def run_coin_combine_step(
                 ),
             )
 
-    combine_result = combine_coins_with_retry(
-        cloud_wallet=params.wallet,
-        combine_kwargs={
-            "number_of_coins": params.number_of_coins,
-            "fee": params.fee_mojos,
-            "asset_id": params.resolved_asset_id,
-            "largest_first": True,
-            "input_coin_ids": resolved_input_coin_ids,
-        },
+    combine_result = params.backend.combine_coins(
+        number_of_coins=params.number_of_coins,
+        fee_mojos=params.fee_mojos,
+        input_coin_ids=resolved_input_coin_ids,
+        largest_first=True,
     )
-    signature_request_id = combine_result["signature_request_id"]
-    if not signature_request_id:
-        raise RuntimeError("coin_combine_failed:missing_signature_request_id")
+    operation_id = str(
+        combine_result.get("signature_request_id") or combine_result.get("operation_id", "")
+    ).strip()
+    if not operation_id:
+        raise RuntimeError("coin_combine_failed:missing_operation_id")
 
     readiness_kwargs: dict[str, int] = {}
     if params.denomination_target is not None:
         readiness_kwargs = params.denomination_target.combine_readiness_kwargs()
     return CoinCombineStepResult(
         step=CoinOpIterationExecuteResult(
-            signature_request_id=signature_request_id,
+            signature_request_id=operation_id,
             initial_signature_state=str(combine_result.get("status", "UNKNOWN")),
             readiness_kwargs=readiness_kwargs,
         ),
