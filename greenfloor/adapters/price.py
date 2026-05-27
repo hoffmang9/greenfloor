@@ -73,20 +73,9 @@ class XchPriceProvider:
         primary_quote_ttl_seconds: int = 120,
         fallback_price_adapter: PriceAdapter | None = None,
         now_fn: Callable[[], float] | None = None,
-        # Legacy keyword aliases for callers/tests migrating off Cloud Wallet naming.
-        cloud_wallet_price_fn: Callable[[], float] | None = None,
-        cloud_wallet_ttl_seconds: int | None = None,
     ) -> None:
-        resolved_primary_fn = (
-            primary_quote_price_fn if primary_quote_price_fn is not None else cloud_wallet_price_fn
-        )
-        resolved_ttl = (
-            int(primary_quote_ttl_seconds)
-            if cloud_wallet_ttl_seconds is None
-            else int(cloud_wallet_ttl_seconds)
-        )
-        self._primary_quote_price_fn = resolved_primary_fn
-        self._primary_quote_ttl_seconds = max(1, resolved_ttl)
+        self._primary_quote_price_fn = primary_quote_price_fn
+        self._primary_quote_ttl_seconds = max(1, int(primary_quote_ttl_seconds))
         self._fallback_price_adapter = fallback_price_adapter or PriceAdapter()
         self._now_fn = now_fn or time.time
         self._primary_quote_cached_price_usd: float | None = None

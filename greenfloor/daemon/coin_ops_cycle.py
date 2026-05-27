@@ -15,9 +15,12 @@ from greenfloor.core.coin_ops_policy import (
 )
 from greenfloor.core.fee_budget import partition_plans_by_budget, projected_coin_ops_fee_mojos
 from greenfloor.daemon.cooldowns import _combine_input_coin_cap
+from greenfloor.daemon.market_helpers import (
+    _base_unit_mojo_multiplier_for_market,
+    _normalize_offer_side,
+)
 from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision
-from greenfloor.daemon.offer_execution import _normalize_offer_side, _watched_coin_ids_for_market
-from greenfloor.hex_utils import default_mojo_multiplier_for_asset
+from greenfloor.daemon.watchlist import _watched_coin_ids_for_market
 from greenfloor.runtime.coin_ops.daemon_execution import execute_managed_coin_op_plans
 from greenfloor.storage.sqlite import SqliteStore
 
@@ -74,16 +77,6 @@ def _executed_sell_offer_counts_by_size(offer_execution: dict[str, Any]) -> dict
             continue
         counts[size] = counts.get(size, 0) + 1
     return counts
-
-
-def _base_unit_mojo_multiplier_for_market(*, market: Any) -> int:
-    pricing = getattr(market, "pricing", {}) or {}
-    default_multiplier = default_mojo_multiplier_for_asset(str(getattr(market, "base_asset", "")))
-    try:
-        multiplier = int(pricing.get("base_unit_mojo_multiplier", default_multiplier))
-    except (TypeError, ValueError):
-        multiplier = default_multiplier
-    return max(1, multiplier)
 
 
 def _plan_and_execute_coin_ops(

@@ -20,11 +20,6 @@ def parse_rate_limit_retry_seconds(error_text: str) -> float | None:
         return None
 
 
-def cloud_wallet_rate_limit_retry_seconds(error_text: str) -> float | None:
-    """Deprecated alias for :func:`parse_rate_limit_retry_seconds`."""
-    return parse_rate_limit_retry_seconds(error_text)
-
-
 def call_with_moderate_retry(
     *,
     action: str,

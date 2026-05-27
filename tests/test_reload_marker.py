@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from greenfloor.daemon.main import _consume_reload_marker
+from greenfloor.daemon.testing import consume_reload_marker
 
 
 def _write_reload_marker(state_dir: Path) -> Path:
@@ -15,6 +15,6 @@ def test_reload_marker_roundtrip(tmp_path: Path) -> None:
     state_dir = tmp_path / "state"
     marker = _write_reload_marker(state_dir)
     assert marker.exists()
-    assert _consume_reload_marker(state_dir) is True
+    assert consume_reload_marker(state_dir) is True
     assert marker.exists() is False
-    assert _consume_reload_marker(state_dir) is False
+    assert consume_reload_marker(state_dir) is False

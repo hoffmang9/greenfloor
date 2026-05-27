@@ -15,6 +15,7 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 
 _PENDING_VISIBILITY_REASON = "managed_offer_post_success_dexie_visibility_pending"
+PENDING_VISIBILITY_REASON = _PENDING_VISIBILITY_REASON
 
 _POST_COOLDOWN_UNTIL: dict[str, float] = {}
 _CANCEL_COOLDOWN_UNTIL: dict[str, float] = {}
@@ -72,6 +73,25 @@ def _is_transient_managed_upstream_error_text(error_text: str) -> bool:
         "signer_http_error:504",
     )
     return any(marker in normalized for marker in transient_markers)
+
+
+class ManagedUpstreamTransientError(Exception):
+    """Transient managed-offer or signer upstream failure (timeouts, HTTP 502/503/504)."""
+
+
+def is_transient_managed_upstream_error(exc: BaseException) -> bool:
+    if isinstance(exc, ManagedUpstreamTransientError):
+        return True
+    return _is_transient_managed_upstream_error_text(str(exc))
+
+
+def is_transient_managed_upstream_reason(reason: str) -> bool:
+    return _is_transient_managed_upstream_error_text(reason)
+
+
+def raise_if_transient_managed_upstream_error(error_text: str) -> None:
+    if _is_transient_managed_upstream_error_text(error_text):
+        raise ManagedUpstreamTransientError(error_text)
 
 
 def _managed_offer_reason_is_503(reason_text: str) -> bool:

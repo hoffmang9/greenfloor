@@ -9,6 +9,18 @@ from pathlib import Path
 from greenfloor.storage.sqlite import SqliteStore
 
 
+class ReservationError(Exception):
+    """Base class for offer reservation coordinator failures."""
+
+
+class ReservationContentionError(ReservationError):
+    """Transient reservation failure due to concurrent lease contention."""
+
+
+class ReservationStorageError(ReservationError):
+    """Non-transient reservation persistence failure."""
+
+
 @dataclass(frozen=True, slots=True)
 class ReservationAcquireResult:
     ok: bool
@@ -45,6 +57,8 @@ class AssetReservationCoordinator:
                 )
                 store.prune_offer_reservation_leases(older_than=prune_before)
                 return expired
+            except Exception as exc:
+                raise ReservationStorageError(str(exc)) from exc
             finally:
                 store.close()
 
@@ -89,6 +103,8 @@ class AssetReservationCoordinator:
                         error=acquire_error,
                     )
                 return ReservationAcquireResult(ok=True, reservation_id=reservation_id, error=None)
+            except Exception as exc:
+                raise ReservationStorageError(str(exc)) from exc
             finally:
                 store.close()
 
@@ -100,5 +116,18 @@ class AssetReservationCoordinator:
                     reservation_id=reservation_id,
                     release_status=status,
                 )
+            except Exception as exc:
+                raise ReservationStorageError(str(exc)) from exc
+            finally:
+                store.close()
+
+    def probe_storage(self) -> None:
+        """Verify reservation storage is reachable before parallel dispatch."""
+        with self._lock:
+            store = self._open_store()
+            try:
+                store.expire_offer_reservation_leases()
+            except Exception as exc:
+                raise ReservationStorageError(str(exc)) from exc
             finally:
                 store.close()

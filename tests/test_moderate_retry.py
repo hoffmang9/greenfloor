@@ -4,15 +4,15 @@ import pytest
 
 from greenfloor.moderate_retry import (
     call_with_moderate_retry,
-    cloud_wallet_rate_limit_retry_seconds,
+    parse_rate_limit_retry_seconds,
     poll_with_exponential_backoff_until,
 )
 
 
-def test_cloud_wallet_rate_limit_retry_seconds_parses_value() -> None:
-    assert cloud_wallet_rate_limit_retry_seconds("try again in 12 seconds") == 12.0
-    assert cloud_wallet_rate_limit_retry_seconds("Try Again In 3 Seconds") == 3.0
-    assert cloud_wallet_rate_limit_retry_seconds("rate limited") is None
+def test_parse_rate_limit_retry_seconds_parses_value() -> None:
+    assert parse_rate_limit_retry_seconds("try again in 12 seconds") == 12.0
+    assert parse_rate_limit_retry_seconds("Try Again In 3 Seconds") == 3.0
+    assert parse_rate_limit_retry_seconds("rate limited") is None
 
 
 def test_call_with_moderate_retry_returns_immediately_on_success() -> None:

@@ -1,5 +1,17 @@
 # Progress Log
 
+## 2026-05-27 (daemon Rust extraction plan — main / strategy_dispatch)
+
+Large Python daemon modules remain intentionally unsplit pending Rust migration (see ADR 0006 signer canonical path). Extraction order:
+
+1. **`greenfloor-signer` cycle kernel (first)** — pure decision structs for strategy action expansion, reservation request shaping, and offer lifecycle transition inputs. Python keeps IO adapters only.
+2. **`strategy_dispatch` managed path (second)** — parallel reservation acquire/release, managed offer post retry classification, and transient-error typing move to Rust; Python retains Dexie visibility polling and audit persistence calls.
+3. **`main` market cycle orchestration (third)** — batch selection, per-market cycle ordering (reconcile → inventory → strategy → cancel → coin-ops), and immediate-requeue bookkeeping move to Rust; Python retains SQLite store, websocket callbacks, and CLI entrypoints.
+
+**Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch.py` each under ~400 lines of Python glue; no new Python modules added for decomposition (Rust crates absorb complexity instead).
+
+**Tracking:** milestone checkpoints recorded here; implementation starts after Cloud Wallet retirement PR merges.
+
 ## 2026-05-26 (offer runtime modularization — F1–F14)
 
 - Deleted `greenfloor/runtime/cloud_wallet_offer_runtime.py` (~2,259 lines); split into focused modules under `greenfloor/runtime/` and `greenfloor/runtime/cloud_wallet/`.

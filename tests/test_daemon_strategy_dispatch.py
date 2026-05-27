@@ -1,207 +1,6 @@
 from __future__ import annotations
 
-import threading
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, cast
-
-import greenfloor.daemon.offer_execution as daemon_offer_execution
-from greenfloor.config import io as config_io
-from greenfloor.config.models import (
-    MarketConfig,
-    MarketInventoryConfig,
-    ProgramConfig,
-    VaultConfig,
-    VaultWalletKeyConfig,
-)
-from greenfloor.core.strategy import PlannedAction
-from greenfloor.daemon import main as daemon_main
-from greenfloor.daemon.main import (
-    _active_offer_counts_by_size,
-    _active_offer_counts_by_size_and_side,
-    _build_dexie_size_by_offer_id,
-    _execute_strategy_actions,
-    _inject_reseed_action_if_no_active_offers,
-    _match_watched_coin_ids,
-    _set_watched_coin_ids_for_market,
-    _strategy_config_from_market,
-    _update_market_coin_watchlist_from_dexie,
-)
-from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.runtime.coin_ops.planning import select_spendable_coins_for_target_amount
-from greenfloor.storage.sqlite import SqliteStore
-from tests.helpers.config_fixtures import minimal_program_config
-
-
-def _execute_local_strategy_actions(
-    *,
-    market: MarketConfig,
-    strategy_actions: list[PlannedAction],
-    program: ProgramConfig,
-    xch_price_usd: float | None,
-    dexie: Any,
-    store: Any,
-    splash: Any | None = None,
-    publish_venue: str = "dexie",
-    keyring_yaml_path: str = "",
-    **_: Any,
-) -> dict[str, Any]:
-    from greenfloor.daemon.main import _execute_single_local_action, _expand_strategy_actions
-
-    expanded = _expand_strategy_actions(strategy_actions)
-    items: list[dict[str, Any]] = []
-    executed_count = 0
-    for action in expanded:
-        item = _execute_single_local_action(
-            program=program,
-            market=market,
-            action=action,
-            xch_price_usd=xch_price_usd,
-            keyring_yaml_path=keyring_yaml_path,
-            dexie=dexie,
-            splash=splash,
-            publish_venue=publish_venue,
-            store=store,
-        )
-        if item.get("status") == "executed":
-            executed_count += 1
-        items.append(item)
-    return {
-        "planned_count": len(expanded),
-        "executed_count": executed_count,
-        "items": items,
-    }
-
-
-def _signer_program_config(**overrides: Any) -> ProgramConfig:
-    vault = VaultConfig(
-        launcher_id="0" * 64,
-        custody_threshold=1,
-        recovery_threshold=1,
-        recovery_clawback_timelock=3600,
-        custody_keys=(VaultWalletKeyConfig(public_key_hex="02" + "00" * 31, curve="SECP256R1"),),
-        recovery_keys=(),
-    )
-    base = minimal_program_config()
-    return replace(
-        base,
-        signer_kms_key_id="kms-key",
-        vault_config=vault,
-        runtime_offer_parallelism_enabled=bool(
-            overrides.get("runtime_offer_parallelism_enabled", False)
-        ),
-        runtime_offer_parallelism_max_workers=int(
-            overrides.get("runtime_offer_parallelism_max_workers", 2)
-        ),
-        runtime_reservation_ttl_seconds=int(overrides.get("runtime_reservation_ttl_seconds", 300)),
-    )
-
-
-class _FakeDexie:
-    def __init__(self, post_result: dict):
-        self.post_result = post_result
-        self.posted: list[str] = []
-        self.calls = 0
-        self.visible_offer_ids: set[str] = set()
-
-    def post_offer(self, offer: str) -> dict:
-        self.posted.append(offer)
-        self.calls += 1
-        return dict(self.post_result)
-
-    def get_offer(self, offer_id: str) -> dict[str, Any]:
-        clean_offer_id = str(offer_id).strip()
-        if clean_offer_id in self.visible_offer_ids:
-            return {"success": True, "offer": {"id": clean_offer_id, "status": 0}}
-        raise RuntimeError("dexie_http_error:404")
-
-
-class _FakeStore:
-    def __init__(self) -> None:
-        self.offer_states: list[dict] = []
-        self.audit_events: list[dict] = []
-
-    def upsert_offer_state(
-        self, *, offer_id: str, market_id: str, state: str, last_seen_status: int | None
-    ) -> None:
-        self.offer_states.append(
-            {
-                "offer_id": offer_id,
-                "market_id": market_id,
-                "state": state,
-                "last_seen_status": last_seen_status,
-            }
-        )
-
-    def list_offer_states(self, *, market_id: str | None = None, limit: int = 200) -> list[dict]:
-        _ = market_id, limit
-        return list(self.offer_states)
-
-    def list_recent_audit_events(
-        self,
-        *,
-        event_types: list[str] | None = None,
-        market_id: str | None = None,
-        limit: int = 50,
-    ) -> list[dict]:
-        rows = list(self.audit_events)
-        if event_types:
-            allowed = set(event_types)
-            rows = [row for row in rows if str(row.get("event_type", "")) in allowed]
-        if market_id:
-            rows = [row for row in rows if str(row.get("market_id", "")) == market_id]
-        return rows[: int(limit)]
-
-    def add_audit_event(self, event_type: str, payload: dict, market_id: str | None = None) -> None:
-        self.audit_events.insert(
-            0,
-            {
-                "event_type": str(event_type),
-                "market_id": market_id,
-                "payload": dict(payload),
-            },
-        )
-
-
-def _coin_ops_base_unit_mojo_multiplier(market: Any) -> int:
-    pricing = getattr(market, "pricing", None)
-    if isinstance(pricing, dict):
-        return int(pricing.get("base_unit_mojo_multiplier", 1000))
-    return int(getattr(pricing, "base_unit_mojo_multiplier", 1000))
-
-
-class _CoinOpsProgram:
-    """Minimal program stub for coin-op tests (includes dry-run and fee fields)."""
-
-    runtime_dry_run = False
-    app_network = "mainnet"
-    signer_kms_key_id = "kms-key"
-    vault_config = SimpleNamespace(launcher_id="0" * 64)
-    coin_ops_split_fee_mojos = 0
-    coin_ops_combine_fee_mojos = 0
-    home_dir = "/tmp/greenfloor-test"
-
-
-def _market() -> MarketConfig:
-    return MarketConfig(
-        market_id="m1",
-        enabled=True,
-        base_asset="asset",
-        base_symbol="BYC",
-        quote_asset="xch",
-        quote_asset_type="unstable",
-        receive_address="xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
-        mode="sell_only",
-        signer_key_id="key-main-1",
-        inventory=MarketInventoryConfig(low_watermark_base_units=100),
-        pricing={
-            "fixed_quote_per_base": 0.5,
-            "base_unit_mojo_multiplier": 1000,
-            "quote_unit_mojo_multiplier": 1000,
-        },
-    )
+from tests.helpers.daemon_test_fixtures import *  # noqa: F403
 
 
 def test_execute_strategy_actions_dry_run_plans_without_posting() -> None:
@@ -220,7 +19,7 @@ def test_execute_strategy_actions_dry_run_plans_without_posting() -> None:
         )
     ]
 
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=True,
@@ -258,18 +57,16 @@ def test_expand_strategy_actions_preserves_strategy_order() -> None:
         ),
     ]
 
-    expanded = daemon_main._expand_strategy_actions(actions)
+    expanded = expand_strategy_actions(actions)
 
     assert [action.size for action in expanded] == [1, 1, 10, 10]
 
 
 def test_execute_strategy_actions_skips_when_builder_skips(monkeypatch) -> None:
-    import greenfloor.daemon.main as daemon_main
-
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
 
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_build_offer_for_action",
         lambda **_kwargs: {"status": "skipped", "reason": "builder_not_ready", "offer": None},
     )
@@ -307,12 +104,10 @@ def test_execute_strategy_actions_skips_when_builder_skips(monkeypatch) -> None:
 
 
 def test_execute_strategy_actions_posts_and_persists_offer_ids(monkeypatch) -> None:
-    import greenfloor.daemon.main as daemon_main
-
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
 
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_build_offer_for_action",
         lambda **_kwargs: {
             "status": "executed",
@@ -356,15 +151,13 @@ def test_execute_strategy_actions_posts_and_persists_offer_ids(monkeypatch) -> N
 
 
 def test_execute_strategy_actions_retries_then_succeeds(monkeypatch) -> None:
-    import greenfloor.daemon.main as daemon_main
-
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_MAX_ATTEMPTS", "3")
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_BACKOFF_MS", "0")
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_COOLDOWN_SECONDS", "10")
 
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_build_offer_for_action",
         lambda **_kwargs: {"status": "executed", "reason": "ok", "offer": "offer1abc"},
     )
@@ -407,14 +200,12 @@ def test_execute_strategy_actions_retries_then_succeeds(monkeypatch) -> None:
 
 
 def test_execute_strategy_actions_applies_post_cooldown_after_retry_exhaust(monkeypatch) -> None:
-    import greenfloor.daemon.main as daemon_main
-
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_MAX_ATTEMPTS", "2")
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_BACKOFF_MS", "0")
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_COOLDOWN_SECONDS", "60")
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_build_offer_for_action",
         lambda **_kwargs: {"status": "executed", "reason": "ok", "offer": "offer1abc"},
     )
@@ -465,7 +256,7 @@ def test_build_offer_for_action_direct_builder_call(monkeypatch) -> None:
         reason="below_target",
     )
 
-    built = daemon_main._build_offer_for_action(
+    built = build_offer_for_action(
         program=minimal_program_config(),
         market=_market(),
         action=action,
@@ -488,9 +279,9 @@ def test_inject_reseed_action_when_no_active_offers() -> None:
     store = _FakeStore()
     store.offer_states = [{"offer_id": "old-1", "market_id": "m1", "state": "expired"}]
     market = _market()
-    strategy_config = _strategy_config_from_market(market)
+    strategy_config = strategy_config_from_market(market)
 
-    actions = _inject_reseed_action_if_no_active_offers(
+    actions = inject_reseed_action_if_no_active_offers(
         strategy_actions=[],
         strategy_config=strategy_config,
         market=market,
@@ -529,9 +320,9 @@ def test_inject_reseed_action_skips_when_offer_targets_are_satisfied() -> None:
         }
     ]
     market = _market()
-    strategy_config = _strategy_config_from_market(market)
+    strategy_config = strategy_config_from_market(market)
 
-    actions = _inject_reseed_action_if_no_active_offers(
+    actions = inject_reseed_action_if_no_active_offers(
         strategy_actions=[],
         strategy_config=strategy_config,
         market=market,
@@ -555,9 +346,9 @@ def test_inject_reseed_action_fills_missing_sizes_when_recent_mempool_is_present
         }
     ]
     market = _market()
-    strategy_config = _strategy_config_from_market(market)
+    strategy_config = strategy_config_from_market(market)
 
-    actions = _inject_reseed_action_if_no_active_offers(
+    actions = inject_reseed_action_if_no_active_offers(
         strategy_actions=[],
         strategy_config=strategy_config,
         market=market,
@@ -584,9 +375,9 @@ def test_inject_reseed_action_when_only_mempool_offer_is_stale() -> None:
         }
     ]
     market = _market()
-    strategy_config = _strategy_config_from_market(market)
+    strategy_config = strategy_config_from_market(market)
 
-    actions = _inject_reseed_action_if_no_active_offers(
+    actions = inject_reseed_action_if_no_active_offers(
         strategy_actions=[],
         strategy_config=strategy_config,
         market=market,
@@ -622,9 +413,9 @@ def test_inject_reseed_action_refills_missing_same_size_offers_immediately() -> 
         }
     ]
     market = _market()
-    strategy_config = _strategy_config_from_market(market)
+    strategy_config = strategy_config_from_market(market)
 
-    actions = _inject_reseed_action_if_no_active_offers(
+    actions = inject_reseed_action_if_no_active_offers(
         strategy_actions=[],
         strategy_config=strategy_config,
         market=market,
@@ -659,9 +450,9 @@ def test_inject_reseed_action_is_not_limited_by_old_cadence_window() -> None:
         }
     ]
     market = _market()
-    strategy_config = _strategy_config_from_market(market)
+    strategy_config = strategy_config_from_market(market)
 
-    actions = _inject_reseed_action_if_no_active_offers(
+    actions = inject_reseed_action_if_no_active_offers(
         strategy_actions=[],
         strategy_config=strategy_config,
         market=market,
@@ -674,21 +465,7 @@ def test_inject_reseed_action_is_not_limited_by_old_cadence_window() -> None:
     assert [action.repeat for action in actions] == [3, 2, 1]
 
 
-def test_apply_action_cadence_gate_passes_through_general_strategy_actions() -> None:
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "created_at": (now - timedelta(seconds=60)).isoformat(),
-            "payload": {
-                "items": [
-                    {"offer_id": "recent-one", "size": 1, "side": "sell", "status": "executed"}
-                ]
-            },
-        }
-    ]
+def test_drop_zero_repeat_strategy_actions_preserves_positive_repeats() -> None:
     actions = [
         PlannedAction(
             size=1,
@@ -702,22 +479,12 @@ def test_apply_action_cadence_gate_passes_through_general_strategy_actions() -> 
         )
     ]
 
-    gated, blocked = daemon_main._apply_action_cadence_gate(
-        actions=actions,
-        target_counts_by_side={"buy": {}, "sell": {1: 5}},
-        active_counts_by_side={"buy": {}, "sell": {1: 3}},
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-    )
+    filtered = drop_zero_repeat_strategy_actions(actions)
 
-    assert gated == actions
-    assert blocked == []
+    assert filtered == actions
 
 
-def test_apply_action_cadence_gate_filters_zero_repeat_actions() -> None:
-    store = _FakeStore()
-    now = datetime.now(UTC)
+def test_drop_zero_repeat_strategy_actions_filters_zero_repeat_actions() -> None:
     actions = [
         PlannedAction(
             size=1,
@@ -741,777 +508,16 @@ def test_apply_action_cadence_gate_filters_zero_repeat_actions() -> None:
         ),
     ]
 
-    gated, blocked = daemon_main._apply_action_cadence_gate(
-        actions=actions,
-        target_counts_by_side={"buy": {}, "sell": {1: 5}},
-        active_counts_by_side={"buy": {}, "sell": {1: 4}},
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-    )
+    filtered = drop_zero_repeat_strategy_actions(actions)
 
-    assert len(gated) == 1
-    assert gated[0].repeat == 1
-    assert blocked == []
+    assert len(filtered) == 1
+    assert filtered[0].repeat == 1
 
 
-def test_active_offer_counts_by_size_uses_offer_state_and_size_mapping() -> None:
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    store.offer_states = [
-        {"offer_id": "one-1", "market_id": "m1", "state": "open"},
-        {"offer_id": "ten-1", "market_id": "m1", "state": "refresh_due"},
-        {
-            "offer_id": "hundred-1",
-            "market_id": "m1",
-            "state": "mempool_observed",
-            "updated_at": now.isoformat(),
-        },
-        {"offer_id": "unknown-1", "market_id": "m1", "state": "open"},
-    ]
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "payload": {
-                "items": [
-                    {"offer_id": "one-1", "size": 1, "status": "executed"},
-                    {"offer_id": "ten-1", "size": 10, "status": "executed"},
-                    {"offer_id": "hundred-1", "size": 100, "status": "executed"},
-                ]
-            },
-        }
-    ]
-
-    counts, state_counts, unmapped = _active_offer_counts_by_size(
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-    )
-
-    assert counts == {1: 1, 10: 1, 100: 1}
-    assert state_counts["open"] == 2
-    assert state_counts["refresh_due"] == 1
-    assert state_counts["mempool_observed"] == 1
-    assert unmapped == 1
-
-
-def test_active_offer_counts_by_size_counts_cli_posted_offer() -> None:
-    """CLI-posted offers must be counted by _active_offer_counts_by_size.
-
-    Before the fix the CLI emitted strategy_offer_execution events without an
-    items list, so _recent_offer_sizes_by_offer_id returned no size for the
-    offer ID and it landed in active_unmapped_offer_ids instead of
-    active_counts_by_size[100]. This caused the daemon to post a duplicate
-    100-unit offer on every cycle.
-    """
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    store.offer_states = [
-        {"offer_id": "cli-hundred-1", "market_id": "m1", "state": "open"},
-    ]
-    # Event written by the fixed CLI path — has items with size/status/offer_id.
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "payload": {
-                "market_id": "m1",
-                "planned_count": 1,
-                "executed_count": 1,
-                "items": [
-                    {
-                        "size": 100,
-                        "status": "executed",
-                        "reason": "dexie_post_success",
-                        "offer_id": "cli-hundred-1",
-                        "attempts": 1,
-                    }
-                ],
-                "venue": "dexie",
-                "signature_request_id": "SignatureRequest_abc",
-                "signature_state": "SUBMITTED",
-            },
-        }
-    ]
-
-    counts, state_counts, unmapped = _active_offer_counts_by_size(
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-    )
-
-    assert counts == {1: 0, 10: 0, 100: 1}, "CLI-posted 100-unit offer must be counted"
-    assert unmapped == 0, "CLI-posted offer must not appear in unmapped"
-
-
-def test_active_offer_counts_by_size_and_side_unknown_metadata_stays_unmapped() -> None:
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    store.offer_states = [
-        {"offer_id": "offer-unknown-side", "market_id": "m1", "state": "open"},
-    ]
-    # No strategy_offer_execution audit event metadata for this active offer.
-    store.audit_events = []
-
-    counts_by_side, state_counts, unmapped = _active_offer_counts_by_size_and_side(
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-    )
-
-    assert counts_by_side["buy"] == {1: 0, 10: 0, 100: 0}
-    assert counts_by_side["sell"] == {1: 0, 10: 0, 100: 0}
-    assert state_counts["open"] == 1
-    assert unmapped == 1
-
-
-def test_active_offer_counts_by_size_and_side_malformed_side_stays_unmapped() -> None:
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    store.offer_states = [
-        {"offer_id": "offer-bad-side", "market_id": "m1", "state": "open"},
-        {"offer_id": "offer-missing-side", "market_id": "m1", "state": "open"},
-    ]
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "payload": {
-                "items": [
-                    {
-                        "offer_id": "offer-bad-side",
-                        "size": 10,
-                        "status": "executed",
-                        "side": "not-a-side",
-                    },
-                    {
-                        "offer_id": "offer-missing-side",
-                        "size": 10,
-                        "status": "executed",
-                    },
-                ]
-            },
-        }
-    ]
-
-    counts_by_side, state_counts, unmapped = _active_offer_counts_by_size_and_side(
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-    )
-
-    assert counts_by_side["buy"] == {1: 0, 10: 0, 100: 0}
-    assert counts_by_side["sell"] == {1: 0, 10: 0, 100: 0}
-    assert state_counts["open"] == 2
-    assert unmapped == 2
-
-
-def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers() -> None:
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    store.offer_states = [{"offer_id": "offer-1", "market_id": "m1", "state": "open"}]
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "payload": {"offer_id": "offer-1"},
-        }
-    ]
-    market = _market()
-    offers = [
-        {"id": "offer-1", "involved_coins": ["0x" + ("a" * 64)]},
-        {"id": "offer-2", "involved_coins": ["0x" + ("b" * 64)]},
-    ]
-
-    _update_market_coin_watchlist_from_dexie(
-        market=market,
-        offers=cast(list[dict[str, Any]], offers),
-        store=cast(Any, store),
-        clock=now,
-    )
-
-    hits = _match_watched_coin_ids(observed_coin_ids=["a" * 64, "b" * 64])
-    assert hits["m1"] == ["a" * 64]
-
-
-def test_build_dexie_size_by_offer_id_extracts_sizes() -> None:
-    """_build_dexie_size_by_offer_id maps offer IDs to base-unit sizes."""
-    base_asset = "asset-abc"
-    offers = [
-        {"id": "offer-1", "offered": [{"id": "asset-abc", "amount": 1}]},
-        {"id": "offer-10", "offered": [{"id": "asset-abc", "amount": 10}]},
-        {"id": "offer-100", "offered": [{"id": "asset-abc", "amount": 100}]},
-        {"id": "offer-other", "offered": [{"id": "other-asset", "amount": 5}]},
-    ]
-    result = _build_dexie_size_by_offer_id(offers, base_asset)
-    assert result == {"offer-1": 1, "offer-10": 10, "offer-100": 100}
-    assert "offer-other" not in result
-
-
-def test_active_offer_counts_by_size_uses_dexie_hint_for_beyond_cap_offer() -> None:
-    """Offers beyond the Dexie 20-offer cap must be resolved via dexie_size_by_offer_id.
-
-    When we have more active offers than Dexie returns in its list endpoint, the
-    beyond-cap offer won't be in the 20-offer response. The daemon fetches it
-    individually from dexie.get_offer() and passes the result as dexie_size_by_offer_id.
-    The ownership gate ensures only our own offers are in the DB, so this lookup is safe.
-    """
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    store.offer_states = [
-        {"offer_id": "beyond-cap-hundred", "market_id": "m1", "state": "open"},
-    ]
-    store.audit_events = []
-
-    counts_without, _, unmapped_without = _active_offer_counts_by_size(
-        store=cast(Any, store), market_id="m1", clock=now
-    )
-    assert counts_without == {1: 0, 10: 0, 100: 0}
-    assert unmapped_without == 1
-
-    counts_with, _, unmapped_with = _active_offer_counts_by_size(
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-        dexie_size_by_offer_id={"beyond-cap-hundred": 100},
-    )
-    assert counts_with == {1: 0, 10: 0, 100: 1}
-    assert unmapped_with == 0
-
-
-def test_active_offer_counts_by_size_foreign_offer_stays_unmapped() -> None:
-    """Offers in the DB with no audit event entry must remain unmapped, never counted.
-
-    This is the observable invariant enforced by the Dexie ownership gate: after the
-    fix the Dexie state-update loop skips offers that are not in our_offer_ids, so
-    foreign offers never reach the DB. If they somehow did, _active_offer_counts_by_size
-    must still not count them by size — they land in active_unmapped_offer_ids instead,
-    keeping counts conservative and leaving a visible signal in the strategy_state_source
-    log.
-    """
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    store.offer_states = [
-        # Our offer, correctly mapped via audit event.
-        {"offer_id": "ours-100", "market_id": "m1", "state": "open"},
-        # Foreign offer — in open state but no audit event (never posted by us).
-        {"offer_id": "foreign-100", "market_id": "m1", "state": "open"},
-    ]
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "payload": {"items": [{"offer_id": "ours-100", "size": 100, "status": "executed"}]},
-        }
-    ]
-
-    counts, _, unmapped = _active_offer_counts_by_size(
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-    )
-
-    assert counts == {1: 0, 10: 0, 100: 1}, "Only our mapped offer should be counted"
-    assert unmapped == 1, "Foreign offer must stay unmapped, not inflate the count"
-
-
-def test_active_offer_counts_by_size_tracks_non_legacy_size() -> None:
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    store.offer_states = [
-        {"offer_id": "ours-50", "market_id": "m1", "state": "open"},
-    ]
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "payload": {"items": [{"offer_id": "ours-50", "size": 50, "status": "executed"}]},
-        }
-    ]
-    counts, _, unmapped = _active_offer_counts_by_size(
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-        tracked_sizes={1, 10, 50},
-    )
-    assert counts == {1: 0, 10: 0, 50: 1}
-    assert unmapped == 0
-
-
-def test_active_offer_counts_excludes_stale_pending_visibility_offer() -> None:
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    stale_created_at = (now - timedelta(minutes=5)).isoformat()
-    store.offer_states = [
-        {"offer_id": "pending-50", "market_id": "m1", "state": "open"},
-    ]
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "created_at": stale_created_at,
-            "payload": {
-                "items": [
-                    {
-                        "offer_id": "pending-50",
-                        "size": 50,
-                        "status": "executed",
-                        "reason": "managed_offer_post_success_dexie_visibility_pending",
-                    }
-                ]
-            },
-        }
-    ]
-    counts, _, unmapped = _active_offer_counts_by_size(
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-        dexie_size_by_offer_id={},
-        tracked_sizes={50},
-    )
-    assert counts == {50: 0}
-    assert unmapped == 1
-
-
-def test_active_offer_counts_keeps_pending_visibility_offer_when_seen_on_dexie() -> None:
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    stale_created_at = (now - timedelta(minutes=5)).isoformat()
-    store.offer_states = [
-        {"offer_id": "pending-50", "market_id": "m1", "state": "open"},
-    ]
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "created_at": stale_created_at,
-            "payload": {
-                "items": [
-                    {
-                        "offer_id": "pending-50",
-                        "size": 50,
-                        "status": "executed",
-                        "reason": "managed_offer_post_success_dexie_visibility_pending",
-                    }
-                ]
-            },
-        }
-    ]
-    counts, _, unmapped = _active_offer_counts_by_size(
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-        dexie_size_by_offer_id={"pending-50": 50},
-        tracked_sizes={50},
-    )
-    assert counts == {50: 1}
-    assert unmapped == 0
-
-
-def test_active_offer_counts_keeps_pending_when_no_dexie_snapshot() -> None:
-    """When dexie_size_by_offer_id is None (no Dexie snapshot this cycle),
-    _is_stale_pending_visibility_offer returns False unconditionally, so the
-    offer is not evicted regardless of age.
-    """
-    store = _FakeStore()
-    now = datetime.now(UTC)
-    very_old = (now - timedelta(hours=1)).isoformat()
-    store.offer_states = [
-        {"offer_id": "pending-old", "market_id": "m1", "state": "open"},
-    ]
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "created_at": very_old,
-            "payload": {
-                "items": [
-                    {
-                        "offer_id": "pending-old",
-                        "size": 50,
-                        "status": "executed",
-                        "reason": "managed_offer_post_success_dexie_visibility_pending",
-                    }
-                ]
-            },
-        }
-    ]
-    counts, _, unmapped = _active_offer_counts_by_size(
-        store=cast(Any, store),
-        market_id="m1",
-        clock=now,
-        dexie_size_by_offer_id=None,
-        tracked_sizes={50},
-    )
-    assert counts == {50: 1}
-    assert unmapped == 0
-
-
-def test_reconcile_offer_states_expires_watched_offer_on_direct_dexie_404(tmp_path: Path) -> None:
-    db_path = tmp_path / "state.sqlite"
-    store = SqliteStore(db_path)
-    market = _market()
-    now = datetime.now(UTC)
-    try:
-        store.upsert_offer_state(
-            offer_id="offer-50",
-            market_id=market.market_id,
-            state="open",
-            last_seen_status=0,
-        )
-        store.add_audit_event(
-            "strategy_offer_execution",
-            {
-                "market_id": market.market_id,
-                "planned_count": 1,
-                "executed_count": 1,
-                "items": [
-                    {
-                        "offer_id": "offer-50",
-                        "size": 50,
-                        "side": "sell",
-                        "status": "executed",
-                        "reason": "dexie_post_success",
-                    }
-                ],
-            },
-            market_id=market.market_id,
-        )
-
-        class _FakeDexie:
-            def get_offers(self, offered: str, requested: str) -> list[dict[str, Any]]:
-                _ = offered, requested
-                return []
-
-            def get_offer(self, offer_id: str, *, timeout: int = 20) -> dict[str, Any]:
-                _ = offer_id, timeout
-                raise RuntimeError("HTTP Error 404: Not Found")
-
-        result = daemon_main._MarketCycleResult()
-        daemon_main._reconcile_offer_states(
-            market=market,
-            network="mainnet",
-            dexie=cast(Any, _FakeDexie()),
-            store=store,
-            now=now,
-            result=result,
-        )
-
-        rows = {
-            r["offer_id"]: r for r in store.list_offer_states(market_id=market.market_id, limit=20)
-        }
-        transitions = store.list_recent_audit_events(
-            event_types=["offer_lifecycle_transition"],
-            market_id=market.market_id,
-            limit=20,
-        )
-    finally:
-        store.close()
-
-    assert rows["offer-50"]["state"] == "expired"
-    assert rows["offer-50"]["last_seen_status"] is None
-    assert transitions[0]["payload"]["offer_id"] == "offer-50"
-    assert transitions[0]["payload"]["signal_source"] == "dexie_get_offer_404"
-    assert transitions[0]["payload"]["dexie_error"] == "HTTP Error 404: Not Found"
-    assert result.immediate_requeue_requested is True
-    assert "expired" in result.immediate_requeue_signals
-
-
-def test_reconcile_offer_states_requests_immediate_requeue_on_tx_confirmed(
-    tmp_path: Path,
-) -> None:
-    db_path = tmp_path / "state.sqlite"
-    store = SqliteStore(db_path)
-    market = _market()
-    try:
-        store.upsert_offer_state(
-            offer_id="offer-confirmed",
-            market_id=market.market_id,
-            state="open",
-            last_seen_status=0,
-        )
-
-        class _FakeDexie:
-            def get_offers(self, offered: str, requested: str) -> list[dict[str, Any]]:
-                _ = offered, requested
-                return [{"id": "offer-confirmed", "status": 4}]
-
-            def get_offer(self, offer_id: str, *, timeout: int = 20) -> dict[str, Any]:
-                _ = offer_id, timeout
-                raise RuntimeError("unexpected_get_offer_call")
-
-        result = daemon_main._MarketCycleResult()
-        daemon_main._reconcile_offer_states(
-            market=market,
-            network="mainnet",
-            dexie=cast(Any, _FakeDexie()),
-            store=store,
-            now=datetime.now(UTC),
-            result=result,
-        )
-
-        rows = {
-            r["offer_id"]: r for r in store.list_offer_states(market_id=market.market_id, limit=20)
-        }
-    finally:
-        store.close()
-
-    assert rows["offer-confirmed"]["state"] == "tx_block_confirmed"
-    assert rows["offer-confirmed"]["last_seen_status"] == 4
-    assert result.immediate_requeue_requested is True
-    assert "tx_confirmed" in result.immediate_requeue_signals
-
-
-def test_reconcile_offer_states_resolves_quote_asset_before_dexie_fetch(
-    monkeypatch, tmp_path: Path
-) -> None:
-    store = daemon_main.SqliteStore(tmp_path / "state.db")
-    market = _market()
-    market.quote_asset = "wUSDC.b"
-    cats = tmp_path / "cats.yaml"
-    cats.write_text(
-        "\n".join(
-            [
-                "cats:",
-                "  - base_symbol: wUSDC.b",
-                "    asset_id: fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(config_io, "default_cats_config_path", lambda: cats)
-    captured: dict[str, str] = {}
-
-    class _FakeDexie:
-        def get_offers(self, offered: str, requested: str) -> list[dict[str, Any]]:
-            captured["offered"] = offered
-            captured["requested"] = requested
-            return []
-
-    try:
-        result = daemon_main._MarketCycleResult()
-        daemon_main._reconcile_offer_states(
-            market=market,
-            network="mainnet",
-            dexie=cast(Any, _FakeDexie()),
-            store=store,
-            now=datetime.now(UTC),
-            result=result,
-        )
-    finally:
-        store.close()
-
-    assert captured == {
-        "offered": "asset",
-        "requested": "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d",
-    }
-
-
-def test_reconcile_offer_states_resolves_base_asset_before_dexie_fetch(
-    monkeypatch,
-    tmp_path: Path,
-) -> None:
-    store = daemon_main.SqliteStore(tmp_path / "state.db")
-    market = _market()
-    market.base_asset = "BYC"
-    hex_id = "a" * 64
-    cats = tmp_path / "cats.yaml"
-    cats.write_text(
-        "\n".join(
-            [
-                "cats:",
-                "  - base_symbol: BYC",
-                f"    asset_id: {hex_id}",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(config_io, "default_cats_config_path", lambda: cats)
-    captured: dict[str, str] = {}
-
-    class _FakeDexie:
-        def get_offers(self, offered: str, requested: str) -> list[dict[str, Any]]:
-            captured["offered"] = offered
-            captured["requested"] = requested
-            return []
-
-    try:
-        result = daemon_main._MarketCycleResult()
-        daemon_main._reconcile_offer_states(
-            market=market,
-            network="mainnet",
-            dexie=cast(Any, _FakeDexie()),
-            store=store,
-            now=datetime.now(UTC),
-            result=result,
-        )
-    finally:
-        store.close()
-
-    assert captured == {"offered": hex_id, "requested": "xch"}
-
-
-def test_reconcile_offer_states_dexie_fallback_status_does_not_mark_mempool(
-    tmp_path: Path,
-) -> None:
-    db_path = tmp_path / "state.sqlite"
-    store = SqliteStore(db_path)
-    market = _market()
-    try:
-        store.upsert_offer_state(
-            offer_id="offer-open",
-            market_id=market.market_id,
-            state="open",
-            last_seen_status=0,
-        )
-
-        class _FakeDexie:
-            def get_offers(self, offered: str, requested: str) -> list[dict[str, Any]]:
-                _ = offered, requested
-                return [{"id": "offer-open", "status": 5}]
-
-            def get_offer(self, offer_id: str, *, timeout: int = 20) -> dict[str, Any]:
-                _ = offer_id, timeout
-                raise RuntimeError("unexpected_get_offer_call")
-
-        result = daemon_main._MarketCycleResult()
-        daemon_main._reconcile_offer_states(
-            market=market,
-            network="mainnet",
-            dexie=cast(Any, _FakeDexie()),
-            store=store,
-            now=datetime.now(UTC),
-            result=result,
-        )
-
-        rows = {
-            r["offer_id"]: r for r in store.list_offer_states(market_id=market.market_id, limit=20)
-        }
-    finally:
-        store.close()
-
-    assert rows["offer-open"]["state"] == "open"
-    assert rows["offer-open"]["last_seen_status"] == 5
-
-
-def test_select_market_batch_prioritizes_immediate_requeue_then_round_robin() -> None:
-    @dataclass
-    class _Market:
-        market_id: str
-        enabled: bool = True
-
-    markets = [_Market("m1"), _Market("m2"), _Market("m3"), _Market("m4")]
-    state = daemon_main._MarketDispatchState()
-    daemon_main._enqueue_immediate_requeue_market(state, "m3")
-
-    selected, consumed = daemon_main._select_market_batch(
-        enabled_markets=markets,
-        slot_count=2,
-        dispatch_state=state,
-    )
-    assert [m.market_id for m in selected] == ["m3", "m1"]
-    assert consumed == ["m3"]
-    assert list(state.immediate_requeue_ids) == []
-
-    selected_next, consumed_next = daemon_main._select_market_batch(
-        enabled_markets=markets,
-        slot_count=2,
-        dispatch_state=state,
-    )
-    assert [m.market_id for m in selected_next] == ["m2", "m3"]
-    assert consumed_next == []
-
-
-def test_detect_stale_open_offers_for_requeue_marks_expired_status(tmp_path: Path) -> None:
-    store = SqliteStore(tmp_path / "state.db")
-    try:
-        store.upsert_offer_state(
-            offer_id="offer-expired",
-            market_id="m1",
-            state="open",
-            last_seen_status=0,
-        )
-
-        class _FakeDexie:
-            @staticmethod
-            def get_offer(offer_id: str, *, timeout: int = 5) -> dict[str, Any]:
-                _ = timeout
-                assert offer_id == "offer-expired"
-                return {"offer": {"id": offer_id, "status": 6}}
-
-        payload = daemon_main._detect_stale_open_offers_for_requeue(
-            store=store,
-            dexie=cast(Any, _FakeDexie()),
-            enabled_market_ids={"m1"},
-        )
-    finally:
-        store.close()
-
-    assert payload["checked_offer_count"] == 1
-    assert payload["requeue_market_ids"] == ["m1"]
-    assert payload["hits"][0]["reason"] == "offer_expired"
-
-
-def test_detect_stale_open_offers_for_requeue_marks_missing_404(tmp_path: Path) -> None:
-    store = SqliteStore(tmp_path / "state.db")
-    try:
-        store.upsert_offer_state(
-            offer_id="offer-missing",
-            market_id="m2",
-            state="open",
-            last_seen_status=0,
-        )
-
-        class _FakeDexie:
-            @staticmethod
-            def get_offer(offer_id: str, *, timeout: int = 5) -> dict[str, Any]:
-                _ = offer_id, timeout
-                raise RuntimeError("HTTP Error 404: Not Found")
-
-        payload = daemon_main._detect_stale_open_offers_for_requeue(
-            store=store,
-            dexie=cast(Any, _FakeDexie()),
-            enabled_market_ids={"m2"},
-        )
-    finally:
-        store.close()
-
-    assert payload["checked_offer_count"] == 1
-    assert payload["requeue_market_ids"] == ["m2"]
-    assert payload["hits"][0]["reason"] == "offer_missing_404"
-
-
-def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:
-    _set_watched_coin_ids_for_market(market_id="m-empty", coin_ids={"c" * 64})
-    assert _match_watched_coin_ids(observed_coin_ids=["d" * 64]) == {}
-
-
-def test_resolve_quote_asset_for_offer_maps_symbol_from_cats(monkeypatch, tmp_path) -> None:
-    cats = tmp_path / "cats.yaml"
-    cats.write_text(
-        "\n".join(
-            [
-                "cats:",
-                "  - base_symbol: wUSDC.b",
-                "    asset_id: fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(config_io, "default_cats_config_path", lambda: cats)
-
-    resolved = daemon_main._resolve_quote_asset_for_offer(
-        quote_asset="wUSDC.b",
-        network="mainnet",
-    )
-    assert resolved == "fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d"
-
-
-def test_execute_strategy_actions_uses_cloud_wallet_path_when_configured(monkeypatch) -> None:
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+def test_execute_strategy_actions_uses_signer_managed_path_when_configured(monkeypatch) -> None:
+    POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-1"},
     )
@@ -1533,7 +539,7 @@ def test_execute_strategy_actions_uses_cloud_wallet_path_when_configured(monkeyp
         )
     ]
 
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -1548,11 +554,11 @@ def test_execute_strategy_actions_uses_cloud_wallet_path_when_configured(monkeyp
     assert result["items"][0]["reason"] == "managed_offer_post_success"
 
 
-def test_execute_strategy_actions_cloud_wallet_requires_dexie_visibility(monkeypatch) -> None:
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+def test_execute_strategy_actions_signer_managed_requires_dexie_visibility(monkeypatch) -> None:
+    POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-missing"},
     )
@@ -1577,7 +583,7 @@ def test_execute_strategy_actions_cloud_wallet_requires_dexie_visibility(monkeyp
         )
     ]
 
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -1593,7 +599,7 @@ def test_execute_strategy_actions_cloud_wallet_requires_dexie_visibility(monkeyp
     assert "managed_offer_post_not_visible_on_dexie" in result["items"][0]["reason"]
 
 
-def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
+def test_execute_strategy_actions_signer_managed_accepts_transient_dexie_http_404(
     monkeypatch,
 ) -> None:
     """A transient 404 from Dexie is treated as pending-visibility, not a hard failure.
@@ -1601,10 +607,10 @@ def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
     The offer is counted as executed with _PENDING_VISIBILITY_REASON so the
     active-offer reader keeps it in scope until the grace period expires.
     """
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-pending"},
     )
@@ -1629,7 +635,7 @@ def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
         )
     ]
 
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -1642,20 +648,20 @@ def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
 
     assert result["executed_count"] == 1
     assert result["items"][0]["status"] == "executed"
-    assert result["items"][0]["reason"] == daemon_main._PENDING_VISIBILITY_REASON
+    assert result["items"][0]["reason"] == PENDING_VISIBILITY_REASON
     assert result["items"][0]["offer_id"] == "offer-fallback-pending"
 
 
 def test_execute_strategy_actions_preserves_planned_size_order(monkeypatch) -> None:
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
     seen_sizes: list[int] = []
 
-    def _fake_cloud_wallet_post(**kwargs: Any) -> dict[str, Any]:
+    def _fake_managed_offer_post(**kwargs: Any) -> dict[str, Any]:
         seen_sizes.append(int(kwargs["size_base_units"]))
         size = int(kwargs["size_base_units"])
         return {"success": True, "offer_id": f"offer-{size}"}
 
-    monkeypatch.setattr(daemon_offer_execution, "_managed_offer_post", _fake_cloud_wallet_post)
+    monkeypatch.setattr(strategy_dispatch, "_managed_offer_post", _fake_managed_offer_post)
 
     _Program = _signer_program_config
 
@@ -1692,7 +698,7 @@ def test_execute_strategy_actions_preserves_planned_size_order(monkeypatch) -> N
         ),
     ]
 
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -1707,17 +713,17 @@ def test_execute_strategy_actions_preserves_planned_size_order(monkeypatch) -> N
     assert seen_sizes == [1, 10, 100]
 
 
-def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(monkeypatch) -> None:
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+def test_execute_strategy_actions_signer_managed_failure_skips_without_builder(monkeypatch) -> None:
+    POST_COOLDOWN_UNTIL.clear()
     calls = {"builder": 0}
 
     def _unexpected_builder(**_kwargs):
         calls["builder"] += 1
         return {"status": "executed", "reason": "offer_builder_success", "offer": "offer1unused"}
 
-    monkeypatch.setattr(daemon_offer_execution, "_build_offer_for_action", _unexpected_builder)
+    monkeypatch.setattr(strategy_dispatch, "_build_offer_for_action", _unexpected_builder)
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_managed_offer_post",
         lambda **_kwargs: {"success": False, "error": "vault_signing_unavailable"},
     )
@@ -1738,7 +744,7 @@ def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(mon
         )
     ]
 
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -1755,10 +761,12 @@ def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(mon
     assert calls["builder"] == 0
 
 
-def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(monkeypatch) -> None:
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+def test_execute_strategy_actions_parallel_signer_managed_reservation_contention(
+    monkeypatch,
+) -> None:
+    POST_COOLDOWN_UNTIL.clear()
 
-    class _FakeCloudWallet:
+    class _FakeManagedSigner:
         def list_coins(self, *, include_pending: bool = True):
             _ = include_pending
             return [
@@ -1775,7 +783,7 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(m
             ]
 
     monkeypatch.setattr(
-        daemon_offer_execution,
+        inventory_scan,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -1783,12 +791,12 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(m
         ],
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
     )
@@ -1820,6 +828,9 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(m
         def release(self, *, reservation_id: str, status: str) -> None:
             self.released.append((str(reservation_id), str(status)))
 
+        def probe_storage(self) -> None:
+            return None
+
     coordinator = _DeterministicContentionCoordinator()
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-parallel"})
     dexie.visible_offer_ids = {"offer-parallel"}
@@ -1835,7 +846,7 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(m
             reason="no_active_offer_reseed",
         )
     ]
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -1855,9 +866,9 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(m
 def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
     monkeypatch, tmp_path
 ) -> None:
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
 
-    class _FakeCloudWallet:
+    class _FakeManagedSigner:
         def list_coins(self, *, include_pending: bool = True):
             _ = include_pending
             return [
@@ -1874,7 +885,7 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
             ]
 
     monkeypatch.setattr(
-        daemon_offer_execution,
+        inventory_scan,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -1882,12 +893,12 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
         ],
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_managed_offer_post",
         lambda **_kwargs: {"success": False, "error": "vault_unavailable"},
     )
@@ -1910,7 +921,7 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
             reason="no_active_offer_reseed",
         )
     ]
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -1964,9 +975,9 @@ def test_reservation_coordinator_expires_stale_leases(tmp_path) -> None:
 def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
     monkeypatch, tmp_path
 ) -> None:
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
 
-    class _FakeCloudWallet:
+    class _FakeManagedSigner:
         def list_coins(self, *, include_pending: bool = True):
             _ = include_pending
             return [
@@ -1975,7 +986,7 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
             ]
 
     monkeypatch.setattr(
-        daemon_offer_execution,
+        inventory_scan,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -1983,12 +994,12 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
         ],
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
     )
@@ -2015,7 +1026,7 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
             reason="no_active_offer_reseed",
         )
     ]
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -2032,22 +1043,17 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
     )
 
 
-def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservation_error(
+def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_transient_reservation_error(
     monkeypatch,
 ) -> None:
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
 
-    class _FakeCloudWallet:
-        def list_coins(self, *, include_pending: bool = True):
-            _ = include_pending
-            return [{"amount": 5000, "state": "SPENDABLE", "asset": {"id": "asset"}}]
-
-    class _BrokenCoordinator:
-        def try_acquire(self, **_kwargs):
-            raise RuntimeError("reservation_storage_down")
+    class _ContentionCoordinator:
+        def probe_storage(self) -> None:
+            raise ReservationContentionError("reservation contention on asset lock")
 
     monkeypatch.setattr(
-        daemon_offer_execution,
+        inventory_scan,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -2055,12 +1061,12 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservati
         ],
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback"},
     )
@@ -2082,7 +1088,7 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservati
             reason="no_active_offer_reseed",
         )
     ]
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -2091,27 +1097,23 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservati
         store=cast(Any, store),
         publish_venue="dexie",
         program=_Program(),
-        reservation_coordinator=cast(Any, _BrokenCoordinator()),
+        reservation_coordinator=cast(Any, _ContentionCoordinator()),
     )
     assert result["executed_count"] == 1
     assert any(event["event_type"] == "offer_parallel_fallback" for event in store.audit_events)
 
 
-def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worker_failures(
-    monkeypatch, tmp_path
+def test_execute_strategy_actions_parallel_raises_on_non_transient_reservation_error(
+    monkeypatch,
 ) -> None:
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
-    monkeypatch.setenv("GREENFLOOR_OFFER_POST_MAX_ATTEMPTS", "1")
-    monkeypatch.setenv("GREENFLOOR_OFFER_POST_BACKOFF_MS", "0")
-    monkeypatch.setenv("GREENFLOOR_OFFER_POST_COOLDOWN_SECONDS", "60")
+    POST_COOLDOWN_UNTIL.clear()
 
-    class _FakeCloudWallet:
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [{"amount": 20_000, "state": "SETTLED", "asset": {"id": "asset_global"}}]
+    class _BrokenCoordinator:
+        def probe_storage(self) -> None:
+            raise ReservationStorageError("reservation_storage_down")
 
     monkeypatch.setattr(
-        daemon_offer_execution,
+        inventory_scan,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -2119,12 +1121,67 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
         ],
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
+        "_resolve_signer_offer_asset_ids_for_reservation",
+        lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
+    )
+
+    def _Program() -> ProgramConfig:
+        return _signer_program_config(runtime_offer_parallelism_enabled=True)
+
+    actions = [
+        PlannedAction(
+            size=1,
+            repeat=1,
+            pair="usdc",
+            expiry_unit="minutes",
+            expiry_value=10,
+            cancel_after_create=True,
+            reason="no_active_offer_reseed",
+        )
+    ]
+    with pytest.raises(ReservationStorageError, match="reservation_storage_down"):
+        execute_strategy_actions(
+            market=_market(),
+            strategy_actions=actions,
+            runtime_dry_run=False,
+            xch_price_usd=30.0,
+            dexie=cast(Any, _FakeDexie(post_result={"success": True, "id": "offer-fallback"})),
+            store=cast(Any, _FakeStore()),
+            publish_venue="dexie",
+            program=_Program(),
+            reservation_coordinator=cast(Any, _BrokenCoordinator()),
+        )
+
+
+def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worker_failures(
+    monkeypatch, tmp_path
+) -> None:
+    POST_COOLDOWN_UNTIL.clear()
+    monkeypatch.setenv("GREENFLOOR_OFFER_POST_MAX_ATTEMPTS", "1")
+    monkeypatch.setenv("GREENFLOOR_OFFER_POST_BACKOFF_MS", "0")
+    monkeypatch.setenv("GREENFLOOR_OFFER_POST_COOLDOWN_SECONDS", "60")
+
+    class _FakeManagedSigner:
+        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
+            _ = asset_id, include_pending
+            return [{"amount": 20_000, "state": "SETTLED", "asset": {"id": "asset_global"}}]
+
+    monkeypatch.setattr(
+        inventory_scan,
+        "list_unspent_coins_by_receive_address",
+        lambda **_kwargs: [
+            {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
+            {"amount": 10_000_000, "state": "CONFIRMED", "id": "coin-xch", "name": "coin-xch"},
+        ],
+    )
+    monkeypatch.setattr(
+        strategy_dispatch,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_execute_single_managed_action",
         lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
     )
@@ -2149,7 +1206,7 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
             side="sell",
         )
     ]
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=market,
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -2165,14 +1222,14 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
         str(item.get("reason", "")).startswith("parallel_offer_worker_error:")
         for item in result["items"]
     )
-    remaining_ms = daemon_main._cooldown_remaining_ms(
-        daemon_main._POST_COOLDOWN_UNTIL,
+    remaining_ms = cooldown_remaining_ms(
+        POST_COOLDOWN_UNTIL,
         f"dexie:{market.market_id}",
     )
     assert remaining_ms > 0
 
 
-def test_execute_strategy_actions_cloud_wallet_nonparallel_converts_worker_exception_to_skip(
+def test_execute_strategy_actions_signer_managed_nonparallel_converts_worker_exception_to_skip(
     monkeypatch,
 ) -> None:
     def _Program():
@@ -2193,12 +1250,12 @@ def test_execute_strategy_actions_cloud_wallet_nonparallel_converts_worker_excep
         )
     ]
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_execute_single_managed_action",
         lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
     )
 
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -2217,9 +1274,9 @@ def test_execute_strategy_actions_cloud_wallet_nonparallel_converts_worker_excep
 def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservation(
     monkeypatch, tmp_path
 ) -> None:
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
 
-    class _FakeCloudWallet:
+    class _FakeManagedSigner:
         def list_coins(self, *, include_pending: bool = True):
             _ = include_pending
             return [
@@ -2228,7 +1285,7 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
             ]
 
     monkeypatch.setattr(
-        daemon_offer_execution,
+        inventory_scan,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -2236,12 +1293,12 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
         ],
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-resolved-asset"},
     )
@@ -2267,7 +1324,7 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
             reason="no_active_offer_reseed",
         )
     ]
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=market,
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -2284,9 +1341,9 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
 def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
     monkeypatch, tmp_path
 ) -> None:
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
 
-    class _FakeCloudWallet:
+    class _FakeManagedSigner:
         def list_coins(
             self, *, asset_id: str | None = None, include_pending: bool = True
         ) -> list[dict[str, Any]]:
@@ -2308,7 +1365,7 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
             return []
 
     monkeypatch.setattr(
-        daemon_offer_execution,
+        inventory_scan,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -2316,12 +1373,12 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
         ],
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-scoped"},
     )
@@ -2347,7 +1404,7 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
             reason="no_active_offer_reseed",
         )
     ]
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=market,
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -2367,9 +1424,9 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
 def test_execute_strategy_actions_parallel_prefers_single_input_offer(
     monkeypatch, tmp_path
 ) -> None:
-    daemon_main._POST_COOLDOWN_UNTIL.clear()
+    POST_COOLDOWN_UNTIL.clear()
 
-    class _FakeCloudWallet:
+    class _FakeManagedSigner:
         def list_coins(
             self, *, asset_id: str | None = None, include_pending: bool = True
         ) -> list[dict[str, Any]]:
@@ -2396,12 +1453,12 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
             return []
 
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_offer_execution,
+        strategy_dispatch,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-should-not-post"},
     )
@@ -2441,11 +1498,11 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
         return []
 
     monkeypatch.setattr(
-        daemon_offer_execution,
+        inventory_scan,
         "list_unspent_coins_by_receive_address",
         _list_unspent_coins,
     )
-    result = _execute_strategy_actions(
+    result = execute_strategy_actions(
         market=market,
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -2464,7 +1521,7 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
 
 def test_coinset_spendable_base_unit_coin_amounts_filters_and_converts(monkeypatch) -> None:
     monkeypatch.setattr(
-        daemon_offer_execution,
+        inventory_scan,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 10000, "state": "CONFIRMED"},
@@ -2472,7 +1529,7 @@ def test_coinset_spendable_base_unit_coin_amounts_filters_and_converts(monkeypat
             {"amount": 20000, "state": "PENDING"},
         ],
     )
-    got = daemon_main._coinset_spendable_base_unit_coin_amounts(
+    got = coinset_spendable_base_unit_coin_amounts(
         program=_signer_program_config(),
         market=_market(),
         resolved_asset_id="Asset_byc",
@@ -2482,7 +1539,7 @@ def test_coinset_spendable_base_unit_coin_amounts_filters_and_converts(monkeypat
 
 
 def test_single_input_preferred_skip_reason_ignores_unknown_max_single() -> None:
-    reason = daemon_main._single_input_preferred_skip_reason(
+    reason = single_input_preferred_skip_reason(
         requested_amounts={"Asset_byc": 10000},
         spendable_profiles={
             "Asset_byc": {

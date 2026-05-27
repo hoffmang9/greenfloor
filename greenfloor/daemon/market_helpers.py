@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.config.io import default_cats_config_path, resolve_quote_asset_for_offer
-from greenfloor.hex_utils import is_hex_id
+from greenfloor.hex_utils import default_mojo_multiplier_for_asset, is_hex_id
 
 _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS = 500
 
@@ -63,3 +63,18 @@ def _resolve_quote_asset_for_offer(*, quote_asset: str, network: str) -> str:
 
 def _market_pricing(market: Any) -> dict[str, Any]:
     return dict(getattr(market, "pricing", {}) or {})
+
+
+def _normalize_offer_side(value: Any) -> str:
+    side = str(value or "").strip().lower()
+    return "buy" if side == "buy" else "sell"
+
+
+def _base_unit_mojo_multiplier_for_market(*, market: Any) -> int:
+    pricing = getattr(market, "pricing", {}) or {}
+    default_multiplier = default_mojo_multiplier_for_asset(str(getattr(market, "base_asset", "")))
+    try:
+        multiplier = int(pricing.get("base_unit_mojo_multiplier", default_multiplier))
+    except (TypeError, ValueError):
+        multiplier = default_multiplier
+    return max(1, multiplier)

@@ -16,12 +16,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import yaml  # noqa: F401
-
-from greenfloor.adapters.coinset import (
-    CoinsetAdapter,  # noqa: F401
-    extract_coinset_tx_ids_from_offer_payload,
-)
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.price import PriceAdapter, XchPriceProvider
 from greenfloor.adapters.splash import SplashAdapter
@@ -31,7 +25,6 @@ from greenfloor.config.io import (
     load_markets_config_with_optional_overlay,
     load_program_config,
     resolve_state_db_path,
-    resolve_trade_asset_for_dexie,
 )
 from greenfloor.config.models import (
     ProgramConfig,
@@ -39,70 +32,51 @@ from greenfloor.config.models import (
 )
 from greenfloor.core.inventory import compute_bucket_counts_from_coins
 from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert, utcnow
-from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
+from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.core.strategy import evaluate_market
 from greenfloor.daemon.cancel_policy import _execute_cancel_policy_for_market
 from greenfloor.daemon.coin_ops_cycle import (
-    _base_unit_mojo_multiplier_for_market,
-    _effective_sell_bucket_counts_for_coin_ops,  # noqa: F401
     _executed_sell_offer_counts_by_size,
     _plan_and_execute_coin_ops,
 )
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient
 from greenfloor.daemon.cooldowns import (
-    _CANCEL_COOLDOWN_UNTIL,  # noqa: F401
-    _MANAGED_OFFER_HEALTH_WINDOW,  # noqa: F401
-    _POST_COOLDOWN_UNTIL,  # noqa: F401
-    _cancel_retry_config,  # noqa: F401
-    _cooldown_remaining_ms,  # noqa: F401
     _env_int,
     _managed_offer_market_health_payload,
-    _post_retry_config,  # noqa: F401
-    _retry_with_backoff,  # noqa: F401
-    _set_cooldown,  # noqa: F401
+)
+from greenfloor.daemon.inventory_scan import (
+    _build_coinset_adapter,
+    _coinset_cat_spendable_base_unit_coin_amounts,
+    _coinset_spendable_base_unit_coin_amounts,
+    _resolve_coinset_ws_url,
+    _run_coinset_signal_capture_once,
 )
 from greenfloor.daemon.market_helpers import (
-    _abs_move_bps,  # noqa: F401
-    _market_pricing,  # noqa: F401
-    _normalize_strategy_pair,  # noqa: F401
-    _resolve_quote_asset_for_offer,
+    _base_unit_mojo_multiplier_for_market,
+    _normalize_offer_side,
 )
 from greenfloor.daemon.market_logging import (
     _daemon_logger,
     _log_market_decision,
 )
-from greenfloor.daemon.offer_execution import (
-    _PENDING_VISIBILITY_REASON,  # noqa: F401
-    _active_offer_counts_by_size,
-    _active_offer_counts_by_size_and_side,
-    _apply_action_cadence_gate,
-    _build_coinset_adapter,
-    _build_dexie_size_by_offer_id,
-    _build_offer_for_action,  # noqa: F401
-    _coinset_cat_spendable_base_unit_coin_amounts,
-    _coinset_spendable_base_unit_coin_amounts,
-    _execute_single_local_action,  # noqa: F401
-    _execute_strategy_actions,
-    _expand_strategy_actions,  # noqa: F401
-    _inject_reseed_action_if_no_active_offers,
-    _is_dexie_offer_missing_error,
-    _match_watched_coin_ids,
-    _normalize_offer_side,
-    _resolve_coinset_ws_url,
-    _resolve_signer_offer_asset_ids_for_reservation,
-    _run_coinset_signal_capture_once,
-    _set_watched_coin_ids_for_market,  # noqa: F401
-    _single_input_preferred_skip_reason,  # noqa: F401
-    _strategy_target_counts_by_size,
-    _update_market_coin_watchlist_from_dexie,
-    _watchlist_offer_ids_from_store,
-)
+from greenfloor.daemon.offer_reconcile_cycle import reconcile_market_cycle_offers
 from greenfloor.daemon.reservations import AssetReservationCoordinator
+from greenfloor.daemon.strategy_dispatch import (
+    _execute_strategy_actions,
+    _resolve_signer_offer_asset_ids_for_reservation,
+)
+from greenfloor.daemon.strategy_reseed import _inject_reseed_action_if_no_active_offers
 from greenfloor.daemon.strategy_state import (
     _evaluate_two_sided_market_actions,
-    _strategy_config_for_side,
     _strategy_config_from_market,
     _strategy_state_from_bucket_counts,
+)
+from greenfloor.daemon.watchlist import (
+    _active_offer_counts_by_size,
+    _active_offer_counts_by_size_and_side,
+    _is_dexie_offer_missing_error,
+    _match_watched_coin_ids,
+    _strategy_target_counts_by_size,
 )
 from greenfloor.keys.router import resolve_market_key
 from greenfloor.logging_setup import (
@@ -411,223 +385,6 @@ def _detect_stale_open_offers_for_requeue(
     }
 
 
-def _reconcile_offer_states(
-    *,
-    market: Any,
-    network: str,
-    dexie: DexieAdapter,
-    store: SqliteStore,
-    now: datetime,
-    result: _MarketCycleResult,
-) -> tuple[list[dict[str, Any]], dict[str, int], str | None, list[dict[str, Any]]]:
-    """Fetch Dexie offers, augment beyond-cap offers, and transition lifecycle states.
-
-    Returns (augmented_offers, dexie_size_by_offer_id, dexie_fetch_error, offers).
-    offers is the raw Dexie list (used by cancel policy); augmented_offers includes
-    beyond-cap individually-fetched offers.
-    """
-    dexie_fetch_error: str | None = None
-    dexie_offered_asset = resolve_trade_asset_for_dexie(
-        asset=str(market.base_asset),
-        network=network,
-    )
-    dexie_requested_asset = _resolve_quote_asset_for_offer(
-        quote_asset=str(market.quote_asset),
-        network=network,
-    )
-    try:
-        offers = dexie.get_offers(dexie_offered_asset, dexie_requested_asset)
-        _log_market_decision(
-            market.market_id,
-            "dexie_offers_fetched",
-            offered=dexie_offered_asset,
-            requested=dexie_requested_asset,
-            count=len(offers),
-        )
-    except Exception as exc:  # pragma: no cover - network dependent
-        dexie_fetch_error = str(exc)
-        result.cycle_errors += 1
-        _log_market_decision(
-            market.market_id,
-            "dexie_offers_error",
-            error=str(exc),
-        )
-        store.add_audit_event(
-            "dexie_offers_error",
-            {"market_id": market.market_id, "error": str(exc)},
-            market_id=market.market_id,
-        )
-        offers = []
-    our_offer_ids = _watchlist_offer_ids_from_store(
-        store=store,
-        market_id=market.market_id,
-        clock=now,
-    )
-    # For any of our active offers not returned by the Dexie list (either genuinely
-    # beyond the 20-offer cap, or expired/completed), fetch them individually and
-    # add to the offers list so the state-transition loop below can handle expirations.
-    # A 5-second timeout prevents a hung TCP connection from stalling the daemon.
-    dexie_offer_ids_in_list = {str(o.get("id", "")).strip() for o in offers if o.get("id")}
-    beyond_cap_ids = our_offer_ids - dexie_offer_ids_in_list
-    augmented_offers = list(offers)
-    augmented_by_id: dict[str, dict[str, Any]] = {}
-    for offer in augmented_offers:
-        if not isinstance(offer, dict):
-            continue
-        offer_id = str(offer.get("id", "")).strip()
-        if not offer_id:
-            continue
-        augmented_by_id[offer_id] = offer
-
-    # Refresh all of our watched offers individually. Dexie list snapshots can
-    # lag status transitions; direct offer fetches make lifecycle state updates
-    # deterministic for strategy planning.
-    missing_watched_offer_ids: set[str] = set()
-    for watched_offer_id in sorted(our_offer_ids):
-        try:
-            single_payload = dexie.get_offer(watched_offer_id, timeout=5)
-            single_offer = single_payload.get("offer") if isinstance(single_payload, dict) else None
-            if isinstance(single_offer, dict):
-                augmented_by_id[watched_offer_id] = single_offer
-        except Exception as exc:  # pragma: no cover - network dependent
-            if _is_dexie_offer_missing_error(exc):
-                transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.EXPIRED)
-                result.immediate_requeue_requested = True
-                result.immediate_requeue_signals.append(OfferSignal.EXPIRED.value)
-                missing_watched_offer_ids.add(watched_offer_id)
-                _log_market_decision(
-                    market.market_id,
-                    "offer_transition",
-                    offer_id=watched_offer_id,
-                    dexie_status=None,
-                    signal_source="dexie_get_offer_404",
-                    old_state=transition.old_state.value,
-                    new_state=transition.new_state.value,
-                    signal=transition.signal.value,
-                )
-                store.upsert_offer_state(
-                    offer_id=watched_offer_id,
-                    market_id=market.market_id,
-                    state=transition.new_state.value,
-                    last_seen_status=None,
-                )
-                store.add_audit_event(
-                    "offer_lifecycle_transition",
-                    {
-                        "offer_id": watched_offer_id,
-                        "market_id": market.market_id,
-                        "old_state": transition.old_state.value,
-                        "new_state": transition.new_state.value,
-                        "signal": transition.signal.value,
-                        "action": transition.action,
-                        "reason": transition.reason,
-                        "dexie_status": None,
-                        "signal_source": "dexie_get_offer_404",
-                        "dexie_error": str(exc),
-                        "coinset_tx_ids": [],
-                        "coinset_confirmed_tx_ids": [],
-                        "coinset_mempool_tx_ids": [],
-                    },
-                    market_id=market.market_id,
-                )
-            continue
-
-    for beyond_offer_id in beyond_cap_ids - missing_watched_offer_ids:
-        try:
-            single_payload = dexie.get_offer(beyond_offer_id, timeout=5)
-            single_offer = single_payload.get("offer") if isinstance(single_payload, dict) else None
-            if isinstance(single_offer, dict):
-                augmented_by_id[beyond_offer_id] = single_offer
-        except Exception:  # pragma: no cover - network dependent
-            pass
-    augmented_offers = list(augmented_by_id.values())
-    dexie_size_by_offer_id: dict[str, int] = _build_dexie_size_by_offer_id(
-        augmented_offers, str(market.base_asset)
-    )
-    if dexie_fetch_error is None:
-        _update_market_coin_watchlist_from_dexie(
-            market=market,
-            offers=augmented_offers,
-            store=store,
-            clock=now,
-        )
-    for offer in augmented_offers:
-        offer_id = str(offer.get("id", ""))
-        if not offer_id:
-            continue
-        if offer_id not in our_offer_ids:
-            continue
-        status = int(offer.get("status", -1))
-        coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer)
-        signal_source = "dexie_status_fallback"
-        coinset_confirmed_tx_ids: list[str] = []
-        coinset_mempool_tx_ids: list[str] = []
-        if coinset_tx_ids:
-            tx_signal_state = store.get_tx_signal_state(coinset_tx_ids)
-            for tx_id in coinset_tx_ids:
-                signal = tx_signal_state.get(tx_id, {})
-                if signal.get("tx_block_confirmed_at"):
-                    coinset_confirmed_tx_ids.append(tx_id)
-                    continue
-                if signal.get("mempool_observed_at"):
-                    coinset_mempool_tx_ids.append(tx_id)
-        if coinset_confirmed_tx_ids and status != 3:
-            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.TX_CONFIRMED)
-            signal_source = "coinset_webhook"
-        elif coinset_mempool_tx_ids:
-            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.MEMPOOL_SEEN)
-            signal_source = "coinset_mempool"
-        elif status == 4:
-            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.TX_CONFIRMED)
-        elif status == 6:
-            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.EXPIRED)
-        elif status == 0:
-            # Dexie status 0 means the offer is still listed/open.
-            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.REFRESH_POSTED)
-        else:
-            # Non-terminal Dexie fallback statuses are not mempool evidence.
-            # Only Coinset mempool signals should drive MEMPOOL_SEEN transitions.
-            transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.REFRESH_POSTED)
-        _log_market_decision(
-            market.market_id,
-            "offer_transition",
-            offer_id=offer_id,
-            dexie_status=status,
-            signal_source=signal_source,
-            old_state=transition.old_state.value,
-            new_state=transition.new_state.value,
-            signal=transition.signal.value,
-        )
-        store.upsert_offer_state(
-            offer_id=offer_id,
-            market_id=market.market_id,
-            state=transition.new_state.value,
-            last_seen_status=status,
-        )
-        store.add_audit_event(
-            "offer_lifecycle_transition",
-            {
-                "offer_id": offer_id,
-                "market_id": market.market_id,
-                "old_state": transition.old_state.value,
-                "new_state": transition.new_state.value,
-                "signal": transition.signal.value,
-                "action": transition.action,
-                "reason": transition.reason,
-                "dexie_status": status,
-                "signal_source": signal_source,
-                "coinset_tx_ids": coinset_tx_ids,
-                "coinset_confirmed_tx_ids": coinset_confirmed_tx_ids,
-                "coinset_mempool_tx_ids": coinset_mempool_tx_ids,
-            },
-            market_id=market.market_id,
-        )
-        if transition.signal in {OfferSignal.EXPIRED, OfferSignal.TX_CONFIRMED}:
-            result.immediate_requeue_requested = True
-            result.immediate_requeue_signals.append(transition.signal.value)
-    return augmented_offers, dexie_size_by_offer_id, dexie_fetch_error, offers
-
-
 def _evaluate_and_execute_strategy(
     *,
     market: Any,
@@ -667,14 +424,6 @@ def _evaluate_and_execute_strategy(
             + int(offer_counts_by_side["sell"].get(size, 0))
             for size in sorted(tracked_sizes)
         }
-        target_counts_by_side = {
-            "buy": _strategy_target_counts_by_size(
-                _strategy_config_for_side(market=market, side="buy")
-            ),
-            "sell": _strategy_target_counts_by_size(
-                _strategy_config_for_side(market=market, side="sell")
-            ),
-        }
     else:
         active_offer_counts_by_size, offer_state_counts, active_unmapped_offer_ids = (
             _active_offer_counts_by_size(
@@ -688,10 +437,6 @@ def _evaluate_and_execute_strategy(
         offer_counts_by_side = {
             "buy": {size: 0 for size in sorted(tracked_sizes)},
             "sell": dict(active_offer_counts_by_size),
-        }
-        target_counts_by_side = {
-            "buy": {},
-            "sell": _strategy_target_counts_by_size(strategy_config),
         }
     _log_market_decision(
         market.market_id,
@@ -717,14 +462,7 @@ def _evaluate_and_execute_strategy(
             config=strategy_config,
             clock=now,
         )
-    strategy_actions, cadence_limited_sizes = _apply_action_cadence_gate(
-        actions=strategy_actions,
-        target_counts_by_side=target_counts_by_side,
-        active_counts_by_side=offer_counts_by_side,
-        store=store,
-        market_id=market.market_id,
-        clock=now,
-    )
+    strategy_actions = [action for action in strategy_actions if int(action.repeat) > 0]
     _log_market_decision(
         market.market_id,
         "strategy_evaluated",
@@ -733,7 +471,7 @@ def _evaluate_and_execute_strategy(
         offer_counts=active_offer_counts_by_size,
         xch_price_usd=xch_price_usd,
         action_count=len(strategy_actions),
-        cadence_limited_sizes=cadence_limited_sizes,
+        cadence_limited_sizes=[],
     )
     if market_mode != "two_sided":
         strategy_actions = _inject_reseed_action_if_no_active_offers(
@@ -894,52 +632,13 @@ def _process_single_market(
         store.add_audit_event("low_inventory_alert", payload, market_id=market.market_id)
         send_pushover_alert(program, event)
 
-    _, dexie_size_by_offer_id, _, offers = _reconcile_offer_states(
+    _, dexie_size_by_offer_id, _, offers = reconcile_market_cycle_offers(
         market=market,
         network=program.app_network,
         dexie=dexie,
         store=store,
         now=now,
         result=result,
-    )
-    cancel_policy = _execute_cancel_policy_for_market(
-        market=market,
-        offers=offers,
-        runtime_dry_run=program.runtime_dry_run,
-        current_xch_price_usd=xch_price_usd,
-        previous_xch_price_usd=previous_xch_price_usd,
-        dexie=dexie,
-        store=store,
-    )
-    if bool(cancel_policy.get("triggered", False)):
-        result.cancel_triggered = True
-    result.cancel_planned += int(cancel_policy.get("planned_count", 0))
-    result.cancel_executed += int(cancel_policy.get("executed_count", 0))
-    _log_market_decision(
-        market.market_id,
-        "cancel_policy_evaluated",
-        eligible=cancel_policy["eligible"],
-        triggered=cancel_policy["triggered"],
-        reason=cancel_policy["reason"],
-        move_bps=cancel_policy["move_bps"],
-        threshold_bps=cancel_policy["threshold_bps"],
-        planned_count=cancel_policy["planned_count"],
-        executed_count=cancel_policy["executed_count"],
-    )
-    store.add_audit_event(
-        "offer_cancel_policy",
-        {
-            "market_id": market.market_id,
-            "eligible": cancel_policy["eligible"],
-            "triggered": cancel_policy["triggered"],
-            "reason": cancel_policy["reason"],
-            "move_bps": cancel_policy["move_bps"],
-            "threshold_bps": cancel_policy["threshold_bps"],
-            "planned_count": cancel_policy["planned_count"],
-            "executed_count": cancel_policy["executed_count"],
-            "items": cancel_policy["items"],
-        },
-        market_id=market.market_id,
     )
 
     sell_ladder = market.ladders.get("sell", [])
@@ -1087,6 +786,48 @@ def _process_single_market(
             {"market_id": market.market_id, "error": str(exc)},
             market_id=market.market_id,
         )
+    # Cancel uses the Dexie offer list fetched at cycle start (before strategy).
+    # Intentionally stale relative to same-cycle posts so cancel policy cannot
+    # target offers strategy just created (avoids cancel-then-reseed races).
+    cancel_policy = _execute_cancel_policy_for_market(
+        market=market,
+        offers=offers,
+        runtime_dry_run=program.runtime_dry_run,
+        current_xch_price_usd=xch_price_usd,
+        previous_xch_price_usd=previous_xch_price_usd,
+        dexie=dexie,
+        store=store,
+    )
+    if bool(cancel_policy.get("triggered", False)):
+        result.cancel_triggered = True
+    result.cancel_planned += int(cancel_policy.get("planned_count", 0))
+    result.cancel_executed += int(cancel_policy.get("executed_count", 0))
+    _log_market_decision(
+        market.market_id,
+        "cancel_policy_evaluated",
+        eligible=cancel_policy["eligible"],
+        triggered=cancel_policy["triggered"],
+        reason=cancel_policy["reason"],
+        move_bps=cancel_policy["move_bps"],
+        threshold_bps=cancel_policy["threshold_bps"],
+        planned_count=cancel_policy["planned_count"],
+        executed_count=cancel_policy["executed_count"],
+    )
+    store.add_audit_event(
+        "offer_cancel_policy",
+        {
+            "market_id": market.market_id,
+            "eligible": cancel_policy["eligible"],
+            "triggered": cancel_policy["triggered"],
+            "reason": cancel_policy["reason"],
+            "move_bps": cancel_policy["move_bps"],
+            "threshold_bps": cancel_policy["threshold_bps"],
+            "planned_count": cancel_policy["planned_count"],
+            "executed_count": cancel_policy["executed_count"],
+            "items": cancel_policy["items"],
+        },
+        market_id=market.market_id,
+    )
     try:
         _plan_and_execute_coin_ops(
             market=market,

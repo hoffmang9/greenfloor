@@ -13,6 +13,8 @@ from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, ap
 from greenfloor.runtime.coin_ops.coins import safe_int
 from greenfloor.storage.sqlite import SqliteStore
 
+OFFER_LIFECYCLE_TRANSITION_EVENT = "offer_lifecycle_transition"
+
 
 def dexie_offer_status(payload: dict[str, Any]) -> int | None:
     raw_status = payload.get("status")
@@ -144,6 +146,107 @@ def _apply_dexie_status_fallback(
     return next_state, reason, signal_source
 
 
+@dataclass(frozen=True, slots=True)
+class CycleOfferTransition:
+    old_state: str
+    new_state: str
+    reason: str
+    signal_source: str
+    signal: str | None
+    changed: bool
+    immediate_requeue: bool
+    coinset_tx_ids: list[str]
+    coinset_confirmed_tx_ids: list[str]
+    coinset_mempool_tx_ids: list[str]
+
+
+def resolve_missing_watched_offer_transition(*, current_state: str) -> CycleOfferTransition:
+    """Transition a watched offer that Dexie cannot find (404 / missing)."""
+    if current_state in {
+        OfferLifecycleState.TX_BLOCK_CONFIRMED.value,
+        OfferLifecycleState.EXPIRED.value,
+        "cancelled",
+    }:
+        return CycleOfferTransition(
+            old_state=current_state,
+            new_state=current_state,
+            reason="dexie_offer_not_found_preserved_terminal",
+            signal_source="dexie_get_offer_404",
+            signal=None,
+            changed=False,
+            immediate_requeue=False,
+            coinset_tx_ids=[],
+            coinset_confirmed_tx_ids=[],
+            coinset_mempool_tx_ids=[],
+        )
+    transition = apply_offer_signal(OfferLifecycleState.OPEN, OfferSignal.EXPIRED)
+    return CycleOfferTransition(
+        old_state=current_state,
+        new_state=transition.new_state.value,
+        reason="dexie_offer_not_found",
+        signal_source="dexie_get_offer_404",
+        signal=transition.signal.value,
+        changed=True,
+        immediate_requeue=True,
+        coinset_tx_ids=[],
+        coinset_confirmed_tx_ids=[],
+        coinset_mempool_tx_ids=[],
+    )
+
+
+def resolve_watched_offer_transition(
+    *,
+    current_state: str,
+    status: int | None,
+    coinset_tx_ids: list[str],
+    get_tx_signal_state: Callable[[list[str]], dict[str, dict[str, Any]]],
+) -> CycleOfferTransition:
+    """Resolve lifecycle state for a watched offer using canonical reconcile rules."""
+    coinset_confirmed_tx_ids, coinset_mempool_tx_ids = _coinset_signal_lists(
+        coinset_tx_ids=coinset_tx_ids,
+        get_tx_signal_state=get_tx_signal_state,
+    )
+    next_state, reason, signal_source = _apply_coinset_signals(
+        current_state=current_state,
+        status=status,
+        coinset_confirmed_tx_ids=coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids=coinset_mempool_tx_ids,
+    )
+    next_state, reason, signal_source = _apply_dexie_status_fallback(
+        status=status,
+        current_state=current_state,
+        coinset_tx_ids=coinset_tx_ids,
+        signal_source=signal_source,
+        next_state=next_state,
+        reason=reason,
+    )
+    changed = next_state != current_state
+    signal: str | None = None
+    if changed:
+        if next_state == OfferLifecycleState.TX_BLOCK_CONFIRMED.value:
+            signal = OfferSignal.TX_CONFIRMED.value
+        elif next_state == OfferLifecycleState.EXPIRED.value:
+            signal = OfferSignal.EXPIRED.value
+        elif next_state == OfferLifecycleState.MEMPOOL_OBSERVED.value:
+            signal = OfferSignal.MEMPOOL_SEEN.value
+    immediate_requeue = changed and signal in {
+        OfferSignal.TX_CONFIRMED.value,
+        OfferSignal.EXPIRED.value,
+    }
+    return CycleOfferTransition(
+        old_state=current_state,
+        new_state=next_state,
+        reason=reason,
+        signal_source=signal_source,
+        signal=signal,
+        changed=changed,
+        immediate_requeue=immediate_requeue,
+        coinset_tx_ids=coinset_tx_ids,
+        coinset_confirmed_tx_ids=coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids=coinset_mempool_tx_ids,
+    )
+
+
 def _taker_fields(
     *,
     coinset_confirmed_tx_ids: list[str],
@@ -166,6 +269,121 @@ def _taker_fields(
     return "none", "none"
 
 
+def _signal_for_state_change(*, old_state: str, new_state: str, changed: bool) -> str | None:
+    if not changed:
+        return None
+    if new_state == OfferLifecycleState.TX_BLOCK_CONFIRMED.value:
+        return OfferSignal.TX_CONFIRMED.value
+    if new_state == OfferLifecycleState.EXPIRED.value:
+        return OfferSignal.EXPIRED.value
+    if new_state == OfferLifecycleState.MEMPOOL_OBSERVED.value:
+        return OfferSignal.MEMPOOL_SEEN.value
+    _ = old_state
+    return None
+
+
+def reconcile_result_from_transition(
+    *,
+    offer_id: str,
+    market_id: str,
+    transition: CycleOfferTransition,
+    last_seen_status: int | None,
+) -> ReconcileOfferResult:
+    taker_signal, taker_diagnostic = _taker_fields(
+        coinset_confirmed_tx_ids=transition.coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids=transition.coinset_mempool_tx_ids,
+        status=last_seen_status,
+        current_state=transition.old_state,
+        next_state=transition.new_state,
+    )
+    return ReconcileOfferResult(
+        offer_id=offer_id,
+        market_id=market_id,
+        old_state=transition.old_state,
+        new_state=transition.new_state,
+        changed=transition.changed,
+        last_seen_status=last_seen_status,
+        reason=transition.reason,
+        taker_signal=taker_signal,
+        taker_diagnostic=taker_diagnostic,
+        signal_source=transition.signal_source,
+        coinset_tx_ids=transition.coinset_tx_ids,
+        coinset_confirmed_tx_ids=transition.coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids=transition.coinset_mempool_tx_ids,
+    )
+
+
+def persist_offer_lifecycle_transition(
+    *,
+    store: SqliteStore,
+    offer_id: str,
+    market_id: str,
+    transition: CycleOfferTransition,
+    last_seen_status: int | None,
+    venue: str | None = None,
+    action: str | None = None,
+    dexie_error: str | None = None,
+) -> None:
+    store.upsert_offer_state(
+        offer_id=offer_id,
+        market_id=market_id,
+        state=transition.new_state,
+        last_seen_status=last_seen_status,
+    )
+    taker_signal, taker_diagnostic = _taker_fields(
+        coinset_confirmed_tx_ids=transition.coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids=transition.coinset_mempool_tx_ids,
+        status=last_seen_status,
+        current_state=transition.old_state,
+        next_state=transition.new_state,
+    )
+    payload: dict[str, Any] = {
+        "offer_id": offer_id,
+        "market_id": market_id,
+        "old_state": transition.old_state,
+        "new_state": transition.new_state,
+        "changed": transition.changed,
+        "reason": transition.reason,
+        "signal": transition.signal,
+        "signal_source": transition.signal_source,
+        "last_seen_status": last_seen_status,
+        "dexie_status": last_seen_status,
+        "coinset_tx_ids": transition.coinset_tx_ids,
+        "coinset_confirmed_tx_ids": transition.coinset_confirmed_tx_ids,
+        "coinset_mempool_tx_ids": transition.coinset_mempool_tx_ids,
+        "taker_signal": taker_signal,
+        "taker_diagnostic": taker_diagnostic,
+    }
+    if venue is not None:
+        payload["venue"] = venue
+    if action is not None:
+        payload["action"] = action
+    if dexie_error is not None:
+        payload["dexie_error"] = dexie_error
+    store.add_audit_event(
+        OFFER_LIFECYCLE_TRANSITION_EVENT,
+        payload,
+        market_id=market_id,
+    )
+    if taker_signal != "none":
+        store.add_audit_event(
+            "taker_detection",
+            {
+                "offer_id": offer_id,
+                "market_id": market_id,
+                "venue": venue or "dexie",
+                "signal": taker_signal,
+                "advisory_diagnostic": taker_diagnostic,
+                "old_state": transition.old_state,
+                "new_state": transition.new_state,
+                "last_seen_status": last_seen_status,
+                "signal_source": transition.signal_source,
+                "coinset_confirmed_tx_ids": transition.coinset_confirmed_tx_ids,
+            },
+            market_id=market_id,
+        )
+
+
 def reconcile_offer_row(
     *,
     row: dict[str, Any],
@@ -176,87 +394,76 @@ def reconcile_offer_row(
     offer_id = str(row["offer_id"])
     market_value = str(row["market_id"])
     current_state = str(row["state"])
-    coinset_tx_ids: list[str] = []
-    coinset_confirmed_tx_ids: list[str] = []
-    coinset_mempool_tx_ids: list[str] = []
     status: int | None = None
-    reason = "ok"
-    signal_source = "none"
-    next_state = current_state
 
     if target_venue != "dexie":
-        next_state = "reconcile_unsupported_venue"
-        reason = f"unsupported_venue:{target_venue}"
-    else:
-        assert dexie_adapter is not None
-        try:
-            payload = dexie_adapter.get_offer(offer_id)
-            status = dexie_offer_status(payload)
-            coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(payload)
-            coinset_confirmed_tx_ids, coinset_mempool_tx_ids = _coinset_signal_lists(
-                coinset_tx_ids=coinset_tx_ids,
-                get_tx_signal_state=get_tx_signal_state,
-            )
-            next_state, reason, signal_source = _apply_coinset_signals(
-                current_state=current_state,
-                status=status,
-                coinset_confirmed_tx_ids=coinset_confirmed_tx_ids,
-                coinset_mempool_tx_ids=coinset_mempool_tx_ids,
-            )
-            next_state, reason, signal_source = _apply_dexie_status_fallback(
-                status=status,
-                current_state=current_state,
-                coinset_tx_ids=coinset_tx_ids,
-                signal_source=signal_source,
-                next_state=next_state,
-                reason=reason,
-            )
-        except urllib.error.HTTPError as exc:
-            status = None
-            if int(getattr(exc, "code", 0)) == 404:
-                transition = apply_offer_signal(
-                    OfferLifecycleState.OPEN,
-                    OfferSignal.EXPIRED,
-                )
-                if current_state in {
-                    OfferLifecycleState.TX_BLOCK_CONFIRMED.value,
-                    OfferLifecycleState.EXPIRED.value,
-                    "cancelled",
-                }:
-                    next_state = current_state
-                else:
-                    next_state = transition.new_state.value
-                reason = "dexie_offer_not_found"
-            else:
-                next_state = current_state
-                reason = f"dexie_http_error:{exc.code}"
-        except Exception as exc:
-            status = None
-            next_state = current_state
-            reason = f"dexie_lookup_error:{exc}"
+        transition = CycleOfferTransition(
+            old_state=current_state,
+            new_state="reconcile_unsupported_venue",
+            reason=f"unsupported_venue:{target_venue}",
+            signal_source="none",
+            signal=None,
+            changed=current_state != "reconcile_unsupported_venue",
+            immediate_requeue=False,
+            coinset_tx_ids=[],
+            coinset_confirmed_tx_ids=[],
+            coinset_mempool_tx_ids=[],
+        )
+        return reconcile_result_from_transition(
+            offer_id=offer_id,
+            market_id=market_value,
+            transition=transition,
+            last_seen_status=status,
+        )
 
-    changed = next_state != current_state
-    taker_signal, taker_diagnostic = _taker_fields(
-        coinset_confirmed_tx_ids=coinset_confirmed_tx_ids,
-        coinset_mempool_tx_ids=coinset_mempool_tx_ids,
-        status=status,
-        current_state=current_state,
-        next_state=next_state,
-    )
-    return ReconcileOfferResult(
+    assert dexie_adapter is not None
+    try:
+        payload = dexie_adapter.get_offer(offer_id)
+        status = dexie_offer_status(payload)
+        coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(payload)
+        transition = resolve_watched_offer_transition(
+            current_state=current_state,
+            status=status,
+            coinset_tx_ids=coinset_tx_ids,
+            get_tx_signal_state=get_tx_signal_state,
+        )
+    except urllib.error.HTTPError as exc:
+        status = None
+        if int(getattr(exc, "code", 0)) == 404:
+            transition = resolve_missing_watched_offer_transition(current_state=current_state)
+        else:
+            transition = CycleOfferTransition(
+                old_state=current_state,
+                new_state=current_state,
+                reason=f"dexie_http_error:{exc.code}",
+                signal_source="none",
+                signal=None,
+                changed=False,
+                immediate_requeue=False,
+                coinset_tx_ids=[],
+                coinset_confirmed_tx_ids=[],
+                coinset_mempool_tx_ids=[],
+            )
+    except Exception as exc:
+        status = None
+        transition = CycleOfferTransition(
+            old_state=current_state,
+            new_state=current_state,
+            reason=f"dexie_lookup_error:{exc}",
+            signal_source="none",
+            signal=None,
+            changed=False,
+            immediate_requeue=False,
+            coinset_tx_ids=[],
+            coinset_confirmed_tx_ids=[],
+            coinset_mempool_tx_ids=[],
+        )
+
+    return reconcile_result_from_transition(
         offer_id=offer_id,
         market_id=market_value,
-        old_state=current_state,
-        new_state=next_state,
-        changed=changed,
+        transition=transition,
         last_seen_status=status,
-        reason=reason,
-        taker_signal=taker_signal,
-        taker_diagnostic=taker_diagnostic,
-        signal_source=signal_source,
-        coinset_tx_ids=coinset_tx_ids,
-        coinset_confirmed_tx_ids=coinset_confirmed_tx_ids,
-        coinset_mempool_tx_ids=coinset_mempool_tx_ids,
     )
 
 
@@ -273,49 +480,31 @@ def persist_reconcile_result(
     result: ReconcileOfferResult,
     target_venue: str,
 ) -> None:
-    store.upsert_offer_state(
+    transition = CycleOfferTransition(
+        old_state=result.old_state,
+        new_state=result.new_state,
+        reason=result.reason,
+        signal_source=result.signal_source,
+        signal=_signal_for_state_change(
+            old_state=result.old_state,
+            new_state=result.new_state,
+            changed=result.changed,
+        ),
+        changed=result.changed,
+        immediate_requeue=False,
+        coinset_tx_ids=result.coinset_tx_ids,
+        coinset_confirmed_tx_ids=result.coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids=result.coinset_mempool_tx_ids,
+    )
+    persist_offer_lifecycle_transition(
+        store=store,
         offer_id=result.offer_id,
         market_id=result.market_id,
-        state=result.new_state,
+        transition=transition,
         last_seen_status=result.last_seen_status,
+        venue=target_venue,
+        action="offers_reconcile",
     )
-    store.add_audit_event(
-        "offer_reconciliation",
-        {
-            "offer_id": result.offer_id,
-            "market_id": result.market_id,
-            "venue": target_venue,
-            "old_state": result.old_state,
-            "new_state": result.new_state,
-            "changed": result.changed,
-            "last_seen_status": result.last_seen_status,
-            "reason": result.reason,
-            "taker_signal": result.taker_signal,
-            "taker_diagnostic": result.taker_diagnostic,
-            "signal_source": result.signal_source,
-            "coinset_tx_ids": result.coinset_tx_ids,
-            "coinset_confirmed_tx_ids": result.coinset_confirmed_tx_ids,
-            "coinset_mempool_tx_ids": result.coinset_mempool_tx_ids,
-        },
-        market_id=result.market_id,
-    )
-    if result.taker_signal != "none":
-        store.add_audit_event(
-            "taker_detection",
-            {
-                "offer_id": result.offer_id,
-                "market_id": result.market_id,
-                "venue": target_venue,
-                "signal": result.taker_signal,
-                "advisory_diagnostic": result.taker_diagnostic,
-                "old_state": result.old_state,
-                "new_state": result.new_state,
-                "last_seen_status": result.last_seen_status,
-                "signal_source": result.signal_source,
-                "coinset_confirmed_tx_ids": result.coinset_confirmed_tx_ids,
-            },
-            market_id=result.market_id,
-        )
 
 
 def reconcile_offers(
