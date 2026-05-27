@@ -1450,7 +1450,7 @@ def test_execute_strategy_actions_uses_cloud_wallet_path_when_configured(monkeyp
     daemon_main._POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr(
         daemon_main,
-        "_cloud_wallet_offer_post_fallback",
+        "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-1"},
     )
 
@@ -1490,7 +1490,7 @@ def test_execute_strategy_actions_cloud_wallet_requires_dexie_visibility(monkeyp
     daemon_main._POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr(
         daemon_main,
-        "_cloud_wallet_offer_post_fallback",
+        "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-missing"},
     )
 
@@ -1541,7 +1541,7 @@ def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
     daemon_main._POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr(
         daemon_main,
-        "_cloud_wallet_offer_post_fallback",
+        "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-pending"},
     )
 
@@ -1591,7 +1591,7 @@ def test_execute_strategy_actions_preserves_planned_size_order(monkeypatch) -> N
         size = int(kwargs["size_base_units"])
         return {"success": True, "offer_id": f"offer-{size}"}
 
-    monkeypatch.setattr(daemon_main, "_cloud_wallet_offer_post_fallback", _fake_cloud_wallet_post)
+    monkeypatch.setattr(daemon_main, "_managed_offer_post", _fake_cloud_wallet_post)
 
     _Program = _CloudWalletProgram
 
@@ -1654,7 +1654,7 @@ def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(mon
     monkeypatch.setattr(daemon_main, "_build_offer_for_action", _unexpected_builder)
     monkeypatch.setattr(
         daemon_main,
-        "_cloud_wallet_offer_post_fallback",
+        "_managed_offer_post",
         lambda **_kwargs: {"success": False, "error": "vault_signing_unavailable"},
     )
 
@@ -1722,7 +1722,7 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(m
     )
     monkeypatch.setattr(
         daemon_main,
-        "_cloud_wallet_offer_post_fallback",
+        "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
     )
 
@@ -1815,7 +1815,7 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
     )
     monkeypatch.setattr(
         daemon_main,
-        "_cloud_wallet_offer_post_fallback",
+        "_managed_offer_post",
         lambda **_kwargs: {"success": False, "error": "vault_unavailable"},
     )
 
@@ -1912,7 +1912,7 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
     )
     monkeypatch.setattr(
         daemon_main,
-        "_cloud_wallet_offer_post_fallback",
+        "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
     )
 
@@ -1978,7 +1978,7 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservati
     )
     monkeypatch.setattr(
         daemon_main,
-        "_cloud_wallet_offer_post_fallback",
+        "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback"},
     )
 
@@ -2151,7 +2151,7 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
     )
     monkeypatch.setattr(
         daemon_main,
-        "_cloud_wallet_offer_post_fallback",
+        "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-resolved-asset"},
     )
 
@@ -2227,7 +2227,7 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
     )
     monkeypatch.setattr(
         daemon_main,
-        "_cloud_wallet_offer_post_fallback",
+        "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-scoped"},
     )
 
@@ -2311,7 +2311,7 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
     )
     monkeypatch.setattr(
         daemon_main,
-        "_cloud_wallet_offer_post_fallback",
+        "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-should-not-post"},
     )
 

@@ -6,7 +6,7 @@ use chia_protocol::Bytes32;
 use chia_secp::{R1PublicKey, R1Signature};
 use clvm_utils::TreeHash;
 
-use crate::config::CloudWalletConfig;
+use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::kms;
 use crate::vault::context::{VaultComputedHashes, VaultContext, VaultCustodySnapshot};
@@ -155,7 +155,7 @@ pub fn build_vault_spend_context_from_hashes(
     snapshot: &VaultCustodySnapshot,
     hashes: &VaultComputedHashes,
     display: &VaultContext,
-    config: &CloudWalletConfig,
+    config: &SignerConfig,
 ) -> SignerResult<VaultSpendContext> {
     let key_bytes = hex_to_bytes(&display.secp256r1_custody_keys[0])?;
     let mut key_array = [0u8; 33];

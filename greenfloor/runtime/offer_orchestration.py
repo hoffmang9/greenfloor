@@ -1,0 +1,415 @@
+"""Shared bootstrap → create → verify → publish offer orchestration."""
+
+from __future__ import annotations
+
+import collections.abc
+import json
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+from greenfloor.adapters.dexie import DexieAdapter
+from greenfloor.adapters.splash import SplashAdapter
+from greenfloor.core.offer_lifecycle import OfferLifecycleState
+from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
+from greenfloor.runtime.offer_publish import (
+    dexie_offer_view_url,
+    expected_publish_asset_fields,
+    initialize_manager_file_logging,
+    log_signed_offer_artifact,
+    normalize_offer_side,
+    post_offer_phase,
+    verify_offer_text_for_dexie,
+)
+from greenfloor.storage.sqlite import SqliteStore
+
+
+@dataclass(frozen=True, slots=True)
+class BootstrapPolicy:
+    allow_split_fallback: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class OfferCreateOutcome:
+    offer_text: str
+    expires_at: str
+    side: str
+    create_phase_ms: int | None = None
+    artifact_wait_ms: int | None = None
+    create_total_ms: int | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
+class OfferCreateFailure(Exception):
+    """Create-phase failure with structured fields for offer result payloads."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        create_phase_ms: int | None = None,
+        artifact_wait_ms: int | None = None,
+        create_total_ms: int | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.create_phase_ms = create_phase_ms
+        self.artifact_wait_ms = artifact_wait_ms
+        self.create_total_ms = create_total_ms
+        self.extra = dict(extra or {})
+
+
+def bootstrap_blocks_offer(
+    bootstrap_result: dict[str, Any], *, policy: BootstrapPolicy
+) -> tuple[bool, str | None]:
+    bootstrap_status = str(bootstrap_result.get("status", "")).strip().lower()
+    bootstrap_reason = (
+        str(bootstrap_result.get("reason", "")).strip() or "bootstrap_precheck_failed"
+    )
+    bootstrap_ready = bool(bootstrap_result.get("ready", False))
+    if bootstrap_status == "failed":
+        if policy.allow_split_fallback and bootstrap_result.get(
+            "fallback_to_cloud_wallet_offer_split"
+        ):
+            return False, None
+        return True, f"bootstrap_failed:{bootstrap_reason}"
+    if bootstrap_status == "executed" and not bootstrap_ready:
+        return True, f"bootstrap_pending:{bootstrap_reason}"
+    if bootstrap_status == "skipped" and bootstrap_reason != "already_ready":
+        return True, f"bootstrap_precheck_skipped:{bootstrap_reason}"
+    return False, None
+
+
+def _iteration_timing_payload(
+    *,
+    started_ms: int,
+    create_phase_ms: int | None,
+    artifact_wait_ms: int | None,
+    create_total_ms: int | None,
+    publish_ms: int | None,
+) -> dict[str, int | None]:
+    now_ms = int(time.monotonic() * 1000)
+    payload: dict[str, int | None] = {
+        "create_phase_ms": create_phase_ms,
+        "publish_ms": publish_ms,
+        "total_ms": now_ms - started_ms,
+    }
+    if artifact_wait_ms is not None:
+        payload["artifact_wait_ms"] = artifact_wait_ms
+    if create_total_ms is not None:
+        payload["create_total_ms"] = create_total_ms
+    return payload
+
+
+@dataclass(frozen=True, slots=True)
+class OfferPostDeps:
+    initialize_manager_file_logging_fn: collections.abc.Callable[..., None]
+    resolve_maker_offer_fee_fn: collections.abc.Callable[..., tuple[int, str]]
+    log_signed_offer_artifact_fn: collections.abc.Callable[..., None]
+    verify_offer_text_for_dexie_fn: collections.abc.Callable[[str], str | None]
+    post_offer_phase_fn: collections.abc.Callable[..., dict[str, Any]]
+    dexie_offer_view_url_fn: collections.abc.Callable[..., str]
+    dexie_adapter_cls: type[DexieAdapter]
+    splash_adapter_cls: type[SplashAdapter]
+    format_output_fn: collections.abc.Callable[[object], str]
+
+
+def default_offer_post_deps(
+    *,
+    format_output_fn: collections.abc.Callable[[object], str] | None = None,
+) -> OfferPostDeps:
+    return OfferPostDeps(
+        initialize_manager_file_logging_fn=initialize_manager_file_logging,
+        resolve_maker_offer_fee_fn=resolve_maker_offer_fee,
+        log_signed_offer_artifact_fn=log_signed_offer_artifact,
+        verify_offer_text_for_dexie_fn=verify_offer_text_for_dexie,
+        post_offer_phase_fn=post_offer_phase,
+        dexie_offer_view_url_fn=dexie_offer_view_url,
+        dexie_adapter_cls=DexieAdapter,
+        splash_adapter_cls=SplashAdapter,
+        format_output_fn=format_output_fn or (lambda payload: json.dumps(payload, indent=2)),
+    )
+
+
+def _append_post_failure(
+    post_results: list[dict[str, Any]],
+    *,
+    publish_venue: str,
+    started_ms: int,
+    error: str,
+    create_phase_ms: int | None = None,
+    artifact_wait_ms: int | None = None,
+    create_total_ms: int | None = None,
+    publish_ms: int | None = None,
+    extra: dict[str, Any] | None = None,
+    bootstrap: dict[str, Any] | None = None,
+) -> None:
+    result: dict[str, Any] = {
+        "success": False,
+        "error": error,
+        "timing_ms": _iteration_timing_payload(
+            started_ms=started_ms,
+            create_phase_ms=create_phase_ms,
+            artifact_wait_ms=artifact_wait_ms,
+            create_total_ms=create_total_ms,
+            publish_ms=publish_ms,
+        ),
+    }
+    if bootstrap is not None:
+        result["bootstrap"] = bootstrap
+    if extra:
+        result.update(extra)
+    post_results.append({"venue": publish_venue, "result": result})
+
+
+def build_and_post_offer(
+    *,
+    program: Any,
+    market: Any,
+    size_base_units: int,
+    repeat: int,
+    publish_venue: str,
+    dexie_base_url: str,
+    splash_base_url: str,
+    drop_only: bool,
+    claim_rewards: bool,
+    quote_price: float,
+    dry_run: bool,
+    action_side: str,
+    resolved_base_asset_id: str,
+    resolved_quote_asset_id: str,
+    bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]],
+    create_offer_fn: collections.abc.Callable[..., OfferCreateOutcome],
+    bootstrap_policy: BootstrapPolicy,
+    path_label: str,
+    path_extra_fields: dict[str, Any] | None = None,
+    post_deps: OfferPostDeps | None = None,
+) -> tuple[int, dict[str, Any]]:
+    resolved_post_deps = post_deps or default_offer_post_deps()
+
+    side = normalize_offer_side(action_side)
+    resolved_post_deps.initialize_manager_file_logging_fn(
+        program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
+    )
+    db_path = (Path(program.home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
+    store = SqliteStore(db_path)
+    post_results: list[dict[str, Any]] = []
+    built_offers_preview: list[dict[str, str]] = []
+    bootstrap_actions: list[dict[str, Any]] = []
+    publish_failures = 0
+    offer_fee_mojos, offer_fee_source = resolved_post_deps.resolve_maker_offer_fee_fn(
+        network=program.app_network
+    )
+    dexie = (
+        resolved_post_deps.dexie_adapter_cls(dexie_base_url)
+        if (not dry_run and publish_venue == "dexie")
+        else None
+    )
+    splash = (
+        resolved_post_deps.splash_adapter_cls(splash_base_url)
+        if (not dry_run and publish_venue == "splash")
+        else None
+    )
+
+    for _ in range(repeat):
+        started_ms = int(time.monotonic() * 1000)
+        bootstrap_result: dict[str, Any] = {"status": "skipped", "reason": "dry_run"}
+        if dry_run:
+            bootstrap_actions.append(dict(bootstrap_result))
+        else:
+            bootstrap_result = bootstrap_phase_fn(
+                program=program,
+                market=market,
+                resolved_base_asset_id=resolved_base_asset_id,
+                resolved_quote_asset_id=resolved_quote_asset_id,
+                quote_price=float(quote_price),
+                action_side=side,
+            )
+            bootstrap_actions.append(bootstrap_result)
+            blocked, error = bootstrap_blocks_offer(bootstrap_result, policy=bootstrap_policy)
+            if blocked:
+                _append_post_failure(
+                    post_results,
+                    publish_venue=publish_venue,
+                    started_ms=started_ms,
+                    error=str(error),
+                    bootstrap=bootstrap_result,
+                )
+                publish_failures += 1
+                continue
+
+        try:
+            created = create_offer_fn(
+                program=program,
+                market=market,
+                size_base_units=size_base_units,
+                quote_price=quote_price,
+                resolved_base_asset_id=resolved_base_asset_id,
+                resolved_quote_asset_id=resolved_quote_asset_id,
+                action_side=side,
+            )
+        except OfferCreateFailure as exc:
+            _append_post_failure(
+                post_results,
+                publish_venue=publish_venue,
+                started_ms=started_ms,
+                error=str(exc),
+                create_phase_ms=exc.create_phase_ms,
+                artifact_wait_ms=exc.artifact_wait_ms,
+                create_total_ms=exc.create_total_ms,
+                extra=exc.extra,
+            )
+            publish_failures += 1
+            continue
+        except Exception as exc:
+            _append_post_failure(
+                post_results,
+                publish_venue=publish_venue,
+                started_ms=started_ms,
+                error=str(exc),
+            )
+            publish_failures += 1
+            continue
+
+        offer_text = str(created.offer_text).strip()
+        if not offer_text:
+            publish_failures += 1
+            _append_post_failure(
+                post_results,
+                publish_venue=publish_venue,
+                started_ms=started_ms,
+                error=f"{path_label}_offer_text_unavailable",
+                create_phase_ms=created.create_phase_ms,
+                artifact_wait_ms=created.artifact_wait_ms,
+                create_total_ms=created.create_total_ms,
+                extra=created.extra,
+            )
+            continue
+
+        resolved_post_deps.log_signed_offer_artifact_fn(
+            offer_text=offer_text,
+            ticker=str(market.base_symbol),
+            amount=int(size_base_units),
+            trading_pair=f"{market.base_symbol}:{market.quote_asset}",
+            expiry=str(created.expires_at),
+        )
+        verify_error = resolved_post_deps.verify_offer_text_for_dexie_fn(offer_text)
+        if verify_error:
+            publish_failures += 1
+            _append_post_failure(
+                post_results,
+                publish_venue=publish_venue,
+                started_ms=started_ms,
+                error=verify_error,
+                create_phase_ms=created.create_phase_ms,
+                artifact_wait_ms=created.artifact_wait_ms,
+                create_total_ms=created.create_total_ms,
+            )
+            continue
+        if dry_run:
+            built_offers_preview.append(
+                {
+                    "offer_prefix": offer_text[:24],
+                    "offer_length": str(len(offer_text)),
+                }
+            )
+            continue
+
+        publish_started = time.monotonic()
+        asset_fields = expected_publish_asset_fields(
+            side=created.side,
+            market=market,
+            resolved_base_asset_id=resolved_base_asset_id,
+            resolved_quote_asset_id=resolved_quote_asset_id,
+        )
+        result = resolved_post_deps.post_offer_phase_fn(
+            publish_venue=publish_venue,
+            dexie=dexie,
+            splash=splash,
+            offer_text=offer_text,
+            drop_only=drop_only,
+            claim_rewards=claim_rewards,
+            market=market,
+            **asset_fields,
+        )
+        publish_ms = int((time.monotonic() - publish_started) * 1000)
+        if result.get("success") is False:
+            publish_failures += 1
+        offer_id = str(result.get("id", "")).strip()
+        result_payload = {
+            **result,
+            **created.extra,
+            "timing_ms": _iteration_timing_payload(
+                started_ms=started_ms,
+                create_phase_ms=created.create_phase_ms,
+                artifact_wait_ms=created.artifact_wait_ms,
+                create_total_ms=created.create_total_ms,
+                publish_ms=publish_ms,
+            ),
+        }
+        if publish_venue == "dexie" and offer_id:
+            result_payload["offer_view_url"] = resolved_post_deps.dexie_offer_view_url_fn(
+                dexie_base_url=dexie_base_url,
+                offer_id=offer_id,
+            )
+        if offer_id and bool(result.get("success", False)):
+            store.upsert_offer_state(
+                offer_id=offer_id,
+                market_id=str(market.market_id),
+                state=OfferLifecycleState.OPEN.value,
+                last_seen_status=None,
+            )
+            audit_item: dict[str, Any] = {
+                "size": int(size_base_units),
+                "side": side,
+                "status": "executed",
+                "reason": f"{publish_venue}_post_success",
+                "offer_id": offer_id,
+                "attempts": 1,
+            }
+            audit_event: dict[str, Any] = {
+                "market_id": str(market.market_id),
+                "planned_count": 1,
+                "executed_count": 1,
+                "items": [audit_item],
+                "venue": publish_venue,
+                "resolved_base_asset_id": resolved_base_asset_id,
+                "resolved_quote_asset_id": resolved_quote_asset_id,
+            }
+            audit_event.update(created.extra)
+            store.add_audit_event(
+                "strategy_offer_execution",
+                audit_event,
+                market_id=str(market.market_id),
+            )
+        post_results.append({"venue": publish_venue, "result": result_payload})
+
+    payload: dict[str, Any] = {
+        "market_id": market.market_id,
+        "pair": f"{market.base_asset}:{market.quote_asset}",
+        "resolved_base_asset_id": resolved_base_asset_id,
+        "resolved_quote_asset_id": resolved_quote_asset_id,
+        "network": program.app_network,
+        "size_base_units": size_base_units,
+        "repeat": repeat,
+        "publish_venue": publish_venue,
+        "dexie_base_url": dexie_base_url,
+        "splash_base_url": splash_base_url if publish_venue == "splash" else None,
+        "drop_only": drop_only,
+        "claim_rewards": claim_rewards,
+        "dry_run": bool(dry_run),
+        "publish_attempts": len(post_results),
+        "publish_failures": publish_failures,
+        "built_offers_preview": built_offers_preview,
+        "bootstrap_actions": bootstrap_actions,
+        "results": post_results,
+        "offer_fee_mojos": offer_fee_mojos,
+        "offer_fee_source": offer_fee_source,
+        "execution_backend": path_label,
+    }
+    if path_extra_fields:
+        payload.update(path_extra_fields)
+    print(resolved_post_deps.format_output_fn(payload))
+    store.close()
+    return (0 if publish_failures == 0 else 2), payload

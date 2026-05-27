@@ -65,6 +65,10 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
     if request_amount <= 0:
         raise ValueError("invalid_request_amount")
 
+    program_config_path = str(payload.get("program_config_path", "")).strip()
+    if not program_config_path:
+        program_config_path = str(payload.get("program_config", "")).strip()
+    program_home_dir = str(payload.get("program_home_dir", "")).strip()
     result = build_signed_spend_bundle(
         {
             "key_id": key_id,
@@ -72,7 +76,13 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
             "receive_address": receive_address,
             "keyring_yaml_path": keyring_yaml_path,
             "asset_id": asset_id,
+            "program_config_path": program_config_path,
+            "program_home_dir": program_home_dir,
             "dry_run": bool(payload.get("dry_run", False)),
+            "expiry_unit": str(payload.get("expiry_unit", "")).strip(),
+            "expiry_value": int(payload.get("expiry_value", 0) or 0),
+            "split_input_coins": bool(payload.get("split_input_coins", True)),
+            "broadcast_split": bool(payload.get("broadcast_split", False)),
             "cloud_wallet_base_url": str(payload.get("cloud_wallet_base_url", "")).strip(),
             "cloud_wallet_user_key_id": str(payload.get("cloud_wallet_user_key_id", "")).strip(),
             "cloud_wallet_private_key_pem_path": str(

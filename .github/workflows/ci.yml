@@ -66,10 +66,42 @@ jobs:
             --manifest-path greenfloor-native/Cargo.toml \
             --out ./.cache/wheelhouse/greenfloor-native
 
+      - name: Resolve greenfloor-signer-pyo3 tree hash
+        id: signer_pyo3
+        run: |
+          echo "sha=$(git rev-parse HEAD:greenfloor-signer-pyo3)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore greenfloor-signer-pyo3 wheel cache
+        id: cache-signer-pyo3-wheel
+        uses: actions/cache/restore@v4
+        with:
+          path: ./.cache/wheelhouse/greenfloor-signer-pyo3
+          key: signer-pyo3-wheelhouse-${{ runner.os }}-${{ runner.arch }}-${{ steps.signer_pyo3.outputs.sha }}
+
+      - name: Build greenfloor-signer-pyo3 wheel (cache miss)
+        if: steps.cache-signer-pyo3-wheel.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ./.cache/wheelhouse/greenfloor-signer-pyo3
+          python -m pip install maturin
+          python -m maturin build \
+            --manifest-path greenfloor-signer-pyo3/Cargo.toml \
+            --out ./.cache/wheelhouse/greenfloor-signer-pyo3
+
       - name: Build and test greenfloor-signer
         run: |
           cargo build --manifest-path greenfloor-signer/Cargo.toml
           cargo test --manifest-path greenfloor-signer/Cargo.toml
+
+      - name: Save greenfloor-signer-pyo3 wheel cache
+        if: steps.cache-signer-pyo3-wheel.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ./.cache/wheelhouse/greenfloor-signer-pyo3
+          key: signer-pyo3-wheelhouse-${{ runner.os }}-${{ runner.arch }}-${{ steps.signer_pyo3.outputs.sha }}
+
+      - name: Install greenfloor-signer-pyo3 wheel
+        run: |
+          python -m pip install ./.cache/wheelhouse/greenfloor-signer-pyo3/*.whl
 
       - name: Save greenfloor-native wheel cache
         if: steps.cache-native-wheel.outputs.cache-hit != 'true'

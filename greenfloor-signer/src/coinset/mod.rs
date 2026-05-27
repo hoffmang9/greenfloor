@@ -1,7 +1,12 @@
 mod backend;
+mod msp;
 mod presplit;
 
 pub use backend::{LiveCoinset, OfferCoinsetBackend};
+pub use msp::{
+    normalize_asset_id, resolve_offer_asset_ids, AssetInfo, MspCoinset, SingletonInfo,
+    DEFAULT_MSP_BASE_URL,
+};
 pub use presplit::{fetch_presplit_cat_by_id, wait_for_unspent_cat};
 
 use chia_protocol::{Bytes32, Coin, CoinSpend, SpendBundle};
@@ -25,11 +30,11 @@ use crate::vault::members::hex_to_bytes32;
 pub const MIN_CAT_OUTPUT_MOJOS: u64 = 1000;
 
 pub fn client_for_network(network: &str) -> SignerResult<CoinsetClient> {
-    match network {
-        "mainnet" => Ok(CoinsetClient::mainnet()),
-        "testnet11" => Ok(CoinsetClient::testnet11()),
-        other => Err(SignerError::Other(format!("unsupported network: {other}"))),
-    }
+    MspCoinset::for_network(network, None).map(|msp| msp.client().clone())
+}
+
+pub fn client_for_config(config: &crate::config::SignerConfig) -> SignerResult<CoinsetClient> {
+    Ok(MspCoinset::new(&config.coinset_msp_base_url).client().clone())
 }
 
 pub fn decode_receive_address(receive_address: &str) -> SignerResult<Bytes32> {

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
 
 from greenfloor.logging_setup import normalize_log_level_name
+
+OfferExecutionBackend = Literal["signer", "cloud_wallet", "bls"]
 
 _CANONICAL_CAT_UNIT_MOJOS = 1000
 _CANONICAL_XCH_UNIT_MOJOS = 1_000_000_000_000
@@ -17,6 +20,153 @@ class SignerKeyConfig:
     fingerprint: int
     network: str | None = None
     keyring_yaml_path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class VaultWalletKeyConfig:
+    public_key_hex: str
+    curve: str
+
+
+@dataclass(frozen=True, slots=True)
+class VaultConfig:
+    launcher_id: str
+    custody_threshold: int
+    recovery_threshold: int
+    recovery_clawback_timelock: int
+    custody_keys: tuple[VaultWalletKeyConfig, ...]
+    recovery_keys: tuple[VaultWalletKeyConfig, ...]
+
+
+_SIGNER_CONFIG_FILENAME = "signer.yaml"
+_DEFAULT_SIGNER_COINSET_MSP_BASE_URL = "https://api-msp.coinset.org"
+
+
+def signer_config_path(home_dir: str) -> Path:
+    return Path(home_dir).expanduser() / "config" / _SIGNER_CONFIG_FILENAME
+
+
+def build_signer_config_document(program: ProgramConfig) -> dict[str, Any]:
+    if program.vault_config is None:
+        raise ValueError("vault config is required to build signer config document")
+    if not str(program.signer_kms_key_id).strip():
+        raise ValueError("signer.kms_key_id is required to build signer config document")
+    signer_section: dict[str, Any] = {
+        "kms_key_id": str(program.signer_kms_key_id).strip(),
+    }
+    kms_region = str(program.signer_kms_region or "").strip()
+    if kms_region:
+        signer_section["kms_region"] = kms_region
+    kms_public_key_hex = str(program.signer_kms_public_key_hex or "").strip()
+    if kms_public_key_hex:
+        signer_section["kms_public_key_hex"] = kms_public_key_hex
+    coinset_msp_base_url = str(program.signer_coinset_msp_base_url or "").strip()
+    if coinset_msp_base_url:
+        signer_section["coinset_msp_base_url"] = coinset_msp_base_url
+    vault = program.vault_config
+    return {
+        "app": {"network": str(program.app_network).strip()},
+        "signer": signer_section,
+        "vault": {
+            "launcher_id": vault.launcher_id,
+            "custody_threshold": int(vault.custody_threshold),
+            "recovery_threshold": int(vault.recovery_threshold),
+            "recovery_clawback_timelock": int(vault.recovery_clawback_timelock),
+            "custody_keys": [
+                {"public_key_hex": key.public_key_hex, "curve": key.curve}
+                for key in vault.custody_keys
+            ],
+            "recovery_keys": [
+                {"public_key_hex": key.public_key_hex, "curve": key.curve}
+                for key in vault.recovery_keys
+            ],
+        },
+    }
+
+
+def write_signer_config_file(program: ProgramConfig) -> Path:
+    from greenfloor.config.io import write_yaml
+
+    path = signer_config_path(program.home_dir)
+    write_yaml(path, build_signer_config_document(program))
+    return path
+
+
+_prepared_signer_config_by_home: dict[str, str] = {}
+
+
+def invalidate_signer_runtime_cache(*, home_dir: str | None = None) -> None:
+    """Drop cached signer.yaml path(s) after program config reload."""
+    if home_dir is None:
+        _prepared_signer_config_by_home.clear()
+        return
+    home_key = str(Path(home_dir).expanduser().resolve())
+    _prepared_signer_config_by_home.pop(home_key, None)
+
+
+def prepare_signer_runtime(program: ProgramConfig) -> str:
+    """Write signer.yaml once per home_dir for the process lifetime."""
+    home_key = str(Path(program.home_dir).expanduser().resolve())
+    cached = _prepared_signer_config_by_home.get(home_key)
+    if cached:
+        return cached
+    path = str(write_signer_config_file(program))
+    _prepared_signer_config_by_home[home_key] = path
+    return path
+
+
+def signer_runtime_config_path(program: ProgramConfig) -> str:
+    """Return signer.yaml path without writing."""
+    home_key = str(Path(program.home_dir).expanduser().resolve())
+    cached = _prepared_signer_config_by_home.get(home_key)
+    if cached:
+        return cached
+    return str(signer_config_path(program.home_dir))
+
+
+def ensure_signer_config_path(program: ProgramConfig) -> str:
+    """Deprecated alias: prefer ``prepare_signer_runtime`` at startup."""
+    return prepare_signer_runtime(program)
+
+
+def cloud_wallet_offer_path_configured(program: ProgramConfig) -> bool:
+    return bool(
+        str(program.cloud_wallet_base_url).strip()
+        and str(program.cloud_wallet_user_key_id).strip()
+        and str(program.cloud_wallet_private_key_pem_path).strip()
+        and str(program.cloud_wallet_vault_id).strip()
+    )
+
+
+def signer_offer_path_configured(program: ProgramConfig) -> bool:
+    if not str(program.signer_kms_key_id).strip():
+        return False
+    vault = program.vault_config
+    return vault is not None and bool(str(vault.launcher_id).strip())
+
+
+def offer_execution_backend(
+    program: ProgramConfig,
+    *,
+    size_base_units: int = 0,
+    local_build_min_size_base_units: int | None = None,
+) -> OfferExecutionBackend:
+    if signer_offer_path_configured(program):
+        return "signer"
+    if cloud_wallet_offer_path_configured(program):
+        threshold = local_build_min_size_base_units
+        if threshold is None:
+            import os
+
+            raw = os.getenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "100").strip()
+            try:
+                threshold = int(raw)
+            except ValueError:
+                threshold = 100
+        if threshold > 0 and int(size_base_units) >= threshold:
+            return "bls"
+        return "cloud_wallet"
+    return "bls"
 
 
 @dataclass(slots=True)
@@ -62,16 +212,21 @@ class ProgramConfig:
     cloud_wallet_kms_region: str = ""
     cloud_wallet_kms_public_key_hex: str = ""
     runtime_cloud_wallet_offer_artifact_timeout_seconds: int = 30
-    runtime_cloud_wallet_bootstrap_signature_wait_timeout_seconds: int = 45
-    runtime_cloud_wallet_bootstrap_signature_warning_interval_seconds: int = 30
-    runtime_cloud_wallet_bootstrap_wait_timeout_seconds: int = 120
-    runtime_cloud_wallet_bootstrap_wait_mempool_warning_seconds: int = 30
-    runtime_cloud_wallet_bootstrap_wait_confirmation_warning_seconds: int = 60
+    runtime_offer_bootstrap_signature_wait_timeout_seconds: int = 45
+    runtime_offer_bootstrap_signature_warning_interval_seconds: int = 30
+    runtime_offer_bootstrap_wait_timeout_seconds: int = 120
+    runtime_offer_bootstrap_wait_mempool_warning_seconds: int = 30
+    runtime_offer_bootstrap_wait_confirmation_warning_seconds: int = 60
     runtime_cloud_wallet_create_signature_wait_timeout_seconds: int = 120
     runtime_cloud_wallet_create_signature_warning_interval_seconds: int = 60
     app_log_level: str = "INFO"
     app_log_level_was_missing: bool = False
     signer_key_registry: dict[str, SignerKeyConfig] = field(default_factory=dict)
+    signer_coinset_msp_base_url: str = _DEFAULT_SIGNER_COINSET_MSP_BASE_URL
+    signer_kms_key_id: str = ""
+    signer_kms_region: str = ""
+    signer_kms_public_key_hex: str = ""
+    vault_config: VaultConfig | None = None
 
 
 @dataclass(slots=True)
@@ -117,6 +272,80 @@ def _req(mapping: dict[str, Any], key: str) -> Any:
     if key not in mapping:
         raise ValueError(f"Missing required field: {key}")
     return mapping[key]
+
+
+def _runtime_timeout_seconds(
+    runtime: dict[str, Any],
+    *,
+    neutral_key: str,
+    legacy_key: str,
+    default: int,
+    minimum: int,
+) -> int:
+    for key in (neutral_key, legacy_key):
+        if key in runtime:
+            return max(minimum, int(runtime[key]))
+    return max(minimum, default)
+
+
+def _parse_vault_wallet_keys(rows: Any, *, section: str) -> tuple[VaultWalletKeyConfig, ...]:
+    if rows is None:
+        raise ValueError(f"Missing required field: vault.{section}")
+    if not isinstance(rows, list):
+        raise ValueError(f"vault.{section} must be a list")
+    parsed: list[VaultWalletKeyConfig] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError(f"vault.{section} entries must be mappings")
+        public_key_hex = str(_req(row, "public_key_hex")).strip()
+        curve = str(_req(row, "curve")).strip()
+        if not public_key_hex:
+            raise ValueError(f"vault.{section} public_key_hex must be non-empty")
+        if not curve:
+            raise ValueError(f"vault.{section} curve must be non-empty")
+        parsed.append(VaultWalletKeyConfig(public_key_hex=public_key_hex, curve=curve))
+    if not parsed:
+        raise ValueError(f"vault.{section} must contain at least one key")
+    return tuple(parsed)
+
+
+def _parse_vault_config(raw: dict[str, Any] | None) -> VaultConfig | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("vault must be a mapping")
+    launcher_id = str(_req(raw, "launcher_id")).strip()
+    if not launcher_id:
+        raise ValueError("vault.launcher_id must be non-empty")
+    return VaultConfig(
+        launcher_id=launcher_id,
+        custody_threshold=int(_req(raw, "custody_threshold")),
+        recovery_threshold=int(_req(raw, "recovery_threshold")),
+        recovery_clawback_timelock=int(_req(raw, "recovery_clawback_timelock")),
+        custody_keys=_parse_vault_wallet_keys(raw.get("custody_keys"), section="custody_keys"),
+        recovery_keys=_parse_vault_wallet_keys(raw.get("recovery_keys"), section="recovery_keys"),
+    )
+
+
+def _parse_signer_section(raw: dict[str, Any] | None) -> dict[str, str]:
+    if raw is None:
+        return {
+            "coinset_msp_base_url": _DEFAULT_SIGNER_COINSET_MSP_BASE_URL,
+            "kms_key_id": "",
+            "kms_region": "",
+            "kms_public_key_hex": "",
+        }
+    if not isinstance(raw, dict):
+        raise ValueError("signer must be a mapping")
+    return {
+        "coinset_msp_base_url": str(
+            raw.get("coinset_msp_base_url", _DEFAULT_SIGNER_COINSET_MSP_BASE_URL)
+        ).strip()
+        or _DEFAULT_SIGNER_COINSET_MSP_BASE_URL,
+        "kms_key_id": str(raw.get("kms_key_id", "")).strip(),
+        "kms_region": str(raw.get("kms_region", "")).strip(),
+        "kms_public_key_hex": str(raw.get("kms_public_key_hex", "")).strip(),
+    }
 
 
 def _validate_strategy_pricing(
@@ -285,6 +514,19 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
     if not isinstance(cloud_wallet, dict):
         raise ValueError("cloud_wallet must be a mapping")
 
+    signer_fields = _parse_signer_section(raw.get("signer"))
+    vault_config = _parse_vault_config(raw.get("vault"))
+    # KMS signing uses signer: only; cloud_wallet.kms_* is legacy fallback at parse time.
+    if not signer_fields["kms_key_id"]:
+        signer_fields = {
+            **signer_fields,
+            "kms_key_id": str(cloud_wallet.get("kms_key_id", "")).strip(),
+            "kms_region": signer_fields["kms_region"]
+            or str(cloud_wallet.get("kms_region", "")).strip(),
+            "kms_public_key_hex": signer_fields["kms_public_key_hex"]
+            or str(cloud_wallet.get("kms_public_key_hex", "")).strip(),
+        }
+
     coin_ops_minimum_fee_mojos = int(coin_ops.get("minimum_fee_mojos", 10_000_000))
     if coin_ops_minimum_fee_mojos < 0:
         raise ValueError("coin_ops.minimum_fee_mojos must be >= 0")
@@ -361,20 +603,40 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         runtime_cloud_wallet_offer_artifact_timeout_seconds=max(
             5, int(runtime.get("cloud_wallet_offer_artifact_timeout_seconds", 30))
         ),
-        runtime_cloud_wallet_bootstrap_signature_wait_timeout_seconds=max(
-            5, int(runtime.get("cloud_wallet_bootstrap_signature_wait_timeout_seconds", 45))
+        runtime_offer_bootstrap_signature_wait_timeout_seconds=_runtime_timeout_seconds(
+            runtime,
+            neutral_key="offer_bootstrap_signature_wait_timeout_seconds",
+            legacy_key="cloud_wallet_bootstrap_signature_wait_timeout_seconds",
+            default=45,
+            minimum=5,
         ),
-        runtime_cloud_wallet_bootstrap_signature_warning_interval_seconds=max(
-            5, int(runtime.get("cloud_wallet_bootstrap_signature_warning_interval_seconds", 30))
+        runtime_offer_bootstrap_signature_warning_interval_seconds=_runtime_timeout_seconds(
+            runtime,
+            neutral_key="offer_bootstrap_signature_warning_interval_seconds",
+            legacy_key="cloud_wallet_bootstrap_signature_warning_interval_seconds",
+            default=30,
+            minimum=5,
         ),
-        runtime_cloud_wallet_bootstrap_wait_timeout_seconds=max(
-            10, int(runtime.get("cloud_wallet_bootstrap_wait_timeout_seconds", 120))
+        runtime_offer_bootstrap_wait_timeout_seconds=_runtime_timeout_seconds(
+            runtime,
+            neutral_key="offer_bootstrap_wait_timeout_seconds",
+            legacy_key="cloud_wallet_bootstrap_wait_timeout_seconds",
+            default=120,
+            minimum=10,
         ),
-        runtime_cloud_wallet_bootstrap_wait_mempool_warning_seconds=max(
-            10, int(runtime.get("cloud_wallet_bootstrap_wait_mempool_warning_seconds", 30))
+        runtime_offer_bootstrap_wait_mempool_warning_seconds=_runtime_timeout_seconds(
+            runtime,
+            neutral_key="offer_bootstrap_wait_mempool_warning_seconds",
+            legacy_key="cloud_wallet_bootstrap_wait_mempool_warning_seconds",
+            default=30,
+            minimum=10,
         ),
-        runtime_cloud_wallet_bootstrap_wait_confirmation_warning_seconds=max(
-            10, int(runtime.get("cloud_wallet_bootstrap_wait_confirmation_warning_seconds", 60))
+        runtime_offer_bootstrap_wait_confirmation_warning_seconds=_runtime_timeout_seconds(
+            runtime,
+            neutral_key="offer_bootstrap_wait_confirmation_warning_seconds",
+            legacy_key="cloud_wallet_bootstrap_wait_confirmation_warning_seconds",
+            default=60,
+            minimum=10,
         ),
         runtime_cloud_wallet_create_signature_wait_timeout_seconds=max(
             5, int(runtime.get("cloud_wallet_create_signature_wait_timeout_seconds", 120))
@@ -385,6 +647,11 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         app_log_level=app_log_level,
         app_log_level_was_missing=app_log_level_was_missing,
         signer_key_registry=key_registry,
+        signer_coinset_msp_base_url=signer_fields["coinset_msp_base_url"],
+        signer_kms_key_id=signer_fields["kms_key_id"],
+        signer_kms_region=signer_fields["kms_region"],
+        signer_kms_public_key_hex=signer_fields["kms_public_key_hex"],
+        vault_config=vault_config,
     )
 
 

@@ -20,7 +20,26 @@ from greenfloor.cli.manager import (
     _resolve_dexie_base_url,
     _resolve_offer_publish_settings,
     _resolve_splash_base_url,
-    _verify_offer_text_for_dexie,
+)
+from greenfloor.runtime.cloud_wallet.assets import (
+    recent_market_resolved_asset_id_hints,
+    resolve_cloud_wallet_asset_id,
+    resolve_cloud_wallet_offer_asset_ids,
+)
+from greenfloor.runtime.cloud_wallet.bootstrap import ensure_offer_bootstrap_denominations
+from greenfloor.runtime.cloud_wallet.phases import (
+    cloud_wallet_create_offer_phase,
+    cloud_wallet_wait_offer_artifact_phase,
+)
+from greenfloor.runtime.cloud_wallet.polling import (
+    poll_offer_artifact_until_available,
+    poll_signature_request_until_not_unsigned,
+)
+from greenfloor.runtime.offer_execution import build_and_post_offer_cloud_wallet
+from greenfloor.runtime.offer_publish import (
+    post_dexie_offer_with_invalid_offer_retry,
+    post_offer_phase,
+    verify_offer_text_for_dexie,
 )
 from tests.logging_helpers import reset_concurrent_log_handlers
 
@@ -122,7 +141,7 @@ def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypat
         "greenfloor.cli.manager._dexie_lookup_token_for_cat_id", _fake_lookup_by_cat
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         _fake_lookup_by_cat,
     )
     monkeypatch.setattr(
@@ -132,13 +151,13 @@ def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypat
         ),
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_symbol",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_symbol",
         lambda *, asset_ref, network: (
             {"id": quote_cat, "code": "wUSDC.b"} if asset_ref == "wUSDC.b" else None
         ),
     )
 
-    base_asset, quote_asset = manager_mod._resolve_cloud_wallet_offer_asset_ids(
+    base_asset, quote_asset = resolve_cloud_wallet_offer_asset_ids(
         wallet=cast(CloudWalletAdapter, _FakeWallet()),
         base_asset_id=base_cat,
         quote_asset_id="wUSDC.b",
@@ -189,7 +208,7 @@ def test_resolve_cloud_wallet_asset_id_uses_local_catalog_hints_when_dexie_missi
 
     monkeypatch.setattr("greenfloor.cli.manager._dexie_lookup_token_for_cat_id", lambda **_: None)
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         lambda **_: None,
     )
     monkeypatch.setattr(
@@ -197,11 +216,11 @@ def test_resolve_cloud_wallet_asset_id_uses_local_catalog_hints_when_dexie_missi
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == base_cat else [],
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
+        "greenfloor.asset_label_catalog._local_catalog_label_hints_for_asset_id",
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == base_cat else [],
     )
 
-    resolved = manager_mod._resolve_cloud_wallet_asset_id(
+    resolved = resolve_cloud_wallet_asset_id(
         wallet=cast(CloudWalletAdapter, _FakeWallet()),
         canonical_asset_id=base_cat,
         symbol_hint=base_cat,
@@ -249,18 +268,18 @@ def test_resolve_cloud_wallet_offer_asset_ids_uses_global_hints_without_label_ma
 
     monkeypatch.setattr("greenfloor.cli.manager._dexie_lookup_token_for_cat_id", lambda **_: None)
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         lambda **_: None,
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._local_catalog_label_hints_for_asset_id", lambda **_: []
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
+        "greenfloor.asset_label_catalog._local_catalog_label_hints_for_asset_id",
         lambda **_: [],
     )
 
-    resolved_base, resolved_quote = manager_mod._resolve_cloud_wallet_offer_asset_ids(
+    resolved_base, resolved_quote = resolve_cloud_wallet_offer_asset_ids(
         wallet=cast(CloudWalletAdapter, _FakeWallet()),
         base_asset_id=base_cat,
         quote_asset_id=quote_cat,
@@ -317,18 +336,18 @@ def test_resolve_cloud_wallet_asset_id_uses_identifier_lookup(monkeypatch) -> No
 
     monkeypatch.setattr("greenfloor.cli.manager._dexie_lookup_token_for_cat_id", lambda **_: None)
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         lambda **_: None,
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._local_catalog_label_hints_for_asset_id", lambda **_: []
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
+        "greenfloor.asset_label_catalog._local_catalog_label_hints_for_asset_id",
         lambda **_: [],
     )
 
-    resolved = manager_mod._resolve_cloud_wallet_asset_id(
+    resolved = resolve_cloud_wallet_asset_id(
         wallet=cast(CloudWalletAdapter, _FakeWallet()),
         canonical_asset_id=cat_hex,
         symbol_hint="ECO.49.2022",
@@ -375,7 +394,7 @@ def test_resolve_cloud_wallet_asset_id_identifier_miss_falls_through(monkeypatch
         ),
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         lambda *, canonical_cat_id_hex, network: (
             {"ticker_id": f"{cat_hex}_xch", "base_code": "ECO.181.2022"}
             if canonical_cat_id_hex == cat_hex
@@ -383,7 +402,7 @@ def test_resolve_cloud_wallet_asset_id_identifier_miss_falls_through(monkeypatch
         ),
     )
 
-    resolved = manager_mod._resolve_cloud_wallet_asset_id(
+    resolved = resolve_cloud_wallet_asset_id(
         wallet=cast(CloudWalletAdapter, _FakeWallet()),
         canonical_asset_id=cat_hex,
         symbol_hint="ECO.181.2022",
@@ -429,7 +448,7 @@ def test_resolve_cloud_wallet_asset_id_identifier_error_falls_through(monkeypatc
         ),
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         lambda *, canonical_cat_id_hex, network: (
             {"ticker_id": f"{cat_hex}_xch", "base_code": "ECO.181.2022"}
             if canonical_cat_id_hex == cat_hex
@@ -437,7 +456,7 @@ def test_resolve_cloud_wallet_asset_id_identifier_error_falls_through(monkeypatc
         ),
     )
 
-    resolved = manager_mod._resolve_cloud_wallet_asset_id(
+    resolved = resolve_cloud_wallet_asset_id(
         wallet=cast(CloudWalletAdapter, _FakeWallet()),
         canonical_asset_id=cat_hex,
         symbol_hint="ECO.181.2022",
@@ -465,7 +484,7 @@ def test_recent_market_resolved_asset_id_hints_reads_strategy_execution(tmp_path
     finally:
         store.close()
 
-    base_hint, quote_hint = manager_mod._recent_market_resolved_asset_id_hints(
+    base_hint, quote_hint = recent_market_resolved_asset_id_hints(
         program_home_dir=str(home_dir),
         market_id="m1",
     )
@@ -713,6 +732,31 @@ def _write_program_with_cloud_wallet(
         )
         text = text.replace('  kms_region: ""', '  kms_region: "us-west-2"')
         text = text.replace('  kms_public_key_hex: ""', '  kms_public_key_hex: "02abc123"')
+        if "signer:" not in text:
+            text = text.replace(
+                "coin_ops:",
+                "\n".join(
+                    [
+                        "signer:",
+                        '  kms_key_id: "arn:aws:kms:us-west-2:123:key/demo"',
+                        '  kms_region: "us-west-2"',
+                        '  kms_public_key_hex: "02abc123"',
+                        "vault:",
+                        '  launcher_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+                        "  custody_threshold: 1",
+                        "  recovery_threshold: 1",
+                        "  recovery_clawback_timelock: 3600",
+                        "  custody_keys:",
+                        '    - public_key_hex: "020202020202020202020202020202020202020202020202020202020202020202"',
+                        "      curve: SECP256R1",
+                        "  recovery_keys:",
+                        '    - public_key_hex: "ab3cb61463a695fa094f7c30526c8097fb813a0c5fa67bab261a7cd354cb6363b2d726218135b25b814f94df4749fc58"',
+                        "      curve: BLS12_381",
+                        "",
+                        "coin_ops:",
+                    ]
+                ),
+            )
     path.write_text(text, encoding="utf-8")
 
 
@@ -778,7 +822,7 @@ def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, c
     )
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        "greenfloor.cli.manager.verify_offer_text_for_dexie",
         lambda _offer: None,
     )
 
@@ -841,7 +885,7 @@ def test_build_and_post_offer_uses_market_configured_expiry_override(
 
     monkeypatch.setattr("greenfloor.cli.manager._build_offer_text_for_request", _fake_build)
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
-    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
+    monkeypatch.setattr("greenfloor.cli.manager.verify_offer_text_for_dexie", lambda _offer: None)
 
     code = _build_and_post_offer(
         program_path=program,
@@ -1125,7 +1169,7 @@ def test_offers_cancel_can_submit_onchain_refresh_after_offchain(
         "greenfloor.cli.manager._new_cloud_wallet_adapter", lambda _p: _FakeWallet()
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **_kw: "Asset_a1",
     )
     monkeypatch.setattr(
@@ -1215,7 +1259,7 @@ def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Pat
     )
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        "greenfloor.cli.manager.verify_offer_text_for_dexie",
         lambda _offer: None,
     )
 
@@ -1263,7 +1307,7 @@ def test_build_and_post_offer_accepts_txch_pair_on_testnet11(
     )
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        "greenfloor.cli.manager.verify_offer_text_for_dexie",
         lambda _offer: None,
     )
 
@@ -1428,7 +1472,7 @@ def test_build_and_post_offer_returns_nonzero_when_offer_verification_fails(
         lambda _payload: "offer1bad",
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        "greenfloor.cli.manager.verify_offer_text_for_dexie",
         lambda _offer: "wallet_sdk_offer_verify_false",
     )
 
@@ -1512,7 +1556,7 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
         return __import__(name)
 
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        "greenfloor.runtime.offer_publish.importlib.import_module",
         _import_module,
     )
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
@@ -1569,7 +1613,7 @@ def test_build_and_post_offer_returns_nonzero_when_publish_fails(
     )
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        "greenfloor.cli.manager.verify_offer_text_for_dexie",
         lambda _offer: None,
     )
 
@@ -1653,7 +1697,7 @@ def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypa
         return __import__(name)
 
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        "greenfloor.runtime.offer_publish.importlib.import_module",
         _import_module,
     )
 
@@ -1699,7 +1743,7 @@ def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypa
             return _SpendBundleWithExpiry()
 
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
-    assert _verify_offer_text_for_dexie("offer1ok") is None
+    assert verify_offer_text_for_dexie("offer1ok") is None
 
 
 def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> None:
@@ -1709,7 +1753,7 @@ def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> 
         return __import__(name)
 
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        "greenfloor.runtime.offer_publish.importlib.import_module",
         _import_module,
     )
 
@@ -1755,8 +1799,8 @@ def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> 
             return _SpendBundleWithExpiry()
 
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
-    assert _verify_offer_text_for_dexie("offer1ok") is None
-    assert _verify_offer_text_for_dexie("offer1bad") == "wallet_sdk_offer_verify_false"
+    assert verify_offer_text_for_dexie("offer1ok") is None
+    assert verify_offer_text_for_dexie("offer1bad") == "wallet_sdk_offer_verify_false"
 
 
 def test_verify_offer_text_for_dexie_rejects_offer_without_expiration_condition(
@@ -1768,7 +1812,7 @@ def test_verify_offer_text_for_dexie_rejects_offer_without_expiration_condition(
         return __import__(name)
 
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        "greenfloor.runtime.offer_publish.importlib.import_module",
         _import_module,
     )
 
@@ -1807,7 +1851,7 @@ def test_verify_offer_text_for_dexie_rejects_offer_without_expiration_condition(
             return _SpendBundleNoExpiry()
 
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
-    assert _verify_offer_text_for_dexie("offer1noexpiry") == "wallet_sdk_offer_missing_expiration"
+    assert verify_offer_text_for_dexie("offer1noexpiry") == "wallet_sdk_offer_missing_expiration"
 
 
 def test_verify_offer_text_for_dexie_extracts_expiry_from_coin_spend_program(
@@ -1819,7 +1863,7 @@ def test_verify_offer_text_for_dexie_extracts_expiry_from_coin_spend_program(
         return __import__(name)
 
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        "greenfloor.runtime.offer_publish.importlib.import_module",
         _import_module,
     )
 
@@ -1865,7 +1909,7 @@ def test_verify_offer_text_for_dexie_extracts_expiry_from_coin_spend_program(
             return _SpendBundle()
 
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
-    assert _verify_offer_text_for_dexie("offer1ok") is None
+    assert verify_offer_text_for_dexie("offer1ok") is None
 
 
 def test_verify_offer_text_for_dexie_rejects_duplicate_spent_coin_ids(
@@ -1877,7 +1921,7 @@ def test_verify_offer_text_for_dexie_rejects_duplicate_spent_coin_ids(
         return __import__(name)
 
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime.importlib.import_module",
+        "greenfloor.runtime.offer_publish.importlib.import_module",
         _import_module,
     )
 
@@ -1919,7 +1963,7 @@ def test_verify_offer_text_for_dexie_rejects_duplicate_spent_coin_ids(
 
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
     assert (
-        _verify_offer_text_for_dexie("offer1duplicate")
+        verify_offer_text_for_dexie("offer1duplicate")
         == "wallet_sdk_offer_duplicate_spent_coin_ids"
     )
 
@@ -1940,7 +1984,7 @@ def test_verify_offer_text_for_dexie_uses_greenfloor_native_before_sdk(monkeypat
     monkeypatch.setitem(sys.modules, "greenfloor_native", _Native)
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
 
-    assert _verify_offer_text_for_dexie("offer1native") is None
+    assert verify_offer_text_for_dexie("offer1native") is None
     assert calls["offer"] == "offer1native"
 
 
@@ -1951,7 +1995,7 @@ def test_verify_offer_text_for_dexie_returns_native_validation_error(monkeypatch
             raise ValueError("native_invalid_offer")
 
     monkeypatch.setitem(sys.modules, "greenfloor_native", _Native)
-    assert _verify_offer_text_for_dexie("offer1bad") == (
+    assert verify_offer_text_for_dexie("offer1bad") == (
         "wallet_sdk_offer_validate_failed:native_invalid_offer"
     )
 
@@ -1999,7 +2043,7 @@ def test_verify_offer_text_for_dexie_checks_duplicate_spends_after_native_valida
     monkeypatch.setitem(sys.modules, "greenfloor_native", _Native)
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
     assert (
-        _verify_offer_text_for_dexie("offer1native-dupe")
+        verify_offer_text_for_dexie("offer1native-dupe")
         == "wallet_sdk_offer_duplicate_spent_coin_ids"
     )
 
@@ -2061,7 +2105,7 @@ def test_coins_list_resolves_asset_filter_before_listing(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_resolved",
     )
     code = _coins_list(program_path=program, asset="BYC", vault_id=None)
@@ -2109,7 +2153,7 @@ def test_coins_list_keeps_asset_scoped_rows_when_wallet_reports_mixed_asset_meta
         lambda *args, **kwargs: warning_calls.append(args),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_kg8byr1jz72w12g9tjchiypp",
     )
     code = _coins_list(program_path=program, asset="BYC", vault_id=None)
@@ -2188,7 +2232,7 @@ def test_coins_list_keeps_asset_totals_when_scoped_rows_omit_reported_asset(
         lambda *args, **kwargs: warning_calls.append(args),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_kg8byr1jz72w12g9tjchiypp",
     )
     code = _coins_list(program_path=program, asset="BYC", vault_id=None)
@@ -2265,7 +2309,7 @@ def test_coins_list_keeps_row_level_spendability_separate_from_wallet_asset_tota
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_kg8",
     )
     code = _coins_list(program_path=program, asset="BYC", vault_id=None)
@@ -2338,7 +2382,7 @@ def test_coins_list_warns_when_item_amount_sum_differs_from_wallet_asset_total(
         lambda *args, **kwargs: warning_calls.append(args),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_kg8",
     )
     code = _coins_list(program_path=program, asset="BYC", vault_id=None)
@@ -2385,7 +2429,7 @@ def test_coins_list_cat_id_uses_wallet_resolution_without_dexie(
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     resolver_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kwargs: resolver_calls.append(kwargs) or "Asset_resolved",
     )
     code = _coins_list(program_path=program, asset="BYC", vault_id=None, cat_id=cat_id)
@@ -2467,7 +2511,7 @@ def test_coins_list_cat_id_works_when_dexie_metadata_absent(
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == cat_id else [],
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
+        "greenfloor.asset_label_catalog._local_catalog_label_hints_for_asset_id",
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == cat_id else [],
     )
     monkeypatch.setattr(
@@ -2475,7 +2519,7 @@ def test_coins_list_cat_id_works_when_dexie_metadata_absent(
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("dexie should not be called")),
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("dexie should not be called")),
     )
     code = _coins_list(program_path=program, asset=None, vault_id=None, cat_id=cat_id)
@@ -2531,7 +2575,7 @@ def test_coins_list_vault_id_override_uses_override_wallet_end_to_end(
     )
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _OverrideWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: (resolver_wallet_ids.append(kw["wallet"].vault_id) or "Asset_resolved"),
     )
 
@@ -2593,7 +2637,7 @@ def test_resolve_cloud_wallet_asset_id_hex_without_dexie_uses_local_catalog_hint
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == base_cat else [],
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
+        "greenfloor.asset_label_catalog._local_catalog_label_hints_for_asset_id",
         lambda *, canonical_asset_id: ["ECO.181.2022"] if canonical_asset_id == base_cat else [],
     )
     monkeypatch.setattr(
@@ -2601,11 +2645,11 @@ def test_resolve_cloud_wallet_asset_id_hex_without_dexie_uses_local_catalog_hint
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("dexie should not be called")),
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         lambda **kwargs: (_ for _ in ()).throw(AssertionError("dexie should not be called")),
     )
 
-    resolved = manager_mod._resolve_cloud_wallet_asset_id(
+    resolved = resolve_cloud_wallet_asset_id(
         wallet=cast(CloudWalletAdapter, _FakeWallet()),
         canonical_asset_id=base_cat,
         symbol_hint=None,
@@ -2683,7 +2727,7 @@ def test_resolve_taker_or_coin_operation_fee_falls_back_to_config_minimum(monkey
 
     monkeypatch.setattr("greenfloor.runtime.coinset_runtime.CoinsetAdapter", _FakeCoinset)
     monkeypatch.setenv("GREENFLOOR_COINSET_FEE_MAX_ATTEMPTS", "1")
-    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
 
     fee, source = manager_mod._resolve_taker_or_coin_operation_fee(
         network="mainnet",
@@ -2758,7 +2802,9 @@ def test_effective_coin_split_fee_for_xch_keeps_default_fee() -> None:
 
 
 def test_resolve_maker_offer_fee_is_zero() -> None:
-    fee, source = manager_mod._resolve_maker_offer_fee(network="mainnet")
+    from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
+
+    fee, source = resolve_maker_offer_fee(network="mainnet")
     assert fee == 0
     assert source == "maker_default_zero"
 
@@ -2789,7 +2835,7 @@ def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_split_base",
     )
     monkeypatch.setattr(
@@ -2853,7 +2899,7 @@ def test_coin_split_auto_selects_largest_spendable_asset_coin(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_split_base",
     )
     monkeypatch.setattr(
@@ -2910,7 +2956,7 @@ def test_coin_split_guardrail_blocks_when_it_would_lock_all_spendable_coins(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_split_base",
     )
     monkeypatch.setattr(
@@ -2967,7 +3013,7 @@ def test_coin_split_guardrail_override_allows_lock_all_spendable(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_split_base",
     )
     monkeypatch.setattr(
@@ -3024,7 +3070,7 @@ def test_coin_split_guardrail_prompt_override_allows_continue(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_split_base",
     )
     monkeypatch.setattr(
@@ -3077,7 +3123,7 @@ def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, caps
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_huun64oh7dbt9f1f9ie8khuw",
     )
     monkeypatch.setattr(
@@ -3701,7 +3747,7 @@ def test_coin_combine_auto_selection_ignores_cat_dust_under_one_unit(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_split_base",
     )
     monkeypatch.setattr(
@@ -3795,7 +3841,7 @@ def test_coin_combine_auto_selection_directly_filters_cross_asset_scoped_rows(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_asset_id",
+        "greenfloor.cli.manager.resolve_cloud_wallet_asset_id",
         lambda **kw: "Asset_split_base",
     )
     monkeypatch.setattr(
@@ -3871,7 +3917,7 @@ def test_coin_split_until_ready_ignores_unknown_states_and_string_asset(
         lambda *, network, minimum_fee_mojos=0: (42, "coinset_conservative"),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
+        "greenfloor.cli.manager.wait_for_mempool_then_confirmation",
         lambda **kwargs: [],
     )
 
@@ -3996,7 +4042,11 @@ def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, c
         lambda *, network, minimum_fee_mojos=0: (42, "coinset_conservative"),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
+        "greenfloor.cli.manager.poll_signature_request_until_not_unsigned",
+        lambda **kwargs: ("SIGNED", []),
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager.wait_for_mempool_then_confirmation",
         lambda **kwargs: [],
     )
 
@@ -4201,8 +4251,6 @@ def test_evaluate_denomination_readiness_asset_id_match_is_case_insensitive() ->
 def test_poll_signature_request_returns_immediately_when_already_signed(monkeypatch) -> None:
     import time as time_module
 
-    from greenfloor.cli.manager import _poll_signature_request_until_not_unsigned
-
     class _FakeWallet:
         @staticmethod
         def get_signature_request(*, signature_request_id):
@@ -4212,7 +4260,7 @@ def test_poll_signature_request_returns_immediately_when_already_signed(monkeypa
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: 0.0)
 
-    status, events = _poll_signature_request_until_not_unsigned(
+    status, events = poll_signature_request_until_not_unsigned(
         wallet=_FakeWallet(),  # type: ignore[arg-type]
         signature_request_id="sr-1",
         timeout_seconds=900,
@@ -4224,8 +4272,6 @@ def test_poll_signature_request_returns_immediately_when_already_signed(monkeypa
 
 def test_poll_signature_request_emits_warning_event_after_interval(monkeypatch) -> None:
     import time as time_module
-
-    from greenfloor.cli.manager import _poll_signature_request_until_not_unsigned
 
     call_count = [0]
 
@@ -4241,7 +4287,7 @@ def test_poll_signature_request_emits_warning_event_after_interval(monkeypatch) 
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
 
-    status, events = _poll_signature_request_until_not_unsigned(
+    status, events = poll_signature_request_until_not_unsigned(
         wallet=_FakeWallet(),  # type: ignore[arg-type]
         signature_request_id="sr-1",
         timeout_seconds=900,
@@ -4258,8 +4304,6 @@ def test_poll_signature_request_raises_on_timeout(monkeypatch) -> None:
 
     import pytest
 
-    from greenfloor.cli.manager import _poll_signature_request_until_not_unsigned
-
     class _FakeWallet:
         @staticmethod
         def get_signature_request(*, signature_request_id):
@@ -4272,7 +4316,7 @@ def test_poll_signature_request_raises_on_timeout(monkeypatch) -> None:
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
 
     with pytest.raises(RuntimeError, match="signature_request_timeout"):
-        _poll_signature_request_until_not_unsigned(
+        poll_signature_request_until_not_unsigned(
             wallet=_FakeWallet(),  # type: ignore[arg-type]
             signature_request_id="sr-1",
             timeout_seconds=900,
@@ -4282,8 +4326,6 @@ def test_poll_signature_request_raises_on_timeout(monkeypatch) -> None:
 
 def test_poll_signature_request_emits_escalation_on_repeated_warnings(monkeypatch) -> None:
     import time as time_module
-
-    from greenfloor.cli.manager import _poll_signature_request_until_not_unsigned
 
     call_count = [0]
 
@@ -4300,7 +4342,7 @@ def test_poll_signature_request_emits_escalation_on_repeated_warnings(monkeypatc
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
 
-    _status, events = _poll_signature_request_until_not_unsigned(
+    _status, events = poll_signature_request_until_not_unsigned(
         wallet=_FakeWallet(),  # type: ignore[arg-type]
         signature_request_id="sr-1",
         timeout_seconds=1800,
@@ -4313,8 +4355,6 @@ def test_poll_signature_request_emits_escalation_on_repeated_warnings(monkeypatc
 
 def test_poll_signature_request_retries_transient_errors(monkeypatch) -> None:
     import time as time_module
-
-    from greenfloor.cli.manager import _poll_signature_request_until_not_unsigned
 
     call_count = [0]
 
@@ -4331,7 +4371,7 @@ def test_poll_signature_request_retries_transient_errors(monkeypatch) -> None:
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
 
-    _status, events = _poll_signature_request_until_not_unsigned(
+    _status, events = poll_signature_request_until_not_unsigned(
         wallet=_FakeWallet(),  # type: ignore[arg-type]
         signature_request_id="sr-1",
         timeout_seconds=900,
@@ -4350,7 +4390,9 @@ def test_poll_signature_request_retries_transient_errors(monkeypatch) -> None:
 def test_wait_for_mempool_emits_in_mempool_event_with_coinset_url(monkeypatch) -> None:
     import time as time_module
 
-    from greenfloor.cli.manager import _wait_for_mempool_then_confirmation
+    from greenfloor.runtime.cloud_wallet.polling import (
+        wait_for_mempool_then_confirmation as _wait_for_mempool_then_confirmation,
+    )
 
     lc_call = [0]
 
@@ -4366,11 +4408,11 @@ def test_wait_for_mempool_emits_in_mempool_event_with_coinset_url(monkeypatch) -
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
     monkeypatch.setattr(
-        "greenfloor.cli.manager._coinset_reconcile_coin_state",
+        "greenfloor.runtime.cloud_wallet.polling._coinset_reconcile_coin_state",
         lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._watch_reorg_risk_with_coinset",
+        "greenfloor.runtime.cloud_wallet.polling._watch_reorg_risk_with_coinset",
         lambda **kwargs: [{"event": "reorg_watch_complete"}],
     )
 
@@ -4389,7 +4431,9 @@ def test_wait_for_mempool_emits_in_mempool_event_with_coinset_url(monkeypatch) -
 def test_wait_for_mempool_returns_when_confirmed_coin_appears(monkeypatch) -> None:
     import time as time_module
 
-    from greenfloor.cli.manager import _wait_for_mempool_then_confirmation
+    from greenfloor.runtime.cloud_wallet.polling import (
+        wait_for_mempool_then_confirmation as _wait_for_mempool_then_confirmation,
+    )
 
     class _FakeWallet:
         @staticmethod
@@ -4400,11 +4444,11 @@ def test_wait_for_mempool_returns_when_confirmed_coin_appears(monkeypatch) -> No
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
     monkeypatch.setattr(
-        "greenfloor.cli.manager._coinset_reconcile_coin_state",
+        "greenfloor.runtime.cloud_wallet.polling._coinset_reconcile_coin_state",
         lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._watch_reorg_risk_with_coinset",
+        "greenfloor.runtime.cloud_wallet.polling._watch_reorg_risk_with_coinset",
         lambda **kwargs: [{"event": "reorg_watch_complete"}],
     )
 
@@ -4422,7 +4466,9 @@ def test_wait_for_mempool_returns_when_confirmed_coin_appears(monkeypatch) -> No
 def test_wait_for_mempool_emits_warning_when_no_mempool_entry(monkeypatch) -> None:
     import time as time_module
 
-    from greenfloor.cli.manager import _wait_for_mempool_then_confirmation
+    from greenfloor.runtime.cloud_wallet.polling import (
+        wait_for_mempool_then_confirmation as _wait_for_mempool_then_confirmation,
+    )
 
     lc_call = [0]
 
@@ -4439,11 +4485,11 @@ def test_wait_for_mempool_emits_warning_when_no_mempool_entry(monkeypatch) -> No
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
     monkeypatch.setattr(
-        "greenfloor.cli.manager._coinset_reconcile_coin_state",
+        "greenfloor.runtime.cloud_wallet.polling._coinset_reconcile_coin_state",
         lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._watch_reorg_risk_with_coinset",
+        "greenfloor.runtime.cloud_wallet.polling._watch_reorg_risk_with_coinset",
         lambda **kwargs: [{"event": "reorg_watch_complete"}],
     )
 
@@ -4461,7 +4507,9 @@ def test_wait_for_mempool_emits_warning_when_no_mempool_entry(monkeypatch) -> No
 def test_wait_for_mempool_ignores_coins_in_initial_set(monkeypatch) -> None:
     import time as time_module
 
-    from greenfloor.cli.manager import _wait_for_mempool_then_confirmation
+    from greenfloor.runtime.cloud_wallet.polling import (
+        wait_for_mempool_then_confirmation as _wait_for_mempool_then_confirmation,
+    )
 
     lc_call = [0]
 
@@ -4481,11 +4529,11 @@ def test_wait_for_mempool_ignores_coins_in_initial_set(monkeypatch) -> None:
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
     monkeypatch.setattr(
-        "greenfloor.cli.manager._coinset_reconcile_coin_state",
+        "greenfloor.runtime.cloud_wallet.polling._coinset_reconcile_coin_state",
         lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._watch_reorg_risk_with_coinset",
+        "greenfloor.runtime.cloud_wallet.polling._watch_reorg_risk_with_coinset",
         lambda **kwargs: [{"event": "reorg_watch_complete"}],
     )
 
@@ -4503,12 +4551,14 @@ def test_wait_for_mempool_ignores_coins_in_initial_set(monkeypatch) -> None:
 def test_wait_for_mempool_filters_to_requested_asset(monkeypatch) -> None:
     import time as time_module
 
-    from greenfloor.cli.manager import _wait_for_mempool_then_confirmation
+    from greenfloor.runtime.cloud_wallet.polling import (
+        wait_for_mempool_then_confirmation as _wait_for_mempool_then_confirmation,
+    )
 
     class _FakeWallet:
         @staticmethod
-        def list_coins(*, include_pending=True):
-            _ = include_pending
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending, asset_id
             return [
                 {
                     "id": "other-coin",
@@ -4528,11 +4578,11 @@ def test_wait_for_mempool_filters_to_requested_asset(monkeypatch) -> None:
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
     monkeypatch.setattr(
-        "greenfloor.cli.manager._coinset_reconcile_coin_state",
+        "greenfloor.runtime.cloud_wallet.polling._coinset_reconcile_coin_state",
         lambda **kwargs: {"reconcile": "ok", "confirmed_block_index": "10"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._watch_reorg_risk_with_coinset",
+        "greenfloor.runtime.cloud_wallet.polling._watch_reorg_risk_with_coinset",
         lambda **kwargs: [{"event": "reorg_watch_complete"}],
     )
 
@@ -4552,14 +4602,15 @@ def test_wait_for_mempool_filters_to_requested_asset(monkeypatch) -> None:
 def test_watch_reorg_risk_waits_until_additional_blocks(monkeypatch) -> None:
     import time as time_module
 
-    from greenfloor.cli.manager import _watch_reorg_risk_with_coinset
+    from greenfloor.runtime.cloud_wallet.polling import _watch_reorg_risk_with_coinset
 
     peak_seq = iter([100, 102, 106])
     elapsed_seq = iter([0.0, 0.0, 10.0, 20.0])
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
     monkeypatch.setattr(
-        "greenfloor.cli.manager._coinset_peak_height", lambda **kwargs: next(peak_seq)
+        "greenfloor.runtime.cloud_wallet.polling._coinset_peak_height",
+        lambda **kwargs: next(peak_seq),
     )
 
     events = _watch_reorg_risk_with_coinset(
@@ -4575,12 +4626,14 @@ def test_watch_reorg_risk_waits_until_additional_blocks(monkeypatch) -> None:
 def test_watch_reorg_risk_times_out_when_chain_stalls(monkeypatch) -> None:
     import time as time_module
 
-    from greenfloor.cli.manager import _watch_reorg_risk_with_coinset
+    from greenfloor.runtime.cloud_wallet.polling import _watch_reorg_risk_with_coinset
 
     elapsed_seq = iter([0.0, 0.0, 61.0])
     monkeypatch.setattr(time_module, "sleep", lambda _: None)
     monkeypatch.setattr(time_module, "monotonic", lambda: next(elapsed_seq))
-    monkeypatch.setattr("greenfloor.cli.manager._coinset_peak_height", lambda **kwargs: 100)
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.polling._coinset_peak_height", lambda **kwargs: 100
+    )
 
     events = _watch_reorg_risk_with_coinset(
         network="mainnet",
@@ -4718,7 +4771,7 @@ def test_build_and_post_offer_uses_local_path_for_large_size_when_cloud_wallet_c
             return {"success": True, "id": "local-100-id"}
 
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
-    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
+    monkeypatch.setattr("greenfloor.cli.manager.verify_offer_text_for_dexie", lambda _offer: None)
 
     code = _build_and_post_offer(
         program_path=program,
@@ -4774,7 +4827,7 @@ def test_build_and_post_offer_uses_local_path_when_cloud_wallet_not_configured(
             return {"success": True, "id": "local-no-cw"}
 
     monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
-    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
+    monkeypatch.setattr("greenfloor.cli.manager.verify_offer_text_for_dexie", lambda _offer: None)
 
     code = _build_and_post_offer(
         program_path=program,
@@ -4796,56 +4849,26 @@ def test_build_and_post_offer_uses_local_path_when_cloud_wallet_not_configured(
     assert local_builder_calls[0] == 1
 
 
-def test_use_local_offer_build_path_for_size_defaults_and_boundaries(monkeypatch) -> None:
-    monkeypatch.delenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", raising=False)
-    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=99) is False
-    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=100) is True
-    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=101) is True
-
-
-def test_use_local_offer_build_path_for_size_invalid_threshold_uses_default(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "not-an-int")
-    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=99) is False
-    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=100) is True
-
-
-def test_use_local_offer_build_path_for_size_non_positive_threshold_disables_local_path(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "0")
-    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=100) is False
-    monkeypatch.setenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "-5")
-    assert manager_mod._use_local_offer_build_path_for_size(size_base_units=1000) is False
-
-
-def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured(
+def test_build_and_post_offer_uses_signer_path_for_kms_configured(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """KMS-configured runs must use the cloud wallet path for all sizes.
-
-    The cloud wallet's createOffer builds the complete vault spend bundle
-    (CAT + vault singleton) and _auto_sign_if_kms signs it. The local build
-    path cannot produce a valid vault offer because SingletonMember requires
-    the vault singleton to be included in the same spend bundle.
-    """
+    """KMS-configured runs must use the local Rust signer path for all sizes."""
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program_with_cloud_wallet(program)
+    _write_program_with_cloud_wallet(program, with_kms=True)
     _write_markets(markets)
 
-    cloud_dispatched = [False]
+    signer_dispatched = [False]
     local_builder_calls = [0]
 
-    def _fake_cloud_wallet(**kwargs):
+    def _fake_signer(**kwargs):
         _ = kwargs
-        cloud_dispatched[0] = True
+        signer_dispatched[0] = True
         return 0, {}
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager._build_and_post_offer_cloud_wallet",
-        _fake_cloud_wallet,
+        "greenfloor.cli.manager._build_and_post_offer_signer",
+        _fake_signer,
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_offer_text_for_request",
@@ -4854,7 +4877,11 @@ def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured(
         ),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._kms_offer_signing_configured", lambda _program: True
+        "greenfloor.cli.manager.offer_execution_backend", lambda _program, **kwargs: "signer"
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager.prepare_signer_runtime",
+        lambda _program: "/tmp/signer.yaml",
     )
 
     code = _build_and_post_offer(
@@ -4873,30 +4900,30 @@ def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured(
         dry_run=False,
     )
     assert code == 0
-    assert cloud_dispatched[0] is True
+    assert signer_dispatched[0] is True
     assert local_builder_calls[0] == 0
 
 
-def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured_large_size(
+def test_build_and_post_offer_uses_signer_path_for_kms_configured_large_size(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """KMS-configured runs use cloud wallet path even for size >= 100."""
+    """KMS-configured runs use signer path even for size >= 100."""
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    _write_program_with_cloud_wallet(program)
+    _write_program_with_cloud_wallet(program, with_kms=True)
     _write_markets(markets)
 
-    cloud_dispatched = [False]
+    signer_dispatched = [False]
     local_builder_calls = [0]
 
-    def _fake_cloud_wallet(**kwargs):
+    def _fake_signer(**kwargs):
         _ = kwargs
-        cloud_dispatched[0] = True
+        signer_dispatched[0] = True
         return 0, {}
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager._build_and_post_offer_cloud_wallet",
-        _fake_cloud_wallet,
+        "greenfloor.cli.manager._build_and_post_offer_signer",
+        _fake_signer,
     )
     monkeypatch.setattr(
         "greenfloor.cli.manager._build_offer_text_for_request",
@@ -4905,7 +4932,11 @@ def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured_large_si
         ),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._kms_offer_signing_configured", lambda _program: True
+        "greenfloor.cli.manager.offer_execution_backend", lambda _program, **kwargs: "signer"
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.manager.prepare_signer_runtime",
+        lambda _program: "/tmp/signer.yaml",
     )
 
     code = _build_and_post_offer(
@@ -4924,7 +4955,7 @@ def test_build_and_post_offer_uses_cloud_wallet_path_for_kms_configured_large_si
         dry_run=False,
     )
     assert code == 0
-    assert cloud_dispatched[0] is True
+    assert signer_dispatched[0] is True
     assert local_builder_calls[0] == 0
 
 
@@ -4944,7 +4975,6 @@ def _load_program_and_market(program_path: Path, markets_path: Path):
 def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
-    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
     from greenfloor.storage.sqlite import SqliteStore
 
     program_path = tmp_path / "program.yaml"
@@ -5006,24 +5036,36 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        "greenfloor.runtime.cloud_wallet.deps.new_cloud_wallet_adapter",
+        lambda _program: _FakeWallet(_program),
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.deps.ensure_offer_bootstrap_denominations",
         lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
-        lambda **kwargs: ("SUBMITTED", []),
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_create_offer_phase",
+        lambda **kwargs: {
+            "known_offer_markers": set(),
+            "offer_request_started_at": dt.datetime.now(dt.UTC),
+            "signature_request_id": "sr-1",
+            "signature_state": "SUBMITTED",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+            "wait_events": [],
+            "side": "sell",
+        },
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_wait_offer_artifact_phase",
         lambda **kwargs: "offer1testartifact",
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        "greenfloor.runtime.cloud_wallet.deps.verify_offer_text_for_dexie",
         lambda _offer: None,
     )
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.deps.DexieAdapter", _FakeDexie)
 
-    code, _ = _build_and_post_offer_cloud_wallet(
+    code, _ = build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=10,
@@ -5071,8 +5113,6 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
 def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_override(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
-    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
-
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
     _write_program_with_cloud_wallet(program_path)
@@ -5125,24 +5165,34 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        "greenfloor.runtime.cloud_wallet.deps.new_cloud_wallet_adapter",
+        lambda _program: _FakeWallet(_program),
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.deps.ensure_offer_bootstrap_denominations",
         lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_create_offer_phase",
+        cloud_wallet_create_offer_phase,
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.phases.poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SUBMITTED", []),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_wait_offer_artifact_phase",
         lambda **kwargs: "offer1cwexpiry",
     )
-    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
+        "greenfloor.runtime.cloud_wallet.deps.verify_offer_text_for_dexie", lambda _offer: None
+    )
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.deps.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr(
+        "greenfloor.runtime.offer_publish.initialize_manager_file_logging", lambda *a, **k: None
     )
 
-    code, _ = _build_and_post_offer_cloud_wallet(
+    code, _ = build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=1,
@@ -5169,7 +5219,6 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
 def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
-    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
     from greenfloor.storage.sqlite import SqliteStore
 
     program_path = tmp_path / "program.yaml"
@@ -5218,24 +5267,38 @@ def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        "greenfloor.runtime.cloud_wallet.deps.new_cloud_wallet_adapter",
+        lambda _program: _FakeWallet(_program),
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.deps.ensure_offer_bootstrap_denominations",
         lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
-        lambda **kwargs: ("SUBMITTED", []),
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_create_offer_phase",
+        lambda **kwargs: {
+            "known_offer_markers": set(),
+            "offer_request_started_at": dt.datetime.now(dt.UTC),
+            "signature_request_id": "sr-1",
+            "signature_state": "SUBMITTED",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+            "wait_events": [],
+            "side": kwargs.get("action_side", "sell"),
+        },
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_wait_offer_artifact_phase",
         lambda **kwargs: "offer1buyaudit",
     )
-    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
+        "greenfloor.runtime.cloud_wallet.deps.verify_offer_text_for_dexie", lambda _offer: None
+    )
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.deps.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr(
+        "greenfloor.runtime.offer_publish.initialize_manager_file_logging", lambda *a, **k: None
     )
 
-    code, _ = _build_and_post_offer_cloud_wallet(
+    code, _ = build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=10,
@@ -5270,8 +5333,6 @@ def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
 def test_build_and_post_offer_cloud_wallet_fails_when_dexie_offer_not_visible(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
-    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
-
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
     _write_program_with_cloud_wallet(program_path)
@@ -5317,25 +5378,38 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_offer_not_visible(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        "greenfloor.runtime.cloud_wallet.deps.new_cloud_wallet_adapter",
+        lambda _program: _FakeWallet(_program),
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.deps.ensure_offer_bootstrap_denominations",
         lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
-        lambda **kwargs: ("SUBMITTED", []),
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_create_offer_phase",
+        lambda **kwargs: {
+            "known_offer_markers": set(),
+            "offer_request_started_at": dt.datetime.now(dt.UTC),
+            "signature_request_id": "sr-1",
+            "signature_state": "SUBMITTED",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+            "wait_events": [],
+            "side": kwargs.get("action_side", "sell"),
+        },
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_wait_offer_artifact_phase",
         lambda **kwargs: "offer1cwvisibility",
     )
-    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
-    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
+        "greenfloor.runtime.cloud_wallet.deps.verify_offer_text_for_dexie", lambda _offer: None
+    )
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.deps.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr(
+        "greenfloor.runtime.offer_publish.initialize_manager_file_logging", lambda *a, **k: None
     )
 
-    code, _ = _build_and_post_offer_cloud_wallet(
+    code, _ = build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=100,
@@ -5358,8 +5432,6 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_offer_not_visible(
 def test_build_and_post_offer_cloud_wallet_fails_when_dexie_visible_offer_size_mismatches(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
-    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
-
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
     _write_program_with_cloud_wallet(program_path)
@@ -5416,25 +5488,38 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_visible_offer_size_m
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        "greenfloor.runtime.cloud_wallet.deps.new_cloud_wallet_adapter",
+        lambda _program: _FakeWallet(_program),
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.deps.ensure_offer_bootstrap_denominations",
         lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
-        lambda **kwargs: ("SUBMITTED", []),
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_create_offer_phase",
+        lambda **kwargs: {
+            "known_offer_markers": set(),
+            "offer_request_started_at": dt.datetime.now(dt.UTC),
+            "signature_request_id": "sr-1",
+            "signature_state": "SUBMITTED",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+            "wait_events": [],
+            "side": kwargs.get("action_side", "sell"),
+        },
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_wait_offer_artifact_phase",
         lambda **kwargs: "offer1cwmismatch",
     )
-    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
-    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
+        "greenfloor.runtime.cloud_wallet.deps.verify_offer_text_for_dexie", lambda _offer: None
+    )
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.deps.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr(
+        "greenfloor.runtime.offer_publish.initialize_manager_file_logging", lambda *a, **k: None
     )
 
-    code, _ = _build_and_post_offer_cloud_wallet(
+    code, _ = build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=100,
@@ -5457,8 +5542,6 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_visible_offer_size_m
 def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
-    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
-
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
     _write_program_with_cloud_wallet(program_path)
@@ -5491,19 +5574,31 @@ def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        "greenfloor.runtime.cloud_wallet.deps.new_cloud_wallet_adapter",
+        lambda _program: _FakeWallet(_program),
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.deps.ensure_offer_bootstrap_denominations",
         lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
-        lambda **kwargs: ("SUBMITTED", []),
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_create_offer_phase",
+        lambda **kwargs: {
+            "known_offer_markers": set(),
+            "offer_request_started_at": dt.datetime.now(dt.UTC),
+            "signature_request_id": "sr-1",
+            "signature_state": "SUBMITTED",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+            "wait_events": [],
+            "side": kwargs.get("action_side", "sell"),
+        },
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_wait_offer_artifact_phase",
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("cloud_wallet_offer_artifact_timeout")),
     )
 
-    code, _ = _build_and_post_offer_cloud_wallet(
+    code, _ = build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=10,
@@ -5519,14 +5614,16 @@ def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
     assert code == 2
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["publish_failures"] == 1
-    assert payload["results"][0]["result"]["error"] == "cloud_wallet_offer_artifact_timeout"
+    result = payload["results"][0]["result"]
+    assert result["error"] == "cloud_wallet_offer_artifact_timeout"
+    assert result["signature_request_id"] == "sr-1"
+    assert result["signature_state"] == "SUBMITTED"
+    assert isinstance(result["wait_events"], list)
 
 
 def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
-    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
-
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
     _write_program_with_cloud_wallet(program_path)
@@ -5569,24 +5666,36 @@ def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        "greenfloor.runtime.cloud_wallet.deps.new_cloud_wallet_adapter",
+        lambda _program: _FakeWallet(_program),
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.deps.ensure_offer_bootstrap_denominations",
         lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
-        lambda **kwargs: ("SUBMITTED", []),
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_create_offer_phase",
+        lambda **kwargs: {
+            "known_offer_markers": set(),
+            "offer_request_started_at": dt.datetime.now(dt.UTC),
+            "signature_request_id": "sr-1",
+            "signature_state": "SUBMITTED",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+            "wait_events": [],
+            "side": kwargs.get("action_side", "sell"),
+        },
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_wait_offer_artifact_phase",
         lambda **kwargs: "offer1badoffer",
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        "greenfloor.runtime.cloud_wallet.deps.verify_offer_text_for_dexie",
         lambda _offer: "wallet_sdk_offer_missing_expiration",
     )
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.deps.DexieAdapter", _FakeDexie)
 
-    code, _ = _build_and_post_offer_cloud_wallet(
+    code, _ = build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=10,
@@ -5608,8 +5717,6 @@ def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
 def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
-    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
-
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
     _write_program_with_cloud_wallet(program_path)
@@ -5646,20 +5753,32 @@ def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
-        lambda **kwargs: ("SUBMITTED", []),
+        "greenfloor.runtime.cloud_wallet.deps.new_cloud_wallet_adapter",
+        lambda _program: _FakeWallet(_program),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_create_offer_phase",
+        lambda **kwargs: {
+            "known_offer_markers": set(),
+            "offer_request_started_at": dt.datetime.now(dt.UTC),
+            "signature_request_id": "sr-1",
+            "signature_state": "SUBMITTED",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+            "wait_events": [],
+            "side": kwargs.get("action_side", "sell"),
+        },
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_wait_offer_artifact_phase",
         lambda **kwargs: "offer1dryruncloudwallet",
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        "greenfloor.runtime.cloud_wallet.deps.verify_offer_text_for_dexie",
         lambda _offer: None,
     )
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FailDexie)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.deps.DexieAdapter", _FailDexie)
 
-    code, _ = _build_and_post_offer_cloud_wallet(
+    code, _ = build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=10,
@@ -5684,8 +5803,6 @@ def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
 def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
-    from greenfloor.cli.manager import _build_and_post_offer_cloud_wallet
-
     program_path = tmp_path / "program.yaml"
     markets_path = tmp_path / "markets.yaml"
     _write_program_with_cloud_wallet(program_path)
@@ -5735,7 +5852,11 @@ def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
 
     monkeypatch.setattr("greenfloor.cli.manager.CloudWalletAdapter", _FakeWallet)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._ensure_offer_bootstrap_denominations",
+        "greenfloor.runtime.cloud_wallet.deps.new_cloud_wallet_adapter",
+        lambda _program: _FakeWallet(_program),
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.deps.ensure_offer_bootstrap_denominations",
         lambda **_kwargs: {
             "status": "failed",
             "reason": "bootstrap_failed_for_test",
@@ -5744,20 +5865,24 @@ def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
         },
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_create_offer_phase",
+        cloud_wallet_create_offer_phase,
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.phases.poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SUBMITTED", []),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_wait_offer_artifact_phase",
         lambda **kwargs: "offer1bootstrapfee",
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._verify_offer_text_for_dexie",
+        "greenfloor.runtime.cloud_wallet.deps.verify_offer_text_for_dexie",
         lambda _offer: None,
     )
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.deps.DexieAdapter", _FakeDexie)
 
-    code, _ = _build_and_post_offer_cloud_wallet(
+    code, _ = build_and_post_offer_cloud_wallet(
         program=prog,
         market=mkt,
         size_base_units=10,
@@ -5827,23 +5952,18 @@ def test_ensure_offer_bootstrap_denominations_surfaces_wait_error(
     _plan = _Plan()
     _plan.deficits = [_Deficit()]
 
-    monkeypatch.setattr("greenfloor.cli.manager.plan_bootstrap_mixed_outputs", lambda **_k: _plan)
-    monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_bootstrap_split_fee",
-        lambda **_k: (0, "coinset_conservative", None),
-    )
-    monkeypatch.setattr(
-        "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
-        lambda **_k: (_ for _ in ()).throw(RuntimeError("confirmation_wait_timeout")),
-    )
-
-    result = manager_mod._ensure_offer_bootstrap_denominations(
+    result = ensure_offer_bootstrap_denominations(
         program=_Program(),
         market=_Market(),
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="xch",
         resolved_quote_asset_id="wusdc",
         quote_price=0.999,
+        plan_bootstrap_mixed_outputs_fn=lambda **_k: _plan,
+        resolve_bootstrap_split_fee_fn=lambda **_k: (0, "coinset_conservative", None),
+        wait_for_mempool_then_confirmation_fn=lambda **_k: (_ for _ in ()).throw(
+            RuntimeError("confirmation_wait_timeout")
+        ),
         split_coins_fn=lambda **_kw: {"signature_request_id": "sr-1", "status": "SUBMITTED"},
         poll_signature_request_until_not_unsigned_fn=lambda **_kw: ("SUBMITTED", []),
     )
@@ -5903,22 +6023,18 @@ def test_ensure_offer_bootstrap_denominations_reports_fee_balance_guidance(
     _plan = _Plan()
     _plan.deficits = [_Deficit()]
 
-    monkeypatch.setattr("greenfloor.cli.manager.plan_bootstrap_mixed_outputs", lambda **_k: _plan)
-    monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_bootstrap_split_fee",
-        lambda **_k: (100, "coinset_conservative", None),
-    )
-
     def _failing_split(**_kw: Any) -> dict:
         raise RuntimeError("insufficient_xch_fee_balance_for_mixed_split:required=100:available=0")
 
-    result = manager_mod._ensure_offer_bootstrap_denominations(
+    result = ensure_offer_bootstrap_denominations(
         program=_Program(),
         market=_Market(),
         wallet=cast(CloudWalletAdapter, _Wallet()),
         resolved_base_asset_id="xch",
         resolved_quote_asset_id="wusdc",
         quote_price=0.999,
+        plan_bootstrap_mixed_outputs_fn=lambda **_k: _plan,
+        resolve_bootstrap_split_fee_fn=lambda **_k: (100, "coinset_conservative", None),
         split_coins_fn=_failing_split,
     )
     assert result["status"] == "failed"
@@ -5979,17 +6095,7 @@ def test_ensure_offer_bootstrap_denominations_buy_waits_on_quote_asset(
         change_amount = 40_000
         deficits = [_Deficit()]
 
-    monkeypatch.setattr("greenfloor.cli.manager.plan_bootstrap_mixed_outputs", lambda **_k: _Plan())
-    monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_bootstrap_split_fee",
-        lambda **_k: (0, "coinset_conservative", None),
-    )
-    monkeypatch.setattr(
-        "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
-        lambda **kwargs: wait_asset_ids.append(str(kwargs.get("asset_id"))) or [],
-    )
-
-    result = manager_mod._ensure_offer_bootstrap_denominations(
+    result = ensure_offer_bootstrap_denominations(
         program=_Program(),
         market=_Market(),
         wallet=cast(CloudWalletAdapter, _Wallet()),
@@ -5997,6 +6103,12 @@ def test_ensure_offer_bootstrap_denominations_buy_waits_on_quote_asset(
         resolved_quote_asset_id="Asset_quote",
         quote_price=1.0,
         action_side="buy",
+        plan_bootstrap_mixed_outputs_fn=lambda **_k: _Plan(),
+        resolve_bootstrap_split_fee_fn=lambda **_k: (0, "coinset_conservative", None),
+        wait_for_mempool_then_confirmation_fn=lambda **kwargs: wait_asset_ids.append(
+            str(kwargs.get("asset_id"))
+        )
+        or [],
         split_coins_fn=lambda **_kw: {"signature_request_id": "sr-1", "status": "SUBMITTED"},
         poll_signature_request_until_not_unsigned_fn=lambda **_kw: ("SUBMITTED", []),
     )
@@ -6042,10 +6154,10 @@ def test_poll_offer_artifact_until_available_returns_new_offer(monkeypatch) -> N
         monotonic_tick["value"] += 1.0
         return float(monotonic_tick["value"])
 
-    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
-    monkeypatch.setattr("greenfloor.cli.manager.time.monotonic", _mono)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("time.monotonic", _mono)
 
-    offer = manager_mod._poll_offer_artifact_until_available(
+    offer = poll_offer_artifact_until_available(
         wallet=cast(CloudWalletAdapter, _FakeWallet()),
         known_markers={"id:old-1", "bech32:offer1old"},
         timeout_seconds=10,
@@ -6088,10 +6200,10 @@ def test_poll_offer_artifact_until_available_filters_out_stale_created_at(monkey
         monotonic_tick["value"] += 0.5
         return float(monotonic_tick["value"])
 
-    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
-    monkeypatch.setattr("greenfloor.cli.manager.time.monotonic", _mono)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("time.monotonic", _mono)
 
-    offer = manager_mod._poll_offer_artifact_until_available(
+    offer = poll_offer_artifact_until_available(
         wallet=cast(CloudWalletAdapter, _FakeWallet()),
         known_markers=set(),
         timeout_seconds=10,
@@ -6108,11 +6220,11 @@ def test_poll_offer_artifact_until_available_times_out(monkeypatch) -> None:
         def get_wallet(*, is_creator=None, states=None, first=100):
             return {"offers": []}
 
-    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
-    monkeypatch.setattr("greenfloor.cli.manager.time.monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("time.monotonic", lambda: next(monotonic_values))
 
     try:
-        manager_mod._poll_offer_artifact_until_available(
+        poll_offer_artifact_until_available(
             wallet=cast(CloudWalletAdapter, _FakeWallet()),
             known_markers=set(),
             timeout_seconds=10,
@@ -6147,10 +6259,10 @@ def test_poll_offer_artifact_until_available_requests_creator_open_pending(monke
         monotonic_tick["value"] += 0.5
         return float(monotonic_tick["value"])
 
-    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
-    monkeypatch.setattr("greenfloor.cli.manager.time.monotonic", _mono)
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("time.monotonic", _mono)
 
-    offer = manager_mod._poll_offer_artifact_until_available(
+    offer = poll_offer_artifact_until_available(
         wallet=cast(CloudWalletAdapter, _FakeWallet()),
         known_markers=set(),
         timeout_seconds=10,
@@ -6195,10 +6307,10 @@ def test_poll_offer_artifact_until_available_requires_open_state(monkeypatch) ->
                 return wallets.pop(0)
             return {"offers": []}
 
-    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda _seconds: None)
-    monkeypatch.setattr("greenfloor.cli.manager.time.monotonic", lambda: next(monotonic_values))
+    monkeypatch.setattr("time.sleep", lambda _seconds: None)
+    monkeypatch.setattr("time.monotonic", lambda: next(monotonic_values))
 
-    offer = manager_mod._poll_offer_artifact_until_available(
+    offer = poll_offer_artifact_until_available(
         wallet=cast(CloudWalletAdapter, _FakeWallet()),
         known_markers=set(),
         timeout_seconds=10,
@@ -6266,12 +6378,12 @@ def test_post_dexie_offer_with_invalid_offer_retry_recovers(monkeypatch) -> None
                 }
             return {"success": True, "id": "offer-1"}
 
-    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda s: sleep_calls.append(s))
-    result = manager_mod._post_dexie_offer_with_invalid_offer_retry(
+    result = post_dexie_offer_with_invalid_offer_retry(
         dexie=_FakeDexie(),  # type: ignore[arg-type]
         offer_text="offer1abc",
         drop_only=True,
         claim_rewards=False,
+        sleep_fn=lambda s: sleep_calls.append(s),
     )
     assert result["success"] is True
     assert len(calls) == 2
@@ -6292,15 +6404,15 @@ def test_post_dexie_offer_with_invalid_offer_retry_exhausts(monkeypatch) -> None
                 "error": 'dexie_http_error:400:{"success":false,"error_message":"Invalid Offer"}',
             }
 
-    monkeypatch.setattr("greenfloor.cli.manager.time.sleep", lambda s: sleep_calls.append(s))
-    result = manager_mod._post_dexie_offer_with_invalid_offer_retry(
+    result = post_dexie_offer_with_invalid_offer_retry(
         dexie=_FakeDexie(),  # type: ignore[arg-type]
         offer_text="offer1abc",
         drop_only=True,
         claim_rewards=False,
+        sleep_fn=lambda s: sleep_calls.append(s),
     )
     assert result["success"] is False
-    assert len(calls) == manager_mod._DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS
+    assert len(calls) == 4
     assert sleep_calls == [1.0, 2.0, 4.0]
 
 
@@ -6336,29 +6448,43 @@ def test_build_and_post_offer_cloud_wallet_passes_min_created_at_to_artifact_pol
             return {"offers": []}
 
     monkeypatch.setattr(
-        "greenfloor.cli.manager._new_cloud_wallet_adapter", lambda _p: _FakeWallet()
+        "greenfloor.runtime.cloud_wallet.deps.new_cloud_wallet_adapter", lambda _p: _FakeWallet()
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._shared_ensure_offer_bootstrap_denominations",
+        "greenfloor.runtime.cloud_wallet.deps.ensure_offer_bootstrap_denominations",
         lambda **kwargs: {"status": "skipped", "reason": "already_ready"},
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_cloud_wallet_offer_asset_ids",
+        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_offer_asset_ids",
         lambda **kwargs: ("Asset_base", "Asset_quote"),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._resolve_maker_offer_fee", lambda **kwargs: (0, "test")
-    )
-    monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
-        lambda **kwargs: ("SUBMITTED", []),
+        "greenfloor.runtime.coinset_runtime.resolve_maker_offer_fee", lambda **kwargs: (0, "test")
     )
     poll_calls: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_offer_artifact_until_available",
+        "greenfloor.runtime.cloud_wallet.phases.poll_offer_artifact_until_available",
         lambda **kwargs: poll_calls.append(kwargs) or "offer1abc",
     )
-    monkeypatch.setattr("greenfloor.cli.manager._verify_offer_text_for_dexie", lambda _offer: None)
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_create_offer_phase",
+        lambda **kwargs: {
+            "known_offer_markers": set(),
+            "offer_request_started_at": dt.datetime.now(dt.UTC),
+            "signature_request_id": "",
+            "signature_state": "SUBMITTED",
+            "expires_at": "2099-01-01T00:00:00+00:00",
+            "wait_events": [],
+            "side": kwargs.get("action_side", "sell"),
+        },
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.deps.cloud_wallet_wait_offer_artifact_phase",
+        cloud_wallet_wait_offer_artifact_phase,
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.cloud_wallet.deps.verify_offer_text_for_dexie", lambda _offer: None
+    )
 
     class _FakeDexie:
         def __init__(self, _base_url):
@@ -6373,14 +6499,14 @@ def test_build_and_post_offer_cloud_wallet_passes_min_created_at_to_artifact_pol
         def get_offer(offer_id: str) -> dict[str, object]:
             return {"success": True, "offer": {"id": str(offer_id), "status": 0}}
 
-    monkeypatch.setattr("greenfloor.cli.manager.DexieAdapter", _FakeDexie)
+    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.deps.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.cli.manager._initialize_manager_file_logging", lambda *a, **k: None
+        "greenfloor.runtime.offer_publish.initialize_manager_file_logging", lambda *a, **k: None
     )
 
     program = manager_mod.load_program_config(program_path)
     program.home_dir = str(tmp_path)
-    code, _ = manager_mod._build_and_post_offer_cloud_wallet(
+    code, _ = build_and_post_offer_cloud_wallet(
         program=program,
         market=market,
         size_base_units=1,
@@ -6453,11 +6579,11 @@ def test_coin_split_until_ready_succeeds_when_denominations_met(
         lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
+        "greenfloor.cli.manager.poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SIGNED", []),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
+        "greenfloor.cli.manager.wait_for_mempool_then_confirmation",
         lambda **kwargs: [],
     )
 
@@ -6597,11 +6723,11 @@ def test_coin_combine_until_ready_with_coin_ids_stops_with_requires_new_coin_sel
         lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._poll_signature_request_until_not_unsigned",
+        "greenfloor.cli.manager.poll_signature_request_until_not_unsigned",
         lambda **kwargs: ("SIGNED", []),
     )
     monkeypatch.setattr(
-        "greenfloor.cli.manager._wait_for_mempool_then_confirmation",
+        "greenfloor.cli.manager.wait_for_mempool_then_confirmation",
         lambda **kwargs: [],
     )
 
@@ -6636,22 +6762,12 @@ def test_cloud_wallet_create_offer_phase_returns_structured_intermediate(monkeyp
             return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
 
     wallet = _Wallet()
-    monkeypatch.setattr(
-        manager_mod,
-        "_wallet_get_wallet_offers",
-        lambda *_args, **_kwargs: {"offers": []},
-    )
-    monkeypatch.setattr(
-        manager_mod,
-        "_poll_signature_request_until_not_unsigned",
-        lambda **_kwargs: ("SUBMITTED", [{"event": "signature_wait_warning"}]),
-    )
     market = type(
         "Market",
         (),
         {"pricing": {"base_unit_mojo_multiplier": 1000, "quote_unit_mojo_multiplier": 1000}},
     )()
-    payload = manager_mod._cloud_wallet_create_offer_phase(
+    payload = cloud_wallet_create_offer_phase(
         wallet=cast(CloudWalletAdapter, wallet),
         market=market,
         size_base_units=3,
@@ -6662,6 +6778,11 @@ def test_cloud_wallet_create_offer_phase_returns_structured_intermediate(monkeyp
         split_input_coins_fee=0,
         expiry_unit="minutes",
         expiry_value=30,
+        wallet_get_wallet_offers_fn=lambda *_args, **_kwargs: {"offers": []},
+        poll_signature_request_until_not_unsigned_fn=lambda **_kwargs: (
+            "SUBMITTED",
+            [{"event": "signature_wait_warning"}],
+        ),
     )
     assert payload["signature_request_id"] == "sr-1"
     assert payload["signature_state"] == "SUBMITTED"
@@ -6678,22 +6799,12 @@ def test_cloud_wallet_create_offer_phase_buy_side_swaps_offer_legs(monkeypatch) 
             captured.update(kwargs)
             return {"signature_request_id": "sr-buy", "status": "UNSIGNED"}
 
-    monkeypatch.setattr(
-        manager_mod,
-        "_wallet_get_wallet_offers",
-        lambda *_args, **_kwargs: {"offers": []},
-    )
-    monkeypatch.setattr(
-        manager_mod,
-        "_poll_signature_request_until_not_unsigned",
-        lambda **_kwargs: ("SUBMITTED", []),
-    )
     market = type(
         "Market",
         (),
         {"pricing": {"base_unit_mojo_multiplier": 1000, "quote_unit_mojo_multiplier": 1000}},
     )()
-    payload = manager_mod._cloud_wallet_create_offer_phase(
+    payload = cloud_wallet_create_offer_phase(
         wallet=cast(CloudWalletAdapter, _Wallet()),
         market=market,
         size_base_units=10,
@@ -6705,6 +6816,8 @@ def test_cloud_wallet_create_offer_phase_buy_side_swaps_offer_legs(monkeypatch) 
         expiry_unit="minutes",
         expiry_value=30,
         action_side="buy",
+        wallet_get_wallet_offers_fn=lambda *_args, **_kwargs: {"offers": []},
+        poll_signature_request_until_not_unsigned_fn=lambda **_kwargs: ("SUBMITTED", []),
     )
     assert payload["side"] == "buy"
     assert captured["offered"] == [{"assetId": "Asset_quote", "amount": 9990}]
@@ -6716,18 +6829,8 @@ def test_cloud_wallet_post_offer_phase_verifies_dexie_visibility(monkeypatch) ->
         pass
 
     dexie = _Dexie()
-    monkeypatch.setattr(
-        manager_mod,
-        "_post_dexie_offer_with_invalid_offer_retry",
-        lambda **_kwargs: {"success": True, "id": "offer-1"},
-    )
-    monkeypatch.setattr(
-        manager_mod,
-        "_verify_dexie_offer_visible_by_id",
-        lambda **_kwargs: "dexie_offer_not_visible_after_publish",
-    )
     market = type("Market", (), {"base_asset": "asset"})()
-    result = manager_mod._cloud_wallet_post_offer_phase(
+    result = post_offer_phase(
         publish_venue="dexie",
         dexie=cast(Any, dexie),
         splash=None,
@@ -6739,6 +6842,13 @@ def test_cloud_wallet_post_offer_phase_verifies_dexie_visibility(monkeypatch) ->
         expected_offered_symbol="asset",
         expected_requested_asset_id="xch",
         expected_requested_symbol="xch",
+        post_dexie_offer_with_invalid_offer_retry_fn=lambda **_kwargs: {
+            "success": True,
+            "id": "offer-1",
+        },
+        verify_dexie_offer_visible_by_id_fn=lambda **_kwargs: (
+            "dexie_offer_not_visible_after_publish"
+        ),
     )
     assert result["success"] is False
     assert "dexie_offer_not_visible_after_publish" in str(result["error"])
@@ -6752,21 +6862,8 @@ def test_cloud_wallet_post_offer_phase_fails_after_repeated_transient_dexie_404(
 
     dexie = _Dexie()
     post_calls = {"count": 0}
-    monkeypatch.setattr(
-        manager_mod,
-        "_post_dexie_offer_with_invalid_offer_retry",
-        lambda **_kwargs: (
-            post_calls.__setitem__("count", post_calls["count"] + 1)
-            or {"success": True, "id": "offer-1"}
-        ),
-    )
-    monkeypatch.setattr(
-        manager_mod,
-        "_verify_dexie_offer_visible_by_id",
-        lambda **_kwargs: "dexie_get_offer_error:HTTP Error 404: Not Found",
-    )
     market = type("Market", (), {"base_asset": "asset"})()
-    result = manager_mod._cloud_wallet_post_offer_phase(
+    result = post_offer_phase(
         publish_venue="dexie",
         dexie=cast(Any, dexie),
         splash=None,
@@ -6778,6 +6875,13 @@ def test_cloud_wallet_post_offer_phase_fails_after_repeated_transient_dexie_404(
         expected_offered_symbol="asset",
         expected_requested_asset_id="xch",
         expected_requested_symbol="xch",
+        post_dexie_offer_with_invalid_offer_retry_fn=lambda **_kwargs: (
+            post_calls.__setitem__("count", post_calls["count"] + 1)
+            or {"success": True, "id": "offer-1"}
+        ),
+        verify_dexie_offer_visible_by_id_fn=lambda **_kwargs: (
+            "dexie_get_offer_error:HTTP Error 404: Not Found"
+        ),
         sleep_fn=lambda _seconds: None,
     )
     assert result["success"] is False

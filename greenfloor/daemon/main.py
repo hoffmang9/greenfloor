@@ -38,6 +38,12 @@ from greenfloor.config.io import (
     resolve_quote_asset_for_offer,
     resolve_trade_asset_for_dexie,
 )
+from greenfloor.config.models import (
+    ProgramConfig,
+    cloud_wallet_offer_path_configured,
+    offer_execution_backend,
+    prepare_signer_runtime,
+)
 from greenfloor.core.coin_ops import BucketSpec, CoinOpPlan, plan_coin_ops
 from greenfloor.core.fee_budget import partition_plans_by_budget, projected_coin_ops_fee_mojos
 from greenfloor.core.inventory import compute_bucket_counts_from_coins
@@ -54,11 +60,10 @@ from greenfloor.logging_setup import (
     warn_if_log_level_auto_healed,
 )
 from greenfloor.notify.pushover import send_pushover_alert
-from greenfloor.runtime.offer_execution import (
-    build_and_post_offer_cloud_wallet,
-    is_transient_dexie_visibility_404_error,
-    resolve_cloud_wallet_offer_asset_ids,
-)
+from greenfloor.runtime.cloud_wallet.assets import resolve_cloud_wallet_offer_asset_ids
+from greenfloor.runtime.cloud_wallet.build_post import build_and_post_offer_cloud_wallet
+from greenfloor.runtime.offer_publish import is_transient_dexie_visibility_404_error
+from greenfloor.runtime.offer_runtime import build_and_post_offer_signer
 from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
 
 _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS = 500
@@ -1565,7 +1570,20 @@ def _build_offer_for_action(
     return {"status": "executed", "reason": "offer_builder_success", "offer": offer}
 
 
+def _managed_offer_backend_for_program(program: Any, *, size_base_units: int) -> str | None:
+    if isinstance(program, ProgramConfig):
+        backend = offer_execution_backend(program, size_base_units=size_base_units)
+        if backend in {"signer", "cloud_wallet"}:
+            return backend
+        return None
+    if _cloud_wallet_configured(program):
+        return "cloud_wallet"
+    return None
+
+
 def _cloud_wallet_configured(program: Any) -> bool:
+    if isinstance(program, ProgramConfig):
+        return cloud_wallet_offer_path_configured(program)
     required = (
         "cloud_wallet_base_url",
         "cloud_wallet_user_key_id",
@@ -2004,7 +2022,7 @@ def _resolve_cloud_wallet_offer_asset_ids_for_reservation(
     return resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id
 
 
-def _cloud_wallet_offer_post_fallback(
+def _managed_offer_post(
     *,
     program: Any,
     market: Any,
@@ -2014,26 +2032,47 @@ def _cloud_wallet_offer_post_fallback(
     side: str = "sell",
     build_and_post_fn: Callable[..., tuple[int, dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
-    if build_and_post_fn is None:
-        build_and_post_fn = build_and_post_offer_cloud_wallet
+    backend: str | None = None
+    if isinstance(program, ProgramConfig):
+        backend = offer_execution_backend(program, size_base_units=size_base_units)
+        if backend == "signer":
+            prepare_signer_runtime(program)
+            if build_and_post_fn is None:
+                build_and_post_fn = build_and_post_offer_signer
+        elif backend == "cloud_wallet":
+            if build_and_post_fn is None:
+                build_and_post_fn = build_and_post_offer_cloud_wallet
+        else:
+            return {
+                "success": False,
+                "error": "managed_offer_post_requires_signer_or_cloud_wallet_backend",
+            }
+    elif build_and_post_fn is None:
+        return {
+            "success": False,
+            "error": "managed_offer_post_requires_program_config",
+        }
 
     quote_price = _resolve_quote_price_quote_per_base(market)
-    artifact_timeout_seconds = int(program.runtime_cloud_wallet_offer_artifact_timeout_seconds)
-    exit_code, payload = build_and_post_fn(
-        program=program,
-        market=market,
-        size_base_units=size_base_units,
-        repeat=1,
-        publish_venue=publish_venue,
-        dexie_base_url=str(program.dexie_api_base),
-        splash_base_url=str(program.splash_api_base),
-        drop_only=True,
-        claim_rewards=False,
-        quote_price=quote_price,
-        dry_run=runtime_dry_run,
-        action_side=side,
-        offer_artifact_timeout_seconds=artifact_timeout_seconds,
-    )
+    build_kwargs: dict[str, Any] = {
+        "program": program,
+        "market": market,
+        "size_base_units": size_base_units,
+        "repeat": 1,
+        "publish_venue": publish_venue,
+        "dexie_base_url": str(program.dexie_api_base),
+        "splash_base_url": str(program.splash_api_base),
+        "drop_only": True,
+        "claim_rewards": False,
+        "quote_price": quote_price,
+        "dry_run": runtime_dry_run,
+        "action_side": side,
+    }
+    if backend == "cloud_wallet":
+        build_kwargs["offer_artifact_timeout_seconds"] = int(
+            program.runtime_cloud_wallet_offer_artifact_timeout_seconds
+        )
+    exit_code, payload = build_and_post_fn(**build_kwargs)
     results = payload.get("results", [])
     result = (
         results[0].get("result", {})
@@ -2055,7 +2094,7 @@ def _cloud_wallet_offer_post_fallback(
         error = str(result.get("error", "")).strip() if isinstance(result, dict) else ""
         return {
             "success": False,
-            "error": error or f"cloud_wallet_fallback_exit_code:{exit_code}",
+            "error": error or f"managed_offer_post_exit_code:{exit_code}",
             "offer_create_ms": create_ms,
             "offer_publish_ms": publish_ms,
             "offer_total_ms": total_ms,
@@ -2063,7 +2102,7 @@ def _cloud_wallet_offer_post_fallback(
             "offer_artifact_wait_ms": artifact_wait_ms,
         }
     if not isinstance(results, list) or not results:
-        return {"success": False, "error": "cloud_wallet_fallback_missing_results"}
+        return {"success": False, "error": "managed_offer_post_missing_results"}
     result = results[0].get("result", {}) if isinstance(results[0], dict) else {}
     if not isinstance(result, dict):
         result = {}
@@ -2208,7 +2247,7 @@ def _execute_single_cloud_wallet_action(
     dexie: DexieAdapter,
 ) -> dict[str, Any]:
     """Execute a single strategy action via the cloud wallet path."""
-    cloud_wallet_post = _cloud_wallet_offer_post_fallback(
+    cloud_wallet_post = _managed_offer_post(
         program=program,
         market=market,
         size_base_units=int(action.size),
@@ -2523,7 +2562,7 @@ def _execute_strategy_actions(
     expanded_actions = _expand_strategy_actions(strategy_actions)
     can_parallelize_cloud_offers = (
         program is not None
-        and _cloud_wallet_configured(program)
+        and _managed_offer_backend_for_program(program, size_base_units=0) == "cloud_wallet"
         and bool(getattr(program, "runtime_offer_parallelism_enabled", False))
         and not runtime_dry_run
         and reservation_coordinator is not None
@@ -2751,7 +2790,14 @@ def _execute_strategy_actions(
                     }
                 )
                 continue
-            if program is not None and _cloud_wallet_configured(program):
+            backend = (
+                _managed_offer_backend_for_program(
+                    program, size_base_units=int(getattr(action, "size", 0))
+                )
+                if program is not None
+                else None
+            )
+            if backend is not None:
                 try:
                     item = _execute_cloud_wallet_action_with_retry(
                         program=program,

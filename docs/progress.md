@@ -1,5 +1,21 @@
 # Progress Log
 
+## 2026-05-26 (Rust signer PyO3 migration — vault offers via coinset MSP)
+
+- Added ADR 0007: vault KMS signing, offers, bootstrap, and asset resolution run through
+  in-process `greenfloor_signer` (PyO3) backed by `greenfloor-signer`; chain IO via
+  `api-msp.coinset.org`; vault metadata from `program.yaml` `signer:` + `vault:` blocks.
+- Replaced `greenfloor-signer/src/cloud_wallet.rs` GraphQL client with `coinset/msp.rs`.
+- Added `greenfloor-signer-pyo3` crate (`resolve_vault_context`, `build_vault_cat_offer`,
+  `build_mixed_split`, `resolve_offer_asset_ids`); CI builds wheel before pytest.
+- Python vault paths in `signing.py` delegate to `greenfloor/adapters/rust_signer.py`;
+  new `greenfloor/runtime/offer_runtime.py` replaces Cloud Wallet offer phases for KMS installs.
+- Golden offer fixtures exported to `tests/fixtures/signer/` from Rust simulator tests.
+- Manager and daemon route KMS-configured installs to the local signer path (no Cloud Wallet
+  offer fallback when `signer.kms_key_id` and `vault.launcher_id` are set).
+- Refactored offer orchestration: shared `offer_orchestration.py` loop, venue-neutral
+  `offer_publish.py`, canonical `offer_execution_backend()` routing gate.
+
 ## 2026-05-26 (greenfloor-signer quality fixes + Rust canonical path ADR)
 
 - Added ADR 0006: `greenfloor-signer` is the canonical vault KMS signing implementation; Python `signing.py` is legacy during migration.

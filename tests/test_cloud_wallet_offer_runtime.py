@@ -1,19 +1,24 @@
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
+from greenfloor.runtime.cloud_wallet.assets import resolve_cloud_wallet_offer_asset_ids
+from greenfloor.runtime.cloud_wallet.bootstrap import ensure_offer_bootstrap_denominations
+from greenfloor.runtime.cloud_wallet.deps import default_cloud_wallet_offer_deps
+from greenfloor.runtime.cloud_wallet.phases import (
+    cloud_wallet_create_offer_phase,
+    cloud_wallet_wait_offer_artifact_phase,
+)
+from greenfloor.runtime.cloud_wallet.polling import wait_for_mempool_then_confirmation
 from greenfloor.runtime.offer_execution import (
     build_and_post_offer_cloud_wallet,
-    cloud_wallet_create_offer_phase,
-    cloud_wallet_post_offer_phase,
-    cloud_wallet_wait_offer_artifact_phase,
-    ensure_offer_bootstrap_denominations,
     is_transient_dexie_visibility_404_error,
-    resolve_cloud_wallet_offer_asset_ids,
 )
+from greenfloor.runtime.offer_publish import post_offer_phase
 
 
 def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypatch) -> None:
@@ -61,11 +66,11 @@ def test_resolve_cloud_wallet_offer_asset_ids_maps_distinct_cat_assets(monkeypat
         return None
 
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         _fake_lookup_by_cat,
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_symbol",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_symbol",
         lambda *, asset_ref, network: (
             {"id": quote_cat, "code": "wUSDC.b"} if asset_ref == "wUSDC.b" else None
         ),
@@ -122,11 +127,11 @@ def test_resolve_cloud_wallet_offer_asset_ids_uses_global_hints_without_label_ma
             }
 
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._dexie_lookup_token_for_cat_id",
+        "greenfloor.asset_label_catalog._dexie_lookup_token_for_cat_id",
         lambda **_: None,
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet_offer_runtime._local_catalog_label_hints_for_asset_id",
+        "greenfloor.asset_label_catalog._local_catalog_label_hints_for_asset_id",
         lambda **_: [],
     )
 
@@ -148,11 +153,11 @@ def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path:
         home_dir = str(tmp_path)
         app_network = "mainnet"
         app_log_level = "INFO"
-        runtime_cloud_wallet_bootstrap_signature_wait_timeout_seconds = 45
-        runtime_cloud_wallet_bootstrap_signature_warning_interval_seconds = 30
-        runtime_cloud_wallet_bootstrap_wait_timeout_seconds = 120
-        runtime_cloud_wallet_bootstrap_wait_mempool_warning_seconds = 30
-        runtime_cloud_wallet_bootstrap_wait_confirmation_warning_seconds = 60
+        runtime_offer_bootstrap_signature_wait_timeout_seconds = 45
+        runtime_offer_bootstrap_signature_warning_interval_seconds = 30
+        runtime_offer_bootstrap_wait_timeout_seconds = 120
+        runtime_offer_bootstrap_wait_mempool_warning_seconds = 30
+        runtime_offer_bootstrap_wait_confirmation_warning_seconds = 60
         runtime_cloud_wallet_create_signature_wait_timeout_seconds = 120
         runtime_cloud_wallet_create_signature_warning_interval_seconds = 60
 
@@ -178,32 +183,35 @@ def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path:
         claim_rewards=False,
         quote_price=1.5,
         dry_run=True,
-        wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
-        initialize_manager_file_logging_fn=lambda *args, **kwargs: None,
-        recent_market_resolved_asset_id_hints_fn=lambda **kwargs: (None, None),
-        resolve_cloud_wallet_offer_asset_ids_fn=lambda **kwargs: ("Asset_base", "Asset_quote"),
-        resolve_maker_offer_fee_fn=lambda **kwargs: (0, "test"),
-        resolve_offer_expiry_for_market_fn=lambda _market: ("minutes", 30),
-        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
-            "status": "skipped",
-            "reason": "dry_run",
-        },
-        cloud_wallet_create_offer_phase_fn=lambda **kwargs: {
-            "known_offer_markers": set(),
-            "offer_request_started_at": "start",
-            "signature_request_id": "sr-1",
-            "signature_state": "SUBMITTED",
-            "wait_events": [],
-            "expires_at": "2026-01-01T00:00:00+00:00",
-            "offer_amount": 5000,
-            "request_amount": 7500,
-            "side": "sell",
-        },
-        cloud_wallet_wait_offer_artifact_phase_fn=lambda **kwargs: "offer1runtime",
-        log_signed_offer_artifact_fn=lambda **kwargs: None,
-        verify_offer_text_for_dexie_fn=lambda _offer_text: None,
-        cloud_wallet_post_offer_phase_fn=lambda **kwargs: {"success": True, "id": "offer-1"},
-        dexie_offer_view_url_fn=lambda **kwargs: "https://dexie.space/offers/offer-1",
+        deps=replace(
+            default_cloud_wallet_offer_deps(),
+            wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
+            initialize_manager_file_logging_fn=lambda *args, **kwargs: None,
+            recent_market_resolved_asset_id_hints_fn=lambda **kwargs: (None, None),
+            resolve_cloud_wallet_offer_asset_ids_fn=lambda **kwargs: ("Asset_base", "Asset_quote"),
+            resolve_maker_offer_fee_fn=lambda **kwargs: (0, "test"),
+            resolve_offer_expiry_for_market_fn=lambda _market: ("minutes", 30),
+            ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
+                "status": "skipped",
+                "reason": "dry_run",
+            },
+            cloud_wallet_create_offer_phase_fn=lambda **kwargs: {
+                "known_offer_markers": set(),
+                "offer_request_started_at": "start",
+                "signature_request_id": "sr-1",
+                "signature_state": "SUBMITTED",
+                "wait_events": [],
+                "expires_at": "2026-01-01T00:00:00+00:00",
+                "offer_amount": 5000,
+                "request_amount": 7500,
+                "side": "sell",
+            },
+            cloud_wallet_wait_offer_artifact_phase_fn=lambda **kwargs: "offer1runtime",
+            log_signed_offer_artifact_fn=lambda **kwargs: None,
+            verify_offer_text_for_dexie_fn=lambda _offer_text: None,
+            post_offer_phase_fn=lambda **kwargs: {"success": True, "id": "offer-1"},
+            dexie_offer_view_url_fn=lambda **kwargs: "https://dexie.space/offers/offer-1",
+        ),
     )
 
     assert exit_code == 0
@@ -221,11 +229,11 @@ def test_build_and_post_offer_cloud_wallet_emits_timing_diagnostics(tmp_path: Pa
         home_dir = str(tmp_path)
         app_network = "mainnet"
         app_log_level = "INFO"
-        runtime_cloud_wallet_bootstrap_signature_wait_timeout_seconds = 45
-        runtime_cloud_wallet_bootstrap_signature_warning_interval_seconds = 30
-        runtime_cloud_wallet_bootstrap_wait_timeout_seconds = 120
-        runtime_cloud_wallet_bootstrap_wait_mempool_warning_seconds = 30
-        runtime_cloud_wallet_bootstrap_wait_confirmation_warning_seconds = 60
+        runtime_offer_bootstrap_signature_wait_timeout_seconds = 45
+        runtime_offer_bootstrap_signature_warning_interval_seconds = 30
+        runtime_offer_bootstrap_wait_timeout_seconds = 120
+        runtime_offer_bootstrap_wait_mempool_warning_seconds = 30
+        runtime_offer_bootstrap_wait_confirmation_warning_seconds = 60
         runtime_cloud_wallet_create_signature_wait_timeout_seconds = 120
         runtime_cloud_wallet_create_signature_warning_interval_seconds = 60
 
@@ -255,33 +263,36 @@ def test_build_and_post_offer_cloud_wallet_emits_timing_diagnostics(tmp_path: Pa
         claim_rewards=False,
         quote_price=1.5,
         dry_run=False,
-        wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
-        dexie_adapter_cls=_Dexie,  # type: ignore[arg-type]
-        initialize_manager_file_logging_fn=lambda *args, **kwargs: None,
-        recent_market_resolved_asset_id_hints_fn=lambda **kwargs: (None, None),
-        resolve_cloud_wallet_offer_asset_ids_fn=lambda **kwargs: ("Asset_base", "Asset_quote"),
-        resolve_maker_offer_fee_fn=lambda **kwargs: (0, "test"),
-        resolve_offer_expiry_for_market_fn=lambda _market: ("minutes", 30),
-        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
-            "status": "skipped",
-            "reason": "already_ready",
-        },
-        cloud_wallet_create_offer_phase_fn=lambda **kwargs: {
-            "known_offer_markers": set(),
-            "offer_request_started_at": "start",
-            "signature_request_id": "sr-timing-1",
-            "signature_state": "SUBMITTED",
-            "wait_events": [],
-            "expires_at": "2026-01-01T00:00:00+00:00",
-            "offer_amount": 5000,
-            "request_amount": 7500,
-            "side": "sell",
-        },
-        cloud_wallet_wait_offer_artifact_phase_fn=lambda **kwargs: "offer1timing",
-        log_signed_offer_artifact_fn=lambda **kwargs: None,
-        verify_offer_text_for_dexie_fn=lambda _offer_text: None,
-        cloud_wallet_post_offer_phase_fn=lambda **kwargs: {"success": True, "id": "offer-timing-1"},
-        dexie_offer_view_url_fn=lambda **kwargs: "https://dexie.space/offers/offer-timing-1",
+        deps=replace(
+            default_cloud_wallet_offer_deps(),
+            wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
+            dexie_adapter_cls=_Dexie,  # type: ignore[arg-type]
+            initialize_manager_file_logging_fn=lambda *args, **kwargs: None,
+            recent_market_resolved_asset_id_hints_fn=lambda **kwargs: (None, None),
+            resolve_cloud_wallet_offer_asset_ids_fn=lambda **kwargs: ("Asset_base", "Asset_quote"),
+            resolve_maker_offer_fee_fn=lambda **kwargs: (0, "test"),
+            resolve_offer_expiry_for_market_fn=lambda _market: ("minutes", 30),
+            ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
+                "status": "skipped",
+                "reason": "already_ready",
+            },
+            cloud_wallet_create_offer_phase_fn=lambda **kwargs: {
+                "known_offer_markers": set(),
+                "offer_request_started_at": "start",
+                "signature_request_id": "sr-timing-1",
+                "signature_state": "SUBMITTED",
+                "wait_events": [],
+                "expires_at": "2026-01-01T00:00:00+00:00",
+                "offer_amount": 5000,
+                "request_amount": 7500,
+                "side": "sell",
+            },
+            cloud_wallet_wait_offer_artifact_phase_fn=lambda **kwargs: "offer1timing",
+            log_signed_offer_artifact_fn=lambda **kwargs: None,
+            verify_offer_text_for_dexie_fn=lambda _offer_text: None,
+            post_offer_phase_fn=lambda **kwargs: {"success": True, "id": "offer-timing-1"},
+            dexie_offer_view_url_fn=lambda **kwargs: "https://dexie.space/offers/offer-timing-1",
+        ),
     )
 
     assert exit_code == 0
@@ -342,7 +353,7 @@ def test_cloud_wallet_post_offer_phase_fails_after_repeated_dexie_404_visibility
         pass
 
     post_attempts: list[int] = []
-    result = cloud_wallet_post_offer_phase(
+    result = post_offer_phase(
         publish_venue="dexie",
         dexie=cast(Any, _Dexie()),
         splash=None,
@@ -381,7 +392,7 @@ def test_cloud_wallet_post_offer_phase_retries_transient_dexie_404_until_visible
             return "dexie_get_offer_error:HTTP Error 404: Not Found"
         return None
 
-    result = cloud_wallet_post_offer_phase(
+    result = post_offer_phase(
         publish_venue="dexie",
         dexie=cast(Any, _Dexie()),
         splash=None,
@@ -550,11 +561,11 @@ def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(
         home_dir = str(tmp_path)
         app_network = "mainnet"
         app_log_level = "INFO"
-        runtime_cloud_wallet_bootstrap_signature_wait_timeout_seconds = 45
-        runtime_cloud_wallet_bootstrap_signature_warning_interval_seconds = 30
-        runtime_cloud_wallet_bootstrap_wait_timeout_seconds = 120
-        runtime_cloud_wallet_bootstrap_wait_mempool_warning_seconds = 30
-        runtime_cloud_wallet_bootstrap_wait_confirmation_warning_seconds = 60
+        runtime_offer_bootstrap_signature_wait_timeout_seconds = 45
+        runtime_offer_bootstrap_signature_warning_interval_seconds = 30
+        runtime_offer_bootstrap_wait_timeout_seconds = 120
+        runtime_offer_bootstrap_wait_mempool_warning_seconds = 30
+        runtime_offer_bootstrap_wait_confirmation_warning_seconds = 60
         runtime_cloud_wallet_create_signature_wait_timeout_seconds = 120
         runtime_cloud_wallet_create_signature_warning_interval_seconds = 60
 
@@ -584,26 +595,29 @@ def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(
         claim_rewards=False,
         quote_price=1.5,
         dry_run=False,
-        wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
-        dexie_adapter_cls=_Dexie,  # type: ignore[arg-type]
-        initialize_manager_file_logging_fn=lambda *args, **kwargs: None,
-        recent_market_resolved_asset_id_hints_fn=lambda **kwargs: (None, None),
-        resolve_cloud_wallet_offer_asset_ids_fn=lambda **kwargs: ("Asset_base", "Asset_quote"),
-        resolve_maker_offer_fee_fn=lambda **kwargs: (0, "test"),
-        resolve_offer_expiry_for_market_fn=lambda _market: ("minutes", 30),
-        ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
-            "status": "executed",
-            "reason": "bootstrap_submitted",
-            "ready": False,
-        },
-        cloud_wallet_create_offer_phase_fn=lambda **_kwargs: (_ for _ in ()).throw(
-            AssertionError("create phase should not run while bootstrap is pending")
+        deps=replace(
+            default_cloud_wallet_offer_deps(),
+            wallet_factory=lambda _program: cast(CloudWalletAdapter, _Wallet()),
+            dexie_adapter_cls=_Dexie,  # type: ignore[arg-type]
+            initialize_manager_file_logging_fn=lambda *args, **kwargs: None,
+            recent_market_resolved_asset_id_hints_fn=lambda **kwargs: (None, None),
+            resolve_cloud_wallet_offer_asset_ids_fn=lambda **kwargs: ("Asset_base", "Asset_quote"),
+            resolve_maker_offer_fee_fn=lambda **kwargs: (0, "test"),
+            resolve_offer_expiry_for_market_fn=lambda _market: ("minutes", 30),
+            ensure_offer_bootstrap_denominations_fn=lambda **kwargs: {
+                "status": "executed",
+                "reason": "bootstrap_submitted",
+                "ready": False,
+            },
+            cloud_wallet_create_offer_phase_fn=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("create phase should not run while bootstrap is pending")
+            ),
+            cloud_wallet_wait_offer_artifact_phase_fn=lambda **kwargs: "offer1unused",
+            log_signed_offer_artifact_fn=lambda **kwargs: None,
+            verify_offer_text_for_dexie_fn=lambda _offer_text: None,
+            post_offer_phase_fn=lambda **kwargs: {"success": True, "id": "offer-unused"},
+            dexie_offer_view_url_fn=lambda **kwargs: "https://dexie.space/offers/offer-unused",
         ),
-        cloud_wallet_wait_offer_artifact_phase_fn=lambda **kwargs: "offer1unused",
-        log_signed_offer_artifact_fn=lambda **kwargs: None,
-        verify_offer_text_for_dexie_fn=lambda _offer_text: None,
-        cloud_wallet_post_offer_phase_fn=lambda **kwargs: {"success": True, "id": "offer-unused"},
-        dexie_offer_view_url_fn=lambda **kwargs: "https://dexie.space/offers/offer-unused",
     )
 
     assert code == 2
@@ -686,8 +700,6 @@ def test_bootstrap_uses_cloud_wallet_split_without_keyring() -> None:
 
 
 def test_wait_for_mempool_then_confirmation_uses_settled_only_coin_scans() -> None:
-    from greenfloor.runtime.cloud_wallet_offer_runtime import wait_for_mempool_then_confirmation
-
     list_coins_include_pending_values: list[bool] = []
     list_coins_asset_ids: list[str | None] = []
 
@@ -721,8 +733,6 @@ def test_wait_for_mempool_then_confirmation_uses_settled_only_coin_scans() -> No
 
 
 def test_wait_for_mempool_then_confirmation_uses_unscoped_scan_without_asset_id() -> None:
-    from greenfloor.runtime.cloud_wallet_offer_runtime import wait_for_mempool_then_confirmation
-
     list_coins_asset_ids: list[str | None] = []
 
     class _Wallet:
