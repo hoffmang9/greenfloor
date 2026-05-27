@@ -117,9 +117,7 @@ def testbuild_and_post_offer_cli_uses_local_path_for_large_size_when_cloud_walle
         "greenfloor.runtime.offer_post_request.build_and_post_offer_cloud_wallet",
         _fake_cloud_wallet,
     )
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer", lambda payload: "offer1abc"
-    )
+    monkeypatch.setattr("greenfloor.cli.offer_build_post.build_offer", lambda payload: "offer1abc")
 
     class _FakeDexie(FakeDexie):
         offer_id = "local-100-id"
@@ -174,9 +172,7 @@ def testbuild_and_post_offer_cli_uses_local_path_when_cloud_wallet_not_configure
         "greenfloor.runtime.offer_post_request.build_and_post_offer_cloud_wallet",
         _fake_cloud_wallet,
     )
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer", lambda payload: "offer1abc"
-    )
+    monkeypatch.setattr("greenfloor.cli.offer_build_post.build_offer", lambda payload: "offer1abc")
 
     class _FakeDexie(FakeDexie):
         offer_id = "local-no-cw"
