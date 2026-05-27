@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
-import greenfloor.signing as signing
+from greenfloor.adapters import bls_cat_coins
 
 
 def _coin_id_bytes(parent_coin_info: bytes, puzzle_hash: bytes, amount: int) -> bytes:
@@ -45,7 +45,7 @@ def test_list_unspent_cat_coins_by_ids_maps_rust_summaries_to_cat_adapters(monke
         _fake_by_ids,
     )
 
-    cats = signing._list_unspent_cat_coins_by_ids(
+    cats = bls_cat_coins._list_unspent_cat_coins_by_ids(
         sdk=_FakeSdk(),
         network="testnet11",
         coin_ids=[child_coin_id.hex()],

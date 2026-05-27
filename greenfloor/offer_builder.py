@@ -118,13 +118,13 @@ def _build_offer(payload: dict[str, Any], sdk: Any) -> str:
     if not spend_bundle_hex:
         spend_bundle_hex = _build_coin_backed_spend_bundle_hex(payload)
     raw_hex = spend_bundle_hex[2:] if spend_bundle_hex.lower().startswith("0x") else spend_bundle_hex
-    try:
-        import greenfloor_native
+    from greenfloor.adapters.native_offer import encode_offer_from_spend_bundle_hex
 
-        return str(greenfloor_native.encode_offer(bytes.fromhex(raw_hex)))
-    except (ImportError, AttributeError):
-        spend_bundle = sdk.SpendBundle.from_bytes(bytes.fromhex(raw_hex))
-        return str(sdk.encode_offer(spend_bundle))
+    offer_text = encode_offer_from_spend_bundle_hex(raw_hex)
+    if offer_text is not None:
+        return offer_text
+    spend_bundle = sdk.SpendBundle.from_bytes(bytes.fromhex(raw_hex))
+    return str(sdk.encode_offer(spend_bundle))
 
 
 def build_offer(payload: dict[str, Any]) -> str:

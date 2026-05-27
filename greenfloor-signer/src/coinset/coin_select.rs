@@ -21,6 +21,17 @@ pub enum CatSelectionMode {
     ExplicitSum,
 }
 
+impl CatSelectionMode {
+    /// Wallet listing uses smallest-first; explicit coin ids use the full set.
+    pub fn from_explicit_ids(explicit_coin_ids: &[Bytes32]) -> Self {
+        if explicit_coin_ids.is_empty() {
+            CatSelectionMode::SmallestFirst
+        } else {
+            CatSelectionMode::ExplicitSum
+        }
+    }
+}
+
 /// Select CAT inputs from an already-listed coin set.
 pub(crate) fn select_cats_from_list(
     cats: Vec<Cat>,
@@ -76,11 +87,7 @@ pub(crate) fn finalize_selected_cats(
     explicit_coin_ids: &[Bytes32],
     target_amount: u64,
 ) -> SignerResult<SelectedCats> {
-    let mode = if explicit_coin_ids.is_empty() {
-        CatSelectionMode::SmallestFirst
-    } else {
-        CatSelectionMode::ExplicitSum
-    };
+    let mode = CatSelectionMode::from_explicit_ids(explicit_coin_ids);
     let selected = select_cats_from_list(
         cats,
         target_amount,

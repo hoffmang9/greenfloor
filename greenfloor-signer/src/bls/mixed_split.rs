@@ -84,11 +84,7 @@ pub async fn build_bls_mixed_split_spend_bundle(
         .await?;
     } else {
         let asset_bytes = cat_asset_bytes(&asset_raw)?;
-        let cat_mode = if explicit_coin_ids.is_empty() {
-            CatSelectionMode::SmallestFirst
-        } else {
-            CatSelectionMode::ExplicitSum
-        };
+        let cat_mode = CatSelectionMode::from_explicit_ids(&explicit_coin_ids);
         offered_cats = list_and_select_cats(
             &client,
             receive_address,

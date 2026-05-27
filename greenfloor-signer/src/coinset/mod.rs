@@ -1,11 +1,11 @@
 mod asset;
 mod backend;
-mod cat_select;
+mod coin_select;
 mod msp;
 mod presplit;
 mod xch;
 
-pub(crate) use cat_select::{
+pub(crate) use coin_select::{
     finalize_selected_cats, list_and_select_cats, select_xch_for_amount, CatSelectionMode,
 };
 

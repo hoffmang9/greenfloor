@@ -129,11 +129,13 @@ pub async fn build_bls_offer_spend_bundle(
         expires_at: None,
     };
 
+    // Assertion nodes for requested payments only (not merged into the driver spend graph).
     let mut payments_ctx = SpendContext::new();
     let requested_payments =
         build_requested_payments(&mut payments_ctx, &terms, receive_puzzle_hash, offer_nonce)?;
     let requested_asset_info = AssetInfo::new();
 
+    // Driver context: input spends, then offer wrapper via Offer::to_spend_bundle.
     let (input_spend_bundle, mut ctx) = build_signed_spend(
         network,
         receive_puzzle_hash,
