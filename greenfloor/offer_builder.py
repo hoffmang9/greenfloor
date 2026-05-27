@@ -79,17 +79,6 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
             "expiry_value": int(payload.get("expiry_value", 0) or 0),
             "split_input_coins": bool(payload.get("split_input_coins", True)),
             "broadcast_split": bool(payload.get("broadcast_split", False)),
-            "cloud_wallet_base_url": str(payload.get("cloud_wallet_base_url", "")).strip(),
-            "cloud_wallet_user_key_id": str(payload.get("cloud_wallet_user_key_id", "")).strip(),
-            "cloud_wallet_private_key_pem_path": str(
-                payload.get("cloud_wallet_private_key_pem_path", "")
-            ).strip(),
-            "cloud_wallet_vault_id": str(payload.get("cloud_wallet_vault_id", "")).strip(),
-            "cloud_wallet_kms_key_id": str(payload.get("cloud_wallet_kms_key_id", "")).strip(),
-            "cloud_wallet_kms_region": str(payload.get("cloud_wallet_kms_region", "")).strip(),
-            "cloud_wallet_kms_public_key_hex": str(
-                payload.get("cloud_wallet_kms_public_key_hex", "")
-            ).strip(),
             "signing_entrypoint": "build_signed_spend_bundle",
             "plan": {
                 "op_type": "offer",

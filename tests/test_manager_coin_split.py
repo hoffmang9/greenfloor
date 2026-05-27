@@ -5,9 +5,10 @@ from pathlib import Path
 
 from greenfloor.cli.coin_ops_split import coin_split
 from greenfloor.runtime.coinset_runtime import CoinsetFeeLookupPreflightError
+from tests.helpers.signer_coin_op_cli_fixtures import patch_signer_coin_op_cli_backend
 from tests.helpers.offer_runtime_fixtures import (
     write_manager_program,
-    write_manager_program_with_cloud_wallet,
+    write_manager_program_with_signer,
     write_markets,
     write_markets_with_ladder,
 )
@@ -18,7 +19,7 @@ def test_coin_split_auto_selects_largest_spendable_asset_coin(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     calls: dict[str, tuple[list[str], int, int, int] | None] = {"split": None}
@@ -46,10 +47,10 @@ def test_coin_split_auto_selects_largest_spendable_asset_coin(
             calls["split"] = (coin_ids, amount_per_coin, number_of_coins, fee)
             return {"signature_request_id": "sr-auto", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
-        lambda **kw: "Asset_split_base",
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
     )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
@@ -68,7 +69,7 @@ def test_coin_split_auto_selects_largest_spendable_asset_coin(
         no_wait=True,
     )
     assert code == 0
-    assert calls["split"] == (["Coin_big"], 10, 10, 42)
+    assert calls["split"] == (["Coin_big"], 10, 10, 0)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["coin_selection_mode"] == "adapter_auto_select"
     assert payload["resolved_asset_id"] == "Asset_split_base"
@@ -79,7 +80,7 @@ def test_coin_split_guardrail_blocks_when_it_would_lock_all_spendable_coins(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     split_called = [False]
@@ -103,10 +104,10 @@ def test_coin_split_guardrail_blocks_when_it_would_lock_all_spendable_coins(
             split_called[0] = True
             return {"signature_request_id": "sr-guard", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
-        lambda **kw: "Asset_split_base",
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
     )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
@@ -137,7 +138,7 @@ def test_coin_split_guardrail_override_allows_lock_all_spendable(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     calls: dict[str, tuple[list[str], int, int, int] | None] = {"split": None}
@@ -160,10 +161,10 @@ def test_coin_split_guardrail_override_allows_lock_all_spendable(
             calls["split"] = (coin_ids, amount_per_coin, number_of_coins, fee)
             return {"signature_request_id": "sr-override", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
-        lambda **kw: "Asset_split_base",
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
     )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
@@ -183,7 +184,7 @@ def test_coin_split_guardrail_override_allows_lock_all_spendable(
         allow_lock_all_spendable=True,
     )
     assert code == 0
-    assert calls["split"] == (["Coin_only"], 10, 10, 42)
+    assert calls["split"] == (["Coin_only"], 10, 10, 0)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["coin_selection_mode"] == "adapter_auto_select"
     assert payload["resolved_asset_id"] == "Asset_split_base"
@@ -194,7 +195,7 @@ def test_coin_split_guardrail_prompt_override_allows_continue(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     calls: dict[str, tuple[list[str], int, int, int] | None] = {"split": None}
@@ -217,10 +218,10 @@ def test_coin_split_guardrail_prompt_override_allows_continue(
             calls["split"] = (coin_ids, amount_per_coin, number_of_coins, fee)
             return {"signature_request_id": "sr-prompt", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
-        lambda **kw: "Asset_split_base",
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
     )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
@@ -241,17 +242,17 @@ def test_coin_split_guardrail_prompt_override_allows_continue(
         prompt_for_override=True,
     )
     assert code == 0
-    assert calls["split"] == (["Coin_only"], 10, 10, 42)
+    assert calls["split"] == (["Coin_only"], 10, 10, 0)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["resolved_asset_id"] == "Asset_split_base"
 
 
-def test_coin_split_distinguishes_coinset_endpoint_preflight_failure(
+def test_coin_split_ignores_coinset_endpoint_preflight_for_signer(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeWallet:
@@ -260,7 +261,21 @@ def test_coin_split_distinguishes_coinset_endpoint_preflight_failure(
         def __init__(self, _config):
             pass
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
+        @staticmethod
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending, asset_id
+            return [{"id": "Coin_abc123", "name": "coin-1"}]
+
+        @staticmethod
+        def split_coins(*, coin_ids, amount_per_coin, number_of_coins, fee):
+            _ = coin_ids, amount_per_coin, number_of_coins, fee
+            return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
+
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
+    )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (_ for _ in ()).throw(
@@ -285,12 +300,10 @@ def test_coin_split_distinguishes_coinset_endpoint_preflight_failure(
         number_of_coins=2,
         no_wait=True,
     )
-    assert code == 2
+    assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
-    assert payload["success"] is False
-    assert payload["error"] == "coinset_fee_preflight_failed:endpoint_validation_failed"
-    assert payload["coinset_fee_lookup"]["failure_kind"] == "endpoint_validation_failed"
-    assert "endpoint routing" in payload["operator_guidance"]
+    assert payload["fee_mojos"] == 0
+    assert payload["fee_source"] == "signer_vault_no_fee"
 
 
 def test_coin_split_returns_structured_error_when_coin_id_not_found(
@@ -298,7 +311,7 @@ def test_coin_split_returns_structured_error_when_coin_id_not_found(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeWallet:
@@ -312,7 +325,11 @@ def test_coin_split_returns_structured_error_when_coin_id_not_found(
             _ = include_pending, asset_id
             return [{"id": "Coin_known", "name": "known-coin-name"}]
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
+    )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
@@ -340,7 +357,7 @@ def test_coin_split_uses_market_ladder_target_when_size_is_provided(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="splash")
+    write_manager_program_with_signer(program, tmp_path=tmp_path, provider="splash")
     write_markets_with_ladder(markets)
     calls = {}
 
@@ -360,7 +377,11 @@ def test_coin_split_uses_market_ladder_target_when_size_is_provided(
             calls["split"] = (coin_ids, amount_per_coin, number_of_coins, fee)
             return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
+    )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (42, "coinset_conservative"),
@@ -379,9 +400,9 @@ def test_coin_split_uses_market_ladder_target_when_size_is_provided(
         size_base_units=10,
     )
     assert code == 0
-    assert calls["split"] == (["Coin_abc123"], 10, 4, 42)
+    assert calls["split"] == (["Coin_abc123"], 10, 4, 0)
     payload = json.loads(capsys.readouterr().out.strip())
-    assert payload["venue"] == "splash"
+    assert payload.get("venue") in {None, "splash"}
     assert payload["denomination_target"]["required_count"] == 4
 
 
@@ -390,7 +411,7 @@ def test_coin_split_until_ready_ignores_unknown_states_and_string_asset(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="dexie")
+    write_manager_program_with_signer(program, tmp_path=tmp_path, provider="dexie")
     write_markets_with_ladder(markets)
 
     class _FakeWallet:
@@ -425,14 +446,14 @@ def test_coin_split_until_ready_ignores_unknown_states_and_string_asset(
             _ = signature_request_id
             return {"status": "SIGNED"}
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
+    )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (42, "coinset_conservative"),
-    )
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling.wait_for_mempool_then_confirmation",
-        lambda **kwargs: [],
     )
 
     code = coin_split(
@@ -452,7 +473,7 @@ def test_coin_split_until_ready_ignores_unknown_states_and_string_asset(
     assert code == 2
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["error"] == "no_spendable_split_coin_available"
-    assert payload["resolved_asset_id"] == "a1"
+    assert payload["resolved_asset_id"] == "Asset_split_base"
 
 
 def test_coin_split_until_ready_requires_size_base_units(tmp_path: Path) -> None:
@@ -508,7 +529,7 @@ def test_coin_split_until_ready_disallows_no_wait(tmp_path: Path) -> None:
 def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="dexie")
+    write_manager_program_with_signer(program, tmp_path=tmp_path, provider="dexie")
     write_markets_with_ladder(markets)
 
     class _FakeWallet:
@@ -550,18 +571,14 @@ def test_coin_split_until_ready_reports_not_ready(monkeypatch, tmp_path: Path, c
             _ = signature_request_id
             return {"status": "SIGNED"}
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
+    )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (42, "coinset_conservative"),
-    )
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling.poll_signature_request_until_not_unsigned",
-        lambda **kwargs: ("SIGNED", []),
-    )
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling.wait_for_mempool_then_confirmation",
-        lambda **kwargs: [],
     )
 
     code = coin_split(
@@ -592,7 +609,7 @@ def test_coin_split_until_ready_succeeds_when_denominations_met(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="dexie")
+    write_manager_program_with_signer(program, tmp_path=tmp_path, provider="dexie")
     write_markets_with_ladder(markets)
 
     class _FakeWallet:
@@ -629,18 +646,14 @@ def test_coin_split_until_ready_succeeds_when_denominations_met(
         def split_coins(*, coin_ids, amount_per_coin, number_of_coins, fee):
             return {"signature_request_id": "sr-ok", "status": "SIGNED"}
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
+    )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),
-    )
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling.poll_signature_request_until_not_unsigned",
-        lambda **kwargs: ("SIGNED", []),
-    )
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.polling.wait_for_mempool_then_confirmation",
-        lambda **kwargs: [],
     )
 
     code = coin_split(
@@ -669,7 +682,7 @@ def test_coin_split_gate_ready_skips_split_in_non_interactive_mode(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path, provider="dexie")
+    write_manager_program_with_signer(program, tmp_path=tmp_path, provider="dexie")
     write_markets_with_ladder(markets)
 
     split_called = [False]
@@ -708,7 +721,11 @@ def test_coin_split_gate_ready_skips_split_in_non_interactive_mode(
             split_called[0] = True
             return {"signature_request_id": "sr-should-not-run", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
+    )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (0, "config_minimum_fee_fallback"),

@@ -19,7 +19,7 @@ from greenfloor.logging_setup import (
     ALLOWED_LOG_LEVELS,
     normalize_log_level_name,
 )
-from greenfloor.runtime.cloud_wallet.adapter import format_json_output
+from greenfloor.runtime.json_output import format_json_output
 from greenfloor.storage.sqlite import SqliteStore
 
 
@@ -255,14 +255,10 @@ def doctor(
     _warn_if_invalid_int_env("GREENFLOOR_OFFER_CANCEL_BACKOFF_MS", minimum=0)
     _warn_if_invalid_int_env("GREENFLOOR_OFFER_CANCEL_COOLDOWN_SECONDS", minimum=0)
 
-    if not program.cloud_wallet_base_url:
-        warnings.append("cloud_wallet_not_configured:base_url")
-    if not program.cloud_wallet_user_key_id:
-        warnings.append("cloud_wallet_not_configured:user_key_id")
-    if not program.cloud_wallet_private_key_pem_path:
-        warnings.append("cloud_wallet_not_configured:private_key_pem_path")
-    if not program.cloud_wallet_vault_id:
-        warnings.append("cloud_wallet_not_configured:vault_id")
+    from greenfloor.config.models import signer_offer_path_configured
+
+    if not signer_offer_path_configured(program):
+        warnings.append("signer_not_configured:kms_key_id_or_vault_launcher_id")
 
     result = {
         "ok": len(problems) == 0,

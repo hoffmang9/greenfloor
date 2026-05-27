@@ -14,7 +14,7 @@ from greenfloor.cli.cats_catalog import (
 )
 from greenfloor.cli.prompts import prompt_yes_no
 from greenfloor.config.io import write_yaml
-from greenfloor.runtime.cloud_wallet.adapter import format_json_output
+from greenfloor.runtime.json_output import format_json_output
 
 
 def cats_add(

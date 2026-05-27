@@ -7,18 +7,18 @@ from typing import Any
 
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.coin_ops_policy import coin_meets_coin_op_min_amount
-from greenfloor.runtime.cloud_wallet.coin_op_errors import (
+from greenfloor.runtime.coin_ops.errors import (
     coin_combine_asset_mismatch_error_payload,
     coin_combine_insufficient_coins_error_payload,
     coin_split_lockup_guardrail_error_payload,
     coin_split_no_spendable_error_payload,
 )
-from greenfloor.runtime.cloud_wallet.coin_ops_models import (
+from greenfloor.runtime.coin_ops.models import (
     CoinOpSelectionMode,
     CombineDenominationTarget,
     SplitDenominationTarget,
 )
-from greenfloor.runtime.cloud_wallet.coin_ops_planning import (
+from greenfloor.runtime.coin_ops.planning import (
     CombineInputSelectionMode,
     SplitCoinPlan,
     SplitPlanningProfile,
@@ -26,14 +26,14 @@ from greenfloor.runtime.cloud_wallet.coin_ops_planning import (
     plan_auto_combine_inputs,
     plan_auto_split_selection,
 )
-from greenfloor.runtime.cloud_wallet.coin_ops_runtime import (
+from greenfloor.runtime.coin_ops.runtime import (
     CoinOpIterationEarlyExit,
     CoinOpIterationExecuteResult,
     CoinOpIterationNeedsConfirmation,
     CoinOpIterationSkipLoop,
     evaluate_coin_split_gate,
 )
-from greenfloor.runtime.cloud_wallet.coins import classify_resolved_coin_ids_by_asset
+from greenfloor.runtime.coin_ops.coins import classify_resolved_coin_ids_by_asset
 from greenfloor.runtime.coin_ops_backend import CoinOpBackend
 
 
@@ -239,30 +239,29 @@ def run_coin_combine_step(
             raise ValueError(
                 "when --coin-id is provided, --input-coin-count must match the number of --coin-id values"
             )
-        if scope.execution_backend == "cloud_wallet":
-            unresolved_coin_ids, mismatched_coin_ids = classify_resolved_coin_ids_by_asset(
-                wallet_coins=wallet_coins,
-                resolved_coin_ids=resolved_input_coin_ids,
-                expected_asset_id=params.resolved_asset_id,
+        unresolved_coin_ids, mismatched_coin_ids = classify_resolved_coin_ids_by_asset(
+            wallet_coins=wallet_coins,
+            resolved_coin_ids=resolved_input_coin_ids,
+            expected_asset_id=params.resolved_asset_id,
+        )
+        if unresolved_coin_ids:
+            return CoinCombineStepResult(
+                step=CoinOpIterationEarlyExit(
+                    return_code=2,
+                    unresolved_coin_ids=unresolved_coin_ids,
+                ),
             )
-            if unresolved_coin_ids:
-                return CoinCombineStepResult(
-                    step=CoinOpIterationEarlyExit(
-                        return_code=2,
-                        unresolved_coin_ids=unresolved_coin_ids,
+        if mismatched_coin_ids:
+            return CoinCombineStepResult(
+                step=CoinOpIterationEarlyExit(
+                    return_code=2,
+                    error_payload=coin_combine_asset_mismatch_error_payload(
+                        scope=scope,
+                        resolved_asset_id=params.resolved_asset_id,
+                        mismatched_coin_ids=mismatched_coin_ids,
                     ),
-                )
-            if mismatched_coin_ids:
-                return CoinCombineStepResult(
-                    step=CoinOpIterationEarlyExit(
-                        return_code=2,
-                        error_payload=coin_combine_asset_mismatch_error_payload(
-                            scope=scope,
-                            resolved_asset_id=params.resolved_asset_id,
-                            mismatched_coin_ids=mismatched_coin_ids,
-                        ),
-                    ),
-                )
+                ),
+            )
     elif params.min_coin_amount_mojos > 0:
         asset_scoped_coins = params.backend.list_asset_scoped_coins()
         spendable_scoped = params.backend.filter_spendable(
@@ -270,7 +269,6 @@ def run_coin_combine_step(
             canonical_asset_id=params.combine_canonical_asset_id,
             min_coin_amount_mojos=params.min_coin_amount_mojos,
             mode=CoinOpSelectionMode.CLI,
-            verify_direct_spendable_lookup=(scope.execution_backend == "cloud_wallet"),
         )
         resolved_input_coin_ids = plan_auto_combine_inputs(
             spendable_coins=spendable_scoped,

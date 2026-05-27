@@ -6,12 +6,9 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from greenfloor.config.models import MarketConfig
-from greenfloor.runtime.cloud_wallet.coin_ops_models import (
-    CoinOpSelectionMode,
-    DenominationTarget,
-)
+from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode, DenominationTarget
 
-CoinOpExecutionBackend = Literal["signer", "cloud_wallet"]
+CoinOpExecutionBackend = Literal["signer"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,36 +20,23 @@ class CoinOpScope:
 
     @property
     def allows_daemon_split_combine_prereq(self) -> bool:
-        return self.execution_backend == "cloud_wallet"
+        return True
 
     def dry_run_reason(self) -> str:
-        if self.execution_backend == "signer":
-            return "dry_run:signer"
-        return "dry_run:cloud_wallet_kms"
+        return "dry_run:signer"
 
     def coin_op_error_prefix(self) -> str:
-        if self.execution_backend == "signer":
-            return "signer_coin_op_error"
-        return "cloud_wallet_coin_op_error"
+        return "signer_coin_op_error"
 
     def split_submitted_reason(self) -> str:
-        if self.execution_backend == "signer":
-            return "signer_split_submitted"
-        return "cloud_wallet_kms_split_submitted"
+        return "signer_split_submitted"
 
     def combine_submitted_reason(self) -> str:
-        if self.execution_backend == "signer":
-            return "signer_combine_submitted"
-        return "cloud_wallet_kms_combine_submitted"
+        return "signer_combine_submitted"
 
     def combine_prereq_submitted_reason(self, *, exact_match: bool) -> str:
-        prefix = (
-            "signer_combine_submitted_for_split_prereq"
-            if self.execution_backend == "signer"
-            else "cloud_wallet_kms_combine_submitted_for_split_prereq"
-        )
         suffix = "exact" if exact_match else "with_change"
-        return f"{prefix}_{suffix}"
+        return f"signer_combine_submitted_for_split_prereq_{suffix}"
 
 
 def scope_payload(scope: CoinOpScope) -> dict[str, object]:

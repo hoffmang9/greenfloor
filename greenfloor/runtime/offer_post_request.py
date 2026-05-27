@@ -8,8 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.config.models import OfferExecutionBackend
-from greenfloor.runtime.cloud_wallet.build_post import build_and_post_offer_cloud_wallet
-from greenfloor.runtime.cloud_wallet.deps import CloudWalletOfferDeps
 from greenfloor.runtime.local_offer import make_local_offer_create_fn
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import (
@@ -79,7 +77,7 @@ class OfferPostRequest:
     def _managed_backend_kwargs(
         self,
         *,
-        deps: SignerOfferDeps | CloudWalletOfferDeps | None = None,
+        deps: SignerOfferDeps | None = None,
         emit_output: bool = True,
         persist_results: bool = True,
     ) -> dict[str, Any]:
@@ -111,23 +109,6 @@ class OfferPostRequest:
                 emit_output=emit_output,
                 persist_results=persist_results,
             ),
-        )
-
-    def run_cloud_wallet(
-        self,
-        *,
-        deps: CloudWalletOfferDeps | None = None,
-        offer_artifact_timeout_seconds: int | None = None,
-        emit_output: bool = True,
-        persist_results: bool = True,
-    ) -> tuple[int, dict[str, Any]]:
-        return build_and_post_offer_cloud_wallet(
-            **self._managed_backend_kwargs(
-                deps=deps,
-                emit_output=emit_output,
-                persist_results=persist_results,
-            ),
-            offer_artifact_timeout_seconds=offer_artifact_timeout_seconds,
         )
 
     def run_local_bls(
@@ -179,8 +160,6 @@ class OfferPostRequest:
     ) -> int:
         if backend == "signer":
             exit_code, _ = self.run_signer()
-        elif backend == "cloud_wallet":
-            exit_code, _ = self.run_cloud_wallet()
         else:
             exit_code, _ = self.run_local_bls(
                 capture_dir_path=capture_dir_path,
@@ -196,12 +175,9 @@ class OfferPostRequest:
         *,
         offer_artifact_timeout_seconds: int | None = None,
     ) -> tuple[int, dict[str, Any]]:
+        _ = offer_artifact_timeout_seconds
         if backend == "bls":
             raise ValueError("managed offer post does not support bls backend")
-        if backend == "signer":
-            return self.run_signer(emit_output=False, persist_results=False)
-        return self.run_cloud_wallet(
-            offer_artifact_timeout_seconds=offer_artifact_timeout_seconds,
-            emit_output=False,
-            persist_results=False,
-        )
+        if backend != "signer":
+            raise ValueError("managed offer post requires signer backend")
+        return self.run_signer(emit_output=False, persist_results=False)

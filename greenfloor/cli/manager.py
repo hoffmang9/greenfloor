@@ -31,7 +31,7 @@ from greenfloor.config.io import (
 from greenfloor.config.io import (
     default_state_dir_path as _default_state_dir_path_shared,
 )
-from greenfloor.runtime.cloud_wallet.adapter import set_json_output_compact
+from greenfloor.runtime.json_output import set_json_output_compact
 
 
 def _default_program_config_path() -> str:

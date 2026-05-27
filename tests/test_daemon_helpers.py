@@ -10,8 +10,7 @@ from greenfloor.daemon import main as daemon_main
 from greenfloor.daemon.main import (
     _abs_move_bps,
     _cancel_retry_config,
-    _cloud_wallet_configured,
-    _cloud_wallet_market_health_payload,
+    _managed_offer_market_health_payload,
     _cooldown_remaining_ms,
     _disabled_market_log_interval_seconds,
     _env_int,
@@ -23,7 +22,7 @@ from greenfloor.daemon.main import (
     _set_cooldown,
     _should_log_disabled_market,
 )
-from greenfloor.runtime.cloud_wallet.coins import coin_matches_direct_spendable_lookup
+from greenfloor.runtime.coin_ops.coins import coin_matches_direct_spendable_lookup
 
 # ---------------------------------------------------------------------------
 # _env_int
@@ -213,18 +212,18 @@ def test_log_disabled_markets_startup_once_logs_and_seeds_throttle(monkeypatch) 
     daemon_main._DISABLED_MARKET_STARTUP_LOGGED = False
 
 
-def test_cloud_wallet_market_health_payload_tracks_503_and_last_success() -> None:
+def test_managed_offer_market_health_payload_tracks_503_and_last_success() -> None:
     # Clear any leftover in-memory state from prior test runs.
-    daemon_main._CLOUD_WALLET_HEALTH_WINDOW.pop("m1-health-test", None)
+    daemon_main._MANAGED_OFFER_HEALTH_WINDOW.pop("m1-health-test", None)
 
     success_time = datetime(2026, 3, 19, 2, 50, 0, tzinfo=UTC)
-    _cloud_wallet_market_health_payload(
+    _managed_offer_market_health_payload(
         market_id="m1-health-test",
         current_items=[
-            {"status": "executed", "reason": "cloud_wallet_post_success"},
+            {"status": "executed", "reason": "managed_offer_post_success"},
             {
                 "status": "skipped",
-                "reason": "cloud_wallet_action_error:cloud_wallet_http_error:503:<html>...</html>",
+                "reason": "managed_offer_action_error:managed_offer_http_error:503:<html>...</html>",
             },
         ],
         now=success_time,
@@ -232,12 +231,12 @@ def test_cloud_wallet_market_health_payload_tracks_503_and_last_success() -> Non
     )
 
     now = datetime(2026, 3, 19, 3, 0, 0, tzinfo=UTC)
-    payload = _cloud_wallet_market_health_payload(
+    payload = _managed_offer_market_health_payload(
         market_id="m1-health-test",
         current_items=[
             {
                 "status": "skipped",
-                "reason": "cloud_wallet_action_error:cloud_wallet_http_error:503:<html>...</html>",
+                "reason": "managed_offer_action_error:managed_offer_http_error:503:<html>...</html>",
             }
         ],
         now=now,
@@ -246,10 +245,10 @@ def test_cloud_wallet_market_health_payload_tracks_503_and_last_success() -> Non
     assert payload["market_id"] == "m1-health-test"
     assert payload["rolling_window_events"] == 2
     assert payload["rolling_503_count"] == 2
-    assert payload["last_cloud_wallet_success_at"] == "2026-03-19T02:50:00+00:00"
-    assert payload["last_cloud_wallet_success_age_seconds"] == 600
+    assert payload["last_managed_offer_success_at"] == "2026-03-19T02:50:00+00:00"
+    assert payload["last_managed_offer_success_age_seconds"] == 600
 
-    daemon_main._CLOUD_WALLET_HEALTH_WINDOW.pop("m1-health-test", None)
+    daemon_main._MANAGED_OFFER_HEALTH_WINDOW.pop("m1-health-test", None)
 
 
 # ---------------------------------------------------------------------------
@@ -271,31 +270,6 @@ def test_abs_move_bps_returns_none_for_none_inputs() -> None:
 def test_abs_move_bps_returns_none_for_non_positive() -> None:
     assert _abs_move_bps(0.0, 100.0) is None
     assert _abs_move_bps(100.0, 0.0) is None
-
-
-# ---------------------------------------------------------------------------
-# _cloud_wallet_configured
-# ---------------------------------------------------------------------------
-
-
-def test_cloud_wallet_configured_true() -> None:
-    class _Prog:
-        cloud_wallet_base_url = "https://api.vault.chia.net"
-        cloud_wallet_user_key_id = "key-1"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-
-    assert _cloud_wallet_configured(_Prog()) is True
-
-
-def test_cloud_wallet_configured_false_when_empty() -> None:
-    class _Prog:
-        cloud_wallet_base_url = ""
-        cloud_wallet_user_key_id = "key-1"
-        cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-        cloud_wallet_vault_id = "Wallet_abc"
-
-    assert _cloud_wallet_configured(_Prog()) is False
 
 
 # ---------------------------------------------------------------------------

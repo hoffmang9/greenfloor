@@ -1,43 +1,43 @@
 use chia_protocol::{Bytes32, SpendBundle};
 use chia_puzzle_types::{
-    Memos,
     offer::{NotarizedPayment, Payment},
+    Memos,
 };
 use chia_sdk_driver::{
-    encode_offer as driver_encode_offer, AssetInfo, Offer, RequestedPayments, SpendContext,
-    decode_offer,
+    decode_offer, encode_offer as driver_encode_offer, AssetInfo, Offer, RequestedPayments,
+    SpendContext,
 };
 use chia_traits::Streamable;
-use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
-use pyo3::types::PyModule;
 
-fn to_py_value_error<E: std::fmt::Display>(err: E) -> PyErr {
-    PyValueError::new_err(err.to_string())
-}
+use crate::error::{SignerError, SignerResult};
 
-fn parse_bytes32(raw: &[u8], field: &str) -> PyResult<Bytes32> {
+fn parse_bytes32(raw: &[u8], field: &str) -> SignerResult<Bytes32> {
     let bytes: [u8; 32] = raw
         .try_into()
-        .map_err(|_| PyValueError::new_err(format!("{field} must be 32 bytes")))?;
+        .map_err(|_| SignerError::Other(format!("{field} must be 32 bytes")))?;
     Ok(Bytes32::new(bytes))
 }
 
-#[pyfunction]
-fn validate_offer(offer: &str) -> PyResult<()> {
-    let spend_bundle = decode_offer(offer).map_err(to_py_value_error)?;
+pub fn validate_offer_text(offer: &str) -> SignerResult<()> {
+    let spend_bundle = decode_offer(offer)?;
     let mut ctx = SpendContext::new();
-    Offer::from_spend_bundle(&mut ctx, &spend_bundle).map_err(to_py_value_error)?;
+    Offer::from_spend_bundle(&mut ctx, &spend_bundle)?;
     Ok(())
 }
 
-#[pyfunction]
-fn from_input_spend_bundle(
+pub fn encode_offer_from_spend_bundle_bytes(spend_bundle_bytes: &[u8]) -> SignerResult<String> {
+    let spend_bundle = SpendBundle::from_bytes(spend_bundle_bytes)
+        .map_err(|err| SignerError::Other(format!("invalid_spend_bundle_bytes:{err}")))?;
+    driver_encode_offer(&spend_bundle).map_err(SignerError::from)
+}
+
+pub fn from_input_spend_bundle_bytes(
     spend_bundle_bytes: &[u8],
     requested_payments_xch: Vec<(Vec<u8>, Vec<(Vec<u8>, u64)>)>,
     requested_payments_cats: Vec<(Vec<u8>, Vec<u8>, Vec<(Vec<u8>, u64)>)>,
-) -> PyResult<Vec<u8>> {
-    let spend_bundle = SpendBundle::from_bytes(spend_bundle_bytes).map_err(to_py_value_error)?;
+) -> SignerResult<Vec<u8>> {
+    let spend_bundle = SpendBundle::from_bytes(spend_bundle_bytes)
+        .map_err(|err| SignerError::Other(format!("invalid_spend_bundle_bytes:{err}")))?;
 
     let mut requested_payments = RequestedPayments::new();
     for (nonce_raw, payments_raw) in requested_payments_xch {
@@ -72,31 +72,16 @@ fn from_input_spend_bundle(
         spend_bundle,
         requested_payments,
         AssetInfo::new(),
-    )
-    .map_err(to_py_value_error)?;
-    let offer_spend_bundle = offer.to_spend_bundle(&mut ctx).map_err(to_py_value_error)?;
-    offer_spend_bundle.to_bytes().map_err(to_py_value_error)
+    )?;
+    let offer_spend_bundle = offer.to_spend_bundle(&mut ctx)?;
+    offer_spend_bundle
+        .to_bytes()
+        .map_err(|err| SignerError::Other(format!("offer_spend_bundle_to_bytes:{err}")))
 }
 
-#[pyfunction]
-fn from_input_spend_bundle_xch(
+pub fn from_input_spend_bundle_xch_bytes(
     spend_bundle_bytes: &[u8],
     requested_payments_xch: Vec<(Vec<u8>, Vec<(Vec<u8>, u64)>)>,
-) -> PyResult<Vec<u8>> {
-    from_input_spend_bundle(spend_bundle_bytes, requested_payments_xch, Vec::new())
-}
-
-#[pyfunction]
-fn encode_offer(spend_bundle_bytes: &[u8]) -> PyResult<String> {
-    let spend_bundle = SpendBundle::from_bytes(spend_bundle_bytes).map_err(to_py_value_error)?;
-    driver_encode_offer(&spend_bundle).map_err(to_py_value_error)
-}
-
-#[pymodule]
-fn greenfloor_native(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(validate_offer, m)?)?;
-    m.add_function(wrap_pyfunction!(from_input_spend_bundle, m)?)?;
-    m.add_function(wrap_pyfunction!(from_input_spend_bundle_xch, m)?)?;
-    m.add_function(wrap_pyfunction!(encode_offer, m)?)?;
-    Ok(())
+) -> SignerResult<Vec<u8>> {
+    from_input_spend_bundle_bytes(spend_bundle_bytes, requested_payments_xch, Vec::new())
 }

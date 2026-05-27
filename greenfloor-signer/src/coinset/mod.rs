@@ -1,9 +1,14 @@
+mod api;
 mod asset;
 mod backend;
 mod coin_select;
 mod msp;
 mod presplit;
 mod xch;
+
+pub use api::{
+    conservative_fee_from_payload, get_conservative_fee_estimate, get_fee_estimate, push_tx_hex,
+};
 
 pub(crate) use coin_select::{
     finalize_selected_cats, list_and_select_cats, select_xch_for_amount, CoinSelectionMode,

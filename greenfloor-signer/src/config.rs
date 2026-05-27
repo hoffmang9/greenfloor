@@ -18,9 +18,6 @@ pub struct SignerConfig {
     pub vault: VaultCustodySnapshot,
 }
 
-/// Legacy alias during module migration.
-pub type CloudWalletConfig = SignerConfig;
-
 #[derive(Debug, Deserialize)]
 struct ProgramYaml {
     app: Option<AppSection>,
@@ -103,10 +100,6 @@ pub fn load_signer_config(path: &Path) -> SignerResult<SignerConfig> {
         kms_public_key_hex,
         vault: vault_snapshot,
     })
-}
-
-pub fn load_cloud_wallet_config(path: &Path) -> SignerResult<SignerConfig> {
-    load_signer_config(path)
 }
 
 fn vault_section_to_snapshot(vault: VaultSection) -> SignerResult<VaultCustodySnapshot> {

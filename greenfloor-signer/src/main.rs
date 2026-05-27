@@ -3,9 +3,8 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand};
 use greenfloor_signer::vault::members::hex_to_bytes32;
 use greenfloor_signer::{
-    build_and_optionally_broadcast_vault_cat_mixed_split, build_vault_cat_offer,
-    load_cloud_wallet_config, parse_coin_ids, resolve_vault_context, CreateOfferRequest,
-    MixedSplitRequest,
+    build_and_optionally_broadcast_vault_cat_mixed_split, build_vault_cat_offer, load_signer_config,
+    parse_coin_ids, resolve_vault_context, CreateOfferRequest, MixedSplitRequest,
 };
 
 #[derive(Debug, Parser)]
@@ -20,7 +19,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Fetch Cloud Wallet custody metadata, derive vault puzzle hashes, and validate KMS key.
+    /// Fetch vault custody metadata, derive vault puzzle hashes, and validate KMS key.
     VaultInfo {
         #[arg(long, default_value = "config/program.yaml")]
         config: PathBuf,
@@ -95,8 +94,8 @@ async fn run() -> Result<(), greenfloor_signer::Error> {
     let cli = Cli::parse();
     match cli.command {
         Commands::VaultInfo { config, json } => {
-            let cloud_wallet = load_cloud_wallet_config(&config)?;
-            let context = resolve_vault_context(cloud_wallet).await?;
+            let config = load_signer_config(&config)?;
+            let context = resolve_vault_context(config).await?;
             if json {
                 println!(
                     "{}",
@@ -144,7 +143,7 @@ async fn run() -> Result<(), greenfloor_signer::Error> {
             expires_at,
             json,
         } => {
-            let cloud_wallet = load_cloud_wallet_config(&config)?;
+            let config = load_signer_config(&config)?;
             let parsed_offer_coin_ids = if offer_coin_ids.is_empty() {
                 Vec::new()
             } else {
@@ -156,7 +155,7 @@ async fn run() -> Result<(), greenfloor_signer::Error> {
                 parse_coin_ids(&presplit_coin_ids)?
             };
             let result = build_vault_cat_offer(
-                cloud_wallet,
+                config,
                 CreateOfferRequest {
                     receive_address,
                     offer_asset_id,
@@ -186,7 +185,7 @@ async fn run_mixed_split(
     allow_sub_cat_output: bool,
     broadcast: bool,
 ) -> Result<greenfloor_signer::MixedSplitResult, greenfloor_signer::Error> {
-    let config = load_cloud_wallet_config(config_path)?;
+    let config = load_signer_config(config_path)?;
     let parsed_coin_ids = if coin_ids.is_empty() {
         Vec::new()
     } else {

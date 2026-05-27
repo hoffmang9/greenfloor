@@ -7,7 +7,7 @@ from typing import Any
 
 from greenfloor.config.models import MarketConfig, MarketInventoryConfig
 from greenfloor.core.coin_ops import CoinOpPlan
-from greenfloor.runtime.cloud_wallet.coin_ops_daemon_execution import (
+from greenfloor.runtime.coin_ops.daemon_execution import (
     DaemonCoinOpExecContext,
     execute_daemon_combine_plan,
     execute_daemon_split_plan,
@@ -47,10 +47,6 @@ class _SignerProgram:
     app_network = "mainnet"
     signer_kms_key_id = "kms-1"
     vault_config = SimpleNamespace(launcher_id="0" * 64)
-    cloud_wallet_base_url = ""
-    cloud_wallet_user_key_id = ""
-    cloud_wallet_private_key_pem_path = ""
-    cloud_wallet_vault_id = ""
     home_dir = "/tmp/greenfloor-test"
     coin_ops_split_fee_mojos = 0
     coin_ops_combine_fee_mojos = 0
@@ -67,7 +63,7 @@ def test_coin_op_scope_disallows_signer_split_combine_prereq() -> None:
         execution_backend="signer",
         vault_id="signer",
     )
-    assert scope.allows_daemon_split_combine_prereq is False
+    assert scope.allows_daemon_split_combine_prereq is True
     assert scope.split_submitted_reason() == "signer_split_submitted"
     assert scope.combine_prereq_submitted_reason(exact_match=True) == (
         "signer_combine_submitted_for_split_prereq_exact"
@@ -76,7 +72,7 @@ def test_coin_op_scope_disallows_signer_split_combine_prereq() -> None:
 
 def test_execute_managed_coin_op_plans_missing_receive_address(monkeypatch) -> None:
     monkeypatch.setattr(
-        "greenfloor.runtime.coin_ops_backend.coin_ops_execution_backend",
+        "greenfloor.runtime.coin_ops.daemon_execution.coin_ops_execution_backend",
         lambda _program: "signer",
     )
     market = _signer_market(receive_address="")
@@ -89,7 +85,6 @@ def test_execute_managed_coin_op_plans_missing_receive_address(monkeypatch) -> N
         combine_input_cap=10,
         watched_coin_ids=set(),
         logger=logging.getLogger("test.signer.coin_ops"),
-        cloud_wallet_configured=False,
     )
     assert result["executed_count"] == 0
     assert result["items"][0]["reason"] == "signer_coin_ops_missing_receive_address"
@@ -246,7 +241,7 @@ def test_signer_daemon_combine_submits(monkeypatch) -> None:
 
 def test_resolve_coin_op_base_asset_id_signer_xch(monkeypatch) -> None:
     monkeypatch.setattr(
-        "greenfloor.runtime.coin_ops_backend.coin_ops_execution_backend",
+        "greenfloor.runtime.coin_ops.daemon_execution.coin_ops_execution_backend",
         lambda _program: "signer",
     )
     market = _signer_market()

@@ -12,7 +12,7 @@ from greenfloor.runtime.offer_publish import (
 
 def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypatch) -> None:
     def _import_module(name: str):
-        if name == "greenfloor_native":
+        if name == "greenfloor_signer":
             raise ImportError("disable native path for this test")
         return __import__(name)
 
@@ -68,7 +68,7 @@ def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypa
 
 def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> None:
     def _import_module(name: str):
-        if name == "greenfloor_native":
+        if name == "greenfloor_signer":
             raise ImportError("disable native path for this test")
         return __import__(name)
 
@@ -127,7 +127,7 @@ def test_verify_offer_text_for_dexie_rejects_offer_without_expiration_condition(
     monkeypatch,
 ) -> None:
     def _import_module(name: str):
-        if name == "greenfloor_native":
+        if name == "greenfloor_signer":
             raise ImportError("disable native path for this test")
         return __import__(name)
 
@@ -178,7 +178,7 @@ def test_verify_offer_text_for_dexie_extracts_expiry_from_coin_spend_program(
     monkeypatch,
 ) -> None:
     def _import_module(name: str):
-        if name == "greenfloor_native":
+        if name == "greenfloor_signer":
             raise ImportError("disable native path for this test")
         return __import__(name)
 
@@ -236,7 +236,7 @@ def test_verify_offer_text_for_dexie_rejects_duplicate_spent_coin_ids(
     monkeypatch,
 ) -> None:
     def _import_module(name: str):
-        if name == "greenfloor_native":
+        if name == "greenfloor_signer":
             raise ImportError("disable native path for this test")
         return __import__(name)
 
@@ -288,7 +288,7 @@ def test_verify_offer_text_for_dexie_rejects_duplicate_spent_coin_ids(
     )
 
 
-def test_verify_offer_text_for_dexie_uses_greenfloor_native_before_sdk(monkeypatch) -> None:
+def test_verify_offer_text_for_dexie_uses_greenfloor_signer_before_sdk(monkeypatch) -> None:
     calls = {}
 
     class _Native:
@@ -301,7 +301,7 @@ def test_verify_offer_text_for_dexie_uses_greenfloor_native_before_sdk(monkeypat
         def validate_offer(_offer: str) -> None:
             raise AssertionError("sdk path should not run when native is available")
 
-    monkeypatch.setitem(sys.modules, "greenfloor_native", _Native)
+    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
 
     assert verify_offer_text_for_dexie("offer1native") is None
@@ -314,7 +314,7 @@ def test_verify_offer_text_for_dexie_returns_native_validation_error(monkeypatch
         def validate_offer(_offer: str) -> None:
             raise ValueError("native_invalid_offer")
 
-    monkeypatch.setitem(sys.modules, "greenfloor_native", _Native)
+    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
     assert verify_offer_text_for_dexie("offer1bad") == (
         "wallet_sdk_offer_validate_failed:native_invalid_offer"
     )
@@ -360,7 +360,7 @@ def test_verify_offer_text_for_dexie_checks_duplicate_spends_after_native_valida
         def to_hex(value):
             return str(value)
 
-    monkeypatch.setitem(sys.modules, "greenfloor_native", _Native)
+    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
     assert (
         verify_offer_text_for_dexie("offer1native-dupe")

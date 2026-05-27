@@ -493,7 +493,7 @@ def test_from_input_spend_bundle_xch_calls_greenfloor_native(monkeypatch) -> Non
         nonce = b"\x22" * 32
         payments = [_Payment()]
 
-    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_native", lambda: _Native)
+    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_signer", lambda: _Native)
 
     result = native_offer_mod.from_input_spend_bundle_xch(
         sdk=_Sdk,
@@ -541,7 +541,7 @@ def test_from_input_spend_bundle_xch_supports_sdk_byte_wrapper_types(monkeypatch
         nonce = _ByteWrapper(b"\xaa" * 32)
         payments = [_Payment()]
 
-    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_native", lambda: _Native)
+    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_signer", lambda: _Native)
 
     result = native_offer_mod.from_input_spend_bundle_xch(
         sdk=_Sdk,
@@ -576,7 +576,7 @@ def test_from_input_spend_bundle_xch_propagates_native_errors(monkeypatch) -> No
         nonce = b"\x22" * 32
         payments = [_Payment()]
 
-    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_native", lambda: _Native)
+    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_signer", lambda: _Native)
 
     try:
         native_offer_mod.from_input_spend_bundle_xch(

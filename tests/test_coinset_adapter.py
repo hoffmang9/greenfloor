@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from typing import Any
+
+import pytest
 
 from greenfloor.adapters.coinset import (
     CoinsetAdapter,
@@ -8,6 +11,24 @@ from greenfloor.adapters.coinset import (
     extract_coin_ids_from_offer_payload,
     extract_coinset_tx_ids_from_offer_payload,
 )
+
+
+@pytest.fixture(autouse=True)
+def _mock_rust_coinset_io(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fake_require(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "coinset_push_tx":
+            return {"success": True, "status": "submitted"}
+        if name == "coinset_get_fee_estimate":
+            return {"success": True, "estimates": [100, 500, 200]}
+        if name == "coinset_get_conservative_fee_estimate":
+            network = args[0] if args else "mainnet"
+            base_url = args[1] if len(args) > 1 else ""
+            cost = args[2] if len(args) > 2 else 1_000_000
+            _ = network, base_url, cost, kwargs
+            return 500
+        raise AssertionError(f"unexpected_rust_coinset_call:{name}")
+
+    monkeypatch.setattr("greenfloor.adapters.coinset._require_rust_coinset", _fake_require)
 
 
 class _FakeResponse:
@@ -128,12 +149,7 @@ def test_coinset_adapter_get_puzzle_and_solution_omits_non_positive_height(monke
     assert captured_bodies[0] == {"coin_id": "0x55"}
 
 
-def test_coinset_adapter_push_tx_returns_payload_dict(monkeypatch) -> None:
-    def _fake_urlopen(_req, timeout=None):
-        _ = timeout
-        return _FakeResponse({"success": True, "status": "submitted"})
-
-    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+def test_push_tx_returns_payload_dict() -> None:
     adapter = CoinsetAdapter()
     result = adapter.push_tx(spend_bundle_hex="0xdeadbeef")
     assert result["success"] is True
@@ -210,42 +226,37 @@ def test_extract_coin_ids_ignores_non_hash_values() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_conservative_fee_estimate_uses_max_of_estimates(monkeypatch) -> None:
-    def _fake_urlopen(_req, timeout=None):
-        _ = timeout
-        return _FakeResponse({"success": True, "estimates": [100, 500, 200]})
-
-    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+def test_conservative_fee_estimate_uses_max_of_estimates() -> None:
     adapter = CoinsetAdapter()
     assert adapter.get_conservative_fee_estimate() == 500
 
 
 def test_conservative_fee_estimate_falls_back_to_fee_estimate_field(monkeypatch) -> None:
-    def _fake_urlopen(_req, timeout=None):
-        _ = timeout
-        return _FakeResponse({"success": True, "fee_estimate": 42})
+    def _fake_require(name: str, *args: Any, **kwargs: Any) -> Any:
+        _ = name, args, kwargs
+        return 42
 
-    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    monkeypatch.setattr("greenfloor.adapters.coinset._require_rust_coinset", _fake_require)
     adapter = CoinsetAdapter()
     assert adapter.get_conservative_fee_estimate() == 42
 
 
 def test_conservative_fee_estimate_returns_none_on_failure(monkeypatch) -> None:
-    def _fake_urlopen(_req, timeout=None):
-        _ = timeout
-        return _FakeResponse({"success": False})
+    def _fake_require(name: str, *args: Any, **kwargs: Any) -> Any:
+        _ = name, args, kwargs
+        return None
 
-    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    monkeypatch.setattr("greenfloor.adapters.coinset._require_rust_coinset", _fake_require)
     adapter = CoinsetAdapter()
     assert adapter.get_conservative_fee_estimate() is None
 
 
 def test_conservative_fee_estimate_skips_invalid_estimate_values(monkeypatch) -> None:
-    def _fake_urlopen(_req, timeout=None):
-        _ = timeout
-        return _FakeResponse({"success": True, "estimates": ["bad", -1, 300]})
+    def _fake_require(name: str, *args: Any, **kwargs: Any) -> Any:
+        _ = name, args, kwargs
+        return 300
 
-    monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+    monkeypatch.setattr("greenfloor.adapters.coinset._require_rust_coinset", _fake_require)
     adapter = CoinsetAdapter()
     assert adapter.get_conservative_fee_estimate() == 300
 

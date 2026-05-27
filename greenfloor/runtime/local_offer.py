@@ -68,18 +68,6 @@ def build_local_offer_payload(
         "keyring_yaml_path": build_ctx.keyring_yaml_path,
         "network": build_ctx.network,
         "asset_id": market.base_asset,
-        "offer_coin_ids": [],
-        "cloud_wallet_base_url": str(program.cloud_wallet_base_url or "").strip(),
-        "cloud_wallet_user_key_id": str(program.cloud_wallet_user_key_id or "").strip(),
-        "cloud_wallet_private_key_pem_path": str(
-            program.cloud_wallet_private_key_pem_path or ""
-        ).strip(),
-        "cloud_wallet_vault_id": str(program.cloud_wallet_vault_id or "").strip(),
-        "cloud_wallet_kms_key_id": str(program.cloud_wallet_kms_key_id or "").strip(),
-        "cloud_wallet_kms_region": str(program.cloud_wallet_kms_region or "").strip(),
-        "cloud_wallet_kms_public_key_hex": str(
-            program.cloud_wallet_kms_public_key_hex or ""
-        ).strip(),
         "program_config_path": str(build_ctx.program_path),
         "program_home_dir": str(program.home_dir),
     }

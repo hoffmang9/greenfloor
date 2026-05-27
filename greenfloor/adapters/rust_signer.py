@@ -77,8 +77,6 @@ def program_config_path_from_payload(payload: dict[str, Any]) -> str | None:
 
 def is_vault_kms_payload(payload: dict[str, Any]) -> bool:
     """True when payload should use vault KMS signing (Rust signer)."""
-    if bool(str(payload.get("cloud_wallet_kms_key_id", "")).strip()):
-        return True
     return bool(str(payload.get("signer_kms_key_id", "")).strip())
 
 

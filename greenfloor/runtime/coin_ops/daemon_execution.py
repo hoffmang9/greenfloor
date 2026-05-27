@@ -1,9 +1,8 @@
-"""Daemon coin-op plan execution via unified ``CoinOpBackend`` (Cloud Wallet or signer)."""
+"""Daemon coin-op plan execution via signer ``CoinOpBackend``."""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,13 +16,13 @@ from greenfloor.core.coin_ops_policy import (
     coin_op_min_amount_mojos,
     coin_op_target_amount_allowed,
 )
-from greenfloor.runtime.cloud_wallet.coin_ops_daemon_ledger import (
+from greenfloor.runtime.coin_ops.daemon_ledger import (
     DaemonCoinOpLedgerItem,
     daemon_coin_op_executed,
     daemon_coin_op_skipped,
 )
-from greenfloor.runtime.cloud_wallet.coin_ops_models import CoinOpSelectionMode
-from greenfloor.runtime.cloud_wallet.coin_ops_planning import (
+from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode
+from greenfloor.runtime.coin_ops.planning import (
     CombineInputSelectionMode,
     SplitCoinPlan,
     SplitCombinePrereqPlan,
@@ -469,42 +468,16 @@ def execute_managed_coin_op_plans(
     combine_input_cap: int,
     watched_coin_ids: set[str],
     logger: logging.Logger,
-    cloud_wallet_configured: bool,
-    cloud_wallet_base_asset_resolver: Callable[[], str] | None = None,
     deps: Any = None,
 ) -> dict[str, Any]:
     backend_name = coin_ops_execution_backend(program)
-    if backend_name == "cloud_wallet":
-        if not cloud_wallet_configured:
-            return _skip_all_plans(
-                program=program,
-                plans=plans,
-                reason="cloud_wallet_required_for_coin_ops",
-                status="skipped",
-                signer_selection=signer_selection,
-            )
-        if not str(getattr(program, "cloud_wallet_kms_key_id", "")).strip():
-            return _skip_all_plans(
-                program=program,
-                plans=plans,
-                reason="cloud_wallet_kms_required_for_coin_ops",
-                status="skipped",
-                signer_selection=signer_selection,
-            )
 
     try:
         if backend_name == "signer" and not str(market.receive_address).strip():
             raise ValueError("signer_coin_ops_missing_receive_address")
-        if backend_name == "signer":
-            resolved_base_asset_id = resolve_coin_op_base_asset_id(
-                program=program, market=market, deps=deps
-            )
-        elif cloud_wallet_base_asset_resolver is not None:
-            resolved_base_asset_id = str(cloud_wallet_base_asset_resolver()).strip()
-        else:
-            resolved_base_asset_id = resolve_coin_op_base_asset_id(
-                program=program, market=market, deps=deps
-            )
+        resolved_base_asset_id = resolve_coin_op_base_asset_id(
+            program=program, market=market, deps=deps
+        )
         backend = build_coin_op_backend(
             program=program,
             market=market,
@@ -535,7 +508,7 @@ def execute_managed_coin_op_plans(
     executed_count = 0
     scope = backend.scope
     dry_run_reason = scope.dry_run_reason()
-    execution_status = "signer" if backend_name == "signer" else "cloud_wallet_kms"
+    execution_status = "signer"
 
     for plan in plans:
         op_type = str(plan.op_type)

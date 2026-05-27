@@ -11,8 +11,8 @@ from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.hex_utils import canonical_is_xch, default_mojo_multiplier_for_asset
 from greenfloor.offer_bootstrap import BootstrapLadderEntry, plan_bootstrap_mixed_outputs
-from greenfloor.runtime.cloud_wallet.bootstrap import resolve_bootstrap_split_fee
-from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
+from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
+from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import (
     BootstrapPolicy,

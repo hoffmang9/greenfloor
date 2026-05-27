@@ -24,14 +24,42 @@ from greenfloor.daemon.main import (
     _update_market_coin_watchlist_from_dexie,
 )
 from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.runtime.cloud_wallet.coin_ops_daemon_execution import (
-    execute_managed_coin_op_plans,
-)
-from greenfloor.runtime.cloud_wallet.coin_ops_planning import (
-    select_spendable_coins_for_target_amount,
-)
+from greenfloor.runtime.coin_ops.planning import select_spendable_coins_for_target_amount
 from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.config_fixtures import minimal_program_config
+
+from dataclasses import replace
+
+from greenfloor.config.models import ProgramConfig, VaultConfig, VaultWalletKeyConfig
+
+
+def _signer_program_config(**overrides: object) -> ProgramConfig:
+    vault = VaultConfig(
+        launcher_id="0" * 64,
+        custody_threshold=1,
+        recovery_threshold=1,
+        recovery_clawback_timelock=3600,
+        custody_keys=(
+            VaultWalletKeyConfig(public_key_hex="02" + "00" * 31, curve="SECP256R1"),
+        ),
+        recovery_keys=(),
+    )
+    base = minimal_program_config()
+    return replace(
+        base,
+        signer_kms_key_id="kms-key",
+        vault_config=vault,
+        runtime_offer_parallelism_enabled=bool(
+            overrides.get("runtime_offer_parallelism_enabled", False)
+        ),
+        runtime_offer_parallelism_max_workers=int(
+            overrides.get("runtime_offer_parallelism_max_workers", 2)
+        ),
+        runtime_reservation_ttl_seconds=int(
+            overrides.get("runtime_reservation_ttl_seconds", 300)
+        ),
+    )
+
 
 
 class _FakeDexie:
@@ -100,27 +128,6 @@ class _FakeStore:
         )
 
 
-class _CloudWalletProgram:
-    """Minimal program stub for cloud-wallet offer-execution tests (4-field variant)."""
-
-    signer_kms_key_id = ""
-    vault_config = None
-    cloud_wallet_base_url = "https://api.vault.chia.net"
-    cloud_wallet_user_key_id = "UserAuthKey_abc"
-    cloud_wallet_private_key_pem_path = "~/.greenfloor/keys/cloud-wallet-user-auth-key.pem"
-    cloud_wallet_vault_id = "Wallet_abc"
-    cloud_wallet_kms_key_id = "kms-key"
-
-
-class _ParallelCloudWalletProgram(_CloudWalletProgram):
-    """Cloud-wallet program stub with offer parallelism enabled."""
-
-    runtime_offer_parallelism_enabled = True
-    runtime_offer_parallelism_max_workers = 2
-    runtime_reservation_ttl_seconds = 300
-    coin_ops_minimum_fee_mojos = 0
-    coin_ops_split_fee_mojos = 0
-
 
 def _coin_ops_base_unit_mojo_multiplier(market: Any) -> int:
     pricing = getattr(market, "pricing", None)
@@ -129,46 +136,16 @@ def _coin_ops_base_unit_mojo_multiplier(market: Any) -> int:
     return int(getattr(pricing, "base_unit_mojo_multiplier", 1000))
 
 
-def _execute_coin_ops_cloud_wallet_kms_only(
-    *,
-    market: Any,
-    program: Any,
-    plans: list[Any],
-    wallet: Any,
-    signer_selection: Any,
-    state_dir: Path,
-) -> dict[str, Any]:
-    _ = wallet, state_dir
-    return execute_managed_coin_op_plans(
-        market=market,
-        program=program,
-        plans=plans,
-        signer_selection=signer_selection,
-        base_unit_mojo_multiplier=_coin_ops_base_unit_mojo_multiplier(market),
-        combine_input_cap=daemon_main._combine_input_coin_cap(),
-        watched_coin_ids=daemon_main._watched_coin_ids_for_market(
-            market_id=str(getattr(market, "market_id", "")).strip()
-        ),
-        logger=logging.getLogger("test.daemon.coin_ops"),
-        cloud_wallet_configured=daemon_main._cloud_wallet_configured(program),
-        cloud_wallet_base_asset_resolver=lambda: "Asset_byc",
-    )
-
-
 class _CoinOpsProgram:
     """Minimal program stub for coin-op tests (includes dry-run and fee fields)."""
 
     runtime_dry_run = False
     app_network = "mainnet"
-    signer_kms_key_id = ""
-    vault_config = None
-    cloud_wallet_base_url = "https://wallet.example"
-    cloud_wallet_user_key_id = "user-key"
-    cloud_wallet_private_key_pem_path = "/tmp/key.pem"
-    cloud_wallet_vault_id = "vault-1"
-    cloud_wallet_kms_key_id = "kms-key"
+    signer_kms_key_id = "kms-key"
+    vault_config = SimpleNamespace(launcher_id="0" * 64)
     coin_ops_split_fee_mojos = 0
     coin_ops_combine_fee_mojos = 0
+    home_dir = "/tmp/greenfloor-test"
 
 
 def _market() -> MarketConfig:
@@ -1044,7 +1021,7 @@ def test_active_offer_counts_excludes_stale_pending_visibility_offer() -> None:
                         "offer_id": "pending-50",
                         "size": 50,
                         "status": "executed",
-                        "reason": "cloud_wallet_post_success_dexie_visibility_pending",
+                        "reason": "managed_offer_post_success_dexie_visibility_pending",
                     }
                 ]
             },
@@ -1079,7 +1056,7 @@ def test_active_offer_counts_keeps_pending_visibility_offer_when_seen_on_dexie()
                         "offer_id": "pending-50",
                         "size": 50,
                         "status": "executed",
-                        "reason": "cloud_wallet_post_success_dexie_visibility_pending",
+                        "reason": "managed_offer_post_success_dexie_visibility_pending",
                     }
                 ]
             },
@@ -1118,7 +1095,7 @@ def test_active_offer_counts_keeps_pending_when_no_dexie_snapshot() -> None:
                         "offer_id": "pending-old",
                         "size": 50,
                         "status": "executed",
-                        "reason": "cloud_wallet_post_success_dexie_visibility_pending",
+                        "reason": "managed_offer_post_success_dexie_visibility_pending",
                     }
                 ]
             },
@@ -1503,7 +1480,7 @@ def test_execute_strategy_actions_uses_cloud_wallet_path_when_configured(monkeyp
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-1"},
     )
 
-    _Program = _CloudWalletProgram
+    _Program = _signer_program_config
 
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
     dexie.visible_offer_ids = {"offer-fallback-1"}
@@ -1532,7 +1509,7 @@ def test_execute_strategy_actions_uses_cloud_wallet_path_when_configured(monkeyp
     )
 
     assert result["executed_count"] == 1
-    assert result["items"][0]["reason"] == "cloud_wallet_post_success"
+    assert result["items"][0]["reason"] == "managed_offer_post_success"
 
 
 def test_execute_strategy_actions_cloud_wallet_requires_dexie_visibility(monkeypatch) -> None:
@@ -1544,7 +1521,7 @@ def test_execute_strategy_actions_cloud_wallet_requires_dexie_visibility(monkeyp
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-missing"},
     )
 
-    _Program = _CloudWalletProgram
+    _Program = _signer_program_config
 
     class _DexieNon404:
         def get_offer(self, offer_id: str) -> dict[str, Any]:
@@ -1577,7 +1554,7 @@ def test_execute_strategy_actions_cloud_wallet_requires_dexie_visibility(monkeyp
 
     assert result["executed_count"] == 0
     assert result["items"][0]["status"] == "skipped"
-    assert "cloud_wallet_post_not_visible_on_dexie" in result["items"][0]["reason"]
+    assert "managed_offer_post_not_visible_on_dexie" in result["items"][0]["reason"]
 
 
 def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
@@ -1596,7 +1573,7 @@ def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-pending"},
     )
 
-    _Program = _CloudWalletProgram
+    _Program = _signer_program_config
 
     class _Dexie404:
         def get_offer(self, offer_id: str) -> dict[str, Any]:
@@ -1644,7 +1621,7 @@ def test_execute_strategy_actions_preserves_planned_size_order(monkeypatch) -> N
 
     monkeypatch.setattr(daemon_main, "_managed_offer_post", _fake_cloud_wallet_post)
 
-    _Program = _CloudWalletProgram
+    _Program = _signer_program_config
 
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
     dexie.visible_offer_ids = {"offer-100", "offer-10", "offer-1"}
@@ -1709,7 +1686,7 @@ def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(mon
         lambda **_kwargs: {"success": False, "error": "vault_signing_unavailable"},
     )
 
-    _Program = _CloudWalletProgram
+    _Program = _signer_program_config
 
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-1"})
     store = _FakeStore()
@@ -1738,7 +1715,7 @@ def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(mon
 
     assert result["executed_count"] == 0
     assert result["items"][0]["status"] == "skipped"
-    assert result["items"][0]["reason"] == "cloud_wallet_post_failed:vault_signing_unavailable"
+    assert result["items"][0]["reason"] == "managed_offer_post_failed:vault_signing_unavailable"
     assert calls["builder"] == 0
 
 
@@ -1763,12 +1740,15 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(m
 
     monkeypatch.setattr(
         daemon_main,
-        "_new_cloud_wallet_adapter_for_daemon",
-        lambda _program: _FakeCloudWallet(),
+        "list_unspent_coins_by_receive_address",
+        lambda **_kwargs: [
+            {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
+            {"amount": 10_000_000, "state": "CONFIRMED", "id": "coin-xch", "name": "coin-xch"},
+        ],
     )
     monkeypatch.setattr(
         daemon_main,
-        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
@@ -1777,7 +1757,7 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(m
         lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
     )
 
-    _Program = _ParallelCloudWalletProgram
+    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     class _DeterministicContentionCoordinator:
         def __init__(self) -> None:
@@ -1856,12 +1836,15 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
 
     monkeypatch.setattr(
         daemon_main,
-        "_new_cloud_wallet_adapter_for_daemon",
-        lambda _program: _FakeCloudWallet(),
+        "list_unspent_coins_by_receive_address",
+        lambda **_kwargs: [
+            {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
+            {"amount": 10_000_000, "state": "CONFIRMED", "id": "coin-xch", "name": "coin-xch"},
+        ],
     )
     monkeypatch.setattr(
         daemon_main,
-        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
@@ -1870,7 +1853,7 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
         lambda **_kwargs: {"success": False, "error": "vault_unavailable"},
     )
 
-    _Program = _ParallelCloudWalletProgram
+    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     db_path = tmp_path / "reservations.sqlite"
     coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
@@ -1953,12 +1936,15 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
 
     monkeypatch.setattr(
         daemon_main,
-        "_new_cloud_wallet_adapter_for_daemon",
-        lambda _program: _FakeCloudWallet(),
+        "list_unspent_coins_by_receive_address",
+        lambda **_kwargs: [
+            {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
+            {"amount": 10_000_000, "state": "CONFIRMED", "id": "coin-xch", "name": "coin-xch"},
+        ],
     )
     monkeypatch.setattr(
         daemon_main,
-        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
@@ -1967,8 +1953,11 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
         lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
     )
 
-    class _Program(_ParallelCloudWalletProgram):
-        coin_ops_minimum_fee_mojos = 10
+    def _Program():
+        return replace(
+            _signer_program_config(runtime_offer_parallelism_enabled=True),
+            coin_ops_minimum_fee_mojos=10,
+        )
 
     db_path = tmp_path / "reservations.sqlite"
     coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
@@ -2019,12 +2008,15 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservati
 
     monkeypatch.setattr(
         daemon_main,
-        "_new_cloud_wallet_adapter_for_daemon",
-        lambda _program: _FakeCloudWallet(),
+        "list_unspent_coins_by_receive_address",
+        lambda **_kwargs: [
+            {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
+            {"amount": 10_000_000, "state": "CONFIRMED", "id": "coin-xch", "name": "coin-xch"},
+        ],
     )
     monkeypatch.setattr(
         daemon_main,
-        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
@@ -2033,7 +2025,7 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservati
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback"},
     )
 
-    _Program = _ParallelCloudWalletProgram
+    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-fallback"})
     dexie.visible_offer_ids = {"offer-fallback"}
@@ -2079,21 +2071,24 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
 
     monkeypatch.setattr(
         daemon_main,
-        "_new_cloud_wallet_adapter_for_daemon",
-        lambda _program: _FakeCloudWallet(),
+        "list_unspent_coins_by_receive_address",
+        lambda **_kwargs: [
+            {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
+            {"amount": 10_000_000, "state": "CONFIRMED", "id": "coin-xch", "name": "coin-xch"},
+        ],
     )
     monkeypatch.setattr(
         daemon_main,
-        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
         daemon_main,
-        "_execute_single_cloud_wallet_action",
+        "_execute_single_managed_action",
         lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
     )
 
-    _Program = _ParallelCloudWalletProgram
+    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     market = _market()
     db_path = tmp_path / "reservations.sqlite"
@@ -2138,8 +2133,7 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
 def test_execute_strategy_actions_cloud_wallet_nonparallel_converts_worker_exception_to_skip(
     monkeypatch,
 ) -> None:
-    class _Program(_CloudWalletProgram):
-        runtime_offer_parallelism_enabled = False
+    def _Program(): return _signer_program_config(runtime_offer_parallelism_enabled=False)
 
     dexie = _FakeDexie(post_result={"success": True, "id": "unused"})
     store = _FakeStore()
@@ -2157,7 +2151,7 @@ def test_execute_strategy_actions_cloud_wallet_nonparallel_converts_worker_excep
     ]
     monkeypatch.setattr(
         daemon_main,
-        "_execute_single_cloud_wallet_action",
+        "_execute_single_managed_action",
         lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
     )
 
@@ -2174,7 +2168,7 @@ def test_execute_strategy_actions_cloud_wallet_nonparallel_converts_worker_excep
     )
     assert result["executed_count"] == 0
     assert len(result["items"]) == 1
-    assert str(result["items"][0]["reason"]).startswith("cloud_wallet_action_error:")
+    assert str(result["items"][0]["reason"]).startswith("managed_action_error:")
 
 
 def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservation(
@@ -2192,12 +2186,15 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
 
     monkeypatch.setattr(
         daemon_main,
-        "_new_cloud_wallet_adapter_for_daemon",
-        lambda _program: _FakeCloudWallet(),
+        "list_unspent_coins_by_receive_address",
+        lambda **_kwargs: [
+            {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
+            {"amount": 10_000_000, "state": "CONFIRMED", "id": "coin-xch", "name": "coin-xch"},
+        ],
     )
     monkeypatch.setattr(
         daemon_main,
-        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
@@ -2206,7 +2203,7 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
         lambda **_kwargs: {"success": True, "offer_id": "offer-resolved-asset"},
     )
 
-    _Program = _ParallelCloudWalletProgram
+    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     market = _market()
     market.base_asset = "asset-local-only"
@@ -2268,12 +2265,15 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
 
     monkeypatch.setattr(
         daemon_main,
-        "_new_cloud_wallet_adapter_for_daemon",
-        lambda _program: _FakeCloudWallet(),
+        "list_unspent_coins_by_receive_address",
+        lambda **_kwargs: [
+            {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
+            {"amount": 10_000_000, "state": "CONFIRMED", "id": "coin-xch", "name": "coin-xch"},
+        ],
     )
     monkeypatch.setattr(
         daemon_main,
-        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
@@ -2282,7 +2282,7 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
         lambda **_kwargs: {"success": True, "offer_id": "offer-scoped"},
     )
 
-    _Program = _ParallelCloudWalletProgram
+    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     market = _market()
     market.base_asset = "asset-local-only"
@@ -2352,12 +2352,7 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
 
     monkeypatch.setattr(
         daemon_main,
-        "_new_cloud_wallet_adapter_for_daemon",
-        lambda _program: _FakeCloudWallet(),
-    )
-    monkeypatch.setattr(
-        daemon_main,
-        "_resolve_cloud_wallet_offer_asset_ids_for_reservation",
+        "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
@@ -2366,7 +2361,7 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
         lambda **_kwargs: {"success": True, "offer_id": "offer-should-not-post"},
     )
 
-    _Program = _ParallelCloudWalletProgram
+    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     market = _market()
     market.base_asset = "asset-local-only"
@@ -2387,6 +2382,23 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
             side="sell",
         )
     ]
+
+    def _list_unspent_coins(**kwargs: Any) -> list[dict[str, Any]]:
+        asset_id = str(kwargs.get("asset_id", "")).strip()
+        if asset_id == "asset_global":
+            return [
+                {"amount": 600, "state": "CONFIRMED", "id": "c1", "name": "c1"},
+                {"amount": 600, "state": "CONFIRMED", "id": "c2", "name": "c2"},
+            ]
+        if asset_id == "xch_asset":
+            return [{"amount": 1000, "state": "CONFIRMED", "id": "x1", "name": "x1"}]
+        return []
+
+    monkeypatch.setattr(
+        daemon_main,
+        "list_unspent_coins_by_receive_address",
+        _list_unspent_coins,
+    )
     result = _execute_strategy_actions(
         market=market,
         strategy_actions=actions,
@@ -2404,283 +2416,25 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
     )
 
 
-def test_cloud_wallet_spendable_base_unit_coin_amounts_filters_and_converts() -> None:
-    class _FakeCloudWallet:
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {"amount": 10000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-                {"amount": 20000, "state": "SETTLED", "asset": None},
-                {"amount": 999, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-                {"amount": 20000, "state": "PENDING", "asset": {"id": "Asset_byc"}},
-                {"amount": 30000, "state": "SETTLED", "asset": {"id": "Asset_other"}},
-            ]
 
-    got = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
-        wallet=cast(Any, _FakeCloudWallet()),
-        resolved_asset_id="Asset_byc",
-        base_unit_mojo_multiplier=1000,
-        canonical_asset_id="BYC",
+
+def test_coinset_spendable_base_unit_coin_amounts_filters_and_converts(monkeypatch) -> None:
+    monkeypatch.setattr(
+        daemon_main,
+        "list_unspent_coins_by_receive_address",
+        lambda **_kwargs: [
+            {"amount": 10000, "state": "CONFIRMED"},
+            {"amount": 999, "state": "CONFIRMED"},
+            {"amount": 20000, "state": "PENDING"},
+        ],
     )
-    assert got == [10, 20]
-
-
-def test_cloud_wallet_spendable_base_unit_coin_amounts_revalidates_with_scoped_refresh() -> None:
-    class _FakeCloudWallet:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            self.calls += 1
-            if self.calls == 1:
-                return [
-                    {"id": "good", "amount": 10000, "state": "SETTLED", "asset": None},
-                    {"id": "wrong-asset", "amount": 10000, "state": "SETTLED", "asset": None},
-                    {"id": "locked", "amount": 10000, "state": "SETTLED", "asset": None},
-                ]
-            return [
-                {
-                    "id": "good",
-                    "amount": 10000,
-                    "state": "SETTLED",
-                    "isLocked": False,
-                    "isLinkedToOpenOffer": False,
-                    "asset": {"id": "Asset_byc"},
-                },
-                {
-                    "id": "wrong-asset",
-                    "amount": 10000,
-                    "state": "SETTLED",
-                    "isLocked": False,
-                    "isLinkedToOpenOffer": False,
-                    "asset": {"id": "Asset_xch"},
-                },
-                {
-                    "id": "locked",
-                    "amount": 10000,
-                    "state": "SETTLED",
-                    "isLocked": True,
-                    "isLinkedToOpenOffer": False,
-                    "asset": {"id": "Asset_byc"},
-                },
-            ]
-
-        def get_coin_record(self, *, coin_id: str):
-            raise AssertionError(f"unexpected get_coin_record call for {coin_id}")
-
-    got = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
-        wallet=cast(Any, _FakeCloudWallet()),
+    got = daemon_main._coinset_spendable_base_unit_coin_amounts(
+        program=_signer_program_config(),
+        market=_market(),
         resolved_asset_id="Asset_byc",
         base_unit_mojo_multiplier=1000,
-        canonical_asset_id="BYC",
-        revalidate_coin_records=True,
     )
     assert got == [10]
-
-
-def test_cloud_wallet_spendable_base_unit_coin_amounts_skips_direct_lookup_by_default() -> None:
-    class _FakeCloudWallet:
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {
-                    "id": "usable",
-                    "amount": 10_000,
-                    "state": "SETTLED",
-                    "isLocked": False,
-                    "isLinkedToOpenOffer": False,
-                    "asset": None,
-                },
-                {
-                    "id": "locked",
-                    "amount": 20_000,
-                    "state": "SETTLED",
-                    "isLocked": True,
-                    "isLinkedToOpenOffer": False,
-                    "asset": None,
-                },
-                {
-                    "id": "linked",
-                    "amount": 30_000,
-                    "state": "SETTLED",
-                    "isLocked": False,
-                    "isLinkedToOpenOffer": True,
-                    "asset": None,
-                },
-            ]
-
-        def get_coin_record(self, *, coin_id: str):
-            raise AssertionError(f"unexpected get_coin_record call for {coin_id}")
-
-    got = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
-        wallet=cast(Any, _FakeCloudWallet()),
-        resolved_asset_id="Asset_byc",
-        base_unit_mojo_multiplier=1000,
-        canonical_asset_id="BYC",
-    )
-    assert got == [10]
-
-
-def test_inventory_scan_avoids_per_coin_coin_record_reads() -> None:
-    lookups: list[str] = []
-
-    class _FakeCloudWallet:
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {
-                    "id": "coin-1",
-                    "amount": 10_000,
-                    "state": "SETTLED",
-                    "isLocked": False,
-                    "isLinkedToOpenOffer": False,
-                    "asset": None,
-                },
-                {
-                    "id": "coin-2",
-                    "amount": 20_000,
-                    "state": "SETTLED",
-                    "isLocked": False,
-                    "isLinkedToOpenOffer": True,
-                    "asset": None,
-                },
-                {
-                    "id": "coin-3",
-                    "amount": 30_000,
-                    "state": "SETTLED",
-                    "isLocked": True,
-                    "isLinkedToOpenOffer": False,
-                    "asset": None,
-                },
-            ]
-
-        def get_coin_record(self, *, coin_id: str):
-            lookups.append(coin_id)
-            return {
-                "id": coin_id,
-                "state": "SETTLED",
-                "isLocked": False,
-                "isLinkedToOpenOffer": False,
-                "asset": {"id": "Asset_byc"},
-            }
-
-    got = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
-        wallet=cast(Any, _FakeCloudWallet()),
-        resolved_asset_id="Asset_byc",
-        base_unit_mojo_multiplier=1000,
-        canonical_asset_id="BYC",
-    )
-    assert got == [10]
-    # Load guardrail: inventory scan should not fan out per-coin GraphQL
-    # getCoinRecord calls; that fanout multiplies SQL load in ent-wallet.
-    assert lookups == []
-
-
-def test_cloud_wallet_spendable_base_unit_coin_amounts_reuses_scoped_list_cache() -> None:
-    calls = {"n": 0}
-
-    class _FakeCloudWallet:
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            calls["n"] += 1
-            _ = include_pending
-            return [
-                {"amount": 10000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-                {"amount": 20000, "state": "SETTLED", "asset": None},
-            ]
-
-    fake = cast(Any, _FakeCloudWallet())
-    cache = daemon_main.CloudWalletAssetScopedListCache(fake)
-    first = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
-        wallet=fake,
-        resolved_asset_id="Asset_byc",
-        base_unit_mojo_multiplier=1000,
-        canonical_asset_id="BYC",
-        scoped_list_cache=cache,
-    )
-    second = daemon_main._cloud_wallet_spendable_base_unit_coin_amounts(
-        wallet=fake,
-        resolved_asset_id="Asset_byc",
-        base_unit_mojo_multiplier=1000,
-        canonical_asset_id="BYC",
-        scoped_list_cache=cache,
-    )
-    assert first == second == [10, 20]
-    assert calls["n"] == 1
-
-
-def test_cloud_wallet_asset_scoped_list_cache_dedupes_list_coins_calls() -> None:
-    calls = {"n": 0}
-
-    class _FakeCloudWallet:
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            calls["n"] += 1
-            _ = include_pending
-            return [
-                {"amount": 10000, "state": "SETTLED", "asset": {"id": asset_id}},
-            ]
-
-    fake = cast(Any, _FakeCloudWallet())
-    cache = daemon_main.CloudWalletAssetScopedListCache(fake)
-    first = cache.list_coins_scoped(resolved_asset_id="Asset_byc")
-    second = cache.list_coins_scoped(resolved_asset_id="Asset_byc")
-    cache.list_coins_scoped(resolved_asset_id="Asset_other")
-    assert calls["n"] == 2
-    assert first is second
-
-
-def test_cloud_wallet_asset_scoped_list_cache_serializes_concurrent_first_fetch() -> None:
-    calls = {"n": 0}
-
-    class _FakeCloudWallet:
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            calls["n"] += 1
-            _ = asset_id, include_pending
-            return []
-
-    cache = daemon_main.CloudWalletAssetScopedListCache(cast(Any, _FakeCloudWallet()))
-
-    def _worker() -> None:
-        cache.list_coins_scoped(resolved_asset_id="Asset_shared")
-
-    threads = [threading.Thread(target=_worker) for _ in range(8)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-    assert calls["n"] == 1
-
-
-def test_cloud_wallet_spendable_profiles_by_asset_falls_back_to_wallet_asset_spendable() -> None:
-    class _FakeCloudWallet:
-        vault_id = "Wallet_1"
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            raise TimeoutError("The read operation timed out")
-
-        def _graphql(self, *, query: str, variables: dict[str, Any]):
-            _ = query
-            if variables.get("assetId") != "Asset_byc":
-                return {"wallet": {"asset": None}}
-            return {
-                "wallet": {
-                    "asset": {
-                        "totalAmount": 200000,
-                        "spendableAmount": 77000,
-                        "lockedAmount": 123000,
-                    }
-                }
-            }
-
-    profiles = daemon_main._cloud_wallet_spendable_profiles_by_asset(
-        wallet=cast(Any, _FakeCloudWallet()),
-        asset_ids={"Asset_byc"},
-    )
-    assert profiles["Asset_byc"]["total"] == 77000
-    assert profiles["Asset_byc"]["max_single"] == 0
-    assert profiles["Asset_byc"]["max_single_known"] == 0
-
 
 def test_single_input_preferred_skip_reason_ignores_unknown_max_single() -> None:
     reason = daemon_main._single_input_preferred_skip_reason(
@@ -2764,801 +2518,3 @@ def test_reservation_coordinator_cross_instance_contention_allows_single_winner(
     assert any("reservation_insufficient_asset" in str(error) for ok, error in results if not ok)
 
 
-def test_execute_coin_ops_cloud_wallet_kms_only_requires_kms() -> None:
-    class _Program(_CoinOpsProgram):
-        cloud_wallet_kms_key_id = ""
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=_market(),
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="split", size_base_units=10, op_count=4, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert result["executed_count"] == 0
-    assert result["items"][0]["status"] == "skipped"
-    assert result["items"][0]["reason"] == "cloud_wallet_kms_required_for_coin_ops"
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_split_submits(monkeypatch) -> None:
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {
-                    "id": "coin-small",
-                    "amount": 15_000,
-                    "state": "CONFIRMED",
-                    "asset": {"id": "Asset_byc"},
-                },
-                {
-                    "id": "coin-big",
-                    "amount": 80_000,
-                    "state": "SPENDABLE",
-                    "asset": {"id": "Asset_byc"},
-                },
-            ]
-
-        def split_coins(self, *, coin_ids, amount_per_coin, number_of_coins, fee):
-            assert coin_ids == ["coin-big"]
-            assert amount_per_coin == 10_000
-            assert number_of_coins == 4
-            assert fee == 0
-            return {"signature_request_id": "sig-123", "status": "SUBMITTED"}
-
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: _FakeCloudWallet(),
-    )
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=_market(),
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="split", size_base_units=10, op_count=4, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert result["executed_count"] == 1
-    assert result["items"][0]["status"] == "executed"
-    assert result["items"][0]["reason"] == "cloud_wallet_kms_split_submitted"
-    assert result["items"][0]["operation_id"] == "sig-123"
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_split_retries_on_not_spendable(
-    monkeypatch,
-) -> None:
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-
-        def __init__(self) -> None:
-            self.split_calls: list[list[str]] = []
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {
-                    "id": "coin-a",
-                    "amount": 100_000,
-                    "state": "SETTLED",
-                    "asset": {"id": "Asset_byc"},
-                },
-                {
-                    "id": "coin-b",
-                    "amount": 90_000,
-                    "state": "SETTLED",
-                    "asset": {"id": "Asset_byc"},
-                },
-            ]
-
-        def split_coins(self, *, coin_ids, amount_per_coin, number_of_coins, fee):
-            _ = amount_per_coin, number_of_coins, fee
-            self.split_calls.append(list(coin_ids))
-            if coin_ids == ["coin-a"]:
-                raise RuntimeError(
-                    "cloud_wallet_graphql_error:Some selected coins are not spendable"
-                )
-            return {"signature_request_id": "sig-retry-ok", "status": "SUBMITTED"}
-
-    fake = _FakeCloudWallet()
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: fake,
-    )
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=_market(),
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="split", size_base_units=10, op_count=4, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert fake.split_calls == [["coin-a"], ["coin-b"]]
-    assert result["executed_count"] == 1
-    assert result["items"][0]["status"] == "executed"
-    assert result["items"][0]["operation_id"] == "sig-retry-ok"
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_split_ignores_asset_mismatch(
-    monkeypatch,
-) -> None:
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {"id": "wrong-1", "amount": 50, "state": "SETTLED", "asset": {"id": "Asset_other"}},
-                {"id": "wrong-2", "amount": 75, "state": "SETTLED", "asset": {"id": "Asset_nope"}},
-            ]
-
-        def split_coins(self, *, coin_ids, amount_per_coin, number_of_coins, fee):
-            raise AssertionError("split_coins should not be called for mismatched assets")
-
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: _FakeCloudWallet(),
-    )
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=_market(),
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="split", size_base_units=10, op_count=4, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert result["executed_count"] == 0
-    assert result["items"][0]["status"] == "skipped"
-    assert result["items"][0]["reason"] == "no_spendable_split_coin_available"
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_split_revalidates_coin_identity(
-    monkeypatch,
-) -> None:
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-
-        def __init__(self) -> None:
-            self.split_calls: list[list[str]] = []
-            self.list_calls = 0
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            self.list_calls += 1
-            if self.list_calls % 2 == 1:
-                return [
-                    {"id": "wrong-asset", "amount": 100_000, "state": "SETTLED", "asset": None},
-                    {"id": "locked", "amount": 90_000, "state": "SETTLED", "asset": None},
-                    {"id": "good", "amount": 80_000, "state": "SETTLED", "asset": None},
-                ]
-            return [
-                {
-                    "id": "wrong-asset",
-                    "amount": 100_000,
-                    "state": "SETTLED",
-                    "isLocked": False,
-                    "isLinkedToOpenOffer": False,
-                    "asset": {"id": "Asset_xch"},
-                },
-                {
-                    "id": "locked",
-                    "amount": 90_000,
-                    "state": "SETTLED",
-                    "isLocked": True,
-                    "isLinkedToOpenOffer": False,
-                    "asset": {"id": "Asset_byc"},
-                },
-                {
-                    "id": "good",
-                    "amount": 80_000,
-                    "state": "SETTLED",
-                    "isLocked": False,
-                    "isLinkedToOpenOffer": False,
-                    "asset": {"id": "Asset_byc"},
-                },
-            ]
-
-        def get_coin_record(self, *, coin_id: str):
-            raise AssertionError(f"unexpected get_coin_record call for {coin_id}")
-
-        def split_coins(self, *, coin_ids, amount_per_coin, number_of_coins, fee):
-            _ = amount_per_coin, number_of_coins, fee
-            self.split_calls.append(list(coin_ids))
-            return {"signature_request_id": "sig-direct-lookup", "status": "SUBMITTED"}
-
-    fake = _FakeCloudWallet()
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: fake,
-    )
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=_market(),
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="split", size_base_units=10, op_count=4, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert fake.split_calls == [["good"]]
-    assert result["executed_count"] == 1
-    assert result["items"][0]["status"] == "executed"
-    assert result["items"][0]["operation_id"] == "sig-direct-lookup"
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_split_requires_sufficient_amount(
-    monkeypatch,
-) -> None:
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {"id": "small-1", "amount": 10, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-                {"id": "small-2", "amount": 20, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-            ]
-
-        def split_coins(self, *, coin_ids, amount_per_coin, number_of_coins, fee):
-            raise AssertionError("split_coins should not be called for insufficient-value coins")
-
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: _FakeCloudWallet(),
-    )
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=_market(),
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="split", size_base_units=10, op_count=4, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert result["executed_count"] == 0
-    assert result["items"][0]["status"] == "skipped"
-    assert result["items"][0]["reason"] == "no_spendable_split_coin_available"
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_split_combines_when_aggregate_sufficient(
-    monkeypatch,
-) -> None:
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-        combine_calls: list[dict[str, Any]]
-
-        def __init__(self) -> None:
-            self.combine_calls = []
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {"id": "s1", "amount": 15_000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-                {"id": "s2", "amount": 7_000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-            ]
-
-        def split_coins(self, *, coin_ids, amount_per_coin, number_of_coins, fee):
-            raise AssertionError("split should not be called before combine in this cycle")
-
-        def combine_coins(
-            self,
-            *,
-            number_of_coins,
-            fee,
-            asset_id,
-            largest_first,
-            input_coin_ids=None,
-            target_amount=None,
-        ):
-            assert fee == 0
-            assert asset_id == "Asset_byc"
-            assert largest_first is True
-            self.combine_calls.append(
-                {
-                    "number_of_coins": int(number_of_coins),
-                    "input_coin_ids": list(input_coin_ids or []),
-                    "target_amount": int(target_amount or 0),
-                }
-            )
-            return {"signature_request_id": "sig-combine-1", "status": "SUBMITTED"}
-
-    fake = _FakeCloudWallet()
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: fake,
-    )
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=_market(),
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="split", size_base_units=10, op_count=2, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert len(fake.combine_calls) == 1
-    assert fake.combine_calls[0]["number_of_coins"] == 2
-    assert fake.combine_calls[0]["target_amount"] == 20_000
-    assert result["executed_count"] == 1
-    assert result["items"][0]["op_type"] == "combine"
-    assert (
-        result["items"][0]["reason"]
-        == "cloud_wallet_kms_combine_submitted_for_split_prereq_with_change"
-    )
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_split_combine_cap_submits_progress(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP", "5")
-
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-
-        def __init__(self) -> None:
-            self.combine_calls: list[dict[str, Any]] = []
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {"id": "s1", "amount": 1_000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-                {"id": "s2", "amount": 1_000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-                {"id": "s3", "amount": 1_000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-                {"id": "s4", "amount": 1_000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-                {"id": "s5", "amount": 1_000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-                {"id": "s6", "amount": 1_000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-            ]
-
-        def split_coins(self, *, coin_ids, amount_per_coin, number_of_coins, fee):
-            raise AssertionError("split should not be called before capped progress combine")
-
-        def combine_coins(
-            self,
-            *,
-            number_of_coins,
-            fee,
-            asset_id,
-            largest_first,
-            input_coin_ids=None,
-            target_amount=None,
-        ):
-            _ = fee, asset_id, largest_first
-            self.combine_calls.append(
-                {
-                    "number_of_coins": int(number_of_coins),
-                    "input_coin_ids": list(input_coin_ids or []),
-                    "target_amount": int(target_amount or 0),
-                }
-            )
-            return {"signature_request_id": "sig-cap-progress", "status": "SUBMITTED"}
-
-    fake = _FakeCloudWallet()
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: fake,
-    )
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=_market(),
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="split", size_base_units=1, op_count=6, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert len(fake.combine_calls) == 1
-    assert fake.combine_calls[0]["number_of_coins"] == 5
-    assert fake.combine_calls[0]["target_amount"] == 5_000
-    assert result["executed_count"] == 1
-    assert result["items"][0]["op_type"] == "combine"
-    assert result["items"][0]["data"]["input_coin_cap_applied"] is True
-    assert result["items"][0]["data"]["selected_coin_count_before_cap"] == 6
-    assert result["items"][0]["data"]["selected_coin_count_after_cap"] == 5
-    assert (
-        "next cycle likely needs only 2-coin combine"
-        in result["items"][0]["data"]["next_step_note"]
-    )
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_split_ignores_sub_cat_dust_on_scoped_reads(
-    monkeypatch,
-) -> None:
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-
-        def __init__(self) -> None:
-            self.combine_calls: list[dict[str, Any]] = []
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            dust_rows = [
-                {"id": f"dust-{idx}", "amount": 10, "state": "SETTLED", "asset": None}
-                for idx in range(89)
-            ]
-            return [
-                {"id": "big-a", "amount": 2500, "state": "SETTLED", "asset": None},
-                {"id": "big-b", "amount": 2500, "state": "SETTLED", "asset": None},
-                {"id": "stray-310", "amount": 310, "state": "SETTLED", "asset": None},
-                *dust_rows,
-            ]
-
-        def split_coins(self, *, coin_ids, amount_per_coin, number_of_coins, fee):
-            raise AssertionError("split should not be called before combine in this cycle")
-
-        def combine_coins(
-            self,
-            *,
-            number_of_coins,
-            fee,
-            asset_id,
-            largest_first,
-            input_coin_ids=None,
-            target_amount=None,
-        ):
-            _ = fee, asset_id, largest_first
-            self.combine_calls.append(
-                {
-                    "number_of_coins": int(number_of_coins),
-                    "input_coin_ids": list(input_coin_ids or []),
-                    "target_amount": int(target_amount or 0),
-                }
-            )
-            return {"signature_request_id": "sig-dust-filtered", "status": "SUBMITTED"}
-
-    fake = _FakeCloudWallet()
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: fake,
-    )
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    market = _market()
-    market.base_asset = "BYC"
-    market.pricing = {"fixed_quote_per_base": 1.0, "base_unit_mojo_multiplier": 100}
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=market,
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="split", size_base_units=10, op_count=4, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert len(fake.combine_calls) == 1
-    assert fake.combine_calls[0]["number_of_coins"] == 2
-    assert fake.combine_calls[0]["input_coin_ids"] == ["big-a", "big-b"]
-    assert fake.combine_calls[0]["target_amount"] == 4000
-    assert result["executed_count"] == 1
-    assert (
-        result["items"][0]["reason"]
-        == "cloud_wallet_kms_combine_submitted_for_split_prereq_with_change"
-    )
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_split_rejects_sub_minimum_cat_outputs(
-    monkeypatch,
-) -> None:
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {
-                    "id": "coin-big",
-                    "amount": 100_000,
-                    "state": "SETTLED",
-                    "asset": {"id": "Asset_byc"},
-                },
-            ]
-
-        def split_coins(self, *, coin_ids, amount_per_coin, number_of_coins, fee):
-            raise AssertionError("split_coins should not be called for sub-minimum CAT outputs")
-
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: _FakeCloudWallet(),
-    )
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    market = _market()
-    market.base_asset = "BYC"
-    market.pricing = {"fixed_quote_per_base": 1.0, "base_unit_mojo_multiplier": 1}
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=market,
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="split", size_base_units=1, op_count=4, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert result["executed_count"] == 0
-    assert result["items"][0]["status"] == "skipped"
-    assert result["items"][0]["reason"] == "split_amount_below_coin_op_minimum"
-    assert result["items"][0]["data"]["amount_per_coin_mojos"] == 1
-    assert result["items"][0]["data"]["minimum_allowed_mojos"] == 1000
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_skips_single_output_split(
-    monkeypatch,
-) -> None:
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-
-        def split_coins(self, *, coin_ids, amount_per_coin, number_of_coins, fee):
-            raise AssertionError("single-output split should be skipped")
-
-    fake = _FakeCloudWallet()
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: fake,
-    )
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=_market(),
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="split", size_base_units=10, op_count=1, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert result["executed_count"] == 0
-    assert result["items"][0]["status"] == "skipped"
-    assert result["items"][0]["reason"] == "split_single_coin_noop_skipped"
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_combine_retries_on_429(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("GREENFLOOR_COIN_OPS_COMBINE_MAX_ATTEMPTS", "3")
-    monkeypatch.setenv("GREENFLOOR_COIN_OPS_COMBINE_BACKOFF_MS", "0")
-
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-
-        def __init__(self) -> None:
-            self.combine_calls = 0
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {"id": "c1", "amount": 10_000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-                {"id": "c2", "amount": 10_000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-            ]
-
-        def combine_coins(self, **_kwargs):
-            self.combine_calls += 1
-            if self.combine_calls < 3:
-                raise RuntimeError("Status not ok: 429")
-            return {"signature_request_id": "sig-combine-retry", "status": "SUBMITTED"}
-
-    fake = _FakeCloudWallet()
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: fake,
-    )
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=_market(),
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="combine", size_base_units=10, op_count=2, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert fake.combine_calls == 3
-    assert result["executed_count"] == 1
-    assert result["items"][0]["status"] == "executed"
-    assert result["items"][0]["operation_id"] == "sig-combine-retry"
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_combine_applies_input_coin_cap(
-    monkeypatch,
-) -> None:
-    monkeypatch.setenv("GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP", "7")
-
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-
-        def __init__(self) -> None:
-            self.last_number_of_coins: int | None = None
-            self.last_input_coin_ids: list[str] | None = None
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {
-                    "id": f"coin-{idx}",
-                    "amount": 10_000,
-                    "state": "SETTLED",
-                    "asset": {"id": "Asset_byc"},
-                }
-                for idx in range(12)
-            ]
-
-        def combine_coins(self, **kwargs):
-            self.last_number_of_coins = int(kwargs.get("number_of_coins", 0))
-            self.last_input_coin_ids = list(kwargs.get("input_coin_ids", []))
-            return {"signature_request_id": "sig-combine-cap", "status": "SUBMITTED"}
-
-    fake = _FakeCloudWallet()
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: fake,
-    )
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=_market(),
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="combine", size_base_units=10, op_count=100, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert fake.last_number_of_coins == 7
-    assert fake.last_input_coin_ids == [f"coin-{idx}" for idx in range(7)]
-    assert result["executed_count"] == 1
-    assert result["items"][0]["status"] == "executed"
-    assert result["items"][0]["data"]["requested_number_of_coins"] == 100
-    assert result["items"][0]["data"]["submitted_number_of_coins"] == 7
-    assert result["items"][0]["data"]["input_coin_cap_applied"] is True
-
-
-def test_execute_coin_ops_cloud_wallet_kms_only_combine_excludes_watched_coin_ids(
-    monkeypatch,
-) -> None:
-    _Program = _CoinOpsProgram
-
-    class _Signer:
-        key_id = "key-main-2"
-
-    class _FakeCloudWallet:
-        vault_id = "vault-1"
-
-        def __init__(self) -> None:
-            self.last_input_coin_ids: list[str] | None = None
-
-        def list_coins(self, *, asset_id: str | None = None, include_pending: bool = True):
-            _ = asset_id, include_pending
-            return [
-                {
-                    "id": "watched",
-                    "amount": 1_000,
-                    "state": "SETTLED",
-                    "asset": {"id": "Asset_byc"},
-                },
-                {"id": "free-1", "amount": 1_000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-                {"id": "free-2", "amount": 1_000, "state": "SETTLED", "asset": {"id": "Asset_byc"}},
-            ]
-
-        def combine_coins(self, **kwargs):
-            self.last_input_coin_ids = list(kwargs.get("input_coin_ids", []))
-            return {"signature_request_id": "sig-combine-safe", "status": "SUBMITTED"}
-
-    fake = _FakeCloudWallet()
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.adapter.new_cloud_wallet_adapter",
-        lambda _program: fake,
-    )
-
-    market = _market()
-    daemon_main._set_watched_coin_ids_for_market(market_id=market.market_id, coin_ids={"watched"})
-
-    from greenfloor.core.coin_ops import CoinOpPlan
-
-    result = _execute_coin_ops_cloud_wallet_kms_only(
-        market=market,
-        program=_Program(),
-        plans=[CoinOpPlan(op_type="combine", size_base_units=1, op_count=2, reason="r")],
-        wallet=cast(Any, object()),
-        signer_selection=_Signer(),
-        state_dir=Path("/tmp"),
-    )
-
-    assert fake.last_input_coin_ids == ["free-1", "free-2"]
-    assert result["executed_count"] == 1
-    daemon_main._set_watched_coin_ids_for_market(market_id=market.market_id, coin_ids=set())

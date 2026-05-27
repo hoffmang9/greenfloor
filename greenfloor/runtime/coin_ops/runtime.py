@@ -1,4 +1,4 @@
-"""Shared Cloud Wallet coin-operation runtime (CLI, daemon refresh, and tests)."""
+"""Shared signer coin-operation runtime (CLI, daemon, tests)."""
 
 from __future__ import annotations
 
@@ -7,115 +7,31 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.config.io import (
     load_markets_config_with_optional_overlay,
     load_program_config,
     resolve_market_for_build,
 )
 from greenfloor.config.models import MarketConfig, MarketLadderEntry, ProgramConfig
-from greenfloor.runtime import coinset_runtime
-from greenfloor.runtime.cloud_wallet import adapter as cloud_wallet_adapter
-from greenfloor.runtime.cloud_wallet import assets as cloud_wallet_assets
-from greenfloor.runtime.cloud_wallet import polling as cloud_wallet_polling
-from greenfloor.runtime.cloud_wallet.adapter import (
-    _require_cloud_wallet_config as require_cloud_wallet_config,
-)
-from greenfloor.runtime.cloud_wallet.coin_op_errors import coin_op_error_payload
-from greenfloor.runtime.cloud_wallet.coin_ops_models import (
-    DenominationTarget,
-    denomination_target_payload,
-)
-from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
+from greenfloor.runtime.coin_ops.errors import coin_op_error_payload
+from greenfloor.runtime.coin_ops.models import DenominationTarget, denomination_target_payload
+from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.coin_ops_backend import (
-    CloudWalletCoinOpBackend,
     CoinOpBackend,
-    CoinOpScope,
     SignerCoinOpBackend,
     build_coin_op_backend,
     resolve_coin_op_base_asset_id,
     resolve_signer_asset_id,
     scope_payload,
 )
-from greenfloor.runtime.coinset_runtime import CoinsetFeeLookupPreflightError
 
 
 @dataclass
 class CoinOpDeps:
-    """Test/DI seam: methods delegate at call time so tests can monkeypatch modules."""
-
-    def new_cloud_wallet_adapter(self, program: ProgramConfig) -> CloudWalletAdapter:
-        return cloud_wallet_adapter.new_cloud_wallet_adapter(program)
-
-    def resolve_cloud_wallet_asset_id(self, **kwargs: Any) -> str:
-        return cloud_wallet_assets.resolve_cloud_wallet_asset_id(**kwargs)
-
-    def resolve_taker_or_coin_operation_fee(self, **kwargs: Any) -> tuple[int, str]:
-        return coinset_runtime._resolve_taker_or_coin_operation_fee(**kwargs)
-
-    def poll_signature_request_until_not_unsigned(self, **kwargs: Any) -> tuple[str, list]:
-        return cloud_wallet_polling.poll_signature_request_until_not_unsigned(**kwargs)
-
-    def wait_for_mempool_then_confirmation(self, **kwargs: Any) -> list:
-        return cloud_wallet_polling.wait_for_mempool_then_confirmation(**kwargs)
+    """Test/DI seam for coin-op setup."""
 
 
 DEFAULT_COIN_OP_DEPS = CoinOpDeps()
-
-
-def wallet_with_optional_vault_override(
-    program: ProgramConfig,
-    *,
-    vault_id: str | None,
-    deps: CoinOpDeps = DEFAULT_COIN_OP_DEPS,
-) -> CloudWalletAdapter:
-    wallet = deps.new_cloud_wallet_adapter(program)
-    if vault_id and vault_id.strip() and vault_id.strip() != wallet.vault_id:
-        override_config = require_cloud_wallet_config(program)
-        wallet = cloud_wallet_adapter.CloudWalletAdapter(
-            CloudWalletConfig(
-                base_url=override_config.base_url,
-                user_key_id=override_config.user_key_id,
-                private_key_pem_path=override_config.private_key_pem_path,
-                vault_id=vault_id.strip(),
-                network=override_config.network,
-            )
-        )
-    return wallet
-
-
-def evaluate_denomination_readiness(
-    *,
-    wallet: CloudWalletAdapter,
-    asset_id: str,
-    size_base_units: int,
-    required_min_count: int | None = None,
-    max_allowed_count: int | None = None,
-) -> dict[str, int | bool | str]:
-    from greenfloor.runtime.cloud_wallet.coins import coin_asset_id
-
-    coins = wallet.list_coins(include_pending=True)
-    spendable = [
-        c
-        for c in coins
-        if is_spendable_coin(c)
-        and coin_asset_id(c).lower() == asset_id.strip().lower()
-        and int(c.get("amount", 0)) == int(size_base_units)
-    ]
-    current_count = len(spendable)
-    ready = True
-    if required_min_count is not None:
-        ready = current_count >= int(required_min_count)
-    if max_allowed_count is not None:
-        ready = ready and current_count <= int(max_allowed_count)
-    return {
-        "asset_id": asset_id,
-        "size_base_units": int(size_base_units),
-        "current_count": current_count,
-        "required_min_count": int(required_min_count) if required_min_count is not None else -1,
-        "max_allowed_count": int(max_allowed_count) if max_allowed_count is not None else -1,
-        "ready": ready,
-    }
 
 
 def as_wait_events(value: object) -> list[dict[str, str]]:
@@ -124,132 +40,8 @@ def as_wait_events(value: object) -> list[dict[str, str]]:
     items: list[dict[str, str]] = []
     for row in value:
         if isinstance(row, dict):
-            event = {str(k): str(v) for k, v in row.items()}
-            items.append(event)
+            items.append({str(k): str(v) for k, v in row.items()})
     return items
-
-
-@dataclass(slots=True)
-class CoinOpFeeResult:
-    fee_mojos: int = 0
-    fee_source: str = ""
-    error_payload: dict[str, object] | None = None
-
-    @property
-    def ok(self) -> bool:
-        return self.error_payload is None
-
-
-def resolve_coin_op_fee(
-    *,
-    network: str,
-    minimum_fee_mojos: int,
-    market: MarketConfig,
-    selected_venue: str | None,
-    wallet: CloudWalletAdapter,
-    deps: CoinOpDeps = DEFAULT_COIN_OP_DEPS,
-) -> CoinOpFeeResult:
-    """Resolve fee for a coin operation without printing."""
-    try:
-        fee_mojos, fee_source = deps.resolve_taker_or_coin_operation_fee(
-            network=network,
-            minimum_fee_mojos=minimum_fee_mojos,
-        )
-        return CoinOpFeeResult(fee_mojos=int(fee_mojos), fee_source=str(fee_source))
-    except CoinsetFeeLookupPreflightError as exc:
-        operator_guidance = (
-            "verify Coinset endpoint routing: unset GREENFLOOR_COINSET_BASE_URL to use "
-            "network defaults, or set it to a valid endpoint for the active network"
-            if exc.failure_kind == "endpoint_validation_failed"
-            else "coinset fee advice is temporarily unavailable; retry shortly and verify Coinset fee endpoint health before resubmitting"
-        )
-        return CoinOpFeeResult(
-            error_payload=coin_op_error_payload(
-                scope=CoinOpScope(
-                    market=market,
-                    selected_venue=selected_venue,
-                    execution_backend="cloud_wallet",
-                    vault_id=str(wallet.vault_id),
-                ),
-                error=f"coinset_fee_preflight_failed:{exc.failure_kind}",
-                operator_guidance=operator_guidance,
-                coinset_fee_lookup={
-                    "status": "failed",
-                    "failure_kind": exc.failure_kind,
-                    "detail": exc.detail,
-                    **exc.diagnostics,
-                },
-            )
-        )
-    except Exception as exc:
-        return CoinOpFeeResult(
-            error_payload=coin_op_error_payload(
-                scope=CoinOpScope(
-                    market=market,
-                    selected_venue=selected_venue,
-                    execution_backend="cloud_wallet",
-                    vault_id=str(wallet.vault_id),
-                ),
-                error=f"fee_resolution_failed:{exc}",
-                operator_guidance=(
-                    "set coin_ops.minimum_fee_mojos in program config (can be 0) "
-                    "or fix GREENFLOOR_COINSET_BASE_URL to a valid Coinset API endpoint"
-                ),
-            )
-        )
-
-
-def coin_op_build_iteration_payload(
-    *,
-    wallet: CloudWalletAdapter,
-    signature_request_id: str,
-    initial_signature_state: str,
-    no_wait: bool,
-    network: str,
-    existing_coin_ids: set[str],
-    iteration: int,
-    denomination_target: DenominationTarget,
-    readiness_asset_id: str,
-    readiness_kwargs: dict[str, int],
-    deps: CoinOpDeps = DEFAULT_COIN_OP_DEPS,
-) -> tuple[dict[str, object], dict[str, int | bool | str] | None]:
-    wait_events: list[dict[str, str]] = []
-    final_signature_state = initial_signature_state
-    if not no_wait:
-        final_signature_state, signature_events = deps.poll_signature_request_until_not_unsigned(
-            wallet=wallet,
-            signature_request_id=signature_request_id,
-            timeout_seconds=15 * 60,
-            warning_interval_seconds=10 * 60,
-        )
-        wait_events.extend(signature_events)
-        wait_events.extend(
-            deps.wait_for_mempool_then_confirmation(
-                wallet=wallet,
-                network=network,
-                initial_coin_ids=existing_coin_ids,
-                include_pending=True,
-                mempool_warning_seconds=5 * 60,
-                confirmation_warning_seconds=15 * 60,
-            )
-        )
-    iteration_payload: dict[str, object] = {
-        "iteration": iteration,
-        "signature_request_id": signature_request_id,
-        "signature_state": final_signature_state,
-        "waited": not no_wait,
-        "wait_events": wait_events,
-    }
-    final_readiness = None
-    if denomination_target is not None:
-        final_readiness = evaluate_denomination_readiness(
-            wallet=wallet,
-            asset_id=readiness_asset_id,
-            size_base_units=denomination_target.size_base_units,
-            **readiness_kwargs,
-        )
-        iteration_payload["denomination_readiness"] = final_readiness
-    return iteration_payload, final_readiness
 
 
 def coin_op_should_stop(
@@ -372,12 +164,6 @@ class CoinOpSetup:
     fee_source: str
     selected_venue: str | None
 
-    @property
-    def wallet(self) -> CloudWalletAdapter:
-        if not isinstance(self.backend, CloudWalletCoinOpBackend):
-            raise AttributeError("wallet is only available for cloud_wallet coin-op backend")
-        return self.backend.wallet
-
 
 @dataclass(slots=True)
 class CoinOpSetupResult:
@@ -397,6 +183,7 @@ def coin_op_setup(
     canonical_asset_id_override: str | None = None,
     deps: CoinOpDeps = DEFAULT_COIN_OP_DEPS,
 ) -> CoinOpSetupResult:
+    _ = deps
     program = load_program_config(program_path)
     selected_venue = resolve_venue_for_coin_prep(venue_override=venue)
     markets = load_markets_config_with_optional_overlay(
@@ -413,30 +200,16 @@ def coin_op_setup(
     hint = canonical_asset_id_override or str(market.base_symbol)
     try:
         if canonical_asset_id_override:
-            from greenfloor.config.models import coin_ops_execution_backend
-
-            if coin_ops_execution_backend(program) == "signer":
-                resolved_asset_id = resolve_signer_asset_id(
-                    program, canonical_asset_id=canonical, symbol_hint=hint
-                )
-            else:
-                wallet = deps.new_cloud_wallet_adapter(program)
-                resolved_asset_id = deps.resolve_cloud_wallet_asset_id(
-                    wallet=wallet,
-                    canonical_asset_id=canonical,
-                    symbol_hint=hint,
-                    program_home_dir=str(program.home_dir),
-                )
-        else:
-            resolved_asset_id = resolve_coin_op_base_asset_id(
-                program=program, market=market, deps=deps
+            resolved_asset_id = resolve_signer_asset_id(
+                program, canonical_asset_id=canonical, symbol_hint=hint
             )
+        else:
+            resolved_asset_id = resolve_coin_op_base_asset_id(program=program, market=market)
         backend = build_coin_op_backend(
             program=program,
             market=market,
             selected_venue=selected_venue,
             resolved_asset_id=resolved_asset_id,
-            deps=deps,
         )
     except ValueError as exc:
         return CoinOpSetupResult(
@@ -445,30 +218,14 @@ def coin_op_setup(
                 "market_id": market.market_id,
             }
         )
-    if isinstance(backend, CloudWalletCoinOpBackend):
-        fee_result = resolve_coin_op_fee(
-            network=network,
-            minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
-            market=market,
-            selected_venue=selected_venue,
-            wallet=backend.wallet,
-            deps=deps,
-        )
-        if not fee_result.ok:
-            return CoinOpSetupResult(error_payload=fee_result.error_payload)
-        fee_mojos = fee_result.fee_mojos
-        fee_source = fee_result.fee_source
-    else:
-        fee_mojos = 0
-        fee_source = "signer_vault_no_fee"
     return CoinOpSetupResult(
         setup=CoinOpSetup(
             program=program,
             market=market,
             backend=backend,
             resolved_asset_id=resolved_asset_id,
-            fee_mojos=fee_mojos,
-            fee_source=fee_source,
+            fee_mojos=0,
+            fee_source="signer_vault_no_fee",
             selected_venue=selected_venue,
         )
     )

@@ -9,8 +9,8 @@ from typing import Any
 from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.core.coin_ops_policy import coin_op_min_amount_mojos
-from greenfloor.runtime.cloud_wallet.coin_ops_models import CoinOpSelectionMode, DenominationTarget
-from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
+from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode, DenominationTarget
+from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.coin_ops_scope import CoinOpScope
 from greenfloor.runtime.coinset_coins import (
     list_unspent_coins_by_receive_address,

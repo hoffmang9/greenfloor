@@ -109,6 +109,6 @@ jobs:
           wheelhouse-subdir: chia-wallet-sdk
           rust-already-configured: ${{ matrix.run_rust_tests }}
 
-      - name: Pytest (greenfloor-native + chia-wallet-sdk offer round-trip on Ubuntu)
+      - name: Pytest (greenfloor_signer + chia-wallet-sdk offer round-trip on Ubuntu)
         if: matrix.run_sdk_integration
-        run: GREENFLOOR_RUN_NATIVE_INTEGRATION_TESTS=1 pytest -vv -s tests/test_greenfloor_native_integration.py
+        run: GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS=1 pytest -vv -s tests/test_greenfloor_native_integration.py

@@ -11,20 +11,22 @@ import pytest
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "signer"
 
 
-def _require_native() -> Any:
-    try:
-        import greenfloor_native  # type: ignore[import-not-found]
-    except ImportError:
-        pytest.skip("greenfloor_native not installed")
-    return greenfloor_native
-
-
 def _require_signer() -> Any:
     try:
         import greenfloor_signer  # type: ignore[import-not-found]
     except ImportError:
         pytest.skip("greenfloor_signer not installed")
     return greenfloor_signer
+
+
+def _require_signer_validate_offer() -> Any:
+    signer = _require_signer()
+    validate = getattr(signer, "validate_offer", None)
+    if not callable(validate):
+        pytest.skip(
+            "greenfloor_signer.validate_offer not available; rebuild greenfloor-signer-pyo3"
+        )
+    return validate
 
 
 def _fixture_paths() -> list[Path]:
@@ -38,11 +40,11 @@ def _fixture_paths() -> list[Path]:
 
 @pytest.mark.parametrize("fixture_path", _fixture_paths(), ids=lambda p: p.name)
 def test_signer_golden_offer_validates(fixture_path: Path) -> None:
-    native = _require_native()
+    validate_offer = _require_signer_validate_offer()
     payload = json.loads(fixture_path.read_text(encoding="utf-8"))
     offer = str(payload.get("offer", "")).strip()
     assert offer.startswith("offer1")
-    native.validate_offer(offer)
+    validate_offer(offer)
 
 
 def test_signer_config_yaml_roundtrip(tmp_path: Path) -> None:

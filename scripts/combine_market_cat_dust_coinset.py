@@ -5,9 +5,8 @@ Scans the vault via ``list_vault_coins_coinset.py`` (launcher + nonce scan), sel
 unspent CAT coins with amount strictly below the dust threshold (default 1000 mojos =
 one CAT unit), then runs ``combine_coinset_direct.py`` in batches.
 
-Requires the same Cloud Wallet + KMS + keyring inputs as the underlying scripts; read
-from ``program.yaml`` and ``markets.yaml`` (optional testnet overlay), not from flags
-except overrides documented in ``--help``.
+Requires signer + vault config in ``program.yaml`` and enabled markets in ``markets.yaml``
+(optionally with a testnet overlay). Flags are mostly overrides; see ``--help``.
 """
 
 from __future__ import annotations
@@ -164,7 +163,7 @@ def _run_script_json(
         return 1, None, (proc.stdout[:2000] + err_tail).strip()
 
 
-def _list_argv_common(args: argparse.Namespace, program: Any) -> list[str]:
+def _list_argv_common(args: argparse.Namespace, program_config_path: Path) -> list[str]:
     root = _repo_root()
     list_script = root / "scripts" / "list_vault_coins_coinset.py"
     argv: list[str] = [str(list_script)]
@@ -177,14 +176,8 @@ def _list_argv_common(args: argparse.Namespace, program: Any) -> list[str]:
         argv.extend(["--launcher-id-file", str(Path(args.launcher_id_file).expanduser())])
     argv.extend(
         [
-            "--cloud-wallet-base-url",
-            str(program.cloud_wallet_base_url).strip(),
-            "--cloud-wallet-user-key-id",
-            str(program.cloud_wallet_user_key_id).strip(),
-            "--cloud-wallet-private-key-pem-path",
-            str(Path(program.cloud_wallet_private_key_pem_path).expanduser()),
-            "--vault-id",
-            str(program.cloud_wallet_vault_id).strip(),
+            "--program-config",
+            str(program_config_path),
             "--max-nonce",
             str(int(args.max_nonce)),
         ]
@@ -195,6 +188,7 @@ def _list_argv_common(args: argparse.Namespace, program: Any) -> list[str]:
 def _combine_argv_for_batch(
     *,
     args: argparse.Namespace,
+    program_config_path: Path,
     program: Any,
     key_id: str,
     keyring_yaml_path: str,
@@ -218,23 +212,14 @@ def _combine_argv_for_batch(
             str(Path(keyring_yaml_path).expanduser()),
             "--receive-address",
             receive_address,
-            "--cloud-wallet-base-url",
-            str(program.cloud_wallet_base_url).strip(),
-            "--cloud-wallet-user-key-id",
-            str(program.cloud_wallet_user_key_id).strip(),
-            "--cloud-wallet-private-key-pem-path",
-            str(Path(program.cloud_wallet_private_key_pem_path).expanduser()),
-            "--vault-id",
-            str(program.cloud_wallet_vault_id).strip(),
-            "--cloud-wallet-kms-key-id",
-            str(program.cloud_wallet_kms_key_id).strip(),
-            "--cloud-wallet-kms-region",
-            str(program.cloud_wallet_kms_region or "us-west-2").strip(),
+            "--program-config",
+            str(program_config_path),
+            "--signer-kms-key-id",
+            str(program.signer_kms_key_id).strip(),
+            "--signer-kms-region",
+            str(program.signer_kms_region or "us-west-2").strip(),
         ]
     )
-    kms_pk = str(program.cloud_wallet_kms_public_key_hex or "").strip()
-    if kms_pk:
-        argv.extend(["--cloud-wallet-kms-public-key-hex", kms_pk])
     argv.extend(
         [
             "--verify-timeout-seconds",
@@ -258,7 +243,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument(
         "--program-config",
         default="~/.greenfloor/config/program.yaml",
-        help="Path to program.yaml (Cloud Wallet, KMS, key registry).",
+        help="Path to program.yaml (signer, vault, key registry).",
     )
     p.add_argument(
         "--markets-config",
@@ -420,7 +405,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 continue
 
-        list_argv = _list_argv_common(args, program)
+        list_argv = _list_argv_common(args, program_path)
         list_argv.extend(["--asset-type", "cat", "--cat-id", job.cat_asset_id])
 
         code, list_payload, list_err = _run_script_json(argv=list_argv, cwd=root)
@@ -478,6 +463,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             c_argv = _combine_argv_for_batch(
                 args=args,
+                program_config_path=program_path,
                 program=program,
                 key_id=job.signer_key_id,
                 keyring_yaml_path=keyring,

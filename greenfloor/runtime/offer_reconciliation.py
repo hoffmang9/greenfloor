@@ -10,7 +10,7 @@ from typing import Any
 from greenfloor.adapters.coinset import extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
-from greenfloor.runtime.cloud_wallet.coins import safe_int
+from greenfloor.runtime.coin_ops.coins import safe_int
 from greenfloor.storage.sqlite import SqliteStore
 
 

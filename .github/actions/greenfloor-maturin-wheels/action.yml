@@ -1,5 +1,5 @@
 name: GreenFloor maturin wheels
-description: Ensure and optionally install the GreenFloor native and signer PyO3 wheels.
+description: Ensure and optionally install the GreenFloor signer PyO3 wheel.
 
 inputs:
   operation:
@@ -13,16 +13,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: ./.github/actions/wheel-cache
-      with:
-        operation: ${{ inputs.operation }}
-        builder: maturin
-        tree-path: greenfloor-native
-        source-path: greenfloor-native/Cargo.toml
-        cache-key-prefix: native-wheelhouse
-        wheelhouse-subdir: greenfloor-native
-        rust-already-configured: ${{ inputs.rust-already-configured }}
-
     - uses: ./.github/actions/wheel-cache
       with:
         operation: ${{ inputs.operation }}

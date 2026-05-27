@@ -7,6 +7,7 @@ pub enum BlsOp {
     Offer,
     XchCoinOp,
     Broadcast,
+    KeyLoad,
 }
 
 /// Stable snake_case reasons consumed by Python ``bls_signing``.
@@ -71,6 +72,8 @@ pub fn bls_reason(err: SignerError, op: BlsOp) -> String {
         (SignerError::Coinset(message), BlsOp::XchCoinOp) => {
             format!("build_spend_bundle_error:{message}")
         }
+        (SignerError::Other(message), BlsOp::KeyLoad) => message,
+        (other, BlsOp::KeyLoad) => format!("load_bls_master_sk_error:{other}"),
         (other, BlsOp::MixedSplit) => format!("build_mixed_split_spend_bundle_error:{other}"),
         (other, BlsOp::Offer) => format!("build_offer_spend_bundle_error:{other}"),
         (other, BlsOp::XchCoinOp) => format!("build_spend_bundle_error:{other}"),

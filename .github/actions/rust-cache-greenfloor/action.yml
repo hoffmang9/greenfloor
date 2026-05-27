@@ -12,6 +12,5 @@ runs:
       with:
         workspaces: |
           greenfloor-signer -> target
-          greenfloor-native -> target
           greenfloor-signer-pyo3 -> target
         cache-workspace-crates: true

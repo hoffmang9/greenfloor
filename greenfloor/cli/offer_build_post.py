@@ -15,7 +15,7 @@ from greenfloor.config.io import (
 from greenfloor.config.models import offer_execution_backend
 from greenfloor.logging_setup import warn_if_log_level_auto_healed
 from greenfloor.offer_builder import build_offer
-from greenfloor.runtime.cloud_wallet.adapter import format_json_output
+from greenfloor.runtime.json_output import format_json_output
 from greenfloor.runtime.offer_build_context import prepare_offer_build_context
 from greenfloor.runtime.offer_execution import default_offer_post_deps
 from greenfloor.runtime.offer_post_request import OfferPostRequest

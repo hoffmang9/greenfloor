@@ -11,8 +11,9 @@ from greenfloor.runtime.coinset_runtime import (
 from greenfloor.runtime.coinset_runtime import (
     _resolve_taker_or_coin_operation_fee as resolve_taker_or_coin_operation_fee,
 )
+from tests.helpers.signer_coin_op_cli_fixtures import patch_signer_coin_op_cli_backend
 from tests.helpers.offer_runtime_fixtures import (
-    write_manager_program_with_cloud_wallet,
+    write_manager_program_with_signer,
     write_markets,
 )
 
@@ -149,7 +150,7 @@ def test_resolve_maker_offer_fee_is_zero() -> None:
 def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     calls = {}
@@ -170,10 +171,10 @@ def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys
             calls["split"] = (coin_ids, amount_per_coin, number_of_coins, fee)
             return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
-        lambda **kw: "Asset_split_base",
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
     )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
@@ -191,12 +192,12 @@ def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys
         no_wait=True,
     )
     assert code == 0
-    assert calls["split"] == (["Coin_abc123"], 10, 2, 42)
+    assert calls["split"] == (["Coin_abc123"], 10, 2, 0)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["venue"] is None
     assert payload["waited"] is False
-    assert payload["fee_mojos"] == 42
-    assert payload["fee_source"] == "coinset_conservative"
+    assert payload["fee_mojos"] == 0
+    assert payload["fee_source"] == "signer_vault_no_fee"
     assert payload["coin_selection_mode"] == "explicit"
     assert payload["resolved_asset_id"] == "Asset_split_base"
 
@@ -204,7 +205,7 @@ def test_coin_split_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys
 def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     calls = {}
@@ -225,10 +226,10 @@ def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, caps
             calls["combine"] = (number_of_coins, fee, largest_first, asset_id, input_coin_ids)
             return {"signature_request_id": "sr-2", "status": "UNSIGNED"}
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
-    monkeypatch.setattr(
-        "greenfloor.runtime.cloud_wallet.assets.resolve_cloud_wallet_asset_id",
-        lambda **kw: "Asset_huun64oh7dbt9f1f9ie8khuw",
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
     )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
@@ -246,14 +247,14 @@ def test_coin_combine_no_wait_uses_advised_fee(monkeypatch, tmp_path: Path, caps
         no_wait=True,
     )
     assert code == 0
-    assert calls["combine"] == (3, 77, True, "Asset_huun64oh7dbt9f1f9ie8khuw", None)
+    assert calls["combine"] == (3, 0, True, "xch", None)
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["venue"] is None
     assert payload["waited"] is False
-    assert payload["fee_mojos"] == 77
+    assert payload["fee_mojos"] == 0
     assert payload["coin_selection_mode"] == "adapter_auto_select"
     assert payload["asset_id"] == "xch"
-    assert payload["resolved_asset_id"] == "Asset_huun64oh7dbt9f1f9ie8khuw"
+    assert payload["resolved_asset_id"] == "xch"
 
 
 def test_coin_split_returns_structured_error_when_fee_resolution_fails(
@@ -261,7 +262,7 @@ def test_coin_split_returns_structured_error_when_fee_resolution_fails(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeWallet:
@@ -275,7 +276,16 @@ def test_coin_split_returns_structured_error_when_fee_resolution_fails(
             _ = include_pending, asset_id
             return [{"id": "Coin_abc123", "name": "coin-1"}]
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
+        @staticmethod
+        def split_coins(*, coin_ids, amount_per_coin, number_of_coins, fee):
+            _ = coin_ids, amount_per_coin, number_of_coins, fee
+            return {"signature_request_id": "sr-1", "status": "UNSIGNED"}
+
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
+    )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (_ for _ in ()).throw(
@@ -293,11 +303,10 @@ def test_coin_split_returns_structured_error_when_fee_resolution_fails(
         number_of_coins=2,
         no_wait=True,
     )
-    assert code == 2
+    assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
-    assert payload["success"] is False
-    assert payload["error"].startswith("fee_resolution_failed:")
-    assert "coin_ops.minimum_fee_mojos" in payload["operator_guidance"]
+    assert payload["fee_mojos"] == 0
+    assert payload["fee_source"] == "signer_vault_no_fee"
 
 
 def test_coin_combine_returns_structured_error_when_fee_resolution_fails(
@@ -305,7 +314,7 @@ def test_coin_combine_returns_structured_error_when_fee_resolution_fails(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeWallet:
@@ -317,9 +326,33 @@ def test_coin_combine_returns_structured_error_when_fee_resolution_fails(
         @staticmethod
         def list_coins(*, include_pending=True, asset_id=None):
             _ = include_pending, asset_id
-            return []
+            return [
+                {
+                    "id": "Coin_a",
+                    "name": "coin-a",
+                    "amount": 1000,
+                    "state": "SETTLED",
+                    "asset": {"id": "Asset_split_base"},
+                },
+                {
+                    "id": "Coin_b",
+                    "name": "coin-b",
+                    "amount": 1000,
+                    "state": "SETTLED",
+                    "asset": {"id": "Asset_split_base"},
+                },
+            ]
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
+        @staticmethod
+        def combine_coins(*, number_of_coins, fee, largest_first, asset_id, input_coin_ids=None):
+            _ = number_of_coins, fee, largest_first, asset_id, input_coin_ids
+            return {"signature_request_id": "sr-2", "status": "UNSIGNED"}
+
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
+    )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (_ for _ in ()).throw(
@@ -332,16 +365,15 @@ def test_coin_combine_returns_structured_error_when_fee_resolution_fails(
         network="mainnet",
         market_id="m1",
         pair=None,
-        number_of_coins=3,
-        asset_id="xch",
-        coin_ids=[],
+        number_of_coins=2,
+        asset_id="a1",
+        coin_ids=["coin-a", "coin-b"],
         no_wait=True,
     )
-    assert code == 2
+    assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
-    assert payload["success"] is False
-    assert payload["error"].startswith("fee_resolution_failed:")
-    assert "coin_ops.minimum_fee_mojos" in payload["operator_guidance"]
+    assert payload["fee_mojos"] == 0
+    assert payload["fee_source"] == "signer_vault_no_fee"
 
 
 def test_coin_combine_distinguishes_temporary_fee_advice_unavailability(
@@ -349,7 +381,7 @@ def test_coin_combine_distinguishes_temporary_fee_advice_unavailability(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program_with_cloud_wallet(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeWallet:
@@ -358,7 +390,36 @@ def test_coin_combine_distinguishes_temporary_fee_advice_unavailability(
         def __init__(self, _config):
             pass
 
-    monkeypatch.setattr("greenfloor.runtime.cloud_wallet.adapter.CloudWalletAdapter", _FakeWallet)
+        @staticmethod
+        def list_coins(*, include_pending=True, asset_id=None):
+            _ = include_pending, asset_id
+            return [
+                {
+                    "id": "Coin_a",
+                    "name": "coin-a",
+                    "amount": 1000,
+                    "state": "SETTLED",
+                    "asset": {"id": "Asset_split_base"},
+                },
+                {
+                    "id": "Coin_b",
+                    "name": "coin-b",
+                    "amount": 1000,
+                    "state": "SETTLED",
+                    "asset": {"id": "Asset_split_base"},
+                },
+            ]
+
+        @staticmethod
+        def combine_coins(*, number_of_coins, fee, largest_first, asset_id, input_coin_ids=None):
+            _ = number_of_coins, fee, largest_first, asset_id, input_coin_ids
+            return {"signature_request_id": "sr-2", "status": "UNSIGNED"}
+
+    patch_signer_coin_op_cli_backend(
+        monkeypatch,
+        wallet_factory=_FakeWallet,
+        resolved_asset_id="Asset_split_base",
+    )
     monkeypatch.setattr(
         "greenfloor.runtime.coinset_runtime._resolve_taker_or_coin_operation_fee",
         lambda *, network, minimum_fee_mojos=0: (_ for _ in ()).throw(
@@ -378,14 +439,12 @@ def test_coin_combine_distinguishes_temporary_fee_advice_unavailability(
         network="mainnet",
         market_id="m1",
         pair=None,
-        number_of_coins=3,
-        asset_id="xch",
-        coin_ids=[],
+        number_of_coins=2,
+        asset_id="a1",
+        coin_ids=["coin-a", "coin-b"],
         no_wait=True,
     )
-    assert code == 2
+    assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
-    assert payload["success"] is False
-    assert payload["error"] == "coinset_fee_preflight_failed:temporary_fee_advice_unavailable"
-    assert payload["coinset_fee_lookup"]["failure_kind"] == "temporary_fee_advice_unavailable"
-    assert "temporarily unavailable" in payload["operator_guidance"]
+    assert payload["fee_mojos"] == 0
+    assert payload["fee_source"] == "signer_vault_no_fee"

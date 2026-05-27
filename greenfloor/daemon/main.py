@@ -20,7 +20,6 @@ from typing import Any
 
 import yaml  # noqa: F401
 
-from greenfloor.adapters.cloud_wallet import CloudWalletAdapter, CloudWalletConfig
 from greenfloor.adapters.coinset import (
     CoinsetAdapter,
     extract_coin_ids_from_offer_payload,
@@ -42,7 +41,6 @@ from greenfloor.config.io import (
 from greenfloor.config.models import (
     MarketConfig,
     ProgramConfig,
-    cloud_wallet_offer_path_configured,
     managed_offer_execution_backend,
     signer_offer_path_configured,
 )
@@ -58,7 +56,6 @@ from greenfloor.core.inventory import compute_bucket_counts_from_coins
 from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert, utcnow
 from greenfloor.core.offer_lifecycle import OfferLifecycleState, OfferSignal, apply_offer_signal
 from greenfloor.core.strategy import MarketState, PlannedAction, StrategyConfig, evaluate_market
-from greenfloor.daemon.cloud_wallet_list_cache import CloudWalletAssetScopedListCache
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient, capture_coinset_websocket_once
 from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.hex_utils import default_mojo_multiplier_for_asset, is_hex_id
@@ -68,19 +65,12 @@ from greenfloor.logging_setup import (
     warn_if_log_level_auto_healed,
 )
 from greenfloor.notify.pushover import send_pushover_alert
-from greenfloor.runtime.cloud_wallet.assets import (
-    resolve_cloud_wallet_offer_asset_ids,
-    wallet_asset_amounts_for_asset_id,
-)
-from greenfloor.runtime.cloud_wallet.coin_ops_daemon_execution import (
+from greenfloor.runtime.coin_ops.coins import is_spendable_coin
+from greenfloor.runtime.coin_ops.daemon_execution import (
     execute_managed_coin_op_plans,
 )
-from greenfloor.runtime.cloud_wallet.coins import (
-    cloud_wallet_coin_matches_asset_scope,
-    coin_matches_scoped_spendable_filters,
-    is_spendable_coin,
-    refresh_scoped_spendable_coin_rows,
-)
+from greenfloor.runtime.coinset_coins import list_unspent_coins_by_receive_address
+from greenfloor.runtime.offer_runtime import signer_resolve_offer_asset_ids
 from greenfloor.runtime.offer_build_context import (
     default_program_config_path,
     prepare_offer_build_context,
@@ -309,34 +299,42 @@ def _combine_input_coin_cap() -> int:
     return _env_int("GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP", 5, minimum=2)
 
 
-def _is_transient_cloud_wallet_upstream_error_text(error_text: str) -> bool:
+def _is_transient_managed_upstream_error_text(error_text: str) -> bool:
     normalized = str(error_text or "").strip().lower()
-    if CloudWalletAdapter._is_transient_error_message(normalized):
-        return True
-    return any(
-        marker in normalized
-        for marker in (
-            "cloud_wallet_http_error:502",
-            "cloud_wallet_http_error:503",
-            "cloud_wallet_http_error:504",
-            "cloud_wallet_network_error",
-        )
+    transient_markers = (
+        "timed out",
+        "timeout",
+        "temporary unavailable",
+        "temporarily unavailable",
+        "bad gateway",
+        "gateway timeout",
+        "service unavailable",
+        "connection reset",
+        "connection refused",
+        "managed_offer_http_error:502",
+        "managed_offer_http_error:503",
+        "managed_offer_http_error:504",
+        "managed_offer_network_error",
+        "signer_http_error:502",
+        "signer_http_error:503",
+        "signer_http_error:504",
     )
+    return any(marker in normalized for marker in transient_markers)
 
 
-def _cloud_wallet_reason_is_503(reason_text: str) -> bool:
+def _managed_offer_reason_is_503(reason_text: str) -> bool:
     normalized = str(reason_text or "").strip().lower()
     return (
-        "cloud_wallet_http_error:503" in normalized
+        "managed_offer_http_error:503" in normalized
         or "503 service temporarily unavailable" in normalized
     )
 
 
-def _cloud_wallet_item_is_success(item: dict[str, Any]) -> bool:
+def _managed_offer_item_is_success(item: dict[str, Any]) -> bool:
     status = str(item.get("status", "")).strip().lower()
     reason = str(item.get("reason", "")).strip().lower()
     return status == "executed" and (
-        reason == "cloud_wallet_post_success" or reason == _PENDING_VISIBILITY_REASON.lower()
+        reason == "managed_offer_post_success" or reason == _PENDING_VISIBILITY_REASON.lower()
     )
 
 
@@ -351,30 +349,30 @@ def _parse_iso_datetime(value: str) -> datetime | None:
 
 
 @dataclass(slots=True)
-class _CWHealthSnapshot:
+class _ManagedOfferHealthSnapshot:
     count_503: int
     had_success: bool
     timestamp: datetime
 
 
-_CLOUD_WALLET_HEALTH_WINDOW: dict[str, deque[_CWHealthSnapshot]] = {}
+_MANAGED_OFFER_HEALTH_WINDOW: dict[str, deque[_ManagedOfferHealthSnapshot]] = {}
 
 
-def _cloud_wallet_market_health_payload(
+def _managed_offer_market_health_payload(
     *,
     market_id: str,
     current_items: list[dict[str, Any]],
     now: datetime,
     window_size: int = 40,
 ) -> dict[str, Any]:
-    window = _CLOUD_WALLET_HEALTH_WINDOW.setdefault(
+    window = _MANAGED_OFFER_HEALTH_WINDOW.setdefault(
         str(market_id), deque(maxlen=max(1, window_size))
     )
     batch_503 = sum(
-        1 for item in current_items if _cloud_wallet_reason_is_503(str(item.get("reason", "")))
+        1 for item in current_items if _managed_offer_reason_is_503(str(item.get("reason", "")))
     )
-    batch_success = any(_cloud_wallet_item_is_success(item) for item in current_items)
-    window.append(_CWHealthSnapshot(count_503=batch_503, had_success=batch_success, timestamp=now))
+    batch_success = any(_managed_offer_item_is_success(item) for item in current_items)
+    window.append(_ManagedOfferHealthSnapshot(count_503=batch_503, had_success=batch_success, timestamp=now))
 
     rolling_503_count = sum(s.count_503 for s in window)
     last_success_at: str | None = None
@@ -393,8 +391,8 @@ def _cloud_wallet_market_health_payload(
         "market_id": str(market_id),
         "rolling_window_events": len(window),
         "rolling_503_count": int(rolling_503_count),
-        "last_cloud_wallet_success_at": last_success_at,
-        "last_cloud_wallet_success_age_seconds": last_success_age_seconds,
+        "last_managed_offer_success_at": last_success_at,
+        "last_managed_offer_success_age_seconds": last_success_age_seconds,
     }
 
 
@@ -690,7 +688,7 @@ _ACTIVE_OFFER_STATES_FOR_RESEED = {
 }
 _RESEED_MEMPOOL_MAX_AGE_SECONDS = 3 * 60
 _PENDING_VISIBILITY_RECHECK_MAX_AGE_SECONDS = 2 * 60
-_PENDING_VISIBILITY_REASON = "cloud_wallet_post_success_dexie_visibility_pending"
+_PENDING_VISIBILITY_REASON = "managed_offer_post_success_dexie_visibility_pending"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1331,12 +1329,6 @@ def _build_offer_for_action(
     from greenfloor.offer_builder import build_offer
 
     side = _normalize_offer_side(getattr(action, "side", "sell"))
-    if side == "buy":
-        return {
-            "status": "skipped",
-            "reason": "offer_builder_failed:buy_side_requires_cloud_wallet_path",
-            "offer": None,
-        }
     resolved_keyring_yaml_path = keyring_yaml_path
     resolved_program_path = default_program_config_path(program, program_path)
     try:
@@ -1369,106 +1361,52 @@ def _build_offer_for_action(
 def _managed_offer_backend_for_program(program: Any, *, size_base_units: int) -> str | None:
     if isinstance(program, ProgramConfig):
         return managed_offer_execution_backend(program, size_base_units=size_base_units)
-    if _cloud_wallet_configured(program):
-        return "cloud_wallet"
     return None
 
 
-def _cloud_wallet_configured(program: Any) -> bool:
-    if isinstance(program, ProgramConfig):
-        return cloud_wallet_offer_path_configured(program)
-    required = (
-        "cloud_wallet_base_url",
-        "cloud_wallet_user_key_id",
-        "cloud_wallet_private_key_pem_path",
-        "cloud_wallet_vault_id",
-    )
-    return all(str(getattr(program, key, "")).strip() for key in required)
+def _reservation_wallet_id(program: ProgramConfig) -> str:
+    vault = program.vault_config
+    if vault is not None:
+        launcher_id = str(vault.launcher_id).strip()
+        if launcher_id:
+            return launcher_id
+    return "signer"
 
 
-def _new_cloud_wallet_adapter_for_daemon(program: Any) -> CloudWalletAdapter:
-    return CloudWalletAdapter(
-        CloudWalletConfig(
-            base_url=str(program.cloud_wallet_base_url).strip(),
-            user_key_id=str(program.cloud_wallet_user_key_id).strip(),
-            private_key_pem_path=str(program.cloud_wallet_private_key_pem_path).strip(),
-            vault_id=str(program.cloud_wallet_vault_id).strip(),
-            network=str(program.app_network).strip(),
-            kms_key_id=str(getattr(program, "cloud_wallet_kms_key_id", "")).strip() or None,
-            kms_region=str(getattr(program, "cloud_wallet_kms_region", "")).strip() or None,
-            kms_public_key_hex=str(getattr(program, "cloud_wallet_kms_public_key_hex", "")).strip()
-            or None,
-        )
-    )
-
-
-def _cloud_wallet_spendable_amounts_by_asset(
+def _coinset_spendable_profiles_by_asset(
     *,
-    wallet: CloudWalletAdapter,
+    program: ProgramConfig,
+    market: MarketConfig,
     asset_ids: set[str],
-) -> dict[str, int]:
-    profiles = _cloud_wallet_spendable_profiles_by_asset(wallet=wallet, asset_ids=asset_ids)
-    return {asset_id: int(profile.get("total", 0)) for asset_id, profile in profiles.items()}
-
-
-def _cloud_wallet_spendable_profiles_by_asset(
-    *,
-    wallet: CloudWalletAdapter,
-    asset_ids: set[str],
-    scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> dict[str, dict[str, int]]:
+    receive_address = str(market.receive_address).strip()
+    network = str(program.app_network).strip()
     requested_asset_ids = {str(asset_id).strip() for asset_id in asset_ids if str(asset_id).strip()}
     profiles: dict[str, dict[str, int]] = {
-        asset_id: {"total": 0, "max_single": 0, "coin_count": 0, "max_single_known": 0}
+        asset_id: {"total": 0, "max_single": 0, "coin_count": 0, "max_single_known": 1}
         for asset_id in requested_asset_ids
     }
-    if not requested_asset_ids:
+    if not requested_asset_ids or not receive_address:
         return profiles
-
-    # Query each requested asset directly. Some wallet backends can return
-    # incomplete/unhelpful results for broad unfiltered inventory reads, while
-    # asset-scoped reads remain accurate.
     for requested_asset_id in requested_asset_ids:
-        requested_asset_id_lower = requested_asset_id.lower()
         profile = profiles[requested_asset_id]
         try:
-            if scoped_list_cache is not None:
-                coins = scoped_list_cache.list_coins_scoped(resolved_asset_id=requested_asset_id)
-            else:
-                coins = wallet.list_coins(asset_id=requested_asset_id)
-        except TypeError:
-            # Backward-compatible fallback for adapters/test doubles that do
-            # not yet accept an `asset_id` keyword.
-            coins = wallet.list_coins()
+            coins = list_unspent_coins_by_receive_address(
+                network=network,
+                receive_address=receive_address,
+                asset_id=requested_asset_id,
+            )
         except Exception as exc:
             _daemon_logger.warning(
-                "cloud_wallet_inventory_lookup_failed asset_id=%s error=%s",
+                "coinset_inventory_lookup_failed asset_id=%s error=%s",
                 requested_asset_id,
                 exc,
             )
-            _total_amount, spendable_amount, _locked_amount = wallet_asset_amounts_for_asset_id(
-                wallet=wallet,
-                asset_id=requested_asset_id,
-            )
-            if spendable_amount is not None and spendable_amount > 0:
-                profile["total"] = max(int(profile.get("total", 0)), int(spendable_amount))
-                _daemon_logger.info(
-                    "cloud_wallet_inventory_lookup_fallback asset_id=%s source=wallet_asset spendable=%s",
-                    requested_asset_id,
-                    spendable_amount,
-                )
             continue
-
-        profile["max_single_known"] = 1
         for coin in coins:
             if not isinstance(coin, dict):
                 continue
             if not is_spendable_coin(coin):
-                continue
-            if not cloud_wallet_coin_matches_asset_scope(
-                coin=coin,
-                scoped_asset_id=requested_asset_id_lower,
-            ):
                 continue
             try:
                 amount = int(coin.get("amount", 0))
@@ -1480,19 +1418,42 @@ def _cloud_wallet_spendable_profiles_by_asset(
             profile["coin_count"] += 1
             if amount > int(profile.get("max_single", 0)):
                 profile["max_single"] = amount
-        if int(profile.get("total", 0)) <= 0:
-            _total_amount, spendable_amount, _locked_amount = wallet_asset_amounts_for_asset_id(
-                wallet=wallet,
-                asset_id=requested_asset_id,
-            )
-            if spendable_amount is not None and spendable_amount > 0:
-                profile["total"] = int(spendable_amount)
-                _daemon_logger.info(
-                    "cloud_wallet_inventory_lookup_fallback asset_id=%s source=wallet_asset spendable=%s",
-                    requested_asset_id,
-                    spendable_amount,
-                )
     return profiles
+
+
+def _coinset_spendable_base_unit_coin_amounts(
+    *,
+    program: ProgramConfig,
+    market: MarketConfig,
+    resolved_asset_id: str,
+    base_unit_mojo_multiplier: int,
+) -> list[int]:
+    receive_address = str(market.receive_address).strip()
+    if not receive_address or not str(resolved_asset_id).strip():
+        return []
+    multiplier = max(1, int(base_unit_mojo_multiplier))
+    try:
+        coins = list_unspent_coins_by_receive_address(
+            network=str(program.app_network).strip(),
+            receive_address=receive_address,
+            asset_id=str(resolved_asset_id).strip(),
+        )
+    except Exception:
+        return []
+    amounts_base_units: list[int] = []
+    for coin in coins:
+        if not isinstance(coin, dict) or not is_spendable_coin(coin):
+            continue
+        try:
+            amount_mojos = int(coin.get("amount", 0))
+        except (TypeError, ValueError):
+            continue
+        if amount_mojos <= 0:
+            continue
+        amount_base_units = amount_mojos // multiplier
+        if amount_base_units > 0:
+            amounts_base_units.append(amount_base_units)
+    return amounts_base_units
 
 
 def _base_unit_mojo_multiplier_for_market(*, market: Any) -> int:
@@ -1504,63 +1465,6 @@ def _base_unit_mojo_multiplier_for_market(*, market: Any) -> int:
         multiplier = default_multiplier
     return max(1, multiplier)
 
-
-def _cloud_wallet_spendable_base_unit_coin_amounts(
-    *,
-    wallet: CloudWalletAdapter,
-    resolved_asset_id: str,
-    base_unit_mojo_multiplier: int,
-    canonical_asset_id: str,
-    scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
-    revalidate_coin_records: bool = False,
-) -> list[int]:
-    target_asset = str(resolved_asset_id).strip().lower()
-    if not target_asset:
-        return []
-    multiplier = max(1, int(base_unit_mojo_multiplier))
-    try:
-        if scoped_list_cache is not None:
-            coins = scoped_list_cache.list_coins_scoped(resolved_asset_id=resolved_asset_id)
-        else:
-            coins = wallet.list_coins(asset_id=resolved_asset_id)
-    except Exception:
-        return []
-    amounts_base_units: list[int] = []
-    refreshed_spendable_rows: dict[str, dict[str, Any]] | None = None
-    if revalidate_coin_records:
-        refreshed_spendable_rows = refresh_scoped_spendable_coin_rows(
-            wallet=wallet,
-            resolved_asset_id=resolved_asset_id,
-            canonical_asset_id=canonical_asset_id,
-        )
-    for coin in coins:
-        if not isinstance(coin, dict):
-            continue
-        if not coin_matches_scoped_spendable_filters(
-            coin=coin,
-            scoped_asset_id=target_asset,
-            canonical_asset_id=canonical_asset_id,
-        ):
-            continue
-        amount_source = coin
-        if refreshed_spendable_rows is not None:
-            coin_id = str(coin.get("id", "")).strip()
-            if not coin_id:
-                continue
-            refreshed_coin = refreshed_spendable_rows.get(coin_id)
-            if refreshed_coin is None:
-                continue
-            amount_source = refreshed_coin
-        try:
-            amount_mojos = int(amount_source.get("amount", 0))
-        except (TypeError, ValueError):
-            amount_mojos = 0
-        if amount_mojos <= 0:
-            continue
-        amount_base_units = amount_mojos // multiplier
-        if amount_base_units > 0:
-            amounts_base_units.append(amount_base_units)
-    return amounts_base_units
 
 
 def _coinset_cat_spendable_base_unit_coin_amounts(
@@ -1611,12 +1515,9 @@ def _reservation_request_for_cloud_offer(*, market: Any, action: Any) -> dict[st
     return _reservation_request_for_cloud_offer_with_assets(
         market=market,
         action=action,
-        resolved_base_asset_id=str(
-            getattr(market, "cloud_wallet_base_global_id", "") or getattr(market, "base_asset", "")
-        ).strip(),
+        resolved_base_asset_id=str(getattr(market, "base_asset", "")).strip(),
         resolved_quote_asset_id=str(
-            getattr(market, "cloud_wallet_quote_global_id", "")
-            or getattr(market, "quote_asset", "")
+            getattr(market, "quote_asset", "")
         ).strip(),
         fee_asset_id="xch",
         fee_amount_mojos=0,
@@ -1666,35 +1567,24 @@ def _estimate_cloud_offer_fee_reservation_mojos(*, program: Any) -> int:
     return 0
 
 
-def _resolve_cloud_wallet_offer_asset_ids_for_reservation(
+def _resolve_signer_offer_asset_ids_for_reservation(
     *,
-    program: Any,
-    market: Any,
-    wallet: CloudWalletAdapter,
+    program: ProgramConfig,
+    market: MarketConfig,
 ) -> tuple[str, str, str]:
     quote_asset = _resolve_quote_asset_for_offer(
         quote_asset=str(getattr(market, "quote_asset", "")),
         network=str(getattr(program, "app_network", "mainnet")),
     )
-    resolved_base_asset_id, resolved_quote_asset_id = resolve_cloud_wallet_offer_asset_ids(
-        wallet=wallet,
+    resolved_base_asset_id, resolved_quote_asset_id = signer_resolve_offer_asset_ids(
+        program=program,
         base_asset_id=str(getattr(market, "base_asset", "")).strip(),
         quote_asset_id=str(quote_asset).strip(),
-        base_symbol_hint=str(getattr(market, "base_symbol", "") or ""),
-        quote_symbol_hint=str(getattr(market, "quote_asset", "") or ""),
-        base_global_id_hint=str(getattr(market, "cloud_wallet_base_global_id", "") or ""),
-        quote_global_id_hint=str(getattr(market, "cloud_wallet_quote_global_id", "") or ""),
-        program_home_dir=str(getattr(program, "home_dir", "") or ""),
     )
-    resolved_xch_asset_id, _ = resolve_cloud_wallet_offer_asset_ids(
-        wallet=wallet,
+    resolved_xch_asset_id, _ = signer_resolve_offer_asset_ids(
+        program=program,
         base_asset_id="xch",
         quote_asset_id=str(quote_asset).strip(),
-        base_symbol_hint="xch",
-        quote_symbol_hint=str(getattr(market, "quote_asset", "") or ""),
-        base_global_id_hint="",
-        quote_global_id_hint=str(getattr(market, "cloud_wallet_quote_global_id", "") or ""),
-        program_home_dir=str(getattr(program, "home_dir", "") or ""),
     )
     return resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id
 
@@ -1713,7 +1603,7 @@ def _managed_offer_post(
     if backend is None:
         return {
             "success": False,
-            "error": "managed_offer_post_requires_signer_or_cloud_wallet_backend",
+            "error": "managed_offer_post_requires_signer_backend",
         }
 
     build_ctx = prepare_offer_build_context(
@@ -1734,14 +1624,9 @@ def _managed_offer_post(
         claim_rewards=False,
         dry_run=runtime_dry_run,
     )
-    offer_artifact_timeout_seconds = (
-        int(program.runtime_cloud_wallet_offer_artifact_timeout_seconds)
-        if backend == "cloud_wallet"
-        else None
-    )
     exit_code, payload = request.run_managed(
         backend,
-        offer_artifact_timeout_seconds=offer_artifact_timeout_seconds,
+        offer_artifact_timeout_seconds=None,
     )
     return parse_managed_offer_post_result(exit_code, payload)
 
@@ -1836,7 +1721,7 @@ def _run_coinset_signal_capture_once(
     )
 
 
-def _execute_single_cloud_wallet_action(
+def _execute_single_managed_action(
     *,
     program: Any,
     market: Any,
@@ -1845,8 +1730,8 @@ def _execute_single_cloud_wallet_action(
     runtime_dry_run: bool,
     dexie: DexieAdapter,
 ) -> dict[str, Any]:
-    """Execute a single strategy action via the cloud wallet path."""
-    cloud_wallet_post = _managed_offer_post(
+    """Execute a single strategy action via the managed signer path."""
+    managed_post = _managed_offer_post(
         program=program,
         market=market,
         size_base_units=int(action.size),
@@ -1855,46 +1740,43 @@ def _execute_single_cloud_wallet_action(
         side=_normalize_offer_side(getattr(action, "side", "sell")),
     )
     timing_fields = {
-        "offer_create_ms": cloud_wallet_post.get("offer_create_ms"),
-        "offer_publish_ms": cloud_wallet_post.get("offer_publish_ms"),
-        "offer_total_ms": cloud_wallet_post.get("offer_total_ms"),
-        "offer_create_phase_ms": cloud_wallet_post.get("offer_create_phase_ms"),
-        "offer_artifact_wait_ms": cloud_wallet_post.get("offer_artifact_wait_ms"),
+        "offer_create_ms": managed_post.get("offer_create_ms"),
+        "offer_publish_ms": managed_post.get("offer_publish_ms"),
+        "offer_total_ms": managed_post.get("offer_total_ms"),
+        "offer_create_phase_ms": managed_post.get("offer_create_phase_ms"),
+        "offer_artifact_wait_ms": managed_post.get("offer_artifact_wait_ms"),
     }
-    if bool(cloud_wallet_post.get("success", False)):
-        cloud_wallet_offer_id = str(cloud_wallet_post.get("offer_id", "")).strip()
-        if publish_venue == "dexie" and cloud_wallet_offer_id:
+    if bool(managed_post.get("success", False)):
+        managed_offer_id = str(managed_post.get("offer_id", "")).strip()
+        if publish_venue == "dexie" and managed_offer_id:
             visible, visibility_error = verify_offer_visible_on_dexie(
                 dexie=dexie,
-                offer_id=cloud_wallet_offer_id,
+                offer_id=managed_offer_id,
             )
             if not visible:
-                # Transient 404 → Dexie propagation lag; mark as pending so the
-                # active-count reader keeps the offer in scope until the grace
-                # period expires (see _is_stale_pending_visibility_offer).
                 if is_transient_dexie_visibility_404_error(visibility_error or ""):
                     return {
                         "size": action.size,
                         "side": _normalize_offer_side(getattr(action, "side", "sell")),
                         "status": "executed",
                         "reason": _PENDING_VISIBILITY_REASON,
-                        "offer_id": cloud_wallet_offer_id or None,
+                        "offer_id": managed_offer_id or None,
                         **timing_fields,
                     }
                 return {
                     "size": action.size,
                     "side": _normalize_offer_side(getattr(action, "side", "sell")),
                     "status": "skipped",
-                    "reason": (f"cloud_wallet_post_not_visible_on_dexie:{visibility_error}"),
-                    "offer_id": cloud_wallet_offer_id or None,
+                    "reason": (f"managed_offer_post_not_visible_on_dexie:{visibility_error}"),
+                    "offer_id": managed_offer_id or None,
                     **timing_fields,
                 }
         return {
             "size": action.size,
             "side": _normalize_offer_side(getattr(action, "side", "sell")),
             "status": "executed",
-            "reason": "cloud_wallet_post_success",
-            "offer_id": cloud_wallet_offer_id or None,
+            "reason": "managed_offer_post_success",
+            "offer_id": managed_offer_id or None,
             **timing_fields,
         }
     return {
@@ -1902,14 +1784,14 @@ def _execute_single_cloud_wallet_action(
         "side": _normalize_offer_side(getattr(action, "side", "sell")),
         "status": "skipped",
         "reason": (
-            f"cloud_wallet_post_failed:{str(cloud_wallet_post.get('error', 'unknown')).strip()}"
+            f"managed_offer_post_failed:{str(managed_post.get('error', 'unknown')).strip()}"
         ),
         "offer_id": None,
         **timing_fields,
     }
 
 
-def _execute_cloud_wallet_action_with_retry(
+def _execute_managed_action_with_retry(
     *,
     program: Any,
     market: Any,
@@ -1918,16 +1800,12 @@ def _execute_cloud_wallet_action_with_retry(
     runtime_dry_run: bool,
     dexie: DexieAdapter,
 ) -> dict[str, Any]:
-    """Execute a single cloud-wallet action with transient-error retries.
-
-    Raises on non-transient or exhausted retries so the caller can decide
-    how to handle the failure (skip-item in sequential, worker-error in parallel).
-    """
+    """Execute a single managed action with transient-error retries."""
     attempts_max, backoff_ms, _ = _post_retry_config()
     last_exc: Exception | None = None
     for attempt_index in range(max(1, int(attempts_max))):
         try:
-            return _execute_single_cloud_wallet_action(
+            return _execute_single_managed_action(
                 program=program,
                 market=market,
                 action=action,
@@ -1939,12 +1817,12 @@ def _execute_cloud_wallet_action_with_retry(
             last_exc = exc
             if attempt_index >= (
                 max(1, int(attempts_max)) - 1
-            ) or not _is_transient_cloud_wallet_upstream_error_text(str(exc)):
+            ) or not _is_transient_managed_upstream_error_text(str(exc)):
                 raise
             if backoff_ms > 0:
                 sleep_seconds = (backoff_ms * (2**attempt_index)) / 1000.0
                 time.sleep(float(sleep_seconds))
-    raise RuntimeError(str(last_exc or "cloud_wallet_action_retry_exhausted"))
+    raise RuntimeError(str(last_exc or "managed_action_retry_exhausted"))
 
 
 def _execute_single_local_action(
@@ -2049,7 +1927,7 @@ def _expand_strategy_actions(strategy_actions: list[Any]) -> list[Any]:
     return expanded_actions
 
 
-def _cloud_wallet_skip_item(*, action: Any, reason: str) -> dict[str, Any]:
+def _managed_skip_item(*, action: Any, reason: str) -> dict[str, Any]:
     return {
         "size": action.size,
         "side": _normalize_offer_side(getattr(action, "side", "sell")),
@@ -2094,16 +1972,15 @@ def _single_input_preferred_skip_reason(
     return None
 
 
-def _prepare_parallel_cloud_wallet_submission(
+def _prepare_parallel_managed_submission(
     *,
     market: Any,
     action: Any,
-    cloud_wallet: CloudWalletAdapter,
+    program: ProgramConfig,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
     resolved_xch_asset_id: str,
     fee_amount_mojos: int,
-    scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> tuple[dict[str, int] | None, dict[str, int] | None, dict[str, Any] | None]:
     requested_amounts = _reservation_request_for_cloud_offer_with_assets(
         market=market,
@@ -2117,12 +1994,12 @@ def _prepare_parallel_cloud_wallet_submission(
         return (
             None,
             None,
-            _cloud_wallet_skip_item(action=action, reason="reservation_invalid_request"),
+            _managed_skip_item(action=action, reason="reservation_invalid_request"),
         )
-    spendable_profiles = _cloud_wallet_spendable_profiles_by_asset(
-        wallet=cloud_wallet,
+    spendable_profiles = _coinset_spendable_profiles_by_asset(
+        program=program,
+        market=market,
         asset_ids=set(requested_amounts.keys()),
-        scoped_list_cache=scoped_list_cache,
     )
     available_amounts = {
         asset_id: int(profile.get("total", 0)) for asset_id, profile in spendable_profiles.items()
@@ -2132,7 +2009,7 @@ def _prepare_parallel_cloud_wallet_submission(
         spendable_profiles=spendable_profiles,
     )
     if single_input_skip_reason:
-        return None, None, _cloud_wallet_skip_item(action=action, reason=single_input_skip_reason)
+        return None, None, _managed_skip_item(action=action, reason=single_input_skip_reason)
     return requested_amounts, available_amounts, None
 
 
@@ -2150,7 +2027,6 @@ def _execute_strategy_actions(
     signer_key_registry: dict[str, Any] | None = None,
     program: Any | None = None,
     reservation_coordinator: AssetReservationCoordinator | None = None,
-    cloud_wallet_scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> dict[str, Any]:
     items: list[dict[str, Any]] = []
     executed_count = 0
@@ -2161,47 +2037,42 @@ def _execute_strategy_actions(
     else:
         keyring_yaml_path = str(getattr(signer_key, "keyring_yaml_path", "") or "").strip()
     expanded_actions = _expand_strategy_actions(strategy_actions)
-    can_parallelize_cloud_offers = (
-        program is not None
-        and _managed_offer_backend_for_program(program, size_base_units=0) == "cloud_wallet"
+    can_parallelize_managed_offers = (
+        isinstance(program, ProgramConfig)
+        and signer_offer_path_configured(program)
         and bool(getattr(program, "runtime_offer_parallelism_enabled", False))
         and not runtime_dry_run
         and reservation_coordinator is not None
     )
-    if can_parallelize_cloud_offers:
+    if can_parallelize_managed_offers:
         try:
             assert program is not None
             assert reservation_coordinator is not None
-            cloud_wallet = _new_cloud_wallet_adapter_for_daemon(program)
             resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id = (
-                _resolve_cloud_wallet_offer_asset_ids_for_reservation(
+                _resolve_signer_offer_asset_ids_for_reservation(
                     program=program,
                     market=market,
-                    wallet=cloud_wallet,
                 )
             )
             fee_amount_mojos = _estimate_cloud_offer_fee_reservation_mojos(program=program)
-            # Health-check the coordinator once per batch before dispatching.
-            # Using an empty request avoids any lease writes while still
-            # surfacing storage/runtime failures early so we can fail over.
+            wallet_id = _reservation_wallet_id(program)
             reservation_coordinator.try_acquire(
                 market_id=str(market.market_id),
-                wallet_id=str(program.cloud_wallet_vault_id).strip(),
+                wallet_id=wallet_id,
                 requested_amounts={},
                 available_amounts={},
             )
             submissions: list[tuple[int, Any, dict[str, int], dict[str, int]]] = []
             for submit_index, action in enumerate(expanded_actions):
                 requested_amounts, available_amounts, skip_item = (
-                    _prepare_parallel_cloud_wallet_submission(
+                    _prepare_parallel_managed_submission(
                         market=market,
                         action=action,
-                        cloud_wallet=cloud_wallet,
+                        program=program,
                         resolved_base_asset_id=resolved_base_asset_id,
                         resolved_quote_asset_id=resolved_quote_asset_id,
                         resolved_xch_asset_id=resolved_xch_asset_id,
                         fee_amount_mojos=fee_amount_mojos,
-                        scoped_list_cache=cloud_wallet_scoped_list_cache,
                     )
                 )
                 if skip_item is not None:
@@ -2214,7 +2085,6 @@ def _execute_strategy_actions(
             if submissions:
                 coordinator = reservation_coordinator
                 assert coordinator is not None
-                wallet_id = str(program.cloud_wallet_vault_id).strip()
                 max_workers = min(
                     len(submissions),
                     max(1, int(getattr(program, "runtime_offer_parallelism_max_workers", 4))),
@@ -2254,7 +2124,7 @@ def _execute_strategy_actions(
                     acquire_ms = int((time.monotonic() - acquire_started) * 1000)
                     if not acquired.ok or not acquired.reservation_id:
                         return {
-                            **_cloud_wallet_skip_item(
+                            **_managed_skip_item(
                                 action=action,
                                 reason=str(acquired.error or "reservation_rejected"),
                             ),
@@ -2272,7 +2142,7 @@ def _execute_strategy_actions(
                         reservation_acquire_ms=acquire_ms,
                     )
                     try:
-                        item = _execute_cloud_wallet_action_with_retry(
+                        item = _execute_managed_action_with_retry(
                             program=program,
                             market=market,
                             action=action,
@@ -2345,7 +2215,7 @@ def _execute_strategy_actions(
                     1
                     for _submit_idx, item in submitted_items
                     if str(item.get("status", "")).strip().lower() == "skipped"
-                    and _is_transient_cloud_wallet_upstream_error_text(str(item.get("reason", "")))
+                    and _is_transient_managed_upstream_error_text(str(item.get("reason", "")))
                 )
                 total_parallel = len(submitted_items)
                 if (
@@ -2377,8 +2247,8 @@ def _execute_strategy_actions(
                 },
                 market_id=str(getattr(market, "market_id", "")),
             )
-            can_parallelize_cloud_offers = False
-    if not can_parallelize_cloud_offers:
+            can_parallelize_managed_offers = False
+    if not can_parallelize_managed_offers:
         for action in expanded_actions:
             if runtime_dry_run:
                 items.append(
@@ -2400,7 +2270,7 @@ def _execute_strategy_actions(
             )
             if backend is not None:
                 try:
-                    item = _execute_cloud_wallet_action_with_retry(
+                    item = _execute_managed_action_with_retry(
                         program=program,
                         market=market,
                         action=action,
@@ -2413,7 +2283,7 @@ def _execute_strategy_actions(
                         "size": action.size,
                         "side": _normalize_offer_side(getattr(action, "side", "sell")),
                         "status": "skipped",
-                        "reason": f"cloud_wallet_action_error:{exc}",
+                        "reason": f"managed_action_error:{exc}",
                         "offer_id": None,
                     }
             else:
@@ -2988,7 +2858,6 @@ def _evaluate_and_execute_strategy(
     dexie_size_by_offer_id: dict[str, int],
     result: _MarketCycleResult,
     reservation_coordinator: AssetReservationCoordinator | None = None,
-    cloud_wallet_scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> tuple[dict[str, dict[int, int]], dict[int, int]]:
     """Evaluate market strategy, inject reseed if needed, and execute offer actions."""
     market_mode = str(getattr(market, "mode", "")).strip().lower()
@@ -3137,7 +3006,6 @@ def _evaluate_and_execute_strategy(
         signer_key_registry=program.signer_key_registry,
         program=program,
         reservation_coordinator=reservation_coordinator,
-        cloud_wallet_scoped_list_cache=cloud_wallet_scoped_list_cache,
     )
     result.strategy_planned += int(offer_execution["planned_count"])
     result.strategy_executed += int(offer_execution["executed_count"])
@@ -3157,13 +3025,13 @@ def _evaluate_and_execute_strategy(
         },
         market_id=market.market_id,
     )
-    health_payload = _cloud_wallet_market_health_payload(
+    health_payload = _managed_offer_market_health_payload(
         market_id=str(market.market_id),
         current_items=list(offer_execution["items"]),
         now=now,
     )
     store.add_audit_event(
-        "cloud_wallet_market_health",
+        "managed_offer_market_health",
         health_payload,
         market_id=market.market_id,
     )
@@ -3275,18 +3143,6 @@ def _plan_and_execute_coin_ops(
                     market_id=str(getattr(market, "market_id", "")).strip()
                 ),
                 logger=_daemon_logger,
-                cloud_wallet_configured=_cloud_wallet_configured(program),
-                cloud_wallet_base_asset_resolver=(
-                    None
-                    if signer_offer_path_configured(program)
-                    else (
-                        lambda: _resolve_cloud_wallet_offer_asset_ids_for_reservation(
-                            program=program,
-                            market=market,
-                            wallet=_new_cloud_wallet_adapter_for_daemon(program),
-                        )[0]
-                    )
-                ),
             )
             _log_market_decision(
                 market.market_id,
@@ -3427,7 +3283,6 @@ def _process_single_market(
     now: datetime,
     state_dir: Path,
     reservation_coordinator: AssetReservationCoordinator | None = None,
-    cloud_wallet_scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> _MarketCycleResult:
     result = _MarketCycleResult()
     _log_market_decision(
@@ -3540,61 +3395,59 @@ def _process_single_market(
     ladder_sizes = [e.size_base_units for e in sell_ladder]
     bucket_counts: dict[int, int] | None = None
     wallet_coins: list[int] = []
-    cloud_wallet_scan_empty = False
+    coinset_scan_empty = False
 
-    if _cloud_wallet_configured(program):
+    if isinstance(program, ProgramConfig) and signer_offer_path_configured(program):
         try:
-            cloud_wallet = _new_cloud_wallet_adapter_for_daemon(program)
-            resolved_base_asset_id, _, _ = _resolve_cloud_wallet_offer_asset_ids_for_reservation(
+            resolved_base_asset_id, _, _ = _resolve_signer_offer_asset_ids_for_reservation(
                 program=program,
                 market=market,
-                wallet=cloud_wallet,
             )
-            wallet_coins = _cloud_wallet_spendable_base_unit_coin_amounts(
-                wallet=cloud_wallet,
+            wallet_coins = _coinset_spendable_base_unit_coin_amounts(
+                program=program,
+                market=market,
                 resolved_asset_id=resolved_base_asset_id,
                 base_unit_mojo_multiplier=_base_unit_mojo_multiplier_for_market(market=market),
-                canonical_asset_id=str(market.base_asset),
-                scoped_list_cache=cloud_wallet_scoped_list_cache,
             )
-            cloud_wallet_scan_empty = len(wallet_coins) == 0
-            bucket_counts = compute_bucket_counts_from_coins(
-                coin_amounts_base_units=wallet_coins,
-                ladder_sizes=ladder_sizes,
-            )
-            _log_market_decision(
-                market.market_id,
-                "inventory_scan_wallet",
-                source="cloud_wallet",
-                resolved_asset_id=resolved_base_asset_id,
-                coin_count=len(wallet_coins),
-                bucket_counts=bucket_counts,
-            )
-            store.add_audit_event(
-                "inventory_bucket_scan",
-                {
-                    "market_id": market.market_id,
-                    "source": "cloud_wallet",
-                    "resolved_asset_id": resolved_base_asset_id,
-                    "bucket_counts": bucket_counts,
-                    "coin_count": len(wallet_coins),
-                },
-                market_id=market.market_id,
-            )
+            coinset_scan_empty = len(wallet_coins) == 0
+            if wallet_coins:
+                bucket_counts = compute_bucket_counts_from_coins(
+                    coin_amounts_base_units=wallet_coins,
+                    ladder_sizes=ladder_sizes,
+                )
+                _log_market_decision(
+                    market.market_id,
+                    "inventory_scan_wallet",
+                    source="coinset",
+                    resolved_asset_id=resolved_base_asset_id,
+                    coin_count=len(wallet_coins),
+                    bucket_counts=bucket_counts,
+                )
+                store.add_audit_event(
+                    "inventory_bucket_scan",
+                    {
+                        "market_id": market.market_id,
+                        "source": "coinset",
+                        "resolved_asset_id": resolved_base_asset_id,
+                        "bucket_counts": bucket_counts,
+                        "coin_count": len(wallet_coins),
+                    },
+                    market_id=market.market_id,
+                )
         except Exception as exc:
             _daemon_logger.warning(
-                "cloud_wallet_inventory_scan_failed market_id=%s error=%s",
+                "coinset_inventory_scan_failed market_id=%s error=%s",
                 market.market_id,
                 exc,
             )
 
-    if bucket_counts is None or cloud_wallet_scan_empty:
+    if bucket_counts is None or coinset_scan_empty:
         fallback_source = (
-            "wallet_adapter_fallback_after_empty_cloud_wallet_scan"
-            if cloud_wallet_scan_empty
+            "wallet_adapter_fallback_after_empty_coinset_scan"
+            if coinset_scan_empty
             else "wallet_adapter"
         )
-        if cloud_wallet_scan_empty and str(market.base_asset).strip().lower() not in {
+        if coinset_scan_empty and str(market.base_asset).strip().lower() not in {
             "xch",
             "1",
             "",
@@ -3606,7 +3459,7 @@ def _process_single_market(
                 base_unit_mojo_multiplier=_base_unit_mojo_multiplier_for_market(market=market),
             )
             if wallet_coins:
-                fallback_source = "coinset_cat_scan_fallback_after_empty_cloud_wallet_scan"
+                fallback_source = "coinset_cat_scan_fallback_after_empty_coinset_scan"
         if not wallet_coins:
             wallet_coins = wallet.list_asset_coins_base_units(
                 asset_id=market.base_asset,
@@ -3669,7 +3522,6 @@ def _process_single_market(
                 dexie_size_by_offer_id=dexie_size_by_offer_id,
                 result=result,
                 reservation_coordinator=reservation_coordinator,
-                cloud_wallet_scoped_list_cache=cloud_wallet_scoped_list_cache,
             )
         )
     except Exception as exc:
@@ -3736,7 +3588,6 @@ def _process_single_market_with_store(
     now: datetime,
     state_dir: Path,
     reservation_coordinator: AssetReservationCoordinator | None = None,
-    cloud_wallet_scoped_list_cache: CloudWalletAssetScopedListCache | None = None,
 ) -> _MarketCycleResult:
     """Run one market cycle with a thread-local SQLite connection."""
     store = SqliteStore(db_path)
@@ -3754,7 +3605,6 @@ def _process_single_market_with_store(
             now=now,
             state_dir=state_dir,
             reservation_coordinator=reservation_coordinator,
-            cloud_wallet_scoped_list_cache=cloud_wallet_scoped_list_cache,
         )
     finally:
         store.close()
@@ -3799,27 +3649,12 @@ def run_once(
         dexie = DexieAdapter(program.dexie_api_base)
         splash = SplashAdapter(program.splash_api_base)
         wallet = WalletAdapter()
-        cloud_wallet_price_fn = None
-        if _cloud_wallet_configured(program):
-            try:
-                cloud_wallet_price_fn = _new_cloud_wallet_adapter_for_daemon(
-                    program
-                ).get_chia_usd_quote
-            except Exception as exc:
-                store.add_audit_event(
-                    "xch_price_provider_init_error",
-                    {"provider": "cloud_wallet_quote", "error": str(exc)},
-                )
-        price = XchPriceProvider(
-            cloud_wallet_price_fn=cloud_wallet_price_fn,
-            cloud_wallet_ttl_seconds=120,
-            fallback_price_adapter=PriceAdapter(),
-        )
+        price = XchPriceProvider(fallback_price_adapter=PriceAdapter())
         previous_xch_price_usd = store.get_latest_xch_price_snapshot()
         reservation_coordinator: AssetReservationCoordinator | None = None
         if bool(
             getattr(program, "runtime_offer_parallelism_enabled", False)
-        ) and _cloud_wallet_configured(program):
+        ) and signer_offer_path_configured(program):
             reservation_coordinator = AssetReservationCoordinator(
                 db_path=db_path,
                 lease_seconds=int(getattr(program, "runtime_reservation_ttl_seconds", 300)),
@@ -3929,14 +3764,6 @@ def run_once(
                 market_dispatch_state.cursor %= len(enabled_markets)
         markets_attempted = len(selected_markets)
         immediate_requeue_market_ids: list[str] = []
-        cloud_wallet_scoped_list_cache: CloudWalletAssetScopedListCache | None = None
-        if _cloud_wallet_configured(program):
-            try:
-                cloud_wallet_scoped_list_cache = CloudWalletAssetScopedListCache(
-                    _new_cloud_wallet_adapter_for_daemon(program)
-                )
-            except Exception:
-                cloud_wallet_scoped_list_cache = None
         if bool(getattr(program, "runtime_parallel_markets", False)) and len(selected_markets) > 1:
             max_workers = max(1, len(selected_markets))
             _daemon_logger.info(
@@ -3960,7 +3787,6 @@ def run_once(
                         now=now,
                         state_dir=state_dir,
                         reservation_coordinator=reservation_coordinator,
-                        cloud_wallet_scoped_list_cache=cloud_wallet_scoped_list_cache,
                     ): market
                     for market in selected_markets
                 }
@@ -4019,7 +3845,6 @@ def run_once(
                         now=now,
                         state_dir=state_dir,
                         reservation_coordinator=reservation_coordinator,
-                        cloud_wallet_scoped_list_cache=cloud_wallet_scoped_list_cache,
                     )
                 except Exception as exc:
                     cycle_error_count += 1

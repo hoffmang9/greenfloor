@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 import greenfloor.cli.manager as manager_mod
-import greenfloor.runtime.cloud_wallet.adapter as adapter_mod
 from greenfloor.asset_label_catalog import _dexie_lookup_token_for_cat_id
 from greenfloor.cli.manager_setup import set_log_level
 from greenfloor.cli.offer_build_post import (
@@ -14,9 +13,7 @@ from greenfloor.cli.offer_build_post import (
     resolve_offer_publish_settings,
     resolve_splash_base_url,
 )
-from greenfloor.runtime.cloud_wallet.assets import (
-    recent_market_resolved_asset_id_hints,
-)
+from greenfloor.runtime.json_output import format_json_output, set_json_output_compact
 from tests.helpers.offer_runtime_fixtures import (
     write_manager_program,
 )
@@ -71,52 +68,16 @@ def test_dexie_lookup_token_for_cat_id_falls_back_to_v3_tickers(monkeypatch) -> 
     assert any(url.endswith("/v3/prices/tickers") for url in calls)
 
 
-def test_recent_market_resolved_asset_id_hints_reads_strategy_execution(tmp_path: Path) -> None:
-    from greenfloor.storage.sqlite import SqliteStore
-
-    home_dir = tmp_path / "home"
-    db_path = home_dir / "db" / "greenfloor.sqlite"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    store = SqliteStore(db_path)
-    try:
-        store.add_audit_event(
-            "strategy_offer_execution",
-            {
-                "market_id": "m1",
-                "resolved_base_asset_id": "Asset_base",
-                "resolved_quote_asset_id": "Asset_quote",
-            },
-            market_id="m1",
-        )
-    finally:
-        store.close()
-
-    base_hint, quote_hint = recent_market_resolved_asset_id_hints(
-        program_home_dir=str(home_dir),
-        market_id="m1",
-    )
-    assert base_hint == "Asset_base"
-    assert quote_hint == "Asset_quote"
-
-
 def test_format_json_output_pretty_mode_has_indentation() -> None:
-    original = adapter_mod._JSON_OUTPUT_COMPACT
-    try:
-        adapter_mod._JSON_OUTPUT_COMPACT = False
-        output = adapter_mod.format_json_output({"alpha": 1, "beta": {"gamma": 2}})
-    finally:
-        adapter_mod._JSON_OUTPUT_COMPACT = original
+    set_json_output_compact(False)
+    output = format_json_output({"alpha": 1, "beta": {"gamma": 2}})
     assert output.startswith("{\n")
     assert '\n  "alpha": 1' in output
 
 
 def test_format_json_output_compact_mode_is_single_line() -> None:
-    original = adapter_mod._JSON_OUTPUT_COMPACT
-    try:
-        adapter_mod._JSON_OUTPUT_COMPACT = True
-        output = adapter_mod.format_json_output({"alpha": 1, "beta": {"gamma": 2}})
-    finally:
-        adapter_mod._JSON_OUTPUT_COMPACT = original
+    set_json_output_compact(True)
+    output = format_json_output({"alpha": 1, "beta": {"gamma": 2}})
     assert output == '{"alpha":1,"beta":{"gamma":2}}'
 
 
