@@ -71,11 +71,18 @@ from greenfloor.runtime.cloud_wallet.assets import (
     resolve_cloud_wallet_offer_asset_ids,
     wallet_asset_amounts_for_asset_id,
 )
-from greenfloor.runtime.cloud_wallet.coin_ops_execution import combine_coins_with_retry
+from greenfloor.runtime.cloud_wallet.coin_ops_daemon_execution import (
+    DaemonCoinOpExecContext,
+    execute_daemon_combine_plan,
+    execute_daemon_split_plan,
+)
+from greenfloor.runtime.cloud_wallet.coin_ops_models import (
+    CoinOpSelectionMode,
+    filter_spendable_for_coin_ops,
+)
 from greenfloor.runtime.cloud_wallet.coins import (
     cloud_wallet_coin_matches_asset_scope,
     coin_matches_scoped_spendable_filters,
-    filter_spendable_scoped_coins,
     is_spendable_coin,
     refresh_scoped_spendable_coin_rows,
 )
@@ -1603,86 +1610,6 @@ def _coinset_cat_spendable_base_unit_coin_amounts(
         if amount_base_units > 0:
             amounts.append(amount_base_units)
     return amounts
-
-
-def _select_spendable_coins_for_target_amount(
-    *,
-    coins: list[dict[str, Any]],
-    target_amount: int,
-) -> tuple[list[str], int, bool]:
-    """Pick spendable input coins to reach target; prefer exact sum first.
-
-    Returns (coin_ids, selected_total, exact_match).
-    """
-    required = int(target_amount)
-    if required <= 0:
-        return [], 0, False
-    entries: list[tuple[str, int]] = []
-    for coin in coins:
-        if not isinstance(coin, dict):
-            continue
-        coin_id = str(coin.get("id", "")).strip()
-        if not coin_id:
-            continue
-        try:
-            amount = int(coin.get("amount", 0))
-        except (TypeError, ValueError):
-            amount = 0
-        if amount <= 0:
-            continue
-        entries.append((coin_id, amount))
-    if not entries:
-        return [], 0, False
-
-    max_amount = max(amount for _, amount in entries)
-    cap = required + max_amount
-    # Guard memory on unusually large amount domains.
-    if cap > 500_000:
-        ordered = sorted(entries, key=lambda row: row[1], reverse=True)
-        picked_ids: list[str] = []
-        running = 0
-        for coin_id, amount in ordered:
-            picked_ids.append(coin_id)
-            running += amount
-            if running >= required:
-                return picked_ids, running, running == required
-        return [], 0, False
-
-    best: dict[int, list[int]] = {0: []}
-    for idx, (_coin_id, amount) in enumerate(entries):
-        snapshot = list(best.items())
-        for prev_sum, subset in snapshot:
-            next_sum = int(prev_sum) + int(amount)
-            if next_sum > cap:
-                continue
-            candidate = subset + [idx]
-            existing = best.get(next_sum)
-            if existing is None or len(candidate) < len(existing):
-                best[next_sum] = candidate
-
-    exact_subset = best.get(required)
-    if exact_subset is not None and len(exact_subset) > 0:
-        ids = [entries[i][0] for i in exact_subset]
-        total = sum(entries[i][1] for i in exact_subset)
-        return ids, total, True
-
-    overs = [s for s in best.keys() if s > required]
-    if not overs:
-        return [], 0, False
-    best_over = min(
-        overs,
-        key=lambda s: (
-            int(s) - required,
-            len(best.get(s, [])),
-            int(s),
-        ),
-    )
-    subset = best.get(best_over, [])
-    if not subset:
-        return [], 0, False
-    ids = [entries[i][0] for i in subset]
-    total = sum(entries[i][1] for i in subset)
-    return ids, total, False
 
 
 def _reservation_request_for_cloud_offer(*, market: Any, action: Any) -> dict[str, int]:
@@ -3536,15 +3463,25 @@ def _execute_coin_ops_cloud_wallet_kms_only(
     items: list[dict[str, Any]] = []
     executed_count = 0
     combine_input_cap = _combine_input_coin_cap()
-
-    def _spendable_asset_scoped_coins(coins: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return filter_spendable_scoped_coins(
+    exec_ctx = DaemonCoinOpExecContext(
+        cloud_wallet=cloud_wallet,
+        market=market,
+        program=program,
+        resolved_base_asset_id=resolved_base_asset_id,
+        base_unit_mojo_multiplier=base_unit_mojo_multiplier,
+        combine_input_cap=combine_input_cap,
+        watched_coin_ids=_watched_coin_ids_for_market(
+            market_id=str(getattr(market, "market_id", "")).strip()
+        ),
+        spendable_coins=lambda coins: filter_spendable_for_coin_ops(
             coins=coins,
             wallet=cloud_wallet,
             resolved_asset_id=resolved_base_asset_id,
             canonical_asset_id=str(getattr(market, "base_asset", "")).strip(),
-            refresh_rows=True,
-        )
+            mode=CoinOpSelectionMode.DAEMON,
+        ),
+        logger=_daemon_logger,
+    )
 
     for plan in plans:
         op_type = str(plan.op_type)
@@ -3577,412 +3514,16 @@ def _execute_coin_ops_cloud_wallet_kms_only(
 
         try:
             if op_type == "split":
-                if op_count == 1:
-                    # A one-output split only manufactures bookkeeping churn.
-                    # Let the market continue rather than creating a cosmetic
-                    # "split 1 coin into 1 coin" transaction.
-                    items.append(
-                        {
-                            "op_type": op_type,
-                            "size_base_units": size_base_units,
-                            "op_count": op_count,
-                            "status": "skipped",
-                            "reason": "split_single_coin_noop_skipped",
-                            "operation_id": None,
-                        }
-                    )
-                    continue
-                amount_per_coin_mojos = size_base_units * base_unit_mojo_multiplier
-                canonical_asset_id = str(getattr(market, "base_asset", "")).strip()
-                # Defensive inner check: _plan_and_execute_coin_ops filters the
-                # ladder before reaching here, but callers that bypass that
-                # layer (e.g. direct tests or future call sites) also get a
-                # clean rejection rather than a failed RPC call.
-                if not _coin_op_target_amount_allowed(
-                    amount_mojos=amount_per_coin_mojos,
-                    canonical_asset_id=canonical_asset_id,
-                ):
-                    items.append(
-                        {
-                            "op_type": op_type,
-                            "size_base_units": size_base_units,
-                            "op_count": op_count,
-                            "status": "skipped",
-                            "reason": "split_amount_below_coin_op_minimum",
-                            "operation_id": None,
-                            "data": {
-                                "amount_per_coin_mojos": int(amount_per_coin_mojos),
-                                "minimum_allowed_mojos": int(
-                                    _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
-                                ),
-                            },
-                        }
-                    )
-                    continue
-                required_amount = amount_per_coin_mojos * op_count
-                coins = cloud_wallet.list_coins(
-                    asset_id=resolved_base_asset_id,
-                )
-                spendable = _spendable_asset_scoped_coins(coins)
-                if not spendable:
-                    items.append(
-                        {
-                            "op_type": op_type,
-                            "size_base_units": size_base_units,
-                            "op_count": op_count,
-                            "status": "skipped",
-                            "reason": "no_spendable_split_coin_available",
-                            "operation_id": None,
-                        }
-                    )
-                    continue
-                attempted_coin_ids: set[str] = set()
-                split_submitted = False
-                for attempt_index in range(2):
-                    # Re-read before each attempt to avoid selecting stale now-locked coins.
-                    fresh = cloud_wallet.list_coins(
-                        asset_id=resolved_base_asset_id,
-                    )
-                    candidate_spendable = [
-                        coin
-                        for coin in _spendable_asset_scoped_coins(fresh)
-                        if str(coin.get("id", "")).strip() not in attempted_coin_ids
-                    ]
-                    fresh_spendable = [
-                        coin
-                        for coin in candidate_spendable
-                        if int(coin.get("amount", 0)) >= required_amount
-                    ]
-                    if not fresh_spendable:
-                        aggregate_amount = sum(
-                            int(coin.get("amount", 0)) for coin in candidate_spendable
-                        )
-                        if attempt_index == 0 and aggregate_amount >= required_amount:
-                            combine_coin_ids, combine_total, exact_match = (
-                                _select_spendable_coins_for_target_amount(
-                                    coins=candidate_spendable,
-                                    target_amount=required_amount,
-                                )
-                            )
-                            if len(combine_coin_ids) >= 2:
-                                amount_by_coin_id = {
-                                    str(coin.get("id", "")).strip(): int(coin.get("amount", 0))
-                                    for coin in candidate_spendable
-                                }
-                                combine_input_coin_ids = list(combine_coin_ids[:combine_input_cap])
-                                combine_cap_applied = len(combine_input_coin_ids) < len(
-                                    combine_coin_ids
-                                )
-                                combine_selected_total = sum(
-                                    amount_by_coin_id.get(coin_id, 0)
-                                    for coin_id in combine_input_coin_ids
-                                )
-                                combine_exact_match = combine_selected_total == required_amount
-                                combine_target_amount = (
-                                    required_amount
-                                    if combine_selected_total >= required_amount
-                                    else combine_selected_total
-                                )
-                                if combine_cap_applied and combine_selected_total < required_amount:
-                                    _daemon_logger.info(
-                                        "coin_ops_combine_cap_progress "
-                                        "market_id=%s required_amount=%s selected_total=%s "
-                                        "selected_before_cap=%s selected_after_cap=%s input_coin_cap=%s "
-                                        "note=%s",
-                                        str(getattr(market, "market_id", "")).strip() or "unknown",
-                                        int(required_amount),
-                                        int(combine_selected_total),
-                                        int(len(combine_coin_ids)),
-                                        int(len(combine_input_coin_ids)),
-                                        int(combine_input_cap),
-                                        "submitted capped progress combine; next cycle likely needs only 2-coin combine",
-                                    )
-                                try:
-                                    combine_result = combine_coins_with_retry(
-                                        cloud_wallet=cloud_wallet,
-                                        combine_kwargs={
-                                            "number_of_coins": len(combine_input_coin_ids),
-                                            "fee": int(program.coin_ops_combine_fee_mojos),
-                                            "asset_id": resolved_base_asset_id,
-                                            "largest_first": True,
-                                            "input_coin_ids": combine_input_coin_ids,
-                                            "target_amount": combine_target_amount,
-                                        },
-                                    )
-                                except Exception as exc:
-                                    items.append(
-                                        {
-                                            "op_type": op_type,
-                                            "size_base_units": size_base_units,
-                                            "op_count": op_count,
-                                            "status": "skipped",
-                                            "reason": (
-                                                f"cloud_wallet_coin_op_error:{exc}"
-                                                ":combine_for_split_prereq"
-                                            ),
-                                            "operation_id": None,
-                                        }
-                                    )
-                                    split_submitted = True
-                                    break
-                                combine_sig_id = str(
-                                    combine_result.get("signature_request_id", "")
-                                ).strip()
-                                if not combine_sig_id:
-                                    items.append(
-                                        {
-                                            "op_type": op_type,
-                                            "size_base_units": size_base_units,
-                                            "op_count": op_count,
-                                            "status": "skipped",
-                                            "reason": "combine_missing_signature_request_id_for_split_prereq",
-                                            "operation_id": None,
-                                        }
-                                    )
-                                    split_submitted = True
-                                    break
-                                items.append(
-                                    {
-                                        "op_type": "combine",
-                                        "size_base_units": size_base_units,
-                                        "op_count": len(combine_input_coin_ids),
-                                        "status": "executed",
-                                        "reason": (
-                                            "cloud_wallet_kms_combine_submitted_for_split_prereq_exact"
-                                            if combine_exact_match
-                                            else "cloud_wallet_kms_combine_submitted_for_split_prereq_with_change"
-                                        ),
-                                        "operation_id": combine_sig_id,
-                                        "data": {
-                                            "target_amount": required_amount,
-                                            "selected_total": int(combine_selected_total),
-                                            "exact_match": bool(combine_exact_match),
-                                            "input_coin_cap_applied": bool(combine_cap_applied),
-                                            "input_coin_cap": int(combine_input_cap),
-                                            "selected_coin_count_before_cap": len(combine_coin_ids),
-                                            "selected_coin_count_after_cap": len(
-                                                combine_input_coin_ids
-                                            ),
-                                            "next_step_note": (
-                                                "submitted capped progress combine; next cycle likely needs "
-                                                "only 2-coin combine"
-                                                if combine_cap_applied
-                                                and combine_selected_total < required_amount
-                                                else ""
-                                            ),
-                                        },
-                                    }
-                                )
-                                executed_count += 1
-                                split_submitted = True
-                                break
-                        break
-                    selected_coin = max(fresh_spendable, key=lambda c: int(c.get("amount", 0)))
-                    selected_coin_id = str(selected_coin.get("id", "")).strip()
-                    if not selected_coin_id:
-                        break
-                    selected_amount = int(selected_coin.get("amount", 0))
-                    selected_remainder = int(selected_amount - required_amount)
-                    min_cat_mojos = _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
-                    if (
-                        min_cat_mojos > 0
-                        and selected_remainder > 0
-                        and selected_remainder < int(min_cat_mojos)
-                    ):
-                        items.append(
-                            {
-                                "op_type": op_type,
-                                "size_base_units": size_base_units,
-                                "op_count": op_count,
-                                "status": "skipped",
-                                "reason": "split_would_create_sub_cat_change",
-                                "operation_id": None,
-                                "data": {
-                                    "selected_coin_id": selected_coin_id,
-                                    "selected_amount_mojos": int(selected_amount),
-                                    "required_amount_mojos": int(required_amount),
-                                    "remainder_mojos": int(selected_remainder),
-                                    "minimum_allowed_mojos": int(min_cat_mojos),
-                                },
-                            }
-                        )
-                        # Intentional: treat this op as "handled" for this cycle so
-                        # we do not churn through alternate candidates and risk
-                        # repeatedly planning dust-producing splits in one pass.
-                        split_submitted = True
-                        break
-                    attempted_coin_ids.add(selected_coin_id)
-                    try:
-                        result = cloud_wallet.split_coins(
-                            coin_ids=[selected_coin_id],
-                            amount_per_coin=amount_per_coin_mojos,
-                            number_of_coins=op_count,
-                            fee=int(program.coin_ops_split_fee_mojos),
-                        )
-                    except Exception as exc:
-                        error_text = str(exc)
-                        if (
-                            "Some selected coins are not spendable" in error_text
-                            and attempt_index == 0
-                        ):
-                            continue
-                        items.append(
-                            {
-                                "op_type": op_type,
-                                "size_base_units": size_base_units,
-                                "op_count": op_count,
-                                "status": "skipped",
-                                "reason": (
-                                    f"cloud_wallet_coin_op_error:{exc}"
-                                    f":selected_coin_id={selected_coin_id}"
-                                ),
-                                "operation_id": None,
-                            }
-                        )
-                        split_submitted = True
-                        break
-
-                    signature_request_id = str(result.get("signature_request_id", "")).strip()
-                    if not signature_request_id:
-                        items.append(
-                            {
-                                "op_type": op_type,
-                                "size_base_units": size_base_units,
-                                "op_count": op_count,
-                                "status": "skipped",
-                                "reason": "split_missing_signature_request_id",
-                                "operation_id": None,
-                            }
-                        )
-                        split_submitted = True
-                        break
-                    items.append(
-                        {
-                            "op_type": op_type,
-                            "size_base_units": size_base_units,
-                            "op_count": op_count,
-                            "status": "executed",
-                            "reason": "cloud_wallet_kms_split_submitted",
-                            "operation_id": signature_request_id,
-                        }
-                    )
-                    executed_count += 1
-                    split_submitted = True
-                    break
-
-                if not split_submitted:
-                    items.append(
-                        {
-                            "op_type": op_type,
-                            "size_base_units": size_base_units,
-                            "op_count": op_count,
-                            "status": "skipped",
-                            "reason": "no_spendable_split_coin_meets_required_amount",
-                            "operation_id": None,
-                        }
-                    )
+                split_items, split_executed = execute_daemon_split_plan(plan=plan, ctx=exec_ctx)
+                items.extend(split_items)
+                executed_count += split_executed
                 continue
-
             if op_type == "combine":
-                requested_number_of_coins = max(2, op_count)
-                capped_number_of_coins = min(requested_number_of_coins, combine_input_cap)
-                target_coin_amount_mojos = size_base_units * base_unit_mojo_multiplier
-                canonical_asset_id = str(getattr(market, "base_asset", "")).strip()
-                # Defensive inner check — see comment in the split branch above.
-                if not _coin_op_target_amount_allowed(
-                    amount_mojos=target_coin_amount_mojos,
-                    canonical_asset_id=canonical_asset_id,
-                ):
-                    items.append(
-                        {
-                            "op_type": op_type,
-                            "size_base_units": size_base_units,
-                            "op_count": op_count,
-                            "status": "skipped",
-                            "reason": "combine_target_amount_below_coin_op_minimum",
-                            "operation_id": None,
-                            "data": {
-                                "target_coin_amount_mojos": int(target_coin_amount_mojos),
-                                "minimum_allowed_mojos": int(
-                                    _coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
-                                ),
-                            },
-                        }
-                    )
-                    continue
-                watched_coin_ids = _watched_coin_ids_for_market(
-                    market_id=str(getattr(market, "market_id", "")).strip()
+                combine_items, combine_executed = execute_daemon_combine_plan(
+                    plan=plan, ctx=exec_ctx
                 )
-                exact_bucket_coin_ids: list[str] = []
-                for coin in _spendable_asset_scoped_coins(
-                    cloud_wallet.list_coins(asset_id=resolved_base_asset_id)
-                ):
-                    coin_id = str(coin.get("id", "")).strip()
-                    if not coin_id or coin_id.lower() in watched_coin_ids:
-                        continue
-                    try:
-                        amount_mojos = int(coin.get("amount", 0))
-                    except (TypeError, ValueError):
-                        continue
-                    if amount_mojos != target_coin_amount_mojos:
-                        continue
-                    exact_bucket_coin_ids.append(coin_id)
-                combine_input_coin_ids = exact_bucket_coin_ids[:capped_number_of_coins]
-                if len(combine_input_coin_ids) < 2:
-                    items.append(
-                        {
-                            "op_type": op_type,
-                            "size_base_units": size_base_units,
-                            "op_count": op_count,
-                            "status": "skipped",
-                            "reason": "no_spendable_combine_coin_available",
-                            "operation_id": None,
-                        }
-                    )
-                    continue
-                result = combine_coins_with_retry(
-                    cloud_wallet=cloud_wallet,
-                    combine_kwargs={
-                        "number_of_coins": len(combine_input_coin_ids),
-                        "fee": int(program.coin_ops_combine_fee_mojos),
-                        "asset_id": resolved_base_asset_id,
-                        "largest_first": True,
-                        "input_coin_ids": combine_input_coin_ids,
-                    },
-                )
-                signature_request_id = str(result.get("signature_request_id", "")).strip()
-                if not signature_request_id:
-                    items.append(
-                        {
-                            "op_type": op_type,
-                            "size_base_units": size_base_units,
-                            "op_count": op_count,
-                            "status": "skipped",
-                            "reason": "combine_missing_signature_request_id",
-                            "operation_id": None,
-                        }
-                    )
-                    continue
-                items.append(
-                    {
-                        "op_type": op_type,
-                        "size_base_units": size_base_units,
-                        "op_count": op_count,
-                        "status": "executed",
-                        "reason": "cloud_wallet_kms_combine_submitted",
-                        "operation_id": signature_request_id,
-                        "data": {
-                            "requested_number_of_coins": int(requested_number_of_coins),
-                            "submitted_number_of_coins": int(len(combine_input_coin_ids)),
-                            "input_coin_cap_applied": bool(
-                                capped_number_of_coins < requested_number_of_coins
-                            ),
-                            "input_coin_cap": int(combine_input_cap),
-                            "input_coin_ids": combine_input_coin_ids,
-                        },
-                    }
-                )
-                executed_count += 1
+                items.extend(combine_items)
+                executed_count += combine_executed
                 continue
 
             items.append(

@@ -7,7 +7,7 @@ from typing import Any
 from greenfloor.adapters.cloud_wallet import CloudWalletAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.offer_decode import extract_coin_id_hints_from_offer_text
-from greenfloor.runtime.cloud_wallet.coin_ops_runtime import CoinOpDeps, DEFAULT_COIN_OP_DEPS
+from greenfloor.runtime.cloud_wallet.coin_ops_runtime import DEFAULT_COIN_OP_DEPS, CoinOpDeps
 from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin, resolve_coin_global_ids
 
 

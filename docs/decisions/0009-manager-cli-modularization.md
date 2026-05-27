@@ -18,17 +18,22 @@ Split the former monolithic `greenfloor/cli/manager.py` into focused CLI modules
 - `greenfloor/cli/coin_ops_split.py` — `coin-split`.
 - `greenfloor/cli/coin_ops_combine.py` — `coin-combine`.
 - `greenfloor/cli/coin_ops.py` — thin re-exports for manager/tests.
+- `greenfloor/cli/coin_ops_cli.py` — explicit `execute_split_cli` / `execute_combine_cli` orchestration (no generic callback command object).
 
 ### Other CLI modules
 
-- `greenfloor/cli/cats.py`, `keys_onboard.py`, `manager_setup.py`, `offers_lifecycle.py`, `offer_build_post.py`, `prompts.py`.
+- `greenfloor/cli/cats.py` — `cats add/list/delete` commands.
+- `greenfloor/cli/cats_catalog.py` — catalog I/O (`load_cats_catalog`, Dexie row metadata helpers).
+- `greenfloor/cli/keys_onboard.py`, `manager_setup.py`, `offers_lifecycle.py`, `offer_build_post.py`, `prompts.py`.
 
 ### Shared runtime
 
 - `greenfloor/runtime/cloud_wallet/coin_op_errors.py` — unified `coin_op_error_payload()` and named error builders.
 - `greenfloor/runtime/cloud_wallet/coin_ops_runtime.py` — setup, fee resolution, iteration loop, typed `MarketConfig`/`ProgramConfig` boundaries.
 - `greenfloor/runtime/cloud_wallet/coin_ops_steps.py` — split/combine step bodies; returns `CoinOpIterationNeedsConfirmation` (no CLI prompts).
-- `greenfloor/runtime/cloud_wallet/coin_ops_cli.py` — shared CLI orchestration (`execute_coin_op_cli`, split confirmation wrapper).
+- `greenfloor/runtime/cloud_wallet/coin_ops_planning.py` — shared split/combine planning (`plan_auto_split_selection`, `plan_auto_combine_inputs`, combine-for-split prereq).
+- `greenfloor/runtime/cloud_wallet/coin_ops_models.py` — typed denomination targets (`SplitDenominationTarget`, `CombineDenominationTarget`), `CoinOpSelectionMode`, `filter_spendable_for_coin_ops()`.
+- `greenfloor/runtime/cloud_wallet/coin_ops_daemon_execution.py` — daemon split/combine plan execution (`execute_daemon_split_plan`, `execute_daemon_combine_plan`, `select_spendable_coins_for_target_amount`).
 - `greenfloor/runtime/cloud_wallet/coin_ops_execution.py` — `combine_coins_with_retry()` (CLI combine + daemon).
 - `greenfloor/runtime/cloud_wallet/coin_ops_refresh.py` — on-chain refresh split after off-chain cancel.
 - `greenfloor/runtime/cloud_wallet/coins.py` — spendable/scoped coin selection (`filter_spendable_scoped_coins`, etc.; CLI + daemon).
@@ -54,7 +59,9 @@ Split the former monolithic `greenfloor/cli/manager.py` into focused CLI modules
 
 ## Consequences
 
-- No single CLI coin-op file may exceed ~600 lines; split/combine share `execute_coin_op_cli()` and `run_coin_op_iteration_loop()`.
-- Interactive confirmations are handled in `coin_ops_cli.py`; runtime steps return `CoinOpIterationNeedsConfirmation`.
+- No single CLI coin-op file may exceed ~600 lines; split/combine share `execute_split_cli` / `execute_combine_cli` and `run_coin_op_iteration_loop()`.
+- Interactive confirmations are handled in `greenfloor/cli/coin_ops_cli.py`; runtime steps return `CoinOpIterationNeedsConfirmation`.
+- Split/combine planning logic lives in `coin_ops_planning.py`; CLI steps and daemon execution adapt its results.
+- Daemon coin-op execution uses `coin_ops_daemon_execution.py`; selection uses `filter_spendable_for_coin_ops(..., mode=CoinOpSelectionMode.DAEMON)`.
+- CLI coin-op selection uses `filter_spendable_for_coin_ops(..., mode=CoinOpSelectionMode.CLI)`.
 - New coin-op or reconcile behavior lands in runtime first; CLI wraps it.
-- Daemon coin-op selection uses the same `filter_spendable_scoped_coins()` helpers as CLI steps.

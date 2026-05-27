@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import urllib.error
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from greenfloor.adapters.coinset import extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter

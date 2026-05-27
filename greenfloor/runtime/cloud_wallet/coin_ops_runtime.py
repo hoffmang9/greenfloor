@@ -25,17 +25,12 @@ from greenfloor.runtime.cloud_wallet.coin_op_errors import (
     coin_op_base_payload,
     coin_op_error_payload,
 )
+from greenfloor.runtime.cloud_wallet.coin_ops_models import (
+    DenominationTarget,
+    denomination_target_payload,
+)
 from greenfloor.runtime.cloud_wallet.coins import is_spendable_coin
 from greenfloor.runtime.coinset_runtime import CoinsetFeeLookupPreflightError
-
-# Re-export error payload helpers for existing import paths.
-from greenfloor.runtime.cloud_wallet.coin_op_errors import (  # noqa: F401
-    coin_combine_asset_mismatch_error_payload,
-    coin_combine_insufficient_coins_error_payload,
-    coin_op_unresolved_error_payload,
-    coin_split_lockup_guardrail_error_payload,
-    coin_split_no_spendable_error_payload,
-)
 
 
 @dataclass
@@ -200,7 +195,7 @@ def coin_op_build_iteration_payload(
     network: str,
     existing_coin_ids: set[str],
     iteration: int,
-    denomination_target: dict[str, Any] | None,
+    denomination_target: DenominationTarget,
     readiness_asset_id: str,
     readiness_kwargs: dict[str, int],
     deps: CoinOpDeps = DEFAULT_COIN_OP_DEPS,
@@ -237,7 +232,7 @@ def coin_op_build_iteration_payload(
         final_readiness = evaluate_denomination_readiness(
             wallet=wallet,
             asset_id=readiness_asset_id,
-            size_base_units=int(denomination_target["size_base_units"]),
+            size_base_units=denomination_target.size_base_units,
             **readiness_kwargs,
         )
         iteration_payload["denomination_readiness"] = final_readiness
@@ -299,7 +294,7 @@ def coin_op_result_payload(
     selected_venue: str | None,
     wallet: CloudWalletAdapter,
     coin_ids: list[str],
-    denomination_target: dict[str, Any] | None,
+    denomination_target: DenominationTarget,
     until_ready: bool,
     max_iterations: int,
     stop_reason: str,
@@ -311,7 +306,7 @@ def coin_op_result_payload(
     return {
         **coin_op_base_payload(market, selected_venue, wallet),
         "coin_selection_mode": "explicit" if coin_ids else "adapter_auto_select",
-        "denomination_target": denomination_target,
+        "denomination_target": denomination_target_payload(denomination_target),
         "until_ready": until_ready,
         "max_iterations": max_iterations,
         "stop_reason": stop_reason,
@@ -467,11 +462,18 @@ CoinOpIterationStep = (
 
 
 @dataclass(slots=True)
+class CoinOpStepOutcome:
+    step: CoinOpIterationStep
+    split_gate: dict[str, int | bool | str] | None = None
+
+
+@dataclass(slots=True)
 class CoinOpLoopResult:
     operations: list[dict[str, object]]
     final_readiness: dict[str, int | bool | str] | None
     stop_reason: str
     unresolved_coin_ids: list[str]
+    split_gate: dict[str, int | bool | str] | None = None
     early_return_code: int | None = None
     error_payload: dict[str, object] | None = None
 
@@ -484,20 +486,24 @@ def run_coin_op_iteration_loop(
     until_ready: bool,
     max_iterations: int,
     coin_ids: list[str],
-    denomination_target: dict[str, Any] | None,
+    denomination_target: DenominationTarget,
     readiness_asset_id: str,
-    run_step: Callable[[int, list[dict[str, Any]], set[str]], CoinOpIterationStep],
+    run_step: Callable[[int, list[dict[str, Any]], set[str]], CoinOpStepOutcome],
     deps: CoinOpDeps = DEFAULT_COIN_OP_DEPS,
 ) -> CoinOpLoopResult:
     operations: list[dict[str, object]] = []
     final_readiness: dict[str, int | bool | str] | None = None
+    split_gate: dict[str, int | bool | str] | None = None
     stop_reason = "single_pass"
     unresolved_coin_ids: list[str] = []
 
     for iteration in range(1, max_iterations + 1):
         wallet_coins = wallet.list_coins(include_pending=True)
         existing_coin_ids = {str(c.get("id", "")).strip() for c in wallet_coins}
-        step = run_step(iteration, wallet_coins, existing_coin_ids)
+        outcome = run_step(iteration, wallet_coins, existing_coin_ids)
+        if outcome.split_gate is not None:
+            split_gate = outcome.split_gate
+        step = outcome.step
 
         if isinstance(step, CoinOpIterationEarlyExit):
             return CoinOpLoopResult(
@@ -505,6 +511,7 @@ def run_coin_op_iteration_loop(
                 final_readiness=final_readiness,
                 stop_reason=step.stop_reason or stop_reason,
                 unresolved_coin_ids=list(step.unresolved_coin_ids or []),
+                split_gate=split_gate,
                 early_return_code=step.return_code,
                 error_payload=step.error_payload,
             )
@@ -547,4 +554,5 @@ def run_coin_op_iteration_loop(
         final_readiness=final_readiness,
         stop_reason=stop_reason,
         unresolved_coin_ids=unresolved_coin_ids,
+        split_gate=split_gate,
     )
