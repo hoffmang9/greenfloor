@@ -1,0 +1,34 @@
+name: GreenFloor maturin wheels
+description: Ensure and optionally install the GreenFloor native and signer PyO3 wheels.
+
+inputs:
+  operation:
+    description: ensure or ensure-and-install
+    required: true
+  rust-already-configured:
+    description: Skip Rust setup on a local wheel build; the caller already configured Rust
+    required: false
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: ./.github/actions/wheel-cache
+      with:
+        operation: ${{ inputs.operation }}
+        builder: maturin
+        tree-path: greenfloor-native
+        source-path: greenfloor-native/Cargo.toml
+        cache-key-prefix: native-wheelhouse
+        wheelhouse-subdir: greenfloor-native
+        rust-already-configured: ${{ inputs.rust-already-configured }}
+
+    - uses: ./.github/actions/wheel-cache
+      with:
+        operation: ${{ inputs.operation }}
+        builder: maturin
+        tree-path: greenfloor-signer-pyo3
+        source-path: greenfloor-signer-pyo3/Cargo.toml
+        cache-key-prefix: signer-pyo3-wheelhouse
+        wheelhouse-subdir: greenfloor-signer-pyo3
+        rust-already-configured: ${{ inputs.rust-already-configured }}

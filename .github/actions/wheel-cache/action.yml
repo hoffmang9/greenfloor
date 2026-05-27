@@ -1,0 +1,117 @@
+name: Wheel cache
+description: Ensure a platform wheel is cached, or install it from the local wheelhouse.
+
+inputs:
+  operation:
+    description: ensure, install, or ensure-and-install
+    required: true
+  wheelhouse-subdir:
+    description: Directory under .cache/wheelhouse/
+    required: true
+  builder:
+    description: maturin or pip; required for ensure and ensure-and-install
+    required: false
+    default: ""
+  tree-path:
+    description: Git tree path for cache keys; required for ensure and ensure-and-install
+    required: false
+    default: ""
+  source-path:
+    description: Cargo manifest (maturin) or package path (pip); required for ensure and ensure-and-install
+    required: false
+    default: ""
+  cache-key-prefix:
+    description: Prefix for the GitHub Actions cache key; required for ensure and ensure-and-install
+    required: false
+    default: ""
+  rust-already-configured:
+    description: Skip Rust toolchain and Cargo cache setup on a build; the caller already configured Rust
+    required: false
+    default: "false"
+
+outputs:
+  cache-hit:
+    description: Whether the wheel cache restore hit during ensure
+    value: ${{ steps.restore.outputs.cache-hit }}
+  tree-sha:
+    description: Git tree SHA used for the cache key during ensure
+    value: ${{ steps.tree.outputs.sha }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate ensure inputs
+      if: inputs.operation == 'ensure' || inputs.operation == 'ensure-and-install'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ "${{ inputs.builder }}" != "maturin" ] && [ "${{ inputs.builder }}" != "pip" ]; then
+          echo "operation '${{ inputs.operation }}' requires builder 'maturin' or 'pip'." >&2
+          exit 1
+        fi
+        if [ -z "${{ inputs.tree-path }}" ]; then
+          echo "operation '${{ inputs.operation }}' requires tree-path." >&2
+          exit 1
+        fi
+        if [ -z "${{ inputs.source-path }}" ]; then
+          echo "operation '${{ inputs.operation }}' requires source-path." >&2
+          exit 1
+        fi
+        if [ -z "${{ inputs.cache-key-prefix }}" ]; then
+          echo "operation '${{ inputs.operation }}' requires cache-key-prefix." >&2
+          exit 1
+        fi
+
+    - id: tree
+      if: inputs.operation == 'ensure' || inputs.operation == 'ensure-and-install'
+      shell: bash
+      run: |
+        echo "sha=$(git rev-parse HEAD:${{ inputs.tree-path }})" >> "$GITHUB_OUTPUT"
+
+    - id: restore
+      if: inputs.operation == 'ensure' || inputs.operation == 'ensure-and-install'
+      uses: actions/cache/restore@v4
+      with:
+        path: .cache/wheelhouse/${{ inputs.wheelhouse-subdir }}
+        key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.tree.outputs.sha }}
+
+    - uses: ./.github/actions/rust-cache-greenfloor
+      if: |
+        (inputs.operation == 'ensure' || inputs.operation == 'ensure-and-install')
+        && steps.restore.outputs.cache-hit != 'true'
+        && inputs.rust-already-configured != 'true'
+
+    - name: Build wheel (cache miss)
+      if: |
+        (inputs.operation == 'ensure' || inputs.operation == 'ensure-and-install')
+        && steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        wheelhouse=".cache/wheelhouse/${{ inputs.wheelhouse-subdir }}"
+        mkdir -p "$wheelhouse"
+
+        if [ "${{ inputs.builder }}" = "maturin" ]; then
+          python -m pip install maturin
+          python -m maturin build \
+            --manifest-path "${{ inputs.source-path }}" \
+            --out "$wheelhouse"
+        else
+          python -m pip wheel \
+            --wheel-dir "$wheelhouse" \
+            "${{ inputs.source-path }}"
+        fi
+
+    - name: Save wheel cache
+      if: |
+        (inputs.operation == 'ensure' || inputs.operation == 'ensure-and-install')
+        && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: .cache/wheelhouse/${{ inputs.wheelhouse-subdir }}
+        key: ${{ inputs.cache-key-prefix }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.tree.outputs.sha }}
+
+    - name: Install wheel
+      if: inputs.operation == 'install' || inputs.operation == 'ensure-and-install'
+      shell: bash
+      run: python -m pip install ".cache/wheelhouse/${{ inputs.wheelhouse-subdir }}"/*.whl
