@@ -8,6 +8,7 @@ from typing import Any, Literal
 from greenfloor.logging_setup import normalize_log_level_name
 
 OfferExecutionBackend = Literal["signer", "cloud_wallet", "bls"]
+ManagedOfferExecutionBackend = Literal["signer", "cloud_wallet"]
 
 _CANONICAL_CAT_UNIT_MOJOS = 1000
 _CANONICAL_XCH_UNIT_MOJOS = 1_000_000_000_000
@@ -167,6 +168,22 @@ def offer_execution_backend(
             return "bls"
         return "cloud_wallet"
     return "bls"
+
+
+def managed_offer_execution_backend(
+    program: ProgramConfig,
+    *,
+    size_base_units: int = 0,
+    local_build_min_size_base_units: int | None = None,
+) -> ManagedOfferExecutionBackend | None:
+    backend = offer_execution_backend(
+        program,
+        size_base_units=size_base_units,
+        local_build_min_size_base_units=local_build_min_size_base_units,
+    )
+    if backend in ("signer", "cloud_wallet"):
+        return backend
+    return None
 
 
 @dataclass(slots=True)

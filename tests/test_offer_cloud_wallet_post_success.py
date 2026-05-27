@@ -104,8 +104,6 @@ def test_build_and_post_offer_cloud_wallet_happy_path_dexie(
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
-        program=prog,
-        market=mkt,
         size_base_units=10,
         repeat=1,
         publish_venue="dexie",
@@ -223,8 +221,6 @@ def test_build_and_post_offer_cloud_wallet_uses_market_configured_expiry_overrid
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
-        program=prog,
-        market=mkt,
         size_base_units=1,
         repeat=1,
         publish_venue="dexie",
@@ -320,8 +316,6 @@ def test_build_and_post_offer_cloud_wallet_records_buy_side_in_audit_event(
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
-        program=prog,
-        market=mkt,
         size_base_units=10,
         repeat=1,
         publish_venue="dexie",
@@ -413,8 +407,6 @@ def test_build_and_post_offer_cloud_wallet_dry_run_skips_publish(
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
-        program=prog,
-        market=mkt,
         size_base_units=10,
         repeat=1,
         publish_venue="dexie",
@@ -508,8 +500,6 @@ def test_build_and_post_offer_cloud_wallet_uses_bootstrap_fallback_split_fee(
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
-        program=prog,
-        market=mkt,
         size_base_units=10,
         repeat=1,
         publish_venue="dexie",

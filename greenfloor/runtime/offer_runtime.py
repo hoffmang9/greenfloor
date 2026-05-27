@@ -450,8 +450,7 @@ def default_signer_offer_deps(*, post_deps: OfferPostDeps | None = None) -> Sign
 
 def build_and_post_offer_signer(
     *,
-    program: ProgramConfig,
-    market: MarketConfig,
+    build_ctx: OfferBuildContext,
     size_base_units: int,
     repeat: int,
     publish_venue: str,
@@ -459,12 +458,13 @@ def build_and_post_offer_signer(
     splash_base_url: str,
     drop_only: bool,
     claim_rewards: bool,
-    build_ctx: OfferBuildContext,
     dry_run: bool,
     deps: SignerOfferDeps | None = None,
     emit_output: bool = True,
     persist_results: bool = True,
 ) -> tuple[int, dict[str, Any]]:
+    program = build_ctx.program
+    market = build_ctx.market
     resolved_deps = deps or default_signer_offer_deps()
 
     prepare_signer_runtime(program)

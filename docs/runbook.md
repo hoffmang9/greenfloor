@@ -154,6 +154,7 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 
 - **Price unavailable:** look for `xch_price_error`; XCH planning is price-gated and may produce no actions.
 - **Offer builder failures:** check `strategy_offer_execution.items[].reason` for `offer_builder_*`.
+- **Offer backend selection:** `build-and-post-offer` and daemon managed post route via `offer_execution_backend()` / `managed_offer_execution_backend()` in program config — vault KMS signer when `signer.kms_key_id` + `vault.launcher_id` are set, else Cloud Wallet when configured, else local BLS for large manual CLI sizes. See ADR 0008.
 - **Dexie post/cancel issues:** look for `dexie_offers_error`, `strategy_offer_execution` skip reasons, and `offer_cancel_policy` skip reasons.
 - **Extended waits on coin operations:** inspect `wait_events` for `poll_retry`, `signature_wait_*`, `in_mempool`, `confirmed`, and `reorg_watch_*` events to determine whether delay is signer-side, mempool-side, Coinset API-side, or chain-depth-side.
 - **Coin-op fee preflight failures:** inspect JSON `error` and `coinset_fee_lookup`:

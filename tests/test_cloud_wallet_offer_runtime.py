@@ -185,8 +185,6 @@ def test_build_and_post_offer_cloud_wallet_runs_without_manager_import(tmp_path:
         network = "mainnet"
 
     exit_code, payload = build_and_post_offer_cloud_wallet(
-        program=_cloud_wallet_test_program(tmp_path),
-        market=_cloud_wallet_test_market(),
         size_base_units=5,
         repeat=1,
         publish_venue="dexie",
@@ -244,8 +242,6 @@ def test_build_and_post_offer_cloud_wallet_emits_timing_diagnostics(tmp_path: Pa
             pass
 
     exit_code, payload = build_and_post_offer_cloud_wallet(
-        program=_cloud_wallet_test_program(tmp_path),
-        market=_cloud_wallet_test_market(),
         size_base_units=5,
         repeat=1,
         publish_venue="dexie",
@@ -559,8 +555,6 @@ def test_build_and_post_offer_cloud_wallet_skips_create_when_bootstrap_pending(
             pass
 
     code, payload = build_and_post_offer_cloud_wallet(
-        program=_cloud_wallet_test_program(tmp_path),
-        market=_cloud_wallet_test_market(),
         size_base_units=5,
         repeat=1,
         publish_venue="dexie",

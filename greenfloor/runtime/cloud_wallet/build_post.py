@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.runtime.cloud_wallet.deps import (
     CloudWalletOfferDeps,
     default_cloud_wallet_offer_deps,
@@ -21,8 +20,7 @@ from greenfloor.runtime.offer_orchestration import (
 
 def build_and_post_offer_cloud_wallet(
     *,
-    program: ProgramConfig,
-    market: MarketConfig,
+    build_ctx: OfferBuildContext,
     size_base_units: int,
     repeat: int,
     publish_venue: str,
@@ -30,13 +28,14 @@ def build_and_post_offer_cloud_wallet(
     splash_base_url: str,
     drop_only: bool,
     claim_rewards: bool,
-    build_ctx: OfferBuildContext,
     dry_run: bool,
     offer_artifact_timeout_seconds: int | None = None,
     emit_output: bool = True,
     persist_results: bool = True,
     deps: CloudWalletOfferDeps | None = None,
 ) -> tuple[int, dict[str, Any]]:
+    program = build_ctx.program
+    market = build_ctx.market
     resolved_deps = deps or default_cloud_wallet_offer_deps()
     resolved_artifact_timeout_seconds = (
         int(program.runtime_cloud_wallet_offer_artifact_timeout_seconds)

@@ -42,7 +42,7 @@ from greenfloor.config.models import (
     MarketConfig,
     ProgramConfig,
     cloud_wallet_offer_path_configured,
-    offer_execution_backend,
+    managed_offer_execution_backend,
 )
 from greenfloor.core.coin_ops import BucketSpec, CoinOpPlan, plan_coin_ops
 from greenfloor.core.fee_budget import partition_plans_by_budget, projected_coin_ops_fee_mojos
@@ -1540,10 +1540,7 @@ def _build_offer_for_action(
 
 def _managed_offer_backend_for_program(program: Any, *, size_base_units: int) -> str | None:
     if isinstance(program, ProgramConfig):
-        backend = offer_execution_backend(program, size_base_units=size_base_units)
-        if backend in {"signer", "cloud_wallet"}:
-            return backend
-        return None
+        return managed_offer_execution_backend(program, size_base_units=size_base_units)
     if _cloud_wallet_configured(program):
         return "cloud_wallet"
     return None
@@ -2000,8 +1997,8 @@ def _managed_offer_post(
     side: str = "sell",
     program_path: Path | None = None,
 ) -> dict[str, Any]:
-    backend = offer_execution_backend(program, size_base_units=size_base_units)
-    if backend not in ("signer", "cloud_wallet"):
+    backend = managed_offer_execution_backend(program, size_base_units=size_base_units)
+    if backend is None:
         return {
             "success": False,
             "error": "managed_offer_post_requires_signer_or_cloud_wallet_backend",

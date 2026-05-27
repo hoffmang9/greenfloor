@@ -11,6 +11,7 @@ from greenfloor.config.models import (
     VaultConfig,
     VaultWalletKeyConfig,
     cloud_wallet_offer_path_configured,
+    managed_offer_execution_backend,
     offer_execution_backend,
     signer_offer_path_configured,
 )
@@ -65,6 +66,22 @@ def test_offer_execution_backend_prefers_signer_over_cloud_wallet() -> None:
     )
     assert cloud_wallet_offer_path_configured(program) is True
     assert offer_execution_backend(program, size_base_units=50) == "signer"
+    assert managed_offer_execution_backend(program, size_base_units=50) == "signer"
+
+
+def test_managed_offer_execution_backend_excludes_bls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GREENFLOOR_LOCAL_BUILD_MIN_SIZE_BASE_UNITS", "1000")
+    program = replace(
+        _program_with_signer(kms_key_id=""),
+        cloud_wallet_base_url="https://api.vault.chia.net",
+        cloud_wallet_user_key_id="user",
+        cloud_wallet_private_key_pem_path="/Users/me/.greenfloor/key.pem",
+        cloud_wallet_vault_id="wallet123",
+    )
+    assert managed_offer_execution_backend(program, size_base_units=50) == "cloud_wallet"
+    assert managed_offer_execution_backend(program, size_base_units=5000) is None
 
 
 def test_offer_execution_backend_cloud_wallet_when_no_signer(

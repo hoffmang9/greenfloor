@@ -76,6 +76,28 @@ class OfferPostRequest:
     claim_rewards: bool
     dry_run: bool
 
+    def _managed_backend_kwargs(
+        self,
+        *,
+        deps: SignerOfferDeps | CloudWalletOfferDeps | None = None,
+        emit_output: bool = True,
+        persist_results: bool = True,
+    ) -> dict[str, Any]:
+        return {
+            "build_ctx": self.build_ctx,
+            "size_base_units": self.size_base_units,
+            "repeat": self.repeat,
+            "publish_venue": self.publish_venue,
+            "dexie_base_url": self.dexie_base_url,
+            "splash_base_url": self.splash_base_url,
+            "drop_only": self.drop_only,
+            "claim_rewards": self.claim_rewards,
+            "dry_run": self.dry_run,
+            "deps": deps,
+            "emit_output": emit_output,
+            "persist_results": persist_results,
+        }
+
     def run_signer(
         self,
         *,
@@ -84,20 +106,11 @@ class OfferPostRequest:
         persist_results: bool = True,
     ) -> tuple[int, dict[str, Any]]:
         return build_and_post_offer_signer(
-            program=self.build_ctx.program,
-            market=self.build_ctx.market,
-            size_base_units=self.size_base_units,
-            repeat=self.repeat,
-            publish_venue=self.publish_venue,
-            dexie_base_url=self.dexie_base_url,
-            splash_base_url=self.splash_base_url,
-            drop_only=self.drop_only,
-            claim_rewards=self.claim_rewards,
-            dry_run=self.dry_run,
-            build_ctx=self.build_ctx,
-            deps=deps,
-            emit_output=emit_output,
-            persist_results=persist_results,
+            **self._managed_backend_kwargs(
+                deps=deps,
+                emit_output=emit_output,
+                persist_results=persist_results,
+            ),
         )
 
     def run_cloud_wallet(
@@ -109,20 +122,11 @@ class OfferPostRequest:
         persist_results: bool = True,
     ) -> tuple[int, dict[str, Any]]:
         return build_and_post_offer_cloud_wallet(
-            program=self.build_ctx.program,
-            market=self.build_ctx.market,
-            size_base_units=self.size_base_units,
-            repeat=self.repeat,
-            publish_venue=self.publish_venue,
-            dexie_base_url=self.dexie_base_url,
-            splash_base_url=self.splash_base_url,
-            drop_only=self.drop_only,
-            claim_rewards=self.claim_rewards,
-            dry_run=self.dry_run,
-            build_ctx=self.build_ctx,
-            deps=deps,
-            emit_output=emit_output,
-            persist_results=persist_results,
+            **self._managed_backend_kwargs(
+                deps=deps,
+                emit_output=emit_output,
+                persist_results=persist_results,
+            ),
             offer_artifact_timeout_seconds=offer_artifact_timeout_seconds,
         )
 

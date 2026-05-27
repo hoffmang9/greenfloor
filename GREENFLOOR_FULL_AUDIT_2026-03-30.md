@@ -1,5 +1,7 @@
 # GreenFloor Full Audit (2026-03-30)
 
+> **Historical snapshot.** Offer runtime was refactored on 2026-05-26. References below to `greenfloor/cloud_wallet_offer_runtime.py`, `_build_and_post_offer_cloud_wallet`, daemon→CLI offer imports, and injectable `build_and_post_fn` describe the pre-refactor codebase. Current architecture: ADR [0005](docs/decisions/0005-runtime-composition-root.md), ADR [0008](docs/decisions/0008-offer-runtime-modularization.md), and `docs/progress.md` (2026-05-26 offer-runtime entry).
+
 ## Executive Summary
 
 | Severity    | Count |

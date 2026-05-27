@@ -90,8 +90,6 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_offer_not_visible(
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
-        program=prog,
-        market=mkt,
         size_base_units=100,
         repeat=1,
         publish_venue="dexie",
@@ -191,8 +189,6 @@ def test_build_and_post_offer_cloud_wallet_fails_when_dexie_visible_offer_size_m
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
-        program=prog,
-        market=mkt,
         size_base_units=100,
         repeat=1,
         publish_venue="dexie",
@@ -269,8 +265,6 @@ def test_build_and_post_offer_cloud_wallet_returns_error_when_no_offer_artifact(
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
-        program=prog,
-        market=mkt,
         size_base_units=10,
         repeat=1,
         publish_venue="dexie",
@@ -359,8 +353,6 @@ def test_build_and_post_offer_cloud_wallet_verify_error_blocks_post(
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
-        program=prog,
-        market=mkt,
         size_base_units=10,
         repeat=1,
         publish_venue="dexie",
@@ -459,8 +451,6 @@ def test_build_and_post_offer_cloud_wallet_passes_min_created_at_to_artifact_pol
     )
     code, _ = build_and_post_offer_cloud_wallet(
         deps=deps,
-        program=program,
-        market=market,
         size_base_units=1,
         repeat=1,
         publish_venue="dexie",
