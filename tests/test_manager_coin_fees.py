@@ -11,11 +11,11 @@ from greenfloor.runtime.coinset_runtime import (
 from greenfloor.runtime.coinset_runtime import (
     _resolve_taker_or_coin_operation_fee as resolve_taker_or_coin_operation_fee,
 )
-from tests.helpers.signer_coin_op_cli_fixtures import patch_signer_coin_op_cli_backend
 from tests.helpers.offer_runtime_fixtures import (
     write_manager_program_with_signer,
     write_markets,
 )
+from tests.helpers.signer_coin_op_cli_fixtures import patch_signer_coin_op_cli_backend
 
 
 def test_resolve_taker_or_coin_operation_fee_uses_coinset_value(monkeypatch) -> None:

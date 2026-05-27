@@ -11,7 +11,6 @@ from greenfloor.cli.coin_ops import (
     coin_split,
     coin_status,
     coins_list,
-    seed_wallet_assets_cache_cli,
 )
 from greenfloor.cli.keys_onboard import keys_onboard
 from greenfloor.cli.manager_setup import (
@@ -168,12 +167,6 @@ def main() -> None:
     p_coins_list.add_argument("--asset", default="")
     p_coins_list.add_argument("--vault-id", default="")
     p_coins_list.add_argument("--cat-id", default="", help="hex CAT asset_id to filter by")
-
-    p_seed_assets = sub.add_parser(
-        "seed-wallet-assets-cache",
-        help="Fetch resolveWalletAssets once and write ~/.greenfloor/cache/wallet_assets_*.json",
-    )
-    p_seed_assets.add_argument("--vault-id", default="")
 
     p_coin_status = sub.add_parser("coin-status")
     p_coin_status.add_argument("--asset", default="")
@@ -350,11 +343,6 @@ def main() -> None:
             asset=args.asset or None,
             vault_id=args.vault_id or None,
             cat_id=args.cat_id or None,
-        )
-    elif args.command == "seed-wallet-assets-cache":
-        code = seed_wallet_assets_cache_cli(
-            program_path=Path(args.program_config),
-            vault_id=args.vault_id or None,
         )
     elif args.command == "coin-status":
         code = coin_status(

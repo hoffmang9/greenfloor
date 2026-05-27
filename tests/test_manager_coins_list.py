@@ -97,7 +97,7 @@ def test_coins_list_cat_id_uses_signer_resolution(monkeypatch, tmp_path: Path, c
     patch_signer_coins_list_backend(monkeypatch, wallet_factory=_FakeWallet)
     monkeypatch.setattr(
         "greenfloor.cli.coin_ops_list.resolve_signer_asset_id",
-        lambda *_args, **kwargs: (resolver_calls.append(dict(kwargs)) or "Asset_resolved"),
+        lambda *_args, **kwargs: resolver_calls.append(dict(kwargs)) or "Asset_resolved",
     )
     code = coins_list(program_path=program, asset="BYC", vault_id=None, cat_id=cat_id)
     assert code == 0

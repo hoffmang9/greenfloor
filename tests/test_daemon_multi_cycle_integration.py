@@ -185,7 +185,11 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
     monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr("greenfloor.daemon.main.evaluate_market", _fake_evaluate_market)
     monkeypatch.setattr(
-        "greenfloor.daemon.main._build_offer_for_action",
+        "greenfloor.daemon.offer_execution.evaluate_market",
+        _fake_evaluate_market,
+    )
+    monkeypatch.setattr(
+        "greenfloor.daemon.offer_execution._build_offer_for_action",
         lambda **_kwargs: {
             "status": "executed",
             "reason": "offer_builder_success",

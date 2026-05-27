@@ -13,7 +13,6 @@ from greenfloor.runtime.offer_build_context import (
     prepare_offer_build_context,
 )
 from greenfloor.runtime.offer_orchestration import (
-    BootstrapPolicy,
     OfferCreateFailure,
     OfferCreateOutcome,
     OfferPostDeps,
@@ -31,7 +30,6 @@ from greenfloor.runtime.offer_runtime import (
 )
 
 __all__ = [
-    "BootstrapPolicy",
     "OfferBuildContext",
     "OfferCreateFailure",
     "OfferCreateOutcome",

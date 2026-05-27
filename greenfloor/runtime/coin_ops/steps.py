@@ -7,6 +7,7 @@ from typing import Any
 
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.coin_ops_policy import coin_meets_coin_op_min_amount
+from greenfloor.runtime.coin_ops.coins import classify_resolved_coin_ids_by_asset
 from greenfloor.runtime.coin_ops.errors import (
     coin_combine_asset_mismatch_error_payload,
     coin_combine_insufficient_coins_error_payload,
@@ -33,7 +34,6 @@ from greenfloor.runtime.coin_ops.runtime import (
     CoinOpIterationSkipLoop,
     evaluate_coin_split_gate,
 )
-from greenfloor.runtime.coin_ops.coins import classify_resolved_coin_ids_by_asset
 from greenfloor.runtime.coin_ops_backend import CoinOpBackend
 
 

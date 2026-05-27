@@ -11,7 +11,6 @@ from greenfloor.config.models import OfferExecutionBackend
 from greenfloor.runtime.local_offer import make_local_offer_create_fn
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import (
-    BootstrapPolicy,
     OfferPostDeps,
     build_and_post_offer,
 )
@@ -141,7 +140,6 @@ class OfferPostRequest:
                 capture_dir_path=capture_dir_path,
                 build_offer_fn=build_offer_fn,
             ),
-            bootstrap_policy=BootstrapPolicy(allow_split_fallback=False),
             path_label=path_label,
             path_extra_fields=path_extra_fields,
             post_deps=post_deps,

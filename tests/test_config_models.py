@@ -306,7 +306,6 @@ def test_parse_program_config_rejects_any_cloud_wallet_value(cloud_wallet_value:
 def test_parse_program_config_runtime_offer_fields_default_without_legacy_keys() -> None:
     raw = _base_program_raw()
     cfg = parse_program_config(raw)
-    assert cfg.runtime_offer_artifact_timeout_seconds == 30
     assert cfg.runtime_offer_bootstrap_wait_timeout_seconds == 120
 
 

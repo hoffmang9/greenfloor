@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any, cast
 
 from greenfloor.config.models import MarketConfig
 from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode
@@ -54,7 +55,12 @@ class SignerCoinOpBackendFake:
     def list_asset_scoped_coins(self) -> list[dict[str, Any]]:
         list_coins = getattr(self._wallet, "list_coins", None)
         if callable(list_coins):
-            return list(list_coins(include_pending=True, asset_id=self.resolved_asset_id))
+            return list(
+                cast(
+                    list[dict[str, Any]],
+                    list_coins(include_pending=True, asset_id=self.resolved_asset_id),
+                )
+            )
         return []
 
     def filter_spendable(

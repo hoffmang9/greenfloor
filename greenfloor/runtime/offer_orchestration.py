@@ -26,11 +26,6 @@ from greenfloor.storage.sqlite import SqliteStore
 
 
 @dataclass(frozen=True, slots=True)
-class BootstrapPolicy:
-    allow_split_fallback: bool = False
-
-
-@dataclass(frozen=True, slots=True)
 class OfferCreateOutcome:
     offer_text: str
     expires_at: str
@@ -60,17 +55,13 @@ class OfferCreateFailure(Exception):
         self.extra = dict(extra or {})
 
 
-def bootstrap_blocks_offer(
-    bootstrap_result: dict[str, Any], *, policy: BootstrapPolicy
-) -> tuple[bool, str | None]:
+def bootstrap_blocks_offer(bootstrap_result: dict[str, Any]) -> tuple[bool, str | None]:
     bootstrap_status = str(bootstrap_result.get("status", "")).strip().lower()
     bootstrap_reason = (
         str(bootstrap_result.get("reason", "")).strip() or "bootstrap_precheck_failed"
     )
     bootstrap_ready = bool(bootstrap_result.get("ready", False))
     if bootstrap_status == "failed":
-        if policy.allow_split_fallback and bootstrap_result.get("fallback_to_presplit_path"):
-            return False, None
         return True, f"bootstrap_failed:{bootstrap_reason}"
     if bootstrap_status == "executed" and not bootstrap_ready:
         return True, f"bootstrap_pending:{bootstrap_reason}"
@@ -222,7 +213,6 @@ def execute_build_and_post_offer(
     resolved_quote_asset_id: str,
     bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]] | None,
     create_offer_fn: collections.abc.Callable[..., OfferCreateOutcome],
-    bootstrap_policy: BootstrapPolicy,
     path_label: str,
     path_extra_fields: dict[str, Any] | None = None,
     post_deps: OfferPostDeps | None = None,
@@ -269,7 +259,7 @@ def execute_build_and_post_offer(
                 action_side=side,
             )
             bootstrap_actions.append(bootstrap_result)
-            blocked, error = bootstrap_blocks_offer(bootstrap_result, policy=bootstrap_policy)
+            blocked, error = bootstrap_blocks_offer(bootstrap_result)
             if blocked:
                 _append_post_failure(
                     post_results,
@@ -457,7 +447,6 @@ def build_and_post_offer(
     resolved_quote_asset_id: str,
     bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]] | None,
     create_offer_fn: collections.abc.Callable[..., OfferCreateOutcome],
-    bootstrap_policy: BootstrapPolicy,
     path_label: str,
     path_extra_fields: dict[str, Any] | None = None,
     post_deps: OfferPostDeps | None = None,
@@ -480,7 +469,6 @@ def build_and_post_offer(
         resolved_quote_asset_id=resolved_quote_asset_id,
         bootstrap_phase_fn=bootstrap_phase_fn,
         create_offer_fn=create_offer_fn,
-        bootstrap_policy=bootstrap_policy,
         path_label=path_label,
         path_extra_fields=path_extra_fields,
         post_deps=resolved_post_deps,

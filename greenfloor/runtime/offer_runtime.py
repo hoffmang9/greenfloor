@@ -15,7 +15,6 @@ from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import (
-    BootstrapPolicy,
     OfferCreateFailure,
     OfferCreateOutcome,
     OfferPostDeps,
@@ -477,7 +476,6 @@ def build_and_post_offer_signer(
         resolved_quote_asset_id=resolved_quote_asset_id,
         bootstrap_phase_fn=bootstrap,
         create_offer_fn=create,
-        bootstrap_policy=BootstrapPolicy(allow_split_fallback=False),
         path_label="signer",
         path_extra_fields={"signer_path": True},
         post_deps=resolved_deps.post_deps,

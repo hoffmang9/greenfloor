@@ -4,12 +4,12 @@ import json
 from pathlib import Path
 
 from greenfloor.cli.coin_ops import coin_combine
-from tests.helpers.signer_coin_op_cli_fixtures import patch_signer_coin_op_cli_backend
 from tests.helpers.offer_runtime_fixtures import (
     write_manager_program_with_signer,
     write_markets,
     write_markets_with_ladder,
 )
+from tests.helpers.signer_coin_op_cli_fixtures import patch_signer_coin_op_cli_backend
 
 
 def test_coin_combine_with_coin_ids_resolves_to_global_ids(
@@ -189,7 +189,7 @@ def test_coin_combine_uses_market_ladder_threshold_when_size_is_provided(
         @staticmethod
         def list_coins(*, include_pending=True, asset_id=None):
             _ = include_pending
-            if asset_id in {"Asset_split_base", "Asset_split_base"}:
+            if asset_id in {"Asset_split_base"}:
                 return [
                     {"id": f"Coin_{i}", "name": f"coin-{i}", "amount": 1500 + i, "state": "SETTLED"}
                     for i in range(6)
@@ -282,7 +282,7 @@ def test_coin_combine_ladder_threshold_uses_ceil(monkeypatch, tmp_path: Path, ca
         @staticmethod
         def list_coins(*, include_pending=True, asset_id=None):
             _ = include_pending
-            if asset_id in {"Asset_split_base", "Asset_split_base"}:
+            if asset_id in {"Asset_split_base"}:
                 return [
                     {"id": f"Coin_{i}", "name": f"coin-{i}", "amount": 2000 + i, "state": "SETTLED"}
                     for i in range(5)

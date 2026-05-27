@@ -1,15 +1,21 @@
 from __future__ import annotations
 
-import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
+import greenfloor.daemon.offer_execution as daemon_offer_execution
 from greenfloor.config import io as config_io
-from greenfloor.config.models import MarketConfig, MarketInventoryConfig
+from greenfloor.config.models import (
+    MarketConfig,
+    MarketInventoryConfig,
+    ProgramConfig,
+    VaultConfig,
+    VaultWalletKeyConfig,
+)
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon import main as daemon_main
 from greenfloor.daemon.main import (
@@ -28,20 +34,54 @@ from greenfloor.runtime.coin_ops.planning import select_spendable_coins_for_targ
 from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.config_fixtures import minimal_program_config
 
-from dataclasses import replace
 
-from greenfloor.config.models import ProgramConfig, VaultConfig, VaultWalletKeyConfig
+def _execute_local_strategy_actions(
+    *,
+    market: MarketConfig,
+    strategy_actions: list[PlannedAction],
+    program: ProgramConfig,
+    xch_price_usd: float | None,
+    dexie: Any,
+    store: Any,
+    splash: Any | None = None,
+    publish_venue: str = "dexie",
+    keyring_yaml_path: str = "",
+    **_: Any,
+) -> dict[str, Any]:
+    from greenfloor.daemon.main import _execute_single_local_action, _expand_strategy_actions
+
+    expanded = _expand_strategy_actions(strategy_actions)
+    items: list[dict[str, Any]] = []
+    executed_count = 0
+    for action in expanded:
+        item = _execute_single_local_action(
+            program=program,
+            market=market,
+            action=action,
+            xch_price_usd=xch_price_usd,
+            keyring_yaml_path=keyring_yaml_path,
+            dexie=dexie,
+            splash=splash,
+            publish_venue=publish_venue,
+            store=store,
+        )
+        if item.get("status") == "executed":
+            executed_count += 1
+        items.append(item)
+    return {
+        "planned_count": len(expanded),
+        "executed_count": executed_count,
+        "items": items,
+    }
 
 
-def _signer_program_config(**overrides: object) -> ProgramConfig:
+def _signer_program_config(**overrides: Any) -> ProgramConfig:
     vault = VaultConfig(
         launcher_id="0" * 64,
         custody_threshold=1,
         recovery_threshold=1,
         recovery_clawback_timelock=3600,
-        custody_keys=(
-            VaultWalletKeyConfig(public_key_hex="02" + "00" * 31, curve="SECP256R1"),
-        ),
+        custody_keys=(VaultWalletKeyConfig(public_key_hex="02" + "00" * 31, curve="SECP256R1"),),
         recovery_keys=(),
     )
     base = minimal_program_config()
@@ -55,11 +95,8 @@ def _signer_program_config(**overrides: object) -> ProgramConfig:
         runtime_offer_parallelism_max_workers=int(
             overrides.get("runtime_offer_parallelism_max_workers", 2)
         ),
-        runtime_reservation_ttl_seconds=int(
-            overrides.get("runtime_reservation_ttl_seconds", 300)
-        ),
+        runtime_reservation_ttl_seconds=int(overrides.get("runtime_reservation_ttl_seconds", 300)),
     )
-
 
 
 class _FakeDexie:
@@ -126,7 +163,6 @@ class _FakeStore:
                 "payload": dict(payload),
             },
         )
-
 
 
 def _coin_ops_base_unit_mojo_multiplier(market: Any) -> int:
@@ -233,7 +269,7 @@ def test_execute_strategy_actions_skips_when_builder_skips(monkeypatch) -> None:
     daemon_main._POST_COOLDOWN_UNTIL.clear()
 
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_build_offer_for_action",
         lambda **_kwargs: {"status": "skipped", "reason": "builder_not_ready", "offer": None},
     )
@@ -252,7 +288,7 @@ def test_execute_strategy_actions_skips_when_builder_skips(monkeypatch) -> None:
         )
     ]
 
-    result = _execute_strategy_actions(
+    result = _execute_local_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -276,7 +312,7 @@ def test_execute_strategy_actions_posts_and_persists_offer_ids(monkeypatch) -> N
     daemon_main._POST_COOLDOWN_UNTIL.clear()
 
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_build_offer_for_action",
         lambda **_kwargs: {
             "status": "executed",
@@ -298,7 +334,7 @@ def test_execute_strategy_actions_posts_and_persists_offer_ids(monkeypatch) -> N
         )
     ]
 
-    result = _execute_strategy_actions(
+    result = _execute_local_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -328,7 +364,7 @@ def test_execute_strategy_actions_retries_then_succeeds(monkeypatch) -> None:
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_COOLDOWN_SECONDS", "10")
 
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_build_offer_for_action",
         lambda **_kwargs: {"status": "executed", "reason": "ok", "offer": "offer1abc"},
     )
@@ -356,7 +392,7 @@ def test_execute_strategy_actions_retries_then_succeeds(monkeypatch) -> None:
             reason="below_target",
         )
     ]
-    result = _execute_strategy_actions(
+    result = _execute_local_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -378,7 +414,7 @@ def test_execute_strategy_actions_applies_post_cooldown_after_retry_exhaust(monk
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_BACKOFF_MS", "0")
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_COOLDOWN_SECONDS", "60")
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_build_offer_for_action",
         lambda **_kwargs: {"status": "executed", "reason": "ok", "offer": "offer1abc"},
     )
@@ -396,7 +432,7 @@ def test_execute_strategy_actions_applies_post_cooldown_after_retry_exhaust(monk
             reason="below_target",
         )
     ]
-    result = _execute_strategy_actions(
+    result = _execute_local_strategy_actions(
         market=_market(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -1475,7 +1511,7 @@ def test_resolve_quote_asset_for_offer_maps_symbol_from_cats(monkeypatch, tmp_pa
 def test_execute_strategy_actions_uses_cloud_wallet_path_when_configured(monkeypatch) -> None:
     daemon_main._POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-1"},
     )
@@ -1516,7 +1552,7 @@ def test_execute_strategy_actions_cloud_wallet_requires_dexie_visibility(monkeyp
     daemon_main._POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-missing"},
     )
@@ -1568,7 +1604,7 @@ def test_execute_strategy_actions_cloud_wallet_accepts_transient_dexie_http_404(
     daemon_main._POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-pending"},
     )
@@ -1619,7 +1655,7 @@ def test_execute_strategy_actions_preserves_planned_size_order(monkeypatch) -> N
         size = int(kwargs["size_base_units"])
         return {"success": True, "offer_id": f"offer-{size}"}
 
-    monkeypatch.setattr(daemon_main, "_managed_offer_post", _fake_cloud_wallet_post)
+    monkeypatch.setattr(daemon_offer_execution, "_managed_offer_post", _fake_cloud_wallet_post)
 
     _Program = _signer_program_config
 
@@ -1679,9 +1715,9 @@ def test_execute_strategy_actions_cloud_wallet_failure_skips_without_builder(mon
         calls["builder"] += 1
         return {"status": "executed", "reason": "offer_builder_success", "offer": "offer1unused"}
 
-    monkeypatch.setattr(daemon_main, "_build_offer_for_action", _unexpected_builder)
+    monkeypatch.setattr(daemon_offer_execution, "_build_offer_for_action", _unexpected_builder)
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_managed_offer_post",
         lambda **_kwargs: {"success": False, "error": "vault_signing_unavailable"},
     )
@@ -1739,7 +1775,7 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(m
             ]
 
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -1747,20 +1783,22 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(m
         ],
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
     )
 
-    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
+    def _Program() -> ProgramConfig:
+        return _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     class _DeterministicContentionCoordinator:
         def __init__(self) -> None:
+            self._lock = threading.Lock()
             self.non_empty_acquire_calls = 0
             self.released: list[tuple[str, str]] = []
 
@@ -1769,14 +1807,15 @@ def test_execute_strategy_actions_parallel_cloud_wallet_reservation_contention(m
             if not requested:
                 # Daemon health-check path.
                 return SimpleNamespace(ok=True, reservation_id="res-health", error=None)
-            self.non_empty_acquire_calls += 1
-            if self.non_empty_acquire_calls == 1:
-                return SimpleNamespace(ok=True, reservation_id="res-1", error=None)
-            return SimpleNamespace(
-                ok=False,
-                reservation_id=None,
-                error="reservation_insufficient_asset",
-            )
+            with self._lock:
+                self.non_empty_acquire_calls += 1
+                if self.non_empty_acquire_calls == 1:
+                    return SimpleNamespace(ok=True, reservation_id="res-1", error=None)
+                return SimpleNamespace(
+                    ok=False,
+                    reservation_id=None,
+                    error="reservation_insufficient_asset",
+                )
 
         def release(self, *, reservation_id: str, status: str) -> None:
             self.released.append((str(reservation_id), str(status)))
@@ -1835,7 +1874,7 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
             ]
 
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -1843,17 +1882,18 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
         ],
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_managed_offer_post",
         lambda **_kwargs: {"success": False, "error": "vault_unavailable"},
     )
 
-    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
+    def _Program() -> ProgramConfig:
+        return _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     db_path = tmp_path / "reservations.sqlite"
     coordinator = AssetReservationCoordinator(db_path=db_path, lease_seconds=300)
@@ -1935,7 +1975,7 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
             ]
 
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -1943,12 +1983,12 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
         ],
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
     )
@@ -2007,7 +2047,7 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservati
             raise RuntimeError("reservation_storage_down")
 
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -2015,17 +2055,18 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_reservati
         ],
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback"},
     )
 
-    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
+    def _Program() -> ProgramConfig:
+        return _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     dexie = _FakeDexie(post_result={"success": True, "id": "offer-fallback"})
     dexie.visible_offer_ids = {"offer-fallback"}
@@ -2070,7 +2111,7 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
             return [{"amount": 20_000, "state": "SETTLED", "asset": {"id": "asset_global"}}]
 
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -2078,17 +2119,18 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
         ],
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_execute_single_managed_action",
         lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
     )
 
-    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
+    def _Program() -> ProgramConfig:
+        return _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     market = _market()
     db_path = tmp_path / "reservations.sqlite"
@@ -2133,7 +2175,8 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
 def test_execute_strategy_actions_cloud_wallet_nonparallel_converts_worker_exception_to_skip(
     monkeypatch,
 ) -> None:
-    def _Program(): return _signer_program_config(runtime_offer_parallelism_enabled=False)
+    def _Program():
+        return _signer_program_config(runtime_offer_parallelism_enabled=False)
 
     dexie = _FakeDexie(post_result={"success": True, "id": "unused"})
     store = _FakeStore()
@@ -2150,7 +2193,7 @@ def test_execute_strategy_actions_cloud_wallet_nonparallel_converts_worker_excep
         )
     ]
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_execute_single_managed_action",
         lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
     )
@@ -2185,7 +2228,7 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
             ]
 
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -2193,17 +2236,18 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
         ],
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-resolved-asset"},
     )
 
-    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
+    def _Program() -> ProgramConfig:
+        return _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     market = _market()
     market.base_asset = "asset-local-only"
@@ -2264,7 +2308,7 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
             return []
 
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 5000, "state": "CONFIRMED", "id": "coin-base", "name": "coin-base"},
@@ -2272,17 +2316,18 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
         ],
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-scoped"},
     )
 
-    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
+    def _Program() -> ProgramConfig:
+        return _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     market = _market()
     market.base_asset = "asset-local-only"
@@ -2351,17 +2396,18 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
             return []
 
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "_managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-should-not-post"},
     )
 
-    _Program = lambda: _signer_program_config(runtime_offer_parallelism_enabled=True)
+    def _Program() -> ProgramConfig:
+        return _signer_program_config(runtime_offer_parallelism_enabled=True)
 
     market = _market()
     market.base_asset = "asset-local-only"
@@ -2395,7 +2441,7 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
         return []
 
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "list_unspent_coins_by_receive_address",
         _list_unspent_coins,
     )
@@ -2416,11 +2462,9 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
     )
 
 
-
-
 def test_coinset_spendable_base_unit_coin_amounts_filters_and_converts(monkeypatch) -> None:
     monkeypatch.setattr(
-        daemon_main,
+        daemon_offer_execution,
         "list_unspent_coins_by_receive_address",
         lambda **_kwargs: [
             {"amount": 10000, "state": "CONFIRMED"},
@@ -2435,6 +2479,7 @@ def test_coinset_spendable_base_unit_coin_amounts_filters_and_converts(monkeypat
         base_unit_mojo_multiplier=1000,
     )
     assert got == [10]
+
 
 def test_single_input_preferred_skip_reason_ignores_unknown_max_single() -> None:
     reason = daemon_main._single_input_preferred_skip_reason(
@@ -2516,5 +2561,3 @@ def test_reservation_coordinator_cross_instance_contention_allows_single_winner(
     assert success_count == 1
     assert failure_count == 1
     assert any("reservation_insufficient_asset" in str(error) for ok, error in results if not ok)
-
-

@@ -84,7 +84,7 @@ def main() -> int:
         default="",
         help="Path to program.yaml used to resolve vault.launcher_id when --launcher-id is omitted.",
     )
-    parser.add_argument("--nonce", type=int, default=0, help="Member nonce to probe (default 0)."    )
+    parser.add_argument("--nonce", type=int, default=0, help="Member nonce to probe (default 0).")
     parser.add_argument(
         "--height-window",
         type=int,
@@ -102,9 +102,7 @@ def main() -> int:
     if not launcher_id:
         program_config = str(args.program_config).strip()
         if not program_config:
-            raise ValueError(
-                "launcher-id, launcher-id-file, or --program-config is required"
-            )
+            raise ValueError("launcher-id, launcher-id-file, or --program-config is required")
         launcher_id = launcher_id_from_program_config(program_config)
         launcher_source = "program_config"
 

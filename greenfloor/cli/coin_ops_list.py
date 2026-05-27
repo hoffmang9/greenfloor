@@ -114,24 +114,6 @@ def coins_list(
     return _coins_list_signer(program=program, asset=asset, cat_id=cat_id)
 
 
-def seed_wallet_assets_cache_cli(
-    *,
-    program_path: Path,
-    vault_id: str | None,
-) -> int:
-    _ = program_path, vault_id
-    print(
-        format_json_output(
-            {
-                "ok": False,
-                "error": "cloud_wallet_assets_cache_removed_use_signer_coin_list",
-            }
-        ),
-        file=sys.stderr,
-    )
-    return 1
-
-
 def coin_status(
     *,
     program_path: Path,

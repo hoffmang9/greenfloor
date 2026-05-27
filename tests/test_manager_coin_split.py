@@ -5,13 +5,13 @@ from pathlib import Path
 
 from greenfloor.cli.coin_ops_split import coin_split
 from greenfloor.runtime.coinset_runtime import CoinsetFeeLookupPreflightError
-from tests.helpers.signer_coin_op_cli_fixtures import patch_signer_coin_op_cli_backend
 from tests.helpers.offer_runtime_fixtures import (
     write_manager_program,
     write_manager_program_with_signer,
     write_markets,
     write_markets_with_ladder,
 )
+from tests.helpers.signer_coin_op_cli_fixtures import patch_signer_coin_op_cli_backend
 
 
 def test_coin_split_auto_selects_largest_spendable_asset_coin(

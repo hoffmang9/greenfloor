@@ -25,7 +25,9 @@ def _import_greenfloor_signer() -> Any:
     return importlib.import_module("greenfloor_signer")
 
 
-def _load_master_private_key(keyring_yaml_path: str, key_id: str) -> tuple[bytes | None, str | None]:
+def _load_master_private_key(
+    keyring_yaml_path: str, key_id: str
+) -> tuple[bytes | None, str | None]:
     _ = keyring_yaml_path
     try:
         signer = _import_greenfloor_signer()
@@ -38,7 +40,7 @@ def _load_master_private_key(keyring_yaml_path: str, key_id: str) -> tuple[bytes
     if error:
         return None, str(error)
     raw = result.get("master_sk_bytes")
-    if not isinstance(raw, (bytes, bytearray, memoryview)):
+    if not isinstance(raw, bytes | bytearray | memoryview):
         return None, "missing_master_sk_bytes"
     return bytes(raw), None
 

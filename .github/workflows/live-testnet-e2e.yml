@@ -44,42 +44,21 @@ jobs:
           operation: ensure-and-install
           rust-already-configured: true
 
-      - name: Resolve chia-wallet-sdk pinned commit
-        id: sdk
-        run: |
-          echo "sha=$(git rev-parse HEAD:chia-wallet-sdk)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore chia-wallet-sdk wheelhouse cache
-        id: cache-sdk-wheelhouse
-        uses: actions/cache/restore@v4
+      - uses: ./.github/actions/wheel-cache
         with:
-          path: ./.cache/wheelhouse/chia-wallet-sdk
-          key: sdk-wheelhouse-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.sha }}
+          operation: ensure-and-install
+          builder: pip
+          tree-path: chia-wallet-sdk
+          source-path: ./chia-wallet-sdk/pyo3
+          cache-key-prefix: sdk-wheelhouse
+          wheelhouse-subdir: chia-wallet-sdk
+          rust-already-configured: true
 
       - name: Install package
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
-          python -m pip install ./.cache/wheelhouse/chia-wallet-sdk/*.whl
-        if: steps.cache-sdk-wheelhouse.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p ./.cache/wheelhouse/chia-wallet-sdk
-          python -m pip wheel \
-            --wheel-dir ./.cache/wheelhouse/chia-wallet-sdk \
-            ./chia-wallet-sdk/pyo3
 
-      - name: Build chia-wallet-sdk wheel (cache miss)
-        if: steps.cache-sdk-wheelhouse.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ./.cache/wheelhouse/chia-wallet-sdk
-          key: sdk-wheelhouse-${{ runner.os }}-${{ runner.arch }}-${{ steps.sdk.outputs.sha }}
-
-      - name: Install package
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-          python -m pip install ./.cache/wheelhouse/chia-wallet-sdk/*.whl
       - name: Validate config and run manager proof flow
         shell: bash
         run: |

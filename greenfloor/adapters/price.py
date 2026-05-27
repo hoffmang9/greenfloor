@@ -64,28 +64,39 @@ class PriceAdapter:
 
 
 class XchPriceProvider:
-    """Unified XCH/USD provider with Cloud Wallet primary and CoinCodex fallback."""
+    """Unified XCH/USD provider with optional primary quote source and CoinCodex fallback."""
 
     def __init__(
         self,
         *,
-        cloud_wallet_price_fn: Callable[[], float] | None = None,
-        cloud_wallet_ttl_seconds: int = 120,
+        primary_quote_price_fn: Callable[[], float] | None = None,
+        primary_quote_ttl_seconds: int = 120,
         fallback_price_adapter: PriceAdapter | None = None,
         now_fn: Callable[[], float] | None = None,
+        # Legacy keyword aliases for callers/tests migrating off Cloud Wallet naming.
+        cloud_wallet_price_fn: Callable[[], float] | None = None,
+        cloud_wallet_ttl_seconds: int | None = None,
     ) -> None:
-        self._cloud_wallet_price_fn = cloud_wallet_price_fn
-        self._cloud_wallet_ttl_seconds = max(1, int(cloud_wallet_ttl_seconds))
+        resolved_primary_fn = (
+            primary_quote_price_fn if primary_quote_price_fn is not None else cloud_wallet_price_fn
+        )
+        resolved_ttl = (
+            int(primary_quote_ttl_seconds)
+            if cloud_wallet_ttl_seconds is None
+            else int(cloud_wallet_ttl_seconds)
+        )
+        self._primary_quote_price_fn = resolved_primary_fn
+        self._primary_quote_ttl_seconds = max(1, resolved_ttl)
         self._fallback_price_adapter = fallback_price_adapter or PriceAdapter()
         self._now_fn = now_fn or time.time
-        self._cloud_wallet_cached_price_usd: float | None = None
-        self._cloud_wallet_cached_at_epoch_s: float | None = None
+        self._primary_quote_cached_price_usd: float | None = None
+        self._primary_quote_cached_at_epoch_s: float | None = None
         self._last_good_price_usd: float | None = None
 
     async def get_xch_price(self) -> float:
-        if self._cloud_wallet_price_fn is not None:
+        if self._primary_quote_price_fn is not None:
             try:
-                price = self._get_cloud_wallet_price()
+                price = self._get_primary_quote_price()
                 self._last_good_price_usd = price
                 return price
             except Exception:
@@ -99,19 +110,19 @@ class XchPriceProvider:
                 return self._last_good_price_usd
             raise
 
-    def _get_cloud_wallet_price(self) -> float:
+    def _get_primary_quote_price(self) -> float:
         now = float(self._now_fn())
         if (
-            self._cloud_wallet_cached_price_usd is not None
-            and self._cloud_wallet_cached_at_epoch_s is not None
-            and (now - self._cloud_wallet_cached_at_epoch_s) <= self._cloud_wallet_ttl_seconds
+            self._primary_quote_cached_price_usd is not None
+            and self._primary_quote_cached_at_epoch_s is not None
+            and (now - self._primary_quote_cached_at_epoch_s) <= self._primary_quote_ttl_seconds
         ):
-            return self._cloud_wallet_cached_price_usd
-        if self._cloud_wallet_price_fn is None:
-            raise RuntimeError("cloud_wallet_price_not_configured")
-        value = float(self._cloud_wallet_price_fn())
+            return self._primary_quote_cached_price_usd
+        if self._primary_quote_price_fn is None:
+            raise RuntimeError("primary_quote_price_not_configured")
+        value = float(self._primary_quote_price_fn())
         if value <= 0:
-            raise ValueError("cloud_wallet_quote_price_must_be_positive")
-        self._cloud_wallet_cached_price_usd = value
-        self._cloud_wallet_cached_at_epoch_s = now
+            raise ValueError("primary_quote_price_must_be_positive")
+        self._primary_quote_cached_price_usd = value
+        self._primary_quote_cached_at_epoch_s = now
         return value

@@ -206,14 +206,7 @@ class ProgramConfig:
     runtime_offer_parallelism_enabled: bool = False
     runtime_offer_parallelism_max_workers: int = 4
     runtime_reservation_ttl_seconds: int = 300
-    runtime_offer_artifact_timeout_seconds: int = 30
-    runtime_offer_bootstrap_signature_wait_timeout_seconds: int = 45
-    runtime_offer_bootstrap_signature_warning_interval_seconds: int = 30
     runtime_offer_bootstrap_wait_timeout_seconds: int = 120
-    runtime_offer_bootstrap_wait_mempool_warning_seconds: int = 30
-    runtime_offer_bootstrap_wait_confirmation_warning_seconds: int = 60
-    runtime_offer_create_signature_wait_timeout_seconds: int = 120
-    runtime_offer_create_signature_warning_interval_seconds: int = 60
     app_log_level: str = "INFO"
     app_log_level_was_missing: bool = False
     signer_key_registry: dict[str, SignerKeyConfig] = field(default_factory=dict)
@@ -576,61 +569,12 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         pushover_user_key_env=str(_req(pushover, "user_key_env")),
         pushover_app_token_env=str(_req(pushover, "app_token_env")),
         pushover_recipient_key_env=str(_req(pushover, "recipient_key_env")),
-        runtime_offer_artifact_timeout_seconds=_runtime_timeout_seconds(
-            runtime,
-            neutral_key="offer_artifact_timeout_seconds",
-            legacy_key="cloud_wallet_offer_artifact_timeout_seconds",
-            default=30,
-            minimum=5,
-        ),
-        runtime_offer_bootstrap_signature_wait_timeout_seconds=_runtime_timeout_seconds(
-            runtime,
-            neutral_key="offer_bootstrap_signature_wait_timeout_seconds",
-            legacy_key="cloud_wallet_bootstrap_signature_wait_timeout_seconds",
-            default=45,
-            minimum=5,
-        ),
-        runtime_offer_bootstrap_signature_warning_interval_seconds=_runtime_timeout_seconds(
-            runtime,
-            neutral_key="offer_bootstrap_signature_warning_interval_seconds",
-            legacy_key="cloud_wallet_bootstrap_signature_warning_interval_seconds",
-            default=30,
-            minimum=5,
-        ),
         runtime_offer_bootstrap_wait_timeout_seconds=_runtime_timeout_seconds(
             runtime,
             neutral_key="offer_bootstrap_wait_timeout_seconds",
             legacy_key="cloud_wallet_bootstrap_wait_timeout_seconds",
             default=120,
             minimum=10,
-        ),
-        runtime_offer_bootstrap_wait_mempool_warning_seconds=_runtime_timeout_seconds(
-            runtime,
-            neutral_key="offer_bootstrap_wait_mempool_warning_seconds",
-            legacy_key="cloud_wallet_bootstrap_wait_mempool_warning_seconds",
-            default=30,
-            minimum=10,
-        ),
-        runtime_offer_bootstrap_wait_confirmation_warning_seconds=_runtime_timeout_seconds(
-            runtime,
-            neutral_key="offer_bootstrap_wait_confirmation_warning_seconds",
-            legacy_key="cloud_wallet_bootstrap_wait_confirmation_warning_seconds",
-            default=60,
-            minimum=10,
-        ),
-        runtime_offer_create_signature_wait_timeout_seconds=_runtime_timeout_seconds(
-            runtime,
-            neutral_key="offer_create_signature_wait_timeout_seconds",
-            legacy_key="cloud_wallet_create_signature_wait_timeout_seconds",
-            default=120,
-            minimum=5,
-        ),
-        runtime_offer_create_signature_warning_interval_seconds=_runtime_timeout_seconds(
-            runtime,
-            neutral_key="offer_create_signature_warning_interval_seconds",
-            legacy_key="cloud_wallet_create_signature_warning_interval_seconds",
-            default=60,
-            minimum=5,
         ),
         app_log_level=app_log_level,
         app_log_level_was_missing=app_log_level_was_missing,

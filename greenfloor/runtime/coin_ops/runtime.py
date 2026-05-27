@@ -13,9 +13,8 @@ from greenfloor.config.io import (
     resolve_market_for_build,
 )
 from greenfloor.config.models import MarketConfig, MarketLadderEntry, ProgramConfig
-from greenfloor.runtime.coin_ops.errors import coin_op_error_payload
-from greenfloor.runtime.coin_ops.models import DenominationTarget, denomination_target_payload
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
+from greenfloor.runtime.coin_ops.models import DenominationTarget, denomination_target_payload
 from greenfloor.runtime.coin_ops_backend import (
     CoinOpBackend,
     SignerCoinOpBackend,

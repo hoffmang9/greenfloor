@@ -1,3 +1,12 @@
+"""Coinset adapter: query helpers in Python, mutations via Rust signer bindings.
+
+Read-only Coinset HTTP calls (coin lookups, offer payload parsing) live here and
+use ``_post_json`` against the configured MSP base URL. Transaction push and fee
+estimation for signed spend bundles are delegated to ``greenfloor_native`` /
+``greenfloor-signer-pyo3`` so mutation paths share the same Rust IO stack as the
+signer.
+"""
+
 from __future__ import annotations
 
 import importlib
@@ -391,7 +400,9 @@ class CoinsetAdapter:
         spend_count: int | None = None,
     ) -> dict[str, Any]:
         resolved_target_times = target_times or [60, 300, 600]
-        spend_count_opt = int(spend_count) if spend_count is not None and int(spend_count) > 0 else None
+        spend_count_opt = (
+            int(spend_count) if spend_count is not None and int(spend_count) > 0 else None
+        )
         payload = _require_rust_coinset(
             "coinset_get_fee_estimate",
             self.network,
@@ -410,7 +421,9 @@ class CoinsetAdapter:
         cost: int = 1_000_000,
         spend_count: int | None = None,
     ) -> int | None:
-        spend_count_opt = int(spend_count) if spend_count is not None and int(spend_count) > 0 else None
+        spend_count_opt = (
+            int(spend_count) if spend_count is not None and int(spend_count) > 0 else None
+        )
         fee = _require_rust_coinset(
             "coinset_get_conservative_fee_estimate",
             self.network,

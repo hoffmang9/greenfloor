@@ -1,4 +1,4 @@
-"""Shared transient-retry and deadline polling helpers for Cloud Wallet / HTTP paths."""
+"""Shared transient-retry and deadline polling helpers for HTTP paths."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any, TypeVar
 _T = TypeVar("_T")
 
 
-def cloud_wallet_rate_limit_retry_seconds(error_text: str) -> float | None:
+def parse_rate_limit_retry_seconds(error_text: str) -> float | None:
     match = re.search(r"try again in (\d+) seconds", error_text, flags=re.IGNORECASE)
     if not match:
         return None
@@ -18,6 +18,11 @@ def cloud_wallet_rate_limit_retry_seconds(error_text: str) -> float | None:
         return float(int(match.group(1)))
     except (TypeError, ValueError):
         return None
+
+
+def cloud_wallet_rate_limit_retry_seconds(error_text: str) -> float | None:
+    """Deprecated alias for :func:`parse_rate_limit_retry_seconds`."""
+    return parse_rate_limit_retry_seconds(error_text)
 
 
 def call_with_moderate_retry(
@@ -39,7 +44,7 @@ def call_with_moderate_retry(
         except Exception as exc:
             attempt += 1
             error_text = str(exc)
-            rate_limit_wait = cloud_wallet_rate_limit_retry_seconds(error_text)
+            rate_limit_wait = parse_rate_limit_retry_seconds(error_text)
             if rate_limit_wait is not None:
                 sleep_seconds = max(sleep_seconds, min(30.0, rate_limit_wait + 0.25))
             if attempt >= max_attempts:
