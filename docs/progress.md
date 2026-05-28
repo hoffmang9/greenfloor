@@ -2,11 +2,13 @@
 
 ## 2026-05-27 (Rust cycle kernel step 8 — reseed gap planning)
 
-- **`plan_reseed_actions_from_gap` in Rust:** `greenfloor-signer/src/cycle/strategy.rs` — offer-size-gap reseed injection (skip reasons, per-size repeat from active vs target counts, seed templates from empty-state planner).
-- **PyO3 + core surface:** `plan_reseed_actions_from_gap` via `strategy_py.rs`; `greenfloor/core/reseed.py` (`ReseedGapPlan` dataclass).
-- **Python IO glue:** `greenfloor/daemon/strategy_reseed.py` retains SQLite active-count fetch and audit logging; pure merge logic delegated to Rust.
-- **Follow-up:** split `cycle/reseed.rs`; PyO3 emits `ReseedSkipReason` enum members; policy returns typed plan directly; removed `evaluate_reseed_candidates` test shim.
-- **Migration status:** step 8 complete for reseed; `strategy_dispatch/` shrink and `strategy_config_from_market` extraction remain toward ~400-line exit criteria.
+- **`plan_reseed_actions_from_gap` in Rust:** `greenfloor-signer/src/cycle/reseed.rs` — offer-size-gap reseed (typed skip reasons, per-size repeat from active vs target counts, `missing_by_size`; seed templates from internal `evaluate_market` on empty bucket state).
+- **PyO3 + core surface:** typed `ReseedGapPlan` / `ReseedSkipReason` via `strategy_py.rs` + `py_utils.rs`; policy in `greenfloor/core/cycle/policy.py`; types in `greenfloor/core/cycle_reseed.py` (exported from `greenfloor.core.cycle`).
+- **Label parity:** `reseed_skip_reason_labels()` in Rust; `tests/test_cycle_reseed.py` asserts Python `ReseedSkipReason` values match the kernel.
+- **Python IO glue:** `greenfloor/daemon/strategy_reseed.py` — SQLite active-count fetch + structured audit logging only (~130 lines).
+- **Removed:** `greenfloor/core/reseed.py`, `evaluate_reseed_candidates` shim in `strategy_state.py`.
+- **Repo hygiene:** `.gitignore` adds `greenfloor-signer/target/` and `greenfloor-signer-pyo3/target/`.
+- **Migration status:** step 8 complete for sell-only gap reseed; `strategy_dispatch/` shrink and `strategy_config_from_market` extraction remain toward ~400-line exit criteria.
 
 ## 2026-05-27 (Review follow-up — enum outcomes + market dispatch extract)
 
@@ -97,7 +99,7 @@
 Secondary follow-ups after step 5:
 
 - **`main.py` cycle runner extraction** — move `run_once` / `_run_loop` (~430 lines) into a dedicated daemon module once strategy dispatch is slim; main retains CLI entrypoint and instance lock only.
-- **`market_cycle.py` strategy phase** — move two-sided action planning and reseed injection (`strategy_state.py`, `strategy_reseed.py`) into Rust `cycle/strategy.rs` extensions to shrink the strategy phase further.
+- **`market_cycle.py` strategy phase** — move two-sided action planning (`strategy_state.py`) into Rust `cycle/strategy.rs` extensions; sell-only gap reseed is already in `cycle/reseed.rs` (step 8).
 - **`greenfloor/storage/sqlite.py`** (~690 lines) — defer until daemon glue hits exit criteria; schema/query helpers are not on the critical offer-post path.
 
 ## 2026-05-27 (Rust cycle kernel step 3 — main market cycle orchestration)
@@ -131,7 +133,7 @@ Large Python daemon modules remain intentionally unsplit pending Rust migration 
 5. **Strategy action execution plan (fifth)** ✅ — parallel vs sequential batch planning and typed orchestration FFI in Rust; Python retains thread pools, reservation SQLite, and offer build/post only.
 6. **`main.py` cycle runner extraction (sixth)** ✅ — `run_once` / `run_loop` moved to `greenfloor/daemon/cycle_runner.py`; `main.py` retains CLI entrypoint and instance lock only.
 7. **`strategy_dispatch` reservation + retry kernel (seventh)** ✅ — typed `ManagedActionOutcome`, `PlannedAction` parallel planning, `parallel_pool` extract.
-8. **Market-cycle reseed gap planning (eighth)** ✅ — `plan_reseed_actions_from_gap` in Rust; Python keeps SQLite offer-count IO and structured reseed logging.
+8. **Market-cycle reseed gap planning (eighth)** ✅ — `cycle/reseed.rs` + typed PyO3 `ReseedGapPlan`; Python keeps SQLite offer-count IO and structured reseed logging; `tests/test_cycle_reseed.py` enforces skip-reason label parity.
 
 **Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch/` each under ~400 lines of Python glue; Rust crates absorb complexity; Python keeps SQLite, Dexie, websocket, and CLI.
 
