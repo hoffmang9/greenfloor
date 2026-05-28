@@ -295,8 +295,6 @@ def record_stale_sweep_check(
     return dict(result)
 
 
-
-
 def needs_inventory_fallback(*, bucket_counts_available: bool, coinset_scan_empty: bool) -> bool:
     return bool(
         _import_signer().needs_inventory_fallback(
