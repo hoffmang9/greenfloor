@@ -192,50 +192,73 @@ impl ReseedSkipReason {
 pub struct ReseedGapPlan {
     pub actions: Vec<PlannedAction>,
     pub skip_reason: Option<ReseedSkipReason>,
+    pub missing_by_size: std::collections::BTreeMap<i64, i64>,
 }
 
-/// Plan offer-size-gap reseed actions when the ordinary planner returned nothing.
-///
-/// Callers supply active/target counts from SQLite; seed templates come from
-/// [`evaluate_market`] on an empty bucket state.
-pub fn plan_reseed_actions_from_gap(
-    strategy_actions: &[PlannedAction],
+fn missing_counts_by_size(
     active_counts_by_size: &std::collections::BTreeMap<i64, i64>,
     target_counts_by_size: &std::collections::BTreeMap<i64, i64>,
-    seed_candidates: &[PlannedAction],
-) -> ReseedGapPlan {
-    if !strategy_actions.is_empty() {
-        return ReseedGapPlan {
-            actions: strategy_actions.to_vec(),
-            skip_reason: Some(ReseedSkipReason::StrategyActionsPresent),
-        };
-    }
-
-    let missing_by_size: std::collections::BTreeMap<i64, i64> = target_counts_by_size
+) -> std::collections::BTreeMap<i64, i64> {
+    target_counts_by_size
         .iter()
         .map(|(size, target)| {
             let active = active_counts_by_size.get(size).copied().unwrap_or(0);
             (*size, (*target - active).max(0))
         })
-        .collect();
+        .collect()
+}
+
+fn empty_market_state(xch_price_usd: Option<f64>) -> MarketState {
+    MarketState {
+        ones: 0,
+        tens: 0,
+        hundreds: 0,
+        xch_price_usd,
+        bucket_counts_by_size: None,
+    }
+}
+
+/// Plan offer-size-gap reseed actions when the ordinary planner returned nothing.
+///
+/// Callers supply active/target counts from SQLite. Seed templates are derived
+/// internally via [`evaluate_market`] on an empty bucket state.
+pub fn plan_reseed_actions_from_gap(
+    strategy_actions: &[PlannedAction],
+    active_counts_by_size: &std::collections::BTreeMap<i64, i64>,
+    target_counts_by_size: &std::collections::BTreeMap<i64, i64>,
+    config: &StrategyConfig,
+    xch_price_usd: Option<f64>,
+) -> ReseedGapPlan {
+    let missing_by_size = missing_counts_by_size(active_counts_by_size, target_counts_by_size);
+
+    if !strategy_actions.is_empty() {
+        return ReseedGapPlan {
+            actions: strategy_actions.to_vec(),
+            skip_reason: Some(ReseedSkipReason::StrategyActionsPresent),
+            missing_by_size,
+        };
+    }
 
     if missing_by_size.values().copied().sum::<i64>() <= 0 {
         return ReseedGapPlan {
             actions: Vec::new(),
             skip_reason: Some(ReseedSkipReason::ActiveOfferTargetsSatisfied),
+            missing_by_size,
         };
     }
 
+    let seed_candidates = evaluate_market(&empty_market_state(xch_price_usd), config);
     if seed_candidates.is_empty() {
         return ReseedGapPlan {
             actions: Vec::new(),
             skip_reason: Some(ReseedSkipReason::NoSeedCandidates),
+            missing_by_size,
         };
     }
 
     let mut one_per_size: std::collections::BTreeMap<i64, &PlannedAction> =
         std::collections::BTreeMap::new();
-    for candidate in seed_candidates {
+    for candidate in &seed_candidates {
         one_per_size.entry(candidate.size).or_insert(candidate);
     }
 
@@ -263,6 +286,7 @@ pub fn plan_reseed_actions_from_gap(
         return ReseedGapPlan {
             actions: Vec::new(),
             skip_reason: Some(ReseedSkipReason::MissingSizesNoSeedTemplate),
+            missing_by_size,
         };
     }
 
@@ -271,12 +295,14 @@ pub fn plan_reseed_actions_from_gap(
         return ReseedGapPlan {
             actions: Vec::new(),
             skip_reason: Some(ReseedSkipReason::ReseedZeroRepeatFiltered),
+            missing_by_size,
         };
     }
 
     ReseedGapPlan {
         actions: reseed_actions,
         skip_reason: None,
+        missing_by_size,
     }
 }
 
@@ -418,6 +444,7 @@ mod tests {
 
     #[test]
     fn plan_reseed_skips_when_strategy_actions_present() {
+        let config = sample_config();
         let existing = vec![PlannedAction {
             size: 1,
             repeat: 1,
@@ -433,28 +460,22 @@ mod tests {
             &existing,
             &BTreeMap::new(),
             &BTreeMap::from([(1, 5)]),
-            &[],
+            &config,
+            Some(30.0),
         );
         assert_eq!(plan.actions, existing);
         assert_eq!(
             plan.skip_reason,
             Some(ReseedSkipReason::StrategyActionsPresent)
         );
+        assert_eq!(plan.missing_by_size.get(&1), Some(&5));
     }
 
     #[test]
     fn plan_reseed_injects_gap_actions_for_empty_planner() {
         let config = sample_config();
-        let empty = MarketState {
-            ones: 0,
-            tens: 0,
-            hundreds: 0,
-            xch_price_usd: Some(30.0),
-            bucket_counts_by_size: None,
-        };
-        let seeds = evaluate_market(&empty, &config);
         let targets = BTreeMap::from([(1, 5), (10, 2), (100, 1)]);
-        let plan = plan_reseed_actions_from_gap(&[], &BTreeMap::new(), &targets, &seeds);
+        let plan = plan_reseed_actions_from_gap(&[], &BTreeMap::new(), &targets, &config, Some(30.0));
         assert!(plan.skip_reason.is_none());
         assert_eq!(plan.actions.len(), 3);
         assert!(plan
@@ -468,34 +489,29 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(1, 5), (10, 2), (100, 1)]
         );
+        assert_eq!(plan.missing_by_size, targets);
     }
 
     #[test]
     fn plan_reseed_skips_when_targets_satisfied() {
+        let config = sample_config();
         let active = BTreeMap::from([(1, 5), (10, 2), (100, 1)]);
         let targets = BTreeMap::from([(1, 5), (10, 2), (100, 1)]);
-        let plan = plan_reseed_actions_from_gap(&[], &active, &targets, &[]);
+        let plan = plan_reseed_actions_from_gap(&[], &active, &targets, &config, Some(30.0));
         assert!(plan.actions.is_empty());
         assert_eq!(
             plan.skip_reason,
             Some(ReseedSkipReason::ActiveOfferTargetsSatisfied)
         );
+        assert!(plan.missing_by_size.values().all(|missing| *missing == 0));
     }
 
     #[test]
     fn plan_reseed_partial_gap_refills_missing_sizes_only() {
         let config = sample_config();
-        let empty = MarketState {
-            ones: 0,
-            tens: 0,
-            hundreds: 0,
-            xch_price_usd: Some(30.0),
-            bucket_counts_by_size: None,
-        };
-        let seeds = evaluate_market(&empty, &config);
         let active = BTreeMap::from([(1, 2)]);
         let targets = BTreeMap::from([(1, 5), (10, 2), (100, 1)]);
-        let plan = plan_reseed_actions_from_gap(&[], &active, &targets, &seeds);
+        let plan = plan_reseed_actions_from_gap(&[], &active, &targets, &config, Some(30.0));
         assert!(plan.skip_reason.is_none());
         assert_eq!(
             plan.actions

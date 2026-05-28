@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from greenfloor.core.cycle_orchestration import StaleSweepProgress
+from greenfloor.core.cycle_reseed import ReseedGapPlan, reseed_gap_plan_from_signer
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.strategy_types import MarketState, StrategyConfig
 
@@ -21,6 +22,7 @@ __all__ = [
     "is_managed_worker_transient_error",
     "is_parallel_dispatch_transient_error",
     "one_sided_offer_counts_by_side",
+    "plan_reseed_actions_from_gap",
     "resolve_inventory_scan_source",
     "resolve_tracked_sizes",
     "size_counts_to_signer",
@@ -163,3 +165,22 @@ def one_sided_offer_counts_by_side(
 
 def empty_stale_sweep_payload() -> StaleSweepProgress:
     return StaleSweepProgress()
+
+
+def plan_reseed_actions_from_gap(
+    *,
+    strategy_actions: list[PlannedAction],
+    active_counts_by_size: dict[int, int],
+    target_counts_by_size: dict[int, int],
+    strategy_config: StrategyConfig,
+    xch_price_usd: float | None,
+) -> ReseedGapPlan:
+    return reseed_gap_plan_from_signer(
+        bridge.plan_reseed_actions_from_gap(
+            strategy_actions=strategy_actions,
+            active_counts_by_size=active_counts_by_size,
+            target_counts_by_size=target_counts_by_size,
+            strategy_config=strategy_config,
+            xch_price_usd=xch_price_usd,
+        )
+    )

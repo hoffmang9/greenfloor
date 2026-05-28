@@ -8,7 +8,7 @@ use signer_core::{
     MarketState, PlannedAction, StrategyConfig,
 };
 
-use crate::py_utils::{dict_to_i64_i64_map, planned_action_class};
+use crate::py_utils::{dict_to_i64_i64_map, planned_action_class, reseed_gap_plan_to_py};
 
 fn optional_i64_i64_map<'py>(
     obj: &Bound<'py, PyAny>,
@@ -156,7 +156,8 @@ fn plan_reseed_actions_from_gap_py(
     strategy_actions: &Bound<'_, PyList>,
     active_counts_by_size: &Bound<'_, PyDict>,
     target_counts_by_size: &Bound<'_, PyDict>,
-    seed_candidates: &Bound<'_, PyList>,
+    config: &Bound<'_, PyAny>,
+    xch_price_usd: Option<f64>,
 ) -> PyResult<Py<PyAny>> {
     let mut parsed_strategy_actions = Vec::with_capacity(strategy_actions.len());
     for item in strategy_actions.iter() {
@@ -164,28 +165,15 @@ fn plan_reseed_actions_from_gap_py(
     }
     let active_counts_by_size = dict_to_i64_i64_map(active_counts_by_size)?;
     let target_counts_by_size = dict_to_i64_i64_map(target_counts_by_size)?;
-    let mut parsed_seed_candidates = Vec::with_capacity(seed_candidates.len());
-    for item in seed_candidates.iter() {
-        parsed_seed_candidates.push(planned_action_from_py(&item)?);
-    }
+    let config = strategy_config_from_py(config)?;
     let plan = plan_reseed_actions_from_gap(
         &parsed_strategy_actions,
         &active_counts_by_size,
         &target_counts_by_size,
-        &parsed_seed_candidates,
+        &config,
+        xch_price_usd,
     );
-    Python::attach(|py| {
-        let result = PyDict::new(py);
-        result.set_item(
-            "actions",
-            planned_actions_to_py_list(py, &plan.actions)?,
-        )?;
-        match plan.skip_reason {
-            Some(reason) => result.set_item("skip_reason", reason.label())?,
-            None => result.set_item("skip_reason", py.None())?,
-        }
-        Ok(result.into())
-    })
+    Python::attach(|py| Ok(reseed_gap_plan_to_py(py, &plan)?.into()))
 }
 
 pub fn register_strategy(m: &Bound<'_, PyModule>) -> PyResult<()> {
