@@ -139,7 +139,8 @@ def evaluate_strategy_for_market(
         "strategy_after_reseed",
         action_count=len(strategy_actions),
         reseed_injected=any(
-            str(action.reason) == "no_active_offer_reseed" for action in strategy_actions
+            str(action.reason) in ("offer_size_gap_reseed", "no_active_offer_reseed")
+            for action in strategy_actions
         ),
     )
     return strategy_actions, offer_counts_by_side, active_offer_counts_by_size

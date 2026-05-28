@@ -1,5 +1,12 @@
 # Progress Log
 
+## 2026-05-27 (Rust cycle kernel step 8 — reseed gap planning)
+
+- **`plan_reseed_actions_from_gap` in Rust:** `greenfloor-signer/src/cycle/strategy.rs` — offer-size-gap reseed injection (skip reasons, per-size repeat from active vs target counts, seed templates from empty-state planner).
+- **PyO3 + core surface:** `plan_reseed_actions_from_gap` via `strategy_py.rs`; `greenfloor/core/reseed.py` (`ReseedGapPlan` dataclass).
+- **Python IO glue:** `greenfloor/daemon/strategy_reseed.py` retains SQLite active-count fetch and audit logging; pure merge logic delegated to Rust.
+- **Migration status:** step 8 complete for reseed; `strategy_dispatch/` shrink and `strategy_config_from_market` extraction remain toward ~400-line exit criteria.
+
 ## 2026-05-27 (Review follow-up — enum outcomes + market dispatch extract)
 
 - **`ManagedActionStatus` enum (Rust):** `ManagedActionOutcome.status` is typed; PyO3 exposes `status` label + `is_pending_visibility` bool from Rust (no Python string compare).
@@ -122,7 +129,8 @@ Large Python daemon modules remain intentionally unsplit pending Rust migration 
 4. **Per-market phase runner (fourth)** ✅ — inventory source selection, tracked sizes, result-state merges, and phase ordering in Rust; Python IO **relocated** to `market_cycle.py` (not yet restructured around a Rust phase table).
 5. **Strategy action execution plan (fifth)** ✅ — parallel vs sequential batch planning and typed orchestration FFI in Rust; Python retains thread pools, reservation SQLite, and offer build/post only.
 6. **`main.py` cycle runner extraction (sixth)** ✅ — `run_once` / `run_loop` moved to `greenfloor/daemon/cycle_runner.py`; `main.py` retains CLI entrypoint and instance lock only.
-7. **`strategy_dispatch` reservation + retry kernel (seventh, in progress)** — typed `ManagedActionOutcome`, `PlannedAction` parallel planning, `parallel_pool` extract; package shrinking toward ~400-line exit target.
+7. **`strategy_dispatch` reservation + retry kernel (seventh)** ✅ — typed `ManagedActionOutcome`, `PlannedAction` parallel planning, `parallel_pool` extract.
+8. **Market-cycle reseed gap planning (eighth)** ✅ — `plan_reseed_actions_from_gap` in Rust; Python keeps SQLite offer-count IO and structured reseed logging.
 
 **Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch/` each under ~400 lines of Python glue; Rust crates absorb complexity; Python keeps SQLite, Dexie, websocket, and CLI.
 

@@ -41,6 +41,6 @@ pub use execution::{
     SequentialActionRoute,
 };
 pub use strategy::{
-    evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction,
-    StrategyConfig,
+    evaluate_market, evaluate_two_sided_market_actions, plan_reseed_actions_from_gap,
+    MarketState, PlannedAction, ReseedGapPlan, ReseedSkipReason, StrategyConfig,
 };

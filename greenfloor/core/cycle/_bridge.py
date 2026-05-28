@@ -70,6 +70,22 @@ def evaluate_two_sided_market_actions(
     )
 
 
+def plan_reseed_actions_from_gap(
+    *,
+    strategy_actions: list[PlannedAction],
+    active_counts_by_size: dict[int, int],
+    target_counts_by_size: dict[int, int],
+    seed_candidates: list[PlannedAction],
+) -> dict[str, Any]:
+    signer = _import_signer()
+    return signer.plan_reseed_actions_from_gap(
+        strategy_actions,
+        active_counts_by_size,
+        target_counts_by_size,
+        seed_candidates,
+    )
+
+
 def sequential_action_route(
     *,
     runtime_dry_run: bool,
