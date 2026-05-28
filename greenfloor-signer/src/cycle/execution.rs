@@ -1,11 +1,115 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use super::dispatch::{reservation_request_for_managed_offer, SpendableAssetProfile};
 use super::dispatch::{expand_inputs_by_repeat, PlannedActionInput};
-use super::dispatch::SpendableAssetProfile;
 use super::managed::{prepare_parallel_managed_submission_decision, ParallelSubmissionDecision};
 use super::strategy::PlannedAction;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParallelActionReservationInput {
+    pub submit_index: usize,
+    pub side: String,
+    pub size_base_units: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParallelReservationContext {
+    pub base_asset_id: String,
+    pub quote_asset_id: String,
+    pub fee_asset_id: String,
+    pub fee_amount_mojos: i64,
+    pub base_unit_mojo_multiplier: i64,
+    pub quote_unit_mojo_multiplier: i64,
+    pub quote_price: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ParallelReservationEntry {
+    submit_index: usize,
+    requested_amounts: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ParallelReservationPrep {
+    entries: Vec<ParallelReservationEntry>,
+    asset_ids: Vec<String>,
+}
+
+fn build_parallel_reservation_prep(
+    actions: &[ParallelActionReservationInput],
+    ctx: &ParallelReservationContext,
+) -> ParallelReservationPrep {
+    let mut entries = Vec::with_capacity(actions.len());
+    let mut asset_ids = BTreeSet::new();
+    for action in actions {
+        let requested_amounts = reservation_request_for_managed_offer(
+            &action.side,
+            action.size_base_units,
+            &ctx.base_asset_id,
+            &ctx.quote_asset_id,
+            ctx.base_unit_mojo_multiplier,
+            ctx.quote_unit_mojo_multiplier,
+            ctx.quote_price,
+            &ctx.fee_asset_id,
+            ctx.fee_amount_mojos,
+        );
+        for asset_id in requested_amounts.keys() {
+            asset_ids.insert(asset_id.clone());
+        }
+        entries.push(ParallelReservationEntry {
+            submit_index: action.submit_index,
+            requested_amounts,
+        });
+    }
+    ParallelReservationPrep {
+        entries,
+        asset_ids: asset_ids.into_iter().collect(),
+    }
+}
+
+pub fn plan_parallel_managed_dispatch(
+    actions: &[PlannedAction],
+    ctx: &ParallelReservationContext,
+    spendable_profiles: &BTreeMap<String, SpendableAssetProfile>,
+) -> ParallelBatchPlan {
+    let reservation_inputs: Vec<ParallelActionReservationInput> = actions
+        .iter()
+        .enumerate()
+        .map(|(submit_index, action)| ParallelActionReservationInput {
+            submit_index,
+            side: action.side.clone(),
+            size_base_units: action.size,
+        })
+        .collect();
+    let prep = build_parallel_reservation_prep(&reservation_inputs, ctx);
+    let mut plan = ParallelBatchPlan::default();
+    for entry in &prep.entries {
+        let decision = prepare_parallel_managed_submission_decision(
+            &entry.requested_amounts,
+            spendable_profiles,
+        );
+        match decision {
+            ParallelSubmissionDecision::Skip { reason } => {
+                plan.skip_items.push(ParallelSkipItem {
+                    submit_index: entry.submit_index,
+                    reason,
+                });
+            }
+            ParallelSubmissionDecision::Proceed {
+                available_amounts,
+            } => {
+                plan.queue.push(ParallelQueueItem {
+                    submit_index: entry.submit_index,
+                    requested_amounts: entry.requested_amounts.clone(),
+                    available_amounts,
+                });
+            }
+        }
+    }
+    plan
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -15,13 +119,6 @@ pub enum SequentialActionRoute {
     Local,
     SkipNoProgram,
     SkipNoManagedBackend,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ParallelSubmissionEntry {
-    pub submit_index: usize,
-    pub requested_amounts: BTreeMap<String, i64>,
-    pub spendable_profiles: BTreeMap<String, SpendableAssetProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,34 +197,6 @@ pub fn expand_planned_actions(actions: &[PlannedAction]) -> Vec<PlannedAction> {
         .collect()
 }
 
-pub fn plan_parallel_submission_batch(entries: &[ParallelSubmissionEntry]) -> ParallelBatchPlan {
-    let mut plan = ParallelBatchPlan::default();
-    for entry in entries {
-        let decision = prepare_parallel_managed_submission_decision(
-            &entry.requested_amounts,
-            &entry.spendable_profiles,
-        );
-        match decision {
-            ParallelSubmissionDecision::Skip { reason } => {
-                plan.skip_items.push(ParallelSkipItem {
-                    submit_index: entry.submit_index,
-                    reason,
-                });
-            }
-            ParallelSubmissionDecision::Proceed {
-                available_amounts,
-            } => {
-                plan.queue.push(ParallelQueueItem {
-                    submit_index: entry.submit_index,
-                    requested_amounts: entry.requested_amounts.clone(),
-                    available_amounts,
-                });
-            }
-        }
-    }
-    plan
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,28 +226,51 @@ mod tests {
         );
     }
 
+    fn sample_reservation_context() -> ParallelReservationContext {
+        ParallelReservationContext {
+            base_asset_id: "base_asset".to_string(),
+            quote_asset_id: "quote_asset".to_string(),
+            fee_asset_id: "xch_asset".to_string(),
+            fee_amount_mojos: 0,
+            base_unit_mojo_multiplier: 1000,
+            quote_unit_mojo_multiplier: 1000,
+            quote_price: 1.5,
+        }
+    }
+
     #[test]
-    fn plan_parallel_batch_splits_skip_and_queue() {
-        let entries = vec![
-            ParallelSubmissionEntry {
-                submit_index: 0,
-                requested_amounts: BTreeMap::new(),
-                spendable_profiles: BTreeMap::new(),
+    fn plan_parallel_managed_dispatch_splits_skip_and_queue() {
+        let ctx = sample_reservation_context();
+        let actions = vec![PlannedAction {
+            size: 0,
+            repeat: 1,
+            pair: String::new(),
+            expiry_unit: String::new(),
+            expiry_value: 0,
+            cancel_after_create: false,
+            reason: String::new(),
+            target_spread_bps: None,
+            side: "sell".to_string(),
+        }, PlannedAction {
+            size: 10,
+            repeat: 1,
+            pair: String::new(),
+            expiry_unit: String::new(),
+            expiry_value: 0,
+            cancel_after_create: false,
+            reason: String::new(),
+            target_spread_bps: None,
+            side: "sell".to_string(),
+        }];
+        let spendable_profiles = BTreeMap::from([(
+            "base_asset".to_string(),
+            SpendableAssetProfile {
+                total: 50000,
+                max_single: 50000,
+                max_single_known: true,
             },
-            ParallelSubmissionEntry {
-                submit_index: 1,
-                requested_amounts: BTreeMap::from([("asset_a".to_string(), 1000)]),
-                spendable_profiles: BTreeMap::from([(
-                    "asset_a".to_string(),
-                    SpendableAssetProfile {
-                        total: 5000,
-                        max_single: 5000,
-                        max_single_known: true,
-                    },
-                )]),
-            },
-        ];
-        let plan = plan_parallel_submission_batch(&entries);
+        )]);
+        let plan = plan_parallel_managed_dispatch(&actions, &ctx, &spendable_profiles);
         assert_eq!(plan.skip_items.len(), 1);
         assert_eq!(plan.skip_items[0].submit_index, 0);
         assert_eq!(plan.queue.len(), 1);

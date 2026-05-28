@@ -4,97 +4,26 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from pathlib import Path
+from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
+from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.runtime.offer_post_request import ManagedOfferPostResult
 from greenfloor.storage.sqlite import SqliteStore
-
-
-class _ManagedOfferPost(Protocol):
-    def __call__(
-        self,
-        *,
-        program: ProgramConfig,
-        market: MarketConfig,
-        size_base_units: int,
-        publish_venue: str,
-        runtime_dry_run: bool,
-        side: str = "sell",
-        program_path: Any = None,
-    ) -> dict[str, Any]: ...
-
-
-class _BuildOfferForAction(Protocol):
-    def __call__(
-        self,
-        *,
-        program: ProgramConfig,
-        market: MarketConfig,
-        action: PlannedAction,
-        xch_price_usd: float | None,
-        program_path: Any = None,
-        keyring_yaml_path: str | None = None,
-    ) -> dict[str, Any]: ...
-
-
-class _ExecuteSingleManagedAction(Protocol):
-    def __call__(
-        self,
-        *,
-        program: ProgramConfig,
-        market: MarketConfig,
-        action: PlannedAction,
-        publish_venue: str,
-        runtime_dry_run: bool,
-        dexie: DexieAdapter,
-        managed_offer_post: _ManagedOfferPost,
-    ) -> StrategyActionItem: ...
-
-
-class _ExecuteManagedActionWithRetry(Protocol):
-    def __call__(
-        self,
-        *,
-        program: ProgramConfig,
-        market: MarketConfig,
-        action: PlannedAction,
-        publish_venue: str,
-        runtime_dry_run: bool,
-        dexie: DexieAdapter,
-        execute_single_managed_action: _ExecuteSingleManagedAction,
-        managed_offer_post: _ManagedOfferPost,
-    ) -> StrategyActionItem: ...
-
-
-class _ExecuteSingleLocalAction(Protocol):
-    def __call__(
-        self,
-        *,
-        program: ProgramConfig,
-        market: MarketConfig,
-        action: PlannedAction,
-        xch_price_usd: float | None,
-        keyring_yaml_path: str,
-        dexie: DexieAdapter,
-        splash: Any,
-        publish_venue: str,
-        store: SqliteStore,
-        program_path: Any = None,
-        build_offer_for_action: _BuildOfferForAction,
-    ) -> StrategyActionItem: ...
 
 
 @dataclass(frozen=True, slots=True)
 class StrategyDispatchHooks:
     resolve_signer_offer_asset_ids_for_reservation: Callable[..., tuple[str, str, str]]
-    build_offer_for_action: _BuildOfferForAction
-    execute_single_local_action: _ExecuteSingleLocalAction
-    managed_offer_post: _ManagedOfferPost
-    execute_single_managed_action: _ExecuteSingleManagedAction
-    execute_managed_action_with_retry: _ExecuteManagedActionWithRetry
+    build_offer_for_action: Callable[..., dict[str, Any]]
+    execute_single_local_action: Callable[..., StrategyActionItem]
+    managed_offer_post: Callable[..., ManagedOfferPostResult]
+    execute_single_managed_action: Callable[..., StrategyActionItem]
+    execute_managed_action_with_retry: Callable[..., StrategyActionItem]
 
     def managed_action_with_retry(
         self,
@@ -126,10 +55,10 @@ class StrategyDispatchHooks:
         xch_price_usd: float | None,
         keyring_yaml_path: str,
         dexie: DexieAdapter,
-        splash: Any,
+        splash: SplashAdapter | None,
         publish_venue: str,
         store: SqliteStore,
-        program_path: Any = None,
+        program_path: Path | None = None,
     ) -> StrategyActionItem:
         return self.execute_single_local_action(
             program=program,

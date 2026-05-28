@@ -99,7 +99,7 @@ def test_run_loop_refreshes_log_level_without_restart(monkeypatch, tmp_path: Pat
         raise KeyboardInterrupt
 
     monkeypatch.setattr(main, "CoinsetWebsocketClient", _FakeWsClient)
-    monkeypatch.setattr(main, "_initialize_daemon_file_logging", _fake_initialize)
+    monkeypatch.setattr(main, "initialize_daemon_file_logging", _fake_initialize)
     monkeypatch.setattr(main, "run_once", _fake_run_once)
     monkeypatch.setattr(main.time, "sleep", lambda _seconds: None)
 
@@ -208,9 +208,9 @@ def test_run_loop_orders_reload_marker_log_sleep_then_reload(monkeypatch, tmp_pa
     monkeypatch.setattr(main, "load_program_config", _fake_load_program_config)
     monkeypatch.setattr(main, "run_once", _fake_run_once)
     monkeypatch.setattr(
-        "greenfloor.daemon.main._consume_reload_marker", _fake_consume_reload_marker
+        "greenfloor.daemon.cycle_runner.consume_reload_marker", _fake_consume_reload_marker
     )
-    monkeypatch.setattr(main, "_log_daemon_event", _fake_log_daemon_event)
+    monkeypatch.setattr(main, "log_daemon_event", _fake_log_daemon_event)
     monkeypatch.setattr(main.time, "sleep", _fake_sleep)
 
     code = run_loop(

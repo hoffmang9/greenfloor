@@ -1,4 +1,4 @@
-"""Tests for daemon/main.py small helper functions: env, retry, cooldown, pricing."""
+"""Tests for daemon helper functions: env, retry, cooldown, pricing."""
 
 from __future__ import annotations
 
@@ -6,13 +6,19 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from greenfloor.daemon import main as daemon_main
-from greenfloor.daemon.main import (
+from greenfloor.daemon import cycle_market_batch
+from greenfloor.daemon.cooldowns import _env_int
+from greenfloor.daemon.cycle_market_batch import (
     _DISABLED_MARKET_NEXT_LOG_AT,
-    _disabled_market_log_interval_seconds,
-    _env_int,
-    _log_disabled_markets_startup_once,
-    _should_log_disabled_market,
+)
+from greenfloor.daemon.cycle_market_batch import (
+    disabled_market_log_interval_seconds as _disabled_market_log_interval_seconds,
+)
+from greenfloor.daemon.cycle_market_batch import (
+    log_disabled_markets_startup_once as _log_disabled_markets_startup_once,
+)
+from greenfloor.daemon.cycle_market_batch import (
+    should_log_disabled_market as _should_log_disabled_market,
 )
 from greenfloor.daemon.market_helpers import (
     _abs_move_bps,
@@ -20,6 +26,7 @@ from greenfloor.daemon.market_helpers import (
     _resolve_quote_asset_for_offer,
 )
 from greenfloor.daemon.market_logging import _daemon_logger
+from greenfloor.daemon.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.testing import (
     cancel_retry_config,
     cooldown_remaining_ms,
@@ -194,7 +201,7 @@ def test_should_log_disabled_market_throttles(monkeypatch) -> None:
 def test_log_disabled_markets_startup_once_logs_and_seeds_throttle(monkeypatch) -> None:
     monkeypatch.setenv("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS", "3600")
     _DISABLED_MARKET_NEXT_LOG_AT.clear()
-    daemon_main._DISABLED_MARKET_STARTUP_LOGGED = False
+    cycle_market_batch._DISABLED_MARKET_STARTUP_LOGGED = False
 
     class _Market:
         def __init__(self, market_id: str, enabled: bool) -> None:
@@ -214,7 +221,7 @@ def test_log_disabled_markets_startup_once_logs_and_seeds_throttle(monkeypatch) 
     assert len(logged) == 1
     assert "disabled_markets_startup" in str(logged[0][0])
     assert "disabled-market" in _DISABLED_MARKET_NEXT_LOG_AT
-    daemon_main._DISABLED_MARKET_STARTUP_LOGGED = False
+    cycle_market_batch._DISABLED_MARKET_STARTUP_LOGGED = False
 
 
 def test_managed_offer_market_health_payload_tracks_503_and_last_success() -> None:
@@ -225,11 +232,18 @@ def test_managed_offer_market_health_payload_tracks_503_and_last_success() -> No
     cooldowns._managed_offer_market_health_payload(
         market_id="m1-health-test",
         current_items=[
-            {"status": "executed", "reason": "managed_offer_post_success"},
-            {
-                "status": "skipped",
-                "reason": "managed_offer_action_error:managed_offer_http_error:503:<html>...</html>",
-            },
+            StrategyActionItem(
+                size=1,
+                side="sell",
+                status="executed",
+                reason="managed_offer_post_success",
+            ),
+            StrategyActionItem(
+                size=1,
+                side="sell",
+                status="skipped",
+                reason="managed_offer_action_error:managed_offer_http_error:503:<html>...</html>",
+            ),
         ],
         now=success_time,
         window_size=20,
@@ -239,10 +253,12 @@ def test_managed_offer_market_health_payload_tracks_503_and_last_success() -> No
     payload = cooldowns._managed_offer_market_health_payload(
         market_id="m1-health-test",
         current_items=[
-            {
-                "status": "skipped",
-                "reason": "managed_offer_action_error:managed_offer_http_error:503:<html>...</html>",
-            }
+            StrategyActionItem(
+                size=1,
+                side="sell",
+                status="skipped",
+                reason="managed_offer_action_error:managed_offer_http_error:503:<html>...</html>",
+            )
         ],
         now=now,
         window_size=20,

@@ -17,10 +17,40 @@ from greenfloor.runtime.offer_orchestration import (
 from greenfloor.runtime.offer_runtime import SignerOfferDeps, build_and_post_offer_signer
 
 
+@dataclass(frozen=True, slots=True)
+class ManagedOfferPostResult:
+    success: bool
+    error: str = ""
+    offer_id: str | None = None
+    offer_create_ms: int | None = None
+    offer_publish_ms: int | None = None
+    offer_total_ms: int | None = None
+    offer_create_phase_ms: int | None = None
+    offer_artifact_wait_ms: int | None = None
+
+    def timing_extra(self) -> dict[str, int]:
+        extra: dict[str, int] = {}
+        for key in (
+            "offer_create_ms",
+            "offer_publish_ms",
+            "offer_total_ms",
+            "offer_create_phase_ms",
+            "offer_artifact_wait_ms",
+        ):
+            value = getattr(self, key)
+            if value is not None:
+                extra[key] = int(value)
+        return extra
+
+
+def _optional_int(value: Any) -> int | None:
+    return int(value) if value is not None else None
+
+
 def parse_managed_offer_post_result(
     exit_code: int,
     payload: dict[str, Any],
-) -> dict[str, Any]:
+) -> ManagedOfferPostResult:
     results = payload.get("results", [])
     result = (
         results[0].get("result", {})
@@ -42,23 +72,35 @@ def parse_managed_offer_post_result(
     }
     if exit_code != 0:
         error = str(result.get("error", "")).strip() if isinstance(result, dict) else ""
-        return {
-            "success": False,
-            "error": error or f"managed_offer_post_exit_code:{exit_code}",
-            **timing_fields,
-        }
+        return ManagedOfferPostResult(
+            success=False,
+            error=error or f"managed_offer_post_exit_code:{exit_code}",
+            offer_create_ms=timing_fields["offer_create_ms"],
+            offer_publish_ms=timing_fields["offer_publish_ms"],
+            offer_total_ms=timing_fields["offer_total_ms"],
+            offer_create_phase_ms=timing_fields["offer_create_phase_ms"],
+            offer_artifact_wait_ms=timing_fields["offer_artifact_wait_ms"],
+        )
     if not isinstance(results, list) or not results:
-        return {"success": False, "error": "managed_offer_post_missing_results"}
+        return ManagedOfferPostResult(
+            success=False,
+            error="managed_offer_post_missing_results",
+        )
     result = results[0].get("result", {}) if isinstance(results[0], dict) else {}
     if not isinstance(result, dict):
         result = {}
     success = bool(result.get("success", False)) and int(payload.get("publish_failures", 1)) == 0
-    return {
-        "success": success,
-        "offer_id": str(result.get("id", "")).strip() or None,
-        "error": str(result.get("error", "")).strip() if not success else "",
-        **timing_fields,
-    }
+    offer_id_raw = str(result.get("id", "")).strip()
+    return ManagedOfferPostResult(
+        success=success,
+        offer_id=offer_id_raw or None,
+        error=str(result.get("error", "")).strip() if not success else "",
+        offer_create_ms=timing_fields["offer_create_ms"],
+        offer_publish_ms=timing_fields["offer_publish_ms"],
+        offer_total_ms=timing_fields["offer_total_ms"],
+        offer_create_phase_ms=timing_fields["offer_create_phase_ms"],
+        offer_artifact_wait_ms=timing_fields["offer_artifact_wait_ms"],
+    )
 
 
 @dataclass(frozen=True, slots=True)

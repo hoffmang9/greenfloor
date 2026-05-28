@@ -9,7 +9,7 @@ from greenfloor.daemon.testing import (
     POST_COOLDOWN_UNTIL,
     coinset_spendable_base_unit_coin_amounts,
     cooldown_remaining_ms,
-    execute_strategy_actions,
+    execute_strategy_dispatch,
     inventory_scan,
     single_input_preferred_skip_reason,
     strategy_dispatch,
@@ -18,12 +18,13 @@ from greenfloor.runtime.coin_ops.planning import select_spendable_coins_for_targ
 from tests.helpers.daemon_test_fixtures import (
     FakeDexie,
     FakeStore,
+    managed_post_result,
     market_config,
     signer_program_config,
 )
 
 
-def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worker_failures(
+def test_execute_strategy_dispatch_parallel_sets_post_cooldown_on_transient_worker_failures(
     monkeypatch, tmp_path
 ) -> None:
     POST_COOLDOWN_UNTIL.clear()
@@ -75,7 +76,7 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
             side="sell",
         )
     ]
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market,
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -86,8 +87,8 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
         program=program_factory(),
         reservation_coordinator=coordinator,
     )
-    assert result["executed_count"] == 0
-    assert all(item.get("transient_upstream") is True for item in result["items"])
+    assert result.executed_count == 0
+    assert all(item.transient_upstream is True for item in result.action_items)
     remaining_ms = cooldown_remaining_ms(
         POST_COOLDOWN_UNTIL,
         f"dexie:{market.market_id}",
@@ -95,7 +96,7 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
     assert remaining_ms > 0
 
 
-def test_execute_strategy_actions_signer_managed_nonparallel_converts_worker_exception_to_skip(
+def test_execute_strategy_dispatch_signer_managed_nonparallel_converts_worker_exception_to_skip(
     monkeypatch,
 ) -> None:
     def program_factory() -> ProgramConfig:
@@ -121,7 +122,7 @@ def test_execute_strategy_actions_signer_managed_nonparallel_converts_worker_exc
         lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
     )
 
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market_config(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -132,12 +133,12 @@ def test_execute_strategy_actions_signer_managed_nonparallel_converts_worker_exc
         program=program_factory(),
         reservation_coordinator=None,
     )
-    assert result["executed_count"] == 0
-    assert len(result["items"]) == 1
-    assert str(result["items"][0]["reason"]).startswith("managed_action_error:")
+    assert result.executed_count == 0
+    assert len(result.action_items) == 1
+    assert result.action_items[0].reason.startswith("managed_action_error:")
 
 
-def test_execute_strategy_actions_parallel_prefers_single_input_offer(
+def test_execute_strategy_dispatch_parallel_prefers_single_input_offer(
     monkeypatch, tmp_path
 ) -> None:
     POST_COOLDOWN_UNTIL.clear()
@@ -176,7 +177,7 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-should-not-post"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-should-not-post"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -218,7 +219,7 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
         "list_unspent_coins_by_receive_address",
         _list_unspent_coins,
     )
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market,
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -229,9 +230,9 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
         program=program_factory(),
         reservation_coordinator=coordinator,
     )
-    assert result["executed_count"] == 0
+    assert result.executed_count == 0
     assert any(
-        "single_input_preferred_requires_combine" in str(item["reason"]) for item in result["items"]
+        "single_input_preferred_requires_combine" in item.reason for item in result.action_items
     )
 
 

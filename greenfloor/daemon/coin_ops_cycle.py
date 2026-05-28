@@ -20,6 +20,7 @@ from greenfloor.daemon.market_helpers import (
     _normalize_offer_side,
 )
 from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision
+from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
 from greenfloor.daemon.watchlist import _watched_coin_ids_for_market
 from greenfloor.runtime.coin_ops.daemon_execution import execute_managed_coin_op_plans
 from greenfloor.storage.sqlite import SqliteStore
@@ -57,25 +58,18 @@ def _effective_sell_bucket_counts_for_coin_ops(
     return effective_counts
 
 
-def _executed_sell_offer_counts_by_size(offer_execution: dict[str, Any]) -> dict[int, int]:
+def _executed_sell_offer_counts_by_size(
+    offer_execution: StrategyActionResult,
+) -> dict[int, int]:
     counts: dict[int, int] = {}
-    items = offer_execution.get("items", [])
-    if not isinstance(items, list):
-        return counts
-    for item in items:
-        if not isinstance(item, dict):
+    for item in offer_execution.action_items:
+        if not item.counts_as_executed:
             continue
-        if str(item.get("status", "")).strip().lower() != "executed":
+        if _normalize_offer_side(item.side) != "sell":
             continue
-        if _normalize_offer_side(item.get("side", "sell")) != "sell":
+        if item.size <= 0:
             continue
-        try:
-            size = int(item.get("size", 0))
-        except (TypeError, ValueError):
-            continue
-        if size <= 0:
-            continue
-        counts[size] = counts.get(size, 0) + 1
+        counts[item.size] = counts.get(item.size, 0) + 1
     return counts
 
 

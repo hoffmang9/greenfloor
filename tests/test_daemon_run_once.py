@@ -60,7 +60,8 @@ def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
-        "greenfloor.daemon.main.process_single_market_with_store", _fake_process_single_market
+        "greenfloor.daemon.cycle_market_dispatch.process_single_market_with_store",
+        _fake_process_single_market,
     )
 
     code = run_once(
@@ -114,7 +115,8 @@ def test_run_once_parallel_market_failure_isolated(monkeypatch, tmp_path: Path) 
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
-        "greenfloor.daemon.main.process_single_market_with_store", _fake_process_single_market
+        "greenfloor.daemon.cycle_market_dispatch.process_single_market_with_store",
+        _fake_process_single_market,
     )
 
     code = run_once(
@@ -177,7 +179,9 @@ def test_run_once_sequential_market_failure_isolated(monkeypatch, tmp_path: Path
     monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.process_single_market", _fake_process_single_market)
+    monkeypatch.setattr(
+        "greenfloor.daemon.cycle_market_dispatch.process_single_market", _fake_process_single_market
+    )
 
     code = run_once(
         program_path=program,
@@ -246,9 +250,11 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(monkeypatch, tmp_path:
     monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
-    monkeypatch.setattr("greenfloor.daemon.main.process_single_market", _fake_process_single_market)
     monkeypatch.setattr(
-        "greenfloor.daemon.main.process_single_market_with_store",
+        "greenfloor.daemon.cycle_market_dispatch.process_single_market", _fake_process_single_market
+    )
+    monkeypatch.setattr(
+        "greenfloor.daemon.cycle_market_dispatch.process_single_market_with_store",
         _fake_process_single_market_with_store,
     )
 
@@ -343,25 +349,27 @@ def test_run_once_uses_websocket_capture_when_enabled(monkeypatch, tmp_path: Pat
 
 
 def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:
-    from greenfloor.daemon.testing import main as daemon_mod
+    from greenfloor.daemon.main import _acquire_daemon_instance_lock
 
     state_dir = tmp_path / "state"
-    with daemon_mod._acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
+    with _acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
         with pytest.raises(RuntimeError, match="daemon_already_running"):
-            with daemon_mod._acquire_daemon_instance_lock(state_dir=state_dir, mode="once"):
+            with _acquire_daemon_instance_lock(state_dir=state_dir, mode="once"):
                 pass
 
 
 def test_main_once_exits_with_lock_conflict(monkeypatch, tmp_path: Path, capsys) -> None:
-    from greenfloor.daemon.testing import main as daemon_mod
+    import greenfloor.daemon.main as daemon_main_module
+    from greenfloor.daemon.main import _acquire_daemon_instance_lock
+    from greenfloor.daemon.main import main as daemon_cli_main
 
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     write_program(program, home)
-    reset_concurrent_log_handlers(module=daemon_mod)
+    reset_concurrent_log_handlers(module=daemon_main_module)
     state_dir = tmp_path / "state"
-    with daemon_mod._acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
+    with _acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
         monkeypatch.setattr(
             "sys.argv",
             [
@@ -374,7 +382,7 @@ def test_main_once_exits_with_lock_conflict(monkeypatch, tmp_path: Path, capsys)
             ],
         )
         with pytest.raises(SystemExit) as exc:
-            daemon_mod.main()
+            daemon_cli_main()
         assert exc.value.code == 3
         captured = capsys.readouterr()
         assert captured.out == ""

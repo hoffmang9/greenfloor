@@ -22,7 +22,11 @@ from greenfloor.runtime.offer_orchestration import (
     execute_build_and_post_offer,
     persist_offer_post_records,
 )
-from greenfloor.runtime.offer_post_request import OfferPostRequest, parse_managed_offer_post_result
+from greenfloor.runtime.offer_post_request import (
+    ManagedOfferPostResult,
+    OfferPostRequest,
+    parse_managed_offer_post_result,
+)
 from greenfloor.runtime.offer_runtime import (
     SignerOfferDeps,
     build_and_post_offer_signer,
@@ -35,6 +39,7 @@ __all__ = [
     "OfferCreateOutcome",
     "OfferPostDeps",
     "OfferPostPersistRecord",
+    "ManagedOfferPostResult",
     "OfferPostRequest",
     "SignerOfferDeps",
     "build_and_post_offer",

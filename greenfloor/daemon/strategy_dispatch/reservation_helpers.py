@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.cycle import reservation_request_for_managed_offer
-from greenfloor.core.planned_action import PlannedAction
-from greenfloor.daemon.market_helpers import _normalize_offer_side, _resolve_quote_asset_for_offer
+from greenfloor.core.parallel_reservation_context import ParallelReservationContext
+from greenfloor.daemon.market_helpers import _resolve_quote_asset_for_offer
 from greenfloor.runtime.offer_publish import resolve_quote_price_for_market
 from greenfloor.runtime.offer_runtime import signer_resolve_offer_asset_ids
 
@@ -19,28 +18,23 @@ def reservation_wallet_id(program: ProgramConfig) -> str:
     return "signer"
 
 
-def reservation_request_for_action(
+def parallel_reservation_context(
     *,
     market: MarketConfig,
-    action: PlannedAction,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
-    fee_asset_id: str,
-    fee_amount_mojos: int,
-) -> dict[str, int]:
+    resolved_xch_asset_id: str,
+    fee_amount_mojos: int = 0,
+) -> ParallelReservationContext:
     pricing = market.pricing or {}
-    base_multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))
-    quote_multiplier = int(pricing.get("quote_unit_mojo_multiplier", 1000))
-    return reservation_request_for_managed_offer(
-        side=_normalize_offer_side(action.side),
-        size_base_units=int(action.size),
+    return ParallelReservationContext(
         base_asset_id=str(resolved_base_asset_id or "").strip(),
         quote_asset_id=str(resolved_quote_asset_id or "").strip(),
-        base_unit_mojo_multiplier=base_multiplier,
-        quote_unit_mojo_multiplier=quote_multiplier,
-        quote_price=float(resolve_quote_price_for_market(market)),
-        fee_asset_id=str(fee_asset_id or "").strip(),
+        fee_asset_id=str(resolved_xch_asset_id or "").strip(),
         fee_amount_mojos=int(fee_amount_mojos),
+        base_unit_mojo_multiplier=int(pricing.get("base_unit_mojo_multiplier", 1000)),
+        quote_unit_mojo_multiplier=int(pricing.get("quote_unit_mojo_multiplier", 1000)),
+        quote_price=float(resolve_quote_price_for_market(market)),
     )
 
 

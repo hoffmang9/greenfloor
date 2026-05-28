@@ -10,9 +10,6 @@ from greenfloor.daemon.cooldowns import (
     _POST_COOLDOWN_UNTIL as POST_COOLDOWN_UNTIL,
 )
 from greenfloor.daemon.cooldowns import (
-    PENDING_VISIBILITY_REASON,
-)
-from greenfloor.daemon.cooldowns import (
     _cancel_retry_config as cancel_retry_config,
 )
 from greenfloor.daemon.cooldowns import (
@@ -27,7 +24,6 @@ from greenfloor.daemon.cooldowns import (
 
 __all__ = [
     "CANCEL_COOLDOWN_UNTIL",
-    "PENDING_VISIBILITY_REASON",
     "POST_COOLDOWN_UNTIL",
     "cancel_retry_config",
     "cooldown_remaining_ms",

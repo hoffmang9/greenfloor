@@ -15,7 +15,7 @@ from greenfloor.daemon.testing import (
     POST_COOLDOWN_UNTIL,
     ReservationContentionError,
     ReservationStorageError,
-    execute_strategy_actions,
+    execute_strategy_dispatch,
     inventory_scan,
     strategy_dispatch,
 )
@@ -23,12 +23,13 @@ from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.daemon_test_fixtures import (
     FakeDexie,
     FakeStore,
+    managed_post_result,
     market_config,
     signer_program_config,
 )
 
 
-def test_execute_strategy_actions_parallel_signer_managed_reservation_contention(
+def test_execute_strategy_dispatch_parallel_signer_managed_reservation_contention(
     monkeypatch,
 ) -> None:
     POST_COOLDOWN_UNTIL.clear()
@@ -65,7 +66,7 @@ def test_execute_strategy_actions_parallel_signer_managed_reservation_contention
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-parallel"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -113,7 +114,7 @@ def test_execute_strategy_actions_parallel_signer_managed_reservation_contention
             reason="no_active_offer_reseed",
         )
     ]
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market_config(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -124,13 +125,13 @@ def test_execute_strategy_actions_parallel_signer_managed_reservation_contention
         program=program_factory(),
         reservation_coordinator=cast(Any, coordinator),
     )
-    assert result["planned_count"] == 2
-    assert result["executed_count"] == 1
-    assert any("reservation_insufficient_asset" in str(item["reason"]) for item in result["items"])
+    assert result.planned_count == 2
+    assert result.executed_count == 1
+    assert any("reservation_insufficient_asset" in item.reason for item in result.action_items)
     assert coordinator.released == [("res-1", "released_success")]
 
 
-def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
+def test_execute_strategy_dispatch_parallel_releases_reservation_on_failure(
     monkeypatch, tmp_path
 ) -> None:
     POST_COOLDOWN_UNTIL.clear()
@@ -167,7 +168,7 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": False, "error": "vault_unavailable"},
+        lambda **_kwargs: managed_post_result(success=False, error="vault_unavailable"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -188,7 +189,7 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
             reason="no_active_offer_reseed",
         )
     ]
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market_config(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -199,7 +200,7 @@ def test_execute_strategy_actions_parallel_releases_reservation_on_failure(
         program=program_factory(),
         reservation_coordinator=coordinator,
     )
-    assert result["executed_count"] == 0
+    assert result.executed_count == 0
     sqlite_store = SqliteStore(db_path)
     try:
         rows = sqlite_store.list_offer_reservation_leases()
@@ -239,7 +240,7 @@ def test_reservation_coordinator_expires_stale_leases(tmp_path) -> None:
         store.close()
 
 
-def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
+def test_execute_strategy_dispatch_parallel_does_not_reserve_coin_ops_min_fee(
     monkeypatch, tmp_path
 ) -> None:
     POST_COOLDOWN_UNTIL.clear()
@@ -268,7 +269,7 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-parallel"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -293,7 +294,7 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
             reason="no_active_offer_reseed",
         )
     ]
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market_config(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -304,13 +305,13 @@ def test_execute_strategy_actions_parallel_does_not_reserve_coin_ops_min_fee(
         program=program_factory(),
         reservation_coordinator=coordinator,
     )
-    assert result["executed_count"] == 2
+    assert result.executed_count == 2
     assert all(
-        "reservation_insufficient_xch_asset" not in str(item["reason"]) for item in result["items"]
+        "reservation_insufficient_xch_asset" not in item.reason for item in result.action_items
     )
 
 
-def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_transient_reservation_error(
+def test_execute_strategy_dispatch_parallel_falls_back_to_sequential_on_transient_reservation_error(
     monkeypatch,
 ) -> None:
     POST_COOLDOWN_UNTIL.clear()
@@ -335,7 +336,7 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_transient
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-fallback"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-fallback"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -355,7 +356,7 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_transient
             reason="no_active_offer_reseed",
         )
     ]
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market_config(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -366,11 +367,11 @@ def test_execute_strategy_actions_parallel_falls_back_to_sequential_on_transient
         program=program_factory(),
         reservation_coordinator=cast(Any, _ContentionCoordinator()),
     )
-    assert result["executed_count"] == 1
+    assert result.executed_count == 1
     assert any(event["event_type"] == "offer_parallel_fallback" for event in store.audit_events)
 
 
-def test_execute_strategy_actions_parallel_raises_on_non_transient_reservation_error(
+def test_execute_strategy_dispatch_parallel_raises_on_non_transient_reservation_error(
     monkeypatch,
 ) -> None:
     POST_COOLDOWN_UNTIL.clear()
@@ -408,7 +409,7 @@ def test_execute_strategy_actions_parallel_raises_on_non_transient_reservation_e
         )
     ]
     with pytest.raises(ReservationStorageError, match="reservation_storage_down"):
-        execute_strategy_actions(
+        execute_strategy_dispatch(
             market=market_config(),
             strategy_actions=actions,
             runtime_dry_run=False,
@@ -421,7 +422,7 @@ def test_execute_strategy_actions_parallel_raises_on_non_transient_reservation_e
         )
 
 
-def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservation(
+def test_execute_strategy_dispatch_parallel_uses_resolved_asset_ids_for_reservation(
     monkeypatch, tmp_path
 ) -> None:
     POST_COOLDOWN_UNTIL.clear()
@@ -450,7 +451,7 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-resolved-asset"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-resolved-asset"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -474,7 +475,7 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
             reason="no_active_offer_reseed",
         )
     ]
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market,
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -485,10 +486,10 @@ def test_execute_strategy_actions_parallel_uses_resolved_asset_ids_for_reservati
         program=program_factory(),
         reservation_coordinator=coordinator,
     )
-    assert result["executed_count"] == 1
+    assert result.executed_count == 1
 
 
-def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
+def test_execute_strategy_dispatch_parallel_uses_asset_scoped_coin_inventory(
     monkeypatch, tmp_path
 ) -> None:
     POST_COOLDOWN_UNTIL.clear()
@@ -530,7 +531,7 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-scoped"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-scoped"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -554,7 +555,7 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
             reason="no_active_offer_reseed",
         )
     ]
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market,
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -565,10 +566,8 @@ def test_execute_strategy_actions_parallel_uses_asset_scoped_coin_inventory(
         program=program_factory(),
         reservation_coordinator=coordinator,
     )
-    assert result["executed_count"] == 1
-    assert not any(
-        "reservation_insufficient_asset" in str(item["reason"]) for item in result["items"]
-    )
+    assert result.executed_count == 1
+    assert not any("reservation_insufficient_asset" in item.reason for item in result.action_items)
 
 
 def test_reservation_coordinator_cross_instance_contention_allows_single_winner(

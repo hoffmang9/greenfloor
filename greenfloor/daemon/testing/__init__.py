@@ -5,7 +5,8 @@ prefer imports from this package so refactors do not require wide private-symbol
 
 Canonical monkeypatch targets (module-qualified paths):
 
-- ``greenfloor.daemon.testing.main`` — cycle orchestration (`run_once`, `run_loop`, adapters)
+- ``greenfloor.daemon.testing.main`` — cycle orchestration (`run_once`, `run_loop`, adapters; aliases ``cycle_runner``)
+- ``greenfloor.daemon.main`` — CLI entrypoint and instance lock
 - ``greenfloor.daemon.testing.inventory_scan`` — coinset adapter factory
 - ``greenfloor.daemon.testing.strategy_dispatch`` — managed/local offer dispatch
   (``build_offer_for_action``, ``execute_single_managed_action``, etc.)
@@ -19,7 +20,6 @@ from __future__ import annotations
 from greenfloor.daemon.testing.cancel_policy import execute_cancel_policy
 from greenfloor.daemon.testing.cooldowns import (
     CANCEL_COOLDOWN_UNTIL,
-    PENDING_VISIBILITY_REASON,
     POST_COOLDOWN_UNTIL,
     cancel_retry_config,
     cooldown_remaining_ms,
@@ -56,7 +56,7 @@ from greenfloor.daemon.testing.strategy_dispatch import (
     execute_managed_action_with_retry,
     execute_single_local_action,
     execute_single_managed_action,
-    execute_strategy_actions,
+    execute_strategy_dispatch,
     expand_planned_actions,
     managed_offer_post,
     resolve_signer_offer_asset_ids_for_reservation,
@@ -83,7 +83,6 @@ __all__ = [
     "CoinsetAdapter",
     "MarketCycleResult",
     "MarketDispatchState",
-    "PENDING_VISIBILITY_REASON",
     "PlannedAction",
     "POST_COOLDOWN_UNTIL",
     "CANCEL_COOLDOWN_UNTIL",
@@ -106,7 +105,7 @@ __all__ = [
     "execute_managed_action_with_retry",
     "execute_single_local_action",
     "execute_single_managed_action",
-    "execute_strategy_actions",
+    "execute_strategy_dispatch",
     "managed_offer_post",
     "resolve_signer_offer_asset_ids_for_reservation",
     "expand_planned_actions",

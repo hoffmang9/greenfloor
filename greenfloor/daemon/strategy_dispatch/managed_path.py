@@ -5,7 +5,6 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig, managed_offer_execution_backend
@@ -13,9 +12,9 @@ from greenfloor.core.cycle import (
     classify_dexie_visibility_outcome,
     classify_managed_post_result,
     is_managed_upstream_transient_error,
-    managed_retry_sleep_ms,
-    should_retry_managed_post,
+    managed_retry_decision,
 )
+from greenfloor.core.managed_action_outcome import ManagedActionOutcome
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.cooldowns import (
     _post_retry_config,
@@ -28,8 +27,25 @@ from greenfloor.runtime.offer_build_context import (
     default_program_config_path,
     prepare_offer_build_context,
 )
-from greenfloor.runtime.offer_post_request import OfferPostRequest, parse_managed_offer_post_result
+from greenfloor.runtime.offer_post_request import (
+    ManagedOfferPostResult,
+    OfferPostRequest,
+    parse_managed_offer_post_result,
+)
 from greenfloor.runtime.offer_publish import verify_offer_visible_on_dexie
+
+
+def _classify_managed_post_outcome(
+    managed_post: ManagedOfferPostResult,
+    *,
+    publish_venue: str,
+) -> ManagedActionOutcome:
+    return classify_managed_post_result(
+        success=managed_post.success,
+        error_text=managed_post.error or "unknown",
+        offer_id=managed_post.offer_id or "",
+        publish_venue=publish_venue,
+    )
 
 
 def managed_offer_post(
@@ -41,13 +57,13 @@ def managed_offer_post(
     runtime_dry_run: bool,
     side: str = "sell",
     program_path: Path | None = None,
-) -> dict[str, Any]:
+) -> ManagedOfferPostResult:
     backend = managed_offer_execution_backend(program, size_base_units=size_base_units)
     if backend is None:
-        return {
-            "success": False,
-            "error": "managed_offer_post_requires_signer_backend",
-        }
+        return ManagedOfferPostResult(
+            success=False,
+            error="managed_offer_post_requires_signer_backend",
+        )
 
     build_ctx = prepare_offer_build_context(
         program=program,
@@ -69,10 +85,8 @@ def managed_offer_post(
     )
     exit_code, payload = request.run_managed(backend)
     result = parse_managed_offer_post_result(exit_code, payload)
-    if not bool(result.get("success", False)):
-        error_text = str(result.get("error", "")).strip()
-        if error_text:
-            raise_if_transient_managed_upstream_error(error_text)
+    if not result.success and result.error:
+        raise_if_transient_managed_upstream_error(result.error)
     return result
 
 
@@ -84,7 +98,7 @@ def execute_single_managed_action(
     publish_venue: str,
     runtime_dry_run: bool,
     dexie: DexieAdapter,
-    managed_offer_post: Callable[..., dict[str, Any]],
+    managed_offer_post: Callable[..., ManagedOfferPostResult],
 ) -> StrategyActionItem:
     managed_post = managed_offer_post(
         program=program,
@@ -94,40 +108,27 @@ def execute_single_managed_action(
         runtime_dry_run=runtime_dry_run,
         side=_normalize_offer_side(action.side),
     )
-    timing_fields = {
-        "offer_create_ms": managed_post.get("offer_create_ms"),
-        "offer_publish_ms": managed_post.get("offer_publish_ms"),
-        "offer_total_ms": managed_post.get("offer_total_ms"),
-        "offer_create_phase_ms": managed_post.get("offer_create_phase_ms"),
-        "offer_artifact_wait_ms": managed_post.get("offer_artifact_wait_ms"),
-    }
-    post_outcome = classify_managed_post_result(
-        success=bool(managed_post.get("success", False)),
-        error_text=str(managed_post.get("error", "unknown")),
-        offer_id=str(managed_post.get("offer_id", "")),
+    timing_fields = managed_post.timing_extra()
+    post_outcome = _classify_managed_post_outcome(
+        managed_post,
         publish_venue=publish_venue,
     )
-    if post_outcome.get("status") == "pending_visibility":
-        managed_offer_id = str(managed_post.get("offer_id", "")).strip()
-        visible, visibility_error = verify_offer_visible_on_dexie(
-            dexie=dexie,
-            offer_id=managed_offer_id,
-        )
-        visibility_outcome = classify_dexie_visibility_outcome(
-            visible=visible,
-            visibility_error=visibility_error or "",
-        )
-        return action_item_from_managed_outcome(
-            action,
-            visibility_outcome,
-            offer_id=managed_offer_id or None,
-            **timing_fields,
-        )
+    if not post_outcome.is_pending_visibility:
+        return action_item_from_managed_outcome(action, post_outcome).with_extra(**timing_fields)
+    managed_offer_id = (post_outcome.offer_id or "").strip()
+    visible, visibility_error = verify_offer_visible_on_dexie(
+        dexie=dexie,
+        offer_id=managed_offer_id,
+    )
+    visibility_outcome = classify_dexie_visibility_outcome(
+        visible=visible,
+        visibility_error=visibility_error or "",
+    )
     return action_item_from_managed_outcome(
         action,
-        post_outcome,
-        **timing_fields,
-    )
+        visibility_outcome,
+        offer_id=managed_offer_id or None,
+    ).with_extra(**timing_fields)
 
 
 def execute_managed_action_with_retry(
@@ -139,7 +140,7 @@ def execute_managed_action_with_retry(
     runtime_dry_run: bool,
     dexie: DexieAdapter,
     execute_single_managed_action: Callable[..., StrategyActionItem],
-    managed_offer_post: Callable[..., dict[str, Any]],
+    managed_offer_post: Callable[..., ManagedOfferPostResult],
 ) -> StrategyActionItem:
     attempts_max, backoff_ms, _ = _post_retry_config()
     last_exc: Exception | None = None
@@ -156,16 +157,14 @@ def execute_managed_action_with_retry(
             )
         except Exception as exc:
             last_exc = exc
-            if not should_retry_managed_post(
+            retry = managed_retry_decision(
                 attempt_index=attempt_index,
                 attempts_max=int(attempts_max),
-                is_upstream_transient=is_managed_upstream_transient_error(exc),
-            ):
-                raise
-            sleep_ms = managed_retry_sleep_ms(
-                attempt_index=attempt_index,
                 backoff_ms=int(backoff_ms),
+                is_upstream_transient=is_managed_upstream_transient_error(exc),
             )
-            if sleep_ms > 0:
-                time.sleep(float(sleep_ms) / 1000.0)
+            if not retry.should_retry:
+                raise
+            if retry.sleep_ms > 0:
+                time.sleep(float(retry.sleep_ms) / 1000.0)
     raise RuntimeError(str(last_exc or "managed_action_retry_exhausted"))

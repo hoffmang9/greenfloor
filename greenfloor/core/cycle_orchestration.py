@@ -1,14 +1,8 @@
-"""Orchestration FFI types (market batch, stale sweep, parallel outcomes)."""
+"""Orchestration FFI types (market batch, stale sweep)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-
-
-@dataclass(frozen=True, slots=True)
-class ParallelActionOutcome:
-    status: str
-    transient_upstream: bool = False
 
 
 @dataclass(frozen=True, slots=True)

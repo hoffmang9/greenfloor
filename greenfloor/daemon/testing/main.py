@@ -2,33 +2,28 @@
 
 from __future__ import annotations
 
-import greenfloor.daemon.main as main
-from greenfloor.daemon.main import (
-    _consume_reload_marker as consume_reload_marker,
-)
-from greenfloor.daemon.main import (
-    _detect_stale_open_offers_for_requeue as detect_stale_open_offers_for_requeue,
-)
-from greenfloor.daemon.main import (
-    _enqueue_immediate_requeue_market as enqueue_immediate_requeue_market,
-)
-from greenfloor.daemon.main import (
-    _MarketDispatchState as MarketDispatchState,
-)
-from greenfloor.daemon.main import (
-    _run_loop as run_loop,
-)
-from greenfloor.daemon.main import (
-    _select_market_batch as select_market_batch,
-)
-from greenfloor.daemon.main import (
+import greenfloor.daemon.cycle_runner as cycle_runner
+from greenfloor.daemon.cycle_runner import (
+    MarketDispatchState,
+    consume_reload_marker,
+    detect_stale_open_offers_for_requeue,
+    enqueue_immediate_requeue_market,
+    run_loop,
     run_once,
+    select_market_batch,
 )
+from greenfloor.daemon.main import _acquire_daemon_instance_lock
+from greenfloor.daemon.main import main as cli_main
 from greenfloor.daemon.market_cycle import MarketCycleResult
+
+# Tests monkeypatch adapter imports on this module object.
+main = cycle_runner
 
 __all__ = [
     "MarketCycleResult",
     "MarketDispatchState",
+    "_acquire_daemon_instance_lock",
+    "cli_main",
     "consume_reload_marker",
     "detect_stale_open_offers_for_requeue",
     "enqueue_immediate_requeue_market",

@@ -14,11 +14,28 @@ from greenfloor.config.models import (
     VaultWalletKeyConfig,
 )
 from greenfloor.core.strategy import PlannedAction
+from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
 from greenfloor.daemon.strategy_dispatch.runtime import hooks_from_module
+from greenfloor.daemon.strategy_dispatch.sequential_path import execute_actions_sequential
 from greenfloor.daemon.testing import (
     expand_planned_actions,
 )
+from greenfloor.runtime.offer_post_request import ManagedOfferPostResult
 from tests.helpers.config_fixtures import minimal_program_config
+
+
+def managed_post_result(
+    *,
+    success: bool = True,
+    offer_id: str = "",
+    error: str = "",
+) -> ManagedOfferPostResult:
+    clean_offer_id = offer_id.strip() or None
+    return ManagedOfferPostResult(
+        success=success,
+        offer_id=clean_offer_id,
+        error=error.strip(),
+    )
 
 
 def execute_local_strategy_actions(
@@ -32,32 +49,23 @@ def execute_local_strategy_actions(
     splash: Any | None = None,
     publish_venue: str = "dexie",
     keyring_yaml_path: str = "",
+    runtime_dry_run: bool = False,
     **_: Any,
-) -> dict[str, Any]:
+) -> StrategyActionResult:
     expanded = expand_planned_actions(strategy_actions)
-    hooks = hooks_from_module()
-    items: list[dict[str, Any]] = []
-    executed_count = 0
-    for action in expanded:
-        item = hooks.local_action(
-            program=program,
-            market=market,
-            action=action,
-            xch_price_usd=xch_price_usd,
-            keyring_yaml_path=keyring_yaml_path,
-            dexie=dexie,
-            splash=splash,
-            publish_venue=publish_venue,
-            store=store,
-        )
-        if item.is_executed:
-            executed_count += 1
-        items.append(item.to_audit_dict())
-    return {
-        "planned_count": len(expanded),
-        "executed_count": executed_count,
-        "items": items,
-    }
+    return execute_actions_sequential(
+        program=program,
+        market=market,
+        expanded_actions=expanded,
+        runtime_dry_run=runtime_dry_run,
+        xch_price_usd=xch_price_usd,
+        dexie=dexie,
+        splash=splash,
+        publish_venue=publish_venue,
+        store=store,
+        keyring_yaml_path=keyring_yaml_path,
+        hooks=hooks_from_module(),
+    )
 
 
 def signer_program_config(**overrides: Any) -> ProgramConfig:

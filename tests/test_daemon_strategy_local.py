@@ -8,7 +8,7 @@ from greenfloor.daemon.testing import (
     POST_COOLDOWN_UNTIL,
     build_offer_for_action,
     drop_zero_repeat_strategy_actions,
-    execute_strategy_actions,
+    execute_strategy_dispatch,
     expand_planned_actions,
     inject_reseed_action_if_no_active_offers,
     strategy_config_from_market,
@@ -23,7 +23,7 @@ from tests.helpers.daemon_test_fixtures import (
 )
 
 
-def test_execute_strategy_actions_dry_run_plans_without_posting() -> None:
+def test_execute_strategy_dispatch_dry_run_plans_without_posting() -> None:
     dexie = FakeDexie(post_result={"success": True, "id": "offer-1"})
     dexie.visible_offer_ids = {"offer-100", "offer-10", "offer-1"}
     store = FakeStore()
@@ -39,7 +39,7 @@ def test_execute_strategy_actions_dry_run_plans_without_posting() -> None:
         )
     ]
 
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market_config(),
         strategy_actions=actions,
         runtime_dry_run=True,
@@ -48,9 +48,9 @@ def test_execute_strategy_actions_dry_run_plans_without_posting() -> None:
         store=cast(Any, store),
     )
 
-    assert result["planned_count"] == 2
-    assert result["executed_count"] == 0
-    assert len(result["items"]) == 2
+    assert result.planned_count == 2
+    assert result.executed_count == 0
+    assert len(result.action_items) == 2
     assert dexie.posted == []
     assert store.offer_states == []
 
@@ -82,7 +82,7 @@ def test_expand_planned_actions_preserves_strategy_order() -> None:
     assert [action.size for action in expanded] == [1, 1, 10, 10]
 
 
-def test_execute_strategy_actions_skips_when_builder_skips(monkeypatch) -> None:
+def test_execute_strategy_dispatch_skips_when_builder_skips(monkeypatch) -> None:
     POST_COOLDOWN_UNTIL.clear()
 
     monkeypatch.setattr(
@@ -115,15 +115,15 @@ def test_execute_strategy_actions_skips_when_builder_skips(monkeypatch) -> None:
         program=minimal_program_config(),
     )
 
-    assert result["planned_count"] == 1
-    assert result["executed_count"] == 0
-    assert result["items"][0]["status"] == "skipped"
-    assert result["items"][0]["reason"] == "builder_not_ready"
+    assert result.planned_count == 1
+    assert result.executed_count == 0
+    assert result.action_items[0].status == "skipped"
+    assert result.action_items[0].reason == "builder_not_ready"
     assert dexie.posted == []
     assert store.offer_states == []
 
 
-def test_execute_strategy_actions_posts_and_persists_offer_ids(monkeypatch) -> None:
+def test_execute_strategy_dispatch_posts_and_persists_offer_ids(monkeypatch) -> None:
     POST_COOLDOWN_UNTIL.clear()
 
     monkeypatch.setattr(
@@ -159,18 +159,18 @@ def test_execute_strategy_actions_posts_and_persists_offer_ids(monkeypatch) -> N
         program=minimal_program_config(),
     )
 
-    assert result["planned_count"] == 2
-    assert result["executed_count"] == 2
+    assert result.planned_count == 2
+    assert result.executed_count == 2
     assert len(dexie.posted) == 2
     assert len(store.offer_states) == 2
     assert all(s["offer_id"] == "offer-123" for s in store.offer_states)
-    first_item = result["items"][0]
-    assert isinstance(first_item.get("offer_create_ms"), int)
-    assert isinstance(first_item.get("offer_publish_ms"), int)
-    assert isinstance(first_item.get("offer_total_ms"), int)
+    first_item = result.action_items[0]
+    assert isinstance(first_item.extra.get("offer_create_ms"), int)
+    assert isinstance(first_item.extra.get("offer_publish_ms"), int)
+    assert isinstance(first_item.extra.get("offer_total_ms"), int)
 
 
-def test_execute_strategy_actions_retries_then_succeeds(monkeypatch) -> None:
+def test_execute_strategy_dispatch_retries_then_succeeds(monkeypatch) -> None:
     POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_MAX_ATTEMPTS", "3")
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_BACKOFF_MS", "0")
@@ -214,12 +214,12 @@ def test_execute_strategy_actions_retries_then_succeeds(monkeypatch) -> None:
         store=cast(Any, store),
         program=minimal_program_config(),
     )
-    assert result["executed_count"] == 1
+    assert result.executed_count == 1
     assert dexie.calls == 2
-    assert result["items"][0]["attempts"] == 2
+    assert result.action_items[0].extra.get("attempts") == 2
 
 
-def test_execute_strategy_actions_applies_post_cooldown_after_retry_exhaust(monkeypatch) -> None:
+def test_execute_strategy_dispatch_applies_post_cooldown_after_retry_exhaust(monkeypatch) -> None:
     POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_MAX_ATTEMPTS", "2")
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_BACKOFF_MS", "0")
@@ -252,10 +252,10 @@ def test_execute_strategy_actions_applies_post_cooldown_after_retry_exhaust(monk
         store=cast(Any, store),
         program=minimal_program_config(),
     )
-    assert result["executed_count"] == 0
+    assert result.executed_count == 0
     assert dexie.calls == 2
-    assert result["items"][0]["reason"].startswith("dexie_post_retry_exhausted:")
-    assert result["items"][1]["reason"].startswith("post_cooldown_active:")
+    assert result.action_items[0].reason.startswith("dexie_post_retry_exhausted:")
+    assert result.action_items[1].reason.startswith("post_cooldown_active:")
 
 
 def test_build_offer_for_action_direct_builder_call(monkeypatch) -> None:

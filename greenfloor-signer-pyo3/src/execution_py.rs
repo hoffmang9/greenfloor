@@ -1,15 +1,14 @@
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use signer_core::{
-    expand_planned_actions, filter_planned_actions_with_positive_repeat,
-    plan_parallel_submission_batch, sequential_action_route, ParallelBatchPlan, SequentialActionRoute,
+    expand_planned_actions, filter_planned_actions_with_positive_repeat, plan_parallel_managed_dispatch,
+    sequential_action_route, ParallelBatchPlan, ParallelReservationContext, SequentialActionRoute,
 };
 
 use crate::py_utils::{
-    parallel_batch_plan_class, parallel_queue_item_class, parallel_skip_item_class,
-    parallel_submission_entry_from_py, string_i64_map_to_py_dict,
+    extract_spendable_profiles, parallel_batch_plan_class, parallel_queue_item_class,
+    parallel_skip_item_class, string_i64_map_to_py_dict,
 };
 use crate::strategy_py::{planned_action_from_py, planned_actions_to_py_list};
 
@@ -50,6 +49,18 @@ fn parallel_batch_plan_to_py<'py>(
     batch_plan_cls.call((), Some(&kwargs))
 }
 
+fn parallel_reservation_context_from_py(ctx: &Bound<'_, PyAny>) -> PyResult<ParallelReservationContext> {
+    Ok(ParallelReservationContext {
+        base_asset_id: ctx.getattr("base_asset_id")?.extract()?,
+        quote_asset_id: ctx.getattr("quote_asset_id")?.extract()?,
+        fee_asset_id: ctx.getattr("fee_asset_id")?.extract()?,
+        fee_amount_mojos: ctx.getattr("fee_amount_mojos")?.extract()?,
+        base_unit_mojo_multiplier: ctx.getattr("base_unit_mojo_multiplier")?.extract()?,
+        quote_unit_mojo_multiplier: ctx.getattr("quote_unit_mojo_multiplier")?.extract()?,
+        quote_price: ctx.getattr("quote_price")?.extract()?,
+    })
+}
+
 #[pyfunction]
 #[pyo3(name = "sequential_action_route")]
 fn sequential_action_route_py(
@@ -64,18 +75,6 @@ fn sequential_action_route_py(
         SequentialActionRoute::SkipNoProgram => "skip_no_program",
         SequentialActionRoute::SkipNoManagedBackend => "skip_no_managed_backend",
     }
-}
-
-#[pyfunction]
-#[pyo3(name = "plan_parallel_submission_batch")]
-fn plan_parallel_submission_batch_py(entries: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-    let list = entries.downcast::<PyList>()?;
-    let mut rust_entries = Vec::with_capacity(list.len());
-    for item in list.iter() {
-        rust_entries.push(parallel_submission_entry_from_py(&item)?);
-    }
-    let plan = plan_parallel_submission_batch(&rust_entries);
-    Python::attach(|py| Ok(parallel_batch_plan_to_py(py, &plan)?.into()))
 }
 
 #[pyfunction]
@@ -102,10 +101,27 @@ fn filter_planned_actions_with_positive_repeat_py(actions: &Bound<'_, PyAny>) ->
     Python::attach(|py| planned_actions_to_py_list(py, &filtered))
 }
 
+#[pyfunction]
+#[pyo3(name = "plan_parallel_managed_dispatch")]
+fn plan_parallel_managed_dispatch_py(
+    actions: &Bound<'_, PyList>,
+    ctx: &Bound<'_, PyAny>,
+    spendable_profiles: &Bound<'_, PyDict>,
+) -> PyResult<Py<PyAny>> {
+    let mut rust_actions = Vec::with_capacity(actions.len());
+    for item in actions.iter() {
+        rust_actions.push(planned_action_from_py(&item)?);
+    }
+    let rust_ctx = parallel_reservation_context_from_py(ctx)?;
+    let profiles = extract_spendable_profiles(spendable_profiles)?;
+    let plan = plan_parallel_managed_dispatch(&rust_actions, &rust_ctx, &profiles);
+    Python::attach(|py| Ok(parallel_batch_plan_to_py(py, &plan)?.into()))
+}
+
 pub fn register_execution(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sequential_action_route_py, m)?)?;
-    m.add_function(wrap_pyfunction!(plan_parallel_submission_batch_py, m)?)?;
     m.add_function(wrap_pyfunction!(expand_planned_actions_py, m)?)?;
     m.add_function(wrap_pyfunction!(filter_planned_actions_with_positive_repeat_py, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_parallel_managed_dispatch_py, m)?)?;
     Ok(())
 }

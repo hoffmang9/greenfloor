@@ -8,13 +8,16 @@ from typing import Any
 from greenfloor.core.cycle_orchestration import (
     MarketBatchSelection,
     OfferStateRow,
-    ParallelActionOutcome,
     StaleSweepCandidate,
     StaleSweepHit,
     StaleSweepProgress,
 )
-from greenfloor.core.parallel_batch_plan import ParallelBatchPlan, ParallelSubmissionEntry
+from greenfloor.core.managed_action_outcome import ManagedActionOutcome
+from greenfloor.core.managed_retry import ManagedRetryDecision
+from greenfloor.core.parallel_batch_plan import ParallelBatchPlan
+from greenfloor.core.parallel_reservation_context import ParallelReservationContext
 from greenfloor.core.planned_action import PlannedAction, planned_actions_from_signer_list
+from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
 _INSTALL_HINT = (
     "Install the greenfloor_signer extension (for example: "
@@ -96,13 +99,20 @@ def filter_planned_actions_with_positive_repeat(
     )
 
 
-def plan_parallel_submission_batch(
-    entries: list[ParallelSubmissionEntry],
+def plan_parallel_managed_dispatch(
+    *,
+    actions: list[PlannedAction],
+    ctx: ParallelReservationContext,
+    spendable_profiles: dict[str, dict[str, int | bool]],
 ) -> ParallelBatchPlan:
     signer = _import_signer()
-    result = signer.plan_parallel_submission_batch(entries)
+    result = signer.plan_parallel_managed_dispatch(
+        actions,
+        ctx,
+        _normalize_spendable_profiles(spendable_profiles),
+    )
     if not isinstance(result, ParallelBatchPlan):
-        raise TypeError("plan_parallel_submission_batch returned non-ParallelBatchPlan result")
+        raise TypeError("plan_parallel_managed_dispatch returned non-ParallelBatchPlan result")
     return result
 
 
@@ -117,14 +127,6 @@ def apply_offer_signal(*, state: str, signal: str) -> dict[str, Any]:
 def expiry_seconds_for_action(*, expiry_unit: str, expiry_value: int) -> int | None:
     signer = _import_signer()
     return signer.expiry_seconds_for_action(expiry_unit, expiry_value)
-
-
-def reservation_request_for_managed_offer(request: dict[str, Any]) -> dict[str, int]:
-    signer = _import_signer()
-    result = signer.reservation_request_for_managed_offer(request)
-    if not isinstance(result, dict):
-        raise TypeError("reservation_request_for_managed_offer returned non-dict result")
-    return {str(key): int(value) for key, value in result.items()}
 
 
 def single_input_preferred_skip_reason(
@@ -203,38 +205,23 @@ def should_apply_parallel_transient_cooldown(
     )
 
 
-def managed_retry_sleep_ms(*, attempt_index: int, backoff_ms: int) -> int:
-    return int(_import_signer().managed_retry_sleep_ms(int(attempt_index), int(backoff_ms)))
-
-
-def should_retry_managed_post(
+def managed_retry_decision(
     *,
     attempt_index: int,
     attempts_max: int,
+    backoff_ms: int,
     is_upstream_transient: bool,
-) -> bool:
-    return bool(
-        _import_signer().should_retry_managed_post(
-            int(attempt_index),
-            int(attempts_max),
-            bool(is_upstream_transient),
-        )
-    )
-
-
-def prepare_parallel_managed_submission_decision(
-    *,
-    requested_amounts: dict[str, int],
-    spendable_profiles: dict[str, dict[str, int | bool]],
-) -> dict[str, Any]:
+) -> ManagedRetryDecision:
     signer = _import_signer()
-    result = signer.prepare_parallel_managed_submission_decision(
-        requested_amounts,
-        _normalize_spendable_profiles(spendable_profiles),
+    result = signer.managed_retry_decision(
+        int(attempt_index),
+        int(attempts_max),
+        int(backoff_ms),
+        bool(is_upstream_transient),
     )
-    if not isinstance(result, dict):
-        raise TypeError("prepare_parallel_managed_submission_decision returned non-dict result")
-    return dict(result)
+    if not isinstance(result, ManagedRetryDecision):
+        raise TypeError("managed_retry_decision returned non-ManagedRetryDecision result")
+    return result
 
 
 def classify_managed_post_result(
@@ -243,31 +230,33 @@ def classify_managed_post_result(
     error_text: str,
     offer_id: str,
     publish_venue: str,
-) -> dict[str, Any]:
+) -> ManagedActionOutcome:
     signer = _import_signer()
     result = signer.classify_managed_post_result(success, error_text, offer_id, publish_venue)
-    if not isinstance(result, dict):
-        raise TypeError("classify_managed_post_result returned non-dict result")
-    return dict(result)
+    if not isinstance(result, ManagedActionOutcome):
+        raise TypeError("classify_managed_post_result returned non-ManagedActionOutcome result")
+    return result
 
 
 def classify_dexie_visibility_outcome(
     *,
     visible: bool,
     visibility_error: str,
-) -> dict[str, Any]:
+) -> ManagedActionOutcome:
     signer = _import_signer()
     result = signer.classify_dexie_visibility_outcome(visible, visibility_error)
-    if not isinstance(result, dict):
-        raise TypeError("classify_dexie_visibility_outcome returned non-dict result")
-    return dict(result)
+    if not isinstance(result, ManagedActionOutcome):
+        raise TypeError(
+            "classify_dexie_visibility_outcome returned non-ManagedActionOutcome result"
+        )
+    return result
 
 
-def count_parallel_transient_failures(items: list[ParallelActionOutcome]) -> int:
+def count_parallel_transient_failures(items: list[StrategyActionItem]) -> int:
     for index, item in enumerate(items):
-        if not isinstance(item, ParallelActionOutcome):
+        if not isinstance(item, StrategyActionItem):
             raise TypeError(
-                f"parallel outcome list item {index} must be ParallelActionOutcome, "
+                f"parallel outcome list item {index} must be StrategyActionItem, "
                 f"got {type(item).__name__}"
             )
     return int(_import_signer().count_parallel_transient_failures(items))
