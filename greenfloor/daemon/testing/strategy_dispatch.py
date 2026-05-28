@@ -12,7 +12,7 @@ from greenfloor.daemon.strategy_dispatch import (
     execute_managed_action_with_retry,
     execute_single_local_action,
     execute_single_managed_action,
-    execute_strategy_actions,
+    execute_strategy_dispatch,
     managed_offer_post,
     resolve_signer_offer_asset_ids_for_reservation,
 )
@@ -22,7 +22,7 @@ __all__ = [
     "execute_managed_action_with_retry",
     "execute_single_local_action",
     "execute_single_managed_action",
-    "execute_strategy_actions",
+    "execute_strategy_dispatch",
     "expand_planned_actions",
     "managed_offer_post",
     "resolve_signer_offer_asset_ids_for_reservation",

@@ -6,7 +6,7 @@ from greenfloor.config.models import ProgramConfig
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon.testing import (
     POST_COOLDOWN_UNTIL,
-    execute_strategy_actions,
+    execute_strategy_dispatch,
     strategy_dispatch,
 )
 from tests.helpers.daemon_test_fixtures import (
@@ -17,7 +17,7 @@ from tests.helpers.daemon_test_fixtures import (
 )
 
 
-def test_execute_strategy_actions_uses_signer_managed_path_when_configured(monkeypatch) -> None:
+def test_execute_strategy_dispatch_uses_signer_managed_path_when_configured(monkeypatch) -> None:
     POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr(
         strategy_dispatch,
@@ -43,7 +43,7 @@ def test_execute_strategy_actions_uses_signer_managed_path_when_configured(monke
         )
     ]
 
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market_config(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -54,11 +54,11 @@ def test_execute_strategy_actions_uses_signer_managed_path_when_configured(monke
         program=program_factory(),
     )
 
-    assert result["executed_count"] == 1
-    assert result["items"][0]["reason"] == "managed_offer_post_success"
+    assert result.executed_count == 1
+    assert result.action_items[0].reason == "managed_offer_post_success"
 
 
-def test_execute_strategy_actions_signer_managed_requires_dexie_visibility(monkeypatch) -> None:
+def test_execute_strategy_dispatch_signer_managed_requires_dexie_visibility(monkeypatch) -> None:
     POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
@@ -88,7 +88,7 @@ def test_execute_strategy_actions_signer_managed_requires_dexie_visibility(monke
         )
     ]
 
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market_config(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -99,12 +99,12 @@ def test_execute_strategy_actions_signer_managed_requires_dexie_visibility(monke
         program=program_factory(),
     )
 
-    assert result["executed_count"] == 0
-    assert result["items"][0]["status"] == "skipped"
-    assert "managed_offer_post_not_visible_on_dexie" in result["items"][0]["reason"]
+    assert result.executed_count == 0
+    assert result.action_items[0].status == "skipped"
+    assert "managed_offer_post_not_visible_on_dexie" in result.action_items[0].reason
 
 
-def test_execute_strategy_actions_signer_managed_accepts_transient_dexie_http_404(
+def test_execute_strategy_dispatch_signer_managed_accepts_transient_dexie_http_404(
     monkeypatch,
 ) -> None:
     """A transient 404 from Dexie is treated as pending-visibility, not a hard failure.
@@ -141,7 +141,7 @@ def test_execute_strategy_actions_signer_managed_accepts_transient_dexie_http_40
         )
     ]
 
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market_config(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -152,13 +152,13 @@ def test_execute_strategy_actions_signer_managed_accepts_transient_dexie_http_40
         program=program_factory(),
     )
 
-    assert result["executed_count"] == 1
-    assert result["items"][0]["status"] == "pending_visibility"
-    assert result["items"][0]["reason"] == "managed_offer_post_success"
-    assert result["items"][0]["offer_id"] == "offer-fallback-pending"
+    assert result.executed_count == 1
+    assert result.action_items[0].status == "pending_visibility"
+    assert result.action_items[0].reason == "managed_offer_post_success"
+    assert result.action_items[0].offer_id == "offer-fallback-pending"
 
 
-def test_execute_strategy_actions_preserves_planned_size_order(monkeypatch) -> None:
+def test_execute_strategy_dispatch_preserves_planned_size_order(monkeypatch) -> None:
     POST_COOLDOWN_UNTIL.clear()
     seen_sizes: list[int] = []
 
@@ -205,7 +205,7 @@ def test_execute_strategy_actions_preserves_planned_size_order(monkeypatch) -> N
         ),
     ]
 
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market_config(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -216,11 +216,13 @@ def test_execute_strategy_actions_preserves_planned_size_order(monkeypatch) -> N
         program=program_factory(),
     )
 
-    assert result["executed_count"] == 3
+    assert result.executed_count == 3
     assert seen_sizes == [1, 10, 100]
 
 
-def test_execute_strategy_actions_signer_managed_failure_skips_without_builder(monkeypatch) -> None:
+def test_execute_strategy_dispatch_signer_managed_failure_skips_without_builder(
+    monkeypatch,
+) -> None:
     POST_COOLDOWN_UNTIL.clear()
     calls = {"builder": 0}
 
@@ -252,7 +254,7 @@ def test_execute_strategy_actions_signer_managed_failure_skips_without_builder(m
         )
     ]
 
-    result = execute_strategy_actions(
+    result = execute_strategy_dispatch(
         market=market_config(),
         strategy_actions=actions,
         runtime_dry_run=False,
@@ -263,7 +265,7 @@ def test_execute_strategy_actions_signer_managed_failure_skips_without_builder(m
         program=program_factory(),
     )
 
-    assert result["executed_count"] == 0
-    assert result["items"][0]["status"] == "skipped"
-    assert result["items"][0]["reason"] == "managed_offer_post_failed:vault_signing_unavailable"
+    assert result.executed_count == 0
+    assert result.action_items[0].status == "skipped"
+    assert result.action_items[0].reason == "managed_offer_post_failed:vault_signing_unavailable"
     assert calls["builder"] == 0

@@ -59,29 +59,17 @@ def _effective_sell_bucket_counts_for_coin_ops(
 
 
 def _executed_sell_offer_counts_by_size(
-    offer_execution: dict[str, Any] | StrategyActionResult,
+    offer_execution: StrategyActionResult,
 ) -> dict[int, int]:
     counts: dict[int, int] = {}
-    if isinstance(offer_execution, StrategyActionResult):
-        items = offer_execution.items
-    else:
-        items = offer_execution.get("items", [])
-    if not isinstance(items, list):
-        return counts
-    for item in items:
-        if not isinstance(item, dict):
+    for item in offer_execution.action_items:
+        if not item.counts_as_executed:
             continue
-        if str(item.get("status", "")).strip().lower() != "executed":
+        if _normalize_offer_side(item.side) != "sell":
             continue
-        if _normalize_offer_side(item.get("side", "sell")) != "sell":
+        if item.size <= 0:
             continue
-        try:
-            size = int(item.get("size", 0))
-        except (TypeError, ValueError):
-            continue
-        if size <= 0:
-            continue
-        counts[size] = counts.get(size, 0) + 1
+        counts[item.size] = counts.get(item.size, 0) + 1
     return counts
 
 

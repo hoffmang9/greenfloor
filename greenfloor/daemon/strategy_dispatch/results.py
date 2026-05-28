@@ -18,24 +18,17 @@ class StrategyActionResult:
     def items(self) -> list[dict[str, Any]]:
         return [item.to_audit_dict() for item in self.action_items]
 
-    def __getitem__(self, key: str) -> Any:
-        if key == "planned_count":
-            return self.planned_count
-        if key == "executed_count":
-            return self.executed_count
-        if key == "items":
-            return self.items
-        raise KeyError(key)
-
-
-def strategy_action_result(
-    *,
-    planned_count: int,
-    executed_count: int,
-    items: list[StrategyActionItem],
-) -> StrategyActionResult:
-    return StrategyActionResult(
-        planned_count=planned_count,
-        executed_count=executed_count,
-        action_items=list(items),
-    )
+    @classmethod
+    def from_items(
+        cls,
+        *,
+        planned_count: int,
+        action_items: list[StrategyActionItem],
+    ) -> StrategyActionResult:
+        items = list(action_items)
+        executed_count = sum(1 for item in items if item.counts_as_executed)
+        return cls(
+            planned_count=planned_count,
+            executed_count=executed_count,
+            action_items=items,
+        )

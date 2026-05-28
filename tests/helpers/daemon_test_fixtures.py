@@ -38,7 +38,6 @@ def execute_local_strategy_actions(
     expanded = expand_planned_actions(strategy_actions)
     hooks = hooks_from_module()
     action_items = []
-    executed_count = 0
     for action in expanded:
         item = hooks.local_action(
             program=program,
@@ -51,12 +50,9 @@ def execute_local_strategy_actions(
             publish_venue=publish_venue,
             store=store,
         )
-        if item.is_executed:
-            executed_count += 1
         action_items.append(item)
-    return StrategyActionResult(
+    return StrategyActionResult.from_items(
         planned_count=len(expanded),
-        executed_count=executed_count,
         action_items=action_items,
     )
 

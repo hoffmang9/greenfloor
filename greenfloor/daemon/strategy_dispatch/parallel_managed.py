@@ -129,9 +129,9 @@ def _run_parallel_batch_submissions(
     reservation_coordinator: AssetReservationCoordinator,
     wallet_id: str,
     hooks: StrategyDispatchHooks,
-) -> tuple[int, list[StrategyActionItem]]:
+) -> list[StrategyActionItem]:
     if not batch_plan.queue:
-        return 0, []
+        return []
 
     max_workers = parallel_max_workers(
         submission_count=len(batch_plan.queue),
@@ -172,12 +172,9 @@ def _run_parallel_batch_submissions(
                 item = parallel_offer_worker_error_item(exc=exc)
             submitted_items.append((submit_index, item))
 
-    executed_count = 0
     items: list[StrategyActionItem] = []
     for _, item in sorted(submitted_items, key=lambda pair: pair[0]):
         _log_offer_action_timing(str(market.market_id), item)
-        if item.counts_as_executed:
-            executed_count += 1
         items.append(item)
 
     _, _, cooldown_seconds = _post_retry_config()
@@ -199,7 +196,7 @@ def _run_parallel_batch_submissions(
             total_parallel=total_parallel,
             cooldown_seconds=cooldown_seconds,
         )
-    return executed_count, items
+    return items
 
 
 def execute_actions_parallel(
@@ -214,7 +211,6 @@ def execute_actions_parallel(
     hooks: StrategyDispatchHooks,
 ) -> StrategyActionResult:
     items: list[StrategyActionItem] = []
-    executed_count = 0
     resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id = (
         hooks.resolve_signer_offer_asset_ids_for_reservation(
             program=program,
@@ -249,23 +245,22 @@ def execute_actions_parallel(
     )
 
     if batch_plan.queue:
-        queued_executed, queued_items = _run_parallel_batch_submissions(
-            program=program,
-            market=market,
-            expanded_actions=expanded_actions,
-            batch_plan=batch_plan,
-            publish_venue=publish_venue,
-            runtime_dry_run=runtime_dry_run,
-            dexie=dexie,
-            reservation_coordinator=reservation_coordinator,
-            wallet_id=wallet_id,
-            hooks=hooks,
+        items.extend(
+            _run_parallel_batch_submissions(
+                program=program,
+                market=market,
+                expanded_actions=expanded_actions,
+                batch_plan=batch_plan,
+                publish_venue=publish_venue,
+                runtime_dry_run=runtime_dry_run,
+                dexie=dexie,
+                reservation_coordinator=reservation_coordinator,
+                wallet_id=wallet_id,
+                hooks=hooks,
+            )
         )
-        executed_count += queued_executed
-        items.extend(queued_items)
 
-    return StrategyActionResult(
+    return StrategyActionResult.from_items(
         planned_count=len(expanded_actions),
-        executed_count=executed_count,
         action_items=items,
     )

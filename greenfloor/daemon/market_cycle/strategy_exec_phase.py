@@ -13,7 +13,7 @@ from greenfloor.daemon.market_cycle.result import MarketCycleResult
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.daemon.strategy_dispatch import StrategyActionResult, execute_strategy_actions
+from greenfloor.daemon.strategy_dispatch import StrategyActionResult, execute_strategy_dispatch
 from greenfloor.storage.sqlite import SqliteStore
 
 
@@ -52,7 +52,7 @@ def execute_strategy_for_market(
         },
         market_id=market.market_id,
     )
-    offer_execution = execute_strategy_actions(
+    offer_execution = execute_strategy_dispatch(
         market=market,
         strategy_actions=strategy_actions,
         runtime_dry_run=program.runtime_dry_run,
@@ -61,7 +61,6 @@ def execute_strategy_for_market(
         splash=splash,
         publish_venue=program.offer_publish_venue,
         store=store,
-        app_network=program.app_network,
         signer_key_registry=program.signer_key_registry,
         program=program,
         reservation_coordinator=reservation_coordinator,

@@ -8,6 +8,8 @@ from greenfloor.daemon.coin_ops_cycle import (
     _executed_sell_offer_counts_by_size,
 )
 from greenfloor.daemon.market_helpers import _normalize_strategy_pair
+from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
 from greenfloor.daemon.strategy_state import (
     _evaluate_two_sided_market_actions,
     _strategy_config_from_market,
@@ -161,18 +163,35 @@ def test_effective_sell_bucket_counts_for_coin_ops_accounts_for_new_sell_posts_i
 
 
 def test_executed_sell_offer_counts_by_size_counts_only_executed_sell_items() -> None:
-    counts = _executed_sell_offer_counts_by_size(
-        {
-            "items": [
-                {"status": "executed", "side": "sell", "size": 10},
-                {"status": "executed", "side": "sell", "size": 10},
-                {"status": "executed", "side": "buy", "size": 10},
-                {"status": "skipped", "side": "sell", "size": 10},
-                {"status": "executed", "side": "sell", "size": 1},
-            ]
-        }
+    result = StrategyActionResult.from_items(
+        planned_count=5,
+        action_items=[
+            StrategyActionItem(size=10, side="sell", status="executed", reason="ok"),
+            StrategyActionItem(size=10, side="sell", status="executed", reason="ok"),
+            StrategyActionItem(size=10, side="buy", status="executed", reason="ok"),
+            StrategyActionItem(size=10, side="sell", status="skipped", reason="skip"),
+            StrategyActionItem(size=1, side="sell", status="executed", reason="ok"),
+        ],
     )
+    counts = _executed_sell_offer_counts_by_size(result)
     assert counts == {10: 2, 1: 1}
+
+
+def test_executed_sell_offer_counts_by_size_includes_pending_visibility_sells() -> None:
+    result = StrategyActionResult.from_items(
+        planned_count=2,
+        action_items=[
+            StrategyActionItem(
+                size=10,
+                side="sell",
+                status="pending_visibility",
+                reason="managed_offer_post_success",
+                offer_id="offer-pending",
+            ),
+            StrategyActionItem(size=10, side="sell", status="skipped", reason="skip"),
+        ],
+    )
+    assert _executed_sell_offer_counts_by_size(result) == {10: 1}
 
 
 def test_evaluate_two_sided_market_actions_uses_side_targets_from_ladders() -> None:
