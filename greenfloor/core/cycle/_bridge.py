@@ -13,7 +13,13 @@ from greenfloor.core.cycle_orchestration import (
     StaleSweepHit,
     StaleSweepProgress,
 )
+from greenfloor.core.managed_retry import ManagedRetryDecision
 from greenfloor.core.parallel_batch_plan import ParallelBatchPlan, ParallelSubmissionEntry
+from greenfloor.core.parallel_reservation_prep import (
+    ParallelActionReservationInput,
+    ParallelReservationContext,
+    ParallelReservationPrep,
+)
 from greenfloor.core.planned_action import PlannedAction, planned_actions_from_signer_list
 
 _INSTALL_HINT = (
@@ -103,6 +109,35 @@ def plan_parallel_submission_batch(
     result = signer.plan_parallel_submission_batch(entries)
     if not isinstance(result, ParallelBatchPlan):
         raise TypeError("plan_parallel_submission_batch returned non-ParallelBatchPlan result")
+    return result
+
+
+def build_parallel_reservation_prep(
+    *,
+    actions: list[ParallelActionReservationInput],
+    ctx: ParallelReservationContext,
+) -> ParallelReservationPrep:
+    signer = _import_signer()
+    result = signer.build_parallel_reservation_prep(actions, ctx)
+    if not isinstance(result, ParallelReservationPrep):
+        raise TypeError(
+            "build_parallel_reservation_prep returned non-ParallelReservationPrep result"
+        )
+    return result
+
+
+def plan_parallel_managed_dispatch(
+    *,
+    prep: ParallelReservationPrep,
+    spendable_profiles: dict[str, dict[str, int | bool]],
+) -> ParallelBatchPlan:
+    signer = _import_signer()
+    result = signer.plan_parallel_managed_dispatch(
+        prep,
+        _normalize_spendable_profiles(spendable_profiles),
+    )
+    if not isinstance(result, ParallelBatchPlan):
+        raise TypeError("plan_parallel_managed_dispatch returned non-ParallelBatchPlan result")
     return result
 
 
@@ -203,23 +238,23 @@ def should_apply_parallel_transient_cooldown(
     )
 
 
-def managed_retry_sleep_ms(*, attempt_index: int, backoff_ms: int) -> int:
-    return int(_import_signer().managed_retry_sleep_ms(int(attempt_index), int(backoff_ms)))
-
-
-def should_retry_managed_post(
+def managed_retry_decision(
     *,
     attempt_index: int,
     attempts_max: int,
+    backoff_ms: int,
     is_upstream_transient: bool,
-) -> bool:
-    return bool(
-        _import_signer().should_retry_managed_post(
-            int(attempt_index),
-            int(attempts_max),
-            bool(is_upstream_transient),
-        )
+) -> ManagedRetryDecision:
+    signer = _import_signer()
+    result = signer.managed_retry_decision(
+        int(attempt_index),
+        int(attempts_max),
+        int(backoff_ms),
+        bool(is_upstream_transient),
     )
+    if not isinstance(result, ManagedRetryDecision):
+        raise TypeError("managed_retry_decision returned non-ManagedRetryDecision result")
+    return result
 
 
 def prepare_parallel_managed_submission_decision(

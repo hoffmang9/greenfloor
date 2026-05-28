@@ -9,6 +9,9 @@ static PLANNED_ACTION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_SKIP_ITEM_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_QUEUE_ITEM_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_BATCH_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static PARALLEL_RESERVATION_PREP_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static PARALLEL_RESERVATION_ENTRY_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static MANAGED_RETRY_DECISION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_ACTION_OUTCOME_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static MARKET_BATCH_SELECTION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static OFFER_STATE_ROW_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
@@ -60,6 +63,33 @@ pub fn parallel_batch_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, Py
         &PARALLEL_BATCH_PLAN_CLS,
         "greenfloor.core.parallel_batch_plan",
         "ParallelBatchPlan",
+    )
+}
+
+pub fn parallel_reservation_prep_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &PARALLEL_RESERVATION_PREP_CLS,
+        "greenfloor.core.parallel_reservation_prep",
+        "ParallelReservationPrep",
+    )
+}
+
+pub fn parallel_reservation_entry_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &PARALLEL_RESERVATION_ENTRY_CLS,
+        "greenfloor.core.parallel_reservation_prep",
+        "ParallelReservationEntry",
+    )
+}
+
+pub fn managed_retry_decision_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &MANAGED_RETRY_DECISION_CLS,
+        "greenfloor.core.managed_retry",
+        "ManagedRetryDecision",
     )
 }
 

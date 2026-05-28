@@ -13,8 +13,7 @@ from greenfloor.core.cycle import (
     classify_dexie_visibility_outcome,
     classify_managed_post_result,
     is_managed_upstream_transient_error,
-    managed_retry_sleep_ms,
-    should_retry_managed_post,
+    managed_retry_decision,
 )
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.cooldowns import (
@@ -156,16 +155,14 @@ def execute_managed_action_with_retry(
             )
         except Exception as exc:
             last_exc = exc
-            if not should_retry_managed_post(
+            retry = managed_retry_decision(
                 attempt_index=attempt_index,
                 attempts_max=int(attempts_max),
-                is_upstream_transient=is_managed_upstream_transient_error(exc),
-            ):
-                raise
-            sleep_ms = managed_retry_sleep_ms(
-                attempt_index=attempt_index,
                 backoff_ms=int(backoff_ms),
+                is_upstream_transient=is_managed_upstream_transient_error(exc),
             )
-            if sleep_ms > 0:
-                time.sleep(float(sleep_ms) / 1000.0)
+            if not retry.should_retry:
+                raise
+            if retry.sleep_ms > 0:
+                time.sleep(float(retry.sleep_ms) / 1000.0)
     raise RuntimeError(str(last_exc or "managed_action_retry_exhausted"))

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from . import _bridge as bridge
 
+build_parallel_reservation_prep = bridge.build_parallel_reservation_prep
 can_parallelize_managed_offers = bridge.can_parallelize_managed_offers
 classify_dexie_stale_offer_status = bridge.classify_dexie_stale_offer_status
 classify_dexie_visibility_outcome = bridge.classify_dexie_visibility_outcome
@@ -20,10 +21,11 @@ is_dexie_offer_missing_error_text = bridge.is_dexie_offer_missing_error_text
 is_transient_dexie_visibility_404_error = bridge.is_transient_dexie_visibility_404_error
 is_transient_managed_upstream_error_text = bridge.is_transient_managed_upstream_error_text
 is_two_sided_market_mode = bridge.is_two_sided_market_mode
-managed_retry_sleep_ms = bridge.managed_retry_sleep_ms
+managed_retry_decision = bridge.managed_retry_decision
 needs_inventory_fallback = bridge.needs_inventory_fallback
 next_disabled_market_log_deadline = bridge.next_disabled_market_log_deadline
 parallel_max_workers = bridge.parallel_max_workers
+plan_parallel_managed_dispatch = bridge.plan_parallel_managed_dispatch
 plan_parallel_submission_batch = bridge.plan_parallel_submission_batch
 prepare_parallel_managed_submission_decision = bridge.prepare_parallel_managed_submission_decision
 record_stale_sweep_check = bridge.record_stale_sweep_check
@@ -32,7 +34,6 @@ select_market_batch = bridge.select_market_batch
 sequential_action_route = bridge.sequential_action_route
 should_apply_parallel_transient_cooldown = bridge.should_apply_parallel_transient_cooldown
 should_log_disabled_market = bridge.should_log_disabled_market
-should_retry_managed_post = bridge.should_retry_managed_post
 should_try_cat_inventory_fallback = bridge.should_try_cat_inventory_fallback
 should_use_market_slot_dispatch = bridge.should_use_market_slot_dispatch
 single_input_preferred_skip_reason = bridge.single_input_preferred_skip_reason

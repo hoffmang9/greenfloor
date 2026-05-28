@@ -5,7 +5,8 @@ prefer imports from this package so refactors do not require wide private-symbol
 
 Canonical monkeypatch targets (module-qualified paths):
 
-- ``greenfloor.daemon.testing.main`` — cycle orchestration (`run_once`, `run_loop`, adapters)
+- ``greenfloor.daemon.testing.main`` — cycle orchestration (`run_once`, `run_loop`, adapters; aliases ``cycle_runner``)
+- ``greenfloor.daemon.main`` — CLI entrypoint and instance lock
 - ``greenfloor.daemon.testing.inventory_scan`` — coinset adapter factory
 - ``greenfloor.daemon.testing.strategy_dispatch`` — managed/local offer dispatch
   (``build_offer_for_action``, ``execute_single_managed_action``, etc.)

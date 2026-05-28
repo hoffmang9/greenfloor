@@ -1,11 +1,104 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
+use super::dispatch::{reservation_request_for_managed_offer, SpendableAssetProfile};
 use super::dispatch::{expand_inputs_by_repeat, PlannedActionInput};
-use super::dispatch::SpendableAssetProfile;
 use super::managed::{prepare_parallel_managed_submission_decision, ParallelSubmissionDecision};
 use super::strategy::PlannedAction;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParallelActionReservationInput {
+    pub submit_index: usize,
+    pub side: String,
+    pub size_base_units: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ParallelReservationContext {
+    pub base_asset_id: String,
+    pub quote_asset_id: String,
+    pub fee_asset_id: String,
+    pub fee_amount_mojos: i64,
+    pub base_unit_mojo_multiplier: i64,
+    pub quote_unit_mojo_multiplier: i64,
+    pub quote_price: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParallelReservationEntry {
+    pub submit_index: usize,
+    pub requested_amounts: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParallelReservationPrep {
+    pub entries: Vec<ParallelReservationEntry>,
+    pub asset_ids: Vec<String>,
+}
+
+pub fn build_parallel_reservation_prep(
+    actions: &[ParallelActionReservationInput],
+    ctx: &ParallelReservationContext,
+) -> ParallelReservationPrep {
+    let mut entries = Vec::with_capacity(actions.len());
+    let mut asset_ids = BTreeSet::new();
+    for action in actions {
+        let requested_amounts = reservation_request_for_managed_offer(
+            &action.side,
+            action.size_base_units,
+            &ctx.base_asset_id,
+            &ctx.quote_asset_id,
+            ctx.base_unit_mojo_multiplier,
+            ctx.quote_unit_mojo_multiplier,
+            ctx.quote_price,
+            &ctx.fee_asset_id,
+            ctx.fee_amount_mojos,
+        );
+        for asset_id in requested_amounts.keys() {
+            asset_ids.insert(asset_id.clone());
+        }
+        entries.push(ParallelReservationEntry {
+            submit_index: action.submit_index,
+            requested_amounts,
+        });
+    }
+    ParallelReservationPrep {
+        entries,
+        asset_ids: asset_ids.into_iter().collect(),
+    }
+}
+
+pub fn plan_parallel_managed_dispatch(
+    prep: &ParallelReservationPrep,
+    spendable_profiles: &BTreeMap<String, SpendableAssetProfile>,
+) -> ParallelBatchPlan {
+    let mut plan = ParallelBatchPlan::default();
+    for entry in &prep.entries {
+        let decision = prepare_parallel_managed_submission_decision(
+            &entry.requested_amounts,
+            spendable_profiles,
+        );
+        match decision {
+            ParallelSubmissionDecision::Skip { reason } => {
+                plan.skip_items.push(ParallelSkipItem {
+                    submit_index: entry.submit_index,
+                    reason,
+                });
+            }
+            ParallelSubmissionDecision::Proceed {
+                available_amounts,
+            } => {
+                plan.queue.push(ParallelQueueItem {
+                    submit_index: entry.submit_index,
+                    requested_amounts: entry.requested_amounts.clone(),
+                    available_amounts,
+                });
+            }
+        }
+    }
+    plan
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -155,6 +248,28 @@ mod tests {
             sequential_action_route(false, true, false),
             SequentialActionRoute::Local
         );
+    }
+
+    #[test]
+    fn build_parallel_reservation_prep_collects_asset_ids() {
+        let actions = vec![ParallelActionReservationInput {
+            submit_index: 0,
+            side: "sell".to_string(),
+            size_base_units: 10,
+        }];
+        let ctx = ParallelReservationContext {
+            base_asset_id: "base_asset".to_string(),
+            quote_asset_id: "quote_asset".to_string(),
+            fee_asset_id: "xch_asset".to_string(),
+            fee_amount_mojos: 0,
+            base_unit_mojo_multiplier: 1000,
+            quote_unit_mojo_multiplier: 1000,
+            quote_price: 1.5,
+        };
+        let prep = build_parallel_reservation_prep(&actions, &ctx);
+        assert_eq!(prep.entries.len(), 1);
+        assert_eq!(prep.entries[0].submit_index, 0);
+        assert!(prep.asset_ids.contains(&"base_asset".to_string()));
     }
 
     #[test]

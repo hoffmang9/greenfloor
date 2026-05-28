@@ -134,6 +134,37 @@ pub fn should_retry_managed_post(
     attempt_index + 1 < max_attempts
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManagedRetryDecisionKind {
+    Stop,
+    Retry,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManagedRetryDecision {
+    pub decision: ManagedRetryDecisionKind,
+    pub sleep_ms: u64,
+}
+
+pub fn managed_retry_decision(
+    attempt_index: u32,
+    attempts_max: u32,
+    backoff_ms: u64,
+    is_upstream_transient: bool,
+) -> ManagedRetryDecision {
+    if !should_retry_managed_post(attempt_index, attempts_max, is_upstream_transient) {
+        return ManagedRetryDecision {
+            decision: ManagedRetryDecisionKind::Stop,
+            sleep_ms: 0,
+        };
+    }
+    ManagedRetryDecision {
+        decision: ManagedRetryDecisionKind::Retry,
+        sleep_ms: managed_retry_sleep_ms(attempt_index, backoff_ms),
+    }
+}
+
 pub fn prepare_parallel_managed_submission_decision(
     requested_amounts: &BTreeMap<String, i64>,
     spendable_profiles: &BTreeMap<String, SpendableAssetProfile>,
@@ -297,6 +328,20 @@ mod tests {
             classify_dexie_visibility_outcome(false, "dexie_http_error:404 not found");
         assert_eq!(outcome.reason, PENDING_VISIBILITY_REASON);
         assert_eq!(outcome.status, "executed");
+    }
+
+    #[test]
+    fn managed_retry_decision_stops_when_not_transient() {
+        let decision = managed_retry_decision(0, 3, 250, false);
+        assert_eq!(decision.decision, ManagedRetryDecisionKind::Stop);
+        assert_eq!(decision.sleep_ms, 0);
+    }
+
+    #[test]
+    fn managed_retry_decision_retries_with_backoff() {
+        let decision = managed_retry_decision(1, 3, 250, true);
+        assert_eq!(decision.decision, ManagedRetryDecisionKind::Retry);
+        assert_eq!(decision.sleep_ms, 500);
     }
 
     #[test]

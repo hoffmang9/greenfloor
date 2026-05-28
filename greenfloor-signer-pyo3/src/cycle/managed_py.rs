@@ -2,17 +2,17 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use crate::cycle::orchestration_py::parallel_action_outcomes_from_py_list;
-use crate::py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
+use crate::py_utils::{dict_from_json_value, managed_retry_decision_class, request_dict_to_json, to_py_err};
 
 use signer_core::{
     can_parallelize_managed_offers, classify_dexie_visibility_outcome, classify_managed_post_result,
     classify_managed_transient_error, count_parallel_transient_failures,
     is_managed_upstream_transient_error, is_managed_worker_transient_error,
     is_parallel_dispatch_transient_error, is_transient_dexie_visibility_404_error,
-    is_transient_managed_upstream_error_text, managed_retry_sleep_ms,
+    is_transient_managed_upstream_error_text, managed_retry_decision,
     parallel_max_workers, prepare_parallel_managed_submission_decision,
     reservation_release_status, reservation_request_for_managed_offer, should_apply_parallel_transient_cooldown,
-    should_retry_managed_post, single_input_preferred_skip_reason, SpendableAssetProfile,
+    single_input_preferred_skip_reason, SpendableAssetProfile,
 };
 
 #[pyfunction]
@@ -174,22 +174,6 @@ fn should_apply_parallel_transient_cooldown_py(
 }
 
 #[pyfunction]
-#[pyo3(name = "managed_retry_sleep_ms")]
-fn managed_retry_sleep_ms_py(attempt_index: u32, backoff_ms: u64) -> u64 {
-    managed_retry_sleep_ms(attempt_index, backoff_ms)
-}
-
-#[pyfunction]
-#[pyo3(name = "should_retry_managed_post")]
-fn should_retry_managed_post_py(
-    attempt_index: u32,
-    attempts_max: u32,
-    is_upstream_transient: bool,
-) -> bool {
-    should_retry_managed_post(attempt_index, attempts_max, is_upstream_transient)
-}
-
-#[pyfunction]
 #[pyo3(name = "prepare_parallel_managed_submission_decision")]
 fn prepare_parallel_managed_submission_decision_py(
     requested_amounts: &Bound<'_, PyDict>,
@@ -237,6 +221,33 @@ fn count_parallel_transient_failures_py(items: &Bound<'_, PyList>) -> PyResult<u
     Ok(count_parallel_transient_failures(&pairs))
 }
 
+#[pyfunction]
+#[pyo3(name = "managed_retry_decision")]
+fn managed_retry_decision_py(
+    attempt_index: u32,
+    attempts_max: u32,
+    backoff_ms: u64,
+    is_upstream_transient: bool,
+) -> PyResult<Py<PyAny>> {
+    let decision = managed_retry_decision(
+        attempt_index,
+        attempts_max,
+        backoff_ms,
+        is_upstream_transient,
+    );
+    let decision_label = match decision.decision {
+        signer_core::ManagedRetryDecisionKind::Stop => "stop",
+        signer_core::ManagedRetryDecisionKind::Retry => "retry",
+    };
+    Python::attach(|py| {
+        let cls = managed_retry_decision_class(py)?;
+        let kwargs = PyDict::new(py);
+        kwargs.set_item("decision", decision_label)?;
+        kwargs.set_item("sleep_ms", decision.sleep_ms)?;
+        Ok(cls.call((), Some(&kwargs))?.into())
+    })
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(
         reservation_request_for_managed_offer_py,
@@ -259,8 +270,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
         should_apply_parallel_transient_cooldown_py,
         m
     )?)?;
-    m.add_function(wrap_pyfunction!(managed_retry_sleep_ms_py, m)?)?;
-    m.add_function(wrap_pyfunction!(should_retry_managed_post_py, m)?)?;
     m.add_function(wrap_pyfunction!(
         prepare_parallel_managed_submission_decision_py,
         m
@@ -268,5 +277,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(classify_managed_post_result_py, m)?)?;
     m.add_function(wrap_pyfunction!(classify_dexie_visibility_outcome_py, m)?)?;
     m.add_function(wrap_pyfunction!(count_parallel_transient_failures_py, m)?)?;
+    m.add_function(wrap_pyfunction!(managed_retry_decision_py, m)?)?;
     Ok(())
 }
