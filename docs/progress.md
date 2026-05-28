@@ -1,5 +1,14 @@
 # Progress Log
 
+## 2026-05-27 (Rust offer reconciliation kernel — step 9)
+
+- **`greenfloor-signer/src/cycle/reconcile.rs`:** Coinset-first watched-offer transition kernel — Dexie status fallback, missing-offer (404) handling, taker field shaping, and `CycleOfferTransition` outputs.
+- **PyO3 + core surface:** typed `CycleOfferTransition` via `reconcile_py.rs` + `py_utils.rs`; policy in `greenfloor/core/offer_reconcile.py`.
+- **Python IO glue:** `greenfloor/runtime/offer_reconciliation.py` keeps Dexie fetch, SQLite tx-signal lookup (`_coinset_signal_lists`), audit persistence, and batch reconcile loops only.
+- **Tests:** Rust unit tests in `reconcile.rs`; Python wiring in `tests/test_offer_reconcile_kernel.py`; existing manager/daemon reconcile integration tests remain parity gates.
+- **Migration status:** step 9 complete for offer lifecycle reconciliation policy.
+- **Next step (step 10):** move the **core coin-op policy bundle** to Rust — `plan_coin_ops`, `fee_budget` partitioning, `compute_bucket_counts_from_coins`, and `coin_ops_policy` min-amount guard (`greenfloor/core/coin_ops.py`, `fee_budget.py`, `inventory.py`, `coin_ops_policy.py`). Python keeps coin-op IO orchestration under `runtime/coin_ops/` and `daemon/coin_ops_cycle.py`.
+
 ## 2026-05-27 (Rust cycle kernel step 8 — reseed gap planning)
 
 - **`plan_reseed_actions_from_gap` in Rust:** `greenfloor-signer/src/cycle/reseed.rs` — offer-size-gap reseed (typed skip reasons, per-size repeat from active vs target counts, `missing_by_size`; seed templates from internal `evaluate_market` on empty bucket state).
@@ -134,6 +143,8 @@ Large Python daemon modules remain intentionally unsplit pending Rust migration 
 6. **`main.py` cycle runner extraction (sixth)** ✅ — `run_once` / `run_loop` moved to `greenfloor/daemon/cycle_runner.py`; `main.py` retains CLI entrypoint and instance lock only.
 7. **`strategy_dispatch` reservation + retry kernel (seventh)** ✅ — typed `ManagedActionOutcome`, `PlannedAction` parallel planning, `parallel_pool` extract.
 8. **Market-cycle reseed gap planning (eighth)** ✅ — `cycle/reseed.rs` + typed PyO3 `ReseedGapPlan`; Python keeps SQLite offer-count IO and structured reseed logging; `tests/test_cycle_reseed.py` enforces skip-reason label parity.
+9. **Offer reconciliation transition kernel (ninth)** ✅ — `cycle/reconcile.rs` + typed PyO3 `CycleOfferTransition`; Python keeps Dexie fetch, SQLite tx-signal lookup, and audit persistence in `runtime/offer_reconciliation.py`.
+10. **Core coin-op policy bundle (tenth, next)** — `plan_coin_ops`, fee-budget partitioning, bucket counting, and CAT min-amount policy in Rust; Python keeps `runtime/coin_ops/` execution IO and `daemon/coin_ops_cycle.py` glue.
 
 **Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch/` each under ~400 lines of Python glue; Rust crates absorb complexity; Python keeps SQLite, Dexie, websocket, and CLI.
 
