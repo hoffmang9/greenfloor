@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypedDict
 
 from greenfloor.core import kernel_bridge
 
@@ -18,6 +18,35 @@ def _require_policy_method(method_name: str):
     if method is None:
         raise RuntimeError(f"{_KERNEL_REBUILD_HINT} Missing symbol: {method_name}")
     return method
+
+
+class ExpectedPublishAssetFields(TypedDict):
+    expected_offered_asset_id: str
+    expected_offered_symbol: str
+    expected_requested_asset_id: str
+    expected_requested_symbol: str
+
+
+def _coerce_expected_publish_asset_fields(payload: object) -> ExpectedPublishAssetFields:
+    if not isinstance(payload, dict):
+        raise TypeError("expected_publish_asset_fields must return dict payload")
+    required_keys = (
+        "expected_offered_asset_id",
+        "expected_offered_symbol",
+        "expected_requested_asset_id",
+        "expected_requested_symbol",
+    )
+    missing = [key for key in required_keys if key not in payload]
+    if missing:
+        raise TypeError(
+            "expected_publish_asset_fields missing keys: " + ", ".join(sorted(missing))
+        )
+    return {
+        "expected_offered_asset_id": str(payload["expected_offered_asset_id"]),
+        "expected_offered_symbol": str(payload["expected_offered_symbol"]),
+        "expected_requested_asset_id": str(payload["expected_requested_asset_id"]),
+        "expected_requested_symbol": str(payload["expected_requested_symbol"]),
+    }
 
 
 def resolve_offer_expiry_for_pricing(pricing: dict[str, Any]) -> tuple[str, int]:
@@ -64,7 +93,7 @@ def expected_publish_asset_fields(
     quote_asset: str,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
-) -> dict[str, str]:
+) -> ExpectedPublishAssetFields:
     resolve_fields = _require_policy_method("expected_publish_asset_fields")
     payload = resolve_fields(
         str(side),
@@ -73,14 +102,7 @@ def expected_publish_asset_fields(
         str(resolved_base_asset_id),
         str(resolved_quote_asset_id),
     )
-    if not isinstance(payload, dict):
-        raise TypeError("expected_publish_asset_fields must return dict payload")
-    return {
-        "expected_offered_asset_id": str(payload.get("expected_offered_asset_id", "")),
-        "expected_offered_symbol": str(payload.get("expected_offered_symbol", "")),
-        "expected_requested_asset_id": str(payload.get("expected_requested_asset_id", "")),
-        "expected_requested_symbol": str(payload.get("expected_requested_symbol", "")),
-    }
+    return _coerce_expected_publish_asset_fields(payload)
 
 
 def dexie_offer_asset_expectation_error(

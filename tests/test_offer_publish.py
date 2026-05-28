@@ -170,6 +170,36 @@ def test_expected_publish_asset_fields_requires_kernel_symbol(monkeypatch) -> No
         )
 
 
+def test_expected_publish_asset_fields_requires_complete_payload(monkeypatch) -> None:
+    class _Native(MinimalSignerKernel):
+        @staticmethod
+        def expected_publish_asset_fields(
+            _side: str,
+            _base_symbol: str,
+            _quote_asset: str,
+            _resolved_base_asset_id: str,
+            _resolved_quote_asset_id: str,
+        ) -> dict[str, str]:
+            return {
+                "expected_offered_asset_id": "offered",
+                "expected_requested_asset_id": "requested",
+                "expected_requested_symbol": "A1",
+            }
+
+    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    with pytest.raises(
+        TypeError,
+        match="expected_publish_asset_fields missing keys: expected_offered_symbol",
+    ):
+        expected_publish_asset_fields(
+            side="buy",
+            base_symbol="A1",
+            quote_asset="xch",
+            resolved_base_asset_id="base",
+            resolved_quote_asset_id="quote",
+        )
+
+
 def test_resolve_offer_expiry_and_quote_price_use_kernel(monkeypatch) -> None:
     class _Native(MinimalSignerKernel):
         @staticmethod
