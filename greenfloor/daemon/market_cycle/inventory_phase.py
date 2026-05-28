@@ -11,7 +11,7 @@ from greenfloor.core.cycle import (
     resolve_inventory_scan_source,
     should_try_cat_inventory_fallback,
 )
-from greenfloor.core.inventory import compute_bucket_counts_from_coins
+from greenfloor.core.coin_ops import compute_bucket_counts_from_coins
 from greenfloor.daemon.inventory_scan import (
     _coinset_cat_spendable_base_unit_coin_amounts,
     _coinset_spendable_base_unit_coin_amounts,

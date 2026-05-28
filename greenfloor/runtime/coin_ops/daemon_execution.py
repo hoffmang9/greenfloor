@@ -11,8 +11,8 @@ from greenfloor.config.models import (
     ProgramConfig,
     coin_ops_execution_backend,
 )
-from greenfloor.core.coin_ops import CoinOpPlan
-from greenfloor.core.coin_ops_policy import (
+from greenfloor.core.coin_ops import (
+    CoinOpPlan,
     coin_op_min_amount_mojos,
     coin_op_target_amount_allowed,
 )

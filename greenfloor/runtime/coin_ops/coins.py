@@ -125,7 +125,7 @@ def coin_matches_scoped_spendable_filters(
     scoped_asset_id: str,
     canonical_asset_id: str,
 ) -> bool:
-    from greenfloor.core.coin_ops_policy import coin_meets_coin_op_min_amount
+    from greenfloor.core.coin_ops import coin_meets_coin_op_min_amount
 
     if not is_spendable_coin(coin):
         return False

@@ -41,7 +41,8 @@ offer reconciliation, and coin-op planning. The name "signer" no longer describe
 - New Python policy surfaces use `kernel_bridge`, not ad-hoc `importlib` copies.
 - Adapter IO paths (`rust_signer`, `coinset`, `bls_signing`, `native_offer`, etc.) import
   the kernel through `kernel_bridge.import_kernel()`.
-- Legacy module shims (`greenfloor.core.fee_budget`, `inventory`, `coin_ops_policy`) remain
-  until step 11 lands; delete them once call sites import `greenfloor.core.coin_ops` only.
+- Legacy module shims (`greenfloor.core.fee_budget`, `inventory`, `coin_ops_policy`) were
+  removed once call sites imported `greenfloor.core.coin_ops` only; coin-op policy now lives
+  in `_bridge.py` with `CoinOpsKernelProtocol` typing the PyO3 surface.
 - ADR 0006/0007 remain valid; this ADR clarifies naming without changing boundaries.
 - Full rename is deferred until Python daemon/CLI glue migration is closer to complete.

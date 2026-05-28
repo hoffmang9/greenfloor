@@ -2,6 +2,10 @@
 
 The compiled extension is still named ``greenfloor_signer`` (see ADR 0010). Python
 callers should use :func:`import_kernel`; ``import_signer`` remains as a migration alias.
+
+Domain modules (for example ``greenfloor.core.coin_ops.kernel_protocol``) define
+``Protocol`` types for the PyO3 surface they call; ``import_kernel()`` still returns
+``Any`` at the loader boundary.
 """
 
 from __future__ import annotations
