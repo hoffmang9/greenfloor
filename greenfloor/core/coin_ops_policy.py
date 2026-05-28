@@ -1,8 +1,14 @@
-"""Deterministic coin-operation policy shared by CLI and daemon."""
+"""Deterministic coin-operation policy shared by CLI and daemon (Rust-backed)."""
 
 from __future__ import annotations
 
-from greenfloor.hex_utils import canonical_is_xch
+from greenfloor.core.coin_ops import _import_signer
+
+__all__ = [
+    "coin_meets_coin_op_min_amount",
+    "coin_op_min_amount_mojos",
+    "coin_op_target_amount_allowed",
+]
 
 
 def coin_op_min_amount_mojos(*, canonical_asset_id: str) -> int:
@@ -10,18 +16,17 @@ def coin_op_min_amount_mojos(*, canonical_asset_id: str) -> int:
     # bug documented in docs/ent-wallet-upstream-byc-coin-query-issue.md.
     # Ignore sub-1-CAT dust during local split/combine candidate selection so
     # tiny stray rows do not get pulled into operational coin management.
-    if canonical_is_xch(canonical_asset_id):
-        return 0
-    return 1000
+    return int(_import_signer().coin_op_min_amount_mojos(str(canonical_asset_id)))
 
 
 def coin_meets_coin_op_min_amount(coin: dict, *, canonical_asset_id: str) -> bool:
-    try:
-        amount = int(coin.get("amount", 0))
-    except (TypeError, ValueError):
-        return False
-    return amount >= coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
+    return bool(_import_signer().coin_meets_coin_op_min_amount(coin, str(canonical_asset_id)))
 
 
 def coin_op_target_amount_allowed(*, amount_mojos: int, canonical_asset_id: str) -> bool:
-    return int(amount_mojos) >= coin_op_min_amount_mojos(canonical_asset_id=canonical_asset_id)
+    return bool(
+        _import_signer().coin_op_target_amount_allowed(
+            int(amount_mojos),
+            str(canonical_asset_id),
+        )
+    )

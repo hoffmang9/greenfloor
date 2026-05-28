@@ -1,6 +1,25 @@
+"""Coin-operation planning kernel (Rust-backed)."""
+
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
+
+_INSTALL_HINT = (
+    "Install the greenfloor_signer extension (for example: "
+    "`maturin develop -m greenfloor-signer-pyo3` from the repo root)."
+)
+
+__all__ = ["BucketSpec", "CoinOpPlan", "plan_coin_ops"]
+
+
+def _import_signer():
+    try:
+        return importlib.import_module("greenfloor_signer")
+    except ImportError as exc:
+        raise ImportError(
+            f"greenfloor_signer is not available. {_INSTALL_HINT} Original error: {exc}"
+        ) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +39,17 @@ class CoinOpPlan:
     reason: str
 
 
+def _require_coin_op_plans(value: object) -> list[CoinOpPlan]:
+    if not isinstance(value, list):
+        raise TypeError("signer returned non-list result")
+    plans: list[CoinOpPlan] = []
+    for item in value:
+        if not isinstance(item, CoinOpPlan):
+            raise TypeError("signer returned non-CoinOpPlan result")
+        plans.append(item)
+    return plans
+
+
 def plan_coin_ops(
     *,
     buckets: list[BucketSpec],
@@ -28,65 +58,12 @@ def plan_coin_ops(
     split_fee_mojos: int,
     combine_fee_mojos: int,
 ) -> list[CoinOpPlan]:
-    plans: list[CoinOpPlan] = []
-    remaining_ops = max_operations_per_run
-    remaining_fee = max_fee_budget_mojos if max_fee_budget_mojos > 0 else 10**18
-
-    deficits: list[tuple[float, BucketSpec, int]] = []
-    for b in buckets:
-        threshold = b.target_count + b.split_buffer_count
-        deficit = threshold - b.current_count
-        if deficit > 0 and b.target_count > 0:
-            deficits.append((deficit / b.target_count, b, deficit))
-    deficits.sort(key=lambda x: (-x[0], x[1].size_base_units))
-
-    for _ratio, bucket, deficit in deficits:
-        if remaining_ops <= 0:
-            break
-        if split_fee_mojos > remaining_fee:
-            break
-        op_count = min(deficit, remaining_ops)
-        if op_count <= 0:
-            continue
-        plans.append(
-            CoinOpPlan(
-                op_type="split",
-                size_base_units=bucket.size_base_units,
-                op_count=op_count,
-                reason="low_watermark_buffer_deficit",
-            )
+    return _require_coin_op_plans(
+        _import_signer().plan_coin_ops(
+            buckets,
+            int(max_operations_per_run),
+            int(max_fee_budget_mojos),
+            int(split_fee_mojos),
+            int(combine_fee_mojos),
         )
-        remaining_ops -= op_count
-        remaining_fee -= split_fee_mojos
-
-    if deficits:
-        return plans
-
-    excess_candidates: list[tuple[BucketSpec, int]] = []
-    for b in buckets:
-        threshold = int(b.target_count * b.combine_when_excess_factor)
-        excess = b.current_count - threshold
-        if excess > 0:
-            excess_candidates.append((b, excess))
-    excess_candidates.sort(key=lambda x: x[0].size_base_units)
-
-    for bucket, excess in excess_candidates:
-        if remaining_ops <= 0:
-            break
-        if combine_fee_mojos > remaining_fee:
-            break
-        op_count = min(excess, remaining_ops)
-        if op_count <= 0:
-            continue
-        plans.append(
-            CoinOpPlan(
-                op_type="combine",
-                size_base_units=bucket.size_base_units,
-                op_count=op_count,
-                reason="excess_only_policy",
-            )
-        )
-        remaining_ops -= op_count
-        remaining_fee -= combine_fee_mojos
-
-    return plans
+    )
