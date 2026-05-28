@@ -27,64 +27,45 @@ from greenfloor.config.io import (
     resolve_state_db_path,
 )
 from greenfloor.config.models import (
-    ProgramConfig,
     signer_offer_path_configured,
 )
-from greenfloor.core.inventory import compute_bucket_counts_from_coins
-from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert, utcnow
-from greenfloor.core.offer_lifecycle import OfferLifecycleState
-from greenfloor.core.strategy import evaluate_market
-from greenfloor.daemon.cancel_policy import _execute_cancel_policy_for_market
-from greenfloor.daemon.coin_ops_cycle import (
-    _executed_sell_offer_counts_by_size,
-    _plan_and_execute_coin_ops,
+from greenfloor.core.cycle import (
+    classify_dexie_stale_offer_status,
+    collect_stale_sweep_candidates,
+    dedupe_sorted_market_ids,
+    empty_stale_sweep_payload,
+    enqueue_immediate_requeue,
+    is_dexie_offer_missing_error_text,
+    next_disabled_market_log_deadline,
+    record_stale_sweep_check,
+    should_use_market_slot_dispatch,
 )
+from greenfloor.core.cycle import (
+    select_market_batch as select_market_batch_kernel,
+)
+from greenfloor.core.cycle import (
+    should_log_disabled_market as should_log_disabled_market_kernel,
+)
+from greenfloor.core.notifications import utcnow
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient
-from greenfloor.daemon.cooldowns import (
-    _env_int,
-    _managed_offer_market_health_payload,
-)
+from greenfloor.daemon.cooldowns import _env_int
 from greenfloor.daemon.inventory_scan import (
     _build_coinset_adapter,
-    _coinset_cat_spendable_base_unit_coin_amounts,
-    _coinset_spendable_base_unit_coin_amounts,
     _resolve_coinset_ws_url,
     _run_coinset_signal_capture_once,
 )
-from greenfloor.daemon.market_helpers import (
-    _base_unit_mojo_multiplier_for_market,
-    _normalize_offer_side,
+from greenfloor.daemon.market_cycle import (
+    process_single_market,
+    process_single_market_with_store,
 )
-from greenfloor.daemon.market_logging import (
-    _daemon_logger,
-    _log_market_decision,
-)
-from greenfloor.daemon.offer_reconcile_cycle import reconcile_market_cycle_offers
+from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision
 from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.daemon.strategy_dispatch import (
-    _execute_strategy_actions,
-    _resolve_signer_offer_asset_ids_for_reservation,
-)
-from greenfloor.daemon.strategy_reseed import _inject_reseed_action_if_no_active_offers
-from greenfloor.daemon.strategy_state import (
-    _evaluate_two_sided_market_actions,
-    _strategy_config_from_market,
-    _strategy_state_from_bucket_counts,
-)
-from greenfloor.daemon.watchlist import (
-    _active_offer_counts_by_size,
-    _active_offer_counts_by_size_and_side,
-    _is_dexie_offer_missing_error,
-    _match_watched_coin_ids,
-    _strategy_target_counts_by_size,
-)
-from greenfloor.keys.router import resolve_market_key
+from greenfloor.daemon.watchlist import _match_watched_coin_ids
 from greenfloor.logging_setup import (
     initialize_service_file_logging,
     warn_if_log_level_auto_healed,
 )
-from greenfloor.notify.pushover import send_pushover_alert
-from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
+from greenfloor.storage.sqlite import SqliteStore
 
 _DAEMON_SERVICE_NAME = "daemon"
 _DISABLED_MARKET_LOG_INTERVAL_SECONDS_DEFAULT = 3600
@@ -117,10 +98,14 @@ def _disabled_market_log_interval_seconds() -> int:
 def _should_log_disabled_market(*, market_id: str, now_monotonic: float | None = None) -> bool:
     now_value = time.monotonic() if now_monotonic is None else float(now_monotonic)
     deadline = float(_DISABLED_MARKET_NEXT_LOG_AT.get(market_id, 0.0))
-    if deadline > now_value:
+    if not should_log_disabled_market_kernel(
+        now_monotonic=now_value,
+        next_log_deadline=deadline,
+    ):
         return False
-    _DISABLED_MARKET_NEXT_LOG_AT[market_id] = now_value + float(
-        _disabled_market_log_interval_seconds()
+    _DISABLED_MARKET_NEXT_LOG_AT[market_id] = next_disabled_market_log_deadline(
+        now_monotonic=now_value,
+        interval_seconds=_disabled_market_log_interval_seconds(),
     )
     return True
 
@@ -207,32 +192,15 @@ def _acquire_daemon_instance_lock(*, state_dir: Path, mode: str):
 
 
 @dataclass(slots=True)
-class _MarketCycleResult:
-    cycle_errors: int = 0
-    strategy_planned: int = 0
-    strategy_executed: int = 0
-    cancel_triggered: bool = False
-    cancel_planned: int = 0
-    cancel_executed: int = 0
-    immediate_requeue_requested: bool = False
-    immediate_requeue_signals: list[str] = field(default_factory=list)
-
-
-@dataclass(slots=True)
 class _MarketDispatchState:
     cursor: int = 0
     immediate_requeue_ids: deque[str] = field(default_factory=deque)
 
 
 def _enqueue_immediate_requeue_market(dispatch_state: _MarketDispatchState, market_id: str) -> None:
-    clean_market_id = str(market_id).strip()
-    if not clean_market_id:
-        return
-    deduped_existing = deque(
-        mid for mid in dispatch_state.immediate_requeue_ids if mid != clean_market_id
+    dispatch_state.immediate_requeue_ids = deque(
+        enqueue_immediate_requeue(list(dispatch_state.immediate_requeue_ids), market_id)
     )
-    deduped_existing.appendleft(clean_market_id)
-    dispatch_state.immediate_requeue_ids = deduped_existing
 
 
 def _select_market_batch(
@@ -250,53 +218,29 @@ def _select_market_batch(
         dispatch_state.cursor = 0
         return [], []
 
-    max_slots = max(1, int(slot_count))
-    if max_slots >= len(enabled_ids):
-        # Keep only currently enabled markets in the requeue deque.
-        dispatch_state.immediate_requeue_ids = deque(
-            mid for mid in dispatch_state.immediate_requeue_ids if mid in enabled_by_id
-        )
-        return [enabled_by_id[mid] for mid in enabled_ids], []
-
-    selected_ids: list[str] = []
-    selected_set: set[str] = set()
-    retained_requeues: deque[str] = deque()
-    consumed_requeues: list[str] = []
-    for market_id in list(dispatch_state.immediate_requeue_ids):
-        if market_id not in enabled_by_id:
-            continue
-        if market_id in selected_set:
-            continue
-        if len(selected_ids) < max_slots:
-            selected_ids.append(market_id)
-            selected_set.add(market_id)
-            consumed_requeues.append(market_id)
-        else:
-            retained_requeues.append(market_id)
-    dispatch_state.immediate_requeue_ids = retained_requeues
-
-    round_robin_slots = max_slots - len(selected_ids)
-    if round_robin_slots > 0:
-        total_enabled = len(enabled_ids)
-        start_idx = dispatch_state.cursor % total_enabled
-        last_rr_idx: int | None = None
-        for step in range(total_enabled):
-            idx = (start_idx + step) % total_enabled
-            market_id = enabled_ids[idx]
-            if market_id in selected_set:
-                continue
-            selected_ids.append(market_id)
-            selected_set.add(market_id)
-            last_rr_idx = idx
-            if len(selected_ids) >= max_slots:
-                break
-        if last_rr_idx is not None:
-            dispatch_state.cursor = (last_rr_idx + 1) % total_enabled
-
+    selection = select_market_batch_kernel(
+        enabled_market_ids=enabled_ids,
+        slot_count=int(slot_count),
+        cursor=int(dispatch_state.cursor),
+        immediate_requeue_ids=list(dispatch_state.immediate_requeue_ids),
+    )
+    dispatch_state.cursor = int(selection.get("cursor", dispatch_state.cursor))
+    dispatch_state.immediate_requeue_ids = deque(
+        str(market_id)
+        for market_id in selection.get("immediate_requeue_ids", [])
+        if str(market_id).strip()
+    )
     selected_markets = [
-        enabled_by_id[market_id] for market_id in selected_ids if market_id in enabled_by_id
+        enabled_by_id[str(market_id)]
+        for market_id in selection.get("selected_market_ids", [])
+        if str(market_id).strip() in enabled_by_id
     ]
-    return selected_markets, consumed_requeues
+    consumed = [
+        str(market_id)
+        for market_id in selection.get("consumed_immediate_requeues", [])
+        if str(market_id).strip()
+    ]
+    return selected_markets, consumed
 
 
 def _detect_stale_open_offers_for_requeue(
@@ -308,598 +252,55 @@ def _detect_stale_open_offers_for_requeue(
     max_offer_checks: int = _GLOBAL_STALE_OPEN_SWEEP_MAX_OFFER_CHECKS,
 ) -> dict[str, Any]:
     if not enabled_market_ids:
-        return {
-            "checked_offer_count": 0,
-            "requeue_market_ids": [],
-            "hits": [],
-        }
+        return empty_stale_sweep_payload()
+
     rows = store.list_offer_states(limit=5000)
-    tracked_states = {
-        OfferLifecycleState.OPEN.value,
-        OfferLifecycleState.REFRESH_DUE.value,
-    }
-    offer_ids_by_market: dict[str, list[str]] = {}
-    for row in rows:
-        market_id = str(row.get("market_id", "")).strip()
-        if market_id not in enabled_market_ids:
-            continue
-        state = str(row.get("state", "")).strip().lower()
-        if state not in tracked_states:
-            continue
-        offer_id = str(row.get("offer_id", "")).strip()
-        if not offer_id:
-            continue
-        market_offer_ids = offer_ids_by_market.setdefault(market_id, [])
-        if offer_id in market_offer_ids:
-            continue
-        if len(market_offer_ids) >= max(1, int(per_market_limit)):
-            continue
-        market_offer_ids.append(offer_id)
-
-    checked_offer_count = 0
-    requeue_market_ids: set[str] = set()
-    hits: list[dict[str, str]] = []
-    for market_id, offer_ids in offer_ids_by_market.items():
-        for offer_id in offer_ids:
-            if checked_offer_count >= max(1, int(max_offer_checks)):
-                return {
-                    "checked_offer_count": checked_offer_count,
-                    "requeue_market_ids": sorted(requeue_market_ids),
-                    "hits": hits,
-                    "truncated": True,
-                }
-            checked_offer_count += 1
-            try:
-                payload = dexie.get_offer(offer_id, timeout=5)
-                offer = payload.get("offer") if isinstance(payload, dict) else None
-                if not isinstance(offer, dict):
-                    continue
-                status = int(offer.get("status", -1))
-                if status in {4, 6}:
-                    reason = "tx_confirmed" if status == 4 else "offer_expired"
-                    requeue_market_ids.add(market_id)
-                    hits.append(
-                        {
-                            "market_id": market_id,
-                            "offer_id": offer_id,
-                            "reason": reason,
-                        }
-                    )
-            except Exception as exc:  # pragma: no cover - network dependent
-                if _is_dexie_offer_missing_error(exc):
-                    requeue_market_ids.add(market_id)
-                    hits.append(
-                        {
-                            "market_id": market_id,
-                            "offer_id": offer_id,
-                            "reason": "offer_missing_404",
-                        }
-                    )
-                continue
-
-    return {
-        "checked_offer_count": checked_offer_count,
-        "requeue_market_ids": sorted(requeue_market_ids),
-        "hits": hits,
-        "truncated": False,
-    }
-
-
-def _evaluate_and_execute_strategy(
-    *,
-    market: Any,
-    program: Any,
-    dexie: DexieAdapter,
-    splash: SplashAdapter,
-    store: SqliteStore,
-    xch_price_usd: float | None,
-    now: datetime,
-    dexie_size_by_offer_id: dict[str, int],
-    result: _MarketCycleResult,
-    reservation_coordinator: AssetReservationCoordinator | None = None,
-) -> tuple[dict[str, dict[int, int]], dict[int, int]]:
-    """Evaluate market strategy, inject reseed if needed, and execute offer actions."""
-    market_mode = str(getattr(market, "mode", "")).strip().lower()
-    strategy_config = _strategy_config_from_market(market)
-    tracked_sizes = {
-        int(entry.size_base_units)
-        for side_entries in (getattr(market, "ladders", {}) or {}).values()
-        for entry in side_entries
-        if int(getattr(entry, "size_base_units", 0)) > 0
-    }
-    if not tracked_sizes:
-        tracked_sizes = set(_strategy_target_counts_by_size(strategy_config).keys())
-    if market_mode == "two_sided":
-        offer_counts_by_side, offer_state_counts, active_unmapped_offer_ids = (
-            _active_offer_counts_by_size_and_side(
-                store=store,
-                market_id=market.market_id,
-                clock=now,
-                dexie_size_by_offer_id=dexie_size_by_offer_id,
-                tracked_sizes=tracked_sizes,
-            )
-        )
-        active_offer_counts_by_size = {
-            size: int(offer_counts_by_side["buy"].get(size, 0))
-            + int(offer_counts_by_side["sell"].get(size, 0))
-            for size in sorted(tracked_sizes)
-        }
-    else:
-        active_offer_counts_by_size, offer_state_counts, active_unmapped_offer_ids = (
-            _active_offer_counts_by_size(
-                store=store,
-                market_id=market.market_id,
-                clock=now,
-                dexie_size_by_offer_id=dexie_size_by_offer_id,
-                tracked_sizes=tracked_sizes,
-            )
-        )
-        offer_counts_by_side = {
-            "buy": {size: 0 for size in sorted(tracked_sizes)},
-            "sell": dict(active_offer_counts_by_size),
-        }
-    _log_market_decision(
-        market.market_id,
-        "strategy_state_source",
-        source="dexie_offer_coverage",
-        active_offer_counts_by_size=active_offer_counts_by_size,
-        active_offer_counts_by_side=offer_counts_by_side,
-        state_counts=offer_state_counts,
-        active_unmapped_offer_ids=active_unmapped_offer_ids,
-    )
-    if market_mode == "two_sided":
-        strategy_actions = _evaluate_two_sided_market_actions(
-            market=market,
-            counts_by_side=offer_counts_by_side,
-            xch_price_usd=xch_price_usd,
-            now=now,
-        )
-    else:
-        strategy_actions = evaluate_market(
-            state=_strategy_state_from_bucket_counts(
-                active_offer_counts_by_size, xch_price_usd=xch_price_usd
-            ),
-            config=strategy_config,
-            clock=now,
-        )
-    strategy_actions = [action for action in strategy_actions if int(action.repeat) > 0]
-    _log_market_decision(
-        market.market_id,
-        "strategy_evaluated",
-        pair=strategy_config.pair,
-        mode=market_mode or "sell_only",
-        offer_counts=active_offer_counts_by_size,
-        xch_price_usd=xch_price_usd,
-        action_count=len(strategy_actions),
-        cadence_limited_sizes=[],
-    )
-    if market_mode != "two_sided":
-        strategy_actions = _inject_reseed_action_if_no_active_offers(
-            strategy_actions=strategy_actions,
-            strategy_config=strategy_config,
-            market=market,
-            store=store,
-            xch_price_usd=xch_price_usd,
-            clock=now,
-            dexie_size_by_offer_id=dexie_size_by_offer_id,
-        )
-    _log_market_decision(
-        market.market_id,
-        "strategy_after_reseed",
-        action_count=len(strategy_actions),
-        reseed_injected=any(
-            str(action.reason) == "no_active_offer_reseed" for action in strategy_actions
-        ),
-    )
-    store.add_audit_event(
-        "strategy_actions_planned",
+    offer_rows = [
         {
-            "market_id": market.market_id,
-            "xch_price_usd": xch_price_usd,
-            "actions": [
-                {
-                    "size": action.size,
-                    "repeat": action.repeat,
-                    "pair": action.pair,
-                    "expiry_unit": action.expiry_unit,
-                    "expiry_value": action.expiry_value,
-                    "cancel_after_create": action.cancel_after_create,
-                    "reason": action.reason,
-                    "target_spread_bps": action.target_spread_bps,
-                    "side": _normalize_offer_side(getattr(action, "side", "sell")),
-                }
-                for action in strategy_actions
-            ],
-        },
-        market_id=market.market_id,
-    )
-    offer_execution = _execute_strategy_actions(
-        market=market,
-        strategy_actions=strategy_actions,
-        runtime_dry_run=program.runtime_dry_run,
-        xch_price_usd=xch_price_usd,
-        dexie=dexie,
-        splash=splash,
-        publish_venue=program.offer_publish_venue,
-        store=store,
-        app_network=program.app_network,
-        signer_key_registry=program.signer_key_registry,
-        program=program,
-        reservation_coordinator=reservation_coordinator,
-    )
-    result.strategy_planned += int(offer_execution["planned_count"])
-    result.strategy_executed += int(offer_execution["executed_count"])
-    _log_market_decision(
-        market.market_id,
-        "strategy_executed",
-        planned_count=offer_execution["planned_count"],
-        executed_count=offer_execution["executed_count"],
-    )
-    store.add_audit_event(
-        "strategy_offer_execution",
-        {
-            "market_id": market.market_id,
-            "planned_count": offer_execution["planned_count"],
-            "executed_count": offer_execution["executed_count"],
-            "items": offer_execution["items"],
-        },
-        market_id=market.market_id,
-    )
-    health_payload = _managed_offer_market_health_payload(
-        market_id=str(market.market_id),
-        current_items=list(offer_execution["items"]),
-        now=now,
-    )
-    store.add_audit_event(
-        "managed_offer_market_health",
-        health_payload,
-        market_id=market.market_id,
-    )
-    return offer_counts_by_side, _executed_sell_offer_counts_by_size(offer_execution)
-
-
-def _process_single_market(
-    *,
-    market: Any,
-    program: Any,
-    allowed_keys: set[str] | None,
-    dexie: DexieAdapter,
-    splash: SplashAdapter,
-    wallet: WalletAdapter,
-    store: SqliteStore,
-    xch_price_usd: float | None,
-    previous_xch_price_usd: float | None,
-    now: datetime,
-    state_dir: Path,
-    reservation_coordinator: AssetReservationCoordinator | None = None,
-) -> _MarketCycleResult:
-    result = _MarketCycleResult()
-    _log_market_decision(
-        market.market_id,
-        "cycle_start",
-        mode=str(getattr(market, "mode", "")),
-        quote_asset=str(getattr(market, "quote_asset", "")),
-    )
-    signer_selection = resolve_market_key(
-        market,
-        allowed_keys,
-        signer_key_registry=program.signer_key_registry,
-        required_network=program.app_network,
-    )
-    _log_market_decision(
-        market.market_id,
-        "signer_selected",
-        key_id=signer_selection.key_id,
-        network=program.app_network,
-    )
-    store.add_price_policy_snapshot(
-        market.market_id,
-        {
-            "mode": market.mode,
-            "base_asset": market.base_asset,
-            "quote_asset": market.quote_asset,
-            "quote_asset_type": market.quote_asset_type,
-        },
-        source="startup",
-    )
-    persisted = store.get_alert_state(market.market_id)
-    state, event = evaluate_low_inventory_alert(
-        now=now,
-        program=program,
-        market=market,
-        state=AlertState(
-            is_low=persisted.is_low,
-            last_alert_at=persisted.last_alert_at,
-        ),
-    )
-    store.upsert_alert_state(
-        StoredAlertState(
-            market_id=market.market_id,
-            is_low=state.is_low,
-            last_alert_at=state.last_alert_at,
-        )
-    )
-    if event:
-        payload = {
-            "event": "low_inventory_alert",
-            "market_id": event.market_id,
-            "ticker": event.ticker,
-            "remaining_amount": event.remaining_amount,
-            "receive_address": event.receive_address,
-            "reason": event.reason,
+            "market_id": str(row.get("market_id", "")),
+            "offer_id": str(row.get("offer_id", "")),
+            "state": str(row.get("state", "")),
         }
-        _log_daemon_event(level=logging.INFO, payload=payload)
-        store.add_audit_event("low_inventory_alert", payload, market_id=market.market_id)
-        send_pushover_alert(program, event)
-
-    _, dexie_size_by_offer_id, _, offers = reconcile_market_cycle_offers(
-        market=market,
-        network=program.app_network,
-        dexie=dexie,
-        store=store,
-        now=now,
-        result=result,
+        for row in rows
+    ]
+    candidates = collect_stale_sweep_candidates(
+        rows=offer_rows,
+        enabled_market_ids=sorted(enabled_market_ids),
+        per_market_limit=max(1, int(per_market_limit)),
     )
-
-    sell_ladder = market.ladders.get("sell", [])
-    ladder_sizes = [e.size_base_units for e in sell_ladder]
-    bucket_counts: dict[int, int] | None = None
-    wallet_coins: list[int] = []
-    coinset_scan_empty = False
-
-    if isinstance(program, ProgramConfig) and signer_offer_path_configured(program):
+    progress = empty_stale_sweep_payload()
+    check_limit = max(1, int(max_offer_checks))
+    for candidate in candidates:
+        if int(progress["checked_offer_count"]) >= check_limit:
+            progress["truncated"] = True
+            return progress
+        market_id = str(candidate.get("market_id", "")).strip()
+        offer_id = str(candidate.get("offer_id", "")).strip()
+        hit: dict[str, str] | None = None
         try:
-            resolved_base_asset_id, _, _ = _resolve_signer_offer_asset_ids_for_reservation(
-                program=program,
-                market=market,
-            )
-            wallet_coins = _coinset_spendable_base_unit_coin_amounts(
-                program=program,
-                market=market,
-                resolved_asset_id=resolved_base_asset_id,
-                base_unit_mojo_multiplier=_base_unit_mojo_multiplier_for_market(market=market),
-            )
-            coinset_scan_empty = len(wallet_coins) == 0
-            if wallet_coins:
-                bucket_counts = compute_bucket_counts_from_coins(
-                    coin_amounts_base_units=wallet_coins,
-                    ladder_sizes=ladder_sizes,
-                )
-                _log_market_decision(
-                    market.market_id,
-                    "inventory_scan_wallet",
-                    source="coinset",
-                    resolved_asset_id=resolved_base_asset_id,
-                    coin_count=len(wallet_coins),
-                    bucket_counts=bucket_counts,
-                )
-                store.add_audit_event(
-                    "inventory_bucket_scan",
-                    {
-                        "market_id": market.market_id,
-                        "source": "coinset",
-                        "resolved_asset_id": resolved_base_asset_id,
-                        "bucket_counts": bucket_counts,
-                        "coin_count": len(wallet_coins),
-                    },
-                    market_id=market.market_id,
-                )
-        except Exception as exc:
-            _daemon_logger.warning(
-                "coinset_inventory_scan_failed market_id=%s error=%s",
-                market.market_id,
-                exc,
-            )
-
-    if bucket_counts is None or coinset_scan_empty:
-        fallback_source = (
-            "wallet_adapter_fallback_after_empty_coinset_scan"
-            if coinset_scan_empty
-            else "wallet_adapter"
-        )
-        if coinset_scan_empty and str(market.base_asset).strip().lower() not in {
-            "xch",
-            "1",
-            "",
-        }:
-            wallet_coins = _coinset_cat_spendable_base_unit_coin_amounts(
-                canonical_asset_id=str(market.base_asset),
-                receive_address=str(market.receive_address),
-                network=str(program.app_network),
-                base_unit_mojo_multiplier=_base_unit_mojo_multiplier_for_market(market=market),
-            )
-            if wallet_coins:
-                fallback_source = "coinset_cat_scan_fallback_after_empty_coinset_scan"
-        if not wallet_coins:
-            wallet_coins = wallet.list_asset_coins_base_units(
-                asset_id=market.base_asset,
-                key_id=market.signer_key_id,
-                receive_address=market.receive_address,
-                network=program.app_network,
-            )
-        if wallet_coins:
-            bucket_counts = compute_bucket_counts_from_coins(
-                coin_amounts_base_units=wallet_coins,
-                ladder_sizes=ladder_sizes,
-            )
-            _log_market_decision(
-                market.market_id,
-                "inventory_scan_wallet",
-                source=fallback_source,
-                coin_count=len(wallet_coins),
-                bucket_counts=bucket_counts,
-            )
-            store.add_audit_event(
-                "inventory_bucket_scan",
-                {
-                    "market_id": market.market_id,
-                    "source": fallback_source,
-                    "bucket_counts": bucket_counts,
-                    "coin_count": len(wallet_coins),
-                },
-                market_id=market.market_id,
-            )
-        else:
-            bucket_counts = dict(market.inventory.bucket_counts)
-            _log_market_decision(
-                market.market_id,
-                "inventory_scan_config_fallback",
-                asset_id=market.base_asset,
-                bucket_counts=bucket_counts,
-            )
-            store.add_audit_event(
-                "inventory_bucket_scan",
-                {
-                    "market_id": market.market_id,
-                    "source": "config_seed_or_no_asset_scan",
-                    "asset_id": market.base_asset,
-                    "bucket_counts": bucket_counts,
-                },
-                market_id=market.market_id,
-            )
-    offer_counts_by_side: dict[str, dict[int, int]] = {"buy": {}, "sell": {}}
-    newly_executed_sell_offer_counts_by_size: dict[int, int] = {}
-    try:
-        offer_counts_by_side, newly_executed_sell_offer_counts_by_size = (
-            _evaluate_and_execute_strategy(
-                market=market,
-                program=program,
-                dexie=dexie,
-                splash=splash,
-                store=store,
-                xch_price_usd=xch_price_usd,
-                now=now,
-                dexie_size_by_offer_id=dexie_size_by_offer_id,
-                result=result,
-                reservation_coordinator=reservation_coordinator,
-            )
-        )
-    except Exception as exc:
-        result.cycle_errors += 1
-        _log_market_decision(
-            market.market_id,
-            "strategy_failed",
-            error=str(exc),
-        )
-        store.add_audit_event(
-            "strategy_execution_error",
-            {"market_id": market.market_id, "error": str(exc)},
-            market_id=market.market_id,
-        )
-    # Cancel uses the Dexie offer list fetched at cycle start (before strategy).
-    # Intentionally stale relative to same-cycle posts so cancel policy cannot
-    # target offers strategy just created (avoids cancel-then-reseed races).
-    cancel_policy = _execute_cancel_policy_for_market(
-        market=market,
-        offers=offers,
-        runtime_dry_run=program.runtime_dry_run,
-        current_xch_price_usd=xch_price_usd,
-        previous_xch_price_usd=previous_xch_price_usd,
-        dexie=dexie,
-        store=store,
-    )
-    if bool(cancel_policy.get("triggered", False)):
-        result.cancel_triggered = True
-    result.cancel_planned += int(cancel_policy.get("planned_count", 0))
-    result.cancel_executed += int(cancel_policy.get("executed_count", 0))
-    _log_market_decision(
-        market.market_id,
-        "cancel_policy_evaluated",
-        eligible=cancel_policy["eligible"],
-        triggered=cancel_policy["triggered"],
-        reason=cancel_policy["reason"],
-        move_bps=cancel_policy["move_bps"],
-        threshold_bps=cancel_policy["threshold_bps"],
-        planned_count=cancel_policy["planned_count"],
-        executed_count=cancel_policy["executed_count"],
-    )
-    store.add_audit_event(
-        "offer_cancel_policy",
-        {
-            "market_id": market.market_id,
-            "eligible": cancel_policy["eligible"],
-            "triggered": cancel_policy["triggered"],
-            "reason": cancel_policy["reason"],
-            "move_bps": cancel_policy["move_bps"],
-            "threshold_bps": cancel_policy["threshold_bps"],
-            "planned_count": cancel_policy["planned_count"],
-            "executed_count": cancel_policy["executed_count"],
-            "items": cancel_policy["items"],
-        },
-        market_id=market.market_id,
-    )
-    try:
-        _plan_and_execute_coin_ops(
-            market=market,
-            program=program,
-            wallet=wallet,
-            store=store,
-            sell_ladder=sell_ladder,
-            wallet_bucket_counts=bucket_counts,
-            active_sell_offer_counts_by_size=offer_counts_by_side.get("sell", {}),
-            newly_executed_sell_offer_counts_by_size=newly_executed_sell_offer_counts_by_size,
-            signer_selection=signer_selection,
-            state_dir=state_dir,
-        )
-    except Exception as exc:
-        result.cycle_errors += 1
-        _log_market_decision(
-            market.market_id,
-            "coin_ops_failed",
-            error=str(exc),
-        )
-        store.add_audit_event(
-            "coin_ops_execution_error",
-            {"market_id": market.market_id, "error": str(exc)},
-            market_id=market.market_id,
-        )
-    _log_market_decision(
-        market.market_id,
-        "cycle_complete",
-        cycle_errors=result.cycle_errors,
-        strategy_planned=result.strategy_planned,
-        strategy_executed=result.strategy_executed,
-        cancel_triggered=result.cancel_triggered,
-        cancel_planned=result.cancel_planned,
-        cancel_executed=result.cancel_executed,
-    )
-    return result
-
-
-def _process_single_market_with_store(
-    *,
-    market: Any,
-    program: Any,
-    allowed_keys: set[str] | None,
-    dexie: DexieAdapter,
-    splash: SplashAdapter,
-    wallet: WalletAdapter,
-    db_path: Path,
-    xch_price_usd: float | None,
-    previous_xch_price_usd: float | None,
-    now: datetime,
-    state_dir: Path,
-    reservation_coordinator: AssetReservationCoordinator | None = None,
-) -> _MarketCycleResult:
-    """Run one market cycle with a thread-local SQLite connection."""
-    store = SqliteStore(db_path)
-    try:
-        return _process_single_market(
-            market=market,
-            program=program,
-            allowed_keys=allowed_keys,
-            dexie=dexie,
-            splash=splash,
-            wallet=wallet,
-            store=store,
-            xch_price_usd=xch_price_usd,
-            previous_xch_price_usd=previous_xch_price_usd,
-            now=now,
-            state_dir=state_dir,
-            reservation_coordinator=reservation_coordinator,
-        )
-    finally:
-        store.close()
+            payload = dexie.get_offer(offer_id, timeout=5)
+            offer = payload.get("offer") if isinstance(payload, dict) else None
+            if isinstance(offer, dict):
+                try:
+                    status = int(offer.get("status", -1))
+                except (TypeError, ValueError):
+                    status = -1
+                reason = classify_dexie_stale_offer_status(status)
+                if reason:
+                    hit = {
+                        "market_id": market_id,
+                        "offer_id": offer_id,
+                        "reason": reason,
+                    }
+        except Exception as exc:  # pragma: no cover - network dependent
+            if is_dexie_offer_missing_error_text(str(exc)):
+                hit = {
+                    "market_id": market_id,
+                    "offer_id": offer_id,
+                    "reason": "offer_missing_404",
+                }
+        progress = record_stale_sweep_check(progress=progress, hit=hit)
+    return progress
 
 
 def run_once(
@@ -1030,10 +431,9 @@ def run_once(
 
         configured_market_slot_count = int(getattr(program, "runtime_market_slot_count", 0))
         consumed_immediate_requeues: list[str] = []
-        if (
-            market_dispatch_state is not None
-            and configured_market_slot_count > 0
-            and len(enabled_markets) > configured_market_slot_count
+        if market_dispatch_state is not None and should_use_market_slot_dispatch(
+            enabled_market_count=len(enabled_markets),
+            slot_count=configured_market_slot_count,
         ):
             selected_markets, consumed_immediate_requeues = _select_market_batch(
                 enabled_markets=enabled_markets,
@@ -1066,7 +466,7 @@ def run_once(
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
                 future_to_market = {
                     pool.submit(
-                        _process_single_market_with_store,
+                        process_single_market_with_store,
                         market=market,
                         program=program,
                         allowed_keys=allowed_keys,
@@ -1124,7 +524,7 @@ def run_once(
             for market in selected_markets:
                 market_id = str(getattr(market, "market_id", "")).strip()
                 try:
-                    mr = _process_single_market(
+                    mr = process_single_market(
                         market=market,
                         program=program,
                         allowed_keys=allowed_keys,
@@ -1164,7 +564,7 @@ def run_once(
                 cancel_executed_total += mr.cancel_executed
                 if mr.immediate_requeue_requested and market_id:
                     immediate_requeue_market_ids.append(market_id)
-        deduped_requeue_market_ids = sorted({mid for mid in immediate_requeue_market_ids if mid})
+        deduped_requeue_market_ids = dedupe_sorted_market_ids(immediate_requeue_market_ids)
         if market_dispatch_state is not None:
             for market_id in deduped_requeue_market_ids:
                 _enqueue_immediate_requeue_market(market_dispatch_state, market_id)

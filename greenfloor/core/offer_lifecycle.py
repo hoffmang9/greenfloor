@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from greenfloor.core.cycle import apply_offer_signal_payload
+
 
 class OfferLifecycleState(StrEnum):
     OPEN = "open"
@@ -33,57 +35,11 @@ def apply_offer_signal(
     state: OfferLifecycleState,
     signal: OfferSignal,
 ) -> OfferTransition:
-    if signal == OfferSignal.MEMPOOL_SEEN and state == OfferLifecycleState.OPEN:
-        return OfferTransition(
-            old_state=state,
-            new_state=OfferLifecycleState.MEMPOOL_OBSERVED,
-            signal=signal,
-            action="mark_mempool_observed",
-            reason="potential_take_seen",
-        )
-    if signal == OfferSignal.TX_CONFIRMED and state in {
-        OfferLifecycleState.OPEN,
-        OfferLifecycleState.MEMPOOL_OBSERVED,
-    }:
-        return OfferTransition(
-            old_state=state,
-            new_state=OfferLifecycleState.TX_BLOCK_CONFIRMED,
-            signal=signal,
-            action="reconcile_coins_and_offers",
-            reason="take_confirmed_on_tx_block",
-        )
-    if signal == OfferSignal.EXPIRY_NEAR and state == OfferLifecycleState.OPEN:
-        return OfferTransition(
-            old_state=state,
-            new_state=OfferLifecycleState.REFRESH_DUE,
-            signal=signal,
-            action="refresh_offer",
-            reason="refresh_window_entered",
-        )
-    if signal == OfferSignal.REFRESH_POSTED and state == OfferLifecycleState.REFRESH_DUE:
-        return OfferTransition(
-            old_state=state,
-            new_state=OfferLifecycleState.OPEN,
-            signal=signal,
-            action="track_new_offer_open",
-            reason="offer_refreshed",
-        )
-    if signal == OfferSignal.EXPIRED and state in {
-        OfferLifecycleState.OPEN,
-        OfferLifecycleState.REFRESH_DUE,
-    }:
-        return OfferTransition(
-            old_state=state,
-            new_state=OfferLifecycleState.EXPIRED,
-            signal=signal,
-            action="cleanup_offer_state",
-            reason="offer_expired",
-        )
-
+    payload = apply_offer_signal_payload(state=state.value, signal=signal.value)
     return OfferTransition(
-        old_state=state,
-        new_state=state,
-        signal=signal,
-        action="noop",
-        reason="signal_ignored_for_state",
+        old_state=OfferLifecycleState(str(payload["old_state"])),
+        new_state=OfferLifecycleState(str(payload["new_state"])),
+        signal=OfferSignal(str(payload["signal"])),
+        action=str(payload["action"]),
+        reason=str(payload["reason"]),
     )

@@ -12,6 +12,7 @@ from typing import Any
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig
+from greenfloor.core.cycle import is_transient_dexie_visibility_404_error
 from greenfloor.hex_utils import normalize_hex_id
 from greenfloor.logging_setup import initialize_service_file_logging
 from greenfloor.offer_decode import (
@@ -373,13 +374,6 @@ def verify_dexie_offer_visible_by_id(
         if attempt < attempts:
             sleep_fn(delay_seconds)
     return last_error
-
-
-def is_transient_dexie_visibility_404_error(error: str) -> bool:
-    normalized = str(error).strip().lower()
-    return (
-        "dexie_get_offer_error" in normalized and "404" in normalized
-    ) or "dexie_http_error:404" in normalized
 
 
 def verify_offer_visible_on_dexie(

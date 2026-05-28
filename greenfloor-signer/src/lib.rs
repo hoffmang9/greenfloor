@@ -1,6 +1,7 @@
 pub mod bls;
 pub mod coinset;
 pub mod config;
+pub mod cycle;
 pub mod error;
 pub mod kms;
 pub mod offer;
@@ -37,6 +38,28 @@ pub use bls::{
 pub use offer::codec::{
     encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
     from_input_spend_bundle_xch_bytes, validate_offer_text,
+};
+pub use cycle::{
+    apply_offer_signal, can_parallelize_managed_offers, classify_dexie_visibility_outcome,
+    classify_managed_post_result, classify_managed_transient_error, evaluate_market,
+    expand_strategy_actions, expiry_seconds_for_action, is_managed_upstream_transient_error,
+    is_managed_worker_transient_error, is_parallel_dispatch_transient_error,
+    is_transient_dexie_visibility_404_error, is_transient_managed_upstream_error_text,
+    managed_retry_sleep_ms, parallel_max_workers, prepare_parallel_managed_submission_decision,
+    reservation_release_status, reservation_request_for_managed_offer,
+    should_apply_parallel_transient_cooldown, should_retry_managed_post,
+    single_input_preferred_skip_reason, classify_dexie_stale_offer_status,
+    collect_stale_sweep_candidates, count_parallel_transient_failures, dedupe_sorted_market_ids,
+    enqueue_immediate_requeue, is_dexie_offer_missing_error_text, next_disabled_market_log_deadline,
+    record_stale_sweep_check, select_market_batch, should_log_disabled_market,
+    should_try_cat_inventory_fallback, should_use_market_slot_dispatch, ManagedActionOutcome,
+    aggregate_two_sided_offer_counts, is_two_sided_market_mode, market_cycle_phases,
+    needs_inventory_fallback, one_sided_offer_counts_by_side, resolve_inventory_scan_source,
+    resolve_tracked_sizes, wallet_fallback_source_label, MarketBatchSelection, MarketCyclePhase,
+    MarketCycleResultState, MarketState, OfferLifecycleState, OfferSignal, OfferStateRow,
+    OfferTransition, ParallelSubmissionDecision, PlannedAction, PlannedActionInput,
+    SpendableAssetProfile, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
+    StrategyConfig,
 };
 pub use vault::{
     build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,

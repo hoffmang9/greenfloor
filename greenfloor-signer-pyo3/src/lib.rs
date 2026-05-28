@@ -1,5 +1,8 @@
 extern crate greenfloor_signer as signer_core;
 
+mod cycle;
+mod py_utils;
+
 use std::future::Future;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -8,17 +11,19 @@ use chia_bls::SecretKey;
 use signer_core::{
     broadcast_bls_spend_bundle, build_and_optionally_broadcast_vault_cat_mixed_split,
     build_bls_mixed_split_spend_bundle, build_bls_offer_spend_bundle,
-    build_bls_xch_coin_op_spend_bundle, build_vault_cat_offer, encode_offer_from_spend_bundle_bytes,
-    from_input_spend_bundle_bytes, from_input_spend_bundle_xch_bytes, get_conservative_fee_estimate,
-    get_fee_estimate, list_cat_coin_summaries, list_cat_coin_summaries_by_ids,
-    load_bls_master_secret_key, load_signer_config, push_tx_hex, resolve_offer_asset_ids,
-    resolve_vault_context, validate_offer_text, BlsMixedSplitRequest, BlsMixedSplitResult,
-    BlsOfferRequest, BlsOfferResult, BlsXchCoinOpRequest, BlsXchCoinOpResult, CreateOfferRequest,
-    MixedSplitRequest,
+    build_bls_xch_coin_op_spend_bundle, build_vault_cat_offer,
+    encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
+    from_input_spend_bundle_xch_bytes, get_conservative_fee_estimate, get_fee_estimate,
+    list_cat_coin_summaries, list_cat_coin_summaries_by_ids, load_bls_master_secret_key,
+    load_signer_config, push_tx_hex, resolve_offer_asset_ids, resolve_vault_context,
+    validate_offer_text, BlsMixedSplitRequest, BlsOfferRequest, BlsXchCoinOpRequest,
+    CreateOfferRequest, MixedSplitRequest,
 };
 use signer_core::error::{bls_reason, broadcast_reason, BlsOp};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+
+use py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
 use pyo3::types::{PyDict, PyList, PyModule};
 
 fn runtime() -> &'static tokio::runtime::Runtime {
@@ -29,27 +34,6 @@ fn runtime() -> &'static tokio::runtime::Runtime {
             .build()
             .expect("tokio runtime")
     })
-}
-
-fn to_py_err<E: std::fmt::Display>(err: E) -> PyErr {
-    PyValueError::new_err(err.to_string())
-}
-
-fn dict_from_json_value(py: Python<'_>, value: serde_json::Value) -> PyResult<Py<PyAny>> {
-    let json = serde_json::to_string(&value).map_err(to_py_err)?;
-    let builtins = py.import("json")?;
-    let loads = builtins.getattr("loads")?;
-    let obj = loads.call1((json,))?;
-    Ok(obj.unbind())
-}
-
-fn request_dict_to_json(request: &Bound<'_, PyDict>) -> PyResult<serde_json::Value> {
-    let py = request.py();
-    let json_mod = py.import("json")?;
-    let dumps = json_mod.getattr("dumps")?;
-    let raw = dumps.call1((request,))?;
-    let raw_str: String = raw.extract()?;
-    serde_json::from_str(&raw_str).map_err(to_py_err)
 }
 
 fn parse_master_sk_bytes(master_sk_bytes: &[u8]) -> PyResult<SecretKey> {
@@ -434,5 +418,7 @@ fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(coinset_push_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(coinset_get_fee_estimate_py, m)?)?;
     m.add_function(wrap_pyfunction!(coinset_get_conservative_fee_estimate_py, m)?)?;
+    cycle::register(m)?;
     Ok(())
 }
+
