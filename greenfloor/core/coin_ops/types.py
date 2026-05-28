@@ -56,3 +56,52 @@ class SplitSkipPlan:
 
 
 SplitAutoSelectPlan = SplitCoinPlan | SplitCombinePrereqPlan | SplitSkipPlan
+
+
+@dataclass(frozen=True, slots=True)
+class SplitDenominationReadiness:
+    """Split-until-ready denomination readiness."""
+
+    asset_id: str
+    size_base_units: int
+    required_min_count: int
+    current_count: int
+    larger_reserve_coin_count: int
+    extra_denom_coin_count: int
+    reserve_ready: bool
+    ready: bool
+
+    def to_payload(self) -> dict[str, int | bool | str]:
+        return {
+            "asset_id": self.asset_id,
+            "size_base_units": self.size_base_units,
+            "current_count": self.current_count,
+            "required_min_count": self.required_min_count,
+            "larger_reserve_coin_count": self.larger_reserve_coin_count,
+            "extra_denom_coin_count": self.extra_denom_coin_count,
+            "reserve_ready": self.reserve_ready,
+            "ready": self.ready,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CombineDenominationReadiness:
+    """Combine-until-ready denomination readiness (excess denomination coin cap)."""
+
+    asset_id: str
+    size_base_units: int
+    max_allowed_count: int
+    current_count: int
+    ready: bool
+
+    def to_payload(self) -> dict[str, int | bool | str]:
+        return {
+            "asset_id": self.asset_id,
+            "size_base_units": self.size_base_units,
+            "current_count": self.current_count,
+            "max_allowed_count": self.max_allowed_count,
+            "ready": self.ready,
+        }
+
+
+DenominationReadiness = SplitDenominationReadiness | CombineDenominationReadiness

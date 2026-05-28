@@ -1,14 +1,10 @@
-"""Typed PyO3 surfaces for deterministic policy kernel bindings.
-
-``DeterministicPolicyKernelProtocol`` covers cycle, cancel, and notification
-policy only. Coin operations use ``CoinOpsKernelProtocol``; BLS, offer codec,
-and reconcile transitions call ``import_kernel()`` directly at adapter boundaries.
-"""
+"""Typed PyO3 surfaces for deterministic policy kernel bindings."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
 
+from greenfloor.core.coin_ops.kernel_protocol import CoinOpsKernelProtocol
 from greenfloor.core.cycle_orchestration import (
     MarketBatchSelection,
     OfferStateRow,
@@ -250,6 +246,53 @@ class NotificationKernelProtocol(Protocol):
     def evaluate_low_inventory_alert(self, input: LowInventoryInput) -> LowInventoryEvaluation: ...
 
 
+class OfferPolicyKernelProtocol(Protocol):
+    def resolve_offer_expiry_for_pricing(self, pricing: dict[str, Any]) -> tuple[str, int]: ...
+
+    def resolve_quote_price_for_pricing(self, pricing: dict[str, Any]) -> float: ...
+
+    def mojo_multiplier_for_leg(
+        self, pricing: dict[str, Any], field: str, asset_id: str
+    ) -> int: ...
+
+    def verify_offer_for_dexie(self, offer: str) -> str | None: ...
+
+
+class RetryPolicyKernelProtocol(Protocol):
+    def parse_rate_limit_retry_seconds(self, error_text: str) -> float | None: ...
+
+    def moderate_retry_sleep_seconds(
+        self, current_sleep: float, rate_limit_wait: float | None
+    ) -> float: ...
+
+    def moderate_retry_next_sleep(self, current_sleep: float) -> float: ...
+
+    def dexie_invalid_offer_should_retry(
+        self, error: str, attempt: int, max_attempts: int
+    ) -> bool: ...
+
+    def dexie_invalid_offer_retry_sleep(self, attempt: int, initial_sleep: float) -> float: ...
+
+    def coinset_fee_lookup_retry_sleep(self, attempt: int) -> float: ...
+
+    def poll_exponential_sleep_now(
+        self,
+        elapsed_seconds: int,
+        timeout_seconds: int,
+        sleep_seconds: float,
+        initial_sleep: float,
+        max_sleep: float,
+    ) -> float | None: ...
+
+    def poll_exponential_advance_sleep(
+        self,
+        sleep_seconds: float,
+        initial_sleep: float,
+        max_sleep: float,
+        multiplier: float,
+    ) -> float: ...
+
+
 class DeterministicPolicyKernelProtocol(
     CycleKernelProtocol,
     CancelPolicyKernelProtocol,
@@ -257,3 +300,13 @@ class DeterministicPolicyKernelProtocol(
     Protocol,
 ):
     """Cycle, cancel, and notification deterministic policy bindings."""
+
+
+class PolicyKernelProtocol(
+    DeterministicPolicyKernelProtocol,
+    CoinOpsKernelProtocol,
+    OfferPolicyKernelProtocol,
+    RetryPolicyKernelProtocol,
+    Protocol,
+):
+    """Full in-process deterministic policy kernel (cycle, coin-ops, offer, retry)."""

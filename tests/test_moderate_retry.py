@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from greenfloor.core.retry_policy import parse_rate_limit_retry_seconds
 from greenfloor.moderate_retry import (
     call_with_moderate_retry,
-    parse_rate_limit_retry_seconds,
     poll_with_exponential_backoff_until,
 )
 

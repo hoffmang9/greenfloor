@@ -19,12 +19,13 @@ def _require_signer() -> Any:
     return greenfloor_signer
 
 
-def _require_signer_validate_offer() -> Any:
+def _require_signer_validate_offer_structure() -> Any:
     signer = _require_signer()
-    validate = getattr(signer, "validate_offer", None)
+    validate = getattr(signer, "validate_offer_structure", None)
     if not callable(validate):
         pytest.skip(
-            "greenfloor_signer.validate_offer not available; rebuild greenfloor-signer-pyo3"
+            "greenfloor_signer.validate_offer_structure not available; "
+            "rebuild greenfloor-signer-pyo3"
         )
     return validate
 
@@ -40,7 +41,7 @@ def _fixture_paths() -> list[Path]:
 
 @pytest.mark.parametrize("fixture_path", _fixture_paths(), ids=lambda p: p.name)
 def test_signer_golden_offer_validates(fixture_path: Path) -> None:
-    validate_offer = _require_signer_validate_offer()
+    validate_offer = _require_signer_validate_offer_structure()
     payload = json.loads(fixture_path.read_text(encoding="utf-8"))
     offer = str(payload.get("offer", "")).strip()
     assert offer.startswith("offer1")

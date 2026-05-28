@@ -39,7 +39,7 @@ def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, c
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie",
+        "greenfloor.core.offer_policy.verify_offer_for_dexie",
         lambda _offer: None,
     )
 
@@ -88,7 +88,7 @@ def test_build_and_post_offer_local_path_persists_sqlite_audit_record(
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie",
+        "greenfloor.core.offer_policy.verify_offer_for_dexie",
         lambda _offer: None,
     )
 
@@ -150,9 +150,7 @@ def test_build_and_post_offer_uses_market_configured_expiry_override(
 
     monkeypatch.setattr("greenfloor.cli.offer_build_post.build_offer", _fake_build)
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
-    monkeypatch.setattr(
-        "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie", lambda _offer: None
-    )
+    monkeypatch.setattr("greenfloor.core.offer_policy.verify_offer_for_dexie", lambda _offer: None)
 
     code = build_and_post_offer_cli(
         program_path=program,
@@ -272,7 +270,7 @@ def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Pat
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie",
+        "greenfloor.core.offer_policy.verify_offer_for_dexie",
         lambda _offer: None,
     )
 
@@ -315,7 +313,7 @@ def test_build_and_post_offer_accepts_txch_pair_on_testnet11(
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie",
+        "greenfloor.core.offer_policy.verify_offer_for_dexie",
         lambda _offer: None,
     )
 
@@ -446,7 +444,7 @@ def test_build_and_post_offer_posts_to_splash_when_selected(
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.SplashAdapter", _FakeSplash)
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie",
+        "greenfloor.core.offer_policy.verify_offer_for_dexie",
         lambda _offer: None,
     )
 
@@ -484,7 +482,7 @@ def test_build_and_post_offer_returns_nonzero_when_offer_verification_fails(
         lambda _payload: "offer1bad",
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie",
+        "greenfloor.core.offer_policy.verify_offer_for_dexie",
         lambda _offer: "wallet_sdk_offer_verify_false",
     )
 
@@ -519,40 +517,6 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
     write_markets(markets)
     called: dict[str, bool] = {"post_offer_called": False}
 
-    class _ConditionNoExpiry:
-        @staticmethod
-        def parse_assert_before_seconds_relative():
-            return None
-
-        @staticmethod
-        def parse_assert_before_seconds_absolute():
-            return None
-
-        @staticmethod
-        def parse_assert_before_height_relative():
-            return None
-
-        @staticmethod
-        def parse_assert_before_height_absolute():
-            return None
-
-    class _CoinSpendNoExpiry:
-        @staticmethod
-        def conditions():
-            return [_ConditionNoExpiry()]
-
-    class _SpendBundleNoExpiry:
-        coin_spends = [_CoinSpendNoExpiry()]
-
-    class _Sdk:
-        @staticmethod
-        def validate_offer(_offer: str) -> None:
-            return None
-
-        @staticmethod
-        def decode_offer(_offer: str):
-            return _SpendBundleNoExpiry()
-
     class _FakeDexie:
         def __init__(self, _base_url: str) -> None:
             pass
@@ -562,14 +526,14 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
             called["post_offer_called"] = True
             return {"success": True, "id": "should-not-post"}
 
-    def _import_kernel():
-        raise ImportError("disable native path for this test")
+    from tests.helpers.kernel_mock import MinimalSignerKernel
 
-    monkeypatch.setattr(
-        "greenfloor.runtime.offer_publish.import_kernel",
-        _import_kernel,
-    )
-    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+    class _Signer(MinimalSignerKernel):
+        @staticmethod
+        def verify_offer_for_dexie(_offer: str) -> str:
+            return "wallet_sdk_offer_missing_expiration"
+
+    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Signer)
     monkeypatch.setattr(
         "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1noexpiry",
@@ -623,7 +587,7 @@ def test_build_and_post_offer_returns_nonzero_when_publish_fails(
     )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie",
+        "greenfloor.core.offer_policy.verify_offer_for_dexie",
         lambda _offer: None,
     )
 

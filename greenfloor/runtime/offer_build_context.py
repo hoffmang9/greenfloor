@@ -7,12 +7,12 @@ from pathlib import Path
 
 from greenfloor.config.io import resolve_quote_asset_for_offer
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.hex_utils import default_mojo_multiplier_for_asset
-from greenfloor.runtime.offer_publish import (
-    normalize_offer_side,
-    resolve_offer_expiry_for_market,
-    resolve_quote_price_for_market,
+from greenfloor.core.offer_policy import (
+    mojo_multiplier_for_leg,
+    resolve_offer_expiry_for_pricing,
+    resolve_quote_price_for_pricing,
 )
+from greenfloor.runtime.offer_publish import normalize_offer_side
 
 
 def keyring_yaml_path_for_market(program: ProgramConfig, market: MarketConfig) -> str:
@@ -58,19 +58,21 @@ def prepare_offer_build_context(
         network=network,
     )
     base_unit_mojo_multiplier = int(
-        pricing.get(
+        mojo_multiplier_for_leg(
+            pricing,
             "base_unit_mojo_multiplier",
-            default_mojo_multiplier_for_asset(str(market.base_asset)),
+            str(market.base_asset),
         )
     )
     quote_unit_mojo_multiplier = int(
-        pricing.get(
+        mojo_multiplier_for_leg(
+            pricing,
             "quote_unit_mojo_multiplier",
-            default_mojo_multiplier_for_asset(str(resolved_quote_asset)),
+            str(resolved_quote_asset),
         )
     )
-    expiry_unit, expiry_value = resolve_offer_expiry_for_market(market)
-    quote_price = resolve_quote_price_for_market(market)
+    expiry_unit, expiry_value = resolve_offer_expiry_for_pricing(pricing)
+    quote_price = resolve_quote_price_for_pricing(pricing)
     resolved_keyring_yaml_path = (
         keyring_yaml_path_for_market(program, market)
         if keyring_yaml_path is None

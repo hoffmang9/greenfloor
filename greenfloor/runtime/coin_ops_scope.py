@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from greenfloor.config.models import MarketConfig
-from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode, DenominationTarget
+from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode
 
 CoinOpExecutionBackend = Literal["signer"]
 
@@ -96,26 +96,3 @@ class CoinOpBackend(Protocol):
         largest_first: bool = True,
         target_amount: int | None = None,
     ) -> dict[str, Any]: ...
-
-    def evaluate_denomination_readiness(
-        self,
-        *,
-        asset_id: str,
-        size_base_units: int,
-        required_min_count: int | None = None,
-        max_allowed_count: int | None = None,
-    ) -> dict[str, int | bool | str]: ...
-
-    def build_iteration_payload(
-        self,
-        *,
-        operation_id: str,
-        operation_state: str,
-        no_wait: bool,
-        network: str,
-        existing_coin_ids: set[str],
-        iteration: int,
-        readiness_asset_id: str,
-        readiness_kwargs: dict[str, int],
-        denomination_target: DenominationTarget | None,
-    ) -> tuple[dict[str, object], dict[str, int | bool | str] | None]: ...

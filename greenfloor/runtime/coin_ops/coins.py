@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from greenfloor.core.coin_ops import is_spendable_wallet_coin
+
 
 def safe_int(value: object) -> int | None:
     try:
@@ -22,22 +24,7 @@ def coin_asset_id(coin: dict) -> str:
 
 
 def is_spendable_coin(coin: dict) -> bool:
-    if bool(coin.get("isLocked", False)):
-        return False
-    coin_state = str(coin.get("state", "")).strip().upper()
-    if not coin_state:
-        return False
-    if coin_state in {
-        "PENDING",
-        "MEMPOOL",
-        "SPENT",
-        "SPENDING",
-        "LOCKED",
-        "RESERVED",
-        "UNCONFIRMED",
-    }:
-        return False
-    return coin_state in {"CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE", "SETTLED"}
+    return is_spendable_wallet_coin(coin)
 
 
 def resolve_coin_global_ids(

@@ -31,14 +31,35 @@ def mock_kernel_default_mojo_multiplier_for_asset(asset_id: str) -> int:
 class MinimalSignerKernel:
     """Base stub for tests that patch ``sys.modules['greenfloor_signer']``.
 
-    Subclass and override only the symbols your test exercises. Hex helpers and
-    ``validate_offer`` are provided by default so offer verification tests do not
-    need to enumerate every kernel export.
+    Subclass and override only the symbols your test exercises. Hex helpers,
+    offer-build pricing helpers, and Dexie verification are provided by default
+    so CLI/offer tests do not need to enumerate every kernel export.
     """
 
     @staticmethod
     def validate_offer(_offer: str) -> None:
         return None
+
+    @staticmethod
+    def verify_offer_for_dexie(_offer: str) -> None:
+        return None
+
+    @staticmethod
+    def mojo_multiplier_for_leg(pricing: object, field: str, asset_id: str) -> int:
+        pricing_dict = pricing if isinstance(pricing, dict) else {}
+        if field in pricing_dict:
+            return int(pricing_dict[field])
+        return mock_kernel_default_mojo_multiplier_for_asset(asset_id)
+
+    @staticmethod
+    def resolve_offer_expiry_for_pricing(pricing: object) -> tuple[str, int]:
+        pricing_dict = pricing if isinstance(pricing, dict) else {}
+        return ("minutes", int(pricing_dict.get("strategy_offer_expiry_minutes", 60)))
+
+    @staticmethod
+    def resolve_quote_price_for_pricing(pricing: object) -> float:
+        pricing_dict = pricing if isinstance(pricing, dict) else {}
+        return float(pricing_dict.get("fixed_quote_per_base", 1.0))
 
     normalize_hex_id = staticmethod(mock_kernel_normalize_hex_id)
     is_hex_id = staticmethod(mock_kernel_is_hex_id)

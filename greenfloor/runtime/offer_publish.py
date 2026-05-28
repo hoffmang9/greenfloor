@@ -12,8 +12,10 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.cycle import is_transient_dexie_visibility_404_error
-from greenfloor.core.kernel_bridge import import_kernel
-from greenfloor.hex_utils import normalize_hex_id
+from greenfloor.core.retry_policy import (
+    dexie_invalid_offer_retry_sleep,
+    dexie_invalid_offer_should_retry,
+)
 from greenfloor.logging_setup import initialize_service_file_logging
 from greenfloor.offer_decode import (
     extract_coin_id_hints_from_offer_text as _extract_coin_id_hints_from_offer_text,
@@ -56,38 +58,6 @@ def dexie_offer_view_url(*, dexie_base_url: str, offer_id: str) -> str:
     return f"https://{host}/offers/{urllib.parse.quote(clean_offer_id)}"
 
 
-def resolve_offer_expiry_for_market(market: MarketConfig) -> tuple[str, int]:
-    pricing = dict(market.pricing or {})
-    value_raw = pricing.get("strategy_offer_expiry_minutes")
-    try:
-        value = int(value_raw or 0)
-    except (TypeError, ValueError):
-        value = 0
-    if value > 0:
-        return "minutes", value
-    return "minutes", 10
-
-
-def resolve_quote_price_for_market(market: MarketConfig) -> float:
-    pricing = dict(market.pricing or {})
-    quote_price = pricing.get("fixed_quote_per_base")
-    if quote_price is None:
-        min_q = pricing.get("min_price_quote_per_base")
-        max_q = pricing.get("max_price_quote_per_base")
-        if min_q is not None and max_q is not None:
-            quote_price = (float(min_q) + float(max_q)) / 2.0
-        elif min_q is not None:
-            quote_price = float(min_q)
-        elif max_q is not None:
-            quote_price = float(max_q)
-    if quote_price is None:
-        raise ValueError(
-            "market pricing must define fixed_quote_per_base or "
-            "min/max_price_quote_per_base for offer build"
-        )
-    return float(quote_price)
-
-
 def log_signed_offer_artifact(
     *,
     offer_text: str,
@@ -109,151 +79,6 @@ def log_signed_offer_artifact(
     )
 
 
-def _condition_has_offer_expiration(condition: object) -> bool:
-    parse_names = (
-        "parse_assert_before_seconds_relative",
-        "parse_assert_before_seconds_absolute",
-        "parse_assert_before_height_relative",
-        "parse_assert_before_height_absolute",
-    )
-    for parse_name in parse_names:
-        parse_fn = getattr(condition, parse_name, None)
-        if not callable(parse_fn):
-            continue
-        try:
-            if parse_fn() is not None:
-                return True
-        except Exception:
-            continue
-    return False
-
-
-def _extract_offer_conditions_from_coin_spend(sdk: object, coin_spend: object) -> list[object]:
-    clvm_cls = getattr(sdk, "Clvm", None)
-    if not callable(clvm_cls):
-        return []
-    puzzle_reveal = getattr(coin_spend, "puzzle_reveal", None)
-    solution = getattr(coin_spend, "solution", None)
-    if not isinstance(puzzle_reveal, bytes | bytearray | memoryview) or not isinstance(
-        solution, bytes | bytearray | memoryview
-    ):
-        return []
-    try:
-        clvm = clvm_cls()
-        deserialize_fn = getattr(clvm, "deserialize", None)
-        if not callable(deserialize_fn):
-            return []
-        puzzle_program = deserialize_fn(bytes(puzzle_reveal))
-        solution_program = deserialize_fn(bytes(solution))
-        run_fn = getattr(puzzle_program, "run", None)
-        if not callable(run_fn):
-            return []
-        run_output = run_fn(solution_program, 1_000_000_000_000, True)
-        value = getattr(run_output, "value", None)
-        if value is None:
-            return []
-        to_list_fn = getattr(value, "to_list", None)
-        if callable(to_list_fn):
-            parsed = to_list_fn() or []
-            if isinstance(parsed, collections.abc.Iterable) and not isinstance(
-                parsed, bytes | bytearray | str
-            ):
-                return list(parsed)
-        if isinstance(value, collections.abc.Iterable) and not isinstance(
-            value, bytes | bytearray | str
-        ):
-            return list(value)
-    except Exception:
-        return []
-    return []
-
-
-def _offer_has_expiration_condition(sdk: object, offer_text: str) -> bool:
-    decode_offer = getattr(sdk, "decode_offer", None)
-    if not callable(decode_offer):
-        return False
-    spend_bundle = decode_offer(offer_text)
-    coin_spends = getattr(spend_bundle, "coin_spends", None) or []
-    for coin_spend in coin_spends:
-        for condition in _extract_offer_conditions_from_coin_spend(sdk, coin_spend):
-            if _condition_has_offer_expiration(condition):
-                return True
-    return False
-
-
-def _offer_has_duplicate_spent_coin_ids(sdk: object, offer_text: str) -> bool:
-    decode_offer = getattr(sdk, "decode_offer", None)
-    to_hex = getattr(sdk, "to_hex", None)
-    if not callable(decode_offer) or not callable(to_hex):
-        return False
-    try:
-        spend_bundle = decode_offer(offer_text)
-    except Exception:
-        return False
-    coin_spends = getattr(spend_bundle, "coin_spends", None) or []
-    seen: set[str] = set()
-    for coin_spend in coin_spends:
-        coin = getattr(coin_spend, "coin", None)
-        if coin is None:
-            continue
-        coin_id_fn = getattr(coin, "coin_id", None)
-        if not callable(coin_id_fn):
-            continue
-        try:
-            coin_id_hex = str(to_hex(coin_id_fn())).strip().lower()
-        except Exception:
-            continue
-        normalized = normalize_hex_id(coin_id_hex)
-        if not normalized:
-            continue
-        if normalized in seen:
-            return True
-        seen.add(normalized)
-    return False
-
-
-def verify_offer_text_for_dexie(offer_text: str) -> str | None:
-    native_validated = False
-    try:
-        native = import_kernel()
-    except ImportError:
-        native = None
-    else:
-        try:
-            native.validate_offer(offer_text)
-            native_validated = True
-        except Exception as exc:
-            return f"wallet_sdk_offer_validate_failed:{exc}"
-    try:
-        import chia_wallet_sdk as sdk  # type: ignore
-    except Exception as exc:
-        if native_validated:
-            return None
-        return f"wallet_sdk_import_error:{exc}"
-    try:
-        decode_offer = getattr(sdk, "decode_offer", None)
-        decode_available = callable(decode_offer)
-        if not native_validated:
-            validate_offer = getattr(sdk, "validate_offer", None)
-            if callable(validate_offer):
-                validate_offer(offer_text)
-            else:
-                verify_offer = getattr(sdk, "verify_offer", None)
-                if not callable(verify_offer):
-                    return "wallet_sdk_validate_offer_unavailable"
-                if not bool(verify_offer(offer_text)):
-                    return "wallet_sdk_offer_verify_false"
-        if native_validated and not decode_available:
-            return None
-        if _offer_has_duplicate_spent_coin_ids(sdk, offer_text):
-            return "wallet_sdk_offer_duplicate_spent_coin_ids"
-        if not _offer_has_expiration_condition(sdk, offer_text):
-            return "wallet_sdk_offer_missing_expiration"
-    except Exception as exc:
-        return f"wallet_sdk_offer_validate_failed:{exc}"
-    return None
-
-
 def post_dexie_offer_with_invalid_offer_retry(
     *,
     dexie: DexieAdapter,
@@ -265,7 +90,6 @@ def post_dexie_offer_with_invalid_offer_retry(
     if sleep_fn is None:
         sleep_fn = time.sleep
     attempt = 0
-    sleep_seconds = _DEXIE_INVALID_OFFER_RETRY_INITIAL_DELAY_SECONDS
     while True:
         result = dexie.post_offer(
             offer_text,
@@ -273,17 +97,19 @@ def post_dexie_offer_with_invalid_offer_retry(
             claim_rewards=claim_rewards,
         )
         error = str(result.get("error", "")).strip()
-        should_retry = (
-            bool(error)
-            and "dexie_http_error:400" in error
-            and "Invalid Offer" in error
-            and attempt < (_DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS - 1)
-        )
-        if not should_retry:
+        if not dexie_invalid_offer_should_retry(
+            error=error,
+            attempt=attempt,
+            max_attempts=_DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS,
+        ):
             return result
+        sleep_fn(
+            dexie_invalid_offer_retry_sleep(
+                attempt=attempt,
+                initial_sleep=_DEXIE_INVALID_OFFER_RETRY_INITIAL_DELAY_SECONDS,
+            )
+        )
         attempt += 1
-        sleep_fn(sleep_seconds)
-        sleep_seconds = min(8.0, sleep_seconds * 2.0)
 
 
 def verify_dexie_offer_visible_by_id(

@@ -8,15 +8,12 @@ pub mod notifications;
 pub mod orchestration;
 pub mod reconcile;
 pub mod reseed;
+pub mod retry;
 pub mod strategy;
 
 pub use cancel::{
     abs_move_bps, cancel_move_threshold_bps, collect_open_offer_ids_for_cancel,
     evaluate_cancel_policy_decision, CancelPolicyDecision,
-};
-pub use notifications::{
-    evaluate_low_inventory_alert, AlertEvent, AlertState, LowInventoryEvaluation,
-    LowInventoryInput,
 };
 pub use dispatch::{
     expiry_seconds_for_action, reservation_request_for_managed_offer,
@@ -44,6 +41,9 @@ pub use market::{
     needs_inventory_fallback, one_sided_offer_counts_by_side, resolve_inventory_scan_source,
     resolve_tracked_sizes, wallet_fallback_source_label, MarketCyclePhase, MarketCycleResultState,
 };
+pub use notifications::{
+    evaluate_low_inventory_alert, AlertEvent, AlertState, LowInventoryEvaluation, LowInventoryInput,
+};
 pub use orchestration::{
     classify_dexie_stale_offer_status, collect_stale_sweep_candidates, dedupe_sorted_market_ids,
     enqueue_immediate_requeue, is_dexie_offer_missing_error_text,
@@ -57,6 +57,11 @@ pub use reconcile::{
 };
 pub use reseed::{
     plan_reseed_actions_from_gap, reseed_skip_reason_labels, ReseedGapPlan, ReseedSkipReason,
+};
+pub use retry::{
+    coinset_fee_lookup_retry_sleep, dexie_invalid_offer_retry_sleep,
+    dexie_invalid_offer_should_retry, moderate_retry_next_sleep, moderate_retry_sleep_seconds,
+    parse_rate_limit_retry_seconds, poll_exponential_advance_sleep, poll_exponential_sleep_now,
 };
 pub use strategy::{
     evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction, StrategyConfig,

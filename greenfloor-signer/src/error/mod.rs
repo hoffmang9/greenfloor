@@ -152,6 +152,12 @@ pub enum SignerError {
     #[error("presplit coin p2 puzzle hash does not match offer binding")]
     PresplitCoinPuzzleHashMismatch,
 
+    #[error("offer_missing_expiration")]
+    OfferMissingExpiration,
+
+    #[error("offer_duplicate_spent_coin_ids")]
+    OfferDuplicateSpentCoinIds,
+
     #[error("{0}")]
     Other(String),
 }

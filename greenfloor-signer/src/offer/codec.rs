@@ -1,15 +1,12 @@
 use chia_protocol::{Bytes32, SpendBundle};
-use chia_puzzle_types::{
-    offer::{NotarizedPayment, Payment},
-    Memos,
-};
-use chia_sdk_driver::{
-    decode_offer, encode_offer as driver_encode_offer, AssetInfo, Offer, RequestedPayments,
-    SpendContext,
-};
+use chia_sdk_driver::{decode_offer, AssetInfo, Offer, SpendContext};
+use chia_sdk_types::{run_puzzle, Condition, Conditions};
 use chia_traits::Streamable;
+use clvm_traits::FromClvm;
+use clvmr::{serde::node_from_bytes, Allocator, NodePtr};
 
 use crate::error::{SignerError, SignerResult};
+use crate::hex::normalize_hex_id;
 
 fn parse_bytes32(raw: &[u8], field: &str) -> SignerResult<Bytes32> {
     let bytes: [u8; 32] = raw
@@ -18,17 +15,109 @@ fn parse_bytes32(raw: &[u8], field: &str) -> SignerResult<Bytes32> {
     Ok(Bytes32::new(bytes))
 }
 
-pub fn validate_offer_text(offer: &str) -> SignerResult<()> {
+fn condition_has_offer_expiration(condition: &Condition<NodePtr>) -> bool {
+    matches!(
+        condition,
+        Condition::AssertBeforeSecondsRelative(_)
+            | Condition::AssertBeforeSecondsAbsolute(_)
+            | Condition::AssertBeforeHeightRelative(_)
+            | Condition::AssertBeforeHeightAbsolute(_)
+    )
+}
+
+fn coin_spend_has_expiration_condition(
+    coin_spend: &chia_protocol::CoinSpend,
+) -> SignerResult<bool> {
+    let mut allocator = Allocator::new();
+    let puzzle = node_from_bytes(&mut allocator, coin_spend.puzzle_reveal.as_ref())
+        .map_err(|err| SignerError::Driver(err.to_string()))?;
+    let solution = node_from_bytes(&mut allocator, coin_spend.solution.as_ref())
+        .map_err(|err| SignerError::Driver(err.to_string()))?;
+    let output = run_puzzle(&mut allocator, puzzle, solution)
+        .map_err(|err| SignerError::Driver(err.to_string()))?;
+    let conditions = Conditions::<NodePtr>::from_clvm(&allocator, output)
+        .map_err(|err| SignerError::Driver(err.to_string()))?;
+    for condition in conditions.iter() {
+        if condition_has_offer_expiration(condition) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+pub fn offer_has_expiration_condition(spend_bundle: &SpendBundle) -> SignerResult<bool> {
+    for coin_spend in &spend_bundle.coin_spends {
+        if coin_spend_has_expiration_condition(coin_spend)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+pub fn offer_has_duplicate_spent_coin_ids(spend_bundle: &SpendBundle) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    for coin_spend in &spend_bundle.coin_spends {
+        let coin_id = coin_spend.coin.coin_id();
+        let normalized = normalize_hex_id(&hex::encode(coin_id));
+        if normalized.is_empty() {
+            continue;
+        }
+        if !seen.insert(normalized) {
+            return true;
+        }
+    }
+    false
+}
+
+fn decode_and_parse_offer(offer: &str) -> SignerResult<SpendBundle> {
     let spend_bundle = decode_offer(offer)?;
     let mut ctx = SpendContext::new();
     Offer::from_spend_bundle(&mut ctx, &spend_bundle)?;
+    Ok(spend_bundle)
+}
+
+/// Decode and parse offer structure (wallet-sdk semantics) without Dexie policy gates.
+pub fn validate_offer_structure(offer: &str) -> SignerResult<()> {
+    decode_and_parse_offer(offer)?;
     Ok(())
+}
+
+/// Full Dexie pre-post validation: structure, expiry, and duplicate spends.
+pub fn validate_offer_text(offer: &str) -> SignerResult<()> {
+    let spend_bundle = decode_and_parse_offer(offer)?;
+    if offer_has_duplicate_spent_coin_ids(&spend_bundle) {
+        return Err(SignerError::OfferDuplicateSpentCoinIds);
+    }
+    if !offer_has_expiration_condition(&spend_bundle)? {
+        return Err(SignerError::OfferMissingExpiration);
+    }
+    Ok(())
+}
+
+fn dexie_verify_error_code(err: SignerError) -> String {
+    match err {
+        SignerError::OfferDuplicateSpentCoinIds => {
+            "wallet_sdk_offer_duplicate_spent_coin_ids".to_string()
+        }
+        SignerError::OfferMissingExpiration => "wallet_sdk_offer_missing_expiration".to_string(),
+        SignerError::Driver(msg) => format!("wallet_sdk_offer_validate_failed:driver:{msg}"),
+        SignerError::Other(msg) => format!("wallet_sdk_offer_validate_failed:other:{msg}"),
+        err => format!("wallet_sdk_offer_validate_failed:{err}"),
+    }
+}
+
+/// Dexie pre-post gate returning a stable error code string, or ``None`` when valid.
+pub fn verify_offer_for_dexie(offer: &str) -> Option<String> {
+    match validate_offer_text(offer) {
+        Ok(()) => None,
+        Err(err) => Some(dexie_verify_error_code(err)),
+    }
 }
 
 pub fn encode_offer_from_spend_bundle_bytes(spend_bundle_bytes: &[u8]) -> SignerResult<String> {
     let spend_bundle = SpendBundle::from_bytes(spend_bundle_bytes)
         .map_err(|err| SignerError::Other(format!("invalid_spend_bundle_bytes:{err}")))?;
-    driver_encode_offer(&spend_bundle).map_err(SignerError::from)
+    chia_sdk_driver::encode_offer(&spend_bundle).map_err(SignerError::from)
 }
 
 pub fn from_input_spend_bundle_bytes(
@@ -39,17 +128,23 @@ pub fn from_input_spend_bundle_bytes(
     let spend_bundle = SpendBundle::from_bytes(spend_bundle_bytes)
         .map_err(|err| SignerError::Other(format!("invalid_spend_bundle_bytes:{err}")))?;
 
-    let mut requested_payments = RequestedPayments::new();
+    let mut requested_payments = chia_sdk_driver::RequestedPayments::new();
     for (nonce_raw, payments_raw) in requested_payments_xch {
         let nonce = parse_bytes32(&nonce_raw, "nonce")?;
         let mut payments = Vec::with_capacity(payments_raw.len());
         for (puzzle_hash_raw, amount) in payments_raw {
             let puzzle_hash = parse_bytes32(&puzzle_hash_raw, "puzzle_hash")?;
-            payments.push(Payment::new(puzzle_hash, amount, Memos::None));
+            payments.push(chia_puzzle_types::offer::Payment::new(
+                puzzle_hash,
+                amount,
+                chia_puzzle_types::Memos::None,
+            ));
         }
         requested_payments
             .xch
-            .push(NotarizedPayment::new(nonce, payments));
+            .push(chia_puzzle_types::offer::NotarizedPayment::new(
+                nonce, payments,
+            ));
     }
     for (asset_id_raw, nonce_raw, payments_raw) in requested_payments_cats {
         let asset_id = parse_bytes32(&asset_id_raw, "asset_id")?;
@@ -57,13 +152,15 @@ pub fn from_input_spend_bundle_bytes(
         let mut payments = Vec::with_capacity(payments_raw.len());
         for (puzzle_hash_raw, amount) in payments_raw {
             let puzzle_hash = parse_bytes32(&puzzle_hash_raw, "puzzle_hash")?;
-            payments.push(Payment::new(puzzle_hash, amount, Memos::None));
+            payments.push(chia_puzzle_types::offer::Payment::new(
+                puzzle_hash,
+                amount,
+                chia_puzzle_types::Memos::None,
+            ));
         }
-        requested_payments
-            .cats
-            .entry(asset_id)
-            .or_default()
-            .push(NotarizedPayment::new(nonce, payments));
+        requested_payments.cats.entry(asset_id).or_default().push(
+            chia_puzzle_types::offer::NotarizedPayment::new(nonce, payments),
+        );
     }
 
     let mut ctx = SpendContext::new();
@@ -84,4 +181,32 @@ pub fn from_input_spend_bundle_xch_bytes(
     requested_payments_xch: Vec<(Vec<u8>, Vec<(Vec<u8>, u64)>)>,
 ) -> SignerResult<Vec<u8>> {
     from_input_spend_bundle_bytes(spend_bundle_bytes, requested_payments_xch, Vec::new())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chia_protocol::Coin;
+
+    #[test]
+    fn duplicate_spent_coin_ids_detected() {
+        let coin = Coin::new(
+            chia_protocol::Bytes32::default(),
+            chia_protocol::Bytes32::default(),
+            1,
+        );
+        let spend = chia_protocol::CoinSpend::new(
+            coin,
+            chia_protocol::Program::default(),
+            chia_protocol::Program::default(),
+        );
+        let bundle = SpendBundle::new(vec![spend.clone(), spend], chia_bls::Signature::default());
+        assert!(offer_has_duplicate_spent_coin_ids(&bundle));
+    }
+
+    #[test]
+    fn empty_bundle_has_no_duplicate_spends() {
+        let bundle = SpendBundle::new(vec![], chia_bls::Signature::default());
+        assert!(!offer_has_duplicate_spent_coin_ids(&bundle));
+    }
 }

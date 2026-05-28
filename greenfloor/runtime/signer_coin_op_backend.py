@@ -10,7 +10,7 @@ from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.core.coin_ops import coin_op_min_amount_mojos
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
-from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode, DenominationTarget
+from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode
 from greenfloor.runtime.coin_ops_scope import CoinOpScope
 from greenfloor.runtime.coinset_coins import (
     list_unspent_coins_by_receive_address,
@@ -216,65 +216,3 @@ class SignerCoinOpBackend:
             fee_mojos=fee_mojos,
             initial_coin_ids=existing_ids,
         )
-
-    def evaluate_denomination_readiness(
-        self,
-        *,
-        asset_id: str,
-        size_base_units: int,
-        required_min_count: int | None = None,
-        max_allowed_count: int | None = None,
-    ) -> dict[str, int | bool | str]:
-        coins = self.list_asset_scoped_coins()
-        spendable = [
-            c
-            for c in coins
-            if is_spendable_coin(c) and int(c.get("amount", 0)) == int(size_base_units)
-        ]
-        current_count = len(spendable)
-        ready = True
-        if required_min_count is not None:
-            ready = current_count >= int(required_min_count)
-        if max_allowed_count is not None:
-            ready = ready and current_count <= int(max_allowed_count)
-        return {
-            "asset_id": asset_id,
-            "size_base_units": int(size_base_units),
-            "current_count": current_count,
-            "required_min_count": int(required_min_count) if required_min_count is not None else -1,
-            "max_allowed_count": int(max_allowed_count) if max_allowed_count is not None else -1,
-            "ready": ready,
-        }
-
-    def build_iteration_payload(
-        self,
-        *,
-        operation_id: str,
-        operation_state: str,
-        no_wait: bool,
-        network: str,
-        existing_coin_ids: set[str],
-        iteration: int,
-        readiness_asset_id: str,
-        readiness_kwargs: dict[str, int],
-        denomination_target: DenominationTarget | None,
-    ) -> tuple[dict[str, object], dict[str, int | bool | str] | None]:
-        _ = network, existing_coin_ids
-        iteration_payload: dict[str, object] = {
-            "iteration": iteration,
-            "operation_id": operation_id,
-            "operation_state": operation_state,
-            "signature_request_id": operation_id,
-            "signature_state": operation_state,
-            "waited": not no_wait,
-            "wait_events": [],
-        }
-        final_readiness = None
-        if denomination_target is not None:
-            final_readiness = self.evaluate_denomination_readiness(
-                asset_id=readiness_asset_id,
-                size_base_units=denomination_target.size_base_units,
-                **readiness_kwargs,
-            )
-            iteration_payload["denomination_readiness"] = final_readiness
-        return iteration_payload, final_readiness

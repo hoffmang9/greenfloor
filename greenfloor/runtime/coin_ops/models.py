@@ -63,9 +63,6 @@ class SplitDenominationTarget:
             "required_count": self.required_count,
         }
 
-    def split_readiness_kwargs(self) -> dict[str, int]:
-        return {"required_min_count": self.required_count}
-
 
 @dataclass(slots=True)
 class CombineDenominationTarget:
@@ -92,9 +89,6 @@ class CombineDenominationTarget:
             "combine_when_excess_factor": self.combine_when_excess_factor,
             "combine_threshold_count": self.combine_threshold_count,
         }
-
-    def combine_readiness_kwargs(self) -> dict[str, int]:
-        return {"max_allowed_count": self.combine_threshold_count}
 
 
 DenominationTarget = SplitDenominationTarget | CombineDenominationTarget | None

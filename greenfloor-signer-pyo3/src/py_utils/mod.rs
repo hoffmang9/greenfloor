@@ -5,8 +5,9 @@ mod policy;
 
 pub use coin_ops::{
     bucket_spec_from_py, coin_op_plan_to_py, coin_op_plans_from_py_list,
-    combine_input_selection_mode_from_py, exclude_coin_ids_from_py_optional,
-    spendable_coins_from_py_list, split_auto_select_plan_to_py, split_planning_profile_from_py,
+    combine_denomination_readiness_to_py, combine_input_selection_mode_from_py,
+    exclude_coin_ids_from_py_optional, spendable_coins_from_py_list, split_auto_select_plan_to_py,
+    split_denomination_readiness_to_py, split_planning_profile_from_py,
 };
 pub use common::{
     dict_from_json_value, dict_to_i64_i64_map, i64_i64_map_to_py_dict, request_dict_to_json,

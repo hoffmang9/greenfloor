@@ -42,9 +42,7 @@ def testbuild_and_post_offer_cli_uses_local_path_when_signer_not_configured(
             return {"success": True, "id": self.offer_id}
 
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
-    monkeypatch.setattr(
-        "greenfloor.runtime.offer_orchestration.verify_offer_text_for_dexie", lambda _offer: None
-    )
+    monkeypatch.setattr("greenfloor.core.offer_policy.verify_offer_for_dexie", lambda _offer: None)
 
     code = build_and_post_offer_cli(
         program_path=program,

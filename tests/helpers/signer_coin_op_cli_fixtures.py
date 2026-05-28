@@ -137,68 +137,6 @@ class SignerCoinOpBackendFake:
             input_coin_ids=input_coin_ids,
         )
 
-    def evaluate_denomination_readiness(
-        self,
-        *,
-        asset_id: str,
-        size_base_units: int,
-        required_min_count: int | None = None,
-        max_allowed_count: int | None = None,
-    ) -> dict[str, int | bool | str]:
-        _ = asset_id, max_allowed_count
-        coins = self.list_asset_scoped_coins()
-        spendable = [
-            coin
-            for coin in coins
-            if str(coin.get("state", "CONFIRMED")).upper() in _spendable_states()
-        ]
-        matching = [
-            coin for coin in spendable if int(coin.get("amount", 0)) == int(size_base_units)
-        ]
-        required = int(required_min_count or 0)
-        current = len(matching)
-        return {
-            "asset_id": asset_id,
-            "size_base_units": int(size_base_units),
-            "required_min_count": required,
-            "current_count": current,
-            "ready": current >= required if required > 0 else True,
-        }
-
-    def build_iteration_payload(
-        self,
-        *,
-        operation_id: str,
-        operation_state: str,
-        no_wait: bool,
-        network: str,
-        existing_coin_ids: set[str],
-        iteration: int,
-        readiness_asset_id: str,
-        readiness_kwargs: dict[str, int],
-        denomination_target: Any,
-    ) -> tuple[dict[str, object], dict[str, int | bool | str] | None]:
-        _ = network, existing_coin_ids
-        final_readiness = None
-        if denomination_target is not None:
-            final_readiness = self.evaluate_denomination_readiness(
-                asset_id=readiness_asset_id,
-                size_base_units=int(denomination_target.size_base_units),
-                **readiness_kwargs,
-            )
-        payload: dict[str, object] = {
-            "iteration": iteration,
-            "operation_id": operation_id,
-            "operation_state": operation_state,
-            "signature_request_id": operation_id,
-            "signature_state": operation_state,
-            "waited": not no_wait,
-            "wait_events": [],
-        }
-        if final_readiness is not None:
-            payload["denomination_readiness"] = final_readiness
-        return payload, final_readiness
-
 
 def _patch_signer_asset_resolvers(
     monkeypatch,

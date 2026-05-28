@@ -11,6 +11,7 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
+from greenfloor.core import offer_policy
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
 from greenfloor.runtime.offer_build_context import OfferBuildContext
@@ -20,7 +21,6 @@ from greenfloor.runtime.offer_publish import (
     log_signed_offer_artifact,
     normalize_offer_side,
     post_offer_phase,
-    verify_offer_text_for_dexie,
 )
 from greenfloor.storage.sqlite import SqliteStore
 
@@ -95,7 +95,7 @@ def _iteration_timing_payload(
 class OfferPostDeps:
     resolve_maker_offer_fee_fn: collections.abc.Callable[..., tuple[int, str]]
     log_signed_offer_artifact_fn: collections.abc.Callable[..., None]
-    verify_offer_text_for_dexie_fn: collections.abc.Callable[[str], str | None]
+    verify_offer_for_dexie_fn: collections.abc.Callable[[str], str | None]
     post_offer_phase_fn: collections.abc.Callable[..., dict[str, Any]]
     dexie_offer_view_url_fn: collections.abc.Callable[..., str]
     dexie_adapter_cls: type[DexieAdapter]
@@ -110,7 +110,7 @@ def default_offer_post_deps(
     return OfferPostDeps(
         resolve_maker_offer_fee_fn=resolve_maker_offer_fee,
         log_signed_offer_artifact_fn=log_signed_offer_artifact,
-        verify_offer_text_for_dexie_fn=verify_offer_text_for_dexie,
+        verify_offer_for_dexie_fn=offer_policy.verify_offer_for_dexie,
         post_offer_phase_fn=post_offer_phase,
         dexie_offer_view_url_fn=dexie_offer_view_url,
         dexie_adapter_cls=DexieAdapter,
@@ -339,7 +339,7 @@ def execute_build_and_post_offer(
             trading_pair=f"{market.base_symbol}:{market.quote_asset}",
             expiry=str(created.expires_at),
         )
-        verify_error = resolved_post_deps.verify_offer_text_for_dexie_fn(offer_text)
+        verify_error = resolved_post_deps.verify_offer_for_dexie_fn(offer_text)
         if verify_error:
             publish_failures += 1
             _append_post_failure(
