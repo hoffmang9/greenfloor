@@ -10,8 +10,13 @@ from typing import Any
 from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.core.offer_side import normalize_offer_side
-from greenfloor.core.signer_offer_request import build_signer_create_offer_request
-from greenfloor.hex_utils import canonical_is_xch, default_mojo_multiplier_for_asset
+from greenfloor.core.signer_offer_request import (
+    build_signer_create_offer_request,
+    quote_mojos_for_base_size,
+    resolve_quote_unit_multiplier,
+    signer_split_asset_id,
+)
+from greenfloor.hex_utils import canonical_is_xch
 from greenfloor.offer_bootstrap import BootstrapLadderEntry, plan_bootstrap_mixed_outputs
 from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
@@ -126,17 +131,17 @@ def signer_bootstrap_phase(
         return {"status": "skipped", "reason": f"missing_{side}_ladder"}
 
     pricing = dict(market.pricing or {})
-    quote_unit_multiplier = int(
-        pricing.get(
-            "quote_unit_mojo_multiplier",
-            default_mojo_multiplier_for_asset(str(resolved_quote_asset_id)),
-        )
+    quote_unit_multiplier = resolve_quote_unit_multiplier(
+        pricing=pricing,
+        resolved_quote_asset_id=str(resolved_quote_asset_id),
     )
     if side == "buy":
         ladder_for_split = []
         for entry in side_ladder:
-            quote_amount = int(
-                round(float(entry.size_base_units) * float(quote_price) * quote_unit_multiplier)
+            quote_amount = quote_mojos_for_base_size(
+                size_base_units=int(entry.size_base_units),
+                quote_price=float(quote_price),
+                quote_unit_multiplier=quote_unit_multiplier,
             )
             if quote_amount <= 0:
                 continue
@@ -147,10 +152,14 @@ def signer_bootstrap_phase(
                     split_buffer_count=int(entry.split_buffer_count),
                 )
             )
-        split_asset_id = str(resolved_quote_asset_id).strip()
     else:
         ladder_for_split = side_ladder
-        split_asset_id = str(resolved_base_asset_id).strip()
+
+    split_asset_id = signer_split_asset_id(
+        action_side=action_side,
+        resolved_base_asset_id=resolved_base_asset_id,
+        resolved_quote_asset_id=resolved_quote_asset_id,
+    )
 
     if not split_asset_id:
         return {"status": "skipped", "reason": f"missing_{side}_asset_for_bootstrap"}

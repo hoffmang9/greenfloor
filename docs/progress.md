@@ -201,7 +201,7 @@ Record these for the next migration agent; none are merge blockers for step 12.
 - **Orchestration FFI:** `greenfloor/core/cycle_orchestration.py` + `greenfloor-signer-pyo3/src/cycle/orchestration_py.rs` — `MarketBatchSelection`, `OfferStateRow`, `StaleSweepCandidate`, `StaleSweepHit`, `StaleSweepProgress`, `ParallelActionOutcome`; `main.py` stale sweep and market batch use attributes (not dict `.get()`).
 - **PyO3 layout:** monolithic `cycle.rs` split into `greenfloor-signer-pyo3/src/cycle/` (`managed_py`, `market_py`, `stale_sweep_py`, `offer_py`, …); `execution_py.rs` for batch planning bindings.
 - **Python packages:** `strategy_dispatch` and `market_cycle` are multi-module packages; `StrategyDispatchHooks` + explicit callables (no `dispatch_pkg` self-imports, no `strategy_dispatch._*` test aliases); `parallel_batch.build_parallel_dispatch_plan`; strategy phase split `strategy_eval_phase` / `strategy_exec_phase` (`StrategyConfig`, `datetime` on `MarketCycleRun.now`); `reservation_helpers` takes `MarketConfig`.
-- **Core cycle surface:** `core/cycle` package (`_bridge`, `reexports`, `policy`); public expand name `expand_planned_actions` only.
+- **Core cycle surface:** `core/cycle` package (`_bridge_managed`, `_bridge_orchestration`, `policy`, `__init__`); public expand name `expand_planned_actions` only.
 - **Migration status:** step 5 complete for strategy dispatch + orchestration typing; step 6 extracted cycle runner from `main.py`.
 
 ## 2026-05-27 (Rust cycle kernel — quality review follow-up)

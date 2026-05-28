@@ -98,6 +98,10 @@ jobs:
       - name: "Test suite (pytest)"
         run: pytest -v --tb=short
 
+      - name: Pytest (signer marker)
+        if: matrix.run_rust_tests
+        run: pytest -v --tb=short -m signer
+
       - uses: ./.github/actions/wheel-cache
         if: matrix.run_sdk_integration
         with:

@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.core.kernel_bridge import import_kernel
-from greenfloor.core.signer_offer_request import SignerCreateOfferPayload
+from greenfloor.core.signer_offer_request import (
+    SignerCreateOfferPayload,
+    signer_create_offer_request_from_fields,
+)
 
 
 def resolve_vault_context(program_path: str) -> dict[str, Any]:
@@ -87,9 +90,7 @@ def expires_at_unix_from_payload(payload: dict[str, Any]) -> int | None:
 
 def vault_offer_request_from_payload(
     payload: dict[str, Any], plan: dict[str, Any]
-) -> dict[str, Any]:
-    offer_asset_id = str(plan.get("offer_asset_id", payload.get("asset_id", ""))).strip().lower()
-    request_asset_id = str(plan.get("request_asset_id", "")).strip().lower()
+) -> SignerCreateOfferPayload:
     raw_offer_coin_ids = plan.get("offer_coin_ids", [])
     offer_coin_ids = (
         [str(value).strip().lower() for value in raw_offer_coin_ids if str(value).strip()]
@@ -102,21 +103,20 @@ def vault_offer_request_from_payload(
         if isinstance(raw_presplit_coin_ids, list)
         else []
     )
-    request: dict[str, Any] = {
-        "receive_address": str(payload.get("receive_address", "")).strip(),
-        "offer_asset_id": offer_asset_id,
-        "offer_amount": int(plan.get("offer_amount", 0)),
-        "request_asset_id": request_asset_id,
-        "request_amount": int(plan.get("request_amount", 0)),
-        "offer_coin_ids": offer_coin_ids,
-        "presplit_coin_ids": presplit_coin_ids,
-        "split_input_coins": bool(payload.get("split_input_coins", True)),
-        "broadcast_split": bool(payload.get("broadcast_split", False)),
-    }
-    expires_at = expires_at_unix_from_payload({**payload, **plan})
-    if expires_at is not None:
-        request["expires_at"] = expires_at
-    return request
+    offer_asset_id = str(plan.get("offer_asset_id", payload.get("asset_id", ""))).strip()
+    request_asset_id = str(plan.get("request_asset_id", "")).strip()
+    return signer_create_offer_request_from_fields(
+        receive_address=str(payload.get("receive_address", "")).strip(),
+        offer_asset_id=offer_asset_id,
+        offer_amount=int(plan.get("offer_amount", 0)),
+        request_asset_id=request_asset_id,
+        request_amount=int(plan.get("request_amount", 0)),
+        offer_coin_ids=offer_coin_ids,
+        presplit_coin_ids=presplit_coin_ids,
+        split_input_coins=bool(payload.get("split_input_coins", True)),
+        broadcast_split=bool(payload.get("broadcast_split", False)),
+        expires_at=expires_at_unix_from_payload({**payload, **plan}),
+    ).to_payload()
 
 
 def vault_mixed_split_request_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
