@@ -7,7 +7,9 @@ from typing import Protocol
 from greenfloor.core.coin_ops.types import (
     BucketSpec,
     CoinOpPlan,
+    CombineInputSelectionMode,
     SplitAutoSelectPlan,
+    SplitPlanningProfile,
 )
 
 
@@ -76,7 +78,7 @@ class CoinOpsKernelProtocol(Protocol):
         candidate_spendable: list[dict[str, object]],
         required_amount_mojos: int,
         canonical_asset_id: str,
-        profile: str,
+        profile: SplitPlanningProfile,
         combine_input_cap: int,
         allow_combine_prereq: bool | None,
     ) -> SplitAutoSelectPlan: ...
@@ -85,7 +87,7 @@ class CoinOpsKernelProtocol(Protocol):
         self,
         spendable_coins: list[dict[str, object]],
         number_of_coins: int,
-        selection_mode: str,
+        selection_mode: CombineInputSelectionMode,
         target_amount_mojos: int | None,
         exclude_coin_ids: set[str] | None,
         max_count: int | None,

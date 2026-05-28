@@ -19,7 +19,7 @@ from greenfloor.runtime.coin_ops.models import (
     CombineDenominationTarget,
     SplitDenominationTarget,
 )
-from greenfloor.runtime.coin_ops.planning import (
+from greenfloor.core.coin_ops import (
     CombineInputSelectionMode,
     SplitCoinPlan,
     SplitPlanningProfile,

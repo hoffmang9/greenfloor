@@ -14,7 +14,7 @@ from greenfloor.daemon.testing import (
     single_input_preferred_skip_reason,
     strategy_dispatch,
 )
-from greenfloor.runtime.coin_ops.planning import select_spendable_coins_for_target_amount
+from greenfloor.core.coin_ops import select_spendable_coins_for_target_amount
 from tests.helpers.daemon_test_fixtures import (
     FakeDexie,
     FakeStore,

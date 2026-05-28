@@ -1,4 +1,11 @@
-"""Coin-operation deterministic policy (Rust-backed kernel)."""
+"""Coin-operation deterministic policy (Rust-backed kernel).
+
+``SplitPlanningProfile`` controls ``plan_auto_split_selection()``:
+
+- ``CLI_AUTO``: largest spendable coin; no required-amount enforcement; no sub-CAT dust guard; no combine prereq.
+- ``DAEMON_AUTO``: enforce required amount; sub-CAT dust guard; combine-for-split prereq on first attempt only
+  (caller passes ``allow_combine_prereq=False`` on retry).
+"""
 
 from greenfloor.core.coin_ops._bridge import (
     coin_meets_coin_op_min_amount,

@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::policy::coin_op_min_amount_mojos;
 use super::selection::{
-    select_exact_amount_coin_ids, select_largest_spendable_coin, select_spendable_coins_for_target_amount,
+    select_exact_amount_coin_ids, select_spendable_coins_for_target_amount,
     split_would_create_sub_cat_change, SpendableCoin,
 };
 
@@ -162,18 +162,10 @@ pub fn plan_auto_split_selection(
     };
 
     if !large_enough.is_empty() {
-        let min_amount = if enforce_required_amount {
-            required_amount_mojos
-        } else {
-            0
-        };
-        let large_enough_owned: Vec<SpendableCoin> =
-            large_enough.iter().map(|c| (*c).clone()).collect();
-        let selected_coin = select_largest_spendable_coin(
-            &large_enough_owned,
-            min_amount,
-            &HashSet::new(),
-        );
+        let selected_coin = large_enough
+            .iter()
+            .filter(|coin| !coin.id.is_empty())
+            .max_by_key(|coin| coin.amount);
         if selected_coin.is_none() {
             return SplitAutoSelectPlan::Skip(SplitSkipPlan {
                 reason: "no_spendable_split_coin_meets_required_amount".to_string(),

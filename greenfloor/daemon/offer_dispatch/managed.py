@@ -14,7 +14,6 @@ from greenfloor.core.cycle import (
     is_managed_upstream_transient_error,
     managed_retry_decision,
 )
-from greenfloor.core.managed_action_outcome import ManagedActionOutcome
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.cooldowns import (
     _post_retry_config,
@@ -33,19 +32,6 @@ from greenfloor.runtime.offer_post_request import (
     parse_managed_offer_post_result,
 )
 from greenfloor.runtime.offer_publish import verify_offer_visible_on_dexie
-
-
-def _classify_managed_post_outcome(
-    managed_post: ManagedOfferPostResult,
-    *,
-    publish_venue: str,
-) -> ManagedActionOutcome:
-    return classify_managed_post_result(
-        success=managed_post.success,
-        error_text=managed_post.error or "unknown",
-        offer_id=managed_post.offer_id or "",
-        publish_venue=publish_venue,
-    )
 
 
 def managed_offer_post(
@@ -109,8 +95,10 @@ def execute_single_managed_action(
         side=_normalize_offer_side(action.side),
     )
     timing_fields = managed_post.timing_extra()
-    post_outcome = _classify_managed_post_outcome(
-        managed_post,
+    post_outcome = classify_managed_post_result(
+        success=managed_post.success,
+        error_text=managed_post.error or "unknown",
+        offer_id=managed_post.offer_id or "",
         publish_venue=publish_venue,
     )
     if not post_outcome.is_pending_visibility:

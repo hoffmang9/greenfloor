@@ -7,13 +7,14 @@ use signer_core::{
     compute_bucket_counts_from_coins, fee_budget_allows_execution, partition_plans_by_budget,
     plan_auto_combine_inputs, plan_auto_split_selection, plan_coin_ops,
     projected_coin_ops_fee_mojos, select_spendable_coins_for_target_amount,
-    split_would_create_sub_cat_change, CombineInputSelectionMode, SplitPlanningProfile,
+    split_would_create_sub_cat_change,
 };
 
 use crate::py_utils::{
     bucket_spec_from_py, coin_op_plan_to_py, coin_op_plans_from_py_list,
-    exclude_coin_ids_from_py_optional, i64_i64_map_to_py_dict, spendable_coins_from_py_list,
-    split_auto_select_plan_to_py,
+    combine_input_selection_mode_from_py, exclude_coin_ids_from_py_optional,
+    i64_i64_map_to_py_dict, spendable_coins_from_py_list, split_auto_select_plan_to_py,
+    split_planning_profile_from_py,
 };
 
 fn coin_amount_mojos_from_py(coin: &Bound<'_, PyDict>) -> PyResult<Option<i64>> {
@@ -183,13 +184,11 @@ fn plan_auto_split_selection_py(
     candidate_spendable: &Bound<'_, PyList>,
     required_amount_mojos: i64,
     canonical_asset_id: &str,
-    profile: &str,
+    profile: &Bound<'_, PyAny>,
     combine_input_cap: i64,
     allow_combine_prereq: Option<bool>,
 ) -> PyResult<Py<PyAny>> {
-    let profile = SplitPlanningProfile::from_label(profile).ok_or_else(|| {
-        PyValueError::new_err(format!("invalid split planning profile: {profile}"))
-    })?;
+    let profile = split_planning_profile_from_py(profile)?;
     let coins = spendable_coins_from_py_list(candidate_spendable)?;
     let plan = plan_auto_split_selection(
         &coins,
@@ -208,14 +207,12 @@ fn plan_auto_combine_inputs_py(
     py: Python<'_>,
     spendable_coins: &Bound<'_, PyList>,
     number_of_coins: usize,
-    selection_mode: &str,
+    selection_mode: &Bound<'_, PyAny>,
     target_amount_mojos: Option<i64>,
     exclude_coin_ids: Option<&Bound<'_, PyAny>>,
     max_count: Option<usize>,
 ) -> PyResult<Py<PyAny>> {
-    let mode = CombineInputSelectionMode::from_label(selection_mode).ok_or_else(|| {
-        PyValueError::new_err(format!("invalid combine selection mode: {selection_mode}"))
-    })?;
+    let mode = combine_input_selection_mode_from_py(selection_mode)?;
     let coins = spendable_coins_from_py_list(spendable_coins)?;
     let excluded = exclude_coin_ids_from_py_optional(exclude_coin_ids)?;
     let ids = plan_auto_combine_inputs(

@@ -22,7 +22,7 @@ from greenfloor.runtime.coin_ops.daemon_ledger import (
     daemon_coin_op_skipped,
 )
 from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode
-from greenfloor.runtime.coin_ops.planning import (
+from greenfloor.core.coin_ops import (
     CombineInputSelectionMode,
     SplitCoinPlan,
     SplitCombinePrereqPlan,

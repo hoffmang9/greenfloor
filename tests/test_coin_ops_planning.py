@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from greenfloor.runtime.coin_ops.planning import (
+from greenfloor.core.coin_ops import (
     SplitCoinPlan,
     SplitCombinePrereqPlan,
     SplitPlanningProfile,

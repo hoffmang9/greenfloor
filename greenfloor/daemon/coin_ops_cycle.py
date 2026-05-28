@@ -20,7 +20,7 @@ from greenfloor.daemon.market_helpers import (
     _normalize_offer_side,
 )
 from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision
-from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
+from greenfloor.daemon.strategy_execution import StrategyActionResult
 from greenfloor.daemon.watchlist import _watched_coin_ids_for_market
 from greenfloor.runtime.coin_ops.daemon_execution import execute_managed_coin_op_plans
 from greenfloor.storage.sqlite import SqliteStore
