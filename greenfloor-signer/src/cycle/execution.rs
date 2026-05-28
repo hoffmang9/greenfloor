@@ -2,20 +2,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::dispatch::{expand_strategy_actions, PlannedActionInput};
-use super::managed::{
-    can_parallelize_managed_offers, prepare_parallel_managed_submission_decision,
-    ParallelSubmissionDecision,
-};
+use super::dispatch::{expand_inputs_by_repeat, PlannedActionInput};
 use super::dispatch::SpendableAssetProfile;
+use super::managed::{prepare_parallel_managed_submission_decision, ParallelSubmissionDecision};
 use super::strategy::PlannedAction;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StrategyExecutionDispatch {
-    Parallel,
-    Sequential,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -30,8 +20,6 @@ pub enum SequentialActionRoute {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParallelSubmissionEntry {
     pub submit_index: usize,
-    pub size: i64,
-    pub side: String,
     pub requested_amounts: BTreeMap<String, i64>,
     pub spendable_profiles: BTreeMap<String, SpendableAssetProfile>,
 }
@@ -39,16 +27,12 @@ pub struct ParallelSubmissionEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParallelSkipItem {
     pub submit_index: usize,
-    pub size: i64,
-    pub side: String,
     pub reason: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParallelQueueItem {
     pub submit_index: usize,
-    pub size: i64,
-    pub side: String,
     pub requested_amounts: BTreeMap<String, i64>,
     pub available_amounts: BTreeMap<String, i64>,
 }
@@ -57,30 +41,6 @@ pub struct ParallelQueueItem {
 pub struct ParallelBatchPlan {
     pub skip_items: Vec<ParallelSkipItem>,
     pub queue: Vec<ParallelQueueItem>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct StrategyActionResultCounts {
-    pub planned_count: i64,
-    pub executed_count: i64,
-}
-
-pub fn select_strategy_execution_dispatch(
-    signer_path_configured: bool,
-    parallelism_enabled: bool,
-    runtime_dry_run: bool,
-    has_coordinator: bool,
-) -> StrategyExecutionDispatch {
-    if can_parallelize_managed_offers(
-        signer_path_configured,
-        parallelism_enabled,
-        runtime_dry_run,
-        has_coordinator,
-    ) {
-        StrategyExecutionDispatch::Parallel
-    } else {
-        StrategyExecutionDispatch::Sequential
-    }
 }
 
 pub fn sequential_action_route(
@@ -124,7 +84,7 @@ pub fn expand_planned_actions(actions: &[PlannedAction]) -> Vec<PlannedAction> {
             target_spread_bps: action.target_spread_bps,
         })
         .collect();
-    expand_strategy_actions(&inputs)
+    expand_inputs_by_repeat(&inputs)
         .into_iter()
         .map(|input| PlannedAction {
             size: input.size,
@@ -151,8 +111,6 @@ pub fn plan_parallel_submission_batch(entries: &[ParallelSubmissionEntry]) -> Pa
             ParallelSubmissionDecision::Skip { reason } => {
                 plan.skip_items.push(ParallelSkipItem {
                     submit_index: entry.submit_index,
-                    size: entry.size,
-                    side: entry.side.clone(),
                     reason,
                 });
             }
@@ -161,8 +119,6 @@ pub fn plan_parallel_submission_batch(entries: &[ParallelSubmissionEntry]) -> Pa
             } => {
                 plan.queue.push(ParallelQueueItem {
                     submit_index: entry.submit_index,
-                    size: entry.size,
-                    side: entry.side.clone(),
                     requested_amounts: entry.requested_amounts.clone(),
                     available_amounts,
                 });
@@ -172,40 +128,10 @@ pub fn plan_parallel_submission_batch(entries: &[ParallelSubmissionEntry]) -> Pa
     plan
 }
 
-pub fn aggregate_strategy_action_result_counts(
-    planned_count: i64,
-    item_statuses: &[&str],
-) -> StrategyActionResultCounts {
-    let executed_count = item_statuses
-        .iter()
-        .filter(|status| **status == "executed")
-        .count() as i64;
-    StrategyActionResultCounts {
-        planned_count,
-        executed_count,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
-
-    #[test]
-    fn select_dispatch_parallel_when_eligible() {
-        assert_eq!(
-            select_strategy_execution_dispatch(true, true, false, true),
-            StrategyExecutionDispatch::Parallel
-        );
-    }
-
-    #[test]
-    fn select_dispatch_sequential_when_dry_run() {
-        assert_eq!(
-            select_strategy_execution_dispatch(true, true, true, true),
-            StrategyExecutionDispatch::Sequential
-        );
-    }
 
     #[test]
     fn sequential_route_dry_run() {
@@ -236,15 +162,11 @@ mod tests {
         let entries = vec![
             ParallelSubmissionEntry {
                 submit_index: 0,
-                size: 10,
-                side: "sell".to_string(),
                 requested_amounts: BTreeMap::new(),
                 spendable_profiles: BTreeMap::new(),
             },
             ParallelSubmissionEntry {
                 submit_index: 1,
-                size: 1,
-                side: "sell".to_string(),
                 requested_amounts: BTreeMap::from([("asset_a".to_string(), 1000)]),
                 spendable_profiles: BTreeMap::from([(
                     "asset_a".to_string(),
@@ -264,12 +186,21 @@ mod tests {
     }
 
     #[test]
-    fn aggregate_counts_executed_items() {
-        let counts = aggregate_strategy_action_result_counts(
-            3,
-            &["planned", "executed", "skipped"],
-        );
-        assert_eq!(counts.planned_count, 3);
-        assert_eq!(counts.executed_count, 1);
+    fn expand_planned_actions_sets_repeat_one_per_unit() {
+        let actions = vec![PlannedAction {
+            size: 10,
+            repeat: 2,
+            pair: "xch".to_string(),
+            expiry_unit: "minutes".to_string(),
+            expiry_value: 10,
+            cancel_after_create: true,
+            reason: "below_target".to_string(),
+            target_spread_bps: None,
+            side: "sell".to_string(),
+        }];
+        let expanded = expand_planned_actions(&actions);
+        assert_eq!(expanded.len(), 2);
+        assert!(expanded.iter().all(|action| action.repeat == 1));
+        assert!(expanded.iter().all(|action| action.size == 10));
     }
 }

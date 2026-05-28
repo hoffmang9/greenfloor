@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from greenfloor.core.cycle import evaluate_two_sided_market_actions as evaluate_two_sided_rust
+from greenfloor.core.cycle import evaluate_two_sided_market_actions
 from greenfloor.core.strategy import (
     MarketState,
     PlannedAction,
@@ -110,24 +110,6 @@ def _strategy_state_from_bucket_counts(
     )
 
 
-def _planned_action_from_rust(payload: dict[str, Any]) -> PlannedAction:
-    return PlannedAction(
-        size=int(payload["size"]),
-        repeat=int(payload["repeat"]),
-        pair=str(payload["pair"]),
-        expiry_unit=str(payload["expiry_unit"]),
-        expiry_value=int(payload["expiry_value"]),
-        cancel_after_create=bool(payload["cancel_after_create"]),
-        reason=str(payload["reason"]),
-        target_spread_bps=(
-            int(payload["target_spread_bps"])
-            if payload.get("target_spread_bps") is not None
-            else None
-        ),
-        side=str(payload.get("side", "sell")),
-    )
-
-
 def _evaluate_two_sided_market_actions(
     *,
     market: Any,
@@ -144,13 +126,12 @@ def _evaluate_two_sided_market_actions(
         counts_by_side.get("sell", {}),
         xch_price_usd=xch_price_usd,
     )
-    raw_actions = evaluate_two_sided_rust(
+    return evaluate_two_sided_market_actions(
         buy_state=buy_state,
         sell_state=sell_state,
         buy_config=_strategy_config_for_side(market=market, side="buy"),
         sell_config=_strategy_config_for_side(market=market, side="sell"),
     )
-    return [_planned_action_from_rust(item) for item in raw_actions]
 
 
 def evaluate_reseed_candidates(

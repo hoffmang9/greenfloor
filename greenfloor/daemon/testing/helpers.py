@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from greenfloor.core.strategy import PlannedAction
+from greenfloor.core.planned_action import PlannedAction
 
 __all__ = ["PlannedAction", "drop_zero_repeat_strategy_actions"]
 

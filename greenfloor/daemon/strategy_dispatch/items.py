@@ -5,12 +5,13 @@ from __future__ import annotations
 from typing import Any
 
 from greenfloor.core.cycle import is_managed_worker_transient_error
+from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
 
 def action_item(
-    action: Any,
+    action: PlannedAction,
     *,
     status: str,
     reason: str,
@@ -22,7 +23,7 @@ def action_item(
         action,
         status=status,
         reason=reason,
-        side=_normalize_offer_side(getattr(action, "side", "sell")),
+        side=_normalize_offer_side(action.side),
         offer_id=offer_id,
         transient_upstream=transient_upstream,
         **extra,
@@ -37,7 +38,7 @@ def parallel_offer_worker_error_item(*, exc: Exception) -> StrategyActionItem:
 
 
 def action_item_from_managed_outcome(
-    action: Any,
+    action: PlannedAction,
     outcome: dict[str, Any],
     *,
     offer_id: str | None = None,
@@ -57,7 +58,7 @@ def action_item_from_managed_outcome(
     )
 
 
-def managed_skip_item(*, action: Any, reason: str) -> StrategyActionItem:
+def managed_skip_item(*, action: PlannedAction, reason: str) -> StrategyActionItem:
     return action_item(action, status="skipped", reason=reason, offer_id=None)
 
 

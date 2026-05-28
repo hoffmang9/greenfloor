@@ -9,7 +9,7 @@ from greenfloor.daemon.testing import (
     build_offer_for_action,
     drop_zero_repeat_strategy_actions,
     execute_strategy_actions,
-    expand_strategy_actions,
+    expand_planned_actions,
     inject_reseed_action_if_no_active_offers,
     strategy_config_from_market,
     strategy_dispatch,
@@ -55,7 +55,7 @@ def test_execute_strategy_actions_dry_run_plans_without_posting() -> None:
     assert store.offer_states == []
 
 
-def test_expand_strategy_actions_preserves_strategy_order() -> None:
+def test_expand_planned_actions_preserves_strategy_order() -> None:
     actions = [
         PlannedAction(
             size=1,
@@ -77,7 +77,7 @@ def test_expand_strategy_actions_preserves_strategy_order() -> None:
         ),
     ]
 
-    expanded = expand_strategy_actions(actions)
+    expanded = expand_planned_actions(actions)
 
     assert [action.size for action in expanded] == [1, 1, 10, 10]
 

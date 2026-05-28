@@ -42,7 +42,7 @@ pub use offer::codec::{
 pub use cycle::{
     apply_offer_signal, can_parallelize_managed_offers, classify_dexie_visibility_outcome,
     classify_managed_post_result, classify_managed_transient_error, evaluate_market,
-    expand_strategy_actions, expiry_seconds_for_action, is_managed_upstream_transient_error,
+    expiry_seconds_for_action, is_managed_upstream_transient_error,
     is_managed_worker_transient_error, is_parallel_dispatch_transient_error,
     is_transient_dexie_visibility_404_error, is_transient_managed_upstream_error_text,
     managed_retry_sleep_ms, parallel_max_workers, prepare_parallel_managed_submission_decision,
@@ -61,8 +61,7 @@ pub use cycle::{
     SpendableAssetProfile, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
     StrategyConfig, evaluate_two_sided_market_actions, expand_planned_actions,
     filter_planned_actions_with_positive_repeat, plan_parallel_submission_batch,
-    select_strategy_execution_dispatch, sequential_action_route, ParallelBatchPlan,
-    ParallelSubmissionEntry, SequentialActionRoute, StrategyExecutionDispatch,
+    sequential_action_route, ParallelBatchPlan, ParallelSubmissionEntry, SequentialActionRoute,
 };
 pub use vault::{
     build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,

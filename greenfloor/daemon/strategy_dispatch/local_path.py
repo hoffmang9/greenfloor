@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.daemon.cooldowns import (
     _POST_COOLDOWN_UNTIL,
@@ -32,14 +33,14 @@ def build_offer_for_action(
     *,
     program: ProgramConfig,
     market: MarketConfig,
-    action: Any,
+    action: PlannedAction,
     xch_price_usd: float | None,
     program_path: Path | None = None,
     keyring_yaml_path: str | None = None,
 ) -> dict[str, Any]:
     from greenfloor.offer_builder import build_offer
 
-    side = _normalize_offer_side(getattr(action, "side", "sell"))
+    side = _normalize_offer_side(action.side)
     resolved_program_path = default_program_config_path(program, program_path)
     try:
         build_ctx = prepare_offer_build_context(
@@ -72,7 +73,7 @@ def execute_single_local_action(
     *,
     program: ProgramConfig,
     market: MarketConfig,
-    action: Any,
+    action: PlannedAction,
     xch_price_usd: float | None,
     keyring_yaml_path: str,
     dexie: DexieAdapter,
@@ -80,12 +81,11 @@ def execute_single_local_action(
     publish_venue: str,
     store: SqliteStore,
     program_path: Path | None = None,
+    build_offer_for_action: Callable[..., dict[str, Any]],
 ) -> StrategyActionItem:
     action_started = time.monotonic()
     build_started = action_started
-    from greenfloor.daemon import strategy_dispatch as dispatch_pkg
-
-    built = dispatch_pkg._build_offer_for_action(
+    built = build_offer_for_action(
         program=program,
         market=market,
         action=action,

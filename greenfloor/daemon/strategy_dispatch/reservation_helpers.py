@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from greenfloor.config.models import ProgramConfig
+from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.cycle import reservation_request_for_managed_offer
 from greenfloor.daemon.market_helpers import _normalize_offer_side, _resolve_quote_asset_for_offer
 from greenfloor.runtime.offer_publish import resolve_quote_price_for_market
@@ -22,8 +23,8 @@ def reservation_wallet_id(program: ProgramConfig) -> str:
 
 def reservation_request_for_action(
     *,
-    market: Any,
-    action: Any,
+    market: MarketConfig,
+    action: PlannedAction,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
     fee_asset_id: str,
@@ -33,7 +34,7 @@ def reservation_request_for_action(
     base_multiplier = int(pricing.get("base_unit_mojo_multiplier", 1000))
     quote_multiplier = int(pricing.get("quote_unit_mojo_multiplier", 1000))
     return reservation_request_for_managed_offer(
-        side=_normalize_offer_side(getattr(action, "side", "sell")),
+        side=_normalize_offer_side(action.side),
         size_base_units=int(action.size),
         base_asset_id=str(resolved_base_asset_id or "").strip(),
         quote_asset_id=str(resolved_quote_asset_id or "").strip(),

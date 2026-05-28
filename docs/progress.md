@@ -1,8 +1,42 @@
 # Progress Log
 
+## 2026-05-27 (Rust cycle kernel step 5 — dispatch typing polish)
+
+- Strategy dispatch paths use ``list[PlannedAction]`` (parallel/sequential/batch, hooks, items).
+- ``planned_actions_from_signer_list`` fast-paths when PyO3 returns dataclass instances.
+- Documented removal path for ``strategy_dispatch._*`` test aliases in package + ``daemon.testing`` docs.
+
+## 2026-05-27 (Rust cycle kernel step 5 — boundary cleanup)
+
+- `greenfloor/core/planned_action.py`: `PlannedAction` + signer list converter (no bridge import).
+- `greenfloor/core/strategy_types.py`: `MarketState` / `StrategyConfig` (breaks cycle↔strategy import loop).
+- PyO3 returns `PlannedAction` dataclass instances (`planned_action_to_py`); `_bridge` annotates `list[PlannedAction]`.
+- Single public expand name: `expand_planned_actions` (removed `expand_strategy_actions` alias).
+- `StrategyDispatchHooks.managed_action_with_retry` / `.local_action` collapse retry call-site boilerplate.
+
+## 2026-05-27 (Rust cycle kernel step 5 — thermo-nuclear review follow-up)
+
+- Signer FFI returns `list[PlannedAction]` at the bridge (no `dict(item)` shuttle); `planned_action_from_signer_item` is the single converter.
+- `StrategyDispatchHooks` replaces redundant `runtime=runtime` injection; dispatch functions take explicit callables (`managed_offer_post`, `build_offer_for_action`, …).
+- Unified Rust expand: `dispatch::expand_inputs_by_repeat` (internal) + public `execution::expand_planned_actions` (`repeat=1` per unit).
+- Split `core/cycle` into `reexports.py` + `policy.py`; `__init__.py` is a thin barrel.
+- `parallel_batch.build_parallel_dispatch_plan` isolates batch planning from thread-pool execution.
+- Split strategy phase into `strategy_eval_phase.py` + `strategy_exec_phase.py`.
+- **Migration status (step 5 + review):** dispatch and market-cycle IO decomposed; **`main.py` still ~850 lines** (step 6 target: halve `main.py`, no new 1k-line files).
+
+## 2026-05-27 (Rust cycle kernel step 5 — review follow-up)
+
+- Removed `select_strategy_execution_dispatch`; Python parallel gating uses `can_parallelize_managed_offers` only.
+- Typed PyO3 execution bindings in `greenfloor-signer-pyo3/src/execution_py.rs` (`plan_parallel_submission_batch`, `expand_planned_actions`, `filter_planned_actions_with_positive_repeat`) — no JSON round-trip on parallel batch planning.
+- `StrategyDispatchRuntime` injection replaces `dispatch_pkg` self-imports; dispatch paths call `runtime.execute_*` so monkeypatch targets on `strategy_dispatch` package exports work.
+- Parallel path batches one `coinset_spendable_profiles_by_asset` call per dispatch; `max_single_known` is `bool` at source (PyO3 rejects non-bool).
+- Slimmed `ParallelSubmissionEntry` (dropped redundant `size`/`side`); expanded units use `repeat=1` in Rust.
+- Split `market_cycle` into `setup_phase.py`, `inventory_phase.py`, `phases.py`, thin `runner.py` (~100 lines).
+- `core/cycle/__init__.py`: `expand_strategy_actions` / `filter_planned_actions_with_positive_repeat` delegate to Rust bridge.
+
 ## 2026-05-27 (Rust cycle kernel step 5 — execution plan + typed strategy FFI)
 
-- Added `greenfloor-signer/src/cycle/execution.rs`: parallel batch planning (`plan_parallel_submission_batch`), execution dispatch mode (`select_strategy_execution_dispatch`), sequential route selection (`sequential_action_route`), and expanded-action helpers.
+- Added `greenfloor-signer/src/cycle/execution.rs`: parallel batch planning (`plan_parallel_submission_batch`), sequential route selection (`sequential_action_route`), and expanded-action helpers.
 - Typed PyO3 for `evaluate_market` and `evaluate_two_sided_market_actions` in `greenfloor-signer-pyo3/src/strategy_py.rs` — Python `greenfloor/core/strategy.py` passes dataclasses directly (no JSON dict shuttle).
 - Moved two-sided planning to Rust `evaluate_two_sided_market_actions`; `strategy_state.py` delegates to the typed bridge.
 - Split `greenfloor/daemon/strategy_dispatch.py` into package (`__init__.py` ~126 lines glue; managed/local/parallel/sequential submodules).

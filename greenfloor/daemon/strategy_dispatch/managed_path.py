@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig, managed_offer_execution_backend
+from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.cycle import (
     classify_dexie_visibility_outcome,
     classify_managed_post_result,
@@ -18,9 +19,7 @@ from greenfloor.core.cycle import (
 from greenfloor.daemon.cooldowns import _post_retry_config, raise_if_transient_managed_upstream_error
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
-from greenfloor.daemon.strategy_dispatch.items import (
-    action_item_from_managed_outcome,
-)
+from greenfloor.daemon.strategy_dispatch.items import action_item_from_managed_outcome
 from greenfloor.runtime.offer_build_context import (
     default_program_config_path,
     prepare_offer_build_context,
@@ -77,20 +76,19 @@ def execute_single_managed_action(
     *,
     program: ProgramConfig,
     market: MarketConfig,
-    action: Any,
+    action: PlannedAction,
     publish_venue: str,
     runtime_dry_run: bool,
     dexie: DexieAdapter,
+    managed_offer_post: Callable[..., dict[str, Any]],
 ) -> StrategyActionItem:
-    from greenfloor.daemon import strategy_dispatch as dispatch_pkg
-
-    managed_post = dispatch_pkg._managed_offer_post(
+    managed_post = managed_offer_post(
         program=program,
         market=market,
-        size_base_units=int(action.size),
+        size_base_units=action.size,
         publish_venue=publish_venue,
         runtime_dry_run=runtime_dry_run,
-        side=_normalize_offer_side(getattr(action, "side", "sell")),
+        side=_normalize_offer_side(action.side),
     )
     timing_fields = {
         "offer_create_ms": managed_post.get("offer_create_ms"),
@@ -132,24 +130,25 @@ def execute_managed_action_with_retry(
     *,
     program: ProgramConfig,
     market: MarketConfig,
-    action: Any,
+    action: PlannedAction,
     publish_venue: str,
     runtime_dry_run: bool,
     dexie: DexieAdapter,
+    execute_single_managed_action: Callable[..., StrategyActionItem],
+    managed_offer_post: Callable[..., dict[str, Any]],
 ) -> StrategyActionItem:
     attempts_max, backoff_ms, _ = _post_retry_config()
     last_exc: Exception | None = None
-    from greenfloor.daemon import strategy_dispatch as dispatch_pkg
-
     for attempt_index in range(max(1, int(attempts_max))):
         try:
-            return dispatch_pkg._execute_single_managed_action(
+            return execute_single_managed_action(
                 program=program,
                 market=market,
                 action=action,
                 publish_venue=publish_venue,
                 runtime_dry_run=runtime_dry_run,
                 dexie=dexie,
+                managed_offer_post=managed_offer_post,
             )
         except Exception as exc:
             last_exc = exc

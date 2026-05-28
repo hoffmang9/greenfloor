@@ -5,6 +5,8 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
+from greenfloor.core.planned_action import PlannedAction, planned_actions_from_signer_list
+
 _INSTALL_HINT = (
     "Install the greenfloor_signer extension (for example: "
     "`maturin develop -m greenfloor-signer-pyo3` from the repo root)."
@@ -27,18 +29,15 @@ def _normalize_spendable_profiles(
         str(asset_id): {
             "total": int(profile.get("total", 0)),
             "max_single": int(profile.get("max_single", 0)),
-            "max_single_known": bool(int(profile.get("max_single_known", 0))),
+            "max_single_known": bool(profile.get("max_single_known", False)),
         }
         for asset_id, profile in spendable_profiles.items()
     }
 
 
-def evaluate_market(*, state: Any, config: Any) -> list[dict[str, Any]]:
+def evaluate_market(*, state: Any, config: Any) -> list[PlannedAction]:
     signer = _import_signer()
-    result = signer.evaluate_market(state, config)
-    if not isinstance(result, list):
-        raise TypeError("evaluate_market returned non-list result")
-    return [dict(item) for item in result]
+    return planned_actions_from_signer_list(signer.evaluate_market(state, config))
 
 
 def evaluate_two_sided_market_actions(
@@ -47,32 +46,14 @@ def evaluate_two_sided_market_actions(
     sell_state: Any,
     buy_config: Any,
     sell_config: Any,
-) -> list[dict[str, Any]]:
+) -> list[PlannedAction]:
     signer = _import_signer()
-    result = signer.evaluate_two_sided_market_actions(
-        buy_state,
-        sell_state,
-        buy_config,
-        sell_config,
-    )
-    if not isinstance(result, list):
-        raise TypeError("evaluate_two_sided_market_actions returned non-list result")
-    return [dict(item) for item in result]
-
-
-def select_strategy_execution_dispatch(
-    *,
-    signer_path_configured: bool,
-    parallelism_enabled: bool,
-    runtime_dry_run: bool,
-    has_coordinator: bool,
-) -> str:
-    return str(
-        _import_signer().select_strategy_execution_dispatch(
-            bool(signer_path_configured),
-            bool(parallelism_enabled),
-            bool(runtime_dry_run),
-            bool(has_coordinator),
+    return planned_actions_from_signer_list(
+        signer.evaluate_two_sided_market_actions(
+            buy_state,
+            sell_state,
+            buy_config,
+            sell_config,
         )
     )
 
@@ -89,6 +70,20 @@ def sequential_action_route(
             bool(program_present),
             bool(managed_backend_available),
         )
+    )
+
+
+def expand_planned_actions(actions: list[PlannedAction]) -> list[PlannedAction]:
+    signer = _import_signer()
+    return planned_actions_from_signer_list(signer.expand_planned_actions(actions))
+
+
+def filter_planned_actions_with_positive_repeat(
+    actions: list[PlannedAction],
+) -> list[PlannedAction]:
+    signer = _import_signer()
+    return planned_actions_from_signer_list(
+        signer.filter_planned_actions_with_positive_repeat(actions)
     )
 
 

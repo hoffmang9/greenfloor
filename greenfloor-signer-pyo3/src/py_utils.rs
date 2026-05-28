@@ -43,3 +43,46 @@ pub fn i64_i64_map_to_py_dict<'py>(
     }
     Ok(dict)
 }
+
+pub fn string_i64_map_to_py_dict<'py>(
+    py: Python<'py>,
+    map: &BTreeMap<String, i64>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    for (key, value) in map {
+        dict.set_item(key, *value)?;
+    }
+    Ok(dict)
+}
+
+pub fn extract_spendable_profiles(
+    profiles: &Bound<'_, PyDict>,
+) -> PyResult<BTreeMap<String, signer_core::SpendableAssetProfile>> {
+    let mut map = BTreeMap::new();
+    for (asset_id, value) in profiles.iter() {
+        let profile = value.downcast::<PyDict>().map_err(|_| {
+            PyValueError::new_err("spendable profile values must be dicts")
+        })?;
+        let max_single_known = profile
+            .get_item("max_single_known")?
+            .ok_or_else(|| {
+                PyValueError::new_err("spendable profile max_single_known must be bool")
+            })?
+            .extract::<bool>()?;
+        map.insert(
+            asset_id.extract::<String>()?,
+            signer_core::SpendableAssetProfile {
+                total: profile
+                    .get_item("total")?
+                    .and_then(|item| item.extract::<i64>().ok())
+                    .unwrap_or(0),
+                max_single: profile
+                    .get_item("max_single")?
+                    .and_then(|item| item.extract::<i64>().ok())
+                    .unwrap_or(0),
+                max_single_known,
+            },
+        );
+    }
+    Ok(map)
+}

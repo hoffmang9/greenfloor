@@ -8,6 +8,8 @@ Canonical monkeypatch targets (module-qualified paths):
 - ``greenfloor.daemon.testing.main`` — cycle orchestration (`run_once`, `run_loop`, adapters)
 - ``greenfloor.daemon.testing.inventory_scan`` — coinset adapter factory
 - ``greenfloor.daemon.testing.strategy_dispatch`` — managed/local offer dispatch
+  (prefer ``build_offer_for_action``, ``execute_single_managed_action``, etc.;
+  ``strategy_dispatch._*`` aliases are legacy — see that package's module docstring)
 - ``greenfloor.daemon.testing.strategy_state`` — reseed policy
 - ``greenfloor.daemon.testing.cooldowns`` — post/cancel cooldown globals
 - ``greenfloor.daemon.testing.cancel_policy`` — cancel policy entry
@@ -54,7 +56,7 @@ from greenfloor.daemon.testing.strategy_dispatch import (
     build_offer_for_action,
     execute_single_local_action,
     execute_strategy_actions,
-    expand_strategy_actions,
+    expand_planned_actions,
     single_input_preferred_skip_reason,
     strategy_dispatch,
 )
@@ -100,7 +102,7 @@ __all__ = [
     "execute_cancel_policy",
     "execute_single_local_action",
     "execute_strategy_actions",
-    "expand_strategy_actions",
+    "expand_planned_actions",
     "inject_reseed_action_if_no_active_offers",
     "inventory_scan",
     "main",

@@ -14,9 +14,10 @@ from greenfloor.config.models import (
     VaultWalletKeyConfig,
 )
 from greenfloor.core.strategy import PlannedAction
+from greenfloor.daemon.strategy_dispatch.runtime import hooks_from_module
 from greenfloor.daemon.testing import (
     execute_single_local_action,
-    expand_strategy_actions,
+    expand_planned_actions,
 )
 from tests.helpers.config_fixtures import minimal_program_config
 
@@ -34,11 +35,12 @@ def execute_local_strategy_actions(
     keyring_yaml_path: str = "",
     **_: Any,
 ) -> dict[str, Any]:
-    expanded = expand_strategy_actions(strategy_actions)
+    expanded = expand_planned_actions(strategy_actions)
+    hooks = hooks_from_module()
     items: list[dict[str, Any]] = []
     executed_count = 0
     for action in expanded:
-        item = execute_single_local_action(
+        item = hooks.local_action(
             program=program,
             market=market,
             action=action,

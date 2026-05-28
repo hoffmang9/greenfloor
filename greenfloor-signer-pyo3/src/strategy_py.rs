@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList, PyModule};
 
 use signer_core::{evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction, StrategyConfig};
 
@@ -67,30 +67,54 @@ fn strategy_config_from_py(obj: &Bound<'_, PyAny>) -> PyResult<StrategyConfig> {
     })
 }
 
-pub fn planned_action_to_py_dict<'py>(
+pub fn planned_action_from_py(obj: &Bound<'_, PyAny>) -> PyResult<PlannedAction> {
+    Ok(PlannedAction {
+        size: obj.getattr("size")?.extract()?,
+        repeat: obj.getattr("repeat")?.extract()?,
+        pair: obj.getattr("pair")?.extract()?,
+        expiry_unit: obj.getattr("expiry_unit")?.extract()?,
+        expiry_value: obj.getattr("expiry_value")?.extract()?,
+        cancel_after_create: obj.getattr("cancel_after_create")?.extract()?,
+        reason: obj.getattr("reason")?.extract()?,
+        target_spread_bps: match obj.getattr("target_spread_bps") {
+            Ok(value) if value.is_none() => None,
+            Ok(value) => Some(value.extract()?),
+            Err(_) => None,
+        },
+        side: obj
+            .getattr("side")
+            .ok()
+            .and_then(|value| value.extract::<String>().ok())
+            .unwrap_or_else(|| "sell".to_string()),
+    })
+}
+
+pub fn planned_action_to_py<'py>(
     py: Python<'py>,
     action: &PlannedAction,
-) -> PyResult<Bound<'py, PyDict>> {
-    let dict = PyDict::new(py);
-    dict.set_item("size", action.size)?;
-    dict.set_item("repeat", action.repeat)?;
-    dict.set_item("pair", &action.pair)?;
-    dict.set_item("expiry_unit", &action.expiry_unit)?;
-    dict.set_item("expiry_value", action.expiry_value)?;
-    dict.set_item("cancel_after_create", action.cancel_after_create)?;
-    dict.set_item("reason", &action.reason)?;
+) -> PyResult<Bound<'py, PyAny>> {
+    let planned_action_cls = PyModule::import(py, "greenfloor.core.planned_action")?
+        .getattr("PlannedAction")?;
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("size", action.size)?;
+    kwargs.set_item("repeat", action.repeat)?;
+    kwargs.set_item("pair", &action.pair)?;
+    kwargs.set_item("expiry_unit", &action.expiry_unit)?;
+    kwargs.set_item("expiry_value", action.expiry_value)?;
+    kwargs.set_item("cancel_after_create", action.cancel_after_create)?;
+    kwargs.set_item("reason", &action.reason)?;
     match action.target_spread_bps {
-        Some(value) => dict.set_item("target_spread_bps", value)?,
-        None => dict.set_item("target_spread_bps", py.None())?,
+        Some(value) => kwargs.set_item("target_spread_bps", value)?,
+        None => kwargs.set_item("target_spread_bps", py.None())?,
     }
-    dict.set_item("side", &action.side)?;
-    Ok(dict)
+    kwargs.set_item("side", &action.side)?;
+    planned_action_cls.call((), Some(&kwargs))
 }
 
 pub fn planned_actions_to_py_list(py: Python<'_>, actions: &[PlannedAction]) -> PyResult<Py<PyAny>> {
-    let list = pyo3::types::PyList::empty(py);
+    let list = PyList::empty(py);
     for action in actions {
-        list.append(planned_action_to_py_dict(py, action)?)?;
+        list.append(planned_action_to_py(py, action)?)?;
     }
     Ok(list.into())
 }
@@ -129,40 +153,4 @@ pub fn register_strategy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(evaluate_market_typed_py, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_two_sided_market_actions_py, m)?)?;
     Ok(())
-}
-
-fn extract_boolish(value: Option<Bound<'_, PyAny>>) -> bool {
-    let Some(value) = value else {
-        return false;
-    };
-    if let Ok(flag) = value.extract::<bool>() {
-        return flag;
-    }
-    value.extract::<i64>().ok().is_some_and(|raw| raw != 0)
-}
-
-pub fn extract_spendable_profiles(
-    profiles: &Bound<'_, PyDict>,
-) -> PyResult<BTreeMap<String, signer_core::SpendableAssetProfile>> {
-    let mut map = BTreeMap::new();
-    for (asset_id, value) in profiles.iter() {
-        let profile = value.downcast::<PyDict>().map_err(|_| {
-            PyTypeError::new_err("spendable profile values must be dicts")
-        })?;
-        map.insert(
-            asset_id.extract::<String>()?,
-            signer_core::SpendableAssetProfile {
-                total: profile
-                    .get_item("total")?
-                    .and_then(|item| item.extract::<i64>().ok())
-                    .unwrap_or(0),
-                max_single: profile
-                    .get_item("max_single")?
-                    .and_then(|item| item.extract::<i64>().ok())
-                    .unwrap_or(0),
-                max_single_known: extract_boolish(profile.get_item("max_single_known")?),
-            },
-        );
-    }
-    Ok(map)
 }

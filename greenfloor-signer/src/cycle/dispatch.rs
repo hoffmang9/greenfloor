@@ -32,7 +32,8 @@ pub struct SpendableAssetProfile {
     pub max_single_known: bool,
 }
 
-pub fn expand_strategy_actions(actions: &[PlannedActionInput]) -> Vec<PlannedActionInput> {
+/// Expand each input row by its `repeat` count (preserves per-row metadata).
+pub(crate) fn expand_inputs_by_repeat(actions: &[PlannedActionInput]) -> Vec<PlannedActionInput> {
     let mut expanded = Vec::new();
     for action in actions {
         let repeat = action.repeat.max(0);
@@ -139,7 +140,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn expand_strategy_actions_preserves_order() {
+    fn expand_inputs_by_repeat_preserves_order() {
         let actions = vec![
             PlannedActionInput {
                 size: 1,
@@ -164,7 +165,7 @@ mod tests {
                 target_spread_bps: None,
             },
         ];
-        let expanded = expand_strategy_actions(&actions);
+        let expanded = expand_inputs_by_repeat(&actions);
         assert_eq!(expanded.len(), 3);
         assert_eq!(expanded[0].size, 1);
         assert_eq!(expanded[1].size, 1);

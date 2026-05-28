@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig, managed_offer_execution_backend
+from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.cycle import is_managed_worker_transient_error, sequential_action_route
 from greenfloor.daemon.market_logging import _log_offer_action_timing
 from greenfloor.daemon.strategy_dispatch.items import action_item, strategy_action_result
+from greenfloor.daemon.strategy_dispatch.runtime import StrategyDispatchHooks
 from greenfloor.storage.sqlite import SqliteStore
 
 
@@ -17,7 +17,7 @@ def execute_actions_sequential(
     *,
     program: ProgramConfig | None,
     market: MarketConfig,
-    expanded_actions: list[Any],
+    expanded_actions: list[PlannedAction],
     runtime_dry_run: bool,
     xch_price_usd: float | None,
     dexie: DexieAdapter,
@@ -25,9 +25,8 @@ def execute_actions_sequential(
     publish_venue: str,
     store: SqliteStore,
     keyring_yaml_path: str,
+    hooks: StrategyDispatchHooks,
 ) -> dict[str, Any]:
-    from greenfloor.daemon import strategy_dispatch as dispatch_pkg
-
     items = []
     executed_count = 0
     for action in expanded_actions:
@@ -48,7 +47,7 @@ def execute_actions_sequential(
         if route == "managed":
             assert program is not None
             try:
-                item = dispatch_pkg._execute_managed_action_with_retry(
+                item = hooks.managed_action_with_retry(
                     program=program,
                     market=market,
                     action=action,
@@ -73,7 +72,7 @@ def execute_actions_sequential(
             )
         else:
             assert program is not None
-            item = dispatch_pkg._execute_single_local_action(
+            item = hooks.local_action(
                 program=program,
                 market=market,
                 action=action,

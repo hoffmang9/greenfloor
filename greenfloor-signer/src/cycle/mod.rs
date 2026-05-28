@@ -7,7 +7,7 @@ pub mod orchestration;
 pub mod strategy;
 
 pub use dispatch::{
-    expand_strategy_actions, expiry_seconds_for_action, reservation_request_for_managed_offer,
+    expiry_seconds_for_action, reservation_request_for_managed_offer,
     single_input_preferred_skip_reason, PlannedActionInput, SpendableAssetProfile,
 };
 pub use lifecycle::{apply_offer_signal, OfferLifecycleState, OfferSignal, OfferTransition};
@@ -34,11 +34,9 @@ pub use orchestration::{
     MarketBatchSelection, OfferStateRow, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
 };
 pub use execution::{
-    aggregate_strategy_action_result_counts, expand_planned_actions,
-    filter_planned_actions_with_positive_repeat, plan_parallel_submission_batch,
-    select_strategy_execution_dispatch, sequential_action_route, ParallelBatchPlan,
+    expand_planned_actions, filter_planned_actions_with_positive_repeat,
+    plan_parallel_submission_batch, sequential_action_route, ParallelBatchPlan,
     ParallelQueueItem, ParallelSkipItem, ParallelSubmissionEntry, SequentialActionRoute,
-    StrategyActionResultCounts, StrategyExecutionDispatch,
 };
 pub use strategy::{
     evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction,
