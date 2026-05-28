@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -11,33 +13,21 @@ use signer_core::{
     apply_offer_signal, can_parallelize_managed_offers, classify_dexie_stale_offer_status,
     classify_dexie_visibility_outcome, classify_managed_post_result, classify_managed_transient_error,
     collect_stale_sweep_candidates, count_parallel_transient_failures, dedupe_sorted_market_ids,
-    enqueue_immediate_requeue, evaluate_market, expiry_seconds_for_action,
-    is_dexie_offer_missing_error_text, is_managed_upstream_transient_error,
-    is_managed_worker_transient_error, is_parallel_dispatch_transient_error,
-    is_transient_dexie_visibility_404_error, is_transient_managed_upstream_error_text,
-    is_two_sided_market_mode, managed_retry_sleep_ms, market_cycle_phases, needs_inventory_fallback,
-    next_disabled_market_log_deadline, one_sided_offer_counts_by_side, parallel_max_workers,
+    enqueue_immediate_requeue, expiry_seconds_for_action, is_dexie_offer_missing_error_text,
+    is_managed_upstream_transient_error, is_managed_worker_transient_error,
+    is_parallel_dispatch_transient_error, is_transient_dexie_visibility_404_error,
+    is_transient_managed_upstream_error_text, is_two_sided_market_mode, managed_retry_sleep_ms,
+    market_cycle_phases, needs_inventory_fallback, next_disabled_market_log_deadline,
+    one_sided_offer_counts_by_side, parallel_max_workers, plan_parallel_submission_batch,
     prepare_parallel_managed_submission_decision, record_stale_sweep_check,
     reservation_release_status, reservation_request_for_managed_offer, resolve_inventory_scan_source,
-    resolve_tracked_sizes, select_market_batch, should_apply_parallel_transient_cooldown,
-    should_log_disabled_market, should_retry_managed_post, should_try_cat_inventory_fallback,
-    should_use_market_slot_dispatch, single_input_preferred_skip_reason,
-    aggregate_two_sided_offer_counts, MarketState, OfferLifecycleState, OfferSignal,
-    OfferStateRow, SpendableAssetProfile, StaleSweepProgress, StrategyConfig,
+    resolve_tracked_sizes, select_market_batch, select_strategy_execution_dispatch,
+    sequential_action_route, should_apply_parallel_transient_cooldown, should_log_disabled_market,
+    should_retry_managed_post, should_try_cat_inventory_fallback, should_use_market_slot_dispatch,
+    single_input_preferred_skip_reason, aggregate_two_sided_offer_counts, OfferLifecycleState,
+    OfferSignal, OfferStateRow, ParallelSubmissionEntry, SequentialActionRoute, SpendableAssetProfile,
+    StaleSweepProgress, StrategyExecutionDispatch,
 };
-
-#[pyfunction]
-#[pyo3(name = "evaluate_market")]
-fn evaluate_market_py(state: &Bound<'_, PyDict>, config: &Bound<'_, PyDict>) -> PyResult<Py<PyAny>> {
-    let state: MarketState = request_dict_to_json(state)
-        .and_then(|value| serde_json::from_value(value).map_err(to_py_err))?;
-    let config: StrategyConfig = request_dict_to_json(config)
-        .and_then(|value| serde_json::from_value(value).map_err(to_py_err))?;
-    let actions = evaluate_market(&state, &config);
-    Python::attach(|py| {
-        dict_from_json_value(py, serde_json::to_value(actions).map_err(to_py_err)?)
-    })
-}
 
 #[pyfunction]
 #[pyo3(name = "apply_offer_signal")]
@@ -498,8 +488,86 @@ fn one_sided_offer_counts_by_side_py(
     })
 }
 
+#[pyfunction]
+#[pyo3(name = "select_strategy_execution_dispatch")]
+fn select_strategy_execution_dispatch_py(
+    signer_path_configured: bool,
+    parallelism_enabled: bool,
+    runtime_dry_run: bool,
+    has_coordinator: bool,
+) -> &'static str {
+    match select_strategy_execution_dispatch(
+        signer_path_configured,
+        parallelism_enabled,
+        runtime_dry_run,
+        has_coordinator,
+    ) {
+        StrategyExecutionDispatch::Parallel => "parallel",
+        StrategyExecutionDispatch::Sequential => "sequential",
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "sequential_action_route")]
+fn sequential_action_route_py(
+    runtime_dry_run: bool,
+    program_present: bool,
+    managed_backend_available: bool,
+) -> &'static str {
+    match sequential_action_route(runtime_dry_run, program_present, managed_backend_available) {
+        SequentialActionRoute::DryRunPlanned => "dry_run_planned",
+        SequentialActionRoute::Managed => "managed",
+        SequentialActionRoute::Local => "local",
+        SequentialActionRoute::SkipNoProgram => "skip_no_program",
+        SequentialActionRoute::SkipNoManagedBackend => "skip_no_managed_backend",
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "plan_parallel_submission_batch")]
+fn plan_parallel_submission_batch_py(entries: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+    let list = entries.downcast::<pyo3::types::PyList>()?;
+    let mut rust_entries = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        let row = item.downcast::<PyDict>()?;
+        let submit_index = row
+            .get_item("submit_index")?
+            .ok_or_else(|| PyValueError::new_err("submit_index required"))?
+            .extract::<usize>()?;
+        let size = row
+            .get_item("size")?
+            .ok_or_else(|| PyValueError::new_err("size required"))?
+            .extract::<i64>()?;
+        let side = row
+            .get_item("side")?
+            .ok_or_else(|| PyValueError::new_err("side required"))?
+            .extract::<String>()?;
+        let requested_any = row
+            .get_item("requested_amounts")?
+            .ok_or_else(|| PyValueError::new_err("requested_amounts required"))?;
+        let requested = requested_any.downcast::<PyDict>()?;
+        let profiles_any = row
+            .get_item("spendable_profiles")?
+            .ok_or_else(|| PyValueError::new_err("spendable_profiles required"))?;
+        let profiles = profiles_any.downcast::<PyDict>()?;
+        let mut requested_amounts = BTreeMap::new();
+        for (asset_id, amount) in requested.iter() {
+            requested_amounts.insert(asset_id.extract::<String>()?, amount.extract::<i64>()?);
+        }
+        rust_entries.push(ParallelSubmissionEntry {
+            submit_index,
+            size,
+            side,
+            requested_amounts,
+            spendable_profiles: crate::strategy_py::extract_spendable_profiles(profiles)?,
+        });
+    }
+    let plan = plan_parallel_submission_batch(&rust_entries);
+    Python::attach(|py| dict_from_json_value(py, serde_json::to_value(&plan).map_err(to_py_err)?))
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(evaluate_market_py, m)?)?;
+    crate::strategy_py::register_strategy(m)?;
     m.add_function(wrap_pyfunction!(apply_offer_signal_py, m)?)?;
     m.add_function(wrap_pyfunction!(expiry_seconds_for_action_py, m)?)?;
     m.add_function(wrap_pyfunction!(
@@ -550,5 +618,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(is_two_sided_market_mode_py, m)?)?;
     m.add_function(wrap_pyfunction!(aggregate_two_sided_offer_counts_py, m)?)?;
     m.add_function(wrap_pyfunction!(one_sided_offer_counts_by_side_py, m)?)?;
+    m.add_function(wrap_pyfunction!(select_strategy_execution_dispatch_py, m)?)?;
+    m.add_function(wrap_pyfunction!(sequential_action_route_py, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_parallel_submission_batch_py, m)?)?;
     Ok(())
 }

@@ -5,7 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from greenfloor.core.strategy import MarketState, PlannedAction, StrategyConfig, evaluate_market
+from greenfloor.core.cycle import evaluate_two_sided_market_actions as evaluate_two_sided_rust
+from greenfloor.core.strategy import (
+    MarketState,
+    PlannedAction,
+    StrategyConfig,
+    evaluate_market,
+)
 from greenfloor.daemon.market_helpers import _market_pricing, _normalize_strategy_pair
 
 
@@ -104,6 +110,24 @@ def _strategy_state_from_bucket_counts(
     )
 
 
+def _planned_action_from_rust(payload: dict[str, Any]) -> PlannedAction:
+    return PlannedAction(
+        size=int(payload["size"]),
+        repeat=int(payload["repeat"]),
+        pair=str(payload["pair"]),
+        expiry_unit=str(payload["expiry_unit"]),
+        expiry_value=int(payload["expiry_value"]),
+        cancel_after_create=bool(payload["cancel_after_create"]),
+        reason=str(payload["reason"]),
+        target_spread_bps=(
+            int(payload["target_spread_bps"])
+            if payload.get("target_spread_bps") is not None
+            else None
+        ),
+        side=str(payload.get("side", "sell")),
+    )
+
+
 def _evaluate_two_sided_market_actions(
     *,
     market: Any,
@@ -111,29 +135,22 @@ def _evaluate_two_sided_market_actions(
     xch_price_usd: float | None,
     now: datetime,
 ) -> list[PlannedAction]:
-    actions: list[PlannedAction] = []
-    for side in ("buy", "sell"):
-        side_config = _strategy_config_for_side(market=market, side=side)
-        side_state = _strategy_state_from_bucket_counts(
-            counts_by_side.get(side, {}),
-            xch_price_usd=xch_price_usd,
-        )
-        side_actions = evaluate_market(state=side_state, config=side_config, clock=now)
-        actions.extend(
-            PlannedAction(
-                size=int(action.size),
-                repeat=int(action.repeat),
-                pair=action.pair,
-                expiry_unit=action.expiry_unit,
-                expiry_value=int(action.expiry_value),
-                cancel_after_create=action.cancel_after_create,
-                reason=action.reason,
-                target_spread_bps=action.target_spread_bps,
-                side=side,
-            )
-            for action in side_actions
-        )
-    return actions
+    _ = now
+    buy_state = _strategy_state_from_bucket_counts(
+        counts_by_side.get("buy", {}),
+        xch_price_usd=xch_price_usd,
+    )
+    sell_state = _strategy_state_from_bucket_counts(
+        counts_by_side.get("sell", {}),
+        xch_price_usd=xch_price_usd,
+    )
+    raw_actions = evaluate_two_sided_rust(
+        buy_state=buy_state,
+        sell_state=sell_state,
+        buy_config=_strategy_config_for_side(market=market, side="buy"),
+        sell_config=_strategy_config_for_side(market=market, side="sell"),
+    )
+    return [_planned_action_from_rust(item) for item in raw_actions]
 
 
 def evaluate_reseed_candidates(

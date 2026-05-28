@@ -21,6 +21,10 @@ __all__ = [
     "empty_stale_sweep_payload",
     "enqueue_immediate_requeue",
     "evaluate_market_payload",
+    "evaluate_two_sided_market_actions",
+    "plan_parallel_submission_batch",
+    "select_strategy_execution_dispatch",
+    "sequential_action_route",
     "expand_strategy_actions",
     "expiry_seconds_for_action",
     "is_dexie_offer_missing_error_text",
@@ -98,7 +102,82 @@ def evaluate_market_payload(
     state: dict[str, Any],
     config: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    return bridge.evaluate_market(state=state, config=config)
+    from greenfloor.core.strategy import MarketState, StrategyConfig
+
+    market_state = MarketState(
+        ones=int(state["ones"]),
+        tens=int(state["tens"]),
+        hundreds=int(state["hundreds"]),
+        xch_price_usd=state.get("xch_price_usd"),
+        bucket_counts_by_size=(
+            {int(k): int(v) for k, v in state["bucket_counts_by_size"].items()}
+            if state.get("bucket_counts_by_size") is not None
+            else None
+        ),
+    )
+    strategy_config = StrategyConfig(
+        pair=str(config["pair"]),
+        ones_target=int(config.get("ones_target", 5)),
+        tens_target=int(config.get("tens_target", 2)),
+        hundreds_target=int(config.get("hundreds_target", 1)),
+        target_spread_bps=config.get("target_spread_bps"),
+        min_xch_price_usd=config.get("min_xch_price_usd"),
+        max_xch_price_usd=config.get("max_xch_price_usd"),
+        offer_expiry_minutes=config.get("offer_expiry_minutes"),
+        target_counts_by_size=(
+            {int(k): int(v) for k, v in config["target_counts_by_size"].items()}
+            if config.get("target_counts_by_size") is not None
+            else None
+        ),
+    )
+    return bridge.evaluate_market(state=market_state, config=strategy_config)
+
+
+def evaluate_two_sided_market_actions(
+    *,
+    buy_state: Any,
+    sell_state: Any,
+    buy_config: Any,
+    sell_config: Any,
+) -> list[dict[str, Any]]:
+    return bridge.evaluate_two_sided_market_actions(
+        buy_state=buy_state,
+        sell_state=sell_state,
+        buy_config=buy_config,
+        sell_config=sell_config,
+    )
+
+
+def select_strategy_execution_dispatch(
+    *,
+    signer_path_configured: bool,
+    parallelism_enabled: bool,
+    runtime_dry_run: bool,
+    has_coordinator: bool,
+) -> str:
+    return bridge.select_strategy_execution_dispatch(
+        signer_path_configured=signer_path_configured,
+        parallelism_enabled=parallelism_enabled,
+        runtime_dry_run=runtime_dry_run,
+        has_coordinator=has_coordinator,
+    )
+
+
+def sequential_action_route(
+    *,
+    runtime_dry_run: bool,
+    program_present: bool,
+    managed_backend_available: bool,
+) -> str:
+    return bridge.sequential_action_route(
+        runtime_dry_run=runtime_dry_run,
+        program_present=program_present,
+        managed_backend_available=managed_backend_available,
+    )
+
+
+def plan_parallel_submission_batch(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    return bridge.plan_parallel_submission_batch(entries)
 
 
 def apply_offer_signal_payload(*, state: str, signal: str) -> dict[str, Any]:

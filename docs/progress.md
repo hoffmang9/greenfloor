@@ -1,5 +1,14 @@
 # Progress Log
 
+## 2026-05-27 (Rust cycle kernel step 5 — execution plan + typed strategy FFI)
+
+- Added `greenfloor-signer/src/cycle/execution.rs`: parallel batch planning (`plan_parallel_submission_batch`), execution dispatch mode (`select_strategy_execution_dispatch`), sequential route selection (`sequential_action_route`), and expanded-action helpers.
+- Typed PyO3 for `evaluate_market` and `evaluate_two_sided_market_actions` in `greenfloor-signer-pyo3/src/strategy_py.rs` — Python `greenfloor/core/strategy.py` passes dataclasses directly (no JSON dict shuttle).
+- Moved two-sided planning to Rust `evaluate_two_sided_market_actions`; `strategy_state.py` delegates to the typed bridge.
+- Split `greenfloor/daemon/strategy_dispatch.py` into package (`__init__.py` ~126 lines glue; managed/local/parallel/sequential submodules).
+- Split `greenfloor/daemon/market_cycle.py` into package (`result.py`, `strategy_phase.py`, `runner.py`).
+- **Migration status:** step 5 complete for strategy dispatch target; `main.py` still above ~400-line exit criteria.
+
 ## 2026-05-27 (Rust cycle kernel — quality review follow-up)
 
 - Split cycle PyO3 bindings into `greenfloor-signer-pyo3/src/cycle.rs` + shared `py_utils.rs`; `lib.rs` back under 500 lines.

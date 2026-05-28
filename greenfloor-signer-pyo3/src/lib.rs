@@ -2,6 +2,7 @@ extern crate greenfloor_signer as signer_core;
 
 mod cycle;
 mod py_utils;
+mod strategy_py;
 
 use std::future::Future;
 use std::path::Path;

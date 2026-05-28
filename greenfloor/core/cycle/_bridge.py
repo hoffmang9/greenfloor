@@ -33,12 +33,71 @@ def _normalize_spendable_profiles(
     }
 
 
-def evaluate_market(*, state: dict[str, Any], config: dict[str, Any]) -> list[dict[str, Any]]:
+def evaluate_market(*, state: Any, config: Any) -> list[dict[str, Any]]:
     signer = _import_signer()
     result = signer.evaluate_market(state, config)
     if not isinstance(result, list):
         raise TypeError("evaluate_market returned non-list result")
     return [dict(item) for item in result]
+
+
+def evaluate_two_sided_market_actions(
+    *,
+    buy_state: Any,
+    sell_state: Any,
+    buy_config: Any,
+    sell_config: Any,
+) -> list[dict[str, Any]]:
+    signer = _import_signer()
+    result = signer.evaluate_two_sided_market_actions(
+        buy_state,
+        sell_state,
+        buy_config,
+        sell_config,
+    )
+    if not isinstance(result, list):
+        raise TypeError("evaluate_two_sided_market_actions returned non-list result")
+    return [dict(item) for item in result]
+
+
+def select_strategy_execution_dispatch(
+    *,
+    signer_path_configured: bool,
+    parallelism_enabled: bool,
+    runtime_dry_run: bool,
+    has_coordinator: bool,
+) -> str:
+    return str(
+        _import_signer().select_strategy_execution_dispatch(
+            bool(signer_path_configured),
+            bool(parallelism_enabled),
+            bool(runtime_dry_run),
+            bool(has_coordinator),
+        )
+    )
+
+
+def sequential_action_route(
+    *,
+    runtime_dry_run: bool,
+    program_present: bool,
+    managed_backend_available: bool,
+) -> str:
+    return str(
+        _import_signer().sequential_action_route(
+            bool(runtime_dry_run),
+            bool(program_present),
+            bool(managed_backend_available),
+        )
+    )
+
+
+def plan_parallel_submission_batch(entries: list[dict[str, Any]]) -> dict[str, Any]:
+    signer = _import_signer()
+    result = signer.plan_parallel_submission_batch(entries)
+    if not isinstance(result, dict):
+        raise TypeError("plan_parallel_submission_batch returned non-dict result")
+    return dict(result)
 
 
 def apply_offer_signal(*, state: str, signal: str) -> dict[str, Any]:

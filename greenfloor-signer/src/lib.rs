@@ -59,7 +59,10 @@ pub use cycle::{
     MarketCycleResultState, MarketState, OfferLifecycleState, OfferSignal, OfferStateRow,
     OfferTransition, ParallelSubmissionDecision, PlannedAction, PlannedActionInput,
     SpendableAssetProfile, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
-    StrategyConfig,
+    StrategyConfig, evaluate_two_sided_market_actions, expand_planned_actions,
+    filter_planned_actions_with_positive_repeat, plan_parallel_submission_batch,
+    select_strategy_execution_dispatch, sequential_action_route, ParallelBatchPlan,
+    ParallelSubmissionEntry, SequentialActionRoute, StrategyExecutionDispatch,
 };
 pub use vault::{
     build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,
