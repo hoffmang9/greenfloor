@@ -11,9 +11,7 @@ import pytest
 
 def _require_signer_integration_enabled() -> None:
     if os.getenv("GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS", "").strip() != "1":
-        pytest.skip(
-            "set GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS=1 to run greenfloor-signer tests"
-        )
+        pytest.skip("set GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS=1 to run greenfloor-signer tests")
 
 
 def _require_importable_modules():

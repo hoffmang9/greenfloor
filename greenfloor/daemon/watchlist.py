@@ -9,8 +9,8 @@ from typing import Any
 
 from greenfloor.adapters.coinset import extract_coin_ids_from_offer_payload
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
+from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.core.strategy import StrategyConfig
-from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.market_logging import _daemon_logger
 from greenfloor.storage.sqlite import SqliteStore
 
@@ -478,7 +478,7 @@ def _active_offer_counts_by_size_and_side(
             continue
         if size is None and dexie_size_by_offer_id:
             size = dexie_size_by_offer_id.get(offer_id)
-        normalized_side = _normalize_offer_side(side)
+        normalized_side = normalize_offer_side(side)
         if size in counts_by_side[normalized_side]:
             counts_by_side[normalized_side][size] = int(counts_by_side[normalized_side][size]) + 1
         else:

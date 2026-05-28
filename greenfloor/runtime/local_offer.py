@@ -6,9 +6,9 @@ import collections.abc
 from pathlib import Path
 from typing import Any
 
+from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import OfferCreateFailure, OfferCreateOutcome
-from greenfloor.runtime.offer_publish import normalize_offer_side
 
 
 def build_daemon_action_offer_payload(

@@ -14,14 +14,14 @@ from greenfloor.core.cycle import (
     is_managed_upstream_transient_error,
     managed_retry_decision,
 )
+from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.core.planned_action import PlannedAction
+from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.cooldowns import (
     _post_retry_config,
     raise_if_transient_managed_upstream_error,
 )
-from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.offer_dispatch.items import action_item_from_managed_outcome
-from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.runtime.offer_build_context import (
     default_program_config_path,
     prepare_offer_build_context,
@@ -92,7 +92,7 @@ def execute_single_managed_action(
         size_base_units=action.size,
         publish_venue=publish_venue,
         runtime_dry_run=runtime_dry_run,
-        side=_normalize_offer_side(action.side),
+        side=normalize_offer_side(action.side),
     )
     timing_fields = managed_post.timing_extra()
     post_outcome = classify_managed_post_result(

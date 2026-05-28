@@ -6,6 +6,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.daemon import cycle_market_batch
 from greenfloor.daemon.cooldowns import _env_int
 from greenfloor.daemon.cycle_market_batch import (
@@ -26,7 +27,6 @@ from greenfloor.daemon.market_helpers import (
     _resolve_quote_asset_for_offer,
 )
 from greenfloor.daemon.market_logging import _daemon_logger
-from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.testing import (
     cancel_retry_config,
     cooldown_remaining_ms,

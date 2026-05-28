@@ -11,7 +11,9 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
+from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.core.planned_action import PlannedAction
+from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.cooldowns import (
     _POST_COOLDOWN_UNTIL,
     _cooldown_remaining_ms,
@@ -19,9 +21,7 @@ from greenfloor.daemon.cooldowns import (
     _post_retry_config,
     _set_cooldown,
 )
-from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.offer_dispatch.items import action_item
-from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.runtime.offer_build_context import (
     default_program_config_path,
     prepare_offer_build_context,
@@ -41,7 +41,7 @@ def build_offer_for_action(
 ) -> dict[str, Any]:
     from greenfloor.offer_builder import build_offer
 
-    side = _normalize_offer_side(action.side)
+    side = normalize_offer_side(action.side)
     resolved_program_path = default_program_config_path(program, program_path)
     try:
         build_ctx = prepare_offer_build_context(

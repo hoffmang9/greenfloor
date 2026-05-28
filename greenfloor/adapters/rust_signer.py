@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.core.kernel_bridge import import_kernel
+from greenfloor.core.signer_offer_request import SignerCreateOfferPayload
 
 
 def resolve_vault_context(program_path: str) -> dict[str, Any]:
@@ -19,7 +20,10 @@ def resolve_vault_context(program_path: str) -> dict[str, Any]:
     return result
 
 
-def build_vault_cat_offer(program_path: str, request_dict: dict[str, Any]) -> dict[str, Any]:
+def build_vault_cat_offer(
+    program_path: str,
+    request_dict: SignerCreateOfferPayload | dict[str, Any],
+) -> dict[str, Any]:
     """Build a vault CAT offer using the canonical Rust signer."""
     signer = import_kernel()
     result = signer.build_vault_cat_offer(str(program_path), request_dict)

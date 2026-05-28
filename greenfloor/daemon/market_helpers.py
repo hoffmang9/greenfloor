@@ -7,7 +7,6 @@ from typing import Any
 
 from greenfloor.config.io import default_cats_config_path, resolve_quote_asset_for_offer
 from greenfloor.core.cancel_policy import abs_move_bps, cancel_move_threshold_bps
-from greenfloor.core.offer_side import normalize_offer_side as _normalize_offer_side
 from greenfloor.core.threshold_parsing import (
     market_cancel_move_threshold_bps,
     unstable_cancel_move_threshold_bps_from_env,

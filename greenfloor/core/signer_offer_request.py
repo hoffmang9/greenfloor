@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TypedDict
 
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.core.policy_bridge import mojo_multiplier_for_leg
+
+
+class SignerCreateOfferPayload(TypedDict):
+    receive_address: str
+    offer_asset_id: str
+    offer_amount: int
+    request_asset_id: str
+    request_amount: int
+    offer_coin_ids: list[str]
+    presplit_coin_ids: list[str]
+    split_input_coins: bool
+    broadcast_split: bool
+    expires_at: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,7 +36,7 @@ class SignerCreateOfferRequest:
     broadcast_split: bool = True
     expires_at: int | None = None
 
-    def to_payload(self) -> dict[str, Any]:
+    def to_payload(self) -> SignerCreateOfferPayload:
         return {
             "receive_address": self.receive_address,
             "offer_asset_id": self.offer_asset_id,
