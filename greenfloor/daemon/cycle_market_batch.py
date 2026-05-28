@@ -10,6 +10,8 @@ from typing import Any
 from greenfloor.core.cycle import (
     enqueue_immediate_requeue,
     next_disabled_market_log_deadline,
+)
+from greenfloor.core.cycle import (
     select_market_batch as select_market_batch_kernel,
 )
 from greenfloor.core.cycle import (
