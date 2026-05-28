@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::OnceLock;
 
 use pyo3::exceptions::{PyTypeError, PyValueError};
@@ -21,6 +21,9 @@ static RESEED_SKIP_REASON_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static CYCLE_OFFER_TRANSITION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static BUCKET_SPEC_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static COIN_OP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static SPLIT_COIN_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static SPLIT_COMBINE_PREREQ_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static SPLIT_SKIP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 
 const ORCHESTRATION_MODULE: &str = "greenfloor.core.cycle_orchestration";
 const CYCLE_RESEED_MODULE: &str = "greenfloor.core.cycle_reseed";
@@ -226,6 +229,109 @@ pub fn coin_op_plans_from_py_list(plans: &Bound<'_, PyList>) -> PyResult<Vec<sig
         parsed.push(coin_op_plan_from_py(&item)?);
     }
     Ok(parsed)
+}
+
+pub fn split_coin_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(py, &SPLIT_COIN_PLAN_CLS, COIN_OPS_MODULE, "SplitCoinPlan")
+}
+
+pub fn split_combine_prereq_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &SPLIT_COMBINE_PREREQ_PLAN_CLS,
+        COIN_OPS_MODULE,
+        "SplitCombinePrereqPlan",
+    )
+}
+
+pub fn split_skip_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(py, &SPLIT_SKIP_PLAN_CLS, COIN_OPS_MODULE, "SplitSkipPlan")
+}
+
+pub fn spendable_coins_from_py_list(list: &Bound<'_, PyList>) -> PyResult<Vec<signer_core::SpendableCoin>> {
+    let mut coins = Vec::with_capacity(list.len());
+    for item in list.iter() {
+        let dict = item.downcast::<PyDict>().map_err(|_| {
+            PyTypeError::new_err("spendable coins must be dict rows")
+        })?;
+        let id = dict
+            .get_item("id")?
+            .map(|value| value.extract::<String>().unwrap_or_default())
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let amount = match dict.get_item("amount")? {
+            None => 0,
+            Some(value) => value.extract::<i64>().unwrap_or(0),
+        };
+        coins.push(signer_core::SpendableCoin { id, amount });
+    }
+    Ok(coins)
+}
+
+pub fn exclude_coin_ids_from_py_optional(
+    exclude: Option<&Bound<'_, PyAny>>,
+) -> PyResult<HashSet<String>> {
+    let Some(value) = exclude else {
+        return Ok(HashSet::new());
+    };
+    if value.is_none() {
+        return Ok(HashSet::new());
+    }
+    let mut set = HashSet::new();
+    for item in value.try_iter()? {
+        set.insert(item?.extract::<String>()?);
+    }
+    Ok(set)
+}
+
+pub fn split_auto_select_plan_to_py<'py>(
+    py: Python<'py>,
+    plan: signer_core::SplitAutoSelectPlan,
+) -> PyResult<Bound<'py, PyAny>> {
+    match plan {
+        signer_core::SplitAutoSelectPlan::Coin(coin) => {
+            let cls = split_coin_plan_class(py)?;
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("coin_id", &coin.coin_id)?;
+            kwargs.set_item("selected_amount_mojos", coin.selected_amount_mojos)?;
+            cls.call((), Some(&kwargs))
+        }
+        signer_core::SplitAutoSelectPlan::CombinePrereq(prereq) => {
+            let cls = split_combine_prereq_plan_class(py)?;
+            let kwargs = PyDict::new(py);
+            let ids = PyList::new(py, &prereq.input_coin_ids)?;
+            kwargs.set_item("input_coin_ids", ids)?;
+            kwargs.set_item("target_amount", prereq.target_amount)?;
+            kwargs.set_item("selected_total", prereq.selected_total)?;
+            kwargs.set_item("exact_match", prereq.exact_match)?;
+            kwargs.set_item("cap_applied", prereq.cap_applied)?;
+            kwargs.set_item(
+                "selected_count_before_cap",
+                prereq.selected_count_before_cap as i64,
+            )?;
+            kwargs.set_item("combine_input_cap", prereq.combine_input_cap)?;
+            cls.call((), Some(&kwargs))
+        }
+        signer_core::SplitAutoSelectPlan::Skip(skip) => {
+            let cls = split_skip_plan_class(py)?;
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("reason", &skip.reason)?;
+            match skip.data {
+                Some(data) => {
+                    let data_dict = PyDict::new(py);
+                    data_dict.set_item("selected_coin_id", &data.selected_coin_id)?;
+                    data_dict.set_item("selected_amount_mojos", data.selected_amount_mojos)?;
+                    data_dict.set_item("required_amount_mojos", data.required_amount_mojos)?;
+                    data_dict.set_item("remainder_mojos", data.remainder_mojos)?;
+                    data_dict.set_item("minimum_allowed_mojos", data.minimum_allowed_mojos)?;
+                    kwargs.set_item("data", data_dict)?;
+                }
+                None => kwargs.set_item("data", py.None())?,
+            }
+            cls.call((), Some(&kwargs))
+        }
+    }
 }
 
 pub fn string_i64_map_from_py_dict(dict: &Bound<'_, PyDict>) -> PyResult<BTreeMap<String, i64>> {
