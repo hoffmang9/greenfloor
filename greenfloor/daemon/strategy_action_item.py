@@ -5,9 +5,21 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+# Statuses that count toward strategy executed_count, coin-op sell adjustment,
+# and reservation release_success.
+_COUNTS_AS_EXECUTED_STATUSES = frozenset({"executed", "pending_visibility"})
+_MANAGED_POST_SUCCESS_REASON = "managed_offer_post_success"
+
 
 @dataclass(frozen=True, slots=True)
 class StrategyActionItem:
+    """Single offer action outcome from strategy dispatch.
+
+    Use ``counts_as_executed`` for strategy metrics, coin-op sell counting, and
+    parallel reservation release. Use ``is_managed_post_success`` only for managed
+    signer health tracking (excludes local builder successes).
+    """
+
     size: int
     side: str
     status: str
@@ -43,18 +55,16 @@ class StrategyActionItem:
         )
 
     @property
-    def is_executed(self) -> bool:
-        return self.status.strip().lower() == "executed"
+    def normalized_status(self) -> str:
+        return self.status.strip().lower()
 
     @property
     def counts_as_executed(self) -> bool:
-        normalized = self.status.strip().lower()
-        return normalized in ("executed", "pending_visibility")
+        return self.normalized_status in _COUNTS_AS_EXECUTED_STATUSES
 
     @property
     def is_managed_post_success(self) -> bool:
-        """Managed signer post succeeded, including Dexie visibility pending."""
-        return self.counts_as_executed and self.reason.strip() == "managed_offer_post_success"
+        return self.counts_as_executed and self.reason.strip() == _MANAGED_POST_SUCCESS_REASON
 
     @classmethod
     def from_action(

@@ -57,10 +57,6 @@ class ManagedUpstreamTransientError(Exception):
     """Transient managed-offer or signer upstream failure (timeouts, HTTP 502/503/504)."""
 
 
-def strategy_action_item_transient_upstream(item: StrategyActionItem) -> bool:
-    return item.transient_upstream
-
-
 def transient_managed_upstream_error_from_text(
     error_text: str,
 ) -> ManagedUpstreamTransientError | None:
