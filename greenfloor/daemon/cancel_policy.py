@@ -7,6 +7,7 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.core.cancel_policy import (
+    cancel_policy_audit_payload,
     collect_open_offer_ids_for_cancel,
     evaluate_cancel_policy_decision,
 )
@@ -44,16 +45,7 @@ def _execute_cancel_policy_for_market(
         env_raw=os.getenv("GREENFLOOR_UNSTABLE_CANCEL_MOVE_BPS", "").strip(),
     )
     if not decision.triggered:
-        return {
-            "eligible": decision.eligible,
-            "triggered": False,
-            "reason": decision.reason,
-            "move_bps": decision.move_bps,
-            "threshold_bps": decision.threshold_bps,
-            "planned_count": 0,
-            "executed_count": 0,
-            "items": items,
-        }
+        return cancel_policy_audit_payload(decision)
 
     target_offer_ids = collect_open_offer_ids_for_cancel(offers)
     executed_count = 0
@@ -106,13 +98,9 @@ def _execute_cancel_policy_for_market(
                 }
             )
 
-    return {
-        "eligible": decision.eligible,
-        "triggered": True,
-        "reason": decision.reason,
-        "move_bps": decision.move_bps,
-        "threshold_bps": decision.threshold_bps,
-        "planned_count": len(target_offer_ids),
-        "executed_count": executed_count,
-        "items": items,
-    }
+    return cancel_policy_audit_payload(
+        decision,
+        planned_count=len(target_offer_ids),
+        executed_count=executed_count,
+        items=items,
+    )

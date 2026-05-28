@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert
+from greenfloor.core.notifications import alert_state, evaluate_low_inventory_alert
 from greenfloor.daemon.market_cycle.result import log_daemon_event
 from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.keys.router import resolve_market_key
@@ -55,7 +55,7 @@ def run_market_cycle_setup(
         now=now,
         program=program,
         market=market,
-        state=AlertState(
+        state=alert_state(
             is_low=persisted.is_low,
             last_alert_at=persisted.last_alert_at,
         ),

@@ -1,6 +1,7 @@
 mod coin_ops;
 mod common;
 mod cycle;
+mod policy;
 
 pub use coin_ops::{
     bucket_spec_from_py, coin_op_plan_to_py, coin_op_plans_from_py_list,
@@ -17,4 +18,8 @@ pub use cycle::{
     parallel_queue_item_class, parallel_skip_item_class, planned_action_class,
     reseed_gap_plan_to_py, stale_sweep_candidate_class, stale_sweep_hit_class,
     stale_sweep_progress_class,
+};
+pub use policy::{
+    cancel_policy_decision_to_py, low_inventory_evaluation_to_py, low_inventory_input_from_py,
+    offer_status_pairs_from_py_list, string_list_to_py_list,
 };

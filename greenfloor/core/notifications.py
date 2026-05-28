@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.kernel_bridge import import_kernel
+from greenfloor.core.kernel_bridge import signer_kernel
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,7 +19,37 @@ class AlertEvent:
 @dataclass(slots=True)
 class AlertState:
     is_low: bool = False
-    last_alert_at: datetime | None = None
+    last_alert_at_unix: int | None = None
+
+    @property
+    def last_alert_at(self) -> datetime | None:
+        return _unix_to_datetime(self.last_alert_at_unix)
+
+
+@dataclass(frozen=True, slots=True)
+class LowInventoryInput:
+    now_unix: int
+    low_inventory_enabled: bool
+    program_default_threshold: int
+    clear_hysteresis_percent: float
+    dedup_cooldown_seconds: int
+    market_enabled: bool
+    market_id: str
+    ticker: str
+    receive_address: str
+    market_threshold: int | None
+    low_watermark: int
+    remaining: int
+    state_is_low: bool
+    state_last_alert_at_unix: int | None
+
+
+def alert_state(
+    *,
+    is_low: bool = False,
+    last_alert_at: datetime | None = None,
+) -> AlertState:
+    return AlertState(is_low=is_low, last_alert_at_unix=_datetime_to_unix(last_alert_at))
 
 
 def _datetime_to_unix(value: datetime | None) -> int | None:
@@ -34,6 +64,31 @@ def _unix_to_datetime(value: int | None) -> datetime | None:
     return datetime.fromtimestamp(int(value), tz=UTC)
 
 
+def _low_inventory_input(
+    *,
+    now: datetime,
+    program: ProgramConfig,
+    market: MarketConfig,
+    state: AlertState,
+) -> LowInventoryInput:
+    return LowInventoryInput(
+        now_unix=int(now.timestamp()),
+        low_inventory_enabled=bool(program.low_inventory_enabled),
+        program_default_threshold=int(program.low_inventory_default_threshold_base_units),
+        clear_hysteresis_percent=float(program.low_inventory_clear_hysteresis_percent),
+        dedup_cooldown_seconds=int(program.low_inventory_dedup_cooldown_seconds),
+        market_enabled=bool(market.enabled),
+        market_id=str(market.market_id),
+        ticker=str(market.base_symbol),
+        receive_address=str(market.receive_address),
+        market_threshold=market.inventory.low_inventory_alert_threshold_base_units,
+        low_watermark=int(market.inventory.low_watermark_base_units),
+        remaining=int(market.inventory.current_available_base_units),
+        state_is_low=bool(state.is_low),
+        state_last_alert_at_unix=state.last_alert_at_unix,
+    )
+
+
 def evaluate_low_inventory_alert(
     *,
     now: datetime,
@@ -41,35 +96,17 @@ def evaluate_low_inventory_alert(
     market: MarketConfig,
     state: AlertState,
 ) -> tuple[AlertState, AlertEvent | None]:
-    state_payload, event_payload = import_kernel().evaluate_low_inventory_alert(
-        int(now.timestamp()),
-        bool(program.low_inventory_enabled),
-        int(program.low_inventory_default_threshold_base_units),
-        float(program.low_inventory_clear_hysteresis_percent),
-        int(program.low_inventory_dedup_cooldown_seconds),
-        bool(market.enabled),
-        str(market.market_id),
-        str(market.base_symbol),
-        str(market.receive_address),
-        market.inventory.low_inventory_alert_threshold_base_units,
-        int(market.inventory.low_watermark_base_units),
-        int(market.inventory.current_available_base_units),
-        bool(state.is_low),
-        _datetime_to_unix(state.last_alert_at),
+    evaluation = signer_kernel().evaluate_low_inventory_alert(
+        _low_inventory_input(now=now, program=program, market=market, state=state)
     )
-    next_state = AlertState(
-        is_low=bool(state_payload["is_low"]),
-        last_alert_at=_unix_to_datetime(state_payload.get("last_alert_at_unix")),
-    )
-    if event_payload is None:
-        return next_state, None
-    return next_state, AlertEvent(
-        market_id=str(event_payload["market_id"]),
-        ticker=str(event_payload["ticker"]),
-        remaining_amount=int(event_payload["remaining_amount"]),
-        receive_address=str(event_payload["receive_address"]),
-        reason=str(event_payload["reason"]),
-    )
+    if not isinstance(evaluation, tuple) or len(evaluation) != 2:
+        raise TypeError("evaluate_low_inventory_alert returned non-tuple result")
+    next_state_raw, event_raw = evaluation
+    if not isinstance(next_state_raw, AlertState):
+        raise TypeError("evaluate_low_inventory_alert returned non-AlertState state")
+    if event_raw is not None and not isinstance(event_raw, AlertEvent):
+        raise TypeError("evaluate_low_inventory_alert returned non-AlertEvent event")
+    return next_state_raw, event_raw
 
 
 def utcnow() -> datetime:

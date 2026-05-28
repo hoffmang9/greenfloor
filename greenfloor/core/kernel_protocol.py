@@ -1,8 +1,8 @@
-"""Typed PyO3 surface for daemon cycle policy bindings."""
+"""Typed PyO3 surface for the deterministic policy kernel."""
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from greenfloor.core.cycle_orchestration import (
     MarketBatchSelection,
@@ -18,8 +18,12 @@ from greenfloor.core.parallel_reservation_context import ParallelReservationCont
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
+if TYPE_CHECKING:
+    from greenfloor.core.cancel_policy import CancelPolicyDecision
+    from greenfloor.core.notifications import AlertEvent, AlertState, LowInventoryInput
 
-class CycleKernelProtocol(Protocol):
+
+class SignerKernelProtocol(Protocol):
     def evaluate_market(self, state: Any, config: Any) -> list[PlannedAction]: ...
 
     def evaluate_two_sided_market_actions(
@@ -214,3 +218,35 @@ class CycleKernelProtocol(Protocol):
         sell_counts: dict[int, int],
         tracked_sizes: list[int],
     ) -> dict[str, dict[int, int]]: ...
+
+    def abs_move_bps(self, current: float | None, previous: float | None) -> float | None: ...
+
+    def cancel_move_threshold_bps(
+        self, market_threshold: int | None, env_threshold: int | None
+    ) -> int: ...
+
+    def evaluate_cancel_policy_decision(
+        self,
+        quote_asset_type: str,
+        cancel_policy_stable_vs_unstable: bool,
+        current_xch_price_usd: float | None,
+        previous_xch_price_usd: float | None,
+        market_threshold: int | None,
+        env_threshold: int | None,
+    ) -> CancelPolicyDecision: ...
+
+    def collect_open_offer_ids_for_cancel(
+        self, offers: list[dict[str, Any]]
+    ) -> list[str]: ...
+
+    def evaluate_low_inventory_alert(
+        self, input: LowInventoryInput
+    ) -> tuple[AlertState, AlertEvent | None]: ...
+
+    def is_hex_id(self, value: str) -> bool: ...
+
+    def normalize_hex_id(self, value: str) -> str: ...
+
+    def canonical_is_xch(self, asset_id: str) -> bool: ...
+
+    def default_mojo_multiplier_for_asset(self, asset_id: str) -> int: ...

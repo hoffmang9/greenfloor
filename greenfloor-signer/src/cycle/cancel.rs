@@ -70,7 +70,9 @@ pub fn evaluate_cancel_policy_decision(
             threshold_bps,
         };
     }
-    let move_bps = move_bps.unwrap_or(0.0);
+    let Some(move_bps) = move_bps else {
+        unreachable!("move_bps checked above");
+    };
     if move_bps < threshold_bps as f64 {
         return CancelPolicyDecision {
             eligible: true,
@@ -90,16 +92,19 @@ pub fn evaluate_cancel_policy_decision(
     }
 }
 
-pub fn collect_open_offer_ids_for_cancel(offer_id: &str, status: i64) -> Option<String> {
+fn open_offer_id_for_cancel(offer_id: &str, status: i64) -> Option<String> {
     let normalized_id = offer_id.trim();
-    if normalized_id.is_empty() {
+    if normalized_id.is_empty() || status != OPEN_DEXIE_OFFER_STATUS {
         return None;
     }
-    if status == OPEN_DEXIE_OFFER_STATUS {
-        Some(normalized_id.to_string())
-    } else {
-        None
-    }
+    Some(normalized_id.to_string())
+}
+
+pub fn collect_open_offer_ids_for_cancel(offers: &[(String, i64)]) -> Vec<String> {
+    offers
+        .iter()
+        .filter_map(|(offer_id, status)| open_offer_id_for_cancel(offer_id, *status))
+        .collect()
 }
 
 #[cfg(test)]
@@ -176,11 +181,14 @@ mod tests {
 
     #[test]
     fn collects_only_open_offers() {
+        let offers = vec![
+            ("o1".to_string(), 0),
+            ("o2".to_string(), 4),
+            ("  ".to_string(), 0),
+        ];
         assert_eq!(
-            collect_open_offer_ids_for_cancel("o1", 0),
-            Some("o1".to_string())
+            collect_open_offer_ids_for_cancel(&offers),
+            vec!["o1".to_string()]
         );
-        assert!(collect_open_offer_ids_for_cancel("o2", 4).is_none());
-        assert!(collect_open_offer_ids_for_cancel("  ", 0).is_none());
     }
 }

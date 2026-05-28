@@ -6,12 +6,12 @@ Canonical validation and normalization for 64-character hex identifiers
 
 from __future__ import annotations
 
-from greenfloor.core.kernel_bridge import import_kernel
+from greenfloor.core.kernel_bridge import signer_kernel
 
 
 def is_hex_id(value: str) -> bool:
     """Return True if *value* is a 64-character lowercase hex string (optionally 0x-prefixed)."""
-    return bool(import_kernel().is_hex_id(str(value)))
+    return bool(signer_kernel().is_hex_id(str(value)))
 
 
 def canonical_is_xch(asset_id: str) -> bool:
@@ -20,7 +20,7 @@ def canonical_is_xch(asset_id: str) -> bool:
     Empty or whitespace returns False. Rust ``is_xch_like_asset`` also treats empty as
     XCH-like for signer payloads; use that only at the FFI boundary, not here.
     """
-    return bool(import_kernel().canonical_is_xch(str(asset_id or "")))
+    return bool(signer_kernel().canonical_is_xch(str(asset_id or "")))
 
 
 def default_mojo_multiplier_for_asset(asset_id: str) -> int:
@@ -28,7 +28,7 @@ def default_mojo_multiplier_for_asset(asset_id: str) -> int:
 
     XCH/TXCH uses 10^12 mojos per XCH; CATs use 1 000 mojos per CAT unit.
     """
-    return int(import_kernel().default_mojo_multiplier_for_asset(str(asset_id or "")))
+    return int(signer_kernel().default_mojo_multiplier_for_asset(str(asset_id or "")))
 
 
 def normalize_hex_id(value: object) -> str:
@@ -38,4 +38,4 @@ def normalize_hex_id(value: object) -> str:
     """
     if not isinstance(value, str):
         return ""
-    return str(import_kernel().normalize_hex_id(value))
+    return str(signer_kernel().normalize_hex_id(value))

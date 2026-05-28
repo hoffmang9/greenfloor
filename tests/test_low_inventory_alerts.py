@@ -2,7 +2,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from greenfloor.config.models import MarketConfig, MarketInventoryConfig
-from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert
+from greenfloor.core.notifications import AlertState, alert_state, evaluate_low_inventory_alert
 from tests.helpers.config_fixtures import minimal_program_config
 
 
@@ -49,7 +49,7 @@ def test_low_inventory_triggers_first_alert() -> None:
 
 def test_low_inventory_dedup_respects_cooldown() -> None:
     now = datetime.now(UTC)
-    prior = AlertState(is_low=True, last_alert_at=now - timedelta(minutes=30))
+    prior = alert_state(is_low=True, last_alert_at=now - timedelta(minutes=30))
     state, event = evaluate_low_inventory_alert(
         now=now,
         program=_program(),
@@ -62,7 +62,7 @@ def test_low_inventory_dedup_respects_cooldown() -> None:
 
 def test_low_inventory_clears_with_hysteresis() -> None:
     now = datetime.now(UTC)
-    prior = AlertState(is_low=True, last_alert_at=now - timedelta(hours=2))
+    prior = alert_state(is_low=True, last_alert_at=now - timedelta(hours=2))
     # threshold=100; clear target=110
     state, event = evaluate_low_inventory_alert(
         now=now,

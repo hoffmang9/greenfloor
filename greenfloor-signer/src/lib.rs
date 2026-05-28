@@ -6,7 +6,6 @@ pub mod cycle;
 pub mod error;
 pub mod hex;
 pub mod kms;
-pub mod notifications;
 pub mod offer;
 pub mod vault;
 
@@ -53,8 +52,8 @@ pub use cycle::{
     classify_dexie_visibility_outcome, classify_managed_post_result,
     classify_managed_transient_error, collect_open_offer_ids_for_cancel,
     collect_stale_sweep_candidates, count_parallel_transient_failures, dedupe_sorted_market_ids,
-    enqueue_immediate_requeue, evaluate_cancel_policy_decision, evaluate_market,
-    evaluate_two_sided_market_actions, expand_planned_actions, expiry_seconds_for_action,
+    enqueue_immediate_requeue, evaluate_cancel_policy_decision, evaluate_low_inventory_alert,
+    evaluate_market, evaluate_two_sided_market_actions, expand_planned_actions, expiry_seconds_for_action,
     filter_planned_actions_with_positive_repeat, is_dexie_offer_missing_error_text,
     is_managed_upstream_transient_error, is_managed_worker_transient_error,
     is_parallel_dispatch_transient_error, is_transient_dexie_visibility_404_error,
@@ -75,11 +74,11 @@ pub use cycle::{
     ParallelBatchPlan, ParallelQueueItem, ParallelReservationContext, ParallelSkipItem,
     ParallelSubmissionDecision, PlannedAction, PlannedActionInput, ReseedGapPlan, ReseedSkipReason,
     SequentialActionRoute, SpendableAssetProfile, StaleSweepCandidate, StaleSweepHit,
-    StaleSweepProgress, StrategyConfig,
+    StaleSweepProgress, StrategyConfig, AlertEvent, AlertState, LowInventoryEvaluation,
+    LowInventoryInput,
 };
 pub use error::SignerError as Error;
 pub use hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
-pub use notifications::{compute_low_inventory_threshold, evaluate_low_inventory_alert};
 pub use offer::codec::{
     encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
     from_input_spend_bundle_xch_bytes, validate_offer_text,
