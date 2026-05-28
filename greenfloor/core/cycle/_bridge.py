@@ -14,11 +14,10 @@ from greenfloor.core.cycle_orchestration import (
     StaleSweepProgress,
 )
 from greenfloor.core.managed_retry import ManagedRetryDecision
-from greenfloor.core.parallel_batch_plan import ParallelBatchPlan, ParallelSubmissionEntry
+from greenfloor.core.parallel_batch_plan import ParallelBatchPlan
 from greenfloor.core.parallel_reservation_prep import (
     ParallelActionReservationInput,
     ParallelReservationContext,
-    ParallelReservationPrep,
 )
 from greenfloor.core.planned_action import PlannedAction, planned_actions_from_signer_list
 
@@ -102,38 +101,16 @@ def filter_planned_actions_with_positive_repeat(
     )
 
 
-def plan_parallel_submission_batch(
-    entries: list[ParallelSubmissionEntry],
-) -> ParallelBatchPlan:
-    signer = _import_signer()
-    result = signer.plan_parallel_submission_batch(entries)
-    if not isinstance(result, ParallelBatchPlan):
-        raise TypeError("plan_parallel_submission_batch returned non-ParallelBatchPlan result")
-    return result
-
-
-def build_parallel_reservation_prep(
+def plan_parallel_managed_dispatch(
     *,
     actions: list[ParallelActionReservationInput],
     ctx: ParallelReservationContext,
-) -> ParallelReservationPrep:
-    signer = _import_signer()
-    result = signer.build_parallel_reservation_prep(actions, ctx)
-    if not isinstance(result, ParallelReservationPrep):
-        raise TypeError(
-            "build_parallel_reservation_prep returned non-ParallelReservationPrep result"
-        )
-    return result
-
-
-def plan_parallel_managed_dispatch(
-    *,
-    prep: ParallelReservationPrep,
     spendable_profiles: dict[str, dict[str, int | bool]],
 ) -> ParallelBatchPlan:
     signer = _import_signer()
     result = signer.plan_parallel_managed_dispatch(
-        prep,
+        actions,
+        ctx,
         _normalize_spendable_profiles(spendable_profiles),
     )
     if not isinstance(result, ParallelBatchPlan):
@@ -255,21 +232,6 @@ def managed_retry_decision(
     if not isinstance(result, ManagedRetryDecision):
         raise TypeError("managed_retry_decision returned non-ManagedRetryDecision result")
     return result
-
-
-def prepare_parallel_managed_submission_decision(
-    *,
-    requested_amounts: dict[str, int],
-    spendable_profiles: dict[str, dict[str, int | bool]],
-) -> dict[str, Any]:
-    signer = _import_signer()
-    result = signer.prepare_parallel_managed_submission_decision(
-        requested_amounts,
-        _normalize_spendable_profiles(spendable_profiles),
-    )
-    if not isinstance(result, dict):
-        raise TypeError("prepare_parallel_managed_submission_decision returned non-dict result")
-    return dict(result)
 
 
 def classify_managed_post_result(

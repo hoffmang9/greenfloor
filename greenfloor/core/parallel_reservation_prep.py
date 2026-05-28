@@ -1,4 +1,4 @@
-"""Parallel managed-offer reservation prep types (Rust FFI + dispatch planning)."""
+"""Parallel managed-offer reservation input types (Rust FFI + dispatch planning)."""
 
 from __future__ import annotations
 
@@ -23,13 +23,13 @@ class ParallelReservationContext:
     quote_price: float
 
 
-@dataclass(frozen=True, slots=True)
-class ParallelReservationEntry:
-    submit_index: int
-    requested_amounts: dict[str, int]
-
-
-@dataclass(frozen=True, slots=True)
-class ParallelReservationPrep:
-    entries: list[ParallelReservationEntry]
-    asset_ids: list[str]
+def parallel_reservation_asset_ids(ctx: ParallelReservationContext) -> set[str]:
+    return {
+        asset_id
+        for asset_id in (
+            str(ctx.base_asset_id).strip(),
+            str(ctx.quote_asset_id).strip(),
+            str(ctx.fee_asset_id).strip(),
+        )
+        if asset_id
+    }

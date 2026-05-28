@@ -1,9 +1,17 @@
 # Progress Log
 
+## 2026-05-27 (Rust cycle kernel step 7 — parallel dispatch collapse)
+
+- **Single Rust call after IO:** `plan_parallel_managed_dispatch(actions, ctx, profiles)` builds prep internally; Python fetches Coinset profiles for `{base, quote, fee}` from context via `parallel_reservation_asset_ids`.
+- **Dead API removed:** `plan_parallel_submission_batch`, `ParallelSubmissionEntry`, `build_parallel_reservation_prep`, and `prepare_parallel_managed_submission_decision` dropped from Python surface.
+- **Managed retry:** `ManagedRetryDecision.should_retry` is a bool field (no string compare).
+- **Daemon split:** websocket handlers extracted to `cycle_ws_handlers.py`; `parallel_plan.py` deleted (worker uses `ParallelQueueItem` directly).
+- **Managed post glue:** `managed_action_item_from_post` centralizes Rust classify + Dexie visibility in `items.py`.
+
 ## 2026-05-27 (Rust cycle kernel step 7 — strategy_dispatch quality follow-up)
 
-- **Typed parallel reservation FFI:** `ParallelReservationPrep`, `ParallelReservationContext`, and `ParallelActionReservationInput` dataclasses — no JSON dict shuttle; Python uses `prep.asset_ids` directly.
-- **Single planning call after IO:** `plan_parallel_managed_dispatch(prep, spendable_profiles)` replaces the two-hop prep/plan split; Rust shares spendable profiles by reference (no per-entry clone).
+- **Typed parallel reservation FFI:** `ParallelReservationContext` and `ParallelActionReservationInput` dataclasses — no JSON dict shuttle.
+- **Single planning call after IO:** superseded by collapsed `plan_parallel_managed_dispatch(actions, ctx, profiles)` above.
 - **Typed managed retry:** `ManagedRetryDecision` dataclass with `should_retry` property; removed `should_retry_managed_post` / `managed_retry_sleep_ms` from the Python policy surface.
 - **Daemon bootstrap:** `greenfloor/daemon/bootstrap.py` owns logging init/reload events; `main.py` no longer imports private `cycle_runner` symbols.
 - **strategy_dispatch split:** `parallel_plan.py`, `parallel_worker.py`; deleted dead `reservation_request_for_action`.
@@ -99,7 +107,7 @@ Large Python daemon modules remain intentionally unsplit pending Rust migration 
 4. **Per-market phase runner (fourth)** ✅ — inventory source selection, tracked sizes, result-state merges, and phase ordering in Rust; Python IO **relocated** to `market_cycle.py` (not yet restructured around a Rust phase table).
 5. **Strategy action execution plan (fifth)** ✅ — parallel vs sequential batch planning and typed orchestration FFI in Rust; Python retains thread pools, reservation SQLite, and offer build/post only.
 6. **`main.py` cycle runner extraction (sixth)** ✅ — `run_once` / `run_loop` moved to `greenfloor/daemon/cycle_runner.py`; `main.py` retains CLI entrypoint and instance lock only.
-7. **`strategy_dispatch` reservation + retry kernel (seventh, in progress)** — typed `ParallelReservationPrep` FFI, single `plan_parallel_managed_dispatch` after IO, typed `ManagedRetryDecision`; package still ~1,155 lines vs ~400 exit target.
+7. **`strategy_dispatch` reservation + retry kernel (seventh, in progress)** — collapsed `plan_parallel_managed_dispatch(actions, ctx, profiles)`; package still shrinking toward ~400-line exit target.
 
 **Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch/` each under ~400 lines of Python glue; Rust crates absorb complexity; Python keeps SQLite, Dexie, websocket, and CLI.
 

@@ -6,13 +6,6 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
-class ParallelSubmissionEntry:
-    submit_index: int
-    requested_amounts: dict[str, int]
-    spendable_profiles: dict[str, dict[str, int | bool]]
-
-
-@dataclass(frozen=True, slots=True)
 class ParallelSkipItem:
     submit_index: int
     reason: str

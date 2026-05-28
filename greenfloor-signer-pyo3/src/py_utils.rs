@@ -9,8 +9,6 @@ static PLANNED_ACTION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_SKIP_ITEM_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_QUEUE_ITEM_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_BATCH_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
-static PARALLEL_RESERVATION_PREP_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
-static PARALLEL_RESERVATION_ENTRY_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static MANAGED_RETRY_DECISION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_ACTION_OUTCOME_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static MARKET_BATCH_SELECTION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
@@ -63,24 +61,6 @@ pub fn parallel_batch_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, Py
         &PARALLEL_BATCH_PLAN_CLS,
         "greenfloor.core.parallel_batch_plan",
         "ParallelBatchPlan",
-    )
-}
-
-pub fn parallel_reservation_prep_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    cached_class(
-        py,
-        &PARALLEL_RESERVATION_PREP_CLS,
-        "greenfloor.core.parallel_reservation_prep",
-        "ParallelReservationPrep",
-    )
-}
-
-pub fn parallel_reservation_entry_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    cached_class(
-        py,
-        &PARALLEL_RESERVATION_ENTRY_CLS,
-        "greenfloor.core.parallel_reservation_prep",
-        "ParallelReservationEntry",
     )
 }
 
@@ -174,25 +154,6 @@ pub fn string_i64_map_to_py_dict<'py>(
         dict.set_item(key, *value)?;
     }
     Ok(dict)
-}
-
-pub fn parallel_submission_entry_from_py(
-    obj: &Bound<'_, PyAny>,
-) -> PyResult<signer_core::ParallelSubmissionEntry> {
-    let submit_index = obj.getattr("submit_index")?.extract::<usize>()?;
-    let requested_attr = obj.getattr("requested_amounts")?;
-    let requested = requested_attr
-        .downcast::<PyDict>()
-        .map_err(|_| PyValueError::new_err("requested_amounts must be a dict"))?;
-    let profiles_attr = obj.getattr("spendable_profiles")?;
-    let profiles = profiles_attr
-        .downcast::<PyDict>()
-        .map_err(|_| PyValueError::new_err("spendable_profiles must be a dict"))?;
-    Ok(signer_core::ParallelSubmissionEntry {
-        submit_index,
-        requested_amounts: string_i64_map_from_py_dict(requested)?,
-        spendable_profiles: extract_spendable_profiles(profiles)?,
-    })
 }
 
 pub fn extract_spendable_profiles(

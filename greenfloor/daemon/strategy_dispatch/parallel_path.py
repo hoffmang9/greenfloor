@@ -9,14 +9,16 @@ from typing import Any
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.core.cycle import (
-    build_parallel_reservation_prep,
     count_parallel_transient_failures,
     parallel_max_workers,
     plan_parallel_managed_dispatch,
     should_apply_parallel_transient_cooldown,
 )
 from greenfloor.core.cycle_orchestration import ParallelActionOutcome
-from greenfloor.core.parallel_reservation_prep import ParallelActionReservationInput
+from greenfloor.core.parallel_reservation_prep import (
+    ParallelActionReservationInput,
+    parallel_reservation_asset_ids,
+)
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.cooldowns import _POST_COOLDOWN_UNTIL, _post_retry_config, _set_cooldown
 from greenfloor.daemon.inventory_scan import coinset_spendable_profiles_by_asset
@@ -25,10 +27,10 @@ from greenfloor.daemon.market_logging import _log_market_decision, _log_offer_ac
 from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.strategy_dispatch.items import (
+    managed_skip_item,
     parallel_offer_worker_error_item,
     strategy_action_result,
 )
-from greenfloor.daemon.strategy_dispatch.parallel_plan import parallel_dispatch_plan_from_batch
 from greenfloor.daemon.strategy_dispatch.parallel_worker import run_parallel_submission
 from greenfloor.daemon.strategy_dispatch.reservation_helpers import (
     parallel_reservation_context,
@@ -59,6 +61,12 @@ def execute_actions_parallel(
     wallet_id = reservation_wallet_id(program)
     reservation_coordinator.probe_storage()
 
+    reservation_ctx = parallel_reservation_context(
+        market=market,
+        resolved_base_asset_id=resolved_base_asset_id,
+        resolved_quote_asset_id=resolved_quote_asset_id,
+        resolved_xch_asset_id=resolved_xch_asset_id,
+    )
     reservation_inputs = [
         ParallelActionReservationInput(
             submit_index=submit_index,
@@ -67,31 +75,25 @@ def execute_actions_parallel(
         )
         for submit_index, action in enumerate(expanded_actions)
     ]
-    prep = build_parallel_reservation_prep(
-        actions=reservation_inputs,
-        ctx=parallel_reservation_context(
-            market=market,
-            resolved_base_asset_id=resolved_base_asset_id,
-            resolved_quote_asset_id=resolved_quote_asset_id,
-            resolved_xch_asset_id=resolved_xch_asset_id,
-        ),
-    )
     spendable_profiles = coinset_spendable_profiles_by_asset(
         program=program,
         market=market,
-        asset_ids={str(asset_id) for asset_id in prep.asset_ids if str(asset_id).strip()},
+        asset_ids=parallel_reservation_asset_ids(reservation_ctx),
     )
     batch_plan = plan_parallel_managed_dispatch(
-        prep=prep,
+        actions=reservation_inputs,
+        ctx=reservation_ctx,
         spendable_profiles=spendable_profiles,
     )
-    skip_items, submissions = parallel_dispatch_plan_from_batch(
-        expanded_actions=expanded_actions,
-        plan=batch_plan,
+    items.extend(
+        managed_skip_item(
+            action=expanded_actions[skip.submit_index],
+            reason=skip.reason,
+        )
+        for skip in batch_plan.skip_items
     )
-    items.extend(skip_items)
 
-    if not submissions:
+    if not batch_plan.queue:
         return strategy_action_result(
             planned_count=len(expanded_actions),
             executed_count=executed_count,
@@ -99,23 +101,24 @@ def execute_actions_parallel(
         )
 
     max_workers = parallel_max_workers(
-        submission_count=len(submissions),
+        submission_count=len(batch_plan.queue),
         configured_max=int(program.runtime_offer_parallelism_max_workers),
     )
     _log_market_decision(
         str(market.market_id),
         "parallel_offer_dispatch",
         planned_count=len(expanded_actions),
-        queued_count=len(submissions),
+        queued_count=len(batch_plan.queue),
         workers=max_workers,
     )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
         future_to_submission: dict[concurrent.futures.Future[StrategyActionItem], int] = {}
-        for submission in submissions:
+        for queue_item in batch_plan.queue:
             future = pool.submit(
                 run_parallel_submission,
-                submission=submission,
+                queue_item=queue_item,
+                action=expanded_actions[queue_item.submit_index],
                 market=market,
                 program=program,
                 publish_venue=publish_venue,
@@ -126,7 +129,7 @@ def execute_actions_parallel(
                 hooks=hooks,
                 queued_at_monotonic=time.monotonic(),
             )
-            future_to_submission[future] = submission.submit_index
+            future_to_submission[future] = queue_item.submit_index
         submitted_items: list[tuple[int, StrategyActionItem]] = []
         for future in concurrent.futures.as_completed(future_to_submission):
             submit_index = future_to_submission[future]

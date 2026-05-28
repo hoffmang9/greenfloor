@@ -10,8 +10,7 @@ use signer_core::{
     is_managed_upstream_transient_error, is_managed_worker_transient_error,
     is_parallel_dispatch_transient_error, is_transient_dexie_visibility_404_error,
     is_transient_managed_upstream_error_text, managed_retry_decision,
-    parallel_max_workers, prepare_parallel_managed_submission_decision,
-    reservation_release_status, reservation_request_for_managed_offer, should_apply_parallel_transient_cooldown,
+    parallel_max_workers, reservation_release_status, reservation_request_for_managed_offer, should_apply_parallel_transient_cooldown,
     single_input_preferred_skip_reason, SpendableAssetProfile,
 };
 
@@ -174,24 +173,6 @@ fn should_apply_parallel_transient_cooldown_py(
 }
 
 #[pyfunction]
-#[pyo3(name = "prepare_parallel_managed_submission_decision")]
-fn prepare_parallel_managed_submission_decision_py(
-    requested_amounts: &Bound<'_, PyDict>,
-    spendable_profiles: &Bound<'_, PyDict>,
-) -> PyResult<Py<PyAny>> {
-    let requested_json = request_dict_to_json(requested_amounts)?;
-    let profiles_json = request_dict_to_json(spendable_profiles)?;
-    let requested: std::collections::BTreeMap<String, i64> =
-        serde_json::from_value(requested_json).map_err(to_py_err)?;
-    let profiles: std::collections::BTreeMap<String, SpendableAssetProfile> =
-        serde_json::from_value(profiles_json).map_err(to_py_err)?;
-    let decision = prepare_parallel_managed_submission_decision(&requested, &profiles);
-    Python::attach(|py| {
-        dict_from_json_value(py, serde_json::to_value(&decision).map_err(to_py_err)?)
-    })
-}
-
-#[pyfunction]
 #[pyo3(name = "classify_managed_post_result")]
 fn classify_managed_post_result_py(
     success: bool,
@@ -235,14 +216,16 @@ fn managed_retry_decision_py(
         backoff_ms,
         is_upstream_transient,
     );
-    let decision_label = match decision.decision {
-        signer_core::ManagedRetryDecisionKind::Stop => "stop",
-        signer_core::ManagedRetryDecisionKind::Retry => "retry",
-    };
     Python::attach(|py| {
         let cls = managed_retry_decision_class(py)?;
         let kwargs = PyDict::new(py);
-        kwargs.set_item("decision", decision_label)?;
+        kwargs.set_item(
+            "should_retry",
+            matches!(
+                decision.decision,
+                signer_core::ManagedRetryDecisionKind::Retry
+            ),
+        )?;
         kwargs.set_item("sleep_ms", decision.sleep_ms)?;
         Ok(cls.call((), Some(&kwargs))?.into())
     })
@@ -268,10 +251,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(reservation_release_status_py, m)?)?;
     m.add_function(wrap_pyfunction!(
         should_apply_parallel_transient_cooldown_py,
-        m
-    )?)?;
-    m.add_function(wrap_pyfunction!(
-        prepare_parallel_managed_submission_decision_py,
         m
     )?)?;
     m.add_function(wrap_pyfunction!(classify_managed_post_result_py, m)?)?;

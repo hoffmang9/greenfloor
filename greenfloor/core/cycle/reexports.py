@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from . import _bridge as bridge
 
-build_parallel_reservation_prep = bridge.build_parallel_reservation_prep
 can_parallelize_managed_offers = bridge.can_parallelize_managed_offers
 classify_dexie_stale_offer_status = bridge.classify_dexie_stale_offer_status
 classify_dexie_visibility_outcome = bridge.classify_dexie_visibility_outcome
@@ -26,8 +25,6 @@ needs_inventory_fallback = bridge.needs_inventory_fallback
 next_disabled_market_log_deadline = bridge.next_disabled_market_log_deadline
 parallel_max_workers = bridge.parallel_max_workers
 plan_parallel_managed_dispatch = bridge.plan_parallel_managed_dispatch
-plan_parallel_submission_batch = bridge.plan_parallel_submission_batch
-prepare_parallel_managed_submission_decision = bridge.prepare_parallel_managed_submission_decision
 record_stale_sweep_check = bridge.record_stale_sweep_check
 reservation_release_status = bridge.reservation_release_status
 select_market_batch = bridge.select_market_batch

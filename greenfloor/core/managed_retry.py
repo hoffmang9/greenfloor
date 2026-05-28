@@ -7,9 +7,5 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class ManagedRetryDecision:
-    decision: str
+    should_retry: bool
     sleep_ms: int
-
-    @property
-    def should_retry(self) -> bool:
-        return self.decision == "retry"

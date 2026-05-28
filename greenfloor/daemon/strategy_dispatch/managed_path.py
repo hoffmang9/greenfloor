@@ -9,12 +9,7 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig, managed_offer_execution_backend
-from greenfloor.core.cycle import (
-    classify_dexie_visibility_outcome,
-    classify_managed_post_result,
-    is_managed_upstream_transient_error,
-    managed_retry_decision,
-)
+from greenfloor.core.cycle import is_managed_upstream_transient_error, managed_retry_decision
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.cooldowns import (
     _post_retry_config,
@@ -22,13 +17,12 @@ from greenfloor.daemon.cooldowns import (
 )
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
-from greenfloor.daemon.strategy_dispatch.items import action_item_from_managed_outcome
+from greenfloor.daemon.strategy_dispatch.items import managed_action_item_from_post
 from greenfloor.runtime.offer_build_context import (
     default_program_config_path,
     prepare_offer_build_context,
 )
 from greenfloor.runtime.offer_post_request import OfferPostRequest, parse_managed_offer_post_result
-from greenfloor.runtime.offer_publish import verify_offer_visible_on_dexie
 
 
 def managed_offer_post(
@@ -93,39 +87,11 @@ def execute_single_managed_action(
         runtime_dry_run=runtime_dry_run,
         side=_normalize_offer_side(action.side),
     )
-    timing_fields = {
-        "offer_create_ms": managed_post.get("offer_create_ms"),
-        "offer_publish_ms": managed_post.get("offer_publish_ms"),
-        "offer_total_ms": managed_post.get("offer_total_ms"),
-        "offer_create_phase_ms": managed_post.get("offer_create_phase_ms"),
-        "offer_artifact_wait_ms": managed_post.get("offer_artifact_wait_ms"),
-    }
-    post_outcome = classify_managed_post_result(
-        success=bool(managed_post.get("success", False)),
-        error_text=str(managed_post.get("error", "unknown")),
-        offer_id=str(managed_post.get("offer_id", "")),
+    return managed_action_item_from_post(
+        action=action,
+        managed_post=managed_post,
         publish_venue=publish_venue,
-    )
-    if post_outcome.get("status") == "pending_visibility":
-        managed_offer_id = str(managed_post.get("offer_id", "")).strip()
-        visible, visibility_error = verify_offer_visible_on_dexie(
-            dexie=dexie,
-            offer_id=managed_offer_id,
-        )
-        visibility_outcome = classify_dexie_visibility_outcome(
-            visible=visible,
-            visibility_error=visibility_error or "",
-        )
-        return action_item_from_managed_outcome(
-            action,
-            visibility_outcome,
-            offer_id=managed_offer_id or None,
-            **timing_fields,
-        )
-    return action_item_from_managed_outcome(
-        action,
-        post_outcome,
-        **timing_fields,
+        dexie=dexie,
     )
 
 

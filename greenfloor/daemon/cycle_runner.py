@@ -8,7 +8,6 @@ import logging
 import os
 import time
 from collections import deque
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -49,6 +48,7 @@ from greenfloor.daemon.bootstrap import (
 )
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient
 from greenfloor.daemon.cooldowns import _env_int
+from greenfloor.daemon.cycle_ws_handlers import build_coinset_websocket_handlers
 from greenfloor.daemon.inventory_scan import (
     _build_coinset_adapter,
     _resolve_coinset_ws_url,
@@ -60,7 +60,6 @@ from greenfloor.daemon.market_cycle import (
 )
 from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision
 from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.daemon.watchlist import _match_watched_coin_ids
 from greenfloor.storage.sqlite import SqliteStore
 
 _DISABLED_MARKET_LOG_INTERVAL_SECONDS_DEFAULT = 3600
@@ -556,77 +555,15 @@ def run_loop(
     )
     coinset = _build_coinset_adapter(program=current_program, coinset_base_url=coinset_base_url)
     ws_url = _resolve_coinset_ws_url(program=current_program, coinset_base_url=coinset_base_url)
-
-    def _with_ws_store(callback: Callable[[SqliteStore], None]) -> None:
-        # Websocket callbacks may run on a worker thread, so open a
-        # callback-local SQLite connection instead of reusing a main-thread store.
-        store = SqliteStore(db_path)
-        try:
-            callback(store)
-        finally:
-            store.close()
-
-    def _on_mempool_tx_ids(tx_ids: list[str]) -> None:
-        if not tx_ids:
-            return
-
-        def _write(store: SqliteStore) -> None:
-            new_count = store.observe_mempool_tx_ids(tx_ids)
-            if new_count:
-                store.add_audit_event(
-                    "mempool_observed",
-                    {"new_tx_ids": new_count, "source": "coinset_websocket"},
-                )
-
-        _with_ws_store(_write)
-
-    def _on_confirmed_tx_ids(tx_ids: list[str]) -> None:
-        if not tx_ids:
-            return
-
-        def _write(store: SqliteStore) -> None:
-            confirmed = store.confirm_tx_ids(tx_ids)
-            store.add_audit_event(
-                "tx_block_confirmed",
-                {
-                    "tx_ids": tx_ids,
-                    "confirmed_count": confirmed,
-                    "source": "coinset_websocket",
-                },
-            )
-
-        _with_ws_store(_write)
-
-    def _on_audit_event(event_type: str, payload: dict[str, Any]) -> None:
-        _with_ws_store(lambda store: store.add_audit_event(event_type, payload))
-
-    def _on_observed_coin_ids(coin_ids: list[str]) -> None:
-        if not coin_ids:
-            return
-        hits = _match_watched_coin_ids(observed_coin_ids=coin_ids)
-        if not hits:
-            return
-
-        def _write(store: SqliteStore) -> None:
-            store.add_audit_event(
-                "coin_watch_hit",
-                {
-                    "coin_id_count": len(coin_ids),
-                    "coin_ids_sample": sorted({str(c).strip().lower() for c in coin_ids})[:10],
-                    "market_hits": {market_id: ids[:10] for market_id, ids in hits.items()},
-                    "source": "coinset_websocket",
-                },
-            )
-
-        _with_ws_store(_write)
+    ws_handlers = build_coinset_websocket_handlers(db_path=db_path)
 
     ws_client = CoinsetWebsocketClient(
         ws_url=ws_url,
         reconnect_interval_seconds=current_program.tx_block_websocket_reconnect_interval_seconds,
-        on_mempool_tx_ids=_on_mempool_tx_ids,
-        on_confirmed_tx_ids=_on_confirmed_tx_ids,
-        on_audit_event=_on_audit_event,
-        on_observed_coin_ids=_on_observed_coin_ids,
+        on_mempool_tx_ids=ws_handlers.on_mempool_tx_ids,
+        on_confirmed_tx_ids=ws_handlers.on_confirmed_tx_ids,
+        on_audit_event=ws_handlers.on_audit_event,
+        on_observed_coin_ids=ws_handlers.on_observed_coin_ids,
         recovery_poll=coinset.get_all_mempool_tx_ids,
     )
     ws_client.start()

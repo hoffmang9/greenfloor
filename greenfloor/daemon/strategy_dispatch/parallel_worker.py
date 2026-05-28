@@ -7,6 +7,8 @@ import time
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.core.cycle import reservation_release_status
+from greenfloor.core.parallel_batch_plan import ParallelQueueItem
+from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.reservations import AssetReservationCoordinator
@@ -15,13 +17,13 @@ from greenfloor.daemon.strategy_dispatch.items import (
     managed_skip_item,
     parallel_offer_worker_error_item,
 )
-from greenfloor.daemon.strategy_dispatch.parallel_plan import PlannedParallelSubmission
 from greenfloor.daemon.strategy_dispatch.runtime import StrategyDispatchHooks
 
 
 def run_parallel_submission(
     *,
-    submission: PlannedParallelSubmission,
+    queue_item: ParallelQueueItem,
+    action: PlannedAction,
     market: MarketConfig,
     program: ProgramConfig,
     publish_venue: str,
@@ -32,10 +34,9 @@ def run_parallel_submission(
     hooks: StrategyDispatchHooks,
     queued_at_monotonic: float,
 ) -> StrategyActionItem:
-    submit_index = submission.submit_index
-    action = submission.action
-    requested_amounts = submission.requested_amounts
-    available_amounts = submission.available_amounts
+    submit_index = queue_item.submit_index
+    requested_amounts = dict(queue_item.requested_amounts)
+    available_amounts = dict(queue_item.available_amounts)
     queue_wait_ms = int((time.monotonic() - queued_at_monotonic) * 1000)
     _log_market_decision(
         str(market.market_id),

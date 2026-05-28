@@ -26,18 +26,33 @@ pub struct ParallelReservationContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ParallelReservationEntry {
-    pub submit_index: usize,
-    pub requested_amounts: BTreeMap<String, i64>,
+struct ParallelReservationEntry {
+    submit_index: usize,
+    requested_amounts: BTreeMap<String, i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ParallelReservationPrep {
-    pub entries: Vec<ParallelReservationEntry>,
-    pub asset_ids: Vec<String>,
+struct ParallelReservationPrep {
+    entries: Vec<ParallelReservationEntry>,
+    asset_ids: Vec<String>,
 }
 
-pub fn build_parallel_reservation_prep(
+pub fn parallel_reservation_asset_ids(ctx: &ParallelReservationContext) -> Vec<String> {
+    let mut asset_ids = BTreeSet::new();
+    for asset_id in [
+        ctx.base_asset_id.as_str(),
+        ctx.quote_asset_id.as_str(),
+        ctx.fee_asset_id.as_str(),
+    ] {
+        let trimmed = asset_id.trim();
+        if !trimmed.is_empty() {
+            asset_ids.insert(trimmed.to_string());
+        }
+    }
+    asset_ids.into_iter().collect()
+}
+
+fn build_parallel_reservation_prep(
     actions: &[ParallelActionReservationInput],
     ctx: &ParallelReservationContext,
 ) -> ParallelReservationPrep {
@@ -70,9 +85,11 @@ pub fn build_parallel_reservation_prep(
 }
 
 pub fn plan_parallel_managed_dispatch(
-    prep: &ParallelReservationPrep,
+    actions: &[ParallelActionReservationInput],
+    ctx: &ParallelReservationContext,
     spendable_profiles: &BTreeMap<String, SpendableAssetProfile>,
 ) -> ParallelBatchPlan {
+    let prep = build_parallel_reservation_prep(actions, ctx);
     let mut plan = ParallelBatchPlan::default();
     for entry in &prep.entries {
         let decision = prepare_parallel_managed_submission_decision(
@@ -108,13 +125,6 @@ pub enum SequentialActionRoute {
     Local,
     SkipNoProgram,
     SkipNoManagedBackend,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ParallelSubmissionEntry {
-    pub submit_index: usize,
-    pub requested_amounts: BTreeMap<String, i64>,
-    pub spendable_profiles: BTreeMap<String, SpendableAssetProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,34 +203,6 @@ pub fn expand_planned_actions(actions: &[PlannedAction]) -> Vec<PlannedAction> {
         .collect()
 }
 
-pub fn plan_parallel_submission_batch(entries: &[ParallelSubmissionEntry]) -> ParallelBatchPlan {
-    let mut plan = ParallelBatchPlan::default();
-    for entry in entries {
-        let decision = prepare_parallel_managed_submission_decision(
-            &entry.requested_amounts,
-            &entry.spendable_profiles,
-        );
-        match decision {
-            ParallelSubmissionDecision::Skip { reason } => {
-                plan.skip_items.push(ParallelSkipItem {
-                    submit_index: entry.submit_index,
-                    reason,
-                });
-            }
-            ParallelSubmissionDecision::Proceed {
-                available_amounts,
-            } => {
-                plan.queue.push(ParallelQueueItem {
-                    submit_index: entry.submit_index,
-                    requested_amounts: entry.requested_amounts.clone(),
-                    available_amounts,
-                });
-            }
-        }
-    }
-    plan
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,14 +232,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn build_parallel_reservation_prep_collects_asset_ids() {
-        let actions = vec![ParallelActionReservationInput {
-            submit_index: 0,
-            side: "sell".to_string(),
-            size_base_units: 10,
-        }];
-        let ctx = ParallelReservationContext {
+    fn sample_reservation_context() -> ParallelReservationContext {
+        ParallelReservationContext {
             base_asset_id: "base_asset".to_string(),
             quote_asset_id: "quote_asset".to_string(),
             fee_asset_id: "xch_asset".to_string(),
@@ -265,35 +241,42 @@ mod tests {
             base_unit_mojo_multiplier: 1000,
             quote_unit_mojo_multiplier: 1000,
             quote_price: 1.5,
-        };
-        let prep = build_parallel_reservation_prep(&actions, &ctx);
-        assert_eq!(prep.entries.len(), 1);
-        assert_eq!(prep.entries[0].submit_index, 0);
-        assert!(prep.asset_ids.contains(&"base_asset".to_string()));
+        }
     }
 
     #[test]
-    fn plan_parallel_batch_splits_skip_and_queue() {
-        let entries = vec![
-            ParallelSubmissionEntry {
+    fn parallel_reservation_asset_ids_collects_context_assets() {
+        let ctx = sample_reservation_context();
+        let asset_ids = parallel_reservation_asset_ids(&ctx);
+        assert!(asset_ids.contains(&"base_asset".to_string()));
+        assert!(asset_ids.contains(&"quote_asset".to_string()));
+        assert!(asset_ids.contains(&"xch_asset".to_string()));
+    }
+
+    #[test]
+    fn plan_parallel_managed_dispatch_splits_skip_and_queue() {
+        let ctx = sample_reservation_context();
+        let actions = vec![
+            ParallelActionReservationInput {
                 submit_index: 0,
-                requested_amounts: BTreeMap::new(),
-                spendable_profiles: BTreeMap::new(),
+                side: "sell".to_string(),
+                size_base_units: 0,
             },
-            ParallelSubmissionEntry {
+            ParallelActionReservationInput {
                 submit_index: 1,
-                requested_amounts: BTreeMap::from([("asset_a".to_string(), 1000)]),
-                spendable_profiles: BTreeMap::from([(
-                    "asset_a".to_string(),
-                    SpendableAssetProfile {
-                        total: 5000,
-                        max_single: 5000,
-                        max_single_known: true,
-                    },
-                )]),
+                side: "sell".to_string(),
+                size_base_units: 10,
             },
         ];
-        let plan = plan_parallel_submission_batch(&entries);
+        let spendable_profiles = BTreeMap::from([(
+            "base_asset".to_string(),
+            SpendableAssetProfile {
+                total: 50000,
+                max_single: 50000,
+                max_single_known: true,
+            },
+        )]);
+        let plan = plan_parallel_managed_dispatch(&actions, &ctx, &spendable_profiles);
         assert_eq!(plan.skip_items.len(), 1);
         assert_eq!(plan.skip_items[0].submit_index, 0);
         assert_eq!(plan.queue.len(), 1);
