@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
@@ -10,6 +9,10 @@ from greenfloor.core.cancel_policy import (
     cancel_policy_audit_payload,
     collect_open_offer_ids_for_cancel,
     evaluate_cancel_policy_decision,
+)
+from greenfloor.core.threshold_parsing import (
+    resolved_market_cancel_move_threshold_bps,
+    unstable_cancel_move_threshold_bps_from_env,
 )
 from greenfloor.daemon.cooldowns import (
     _CANCEL_COOLDOWN_UNTIL,
@@ -41,8 +44,8 @@ def _execute_cancel_policy_for_market(
         ),
         current_xch_price_usd=current_xch_price_usd,
         previous_xch_price_usd=previous_xch_price_usd,
-        market_threshold_raw=pricing.get("cancel_move_threshold_bps"),
-        env_raw=os.getenv("GREENFLOOR_UNSTABLE_CANCEL_MOVE_BPS", "").strip(),
+        market_threshold=resolved_market_cancel_move_threshold_bps(market),
+        env_threshold=unstable_cancel_move_threshold_bps_from_env(),
     )
     if not decision.triggered:
         return cancel_policy_audit_payload(decision)

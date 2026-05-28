@@ -3,9 +3,10 @@
 The compiled extension is still named ``greenfloor_signer`` (see ADR 0010). Python
 callers should use :func:`import_kernel`; ``import_signer`` remains as a migration alias.
 
-Domain modules define ``Protocol`` types for the PyO3 surface they call
-(``SignerKernelProtocol``, ``CoinOpsKernelProtocol``); ``import_kernel()`` still
-returns ``Any`` at the loader boundary.
+Deterministic policy bridges use :func:`policy_kernel` with
+``DeterministicPolicyKernelProtocol``. Coin operations use
+``CoinOpsKernelProtocol``; adapters and signing paths call ``import_kernel()``
+directly.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from greenfloor.core.kernel_protocol import SignerKernelProtocol
+    from greenfloor.core.kernel_protocol import DeterministicPolicyKernelProtocol
 
 _KERNEL_MODULE = "greenfloor_signer"
 _INSTALL_HINT = (
@@ -32,9 +33,12 @@ def import_kernel() -> Any:
         ) from exc
 
 
-def signer_kernel() -> SignerKernelProtocol:
+def policy_kernel() -> DeterministicPolicyKernelProtocol:
     return import_kernel()  # type: ignore[return-value]
 
+
+# Migration alias — prefer policy_kernel for deterministic policy bridges.
+signer_kernel = policy_kernel
 
 # Migration alias — prefer import_kernel for new code.
 import_signer = import_kernel

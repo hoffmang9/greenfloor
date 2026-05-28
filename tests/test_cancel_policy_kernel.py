@@ -27,11 +27,11 @@ def test_abs_move_bps_rejects_invalid_inputs(current, previous) -> None:
 
 
 def test_cancel_move_threshold_bps_prefers_market_override() -> None:
-    assert cancel_move_threshold_bps(market_threshold_raw=100, env_raw="250") == 100
+    assert cancel_move_threshold_bps(market_threshold=100, env_threshold=250) == 100
 
 
 def test_cancel_move_threshold_bps_uses_env_when_market_missing() -> None:
-    assert cancel_move_threshold_bps(env_raw="250") == 250
+    assert cancel_move_threshold_bps(env_threshold=250) == 250
     assert cancel_move_threshold_bps() == 500
 
 
@@ -106,7 +106,7 @@ def test_evaluate_cancel_policy_decision_uses_market_threshold() -> None:
         cancel_policy_stable_vs_unstable=True,
         current_xch_price_usd=30.6,
         previous_xch_price_usd=30.0,
-        market_threshold_raw=100,
+        market_threshold=100,
     )
     assert decision.triggered is True
     assert decision.threshold_bps == 100

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.kernel_bridge import signer_kernel
+from greenfloor.core.kernel_bridge import policy_kernel
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +42,12 @@ class LowInventoryInput:
     remaining: int
     state_is_low: bool
     state_last_alert_at_unix: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class LowInventoryEvaluation:
+    state: AlertState
+    event: AlertEvent | None
 
 
 def alert_state(
@@ -96,17 +102,12 @@ def evaluate_low_inventory_alert(
     market: MarketConfig,
     state: AlertState,
 ) -> tuple[AlertState, AlertEvent | None]:
-    evaluation = signer_kernel().evaluate_low_inventory_alert(
+    evaluation = policy_kernel().evaluate_low_inventory_alert(
         _low_inventory_input(now=now, program=program, market=market, state=state)
     )
-    if not isinstance(evaluation, tuple) or len(evaluation) != 2:
-        raise TypeError("evaluate_low_inventory_alert returned non-tuple result")
-    next_state_raw, event_raw = evaluation
-    if not isinstance(next_state_raw, AlertState):
-        raise TypeError("evaluate_low_inventory_alert returned non-AlertState state")
-    if event_raw is not None and not isinstance(event_raw, AlertEvent):
-        raise TypeError("evaluate_low_inventory_alert returned non-AlertEvent event")
-    return next_state_raw, event_raw
+    if not isinstance(evaluation, LowInventoryEvaluation):
+        raise TypeError("evaluate_low_inventory_alert returned non-LowInventoryEvaluation result")
+    return evaluation.state, evaluation.event
 
 
 def utcnow() -> datetime:

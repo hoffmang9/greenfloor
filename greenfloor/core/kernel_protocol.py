@@ -1,4 +1,9 @@
-"""Typed PyO3 surface for the deterministic policy kernel."""
+"""Typed PyO3 surfaces for deterministic policy kernel bindings.
+
+``DeterministicPolicyKernelProtocol`` covers cycle, cancel, and notification
+policy only. Coin operations use ``CoinOpsKernelProtocol``; BLS, offer codec,
+and reconcile transitions call ``import_kernel()`` directly at adapter boundaries.
+"""
 
 from __future__ import annotations
 
@@ -20,10 +25,13 @@ from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
 if TYPE_CHECKING:
     from greenfloor.core.cancel_policy import CancelPolicyDecision
-    from greenfloor.core.notifications import AlertEvent, AlertState, LowInventoryInput
+    from greenfloor.core.notifications import (
+        LowInventoryEvaluation,
+        LowInventoryInput,
+    )
 
 
-class SignerKernelProtocol(Protocol):
+class CycleKernelProtocol(Protocol):
     def evaluate_market(self, state: Any, config: Any) -> list[PlannedAction]: ...
 
     def evaluate_two_sided_market_actions(
@@ -86,9 +94,7 @@ class SignerKernelProtocol(Protocol):
         self, exception_class: str, error_text: str
     ) -> bool: ...
 
-    def is_managed_worker_transient_error(
-        self, exception_class: str, error_text: str
-    ) -> bool: ...
+    def is_managed_worker_transient_error(self, exception_class: str, error_text: str) -> bool: ...
 
     def is_parallel_dispatch_transient_error(
         self, exception_class: str, error_text: str
@@ -219,6 +225,8 @@ class SignerKernelProtocol(Protocol):
         tracked_sizes: list[int],
     ) -> dict[str, dict[int, int]]: ...
 
+
+class CancelPolicyKernelProtocol(Protocol):
     def abs_move_bps(self, current: float | None, previous: float | None) -> float | None: ...
 
     def cancel_move_threshold_bps(
@@ -235,18 +243,17 @@ class SignerKernelProtocol(Protocol):
         env_threshold: int | None,
     ) -> CancelPolicyDecision: ...
 
-    def collect_open_offer_ids_for_cancel(
-        self, offers: list[dict[str, Any]]
-    ) -> list[str]: ...
+    def collect_open_offer_ids_for_cancel(self, offers: list[dict[str, Any]]) -> list[str]: ...
 
-    def evaluate_low_inventory_alert(
-        self, input: LowInventoryInput
-    ) -> tuple[AlertState, AlertEvent | None]: ...
 
-    def is_hex_id(self, value: str) -> bool: ...
+class NotificationKernelProtocol(Protocol):
+    def evaluate_low_inventory_alert(self, input: LowInventoryInput) -> LowInventoryEvaluation: ...
 
-    def normalize_hex_id(self, value: str) -> str: ...
 
-    def canonical_is_xch(self, asset_id: str) -> bool: ...
-
-    def default_mojo_multiplier_for_asset(self, asset_id: str) -> int: ...
+class DeterministicPolicyKernelProtocol(
+    CycleKernelProtocol,
+    CancelPolicyKernelProtocol,
+    NotificationKernelProtocol,
+    Protocol,
+):
+    """Cycle, cancel, and notification deterministic policy bindings."""

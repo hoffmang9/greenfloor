@@ -167,6 +167,7 @@ def test_parse_markets_config_accepts_cancel_move_threshold_bps() -> None:
     row["pricing"] = {"cancel_move_threshold_bps": 250}
     out = parse_markets_config({"markets": [row]})
     assert out.markets[0].pricing["cancel_move_threshold_bps"] == 250
+    assert out.markets[0].cancel_move_threshold_bps == 250
 
 
 def test_parse_markets_config_stable_quote_validates_present_strategy_fields() -> None:

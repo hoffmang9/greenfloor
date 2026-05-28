@@ -12,7 +12,7 @@ const NOTIFICATIONS_MODULE: &str = "greenfloor.core.notifications";
 static CANCEL_POLICY_DECISION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static ALERT_EVENT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static ALERT_STATE_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
-static LOW_INVENTORY_INPUT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static LOW_INVENTORY_EVALUATION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 
 pub fn cancel_policy_decision_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     cached_class(
@@ -31,12 +31,12 @@ pub fn alert_state_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     cached_class(py, &ALERT_STATE_CLS, NOTIFICATIONS_MODULE, "AlertState")
 }
 
-pub fn low_inventory_input_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn low_inventory_evaluation_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     cached_class(
         py,
-        &LOW_INVENTORY_INPUT_CLS,
+        &LOW_INVENTORY_EVALUATION_CLS,
         NOTIFICATIONS_MODULE,
-        "LowInventoryInput",
+        "LowInventoryEvaluation",
     )
 }
 
@@ -83,12 +83,15 @@ pub fn low_inventory_evaluation_to_py<'py>(
     py: Python<'py>,
     evaluation: &signer_core::LowInventoryEvaluation,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let state = alert_state_to_py(py, &evaluation.state)?;
+    let cls = low_inventory_evaluation_class(py)?;
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("state", alert_state_to_py(py, &evaluation.state)?)?;
     let event = match &evaluation.event {
         None => py.None().into_bound(py),
         Some(event) => alert_event_to_py(py, event)?.into_any(),
     };
-    Ok((state, event).into_pyobject(py)?.into_any())
+    kwargs.set_item("event", event)?;
+    cls.call((), Some(&kwargs))
 }
 
 pub fn low_inventory_input_from_py(input: &Bound<'_, PyAny>) -> PyResult<signer_core::LowInventoryInput> {
