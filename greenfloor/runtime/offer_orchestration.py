@@ -18,7 +18,6 @@ from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_publish import (
     dexie_offer_view_url,
-    expected_publish_asset_fields,
     log_signed_offer_artifact,
     post_offer_phase,
 )
@@ -348,9 +347,10 @@ def execute_build_and_post_offer(
             continue
 
         publish_started = time.monotonic()
-        asset_fields = expected_publish_asset_fields(
+        asset_fields = offer_policy.expected_publish_asset_fields(
             side=created.side,
-            market=market,
+            base_symbol=str(market.base_symbol),
+            quote_asset=str(market.quote_asset),
             resolved_base_asset_id=resolved_base_asset_id,
             resolved_quote_asset_id=resolved_quote_asset_id,
         )

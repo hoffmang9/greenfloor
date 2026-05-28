@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from typing import Any, cast
 
+import pytest
+
 from greenfloor.core.offer_policy import (
     bootstrap_block_error,
     dexie_offer_asset_expectation_error,
@@ -108,19 +110,17 @@ def test_bootstrap_block_error_delegates_to_kernel(monkeypatch) -> None:
     )
 
 
-def test_bootstrap_block_error_fallback_when_kernel_symbol_missing(monkeypatch) -> None:
+def test_bootstrap_block_error_requires_kernel_symbol(monkeypatch) -> None:
     class _Native:
         pass
 
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
-    assert (
+    with pytest.raises(RuntimeError, match="Missing symbol: bootstrap_block_error"):
         bootstrap_block_error(
             bootstrap_status="executed",
             bootstrap_reason="split_submitted",
             bootstrap_ready=False,
         )
-        == "bootstrap_pending:split_submitted"
-    )
 
 
 def test_expected_publish_asset_fields_delegates_to_kernel(monkeypatch) -> None:
@@ -155,35 +155,19 @@ def test_expected_publish_asset_fields_delegates_to_kernel(monkeypatch) -> None:
     }
 
 
-def test_expected_publish_asset_fields_fallback_when_kernel_symbol_missing(monkeypatch) -> None:
+def test_expected_publish_asset_fields_requires_kernel_symbol(monkeypatch) -> None:
     class _Native:
         pass
 
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
-    assert expected_publish_asset_fields(
-        side="buy",
-        base_symbol="A1",
-        quote_asset="xch",
-        resolved_base_asset_id="base",
-        resolved_quote_asset_id="quote",
-    ) == {
-        "expected_offered_asset_id": "quote",
-        "expected_offered_symbol": "xch",
-        "expected_requested_asset_id": "base",
-        "expected_requested_symbol": "A1",
-    }
-    assert expected_publish_asset_fields(
-        side="not-buy",
-        base_symbol="A1",
-        quote_asset="xch",
-        resolved_base_asset_id="base",
-        resolved_quote_asset_id="quote",
-    ) == {
-        "expected_offered_asset_id": "base",
-        "expected_offered_symbol": "A1",
-        "expected_requested_asset_id": "quote",
-        "expected_requested_symbol": "xch",
-    }
+    with pytest.raises(RuntimeError, match="Missing symbol: expected_publish_asset_fields"):
+        expected_publish_asset_fields(
+            side="buy",
+            base_symbol="A1",
+            quote_asset="xch",
+            resolved_base_asset_id="base",
+            resolved_quote_asset_id="quote",
+        )
 
 
 def test_resolve_offer_expiry_and_quote_price_use_kernel(monkeypatch) -> None:
@@ -234,6 +218,22 @@ def test_dexie_offer_asset_expectation_error_delegates_to_kernel(monkeypatch) ->
         "dexie_offer_requested_asset_missing:expected_asset=request-asset:"
         "expected_symbol=request-symbol:offered=offer-asset:offered_symbol=offer-symbol"
     )
+
+
+def test_dexie_offer_asset_expectation_error_requires_kernel_symbol(monkeypatch) -> None:
+    class _Native:
+        pass
+
+    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    with pytest.raises(RuntimeError, match="Missing symbol: dexie_offer_asset_expectation_error"):
+        dexie_offer_asset_expectation_error(
+            offered=[],
+            requested=[],
+            expected_offered_asset_id="offer-asset",
+            expected_offered_symbol="offer-symbol",
+            expected_requested_asset_id="request-asset",
+            expected_requested_symbol="request-symbol",
+        )
 
 
 def test_verify_dexie_offer_visible_by_id_uses_kernel_asset_expectation(monkeypatch) -> None:

@@ -141,12 +141,7 @@ impl SimulatorVaultHarness {
                 &mut ctx,
                 &[
                     Action::single_issue_cat(None, cat_amount),
-                    Action::send(
-                        issue_id,
-                        self.chain.p2_message_hash,
-                        cat_amount,
-                        vault_hint,
-                    ),
+                    Action::send(issue_id, self.chain.p2_message_hash, cat_amount, vault_hint),
                 ],
             )
             .expect("apply cat funding");

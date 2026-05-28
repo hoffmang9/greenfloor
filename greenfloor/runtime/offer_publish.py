@@ -10,7 +10,6 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
-from greenfloor.config.models import MarketConfig
 from greenfloor.core import offer_policy
 from greenfloor.core.cycle import is_transient_dexie_visibility_404_error
 from greenfloor.core.retry_policy import (
@@ -249,18 +248,3 @@ def post_offer_phase(
     assert splash is not None
     return splash.post_offer(offer_text)
 
-
-def expected_publish_asset_fields(
-    *,
-    side: str,
-    market: MarketConfig,
-    resolved_base_asset_id: str,
-    resolved_quote_asset_id: str,
-) -> dict[str, str]:
-    return offer_policy.expected_publish_asset_fields(
-        side=str(side),
-        base_symbol=str(market.base_symbol),
-        quote_asset=str(market.quote_asset),
-        resolved_base_asset_id=str(resolved_base_asset_id),
-        resolved_quote_asset_id=str(resolved_quote_asset_id),
-    )

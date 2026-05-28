@@ -41,7 +41,10 @@ mod tests {
             let built = export_offer_fixture(scenario).await;
             write_fixture(out, scenario.name(), &built);
         }
-        for scenario in [OfferLegScenario::BuySideDirect, OfferLegScenario::CatCatDirect] {
+        for scenario in [
+            OfferLegScenario::BuySideDirect,
+            OfferLegScenario::CatCatDirect,
+        ] {
             let built = export_offer_leg_fixture(scenario).await;
             write_fixture(out, scenario.name(), &built);
         }
