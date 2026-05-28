@@ -21,7 +21,7 @@ from greenfloor.daemon.cooldowns import (
 )
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.offer_dispatch.items import action_item_from_managed_outcome
-from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.runtime.offer_build_context import (
     default_program_config_path,
     prepare_offer_build_context,

@@ -8,7 +8,7 @@ from greenfloor.core.cycle import is_managed_worker_transient_error
 from greenfloor.core.managed_action_outcome import ManagedActionOutcome
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.market_helpers import _normalize_offer_side
-from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.core.strategy_action_item import StrategyActionItem
 
 __all__ = [
     "action_item",

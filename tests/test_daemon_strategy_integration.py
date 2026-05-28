@@ -8,7 +8,7 @@ from greenfloor.daemon.coin_ops_cycle import (
     _executed_sell_offer_counts_by_size,
 )
 from greenfloor.daemon.market_helpers import _normalize_strategy_pair
-from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.strategy_execution import StrategyActionResult
 from greenfloor.daemon.strategy_state import (
     _evaluate_two_sided_market_actions,

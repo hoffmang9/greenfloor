@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.core.strategy_action_item import StrategyActionItem
 
 _daemon_logger = logging.getLogger("greenfloor.daemon")
 

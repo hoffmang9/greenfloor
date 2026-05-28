@@ -17,7 +17,7 @@ from greenfloor.core.managed_retry import ManagedRetryDecision
 from greenfloor.core.parallel_batch_plan import ParallelBatchPlan
 from greenfloor.core.parallel_reservation_context import ParallelReservationContext
 from greenfloor.core.planned_action import PlannedAction
-from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.core.strategy_action_item import StrategyActionItem
 
 if TYPE_CHECKING:
     from greenfloor.core.cancel_policy import CancelPolicyDecision, OpenOfferRow

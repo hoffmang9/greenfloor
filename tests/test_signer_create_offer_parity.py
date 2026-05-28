@@ -91,8 +91,14 @@ def test_signer_golden_fixture_contract(fixture_path: Path) -> None:
         broadcast_split=bool(fixture_req["broadcast_split"]),
         expires_at_unix=fixture_req.get("expires_at"),
     )
-    assert _comparable_request_fields(runtime_req) == _comparable_request_fields(fixture_req)
+    assert _comparable_request_fields(runtime_req.to_payload()) == _comparable_request_fields(
+        fixture_req
+    )
 
+
+@pytest.mark.signer
+@pytest.mark.parametrize("fixture_path", sorted(FIXTURE_DIR.glob("*.json")))
+def test_signer_golden_offer_validates(fixture_path: Path) -> None:
     try:
         import greenfloor_signer  # type: ignore[import-not-found]
     except ImportError:
@@ -102,4 +108,9 @@ def test_signer_golden_fixture_contract(fixture_path: Path) -> None:
     if not callable(validate):
         pytest.skip("greenfloor_signer.validate_offer_structure not available")
 
-    validate(str(payload["offer"]).strip())
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    offer = str(payload.get("offer", "")).strip()
+    assert offer.startswith("offer1")
+    assert "create_offer_request" in payload
+    assert "runtime_parity" in payload
+    validate(offer)

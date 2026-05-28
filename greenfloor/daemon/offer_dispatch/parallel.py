@@ -30,7 +30,7 @@ from greenfloor.daemon.offer_dispatch.reservation import (
     reservation_wallet_id,
 )
 from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.strategy_execution import StrategyActionResult, StrategyDispatchHooks
 
 

@@ -1,12 +1,41 @@
-"""Deterministic signer ``create_offer`` request dict construction (no IO)."""
+"""Deterministic signer ``create_offer`` request construction (no IO)."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.core.policy_bridge import mojo_multiplier_for_leg
+
+
+@dataclass(frozen=True, slots=True)
+class SignerCreateOfferRequest:
+    receive_address: str
+    offer_asset_id: str
+    offer_amount: int
+    request_asset_id: str
+    request_amount: int
+    offer_coin_ids: tuple[str, ...] = ()
+    presplit_coin_ids: tuple[str, ...] = ()
+    split_input_coins: bool = True
+    broadcast_split: bool = True
+    expires_at: int | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "receive_address": self.receive_address,
+            "offer_asset_id": self.offer_asset_id,
+            "offer_amount": int(self.offer_amount),
+            "request_asset_id": self.request_asset_id,
+            "request_amount": int(self.request_amount),
+            "offer_coin_ids": list(self.offer_coin_ids),
+            "presplit_coin_ids": list(self.presplit_coin_ids),
+            "split_input_coins": bool(self.split_input_coins),
+            "broadcast_split": bool(self.broadcast_split),
+            "expires_at": self.expires_at,
+        }
 
 
 def build_signer_create_offer_request(
@@ -20,8 +49,8 @@ def build_signer_create_offer_request(
     split_input_coins: bool = True,
     broadcast_split: bool = True,
     expires_at_unix: int | None = None,
-) -> dict[str, Any]:
-    """Build the dict passed to ``rust_signer.build_vault_cat_offer``."""
+) -> SignerCreateOfferRequest:
+    """Build the request passed to ``rust_signer.build_vault_cat_offer``."""
     side = normalize_offer_side(action_side)
     pricing = dict(market.pricing or {})
     base_mult = int(
@@ -58,15 +87,13 @@ def build_signer_create_offer_request(
     if not receive_address:
         raise ValueError("market.receive_address is required for signer offer build")
 
-    return {
-        "receive_address": receive_address,
-        "offer_asset_id": offer_asset_id.removeprefix("0x").lower(),
-        "offer_amount": int(offer_amount_mojos),
-        "request_asset_id": request_asset_id.removeprefix("0x").lower(),
-        "request_amount": int(request_amount_mojos),
-        "offer_coin_ids": [],
-        "presplit_coin_ids": [],
-        "split_input_coins": bool(split_input_coins),
-        "broadcast_split": bool(broadcast_split),
-        "expires_at": expires_at_unix,
-    }
+    return SignerCreateOfferRequest(
+        receive_address=receive_address,
+        offer_asset_id=offer_asset_id.removeprefix("0x").lower(),
+        offer_amount=int(offer_amount_mojos),
+        request_asset_id=request_asset_id.removeprefix("0x").lower(),
+        request_amount=int(request_amount_mojos),
+        split_input_coins=bool(split_input_coins),
+        broadcast_split=bool(broadcast_split),
+        expires_at=expires_at_unix,
+    )

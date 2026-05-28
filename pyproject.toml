@@ -45,3 +45,6 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--basetemp=.pytest_tmp"
+markers = [
+    "signer: requires compiled greenfloor_signer (validate_offer_structure)",
+]

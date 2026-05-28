@@ -315,15 +315,15 @@ def signer_create_offer_phase(
         expires_at_unix=int(expires_at_dt.timestamp()),
     )
     config_path = _signer_config_path(program)
-    result = rust_signer.build_vault_cat_offer(config_path, request)
+    result = rust_signer.build_vault_cat_offer(config_path, request.to_payload())
     offer_text = str(result.get("offer", "")).strip()
     if not offer_text.startswith("offer1"):
         raise RuntimeError("signer_create_offer_failed:missing_offer_text")
     return {
         "offer_text": offer_text,
         "expires_at": expires_at_dt.isoformat(),
-        "offer_amount": int(request["offer_amount"]),
-        "request_amount": int(request["request_amount"]),
+        "offer_amount": request.offer_amount,
+        "request_amount": request.request_amount,
         "side": normalize_offer_side(action_side),
         "execution_mode": str(result.get("execution_mode", "")).strip(),
         "create_result": dict(result) if isinstance(result, dict) else {},

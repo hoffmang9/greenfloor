@@ -26,7 +26,7 @@ from greenfloor.daemon.market_helpers import (
     _resolve_quote_asset_for_offer,
 )
 from greenfloor.daemon.market_logging import _daemon_logger
-from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.testing import (
     cancel_retry_config,
     cooldown_remaining_ms,
