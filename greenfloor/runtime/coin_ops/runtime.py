@@ -287,9 +287,12 @@ def run_coin_op_iteration_loop(
         )
         operations.append(iteration_payload)
 
+        readiness_ready = (
+            None if final_readiness is None else bool(final_readiness.get("ready", False))
+        )
         should_break, reason = coin_op_should_stop(
             until_ready=until_ready,
-            final_readiness=final_readiness,
+            readiness_ready=readiness_ready,
             coin_ids=coin_ids,
             iteration=iteration,
             max_iterations=max_iterations,

@@ -68,3 +68,15 @@ class CoinSplitGateResult:
     extra_denom_coin_count: int
     reserve_ready: bool
     ready: bool
+
+    def to_readiness_payload(self) -> dict[str, int | bool | str]:
+        return {
+            "asset_id": self.asset_id,
+            "size_base_units": self.size_base_units,
+            "required_min_count": self.required_min_count,
+            "current_count": self.current_count,
+            "larger_reserve_coin_count": self.larger_reserve_coin_count,
+            "extra_denom_coin_count": self.extra_denom_coin_count,
+            "reserve_ready": self.reserve_ready,
+            "ready": self.ready,
+        }

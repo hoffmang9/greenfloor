@@ -145,8 +145,19 @@ class SignerCoinOpBackendFake:
         required_min_count: int | None = None,
         max_allowed_count: int | None = None,
     ) -> dict[str, int | bool | str]:
-        _ = asset_id, max_allowed_count
+        from greenfloor.core.coin_ops import (
+            combine_denomination_readiness,
+            split_denomination_readiness,
+        )
+
         coins = self.list_asset_scoped_coins()
+        if required_min_count is not None and max_allowed_count is None:
+            return split_denomination_readiness(
+                asset_scoped_coins=coins,
+                asset_id=asset_id,
+                size_base_units=int(size_base_units),
+                required_min_count=int(required_min_count),
+            )
         spendable = [
             coin
             for coin in coins
@@ -155,14 +166,19 @@ class SignerCoinOpBackendFake:
         matching = [
             coin for coin in spendable if int(coin.get("amount", 0)) == int(size_base_units)
         ]
-        required = int(required_min_count or 0)
-        current = len(matching)
+        if max_allowed_count is not None:
+            return combine_denomination_readiness(
+                asset_id=asset_id,
+                size_base_units=int(size_base_units),
+                max_allowed_count=int(max_allowed_count),
+                matching_count=len(matching),
+            )
         return {
             "asset_id": asset_id,
             "size_base_units": int(size_base_units),
-            "required_min_count": required,
-            "current_count": current,
-            "ready": current >= required if required > 0 else True,
+            "required_min_count": -1,
+            "current_count": len(matching),
+            "ready": True,
         }
 
     def build_iteration_payload(

@@ -67,19 +67,22 @@ pub fn offer_has_duplicate_spent_coin_ids(spend_bundle: &SpendBundle) -> bool {
     false
 }
 
-/// Decode and parse offer structure (wallet-sdk semantics) without Dexie policy gates.
-pub fn validate_offer_structure(offer: &str) -> SignerResult<()> {
+fn decode_and_parse_offer(offer: &str) -> SignerResult<SpendBundle> {
     let spend_bundle = decode_offer(offer)?;
     let mut ctx = SpendContext::new();
     Offer::from_spend_bundle(&mut ctx, &spend_bundle)?;
+    Ok(spend_bundle)
+}
+
+/// Decode and parse offer structure (wallet-sdk semantics) without Dexie policy gates.
+pub fn validate_offer_structure(offer: &str) -> SignerResult<()> {
+    decode_and_parse_offer(offer)?;
     Ok(())
 }
 
 /// Full Dexie pre-post validation: structure, expiry, and duplicate spends.
 pub fn validate_offer_text(offer: &str) -> SignerResult<()> {
-    let spend_bundle = decode_offer(offer)?;
-    let mut ctx = SpendContext::new();
-    Offer::from_spend_bundle(&mut ctx, &spend_bundle)?;
+    let spend_bundle = decode_and_parse_offer(offer)?;
     if offer_has_duplicate_spent_coin_ids(&spend_bundle) {
         return Err(SignerError::OfferDuplicateSpentCoinIds);
     }
@@ -89,17 +92,23 @@ pub fn validate_offer_text(offer: &str) -> SignerResult<()> {
     Ok(())
 }
 
+fn dexie_verify_error_code(err: SignerError) -> String {
+    match err {
+        SignerError::OfferDuplicateSpentCoinIds => {
+            "wallet_sdk_offer_duplicate_spent_coin_ids".to_string()
+        }
+        SignerError::OfferMissingExpiration => "wallet_sdk_offer_missing_expiration".to_string(),
+        SignerError::Driver(msg) => format!("wallet_sdk_offer_validate_failed:driver:{msg}"),
+        SignerError::Other(msg) => format!("wallet_sdk_offer_validate_failed:other:{msg}"),
+        err => format!("wallet_sdk_offer_validate_failed:{err}"),
+    }
+}
+
 /// Dexie pre-post gate returning a stable error code string, or ``None`` when valid.
 pub fn verify_offer_for_dexie(offer: &str) -> Option<String> {
     match validate_offer_text(offer) {
         Ok(()) => None,
-        Err(SignerError::OfferDuplicateSpentCoinIds) => {
-            Some("wallet_sdk_offer_duplicate_spent_coin_ids".to_string())
-        }
-        Err(SignerError::OfferMissingExpiration) => {
-            Some("wallet_sdk_offer_missing_expiration".to_string())
-        }
-        Err(err) => Some(format!("wallet_sdk_offer_validate_failed:{err}")),
+        Err(err) => Some(dexie_verify_error_code(err)),
     }
 }
 

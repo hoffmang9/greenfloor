@@ -12,7 +12,6 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.cycle import is_transient_dexie_visibility_404_error
-from greenfloor.core.offer_policy import verify_offer_for_dexie
 from greenfloor.core.retry_policy import (
     dexie_invalid_offer_retry_sleep,
     dexie_invalid_offer_should_retry,
@@ -78,13 +77,6 @@ def log_signed_offer_artifact(
         trading_pair,
         expiry,
     )
-
-
-def verify_offer_text_for_dexie(offer_text: str) -> str | None:
-    try:
-        return verify_offer_for_dexie(offer_text)
-    except ImportError:
-        return "wallet_sdk_import_error:greenfloor_signer_unavailable"
 
 
 def post_dexie_offer_with_invalid_offer_retry(

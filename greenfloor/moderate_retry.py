@@ -6,13 +6,7 @@ import collections.abc
 import time
 from typing import Any, TypeVar
 
-from greenfloor.core.retry_policy import (
-    moderate_retry_next_sleep,
-    moderate_retry_sleep_seconds,
-    parse_rate_limit_retry_seconds,
-    poll_exponential_advance_sleep,
-    poll_exponential_sleep_now,
-)
+from greenfloor.core import retry_policy
 
 _T = TypeVar("_T")
 
@@ -36,10 +30,10 @@ def call_with_moderate_retry(
         except Exception as exc:
             attempt += 1
             error_text = str(exc)
-            rate_limit_wait = parse_rate_limit_retry_seconds(error_text)
+            rate_limit_wait = retry_policy.parse_rate_limit_retry_seconds(error_text)
             if attempt >= max_attempts:
                 raise RuntimeError(f"{action}_retry_exhausted:{exc}") from exc
-            sleep_seconds = moderate_retry_sleep_seconds(
+            sleep_seconds = retry_policy.moderate_retry_sleep_seconds(
                 current_sleep=sleep_seconds,
                 rate_limit_wait=rate_limit_wait,
             )
@@ -55,7 +49,7 @@ def call_with_moderate_retry(
                     }
                 )
             sleep_fn(sleep_seconds)
-            sleep_seconds = moderate_retry_next_sleep(sleep_seconds)
+            sleep_seconds = retry_policy.moderate_retry_next_sleep(sleep_seconds)
 
 
 def poll_with_exponential_backoff_until(
@@ -77,7 +71,7 @@ def poll_with_exponential_backoff_until(
         result = on_tick(elapsed)
         if result is not None:
             return result
-        sleep_now = poll_exponential_sleep_now(
+        sleep_now = retry_policy.poll_exponential_sleep_now(
             elapsed_seconds=elapsed,
             timeout_seconds=timeout_seconds,
             sleep_seconds=sleep_seconds,
@@ -87,7 +81,7 @@ def poll_with_exponential_backoff_until(
         if sleep_now is None:
             raise RuntimeError(timeout_error)
         sleep_fn(sleep_now)
-        sleep_seconds = poll_exponential_advance_sleep(
+        sleep_seconds = retry_policy.poll_exponential_advance_sleep(
             sleep_seconds=sleep_now,
             initial_sleep=initial_sleep,
             max_sleep=max_sleep,
@@ -97,10 +91,5 @@ def poll_with_exponential_backoff_until(
 
 __all__ = [
     "call_with_moderate_retry",
-    "moderate_retry_next_sleep",
-    "moderate_retry_sleep_seconds",
-    "parse_rate_limit_retry_seconds",
-    "poll_exponential_advance_sleep",
-    "poll_exponential_sleep_now",
     "poll_with_exponential_backoff_until",
 ]

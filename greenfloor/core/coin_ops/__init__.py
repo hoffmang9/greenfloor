@@ -9,9 +9,10 @@
 
 from greenfloor.core.coin_ops._bridge import (
     coin_op_should_stop,
-    coin_split_gate_as_payload,
+    combine_denomination_readiness,
     evaluate_coin_split_gate,
     is_spendable_wallet_coin,
+    split_denomination_readiness,
     coin_meets_coin_op_min_amount,
     coin_op_min_amount_mojos,
     coin_op_target_amount_allowed,

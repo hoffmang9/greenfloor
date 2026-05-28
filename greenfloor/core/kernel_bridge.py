@@ -15,7 +15,7 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from greenfloor.core.kernel_protocol import DeterministicPolicyKernelProtocol
+    from greenfloor.core.kernel_protocol import PolicyKernelProtocol
 
 _KERNEL_MODULE = "greenfloor_signer"
 _INSTALL_HINT = (
@@ -33,7 +33,7 @@ def import_kernel() -> Any:
         ) from exc
 
 
-def policy_kernel() -> DeterministicPolicyKernelProtocol:
+def policy_kernel() -> PolicyKernelProtocol:
     return import_kernel()  # type: ignore[return-value]
 
 

@@ -252,37 +252,54 @@ def evaluate_coin_split_gate(
     )
 
 
-def coin_split_gate_as_payload(gate: CoinSplitGateResult) -> dict[str, int | bool | str]:
+def split_denomination_readiness(
+    *,
+    asset_scoped_coins: list[dict[str, Any]],
+    asset_id: str,
+    size_base_units: int,
+    required_min_count: int,
+) -> dict[str, int | bool | str]:
+    """Split-until-ready readiness using the Rust coin-split gate (reserve-aware)."""
+    gate = evaluate_coin_split_gate(
+        asset_scoped_coins=asset_scoped_coins,
+        resolved_asset_id=str(asset_id),
+        size_base_units=int(size_base_units),
+        required_count=int(required_min_count),
+    )
+    return gate.to_readiness_payload()
+
+
+def combine_denomination_readiness(
+    *,
+    asset_id: str,
+    size_base_units: int,
+    max_allowed_count: int,
+    matching_count: int,
+) -> dict[str, int | bool | str]:
+    """Combine-until-ready readiness (excess denomination coin cap)."""
+    current_count = int(matching_count)
+    max_allowed = int(max_allowed_count)
     return {
-        "asset_id": gate.asset_id,
-        "size_base_units": gate.size_base_units,
-        "required_min_count": gate.required_min_count,
-        "current_count": gate.current_count,
-        "larger_reserve_coin_count": gate.larger_reserve_coin_count,
-        "extra_denom_coin_count": gate.extra_denom_coin_count,
-        "reserve_ready": gate.reserve_ready,
-        "ready": gate.ready,
+        "asset_id": str(asset_id),
+        "size_base_units": int(size_base_units),
+        "current_count": current_count,
+        "required_min_count": -1,
+        "max_allowed_count": max_allowed,
+        "ready": current_count <= max_allowed,
     }
 
 
 def coin_op_should_stop(
     *,
     until_ready: bool,
-    final_readiness: CoinSplitGateResult | dict[str, int | bool | str] | None,
+    readiness_ready: bool | None,
     coin_ids: list[str],
     iteration: int,
     max_iterations: int,
 ) -> tuple[bool, str]:
-    ready: bool | None
-    if final_readiness is None:
-        ready = None
-    elif isinstance(final_readiness, CoinSplitGateResult):
-        ready = final_readiness.ready
-    else:
-        ready = bool(final_readiness.get("ready", False))
     stop, reason = _coin_ops_kernel().coin_op_should_stop(
         bool(until_ready),
-        ready,
+        readiness_ready,
         bool(coin_ids),
         int(iteration),
         int(max_iterations),

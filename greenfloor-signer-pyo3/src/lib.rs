@@ -281,6 +281,8 @@ fn resolve_offer_asset_ids_py(
     })
 }
 
+/// Full Dexie pre-post validation (structure, expiry, duplicate spends).
+/// Prefer :func:`verify_offer_for_dexie` when callers need stable error code strings.
 #[pyfunction]
 #[pyo3(name = "validate_offer")]
 fn validate_offer_py(offer: &str) -> PyResult<()> {
