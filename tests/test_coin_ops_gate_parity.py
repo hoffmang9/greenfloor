@@ -2,7 +2,19 @@
 
 from __future__ import annotations
 
-from greenfloor.core.coin_ops import coin_op_should_stop, evaluate_coin_split_gate
+from greenfloor.core.coin_ops import (
+    coin_op_should_stop,
+    evaluate_coin_split_gate,
+    is_spendable_wallet_coin,
+)
+from greenfloor.runtime.coin_ops.coins import is_spendable_coin
+
+
+def test_is_spendable_coin_matches_kernel() -> None:
+    coin = {"amount": 100, "state": "CONFIRMED"}
+    assert is_spendable_coin(coin) is is_spendable_wallet_coin(coin)
+    locked = {"amount": 100, "state": "CONFIRMED", "isLocked": True}
+    assert is_spendable_coin(locked) is False
 
 
 def test_evaluate_coin_split_gate_ready() -> None:
@@ -17,9 +29,9 @@ def test_evaluate_coin_split_gate_ready() -> None:
         size_base_units=100,
         required_count=2,
     )
-    assert gate["ready"] is True
-    assert gate["reserve_ready"] is True
-    assert gate["current_count"] == 2
+    assert gate.ready is True
+    assert gate.reserve_ready is True
+    assert gate.current_count == 2
 
 
 def test_coin_op_should_stop_max_iterations() -> None:

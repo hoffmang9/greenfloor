@@ -13,10 +13,7 @@ from greenfloor.config.io import (
     resolve_market_for_build,
 )
 from greenfloor.config.models import MarketConfig, MarketLadderEntry, ProgramConfig
-from greenfloor.core.coin_ops.gate_bridge import (
-    coin_op_should_stop as _coin_op_should_stop,
-    evaluate_coin_split_gate as _evaluate_coin_split_gate,
-)
+from greenfloor.core.coin_ops import coin_op_should_stop, evaluate_coin_split_gate
 from greenfloor.runtime.coin_ops.models import DenominationTarget, denomination_target_payload
 from greenfloor.runtime.coin_ops_backend import (
     CoinOpBackend,
@@ -36,38 +33,6 @@ def as_wait_events(value: object) -> list[dict[str, str]]:
         if isinstance(row, dict):
             items.append({str(k): str(v) for k, v in row.items()})
     return items
-
-
-def coin_op_should_stop(
-    *,
-    until_ready: bool,
-    final_readiness: dict[str, int | bool | str] | None,
-    coin_ids: list[str],
-    iteration: int,
-    max_iterations: int,
-) -> tuple[bool, str]:
-    return _coin_op_should_stop(
-        until_ready=until_ready,
-        final_readiness=final_readiness,
-        coin_ids=coin_ids,
-        iteration=iteration,
-        max_iterations=max_iterations,
-    )
-
-
-def evaluate_coin_split_gate(
-    *,
-    asset_scoped_coins: list[dict],
-    resolved_asset_id: str,
-    size_base_units: int,
-    required_count: int,
-) -> dict[str, int | bool | str]:
-    return _evaluate_coin_split_gate(
-        asset_scoped_coins=asset_scoped_coins,
-        resolved_asset_id=resolved_asset_id,
-        size_base_units=size_base_units,
-        required_count=required_count,
-    )
 
 
 def coin_op_result_payload(

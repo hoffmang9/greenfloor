@@ -13,9 +13,9 @@ use signer_core::{
 
 use crate::py_utils::{
     bucket_spec_from_py, coin_op_plan_to_py, coin_op_plans_from_py_list,
-    combine_input_selection_mode_from_py, dict_from_json_value, exclude_coin_ids_from_py_optional,
-    i64_i64_map_to_py_dict, request_dict_to_json, spendable_coins_from_py_list,
-    split_auto_select_plan_to_py, split_planning_profile_from_py, to_py_err,
+    coin_split_gate_result_to_py, combine_input_selection_mode_from_py,
+    exclude_coin_ids_from_py_optional, i64_i64_map_to_py_dict, request_dict_to_json,
+    spendable_coins_from_py_list, split_auto_select_plan_to_py, split_planning_profile_from_py,
 };
 
 fn coin_amount_mojos_from_py(coin: &Bound<'_, PyDict>) -> PyResult<Option<i64>> {
@@ -261,7 +261,7 @@ fn evaluate_coin_split_gate_py(
         size_base_units,
         required_count,
     );
-    dict_from_json_value(py, serde_json::to_value(&gate).map_err(to_py_err)?)
+    Ok(coin_split_gate_result_to_py(py, &gate)?.unbind())
 }
 
 #[pyfunction]

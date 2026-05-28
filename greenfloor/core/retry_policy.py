@@ -12,16 +12,11 @@ def parse_rate_limit_retry_seconds(error_text: str) -> float | None:
 
 def moderate_retry_sleep_seconds(
     *,
-    attempt: int,
     current_sleep: float,
     rate_limit_wait: float | None,
 ) -> float:
     return float(
-        import_kernel().moderate_retry_sleep_seconds(
-            int(attempt),
-            float(current_sleep),
-            rate_limit_wait,
-        )
+        import_kernel().moderate_retry_sleep_seconds(float(current_sleep), rate_limit_wait)
     )
 
 
@@ -49,21 +44,36 @@ def coinset_fee_lookup_retry_sleep(attempt: int) -> float:
     return float(import_kernel().coinset_fee_lookup_retry_sleep(int(attempt)))
 
 
-def poll_exponential_next_sleep(
+def poll_exponential_sleep_now(
     *,
     elapsed_seconds: int,
     timeout_seconds: int,
-    current_sleep: float,
+    sleep_seconds: float,
+    initial_sleep: float,
+    max_sleep: float,
+) -> float | None:
+    value = import_kernel().poll_exponential_sleep_now(
+        int(elapsed_seconds),
+        int(timeout_seconds),
+        float(sleep_seconds),
+        float(initial_sleep),
+        float(max_sleep),
+    )
+    return None if value is None else float(value)
+
+
+def poll_exponential_advance_sleep(
+    *,
+    sleep_seconds: float,
     initial_sleep: float,
     max_sleep: float,
     multiplier: float,
-) -> float | None:
-    value = import_kernel().poll_exponential_next_sleep(
-        int(elapsed_seconds),
-        int(timeout_seconds),
-        float(current_sleep),
-        float(initial_sleep),
-        float(max_sleep),
-        float(multiplier),
+) -> float:
+    return float(
+        import_kernel().poll_exponential_advance_sleep(
+            float(sleep_seconds),
+            float(initial_sleep),
+            float(max_sleep),
+            float(multiplier),
+        )
     )
-    return None if value is None else float(value)

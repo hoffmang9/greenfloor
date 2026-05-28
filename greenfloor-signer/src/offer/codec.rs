@@ -81,14 +81,26 @@ pub fn validate_offer_text(offer: &str) -> SignerResult<()> {
     let mut ctx = SpendContext::new();
     Offer::from_spend_bundle(&mut ctx, &spend_bundle)?;
     if offer_has_duplicate_spent_coin_ids(&spend_bundle) {
-        return Err(SignerError::Other(
-            "offer_duplicate_spent_coin_ids".to_string(),
-        ));
+        return Err(SignerError::OfferDuplicateSpentCoinIds);
     }
     if !offer_has_expiration_condition(&spend_bundle)? {
-        return Err(SignerError::Other("offer_missing_expiration".to_string()));
+        return Err(SignerError::OfferMissingExpiration);
     }
     Ok(())
+}
+
+/// Dexie pre-post gate returning a stable error code string, or ``None`` when valid.
+pub fn verify_offer_for_dexie(offer: &str) -> Option<String> {
+    match validate_offer_text(offer) {
+        Ok(()) => None,
+        Err(SignerError::OfferDuplicateSpentCoinIds) => {
+            Some("wallet_sdk_offer_duplicate_spent_coin_ids".to_string())
+        }
+        Err(SignerError::OfferMissingExpiration) => {
+            Some("wallet_sdk_offer_missing_expiration".to_string())
+        }
+        Err(err) => Some(format!("wallet_sdk_offer_validate_failed:{err}")),
+    }
 }
 
 pub fn encode_offer_from_spend_bundle_bytes(spend_bundle_bytes: &[u8]) -> SignerResult<String> {

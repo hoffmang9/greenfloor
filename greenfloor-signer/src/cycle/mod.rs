@@ -62,7 +62,7 @@ pub use reseed::{
 pub use retry::{
     coinset_fee_lookup_retry_sleep, dexie_invalid_offer_retry_sleep,
     dexie_invalid_offer_should_retry, moderate_retry_next_sleep, moderate_retry_sleep_seconds,
-    parse_rate_limit_retry_seconds, poll_exponential_next_sleep,
+    parse_rate_limit_retry_seconds, poll_exponential_advance_sleep, poll_exponential_sleep_now,
 };
 pub use strategy::{
     evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction, StrategyConfig,

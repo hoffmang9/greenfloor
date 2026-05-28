@@ -15,6 +15,7 @@ static COIN_OP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static SPLIT_COIN_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static SPLIT_COMBINE_PREREQ_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static SPLIT_SKIP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static COIN_SPLIT_GATE_RESULT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 
 fn enum_label_from_py(obj: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(label) = obj.extract::<String>() {
@@ -43,6 +44,32 @@ pub fn bucket_spec_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 pub fn coin_op_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     cached_class(py, &COIN_OP_PLAN_CLS, COIN_OPS_MODULE, "CoinOpPlan")
+}
+
+pub fn coin_split_gate_result_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &COIN_SPLIT_GATE_RESULT_CLS,
+        COIN_OPS_MODULE,
+        "CoinSplitGateResult",
+    )
+}
+
+pub fn coin_split_gate_result_to_py<'py>(
+    py: Python<'py>,
+    gate: &signer_core::CoinSplitGateResult,
+) -> PyResult<Bound<'py, PyAny>> {
+    let cls = coin_split_gate_result_class(py)?;
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("asset_id", &gate.asset_id)?;
+    kwargs.set_item("size_base_units", gate.size_base_units)?;
+    kwargs.set_item("required_min_count", gate.required_min_count)?;
+    kwargs.set_item("current_count", gate.current_count)?;
+    kwargs.set_item("larger_reserve_coin_count", gate.larger_reserve_coin_count)?;
+    kwargs.set_item("extra_denom_coin_count", gate.extra_denom_coin_count)?;
+    kwargs.set_item("reserve_ready", gate.reserve_ready)?;
+    kwargs.set_item("ready", gate.ready)?;
+    cls.call((), Some(&kwargs))
 }
 
 fn coin_op_kind_from_py(obj: &Bound<'_, PyAny>) -> PyResult<signer_core::CoinOpKind> {

@@ -13,7 +13,7 @@ def test_verify_offer_text_for_dexie_uses_greenfloor_signer_only(monkeypatch) ->
 
     class _Signer:
         @staticmethod
-        def validate_offer(offer: str) -> None:
+        def verify_offer_for_dexie(offer: str) -> None:
             calls["offer"] = offer
 
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Signer)
@@ -25,10 +25,10 @@ def test_verify_offer_text_for_dexie_uses_greenfloor_signer_only(monkeypatch) ->
 def test_verify_offer_text_for_dexie_reports_missing_kernel(monkeypatch) -> None:
     import greenfloor.runtime.offer_publish as offer_publish_mod
 
-    def _fail_kernel():
+    def _fail_verify(_offer: str) -> str | None:
         raise ImportError("disable signer path for this test")
 
-    monkeypatch.setattr(offer_publish_mod, "import_kernel", _fail_kernel)
+    monkeypatch.setattr(offer_publish_mod, "verify_offer_for_dexie", _fail_verify)
     monkeypatch.delitem(sys.modules, "greenfloor_signer", raising=False)
 
     assert _verify_offer_text_for_dexie("offer1contract") == (

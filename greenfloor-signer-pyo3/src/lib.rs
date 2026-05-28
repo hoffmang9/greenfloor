@@ -26,7 +26,8 @@ use signer_core::{
     from_input_spend_bundle_xch_bytes, get_conservative_fee_estimate, get_fee_estimate,
     list_cat_coin_summaries, list_cat_coin_summaries_by_ids, load_bls_master_secret_key,
     load_signer_config, push_tx_hex, resolve_offer_asset_ids, resolve_vault_context,
-    validate_offer_structure, validate_offer_text, BlsMixedSplitRequest, BlsOfferRequest,
+    validate_offer_structure, validate_offer_text, verify_offer_for_dexie, BlsMixedSplitRequest,
+    BlsOfferRequest,
     BlsXchCoinOpRequest,
     CreateOfferRequest, MixedSplitRequest,
 };
@@ -293,6 +294,12 @@ fn validate_offer_structure_py(offer: &str) -> PyResult<()> {
 }
 
 #[pyfunction]
+#[pyo3(name = "verify_offer_for_dexie")]
+fn verify_offer_for_dexie_py(offer: &str) -> Option<String> {
+    verify_offer_for_dexie(offer)
+}
+
+#[pyfunction]
 #[pyo3(name = "encode_offer")]
 fn encode_offer_py(spend_bundle_bytes: &[u8]) -> PyResult<String> {
     encode_offer_from_spend_bundle_bytes(spend_bundle_bytes).map_err(to_py_err)
@@ -411,6 +418,7 @@ fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(resolve_offer_asset_ids_py, m)?)?;
     m.add_function(wrap_pyfunction!(validate_offer_py, m)?)?;
     m.add_function(wrap_pyfunction!(validate_offer_structure_py, m)?)?;
+    m.add_function(wrap_pyfunction!(verify_offer_for_dexie_py, m)?)?;
     m.add_function(wrap_pyfunction!(encode_offer_py, m)?)?;
     m.add_function(wrap_pyfunction!(from_input_spend_bundle_py, m)?)?;
     m.add_function(wrap_pyfunction!(from_input_spend_bundle_xch_py, m)?)?;

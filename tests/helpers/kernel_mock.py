@@ -31,9 +31,9 @@ def mock_kernel_default_mojo_multiplier_for_asset(asset_id: str) -> int:
 class MinimalSignerKernel:
     """Base stub for tests that patch ``sys.modules['greenfloor_signer']``.
 
-    Subclass and override only the symbols your test exercises. Hex helpers and
-    ``validate_offer`` are provided by default so offer verification tests do not
-    need to enumerate every kernel export.
+    Subclass and override only the symbols your test exercises. Hex helpers,
+    offer-build pricing helpers, and Dexie verification are provided by default
+    so CLI/offer tests do not need to enumerate every kernel export.
     """
 
     @staticmethod
@@ -41,35 +41,25 @@ class MinimalSignerKernel:
         return None
 
     @staticmethod
-    def resolve_offer_expiry_for_pricing(pricing: dict) -> tuple[str, int]:
-        raw = pricing.get("strategy_offer_expiry_minutes", 0)
-        try:
-            value = int(raw or 0)
-        except (TypeError, ValueError):
-            value = 0
-        return ("minutes", value if value > 0 else 10)
+    def verify_offer_for_dexie(_offer: str) -> None:
+        return None
 
     @staticmethod
-    def resolve_quote_price_for_pricing(pricing: dict) -> float:
-        fixed = pricing.get("fixed_quote_per_base")
-        if fixed is not None:
-            return float(fixed)
-        min_q = pricing.get("min_price_quote_per_base")
-        max_q = pricing.get("max_price_quote_per_base")
-        if min_q is not None and max_q is not None:
-            return (float(min_q) + float(max_q)) / 2.0
-        if min_q is not None:
-            return float(min_q)
-        if max_q is not None:
-            return float(max_q)
-        raise ValueError("market pricing must define fixed_quote_per_base or min/max")
-
-    @staticmethod
-    def mojo_multiplier_for_leg(pricing: dict, field: str, asset_id: str) -> int:
-        override = pricing.get(field)
-        if override is not None:
-            return int(override)
+    def mojo_multiplier_for_leg(pricing: object, field: str, asset_id: str) -> int:
+        pricing_dict = pricing if isinstance(pricing, dict) else {}
+        if field in pricing_dict:
+            return int(pricing_dict[field])
         return mock_kernel_default_mojo_multiplier_for_asset(asset_id)
+
+    @staticmethod
+    def resolve_offer_expiry_for_pricing(pricing: object) -> tuple[str, int]:
+        pricing_dict = pricing if isinstance(pricing, dict) else {}
+        return ("minutes", int(pricing_dict.get("strategy_offer_expiry_minutes", 60)))
+
+    @staticmethod
+    def resolve_quote_price_for_pricing(pricing: object) -> float:
+        pricing_dict = pricing if isinstance(pricing, dict) else {}
+        return float(pricing_dict.get("fixed_quote_per_base", 1.0))
 
     normalize_hex_id = staticmethod(mock_kernel_normalize_hex_id)
     is_hex_id = staticmethod(mock_kernel_is_hex_id)

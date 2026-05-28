@@ -14,16 +14,14 @@ pub fn parse_rate_limit_retry_seconds(error_text: &str) -> Option<f64> {
     digits.parse::<i64>().ok().map(|seconds| seconds as f64)
 }
 
-/// Next sleep for generic moderate retry (attempt is 1-based after a failure).
+/// Sleep duration before the next moderate-retry attempt after a failure.
 pub fn moderate_retry_sleep_seconds(
-    attempt: u32,
     mut current_sleep: f64,
     rate_limit_wait: Option<f64>,
 ) -> f64 {
     if let Some(wait) = rate_limit_wait {
         current_sleep = current_sleep.max((wait + 0.25).min(30.0));
     }
-    let _ = attempt;
     current_sleep
 }
 
@@ -48,23 +46,37 @@ pub fn coinset_fee_lookup_retry_sleep(attempt: u32) -> f64 {
     (0.5 * 2f64.powi(attempt.min(31) as i32)).min(8.0)
 }
 
-/// Returns ``Some(next_sleep)`` while polling should continue, or ``None`` when timed out.
-pub fn poll_exponential_next_sleep(
+/// Sleep duration to use after a failed poll tick, or ``None`` when timed out.
+pub fn poll_exponential_sleep_now(
     elapsed_seconds: i64,
     timeout_seconds: i64,
-    current_sleep: f64,
+    sleep_seconds: f64,
     initial_sleep: f64,
     max_sleep: f64,
-    multiplier: f64,
 ) -> Option<f64> {
     if elapsed_seconds >= timeout_seconds {
         return None;
     }
-    Some(if current_sleep <= 0.0 {
+    Some(if sleep_seconds <= 0.0 {
         initial_sleep
     } else {
-        (current_sleep * multiplier).min(max_sleep)
+        sleep_seconds.min(max_sleep)
     })
+}
+
+/// Advance sleep baseline after a poll backoff sleep.
+pub fn poll_exponential_advance_sleep(
+    sleep_seconds: f64,
+    initial_sleep: f64,
+    max_sleep: f64,
+    multiplier: f64,
+) -> f64 {
+    let base = if sleep_seconds <= 0.0 {
+        initial_sleep
+    } else {
+        sleep_seconds
+    };
+    (base * multiplier).min(max_sleep)
 }
 
 #[cfg(test)]
@@ -88,11 +100,9 @@ mod tests {
     }
 
     #[test]
-    fn poll_exponential_times_out() {
-        assert!(poll_exponential_next_sleep(10, 10, 1.0, 0.5, 8.0, 2.0).is_none());
-        assert_eq!(
-            poll_exponential_next_sleep(0, 10, 1.0, 0.5, 8.0, 2.0),
-            Some(2.0)
-        );
+    fn poll_exponential_sleep_and_advance() {
+        assert!(poll_exponential_sleep_now(10, 10, 1.0, 0.5, 8.0).is_none());
+        assert_eq!(poll_exponential_sleep_now(0, 10, 0.0, 0.5, 8.0), Some(0.5));
+        assert_eq!(poll_exponential_advance_sleep(0.5, 0.5, 8.0, 2.0), 1.0);
     }
 }

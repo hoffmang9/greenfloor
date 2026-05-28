@@ -7,7 +7,7 @@ from pathlib import Path
 
 from greenfloor.config.io import resolve_quote_asset_for_offer
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.offer_build import (
+from greenfloor.core.offer_policy import (
     mojo_multiplier_for_leg,
     resolve_offer_expiry_for_pricing,
     resolve_quote_price_for_pricing,

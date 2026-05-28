@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from typing import Any
+
 from greenfloor.core.coin_ops.types import (
     BucketSpec,
     CoinOpPlan,
+    CoinSplitGateResult,
     CombineInputSelectionMode,
     SplitAutoSelectPlan,
     SplitPlanningProfile,
@@ -92,3 +95,22 @@ class CoinOpsKernelProtocol(Protocol):
         exclude_coin_ids: set[str] | None,
         max_count: int | None,
     ) -> list[str]: ...
+
+    def is_spendable_wallet_coin(self, coin: dict[str, Any]) -> bool: ...
+
+    def evaluate_coin_split_gate(
+        self,
+        asset_scoped_coins: list[dict[str, Any]],
+        resolved_asset_id: str,
+        size_base_units: int,
+        required_count: int,
+    ) -> CoinSplitGateResult: ...
+
+    def coin_op_should_stop(
+        self,
+        until_ready: bool,
+        final_readiness_ready: bool | None,
+        has_explicit_coin_ids: bool,
+        iteration: int,
+        max_iterations: int,
+    ) -> tuple[bool, str]: ...

@@ -14,5 +14,6 @@ pub use build_context::{
 pub use codec::{
     encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
     from_input_spend_bundle_xch_bytes, validate_offer_structure, validate_offer_text,
+    verify_offer_for_dexie,
 };
 pub use types::{CreateOfferRequest, CreateOfferResult, OfferExecutionMode};

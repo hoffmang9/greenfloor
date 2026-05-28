@@ -3,11 +3,13 @@ from __future__ import annotations
 import sys
 from typing import Any, cast
 
+from greenfloor.core.offer_policy import (
+    resolve_offer_expiry_for_pricing,
+    resolve_quote_price_for_pricing,
+)
 from greenfloor.runtime.offer_publish import (
     post_dexie_offer_with_invalid_offer_retry,
     post_offer_phase,
-    resolve_offer_expiry_for_market,
-    resolve_quote_price_for_market,
     verify_offer_text_for_dexie,
 )
 from tests.helpers.kernel_mock import MinimalSignerKernel
@@ -18,7 +20,7 @@ def test_verify_offer_text_for_dexie_success(monkeypatch) -> None:
 
     class _Native(MinimalSignerKernel):
         @staticmethod
-        def validate_offer(offer: str) -> None:
+        def verify_offer_for_dexie(offer: str) -> None:
             calls.append(offer)
 
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
@@ -29,8 +31,8 @@ def test_verify_offer_text_for_dexie_success(monkeypatch) -> None:
 def test_verify_offer_text_for_dexie_maps_duplicate_spends(monkeypatch) -> None:
     class _Native(MinimalSignerKernel):
         @staticmethod
-        def validate_offer(_offer: str) -> None:
-            raise ValueError("offer_duplicate_spent_coin_ids")
+        def verify_offer_for_dexie(_offer: str) -> str:
+            return "wallet_sdk_offer_duplicate_spent_coin_ids"
 
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
     assert (
@@ -42,8 +44,8 @@ def test_verify_offer_text_for_dexie_maps_duplicate_spends(monkeypatch) -> None:
 def test_verify_offer_text_for_dexie_maps_missing_expiration(monkeypatch) -> None:
     class _Native(MinimalSignerKernel):
         @staticmethod
-        def validate_offer(_offer: str) -> None:
-            raise ValueError("offer_missing_expiration")
+        def verify_offer_for_dexie(_offer: str) -> str:
+            return "wallet_sdk_offer_missing_expiration"
 
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
     assert (
@@ -54,8 +56,8 @@ def test_verify_offer_text_for_dexie_maps_missing_expiration(monkeypatch) -> Non
 def test_verify_offer_text_for_dexie_returns_native_validation_error(monkeypatch) -> None:
     class _Native(MinimalSignerKernel):
         @staticmethod
-        def validate_offer(_offer: str) -> None:
-            raise ValueError("native_invalid_offer")
+        def verify_offer_for_dexie(_offer: str) -> str:
+            return "wallet_sdk_offer_validate_failed:native_invalid_offer"
 
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
     assert verify_offer_text_for_dexie("offer1bad") == (
@@ -64,14 +66,12 @@ def test_verify_offer_text_for_dexie_returns_native_validation_error(monkeypatch
 
 
 def test_verify_offer_text_for_dexie_reports_missing_kernel(monkeypatch) -> None:
-    monkeypatch.delitem(sys.modules, "greenfloor_signer", raising=False)
-
     def _import_kernel():
         raise ImportError("greenfloor_signer_unavailable")
 
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_publish.import_kernel",
-        _import_kernel,
+        "greenfloor.runtime.offer_publish.verify_offer_for_dexie",
+        lambda _offer: (_ for _ in ()).throw(ImportError("greenfloor_signer_unavailable")),
     )
     assert verify_offer_text_for_dexie("offer1contract") == (
         "wallet_sdk_import_error:greenfloor_signer_unavailable"
@@ -89,12 +89,9 @@ def test_resolve_offer_expiry_and_quote_price_use_kernel(monkeypatch) -> None:
             return 1.5
 
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
-
-    class _Market:
-        pricing = {"strategy_offer_expiry_minutes": 12}
-
-    assert resolve_offer_expiry_for_market(_Market()) == ("minutes", 12)  # type: ignore[arg-type]
-    assert resolve_quote_price_for_market(_Market()) == 1.5  # type: ignore[arg-type]
+    pricing = {"strategy_offer_expiry_minutes": 12}
+    assert resolve_offer_expiry_for_pricing(pricing) == ("minutes", 12)
+    assert resolve_quote_price_for_pricing(pricing) == 1.5
 
 
 def test_post_dexie_offer_with_invalid_offer_retry_recovers(monkeypatch) -> None:

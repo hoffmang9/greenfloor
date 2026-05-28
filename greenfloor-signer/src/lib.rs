@@ -71,7 +71,7 @@ pub use cycle::{
     unsupported_venue_offer_transition, wallet_fallback_source_label, CancelPolicyDecision,
     coinset_fee_lookup_retry_sleep, dexie_invalid_offer_retry_sleep,
     dexie_invalid_offer_should_retry, moderate_retry_next_sleep, moderate_retry_sleep_seconds,
-    parse_rate_limit_retry_seconds, poll_exponential_next_sleep,
+    parse_rate_limit_retry_seconds, poll_exponential_advance_sleep, poll_exponential_sleep_now,
     CycleOfferTransition, ManagedActionOutcome, ManagedActionStatus, ManagedRetryDecision,
     ManagedRetryDecisionKind, MarketBatchSelection, MarketCyclePhase, MarketCycleResultState,
     MarketState, OfferLifecycleState, OfferSignal, OfferStateRow, OfferTransition,
@@ -89,6 +89,7 @@ pub use offer::build_context::{
 pub use offer::codec::{
     encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
     from_input_spend_bundle_xch_bytes, validate_offer_structure, validate_offer_text,
+    verify_offer_for_dexie,
 };
 pub use offer::{build_vault_cat_offer, CreateOfferRequest, CreateOfferResult};
 pub use vault::{

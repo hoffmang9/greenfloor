@@ -566,8 +566,8 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
 
     class _Signer(MinimalSignerKernel):
         @staticmethod
-        def validate_offer(_offer: str) -> None:
-            raise ValueError("offer_missing_expiration")
+        def verify_offer_for_dexie(_offer: str) -> str:
+            return "wallet_sdk_offer_missing_expiration"
 
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Signer)
     monkeypatch.setattr(

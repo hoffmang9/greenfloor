@@ -12,12 +12,7 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.cycle import is_transient_dexie_visibility_404_error
-from greenfloor.core.kernel_bridge import import_kernel
-from greenfloor.core.offer_build import (
-    resolve_offer_expiry_for_pricing,
-    resolve_quote_price_for_pricing,
-)
-from greenfloor.core.offer_validate import map_validate_offer_error
+from greenfloor.core.offer_policy import verify_offer_for_dexie
 from greenfloor.core.retry_policy import (
     dexie_invalid_offer_retry_sleep,
     dexie_invalid_offer_should_retry,
@@ -64,14 +59,6 @@ def dexie_offer_view_url(*, dexie_base_url: str, offer_id: str) -> str:
     return f"https://{host}/offers/{urllib.parse.quote(clean_offer_id)}"
 
 
-def resolve_offer_expiry_for_market(market: MarketConfig) -> tuple[str, int]:
-    return resolve_offer_expiry_for_pricing(dict(market.pricing or {}))
-
-
-def resolve_quote_price_for_market(market: MarketConfig) -> float:
-    return resolve_quote_price_for_pricing(dict(market.pricing or {}))
-
-
 def log_signed_offer_artifact(
     *,
     offer_text: str,
@@ -95,12 +82,9 @@ def log_signed_offer_artifact(
 
 def verify_offer_text_for_dexie(offer_text: str) -> str | None:
     try:
-        import_kernel().validate_offer(offer_text)
+        return verify_offer_for_dexie(offer_text)
     except ImportError:
         return "wallet_sdk_import_error:greenfloor_signer_unavailable"
-    except Exception as exc:
-        return map_validate_offer_error(exc)
-    return None
 
 
 def post_dexie_offer_with_invalid_offer_retry(

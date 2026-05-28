@@ -10,6 +10,8 @@ from greenfloor.core.retry_policy import (
     moderate_retry_next_sleep,
     moderate_retry_sleep_seconds,
     parse_rate_limit_retry_seconds,
+    poll_exponential_advance_sleep,
+    poll_exponential_sleep_now,
 )
 
 _T = TypeVar("_T")
@@ -38,7 +40,6 @@ def call_with_moderate_retry(
             if attempt >= max_attempts:
                 raise RuntimeError(f"{action}_retry_exhausted:{exc}") from exc
             sleep_seconds = moderate_retry_sleep_seconds(
-                attempt=attempt,
                 current_sleep=sleep_seconds,
                 rate_limit_wait=rate_limit_wait,
             )
@@ -76,10 +77,22 @@ def poll_with_exponential_backoff_until(
         result = on_tick(elapsed)
         if result is not None:
             return result
-        if elapsed >= timeout_seconds:
+        sleep_now = poll_exponential_sleep_now(
+            elapsed_seconds=elapsed,
+            timeout_seconds=timeout_seconds,
+            sleep_seconds=sleep_seconds,
+            initial_sleep=initial_sleep,
+            max_sleep=max_sleep,
+        )
+        if sleep_now is None:
             raise RuntimeError(timeout_error)
-        sleep_fn(sleep_seconds)
-        sleep_seconds = min(max_sleep, sleep_seconds * sleep_multiplier)
+        sleep_fn(sleep_now)
+        sleep_seconds = poll_exponential_advance_sleep(
+            sleep_seconds=sleep_now,
+            initial_sleep=initial_sleep,
+            max_sleep=max_sleep,
+            multiplier=sleep_multiplier,
+        )
 
 
 __all__ = [
@@ -87,5 +100,7 @@ __all__ = [
     "moderate_retry_next_sleep",
     "moderate_retry_sleep_seconds",
     "parse_rate_limit_retry_seconds",
+    "poll_exponential_advance_sleep",
+    "poll_exponential_sleep_now",
     "poll_with_exponential_backoff_until",
 ]

@@ -7,11 +7,11 @@
   (caller passes ``allow_combine_prereq=False`` on retry).
 """
 
-from greenfloor.core.coin_ops.gate_bridge import (
-    coin_op_should_stop,
-    evaluate_coin_split_gate,
-)
 from greenfloor.core.coin_ops._bridge import (
+    coin_op_should_stop,
+    coin_split_gate_as_payload,
+    evaluate_coin_split_gate,
+    is_spendable_wallet_coin,
     coin_meets_coin_op_min_amount,
     coin_op_min_amount_mojos,
     coin_op_target_amount_allowed,
@@ -28,6 +28,7 @@ from greenfloor.core.coin_ops._bridge import (
 from greenfloor.core.coin_ops.types import (
     BucketSpec,
     CoinOpPlan,
+    CoinSplitGateResult,
     CombineInputSelectionMode,
     SplitAutoSelectPlan,
     SplitCoinPlan,
@@ -39,7 +40,9 @@ from greenfloor.core.coin_ops.types import (
 __all__ = [
     "coin_op_should_stop",
     "evaluate_coin_split_gate",
+    "is_spendable_wallet_coin",
     "BucketSpec",
+    "CoinSplitGateResult",
     "CoinOpPlan",
     "CombineInputSelectionMode",
     "SplitAutoSelectPlan",

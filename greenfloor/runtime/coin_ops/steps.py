@@ -12,6 +12,8 @@ from greenfloor.core.coin_ops import (
     SplitPlanningProfile,
     SplitSkipPlan,
     coin_meets_coin_op_min_amount,
+    coin_split_gate_as_payload,
+    evaluate_coin_split_gate,
     plan_auto_combine_inputs,
     plan_auto_split_selection,
 )
@@ -32,7 +34,6 @@ from greenfloor.runtime.coin_ops.runtime import (
     CoinOpIterationExecuteResult,
     CoinOpIterationNeedsConfirmation,
     CoinOpIterationSkipLoop,
-    evaluate_coin_split_gate,
 )
 from greenfloor.runtime.coin_ops_backend import CoinOpBackend
 
@@ -85,13 +86,14 @@ def run_coin_split_step(
     }
     split_gate: dict[str, int | bool | str] | None = None
     if params.denomination_target is not None:
-        split_gate = evaluate_coin_split_gate(
+        gate = evaluate_coin_split_gate(
             asset_scoped_coins=asset_scoped_coins,
             resolved_asset_id=params.resolved_asset_id,
             size_base_units=params.denomination_target.size_base_units,
             required_count=params.denomination_target.required_count,
         )
-        if bool(split_gate["ready"]) and not params.force_split_when_ready:
+        split_gate = coin_split_gate_as_payload(gate)
+        if gate.ready and not params.force_split_when_ready:
             return CoinSplitStepResult(
                 step=CoinOpIterationNeedsConfirmation(
                     message=(

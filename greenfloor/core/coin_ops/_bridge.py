@@ -20,9 +20,12 @@ from greenfloor.core.coin_ops.selection_bridge import (
 from greenfloor.core.coin_ops.selection_bridge import (
     split_would_create_sub_cat_change as _split_would_create_sub_cat_change,
 )
+from typing import Any
+
 from greenfloor.core.coin_ops.types import (
     BucketSpec,
     CoinOpPlan,
+    CoinSplitGateResult,
     CombineInputSelectionMode,
     SplitAutoSelectPlan,
     SplitPlanningProfile,
@@ -220,3 +223,68 @@ def plan_auto_combine_inputs(
         exclude_coin_ids=exclude_coin_ids,
         max_count=max_count,
     )
+
+
+def is_spendable_wallet_coin(coin: dict[str, Any]) -> bool:
+    return bool(_coin_ops_kernel().is_spendable_wallet_coin(coin))
+
+
+def _require_coin_split_gate_result(value: object) -> CoinSplitGateResult:
+    if not isinstance(value, CoinSplitGateResult):
+        raise TypeError("kernel returned non-CoinSplitGateResult result")
+    return value
+
+
+def evaluate_coin_split_gate(
+    *,
+    asset_scoped_coins: list[dict[str, Any]],
+    resolved_asset_id: str,
+    size_base_units: int,
+    required_count: int,
+) -> CoinSplitGateResult:
+    return _require_coin_split_gate_result(
+        _coin_ops_kernel().evaluate_coin_split_gate(
+            asset_scoped_coins,
+            str(resolved_asset_id),
+            int(size_base_units),
+            int(required_count),
+        )
+    )
+
+
+def coin_split_gate_as_payload(gate: CoinSplitGateResult) -> dict[str, int | bool | str]:
+    return {
+        "asset_id": gate.asset_id,
+        "size_base_units": gate.size_base_units,
+        "required_min_count": gate.required_min_count,
+        "current_count": gate.current_count,
+        "larger_reserve_coin_count": gate.larger_reserve_coin_count,
+        "extra_denom_coin_count": gate.extra_denom_coin_count,
+        "reserve_ready": gate.reserve_ready,
+        "ready": gate.ready,
+    }
+
+
+def coin_op_should_stop(
+    *,
+    until_ready: bool,
+    final_readiness: CoinSplitGateResult | dict[str, int | bool | str] | None,
+    coin_ids: list[str],
+    iteration: int,
+    max_iterations: int,
+) -> tuple[bool, str]:
+    ready: bool | None
+    if final_readiness is None:
+        ready = None
+    elif isinstance(final_readiness, CoinSplitGateResult):
+        ready = final_readiness.ready
+    else:
+        ready = bool(final_readiness.get("ready", False))
+    stop, reason = _coin_ops_kernel().coin_op_should_stop(
+        bool(until_ready),
+        ready,
+        bool(coin_ids),
+        int(iteration),
+        int(max_iterations),
+    )
+    return bool(stop), str(reason)

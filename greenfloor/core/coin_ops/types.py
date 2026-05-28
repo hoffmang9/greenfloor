@@ -56,3 +56,15 @@ class SplitSkipPlan:
 
 
 SplitAutoSelectPlan = SplitCoinPlan | SplitCombinePrereqPlan | SplitSkipPlan
+
+
+@dataclass(frozen=True, slots=True)
+class CoinSplitGateResult:
+    asset_id: str
+    size_base_units: int
+    required_min_count: int
+    current_count: int
+    larger_reserve_coin_count: int
+    extra_denom_coin_count: int
+    reserve_ready: bool
+    ready: bool
