@@ -247,4 +247,3 @@ def post_offer_phase(
         }
     assert splash is not None
     return splash.post_offer(offer_text)
-

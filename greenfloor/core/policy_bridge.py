@@ -12,6 +12,7 @@ _KERNEL_REBUILD_HINT = (
     "greenfloor-signer-pyo3/Cargo.toml`)."
 )
 
+
 def _require_policy_method(method_name: str):
     kernel = kernel_bridge.policy_kernel()
     method = getattr(kernel, method_name, None)
@@ -38,9 +39,7 @@ def _coerce_expected_publish_asset_fields(payload: object) -> ExpectedPublishAss
     )
     missing = [key for key in required_keys if key not in payload]
     if missing:
-        raise TypeError(
-            "expected_publish_asset_fields missing keys: " + ", ".join(sorted(missing))
-        )
+        raise TypeError("expected_publish_asset_fields missing keys: " + ", ".join(sorted(missing)))
     return {
         "expected_offered_asset_id": str(payload["expected_offered_asset_id"]),
         "expected_offered_symbol": str(payload["expected_offered_symbol"]),
