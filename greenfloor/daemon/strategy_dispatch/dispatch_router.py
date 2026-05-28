@@ -15,7 +15,7 @@ from greenfloor.core.cycle import (
 )
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.daemon.strategy_dispatch.parallel_managed import execute_actions_parallel
+from greenfloor.daemon.offer_dispatch.parallel import execute_actions_parallel
 from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
 from greenfloor.daemon.strategy_dispatch.runtime import StrategyDispatchHooks, hooks_from_module
 from greenfloor.daemon.strategy_dispatch.sequential_path import execute_actions_sequential

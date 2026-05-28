@@ -9,7 +9,7 @@ from greenfloor.core.cycle import is_managed_worker_transient_error, sequential_
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.market_logging import _log_offer_action_timing
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
-from greenfloor.daemon.strategy_dispatch.items import action_item
+from greenfloor.daemon.offer_dispatch.items import action_item
 from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
 from greenfloor.daemon.strategy_dispatch.runtime import StrategyDispatchHooks
 from greenfloor.storage.sqlite import SqliteStore
