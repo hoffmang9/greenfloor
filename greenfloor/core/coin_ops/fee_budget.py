@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from greenfloor.core.coin_ops._bridge import _kernel, _require_coin_op_plans
+from greenfloor.core.coin_ops._bridge import _require_coin_op_plans
 from greenfloor.core.coin_ops.types import CoinOpPlan
+from greenfloor.core.kernel_bridge import import_kernel
 
 
 def projected_coin_ops_fee_mojos(
@@ -11,7 +12,7 @@ def projected_coin_ops_fee_mojos(
     combine_fee_mojos: int,
 ) -> int:
     return int(
-        _kernel().projected_coin_ops_fee_mojos(
+        import_kernel().projected_coin_ops_fee_mojos(
             plans,
             int(split_fee_mojos),
             int(combine_fee_mojos),
@@ -26,7 +27,7 @@ def fee_budget_allows_execution(
     projected_mojos: int,
 ) -> bool:
     return bool(
-        _kernel().fee_budget_allows_execution(
+        import_kernel().fee_budget_allows_execution(
             int(max_daily_fee_budget_mojos),
             int(spent_today_mojos),
             int(projected_mojos),
@@ -47,7 +48,7 @@ def partition_plans_by_budget(
     Preserves input order. If budget is unlimited (<=0), all plans are executable.
     Can split a plan by op_count if only partial operations fit.
     """
-    allowed, skipped = _kernel().partition_plans_by_budget(
+    allowed, skipped = import_kernel().partition_plans_by_budget(
         plans,
         int(split_fee_mojos),
         int(combine_fee_mojos),

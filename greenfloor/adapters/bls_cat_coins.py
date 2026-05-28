@@ -37,11 +37,7 @@ def _hex_to_bytes(value: str) -> bytes:
     return bytes.fromhex(raw)
 
 
-def _import_greenfloor_signer() -> Any:
-    import importlib
-
-    return importlib.import_module("greenfloor_signer")
-
+from greenfloor.core.kernel_bridge import import_kernel
 
 @dataclass(slots=True)
 class _CatCoinAdapter:
@@ -90,7 +86,7 @@ def _fetch_cat_summaries(
     receive_address: str,
     asset_id: str,
 ) -> list[dict[str, Any]]:
-    signer = _import_greenfloor_signer()
+    signer = import_kernel()
     raw = signer.list_bls_cat_coins(network, receive_address, asset_id)
     if not isinstance(raw, list):
         return []
@@ -98,7 +94,7 @@ def _fetch_cat_summaries(
 
 
 def _fetch_cat_summaries_by_ids(*, network: str, coin_ids: list[str]) -> list[dict[str, Any]]:
-    signer = _import_greenfloor_signer()
+    signer = import_kernel()
     raw = signer.list_bls_cat_coins_by_ids(network, coin_ids)
     if not isinstance(raw, list):
         return []

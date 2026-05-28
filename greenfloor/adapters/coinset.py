@@ -9,13 +9,13 @@ signer.
 
 from __future__ import annotations
 
-import importlib
 import json
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
 
+from greenfloor.core.kernel_bridge import import_kernel
 from greenfloor.hex_utils import normalize_hex_id
 
 _COINSET_TX_ID_KEYS = (
@@ -129,24 +129,13 @@ def extract_coin_ids_from_offer_payload(payload: dict[str, Any]) -> list[str]:
     return coin_ids
 
 
-_COINSET_SIGNER_INSTALL_HINT = (
-    "Install the greenfloor_signer extension (for example: "
-    "`maturin develop -m greenfloor-signer-pyo3` from the repo root)."
-)
-
-
-def _import_greenfloor_signer() -> Any:
+def _require_rust_coinset(name: str, *args: Any, **kwargs: Any) -> Any:
     try:
-        return importlib.import_module("greenfloor_signer")
+        signer = import_kernel()
     except ImportError as exc:
         raise RuntimeError(
-            f"greenfloor_signer_required_for_coinset_io: {_COINSET_SIGNER_INSTALL_HINT} "
-            f"Original error: {exc}"
+            f"greenfloor_signer_required_for_coinset_io: {exc}"
         ) from exc
-
-
-def _require_rust_coinset(name: str, *args: Any, **kwargs: Any) -> Any:
-    signer = _import_greenfloor_signer()
     fn = getattr(signer, name, None)
     if not callable(fn):
         raise RuntimeError(f"greenfloor_signer_missing_coinset_fn:{name}")

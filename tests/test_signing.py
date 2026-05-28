@@ -165,7 +165,7 @@ def test_build_signed_spend_bundle_signer_import_error(monkeypatch) -> None:
         "_load_master_private_key",
         lambda *_args, **_kwargs: (b"\x01" * 32, None),
     )
-    monkeypatch.setattr(signing_mod, "_import_greenfloor_signer", _fail_import)
+    monkeypatch.setattr(signing_mod, "import_kernel", _fail_import)
     result = signing_mod.build_signed_spend_bundle(
         {
             "key_id": "k1",
@@ -493,7 +493,7 @@ def test_from_input_spend_bundle_xch_calls_greenfloor_native(monkeypatch) -> Non
         nonce = b"\x22" * 32
         payments = [_Payment()]
 
-    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_signer", lambda: _Native)
+    monkeypatch.setattr(native_offer_mod, "import_kernel", lambda: _Native)
 
     result = native_offer_mod.from_input_spend_bundle_xch(
         sdk=_Sdk,
@@ -541,7 +541,7 @@ def test_from_input_spend_bundle_xch_supports_sdk_byte_wrapper_types(monkeypatch
         nonce = _ByteWrapper(b"\xaa" * 32)
         payments = [_Payment()]
 
-    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_signer", lambda: _Native)
+    monkeypatch.setattr(native_offer_mod, "import_kernel", lambda: _Native)
 
     result = native_offer_mod.from_input_spend_bundle_xch(
         sdk=_Sdk,
@@ -576,7 +576,7 @@ def test_from_input_spend_bundle_xch_propagates_native_errors(monkeypatch) -> No
         nonce = b"\x22" * 32
         payments = [_Payment()]
 
-    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_signer", lambda: _Native)
+    monkeypatch.setattr(native_offer_mod, "import_kernel", lambda: _Native)
 
     try:
         native_offer_mod.from_input_spend_bundle_xch(
@@ -806,7 +806,7 @@ def test_build_mixed_split_rejects_sub_unit_cat_outputs(monkeypatch) -> None:
         def build_bls_mixed_split(_network: str, _sk: bytes, _request: dict) -> dict:
             return {"error": "cat_output_below_minimum_mojos"}
 
-    monkeypatch.setattr(signing_mod, "_import_greenfloor_signer", lambda: _Signer())
+    monkeypatch.setattr(signing_mod, "import_kernel", lambda: _Signer())
 
     spend_bundle_hex, err = signing_mod._build_mixed_split_spend_bundle(
         {

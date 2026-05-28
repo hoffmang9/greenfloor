@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from . import _bridge as bridge
+from greenfloor.core.kernel_bridge import import_kernel
 
 can_parallelize_managed_offers = bridge.can_parallelize_managed_offers
 classify_dexie_stale_offer_status = bridge.classify_dexie_stale_offer_status
@@ -37,7 +38,7 @@ single_input_preferred_skip_reason = bridge.single_input_preferred_skip_reason
 
 
 def market_cycle_phases() -> tuple[str, ...]:
-    return tuple(bridge._import_signer().market_cycle_phases())
+    return tuple(import_kernel().market_cycle_phases())
 
 
 MARKET_CYCLE_PHASES: tuple[str, ...] = market_cycle_phases()

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from greenfloor.core.coin_ops.types import CoinOpPlan
-from greenfloor.core.kernel_bridge import import_kernel
 
 
 def _require_coin_op_plans(value: object) -> list[CoinOpPlan]:
@@ -15,7 +14,3 @@ def _require_coin_op_plans(value: object) -> list[CoinOpPlan]:
             raise TypeError("kernel returned non-CoinOpPlan result")
         plans.append(item)
     return plans
-
-
-def _kernel():
-    return import_kernel()

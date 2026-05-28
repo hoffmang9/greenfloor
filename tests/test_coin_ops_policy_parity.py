@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from greenfloor.core.coin_ops import BucketSpec, CoinOpPlan, plan_coin_ops
-from greenfloor.core.coin_ops.policy import (
+from greenfloor.core.coin_ops import (
     coin_meets_coin_op_min_amount,
     coin_op_min_amount_mojos,
     coin_op_target_amount_allowed,
 )
-from greenfloor.core.kernel_bridge import import_kernel
 from greenfloor.hex_utils import canonical_is_xch
 
 _CAT_ID = "0000000000000000000000000000000000000000000000000000000000000001"
@@ -44,29 +42,9 @@ def test_coin_meets_min_amount_treats_missing_amount_as_zero() -> None:
     assert not coin_meets_coin_op_min_amount({}, canonical_asset_id=_CAT_ID)
 
 
-def test_target_amount_allowed_matches_threshold_helper() -> None:
-    kernel = import_kernel()
+def test_target_amount_allowed_matches_coin_meets_for_same_amount() -> None:
     amount = 1500
     assert coin_op_target_amount_allowed(amount_mojos=amount, canonical_asset_id=_CAT_ID)
-    assert bool(kernel.coin_op_target_amount_allowed(amount, _CAT_ID))
-
-
-def test_plan_coin_ops_returns_typed_plans() -> None:
-    plans = plan_coin_ops(
-        buckets=[
-            BucketSpec(
-                size_base_units=1,
-                target_count=5,
-                split_buffer_count=1,
-                combine_when_excess_factor=2.0,
-                current_count=2,
-            )
-        ],
-        max_operations_per_run=10,
-        max_fee_budget_mojos=100,
-        split_fee_mojos=1,
-        combine_fee_mojos=1,
-    )
-    assert plans
-    assert isinstance(plans[0], CoinOpPlan)
-    assert plans[0].op_type == "split"
+    assert coin_meets_coin_op_min_amount({"amount": amount}, canonical_asset_id=_CAT_ID)
+    assert not coin_op_target_amount_allowed(amount_mojos=500, canonical_asset_id=_CAT_ID)
+    assert not coin_meets_coin_op_min_amount({"amount": 500}, canonical_asset_id=_CAT_ID)

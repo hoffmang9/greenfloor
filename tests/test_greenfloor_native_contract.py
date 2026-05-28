@@ -31,15 +31,12 @@ def test_verify_offer_text_for_dexie_uses_greenfloor_signer_when_sdk_lacks_valid
 
 
 def test_verify_offer_text_for_dexie_reports_missing_validators(monkeypatch) -> None:
-    def _import_module(name: str):
-        if name == "greenfloor_signer":
-            raise ImportError("disable signer path for this test")
-        return __import__(name)
+    import greenfloor.runtime.offer_publish as offer_publish_mod
 
-    monkeypatch.setattr(
-        "greenfloor.runtime.offer_publish.importlib.import_module",
-        _import_module,
-    )
+    def _fail_kernel():
+        raise ImportError("disable signer path for this test")
+
+    monkeypatch.setattr(offer_publish_mod, "import_kernel", _fail_kernel)
 
     class _Sdk:
         pass
@@ -81,7 +78,7 @@ def test_from_input_spend_bundle_xch_contract_bytes_in_bytes_out(monkeypatch) ->
         nonce = b"\x22" * 32
         payments = [_Payment()]
 
-    monkeypatch.setattr(native_offer_mod, "_import_greenfloor_signer", lambda: _Signer)
+    monkeypatch.setattr(native_offer_mod, "import_kernel", lambda: _Signer)
 
     result = native_offer_mod.from_input_spend_bundle_xch(
         sdk=_Sdk,
