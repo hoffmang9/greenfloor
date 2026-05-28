@@ -12,6 +12,7 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.cycle import is_transient_dexie_visibility_404_error
+from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.core.retry_policy import (
     dexie_invalid_offer_retry_sleep,
     dexie_invalid_offer_should_retry,
@@ -36,11 +37,6 @@ def initialize_manager_file_logging(home_dir: str, *, log_level: str | None) -> 
         log_level=log_level,
         service_logger=_runtime_logger,
     )
-
-
-def normalize_offer_side(value: str | None) -> str:
-    side = str(value or "").strip().lower()
-    return "buy" if side == "buy" else "sell"
 
 
 def dexie_offer_view_url(*, dexie_base_url: str, offer_id: str) -> str:

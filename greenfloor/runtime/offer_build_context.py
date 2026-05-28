@@ -12,7 +12,7 @@ from greenfloor.core.offer_policy import (
     resolve_offer_expiry_for_pricing,
     resolve_quote_price_for_pricing,
 )
-from greenfloor.runtime.offer_publish import normalize_offer_side
+from greenfloor.core.offer_side import normalize_offer_side
 
 
 def keyring_yaml_path_for_market(program: ProgramConfig, market: MarketConfig) -> str:

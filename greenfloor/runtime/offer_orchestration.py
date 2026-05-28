@@ -13,13 +13,13 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.core import offer_policy
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
+from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_publish import (
     dexie_offer_view_url,
     expected_publish_asset_fields,
     log_signed_offer_artifact,
-    normalize_offer_side,
     post_offer_phase,
 )
 from greenfloor.storage.sqlite import SqliteStore

@@ -1,5 +1,22 @@
 # Progress Log
 
+## 2026-05-28 (Signer fixture hygiene follow-up — consolidate protocols and tests)
+
+- **Kernel protocols:** re-collapsed domain splits back into single `greenfloor/core/kernel_protocol.py` (five-file split removed).
+- **Offer side + request:** canonical `normalize_offer_side` in `core/offer_side.py`; signer request builder in `core/signer_offer_request.py` (uses `mojo_multiplier_for_le`).
+- **Rust tests:** `offer_leg_scenarios_build_on_simulator` (renamed from roundtrip; build-only on sim for CAT:CAT legs).
+- **Python tests:** `test_signer_golden_fixture_contract` (schema + core parity + validate in one parametrized test); `test_offer_runtime.py` covers signer IO shell only (leg math owned by parity fixtures).
+- **Fixtures:** all golden JSON embed `runtime_parity` (action_side, resolved assets, size/price, multipliers).
+
+## 2026-05-28 (Rust migration items 2–3 — signer fixtures, bridge/protocol hygiene, docs)
+
+- **Golden fixtures:** `buy_side.json`, `cat_cat.json`, and roundtrip scenarios exported from simulator with embedded `create_offer_request` and `runtime_parity`; regenerate via `EXPORT_SIGNER_FIXTURES=1 cargo test export_signer_fixtures_to_disk` in `greenfloor-signer/`.
+- **Rust tests:** `build_vault_cat_offer_roundtrips`, `offer_leg_scenarios_build_on_simulator`; shared `setup_roundtrip` / `build_offer_from_setup`; `fund_vault_two_cats()` for dual-CAT issuance.
+- **Python tests:** `tests/test_signer_create_offer_parity.py`; `tests/test_greenfloor_signer_integration.py` (config roundtrip + gated PyO3 integration).
+- **Kernel protocols:** composed in `kernel_protocol.py` (cycle, cancel, notification, offer, retry).
+- **Cycle bridge:** `_bridge_managed.py`, `_bridge_orchestration.py`, `_bridge_common.py`; no `_bridge.py` shim.
+- **Docs:** `docs/plan.md`, `docs/runbook.md`, ADR 0007 deferred notes updated for signer-only vault path.
+
 ## 2026-05-28 (Rust migration steps 14–16 — offer validate, build context, retry, coin-op gates)
 
 - **Step 14 — Retry policy (`greenfloor-signer/src/cycle/retry.rs`):** `parse_rate_limit_retry_seconds`, Dexie invalid-offer retry gating/sleep, Coinset fee lookup sleep; PyO3 `retry_py.rs`; Python `greenfloor/core/retry_policy.py` + `moderate_retry.py` / `coinset_runtime.py` wired to kernel.
@@ -92,7 +109,7 @@ Steps 1–13 moved deterministic daemon/coin-op/shared policy into `greenfloor-s
 - **Python IO glue:** `runtime/coin_ops/planning.py` and `selection.py` are thin re-exports (~80 lines total); CLI/daemon execution modules unchanged.
 - **Tests:** Rust unit tests in `selection.rs` and `split_planning.rs`; existing `tests/test_coin_ops_planning.py` and daemon parallel selection tests remain parity gates.
 - **Migration status:** step 11 complete for coin-op selection/planning helpers.
-- **Next step (deferred hygiene):** split `kernel_protocol.py` by domain before ~300 lines, keep hex parity gates in `test_coin_ops_policy_parity.py`.
+- **Deferred hygiene (superseded):** ~~split `kernel_protocol.py` by domain~~ — consolidated back into one module after signer-fixture work (2026-05-28).
 
 ## 2026-05-27 (Rust coin-op policy kernel — step 10)
 
@@ -184,7 +201,7 @@ Record these for the next migration agent; none are merge blockers for step 12.
 - **Orchestration FFI:** `greenfloor/core/cycle_orchestration.py` + `greenfloor-signer-pyo3/src/cycle/orchestration_py.rs` — `MarketBatchSelection`, `OfferStateRow`, `StaleSweepCandidate`, `StaleSweepHit`, `StaleSweepProgress`, `ParallelActionOutcome`; `main.py` stale sweep and market batch use attributes (not dict `.get()`).
 - **PyO3 layout:** monolithic `cycle.rs` split into `greenfloor-signer-pyo3/src/cycle/` (`managed_py`, `market_py`, `stale_sweep_py`, `offer_py`, …); `execution_py.rs` for batch planning bindings.
 - **Python packages:** `strategy_dispatch` and `market_cycle` are multi-module packages; `StrategyDispatchHooks` + explicit callables (no `dispatch_pkg` self-imports, no `strategy_dispatch._*` test aliases); `parallel_batch.build_parallel_dispatch_plan`; strategy phase split `strategy_eval_phase` / `strategy_exec_phase` (`StrategyConfig`, `datetime` on `MarketCycleRun.now`); `reservation_helpers` takes `MarketConfig`.
-- **Core cycle surface:** `core/cycle` package (`_bridge`, `reexports`, `policy`); public expand name `expand_planned_actions` only.
+- **Core cycle surface:** `core/cycle` package (`_bridge_managed`, `_bridge_orchestration`, `policy`, `__init__`); public expand name `expand_planned_actions` only.
 - **Migration status:** step 5 complete for strategy dispatch + orchestration typing; step 6 extracted cycle runner from `main.py`.
 
 ## 2026-05-27 (Rust cycle kernel — quality review follow-up)

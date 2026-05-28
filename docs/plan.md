@@ -52,8 +52,8 @@ Operator output/coin-op behavior notes:
 - `WalletAdapter` (daemon coin-op path) calls `signing.sign_and_broadcast()` directly.
 - Local BLS offer text construction lives in `greenfloor/offer_builder.py` (canonical); `greenfloor/cli/offer_builder_sdk.py` is a thin stdin/stdout wrapper for external tooling only.
 - Offer build/post orchestration (bootstrap → create → verify → publish) lives under `greenfloor/runtime/` with composition root `greenfloor/runtime/offer_execution.py` (see ADR 0005, ADR 0008).
-- Routing gates: `offer_execution_backend()` and `managed_offer_execution_backend()` in `greenfloor/config/models.py` select signer, Cloud Wallet, or local BLS paths.
-- Vault KMS installs use `greenfloor/runtime/offer_runtime.py` (Rust signer via PyO3); Cloud Wallet installs use `greenfloor/runtime/cloud_wallet/`.
+- Routing gates: `offer_execution_backend()` and `managed_offer_execution_backend()` in `greenfloor/config/models.py` select the vault KMS signer path when `signer.kms_key_id` and `vault.launcher_id` are set, otherwise local BLS for manual CLI sizes.
+- Vault KMS installs use `greenfloor/runtime/offer_runtime.py` (Rust signer via PyO3). Legacy `cloud_wallet:` blocks in `program.yaml` are rejected at config load.
 - No intermediate subprocess layers for in-process Python paths. See `AGENTS.md` for design discipline rules.
 
 ## Offer File Contract
@@ -152,12 +152,12 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
 
 - `tests/test_chia_wallet_sdk_simulator_harness.py` was deleted (2026-02-25): all six tests
   ran `cargo test` on `chia-sdk-driver` Rust internals (CAT issuance, catalog, reward distributor)
-  and tested no GreenFloor code. SDK has its own CI. `test_greenfloor_native_integration.py`
-  covers the SDK surface GreenFloor actually uses.
+  and tested no GreenFloor code. SDK has its own CI. `tests/test_greenfloor_signer_integration.py`
+  covers the signer surface GreenFloor actually uses.
 - CI pytest runs as a standalone step (`"Test suite (pytest)"`) with `-v --tb=short`, giving each test its own line in logs and a dedicated collapsible section with pass/fail badge. The `pre-commit` step skips pytest via `SKIP: pytest` so lint/type-check and tests have independent status indicators. Locally, `pre-commit run --all-files` still runs pytest as part of the hook set.
 - Three tests are intentionally skipped in CI:
   - `test_replay_captured_cat_parse_cases` — requires `GREENFLOOR_CAT_PARSE_REPLAY_CASES_DIR` (operator-provided fixture directory).
-  - `test_greenfloor_native_validate_offer_rejects_garbage` and `test_greenfloor_native_from_input_spend_bundle_xch_round_trip_offer` — require `GREENFLOOR_RUN_NATIVE_INTEGRATION_TESTS=1` (compiled Rust `chia-wallet-sdk` bindings).
+  - `test_greenfloor_signer_validate_offer_rejects_garbage` and `test_greenfloor_signer_from_input_spend_bundle_xch_round_trip_offer` in `tests/test_greenfloor_signer_integration.py` — require `GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS=1` (compiled `greenfloor_signer` + `chia-wallet-sdk` bindings).
 
 ## Deferred Backlog (Post-Testnet Proof)
 

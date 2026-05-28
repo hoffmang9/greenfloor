@@ -104,6 +104,21 @@ impl SimulatorVaultHarness {
     }
 
     pub fn fund_vault_cat(&mut self, cat_amount: u64) -> Cat {
+        self.fund_vault_cat_labeled(cat_amount, 0)
+    }
+
+    /// Fund the vault with two CAT assets via sequential issuance spends.
+    pub fn fund_vault_two_cats(&mut self, base_amount: u64, quote_amount: u64) -> (Cat, Cat) {
+        let base_cat = self.fund_vault_cat(base_amount);
+        let quote_cat = self.fund_vault_cat(quote_amount);
+        if base_cat.info.asset_id == quote_cat.info.asset_id {
+            panic!("expected distinct CAT asset ids from sequential issuance");
+        }
+        (base_cat, quote_cat)
+    }
+
+    /// Fund the vault with a CAT issued under ``Id::New(label)`` within one issuance spend.
+    pub fn fund_vault_cat_labeled(&mut self, cat_amount: u64, label: usize) -> Cat {
         if self
             .chain
             .sim
@@ -118,6 +133,7 @@ impl SimulatorVaultHarness {
         let mut sim = self.chain.sim.lock().expect("sim lock");
         let issuer = sim.bls(10_000_000_000);
         let vault_hint = ctx.hint(self.chain.p2_message_hash).expect("vault hint");
+        let issue_id = Id::New(label);
         let mut spends = Spends::new(issuer.puzzle_hash);
         spends.add(issuer.coin);
         let deltas = spends
@@ -126,7 +142,7 @@ impl SimulatorVaultHarness {
                 &[
                     Action::single_issue_cat(None, cat_amount),
                     Action::send(
-                        Id::New(0),
+                        issue_id,
                         self.chain.p2_message_hash,
                         cat_amount,
                         vault_hint,
@@ -146,7 +162,7 @@ impl SimulatorVaultHarness {
             .expect("confirm cat funding");
         drop(sim);
 
-        let cat = outputs.cats[&Id::New(0)]
+        let cat = outputs.cats[&issue_id]
             .iter()
             .find(|cat| {
                 cat.coin.amount == cat_amount
@@ -154,7 +170,9 @@ impl SimulatorVaultHarness {
             })
             .cloned()
             .expect("funded cat coin");
-        self.chain.asset_id = cat.info.asset_id;
+        if label == 0 {
+            self.chain.asset_id = cat.info.asset_id;
+        }
         cat
     }
 

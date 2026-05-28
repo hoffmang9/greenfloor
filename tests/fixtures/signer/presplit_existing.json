@@ -6,5 +6,30 @@
   "offer_nonce": "a62095a926173685d5b8e3fb46662305016b6679b5dcede65104712f8d14f38c",
   "selected_coin_ids": [],
   "split_spend_bundle_hex": null,
-  "presplit_coin_id": "7d3f746ba155e2df39ee520b0c701b16ff94cdc54b0f989e7c478b032aa0df39"
+  "presplit_coin_id": "7d3f746ba155e2df39ee520b0c701b16ff94cdc54b0f989e7c478b032aa0df39",
+  "runtime_parity": {
+    "action_side": "sell",
+    "resolved_base_asset_id": "457275a8b9926058d8c9c2ebae52ac5938a4034345cafef6e87f4c7c24b749d8",
+    "resolved_quote_asset_id": "xch",
+    "size_base_units": 1,
+    "quote_price": 1.0,
+    "base_unit_mojo_multiplier": 1000,
+    "quote_unit_mojo_multiplier": 1000000000000
+  },
+  "create_offer_request": {
+    "receive_address": "xch1llh50uwrps0p8pjspk0u5zmufwwhs3lxtx8q6r2cwsm94qt9sqcq33aemc",
+    "offer_asset_id": "457275a8b9926058d8c9c2ebae52ac5938a4034345cafef6e87f4c7c24b749d8",
+    "offer_amount": 1000,
+    "request_asset_id": "xch",
+    "request_amount": 1000000000000,
+    "offer_coin_ids": [
+      "33b679d365672f38bb4db7896fc0ad0fb12b04c95fc22cfaa54272c2314e95e7"
+    ],
+    "presplit_coin_ids": [
+      "7d3f746ba155e2df39ee520b0c701b16ff94cdc54b0f989e7c478b032aa0df39"
+    ],
+    "split_input_coins": false,
+    "broadcast_split": false,
+    "expires_at": null
+  }
 }

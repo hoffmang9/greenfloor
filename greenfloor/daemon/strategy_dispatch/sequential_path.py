@@ -7,9 +7,9 @@ from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig, managed_offer_execution_backend
 from greenfloor.core.cycle import is_managed_worker_transient_error, sequential_action_route
 from greenfloor.core.planned_action import PlannedAction
+from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.market_logging import _log_offer_action_timing
 from greenfloor.daemon.offer_dispatch.items import action_item
-from greenfloor.daemon.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.strategy_execution import StrategyActionResult, StrategyDispatchHooks
 from greenfloor.storage.sqlite import SqliteStore
 

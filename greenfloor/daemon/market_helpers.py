@@ -51,11 +51,6 @@ def _market_pricing(market: Any) -> dict[str, Any]:
     return dict(getattr(market, "pricing", {}) or {})
 
 
-def _normalize_offer_side(value: Any) -> str:
-    side = str(value or "").strip().lower()
-    return "buy" if side == "buy" else "sell"
-
-
 def _base_unit_mojo_multiplier_for_market(*, market: Any) -> int:
     pricing = getattr(market, "pricing", {}) or {}
     default_multiplier = default_mojo_multiplier_for_asset(str(getattr(market, "base_asset", "")))

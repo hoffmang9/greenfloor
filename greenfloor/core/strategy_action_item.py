@@ -1,9 +1,11 @@
-"""Typed strategy offer action result items."""
+"""Typed strategy offer action outcome (shared by cycle kernel and daemon dispatch)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+
+from greenfloor.core.offer_side import normalize_offer_side
 
 # Statuses that count toward strategy executed_count, coin-op sell adjustment,
 # and reservation release_success.
@@ -96,11 +98,9 @@ class StrategyActionItem:
         exc: Exception,
         transient_upstream: bool,
     ) -> StrategyActionItem:
-        from greenfloor.daemon.market_helpers import _normalize_offer_side
-
         return cls(
             size=int(getattr(action, "size", 0)),
-            side=_normalize_offer_side(getattr(action, "side", "sell")),
+            side=normalize_offer_side(getattr(action, "side", "sell")),
             status="skipped",
             reason=f"parallel_offer_worker_error:{exc}",
             offer_id=None,

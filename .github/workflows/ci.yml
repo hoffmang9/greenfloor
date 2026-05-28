@@ -98,6 +98,10 @@ jobs:
       - name: "Test suite (pytest)"
         run: pytest -v --tb=short
 
+      - name: Pytest (signer marker)
+        if: matrix.run_rust_tests
+        run: pytest -v --tb=short -m signer
+
       - uses: ./.github/actions/wheel-cache
         if: matrix.run_sdk_integration
         with:
@@ -111,4 +115,4 @@ jobs:
 
       - name: Pytest (greenfloor_signer + chia-wallet-sdk offer round-trip on Ubuntu)
         if: matrix.run_sdk_integration
-        run: GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS=1 pytest -vv -s tests/test_greenfloor_native_integration.py
+        run: GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS=1 pytest -vv -s tests/test_greenfloor_signer_integration.py

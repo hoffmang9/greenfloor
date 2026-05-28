@@ -9,7 +9,14 @@ from typing import Any
 
 from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
-from greenfloor.hex_utils import canonical_is_xch, default_mojo_multiplier_for_asset
+from greenfloor.core.offer_side import normalize_offer_side
+from greenfloor.core.signer_offer_request import (
+    build_signer_create_offer_request,
+    quote_mojos_for_base_size,
+    resolve_quote_unit_multiplier,
+    signer_split_asset_id,
+)
+from greenfloor.hex_utils import canonical_is_xch
 from greenfloor.offer_bootstrap import BootstrapLadderEntry, plan_bootstrap_mixed_outputs
 from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
@@ -21,7 +28,6 @@ from greenfloor.runtime.offer_orchestration import (
     build_and_post_offer,
     default_offer_post_deps,
 )
-from greenfloor.runtime.offer_publish import normalize_offer_side
 
 _runtime_logger = logging.getLogger("greenfloor.manager")
 
@@ -125,17 +131,17 @@ def signer_bootstrap_phase(
         return {"status": "skipped", "reason": f"missing_{side}_ladder"}
 
     pricing = dict(market.pricing or {})
-    quote_unit_multiplier = int(
-        pricing.get(
-            "quote_unit_mojo_multiplier",
-            default_mojo_multiplier_for_asset(str(resolved_quote_asset_id)),
-        )
+    quote_unit_multiplier = resolve_quote_unit_multiplier(
+        pricing=pricing,
+        resolved_quote_asset_id=str(resolved_quote_asset_id),
     )
     if side == "buy":
         ladder_for_split = []
         for entry in side_ladder:
-            quote_amount = int(
-                round(float(entry.size_base_units) * float(quote_price) * quote_unit_multiplier)
+            quote_amount = quote_mojos_for_base_size(
+                size_base_units=int(entry.size_base_units),
+                quote_price=float(quote_price),
+                quote_unit_multiplier=quote_unit_multiplier,
             )
             if quote_amount <= 0:
                 continue
@@ -146,10 +152,14 @@ def signer_bootstrap_phase(
                     split_buffer_count=int(entry.split_buffer_count),
                 )
             )
-        split_asset_id = str(resolved_quote_asset_id).strip()
     else:
         ladder_for_split = side_ladder
-        split_asset_id = str(resolved_base_asset_id).strip()
+
+    split_asset_id = signer_split_asset_id(
+        action_side=action_side,
+        resolved_base_asset_id=resolved_base_asset_id,
+        resolved_quote_asset_id=resolved_quote_asset_id,
+    )
 
     if not split_asset_id:
         return {"status": "skipped", "reason": f"missing_{side}_asset_for_bootstrap"}
@@ -301,71 +311,29 @@ def signer_create_offer_phase(
     split_input_coins: bool = True,
     broadcast_split: bool = True,
 ) -> dict[str, Any]:
-    side = normalize_offer_side(action_side)
-    offer_amount = int(
-        size_base_units
-        * int(
-            (market.pricing or {}).get(
-                "base_unit_mojo_multiplier",
-                default_mojo_multiplier_for_asset(str(resolved_base_asset_id)),
-            )
-        )
-    )
-    request_amount = int(
-        round(
-            float(size_base_units)
-            * float(quote_price)
-            * int(
-                (market.pricing or {}).get(
-                    "quote_unit_mojo_multiplier",
-                    default_mojo_multiplier_for_asset(str(resolved_quote_asset_id)),
-                )
-            )
-        )
-    )
-    if request_amount <= 0:
-        raise ValueError("request_amount must be positive")
-
-    if side == "buy":
-        offer_asset_id = str(resolved_quote_asset_id).strip()
-        request_asset_id = str(resolved_base_asset_id).strip()
-        offer_amount_mojos = request_amount
-        request_amount_mojos = offer_amount
-    else:
-        offer_asset_id = str(resolved_base_asset_id).strip()
-        request_asset_id = str(resolved_quote_asset_id).strip()
-        offer_amount_mojos = offer_amount
-        request_amount_mojos = request_amount
-
     expires_at_dt = dt.datetime.now(dt.UTC) + dt.timedelta(**{expiry_unit: int(expiry_value)})
-    expires_at_unix = int(expires_at_dt.timestamp())
-    receive_address = str(market.receive_address or "").strip()
-    if not receive_address:
-        raise ValueError("market.receive_address is required for signer offer build")
-
+    request = build_signer_create_offer_request(
+        market=market,
+        size_base_units=size_base_units,
+        quote_price=quote_price,
+        resolved_base_asset_id=resolved_base_asset_id,
+        resolved_quote_asset_id=resolved_quote_asset_id,
+        action_side=action_side,
+        split_input_coins=split_input_coins,
+        broadcast_split=broadcast_split,
+        expires_at_unix=int(expires_at_dt.timestamp()),
+    )
     config_path = _signer_config_path(program)
-    request = {
-        "receive_address": receive_address,
-        "offer_asset_id": offer_asset_id.removeprefix("0x"),
-        "offer_amount": int(offer_amount_mojos),
-        "request_asset_id": request_asset_id.removeprefix("0x"),
-        "request_amount": int(request_amount_mojos),
-        "offer_coin_ids": [],
-        "presplit_coin_ids": [],
-        "split_input_coins": bool(split_input_coins),
-        "broadcast_split": bool(broadcast_split),
-        "expires_at": expires_at_unix,
-    }
-    result = rust_signer.build_vault_cat_offer(config_path, request)
+    result = rust_signer.build_vault_cat_offer(config_path, request.to_payload())
     offer_text = str(result.get("offer", "")).strip()
     if not offer_text.startswith("offer1"):
         raise RuntimeError("signer_create_offer_failed:missing_offer_text")
     return {
         "offer_text": offer_text,
         "expires_at": expires_at_dt.isoformat(),
-        "offer_amount": offer_amount,
-        "request_amount": request_amount,
-        "side": side,
+        "offer_amount": request.offer_amount,
+        "request_amount": request.request_amount,
+        "side": normalize_offer_side(action_side),
         "execution_mode": str(result.get("execution_mode", "")).strip(),
         "create_result": dict(result) if isinstance(result, dict) else {},
     }

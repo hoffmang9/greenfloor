@@ -16,7 +16,7 @@ from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.core.cycle import (
     is_transient_managed_upstream_error_text,
 )
-from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.core.strategy_action_item import StrategyActionItem
 
 _POST_COOLDOWN_UNTIL: dict[str, float] = {}
 _CANCEL_COOLDOWN_UNTIL: dict[str, float] = {}

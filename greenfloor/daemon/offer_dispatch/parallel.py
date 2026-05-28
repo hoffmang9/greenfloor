@@ -14,12 +14,13 @@ from greenfloor.core.cycle import (
     reservation_release_status,
     should_apply_parallel_transient_cooldown,
 )
+from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.core.parallel_batch_plan import ParallelBatchPlan, ParallelQueueItem
 from greenfloor.core.parallel_reservation_context import parallel_reservation_asset_ids
 from greenfloor.core.planned_action import PlannedAction
+from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.cooldowns import _POST_COOLDOWN_UNTIL, _post_retry_config, _set_cooldown
 from greenfloor.daemon.inventory_scan import coinset_spendable_profiles_by_asset
-from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.market_logging import _log_market_decision, _log_offer_action_timing
 from greenfloor.daemon.offer_dispatch.items import (
     managed_skip_item,
@@ -30,7 +31,6 @@ from greenfloor.daemon.offer_dispatch.reservation import (
     reservation_wallet_id,
 )
 from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.daemon.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.strategy_execution import StrategyActionResult, StrategyDispatchHooks
 
 
@@ -57,7 +57,7 @@ def _run_parallel_submission(
         "parallel_offer_queue_wait",
         submit_index=submit_index,
         size=action.size,
-        side=_normalize_offer_side(action.side),
+        side=normalize_offer_side(action.side),
         queue_wait_ms=queue_wait_ms,
     )
     acquire_started = time.monotonic()

@@ -1,4 +1,4 @@
-"""Typed PyO3 surfaces for deterministic policy kernel bindings."""
+"""Composed PyO3 protocol surfaces for the deterministic policy kernel."""
 
 from __future__ import annotations
 
@@ -17,14 +17,22 @@ from greenfloor.core.managed_retry import ManagedRetryDecision
 from greenfloor.core.parallel_batch_plan import ParallelBatchPlan
 from greenfloor.core.parallel_reservation_context import ParallelReservationContext
 from greenfloor.core.planned_action import PlannedAction
-from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.core.strategy_action_item import StrategyActionItem
 
 if TYPE_CHECKING:
     from greenfloor.core.cancel_policy import CancelPolicyDecision, OpenOfferRow
-    from greenfloor.core.notifications import (
-        LowInventoryEvaluation,
-        LowInventoryInput,
-    )
+    from greenfloor.core.notifications import LowInventoryEvaluation, LowInventoryInput
+
+__all__ = [
+    "CancelPolicyKernelProtocol",
+    "CoinOpsKernelProtocol",
+    "CycleKernelProtocol",
+    "DeterministicPolicyKernelProtocol",
+    "NotificationKernelProtocol",
+    "OfferPolicyKernelProtocol",
+    "PolicyKernelProtocol",
+    "RetryPolicyKernelProtocol",
+]
 
 
 class CycleKernelProtocol(Protocol):
