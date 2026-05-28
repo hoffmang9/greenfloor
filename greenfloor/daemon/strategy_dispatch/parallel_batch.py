@@ -5,16 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from greenfloor.core.cycle import plan_parallel_submission_batch
-from greenfloor.core.parallel_batch_plan import ParallelBatchPlan
+from greenfloor.core.parallel_batch_plan import ParallelBatchPlan, ParallelSubmissionEntry
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.strategy_dispatch.items import managed_skip_item
-
-
-@dataclass(frozen=True, slots=True)
-class ParallelSubmissionPlanEntry:
-    submit_index: int
-    requested_amounts: dict[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,18 +28,9 @@ class ParallelDispatchPlan:
 def build_parallel_dispatch_plan(
     *,
     expanded_actions: list[PlannedAction],
-    entries: list[ParallelSubmissionPlanEntry],
-    spendable_profiles: dict[str, dict[str, int | bool]],
+    entries: list[ParallelSubmissionEntry],
 ) -> ParallelDispatchPlan:
-    batch_entries = [
-        {
-            "submit_index": entry.submit_index,
-            "requested_amounts": entry.requested_amounts,
-            "spendable_profiles": spendable_profiles,
-        }
-        for entry in entries
-    ]
-    plan: ParallelBatchPlan = plan_parallel_submission_batch(batch_entries)
+    plan: ParallelBatchPlan = plan_parallel_submission_batch(entries)
     skip_items: list[StrategyActionItem] = []
     for skip in plan.skip_items:
         skip_items.append(

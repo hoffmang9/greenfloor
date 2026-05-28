@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +34,7 @@ class MarketCycleRun:
     store: SqliteStore
     xch_price_usd: float | None
     previous_xch_price_usd: float | None
-    now: Any
+    now: datetime
     state_dir: Path
     reservation_coordinator: AssetReservationCoordinator | None
     result: MarketCycleResult

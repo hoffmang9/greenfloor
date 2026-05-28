@@ -4,13 +4,12 @@ use pyo3::types::{PyDict, PyList};
 
 use signer_core::{
     expand_planned_actions, filter_planned_actions_with_positive_repeat,
-    plan_parallel_submission_batch, sequential_action_route, ParallelBatchPlan,
-    ParallelSubmissionEntry, SequentialActionRoute,
+    plan_parallel_submission_batch, sequential_action_route, ParallelBatchPlan, SequentialActionRoute,
 };
 
 use crate::py_utils::{
-    extract_spendable_profiles, parallel_batch_plan_class, parallel_queue_item_class,
-    parallel_skip_item_class, string_i64_map_from_py_dict, string_i64_map_to_py_dict,
+    parallel_batch_plan_class, parallel_queue_item_class, parallel_skip_item_class,
+    parallel_submission_entry_from_py, string_i64_map_to_py_dict,
 };
 use crate::strategy_py::{planned_action_from_py, planned_actions_to_py_list};
 
@@ -73,24 +72,7 @@ fn plan_parallel_submission_batch_py(entries: &Bound<'_, PyAny>) -> PyResult<Py<
     let list = entries.downcast::<PyList>()?;
     let mut rust_entries = Vec::with_capacity(list.len());
     for item in list.iter() {
-        let row = item.downcast::<PyDict>()?;
-        let submit_index = row
-            .get_item("submit_index")?
-            .ok_or_else(|| PyValueError::new_err("submit_index required"))?
-            .extract::<usize>()?;
-        let requested_any = row
-            .get_item("requested_amounts")?
-            .ok_or_else(|| PyValueError::new_err("requested_amounts required"))?;
-        let requested = requested_any.downcast::<PyDict>()?;
-        let profiles_any = row
-            .get_item("spendable_profiles")?
-            .ok_or_else(|| PyValueError::new_err("spendable_profiles required"))?;
-        let profiles = profiles_any.downcast::<PyDict>()?;
-        rust_entries.push(ParallelSubmissionEntry {
-            submit_index,
-            requested_amounts: string_i64_map_from_py_dict(requested)?,
-            spendable_profiles: extract_spendable_profiles(profiles)?,
-        });
+        rust_entries.push(parallel_submission_entry_from_py(&item)?);
     }
     let plan = plan_parallel_submission_batch(&rust_entries);
     Python::attach(|py| Ok(parallel_batch_plan_to_py(py, &plan)?.into()))

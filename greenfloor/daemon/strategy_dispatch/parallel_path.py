@@ -26,8 +26,8 @@ from greenfloor.daemon.strategy_dispatch.items import (
     parallel_offer_worker_error_item,
     strategy_action_result,
 )
+from greenfloor.core.parallel_batch_plan import ParallelSubmissionEntry
 from greenfloor.daemon.strategy_dispatch.parallel_batch import (
-    ParallelSubmissionPlanEntry,
     PlannedParallelSubmission,
     build_parallel_dispatch_plan,
 )
@@ -61,7 +61,7 @@ def execute_actions_parallel(
     wallet_id = reservation_wallet_id(program)
     reservation_coordinator.probe_storage()
 
-    plan_entries: list[ParallelSubmissionPlanEntry] = []
+    pending_requests: list[tuple[int, dict[str, int]]] = []
     all_asset_ids: set[str] = set()
     for submit_index, action in enumerate(expanded_actions):
         requested_amounts = reservation_request_for_action(
@@ -73,22 +73,24 @@ def execute_actions_parallel(
             fee_amount_mojos=fee_amount_mojos,
         )
         all_asset_ids.update(requested_amounts.keys())
-        plan_entries.append(
-            ParallelSubmissionPlanEntry(
-                submit_index=submit_index,
-                requested_amounts=requested_amounts,
-            )
-        )
+        pending_requests.append((submit_index, requested_amounts))
 
     spendable_profiles = coinset_spendable_profiles_by_asset(
         program=program,
         market=market,
         asset_ids=all_asset_ids,
     )
+    batch_entries = [
+        ParallelSubmissionEntry(
+            submit_index=submit_index,
+            requested_amounts=requested_amounts,
+            spendable_profiles=spendable_profiles,
+        )
+        for submit_index, requested_amounts in pending_requests
+    ]
     dispatch_plan = build_parallel_dispatch_plan(
         expanded_actions=expanded_actions,
-        entries=plan_entries,
-        spendable_profiles=spendable_profiles,
+        entries=batch_entries,
     )
     items.extend(dispatch_plan.skip_items)
     submissions = dispatch_plan.submissions

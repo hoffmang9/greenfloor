@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from greenfloor.core.cycle import (
     aggregate_two_sided_offer_counts,
@@ -12,8 +11,9 @@ from greenfloor.core.cycle import (
     one_sided_offer_counts_by_side,
     resolve_tracked_sizes,
 )
-from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.config.models import MarketConfig
 from greenfloor.core.planned_action import PlannedAction
+from greenfloor.core.strategy_types import StrategyConfig
 from greenfloor.core.strategy import evaluate_market
 from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.strategy_reseed import _inject_reseed_action_if_no_active_offers
@@ -31,11 +31,11 @@ from greenfloor.storage.sqlite import SqliteStore
 
 
 def resolve_tracked_sizes_for_market(
-    *, market: MarketConfig, strategy_config: Any
+    *, market: MarketConfig, strategy_config: StrategyConfig
 ) -> list[int]:
     ladder_sizes = [
-        int(getattr(entry, "size_base_units", 0))
-        for side_entries in (getattr(market, "ladders", {}) or {}).values()
+        int(entry.size_base_units)
+        for side_entries in market.ladders.values()
         for entry in side_entries
     ]
     return resolve_tracked_sizes(
