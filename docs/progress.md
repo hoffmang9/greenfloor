@@ -1,8 +1,23 @@
 # Progress Log
 
+## 2026-05-27 (Review follow-up — enum outcomes + market dispatch extract)
+
+- **`ManagedActionStatus` enum (Rust):** `ManagedActionOutcome.status` is typed; PyO3 exposes `status` label + `is_pending_visibility` bool from Rust (no Python string compare).
+- **Lean Rust asset IDs:** removed `parallel_reservation_asset_ids` from the public signer surface; Python-only helper lives in `parallel_reservation_context.py` (renamed from `parallel_reservation_prep.py`).
+- **Managed post boundary:** `_classify_managed_post_outcome` centralizes dict → Rust classify in `managed_path.py`.
+- **Daemon split:** parallel/sequential market processing extracted to `cycle_market_dispatch.py`; `cycle_runner.run_once` delegates via `dispatch_selected_markets`.
+
+## 2026-05-27 (Rust cycle kernel step 7 — typed outcomes + dispatch shrink)
+
+- **Typed managed outcomes:** `ManagedActionOutcome` dataclass FFI for `classify_managed_post_result` / `classify_dexie_visibility_outcome`; Dexie visibility IO stays in `managed_path.py`, pure shaping in `items.py`.
+- **PlannedAction parallel planning:** `plan_parallel_managed_dispatch(expanded_actions, ctx, profiles)` — `ParallelActionReservationInput` removed from Python public surface.
+- **Retired Python export:** `reservation_request_for_managed_offer` (Rust-internal only).
+- **Daemon splits:** `cycle_market_batch.py`, `cycle_stale_sweep.py`; `parallel_pool.py` owns thread-pool + transient cooldown tail.
+- **Line-count status:** `strategy_dispatch/` ~1,146 lines (`parallel_path` 90, `parallel_pool` 115); `cycle_runner.py` 426 (+ `cycle_market_batch` 129, `cycle_stale_sweep` 81). Exit target ~400 still in progress.
+
 ## 2026-05-27 (Rust cycle kernel step 7 — parallel dispatch collapse)
 
-- **Single Rust call after IO:** `plan_parallel_managed_dispatch(actions, ctx, profiles)` builds prep internally; Python fetches Coinset profiles for `{base, quote, fee}` from context via `parallel_reservation_asset_ids`.
+- **Single Rust call after IO:** `plan_parallel_managed_dispatch(actions, ctx, profiles)` builds prep internally; Python fetches Coinset profiles for `{base, quote, fee}` from `parallel_reservation_context.py`.
 - **Dead API removed:** `plan_parallel_submission_batch`, `ParallelSubmissionEntry`, `build_parallel_reservation_prep`, and `prepare_parallel_managed_submission_decision` dropped from Python surface.
 - **Managed retry:** `ManagedRetryDecision.should_retry` is a bool field (no string compare).
 - **Daemon split:** websocket handlers extracted to `cycle_ws_handlers.py`; `parallel_plan.py` deleted (worker uses `ParallelQueueItem` directly).
@@ -107,7 +122,7 @@ Large Python daemon modules remain intentionally unsplit pending Rust migration 
 4. **Per-market phase runner (fourth)** ✅ — inventory source selection, tracked sizes, result-state merges, and phase ordering in Rust; Python IO **relocated** to `market_cycle.py` (not yet restructured around a Rust phase table).
 5. **Strategy action execution plan (fifth)** ✅ — parallel vs sequential batch planning and typed orchestration FFI in Rust; Python retains thread pools, reservation SQLite, and offer build/post only.
 6. **`main.py` cycle runner extraction (sixth)** ✅ — `run_once` / `run_loop` moved to `greenfloor/daemon/cycle_runner.py`; `main.py` retains CLI entrypoint and instance lock only.
-7. **`strategy_dispatch` reservation + retry kernel (seventh, in progress)** — collapsed `plan_parallel_managed_dispatch(actions, ctx, profiles)`; package still shrinking toward ~400-line exit target.
+7. **`strategy_dispatch` reservation + retry kernel (seventh, in progress)** — typed `ManagedActionOutcome`, `PlannedAction` parallel planning, `parallel_pool` extract; package shrinking toward ~400-line exit target.
 
 **Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch/` each under ~400 lines of Python glue; Rust crates absorb complexity; Python keeps SQLite, Dexie, websocket, and CLI.
 

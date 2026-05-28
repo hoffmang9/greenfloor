@@ -19,7 +19,8 @@ pub use managed::{
     is_transient_dexie_visibility_404_error, is_transient_managed_upstream_error_text,
     managed_retry_decision, parallel_max_workers, prepare_parallel_managed_submission_decision,
     reservation_release_status, should_apply_parallel_transient_cooldown,
-    ManagedActionOutcome, ManagedRetryDecision, ManagedRetryDecisionKind, ParallelSubmissionDecision,
+    ManagedActionOutcome, ManagedActionStatus, ManagedRetryDecision, ManagedRetryDecisionKind,
+    ParallelSubmissionDecision,
 };
 pub use market::{
     aggregate_two_sided_offer_counts, is_two_sided_market_mode, market_cycle_phases,
@@ -35,9 +36,9 @@ pub use orchestration::{
 };
 pub use execution::{
     expand_planned_actions, filter_planned_actions_with_positive_repeat,
-    parallel_reservation_asset_ids, plan_parallel_managed_dispatch, sequential_action_route,
-    ParallelActionReservationInput, ParallelBatchPlan, ParallelQueueItem, ParallelReservationContext,
-    ParallelSkipItem, SequentialActionRoute,
+    plan_parallel_managed_dispatch, sequential_action_route,
+    ParallelBatchPlan, ParallelQueueItem, ParallelReservationContext, ParallelSkipItem,
+    SequentialActionRoute,
 };
 pub use strategy::{
     evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction,

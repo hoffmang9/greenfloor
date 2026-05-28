@@ -21,7 +21,6 @@ __all__ = [
     "is_managed_worker_transient_error",
     "is_parallel_dispatch_transient_error",
     "one_sided_offer_counts_by_side",
-    "reservation_request_for_managed_offer",
     "resolve_inventory_scan_source",
     "resolve_tracked_sizes",
     "size_counts_to_signer",
@@ -78,33 +77,6 @@ def expiry_seconds_for_action(action: Any) -> int | None:
     except (TypeError, ValueError):
         return None
     return bridge.expiry_seconds_for_action(expiry_unit=unit, expiry_value=value)
-
-
-def reservation_request_for_managed_offer(
-    *,
-    side: str,
-    size_base_units: int,
-    base_asset_id: str,
-    quote_asset_id: str,
-    base_unit_mojo_multiplier: int,
-    quote_unit_mojo_multiplier: int,
-    quote_price: float,
-    fee_asset_id: str,
-    fee_amount_mojos: int,
-) -> dict[str, int]:
-    return bridge.reservation_request_for_managed_offer(
-        {
-            "side": side,
-            "size_base_units": int(size_base_units),
-            "base_asset_id": str(base_asset_id),
-            "quote_asset_id": str(quote_asset_id),
-            "base_unit_mojo_multiplier": int(base_unit_mojo_multiplier),
-            "quote_unit_mojo_multiplier": int(quote_unit_mojo_multiplier),
-            "quote_price": float(quote_price),
-            "fee_asset_id": str(fee_asset_id),
-            "fee_amount_mojos": int(fee_amount_mojos),
-        }
-    )
 
 
 def classify_managed_transient_error(exc: BaseException) -> str | None:

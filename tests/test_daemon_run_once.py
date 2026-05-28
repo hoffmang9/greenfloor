@@ -60,7 +60,7 @@ def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
-        "greenfloor.daemon.cycle_runner.process_single_market_with_store",
+        "greenfloor.daemon.cycle_market_dispatch.process_single_market_with_store",
         _fake_process_single_market,
     )
 
@@ -115,7 +115,7 @@ def test_run_once_parallel_market_failure_isolated(monkeypatch, tmp_path: Path) 
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
-        "greenfloor.daemon.cycle_runner.process_single_market_with_store",
+        "greenfloor.daemon.cycle_market_dispatch.process_single_market_with_store",
         _fake_process_single_market,
     )
 
@@ -180,7 +180,7 @@ def test_run_once_sequential_market_failure_isolated(monkeypatch, tmp_path: Path
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
-        "greenfloor.daemon.cycle_runner.process_single_market", _fake_process_single_market
+        "greenfloor.daemon.cycle_market_dispatch.process_single_market", _fake_process_single_market
     )
 
     code = run_once(
@@ -251,10 +251,10 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(monkeypatch, tmp_path:
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
-        "greenfloor.daemon.cycle_runner.process_single_market", _fake_process_single_market
+        "greenfloor.daemon.cycle_market_dispatch.process_single_market", _fake_process_single_market
     )
     monkeypatch.setattr(
-        "greenfloor.daemon.cycle_runner.process_single_market_with_store",
+        "greenfloor.daemon.cycle_market_dispatch.process_single_market_with_store",
         _fake_process_single_market_with_store,
     )
 

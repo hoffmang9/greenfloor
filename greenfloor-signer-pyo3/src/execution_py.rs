@@ -3,8 +3,7 @@ use pyo3::types::{PyDict, PyList};
 
 use signer_core::{
     expand_planned_actions, filter_planned_actions_with_positive_repeat, plan_parallel_managed_dispatch,
-    sequential_action_route, ParallelActionReservationInput, ParallelBatchPlan, ParallelReservationContext,
-    SequentialActionRoute,
+    sequential_action_route, ParallelBatchPlan, ParallelReservationContext, SequentialActionRoute,
 };
 
 use crate::py_utils::{
@@ -62,20 +61,6 @@ fn parallel_reservation_context_from_py(ctx: &Bound<'_, PyAny>) -> PyResult<Para
     })
 }
 
-fn parallel_action_reservation_inputs_from_py(
-    actions: &Bound<'_, PyList>,
-) -> PyResult<Vec<ParallelActionReservationInput>> {
-    let mut inputs = Vec::with_capacity(actions.len());
-    for item in actions.iter() {
-        inputs.push(ParallelActionReservationInput {
-            submit_index: item.getattr("submit_index")?.extract()?,
-            side: item.getattr("side")?.extract()?,
-            size_base_units: item.getattr("size_base_units")?.extract()?,
-        });
-    }
-    Ok(inputs)
-}
-
 #[pyfunction]
 #[pyo3(name = "sequential_action_route")]
 fn sequential_action_route_py(
@@ -123,7 +108,10 @@ fn plan_parallel_managed_dispatch_py(
     ctx: &Bound<'_, PyAny>,
     spendable_profiles: &Bound<'_, PyDict>,
 ) -> PyResult<Py<PyAny>> {
-    let rust_actions = parallel_action_reservation_inputs_from_py(actions)?;
+    let mut rust_actions = Vec::with_capacity(actions.len());
+    for item in actions.iter() {
+        rust_actions.push(planned_action_from_py(&item)?);
+    }
     let rust_ctx = parallel_reservation_context_from_py(ctx)?;
     let profiles = extract_spendable_profiles(spendable_profiles)?;
     let plan = plan_parallel_managed_dispatch(&rust_actions, &rust_ctx, &profiles);

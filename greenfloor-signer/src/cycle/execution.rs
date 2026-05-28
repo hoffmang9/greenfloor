@@ -37,21 +37,6 @@ struct ParallelReservationPrep {
     asset_ids: Vec<String>,
 }
 
-pub fn parallel_reservation_asset_ids(ctx: &ParallelReservationContext) -> Vec<String> {
-    let mut asset_ids = BTreeSet::new();
-    for asset_id in [
-        ctx.base_asset_id.as_str(),
-        ctx.quote_asset_id.as_str(),
-        ctx.fee_asset_id.as_str(),
-    ] {
-        let trimmed = asset_id.trim();
-        if !trimmed.is_empty() {
-            asset_ids.insert(trimmed.to_string());
-        }
-    }
-    asset_ids.into_iter().collect()
-}
-
 fn build_parallel_reservation_prep(
     actions: &[ParallelActionReservationInput],
     ctx: &ParallelReservationContext,
@@ -85,11 +70,20 @@ fn build_parallel_reservation_prep(
 }
 
 pub fn plan_parallel_managed_dispatch(
-    actions: &[ParallelActionReservationInput],
+    actions: &[PlannedAction],
     ctx: &ParallelReservationContext,
     spendable_profiles: &BTreeMap<String, SpendableAssetProfile>,
 ) -> ParallelBatchPlan {
-    let prep = build_parallel_reservation_prep(actions, ctx);
+    let reservation_inputs: Vec<ParallelActionReservationInput> = actions
+        .iter()
+        .enumerate()
+        .map(|(submit_index, action)| ParallelActionReservationInput {
+            submit_index,
+            side: action.side.clone(),
+            size_base_units: action.size,
+        })
+        .collect();
+    let prep = build_parallel_reservation_prep(&reservation_inputs, ctx);
     let mut plan = ParallelBatchPlan::default();
     for entry in &prep.entries {
         let decision = prepare_parallel_managed_submission_decision(
@@ -245,29 +239,29 @@ mod tests {
     }
 
     #[test]
-    fn parallel_reservation_asset_ids_collects_context_assets() {
-        let ctx = sample_reservation_context();
-        let asset_ids = parallel_reservation_asset_ids(&ctx);
-        assert!(asset_ids.contains(&"base_asset".to_string()));
-        assert!(asset_ids.contains(&"quote_asset".to_string()));
-        assert!(asset_ids.contains(&"xch_asset".to_string()));
-    }
-
-    #[test]
     fn plan_parallel_managed_dispatch_splits_skip_and_queue() {
         let ctx = sample_reservation_context();
-        let actions = vec![
-            ParallelActionReservationInput {
-                submit_index: 0,
-                side: "sell".to_string(),
-                size_base_units: 0,
-            },
-            ParallelActionReservationInput {
-                submit_index: 1,
-                side: "sell".to_string(),
-                size_base_units: 10,
-            },
-        ];
+        let actions = vec![PlannedAction {
+            size: 0,
+            repeat: 1,
+            pair: String::new(),
+            expiry_unit: String::new(),
+            expiry_value: 0,
+            cancel_after_create: false,
+            reason: String::new(),
+            target_spread_bps: None,
+            side: "sell".to_string(),
+        }, PlannedAction {
+            size: 10,
+            repeat: 1,
+            pair: String::new(),
+            expiry_unit: String::new(),
+            expiry_value: 0,
+            cancel_after_create: false,
+            reason: String::new(),
+            target_spread_bps: None,
+            side: "sell".to_string(),
+        }];
         let spendable_profiles = BTreeMap::from([(
             "base_asset".to_string(),
             SpendableAssetProfile {

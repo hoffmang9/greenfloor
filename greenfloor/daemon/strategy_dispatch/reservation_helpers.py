@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.parallel_reservation_prep import ParallelReservationContext
+from greenfloor.core.parallel_reservation_context import ParallelReservationContext
 from greenfloor.daemon.market_helpers import _resolve_quote_asset_for_offer
 from greenfloor.runtime.offer_publish import resolve_quote_price_for_market
 from greenfloor.runtime.offer_runtime import signer_resolve_offer_asset_ids

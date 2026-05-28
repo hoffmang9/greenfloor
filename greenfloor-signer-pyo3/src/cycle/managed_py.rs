@@ -2,7 +2,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use crate::cycle::orchestration_py::parallel_action_outcomes_from_py_list;
-use crate::py_utils::{dict_from_json_value, managed_retry_decision_class, request_dict_to_json, to_py_err};
+use crate::py_utils::{managed_action_outcome_to_py, managed_retry_decision_class, request_dict_to_json, to_py_err};
 
 use signer_core::{
     can_parallelize_managed_offers, classify_dexie_visibility_outcome, classify_managed_post_result,
@@ -10,65 +10,9 @@ use signer_core::{
     is_managed_upstream_transient_error, is_managed_worker_transient_error,
     is_parallel_dispatch_transient_error, is_transient_dexie_visibility_404_error,
     is_transient_managed_upstream_error_text, managed_retry_decision,
-    parallel_max_workers, reservation_release_status, reservation_request_for_managed_offer, should_apply_parallel_transient_cooldown,
+    parallel_max_workers, reservation_release_status, should_apply_parallel_transient_cooldown,
     single_input_preferred_skip_reason, SpendableAssetProfile,
 };
-
-#[pyfunction]
-#[pyo3(name = "reservation_request_for_managed_offer")]
-fn reservation_request_for_managed_offer_py(request: &Bound<'_, PyDict>) -> PyResult<Py<PyAny>> {
-    let payload = request_dict_to_json(request)?;
-    let side = payload
-        .get("side")
-        .and_then(|value| value.as_str())
-        .unwrap_or("sell");
-    let size_base_units = payload
-        .get("size_base_units")
-        .and_then(|value| value.as_i64())
-        .unwrap_or(0);
-    let base_asset_id = payload
-        .get("base_asset_id")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    let quote_asset_id = payload
-        .get("quote_asset_id")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    let base_unit_mojo_multiplier = payload
-        .get("base_unit_mojo_multiplier")
-        .and_then(|value| value.as_i64())
-        .unwrap_or(1000);
-    let quote_unit_mojo_multiplier = payload
-        .get("quote_unit_mojo_multiplier")
-        .and_then(|value| value.as_i64())
-        .unwrap_or(1000);
-    let quote_price = payload
-        .get("quote_price")
-        .and_then(|value| value.as_f64())
-        .unwrap_or(0.0);
-    let fee_asset_id = payload
-        .get("fee_asset_id")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    let fee_amount_mojos = payload
-        .get("fee_amount_mojos")
-        .and_then(|value| value.as_i64())
-        .unwrap_or(0);
-    let request_map = reservation_request_for_managed_offer(
-        side,
-        size_base_units,
-        base_asset_id,
-        quote_asset_id,
-        base_unit_mojo_multiplier,
-        quote_unit_mojo_multiplier,
-        quote_price,
-        fee_asset_id,
-        fee_amount_mojos,
-    );
-    Python::attach(|py| {
-        dict_from_json_value(py, serde_json::to_value(request_map).map_err(to_py_err)?)
-    })
-}
 
 #[pyfunction]
 #[pyo3(name = "single_input_preferred_skip_reason")]
@@ -181,18 +125,14 @@ fn classify_managed_post_result_py(
     publish_venue: &str,
 ) -> PyResult<Py<PyAny>> {
     let outcome = classify_managed_post_result(success, error_text, offer_id, publish_venue);
-    Python::attach(|py| {
-        dict_from_json_value(py, serde_json::to_value(&outcome).map_err(to_py_err)?)
-    })
+    Python::attach(|py| Ok(managed_action_outcome_to_py(py, &outcome)?.into()))
 }
 
 #[pyfunction]
 #[pyo3(name = "classify_dexie_visibility_outcome")]
 fn classify_dexie_visibility_outcome_py(visible: bool, visibility_error: &str) -> PyResult<Py<PyAny>> {
     let outcome = classify_dexie_visibility_outcome(visible, visibility_error);
-    Python::attach(|py| {
-        dict_from_json_value(py, serde_json::to_value(&outcome).map_err(to_py_err)?)
-    })
+    Python::attach(|py| Ok(managed_action_outcome_to_py(py, &outcome)?.into()))
 }
 
 #[pyfunction]
@@ -232,10 +172,6 @@ fn managed_retry_decision_py(
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(
-        reservation_request_for_managed_offer_py,
-        m
-    )?)?;
     m.add_function(wrap_pyfunction!(single_input_preferred_skip_reason_py, m)?)?;
     m.add_function(wrap_pyfunction!(
         is_transient_managed_upstream_error_text_py,

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import logging
 import os
 import time
-from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -23,23 +21,11 @@ from greenfloor.config.io import (
 )
 from greenfloor.config.models import signer_offer_path_configured
 from greenfloor.core.cycle import (
-    classify_dexie_stale_offer_status,
-    collect_stale_sweep_candidates,
     dedupe_sorted_market_ids,
     empty_stale_sweep_payload,
-    enqueue_immediate_requeue,
-    is_dexie_offer_missing_error_text,
-    next_disabled_market_log_deadline,
-    record_stale_sweep_check,
     should_use_market_slot_dispatch,
 )
-from greenfloor.core.cycle import (
-    select_market_batch as select_market_batch_kernel,
-)
-from greenfloor.core.cycle import (
-    should_log_disabled_market as should_log_disabled_market_kernel,
-)
-from greenfloor.core.cycle_orchestration import OfferStateRow, StaleSweepHit, StaleSweepProgress
+from greenfloor.core.cycle_orchestration import StaleSweepProgress
 from greenfloor.core.notifications import utcnow
 from greenfloor.daemon.bootstrap import (
     initialize_daemon_file_logging,
@@ -47,73 +33,36 @@ from greenfloor.daemon.bootstrap import (
     warn_if_daemon_log_level_auto_healed,
 )
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient
-from greenfloor.daemon.cooldowns import _env_int
+from greenfloor.daemon.cycle_market_batch import (
+    MarketDispatchState,
+    clear_disabled_market_log_state,
+    enqueue_immediate_requeue_market,
+    log_disabled_market_skip,
+    log_disabled_markets_startup_once,
+    select_market_batch,
+    should_log_disabled_market,
+)
+from greenfloor.daemon.cycle_market_dispatch import dispatch_selected_markets
+from greenfloor.daemon.cycle_stale_sweep import detect_stale_open_offers_for_requeue
 from greenfloor.daemon.cycle_ws_handlers import build_coinset_websocket_handlers
 from greenfloor.daemon.inventory_scan import (
     _build_coinset_adapter,
     _resolve_coinset_ws_url,
     _run_coinset_signal_capture_once,
 )
-from greenfloor.daemon.market_cycle import (
+
+# Backward-compatible re-exports for tests and legacy imports.
+from greenfloor.daemon.market_cycle import (  # noqa: F401
     process_single_market,
     process_single_market_with_store,
 )
-from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision
+from greenfloor.daemon.market_logging import _daemon_logger
 from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.storage.sqlite import SqliteStore
 
-_DISABLED_MARKET_LOG_INTERVAL_SECONDS_DEFAULT = 3600
-_DISABLED_MARKET_NEXT_LOG_AT: dict[str, float] = {}
-_DISABLED_MARKET_STARTUP_LOGGED = False
-_GLOBAL_STALE_OPEN_SWEEP_MAX_OFFERS_PER_MARKET = 3
-_GLOBAL_STALE_OPEN_SWEEP_MAX_OFFER_CHECKS = 60
-
-
-def _disabled_market_log_interval_seconds() -> int:
-    return _env_int(
-        "GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS",
-        _DISABLED_MARKET_LOG_INTERVAL_SECONDS_DEFAULT,
-        minimum=60,
-    )
-
-
-def _should_log_disabled_market(*, market_id: str, now_monotonic: float | None = None) -> bool:
-    now_value = time.monotonic() if now_monotonic is None else float(now_monotonic)
-    deadline = float(_DISABLED_MARKET_NEXT_LOG_AT.get(market_id, 0.0))
-    if not should_log_disabled_market_kernel(
-        now_monotonic=now_value,
-        next_log_deadline=deadline,
-    ):
-        return False
-    _DISABLED_MARKET_NEXT_LOG_AT[market_id] = next_disabled_market_log_deadline(
-        now_monotonic=now_value,
-        interval_seconds=_disabled_market_log_interval_seconds(),
-    )
-    return True
-
-
-def _log_disabled_markets_startup_once(*, markets: list[Any]) -> None:
-    global _DISABLED_MARKET_STARTUP_LOGGED
-    if _DISABLED_MARKET_STARTUP_LOGGED:
-        return
-    interval_seconds = _disabled_market_log_interval_seconds()
-    disabled_market_ids = [
-        str(getattr(market, "market_id", "")).strip()
-        for market in markets
-        if not bool(getattr(market, "enabled", True))
-    ]
-    disabled_market_ids = [market_id for market_id in disabled_market_ids if market_id]
-    if disabled_market_ids:
-        _daemon_logger.info(
-            "disabled_markets_startup count=%s interval_seconds=%s market_ids=%s",
-            len(disabled_market_ids),
-            interval_seconds,
-            sorted(disabled_market_ids),
-        )
-        now_value = time.monotonic()
-        for market_id in disabled_market_ids:
-            _DISABLED_MARKET_NEXT_LOG_AT[market_id] = now_value + float(interval_seconds)
-    _DISABLED_MARKET_STARTUP_LOGGED = True
+# Backward-compatible aliases for tests and legacy imports.
+_should_log_disabled_market = should_log_disabled_market
+_log_disabled_markets_startup_once = log_disabled_markets_startup_once
 
 
 def consume_reload_marker(state_dir: Path) -> bool:
@@ -122,120 +71,6 @@ def consume_reload_marker(state_dir: Path) -> bool:
         return False
     marker.unlink(missing_ok=True)
     return True
-
-
-@dataclass(slots=True)
-class MarketDispatchState:
-    cursor: int = 0
-    immediate_requeue_ids: deque[str] = field(default_factory=deque)
-
-
-def enqueue_immediate_requeue_market(dispatch_state: MarketDispatchState, market_id: str) -> None:
-    dispatch_state.immediate_requeue_ids = deque(
-        enqueue_immediate_requeue(list(dispatch_state.immediate_requeue_ids), market_id)
-    )
-
-
-def select_market_batch(
-    *,
-    enabled_markets: list[Any],
-    slot_count: int,
-    dispatch_state: MarketDispatchState,
-) -> tuple[list[Any], list[str]]:
-    enabled_by_id: dict[str, Any] = {
-        str(getattr(market, "market_id", "")).strip(): market for market in enabled_markets
-    }
-    enabled_ids = [market_id for market_id in enabled_by_id if market_id]
-    if not enabled_ids:
-        dispatch_state.immediate_requeue_ids = deque()
-        dispatch_state.cursor = 0
-        return [], []
-
-    selection = select_market_batch_kernel(
-        enabled_market_ids=enabled_ids,
-        slot_count=int(slot_count),
-        cursor=int(dispatch_state.cursor),
-        immediate_requeue_ids=list(dispatch_state.immediate_requeue_ids),
-    )
-    dispatch_state.cursor = int(selection.cursor)
-    dispatch_state.immediate_requeue_ids = deque(
-        str(market_id) for market_id in selection.immediate_requeue_ids if str(market_id).strip()
-    )
-    selected_markets = [
-        enabled_by_id[str(market_id)]
-        for market_id in selection.selected_market_ids
-        if str(market_id).strip() in enabled_by_id
-    ]
-    consumed = [
-        str(market_id)
-        for market_id in selection.consumed_immediate_requeues
-        if str(market_id).strip()
-    ]
-    return selected_markets, consumed
-
-
-def detect_stale_open_offers_for_requeue(
-    *,
-    store: SqliteStore,
-    dexie: DexieAdapter,
-    enabled_market_ids: set[str],
-    per_market_limit: int = _GLOBAL_STALE_OPEN_SWEEP_MAX_OFFERS_PER_MARKET,
-    max_offer_checks: int = _GLOBAL_STALE_OPEN_SWEEP_MAX_OFFER_CHECKS,
-) -> StaleSweepProgress:
-    if not enabled_market_ids:
-        return empty_stale_sweep_payload()
-
-    rows = store.list_offer_states(limit=5000)
-    offer_rows = [
-        OfferStateRow(
-            market_id=str(row.get("market_id", "")),
-            offer_id=str(row.get("offer_id", "")),
-            state=str(row.get("state", "")),
-        )
-        for row in rows
-    ]
-    candidates = collect_stale_sweep_candidates(
-        rows=offer_rows,
-        enabled_market_ids=sorted(enabled_market_ids),
-        per_market_limit=max(1, int(per_market_limit)),
-    )
-    progress = empty_stale_sweep_payload()
-    check_limit = max(1, int(max_offer_checks))
-    for candidate in candidates:
-        if int(progress.checked_offer_count) >= check_limit:
-            return StaleSweepProgress(
-                checked_offer_count=progress.checked_offer_count,
-                requeue_market_ids=list(progress.requeue_market_ids),
-                hits=list(progress.hits),
-                truncated=True,
-            )
-        market_id = str(candidate.market_id).strip()
-        offer_id = str(candidate.offer_id).strip()
-        hit: StaleSweepHit | None = None
-        try:
-            payload = dexie.get_offer(offer_id, timeout=5)
-            offer = payload.get("offer") if isinstance(payload, dict) else None
-            if isinstance(offer, dict):
-                try:
-                    status = int(offer.get("status", -1))
-                except (TypeError, ValueError):
-                    status = -1
-                reason = classify_dexie_stale_offer_status(status)
-                if reason:
-                    hit = StaleSweepHit(
-                        market_id=market_id,
-                        offer_id=offer_id,
-                        reason=reason,
-                    )
-        except Exception as exc:  # pragma: no cover - network dependent
-            if is_dexie_offer_missing_error_text(str(exc)):
-                hit = StaleSweepHit(
-                    market_id=market_id,
-                    offer_id=offer_id,
-                    reason="offer_missing_404",
-                )
-        progress = record_stale_sweep_check(progress=progress, hit=hit)
-    return progress
 
 
 def run_once(
@@ -257,7 +92,7 @@ def run_once(
         path=markets_path,
         overlay_path=testnet_markets_path,
     )
-    _log_disabled_markets_startup_once(markets=list(markets.markets))
+    log_disabled_markets_startup_once(markets=list(markets.markets))
     db_path = resolve_state_db_path(
         program_home_dir=program.home_dir,
         explicit_db_path=db_path_override,
@@ -323,10 +158,9 @@ def run_once(
         enabled_markets: list[Any] = []
         for market in markets.markets:
             if not market.enabled:
-                if _should_log_disabled_market(market_id=market.market_id):
-                    _log_market_decision(market.market_id, "market_skipped", reason="disabled")
+                log_disabled_market_skip(market_id=market.market_id)
                 continue
-            _DISABLED_MARKET_NEXT_LOG_AT.pop(market.market_id, None)
+            clear_disabled_market_log_state(market_id=market.market_id)
             enabled_markets.append(market)
 
         stale_open_sweep_payload: StaleSweepProgress = empty_stale_sweep_payload()
@@ -380,119 +214,41 @@ def run_once(
         else:
             selected_markets = enabled_markets
             if market_dispatch_state is not None and enabled_markets:
-                # Keep scheduler cursor bounded even when slot dispatch is disabled.
                 market_dispatch_state.cursor %= len(enabled_markets)
         markets_attempted = len(selected_markets)
-        immediate_requeue_market_ids: list[str] = []
-        if bool(getattr(program, "runtime_parallel_markets", False)) and len(selected_markets) > 1:
-            max_workers = max(1, len(selected_markets))
-            _daemon_logger.info(
-                "market_parallel_dispatch enabled=true workers=%s markets=%s",
-                max_workers,
-                markets_attempted,
-            )
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-                future_to_market = {
-                    pool.submit(
-                        process_single_market_with_store,
-                        market=market,
-                        program=program,
-                        allowed_keys=allowed_keys,
-                        dexie=dexie,
-                        splash=splash,
-                        wallet=wallet,
-                        db_path=db_path,
-                        xch_price_usd=xch_price_usd,
-                        previous_xch_price_usd=previous_xch_price_usd,
-                        now=now,
-                        state_dir=state_dir,
-                        reservation_coordinator=reservation_coordinator,
-                    ): market
-                    for market in selected_markets
-                }
-                for future in concurrent.futures.as_completed(future_to_market):
-                    market = future_to_market[future]
-                    market_id = str(getattr(market, "market_id", "")).strip()
-                    try:
-                        mr = future.result()
-                    except Exception as exc:
-                        cycle_error_count += 1
-                        _log_market_decision(
-                            market_id or "unknown",
-                            "cycle_failed",
-                            error=str(exc),
-                        )
-                        # This runs in the main thread while iterating
-                        # `as_completed`, so emitting the aggregate market-cycle
-                        # error through the outer store is thread-safe.
-                        store.add_audit_event(
-                            "market_cycle_error",
-                            {
-                                "market_id": market_id,
-                                "error": str(exc),
-                                "source": "parallel_market_worker",
-                            },
-                        )
-                        continue
-                    markets_processed += 1
-                    cycle_error_count += mr.cycle_errors
-                    strategy_planned_total += mr.strategy_planned
-                    strategy_executed_total += mr.strategy_executed
-                    if mr.cancel_triggered:
-                        cancel_triggered_count += 1
-                    cancel_planned_total += mr.cancel_planned
-                    cancel_executed_total += mr.cancel_executed
-                    if mr.immediate_requeue_requested and market_id:
-                        immediate_requeue_market_ids.append(market_id)
-        else:
-            _daemon_logger.info(
-                "market_parallel_dispatch enabled=false workers=1 markets=%s",
-                markets_attempted,
-            )
-            for market in selected_markets:
-                market_id = str(getattr(market, "market_id", "")).strip()
-                try:
-                    mr = process_single_market(
-                        market=market,
-                        program=program,
-                        allowed_keys=allowed_keys,
-                        dexie=dexie,
-                        splash=splash,
-                        wallet=wallet,
-                        store=store,
-                        xch_price_usd=xch_price_usd,
-                        previous_xch_price_usd=previous_xch_price_usd,
-                        now=now,
-                        state_dir=state_dir,
-                        reservation_coordinator=reservation_coordinator,
-                    )
-                except Exception as exc:
-                    cycle_error_count += 1
-                    _log_market_decision(
-                        market_id or "unknown",
-                        "cycle_failed",
-                        error=str(exc),
-                    )
-                    store.add_audit_event(
-                        "market_cycle_error",
-                        {
-                            "market_id": market_id,
-                            "error": str(exc),
-                            "source": "sequential_market_worker",
-                        },
-                    )
-                    continue
-                markets_processed += 1
-                cycle_error_count += mr.cycle_errors
-                strategy_planned_total += mr.strategy_planned
-                strategy_executed_total += mr.strategy_executed
-                if mr.cancel_triggered:
-                    cancel_triggered_count += 1
-                cancel_planned_total += mr.cancel_planned
-                cancel_executed_total += mr.cancel_executed
-                if mr.immediate_requeue_requested and market_id:
-                    immediate_requeue_market_ids.append(market_id)
-        deduped_requeue_market_ids = dedupe_sorted_market_ids(immediate_requeue_market_ids)
+        parallel_markets_enabled = bool(getattr(program, "runtime_parallel_markets", False))
+        _daemon_logger.info(
+            "market_parallel_dispatch enabled=%s workers=%s markets=%s",
+            parallel_markets_enabled and markets_attempted > 1,
+            max(1, markets_attempted) if parallel_markets_enabled and markets_attempted > 1 else 1,
+            markets_attempted,
+        )
+        dispatch_result = dispatch_selected_markets(
+            program=program,
+            selected_markets=selected_markets,
+            allowed_keys=allowed_keys,
+            dexie=dexie,
+            splash=splash,
+            wallet=wallet,
+            store=store,
+            db_path=db_path,
+            xch_price_usd=xch_price_usd,
+            previous_xch_price_usd=previous_xch_price_usd,
+            now=now,
+            state_dir=state_dir,
+            reservation_coordinator=reservation_coordinator,
+            parallel_markets_enabled=parallel_markets_enabled,
+        )
+        markets_processed = dispatch_result.markets_processed
+        cycle_error_count += dispatch_result.cycle_error_count
+        strategy_planned_total += dispatch_result.strategy_planned_total
+        strategy_executed_total += dispatch_result.strategy_executed_total
+        cancel_triggered_count += dispatch_result.cancel_triggered_count
+        cancel_planned_total += dispatch_result.cancel_planned_total
+        cancel_executed_total += dispatch_result.cancel_executed_total
+        deduped_requeue_market_ids = dedupe_sorted_market_ids(
+            dispatch_result.immediate_requeue_market_ids
+        )
         if market_dispatch_state is not None:
             for market_id in deduped_requeue_market_ids:
                 enqueue_immediate_requeue_market(market_dispatch_state, market_id)

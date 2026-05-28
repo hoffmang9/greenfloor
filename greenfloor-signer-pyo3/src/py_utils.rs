@@ -10,6 +10,7 @@ static PARALLEL_SKIP_ITEM_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_QUEUE_ITEM_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_BATCH_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static MANAGED_RETRY_DECISION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static MANAGED_ACTION_OUTCOME_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_ACTION_OUTCOME_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static MARKET_BATCH_SELECTION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static OFFER_STATE_ROW_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
@@ -71,6 +72,29 @@ pub fn managed_retry_decision_class<'py>(py: Python<'py>) -> PyResult<Bound<'py,
         "greenfloor.core.managed_retry",
         "ManagedRetryDecision",
     )
+}
+
+pub fn managed_action_outcome_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &MANAGED_ACTION_OUTCOME_CLS,
+        "greenfloor.core.managed_action_outcome",
+        "ManagedActionOutcome",
+    )
+}
+
+pub fn managed_action_outcome_to_py<'py>(
+    py: Python<'py>,
+    outcome: &signer_core::ManagedActionOutcome,
+) -> PyResult<Bound<'py, PyAny>> {
+    let cls = managed_action_outcome_class(py)?;
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("status", outcome.status.as_str())?;
+    kwargs.set_item("reason", &outcome.reason)?;
+    kwargs.set_item("offer_id", &outcome.offer_id)?;
+    kwargs.set_item("transient_upstream", outcome.transient_upstream)?;
+    kwargs.set_item("is_pending_visibility", outcome.is_pending_visibility())?;
+    cls.call((), Some(&kwargs))
 }
 
 pub fn parallel_action_outcome_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {

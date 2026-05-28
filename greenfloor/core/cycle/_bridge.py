@@ -13,12 +13,10 @@ from greenfloor.core.cycle_orchestration import (
     StaleSweepHit,
     StaleSweepProgress,
 )
+from greenfloor.core.managed_action_outcome import ManagedActionOutcome
 from greenfloor.core.managed_retry import ManagedRetryDecision
 from greenfloor.core.parallel_batch_plan import ParallelBatchPlan
-from greenfloor.core.parallel_reservation_prep import (
-    ParallelActionReservationInput,
-    ParallelReservationContext,
-)
+from greenfloor.core.parallel_reservation_context import ParallelReservationContext
 from greenfloor.core.planned_action import PlannedAction, planned_actions_from_signer_list
 
 _INSTALL_HINT = (
@@ -103,7 +101,7 @@ def filter_planned_actions_with_positive_repeat(
 
 def plan_parallel_managed_dispatch(
     *,
-    actions: list[ParallelActionReservationInput],
+    actions: list[PlannedAction],
     ctx: ParallelReservationContext,
     spendable_profiles: dict[str, dict[str, int | bool]],
 ) -> ParallelBatchPlan:
@@ -129,14 +127,6 @@ def apply_offer_signal(*, state: str, signal: str) -> dict[str, Any]:
 def expiry_seconds_for_action(*, expiry_unit: str, expiry_value: int) -> int | None:
     signer = _import_signer()
     return signer.expiry_seconds_for_action(expiry_unit, expiry_value)
-
-
-def reservation_request_for_managed_offer(request: dict[str, Any]) -> dict[str, int]:
-    signer = _import_signer()
-    result = signer.reservation_request_for_managed_offer(request)
-    if not isinstance(result, dict):
-        raise TypeError("reservation_request_for_managed_offer returned non-dict result")
-    return {str(key): int(value) for key, value in result.items()}
 
 
 def single_input_preferred_skip_reason(
@@ -240,24 +230,26 @@ def classify_managed_post_result(
     error_text: str,
     offer_id: str,
     publish_venue: str,
-) -> dict[str, Any]:
+) -> ManagedActionOutcome:
     signer = _import_signer()
     result = signer.classify_managed_post_result(success, error_text, offer_id, publish_venue)
-    if not isinstance(result, dict):
-        raise TypeError("classify_managed_post_result returned non-dict result")
-    return dict(result)
+    if not isinstance(result, ManagedActionOutcome):
+        raise TypeError("classify_managed_post_result returned non-ManagedActionOutcome result")
+    return result
 
 
 def classify_dexie_visibility_outcome(
     *,
     visible: bool,
     visibility_error: str,
-) -> dict[str, Any]:
+) -> ManagedActionOutcome:
     signer = _import_signer()
     result = signer.classify_dexie_visibility_outcome(visible, visibility_error)
-    if not isinstance(result, dict):
-        raise TypeError("classify_dexie_visibility_outcome returned non-dict result")
-    return dict(result)
+    if not isinstance(result, ManagedActionOutcome):
+        raise TypeError(
+            "classify_dexie_visibility_outcome returned non-ManagedActionOutcome result"
+        )
+    return result
 
 
 def count_parallel_transient_failures(items: list[ParallelActionOutcome]) -> int:

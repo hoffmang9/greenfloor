@@ -6,12 +6,40 @@ use super::dispatch::{single_input_preferred_skip_reason, SpendableAssetProfile}
 
 const PENDING_VISIBILITY_REASON: &str = "managed_offer_post_success_dexie_visibility_pending";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ManagedActionStatus {
+    Executed,
+    Skipped,
+    PendingVisibility,
+}
+
+impl ManagedActionStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Executed => "executed",
+            Self::Skipped => "skipped",
+            Self::PendingVisibility => "pending_visibility",
+        }
+    }
+
+    pub fn is_pending_visibility(self) -> bool {
+        matches!(self, Self::PendingVisibility)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManagedActionOutcome {
-    pub status: String,
+    pub status: ManagedActionStatus,
     pub reason: String,
     pub offer_id: Option<String>,
     pub transient_upstream: bool,
+}
+
+impl ManagedActionOutcome {
+    pub fn is_pending_visibility(&self) -> bool {
+        self.status.is_pending_visibility()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,14 +230,14 @@ pub fn classify_managed_post_result(
         let clean_offer_id = offer_id.trim();
         if publish_venue.trim().eq_ignore_ascii_case("dexie") && !clean_offer_id.is_empty() {
             return ManagedActionOutcome {
-                status: "pending_visibility".to_string(),
+                status: ManagedActionStatus::PendingVisibility,
                 reason: "managed_offer_post_success".to_string(),
                 offer_id: Some(clean_offer_id.to_string()),
                 transient_upstream: false,
             };
         }
         return ManagedActionOutcome {
-            status: "executed".to_string(),
+            status: ManagedActionStatus::Executed,
             reason: "managed_offer_post_success".to_string(),
             offer_id: if clean_offer_id.is_empty() {
                 None
@@ -220,7 +248,7 @@ pub fn classify_managed_post_result(
         };
     }
     ManagedActionOutcome {
-        status: "skipped".to_string(),
+        status: ManagedActionStatus::Skipped,
         reason: format!(
             "managed_offer_post_failed:{}",
             error_text.trim()
@@ -236,7 +264,7 @@ pub fn classify_dexie_visibility_outcome(
 ) -> ManagedActionOutcome {
     if visible {
         return ManagedActionOutcome {
-            status: "executed".to_string(),
+            status: ManagedActionStatus::Executed,
             reason: "managed_offer_post_success".to_string(),
             offer_id: None,
             transient_upstream: false,
@@ -244,25 +272,25 @@ pub fn classify_dexie_visibility_outcome(
     }
     if is_transient_dexie_visibility_404_error(visibility_error) {
         return ManagedActionOutcome {
-            status: "executed".to_string(),
+            status: ManagedActionStatus::Executed,
             reason: PENDING_VISIBILITY_REASON.to_string(),
             offer_id: None,
             transient_upstream: false,
         };
     }
     ManagedActionOutcome {
-        status: "skipped".to_string(),
+        status: ManagedActionStatus::Skipped,
         reason: format!("managed_offer_post_not_visible_on_dexie:{visibility_error}"),
         offer_id: None,
         transient_upstream: false,
     }
 }
 
-pub fn count_parallel_transient_failures(items: &[(String, bool)]) -> usize {
+pub fn count_parallel_transient_failures(items: &[(ManagedActionStatus, bool)]) -> usize {
     items
         .iter()
         .filter(|(status, transient_upstream)| {
-            status.trim().eq_ignore_ascii_case("skipped") && *transient_upstream
+            *status == ManagedActionStatus::Skipped && *transient_upstream
         })
         .count()
 }
@@ -319,7 +347,7 @@ mod tests {
     #[test]
     fn managed_post_dexie_success_needs_visibility() {
         let outcome = classify_managed_post_result(true, "", "offer-1", "dexie");
-        assert_eq!(outcome.status, "pending_visibility");
+        assert_eq!(outcome.status, ManagedActionStatus::PendingVisibility);
     }
 
     #[test]
@@ -327,7 +355,7 @@ mod tests {
         let outcome =
             classify_dexie_visibility_outcome(false, "dexie_http_error:404 not found");
         assert_eq!(outcome.reason, PENDING_VISIBILITY_REASON);
-        assert_eq!(outcome.status, "executed");
+        assert_eq!(outcome.status, ManagedActionStatus::Executed);
     }
 
     #[test]

@@ -2,7 +2,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use signer_core::{
-    MarketBatchSelection, OfferStateRow, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
+    ManagedActionStatus, MarketBatchSelection, OfferStateRow, StaleSweepCandidate, StaleSweepHit,
+    StaleSweepProgress,
 };
 
 use crate::py_utils::{
@@ -110,9 +111,17 @@ pub fn offer_state_row_from_py(obj: &Bound<'_, PyAny>) -> PyResult<OfferStateRow
     })
 }
 
+fn parse_managed_action_status(status: &str) -> ManagedActionStatus {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "executed" => ManagedActionStatus::Executed,
+        "pending_visibility" => ManagedActionStatus::PendingVisibility,
+        _ => ManagedActionStatus::Skipped,
+    }
+}
+
 pub fn parallel_action_outcomes_from_py_list(
     items: &Bound<'_, PyList>,
-) -> PyResult<Vec<(String, bool)>> {
+) -> PyResult<Vec<(ManagedActionStatus, bool)>> {
     let mut pairs = Vec::with_capacity(items.len());
     for item in items.iter() {
         let status = item.getattr("status")?.extract::<String>()?;
@@ -120,7 +129,7 @@ pub fn parallel_action_outcomes_from_py_list(
             .getattr("transient_upstream")?
             .extract::<bool>()
             .unwrap_or(false);
-        pairs.push((status, transient_upstream));
+        pairs.push((parse_managed_action_status(&status), transient_upstream));
     }
     Ok(pairs)
 }

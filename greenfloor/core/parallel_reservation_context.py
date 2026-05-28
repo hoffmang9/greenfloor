@@ -1,15 +1,8 @@
-"""Parallel managed-offer reservation input types (Rust FFI + dispatch planning)."""
+"""Parallel managed-offer reservation context for Coinset profile fetch."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-
-
-@dataclass(frozen=True, slots=True)
-class ParallelActionReservationInput:
-    submit_index: int
-    side: str
-    size_base_units: int
 
 
 @dataclass(frozen=True, slots=True)

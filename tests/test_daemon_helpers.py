@@ -6,13 +6,19 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from greenfloor.daemon import cycle_runner as daemon_cycle_runner
+from greenfloor.daemon import cycle_market_batch
 from greenfloor.daemon.cooldowns import _env_int
-from greenfloor.daemon.cycle_runner import (
+from greenfloor.daemon.cycle_market_batch import (
     _DISABLED_MARKET_NEXT_LOG_AT,
-    _disabled_market_log_interval_seconds,
-    _log_disabled_markets_startup_once,
-    _should_log_disabled_market,
+)
+from greenfloor.daemon.cycle_market_batch import (
+    disabled_market_log_interval_seconds as _disabled_market_log_interval_seconds,
+)
+from greenfloor.daemon.cycle_market_batch import (
+    log_disabled_markets_startup_once as _log_disabled_markets_startup_once,
+)
+from greenfloor.daemon.cycle_market_batch import (
+    should_log_disabled_market as _should_log_disabled_market,
 )
 from greenfloor.daemon.market_helpers import (
     _abs_move_bps,
@@ -194,7 +200,7 @@ def test_should_log_disabled_market_throttles(monkeypatch) -> None:
 def test_log_disabled_markets_startup_once_logs_and_seeds_throttle(monkeypatch) -> None:
     monkeypatch.setenv("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS", "3600")
     _DISABLED_MARKET_NEXT_LOG_AT.clear()
-    daemon_cycle_runner._DISABLED_MARKET_STARTUP_LOGGED = False
+    cycle_market_batch._DISABLED_MARKET_STARTUP_LOGGED = False
 
     class _Market:
         def __init__(self, market_id: str, enabled: bool) -> None:
@@ -214,7 +220,7 @@ def test_log_disabled_markets_startup_once_logs_and_seeds_throttle(monkeypatch) 
     assert len(logged) == 1
     assert "disabled_markets_startup" in str(logged[0][0])
     assert "disabled-market" in _DISABLED_MARKET_NEXT_LOG_AT
-    daemon_cycle_runner._DISABLED_MARKET_STARTUP_LOGGED = False
+    cycle_market_batch._DISABLED_MARKET_STARTUP_LOGGED = False
 
 
 def test_managed_offer_market_health_payload_tracks_503_and_last_success() -> None:
