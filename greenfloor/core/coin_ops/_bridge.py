@@ -1,4 +1,9 @@
-"""Rust-backed coin-operation policy bridge."""
+"""Rust-backed coin-operation policy bridge.
+
+Each public function is an explicit FFI wrapper (coercion, validation, docstrings).
+Do not collapse these into a generic dispatch helper; the repetition is intentional so
+each kernel call stays auditable at the Python boundary (see progress.md step 10 handoff).
+"""
 
 from __future__ import annotations
 

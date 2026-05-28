@@ -29,12 +29,12 @@ offer reconciliation, and coin-op planning. The name "signer" no longer describe
 
 ## Naming map
 
-| Layer | Current | Target |
-|-------|---------|--------|
-| Cargo crate | `greenfloor-signer` | `greenfloor-kernel` |
-| PyO3 module | `greenfloor_signer` | `greenfloor_kernel` |
-| Python bridge | `kernel_bridge.import_kernel()` | unchanged |
-| Vault/sign path docs | "Rust signer" | "Rust kernel (vault path)" |
+| Layer                | Current                         | Target                     |
+| -------------------- | ------------------------------- | -------------------------- |
+| Cargo crate          | `greenfloor-signer`             | `greenfloor-kernel`        |
+| PyO3 module          | `greenfloor_signer`             | `greenfloor_kernel`        |
+| Python bridge        | `kernel_bridge.import_kernel()` | unchanged                  |
+| Vault/sign path docs | "Rust signer"                   | "Rust kernel (vault path)" |
 
 ## Consequences
 

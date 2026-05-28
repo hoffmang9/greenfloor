@@ -11,14 +11,12 @@ from greenfloor.runtime.offer_publish import (
 
 
 def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypatch) -> None:
-    def _import_module(name: str):
-        if name == "greenfloor_signer":
-            raise ImportError("disable native path for this test")
-        return __import__(name)
+    def _import_kernel():
+        raise ImportError("disable native path for this test")
 
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_publish.importlib.import_module",
-        _import_module,
+        "greenfloor.runtime.offer_publish.import_kernel",
+        _import_kernel,
     )
 
     class _ConditionWithExpiry:
@@ -67,14 +65,12 @@ def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypa
 
 
 def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> None:
-    def _import_module(name: str):
-        if name == "greenfloor_signer":
-            raise ImportError("disable native path for this test")
-        return __import__(name)
+    def _import_kernel():
+        raise ImportError("disable native path for this test")
 
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_publish.importlib.import_module",
-        _import_module,
+        "greenfloor.runtime.offer_publish.import_kernel",
+        _import_kernel,
     )
 
     class _ConditionWithExpiry:
@@ -126,14 +122,12 @@ def test_verify_offer_text_for_dexie_falls_back_to_verify_offer(monkeypatch) -> 
 def test_verify_offer_text_for_dexie_rejects_offer_without_expiration_condition(
     monkeypatch,
 ) -> None:
-    def _import_module(name: str):
-        if name == "greenfloor_signer":
-            raise ImportError("disable native path for this test")
-        return __import__(name)
+    def _import_kernel():
+        raise ImportError("disable native path for this test")
 
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_publish.importlib.import_module",
-        _import_module,
+        "greenfloor.runtime.offer_publish.import_kernel",
+        _import_kernel,
     )
 
     class _ConditionNoExpiry:
@@ -177,14 +171,12 @@ def test_verify_offer_text_for_dexie_rejects_offer_without_expiration_condition(
 def test_verify_offer_text_for_dexie_extracts_expiry_from_coin_spend_program(
     monkeypatch,
 ) -> None:
-    def _import_module(name: str):
-        if name == "greenfloor_signer":
-            raise ImportError("disable native path for this test")
-        return __import__(name)
+    def _import_kernel():
+        raise ImportError("disable native path for this test")
 
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_publish.importlib.import_module",
-        _import_module,
+        "greenfloor.runtime.offer_publish.import_kernel",
+        _import_kernel,
     )
 
     class _ConditionWithExpiry:
@@ -235,14 +227,12 @@ def test_verify_offer_text_for_dexie_extracts_expiry_from_coin_spend_program(
 def test_verify_offer_text_for_dexie_rejects_duplicate_spent_coin_ids(
     monkeypatch,
 ) -> None:
-    def _import_module(name: str):
-        if name == "greenfloor_signer":
-            raise ImportError("disable native path for this test")
-        return __import__(name)
+    def _import_kernel():
+        raise ImportError("disable native path for this test")
 
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_publish.importlib.import_module",
-        _import_module,
+        "greenfloor.runtime.offer_publish.import_kernel",
+        _import_kernel,
     )
 
     class _ConditionWithExpiry:

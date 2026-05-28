@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from . import _bridge as bridge
 from greenfloor.core.kernel_bridge import import_kernel
+
+from . import _bridge as bridge
 
 can_parallelize_managed_offers = bridge.can_parallelize_managed_offers
 classify_dexie_stale_offer_status = bridge.classify_dexie_stale_offer_status

@@ -11,6 +11,8 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any, Protocol, cast, runtime_checkable
 
+from greenfloor.core.kernel_bridge import import_kernel
+
 
 @runtime_checkable
 class CatCoinLike(Protocol):
@@ -36,8 +38,6 @@ def _hex_to_bytes(value: str) -> bytes:
         raw = f"0{raw}"
     return bytes.fromhex(raw)
 
-
-from greenfloor.core.kernel_bridge import import_kernel
 
 @dataclass(slots=True)
 class _CatCoinAdapter:
