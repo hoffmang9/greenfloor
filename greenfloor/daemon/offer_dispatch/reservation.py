@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.core.offer_policy import resolve_quote_price_for_pricing
 from greenfloor.core.parallel_reservation_context import ParallelReservationContext
 from greenfloor.daemon.market_helpers import _resolve_quote_asset_for_offer
-from greenfloor.core.offer_policy import resolve_quote_price_for_pricing
 from greenfloor.runtime.offer_runtime import signer_resolve_offer_asset_ids
 
 

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from greenfloor.core.retry_policy import (
     coinset_fee_lookup_retry_sleep,
     dexie_invalid_offer_retry_sleep,

@@ -15,10 +15,6 @@ pub use cancel::{
     abs_move_bps, cancel_move_threshold_bps, collect_open_offer_ids_for_cancel,
     evaluate_cancel_policy_decision, CancelPolicyDecision,
 };
-pub use notifications::{
-    evaluate_low_inventory_alert, AlertEvent, AlertState, LowInventoryEvaluation,
-    LowInventoryInput,
-};
 pub use dispatch::{
     expiry_seconds_for_action, reservation_request_for_managed_offer,
     single_input_preferred_skip_reason, PlannedActionInput, SpendableAssetProfile,
@@ -44,6 +40,9 @@ pub use market::{
     aggregate_two_sided_offer_counts, is_two_sided_market_mode, market_cycle_phases,
     needs_inventory_fallback, one_sided_offer_counts_by_side, resolve_inventory_scan_source,
     resolve_tracked_sizes, wallet_fallback_source_label, MarketCyclePhase, MarketCycleResultState,
+};
+pub use notifications::{
+    evaluate_low_inventory_alert, AlertEvent, AlertState, LowInventoryEvaluation, LowInventoryInput,
 };
 pub use orchestration::{
     classify_dexie_stale_offer_status, collect_stale_sweep_candidates, dedupe_sorted_market_ids,

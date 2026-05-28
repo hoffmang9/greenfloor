@@ -27,9 +27,7 @@ use signer_core::{
     list_cat_coin_summaries, list_cat_coin_summaries_by_ids, load_bls_master_secret_key,
     load_signer_config, push_tx_hex, resolve_offer_asset_ids, resolve_vault_context,
     validate_offer_structure, validate_offer_text, verify_offer_for_dexie, BlsMixedSplitRequest,
-    BlsOfferRequest,
-    BlsXchCoinOpRequest,
-    CreateOfferRequest, MixedSplitRequest,
+    BlsOfferRequest, BlsXchCoinOpRequest, CreateOfferRequest, MixedSplitRequest,
 };
 
 use py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};

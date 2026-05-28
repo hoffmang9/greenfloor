@@ -26,13 +26,7 @@ pub fn is_spendable_wallet_coin(coin: &Value) -> bool {
     if NON_SPENDABLE.contains(&state.as_str()) {
         return false;
     }
-    const SPENDABLE: &[&str] = &[
-        "CONFIRMED",
-        "UNSPENT",
-        "SPENDABLE",
-        "AVAILABLE",
-        "SETTLED",
-    ];
+    const SPENDABLE: &[&str] = &["CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE", "SETTLED"];
     SPENDABLE.contains(&state.as_str())
 }
 
@@ -44,7 +38,9 @@ mod tests {
     #[test]
     fn locked_or_pending_not_spendable() {
         assert!(!is_spendable_wallet_coin(&json!({"state": "PENDING"})));
-        assert!(!is_spendable_wallet_coin(&json!({"isLocked": true, "state": "CONFIRMED"})));
+        assert!(!is_spendable_wallet_coin(
+            &json!({"isLocked": true, "state": "CONFIRMED"})
+        ));
     }
 
     #[test]

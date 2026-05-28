@@ -7,6 +7,9 @@ each kernel call stays auditable at the Python boundary (see progress.md step 10
 
 from __future__ import annotations
 
+from typing import Any
+
+from greenfloor.core import kernel_bridge
 from greenfloor.core.coin_ops.selection_bridge import (
     plan_auto_combine_inputs as _plan_auto_combine_inputs,
 )
@@ -19,17 +22,15 @@ from greenfloor.core.coin_ops.selection_bridge import (
 from greenfloor.core.coin_ops.selection_bridge import (
     split_would_create_sub_cat_change as _split_would_create_sub_cat_change,
 )
-from typing import Any
-
 from greenfloor.core.coin_ops.types import (
     BucketSpec,
     CoinOpPlan,
+    CombineDenominationReadiness,
     CombineInputSelectionMode,
-    DenominationReadiness,
     SplitAutoSelectPlan,
+    SplitDenominationReadiness,
     SplitPlanningProfile,
 )
-from greenfloor.core import kernel_bridge
 
 
 def _require_coin_op_plans(value: object) -> list[CoinOpPlan]:
@@ -142,7 +143,9 @@ def coin_op_min_amount_mojos(*, canonical_asset_id: str) -> int:
 
 
 def coin_meets_coin_op_min_amount(coin: dict, *, canonical_asset_id: str) -> bool:
-    return bool(kernel_bridge.coin_ops_kernel().coin_meets_coin_op_min_amount(coin, str(canonical_asset_id)))
+    return bool(
+        kernel_bridge.coin_ops_kernel().coin_meets_coin_op_min_amount(coin, str(canonical_asset_id))
+    )
 
 
 def coin_op_target_amount_allowed(*, amount_mojos: int, canonical_asset_id: str) -> bool:
@@ -230,67 +233,34 @@ def evaluate_coin_split_gate(
     resolved_asset_id: str,
     size_base_units: int,
     required_count: int,
-) -> DenominationReadiness:
+) -> SplitDenominationReadiness:
     gate = kernel_bridge.coin_ops_kernel().evaluate_coin_split_gate(
         asset_scoped_coins,
         str(resolved_asset_id),
         int(size_base_units),
         int(required_count),
     )
-    if isinstance(gate, DenominationReadiness):
+    if isinstance(gate, SplitDenominationReadiness):
         return gate
-    return DenominationReadiness.from_kernel_gate(gate)
+    return SplitDenominationReadiness.from_kernel_gate(gate)
 
 
-def combine_denomination_readiness(
-    *,
-    asset_id: str,
-    size_base_units: int,
-    max_allowed_count: int,
-    matching_count: int,
-) -> DenominationReadiness:
-    """Combine-until-ready readiness (excess denomination coin cap)."""
-    return DenominationReadiness.from_combine(
-        asset_id=asset_id,
-        size_base_units=size_base_units,
-        max_allowed_count=max_allowed_count,
-        matching_count=matching_count,
-    )
-
-
-def evaluate_denomination_readiness(
+def evaluate_coin_combine_gate(
     *,
     asset_scoped_coins: list[dict[str, Any]],
     asset_id: str,
     size_base_units: int,
-    required_min_count: int | None = None,
-    max_allowed_count: int | None = None,
-) -> DenominationReadiness:
-    if required_min_count is not None and max_allowed_count is None:
-        return evaluate_coin_split_gate(
-            asset_scoped_coins=asset_scoped_coins,
-            resolved_asset_id=str(asset_id),
-            size_base_units=int(size_base_units),
-            required_count=int(required_min_count),
-        )
-    matching = [
-        coin
-        for coin in asset_scoped_coins
-        if is_spendable_wallet_coin(coin) and int(coin.get("amount", 0)) == int(size_base_units)
-    ]
-    if max_allowed_count is not None:
-        return combine_denomination_readiness(
-            asset_id=asset_id,
-            size_base_units=int(size_base_units),
-            max_allowed_count=int(max_allowed_count),
-            matching_count=len(matching),
-        )
-    return DenominationReadiness(
-        asset_id=str(asset_id),
-        size_base_units=int(size_base_units),
-        current_count=len(matching),
-        ready=True,
+    max_allowed_count: int,
+) -> CombineDenominationReadiness:
+    gate = kernel_bridge.coin_ops_kernel().evaluate_coin_combine_gate(
+        asset_scoped_coins,
+        str(asset_id),
+        int(size_base_units),
+        int(max_allowed_count),
     )
+    if isinstance(gate, CombineDenominationReadiness):
+        return gate
+    return CombineDenominationReadiness.from_kernel_gate(gate)
 
 
 def coin_op_should_stop(

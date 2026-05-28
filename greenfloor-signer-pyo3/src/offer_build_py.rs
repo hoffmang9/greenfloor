@@ -33,7 +33,11 @@ fn resolve_quote_price_for_pricing_py(pricing: &Bound<'_, PyAny>) -> PyResult<f6
 
 #[pyfunction]
 #[pyo3(name = "mojo_multiplier_for_leg")]
-fn mojo_multiplier_for_leg_py(pricing: &Bound<'_, PyAny>, field: &str, asset_id: &str) -> PyResult<i64> {
+fn mojo_multiplier_for_leg_py(
+    pricing: &Bound<'_, PyAny>,
+    field: &str,
+    asset_id: &str,
+) -> PyResult<i64> {
     let pricing = pricing_from_py(pricing)?;
     Ok(mojo_multiplier_for_leg(&pricing, field, asset_id))
 }

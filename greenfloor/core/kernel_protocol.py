@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol
 
 from greenfloor.core.coin_ops.kernel_protocol import CoinOpsKernelProtocol
-
 from greenfloor.core.cycle_orchestration import (
     MarketBatchSelection,
     OfferStateRow,
@@ -252,7 +251,9 @@ class OfferPolicyKernelProtocol(Protocol):
 
     def resolve_quote_price_for_pricing(self, pricing: dict[str, Any]) -> float: ...
 
-    def mojo_multiplier_for_leg(self, pricing: dict[str, Any], field: str, asset_id: str) -> int: ...
+    def mojo_multiplier_for_leg(
+        self, pricing: dict[str, Any], field: str, asset_id: str
+    ) -> int: ...
 
     def verify_offer_for_dexie(self, offer: str) -> str | None: ...
 

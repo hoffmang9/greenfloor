@@ -4,16 +4,16 @@ use pyo3::types::{PyAny, PyDict, PyList};
 
 use signer_core::{
     amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_should_stop,
-    coin_op_target_amount_allowed, compute_bucket_counts_from_coins, evaluate_coin_split_gate,
-    fee_budget_allows_execution, is_spendable_wallet_coin, partition_plans_by_budget,
-    plan_auto_combine_inputs, plan_auto_split_selection, plan_coin_ops,
+    coin_op_target_amount_allowed, compute_bucket_counts_from_coins, evaluate_coin_combine_gate,
+    evaluate_coin_split_gate, fee_budget_allows_execution, is_spendable_wallet_coin,
+    partition_plans_by_budget, plan_auto_combine_inputs, plan_auto_split_selection, plan_coin_ops,
     projected_coin_ops_fee_mojos, select_spendable_coins_for_target_amount,
     split_would_create_sub_cat_change,
 };
 
 use crate::py_utils::{
-    bucket_spec_from_py, coin_op_plan_to_py, coin_op_plans_from_py_list,
-    coin_split_gate_result_to_py, combine_input_selection_mode_from_py,
+    bucket_spec_from_py, coin_combine_gate_result_to_py, coin_op_plan_to_py,
+    coin_op_plans_from_py_list, coin_split_gate_result_to_py, combine_input_selection_mode_from_py,
     exclude_coin_ids_from_py_optional, i64_i64_map_to_py_dict, request_dict_to_json,
     spendable_coins_from_py_list, split_auto_select_plan_to_py, split_planning_profile_from_py,
 };
@@ -255,13 +255,22 @@ fn evaluate_coin_split_gate_py(
     required_count: i64,
 ) -> PyResult<Py<PyAny>> {
     let coins = wallet_coins_from_py_list(asset_scoped_coins)?;
-    let gate = evaluate_coin_split_gate(
-        &coins,
-        resolved_asset_id,
-        size_base_units,
-        required_count,
-    );
+    let gate = evaluate_coin_split_gate(&coins, resolved_asset_id, size_base_units, required_count);
     Ok(coin_split_gate_result_to_py(py, &gate)?.unbind())
+}
+
+#[pyfunction]
+#[pyo3(name = "evaluate_coin_combine_gate")]
+fn evaluate_coin_combine_gate_py(
+    py: Python<'_>,
+    asset_scoped_coins: &Bound<'_, PyList>,
+    asset_id: &str,
+    size_base_units: i64,
+    max_allowed_count: i64,
+) -> PyResult<Py<PyAny>> {
+    let coins = wallet_coins_from_py_list(asset_scoped_coins)?;
+    let gate = evaluate_coin_combine_gate(&coins, asset_id, size_base_units, max_allowed_count);
+    Ok(coin_combine_gate_result_to_py(py, &gate)?.unbind())
 }
 
 #[pyfunction]
@@ -301,6 +310,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(plan_auto_combine_inputs_py, m)?)?;
     m.add_function(wrap_pyfunction!(is_spendable_wallet_coin_py, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_coin_split_gate_py, m)?)?;
+    m.add_function(wrap_pyfunction!(evaluate_coin_combine_gate_py, m)?)?;
     m.add_function(wrap_pyfunction!(coin_op_should_stop_py, m)?)?;
     Ok(())
 }

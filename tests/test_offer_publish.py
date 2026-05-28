@@ -35,10 +35,7 @@ def test_verify_offer_for_dexie_maps_duplicate_spends(monkeypatch) -> None:
             return "wallet_sdk_offer_duplicate_spent_coin_ids"
 
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
-    assert (
-        verify_offer_for_dexie("offer1duplicate")
-        == "wallet_sdk_offer_duplicate_spent_coin_ids"
-    )
+    assert verify_offer_for_dexie("offer1duplicate") == "wallet_sdk_offer_duplicate_spent_coin_ids"
 
 
 def test_verify_offer_for_dexie_maps_missing_expiration(monkeypatch) -> None:
@@ -60,6 +57,18 @@ def test_verify_offer_for_dexie_returns_native_validation_error(monkeypatch) -> 
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
     assert verify_offer_for_dexie("offer1bad") == (
         "wallet_sdk_offer_validate_failed:native_invalid_offer"
+    )
+
+
+def test_verify_offer_for_dexie_maps_structure_validate_failed(monkeypatch) -> None:
+    class _Native(MinimalSignerKernel):
+        @staticmethod
+        def verify_offer_for_dexie(_offer: str) -> str:
+            return "wallet_sdk_offer_validate_failed:malformed_offer"
+
+    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    assert verify_offer_for_dexie("offer1malformed") == (
+        "wallet_sdk_offer_validate_failed:malformed_offer"
     )
 
 

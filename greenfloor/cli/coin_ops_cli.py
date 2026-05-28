@@ -6,11 +6,12 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from greenfloor.cli.prompts import prompt_yes_no
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.coin_ops import coin_op_min_amount_mojos
-from greenfloor.core.coin_ops.types import DenominationReadiness
+from greenfloor.core.coin_ops.types import DenominationReadiness, SplitDenominationReadiness
 from greenfloor.runtime.coin_ops.errors import coin_op_unresolved_error_payload
 from greenfloor.runtime.coin_ops.models import (
     CombineDenominationTarget,
@@ -41,7 +42,10 @@ from greenfloor.runtime.json_output import format_json_output
 class _CoinOpCliRun:
     denomination_target: DenominationTarget
     readiness_asset_id: str
-    run_step: Callable[[int, list[dict], set[str]], CoinOpStepOutcome]
+    run_step: Callable[
+        [int, list[dict[str, Any]], set[str], DenominationReadiness | None],
+        CoinOpStepOutcome,
+    ]
     extra_payload: dict[str, object]
 
 
@@ -130,7 +134,7 @@ def _build_success_payload(
     coin_ids: list[str],
     until_ready: bool,
     max_iterations: int,
-    final_readiness: DenominationReadiness | None,
+    denomination_readiness: DenominationReadiness | None,
     extra_fields: dict[str, object] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
@@ -141,7 +145,7 @@ def _build_success_payload(
             until_ready=until_ready,
             max_iterations=max_iterations,
             stop_reason=complete.loop_result.stop_reason,
-            final_readiness=final_readiness,
+            denomination_readiness=denomination_readiness,
             operations=complete.loop_result.operations,
         ),
         **complete.extra_payload,
@@ -218,15 +222,26 @@ def _build_split_run_step(
     *,
     step_params: CoinSplitStepParams,
     prompt_for_override: bool | None,
-) -> Callable[[int, list[dict], set[str]], CoinOpStepOutcome]:
+) -> Callable[
+    [int, list[dict[str, Any]], set[str], DenominationReadiness | None],
+    CoinOpStepOutcome,
+]:
     def run_step(
         iteration: int,
         wallet_coins: list[dict],
         existing_coin_ids: set[str],
+        pre_readiness: DenominationReadiness | None,
     ) -> CoinOpStepOutcome:
         _ = iteration, existing_coin_ids
+        split_pre_readiness = (
+            pre_readiness if isinstance(pre_readiness, SplitDenominationReadiness) else None
+        )
         while True:
-            step_result = run_coin_split_step(params=step_params, wallet_coins=wallet_coins)
+            step_result = run_coin_split_step(
+                params=step_params,
+                wallet_coins=wallet_coins,
+                pre_readiness=split_pre_readiness,
+            )
             step = step_result.step
             if isinstance(step, CoinOpIterationNeedsConfirmation):
                 if prompt_yes_no(step.message, prompt_for_override=prompt_for_override):
@@ -235,8 +250,14 @@ def _build_split_run_step(
                     elif step.override == "allow_lock_all_spendable":
                         step_params.allow_lock_all_spendable = True
                     continue
-                return CoinOpStepOutcome(step=step.decline_step, split_gate=step_result.split_gate)
-            return CoinOpStepOutcome(step=step, split_gate=step_result.split_gate)
+                return CoinOpStepOutcome(
+                    step=step.decline_step,
+                    denomination_readiness=step_result.denomination_readiness,
+                )
+            return CoinOpStepOutcome(
+                step=step,
+                denomination_readiness=step_result.denomination_readiness,
+            )
 
     return run_step
 
@@ -323,11 +344,9 @@ def execute_split_cli(
     if isinstance(result, int):
         return result
 
-    final_readiness = result.loop_result.final_readiness or result.loop_result.split_gate
+    readiness = result.loop_result.denomination_readiness
     split_gate_payload = (
-        None
-        if result.loop_result.split_gate is None
-        else result.loop_result.split_gate.to_payload()
+        None if not isinstance(readiness, SplitDenominationReadiness) else readiness.to_payload()
     )
     return _finish_coin_op_cli(
         setup=result.setup,
@@ -338,7 +357,7 @@ def execute_split_cli(
             coin_ids=coin_ids,
             until_ready=until_ready,
             max_iterations=max_iterations,
-            final_readiness=final_readiness,
+            denomination_readiness=readiness,
             extra_fields={"split_gate": split_gate_payload},
         ),
     )
@@ -389,8 +408,9 @@ def execute_combine_cli(
             iteration: int,
             wallet_coins: list[dict],
             existing_coin_ids: set[str],
+            pre_readiness: DenominationReadiness | None,
         ) -> CoinOpStepOutcome:
-            _ = iteration, existing_coin_ids
+            _ = iteration, existing_coin_ids, pre_readiness
             step_result = run_coin_combine_step(params=step_params, wallet_coins=wallet_coins)
             return CoinOpStepOutcome(step=step_result.step)
 
@@ -440,6 +460,6 @@ def execute_combine_cli(
             coin_ids=coin_ids,
             until_ready=until_ready,
             max_iterations=max_iterations,
-            final_readiness=result.loop_result.final_readiness,
+            denomination_readiness=result.loop_result.denomination_readiness,
         ),
     )

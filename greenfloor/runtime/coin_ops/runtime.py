@@ -15,8 +15,11 @@ from greenfloor.config.io import (
 from greenfloor.config.models import MarketConfig, MarketLadderEntry, ProgramConfig
 from greenfloor.core.coin_ops import coin_op_should_stop
 from greenfloor.core.coin_ops.types import DenominationReadiness
-from greenfloor.runtime.coin_ops.readiness import build_coin_op_iteration_payload
 from greenfloor.runtime.coin_ops.models import DenominationTarget, denomination_target_payload
+from greenfloor.runtime.coin_ops.readiness import (
+    build_coin_op_iteration_payload,
+    evaluate_readiness_for_denomination_target,
+)
 from greenfloor.runtime.coin_ops_backend import (
     CoinOpBackend,
     SignerCoinOpBackend,
@@ -45,7 +48,7 @@ def coin_op_result_payload(
     until_ready: bool,
     max_iterations: int,
     stop_reason: str,
-    final_readiness: DenominationReadiness | None,
+    denomination_readiness: DenominationReadiness | None,
     operations: list[dict[str, object]],
 ) -> dict[str, object]:
     return {
@@ -56,7 +59,7 @@ def coin_op_result_payload(
         "max_iterations": max_iterations,
         "stop_reason": stop_reason,
         "denomination_readiness": (
-            None if final_readiness is None else final_readiness.to_payload()
+            None if denomination_readiness is None else denomination_readiness.to_payload()
         ),
         "operations": operations,
         "signature_request_id": (
@@ -212,16 +215,15 @@ CoinOpIterationStep = (
 @dataclass(slots=True)
 class CoinOpStepOutcome:
     step: CoinOpIterationStep
-    split_gate: DenominationReadiness | None = None
+    denomination_readiness: DenominationReadiness | None = None
 
 
 @dataclass(slots=True)
 class CoinOpLoopResult:
     operations: list[dict[str, object]]
-    final_readiness: DenominationReadiness | None
+    denomination_readiness: DenominationReadiness | None
     stop_reason: str
     unresolved_coin_ids: list[str]
-    split_gate: DenominationReadiness | None = None
     early_return_code: int | None = None
     error_payload: dict[str, object] | None = None
 
@@ -236,14 +238,17 @@ def run_coin_op_iteration_loop(
     coin_ids: list[str],
     denomination_target: DenominationTarget,
     readiness_asset_id: str,
-    run_step: Callable[[int, list[dict[str, Any]], set[str]], CoinOpStepOutcome],
+    run_step: Callable[
+        [int, list[dict[str, Any]], set[str], DenominationReadiness | None],
+        CoinOpStepOutcome,
+    ],
 ) -> CoinOpLoopResult:
+    _ = network
     backend = setup.backend
     if isinstance(backend, SignerCoinOpBackend):
         backend.no_wait = no_wait
     operations: list[dict[str, object]] = []
-    final_readiness: DenominationReadiness | None = None
-    split_gate: DenominationReadiness | None = None
+    denomination_readiness: DenominationReadiness | None = None
     stop_reason = "single_pass"
     unresolved_coin_ids: list[str] = []
 
@@ -254,18 +259,24 @@ def run_coin_op_iteration_loop(
             for c in wallet_coins
             if str(c.get("id", c.get("name", ""))).strip()
         }
-        outcome = run_step(iteration, wallet_coins, existing_coin_ids)
-        if outcome.split_gate is not None:
-            split_gate = outcome.split_gate
+        pre_readiness = evaluate_readiness_for_denomination_target(
+            asset_scoped_coins=backend.list_asset_scoped_coins(),
+            asset_id=readiness_asset_id,
+            target=denomination_target,
+        )
+        outcome = run_step(iteration, wallet_coins, existing_coin_ids, pre_readiness)
+        if outcome.denomination_readiness is not None:
+            denomination_readiness = outcome.denomination_readiness
+        elif pre_readiness is not None:
+            denomination_readiness = pre_readiness
         step = outcome.step
 
         if isinstance(step, CoinOpIterationEarlyExit):
             return CoinOpLoopResult(
                 operations=operations,
-                final_readiness=final_readiness,
+                denomination_readiness=denomination_readiness,
                 stop_reason=step.stop_reason or stop_reason,
                 unresolved_coin_ids=list(step.unresolved_coin_ids or []),
-                split_gate=split_gate,
                 early_return_code=step.return_code,
                 error_payload=step.error_payload,
             )
@@ -277,7 +288,7 @@ def run_coin_op_iteration_loop(
                 "coin_op_iteration_needs_confirmation must be handled before the loop"
             )
 
-        iteration_payload, final_readiness = build_coin_op_iteration_payload(
+        iteration_payload, denomination_readiness = build_coin_op_iteration_payload(
             operation_id=step.signature_request_id,
             operation_state=step.initial_signature_state,
             no_wait=no_wait,
@@ -285,10 +296,12 @@ def run_coin_op_iteration_loop(
             readiness_asset_id=readiness_asset_id,
             denomination_target=denomination_target,
             asset_scoped_coins=backend.list_asset_scoped_coins(),
+            readiness=pre_readiness,
+            refresh_readiness=True,
         )
         operations.append(iteration_payload)
 
-        readiness_ready = None if final_readiness is None else final_readiness.ready
+        readiness_ready = None if denomination_readiness is None else denomination_readiness.ready
         should_break, reason = coin_op_should_stop(
             until_ready=until_ready,
             readiness_ready=readiness_ready,
@@ -302,8 +315,7 @@ def run_coin_op_iteration_loop(
 
     return CoinOpLoopResult(
         operations=operations,
-        final_readiness=final_readiness,
+        denomination_readiness=denomination_readiness,
         stop_reason=stop_reason,
         unresolved_coin_ids=unresolved_coin_ids,
-        split_gate=split_gate,
     )

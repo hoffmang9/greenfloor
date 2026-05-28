@@ -12,11 +12,10 @@ from greenfloor.core.coin_ops import (
     SplitPlanningProfile,
     SplitSkipPlan,
     coin_meets_coin_op_min_amount,
-    evaluate_coin_split_gate,
     plan_auto_combine_inputs,
     plan_auto_split_selection,
 )
-from greenfloor.core.coin_ops.types import DenominationReadiness
+from greenfloor.core.coin_ops.types import DenominationReadiness, SplitDenominationReadiness
 from greenfloor.runtime.coin_ops.coins import classify_resolved_coin_ids_by_asset
 from greenfloor.runtime.coin_ops.errors import (
     coin_combine_asset_mismatch_error_payload,
@@ -62,13 +61,14 @@ class CoinSplitStepResult:
         | CoinOpIterationSkipLoop
         | CoinOpIterationNeedsConfirmation
     )
-    split_gate: DenominationReadiness | None = None
+    denomination_readiness: DenominationReadiness | None = None
 
 
 def run_coin_split_step(
     *,
     params: CoinSplitStepParams,
     wallet_coins: list[dict[str, Any]],
+    pre_readiness: SplitDenominationReadiness | None = None,
 ) -> CoinSplitStepResult:
     scope = params.backend.scope
     asset_scoped_coins = params.backend.list_asset_scoped_coins()
@@ -84,16 +84,12 @@ def run_coin_split_step(
         for c in spendable_scoped
         if str(c.get("id", c.get("name", ""))).strip()
     }
-    split_gate: DenominationReadiness | None = None
+    denomination_readiness: SplitDenominationReadiness | None = None
     if params.denomination_target is not None:
-        gate = evaluate_coin_split_gate(
-            asset_scoped_coins=asset_scoped_coins,
-            resolved_asset_id=params.resolved_asset_id,
-            size_base_units=params.denomination_target.size_base_units,
-            required_count=params.denomination_target.required_count,
-        )
-        split_gate = gate
-        if gate.ready and not params.force_split_when_ready:
+        if pre_readiness is None:
+            raise RuntimeError("split step requires pre_readiness when denomination_target is set")
+        denomination_readiness = pre_readiness
+        if pre_readiness.ready and not params.force_split_when_ready:
             return CoinSplitStepResult(
                 step=CoinOpIterationNeedsConfirmation(
                     message=(
@@ -103,7 +99,7 @@ def run_coin_split_step(
                     override="force_split_when_ready",
                     decline_step=CoinOpIterationSkipLoop(stop_reason="ready"),
                 ),
-                split_gate=split_gate,
+                denomination_readiness=denomination_readiness,
             )
     if params.explicit_coin_ids:
         resolved_coin_ids, unresolved_coin_ids = params.backend.resolve_coin_ids(
@@ -115,7 +111,7 @@ def run_coin_split_step(
                     return_code=2,
                     unresolved_coin_ids=unresolved_coin_ids,
                 ),
-                split_gate=split_gate,
+                denomination_readiness=denomination_readiness,
             )
     else:
         spendable_asset_coins = [
@@ -134,7 +130,7 @@ def run_coin_split_step(
                         min_coin_amount_mojos=params.min_coin_amount_mojos,
                     ),
                 ),
-                split_gate=split_gate,
+                denomination_readiness=denomination_readiness,
             )
         selection = plan_auto_split_selection(
             candidate_spendable=spendable_asset_coins,
@@ -170,7 +166,7 @@ def run_coin_split_step(
                     ),
                 ),
             ),
-            split_gate=split_gate,
+            denomination_readiness=denomination_readiness,
         )
 
     split_result = params.backend.split_coins(
@@ -191,7 +187,7 @@ def run_coin_split_step(
             signature_request_id=operation_id,
             initial_signature_state=str(split_result.get("status", "UNKNOWN")),
         ),
-        split_gate=split_gate,
+        denomination_readiness=denomination_readiness,
     )
 
 
@@ -212,7 +208,7 @@ class CoinCombineStepParams:
 @dataclass(slots=True)
 class CoinCombineStepResult:
     step: CoinOpIterationExecuteResult | CoinOpIterationEarlyExit
-    split_gate: DenominationReadiness | None = None
+    denomination_readiness: DenominationReadiness | None = None
 
 
 def run_coin_combine_step(

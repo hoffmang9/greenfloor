@@ -15,10 +15,7 @@ pub fn parse_rate_limit_retry_seconds(error_text: &str) -> Option<f64> {
 }
 
 /// Sleep duration before the next moderate-retry attempt after a failure.
-pub fn moderate_retry_sleep_seconds(
-    mut current_sleep: f64,
-    rate_limit_wait: Option<f64>,
-) -> f64 {
+pub fn moderate_retry_sleep_seconds(mut current_sleep: f64, rate_limit_wait: Option<f64>) -> f64 {
     if let Some(wait) = rate_limit_wait {
         current_sleep = current_sleep.max((wait + 0.25).min(30.0));
     }

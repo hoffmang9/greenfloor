@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
 from greenfloor.config.models import MarketConfig
-from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode, DenominationTarget
+from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode
 
 CoinOpExecutionBackend = Literal["signer"]
 
@@ -96,4 +96,3 @@ class CoinOpBackend(Protocol):
         largest_first: bool = True,
         target_amount: int | None = None,
     ) -> dict[str, Any]: ...
-

@@ -25,7 +25,9 @@ fn condition_has_offer_expiration(condition: &Condition<NodePtr>) -> bool {
     )
 }
 
-fn coin_spend_has_expiration_condition(coin_spend: &chia_protocol::CoinSpend) -> SignerResult<bool> {
+fn coin_spend_has_expiration_condition(
+    coin_spend: &chia_protocol::CoinSpend,
+) -> SignerResult<bool> {
     let mut allocator = Allocator::new();
     let puzzle = node_from_bytes(&mut allocator, coin_spend.puzzle_reveal.as_ref())
         .map_err(|err| SignerError::Driver(err.to_string()))?;
@@ -140,7 +142,9 @@ pub fn from_input_spend_bundle_bytes(
         }
         requested_payments
             .xch
-            .push(chia_puzzle_types::offer::NotarizedPayment::new(nonce, payments));
+            .push(chia_puzzle_types::offer::NotarizedPayment::new(
+                nonce, payments,
+            ));
     }
     for (asset_id_raw, nonce_raw, payments_raw) in requested_payments_cats {
         let asset_id = parse_bytes32(&asset_id_raw, "asset_id")?;
@@ -154,11 +158,9 @@ pub fn from_input_spend_bundle_bytes(
                 chia_puzzle_types::Memos::None,
             ));
         }
-        requested_payments
-            .cats
-            .entry(asset_id)
-            .or_default()
-            .push(chia_puzzle_types::offer::NotarizedPayment::new(nonce, payments));
+        requested_payments.cats.entry(asset_id).or_default().push(
+            chia_puzzle_types::offer::NotarizedPayment::new(nonce, payments),
+        );
     }
 
     let mut ctx = SpendContext::new();

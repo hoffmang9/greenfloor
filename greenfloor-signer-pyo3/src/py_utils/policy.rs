@@ -93,7 +93,9 @@ pub fn low_inventory_evaluation_to_py<'py>(
     cls.call((), Some(&kwargs))
 }
 
-pub fn low_inventory_input_from_py(input: &Bound<'_, PyAny>) -> PyResult<signer_core::LowInventoryInput> {
+pub fn low_inventory_input_from_py(
+    input: &Bound<'_, PyAny>,
+) -> PyResult<signer_core::LowInventoryInput> {
     Ok(signer_core::LowInventoryInput {
         now_unix: input.getattr("now_unix")?.extract()?,
         low_inventory_enabled: input.getattr("low_inventory_enabled")?.extract()?,
@@ -112,9 +114,7 @@ pub fn low_inventory_input_from_py(input: &Bound<'_, PyAny>) -> PyResult<signer_
     })
 }
 
-pub fn open_offer_rows_from_py_list(
-    offers: &Bound<'_, PyList>,
-) -> PyResult<Vec<(String, i64)>> {
+pub fn open_offer_rows_from_py_list(offers: &Bound<'_, PyList>) -> PyResult<Vec<(String, i64)>> {
     let mut pairs = Vec::new();
     for item in offers.iter() {
         let offer_id = item
@@ -130,7 +130,10 @@ pub fn open_offer_rows_from_py_list(
     Ok(pairs)
 }
 
-pub fn string_list_to_py_list<'py>(py: Python<'py>, values: &[String]) -> PyResult<Bound<'py, PyList>> {
+pub fn string_list_to_py_list<'py>(
+    py: Python<'py>,
+    values: &[String],
+) -> PyResult<Bound<'py, PyList>> {
     let list = PyList::empty(py);
     for value in values {
         list.append(value)?;

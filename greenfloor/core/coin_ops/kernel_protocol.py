@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Protocol
-
-from typing import Any
+from typing import Any, Protocol
 
 from greenfloor.core.coin_ops.types import (
     BucketSpec,
+    CoinCombineGateResult,
     CoinOpPlan,
     CoinSplitGateResult,
     CombineInputSelectionMode,
@@ -104,7 +103,15 @@ class CoinOpsKernelProtocol(Protocol):
         resolved_asset_id: str,
         size_base_units: int,
         required_count: int,
-    ) -> CoinSplitGateResult: ...  # PyO3 returns kernel shape; bridge converts to DenominationReadiness
+    ) -> CoinSplitGateResult: ...  # PyO3 FFI; bridge converts to SplitDenominationReadiness
+
+    def evaluate_coin_combine_gate(
+        self,
+        asset_scoped_coins: list[dict[str, Any]],
+        asset_id: str,
+        size_base_units: int,
+        max_allowed_count: int,
+    ) -> CoinCombineGateResult: ...  # PyO3 FFI; bridge converts to CombineDenominationReadiness
 
     def coin_op_should_stop(
         self,

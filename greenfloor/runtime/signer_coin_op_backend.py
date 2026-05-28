@@ -216,4 +216,3 @@ class SignerCoinOpBackend:
             fee_mojos=fee_mojos,
             initial_coin_ids=existing_ids,
         )
-

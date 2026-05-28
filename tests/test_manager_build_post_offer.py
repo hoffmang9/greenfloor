@@ -150,9 +150,7 @@ def test_build_and_post_offer_uses_market_configured_expiry_override(
 
     monkeypatch.setattr("greenfloor.cli.offer_build_post.build_offer", _fake_build)
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
-    monkeypatch.setattr(
-        "greenfloor.core.offer_policy.verify_offer_for_dexie", lambda _offer: None
-    )
+    monkeypatch.setattr("greenfloor.core.offer_policy.verify_offer_for_dexie", lambda _offer: None)
 
     code = build_and_post_offer_cli(
         program_path=program,

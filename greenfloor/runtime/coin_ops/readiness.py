@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from greenfloor.core.coin_ops import (
-    evaluate_coin_split_gate,
-    evaluate_denomination_readiness,
+from greenfloor.core.coin_ops import evaluate_coin_combine_gate, evaluate_coin_split_gate
+from greenfloor.core.coin_ops.types import (
+    DenominationReadiness,
 )
-from greenfloor.core.coin_ops.types import DenominationReadiness
 from greenfloor.runtime.coin_ops.models import (
     CombineDenominationTarget,
     DenominationTarget,
@@ -32,7 +31,7 @@ def evaluate_readiness_for_denomination_target(
             required_count=int(target.required_count),
         )
     if isinstance(target, CombineDenominationTarget):
-        return evaluate_denomination_readiness(
+        return evaluate_coin_combine_gate(
             asset_scoped_coins=asset_scoped_coins,
             asset_id=str(asset_id),
             size_base_units=int(target.size_base_units),
@@ -50,6 +49,8 @@ def build_coin_op_iteration_payload(
     readiness_asset_id: str,
     denomination_target: DenominationTarget | None,
     asset_scoped_coins: list[dict[str, Any]],
+    readiness: DenominationReadiness | None = None,
+    refresh_readiness: bool = False,
 ) -> tuple[dict[str, object], DenominationReadiness | None]:
     iteration_payload: dict[str, object] = {
         "iteration": iteration,
@@ -60,11 +61,13 @@ def build_coin_op_iteration_payload(
         "waited": not no_wait,
         "wait_events": [],
     }
-    final_readiness = evaluate_readiness_for_denomination_target(
-        asset_scoped_coins=asset_scoped_coins,
-        asset_id=readiness_asset_id,
-        target=denomination_target,
-    )
-    if final_readiness is not None:
-        iteration_payload["denomination_readiness"] = final_readiness.to_payload()
-    return iteration_payload, final_readiness
+    denomination_readiness = readiness
+    if refresh_readiness or denomination_readiness is None:
+        denomination_readiness = evaluate_readiness_for_denomination_target(
+            asset_scoped_coins=asset_scoped_coins,
+            asset_id=readiness_asset_id,
+            target=denomination_target,
+        )
+    if denomination_readiness is not None:
+        iteration_payload["denomination_readiness"] = denomination_readiness.to_payload()
+    return iteration_payload, denomination_readiness

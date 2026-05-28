@@ -17,10 +17,7 @@ fn abs_move_bps_py(current: Option<f64>, previous: Option<f64>) -> Option<f64> {
 
 #[pyfunction]
 #[pyo3(name = "cancel_move_threshold_bps")]
-fn cancel_move_threshold_bps_py(
-    market_threshold: Option<i64>,
-    env_threshold: Option<i64>,
-) -> i64 {
+fn cancel_move_threshold_bps_py(market_threshold: Option<i64>, env_threshold: Option<i64>) -> i64 {
     cancel_move_threshold_bps(market_threshold, env_threshold)
 }
 
