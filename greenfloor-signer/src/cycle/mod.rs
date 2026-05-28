@@ -4,6 +4,7 @@ pub mod lifecycle;
 pub mod managed;
 pub mod market;
 pub mod orchestration;
+pub mod reconcile;
 pub mod reseed;
 pub mod strategy;
 
@@ -40,6 +41,10 @@ pub use execution::{
     plan_parallel_managed_dispatch, sequential_action_route,
     ParallelBatchPlan, ParallelQueueItem, ParallelReservationContext, ParallelSkipItem,
     SequentialActionRoute,
+};
+pub use reconcile::{
+    resolve_missing_watched_offer_transition, resolve_watched_offer_transition_from_signals,
+    unchanged_offer_transition, unsupported_venue_offer_transition, CycleOfferTransition,
 };
 pub use reseed::{
     plan_reseed_actions_from_gap, reseed_skip_reason_labels, ReseedGapPlan, ReseedSkipReason,

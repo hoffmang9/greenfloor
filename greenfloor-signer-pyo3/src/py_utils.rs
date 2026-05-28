@@ -18,9 +18,11 @@ static STALE_SWEEP_HIT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static STALE_SWEEP_PROGRESS_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static RESEED_GAP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static RESEED_SKIP_REASON_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static CYCLE_OFFER_TRANSITION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 
 const ORCHESTRATION_MODULE: &str = "greenfloor.core.cycle_orchestration";
 const CYCLE_RESEED_MODULE: &str = "greenfloor.core.cycle_reseed";
+const OFFER_RECONCILE_MODULE: &str = "greenfloor.core.offer_reconcile";
 
 fn cached_class<'py>(
     py: Python<'py>,
@@ -147,6 +149,15 @@ pub fn stale_sweep_hit_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>
 
 pub fn stale_sweep_progress_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     cached_class(py, &STALE_SWEEP_PROGRESS_CLS, ORCHESTRATION_MODULE, "StaleSweepProgress")
+}
+
+pub fn cycle_offer_transition_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &CYCLE_OFFER_TRANSITION_CLS,
+        OFFER_RECONCILE_MODULE,
+        "CycleOfferTransition",
+    )
 }
 
 pub fn string_i64_map_from_py_dict(dict: &Bound<'_, PyDict>) -> PyResult<BTreeMap<String, i64>> {

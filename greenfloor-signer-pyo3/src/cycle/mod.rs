@@ -3,6 +3,7 @@ mod managed_py;
 mod market_py;
 mod offer_py;
 mod orchestration_py;
+mod reconcile_py;
 mod stale_sweep_py;
 mod strategy_counts_py;
 
@@ -17,5 +18,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     stale_sweep_py::register(m)?;
     inventory_py::register(m)?;
     strategy_counts_py::register(m)?;
+    reconcile_py::register(m)?;
     Ok(())
 }
