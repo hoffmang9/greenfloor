@@ -2,6 +2,9 @@
 
 from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.core.policy_bridge import (
+    bootstrap_block_error,
+    dexie_offer_asset_expectation_error,
+    expected_publish_asset_fields,
     mojo_multiplier_for_leg,
     resolve_offer_expiry_for_pricing,
     resolve_quote_price_for_pricing,
@@ -16,7 +19,10 @@ from greenfloor.core.signer_offer_request import (
 __all__ = [
     "SignerCreateOfferPayload",
     "SignerCreateOfferRequest",
+    "bootstrap_block_error",
     "build_signer_create_offer_request",
+    "dexie_offer_asset_expectation_error",
+    "expected_publish_asset_fields",
     "mojo_multiplier_for_leg",
     "normalize_offer_side",
     "resolve_offer_expiry_for_pricing",

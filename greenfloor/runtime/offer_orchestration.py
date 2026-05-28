@@ -56,18 +56,12 @@ class OfferCreateFailure(Exception):
 
 
 def bootstrap_blocks_offer(bootstrap_result: dict[str, Any]) -> tuple[bool, str | None]:
-    bootstrap_status = str(bootstrap_result.get("status", "")).strip().lower()
-    bootstrap_reason = (
-        str(bootstrap_result.get("reason", "")).strip() or "bootstrap_precheck_failed"
+    error = offer_policy.bootstrap_block_error(
+        bootstrap_status=str(bootstrap_result.get("status", "")),
+        bootstrap_reason=str(bootstrap_result.get("reason", "")),
+        bootstrap_ready=bool(bootstrap_result.get("ready", False)),
     )
-    bootstrap_ready = bool(bootstrap_result.get("ready", False))
-    if bootstrap_status == "failed":
-        return True, f"bootstrap_failed:{bootstrap_reason}"
-    if bootstrap_status == "executed" and not bootstrap_ready:
-        return True, f"bootstrap_pending:{bootstrap_reason}"
-    if bootstrap_status == "skipped" and bootstrap_reason != "already_ready":
-        return True, f"bootstrap_precheck_skipped:{bootstrap_reason}"
-    return False, None
+    return (error is not None), error
 
 
 def _iteration_timing_payload(

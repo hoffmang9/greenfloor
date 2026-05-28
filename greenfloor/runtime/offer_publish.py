@@ -11,8 +11,8 @@ from typing import Any
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig
+from greenfloor.core import offer_policy
 from greenfloor.core.cycle import is_transient_dexie_visibility_404_error
-from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.core.retry_policy import (
     dexie_invalid_offer_retry_sleep,
     dexie_invalid_offer_should_retry,
@@ -143,54 +143,16 @@ def verify_dexie_offer_visible_by_id(
             if isinstance(offer_payload, dict):
                 offered = offer_payload.get("offered")
                 requested = offer_payload.get("requested")
-                if expected_offered_asset_id and isinstance(offered, list):
-                    expected_asset = str(expected_offered_asset_id).strip().lower()
-                    expected_symbol = str(expected_offered_symbol or "").strip().lower()
-                    found = any(
-                        isinstance(row, dict)
-                        and (
-                            str(row.get("id", "")).strip().lower() == expected_asset
-                            or (
-                                expected_symbol
-                                and str(row.get("code", "")).strip().lower() == expected_symbol
-                            )
-                            or (
-                                expected_symbol
-                                and str(row.get("name", "")).strip().lower() == expected_symbol
-                            )
-                        )
-                        for row in offered
-                    )
-                    if not found:
-                        return (
-                            "dexie_offer_offered_asset_missing:"
-                            f"expected_asset={expected_offered_asset_id}:"
-                            f"expected_symbol={expected_offered_symbol}"
-                        )
-                if expected_requested_asset_id and isinstance(requested, list):
-                    expected_asset = str(expected_requested_asset_id).strip().lower()
-                    expected_symbol = str(expected_requested_symbol or "").strip().lower()
-                    found = any(
-                        isinstance(row, dict)
-                        and (
-                            str(row.get("id", "")).strip().lower() == expected_asset
-                            or (
-                                expected_symbol
-                                and str(row.get("code", "")).strip().lower() == expected_symbol
-                            )
-                            or (
-                                expected_symbol
-                                and str(row.get("name", "")).strip().lower() == expected_symbol
-                            )
-                        )
-                        for row in requested
-                    )
-                    if not found:
-                        return (
-                            "dexie_offer_requested_asset_missing:"
-                            f"expected_asset={expected_requested_asset_id}:"
-                            f"expected_symbol={expected_requested_symbol}"
-                        )
+                asset_error = offer_policy.dexie_offer_asset_expectation_error(
+                    offered=offered,
+                    requested=requested,
+                    expected_offered_asset_id=str(expected_offered_asset_id or ""),
+                    expected_offered_symbol=str(expected_offered_symbol or ""),
+                    expected_requested_asset_id=str(expected_requested_asset_id or ""),
+                    expected_requested_symbol=str(expected_requested_symbol or ""),
+                )
+                if asset_error:
+                    return asset_error
             return None
         last_error = "dexie_offer_visibility_payload_mismatch"
         if attempt < attempts:
@@ -295,17 +257,10 @@ def expected_publish_asset_fields(
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
 ) -> dict[str, str]:
-    is_buy = normalize_offer_side(side) == "buy"
-    if is_buy:
-        return {
-            "expected_offered_asset_id": str(resolved_quote_asset_id),
-            "expected_offered_symbol": str(market.quote_asset),
-            "expected_requested_asset_id": str(resolved_base_asset_id),
-            "expected_requested_symbol": str(market.base_symbol),
-        }
-    return {
-        "expected_offered_asset_id": str(resolved_base_asset_id),
-        "expected_offered_symbol": str(market.base_symbol),
-        "expected_requested_asset_id": str(resolved_quote_asset_id),
-        "expected_requested_symbol": str(market.quote_asset),
-    }
+    return offer_policy.expected_publish_asset_fields(
+        side=str(side),
+        base_symbol=str(market.base_symbol),
+        quote_asset=str(market.quote_asset),
+        resolved_base_asset_id=str(resolved_base_asset_id),
+        resolved_quote_asset_id=str(resolved_quote_asset_id),
+    )

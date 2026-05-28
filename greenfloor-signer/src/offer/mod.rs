@@ -5,6 +5,7 @@ pub mod codec;
 pub mod invariants;
 pub mod plan;
 pub mod presplit;
+pub mod publish;
 pub mod types;
 
 pub use build::build_vault_cat_offer;
@@ -15,5 +16,9 @@ pub use codec::{
     encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
     from_input_spend_bundle_xch_bytes, validate_offer_structure, validate_offer_text,
     verify_offer_for_dexie,
+};
+pub use publish::{
+    bootstrap_block_error, dexie_offer_asset_expectation_error, expected_publish_asset_fields,
+    ExpectedPublishAssetFields,
 };
 pub use types::{CreateOfferRequest, CreateOfferResult, OfferExecutionMode};

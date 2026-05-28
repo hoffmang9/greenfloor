@@ -265,6 +265,32 @@ class OfferPolicyKernelProtocol(Protocol):
 
     def verify_offer_for_dexie(self, offer: str) -> str | None: ...
 
+    def bootstrap_block_error(
+        self,
+        bootstrap_status: str,
+        bootstrap_reason: str,
+        bootstrap_ready: bool,
+    ) -> str | None: ...
+
+    def expected_publish_asset_fields(
+        self,
+        side: str,
+        base_symbol: str,
+        quote_asset: str,
+        resolved_base_asset_id: str,
+        resolved_quote_asset_id: str,
+    ) -> dict[str, str]: ...
+
+    def dexie_offer_asset_expectation_error(
+        self,
+        offered: object,
+        requested: object,
+        expected_offered_asset_id: str,
+        expected_offered_symbol: str,
+        expected_requested_asset_id: str,
+        expected_requested_symbol: str,
+    ) -> str | None: ...
+
 
 class RetryPolicyKernelProtocol(Protocol):
     def parse_rate_limit_retry_seconds(self, error_text: str) -> float | None: ...
