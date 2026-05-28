@@ -18,7 +18,7 @@ from greenfloor.daemon.inventory_scan import (
 )
 from greenfloor.daemon.market_helpers import _base_unit_mojo_multiplier_for_market
 from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision
-from greenfloor.daemon.strategy_dispatch.reservation_helpers import (
+from greenfloor.daemon.offer_dispatch.reservation import (
     resolve_signer_offer_asset_ids_for_reservation,
 )
 from greenfloor.storage.sqlite import SqliteStore

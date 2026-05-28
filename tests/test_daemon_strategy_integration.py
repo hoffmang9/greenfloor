@@ -9,7 +9,7 @@ from greenfloor.daemon.coin_ops_cycle import (
 )
 from greenfloor.daemon.market_helpers import _normalize_strategy_pair
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
-from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
+from greenfloor.daemon.strategy_execution import StrategyActionResult
 from greenfloor.daemon.strategy_state import (
     _evaluate_two_sided_market_actions,
     _strategy_config_from_market,

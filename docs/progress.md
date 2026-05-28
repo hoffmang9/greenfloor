@@ -1,5 +1,24 @@
 # Progress Log
 
+## 2026-05-27 (strategy_dispatch exit criteria — package shrink)
+
+- **`greenfloor/daemon/offer_dispatch/`:** new home for managed/local/parallel offer build+post IO (~760 lines): `managed.py`, `local.py`, `parallel.py`, `reservation.py`, `items.py`.
+- **`greenfloor/daemon/strategy_dispatch/`:** routing glue only — `dispatch_router.py`, `sequential_path.py`, `runtime.py`, `results.py` (**386 lines**, under ~400 exit target).
+- **Backward compat:** `strategy_dispatch` package re-exports `build_offer_for_action`, `managed_offer_post`, etc. so test monkeypatches on `strategy_dispatch.*` unchanged.
+- **`inventory_phase`:** imports `resolve_signer_offer_asset_ids_for_reservation` from `offer_dispatch.reservation`.
+- **Tests:** 47 strategy dispatch tests pass.
+- **Migration status:** daemon `strategy_dispatch/` line-count exit criterion met; offer execution IO lives in `offer_dispatch/`.
+
+## 2026-05-27 (Rust coin-op selection/planning — step 11)
+
+- **`greenfloor-signer/src/coin_ops/selection.rs`:** spendable coin subset-sum selection, largest/exact pickers, and sub-CAT change dust guard.
+- **`greenfloor-signer/src/coin_ops/split_planning.rs`:** `plan_auto_split_selection` (CLI vs daemon profiles), combine-prereq gating, and `plan_auto_combine_inputs`.
+- **PyO3 + core surface:** `coin_ops_py.rs` + `py_utils.rs` expose typed `SplitCoinPlan` / `SplitCombinePrereqPlan` / `SplitSkipPlan` via `greenfloor.core.coin_ops.types`; bridge in `_bridge.py` with `CoinOpsKernelProtocol` extended.
+- **Python IO glue:** `runtime/coin_ops/planning.py` and `selection.py` are thin re-exports (~80 lines total); CLI/daemon execution modules unchanged.
+- **Tests:** Rust unit tests in `selection.rs` and `split_planning.rs`; existing `tests/test_coin_ops_planning.py` and daemon parallel selection tests remain parity gates.
+- **Migration status:** step 11 complete for coin-op selection/planning helpers.
+- **Next step (deferred hygiene):** `CycleKernelProtocol` on `core/cycle/_bridge.py`, `py_utils.rs` domain split before ~500 lines, dual XCH identity parity gate in `test_coin_ops_policy_parity.py`.
+
 ## 2026-05-27 (Rust coin-op policy kernel — step 10)
 
 - **`greenfloor-signer/src/coin_ops/`:** deterministic coin-op policy bundle — `plan_coin_ops`, fee-budget partitioning, bucket counting, and CAT min-amount guard.
@@ -8,16 +27,16 @@
 - **Tests:** Rust unit tests in `coin_ops/{plan,fee_budget,inventory,policy}.rs`; Python parity/FFI contract in `tests/test_coin_ops_policy_parity.py`; existing planner/fee/inventory tests remain parity gates.
 - **Follow-up:** consolidated Python surface into `greenfloor/core/coin_ops/` package + shared `kernel_bridge`; deduplicated PyO3 class caching; `amount_meets_coin_op_min_mojos` is the single Rust threshold check (ADR 0010).
 - **Migration status:** step 10 complete for core coin-op policy.
-- **Next step (step 11):** move **coin-op selection/planning helpers** from `runtime/coin_ops/planning.py` and `runtime/coin_ops/selection.py` into Rust (auto-split profile selection, combine-prereq gating, sub-CAT change rejection). Python keeps CLI/daemon execution IO only.
+- **Completed (step 11):** coin-op selection/planning — see step 11 entry above (`selection.rs`, `split_planning.rs`).
 
-### Agent handoff — deferred follow-up (post step 10 review)
+### Agent handoff — deferred follow-up (post step 11)
 
-Record these for the next migration agent; none are merge blockers for step 10.
+Record these for the next migration agent; none are merge blockers for step 11.
 
-1. **`greenfloor/core/cycle/_bridge.py` (~440 lines, untyped FFI):** add a `CycleKernelProtocol` (mirror `CoinOpsKernelProtocol`) when the cycle epic is touched next; shrink wrapper boilerplate only if it deletes real complexity.
-2. **`greenfloor/runtime/coin_ops/planning.py` + `selection.py` (~315 lines, step 11 scope):** migrate auto-split profile selection, combine-prereq gating, and sub-CAT change rejection to Rust; Python keeps wallet/coinset execution IO only.
-3. **Dual XCH asset identity (Python + Rust):** `hex_utils.canonical_is_xch` and `coinset::is_canonical_xch_asset` remain separate until more asset policy moves to Rust; keep `tests/test_coin_ops_policy_parity.py` as the parity gate.
-4. **`greenfloor-signer-pyo3/src/py_utils.rs` (~320 lines):** split into domain submodules (for example `py_utils/coin_ops.rs`, `py_utils/cycle.rs`) before the file reaches ~500 lines.
+1. **`greenfloor/core/cycle/_bridge.py` (~440 lines, untyped FFI):** add a `CycleKernelProtocol` (mirror `CoinOpsKernelProtocol`) when the cycle epic is touched next.
+2. **Dual XCH asset identity (Python + Rust):** `hex_utils.canonical_is_xch` and `coinset::is_canonical_xch_asset` remain separate; keep `tests/test_coin_ops_policy_parity.py` as the parity gate.
+3. **`greenfloor-signer-pyo3/src/py_utils.rs` (~420 lines):** split into domain submodules (for example `py_utils/coin_ops.rs`, `py_utils/cycle.rs`) before the file reaches ~500 lines.
+4. **`strategy_dispatch/` line-count exit (~400 target):** ✅ met (386 lines); execution IO in `offer_dispatch/`.
 
 ## 2026-05-27 (Rust offer reconciliation kernel — step 9)
 
@@ -164,11 +183,11 @@ Large Python daemon modules remain intentionally unsplit pending Rust migration 
 8. **Market-cycle reseed gap planning (eighth)** ✅ — `cycle/reseed.rs` + typed PyO3 `ReseedGapPlan`; Python keeps SQLite offer-count IO and structured reseed logging; `tests/test_cycle_reseed.py` enforces skip-reason label parity.
 9. **Offer reconciliation transition kernel (ninth)** ✅ — `cycle/reconcile.rs` + typed PyO3 `CycleOfferTransition`; Python keeps Dexie fetch, SQLite tx-signal lookup, and audit persistence in `runtime/offer_reconciliation.py`.
 10. **Core coin-op policy bundle (tenth)** ✅ — `coin_ops/{plan,fee_budget,inventory,policy}.rs` + PyO3 `coin_ops_py.rs`; Python keeps `runtime/coin_ops/` execution IO and `daemon/coin_ops_cycle.py` glue.
-11. **Coin-op selection/planning helpers (eleventh, next)** — auto-split profile selection, combine-prereq gating, and sub-CAT change rejection from `runtime/coin_ops/planning.py` / `selection.py` in Rust; Python keeps CLI/daemon execution IO only.
+11. **Coin-op selection/planning helpers (eleventh)** ✅ — `coin_ops/selection.rs` + `split_planning.rs`; Python keeps CLI/daemon execution IO only (`runtime/coin_ops/planning.py` / `selection.py` re-exports).
 
-**Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch/` each under ~400 lines of Python glue; Rust crates absorb complexity; Python keeps SQLite, Dexie, websocket, and CLI.
+**Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch/` each under ~400 lines of Python glue; Rust crates absorb complexity; Python keeps SQLite, Dexie, websocket, and CLI. **`strategy_dispatch/` ✅ (386 lines).** `main.py` satisfied via `cycle_runner.py` extraction (step 6).
 
-**Tracking:** milestone checkpoints recorded here; **`strategy_dispatch` line-count shrink** (managed/local IO paths) continues toward exit criteria.
+**Tracking:** milestone checkpoints recorded here; offer execution IO consolidated under `greenfloor/daemon/offer_dispatch/`.
 
 ## 2026-05-26 (offer runtime modularization — F1–F14)
 

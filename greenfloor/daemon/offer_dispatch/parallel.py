@@ -21,18 +21,17 @@ from greenfloor.daemon.cooldowns import _POST_COOLDOWN_UNTIL, _post_retry_config
 from greenfloor.daemon.inventory_scan import coinset_spendable_profiles_by_asset
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.market_logging import _log_market_decision, _log_offer_action_timing
-from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.daemon.strategy_action_item import StrategyActionItem
-from greenfloor.daemon.strategy_dispatch.items import (
+from greenfloor.daemon.offer_dispatch.items import (
     managed_skip_item,
     parallel_offer_worker_error_item,
 )
-from greenfloor.daemon.strategy_dispatch.reservation_helpers import (
+from greenfloor.daemon.offer_dispatch.reservation import (
     parallel_reservation_context,
     reservation_wallet_id,
 )
-from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
-from greenfloor.daemon.strategy_dispatch.runtime import StrategyDispatchHooks
+from greenfloor.daemon.reservations import AssetReservationCoordinator
+from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.daemon.strategy_execution import StrategyActionResult, StrategyDispatchHooks
 
 
 def _run_parallel_submission(
@@ -88,13 +87,15 @@ def _run_parallel_submission(
         reservation_acquire_ms=acquire_ms,
     )
     try:
-        item = hooks.managed_action_with_retry(
+        item = hooks.execute_managed_action_with_retry(
             program=program,
             market=market,
             action=action,
             publish_venue=publish_venue,
             runtime_dry_run=runtime_dry_run,
             dexie=dexie,
+            execute_single_managed_action=hooks.execute_single_managed_action,
+            managed_offer_post=hooks.managed_offer_post,
         )
     except Exception as exc:
         item = parallel_offer_worker_error_item(action=action, exc=exc)

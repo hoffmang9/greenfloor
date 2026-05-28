@@ -27,7 +27,11 @@ pub async fn resolve_offer_asset_ids(
 pub use coin_ops::{
     amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_target_amount_allowed,
     compute_bucket_counts_from_coins, fee_budget_allows_execution, partition_plans_by_budget,
-    plan_coin_ops, projected_coin_ops_fee_mojos, BucketSpec, CoinOpKind, CoinOpPlan,
+    plan_auto_combine_inputs, plan_auto_split_selection, plan_coin_ops,
+    projected_coin_ops_fee_mojos, select_spendable_coins_for_target_amount,
+    split_would_create_sub_cat_change, BucketSpec, CoinOpKind, CoinOpPlan,
+    CombineInputSelectionMode, SpendableCoin, SplitAutoSelectPlan, SplitCoinPlan,
+    SplitCombinePrereqPlan, SplitPlanningProfile, SplitSkipPlan,
 };
 pub use coinset::{
     get_conservative_fee_estimate, get_fee_estimate, parse_coin_ids, push_tx_hex,

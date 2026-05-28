@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from greenfloor.config.models import ProgramConfig
+from greenfloor.core.coin_ops import select_spendable_coins_for_target_amount
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.daemon.testing import (
@@ -11,10 +12,9 @@ from greenfloor.daemon.testing import (
     cooldown_remaining_ms,
     execute_strategy_dispatch,
     inventory_scan,
+    offer_dispatch,
     single_input_preferred_skip_reason,
-    strategy_dispatch,
 )
-from greenfloor.runtime.coin_ops.planning import select_spendable_coins_for_target_amount
 from tests.helpers.daemon_test_fixtures import (
     FakeDexie,
     FakeStore,
@@ -46,12 +46,12 @@ def test_execute_strategy_dispatch_parallel_sets_post_cooldown_on_transient_work
         ],
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "execute_single_managed_action",
         lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
     )
@@ -117,7 +117,7 @@ def test_execute_strategy_dispatch_signer_managed_nonparallel_converts_worker_ex
         )
     ]
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "execute_single_managed_action",
         lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
     )
@@ -170,12 +170,12 @@ def test_execute_strategy_dispatch_parallel_prefers_single_input_offer(
             return []
 
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "managed_offer_post",
         lambda **_kwargs: managed_post_result(offer_id="offer-should-not-post"),
     )

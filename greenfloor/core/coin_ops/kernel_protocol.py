@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from greenfloor.core.coin_ops.types import BucketSpec, CoinOpPlan
+from greenfloor.core.coin_ops.types import (
+    BucketSpec,
+    CoinOpPlan,
+    CombineInputSelectionMode,
+    SplitAutoSelectPlan,
+    SplitPlanningProfile,
+)
 
 
 class CoinOpsKernelProtocol(Protocol):
@@ -53,3 +59,36 @@ class CoinOpsKernelProtocol(Protocol):
     ) -> bool: ...
 
     def coin_op_target_amount_allowed(self, amount_mojos: int, canonical_asset_id: str) -> bool: ...
+
+    def select_spendable_coins_for_target_amount(
+        self,
+        coins: list[dict[str, object]],
+        target_amount: int,
+    ) -> tuple[list[str], int, bool]: ...
+
+    def split_would_create_sub_cat_change(
+        self,
+        selected_amount_mojos: int,
+        required_amount_mojos: int,
+        canonical_asset_id: str,
+    ) -> tuple[bool, int]: ...
+
+    def plan_auto_split_selection(
+        self,
+        candidate_spendable: list[dict[str, object]],
+        required_amount_mojos: int,
+        canonical_asset_id: str,
+        profile: SplitPlanningProfile,
+        combine_input_cap: int,
+        allow_combine_prereq: bool | None,
+    ) -> SplitAutoSelectPlan: ...
+
+    def plan_auto_combine_inputs(
+        self,
+        spendable_coins: list[dict[str, object]],
+        number_of_coins: int,
+        selection_mode: CombineInputSelectionMode,
+        target_amount_mojos: int | None,
+        exclude_coin_ids: set[str] | None,
+        max_count: int | None,
+    ) -> list[str]: ...

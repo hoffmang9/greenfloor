@@ -8,8 +8,8 @@ Canonical monkeypatch targets (module-qualified paths):
 - ``greenfloor.daemon.testing.main`` — cycle orchestration (`run_once`, `run_loop`, adapters; aliases ``cycle_runner``)
 - ``greenfloor.daemon.main`` — CLI entrypoint and instance lock
 - ``greenfloor.daemon.testing.inventory_scan`` — coinset adapter factory
-- ``greenfloor.daemon.testing.strategy_dispatch`` — managed/local offer dispatch
-  (``build_offer_for_action``, ``execute_single_managed_action``, etc.)
+- ``greenfloor.daemon.testing.strategy_dispatch`` — routing (``execute_strategy_dispatch``)
+  and ``offer_dispatch`` module for managed/local offer IO monkeypatches
 - ``greenfloor.daemon.testing.strategy_state`` — reseed policy
 - ``greenfloor.daemon.testing.cooldowns`` — post/cancel cooldown globals
 - ``greenfloor.daemon.testing.cancel_policy`` — cancel policy entry
@@ -59,9 +59,9 @@ from greenfloor.daemon.testing.strategy_dispatch import (
     execute_strategy_dispatch,
     expand_planned_actions,
     managed_offer_post,
+    offer_dispatch,
     resolve_signer_offer_asset_ids_for_reservation,
     single_input_preferred_skip_reason,
-    strategy_dispatch,
 )
 from greenfloor.daemon.testing.strategy_state import (
     inject_reseed_action_if_no_active_offers,
@@ -121,7 +121,7 @@ __all__ = [
     "set_watched_coin_ids_for_market",
     "single_input_preferred_skip_reason",
     "strategy_config_from_market",
-    "strategy_dispatch",
+    "offer_dispatch",
     "strategy_state",
     "update_market_coin_watchlist_from_dexie",
 ]

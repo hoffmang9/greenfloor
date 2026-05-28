@@ -1,14 +1,20 @@
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use signer_core::{
     amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_target_amount_allowed,
     compute_bucket_counts_from_coins, fee_budget_allows_execution, partition_plans_by_budget,
-    plan_coin_ops, projected_coin_ops_fee_mojos,
+    plan_auto_combine_inputs, plan_auto_split_selection, plan_coin_ops,
+    projected_coin_ops_fee_mojos, select_spendable_coins_for_target_amount,
+    split_would_create_sub_cat_change,
 };
 
 use crate::py_utils::{
-    bucket_spec_from_py, coin_op_plan_to_py, coin_op_plans_from_py_list, i64_i64_map_to_py_dict,
+    bucket_spec_from_py, coin_op_plan_to_py, coin_op_plans_from_py_list,
+    combine_input_selection_mode_from_py, exclude_coin_ids_from_py_optional,
+    i64_i64_map_to_py_dict, spendable_coins_from_py_list, split_auto_select_plan_to_py,
+    split_planning_profile_from_py,
 };
 
 fn coin_amount_mojos_from_py(coin: &Bound<'_, PyDict>) -> PyResult<Option<i64>> {
@@ -143,6 +149,85 @@ fn coin_op_target_amount_allowed_py(amount_mojos: i64, canonical_asset_id: &str)
     coin_op_target_amount_allowed(amount_mojos, canonical_asset_id)
 }
 
+#[pyfunction]
+#[pyo3(name = "select_spendable_coins_for_target_amount")]
+fn select_spendable_coins_for_target_amount_py(
+    py: Python<'_>,
+    coins: &Bound<'_, PyList>,
+    target_amount: i64,
+) -> PyResult<Py<PyAny>> {
+    let parsed = spendable_coins_from_py_list(coins)?;
+    let (coin_ids, total, exact) =
+        select_spendable_coins_for_target_amount(&parsed, target_amount);
+    let ids = PyList::new(py, &coin_ids)?;
+    Ok((ids, total, exact).into_pyobject(py)?.into())
+}
+
+#[pyfunction]
+#[pyo3(name = "split_would_create_sub_cat_change")]
+fn split_would_create_sub_cat_change_py(
+    selected_amount_mojos: i64,
+    required_amount_mojos: i64,
+    canonical_asset_id: &str,
+) -> (bool, i64) {
+    split_would_create_sub_cat_change(
+        selected_amount_mojos,
+        required_amount_mojos,
+        canonical_asset_id,
+    )
+}
+
+#[pyfunction]
+#[pyo3(name = "plan_auto_split_selection")]
+fn plan_auto_split_selection_py(
+    py: Python<'_>,
+    candidate_spendable: &Bound<'_, PyList>,
+    required_amount_mojos: i64,
+    canonical_asset_id: &str,
+    profile: &Bound<'_, PyAny>,
+    combine_input_cap: i64,
+    allow_combine_prereq: Option<bool>,
+) -> PyResult<Py<PyAny>> {
+    let profile = split_planning_profile_from_py(profile)?;
+    let coins = spendable_coins_from_py_list(candidate_spendable)?;
+    let plan = plan_auto_split_selection(
+        &coins,
+        required_amount_mojos,
+        canonical_asset_id,
+        profile,
+        combine_input_cap,
+        allow_combine_prereq,
+    );
+    Ok(split_auto_select_plan_to_py(py, plan)?.into())
+}
+
+#[pyfunction]
+#[pyo3(name = "plan_auto_combine_inputs")]
+fn plan_auto_combine_inputs_py(
+    py: Python<'_>,
+    spendable_coins: &Bound<'_, PyList>,
+    number_of_coins: usize,
+    selection_mode: &Bound<'_, PyAny>,
+    target_amount_mojos: Option<i64>,
+    exclude_coin_ids: Option<&Bound<'_, PyAny>>,
+    max_count: Option<usize>,
+) -> PyResult<Py<PyAny>> {
+    let mode = combine_input_selection_mode_from_py(selection_mode)?;
+    let coins = spendable_coins_from_py_list(spendable_coins)?;
+    let excluded = exclude_coin_ids_from_py_optional(exclude_coin_ids)?;
+    let ids = plan_auto_combine_inputs(
+        &coins,
+        number_of_coins,
+        mode,
+        target_amount_mojos,
+        Some(&excluded),
+        max_count,
+    )
+    .map_err(PyValueError::new_err)?;
+    let list = PyList::new(py, &ids)?;
+    Ok(list.into())
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(plan_coin_ops_py, m)?)?;
     m.add_function(wrap_pyfunction!(projected_coin_ops_fee_mojos_py, m)?)?;
@@ -152,5 +237,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(coin_op_min_amount_mojos_py, m)?)?;
     m.add_function(wrap_pyfunction!(coin_meets_coin_op_min_amount_py, m)?)?;
     m.add_function(wrap_pyfunction!(coin_op_target_amount_allowed_py, m)?)?;
+    m.add_function(wrap_pyfunction!(select_spendable_coins_for_target_amount_py, m)?)?;
+    m.add_function(wrap_pyfunction!(split_would_create_sub_cat_change_py, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_auto_split_selection_py, m)?)?;
+    m.add_function(wrap_pyfunction!(plan_auto_combine_inputs_py, m)?)?;
     Ok(())
 }

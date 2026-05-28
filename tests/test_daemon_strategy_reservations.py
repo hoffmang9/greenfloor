@@ -17,7 +17,7 @@ from greenfloor.daemon.testing import (
     ReservationStorageError,
     execute_strategy_dispatch,
     inventory_scan,
-    strategy_dispatch,
+    offer_dispatch,
 )
 from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.daemon_test_fixtures import (
@@ -59,12 +59,12 @@ def test_execute_strategy_dispatch_parallel_signer_managed_reservation_contentio
         ],
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "managed_offer_post",
         lambda **_kwargs: managed_post_result(offer_id="offer-parallel"),
     )
@@ -161,12 +161,12 @@ def test_execute_strategy_dispatch_parallel_releases_reservation_on_failure(
         ],
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "managed_offer_post",
         lambda **_kwargs: managed_post_result(success=False, error="vault_unavailable"),
     )
@@ -262,12 +262,12 @@ def test_execute_strategy_dispatch_parallel_does_not_reserve_coin_ops_min_fee(
         ],
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "managed_offer_post",
         lambda **_kwargs: managed_post_result(offer_id="offer-parallel"),
     )
@@ -329,12 +329,12 @@ def test_execute_strategy_dispatch_parallel_falls_back_to_sequential_on_transien
         ],
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "managed_offer_post",
         lambda **_kwargs: managed_post_result(offer_id="offer-fallback"),
     )
@@ -389,7 +389,7 @@ def test_execute_strategy_dispatch_parallel_raises_on_non_transient_reservation_
         ],
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset", "quote_asset", "xch_asset"),
     )
@@ -444,12 +444,12 @@ def test_execute_strategy_dispatch_parallel_uses_resolved_asset_ids_for_reservat
         ],
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "managed_offer_post",
         lambda **_kwargs: managed_post_result(offer_id="offer-resolved-asset"),
     )
@@ -524,12 +524,12 @@ def test_execute_strategy_dispatch_parallel_uses_asset_scoped_coin_inventory(
         ],
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "managed_offer_post",
         lambda **_kwargs: managed_post_result(offer_id="offer-scoped"),
     )

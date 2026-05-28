@@ -11,8 +11,8 @@ from greenfloor.daemon.testing import (
     execute_strategy_dispatch,
     expand_planned_actions,
     inject_reseed_action_if_no_active_offers,
+    offer_dispatch,
     strategy_config_from_market,
-    strategy_dispatch,
 )
 from tests.helpers.config_fixtures import minimal_program_config
 from tests.helpers.daemon_test_fixtures import (
@@ -86,7 +86,7 @@ def test_execute_strategy_dispatch_skips_when_builder_skips(monkeypatch) -> None
     POST_COOLDOWN_UNTIL.clear()
 
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "build_offer_for_action",
         lambda **_kwargs: {"status": "skipped", "reason": "builder_not_ready", "offer": None},
     )
@@ -127,7 +127,7 @@ def test_execute_strategy_dispatch_posts_and_persists_offer_ids(monkeypatch) -> 
     POST_COOLDOWN_UNTIL.clear()
 
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "build_offer_for_action",
         lambda **_kwargs: {
             "status": "executed",
@@ -177,7 +177,7 @@ def test_execute_strategy_dispatch_retries_then_succeeds(monkeypatch) -> None:
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_COOLDOWN_SECONDS", "10")
 
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "build_offer_for_action",
         lambda **_kwargs: {"status": "executed", "reason": "ok", "offer": "offer1abc"},
     )
@@ -225,7 +225,7 @@ def test_execute_strategy_dispatch_applies_post_cooldown_after_retry_exhaust(mon
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_BACKOFF_MS", "0")
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_COOLDOWN_SECONDS", "60")
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "build_offer_for_action",
         lambda **_kwargs: {"status": "executed", "reason": "ok", "offer": "offer1abc"},
     )

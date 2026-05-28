@@ -8,10 +8,9 @@ from greenfloor.config.models import MarketConfig, ProgramConfig, managed_offer_
 from greenfloor.core.cycle import is_managed_worker_transient_error, sequential_action_route
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.market_logging import _log_offer_action_timing
+from greenfloor.daemon.offer_dispatch.items import action_item
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
-from greenfloor.daemon.strategy_dispatch.items import action_item
-from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
-from greenfloor.daemon.strategy_dispatch.runtime import StrategyDispatchHooks
+from greenfloor.daemon.strategy_execution import StrategyActionResult, StrategyDispatchHooks
 from greenfloor.storage.sqlite import SqliteStore
 
 
@@ -47,13 +46,15 @@ def execute_actions_sequential(
         if route == "managed":
             assert program is not None
             try:
-                item = hooks.managed_action_with_retry(
+                item = hooks.execute_managed_action_with_retry(
                     program=program,
                     market=market,
                     action=action,
                     publish_venue=publish_venue,
                     runtime_dry_run=runtime_dry_run,
                     dexie=dexie,
+                    execute_single_managed_action=hooks.execute_single_managed_action,
+                    managed_offer_post=hooks.managed_offer_post,
                 )
             except Exception as exc:
                 item = action_item(
@@ -72,7 +73,7 @@ def execute_actions_sequential(
             )
         else:
             assert program is not None
-            item = hooks.local_action(
+            item = hooks.execute_single_local_action(
                 program=program,
                 market=market,
                 action=action,
@@ -82,6 +83,7 @@ def execute_actions_sequential(
                 splash=splash,
                 publish_venue=publish_venue,
                 store=store,
+                build_offer_for_action=hooks.build_offer_for_action,
             )
         _log_offer_action_timing(str(market.market_id), item)
         items.append(item)

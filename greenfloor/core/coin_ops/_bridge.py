@@ -8,7 +8,25 @@ each kernel call stays auditable at the Python boundary (see progress.md step 10
 from __future__ import annotations
 
 from greenfloor.core.coin_ops.kernel_protocol import CoinOpsKernelProtocol
-from greenfloor.core.coin_ops.types import BucketSpec, CoinOpPlan
+from greenfloor.core.coin_ops.selection_bridge import (
+    plan_auto_combine_inputs as _plan_auto_combine_inputs,
+)
+from greenfloor.core.coin_ops.selection_bridge import (
+    plan_auto_split_selection as _plan_auto_split_selection,
+)
+from greenfloor.core.coin_ops.selection_bridge import (
+    select_spendable_coins_for_target_amount as _select_spendable_coins_for_target_amount,
+)
+from greenfloor.core.coin_ops.selection_bridge import (
+    split_would_create_sub_cat_change as _split_would_create_sub_cat_change,
+)
+from greenfloor.core.coin_ops.types import (
+    BucketSpec,
+    CoinOpPlan,
+    CombineInputSelectionMode,
+    SplitAutoSelectPlan,
+    SplitPlanningProfile,
+)
 from greenfloor.core.kernel_bridge import import_kernel
 
 
@@ -135,4 +153,70 @@ def coin_op_target_amount_allowed(*, amount_mojos: int, canonical_asset_id: str)
             int(amount_mojos),
             str(canonical_asset_id),
         )
+    )
+
+
+def select_spendable_coins_for_target_amount(
+    *,
+    coins: list[dict],
+    target_amount: int,
+) -> tuple[list[str], int, bool]:
+    return _select_spendable_coins_for_target_amount(
+        _coin_ops_kernel(),
+        coins=coins,
+        target_amount=target_amount,
+    )
+
+
+def split_would_create_sub_cat_change(
+    *,
+    selected_amount_mojos: int,
+    required_amount_mojos: int,
+    canonical_asset_id: str,
+) -> tuple[bool, int]:
+    return _split_would_create_sub_cat_change(
+        _coin_ops_kernel(),
+        selected_amount_mojos=selected_amount_mojos,
+        required_amount_mojos=required_amount_mojos,
+        canonical_asset_id=canonical_asset_id,
+    )
+
+
+def plan_auto_split_selection(
+    *,
+    candidate_spendable: list[dict],
+    required_amount_mojos: int,
+    canonical_asset_id: str,
+    profile: SplitPlanningProfile,
+    combine_input_cap: int,
+    allow_combine_prereq: bool | None = None,
+) -> SplitAutoSelectPlan:
+    return _plan_auto_split_selection(
+        _coin_ops_kernel(),
+        candidate_spendable=candidate_spendable,
+        required_amount_mojos=required_amount_mojos,
+        canonical_asset_id=canonical_asset_id,
+        profile=profile,
+        combine_input_cap=combine_input_cap,
+        allow_combine_prereq=allow_combine_prereq,
+    )
+
+
+def plan_auto_combine_inputs(
+    *,
+    spendable_coins: list[dict],
+    number_of_coins: int,
+    selection_mode: CombineInputSelectionMode,
+    target_amount_mojos: int | None = None,
+    exclude_coin_ids: set[str] | None = None,
+    max_count: int | None = None,
+) -> list[str]:
+    return _plan_auto_combine_inputs(
+        _coin_ops_kernel(),
+        spendable_coins=spendable_coins,
+        number_of_coins=number_of_coins,
+        selection_mode=selection_mode,
+        target_amount_mojos=target_amount_mojos,
+        exclude_coin_ids=exclude_coin_ids,
+        max_count=max_count,
     )

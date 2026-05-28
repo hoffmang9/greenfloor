@@ -8,6 +8,7 @@ from greenfloor.core.coin_ops import (
     coin_meets_coin_op_min_amount,
     coin_op_min_amount_mojos,
     coin_op_target_amount_allowed,
+    select_spendable_coins_for_target_amount,
 )
 from greenfloor.hex_utils import canonical_is_xch
 
@@ -40,6 +41,21 @@ def test_coin_meets_min_amount_rejects_invalid_amount_type() -> None:
 def test_coin_meets_min_amount_treats_missing_amount_as_zero() -> None:
     assert coin_meets_coin_op_min_amount({}, canonical_asset_id="xch")
     assert not coin_meets_coin_op_min_amount({}, canonical_asset_id=_CAT_ID)
+
+
+def test_spendable_coin_parse_skips_invalid_amount_rows() -> None:
+    coins = [
+        {"id": "valid", "amount": 5000},
+        {"id": "bad_amount", "amount": "not-int"},
+        {"id": "", "amount": 1000},
+    ]
+    coin_ids, total, exact = select_spendable_coins_for_target_amount(
+        coins=coins,
+        target_amount=5000,
+    )
+    assert coin_ids == ["valid"]
+    assert total == 5000
+    assert exact is True
 
 
 def test_target_amount_allowed_matches_coin_meets_for_same_amount() -> None:

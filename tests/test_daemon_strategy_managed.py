@@ -7,7 +7,7 @@ from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon.testing import (
     POST_COOLDOWN_UNTIL,
     execute_strategy_dispatch,
-    strategy_dispatch,
+    offer_dispatch,
 )
 from tests.helpers.daemon_test_fixtures import (
     FakeDexie,
@@ -21,7 +21,7 @@ from tests.helpers.daemon_test_fixtures import (
 def test_execute_strategy_dispatch_uses_signer_managed_path_when_configured(monkeypatch) -> None:
     POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "managed_offer_post",
         lambda **_kwargs: managed_post_result(offer_id="offer-fallback-1"),
     )
@@ -63,7 +63,7 @@ def test_execute_strategy_dispatch_signer_managed_requires_dexie_visibility(monk
     POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "managed_offer_post",
         lambda **_kwargs: managed_post_result(offer_id="offer-fallback-missing"),
     )
@@ -116,7 +116,7 @@ def test_execute_strategy_dispatch_signer_managed_accepts_transient_dexie_http_4
     POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "managed_offer_post",
         lambda **_kwargs: managed_post_result(offer_id="offer-fallback-pending"),
     )
@@ -168,7 +168,7 @@ def test_execute_strategy_dispatch_preserves_planned_size_order(monkeypatch) -> 
         size = int(kwargs["size_base_units"])
         return managed_post_result(offer_id=f"offer-{size}")
 
-    monkeypatch.setattr(strategy_dispatch, "managed_offer_post", _fake_managed_offer_post)
+    monkeypatch.setattr(offer_dispatch, "managed_offer_post", _fake_managed_offer_post)
 
     def program_factory() -> ProgramConfig:
         return signer_program_config()
@@ -231,9 +231,9 @@ def test_execute_strategy_dispatch_signer_managed_failure_skips_without_builder(
         calls["builder"] += 1
         return {"status": "executed", "reason": "offer_builder_success", "offer": "offer1unused"}
 
-    monkeypatch.setattr(strategy_dispatch, "build_offer_for_action", _unexpected_builder)
+    monkeypatch.setattr(offer_dispatch, "build_offer_for_action", _unexpected_builder)
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "managed_offer_post",
         lambda **_kwargs: managed_post_result(success=False, error="vault_signing_unavailable"),
     )
