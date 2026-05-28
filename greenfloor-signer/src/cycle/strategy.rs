@@ -147,6 +147,25 @@ pub fn evaluate_market(state: &MarketState, config: &StrategyConfig) -> Vec<Plan
     actions
 }
 
+pub fn evaluate_two_sided_market_actions(
+    buy_state: &MarketState,
+    sell_state: &MarketState,
+    buy_config: &StrategyConfig,
+    sell_config: &StrategyConfig,
+) -> Vec<PlannedAction> {
+    let mut actions = Vec::new();
+    for (side, state, config) in [
+        ("buy", buy_state, buy_config),
+        ("sell", sell_state, sell_config),
+    ] {
+        for mut action in evaluate_market(state, config) {
+            action.side = side.to_string();
+            actions.push(action);
+        }
+    }
+    actions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,6 +261,26 @@ mod tests {
             ..sample_state()
         };
         assert!(evaluate_market(&state, &sample_config()).is_empty());
+    }
+
+    #[test]
+    fn evaluate_two_sided_market_actions_assigns_side_labels() {
+        let state = MarketState {
+            ones: 0,
+            tens: 0,
+            hundreds: 0,
+            xch_price_usd: None,
+            bucket_counts_by_size: Some(BTreeMap::from([(10, 0)])),
+        };
+        let config = StrategyConfig {
+            pair: "usdc".to_string(),
+            target_counts_by_size: Some(BTreeMap::from([(10, 1)])),
+            ..sample_config()
+        };
+        let actions = evaluate_two_sided_market_actions(&state, &state, &config, &config);
+        assert_eq!(actions.len(), 2);
+        assert!(actions.iter().any(|action| action.side == "buy"));
+        assert!(actions.iter().any(|action| action.side == "sell"));
     }
 
     #[test]

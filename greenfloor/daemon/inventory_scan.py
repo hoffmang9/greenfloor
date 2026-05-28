@@ -16,17 +16,22 @@ from greenfloor.runtime.coinset_coins import list_unspent_coins_by_receive_addre
 from greenfloor.storage.sqlite import SqliteStore
 
 
-def _coinset_spendable_profiles_by_asset(
+def coinset_spendable_profiles_by_asset(
     *,
     program: ProgramConfig,
     market: MarketConfig,
     asset_ids: set[str],
-) -> dict[str, dict[str, int]]:
+) -> dict[str, dict[str, int | bool]]:
     receive_address = str(market.receive_address).strip()
     network = str(program.app_network).strip()
     requested_asset_ids = {str(asset_id).strip() for asset_id in asset_ids if str(asset_id).strip()}
-    profiles: dict[str, dict[str, int]] = {
-        asset_id: {"total": 0, "max_single": 0, "coin_count": 0, "max_single_known": 1}
+    profiles: dict[str, dict[str, int | bool]] = {
+        asset_id: {
+            "total": 0,
+            "max_single": 0,
+            "coin_count": 0,
+            "max_single_known": True,
+        }
         for asset_id in requested_asset_ids
     }
     if not requested_asset_ids or not receive_address:
@@ -62,6 +67,9 @@ def _coinset_spendable_profiles_by_asset(
             if amount > int(profile.get("max_single", 0)):
                 profile["max_single"] = amount
     return profiles
+
+
+_coinset_spendable_profiles_by_asset = coinset_spendable_profiles_by_asset
 
 
 def _coinset_spendable_base_unit_coin_amounts(

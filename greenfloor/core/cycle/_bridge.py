@@ -5,6 +5,17 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
+from greenfloor.core.cycle_orchestration import (
+    MarketBatchSelection,
+    OfferStateRow,
+    ParallelActionOutcome,
+    StaleSweepCandidate,
+    StaleSweepHit,
+    StaleSweepProgress,
+)
+from greenfloor.core.parallel_batch_plan import ParallelBatchPlan, ParallelSubmissionEntry
+from greenfloor.core.planned_action import PlannedAction, planned_actions_from_signer_list
+
 _INSTALL_HINT = (
     "Install the greenfloor_signer extension (for example: "
     "`maturin develop -m greenfloor-signer-pyo3` from the repo root)."
@@ -27,18 +38,72 @@ def _normalize_spendable_profiles(
         str(asset_id): {
             "total": int(profile.get("total", 0)),
             "max_single": int(profile.get("max_single", 0)),
-            "max_single_known": bool(int(profile.get("max_single_known", 0))),
+            "max_single_known": bool(profile.get("max_single_known", False)),
         }
         for asset_id, profile in spendable_profiles.items()
     }
 
 
-def evaluate_market(*, state: dict[str, Any], config: dict[str, Any]) -> list[dict[str, Any]]:
+def evaluate_market(*, state: Any, config: Any) -> list[PlannedAction]:
     signer = _import_signer()
-    result = signer.evaluate_market(state, config)
-    if not isinstance(result, list):
-        raise TypeError("evaluate_market returned non-list result")
-    return [dict(item) for item in result]
+    return planned_actions_from_signer_list(signer.evaluate_market(state, config))
+
+
+def evaluate_two_sided_market_actions(
+    *,
+    buy_state: Any,
+    sell_state: Any,
+    buy_config: Any,
+    sell_config: Any,
+) -> list[PlannedAction]:
+    signer = _import_signer()
+    return planned_actions_from_signer_list(
+        signer.evaluate_two_sided_market_actions(
+            buy_state,
+            sell_state,
+            buy_config,
+            sell_config,
+        )
+    )
+
+
+def sequential_action_route(
+    *,
+    runtime_dry_run: bool,
+    program_present: bool,
+    managed_backend_available: bool,
+) -> str:
+    return str(
+        _import_signer().sequential_action_route(
+            bool(runtime_dry_run),
+            bool(program_present),
+            bool(managed_backend_available),
+        )
+    )
+
+
+def expand_planned_actions(actions: list[PlannedAction]) -> list[PlannedAction]:
+    signer = _import_signer()
+    return planned_actions_from_signer_list(signer.expand_planned_actions(actions))
+
+
+def filter_planned_actions_with_positive_repeat(
+    actions: list[PlannedAction],
+) -> list[PlannedAction]:
+    signer = _import_signer()
+    return planned_actions_from_signer_list(
+        signer.filter_planned_actions_with_positive_repeat(actions)
+    )
+
+
+def plan_parallel_submission_batch(
+    entries: list[ParallelSubmissionEntry],
+) -> ParallelBatchPlan:
+    signer = _import_signer()
+    result = signer.plan_parallel_submission_batch(entries)
+    if not isinstance(result, ParallelBatchPlan):
+        raise TypeError("plan_parallel_submission_batch returned non-ParallelBatchPlan result")
+    return result
 
 
 def apply_offer_signal(*, state: str, signal: str) -> dict[str, Any]:
@@ -198,7 +263,13 @@ def classify_dexie_visibility_outcome(
     return dict(result)
 
 
-def count_parallel_transient_failures(items: list[dict[str, Any]]) -> int:
+def count_parallel_transient_failures(items: list[ParallelActionOutcome]) -> int:
+    for index, item in enumerate(items):
+        if not isinstance(item, ParallelActionOutcome):
+            raise TypeError(
+                f"parallel outcome list item {index} must be ParallelActionOutcome, "
+                f"got {type(item).__name__}"
+            )
     return int(_import_signer().count_parallel_transient_failures(items))
 
 
@@ -208,7 +279,7 @@ def select_market_batch(
     slot_count: int,
     cursor: int,
     immediate_requeue_ids: list[str],
-) -> dict[str, Any]:
+) -> MarketBatchSelection:
     signer = _import_signer()
     result = signer.select_market_batch(
         enabled_market_ids,
@@ -216,9 +287,9 @@ def select_market_batch(
         int(cursor),
         immediate_requeue_ids,
     )
-    if not isinstance(result, dict):
-        raise TypeError("select_market_batch returned non-dict result")
-    return dict(result)
+    if not isinstance(result, MarketBatchSelection):
+        raise TypeError("select_market_batch returned non-MarketBatchSelection result")
+    return result
 
 
 def enqueue_immediate_requeue(
@@ -264,15 +335,21 @@ def should_try_cat_inventory_fallback(*, coinset_scan_empty: bool, base_asset: s
 
 def collect_stale_sweep_candidates(
     *,
-    rows: list[dict[str, Any]],
+    rows: list[OfferStateRow],
     enabled_market_ids: list[str],
     per_market_limit: int,
-) -> list[dict[str, Any]]:
+) -> list[StaleSweepCandidate]:
     signer = _import_signer()
     result = signer.collect_stale_sweep_candidates(rows, enabled_market_ids, int(per_market_limit))
     if not isinstance(result, list):
         raise TypeError("collect_stale_sweep_candidates returned non-list result")
-    return [dict(item) for item in result]
+    for index, item in enumerate(result):
+        if not isinstance(item, StaleSweepCandidate):
+            raise TypeError(
+                f"stale sweep candidate list item {index} must be StaleSweepCandidate, "
+                f"got {type(item).__name__}"
+            )
+    return result
 
 
 def classify_dexie_stale_offer_status(status: int) -> str | None:
@@ -285,14 +362,14 @@ def is_dexie_offer_missing_error_text(error_text: str) -> bool:
 
 def record_stale_sweep_check(
     *,
-    progress: dict[str, Any],
-    hit: dict[str, str] | None,
-) -> dict[str, Any]:
+    progress: StaleSweepProgress,
+    hit: StaleSweepHit | None,
+) -> StaleSweepProgress:
     signer = _import_signer()
     result = signer.record_stale_sweep_check(progress, hit)
-    if not isinstance(result, dict):
-        raise TypeError("record_stale_sweep_check returned non-dict result")
-    return dict(result)
+    if not isinstance(result, StaleSweepProgress):
+        raise TypeError("record_stale_sweep_check returned non-StaleSweepProgress result")
+    return result
 
 
 def needs_inventory_fallback(*, bucket_counts_available: bool, coinset_scan_empty: bool) -> bool:

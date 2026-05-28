@@ -5,7 +5,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from greenfloor.core.strategy import MarketState, PlannedAction, StrategyConfig, evaluate_market
+from greenfloor.core.cycle import evaluate_two_sided_market_actions
+from greenfloor.core.strategy import (
+    MarketState,
+    PlannedAction,
+    StrategyConfig,
+    evaluate_market,
+)
 from greenfloor.daemon.market_helpers import _market_pricing, _normalize_strategy_pair
 
 
@@ -111,40 +117,30 @@ def _evaluate_two_sided_market_actions(
     xch_price_usd: float | None,
     now: datetime,
 ) -> list[PlannedAction]:
-    actions: list[PlannedAction] = []
-    for side in ("buy", "sell"):
-        side_config = _strategy_config_for_side(market=market, side=side)
-        side_state = _strategy_state_from_bucket_counts(
-            counts_by_side.get(side, {}),
-            xch_price_usd=xch_price_usd,
-        )
-        side_actions = evaluate_market(state=side_state, config=side_config, clock=now)
-        actions.extend(
-            PlannedAction(
-                size=int(action.size),
-                repeat=int(action.repeat),
-                pair=action.pair,
-                expiry_unit=action.expiry_unit,
-                expiry_value=int(action.expiry_value),
-                cancel_after_create=action.cancel_after_create,
-                reason=action.reason,
-                target_spread_bps=action.target_spread_bps,
-                side=side,
-            )
-            for action in side_actions
-        )
-    return actions
+    _ = now
+    buy_state = _strategy_state_from_bucket_counts(
+        counts_by_side.get("buy", {}),
+        xch_price_usd=xch_price_usd,
+    )
+    sell_state = _strategy_state_from_bucket_counts(
+        counts_by_side.get("sell", {}),
+        xch_price_usd=xch_price_usd,
+    )
+    return evaluate_two_sided_market_actions(
+        buy_state=buy_state,
+        sell_state=sell_state,
+        buy_config=_strategy_config_for_side(market=market, side="buy"),
+        sell_config=_strategy_config_for_side(market=market, side="sell"),
+    )
 
 
 def evaluate_reseed_candidates(
     *,
     strategy_config: StrategyConfig,
     xch_price_usd: float | None,
-    clock: datetime,
 ) -> list[PlannedAction]:
     """Evaluate seed actions for offer rehydration (empty bucket state)."""
     return evaluate_market(
         state=_strategy_state_from_bucket_counts({}, xch_price_usd=xch_price_usd),
         config=strategy_config,
-        clock=clock,
     )

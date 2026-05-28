@@ -1,4 +1,5 @@
 pub mod dispatch;
+pub mod execution;
 pub mod lifecycle;
 pub mod managed;
 pub mod market;
@@ -6,7 +7,7 @@ pub mod orchestration;
 pub mod strategy;
 
 pub use dispatch::{
-    expand_strategy_actions, expiry_seconds_for_action, reservation_request_for_managed_offer,
+    expiry_seconds_for_action, reservation_request_for_managed_offer,
     single_input_preferred_skip_reason, PlannedActionInput, SpendableAssetProfile,
 };
 pub use lifecycle::{apply_offer_signal, OfferLifecycleState, OfferSignal, OfferTransition};
@@ -32,4 +33,12 @@ pub use orchestration::{
     should_log_disabled_market, should_try_cat_inventory_fallback, should_use_market_slot_dispatch,
     MarketBatchSelection, OfferStateRow, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
 };
-pub use strategy::{evaluate_market, MarketState, PlannedAction, StrategyConfig};
+pub use execution::{
+    expand_planned_actions, filter_planned_actions_with_positive_repeat,
+    plan_parallel_submission_batch, sequential_action_route, ParallelBatchPlan,
+    ParallelQueueItem, ParallelSkipItem, ParallelSubmissionEntry, SequentialActionRoute,
+};
+pub use strategy::{
+    evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction,
+    StrategyConfig,
+};

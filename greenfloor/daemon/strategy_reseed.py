@@ -63,7 +63,6 @@ def _inject_reseed_action_if_no_active_offers(
     seed_candidates = strategy_state.evaluate_reseed_candidates(
         strategy_config=strategy_config,
         xch_price_usd=xch_price_usd,
-        clock=clock,
     )
     if not seed_candidates:
         _log_market_decision(

@@ -1,5 +1,15 @@
 # Progress Log
 
+## 2026-05-27 (Rust cycle kernel step 5 — execution + typed FFI)
+
+- **Rust execution plan:** `greenfloor-signer/src/cycle/execution.rs` — `plan_parallel_submission_batch`, `expand_planned_actions`, `filter_planned_actions_with_positive_repeat`, `sequential_action_route`; parallel gating via `can_parallelize_managed_offers` only (removed `select_strategy_execution_dispatch`).
+- **Typed strategy FFI:** PyO3 returns `PlannedAction` / `ParallelSubmissionEntry` / `ParallelBatchPlan` dataclasses; bridge uses `planned_actions_from_signer_list` (strict type checks, no per-item dict shuttle). `greenfloor/core/planned_action.py` and `greenfloor/core/strategy_types.py` break the cycle↔strategy import loop.
+- **Orchestration FFI:** `greenfloor/core/cycle_orchestration.py` + `greenfloor-signer-pyo3/src/cycle/orchestration_py.rs` — `MarketBatchSelection`, `OfferStateRow`, `StaleSweepCandidate`, `StaleSweepHit`, `StaleSweepProgress`, `ParallelActionOutcome`; `main.py` stale sweep and market batch use attributes (not dict `.get()`).
+- **PyO3 layout:** monolithic `cycle.rs` split into `greenfloor-signer-pyo3/src/cycle/` (`managed_py`, `market_py`, `stale_sweep_py`, `offer_py`, …); `execution_py.rs` for batch planning bindings.
+- **Python packages:** `strategy_dispatch` and `market_cycle` are multi-module packages; `StrategyDispatchHooks` + explicit callables (no `dispatch_pkg` self-imports, no `strategy_dispatch._*` test aliases); `parallel_batch.build_parallel_dispatch_plan`; strategy phase split `strategy_eval_phase` / `strategy_exec_phase` (`StrategyConfig`, `datetime` on `MarketCycleRun.now`); `reservation_helpers` takes `MarketConfig`.
+- **Core cycle surface:** `core/cycle` package (`_bridge`, `reexports`, `policy`); public expand name `expand_planned_actions` only.
+- **Migration status:** step 5 complete for strategy dispatch + orchestration typing; **`main.py` still ~850 lines** (step 6: halve `main.py`, extract `run_once` / `_run_loop`).
+
 ## 2026-05-27 (Rust cycle kernel — quality review follow-up)
 
 - Split cycle PyO3 bindings into `greenfloor-signer-pyo3/src/cycle.rs` + shared `py_utils.rs`; `lib.rs` back under 500 lines.
@@ -65,11 +75,11 @@ Large Python daemon modules remain intentionally unsplit pending Rust migration 
 2. **`strategy_dispatch` managed path (second)** ✅ — parallel reservation acquire/release decisions, managed offer post retry classification, and transient-error typing in Rust; Python retains Dexie visibility polling and audit persistence calls.
 3. **`main` market cycle orchestration (third)** ✅ — batch selection, stale sweep classification, disabled-market throttling, slot-dispatch gating, and immediate-requeue bookkeeping in Rust; Python retains SQLite/Dexie IO.
 4. **Per-market phase runner (fourth)** ✅ — inventory source selection, tracked sizes, result-state merges, and phase ordering in Rust; Python IO **relocated** to `market_cycle.py` (not yet restructured around a Rust phase table).
-5. **Strategy action execution plan (fifth — next)** — parallel vs sequential batch planning, reservation grouping, and retry scheduling structs in Rust (`cycle/execution.rs`); Python retains thread pools, reservation SQLite, and offer build/post only.
+5. **Strategy action execution plan (fifth)** ✅ — parallel vs sequential batch planning and typed orchestration FFI in Rust; Python retains thread pools, reservation SQLite, and offer build/post only.
 
 **Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch.py` each under ~400 lines of Python glue; Rust crates absorb complexity; Python keeps SQLite, Dexie, websocket, and CLI.
 
-**Tracking:** milestone checkpoints recorded here; step 5 is the recommended next hunk (see step 4 entry above).
+**Tracking:** milestone checkpoints recorded here; **step 6** (`main.py` cycle runner extraction) is the recommended next hunk.
 
 ## 2026-05-26 (offer runtime modularization — F1–F14)
 

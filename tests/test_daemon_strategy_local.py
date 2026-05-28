@@ -9,7 +9,7 @@ from greenfloor.daemon.testing import (
     build_offer_for_action,
     drop_zero_repeat_strategy_actions,
     execute_strategy_actions,
-    expand_strategy_actions,
+    expand_planned_actions,
     inject_reseed_action_if_no_active_offers,
     strategy_config_from_market,
     strategy_dispatch,
@@ -55,7 +55,7 @@ def test_execute_strategy_actions_dry_run_plans_without_posting() -> None:
     assert store.offer_states == []
 
 
-def test_expand_strategy_actions_preserves_strategy_order() -> None:
+def test_expand_planned_actions_preserves_strategy_order() -> None:
     actions = [
         PlannedAction(
             size=1,
@@ -77,7 +77,7 @@ def test_expand_strategy_actions_preserves_strategy_order() -> None:
         ),
     ]
 
-    expanded = expand_strategy_actions(actions)
+    expanded = expand_planned_actions(actions)
 
     assert [action.size for action in expanded] == [1, 1, 10, 10]
 
@@ -87,7 +87,7 @@ def test_execute_strategy_actions_skips_when_builder_skips(monkeypatch) -> None:
 
     monkeypatch.setattr(
         strategy_dispatch,
-        "_build_offer_for_action",
+        "build_offer_for_action",
         lambda **_kwargs: {"status": "skipped", "reason": "builder_not_ready", "offer": None},
     )
     dexie = FakeDexie(post_result={"success": True, "id": "offer-1"})
@@ -128,7 +128,7 @@ def test_execute_strategy_actions_posts_and_persists_offer_ids(monkeypatch) -> N
 
     monkeypatch.setattr(
         strategy_dispatch,
-        "_build_offer_for_action",
+        "build_offer_for_action",
         lambda **_kwargs: {
             "status": "executed",
             "reason": "offer_builder_success",
@@ -178,7 +178,7 @@ def test_execute_strategy_actions_retries_then_succeeds(monkeypatch) -> None:
 
     monkeypatch.setattr(
         strategy_dispatch,
-        "_build_offer_for_action",
+        "build_offer_for_action",
         lambda **_kwargs: {"status": "executed", "reason": "ok", "offer": "offer1abc"},
     )
 
@@ -226,7 +226,7 @@ def test_execute_strategy_actions_applies_post_cooldown_after_retry_exhaust(monk
     monkeypatch.setenv("GREENFLOOR_OFFER_POST_COOLDOWN_SECONDS", "60")
     monkeypatch.setattr(
         strategy_dispatch,
-        "_build_offer_for_action",
+        "build_offer_for_action",
         lambda **_kwargs: {"status": "executed", "reason": "ok", "offer": "offer1abc"},
     )
 

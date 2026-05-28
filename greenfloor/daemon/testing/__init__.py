@@ -8,6 +8,7 @@ Canonical monkeypatch targets (module-qualified paths):
 - ``greenfloor.daemon.testing.main`` — cycle orchestration (`run_once`, `run_loop`, adapters)
 - ``greenfloor.daemon.testing.inventory_scan`` — coinset adapter factory
 - ``greenfloor.daemon.testing.strategy_dispatch`` — managed/local offer dispatch
+  (``build_offer_for_action``, ``execute_single_managed_action``, etc.)
 - ``greenfloor.daemon.testing.strategy_state`` — reseed policy
 - ``greenfloor.daemon.testing.cooldowns`` — post/cancel cooldown globals
 - ``greenfloor.daemon.testing.cancel_policy`` — cancel policy entry
@@ -52,9 +53,13 @@ from greenfloor.daemon.testing.reservations import (
 )
 from greenfloor.daemon.testing.strategy_dispatch import (
     build_offer_for_action,
+    execute_managed_action_with_retry,
     execute_single_local_action,
+    execute_single_managed_action,
     execute_strategy_actions,
-    expand_strategy_actions,
+    expand_planned_actions,
+    managed_offer_post,
+    resolve_signer_offer_asset_ids_for_reservation,
     single_input_preferred_skip_reason,
     strategy_dispatch,
 )
@@ -98,9 +103,13 @@ __all__ = [
     "enqueue_immediate_requeue_market",
     "evaluate_reseed_candidates",
     "execute_cancel_policy",
+    "execute_managed_action_with_retry",
     "execute_single_local_action",
+    "execute_single_managed_action",
     "execute_strategy_actions",
-    "expand_strategy_actions",
+    "managed_offer_post",
+    "resolve_signer_offer_asset_ids_for_reservation",
+    "expand_planned_actions",
     "inject_reseed_action_if_no_active_offers",
     "inventory_scan",
     "main",

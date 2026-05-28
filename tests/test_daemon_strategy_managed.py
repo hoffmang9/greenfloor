@@ -22,7 +22,7 @@ def test_execute_strategy_actions_uses_signer_managed_path_when_configured(monke
     POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr(
         strategy_dispatch,
-        "_managed_offer_post",
+        "managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-1"},
     )
 
@@ -64,7 +64,7 @@ def test_execute_strategy_actions_signer_managed_requires_dexie_visibility(monke
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
         strategy_dispatch,
-        "_managed_offer_post",
+        "managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-missing"},
     )
 
@@ -117,7 +117,7 @@ def test_execute_strategy_actions_signer_managed_accepts_transient_dexie_http_40
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
     monkeypatch.setattr(
         strategy_dispatch,
-        "_managed_offer_post",
+        "managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-pending"},
     )
 
@@ -163,12 +163,12 @@ def test_execute_strategy_actions_preserves_planned_size_order(monkeypatch) -> N
     POST_COOLDOWN_UNTIL.clear()
     seen_sizes: list[int] = []
 
-    def _fake_managed_offer_post(**kwargs: Any) -> dict[str, Any]:
+    def _fakemanaged_offer_post(**kwargs: Any) -> dict[str, Any]:
         seen_sizes.append(int(kwargs["size_base_units"]))
         size = int(kwargs["size_base_units"])
         return {"success": True, "offer_id": f"offer-{size}"}
 
-    monkeypatch.setattr(strategy_dispatch, "_managed_offer_post", _fake_managed_offer_post)
+    monkeypatch.setattr(strategy_dispatch, "managed_offer_post", _fakemanaged_offer_post)
 
     def program_factory() -> ProgramConfig:
         return signer_program_config()
@@ -229,10 +229,10 @@ def test_execute_strategy_actions_signer_managed_failure_skips_without_builder(m
         calls["builder"] += 1
         return {"status": "executed", "reason": "offer_builder_success", "offer": "offer1unused"}
 
-    monkeypatch.setattr(strategy_dispatch, "_build_offer_for_action", _unexpected_builder)
+    monkeypatch.setattr(strategy_dispatch, "build_offer_for_action", _unexpected_builder)
     monkeypatch.setattr(
         strategy_dispatch,
-        "_managed_offer_post",
+        "managed_offer_post",
         lambda **_kwargs: {"success": False, "error": "vault_signing_unavailable"},
     )
 

@@ -1,0 +1,45 @@
+"""Direct re-exports from the Rust cycle bridge (no Python shaping)."""
+
+from __future__ import annotations
+
+from . import _bridge as bridge
+
+can_parallelize_managed_offers = bridge.can_parallelize_managed_offers
+classify_dexie_stale_offer_status = bridge.classify_dexie_stale_offer_status
+classify_dexie_visibility_outcome = bridge.classify_dexie_visibility_outcome
+classify_managed_post_result = bridge.classify_managed_post_result
+collect_stale_sweep_candidates = bridge.collect_stale_sweep_candidates
+count_parallel_transient_failures = bridge.count_parallel_transient_failures
+dedupe_sorted_market_ids = bridge.dedupe_sorted_market_ids
+enqueue_immediate_requeue = bridge.enqueue_immediate_requeue
+evaluate_market = bridge.evaluate_market
+evaluate_two_sided_market_actions = bridge.evaluate_two_sided_market_actions
+expand_planned_actions = bridge.expand_planned_actions
+filter_planned_actions_with_positive_repeat = bridge.filter_planned_actions_with_positive_repeat
+is_dexie_offer_missing_error_text = bridge.is_dexie_offer_missing_error_text
+is_transient_dexie_visibility_404_error = bridge.is_transient_dexie_visibility_404_error
+is_transient_managed_upstream_error_text = bridge.is_transient_managed_upstream_error_text
+is_two_sided_market_mode = bridge.is_two_sided_market_mode
+managed_retry_sleep_ms = bridge.managed_retry_sleep_ms
+needs_inventory_fallback = bridge.needs_inventory_fallback
+next_disabled_market_log_deadline = bridge.next_disabled_market_log_deadline
+parallel_max_workers = bridge.parallel_max_workers
+plan_parallel_submission_batch = bridge.plan_parallel_submission_batch
+prepare_parallel_managed_submission_decision = bridge.prepare_parallel_managed_submission_decision
+record_stale_sweep_check = bridge.record_stale_sweep_check
+reservation_release_status = bridge.reservation_release_status
+select_market_batch = bridge.select_market_batch
+sequential_action_route = bridge.sequential_action_route
+should_apply_parallel_transient_cooldown = bridge.should_apply_parallel_transient_cooldown
+should_log_disabled_market = bridge.should_log_disabled_market
+should_retry_managed_post = bridge.should_retry_managed_post
+should_try_cat_inventory_fallback = bridge.should_try_cat_inventory_fallback
+should_use_market_slot_dispatch = bridge.should_use_market_slot_dispatch
+single_input_preferred_skip_reason = bridge.single_input_preferred_skip_reason
+
+
+def market_cycle_phases() -> tuple[str, ...]:
+    return tuple(bridge._import_signer().market_cycle_phases())
+
+
+MARKET_CYCLE_PHASES: tuple[str, ...] = market_cycle_phases()
