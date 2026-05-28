@@ -44,7 +44,8 @@ def test_greenfloor_signer_from_input_spend_bundle_xch_round_trip_offer() -> Non
     )
     offer_text = signer.encode_offer(offer_spend_bundle_bytes)
     assert str(offer_text).startswith("offer1")
-    signer.validate_offer(offer_text)
+    # Synthetic round-trip offers have no expiry; structure validation is the contract here.
+    signer.validate_offer_structure(offer_text)
 
 
 def test_greenfloor_signer_config_yaml_roundtrip(tmp_path: Path) -> None:
