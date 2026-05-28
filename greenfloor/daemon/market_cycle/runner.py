@@ -9,10 +9,10 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.market_cycle.phases import MarketCycleRun, run_market_cycle_phases
 from greenfloor.daemon.market_cycle.result import MarketCycleResult
 from greenfloor.daemon.market_cycle.setup_phase import run_market_cycle_setup
+from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.storage.sqlite import SqliteStore
 

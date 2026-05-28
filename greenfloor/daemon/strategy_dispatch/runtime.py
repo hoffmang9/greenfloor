@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig

@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
+from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.cooldowns import (
     _POST_COOLDOWN_UNTIL,
     _cooldown_remaining_ms,

@@ -7,8 +7,8 @@ from typing import Any
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig, managed_offer_execution_backend
-from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.cycle import is_managed_worker_transient_error, sequential_action_route
+from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.market_logging import _log_offer_action_timing
 from greenfloor.daemon.strategy_dispatch.items import action_item, strategy_action_result
 from greenfloor.daemon.strategy_dispatch.runtime import StrategyDispatchHooks
@@ -33,8 +33,7 @@ def execute_actions_sequential(
     executed_count = 0
     for action in expanded_actions:
         managed_backend_available = (
-            managed_offer_execution_backend(program, size_base_units=int(action.size))
-            is not None
+            managed_offer_execution_backend(program, size_base_units=int(action.size)) is not None
             if program is not None
             else False
         )

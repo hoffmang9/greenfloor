@@ -7,8 +7,8 @@ from datetime import datetime
 from typing import Any
 
 from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert
-from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.market_cycle.result import log_daemon_event
+from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.keys.router import resolve_market_key
 from greenfloor.notify.pushover import send_pushover_alert
 from greenfloor.storage.sqlite import SqliteStore, StoredAlertState

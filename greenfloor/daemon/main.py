@@ -43,10 +43,10 @@ from greenfloor.core.cycle import (
 from greenfloor.core.cycle import (
     select_market_batch as select_market_batch_kernel,
 )
-from greenfloor.core.cycle_orchestration import OfferStateRow, StaleSweepHit, StaleSweepProgress
 from greenfloor.core.cycle import (
     should_log_disabled_market as should_log_disabled_market_kernel,
 )
+from greenfloor.core.cycle_orchestration import OfferStateRow, StaleSweepHit, StaleSweepProgress
 from greenfloor.core.notifications import utcnow
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient
 from greenfloor.daemon.cooldowns import _env_int
@@ -227,9 +227,7 @@ def _select_market_batch(
     )
     dispatch_state.cursor = int(selection.cursor)
     dispatch_state.immediate_requeue_ids = deque(
-        str(market_id)
-        for market_id in selection.immediate_requeue_ids
-        if str(market_id).strip()
+        str(market_id) for market_id in selection.immediate_requeue_ids if str(market_id).strip()
     )
     selected_markets = [
         enabled_by_id[str(market_id)]
@@ -581,9 +579,7 @@ def run_once(
                 "stale_open_sweep_requeue_market_ids": list(
                     stale_open_sweep_payload.requeue_market_ids
                 ),
-                "stale_open_sweep_requeue_count": len(
-                    stale_open_sweep_payload.requeue_market_ids
-                ),
+                "stale_open_sweep_requeue_count": len(stale_open_sweep_payload.requeue_market_ids),
                 "stale_open_sweep_truncated": bool(stale_open_sweep_payload.truncated),
                 "immediate_requeue_market_ids": deduped_requeue_market_ids,
                 "immediate_requeue_count": len(deduped_requeue_market_ids),

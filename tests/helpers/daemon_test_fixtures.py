@@ -16,7 +16,6 @@ from greenfloor.config.models import (
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon.strategy_dispatch.runtime import hooks_from_module
 from greenfloor.daemon.testing import (
-    execute_single_local_action,
     expand_planned_actions,
 )
 from tests.helpers.config_fixtures import minimal_program_config

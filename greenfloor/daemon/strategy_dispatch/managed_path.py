@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig, managed_offer_execution_backend
-from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.cycle import (
     classify_dexie_visibility_outcome,
     classify_managed_post_result,
@@ -16,7 +16,11 @@ from greenfloor.core.cycle import (
     managed_retry_sleep_ms,
     should_retry_managed_post,
 )
-from greenfloor.daemon.cooldowns import _post_retry_config, raise_if_transient_managed_upstream_error
+from greenfloor.core.planned_action import PlannedAction
+from greenfloor.daemon.cooldowns import (
+    _post_retry_config,
+    raise_if_transient_managed_upstream_error,
+)
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.strategy_dispatch.items import action_item_from_managed_outcome

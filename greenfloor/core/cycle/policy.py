@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import _bridge as bridge
 from greenfloor.core.cycle_orchestration import StaleSweepProgress
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.strategy_types import MarketState, StrategyConfig
+
+from . import _bridge as bridge
 
 __all__ = [
     "aggregate_two_sided_offer_counts",

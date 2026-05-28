@@ -14,10 +14,10 @@ from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.core.cycle import MARKET_CYCLE_PHASES
 from greenfloor.daemon.cancel_policy import _execute_cancel_policy_for_market
 from greenfloor.daemon.coin_ops_cycle import _plan_and_execute_coin_ops
-from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.market_cycle.inventory_phase import run_market_cycle_inventory
 from greenfloor.daemon.market_cycle.result import MarketCycleResult
 from greenfloor.daemon.market_cycle.strategy_phase import evaluate_and_execute_strategy
+from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.offer_reconcile_cycle import reconcile_market_cycle_offers
 from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.storage.sqlite import SqliteStore
