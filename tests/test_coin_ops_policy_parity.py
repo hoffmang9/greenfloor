@@ -27,7 +27,11 @@ _CAT_ID = "0000000000000000000000000000000000000000000000000000000000000001"
     ],
 )
 def test_canonical_xch_parity_with_hex_utils(asset_id: str, expected_xch: bool) -> None:
+    from greenfloor.core.kernel_bridge import import_kernel
+
+    kernel = import_kernel()
     assert canonical_is_xch(asset_id) is expected_xch
+    assert bool(kernel.canonical_is_xch(asset_id)) is expected_xch
     if expected_xch:
         assert coin_op_min_amount_mojos(canonical_asset_id=asset_id) == 0
     else:

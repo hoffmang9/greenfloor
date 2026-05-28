@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.core.kernel_bridge import import_kernel
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,12 +22,16 @@ class AlertState:
     last_alert_at: datetime | None = None
 
 
-def compute_low_inventory_threshold(program: ProgramConfig, market: MarketConfig) -> int:
-    if market.inventory.low_inventory_alert_threshold_base_units is not None:
-        return market.inventory.low_inventory_alert_threshold_base_units
-    if program.low_inventory_default_threshold_base_units > 0:
-        return program.low_inventory_default_threshold_base_units
-    return market.inventory.low_watermark_base_units
+def _datetime_to_unix(value: datetime | None) -> int | None:
+    if value is None:
+        return None
+    return int(value.timestamp())
+
+
+def _unix_to_datetime(value: int | None) -> datetime | None:
+    if value is None:
+        return None
+    return datetime.fromtimestamp(int(value), tz=UTC)
 
 
 def evaluate_low_inventory_alert(
@@ -36,45 +41,35 @@ def evaluate_low_inventory_alert(
     market: MarketConfig,
     state: AlertState,
 ) -> tuple[AlertState, AlertEvent | None]:
-    if not market.enabled or not program.low_inventory_enabled:
-        return state, None
-
-    threshold = compute_low_inventory_threshold(program, market)
-    remaining = market.inventory.current_available_base_units
-    hysteresis_target = int(threshold * (1 + program.low_inventory_clear_hysteresis_percent / 100))
-
-    next_state = AlertState(is_low=state.is_low, last_alert_at=state.last_alert_at)
-
-    if remaining >= hysteresis_target:
-        next_state.is_low = False
+    state_payload, event_payload = import_kernel().evaluate_low_inventory_alert(
+        int(now.timestamp()),
+        bool(program.low_inventory_enabled),
+        int(program.low_inventory_default_threshold_base_units),
+        float(program.low_inventory_clear_hysteresis_percent),
+        int(program.low_inventory_dedup_cooldown_seconds),
+        bool(market.enabled),
+        str(market.market_id),
+        str(market.base_symbol),
+        str(market.receive_address),
+        market.inventory.low_inventory_alert_threshold_base_units,
+        int(market.inventory.low_watermark_base_units),
+        int(market.inventory.current_available_base_units),
+        bool(state.is_low),
+        _datetime_to_unix(state.last_alert_at),
+    )
+    next_state = AlertState(
+        is_low=bool(state_payload["is_low"]),
+        last_alert_at=_unix_to_datetime(state_payload.get("last_alert_at_unix")),
+    )
+    if event_payload is None:
         return next_state, None
-
-    if remaining >= threshold:
-        return next_state, None
-
-    should_send = False
-    reason = "low_triggered"
-    if not state.is_low:
-        should_send = True
-    elif state.last_alert_at is None:
-        should_send = True
-    else:
-        cooldown = timedelta(seconds=program.low_inventory_dedup_cooldown_seconds)
-        should_send = now - state.last_alert_at >= cooldown
-        reason = "reminder_sent"
-
-    next_state.is_low = True
-    if should_send:
-        next_state.last_alert_at = now
-        event = AlertEvent(
-            market_id=market.market_id,
-            ticker=market.base_symbol,
-            remaining_amount=remaining,
-            receive_address=market.receive_address,
-            reason=reason,
-        )
-        return next_state, event
-    return next_state, None
+    return next_state, AlertEvent(
+        market_id=str(event_payload["market_id"]),
+        ticker=str(event_payload["ticker"]),
+        remaining_amount=int(event_payload["remaining_amount"]),
+        receive_address=str(event_payload["receive_address"]),
+        reason=str(event_payload["reason"]),
+    )
 
 
 def utcnow() -> datetime:

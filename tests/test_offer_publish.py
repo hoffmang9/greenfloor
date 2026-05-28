@@ -8,6 +8,7 @@ from greenfloor.runtime.offer_publish import (
     post_offer_phase,
     verify_offer_text_for_dexie,
 )
+from tests.helpers.kernel_mock import mock_kernel_normalize_hex_id
 
 
 def test_verify_offer_text_for_dexie_uses_validate_offer_when_available(monkeypatch) -> None:
@@ -286,6 +287,8 @@ def test_verify_offer_text_for_dexie_uses_greenfloor_signer_before_sdk(monkeypat
         def validate_offer(offer: str) -> None:
             calls["offer"] = offer
 
+        normalize_hex_id = staticmethod(mock_kernel_normalize_hex_id)
+
     class _Sdk:
         @staticmethod
         def validate_offer(_offer: str) -> None:
@@ -304,6 +307,8 @@ def test_verify_offer_text_for_dexie_returns_native_validation_error(monkeypatch
         def validate_offer(_offer: str) -> None:
             raise ValueError("native_invalid_offer")
 
+        normalize_hex_id = staticmethod(mock_kernel_normalize_hex_id)
+
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
     assert verify_offer_text_for_dexie("offer1bad") == (
         "wallet_sdk_offer_validate_failed:native_invalid_offer"
@@ -317,6 +322,8 @@ def test_verify_offer_text_for_dexie_checks_duplicate_spends_after_native_valida
         @staticmethod
         def validate_offer(_offer: str) -> None:
             return None
+
+        normalize_hex_id = staticmethod(mock_kernel_normalize_hex_id)
 
     class _ConditionWithExpiry:
         @staticmethod

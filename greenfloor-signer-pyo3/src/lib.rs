@@ -3,6 +3,8 @@ extern crate greenfloor_signer as signer_core;
 mod coin_ops_py;
 mod cycle;
 mod execution_py;
+mod hex_py;
+mod notifications_py;
 mod py_utils;
 mod strategy_py;
 
@@ -11,6 +13,9 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use chia_bls::SecretKey;
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+use signer_core::error::{bls_reason, broadcast_reason, BlsOp};
 use signer_core::{
     broadcast_bls_spend_bundle, build_and_optionally_broadcast_vault_cat_mixed_split,
     build_bls_mixed_split_spend_bundle, build_bls_offer_spend_bundle,
@@ -22,9 +27,6 @@ use signer_core::{
     validate_offer_text, BlsMixedSplitRequest, BlsOfferRequest, BlsXchCoinOpRequest,
     CreateOfferRequest, MixedSplitRequest,
 };
-use signer_core::error::{bls_reason, broadcast_reason, BlsOp};
-use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
 
 use py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
 use pyo3::types::{PyDict, PyList, PyModule};
@@ -77,10 +79,7 @@ fn resolve_vault_context_py(config_path: &str) -> PyResult<Py<PyAny>> {
         .block_on(resolve_vault_context(config))
         .map_err(to_py_err)?;
     Python::attach(|py| {
-        dict_from_json_value(
-            py,
-            serde_json::to_value(&context).map_err(to_py_err)?,
-        )
+        dict_from_json_value(py, serde_json::to_value(&context).map_err(to_py_err)?)
     })
 }
 
@@ -89,17 +88,11 @@ fn resolve_vault_context_py(config_path: &str) -> PyResult<Py<PyAny>> {
 fn build_vault_cat_offer_py(config_path: &str, request: &Bound<'_, PyDict>) -> PyResult<Py<PyAny>> {
     let config = load_signer_config(Path::new(config_path)).map_err(to_py_err)?;
     let payload = request_dict_to_json(request)?;
-    let offer_request: CreateOfferRequest =
-        serde_json::from_value(payload).map_err(to_py_err)?;
+    let offer_request: CreateOfferRequest = serde_json::from_value(payload).map_err(to_py_err)?;
     let result = runtime()
         .block_on(build_vault_cat_offer(config, offer_request))
         .map_err(to_py_err)?;
-    Python::attach(|py| {
-        dict_from_json_value(
-            py,
-            serde_json::to_value(&result).map_err(to_py_err)?,
-        )
-    })
+    Python::attach(|py| dict_from_json_value(py, serde_json::to_value(&result).map_err(to_py_err)?))
 }
 
 #[pyfunction]
@@ -111,8 +104,7 @@ fn build_mixed_split_py(config_path: &str, request: &Bound<'_, PyDict>) -> PyRes
         .get("broadcast")
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
-    let split_request: MixedSplitRequest =
-        serde_json::from_value(payload).map_err(to_py_err)?;
+    let split_request: MixedSplitRequest = serde_json::from_value(payload).map_err(to_py_err)?;
     let result = runtime()
         .block_on(build_and_optionally_broadcast_vault_cat_mixed_split(
             config,
@@ -120,12 +112,7 @@ fn build_mixed_split_py(config_path: &str, request: &Bound<'_, PyDict>) -> PyRes
             broadcast,
         ))
         .map_err(to_py_err)?;
-    Python::attach(|py| {
-        dict_from_json_value(
-            py,
-            serde_json::to_value(&result).map_err(to_py_err)?,
-        )
-    })
+    Python::attach(|py| dict_from_json_value(py, serde_json::to_value(&result).map_err(to_py_err)?))
 }
 
 #[pyfunction]
@@ -420,9 +407,13 @@ fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(load_bls_master_sk_py, m)?)?;
     m.add_function(wrap_pyfunction!(coinset_push_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(coinset_get_fee_estimate_py, m)?)?;
-    m.add_function(wrap_pyfunction!(coinset_get_conservative_fee_estimate_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        coinset_get_conservative_fee_estimate_py,
+        m
+    )?)?;
     coin_ops_py::register(m)?;
     cycle::register(m)?;
+    hex_py::register(m)?;
+    notifications_py::register(m)?;
     Ok(())
 }
-
