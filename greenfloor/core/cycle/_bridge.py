@@ -452,32 +452,3 @@ def one_sided_offer_counts_by_side(
         "buy": {int(key): int(value) for key, value in dict(result.get("buy", {})).items()},
         "sell": {int(key): int(value) for key, value in dict(result.get("sell", {})).items()},
     }
-
-
-def resolve_missing_watched_offer_transition(current_state: str) -> Any:
-    return _import_signer().resolve_missing_watched_offer_transition(str(current_state))
-
-
-def resolve_watched_offer_transition_from_signals(
-    *,
-    current_state: str,
-    status: int | None,
-    coinset_tx_ids: list[str],
-    coinset_confirmed_tx_ids: list[str],
-    coinset_mempool_tx_ids: list[str],
-) -> Any:
-    return _import_signer().resolve_watched_offer_transition_from_signals(
-        str(current_state),
-        status,
-        list(coinset_tx_ids),
-        list(coinset_confirmed_tx_ids),
-        list(coinset_mempool_tx_ids),
-    )
-
-
-def unchanged_offer_transition(current_state: str, reason: str) -> Any:
-    return _import_signer().unchanged_offer_transition(str(current_state), str(reason))
-
-
-def unsupported_venue_offer_transition(current_state: str, venue: str) -> Any:
-    return _import_signer().unsupported_venue_offer_transition(str(current_state), str(venue))

@@ -68,6 +68,20 @@ def test_resolve_watched_offer_transition_missing_status_without_tx_ids() -> Non
     assert transition.signal_source == "none"
 
 
+def test_resolve_watched_offer_transition_coinset_signal_unavailable_for_offer() -> None:
+    tx_id = "f" * 64
+    transition = resolve_watched_offer_transition_from_signals(
+        current_state="open",
+        status=None,
+        coinset_tx_ids=[tx_id],
+        coinset_confirmed_tx_ids=[],
+        coinset_mempool_tx_ids=[],
+    )
+    assert transition.new_state == "open"
+    assert transition.reason == "coinset_signal_unavailable_for_offer"
+    assert transition.signal_source == "none"
+
+
 def test_resolve_watched_offer_transition_dexie_status_fallback() -> None:
     transition = resolve_watched_offer_transition_from_signals(
         current_state="open",

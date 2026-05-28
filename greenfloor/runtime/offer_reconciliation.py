@@ -126,7 +126,7 @@ def reconcile_result_from_transition(
     transition: CycleOfferTransition,
     last_seen_status: int | None,
 ) -> ReconcileOfferResult:
-    taker_signal, taker_diagnostic = transition.taker_fields(last_seen_status=last_seen_status)
+    _ = last_seen_status
     return ReconcileOfferResult(
         offer_id=offer_id,
         market_id=market_id,
@@ -135,8 +135,8 @@ def reconcile_result_from_transition(
         changed=transition.changed,
         last_seen_status=last_seen_status,
         reason=transition.reason,
-        taker_signal=taker_signal,
-        taker_diagnostic=taker_diagnostic,
+        taker_signal=transition.taker_signal,
+        taker_diagnostic=transition.taker_diagnostic,
         signal_source=transition.signal_source,
         coinset_tx_ids=transition.coinset_tx_ids,
         coinset_confirmed_tx_ids=transition.coinset_confirmed_tx_ids,
@@ -161,7 +161,6 @@ def persist_offer_lifecycle_transition(
         state=transition.new_state,
         last_seen_status=last_seen_status,
     )
-    taker_signal, taker_diagnostic = transition.taker_fields(last_seen_status=last_seen_status)
     payload: dict[str, Any] = {
         "offer_id": offer_id,
         "market_id": market_id,
@@ -176,8 +175,8 @@ def persist_offer_lifecycle_transition(
         "coinset_tx_ids": transition.coinset_tx_ids,
         "coinset_confirmed_tx_ids": transition.coinset_confirmed_tx_ids,
         "coinset_mempool_tx_ids": transition.coinset_mempool_tx_ids,
-        "taker_signal": taker_signal,
-        "taker_diagnostic": taker_diagnostic,
+        "taker_signal": transition.taker_signal,
+        "taker_diagnostic": transition.taker_diagnostic,
     }
     if venue is not None:
         payload["venue"] = venue
@@ -190,15 +189,15 @@ def persist_offer_lifecycle_transition(
         payload,
         market_id=market_id,
     )
-    if taker_signal != "none":
+    if transition.taker_signal != "none":
         store.add_audit_event(
             "taker_detection",
             {
                 "offer_id": offer_id,
                 "market_id": market_id,
                 "venue": venue or "dexie",
-                "signal": taker_signal,
-                "advisory_diagnostic": taker_diagnostic,
+                "signal": transition.taker_signal,
+                "advisory_diagnostic": transition.taker_diagnostic,
                 "old_state": transition.old_state,
                 "new_state": transition.new_state,
                 "last_seen_status": last_seen_status,

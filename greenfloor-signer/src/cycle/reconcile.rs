@@ -1,14 +1,55 @@
+use std::borrow::Cow;
+
 use serde::{Deserialize, Serialize};
 
 use super::lifecycle::{apply_offer_signal, OfferLifecycleState, OfferSignal};
 
-const STATE_CANCELLED: &str = "cancelled";
-const STATE_TX_BLOCK_CONFIRMED: &str = "tx_block_confirmed";
-const STATE_EXPIRED: &str = "expired";
 const TAKER_NONE: &str = "none";
+const STATE_UNSUPPORTED_VENUE: &str = "reconcile_unsupported_venue";
 
-fn is_terminal_reconcile_state(state: &str) -> bool {
-    matches!(state, STATE_TX_BLOCK_CONFIRMED | STATE_EXPIRED | STATE_CANCELLED)
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ReconcileState {
+    Lifecycle(OfferLifecycleState),
+    Cancelled,
+    UnsupportedVenue,
+    Other(String),
+}
+
+impl ReconcileState {
+    fn parse(raw: &str) -> Self {
+        match raw {
+            "open" => Self::Lifecycle(OfferLifecycleState::Open),
+            "mempool_observed" => Self::Lifecycle(OfferLifecycleState::MempoolObserved),
+            "tx_block_confirmed" => Self::Lifecycle(OfferLifecycleState::TxBlockConfirmed),
+            "refresh_due" => Self::Lifecycle(OfferLifecycleState::RefreshDue),
+            "expired" => Self::Lifecycle(OfferLifecycleState::Expired),
+            "cancelled" => Self::Cancelled,
+            STATE_UNSUPPORTED_VENUE => Self::UnsupportedVenue,
+            other => Self::Other(other.to_string()),
+        }
+    }
+
+    fn as_str(&self) -> Cow<'_, str> {
+        match self {
+            Self::Lifecycle(state) => Cow::Borrowed(state.as_str()),
+            Self::Cancelled => Cow::Borrowed("cancelled"),
+            Self::UnsupportedVenue => Cow::Borrowed(STATE_UNSUPPORTED_VENUE),
+            Self::Other(value) => Cow::Borrowed(value),
+        }
+    }
+
+    fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Lifecycle(OfferLifecycleState::TxBlockConfirmed)
+                | Self::Lifecycle(OfferLifecycleState::Expired)
+                | Self::Cancelled
+        )
+    }
+
+    fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,7 +70,7 @@ pub struct CycleOfferTransition {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReconcileDecision {
-    new_state: String,
+    new_state: ReconcileState,
     reason: &'static str,
     signal_source: &'static str,
     signal: Option<OfferSignal>,
@@ -37,60 +78,90 @@ struct ReconcileDecision {
     taker_diagnostic: &'static str,
 }
 
-impl ReconcileDecision {
-    fn into_transition(
-        self,
-        current_state: &str,
-        coinset_tx_ids: Vec<String>,
-        coinset_confirmed_tx_ids: Vec<String>,
-        coinset_mempool_tx_ids: Vec<String>,
-    ) -> CycleOfferTransition {
-        let changed = self.new_state != current_state;
-        let signal = if changed {
-            self.signal.map(|value| value.as_str().to_string())
-        } else {
-            None
-        };
-        let immediate_requeue = changed
-            && matches!(
-                self.signal,
-                Some(OfferSignal::TxConfirmed) | Some(OfferSignal::Expired)
-            );
-        CycleOfferTransition {
-            old_state: current_state.to_string(),
-            new_state: self.new_state,
-            reason: self.reason.to_string(),
-            signal_source: self.signal_source.to_string(),
-            signal,
-            changed,
-            immediate_requeue,
-            taker_signal: self.taker_signal.to_string(),
-            taker_diagnostic: self.taker_diagnostic.to_string(),
-            coinset_tx_ids,
-            coinset_confirmed_tx_ids,
-            coinset_mempool_tx_ids,
-        }
+struct TransitionBuildArgs<'a> {
+    current_state: &'a str,
+    new_state: ReconcileState,
+    reason: Cow<'a, str>,
+    signal_source: &'static str,
+    signal: Option<OfferSignal>,
+    immediate_requeue: bool,
+    taker_signal: &'static str,
+    taker_diagnostic: &'static str,
+    coinset_tx_ids: Vec<String>,
+    coinset_confirmed_tx_ids: Vec<String>,
+    coinset_mempool_tx_ids: Vec<String>,
+}
+
+fn empty_coinset_lists() -> (Vec<String>, Vec<String>, Vec<String>) {
+    (Vec::new(), Vec::new(), Vec::new())
+}
+
+fn build_transition(args: TransitionBuildArgs<'_>) -> CycleOfferTransition {
+    let new_state = args.new_state.as_str().into_owned();
+    let changed = new_state != args.current_state;
+    let signal = if changed {
+        args.signal.map(|value| value.as_str().to_string())
+    } else {
+        None
+    };
+    CycleOfferTransition {
+        old_state: args.current_state.to_string(),
+        new_state,
+        reason: args.reason.into_owned(),
+        signal_source: args.signal_source.to_string(),
+        signal,
+        changed,
+        immediate_requeue: args.immediate_requeue && changed,
+        taker_signal: args.taker_signal.to_string(),
+        taker_diagnostic: args.taker_diagnostic.to_string(),
+        coinset_tx_ids: args.coinset_tx_ids,
+        coinset_confirmed_tx_ids: args.coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids: args.coinset_mempool_tx_ids,
     }
 }
 
-fn reconciled_state_from_dexie_status(status: i64, current_state: &str) -> String {
+fn build_transition_from_decision(
+    current_state: &str,
+    decision: ReconcileDecision,
+    coinset_tx_ids: Vec<String>,
+    coinset_confirmed_tx_ids: Vec<String>,
+    coinset_mempool_tx_ids: Vec<String>,
+) -> CycleOfferTransition {
+    let immediate_requeue = matches!(
+        decision.signal,
+        Some(OfferSignal::TxConfirmed) | Some(OfferSignal::Expired)
+    );
+    build_transition(TransitionBuildArgs {
+        current_state,
+        new_state: decision.new_state,
+        reason: Cow::Borrowed(decision.reason),
+        signal_source: decision.signal_source,
+        signal: decision.signal,
+        immediate_requeue,
+        taker_signal: decision.taker_signal,
+        taker_diagnostic: decision.taker_diagnostic,
+        coinset_tx_ids,
+        coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids,
+    })
+}
+
+fn reconciled_state_from_dexie_status(status: i64, current_state: &ReconcileState) -> ReconcileState {
     match status {
-        4 => apply_offer_signal(OfferLifecycleState::Open, OfferSignal::TxConfirmed)
-            .new_state
-            .as_str()
-            .to_string(),
-        6 => apply_offer_signal(OfferLifecycleState::Open, OfferSignal::Expired)
-            .new_state
-            .as_str()
-            .to_string(),
-        3 => STATE_CANCELLED.to_string(),
-        0 | 1 | 2 | 5 => current_state.to_string(),
-        _ => current_state.to_string(),
+        4 => ReconcileState::Lifecycle(
+            apply_offer_signal(OfferLifecycleState::Open, OfferSignal::TxConfirmed).new_state,
+        ),
+        6 => ReconcileState::Lifecycle(
+            apply_offer_signal(OfferLifecycleState::Open, OfferSignal::Expired).new_state,
+        ),
+        3 => ReconcileState::Cancelled,
+        0 | 1 | 2 | 5 => current_state.clone(),
+        _ => current_state.clone(),
     }
 }
 
 fn resolve_watched_offer_decision(
-    current_state: &str,
+    current_state: &ReconcileState,
     status: Option<i64>,
     coinset_tx_ids: &[String],
     coinset_confirmed_tx_ids: &[String],
@@ -98,12 +169,12 @@ fn resolve_watched_offer_decision(
 ) -> ReconcileDecision {
     if !coinset_confirmed_tx_ids.is_empty()
         && status != Some(3)
-        && current_state != STATE_CANCELLED
+        && !current_state.is_cancelled()
     {
         let transition =
             apply_offer_signal(OfferLifecycleState::Open, OfferSignal::TxConfirmed);
         return ReconcileDecision {
-            new_state: transition.new_state.as_str().to_string(),
+            new_state: ReconcileState::Lifecycle(transition.new_state),
             reason: "coinset_tx_block_webhook_confirmed",
             signal_source: "coinset_webhook",
             signal: Some(OfferSignal::TxConfirmed),
@@ -113,18 +184,18 @@ fn resolve_watched_offer_decision(
     }
 
     if !coinset_mempool_tx_ids.is_empty() {
-        let new_state = if is_terminal_reconcile_state(current_state) {
-            current_state.to_string()
+        let new_state = if current_state.is_terminal() {
+            current_state.clone()
         } else {
-            apply_offer_signal(OfferLifecycleState::Open, OfferSignal::MempoolSeen)
-                .new_state
-                .as_str()
-                .to_string()
+            ReconcileState::Lifecycle(
+                apply_offer_signal(OfferLifecycleState::Open, OfferSignal::MempoolSeen).new_state,
+            )
         };
-        let signal = if new_state == OfferLifecycleState::MempoolObserved.as_str() {
-            Some(OfferSignal::MempoolSeen)
-        } else {
-            None
+        let signal = match &new_state {
+            ReconcileState::Lifecycle(OfferLifecycleState::MempoolObserved) => {
+                Some(OfferSignal::MempoolSeen)
+            }
+            _ => None,
         };
         return ReconcileDecision {
             new_state,
@@ -139,7 +210,7 @@ fn resolve_watched_offer_decision(
     if status.is_none() {
         if coinset_tx_ids.is_empty() {
             return ReconcileDecision {
-                new_state: current_state.to_string(),
+                new_state: current_state.clone(),
                 reason: "missing_status",
                 signal_source: "none",
                 signal: None,
@@ -148,7 +219,7 @@ fn resolve_watched_offer_decision(
             };
         }
         return ReconcileDecision {
-            new_state: current_state.to_string(),
+            new_state: current_state.clone(),
             reason: "coinset_signal_unavailable_for_offer",
             signal_source: "none",
             signal: None,
@@ -173,92 +244,94 @@ fn resolve_watched_offer_decision(
     }
 }
 
-fn signal_for_state_change(current_state: &str, new_state: &str) -> Option<OfferSignal> {
+fn signal_for_state_change(
+    current_state: &ReconcileState,
+    new_state: &ReconcileState,
+) -> Option<OfferSignal> {
     if new_state == current_state {
         return None;
     }
-    if new_state == OfferLifecycleState::TxBlockConfirmed.as_str() {
-        return Some(OfferSignal::TxConfirmed);
+    match new_state {
+        ReconcileState::Lifecycle(OfferLifecycleState::TxBlockConfirmed) => {
+            Some(OfferSignal::TxConfirmed)
+        }
+        ReconcileState::Lifecycle(OfferLifecycleState::Expired) => Some(OfferSignal::Expired),
+        ReconcileState::Lifecycle(OfferLifecycleState::MempoolObserved) => {
+            Some(OfferSignal::MempoolSeen)
+        }
+        _ => None,
     }
-    if new_state == OfferLifecycleState::Expired.as_str() {
-        return Some(OfferSignal::Expired);
-    }
-    if new_state == OfferLifecycleState::MempoolObserved.as_str() {
-        return Some(OfferSignal::MempoolSeen);
-    }
-    None
 }
 
 pub fn unchanged_offer_transition(current_state: &str, reason: impl Into<String>) -> CycleOfferTransition {
-    CycleOfferTransition {
-        old_state: current_state.to_string(),
-        new_state: current_state.to_string(),
-        reason: reason.into(),
-        signal_source: "none".to_string(),
+    let (coinset_tx_ids, coinset_confirmed_tx_ids, coinset_mempool_tx_ids) = empty_coinset_lists();
+    build_transition(TransitionBuildArgs {
+        current_state,
+        new_state: ReconcileState::parse(current_state),
+        reason: Cow::Owned(reason.into()),
+        signal_source: "none",
         signal: None,
-        changed: false,
         immediate_requeue: false,
-        taker_signal: TAKER_NONE.to_string(),
-        taker_diagnostic: TAKER_NONE.to_string(),
-        coinset_tx_ids: Vec::new(),
-        coinset_confirmed_tx_ids: Vec::new(),
-        coinset_mempool_tx_ids: Vec::new(),
-    }
+        taker_signal: TAKER_NONE,
+        taker_diagnostic: TAKER_NONE,
+        coinset_tx_ids,
+        coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids,
+    })
 }
 
 pub fn unsupported_venue_offer_transition(
     current_state: &str,
     venue: &str,
 ) -> CycleOfferTransition {
-    let new_state = "reconcile_unsupported_venue".to_string();
-    CycleOfferTransition {
-        old_state: current_state.to_string(),
-        new_state: new_state.clone(),
-        reason: format!("unsupported_venue:{venue}"),
-        signal_source: "none".to_string(),
+    let (coinset_tx_ids, coinset_confirmed_tx_ids, coinset_mempool_tx_ids) = empty_coinset_lists();
+    build_transition(TransitionBuildArgs {
+        current_state,
+        new_state: ReconcileState::UnsupportedVenue,
+        reason: Cow::Owned(format!("unsupported_venue:{venue}")),
+        signal_source: "none",
         signal: None,
-        changed: current_state != new_state,
         immediate_requeue: false,
-        taker_signal: TAKER_NONE.to_string(),
-        taker_diagnostic: TAKER_NONE.to_string(),
-        coinset_tx_ids: Vec::new(),
-        coinset_confirmed_tx_ids: Vec::new(),
-        coinset_mempool_tx_ids: Vec::new(),
-    }
+        taker_signal: TAKER_NONE,
+        taker_diagnostic: TAKER_NONE,
+        coinset_tx_ids,
+        coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids,
+    })
 }
 
 pub fn resolve_missing_watched_offer_transition(current_state: &str) -> CycleOfferTransition {
-    if is_terminal_reconcile_state(current_state) {
-        return CycleOfferTransition {
-            old_state: current_state.to_string(),
-            new_state: current_state.to_string(),
-            reason: "dexie_offer_not_found_preserved_terminal".to_string(),
-            signal_source: "dexie_get_offer_404".to_string(),
+    let parsed = ReconcileState::parse(current_state);
+    let (coinset_tx_ids, coinset_confirmed_tx_ids, coinset_mempool_tx_ids) = empty_coinset_lists();
+    if parsed.is_terminal() {
+        return build_transition(TransitionBuildArgs {
+            current_state,
+            new_state: parsed,
+            reason: Cow::Borrowed("dexie_offer_not_found_preserved_terminal"),
+            signal_source: "dexie_get_offer_404",
             signal: None,
-            changed: false,
             immediate_requeue: false,
-            taker_signal: TAKER_NONE.to_string(),
-            taker_diagnostic: TAKER_NONE.to_string(),
-            coinset_tx_ids: Vec::new(),
-            coinset_confirmed_tx_ids: Vec::new(),
-            coinset_mempool_tx_ids: Vec::new(),
-        };
+            taker_signal: TAKER_NONE,
+            taker_diagnostic: TAKER_NONE,
+            coinset_tx_ids,
+            coinset_confirmed_tx_ids,
+            coinset_mempool_tx_ids,
+        });
     }
     let transition = apply_offer_signal(OfferLifecycleState::Open, OfferSignal::Expired);
-    CycleOfferTransition {
-        old_state: current_state.to_string(),
-        new_state: transition.new_state.as_str().to_string(),
-        reason: "dexie_offer_not_found".to_string(),
-        signal_source: "dexie_get_offer_404".to_string(),
-        signal: Some(transition.signal.as_str().to_string()),
-        changed: true,
+    build_transition(TransitionBuildArgs {
+        current_state,
+        new_state: ReconcileState::Lifecycle(transition.new_state),
+        reason: Cow::Borrowed("dexie_offer_not_found"),
+        signal_source: "dexie_get_offer_404",
+        signal: Some(OfferSignal::Expired),
         immediate_requeue: true,
-        taker_signal: TAKER_NONE.to_string(),
-        taker_diagnostic: TAKER_NONE.to_string(),
-        coinset_tx_ids: Vec::new(),
-        coinset_confirmed_tx_ids: Vec::new(),
-        coinset_mempool_tx_ids: Vec::new(),
-    }
+        taker_signal: TAKER_NONE,
+        taker_diagnostic: TAKER_NONE,
+        coinset_tx_ids,
+        coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids,
+    })
 }
 
 pub fn resolve_watched_offer_transition_from_signals(
@@ -268,15 +341,17 @@ pub fn resolve_watched_offer_transition_from_signals(
     coinset_confirmed_tx_ids: Vec<String>,
     coinset_mempool_tx_ids: Vec<String>,
 ) -> CycleOfferTransition {
+    let parsed = ReconcileState::parse(current_state);
     let decision = resolve_watched_offer_decision(
-        current_state,
+        &parsed,
         status,
         &coinset_tx_ids,
         &coinset_confirmed_tx_ids,
         &coinset_mempool_tx_ids,
     );
-    decision.into_transition(
+    build_transition_from_decision(
         current_state,
+        decision,
         coinset_tx_ids,
         coinset_confirmed_tx_ids,
         coinset_mempool_tx_ids,
@@ -339,6 +414,20 @@ mod tests {
             resolve_watched_offer_transition_from_signals("open", None, vec![], vec![], vec![]);
         assert_eq!(transition.new_state, "open");
         assert_eq!(transition.reason, "missing_status");
+        assert_eq!(transition.signal_source, "none");
+    }
+
+    #[test]
+    fn coinset_signal_unavailable_for_offer() {
+        let transition = resolve_watched_offer_transition_from_signals(
+            "open",
+            None,
+            vec!["f".repeat(64)],
+            vec![],
+            vec![],
+        );
+        assert_eq!(transition.new_state, "open");
+        assert_eq!(transition.reason, "coinset_signal_unavailable_for_offer");
         assert_eq!(transition.signal_source, "none");
     }
 
