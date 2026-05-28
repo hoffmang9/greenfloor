@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
 from typing import Any
 
 from greenfloor.core.cycle_orchestration import (
@@ -12,6 +11,7 @@ from greenfloor.core.cycle_orchestration import (
     StaleSweepHit,
     StaleSweepProgress,
 )
+from greenfloor.core.kernel_bridge import import_signer
 from greenfloor.core.managed_action_outcome import ManagedActionOutcome
 from greenfloor.core.managed_retry import ManagedRetryDecision
 from greenfloor.core.parallel_batch_plan import ParallelBatchPlan
@@ -19,19 +19,9 @@ from greenfloor.core.parallel_reservation_context import ParallelReservationCont
 from greenfloor.core.planned_action import PlannedAction, planned_actions_from_signer_list
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
-_INSTALL_HINT = (
-    "Install the greenfloor_signer extension (for example: "
-    "`maturin develop -m greenfloor-signer-pyo3` from the repo root)."
-)
-
 
 def _import_signer() -> Any:
-    try:
-        return importlib.import_module("greenfloor_signer")
-    except ImportError as exc:
-        raise ImportError(
-            f"greenfloor_signer is not available. {_INSTALL_HINT} Original error: {exc}"
-        ) from exc
+    return import_signer()
 
 
 def _normalize_spendable_profiles(

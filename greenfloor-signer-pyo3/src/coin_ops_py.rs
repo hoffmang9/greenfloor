@@ -1,88 +1,24 @@
-use std::sync::OnceLock;
-
-use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyModule};
+use pyo3::types::{PyDict, PyList};
 
 use signer_core::{
-    coin_meets_coin_op_min_amount, coin_op_min_amount_mojos, coin_op_target_amount_allowed,
+    amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_target_amount_allowed,
     compute_bucket_counts_from_coins, fee_budget_allows_execution, partition_plans_by_budget,
-    plan_coin_ops, projected_coin_ops_fee_mojos, BucketSpec, CoinOpPlan,
+    plan_coin_ops, projected_coin_ops_fee_mojos,
 };
 
-use crate::py_utils::i64_i64_map_to_py_dict;
+use crate::py_utils::{
+    bucket_spec_from_py, coin_op_plan_to_py, coin_op_plans_from_py_list, i64_i64_map_to_py_dict,
+};
 
-const COIN_OPS_MODULE: &str = "greenfloor.core.coin_ops";
-
-static BUCKET_SPEC_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
-static COIN_OP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
-
-fn cached_coin_ops_class<'py>(
-    py: Python<'py>,
-    cache: &OnceLock<Py<PyAny>>,
-    name: &str,
-) -> PyResult<Bound<'py, PyAny>> {
-    if let Some(cls) = cache.get() {
-        return Ok(cls.bind(py).clone());
+fn coin_amount_mojos_from_py(coin: &Bound<'_, PyDict>) -> PyResult<Option<i64>> {
+    match coin.get_item("amount")? {
+        None => Ok(Some(0)),
+        Some(value) => match value.extract::<i64>() {
+            Ok(amount) => Ok(Some(amount)),
+            Err(_) => Ok(None),
+        },
     }
-    let cls = PyModule::import(py, COIN_OPS_MODULE)?.getattr(name)?.unbind();
-    let _ = cache.set(cls);
-    Ok(cache.get().expect("cached class").bind(py).clone())
-}
-
-fn bucket_spec_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    cached_coin_ops_class(py, &BUCKET_SPEC_CLS, "BucketSpec")
-}
-
-fn coin_op_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    cached_coin_ops_class(py, &COIN_OP_PLAN_CLS, "CoinOpPlan")
-}
-
-fn bucket_spec_from_py(obj: &Bound<'_, PyAny>) -> PyResult<BucketSpec> {
-    if let Ok(cls) = bucket_spec_class(obj.py()) {
-        if obj.is_instance(&cls)? {
-            return Ok(BucketSpec {
-                size_base_units: obj.getattr("size_base_units")?.extract()?,
-                target_count: obj.getattr("target_count")?.extract()?,
-                split_buffer_count: obj.getattr("split_buffer_count")?.extract()?,
-                combine_when_excess_factor: obj.getattr("combine_when_excess_factor")?.extract()?,
-                current_count: obj.getattr("current_count")?.extract()?,
-            });
-        }
-    }
-    Err(PyTypeError::new_err("expected BucketSpec"))
-}
-
-fn coin_op_plan_from_py(obj: &Bound<'_, PyAny>) -> PyResult<CoinOpPlan> {
-    if let Ok(cls) = coin_op_plan_class(obj.py()) {
-        if obj.is_instance(&cls)? {
-            return Ok(CoinOpPlan {
-                op_type: obj.getattr("op_type")?.extract()?,
-                size_base_units: obj.getattr("size_base_units")?.extract()?,
-                op_count: obj.getattr("op_count")?.extract()?,
-                reason: obj.getattr("reason")?.extract()?,
-            });
-        }
-    }
-    Err(PyTypeError::new_err("expected CoinOpPlan"))
-}
-
-fn coin_op_plan_to_py<'py>(py: Python<'py>, plan: &CoinOpPlan) -> PyResult<Bound<'py, PyAny>> {
-    let cls = coin_op_plan_class(py)?;
-    let kwargs = PyDict::new(py);
-    kwargs.set_item("op_type", &plan.op_type)?;
-    kwargs.set_item("size_base_units", plan.size_base_units)?;
-    kwargs.set_item("op_count", plan.op_count)?;
-    kwargs.set_item("reason", &plan.reason)?;
-    cls.call((), Some(&kwargs))
-}
-
-fn coin_op_plans_from_py_list(plans: &Bound<'_, PyList>) -> PyResult<Vec<CoinOpPlan>> {
-    let mut parsed = Vec::with_capacity(plans.len());
-    for item in plans.iter() {
-        parsed.push(coin_op_plan_from_py(&item)?);
-    }
-    Ok(parsed)
 }
 
 #[pyfunction]
@@ -95,7 +31,7 @@ fn plan_coin_ops_py(
     split_fee_mojos: i64,
     combine_fee_mojos: i64,
 ) -> PyResult<Py<PyAny>> {
-    let bucket_specs: Vec<BucketSpec> = buckets
+    let bucket_specs: Vec<_> = buckets
         .iter()
         .map(|item| bucket_spec_from_py(&item))
         .collect::<PyResult<_>>()?;
@@ -194,11 +130,11 @@ fn coin_meets_coin_op_min_amount_py(
     coin: &Bound<'_, PyDict>,
     canonical_asset_id: &str,
 ) -> PyResult<bool> {
-    let amount = match coin.get_item("amount")? {
-        Some(value) => value.extract::<i64>().unwrap_or(0),
-        None => 0,
+    let amount = match coin_amount_mojos_from_py(coin)? {
+        Some(amount) => amount,
+        None => return Ok(false),
     };
-    Ok(coin_meets_coin_op_min_amount(amount, canonical_asset_id))
+    Ok(amount_meets_coin_op_min_mojos(amount, canonical_asset_id))
 }
 
 #[pyfunction]

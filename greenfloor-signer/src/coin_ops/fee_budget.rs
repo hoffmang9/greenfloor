@@ -1,4 +1,4 @@
-use super::plan::CoinOpPlan;
+use super::plan::{CoinOpKind, CoinOpPlan};
 
 pub fn projected_coin_ops_fee_mojos(
     plans: &[CoinOpPlan],
@@ -7,11 +7,9 @@ pub fn projected_coin_ops_fee_mojos(
 ) -> i64 {
     let mut total = 0_i64;
     for plan in plans {
-        let per_op_fee = if plan.op_type == "split" {
-            split_fee_mojos
-        } else {
-            combine_fee_mojos
-        };
+        let per_op_fee = plan
+            .op_type
+            .fee_mojos(split_fee_mojos, combine_fee_mojos);
         total += plan.op_count.max(0) * per_op_fee.max(0);
     }
     total
@@ -44,12 +42,10 @@ pub fn partition_plans_by_budget(
     let mut skipped = Vec::new();
 
     for plan in plans {
-        let per_op = if plan.op_type == "split" {
-            split_fee_mojos
-        } else {
-            combine_fee_mojos
-        }
-        .max(0);
+        let per_op = plan
+            .op_type
+            .fee_mojos(split_fee_mojos, combine_fee_mojos)
+            .max(0);
         if plan.op_count <= 0 {
             continue;
         }
@@ -68,13 +64,13 @@ pub fn partition_plans_by_budget(
             continue;
         }
         allowed.push(CoinOpPlan {
-            op_type: plan.op_type.clone(),
+            op_type: plan.op_type,
             size_base_units: plan.size_base_units,
             op_count: affordable_ops,
             reason: plan.reason.clone(),
         });
         skipped.push(CoinOpPlan {
-            op_type: plan.op_type.clone(),
+            op_type: plan.op_type,
             size_base_units: plan.size_base_units,
             op_count: plan.op_count - affordable_ops,
             reason: "fee_budget_partial_overflow".to_string(),
@@ -90,20 +86,20 @@ mod tests {
     use super::{
         fee_budget_allows_execution, partition_plans_by_budget, projected_coin_ops_fee_mojos,
     };
-    use crate::coin_ops::plan::CoinOpPlan;
+    use crate::coin_ops::plan::{CoinOpKind, CoinOpPlan};
 
     #[test]
     fn projected_fee_sums_per_op_type() {
         let fee = projected_coin_ops_fee_mojos(
             &[
                 CoinOpPlan {
-                    op_type: "split".to_string(),
+                    op_type: CoinOpKind::Split,
                     size_base_units: 1,
                     op_count: 3,
                     reason: "x".to_string(),
                 },
                 CoinOpPlan {
-                    op_type: "combine".to_string(),
+                    op_type: CoinOpKind::Combine,
                     size_base_units: 10,
                     op_count: 2,
                     reason: "y".to_string(),
@@ -125,7 +121,7 @@ mod tests {
     fn partition_partial_split() {
         let (allowed, skipped) = partition_plans_by_budget(
             &[CoinOpPlan {
-                op_type: "split".to_string(),
+                op_type: CoinOpKind::Split,
                 size_base_units: 1,
                 op_count: 5,
                 reason: "r".to_string(),

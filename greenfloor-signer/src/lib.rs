@@ -25,9 +25,9 @@ pub async fn resolve_offer_asset_ids(
 }
 
 pub use coin_ops::{
-    coin_meets_coin_op_min_amount, coin_op_min_amount_mojos, coin_op_target_amount_allowed,
-    compute_bucket_counts_from_coins, fee_budget_allows_execution, is_canonical_xch_asset,
-    partition_plans_by_budget, plan_coin_ops, projected_coin_ops_fee_mojos, BucketSpec, CoinOpPlan,
+    amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_target_amount_allowed,
+    compute_bucket_counts_from_coins, fee_budget_allows_execution, partition_plans_by_budget,
+    plan_coin_ops, projected_coin_ops_fee_mojos, BucketSpec, CoinOpKind, CoinOpPlan,
 };
 pub use coinset::{
     get_conservative_fee_estimate, get_fee_estimate, parse_coin_ids, push_tx_hex,

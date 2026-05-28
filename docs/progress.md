@@ -5,7 +5,8 @@
 - **`greenfloor-signer/src/coin_ops/`:** deterministic coin-op policy bundle — `plan_coin_ops`, fee-budget partitioning, bucket counting, and CAT min-amount guard.
 - **PyO3 + core surface:** `coin_ops_py.rs` exposes typed `BucketSpec` / `CoinOpPlan` round-trip via `greenfloor.core.coin_ops` dataclasses; Python modules `coin_ops.py`, `fee_budget.py`, `inventory.py`, and `coin_ops_policy.py` are thin Rust-backed wrappers.
 - **Python IO glue:** `runtime/coin_ops/` and `daemon/coin_ops_cycle.py` unchanged — still own Coinset/wallet execution, fee lookup, and SQLite budget accounting.
-- **Tests:** Rust unit tests in `coin_ops/{plan,fee_budget,inventory,policy}.rs`; Python wiring in `tests/test_coin_ops_kernel.py`; existing planner/fee/inventory tests remain parity gates.
+- **Tests:** Rust unit tests in `coin_ops/{plan,fee_budget,inventory,policy}.rs`; Python parity/FFI contract in `tests/test_coin_ops_policy_parity.py`; existing planner/fee/inventory tests remain parity gates.
+- **Follow-up:** consolidated Python surface into `greenfloor/core/coin_ops/` package + shared `kernel_bridge`; deduplicated PyO3 class caching; `amount_meets_coin_op_min_mojos` is the single Rust threshold check (ADR 0010).
 - **Migration status:** step 10 complete for core coin-op policy.
 - **Next step (step 11):** move **coin-op selection/planning helpers** from `runtime/coin_ops/planning.py` and `runtime/coin_ops/selection.py` into Rust (auto-split profile selection, combine-prereq gating, sub-CAT change rejection). Python keeps CLI/daemon execution IO only.
 

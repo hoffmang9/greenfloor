@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyModule};
+use pyo3::types::{PyDict, PyList, PyModule};
 
 static PLANNED_ACTION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_SKIP_ITEM_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
@@ -19,10 +19,13 @@ static STALE_SWEEP_PROGRESS_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static RESEED_GAP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static RESEED_SKIP_REASON_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static CYCLE_OFFER_TRANSITION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static BUCKET_SPEC_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static COIN_OP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 
 const ORCHESTRATION_MODULE: &str = "greenfloor.core.cycle_orchestration";
 const CYCLE_RESEED_MODULE: &str = "greenfloor.core.cycle_reseed";
 const OFFER_RECONCILE_MODULE: &str = "greenfloor.core.offer_reconcile";
+const COIN_OPS_MODULE: &str = "greenfloor.core.coin_ops";
 
 fn cached_class<'py>(
     py: Python<'py>,
@@ -158,6 +161,71 @@ pub fn cycle_offer_transition_class<'py>(py: Python<'py>) -> PyResult<Bound<'py,
         OFFER_RECONCILE_MODULE,
         "CycleOfferTransition",
     )
+}
+
+pub fn bucket_spec_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(py, &BUCKET_SPEC_CLS, COIN_OPS_MODULE, "BucketSpec")
+}
+
+pub fn coin_op_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(py, &COIN_OP_PLAN_CLS, COIN_OPS_MODULE, "CoinOpPlan")
+}
+
+fn coin_op_kind_from_py(obj: &Bound<'_, PyAny>) -> PyResult<signer_core::CoinOpKind> {
+    let op_type: String = obj.getattr("op_type")?.extract()?;
+    match op_type.as_str() {
+        "split" => Ok(signer_core::CoinOpKind::Split),
+        "combine" => Ok(signer_core::CoinOpKind::Combine),
+        other => Err(PyValueError::new_err(format!("invalid coin op type: {other}"))),
+    }
+}
+
+pub fn bucket_spec_from_py(obj: &Bound<'_, PyAny>) -> PyResult<signer_core::BucketSpec> {
+    let cls = bucket_spec_class(obj.py())?;
+    if !obj.is_instance(&cls)? {
+        return Err(PyTypeError::new_err("expected BucketSpec"));
+    }
+    Ok(signer_core::BucketSpec {
+        size_base_units: obj.getattr("size_base_units")?.extract()?,
+        target_count: obj.getattr("target_count")?.extract()?,
+        split_buffer_count: obj.getattr("split_buffer_count")?.extract()?,
+        combine_when_excess_factor: obj.getattr("combine_when_excess_factor")?.extract()?,
+        current_count: obj.getattr("current_count")?.extract()?,
+    })
+}
+
+pub fn coin_op_plan_from_py(obj: &Bound<'_, PyAny>) -> PyResult<signer_core::CoinOpPlan> {
+    let cls = coin_op_plan_class(obj.py())?;
+    if !obj.is_instance(&cls)? {
+        return Err(PyTypeError::new_err("expected CoinOpPlan"));
+    }
+    Ok(signer_core::CoinOpPlan {
+        op_type: coin_op_kind_from_py(obj)?,
+        size_base_units: obj.getattr("size_base_units")?.extract()?,
+        op_count: obj.getattr("op_count")?.extract()?,
+        reason: obj.getattr("reason")?.extract()?,
+    })
+}
+
+pub fn coin_op_plan_to_py<'py>(
+    py: Python<'py>,
+    plan: &signer_core::CoinOpPlan,
+) -> PyResult<Bound<'py, PyAny>> {
+    let cls = coin_op_plan_class(py)?;
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("op_type", plan.op_type.as_str())?;
+    kwargs.set_item("size_base_units", plan.size_base_units)?;
+    kwargs.set_item("op_count", plan.op_count)?;
+    kwargs.set_item("reason", &plan.reason)?;
+    cls.call((), Some(&kwargs))
+}
+
+pub fn coin_op_plans_from_py_list(plans: &Bound<'_, PyList>) -> PyResult<Vec<signer_core::CoinOpPlan>> {
+    let mut parsed = Vec::with_capacity(plans.len());
+    for item in plans.iter() {
+        parsed.push(coin_op_plan_from_py(&item)?);
+    }
+    Ok(parsed)
 }
 
 pub fn string_i64_map_from_py_dict(dict: &Bound<'_, PyDict>) -> PyResult<BTreeMap<String, i64>> {

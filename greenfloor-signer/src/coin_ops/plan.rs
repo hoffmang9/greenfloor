@@ -1,3 +1,25 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoinOpKind {
+    Split,
+    Combine,
+}
+
+impl CoinOpKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Split => "split",
+            Self::Combine => "combine",
+        }
+    }
+
+    pub fn fee_mojos(self, split_fee_mojos: i64, combine_fee_mojos: i64) -> i64 {
+        match self {
+            Self::Split => split_fee_mojos,
+            Self::Combine => combine_fee_mojos,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BucketSpec {
     pub size_base_units: i64,
@@ -9,7 +31,7 @@ pub struct BucketSpec {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CoinOpPlan {
-    pub op_type: String,
+    pub op_type: CoinOpKind,
     pub size_base_units: i64,
     pub op_count: i64,
     pub reason: String,
@@ -59,7 +81,7 @@ pub fn plan_coin_ops(
             continue;
         }
         plans.push(CoinOpPlan {
-            op_type: "split".to_string(),
+            op_type: CoinOpKind::Split,
             size_base_units: bucket.size_base_units,
             op_count,
             reason: "low_watermark_buffer_deficit".to_string(),
@@ -94,7 +116,7 @@ pub fn plan_coin_ops(
             continue;
         }
         plans.push(CoinOpPlan {
-            op_type: "combine".to_string(),
+            op_type: CoinOpKind::Combine,
             size_base_units: bucket.size_base_units,
             op_count,
             reason: "excess_only_policy".to_string(),
@@ -108,13 +130,9 @@ pub fn plan_coin_ops(
 
 #[cfg(test)]
 mod tests {
-    use super::{plan_coin_ops, BucketSpec};
+    use super::{plan_coin_ops, BucketSpec, CoinOpKind};
 
-    fn bucket(
-        size_base_units: i64,
-        target_count: i64,
-        current_count: i64,
-    ) -> BucketSpec {
+    fn bucket(size_base_units: i64, target_count: i64, current_count: i64) -> BucketSpec {
         BucketSpec {
             size_base_units,
             target_count,
@@ -126,18 +144,9 @@ mod tests {
 
     #[test]
     fn plans_split_when_deficit_exists() {
-        let plans = plan_coin_ops(
-            &[
-                bucket(1, 5, 2),
-                bucket(10, 2, 3),
-            ],
-            10,
-            100,
-            1,
-            1,
-        );
+        let plans = plan_coin_ops(&[bucket(1, 5, 2), bucket(10, 2, 3)], 10, 100, 1, 1);
         assert!(!plans.is_empty());
-        assert_eq!(plans[0].op_type, "split");
+        assert_eq!(plans[0].op_type, CoinOpKind::Split);
         assert_eq!(plans[0].size_base_units, 1);
     }
 
@@ -145,6 +154,6 @@ mod tests {
     fn plans_combine_only_when_no_deficits() {
         let plans = plan_coin_ops(&[bucket(1, 5, 12)], 4, 10, 1, 1);
         assert!(!plans.is_empty());
-        assert_eq!(plans[0].op_type, "combine");
+        assert_eq!(plans[0].op_type, CoinOpKind::Combine);
     }
 }

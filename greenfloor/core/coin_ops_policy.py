@@ -1,32 +1,13 @@
-"""Deterministic coin-operation policy shared by CLI and daemon (Rust-backed)."""
+"""Backward-compatible re-export; prefer ``greenfloor.core.coin_ops``."""
 
-from __future__ import annotations
-
-from greenfloor.core.coin_ops import _import_signer
+from greenfloor.core.coin_ops.policy import (
+    coin_meets_coin_op_min_amount,
+    coin_op_min_amount_mojos,
+    coin_op_target_amount_allowed,
+)
 
 __all__ = [
     "coin_meets_coin_op_min_amount",
     "coin_op_min_amount_mojos",
     "coin_op_target_amount_allowed",
 ]
-
-
-def coin_op_min_amount_mojos(*, canonical_asset_id: str) -> int:
-    # Temporary workaround for the upstream Cloud Wallet / ent-wallet asset-scope
-    # bug documented in docs/ent-wallet-upstream-byc-coin-query-issue.md.
-    # Ignore sub-1-CAT dust during local split/combine candidate selection so
-    # tiny stray rows do not get pulled into operational coin management.
-    return int(_import_signer().coin_op_min_amount_mojos(str(canonical_asset_id)))
-
-
-def coin_meets_coin_op_min_amount(coin: dict, *, canonical_asset_id: str) -> bool:
-    return bool(_import_signer().coin_meets_coin_op_min_amount(coin, str(canonical_asset_id)))
-
-
-def coin_op_target_amount_allowed(*, amount_mojos: int, canonical_asset_id: str) -> bool:
-    return bool(
-        _import_signer().coin_op_target_amount_allowed(
-            int(amount_mojos),
-            str(canonical_asset_id),
-        )
-    )
