@@ -14,7 +14,7 @@ from greenfloor.core.coin_ops.types import (
 
 
 def _require_split_auto_select_plan(value: object) -> SplitAutoSelectPlan:
-    if isinstance(value, (SplitCoinPlan, SplitCombinePrereqPlan, SplitSkipPlan)):
+    if isinstance(value, SplitCoinPlan | SplitCombinePrereqPlan | SplitSkipPlan):
         return value
     raise TypeError("kernel returned invalid split auto-select plan")
 

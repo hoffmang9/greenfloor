@@ -9,8 +9,8 @@ from greenfloor.daemon.testing import (
     CANCEL_COOLDOWN_UNTIL,
     POST_COOLDOWN_UNTIL,
     main,
+    offer_dispatch,
     run_once,
-    strategy_dispatch,
 )
 from greenfloor.runtime.offer_reconciliation import reconcile_offers
 from greenfloor.storage.sqlite import SqliteStore
@@ -192,7 +192,7 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
         _fake_evaluate_market,
     )
     monkeypatch.setattr(
-        strategy_dispatch,
+        offer_dispatch,
         "build_offer_for_action",
         lambda **_kwargs: {
             "status": "executed",

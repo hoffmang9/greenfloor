@@ -1,15 +1,11 @@
-"""Daemon strategy action dispatch (routing glue; execution in offer_dispatch)."""
+"""Daemon strategy action dispatch (routing glue only).
+
+Tests that stub managed/local offer IO should monkeypatch ``greenfloor.daemon.offer_dispatch``,
+not this package.
+"""
 
 from __future__ import annotations
 
-from greenfloor.daemon.offer_dispatch import (
-    build_offer_for_action,
-    execute_managed_action_with_retry,
-    execute_single_local_action,
-    execute_single_managed_action,
-    managed_offer_post,
-    resolve_signer_offer_asset_ids_for_reservation,
-)
 from greenfloor.daemon.strategy_dispatch.dispatch_router import (
     StrategyDispatchMode,
     execute_strategy_dispatch,
@@ -25,13 +21,7 @@ __all__ = [
     "StrategyActionResult",
     "StrategyDispatchHooks",
     "StrategyDispatchMode",
-    "build_offer_for_action",
-    "execute_managed_action_with_retry",
-    "execute_single_local_action",
-    "execute_single_managed_action",
     "execute_strategy_dispatch",
     "hooks_from_module",
-    "managed_offer_post",
-    "resolve_signer_offer_asset_ids_for_reservation",
     "resolve_strategy_dispatch_mode",
 ]

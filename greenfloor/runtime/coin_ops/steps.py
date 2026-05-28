@@ -6,7 +6,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from greenfloor.config.models import MarketConfig
-from greenfloor.core.coin_ops import coin_meets_coin_op_min_amount
+from greenfloor.core.coin_ops import (
+    CombineInputSelectionMode,
+    SplitCoinPlan,
+    SplitPlanningProfile,
+    SplitSkipPlan,
+    coin_meets_coin_op_min_amount,
+    plan_auto_combine_inputs,
+    plan_auto_split_selection,
+)
 from greenfloor.runtime.coin_ops.coins import classify_resolved_coin_ids_by_asset
 from greenfloor.runtime.coin_ops.errors import (
     coin_combine_asset_mismatch_error_payload,
@@ -18,14 +26,6 @@ from greenfloor.runtime.coin_ops.models import (
     CoinOpSelectionMode,
     CombineDenominationTarget,
     SplitDenominationTarget,
-)
-from greenfloor.core.coin_ops import (
-    CombineInputSelectionMode,
-    SplitCoinPlan,
-    SplitPlanningProfile,
-    SplitSkipPlan,
-    plan_auto_combine_inputs,
-    plan_auto_split_selection,
 )
 from greenfloor.runtime.coin_ops.runtime import (
     CoinOpIterationEarlyExit,

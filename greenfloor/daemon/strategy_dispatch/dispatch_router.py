@@ -14,14 +14,14 @@ from greenfloor.core.cycle import (
     is_parallel_dispatch_transient_error,
 )
 from greenfloor.core.planned_action import PlannedAction
-from greenfloor.daemon.reservations import AssetReservationCoordinator
 from greenfloor.daemon.offer_dispatch.parallel import execute_actions_parallel
+from greenfloor.daemon.reservations import AssetReservationCoordinator
+from greenfloor.daemon.strategy_dispatch.sequential_path import execute_actions_sequential
 from greenfloor.daemon.strategy_execution import (
     StrategyActionResult,
     StrategyDispatchHooks,
     hooks_from_module,
 )
-from greenfloor.daemon.strategy_dispatch.sequential_path import execute_actions_sequential
 from greenfloor.storage.sqlite import SqliteStore
 
 

@@ -10,8 +10,14 @@ from __future__ import annotations
 from greenfloor.core.coin_ops.kernel_protocol import CoinOpsKernelProtocol
 from greenfloor.core.coin_ops.selection_bridge import (
     plan_auto_combine_inputs as _plan_auto_combine_inputs,
+)
+from greenfloor.core.coin_ops.selection_bridge import (
     plan_auto_split_selection as _plan_auto_split_selection,
+)
+from greenfloor.core.coin_ops.selection_bridge import (
     select_spendable_coins_for_target_amount as _select_spendable_coins_for_target_amount,
+)
+from greenfloor.core.coin_ops.selection_bridge import (
     split_would_create_sub_cat_change as _split_would_create_sub_cat_change,
 )
 from greenfloor.core.coin_ops.types import (
@@ -19,10 +25,7 @@ from greenfloor.core.coin_ops.types import (
     CoinOpPlan,
     CombineInputSelectionMode,
     SplitAutoSelectPlan,
-    SplitCoinPlan,
-    SplitCombinePrereqPlan,
     SplitPlanningProfile,
-    SplitSkipPlan,
 )
 from greenfloor.core.kernel_bridge import import_kernel
 

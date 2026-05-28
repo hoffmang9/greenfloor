@@ -6,13 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from greenfloor.adapters.dexie import DexieAdapter
-from greenfloor.adapters.splash import SplashAdapter
-from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 from greenfloor.runtime.offer_post_request import ManagedOfferPostResult
-from greenfloor.storage.sqlite import SqliteStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +38,7 @@ class StrategyActionResult:
 
 @dataclass(frozen=True, slots=True)
 class StrategyDispatchHooks:
-    """Callable bundle for strategy offer execution (tests patch offer_dispatch exports)."""
+    """Callable bundle for strategy offer execution."""
 
     resolve_signer_offer_asset_ids_for_reservation: Callable[..., tuple[str, str, str]]
     build_offer_for_action: Callable[..., dict[str, Any]]
@@ -54,8 +49,7 @@ class StrategyDispatchHooks:
 
 
 def hooks_from_module() -> StrategyDispatchHooks:
-    """Resolve callables from ``strategy_dispatch`` so tests can monkeypatch that package."""
-    from greenfloor.daemon import strategy_dispatch as pkg
+    from greenfloor.daemon import offer_dispatch as pkg
 
     return StrategyDispatchHooks(
         resolve_signer_offer_asset_ids_for_reservation=(
