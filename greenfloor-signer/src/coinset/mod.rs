@@ -49,7 +49,9 @@ pub fn client_for_network(network: &str) -> SignerResult<CoinsetClient> {
 }
 
 pub fn client_for_config(config: &crate::config::SignerConfig) -> SignerResult<CoinsetClient> {
-    Ok(MspCoinset::new(&config.coinset_msp_base_url).client().clone())
+    Ok(MspCoinset::new(&config.coinset_msp_base_url)
+        .client()
+        .clone())
 }
 
 pub fn decode_receive_address(receive_address: &str) -> SignerResult<Bytes32> {

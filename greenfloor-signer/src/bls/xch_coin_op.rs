@@ -118,8 +118,7 @@ mod tests {
     #[test]
     fn plan_xch_additions_split_includes_change() {
         let receive = Bytes32::new([0x11; 32]);
-        let outputs =
-            plan_xch_additions("split", 10, 2, 0, receive, 25).expect("valid additions");
+        let outputs = plan_xch_additions("split", 10, 2, 0, receive, 25).expect("valid additions");
         assert_eq!(outputs.len(), 3);
         assert_eq!(outputs[0], (receive, 10));
         assert_eq!(outputs[1], (receive, 10));

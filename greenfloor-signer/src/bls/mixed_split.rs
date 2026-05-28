@@ -2,8 +2,8 @@ use chia_bls::SecretKey;
 use chia_protocol::{Coin, SpendBundle};
 use chia_puzzle_types::Memos;
 use chia_sdk_driver::{Action, Cat, Id};
-use chia_traits::Streamable;
 use chia_sdk_utils::select_coins;
+use chia_traits::Streamable;
 use serde::{Deserialize, Serialize};
 
 use crate::bls::coins::cat_asset_bytes;
@@ -60,8 +60,7 @@ pub async fn build_bls_mixed_split_spend_bundle(
 
     let client = client_for_network(network)?;
     let receive_address = request.receive_address.trim();
-    let receive_puzzle_hash =
-        crate::coinset::decode_receive_address(receive_address)?;
+    let receive_puzzle_hash = crate::coinset::decode_receive_address(receive_address)?;
     let target_total: u64 = request.output_amounts.iter().sum();
     let fee_mojos = request.fee_mojos;
     let explicit_coin_ids = crate::coinset::parse_coin_ids(&request.coin_ids)?;
@@ -187,9 +186,9 @@ pub async fn broadcast_bls_spend_bundle(
 ) -> SignerResult<BroadcastSpendBundleResult> {
     let client = client_for_network(network)?;
     let raw = spend_bundle_hex.trim().trim_start_matches("0x");
-    let bytes = hex::decode(raw).map_err(|err| SignerError::Other(format!("invalid hex: {err}")))?;
-    let spend_bundle =
-        SpendBundle::from_bytes(&bytes)
-            .map_err(|err: chia_traits::Error| SignerError::Other(err.to_string()))?;
+    let bytes =
+        hex::decode(raw).map_err(|err| SignerError::Other(format!("invalid hex: {err}")))?;
+    let spend_bundle = SpendBundle::from_bytes(&bytes)
+        .map_err(|err: chia_traits::Error| SignerError::Other(err.to_string()))?;
     broadcast_spend_bundle(&client, spend_bundle).await
 }

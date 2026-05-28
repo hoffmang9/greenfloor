@@ -363,8 +363,8 @@ mod coinset_parse_tests {
             solution: parent.solution.clone(),
         };
         drop(sim);
-        let resolved = coinset::require_cat_from_parent_spend(cat.coin, &parent_spend)
-            .expect("resolve cat");
+        let resolved =
+            coinset::require_cat_from_parent_spend(cat.coin, &parent_spend).expect("resolve cat");
         assert_eq!(resolved.coin.coin_id(), coin_id);
         assert_eq!(resolved.coin.amount, 5_000);
     }

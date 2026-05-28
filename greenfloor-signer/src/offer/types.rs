@@ -10,9 +10,17 @@ pub struct CreateOfferRequest {
     pub offer_amount: u64,
     pub request_asset_id: String,
     pub request_amount: u64,
-    #[serde(default, deserialize_with = "deserialize_coin_ids", serialize_with = "serialize_coin_ids")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_coin_ids",
+        serialize_with = "serialize_coin_ids"
+    )]
     pub offer_coin_ids: Vec<Bytes32>,
-    #[serde(default, deserialize_with = "deserialize_coin_ids", serialize_with = "serialize_coin_ids")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_coin_ids",
+        serialize_with = "serialize_coin_ids"
+    )]
     pub presplit_coin_ids: Vec<Bytes32>,
     pub split_input_coins: bool,
     pub broadcast_split: bool,

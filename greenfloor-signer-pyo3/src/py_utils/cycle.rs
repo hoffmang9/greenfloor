@@ -27,7 +27,12 @@ static RESEED_SKIP_REASON_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static CYCLE_OFFER_TRANSITION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 
 pub fn planned_action_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    cached_class(py, &PLANNED_ACTION_CLS, "greenfloor.core.planned_action", "PlannedAction")
+    cached_class(
+        py,
+        &PLANNED_ACTION_CLS,
+        "greenfloor.core.planned_action",
+        "PlannedAction",
+    )
 }
 
 pub fn parallel_skip_item_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -58,14 +63,24 @@ pub fn parallel_batch_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, Py
 }
 
 pub fn reseed_gap_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    cached_class(py, &RESEED_GAP_PLAN_CLS, CYCLE_RESEED_MODULE, "ReseedGapPlan")
+    cached_class(
+        py,
+        &RESEED_GAP_PLAN_CLS,
+        CYCLE_RESEED_MODULE,
+        "ReseedGapPlan",
+    )
 }
 
 pub fn reseed_skip_reason_to_py<'py>(
     py: Python<'py>,
     reason: signer_core::ReseedSkipReason,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let cls = cached_class(py, &RESEED_SKIP_REASON_CLS, CYCLE_RESEED_MODULE, "ReseedSkipReason")?;
+    let cls = cached_class(
+        py,
+        &RESEED_SKIP_REASON_CLS,
+        CYCLE_RESEED_MODULE,
+        "ReseedSkipReason",
+    )?;
     cls.call1((reason.label(),))
 }
 
@@ -83,7 +98,10 @@ pub fn reseed_gap_plan_to_py<'py>(
         Some(reason) => kwargs.set_item("skip_reason", reseed_skip_reason_to_py(py, reason)?)?,
         None => kwargs.set_item("skip_reason", py.None())?,
     }
-    kwargs.set_item("missing_by_size", i64_i64_map_to_py_dict(py, &plan.missing_by_size)?)?;
+    kwargs.set_item(
+        "missing_by_size",
+        i64_i64_map_to_py_dict(py, &plan.missing_by_size)?,
+    )?;
     cls.call((), Some(&kwargs))
 }
 
@@ -120,23 +138,48 @@ pub fn managed_action_outcome_to_py<'py>(
 }
 
 pub fn market_batch_selection_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    cached_class(py, &MARKET_BATCH_SELECTION_CLS, ORCHESTRATION_MODULE, "MarketBatchSelection")
+    cached_class(
+        py,
+        &MARKET_BATCH_SELECTION_CLS,
+        ORCHESTRATION_MODULE,
+        "MarketBatchSelection",
+    )
 }
 
 pub fn offer_state_row_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    cached_class(py, &OFFER_STATE_ROW_CLS, ORCHESTRATION_MODULE, "OfferStateRow")
+    cached_class(
+        py,
+        &OFFER_STATE_ROW_CLS,
+        ORCHESTRATION_MODULE,
+        "OfferStateRow",
+    )
 }
 
 pub fn stale_sweep_candidate_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    cached_class(py, &STALE_SWEEP_CANDIDATE_CLS, ORCHESTRATION_MODULE, "StaleSweepCandidate")
+    cached_class(
+        py,
+        &STALE_SWEEP_CANDIDATE_CLS,
+        ORCHESTRATION_MODULE,
+        "StaleSweepCandidate",
+    )
 }
 
 pub fn stale_sweep_hit_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    cached_class(py, &STALE_SWEEP_HIT_CLS, ORCHESTRATION_MODULE, "StaleSweepHit")
+    cached_class(
+        py,
+        &STALE_SWEEP_HIT_CLS,
+        ORCHESTRATION_MODULE,
+        "StaleSweepHit",
+    )
 }
 
 pub fn stale_sweep_progress_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    cached_class(py, &STALE_SWEEP_PROGRESS_CLS, ORCHESTRATION_MODULE, "StaleSweepProgress")
+    cached_class(
+        py,
+        &STALE_SWEEP_PROGRESS_CLS,
+        ORCHESTRATION_MODULE,
+        "StaleSweepProgress",
+    )
 }
 
 pub fn cycle_offer_transition_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {

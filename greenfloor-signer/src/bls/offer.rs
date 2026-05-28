@@ -1,9 +1,9 @@
+use crate::coinset::CoinsetClient;
 use chia_bls::SecretKey;
 use chia_protocol::{Bytes32, Coin};
 use chia_puzzle_types::Memos;
 use chia_puzzles::SETTLEMENT_PAYMENT_HASH;
 use chia_sdk_driver::{Action, AssetInfo, Cat, Id, Offer, SpendContext};
-use crate::coinset::CoinsetClient;
 use clvmr::Allocator;
 use serde::{Deserialize, Serialize};
 
@@ -51,7 +51,11 @@ async fn select_offer_inputs(
         )
         .await?;
         let offered_total: u64 = offered_xch.iter().map(|c| c.amount).sum();
-        return Ok((offered_xch, Vec::new(), offered_total.saturating_sub(offer_amount)));
+        return Ok((
+            offered_xch,
+            Vec::new(),
+            offered_total.saturating_sub(offer_amount),
+        ));
     }
     let asset_bytes = cat_asset_bytes(offer_asset_raw)?;
     let offered_cats = list_and_select_cats(
@@ -66,7 +70,11 @@ async fn select_offer_inputs(
     )
     .await?;
     let offered_total: u64 = offered_cats.iter().map(|cat| cat.coin.amount).sum();
-    Ok((Vec::new(), offered_cats, offered_total.saturating_sub(offer_amount)))
+    Ok((
+        Vec::new(),
+        offered_cats,
+        offered_total.saturating_sub(offer_amount),
+    ))
 }
 
 pub async fn build_bls_offer_spend_bundle(

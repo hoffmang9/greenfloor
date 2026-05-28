@@ -200,8 +200,7 @@ pub fn prepare_parallel_managed_submission_decision(
             reason: "reservation_invalid_request".to_string(),
         };
     }
-    if let Some(reason) =
-        single_input_preferred_skip_reason(requested_amounts, spendable_profiles)
+    if let Some(reason) = single_input_preferred_skip_reason(requested_amounts, spendable_profiles)
     {
         return ParallelSubmissionDecision::Skip { reason };
     }
@@ -247,10 +246,7 @@ pub fn classify_managed_post_result(
     }
     ManagedActionOutcome {
         status: ManagedActionStatus::Skipped,
-        reason: format!(
-            "managed_offer_post_failed:{}",
-            error_text.trim()
-        ),
+        reason: format!("managed_offer_post_failed:{}", error_text.trim()),
         offer_id: None,
         transient_upstream: false,
     }
@@ -327,12 +323,18 @@ mod tests {
             "ManagedUpstreamTransientError",
             "timeout"
         ));
-        assert!(!is_managed_upstream_transient_error("TimeoutError", "timeout"));
+        assert!(!is_managed_upstream_transient_error(
+            "TimeoutError",
+            "timeout"
+        ));
     }
 
     #[test]
     fn worker_transient_includes_timeout() {
-        assert!(is_managed_worker_transient_error("TimeoutError", "timed out"));
+        assert!(is_managed_worker_transient_error(
+            "TimeoutError",
+            "timed out"
+        ));
     }
 
     #[test]
@@ -350,8 +352,7 @@ mod tests {
 
     #[test]
     fn dexie_visibility_404_is_pending() {
-        let outcome =
-            classify_dexie_visibility_outcome(false, "dexie_http_error:404 not found");
+        let outcome = classify_dexie_visibility_outcome(false, "dexie_http_error:404 not found");
         assert_eq!(outcome.status, ManagedActionStatus::PendingVisibility);
         assert_eq!(outcome.reason, "managed_offer_post_success");
     }
@@ -372,10 +373,8 @@ mod tests {
 
     #[test]
     fn prepare_parallel_submission_skips_invalid_request() {
-        let decision = prepare_parallel_managed_submission_decision(
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        );
+        let decision =
+            prepare_parallel_managed_submission_decision(&BTreeMap::new(), &BTreeMap::new());
         assert_eq!(
             decision,
             ParallelSubmissionDecision::Skip {

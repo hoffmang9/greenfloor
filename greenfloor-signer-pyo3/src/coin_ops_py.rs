@@ -157,8 +157,7 @@ fn select_spendable_coins_for_target_amount_py(
     target_amount: i64,
 ) -> PyResult<Py<PyAny>> {
     let parsed = spendable_coins_from_py_list(coins)?;
-    let (coin_ids, total, exact) =
-        select_spendable_coins_for_target_amount(&parsed, target_amount);
+    let (coin_ids, total, exact) = select_spendable_coins_for_target_amount(&parsed, target_amount);
     let ids = PyList::new(py, &coin_ids)?;
     Ok((ids, total, exact).into_pyobject(py)?.into())
 }
@@ -237,7 +236,10 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(coin_op_min_amount_mojos_py, m)?)?;
     m.add_function(wrap_pyfunction!(coin_meets_coin_op_min_amount_py, m)?)?;
     m.add_function(wrap_pyfunction!(coin_op_target_amount_allowed_py, m)?)?;
-    m.add_function(wrap_pyfunction!(select_spendable_coins_for_target_amount_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        select_spendable_coins_for_target_amount_py,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(split_would_create_sub_cat_change_py, m)?)?;
     m.add_function(wrap_pyfunction!(plan_auto_split_selection_py, m)?)?;
     m.add_function(wrap_pyfunction!(plan_auto_combine_inputs_py, m)?)?;

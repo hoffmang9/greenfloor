@@ -105,10 +105,7 @@ pub fn resolve_inventory_scan_source(
     "config_seed_or_no_asset_scan"
 }
 
-pub fn resolve_tracked_sizes(
-    ladder_sizes: &[i64],
-    strategy_default_sizes: &[i64],
-) -> Vec<i64> {
+pub fn resolve_tracked_sizes(ladder_sizes: &[i64], strategy_default_sizes: &[i64]) -> Vec<i64> {
     let mut tracked: Vec<i64> = ladder_sizes
         .iter()
         .copied()
@@ -162,7 +159,10 @@ pub fn filter_positive_repeat_actions<T, F>(actions: &[T], repeat_of: F) -> usiz
 where
     F: Fn(&T) -> i64,
 {
-    actions.iter().filter(|action| repeat_of(action) > 0).count()
+    actions
+        .iter()
+        .filter(|action| repeat_of(action) > 0)
+        .count()
 }
 
 #[cfg(test)]

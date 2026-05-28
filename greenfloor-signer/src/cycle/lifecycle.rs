@@ -53,10 +53,7 @@ pub struct OfferTransition {
     pub reason: String,
 }
 
-pub fn apply_offer_signal(
-    state: OfferLifecycleState,
-    signal: OfferSignal,
-) -> OfferTransition {
+pub fn apply_offer_signal(state: OfferLifecycleState, signal: OfferSignal) -> OfferTransition {
     match (state, signal) {
         (OfferLifecycleState::Open, OfferSignal::MempoolSeen) => OfferTransition {
             old_state: state,
@@ -89,16 +86,15 @@ pub fn apply_offer_signal(
             action: "track_new_offer_open".to_string(),
             reason: "offer_refreshed".to_string(),
         },
-        (
-            OfferLifecycleState::Open | OfferLifecycleState::RefreshDue,
-            OfferSignal::Expired,
-        ) => OfferTransition {
-            old_state: state,
-            new_state: OfferLifecycleState::Expired,
-            signal,
-            action: "cleanup_offer_state".to_string(),
-            reason: "offer_expired".to_string(),
-        },
+        (OfferLifecycleState::Open | OfferLifecycleState::RefreshDue, OfferSignal::Expired) => {
+            OfferTransition {
+                old_state: state,
+                new_state: OfferLifecycleState::Expired,
+                signal,
+                action: "cleanup_offer_state".to_string(),
+                reason: "offer_expired".to_string(),
+            }
+        }
         _ => OfferTransition {
             old_state: state,
             new_state: state,
@@ -122,10 +118,8 @@ mod tests {
 
     #[test]
     fn refresh_posted_returns_to_open() {
-        let transition = apply_offer_signal(
-            OfferLifecycleState::RefreshDue,
-            OfferSignal::RefreshPosted,
-        );
+        let transition =
+            apply_offer_signal(OfferLifecycleState::RefreshDue, OfferSignal::RefreshPosted);
         assert_eq!(transition.new_state, OfferLifecycleState::Open);
         assert_eq!(transition.action, "track_new_offer_open");
     }

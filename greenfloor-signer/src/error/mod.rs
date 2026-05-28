@@ -185,10 +185,7 @@ mod tests {
                 SignerError::VaultLauncherIdInvalid,
                 "vault launcher id missing or invalid",
             ),
-            (
-                SignerError::InsufficientCatCoins,
-                "insufficient cat coins",
-            ),
+            (SignerError::InsufficientCatCoins, "insufficient cat coins"),
             (
                 SignerError::OfferInputRequiresPresplit,
                 "offer input exceeds offer amount; enable split-input-coins or specify exact coin",

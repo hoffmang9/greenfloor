@@ -16,21 +16,18 @@ fn env_trimmed(name: &str) -> Option<String> {
 fn parse_secret_key_hex(raw: &str) -> SignerResult<SecretKey> {
     let trimmed = raw.trim();
     let hex_str = trimmed.strip_prefix("0x").unwrap_or(trimmed);
-    let bytes = hex::decode(hex_str).map_err(|err| {
-        SignerError::Other(format!("invalid_secret_key_hex:{err}"))
-    })?;
+    let bytes = hex::decode(hex_str)
+        .map_err(|err| SignerError::Other(format!("invalid_secret_key_hex:{err}")))?;
     let key_bytes: [u8; 32] = bytes
         .try_into()
         .map_err(|_| SignerError::Other("secret_key_hex_must_be_32_bytes".into()))?;
-    SecretKey::from_bytes(&key_bytes).map_err(|err| {
-        SignerError::Other(format!("invalid_secret_key_bytes:{err}"))
-    })
+    SecretKey::from_bytes(&key_bytes)
+        .map_err(|err| SignerError::Other(format!("invalid_secret_key_bytes:{err}")))
 }
 
 fn parse_json_map(raw: &str, error_label: &str) -> SignerResult<HashMap<String, String>> {
-    let value: serde_json::Value = serde_json::from_str(raw).map_err(|_| {
-        SignerError::Other(format!("invalid_{error_label}"))
-    })?;
+    let value: serde_json::Value = serde_json::from_str(raw)
+        .map_err(|_| SignerError::Other(format!("invalid_{error_label}")))?;
     let Some(object) = value.as_object() else {
         return Err(SignerError::Other(format!("invalid_{error_label}")));
     };
@@ -72,9 +69,8 @@ pub fn load_bls_master_secret_key(key_id: &str) -> SignerResult<SecretKey> {
     }
 
     let mnemonic_text = mnemonic_for_key_id(key_id)?;
-    let mnemonic = Mnemonic::from_str(&mnemonic_text).map_err(|err| {
-        SignerError::Other(format!("mnemonic_to_master_key_error:{err}"))
-    })?;
+    let mnemonic = Mnemonic::from_str(&mnemonic_text)
+        .map_err(|err| SignerError::Other(format!("mnemonic_to_master_key_error:{err}")))?;
     let seed = mnemonic.to_seed("");
     Ok(SecretKey::from_seed(&seed))
 }

@@ -20,10 +20,7 @@ mod tests {
 
     #[test]
     fn bucket_counts_exact_matches_only() {
-        let got = compute_bucket_counts_from_coins(
-            &[1, 1, 2, 10, 100, 99],
-            &[1, 10, 100],
-        );
+        let got = compute_bucket_counts_from_coins(&[1, 1, 2, 10, 100, 99], &[1, 10, 100]);
         assert_eq!(got.get(&1), Some(&2));
         assert_eq!(got.get(&10), Some(&1));
         assert_eq!(got.get(&100), Some(&1));

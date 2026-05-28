@@ -194,14 +194,8 @@ mod tests {
 
     #[test]
     fn target_amount_prefers_exact_subset() {
-        let list = coins(&[
-            ("c5", 5000),
-            ("c3", 3000),
-            ("c2", 2000),
-            ("c3b", 3000),
-        ]);
-        let (ids, total, exact) =
-            select_spendable_coins_for_target_amount(&list, 10_000);
+        let list = coins(&[("c5", 5000), ("c3", 3000), ("c2", 2000), ("c3b", 3000)]);
+        let (ids, total, exact) = select_spendable_coins_for_target_amount(&list, 10_000);
         assert!(exact);
         assert_eq!(total, 10_000);
         assert_eq!(ids.len(), 3);
@@ -212,8 +206,7 @@ mod tests {
     #[test]
     fn target_amount_uses_change_when_no_exact() {
         let list = coins(&[("c5", 5000), ("c3a", 3000), ("c3b", 3000)]);
-        let (ids, total, exact) =
-            select_spendable_coins_for_target_amount(&list, 10_000);
+        let (ids, total, exact) = select_spendable_coins_for_target_amount(&list, 10_000);
         assert!(!exact);
         assert_eq!(total, 11_000);
         let set: HashSet<_> = ids.into_iter().collect();

@@ -7,9 +7,7 @@ pub fn projected_coin_ops_fee_mojos(
 ) -> i64 {
     let mut total = 0_i64;
     for plan in plans {
-        let per_op_fee = plan
-            .op_type
-            .fee_mojos(split_fee_mojos, combine_fee_mojos);
+        let per_op_fee = plan.op_type.fee_mojos(split_fee_mojos, combine_fee_mojos);
         total += plan.op_count.max(0) * per_op_fee.max(0);
     }
     total

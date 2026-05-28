@@ -157,7 +157,10 @@ fn build_transition_from_decision(
     })
 }
 
-fn reconciled_state_from_dexie_status(status: i64, current_state: &ReconcileState) -> ReconcileState {
+fn reconciled_state_from_dexie_status(
+    status: i64,
+    current_state: &ReconcileState,
+) -> ReconcileState {
     match status {
         4 => ReconcileState::Lifecycle(
             apply_offer_signal(OfferLifecycleState::Open, OfferSignal::TxConfirmed).new_state,
@@ -180,12 +183,8 @@ fn resolve_watched_offer_decision(
 ) -> ReconcileDecision {
     // Coinset confirmed/mempool paths apply lifecycle signals from `Open`, not from
     // `current_state`. Terminal-state guard on mempool preserves completed offers.
-    if !coinset_confirmed_tx_ids.is_empty()
-        && status != Some(3)
-        && !current_state.is_cancelled()
-    {
-        let transition =
-            apply_offer_signal(OfferLifecycleState::Open, OfferSignal::TxConfirmed);
+    if !coinset_confirmed_tx_ids.is_empty() && status != Some(3) && !current_state.is_cancelled() {
+        let transition = apply_offer_signal(OfferLifecycleState::Open, OfferSignal::TxConfirmed);
         return ReconcileDecision {
             new_state: ReconcileState::Lifecycle(transition.new_state),
             reason: "coinset_tx_block_webhook_confirmed",
@@ -432,8 +431,9 @@ mod tests {
 
     #[test]
     fn missing_status_without_tx_ids() {
-        let transition = resolve_watched_offer_transition_from_signals("open", None, vec![], vec![], vec![])
-            .expect("valid reconcile state");
+        let transition =
+            resolve_watched_offer_transition_from_signals("open", None, vec![], vec![], vec![])
+                .expect("valid reconcile state");
         assert_eq!(transition.new_state, "open");
         assert_eq!(transition.reason, "missing_status");
         assert_eq!(transition.signal_source, "none");
@@ -475,7 +475,8 @@ mod tests {
 
     #[test]
     fn missing_watched_offer_expires_open_offer() {
-        let transition = resolve_missing_watched_offer_transition("open").expect("valid reconcile state");
+        let transition =
+            resolve_missing_watched_offer_transition("open").expect("valid reconcile state");
         assert_eq!(transition.new_state, "expired");
         assert!(transition.changed);
         assert!(transition.immediate_requeue);
@@ -484,16 +485,16 @@ mod tests {
 
     #[test]
     fn missing_watched_offer_preserves_terminal_state() {
-        let transition =
-            resolve_missing_watched_offer_transition("tx_block_confirmed").expect("valid reconcile state");
+        let transition = resolve_missing_watched_offer_transition("tx_block_confirmed")
+            .expect("valid reconcile state");
         assert_eq!(transition.new_state, "tx_block_confirmed");
         assert!(!transition.changed);
     }
 
     #[test]
     fn unchanged_offer_transition_factory() {
-        let transition =
-            unchanged_offer_transition("open", "dexie_lookup_error:boom").expect("valid reconcile state");
+        let transition = unchanged_offer_transition("open", "dexie_lookup_error:boom")
+            .expect("valid reconcile state");
         assert_eq!(transition.old_state, "open");
         assert_eq!(transition.new_state, "open");
         assert!(!transition.changed);
@@ -518,6 +519,9 @@ mod tests {
             vec![],
         )
         .expect_err("unknown state should fail");
-        assert_eq!(err.to_string(), "unknown offer reconcile state: not_a_real_state");
+        assert_eq!(
+            err.to_string(),
+            "unknown offer reconcile state: not_a_real_state"
+        );
     }
 }

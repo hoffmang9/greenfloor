@@ -26,8 +26,7 @@ pub fn synthetic_keys_for_puzzle_hashes(
     master_sk: &SecretKey,
     puzzle_hashes: &HashSet<Bytes32>,
 ) -> SignerResult<SyntheticKeys> {
-    let synthetic_sks =
-        synthetic_secret_keys_for_puzzle_hashes(master_sk, puzzle_hashes, None)?;
+    let synthetic_sks = synthetic_secret_keys_for_puzzle_hashes(master_sk, puzzle_hashes, None)?;
     let synthetic_pks: IndexMap<Bytes32, PublicKey> = synthetic_sks
         .iter()
         .map(|(puzzle_hash, sk)| (*puzzle_hash, sk.public_key()))

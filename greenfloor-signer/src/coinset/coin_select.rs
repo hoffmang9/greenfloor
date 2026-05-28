@@ -73,13 +73,7 @@ pub(crate) async fn list_and_select_cats(
     } else {
         list_unspent_cats_by_ids(client, explicit_coin_ids).await?
     };
-    select_cats_from_list(
-        cats,
-        target_amount,
-        mode,
-        empty_list_err,
-        insufficient_err,
-    )
+    select_cats_from_list(cats, target_amount, mode, empty_list_err, insufficient_err)
 }
 
 pub(crate) fn finalize_selected_cats(

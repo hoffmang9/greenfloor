@@ -116,10 +116,14 @@ fn vault_section_to_snapshot(vault: VaultSection) -> SignerResult<VaultCustodySn
         .ok_or(SignerError::VaultThresholdOrTimelockInvalid)?;
 
     let custody_keys = wallet_keys_from_yaml(
-        vault.custody_keys.ok_or(SignerError::UnsupportedVaultSignerCardinality)?,
+        vault
+            .custody_keys
+            .ok_or(SignerError::UnsupportedVaultSignerCardinality)?,
     )?;
     let recovery_keys = wallet_keys_from_yaml(
-        vault.recovery_keys.ok_or(SignerError::UnsupportedVaultSignerCardinality)?,
+        vault
+            .recovery_keys
+            .ok_or(SignerError::UnsupportedVaultSignerCardinality)?,
     )?;
 
     if custody_keys.is_empty() || recovery_keys.is_empty() {
@@ -202,9 +206,6 @@ vault:
         assert_eq!(cfg.network, "testnet11");
         assert_eq!(cfg.kms_key_id, "arn:aws:kms:us-west-2:123:key/abc");
         assert_eq!(cfg.vault.custody_threshold, 1);
-        assert_eq!(
-            hex::encode(cfg.vault.launcher_id),
-            "aa".repeat(32)
-        );
+        assert_eq!(hex::encode(cfg.vault.launcher_id), "aa".repeat(32));
     }
 }

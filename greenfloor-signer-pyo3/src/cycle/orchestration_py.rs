@@ -18,7 +18,10 @@ pub fn market_batch_selection_to_py<'py>(
     let cls = market_batch_selection_class(py)?;
     let kwargs = PyDict::new(py);
     kwargs.set_item("selected_market_ids", &selection.selected_market_ids)?;
-    kwargs.set_item("consumed_immediate_requeues", &selection.consumed_immediate_requeues)?;
+    kwargs.set_item(
+        "consumed_immediate_requeues",
+        &selection.consumed_immediate_requeues,
+    )?;
     kwargs.set_item("cursor", selection.cursor)?;
     kwargs.set_item("immediate_requeue_ids", &selection.immediate_requeue_ids)?;
     cls.call((), Some(&kwargs))

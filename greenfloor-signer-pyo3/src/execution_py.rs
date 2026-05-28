@@ -2,8 +2,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use signer_core::{
-    expand_planned_actions, filter_planned_actions_with_positive_repeat, plan_parallel_managed_dispatch,
-    sequential_action_route, ParallelBatchPlan, ParallelReservationContext, SequentialActionRoute,
+    expand_planned_actions, filter_planned_actions_with_positive_repeat,
+    plan_parallel_managed_dispatch, sequential_action_route, ParallelBatchPlan,
+    ParallelReservationContext, SequentialActionRoute,
 };
 
 use crate::py_utils::{
@@ -49,7 +50,9 @@ fn parallel_batch_plan_to_py<'py>(
     batch_plan_cls.call((), Some(&kwargs))
 }
 
-fn parallel_reservation_context_from_py(ctx: &Bound<'_, PyAny>) -> PyResult<ParallelReservationContext> {
+fn parallel_reservation_context_from_py(
+    ctx: &Bound<'_, PyAny>,
+) -> PyResult<ParallelReservationContext> {
     Ok(ParallelReservationContext {
         base_asset_id: ctx.getattr("base_asset_id")?.extract()?,
         quote_asset_id: ctx.getattr("quote_asset_id")?.extract()?,
@@ -91,7 +94,9 @@ fn expand_planned_actions_py(actions: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> 
 
 #[pyfunction]
 #[pyo3(name = "filter_planned_actions_with_positive_repeat")]
-fn filter_planned_actions_with_positive_repeat_py(actions: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+fn filter_planned_actions_with_positive_repeat_py(
+    actions: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
     let list = actions.downcast::<PyList>()?;
     let mut rust_actions = Vec::with_capacity(list.len());
     for item in list.iter() {
@@ -121,7 +126,10 @@ fn plan_parallel_managed_dispatch_py(
 pub fn register_execution(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sequential_action_route_py, m)?)?;
     m.add_function(wrap_pyfunction!(expand_planned_actions_py, m)?)?;
-    m.add_function(wrap_pyfunction!(filter_planned_actions_with_positive_repeat_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        filter_planned_actions_with_positive_repeat_py,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(plan_parallel_managed_dispatch_py, m)?)?;
     Ok(())
 }

@@ -40,10 +40,7 @@ pub struct OfferStateRow {
     pub state: String,
 }
 
-pub fn enqueue_immediate_requeue(
-    immediate_requeue_ids: &[String],
-    market_id: &str,
-) -> Vec<String> {
+pub fn enqueue_immediate_requeue(immediate_requeue_ids: &[String], market_id: &str) -> Vec<String> {
     let clean_market_id = market_id.trim();
     if clean_market_id.is_empty() {
         return immediate_requeue_ids.to_vec();
@@ -210,7 +207,9 @@ pub fn collect_stale_sweep_candidates(
         if offer_id.is_empty() {
             continue;
         }
-        let market_offer_ids = offer_ids_by_market.entry(market_id.to_string()).or_default();
+        let market_offer_ids = offer_ids_by_market
+            .entry(market_id.to_string())
+            .or_default();
         if market_offer_ids.iter().any(|existing| existing == offer_id) {
             continue;
         }
@@ -287,22 +286,14 @@ mod tests {
         assert_eq!(first.consumed_immediate_requeues, vec!["m3"]);
         assert!(first.immediate_requeue_ids.is_empty());
 
-        let second = select_market_batch(
-            &enabled,
-            2,
-            first.cursor,
-            &first.immediate_requeue_ids,
-        );
+        let second = select_market_batch(&enabled, 2, first.cursor, &first.immediate_requeue_ids);
         assert_eq!(second.selected_market_ids, vec!["m2", "m3"]);
         assert!(second.consumed_immediate_requeues.is_empty());
     }
 
     #[test]
     fn enqueue_immediate_requeue_deduplicates_and_prepends() {
-        let updated = enqueue_immediate_requeue(
-            &["m2".to_string(), "m1".to_string()],
-            "m2",
-        );
+        let updated = enqueue_immediate_requeue(&["m2".to_string(), "m1".to_string()], "m2");
         assert_eq!(updated, vec!["m2", "m1"]);
     }
 

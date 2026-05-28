@@ -18,9 +18,14 @@ struct FeeEstimateResponse {
     fee_estimate: Option<Value>,
 }
 
-fn coinset_client(network: &str, base_url: Option<&str>) -> SignerResult<chia_sdk_coinset::CoinsetClient> {
+fn coinset_client(
+    network: &str,
+    base_url: Option<&str>,
+) -> SignerResult<chia_sdk_coinset::CoinsetClient> {
     if let Some(url) = base_url.map(str::trim).filter(|value| !value.is_empty()) {
-        Ok(MspCoinset::for_network(network, Some(url))?.client().clone())
+        Ok(MspCoinset::for_network(network, Some(url))?
+            .client()
+            .clone())
     } else {
         client_for_network(network)
     }
@@ -33,10 +38,10 @@ pub async fn push_tx_hex(
 ) -> SignerResult<Value> {
     let client = coinset_client(network, base_url)?;
     let raw = spend_bundle_hex.trim().trim_start_matches("0x");
-    let bytes = hex::decode(raw).map_err(|err| SignerError::Other(format!("invalid hex: {err}")))?;
-    let spend_bundle =
-        SpendBundle::from_bytes(&bytes)
-            .map_err(|err: chia_traits::Error| SignerError::Other(err.to_string()))?;
+    let bytes =
+        hex::decode(raw).map_err(|err| SignerError::Other(format!("invalid hex: {err}")))?;
+    let spend_bundle = SpendBundle::from_bytes(&bytes)
+        .map_err(|err: chia_traits::Error| SignerError::Other(err.to_string()))?;
     let result = broadcast_spend_bundle(&client, spend_bundle).await?;
     Ok(json!({
         "success": true,
@@ -66,7 +71,8 @@ pub async fn get_fee_estimate(
     }
     if network.trim().eq_ignore_ascii_case("testnet11") {
         if let Some(obj) = body.as_object_mut() {
-            obj.entry("network".to_string()).or_insert(json!("testnet11"));
+            obj.entry("network".to_string())
+                .or_insert(json!("testnet11"));
         }
     }
     let response: FeeEstimateResponse = msp
@@ -88,7 +94,11 @@ pub async fn get_fee_estimate(
 }
 
 pub fn conservative_fee_from_payload(payload: &Value) -> Option<u64> {
-    if !payload.get("success").and_then(Value::as_bool).unwrap_or(false) {
+    if !payload
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         return None;
     }
     if let Some(estimates) = payload.get("estimates").and_then(Value::as_array) {
@@ -104,9 +114,11 @@ pub fn conservative_fee_from_payload(payload: &Value) -> Option<u64> {
             return Some(*valid.iter().max()?);
         }
     }
-    payload
-        .get("fee_estimate")
-        .and_then(|value| value.as_u64().or_else(|| value.as_i64().filter(|v| *v >= 0).map(|v| v as u64)))
+    payload.get("fee_estimate").and_then(|value| {
+        value
+            .as_u64()
+            .or_else(|| value.as_i64().filter(|v| *v >= 0).map(|v| v as u64))
+    })
 }
 
 pub async fn get_conservative_fee_estimate(
@@ -115,14 +127,8 @@ pub async fn get_conservative_fee_estimate(
     cost: u64,
     spend_count: Option<u64>,
 ) -> SignerResult<Option<u64>> {
-    let payload = get_fee_estimate(
-        network,
-        base_url,
-        vec![300, 600, 1200],
-        cost,
-        spend_count,
-    )
-    .await?;
+    let payload =
+        get_fee_estimate(network, base_url, vec![300, 600, 1200], cost, spend_count).await?;
     Ok(conservative_fee_from_payload(&payload))
 }
 

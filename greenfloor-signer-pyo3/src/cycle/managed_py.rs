@@ -2,16 +2,19 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use crate::cycle::orchestration_py::strategy_action_item_status_pairs_from_py_list;
-use crate::py_utils::{managed_action_outcome_to_py, managed_retry_decision_class, request_dict_to_json, to_py_err};
+use crate::py_utils::{
+    managed_action_outcome_to_py, managed_retry_decision_class, request_dict_to_json, to_py_err,
+};
 
 use signer_core::{
-    can_parallelize_managed_offers, classify_dexie_visibility_outcome, classify_managed_post_result,
-    classify_managed_transient_error, count_parallel_transient_failures,
-    is_managed_upstream_transient_error, is_managed_worker_transient_error,
-    is_parallel_dispatch_transient_error, is_transient_dexie_visibility_404_error,
-    is_transient_managed_upstream_error_text, managed_retry_decision,
-    parallel_max_workers, reservation_release_status, should_apply_parallel_transient_cooldown,
-    single_input_preferred_skip_reason, SpendableAssetProfile,
+    can_parallelize_managed_offers, classify_dexie_visibility_outcome,
+    classify_managed_post_result, classify_managed_transient_error,
+    count_parallel_transient_failures, is_managed_upstream_transient_error,
+    is_managed_worker_transient_error, is_parallel_dispatch_transient_error,
+    is_transient_dexie_visibility_404_error, is_transient_managed_upstream_error_text,
+    managed_retry_decision, parallel_max_workers, reservation_release_status,
+    should_apply_parallel_transient_cooldown, single_input_preferred_skip_reason,
+    SpendableAssetProfile,
 };
 
 #[pyfunction]
@@ -26,10 +29,7 @@ fn single_input_preferred_skip_reason_py(
         serde_json::from_value(requested_json).map_err(to_py_err)?;
     let profiles: std::collections::BTreeMap<String, SpendableAssetProfile> =
         serde_json::from_value(profiles_json).map_err(to_py_err)?;
-    Ok(single_input_preferred_skip_reason(
-        &requested,
-        &profiles,
-    ))
+    Ok(single_input_preferred_skip_reason(&requested, &profiles))
 }
 
 #[pyfunction]
@@ -40,19 +40,13 @@ fn is_transient_managed_upstream_error_text_py(error_text: &str) -> bool {
 
 #[pyfunction]
 #[pyo3(name = "classify_managed_transient_error")]
-fn classify_managed_transient_error_py(
-    exception_class: &str,
-    error_text: &str,
-) -> Option<String> {
+fn classify_managed_transient_error_py(exception_class: &str, error_text: &str) -> Option<String> {
     classify_managed_transient_error(exception_class, error_text)
 }
 
 #[pyfunction]
 #[pyo3(name = "is_managed_upstream_transient_error")]
-fn is_managed_upstream_transient_error_py(
-    exception_class: &str,
-    error_text: &str,
-) -> bool {
+fn is_managed_upstream_transient_error_py(exception_class: &str, error_text: &str) -> bool {
     is_managed_upstream_transient_error(exception_class, error_text)
 }
 
@@ -109,11 +103,7 @@ fn should_apply_parallel_transient_cooldown_py(
     total_parallel: usize,
     cooldown_seconds: u64,
 ) -> bool {
-    should_apply_parallel_transient_cooldown(
-        transient_failures,
-        total_parallel,
-        cooldown_seconds,
-    )
+    should_apply_parallel_transient_cooldown(transient_failures, total_parallel, cooldown_seconds)
 }
 
 #[pyfunction]
@@ -130,7 +120,10 @@ fn classify_managed_post_result_py(
 
 #[pyfunction]
 #[pyo3(name = "classify_dexie_visibility_outcome")]
-fn classify_dexie_visibility_outcome_py(visible: bool, visibility_error: &str) -> PyResult<Py<PyAny>> {
+fn classify_dexie_visibility_outcome_py(
+    visible: bool,
+    visibility_error: &str,
+) -> PyResult<Py<PyAny>> {
     let outcome = classify_dexie_visibility_outcome(visible, visibility_error);
     Python::attach(|py| Ok(managed_action_outcome_to_py(py, &outcome)?.into()))
 }
@@ -180,8 +173,14 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(classify_managed_transient_error_py, m)?)?;
     m.add_function(wrap_pyfunction!(is_managed_upstream_transient_error_py, m)?)?;
     m.add_function(wrap_pyfunction!(is_managed_worker_transient_error_py, m)?)?;
-    m.add_function(wrap_pyfunction!(is_parallel_dispatch_transient_error_py, m)?)?;
-    m.add_function(wrap_pyfunction!(is_transient_dexie_visibility_404_error_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        is_parallel_dispatch_transient_error_py,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        is_transient_dexie_visibility_404_error_py,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(can_parallelize_managed_offers_py, m)?)?;
     m.add_function(wrap_pyfunction!(parallel_max_workers_py, m)?)?;
     m.add_function(wrap_pyfunction!(reservation_release_status_py, m)?)?;
