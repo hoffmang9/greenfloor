@@ -38,8 +38,11 @@ def action_item(
     )
 
 
-def parallel_offer_worker_error_item(*, exc: Exception) -> StrategyActionItem:
+def parallel_offer_worker_error_item(
+    *, action: PlannedAction, exc: Exception
+) -> StrategyActionItem:
     return StrategyActionItem.from_worker_error(
+        action=action,
         exc=exc,
         transient_upstream=is_managed_worker_transient_error(exc),
     )

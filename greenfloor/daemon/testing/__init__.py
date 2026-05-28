@@ -20,7 +20,6 @@ from __future__ import annotations
 from greenfloor.daemon.testing.cancel_policy import execute_cancel_policy
 from greenfloor.daemon.testing.cooldowns import (
     CANCEL_COOLDOWN_UNTIL,
-    PENDING_VISIBILITY_REASON,
     POST_COOLDOWN_UNTIL,
     cancel_retry_config,
     cooldown_remaining_ms,
@@ -84,7 +83,6 @@ __all__ = [
     "CoinsetAdapter",
     "MarketCycleResult",
     "MarketDispatchState",
-    "PENDING_VISIBILITY_REASON",
     "PlannedAction",
     "POST_COOLDOWN_UNTIL",
     "CANCEL_COOLDOWN_UNTIL",

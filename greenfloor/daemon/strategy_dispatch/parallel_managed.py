@@ -97,7 +97,7 @@ def _run_parallel_submission(
             dexie=dexie,
         )
     except Exception as exc:
-        item = parallel_offer_worker_error_item(exc=exc)
+        item = parallel_offer_worker_error_item(action=action, exc=exc)
     release_status = reservation_release_status(is_executed=item.counts_as_executed)
     reservation_coordinator.release(reservation_id=reservation_id, status=release_status)
     reservation_hold_ms = int((time.monotonic() - reserved_at) * 1000)
@@ -169,7 +169,10 @@ def _run_parallel_batch_submissions(
             try:
                 item = future.result()
             except Exception as exc:
-                item = parallel_offer_worker_error_item(exc=exc)
+                item = parallel_offer_worker_error_item(
+                    action=expanded_actions[submit_index],
+                    exc=exc,
+                )
             submitted_items.append((submit_index, item))
 
     items: list[StrategyActionItem] = []

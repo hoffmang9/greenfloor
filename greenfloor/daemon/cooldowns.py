@@ -18,11 +18,6 @@ from greenfloor.core.cycle import (
 )
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
-_PENDING_VISIBILITY_REASON = "managed_offer_post_success_dexie_visibility_pending"
-# Deprecated: pending visibility is expressed via status="pending_visibility".
-LEGACY_PENDING_VISIBILITY_REASON = _PENDING_VISIBILITY_REASON
-PENDING_VISIBILITY_REASON = _PENDING_VISIBILITY_REASON
-
 _POST_COOLDOWN_UNTIL: dict[str, float] = {}
 _CANCEL_COOLDOWN_UNTIL: dict[str, float] = {}
 _COOLDOWN_LOCK = threading.Lock()
@@ -88,17 +83,6 @@ def _managed_offer_reason_is_503(reason_text: str) -> bool:
     )
 
 
-def _managed_offer_item_is_success(item: dict[str, Any]) -> bool:
-    status = str(item.get("status", "")).strip().lower()
-    reason = str(item.get("reason", "")).strip().lower()
-    if status == "pending_visibility":
-        return True
-    if status == "executed" and reason == "managed_offer_post_success":
-        return True
-    # Legacy audit rows before status-only pending visibility.
-    return status == "executed" and reason == _PENDING_VISIBILITY_REASON.lower()
-
-
 def _parse_iso_datetime(value: str) -> datetime | None:
     text = str(value or "").strip()
     if not text:
@@ -122,17 +106,15 @@ _MANAGED_OFFER_HEALTH_WINDOW: dict[str, deque[_ManagedOfferHealthSnapshot]] = {}
 def _managed_offer_market_health_payload(
     *,
     market_id: str,
-    current_items: list[dict[str, Any]],
+    current_items: list[StrategyActionItem],
     now: datetime,
     window_size: int = 40,
 ) -> dict[str, Any]:
     window = _MANAGED_OFFER_HEALTH_WINDOW.setdefault(
         str(market_id), deque(maxlen=max(1, window_size))
     )
-    batch_503 = sum(
-        1 for item in current_items if _managed_offer_reason_is_503(str(item.get("reason", "")))
-    )
-    batch_success = any(_managed_offer_item_is_success(item) for item in current_items)
+    batch_503 = sum(1 for item in current_items if _managed_offer_reason_is_503(item.reason))
+    batch_success = any(item.is_managed_post_success for item in current_items)
     window.append(
         _ManagedOfferHealthSnapshot(count_503=batch_503, had_success=batch_success, timestamp=now)
     )

@@ -10,7 +10,6 @@ from typing import Any
 from greenfloor.adapters.coinset import extract_coin_ids_from_offer_payload
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.core.strategy import StrategyConfig
-from greenfloor.daemon.cooldowns import LEGACY_PENDING_VISIBILITY_REASON
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.market_logging import _daemon_logger
 from greenfloor.storage.sqlite import SqliteStore
@@ -182,10 +181,7 @@ def _parse_event_created_at(value: Any) -> datetime | None:
 
 
 def _is_pending_visibility_metadata(metadata: _OfferExecutionMetadata) -> bool:
-    if metadata.status == "pending_visibility":
-        return True
-    # Legacy audit rows before status-only pending visibility.
-    return metadata.reason == LEGACY_PENDING_VISIBILITY_REASON
+    return metadata.status == "pending_visibility"
 
 
 def _is_stale_pending_visibility_offer(

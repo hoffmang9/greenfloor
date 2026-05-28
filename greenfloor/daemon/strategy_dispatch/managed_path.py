@@ -35,16 +35,6 @@ from greenfloor.runtime.offer_post_request import (
 from greenfloor.runtime.offer_publish import verify_offer_visible_on_dexie
 
 
-def _coerce_managed_post_result(value: ManagedOfferPostResult | object) -> ManagedOfferPostResult:
-    if isinstance(value, ManagedOfferPostResult):
-        return value
-    if isinstance(value, dict):
-        return ManagedOfferPostResult.from_mapping(value)
-    raise TypeError(
-        f"managed_offer_post must return ManagedOfferPostResult, got {type(value).__name__}"
-    )
-
-
 def _classify_managed_post_outcome(
     managed_post: ManagedOfferPostResult,
     *,
@@ -110,15 +100,13 @@ def execute_single_managed_action(
     dexie: DexieAdapter,
     managed_offer_post: Callable[..., ManagedOfferPostResult],
 ) -> StrategyActionItem:
-    managed_post = _coerce_managed_post_result(
-        managed_offer_post(
-            program=program,
-            market=market,
-            size_base_units=action.size,
-            publish_venue=publish_venue,
-            runtime_dry_run=runtime_dry_run,
-            side=_normalize_offer_side(action.side),
-        )
+    managed_post = managed_offer_post(
+        program=program,
+        market=market,
+        size_base_units=action.size,
+        publish_venue=publish_venue,
+        runtime_dry_run=runtime_dry_run,
+        side=_normalize_offer_side(action.side),
     )
     timing_fields = managed_post.timing_extra()
     post_outcome = _classify_managed_post_outcome(

@@ -18,6 +18,7 @@ from greenfloor.runtime.coin_ops.planning import select_spendable_coins_for_targ
 from tests.helpers.daemon_test_fixtures import (
     FakeDexie,
     FakeStore,
+    managed_post_result,
     market_config,
     signer_program_config,
 )
@@ -176,7 +177,7 @@ def test_execute_strategy_dispatch_parallel_prefers_single_input_offer(
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-should-not-post"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-should-not-post"),
     )
 
     def program_factory() -> ProgramConfig:

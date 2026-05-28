@@ -42,21 +42,6 @@ class ManagedOfferPostResult:
                 extra[key] = int(value)
         return extra
 
-    @classmethod
-    def from_mapping(cls, data: dict[str, Any]) -> ManagedOfferPostResult:
-        offer_id_raw = data.get("offer_id")
-        clean_offer_id = str(offer_id_raw).strip() if offer_id_raw not in (None, "") else None
-        return cls(
-            success=bool(data.get("success", False)),
-            error=str(data.get("error", "")).strip(),
-            offer_id=clean_offer_id,
-            offer_create_ms=_optional_int(data.get("offer_create_ms")),
-            offer_publish_ms=_optional_int(data.get("offer_publish_ms")),
-            offer_total_ms=_optional_int(data.get("offer_total_ms")),
-            offer_create_phase_ms=_optional_int(data.get("offer_create_phase_ms")),
-            offer_artifact_wait_ms=_optional_int(data.get("offer_artifact_wait_ms")),
-        )
-
 
 def _optional_int(value: Any) -> int | None:
     return int(value) if value is not None else None

@@ -23,6 +23,7 @@ from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.daemon_test_fixtures import (
     FakeDexie,
     FakeStore,
+    managed_post_result,
     market_config,
     signer_program_config,
 )
@@ -65,7 +66,7 @@ def test_execute_strategy_dispatch_parallel_signer_managed_reservation_contentio
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-parallel"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -167,7 +168,7 @@ def test_execute_strategy_dispatch_parallel_releases_reservation_on_failure(
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": False, "error": "vault_unavailable"},
+        lambda **_kwargs: managed_post_result(success=False, error="vault_unavailable"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -268,7 +269,7 @@ def test_execute_strategy_dispatch_parallel_does_not_reserve_coin_ops_min_fee(
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-parallel"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-parallel"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -335,7 +336,7 @@ def test_execute_strategy_dispatch_parallel_falls_back_to_sequential_on_transien
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-fallback"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-fallback"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -450,7 +451,7 @@ def test_execute_strategy_dispatch_parallel_uses_resolved_asset_ids_for_reservat
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-resolved-asset"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-resolved-asset"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -530,7 +531,7 @@ def test_execute_strategy_dispatch_parallel_uses_asset_scoped_coin_inventory(
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-scoped"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-scoped"),
     )
 
     def program_factory() -> ProgramConfig:

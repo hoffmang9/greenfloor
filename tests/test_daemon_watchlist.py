@@ -314,8 +314,8 @@ def test_active_offer_counts_excludes_stale_pending_visibility_offer() -> None:
                     {
                         "offer_id": "pending-50",
                         "size": 50,
-                        "status": "executed",
-                        "reason": "managed_offer_post_success_dexie_visibility_pending",
+                        "status": "pending_visibility",
+                        "reason": "managed_offer_post_success",
                     }
                 ]
             },
@@ -349,8 +349,8 @@ def test_active_offer_counts_keeps_pending_visibility_offer_when_seen_on_dexie()
                     {
                         "offer_id": "pending-50",
                         "size": 50,
-                        "status": "executed",
-                        "reason": "managed_offer_post_success_dexie_visibility_pending",
+                        "status": "pending_visibility",
+                        "reason": "managed_offer_post_success",
                     }
                 ]
             },
@@ -388,8 +388,8 @@ def test_active_offer_counts_keeps_pending_when_no_dexie_snapshot() -> None:
                     {
                         "offer_id": "pending-old",
                         "size": 50,
-                        "status": "executed",
-                        "reason": "managed_offer_post_success_dexie_visibility_pending",
+                        "status": "pending_visibility",
+                        "reason": "managed_offer_post_success",
                     }
                 ]
             },

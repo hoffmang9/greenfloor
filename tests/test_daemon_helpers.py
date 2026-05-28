@@ -26,6 +26,7 @@ from greenfloor.daemon.market_helpers import (
     _resolve_quote_asset_for_offer,
 )
 from greenfloor.daemon.market_logging import _daemon_logger
+from greenfloor.daemon.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.testing import (
     cancel_retry_config,
     cooldown_remaining_ms,
@@ -231,11 +232,18 @@ def test_managed_offer_market_health_payload_tracks_503_and_last_success() -> No
     cooldowns._managed_offer_market_health_payload(
         market_id="m1-health-test",
         current_items=[
-            {"status": "executed", "reason": "managed_offer_post_success"},
-            {
-                "status": "skipped",
-                "reason": "managed_offer_action_error:managed_offer_http_error:503:<html>...</html>",
-            },
+            StrategyActionItem(
+                size=1,
+                side="sell",
+                status="executed",
+                reason="managed_offer_post_success",
+            ),
+            StrategyActionItem(
+                size=1,
+                side="sell",
+                status="skipped",
+                reason="managed_offer_action_error:managed_offer_http_error:503:<html>...</html>",
+            ),
         ],
         now=success_time,
         window_size=20,
@@ -245,10 +253,12 @@ def test_managed_offer_market_health_payload_tracks_503_and_last_success() -> No
     payload = cooldowns._managed_offer_market_health_payload(
         market_id="m1-health-test",
         current_items=[
-            {
-                "status": "skipped",
-                "reason": "managed_offer_action_error:managed_offer_http_error:503:<html>...</html>",
-            }
+            StrategyActionItem(
+                size=1,
+                side="sell",
+                status="skipped",
+                reason="managed_offer_action_error:managed_offer_http_error:503:<html>...</html>",
+            )
         ],
         now=now,
         window_size=20,

@@ -12,6 +12,7 @@ from greenfloor.daemon.testing import (
 from tests.helpers.daemon_test_fixtures import (
     FakeDexie,
     FakeStore,
+    managed_post_result,
     market_config,
     signer_program_config,
 )
@@ -22,7 +23,7 @@ def test_execute_strategy_dispatch_uses_signer_managed_path_when_configured(monk
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-1"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-fallback-1"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -64,7 +65,7 @@ def test_execute_strategy_dispatch_signer_managed_requires_dexie_visibility(monk
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-missing"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-fallback-missing"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -117,7 +118,7 @@ def test_execute_strategy_dispatch_signer_managed_accepts_transient_dexie_http_4
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": True, "offer_id": "offer-fallback-pending"},
+        lambda **_kwargs: managed_post_result(offer_id="offer-fallback-pending"),
     )
 
     def program_factory() -> ProgramConfig:
@@ -162,12 +163,12 @@ def test_execute_strategy_dispatch_preserves_planned_size_order(monkeypatch) -> 
     POST_COOLDOWN_UNTIL.clear()
     seen_sizes: list[int] = []
 
-    def _fakemanaged_offer_post(**kwargs: Any) -> dict[str, Any]:
+    def _fake_managed_offer_post(**kwargs: Any):
         seen_sizes.append(int(kwargs["size_base_units"]))
         size = int(kwargs["size_base_units"])
-        return {"success": True, "offer_id": f"offer-{size}"}
+        return managed_post_result(offer_id=f"offer-{size}")
 
-    monkeypatch.setattr(strategy_dispatch, "managed_offer_post", _fakemanaged_offer_post)
+    monkeypatch.setattr(strategy_dispatch, "managed_offer_post", _fake_managed_offer_post)
 
     def program_factory() -> ProgramConfig:
         return signer_program_config()
@@ -234,7 +235,7 @@ def test_execute_strategy_dispatch_signer_managed_failure_skips_without_builder(
     monkeypatch.setattr(
         strategy_dispatch,
         "managed_offer_post",
-        lambda **_kwargs: {"success": False, "error": "vault_signing_unavailable"},
+        lambda **_kwargs: managed_post_result(success=False, error="vault_signing_unavailable"),
     )
 
     def program_factory() -> ProgramConfig:

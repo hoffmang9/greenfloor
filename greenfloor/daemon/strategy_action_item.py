@@ -51,6 +51,11 @@ class StrategyActionItem:
         normalized = self.status.strip().lower()
         return normalized in ("executed", "pending_visibility")
 
+    @property
+    def is_managed_post_success(self) -> bool:
+        """Managed signer post succeeded, including Dexie visibility pending."""
+        return self.counts_as_executed and self.reason.strip() == "managed_offer_post_success"
+
     @classmethod
     def from_action(
         cls,
@@ -77,12 +82,15 @@ class StrategyActionItem:
     def from_worker_error(
         cls,
         *,
+        action: Any,
         exc: Exception,
         transient_upstream: bool,
     ) -> StrategyActionItem:
+        from greenfloor.daemon.market_helpers import _normalize_offer_side
+
         return cls(
-            size=0,
-            side="sell",
+            size=int(getattr(action, "size", 0)),
+            side=_normalize_offer_side(getattr(action, "side", "sell")),
             status="skipped",
             reason=f"parallel_offer_worker_error:{exc}",
             offer_id=None,

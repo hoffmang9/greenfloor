@@ -87,7 +87,7 @@ def execute_strategy_for_market(
     )
     health_payload = _managed_offer_market_health_payload(
         market_id=str(market.market_id),
-        current_items=list(offer_execution.items),
+        current_items=list(offer_execution.action_items),
         now=now,
     )
     store.add_audit_event(
