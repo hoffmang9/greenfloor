@@ -31,27 +31,17 @@ Optional developer bootstrap for testnet markets:
 
 ## 2) Steady-State Operations
 
-- Cloud Wallet config prerequisite (required for vault-first paths):
-  - Set `cloud_wallet.base_url`, `cloud_wallet.user_key_id`, `cloud_wallet.private_key_pem_path`, and `cloud_wallet.vault_id` in `~/.greenfloor/config/program.yaml`.
-  - Where to find each value:
-    - `cloud_wallet.base_url`: open `https://vault.chia.net/settings.json`, read `GRAPHQL_URI`, and keep the origin only (for example `https://api.vault.chia.net`, not `/graphql`).
-    - `cloud_wallet.user_key_id`: in Cloud Wallet UI, go to **Settings -> API Keys** (`/settings/api-keys`), create/select a key, copy **Key Id**.
-    - `cloud_wallet.private_key_pem_path`: from the **API Key Created** modal, click **Download Key** and save the PEM file (recommended: `~/.greenfloor/keys/cloud-wallet-user-auth-key.pem`).
-      The file must contain full PEM text (`-----BEGIN PRIVATE KEY-----` ... `-----END PRIVATE KEY-----`), not base64-only text.
-    - `cloud_wallet.vault_id`: open the target vault and copy the URL segment in `.../wallet/<ID>/...`; use the `Wallet_...` value, not `vaultLauncherId`.
-  - **Cloud Wallet HTTP timeouts (diagnosis):** GreenFloor’s GraphQL client uses `urllib` with a configurable deadline. If logs show `The read operation timed out` / `cloud_wallet_transient_network_error`, treat slow **operations** (not just packet loss) as the default hypothesis.
-    - **`GREENFLOOR_CLOUD_WALLET_HTTP_TIMEOUT_SECONDS`** — per-request timeout in seconds (default `10`, minimum `5`). Raise temporarily (for example `45`) on a host to see whether failures disappear; if they do, the API or resolver path is regularly exceeding the old limit.
-    - **`GREENFLOOR_CLOUD_WALLET_MAX_ATTEMPTS`** — retry count for transient HTTP/URL errors and some 429/5xx paths (default `3`).
-    - **`GREENFLOOR_CLOUD_WALLET_SLOW_LOG_MS`** — optional; if unset, a **slow** request is logged when duration ≥ 80% of the HTTP timeout (milliseconds). Set explicitly to tune `cloud_wallet_graphql_slow` noise.
-    - **Structured timing:** At `INFO`, each successful round trip logs `cloud_wallet_graphql_ok` with `operation` (for example `mutation_createOffer`, `query_listCoins`), `duration_ms`, and `http_timeout_s`. Failed attempts include `operation` and `duration_ms` on retry and final warning lines. Correlate these with Vault API or DB traces for the same wall time.
-    - Set these on the **daemon process** (systemd `Environment=`, wrapper script, or `export` before `greenfloord`); they are not read from `program.yaml`.
-  - **Wallet asset catalog cache:** Mapping symbols/hex CAT ids to Cloud Wallet `Asset_…` global ids uses the GraphQL `resolveWalletAssets` list. That list is cached on disk as JSON under **`$HOME/.greenfloor/cache/`** (using `app.home_dir` from `program.yaml`), keyed by API origin and vault id. Default TTL is **12 hours**; override with **`GREENFLOOR_CLOUD_WALLET_ASSETS_CACHE_TTL_SECONDS`** (minimum 60). The cache is skipped when `program_home_dir` is unset or the wallet client has no base URL (test doubles). To **warm the cache** without waiting for a successful offer path (for example after timeouts prevented a write), run once with a generous HTTP timeout: `GREENFLOOR_CLOUD_WALLET_HTTP_TIMEOUT_SECONDS=60 greenfloor-manager --program-config ~/.greenfloor/config/program.yaml seed-wallet-assets-cache` (optional `--vault-id Wallet_…` if different from `program.yaml`).
+- Vault KMS signer config (required for vault offer/coin-op paths):
+  - Set `signer.kms_key_id`, `signer.kms_region`, `signer.kms_public_key_hex`, and `signer.coinset_msp_base_url` in `~/.greenfloor/config/program.yaml`.
+  - Set `vault.launcher_id`, custody/recovery thresholds, and member public keys under `vault:` (see `config/program.yaml` example in-repo).
+  - Legacy `cloud_wallet:` blocks are rejected at config load; migrate to `signer:` + `vault:` before upgrading.
+  - On-chain IO uses Coinset MSP (`api-msp.coinset.org` by default). Optional override: `GREENFLOOR_COINSET_BASE_URL`.
 - Review vault coin inventory before shaping or posting:
   - `greenfloor-manager coins-list`
   - `greenfloor-manager coin-status`
   - Optional asset scope: `greenfloor-manager coins-list --asset <ticker|CAT-id|Asset-id|xch>`
   - Optional asset scope: `greenfloor-manager coin-status --asset <ticker|CAT-id|Asset-id|xch>`
-- **CAT dust via Coinset (enabled markets):** Sub-unit CAT outputs (strictly below **1000** mojos per coin) can be merged with the direct Coinset signer path, one batch per `keys.registry` signer used on the market rows. From the repo root: `PATH="$(pwd)/.venv/bin:$PATH" python scripts/combine_market_cat_dust_coinset.py --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml`. Prefer `--dry-run` or `--list-only` before live combines; `--cat-asset-id <hex>` scopes a single asset; optional `--testnet-markets-config` matches daemon overlay semantics. Uses the same launcher cache and Cloud Wallet env timeout variables as other vault scripts (`GREENFLOOR_CLOUD_WALLET_HTTP_TIMEOUT_SECONDS`, etc.).
+- **CAT dust via Coinset (enabled markets):** Sub-unit CAT outputs (strictly below **1000** mojos per coin) can be merged with the direct Coinset signer path, one batch per `keys.registry` signer used on the market rows. From the repo root: `PATH="$(pwd)/.venv/bin:$PATH" python scripts/combine_market_cat_dust_coinset.py --program-config ~/.greenfloor/config/program.yaml --markets-config ~/.greenfloor/config/markets.yaml`. Prefer `--dry-run` or `--list-only` before live combines; `--cat-asset-id <hex>` scopes a single asset; optional `--testnet-markets-config` matches daemon overlay semantics.
 - Shape denominations for the selected market context:
   - Split: `greenfloor-manager coin-split --pair TDBX:txch --coin-id <coin-id> --amount-per-coin 1000 --number-of-coins 10`
   - Combine: `greenfloor-manager coin-combine --pair TDBX:txch --input-coin-count 10 --asset-id xch`
@@ -98,7 +88,7 @@ Use this checklist when promoting from one-off manager proof runs to continuous 
    - `app.network: mainnet`
    - `runtime.dry_run: false`
    - `venues.dexie.api_base: "https://api.dexie.space"`
-   - populated `cloud_wallet.base_url`, `cloud_wallet.user_key_id`, `cloud_wallet.private_key_pem_path`, `cloud_wallet.vault_id`
+   - populated `signer.kms_key_id`, `signer.kms_region`, `signer.kms_public_key_hex`, and `vault.launcher_id`
 2. Isolate the canary market:
    - keep `eco1812022_sell_wusdbc` enabled in `~/.greenfloor/config/markets.yaml`
    - temporarily disable unrelated markets during initial canary
@@ -154,7 +144,7 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 
 - **Price unavailable:** look for `xch_price_error`; XCH planning is price-gated and may produce no actions.
 - **Offer builder failures:** check `strategy_offer_execution.items[].reason` for `offer_builder_*`.
-- **Offer backend selection:** `build-and-post-offer` and daemon managed post route via `offer_execution_backend()` / `managed_offer_execution_backend()` in program config — vault KMS signer when `signer.kms_key_id` + `vault.launcher_id` are set, else Cloud Wallet when configured, else local BLS for large manual CLI sizes. See ADR 0008.
+- **Offer backend selection:** `build-and-post-offer` and daemon managed post route via `offer_execution_backend()` / `managed_offer_execution_backend()` in program config — vault KMS signer when `signer.kms_key_id` + `vault.launcher_id` are set, else local BLS for large manual CLI sizes. See ADR 0007 and ADR 0008.
 - **Dexie post/cancel issues:** look for `dexie_offers_error`, `strategy_offer_execution` skip reasons, and `offer_cancel_policy` skip reasons.
 - **Extended waits on coin operations:** inspect `wait_events` for `poll_retry`, `signature_wait_*`, `in_mempool`, `confirmed`, and `reorg_watch_*` events to determine whether delay is signer-side, mempool-side, Coinset API-side, or chain-depth-side.
 - **Coin-op fee preflight failures:** inspect JSON `error` and `coinset_fee_lookup`:

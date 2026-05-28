@@ -24,11 +24,10 @@ orchestration (manager, daemon, Dexie/Splash publish, ladder planning).
 
 ## Deferred (documented)
 
-- Full deletion of Cloud Wallet GraphQL adapter methods (`create_offer`, `split_coins`) remains
-  until all operator installs migrate off Cloud Wallet offer paths.
-- Rust simulator scenarios for buy-side and CAT-request fixtures are covered at the Python
-  orchestration layer; dedicated `buy_side.json` / `cat_cat.json` exports are deferred.
-- PyO3 ↔ CLI JSON parity test deferred until the signer CLI stabilizes on the same request schema.
+- Rust simulator atomic-take roundtrip for CAT:CAT requested legs remains sell-CAT/request-XCH only;
+  buy-side and cat-cat fixtures validate offer build + `create_offer_request` shape.
+- Operator `greenfloor-signer create-offer` CLI parity with live Coinset is covered by PyO3 in
+  production paths; dedicated subprocess JSON parity tests are not required while PyO3 is canonical.
 
 ## Consequences
 

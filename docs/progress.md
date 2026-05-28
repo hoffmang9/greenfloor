@@ -1,5 +1,14 @@
 # Progress Log
 
+## 2026-05-28 (Rust migration items 2–3 — signer fixtures, bridge/protocol hygiene, docs)
+
+- **Golden fixtures:** `buy_side.json` and `cat_cat.json` exported from simulator (`OfferLegScenario`) with embedded `create_offer_request`; regenerate via `EXPORT_SIGNER_FIXTURES=1 cargo test export_signer_fixtures_to_disk` in `greenfloor-signer/`.
+- **Rust tests:** `offer_leg_scenarios_roundtrip_on_simulator`, `create_offer_request_json_matches_pyo3_deserialize_shape`; `fund_vault_two_cats()` for dual-CAT issuance.
+- **Python tests:** `tests/test_signer_create_offer_parity.py`; `tests/test_greenfloor_signer_integration.py` (CI step renamed); `test_greenfloor_native_integration.py` re-exports for compat.
+- **Kernel protocols:** split into `cycle_kernel_protocol.py`, `cancel_kernel_protocol.py`, `notification_kernel_protocol.py`, `offer_kernel_protocol.py`, `retry_kernel_protocol.py`; `kernel_protocol.py` composes only.
+- **Cycle bridge:** `_bridge_managed.py`, `_bridge_orchestration.py`, `_bridge_common.py`; `_bridge.py` is re-exports (~90 lines).
+- **Docs:** `docs/plan.md`, `docs/runbook.md`, ADR 0007 deferred notes updated for signer-only vault path.
+
 ## 2026-05-28 (Rust migration steps 14–16 — offer validate, build context, retry, coin-op gates)
 
 - **Step 14 — Retry policy (`greenfloor-signer/src/cycle/retry.rs`):** `parse_rate_limit_retry_seconds`, Dexie invalid-offer retry gating/sleep, Coinset fee lookup sleep; PyO3 `retry_py.rs`; Python `greenfloor/core/retry_policy.py` + `moderate_retry.py` / `coinset_runtime.py` wired to kernel.

@@ -23,6 +23,27 @@ pub enum OfferRoundtripScenario {
     PresplitExisting,
 }
 
+/// Leg-layout scenarios exported as golden fixtures (direct path only).
+#[derive(Debug, Clone, Copy)]
+pub enum OfferLegScenario {
+    /// Sell base CAT for XCH (legacy simulator default).
+    SellCatRequestXch,
+    /// Buy base CAT: offer quote CAT, request base CAT (daemon buy-side leg swap).
+    BuySideDirect,
+    /// Sell base CAT for quote CAT (CAT:CAT pair).
+    CatCatDirect,
+}
+
+impl OfferLegScenario {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::SellCatRequestXch => "sell_cat_request_xch",
+            Self::BuySideDirect => "buy_side",
+            Self::CatCatDirect => "cat_cat",
+        }
+    }
+}
+
 impl OfferRoundtripScenario {
     pub fn name(self) -> &'static str {
         match self {
@@ -228,6 +249,97 @@ async fn run_offer_roundtrip(scenario: OfferRoundtripScenario) {
     take_atomic_offer_on_sim(&mut harness, &offer_from_result(&result));
 }
 
+fn build_leg_request(
+    harness: &SimulatorVaultHarness,
+    scenario: OfferLegScenario,
+    offer_cat: &chia_sdk_driver::Cat,
+    request_cat: Option<&chia_sdk_driver::Cat>,
+) -> CreateOfferRequest {
+    let receive_address =
+        chia_sdk_utils::Address::new(harness.chain.p2_message_hash, "xch".to_string())
+            .encode()
+            .expect("test receive address");
+    match scenario {
+        OfferLegScenario::SellCatRequestXch => sample_create_offer_request(
+            harness,
+            1_000,
+            offer_cat,
+            vec![],
+            vec![],
+            false,
+            false,
+        ),
+        OfferLegScenario::BuySideDirect => {
+            let base_cat = offer_cat;
+            let quote_cat = request_cat.expect("quote cat for buy_side");
+            CreateOfferRequest {
+                receive_address,
+                offer_asset_id: hex::encode(quote_cat.info.asset_id),
+                offer_amount: quote_cat.coin.amount,
+                request_asset_id: hex::encode(base_cat.info.asset_id),
+                request_amount: 1_000,
+                offer_coin_ids: vec![quote_cat.coin.coin_id()],
+                presplit_coin_ids: vec![],
+                split_input_coins: false,
+                broadcast_split: false,
+                expires_at: None,
+            }
+        }
+        OfferLegScenario::CatCatDirect => {
+            let base_cat = offer_cat;
+            let quote_cat = request_cat.expect("quote cat for cat_cat");
+            CreateOfferRequest {
+                receive_address,
+                offer_asset_id: hex::encode(base_cat.info.asset_id),
+                offer_amount: base_cat.coin.amount,
+                request_asset_id: hex::encode(quote_cat.info.asset_id),
+                request_amount: 2_000,
+                offer_coin_ids: vec![base_cat.coin.coin_id()],
+                presplit_coin_ids: vec![],
+                split_input_coins: false,
+                broadcast_split: false,
+                expires_at: None,
+            }
+        }
+    }
+}
+
+pub struct OfferLegFixtureExport {
+    pub scenario: OfferLegScenario,
+    pub request: CreateOfferRequest,
+    pub result: crate::offer::CreateOfferResult,
+}
+
+pub async fn export_offer_leg_fixture(scenario: OfferLegScenario) -> OfferLegFixtureExport {
+    let mut harness = SimulatorVaultHarness::new();
+    let (request, registered_cats) = match scenario {
+        OfferLegScenario::SellCatRequestXch => {
+            let offer_cat = harness.fund_vault_cat(1_000);
+            let request = build_leg_request(&harness, scenario, &offer_cat, None);
+            (request, vec![offer_cat])
+        }
+        OfferLegScenario::BuySideDirect | OfferLegScenario::CatCatDirect => {
+            let (base_cat, quote_cat) = harness.fund_vault_two_cats(5_000, 5_000);
+            let request = build_leg_request(&harness, scenario, &base_cat, Some(&quote_cat));
+            (request, vec![base_cat, quote_cat])
+        }
+    };
+    let coinset = SimulatorOfferCoinset::new(&harness.chain);
+    for cat in registered_cats {
+        coinset.register_cat(cat);
+    }
+    let input = OfferInput::try_from(request.clone()).expect("offer input");
+    let result = build_vault_cat_offer_with_spend(&mut harness.vault_ctx, &coinset, input)
+        .await
+        .unwrap_or_else(|err| panic!("{} offer: {err}", scenario.name()));
+
+    OfferLegFixtureExport {
+        scenario,
+        request,
+        result,
+    }
+}
+
 pub async fn export_offer_fixture(
     scenario: OfferRoundtripScenario,
 ) -> crate::offer::CreateOfferResult {
@@ -266,6 +378,79 @@ pub async fn export_offer_fixture(
     build_vault_cat_offer_with_spend(&mut harness.vault_ctx, &coinset, input)
         .await
         .unwrap_or_else(|err| panic!("{} offer: {err}", scenario.name()))
+}
+
+async fn run_leg_roundtrip(scenario: OfferLegScenario) {
+    let mut harness = SimulatorVaultHarness::new();
+    let (request, registered_cats) = match scenario {
+        OfferLegScenario::SellCatRequestXch => {
+            let offer_cat = harness.fund_vault_cat(1_000);
+            let request = build_leg_request(&harness, scenario, &offer_cat, None);
+            (request, vec![offer_cat])
+        }
+        OfferLegScenario::BuySideDirect | OfferLegScenario::CatCatDirect => {
+            let (base_cat, quote_cat) = harness.fund_vault_two_cats(5_000, 5_000);
+            let request = build_leg_request(&harness, scenario, &base_cat, Some(&quote_cat));
+            (request, vec![base_cat, quote_cat])
+        }
+    };
+    let coinset = SimulatorOfferCoinset::new(&harness.chain);
+    for cat in registered_cats {
+        coinset.register_cat(cat);
+    }
+    let input = OfferInput::try_from(request.clone()).expect("offer input");
+    let result = build_vault_cat_offer_with_spend(&mut harness.vault_ctx, &coinset, input)
+        .await
+        .unwrap_or_else(|err| panic!("{} offer: {err}", scenario.name()));
+    assert!(result.offer.starts_with("offer1"));
+    if matches!(scenario, OfferLegScenario::SellCatRequestXch) {
+        take_atomic_offer_on_sim(&mut harness, &offer_from_result(&result));
+    }
+    match scenario {
+        OfferLegScenario::BuySideDirect => {
+            assert_ne!(request.offer_asset_id, request.request_asset_id);
+            assert!(request.offer_amount >= request.request_amount);
+        }
+        OfferLegScenario::CatCatDirect => {
+            assert_ne!(request.offer_asset_id, request.request_asset_id);
+        }
+        OfferLegScenario::SellCatRequestXch => {
+            assert_eq!(request.request_asset_id, "xch");
+        }
+    }
+}
+
+#[tokio::test]
+async fn offer_leg_scenarios_roundtrip_on_simulator() {
+    for scenario in [
+        OfferLegScenario::SellCatRequestXch,
+        OfferLegScenario::BuySideDirect,
+        OfferLegScenario::CatCatDirect,
+    ] {
+        run_leg_roundtrip(scenario).await;
+    }
+}
+
+#[test]
+fn create_offer_request_json_matches_pyo3_deserialize_shape() {
+    let request = CreateOfferRequest {
+        receive_address: "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqslas8z".to_string(),
+        offer_asset_id: "aa".repeat(32),
+        offer_amount: 1_000,
+        request_asset_id: "bb".repeat(32),
+        request_amount: 2_000,
+        offer_coin_ids: vec![],
+        presplit_coin_ids: vec![],
+        split_input_coins: true,
+        broadcast_split: false,
+        expires_at: Some(1_700_000_000),
+    };
+    let json = serde_json::to_value(&request).expect("serialize");
+    let restored: CreateOfferRequest = serde_json::from_value(json).expect("deserialize");
+    assert_eq!(restored.offer_asset_id, request.offer_asset_id);
+    assert_eq!(restored.request_asset_id, request.request_asset_id);
+    assert_eq!(restored.offer_amount, request.offer_amount);
+    assert_eq!(restored.split_input_coins, request.split_input_coins);
 }
 
 #[tokio::test]

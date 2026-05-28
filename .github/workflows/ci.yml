@@ -111,4 +111,4 @@ jobs:
 
       - name: Pytest (greenfloor_signer + chia-wallet-sdk offer round-trip on Ubuntu)
         if: matrix.run_sdk_integration
-        run: GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS=1 pytest -vv -s tests/test_greenfloor_native_integration.py
+        run: GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS=1 pytest -vv -s tests/test_greenfloor_signer_integration.py
