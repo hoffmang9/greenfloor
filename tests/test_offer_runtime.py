@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -25,15 +24,13 @@ def _sample_market(*, base_multiplier: int = 1000, quote_multiplier: int = 1000)
     )
 
 
-def test_signer_create_offer_phase_buy_side_swaps_legs(monkeypatch) -> None:
+def test_signer_create_offer_phase_calls_signer_and_returns_offer_text(monkeypatch) -> None:
     captured: dict = {}
 
     def _fake_build(_config_path: str, request: dict) -> dict:
         captured.update(request)
         return {"offer": "offer1test", "execution_mode": "direct"}
 
-    fake_signer = MagicMock()
-    fake_signer.build_vault_cat_offer.side_effect = _fake_build
     monkeypatch.setattr(
         "greenfloor.adapters.rust_signer.build_vault_cat_offer",
         _fake_build,
@@ -57,91 +54,13 @@ def test_signer_create_offer_phase_buy_side_swaps_legs(monkeypatch) -> None:
         action_side="buy",
     )
 
+    assert captured
+    assert captured["receive_address"] == market.receive_address
+    assert captured["expires_at"] is not None
     assert result["side"] == "buy"
-    assert captured["offer_asset_id"] == "quotecat"
-    assert captured["request_asset_id"] == "basecat"
-    assert captured["offer_amount"] == 20_000
-    assert captured["request_amount"] == 10_000
-    assert captured["split_input_coins"] is True
     assert result["offer_text"] == "offer1test"
-
-
-def test_signer_create_offer_phase_sell_side_keeps_legs(monkeypatch) -> None:
-    captured: dict = {}
-
-    def _fake_build(_config_path: str, request: dict) -> dict:
-        captured.update(request)
-        return {"offer": "offer1sell", "execution_mode": "direct"}
-
-    fake_signer = MagicMock()
-    fake_signer.build_vault_cat_offer.side_effect = _fake_build
-    monkeypatch.setattr(
-        "greenfloor.adapters.rust_signer.build_vault_cat_offer",
-        _fake_build,
-    )
-    monkeypatch.setattr(
-        "greenfloor.runtime.offer_runtime.prepare_signer_runtime",
-        lambda _program: "/tmp/signer.yaml",
-    )
-
-    program = cast(ProgramConfig, SimpleNamespace())
-    market = _sample_market()
-    signer_create_offer_phase(
-        program=program,
-        market=market,
-        size_base_units=5,
-        quote_price=1.5,
-        resolved_base_asset_id="basecat",
-        resolved_quote_asset_id="quotecat",
-        expiry_unit="minutes",
-        expiry_value=30,
-        action_side="sell",
-    )
-
-    assert captured["offer_asset_id"] == "basecat"
-    assert captured["request_asset_id"] == "quotecat"
-    assert captured["offer_amount"] == 5_000
-    assert captured["request_amount"] == 7_500
-
-
-def test_signer_create_offer_phase_cat_cat_sell_passes_both_cat_ids(monkeypatch) -> None:
-    captured: dict = {}
-
-    def _fake_build(_config_path: str, request: dict) -> dict:
-        captured.update(request)
-        return {"offer": "offer1catcat", "execution_mode": "direct"}
-
-    monkeypatch.setattr(
-        "greenfloor.adapters.rust_signer.build_vault_cat_offer",
-        _fake_build,
-    )
-    monkeypatch.setattr(
-        "greenfloor.runtime.offer_runtime.prepare_signer_runtime",
-        lambda _program: "/tmp/signer.yaml",
-    )
-
-    program = cast(ProgramConfig, SimpleNamespace())
-    market = _sample_market()
-    signer_create_offer_phase(
-        program=program,
-        market=market,
-        size_base_units=10,
-        quote_price=2.0,
-        resolved_base_asset_id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        resolved_quote_asset_id="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        expiry_unit="hours",
-        expiry_value=1,
-        action_side="sell",
-    )
-
-    assert captured["offer_asset_id"] == (
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    )
-    assert captured["request_asset_id"] == (
-        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    )
-    assert captured["offer_amount"] == 10_000
-    assert captured["request_amount"] == 20_000
+    assert result["execution_mode"] == "direct"
+    assert result["expires_at"]
 
 
 def test_signer_create_offer_phase_requires_offer_text(monkeypatch) -> None:

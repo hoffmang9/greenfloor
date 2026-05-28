@@ -465,7 +465,7 @@ pub async fn export_offer_fixture(scenario: OfferRoundtripScenario) -> OfferBuil
     }
 }
 
-async fn run_leg_roundtrip(scenario: OfferLegScenario) {
+async fn leg_offer_builds_on_simulator(scenario: OfferLegScenario) {
     let built = build_leg_offer(scenario).await;
     assert!(built.result.offer.starts_with("offer1"));
     assert_ne!(built.request.offer_asset_id, built.request.request_asset_id);
@@ -478,9 +478,9 @@ async fn run_leg_roundtrip(scenario: OfferLegScenario) {
 }
 
 #[tokio::test]
-async fn offer_leg_scenarios_roundtrip_on_simulator() {
+async fn offer_leg_scenarios_build_on_simulator() {
     for scenario in [OfferLegScenario::BuySideDirect, OfferLegScenario::CatCatDirect] {
-        run_leg_roundtrip(scenario).await;
+        leg_offer_builds_on_simulator(scenario).await;
     }
 }
 

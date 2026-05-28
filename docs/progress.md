@@ -1,11 +1,19 @@
 # Progress Log
 
+## 2026-05-28 (Signer fixture hygiene follow-up — consolidate protocols and tests)
+
+- **Kernel protocols:** re-collapsed domain splits back into single `greenfloor/core/kernel_protocol.py` (five-file split removed).
+- **Offer side + request:** canonical `normalize_offer_side` in `core/offer_side.py`; signer request builder in `core/signer_offer_request.py` (uses `mojo_multiplier_for_le`).
+- **Rust tests:** `offer_leg_scenarios_build_on_simulator` (renamed from roundtrip; build-only on sim for CAT:CAT legs).
+- **Python tests:** `test_signer_golden_fixture_contract` (schema + core parity + validate in one parametrized test); `test_offer_runtime.py` covers signer IO shell only (leg math owned by parity fixtures).
+- **Fixtures:** all golden JSON embed `runtime_parity` (action_side, resolved assets, size/price, multipliers).
+
 ## 2026-05-28 (Rust migration items 2–3 — signer fixtures, bridge/protocol hygiene, docs)
 
-- **Golden fixtures:** `buy_side.json` and `cat_cat.json` exported from simulator (`OfferLegScenario`) with embedded `create_offer_request`; regenerate via `EXPORT_SIGNER_FIXTURES=1 cargo test export_signer_fixtures_to_disk` in `greenfloor-signer/`.
-- **Rust tests:** `offer_leg_scenarios_roundtrip_on_simulator`, `create_offer_request_json_matches_pyo3_deserialize_shape`; `fund_vault_two_cats()` for dual-CAT issuance.
-- **Python tests:** `tests/test_signer_create_offer_parity.py` (golden validate + runtime leg parity); `tests/test_greenfloor_signer_integration.py`.
-- **Kernel protocols:** split into `cycle_kernel_protocol.py`, `cancel_kernel_protocol.py`, `notification_kernel_protocol.py`, `offer_kernel_protocol.py`, `retry_kernel_protocol.py`; `kernel_protocol.py` composes only.
+- **Golden fixtures:** `buy_side.json`, `cat_cat.json`, and roundtrip scenarios exported from simulator with embedded `create_offer_request` and `runtime_parity`; regenerate via `EXPORT_SIGNER_FIXTURES=1 cargo test export_signer_fixtures_to_disk` in `greenfloor-signer/`.
+- **Rust tests:** `build_vault_cat_offer_roundtrips`, `offer_leg_scenarios_build_on_simulator`; shared `setup_roundtrip` / `build_offer_from_setup`; `fund_vault_two_cats()` for dual-CAT issuance.
+- **Python tests:** `tests/test_signer_create_offer_parity.py`; `tests/test_greenfloor_signer_integration.py` (config roundtrip + gated PyO3 integration).
+- **Kernel protocols:** composed in `kernel_protocol.py` (cycle, cancel, notification, offer, retry).
 - **Cycle bridge:** `_bridge_managed.py`, `_bridge_orchestration.py`, `_bridge_common.py`; no `_bridge.py` shim.
 - **Docs:** `docs/plan.md`, `docs/runbook.md`, ADR 0007 deferred notes updated for signer-only vault path.
 
@@ -101,7 +109,7 @@ Steps 1–13 moved deterministic daemon/coin-op/shared policy into `greenfloor-s
 - **Python IO glue:** `runtime/coin_ops/planning.py` and `selection.py` are thin re-exports (~80 lines total); CLI/daemon execution modules unchanged.
 - **Tests:** Rust unit tests in `selection.rs` and `split_planning.rs`; existing `tests/test_coin_ops_planning.py` and daemon parallel selection tests remain parity gates.
 - **Migration status:** step 11 complete for coin-op selection/planning helpers.
-- **Next step (deferred hygiene):** split `kernel_protocol.py` by domain before ~300 lines, keep hex parity gates in `test_coin_ops_policy_parity.py`.
+- **Deferred hygiene (superseded):** ~~split `kernel_protocol.py` by domain~~ — consolidated back into one module after signer-fixture work (2026-05-28).
 
 ## 2026-05-27 (Rust coin-op policy kernel — step 10)
 

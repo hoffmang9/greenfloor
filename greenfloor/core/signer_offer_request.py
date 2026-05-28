@@ -5,12 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from greenfloor.config.models import MarketConfig
+from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.core.policy_bridge import mojo_multiplier_for_leg
-
-
-def normalize_action_side(value: str | None) -> str:
-    side = str(value or "").strip().lower()
-    return "buy" if side == "buy" else "sell"
 
 
 def build_signer_create_offer_request(
@@ -26,7 +22,7 @@ def build_signer_create_offer_request(
     expires_at_unix: int | None = None,
 ) -> dict[str, Any]:
     """Build the dict passed to ``rust_signer.build_vault_cat_offer``."""
-    side = normalize_action_side(action_side)
+    side = normalize_offer_side(action_side)
     pricing = dict(market.pricing or {})
     base_mult = int(
         mojo_multiplier_for_leg(
