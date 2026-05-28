@@ -31,6 +31,5 @@ pub use orchestration::{
     next_disabled_market_log_deadline, record_stale_sweep_check, select_market_batch,
     should_log_disabled_market, should_try_cat_inventory_fallback, should_use_market_slot_dispatch,
     MarketBatchSelection, OfferStateRow, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
-    MARKET_CYCLE_PHASES,
 };
 pub use strategy::{evaluate_market, MarketState, PlannedAction, StrategyConfig};

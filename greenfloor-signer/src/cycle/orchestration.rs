@@ -2,14 +2,6 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-pub const MARKET_CYCLE_PHASES: &[&str] = &[
-    "reconcile",
-    "inventory",
-    "strategy",
-    "cancel",
-    "coin_ops",
-];
-
 const TRACKED_STALE_SWEEP_STATES: &[&str] = &["open", "refresh_due"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

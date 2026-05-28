@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from greenfloor.adapters import cycle_kernel
+from greenfloor.core.cycle import _signer_apply_offer_signal
 
 
 class OfferLifecycleState(StrEnum):
@@ -35,7 +35,7 @@ def apply_offer_signal(
     state: OfferLifecycleState,
     signal: OfferSignal,
 ) -> OfferTransition:
-    payload = cycle_kernel.apply_offer_signal(state=state.value, signal=signal.value)
+    payload = _signer_apply_offer_signal(state=state.value, signal=signal.value)
     return OfferTransition(
         old_state=OfferLifecycleState(str(payload["old_state"])),
         new_state=OfferLifecycleState(str(payload["new_state"])),

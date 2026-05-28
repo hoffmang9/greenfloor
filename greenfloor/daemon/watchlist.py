@@ -201,7 +201,7 @@ def _is_stale_pending_visibility_offer(
 
 
 def _is_dexie_offer_missing_error(error: Exception) -> bool:
-    from greenfloor.core.cycle_orchestration import is_dexie_offer_missing_error_text
+    from greenfloor.core.cycle import is_dexie_offer_missing_error_text
 
     return is_dexie_offer_missing_error_text(str(error))
 

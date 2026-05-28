@@ -13,18 +13,15 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
 from greenfloor.config.models import ProgramConfig, signer_offer_path_configured
-from greenfloor.core.cycle_market import (
+from greenfloor.core.cycle import (
     aggregate_two_sided_offer_counts,
     is_two_sided_market_mode,
-    merge_cancel_policy,
-    merge_strategy_execution,
     needs_inventory_fallback,
     one_sided_offer_counts_by_side,
-    record_phase_error,
     resolve_inventory_scan_source,
     resolve_tracked_sizes,
+    should_try_cat_inventory_fallback,
 )
-from greenfloor.core.cycle_orchestration import should_try_cat_inventory_fallback
 from greenfloor.core.inventory import compute_bucket_counts_from_coins
 from greenfloor.core.notifications import AlertState, evaluate_low_inventory_alert
 from greenfloor.core.strategy import evaluate_market
@@ -82,6 +79,19 @@ class MarketCycleResult:
     cancel_executed: int = 0
     immediate_requeue_requested: bool = False
     immediate_requeue_signals: list[str] = field(default_factory=list)
+
+    def record_phase_error(self) -> None:
+        self.cycle_errors += 1
+
+    def merge_strategy_execution(self, *, planned: int, executed: int) -> None:
+        self.strategy_planned += max(0, int(planned))
+        self.strategy_executed += max(0, int(executed))
+
+    def merge_cancel_policy(self, *, triggered: bool, planned: int, executed: int) -> None:
+        if triggered:
+            self.cancel_triggered = True
+        self.cancel_planned += max(0, int(planned))
+        self.cancel_executed += max(0, int(executed))
 
 
 # Backward-compatible alias for tests and internal imports.
@@ -245,8 +255,7 @@ def evaluate_and_execute_strategy(
         program=program,
         reservation_coordinator=reservation_coordinator,
     )
-    merge_strategy_execution(
-        result,
+    result.merge_strategy_execution(
         planned=int(offer_execution["planned_count"]),
         executed=int(offer_execution["executed_count"]),
     )
@@ -548,7 +557,7 @@ def process_single_market(
             )
         )
     except Exception as exc:
-        record_phase_error(result)
+        result.record_phase_error()
         _log_market_decision(
             market.market_id,
             "strategy_failed",
@@ -569,8 +578,7 @@ def process_single_market(
         dexie=dexie,
         store=store,
     )
-    merge_cancel_policy(
-        result,
+    result.merge_cancel_policy(
         triggered=bool(cancel_policy.get("triggered", False)),
         planned=int(cancel_policy.get("planned_count", 0)),
         executed=int(cancel_policy.get("executed_count", 0)),
@@ -616,7 +624,7 @@ def process_single_market(
             state_dir=state_dir,
         )
     except Exception as exc:
-        record_phase_error(result)
+        result.record_phase_error()
         _log_market_decision(
             market.market_id,
             "coin_ops_failed",

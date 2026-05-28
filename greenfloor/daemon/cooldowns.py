@@ -13,7 +13,9 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
-from greenfloor.core.cycle_managed import is_transient_managed_upstream_error_text
+from greenfloor.core.cycle import (
+    is_transient_managed_upstream_error_text,
+)
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
 _PENDING_VISIBILITY_REASON = "managed_offer_post_success_dexie_visibility_pending"
@@ -54,40 +56,8 @@ def _combine_input_coin_cap() -> int:
     return _env_int("GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP", 5, minimum=2)
 
 
-def _is_transient_managed_upstream_error_text(error_text: str) -> bool:
-    return is_transient_managed_upstream_error_text(error_text)
-
-
 class ManagedUpstreamTransientError(Exception):
     """Transient managed-offer or signer upstream failure (timeouts, HTTP 502/503/504)."""
-
-
-def classify_managed_transient_error(exc: BaseException) -> str | None:
-    """Classify managed-offer transient failures."""
-    from greenfloor.core.cycle_managed import classify_managed_transient_error as classify
-
-    return classify(exc)
-
-
-def is_managed_upstream_transient_error(exc: BaseException) -> bool:
-    """Typed upstream transients eligible for managed-post retry."""
-    from greenfloor.core.cycle_managed import is_managed_upstream_transient_error as is_upstream
-
-    return is_upstream(exc)
-
-
-def is_managed_worker_transient_error(exc: BaseException) -> bool:
-    """Worker failures that should trigger parallel post cooldown aggregation."""
-    from greenfloor.core.cycle_managed import is_managed_worker_transient_error as is_worker
-
-    return is_worker(exc)
-
-
-def is_parallel_dispatch_transient_error(exc: BaseException) -> bool:
-    """Parallel dispatch failures eligible for sequential fallback."""
-    from greenfloor.core.cycle_managed import is_parallel_dispatch_transient_error as is_parallel
-
-    return is_parallel(exc)
 
 
 def strategy_action_item_transient_upstream(item: StrategyActionItem) -> bool:
@@ -97,7 +67,7 @@ def strategy_action_item_transient_upstream(item: StrategyActionItem) -> bool:
 def transient_managed_upstream_error_from_text(
     error_text: str,
 ) -> ManagedUpstreamTransientError | None:
-    if _is_transient_managed_upstream_error_text(error_text):
+    if is_transient_managed_upstream_error_text(error_text):
         return ManagedUpstreamTransientError(error_text)
     return None
 

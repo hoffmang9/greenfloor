@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import greenfloor.daemon.strategy_dispatch as strategy_dispatch
-from greenfloor.core.cycle_dispatch import (
+from greenfloor.core.cycle import (
     expand_strategy_actions,
     single_input_preferred_skip_reason,
 )
