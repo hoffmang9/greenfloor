@@ -43,8 +43,8 @@ pub use execution::{
     SequentialActionRoute,
 };
 pub use reconcile::{
-    reconciled_state_from_dexie_status, resolve_missing_watched_offer_transition,
-    resolve_watched_offer_transition, taker_fields, CycleOfferTransition, TakerFields,
+    resolve_missing_watched_offer_transition, resolve_watched_offer_transition_from_signals,
+    unchanged_offer_transition, unsupported_venue_offer_transition, CycleOfferTransition,
 };
 pub use reseed::{
     plan_reseed_actions_from_gap, reseed_skip_reason_labels, ReseedGapPlan, ReseedSkipReason,

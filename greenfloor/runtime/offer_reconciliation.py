@@ -12,7 +12,9 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.core.offer_reconcile import (
     CycleOfferTransition,
     resolve_missing_watched_offer_transition,
-    resolve_watched_offer_transition as resolve_watched_offer_transition_from_signals,
+    resolve_watched_offer_transition_from_signals,
+    unchanged_offer_transition,
+    unsupported_venue_offer_transition,
 )
 from greenfloor.runtime.coin_ops.coins import safe_int
 from greenfloor.storage.sqlite import SqliteStore
@@ -220,17 +222,9 @@ def reconcile_offer_row(
     status: int | None = None
 
     if target_venue != "dexie":
-        transition = CycleOfferTransition(
-            old_state=current_state,
-            new_state="reconcile_unsupported_venue",
-            reason=f"unsupported_venue:{target_venue}",
-            signal_source="none",
-            signal=None,
-            changed=current_state != "reconcile_unsupported_venue",
-            immediate_requeue=False,
-            coinset_tx_ids=[],
-            coinset_confirmed_tx_ids=[],
-            coinset_mempool_tx_ids=[],
+        transition = unsupported_venue_offer_transition(
+            current_state=current_state,
+            venue=target_venue,
         )
         return ReconcileOfferRowOutcome(
             offer_id=offer_id,
@@ -255,31 +249,15 @@ def reconcile_offer_row(
         if int(getattr(exc, "code", 0)) == 404:
             transition = resolve_missing_watched_offer_transition(current_state=current_state)
         else:
-            transition = CycleOfferTransition(
-                old_state=current_state,
-                new_state=current_state,
+            transition = unchanged_offer_transition(
+                current_state=current_state,
                 reason=f"dexie_http_error:{exc.code}",
-                signal_source="none",
-                signal=None,
-                changed=False,
-                immediate_requeue=False,
-                coinset_tx_ids=[],
-                coinset_confirmed_tx_ids=[],
-                coinset_mempool_tx_ids=[],
             )
     except Exception as exc:
         status = None
-        transition = CycleOfferTransition(
-            old_state=current_state,
-            new_state=current_state,
+        transition = unchanged_offer_transition(
+            current_state=current_state,
             reason=f"dexie_lookup_error:{exc}",
-            signal_source="none",
-            signal=None,
-            changed=False,
-            immediate_requeue=False,
-            coinset_tx_ids=[],
-            coinset_confirmed_tx_ids=[],
-            coinset_mempool_tx_ids=[],
         )
 
     return ReconcileOfferRowOutcome(
