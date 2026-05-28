@@ -64,7 +64,6 @@ from greenfloor.daemon.testing.strategy_dispatch import (
     strategy_dispatch,
 )
 from greenfloor.daemon.testing.strategy_state import (
-    evaluate_reseed_candidates,
     inject_reseed_action_if_no_active_offers,
     strategy_config_from_market,
     strategy_state,
@@ -100,7 +99,6 @@ __all__ = [
     "detect_stale_open_offers_for_requeue",
     "drop_zero_repeat_strategy_actions",
     "enqueue_immediate_requeue_market",
-    "evaluate_reseed_candidates",
     "execute_cancel_policy",
     "execute_managed_action_with_retry",
     "execute_single_local_action",

@@ -4,6 +4,7 @@ pub mod lifecycle;
 pub mod managed;
 pub mod market;
 pub mod orchestration;
+pub mod reseed;
 pub mod strategy;
 
 pub use dispatch::{
@@ -40,7 +41,9 @@ pub use execution::{
     ParallelBatchPlan, ParallelQueueItem, ParallelReservationContext, ParallelSkipItem,
     SequentialActionRoute,
 };
+pub use reseed::{
+    plan_reseed_actions_from_gap, reseed_skip_reason_labels, ReseedGapPlan, ReseedSkipReason,
+};
 pub use strategy::{
-    evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction,
-    StrategyConfig,
+    evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction, StrategyConfig,
 };

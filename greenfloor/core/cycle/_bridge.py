@@ -70,6 +70,28 @@ def evaluate_two_sided_market_actions(
     )
 
 
+def reseed_skip_reason_labels() -> tuple[str, ...]:
+    return tuple(str(label) for label in _import_signer().reseed_skip_reason_labels())
+
+
+def plan_reseed_actions_from_gap(
+    *,
+    strategy_actions: list[PlannedAction],
+    active_counts_by_size: dict[int, int],
+    target_counts_by_size: dict[int, int],
+    strategy_config: Any,
+    xch_price_usd: float | None,
+) -> Any:
+    signer = _import_signer()
+    return signer.plan_reseed_actions_from_gap(
+        strategy_actions,
+        active_counts_by_size,
+        target_counts_by_size,
+        strategy_config,
+        xch_price_usd,
+    )
+
+
 def sequential_action_route(
     *,
     runtime_dry_run: bool,

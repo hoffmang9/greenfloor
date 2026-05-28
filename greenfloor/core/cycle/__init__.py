@@ -13,6 +13,7 @@ from greenfloor.core.cycle.policy import (
     is_managed_worker_transient_error,
     is_parallel_dispatch_transient_error,
     one_sided_offer_counts_by_side,
+    plan_reseed_actions_from_gap,
     resolve_inventory_scan_source,
     resolve_tracked_sizes,
     size_counts_to_signer,
@@ -51,6 +52,7 @@ from greenfloor.core.cycle.reexports import (
     should_use_market_slot_dispatch,
     single_input_preferred_skip_reason,
 )
+from greenfloor.core.cycle_reseed import ReseedGapPlan, ReseedSkipReason
 
 __all__ = [
     "MARKET_CYCLE_PHASES",
@@ -84,7 +86,10 @@ __all__ = [
     "needs_inventory_fallback",
     "next_disabled_market_log_deadline",
     "one_sided_offer_counts_by_side",
+    "plan_reseed_actions_from_gap",
     "parallel_max_workers",
+    "ReseedGapPlan",
+    "ReseedSkipReason",
     "plan_parallel_managed_dispatch",
     "record_stale_sweep_check",
     "reservation_release_status",

@@ -10,7 +10,6 @@ from greenfloor.core.strategy import (
     MarketState,
     PlannedAction,
     StrategyConfig,
-    evaluate_market,
 )
 from greenfloor.daemon.market_helpers import _market_pricing, _normalize_strategy_pair
 
@@ -131,16 +130,4 @@ def _evaluate_two_sided_market_actions(
         sell_state=sell_state,
         buy_config=_strategy_config_for_side(market=market, side="buy"),
         sell_config=_strategy_config_for_side(market=market, side="sell"),
-    )
-
-
-def evaluate_reseed_candidates(
-    *,
-    strategy_config: StrategyConfig,
-    xch_price_usd: float | None,
-) -> list[PlannedAction]:
-    """Evaluate seed actions for offer rehydration (empty bucket state)."""
-    return evaluate_market(
-        state=_strategy_state_from_bucket_counts({}, xch_price_usd=xch_price_usd),
-        config=strategy_config,
     )
