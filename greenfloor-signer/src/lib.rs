@@ -59,7 +59,7 @@ pub use cycle::{
     OfferTransition, ParallelSubmissionDecision, PlannedAction, PlannedActionInput,
     SpendableAssetProfile, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
     StrategyConfig, evaluate_two_sided_market_actions, expand_planned_actions,
-    plan_reseed_actions_from_gap, ReseedGapPlan, ReseedSkipReason,
+    plan_reseed_actions_from_gap, reseed_skip_reason_labels, ReseedGapPlan, ReseedSkipReason,
     filter_planned_actions_with_positive_repeat, plan_parallel_managed_dispatch,
     sequential_action_route, ParallelBatchPlan, ParallelQueueItem, ParallelReservationContext,
     ParallelSkipItem, SequentialActionRoute,

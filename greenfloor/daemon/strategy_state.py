@@ -10,7 +10,6 @@ from greenfloor.core.strategy import (
     MarketState,
     PlannedAction,
     StrategyConfig,
-    evaluate_market,
 )
 from greenfloor.daemon.market_helpers import _market_pricing, _normalize_strategy_pair
 

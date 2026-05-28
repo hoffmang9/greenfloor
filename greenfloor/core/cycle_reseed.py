@@ -9,7 +9,7 @@ from greenfloor.core.planned_action import PlannedAction
 
 
 class ReseedSkipReason(StrEnum):
-    """Labels are owned by the Rust cycle reseed kernel (`ReseedSkipReason::label`)."""
+    """Member values must match `reseed_skip_reason_labels()` from the Rust reseed kernel."""
 
     STRATEGY_ACTIONS_PRESENT = "strategy_actions_present"
     ACTIVE_OFFER_TARGETS_SATISFIED = "active_offer_targets_satisfied"
@@ -23,3 +23,7 @@ class ReseedGapPlan:
     actions: list[PlannedAction]
     skip_reason: ReseedSkipReason | None
     missing_by_size: dict[int, int]
+
+
+def python_reseed_skip_reason_labels() -> frozenset[str]:
+    return frozenset(member.value for member in ReseedSkipReason)

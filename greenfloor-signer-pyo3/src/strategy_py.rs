@@ -5,7 +5,7 @@ use pyo3::types::{PyDict, PyList};
 
 use signer_core::{
     evaluate_market, evaluate_two_sided_market_actions, plan_reseed_actions_from_gap,
-    MarketState, PlannedAction, StrategyConfig,
+    reseed_skip_reason_labels, MarketState, PlannedAction, StrategyConfig,
 };
 
 use crate::py_utils::{dict_to_i64_i64_map, planned_action_class, reseed_gap_plan_to_py};
@@ -176,9 +176,19 @@ fn plan_reseed_actions_from_gap_py(
     Python::attach(|py| Ok(reseed_gap_plan_to_py(py, &plan)?.into()))
 }
 
+#[pyfunction]
+#[pyo3(name = "reseed_skip_reason_labels")]
+fn reseed_skip_reason_labels_py() -> Vec<String> {
+    reseed_skip_reason_labels()
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+
 pub fn register_strategy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(evaluate_market_typed_py, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_two_sided_market_actions_py, m)?)?;
     m.add_function(wrap_pyfunction!(plan_reseed_actions_from_gap_py, m)?)?;
+    m.add_function(wrap_pyfunction!(reseed_skip_reason_labels_py, m)?)?;
     Ok(())
 }

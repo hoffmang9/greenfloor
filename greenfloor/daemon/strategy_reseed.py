@@ -22,10 +22,10 @@ from greenfloor.storage.sqlite import SqliteStore
 class _ReseedLogContext:
     strategy_config: StrategyConfig
     xch_price_usd: float | None
-    state_counts: dict
+    state_counts: dict[str, int]
     active_counts_by_size: dict[int, int]
     target_counts_by_size: dict[int, int]
-    active_unmapped_offer_ids: list
+    active_unmapped_offer_ids: int
 
 
 def _reseed_skip_log_extra(plan: ReseedGapPlan, ctx: _ReseedLogContext) -> dict:

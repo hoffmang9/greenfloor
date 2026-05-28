@@ -22,6 +22,17 @@ impl ReseedSkipReason {
     }
 }
 
+/// Stable label list for Python `ReseedSkipReason` parity tests and PyO3 FFI.
+pub fn reseed_skip_reason_labels() -> Vec<&'static str> {
+    vec![
+        ReseedSkipReason::StrategyActionsPresent.label(),
+        ReseedSkipReason::ActiveOfferTargetsSatisfied.label(),
+        ReseedSkipReason::NoSeedCandidates.label(),
+        ReseedSkipReason::MissingSizesNoSeedTemplate.label(),
+        ReseedSkipReason::ReseedZeroRepeatFiltered.label(),
+    ]
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReseedGapPlan {
     pub actions: Vec<PlannedAction>,
@@ -157,6 +168,14 @@ mod tests {
             offer_expiry_minutes: None,
             target_counts_by_size: None,
         }
+    }
+
+    #[test]
+    fn reseed_skip_reason_labels_are_unique_and_complete() {
+        let labels = reseed_skip_reason_labels();
+        assert_eq!(labels.len(), 5);
+        let unique: std::collections::BTreeSet<_> = labels.iter().copied().collect();
+        assert_eq!(unique.len(), labels.len());
     }
 
     #[test]

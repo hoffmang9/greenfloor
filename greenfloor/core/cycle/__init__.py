@@ -18,7 +18,6 @@ from greenfloor.core.cycle.policy import (
     resolve_tracked_sizes,
     size_counts_to_signer,
 )
-from greenfloor.core.cycle_reseed import ReseedGapPlan, ReseedSkipReason
 from greenfloor.core.cycle.reexports import (
     MARKET_CYCLE_PHASES,
     can_parallelize_managed_offers,
@@ -53,6 +52,7 @@ from greenfloor.core.cycle.reexports import (
     should_use_market_slot_dispatch,
     single_input_preferred_skip_reason,
 )
+from greenfloor.core.cycle_reseed import ReseedGapPlan, ReseedSkipReason
 
 __all__ = [
     "MARKET_CYCLE_PHASES",

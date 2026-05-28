@@ -41,7 +41,9 @@ pub use execution::{
     ParallelBatchPlan, ParallelQueueItem, ParallelReservationContext, ParallelSkipItem,
     SequentialActionRoute,
 };
-pub use reseed::{plan_reseed_actions_from_gap, ReseedGapPlan, ReseedSkipReason};
+pub use reseed::{
+    plan_reseed_actions_from_gap, reseed_skip_reason_labels, ReseedGapPlan, ReseedSkipReason,
+};
 pub use strategy::{
     evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction, StrategyConfig,
 };
