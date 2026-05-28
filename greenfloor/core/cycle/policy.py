@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from greenfloor.core.cycle_orchestration import StaleSweepProgress
-from greenfloor.core.cycle_reseed import ReseedGapPlan, reseed_gap_plan_from_signer
+from greenfloor.core.cycle_reseed import ReseedGapPlan
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.strategy_types import MarketState, StrategyConfig
 
@@ -175,12 +175,13 @@ def plan_reseed_actions_from_gap(
     strategy_config: StrategyConfig,
     xch_price_usd: float | None,
 ) -> ReseedGapPlan:
-    return reseed_gap_plan_from_signer(
-        bridge.plan_reseed_actions_from_gap(
-            strategy_actions=strategy_actions,
-            active_counts_by_size=active_counts_by_size,
-            target_counts_by_size=target_counts_by_size,
-            strategy_config=strategy_config,
-            xch_price_usd=xch_price_usd,
-        )
+    result = bridge.plan_reseed_actions_from_gap(
+        strategy_actions=strategy_actions,
+        active_counts_by_size=active_counts_by_size,
+        target_counts_by_size=target_counts_by_size,
+        strategy_config=strategy_config,
+        xch_price_usd=xch_price_usd,
     )
+    if not isinstance(result, ReseedGapPlan):
+        raise TypeError("plan_reseed_actions_from_gap returned non-ReseedGapPlan result")
+    return result

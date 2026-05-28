@@ -17,6 +17,7 @@ static STALE_SWEEP_CANDIDATE_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static STALE_SWEEP_HIT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static STALE_SWEEP_PROGRESS_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static RESEED_GAP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static RESEED_SKIP_REASON_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 
 const ORCHESTRATION_MODULE: &str = "greenfloor.core.cycle_orchestration";
 const CYCLE_RESEED_MODULE: &str = "greenfloor.core.cycle_reseed";
@@ -70,6 +71,14 @@ pub fn reseed_gap_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>
     cached_class(py, &RESEED_GAP_PLAN_CLS, CYCLE_RESEED_MODULE, "ReseedGapPlan")
 }
 
+pub fn reseed_skip_reason_to_py<'py>(
+    py: Python<'py>,
+    reason: signer_core::ReseedSkipReason,
+) -> PyResult<Bound<'py, PyAny>> {
+    let cls = cached_class(py, &RESEED_SKIP_REASON_CLS, CYCLE_RESEED_MODULE, "ReseedSkipReason")?;
+    cls.call1((reason.label(),))
+}
+
 pub fn reseed_gap_plan_to_py<'py>(
     py: Python<'py>,
     plan: &signer_core::ReseedGapPlan,
@@ -81,7 +90,7 @@ pub fn reseed_gap_plan_to_py<'py>(
         crate::strategy_py::planned_actions_to_py_list(py, &plan.actions)?,
     )?;
     match plan.skip_reason {
-        Some(reason) => kwargs.set_item("skip_reason", reason.label())?,
+        Some(reason) => kwargs.set_item("skip_reason", reseed_skip_reason_to_py(py, reason)?)?,
         None => kwargs.set_item("skip_reason", py.None())?,
     }
     kwargs.set_item("missing_by_size", i64_i64_map_to_py_dict(py, &plan.missing_by_size)?)?;

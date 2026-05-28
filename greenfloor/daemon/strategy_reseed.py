@@ -57,11 +57,7 @@ def _reseed_skip_log_extra(plan: ReseedGapPlan, ctx: _ReseedLogContext) -> dict:
             return {"missing_by_size": plan.missing_by_size}
         case None:
             if plan.actions:
-                return {
-                    "active_counts_by_size": ctx.active_counts_by_size,
-                    "target_counts_by_size": ctx.target_counts_by_size,
-                    "missing_by_size": plan.missing_by_size,
-                }
+                return {"missing_by_size": plan.missing_by_size}
     return {}
 
 

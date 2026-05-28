@@ -5,6 +5,7 @@
 - **`plan_reseed_actions_from_gap` in Rust:** `greenfloor-signer/src/cycle/strategy.rs` — offer-size-gap reseed injection (skip reasons, per-size repeat from active vs target counts, seed templates from empty-state planner).
 - **PyO3 + core surface:** `plan_reseed_actions_from_gap` via `strategy_py.rs`; `greenfloor/core/reseed.py` (`ReseedGapPlan` dataclass).
 - **Python IO glue:** `greenfloor/daemon/strategy_reseed.py` retains SQLite active-count fetch and audit logging; pure merge logic delegated to Rust.
+- **Follow-up:** split `cycle/reseed.rs`; PyO3 emits `ReseedSkipReason` enum members; policy returns typed plan directly; removed `evaluate_reseed_candidates` test shim.
 - **Migration status:** step 8 complete for reseed; `strategy_dispatch/` shrink and `strategy_config_from_market` extraction remain toward ~400-line exit criteria.
 
 ## 2026-05-27 (Review follow-up — enum outcomes + market dispatch extract)
