@@ -6,7 +6,7 @@ use signer_core::{
     unchanged_offer_transition, unsupported_venue_offer_transition, CycleOfferTransition,
 };
 
-use crate::py_utils::cycle_offer_transition_class;
+use crate::py_utils::{cycle_offer_transition_class, to_py_err};
 
 pub fn cycle_offer_transition_to_py<'py>(
     py: Python<'py>,
@@ -38,7 +38,7 @@ fn resolve_missing_watched_offer_transition_py(
     py: Python<'_>,
     current_state: &str,
 ) -> PyResult<Py<PyAny>> {
-    let transition = resolve_missing_watched_offer_transition(current_state);
+    let transition = resolve_missing_watched_offer_transition(current_state).map_err(to_py_err)?;
     Ok(cycle_offer_transition_to_py(py, &transition)?.into())
 }
 
@@ -58,14 +58,15 @@ fn resolve_watched_offer_transition_from_signals_py(
         coinset_tx_ids,
         coinset_confirmed_tx_ids,
         coinset_mempool_tx_ids,
-    );
+    )
+    .map_err(to_py_err)?;
     Ok(cycle_offer_transition_to_py(py, &transition)?.into())
 }
 
 #[pyfunction]
 #[pyo3(name = "unchanged_offer_transition")]
 fn unchanged_offer_transition_py(py: Python<'_>, current_state: &str, reason: &str) -> PyResult<Py<PyAny>> {
-    let transition = unchanged_offer_transition(current_state, reason);
+    let transition = unchanged_offer_transition(current_state, reason).map_err(to_py_err)?;
     Ok(cycle_offer_transition_to_py(py, &transition)?.into())
 }
 
@@ -76,7 +77,7 @@ fn unsupported_venue_offer_transition_py(
     current_state: &str,
     venue: &str,
 ) -> PyResult<Py<PyAny>> {
-    let transition = unsupported_venue_offer_transition(current_state, venue);
+    let transition = unsupported_venue_offer_transition(current_state, venue).map_err(to_py_err)?;
     Ok(cycle_offer_transition_to_py(py, &transition)?.into())
 }
 

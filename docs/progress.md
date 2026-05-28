@@ -3,7 +3,7 @@
 ## 2026-05-27 (Rust offer reconciliation kernel — step 9)
 
 - **`greenfloor-signer/src/cycle/reconcile.rs`:** Coinset-first watched-offer transition kernel — Dexie status fallback, missing-offer (404) handling, taker field shaping, and `CycleOfferTransition` outputs.
-- **PyO3 + core surface:** typed `CycleOfferTransition` via `reconcile_py.rs` + `py_utils.rs`; policy in `greenfloor/core/offer_reconcile.py`.
+- **PyO3 + core surface:** typed `CycleOfferTransition` via `reconcile_py.rs` + `py_utils.rs`; policy in `greenfloor/core/offer_reconcile/`.
 - **Python IO glue:** `greenfloor/runtime/offer_reconciliation.py` keeps Dexie fetch, SQLite tx-signal lookup (`_coinset_signal_lists`), audit persistence, and batch reconcile loops only.
 - **Tests:** Rust unit tests in `reconcile.rs`; Python wiring in `tests/test_offer_reconcile_kernel.py`; existing manager/daemon reconcile integration tests remain parity gates.
 - **Migration status:** step 9 complete for offer lifecycle reconciliation policy.

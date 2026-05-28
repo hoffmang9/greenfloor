@@ -8,24 +8,36 @@ const TAKER_NONE: &str = "none";
 const STATE_UNSUPPORTED_VENUE: &str = "reconcile_unsupported_venue";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReconcileStateError {
+    state: String,
+}
+
+impl std::fmt::Display for ReconcileStateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unknown offer reconcile state: {}", self.state)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ReconcileState {
     Lifecycle(OfferLifecycleState),
     Cancelled,
     UnsupportedVenue,
-    Other(String),
 }
 
 impl ReconcileState {
-    fn parse(raw: &str) -> Self {
-        match raw {
-            "open" => Self::Lifecycle(OfferLifecycleState::Open),
-            "mempool_observed" => Self::Lifecycle(OfferLifecycleState::MempoolObserved),
-            "tx_block_confirmed" => Self::Lifecycle(OfferLifecycleState::TxBlockConfirmed),
-            "refresh_due" => Self::Lifecycle(OfferLifecycleState::RefreshDue),
-            "expired" => Self::Lifecycle(OfferLifecycleState::Expired),
-            "cancelled" => Self::Cancelled,
-            STATE_UNSUPPORTED_VENUE => Self::UnsupportedVenue,
-            other => Self::Other(other.to_string()),
+    fn parse(raw: &str) -> Result<Self, ReconcileStateError> {
+        match raw.trim() {
+            "open" => Ok(Self::Lifecycle(OfferLifecycleState::Open)),
+            "mempool_observed" => Ok(Self::Lifecycle(OfferLifecycleState::MempoolObserved)),
+            "tx_block_confirmed" => Ok(Self::Lifecycle(OfferLifecycleState::TxBlockConfirmed)),
+            "refresh_due" => Ok(Self::Lifecycle(OfferLifecycleState::RefreshDue)),
+            "expired" => Ok(Self::Lifecycle(OfferLifecycleState::Expired)),
+            "cancelled" => Ok(Self::Cancelled),
+            STATE_UNSUPPORTED_VENUE => Ok(Self::UnsupportedVenue),
+            other => Err(ReconcileStateError {
+                state: other.to_string(),
+            }),
         }
     }
 
@@ -34,7 +46,6 @@ impl ReconcileState {
             Self::Lifecycle(state) => Cow::Borrowed(state.as_str()),
             Self::Cancelled => Cow::Borrowed("cancelled"),
             Self::UnsupportedVenue => Cow::Borrowed(STATE_UNSUPPORTED_VENUE),
-            Self::Other(value) => Cow::Borrowed(value),
         }
     }
 
@@ -167,6 +178,8 @@ fn resolve_watched_offer_decision(
     coinset_confirmed_tx_ids: &[String],
     coinset_mempool_tx_ids: &[String],
 ) -> ReconcileDecision {
+    // Coinset confirmed/mempool paths apply lifecycle signals from `Open`, not from
+    // `current_state`. Terminal-state guard on mempool preserves completed offers.
     if !coinset_confirmed_tx_ids.is_empty()
         && status != Some(3)
         && !current_state.is_cancelled()
@@ -263,11 +276,14 @@ fn signal_for_state_change(
     }
 }
 
-pub fn unchanged_offer_transition(current_state: &str, reason: impl Into<String>) -> CycleOfferTransition {
+pub fn unchanged_offer_transition(
+    current_state: &str,
+    reason: impl Into<String>,
+) -> Result<CycleOfferTransition, ReconcileStateError> {
     let (coinset_tx_ids, coinset_confirmed_tx_ids, coinset_mempool_tx_ids) = empty_coinset_lists();
-    build_transition(TransitionBuildArgs {
+    Ok(build_transition(TransitionBuildArgs {
         current_state,
-        new_state: ReconcileState::parse(current_state),
+        new_state: ReconcileState::parse(current_state)?,
         reason: Cow::Owned(reason.into()),
         signal_source: "none",
         signal: None,
@@ -277,15 +293,16 @@ pub fn unchanged_offer_transition(current_state: &str, reason: impl Into<String>
         coinset_tx_ids,
         coinset_confirmed_tx_ids,
         coinset_mempool_tx_ids,
-    })
+    }))
 }
 
 pub fn unsupported_venue_offer_transition(
     current_state: &str,
     venue: &str,
-) -> CycleOfferTransition {
+) -> Result<CycleOfferTransition, ReconcileStateError> {
+    ReconcileState::parse(current_state)?;
     let (coinset_tx_ids, coinset_confirmed_tx_ids, coinset_mempool_tx_ids) = empty_coinset_lists();
-    build_transition(TransitionBuildArgs {
+    Ok(build_transition(TransitionBuildArgs {
         current_state,
         new_state: ReconcileState::UnsupportedVenue,
         reason: Cow::Owned(format!("unsupported_venue:{venue}")),
@@ -297,14 +314,16 @@ pub fn unsupported_venue_offer_transition(
         coinset_tx_ids,
         coinset_confirmed_tx_ids,
         coinset_mempool_tx_ids,
-    })
+    }))
 }
 
-pub fn resolve_missing_watched_offer_transition(current_state: &str) -> CycleOfferTransition {
-    let parsed = ReconcileState::parse(current_state);
+pub fn resolve_missing_watched_offer_transition(
+    current_state: &str,
+) -> Result<CycleOfferTransition, ReconcileStateError> {
+    let parsed = ReconcileState::parse(current_state)?;
     let (coinset_tx_ids, coinset_confirmed_tx_ids, coinset_mempool_tx_ids) = empty_coinset_lists();
     if parsed.is_terminal() {
-        return build_transition(TransitionBuildArgs {
+        return Ok(build_transition(TransitionBuildArgs {
             current_state,
             new_state: parsed,
             reason: Cow::Borrowed("dexie_offer_not_found_preserved_terminal"),
@@ -316,10 +335,10 @@ pub fn resolve_missing_watched_offer_transition(current_state: &str) -> CycleOff
             coinset_tx_ids,
             coinset_confirmed_tx_ids,
             coinset_mempool_tx_ids,
-        });
+        }));
     }
     let transition = apply_offer_signal(OfferLifecycleState::Open, OfferSignal::Expired);
-    build_transition(TransitionBuildArgs {
+    Ok(build_transition(TransitionBuildArgs {
         current_state,
         new_state: ReconcileState::Lifecycle(transition.new_state),
         reason: Cow::Borrowed("dexie_offer_not_found"),
@@ -331,7 +350,7 @@ pub fn resolve_missing_watched_offer_transition(current_state: &str) -> CycleOff
         coinset_tx_ids,
         coinset_confirmed_tx_ids,
         coinset_mempool_tx_ids,
-    })
+    }))
 }
 
 pub fn resolve_watched_offer_transition_from_signals(
@@ -340,8 +359,8 @@ pub fn resolve_watched_offer_transition_from_signals(
     coinset_tx_ids: Vec<String>,
     coinset_confirmed_tx_ids: Vec<String>,
     coinset_mempool_tx_ids: Vec<String>,
-) -> CycleOfferTransition {
-    let parsed = ReconcileState::parse(current_state);
+) -> Result<CycleOfferTransition, ReconcileStateError> {
+    let parsed = ReconcileState::parse(current_state)?;
     let decision = resolve_watched_offer_decision(
         &parsed,
         status,
@@ -349,13 +368,13 @@ pub fn resolve_watched_offer_transition_from_signals(
         &coinset_confirmed_tx_ids,
         &coinset_mempool_tx_ids,
     );
-    build_transition_from_decision(
+    Ok(build_transition_from_decision(
         current_state,
         decision,
         coinset_tx_ids,
         coinset_confirmed_tx_ids,
         coinset_mempool_tx_ids,
-    )
+    ))
 }
 
 #[cfg(test)]
@@ -370,7 +389,8 @@ mod tests {
             vec!["c".repeat(64)],
             vec!["c".repeat(64)],
             vec![],
-        );
+        )
+        .expect("valid reconcile state");
         assert_eq!(transition.new_state, "tx_block_confirmed");
         assert_eq!(transition.reason, "coinset_tx_block_webhook_confirmed");
         assert_eq!(transition.signal_source, "coinset_webhook");
@@ -387,7 +407,8 @@ mod tests {
             vec!["d".repeat(64)],
             vec![],
             vec!["d".repeat(64)],
-        );
+        )
+        .expect("valid reconcile state");
         assert_eq!(transition.new_state, "mempool_observed");
         assert_eq!(transition.reason, "coinset_mempool_observed");
         assert_eq!(transition.signal_source, "coinset_mempool");
@@ -402,7 +423,8 @@ mod tests {
             vec!["e".repeat(64)],
             vec![],
             vec![],
-        );
+        )
+        .expect("valid reconcile state");
         assert_eq!(transition.new_state, "open");
         assert_eq!(transition.signal_source, "dexie_status_fallback");
         assert!(!transition.changed);
@@ -410,8 +432,8 @@ mod tests {
 
     #[test]
     fn missing_status_without_tx_ids() {
-        let transition =
-            resolve_watched_offer_transition_from_signals("open", None, vec![], vec![], vec![]);
+        let transition = resolve_watched_offer_transition_from_signals("open", None, vec![], vec![], vec![])
+            .expect("valid reconcile state");
         assert_eq!(transition.new_state, "open");
         assert_eq!(transition.reason, "missing_status");
         assert_eq!(transition.signal_source, "none");
@@ -425,7 +447,8 @@ mod tests {
             vec!["f".repeat(64)],
             vec![],
             vec![],
-        );
+        )
+        .expect("valid reconcile state");
         assert_eq!(transition.new_state, "open");
         assert_eq!(transition.reason, "coinset_signal_unavailable_for_offer");
         assert_eq!(transition.signal_source, "none");
@@ -434,7 +457,8 @@ mod tests {
     #[test]
     fn dexie_status_fallback_when_no_coinset_tx_ids() {
         let transition =
-            resolve_watched_offer_transition_from_signals("open", Some(4), vec![], vec![], vec![]);
+            resolve_watched_offer_transition_from_signals("open", Some(4), vec![], vec![], vec![])
+                .expect("valid reconcile state");
         assert_eq!(transition.new_state, "tx_block_confirmed");
         assert_eq!(transition.signal_source, "dexie_status_fallback");
         assert_eq!(transition.taker_diagnostic, "dexie_status_pattern_fallback");
@@ -443,14 +467,15 @@ mod tests {
     #[test]
     fn dexie_cancelled_status_fallback() {
         let transition =
-            resolve_watched_offer_transition_from_signals("open", Some(3), vec![], vec![], vec![]);
+            resolve_watched_offer_transition_from_signals("open", Some(3), vec![], vec![], vec![])
+                .expect("valid reconcile state");
         assert_eq!(transition.new_state, "cancelled");
         assert_eq!(transition.signal_source, "dexie_status_fallback");
     }
 
     #[test]
     fn missing_watched_offer_expires_open_offer() {
-        let transition = resolve_missing_watched_offer_transition("open");
+        let transition = resolve_missing_watched_offer_transition("open").expect("valid reconcile state");
         assert_eq!(transition.new_state, "expired");
         assert!(transition.changed);
         assert!(transition.immediate_requeue);
@@ -459,14 +484,16 @@ mod tests {
 
     #[test]
     fn missing_watched_offer_preserves_terminal_state() {
-        let transition = resolve_missing_watched_offer_transition("tx_block_confirmed");
+        let transition =
+            resolve_missing_watched_offer_transition("tx_block_confirmed").expect("valid reconcile state");
         assert_eq!(transition.new_state, "tx_block_confirmed");
         assert!(!transition.changed);
     }
 
     #[test]
     fn unchanged_offer_transition_factory() {
-        let transition = unchanged_offer_transition("open", "dexie_lookup_error:boom");
+        let transition =
+            unchanged_offer_transition("open", "dexie_lookup_error:boom").expect("valid reconcile state");
         assert_eq!(transition.old_state, "open");
         assert_eq!(transition.new_state, "open");
         assert!(!transition.changed);
@@ -475,8 +502,22 @@ mod tests {
 
     #[test]
     fn unsupported_venue_offer_transition_factory() {
-        let transition = unsupported_venue_offer_transition("open", "splash");
+        let transition =
+            unsupported_venue_offer_transition("open", "splash").expect("valid reconcile state");
         assert_eq!(transition.new_state, "reconcile_unsupported_venue");
         assert!(transition.changed);
+    }
+
+    #[test]
+    fn unknown_reconcile_state_is_rejected() {
+        let err = resolve_watched_offer_transition_from_signals(
+            "not_a_real_state",
+            None,
+            vec![],
+            vec![],
+            vec![],
+        )
+        .expect_err("unknown state should fail");
+        assert_eq!(err.to_string(), "unknown offer reconcile state: not_a_real_state");
     }
 }

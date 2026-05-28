@@ -22,7 +22,6 @@ from greenfloor.storage.sqlite import SqliteStore
 OFFER_LIFECYCLE_TRANSITION_EVENT = "offer_lifecycle_transition"
 
 __all__ = [
-    "CycleOfferTransition",
     "OFFER_LIFECYCLE_TRANSITION_EVENT",
     "ReconcileBatchResult",
     "ReconcileOfferResult",
@@ -33,7 +32,6 @@ __all__ = [
     "reconcile_offer_row",
     "reconcile_offers",
     "reconcile_result_from_transition",
-    "resolve_missing_watched_offer_transition",
     "resolve_watched_offer_transition",
 ]
 
@@ -126,7 +124,6 @@ def reconcile_result_from_transition(
     transition: CycleOfferTransition,
     last_seen_status: int | None,
 ) -> ReconcileOfferResult:
-    _ = last_seen_status
     return ReconcileOfferResult(
         offer_id=offer_id,
         market_id=market_id,

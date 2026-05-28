@@ -1,3 +1,5 @@
+import pytest
+
 from greenfloor.core.offer_reconcile import (
     CycleOfferTransition,
     resolve_missing_watched_offer_transition,
@@ -134,3 +136,14 @@ def test_unsupported_venue_offer_transition_factory() -> None:
     transition = unsupported_venue_offer_transition(current_state="open", venue="splash")
     assert transition.new_state == "reconcile_unsupported_venue"
     assert transition.changed
+
+
+def test_resolve_watched_offer_transition_rejects_unknown_state() -> None:
+    with pytest.raises(ValueError, match="unknown offer reconcile state: not_a_real_state"):
+        resolve_watched_offer_transition_from_signals(
+            current_state="not_a_real_state",
+            status=None,
+            coinset_tx_ids=[],
+            coinset_confirmed_tx_ids=[],
+            coinset_mempool_tx_ids=[],
+        )
