@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
@@ -14,7 +13,7 @@ from greenfloor.daemon.market_cycle.result import MarketCycleResult
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.daemon.strategy_dispatch import execute_strategy_actions
+from greenfloor.daemon.strategy_dispatch import StrategyActionResult, execute_strategy_actions
 from greenfloor.storage.sqlite import SqliteStore
 
 
@@ -30,7 +29,7 @@ def execute_strategy_for_market(
     now: datetime,
     result: MarketCycleResult,
     reservation_coordinator: AssetReservationCoordinator | None = None,
-) -> dict[str, Any]:
+) -> StrategyActionResult:
     store.add_audit_event(
         "strategy_actions_planned",
         {
@@ -68,28 +67,28 @@ def execute_strategy_for_market(
         reservation_coordinator=reservation_coordinator,
     )
     result.merge_strategy_execution(
-        planned=int(offer_execution["planned_count"]),
-        executed=int(offer_execution["executed_count"]),
+        planned=offer_execution.planned_count,
+        executed=offer_execution.executed_count,
     )
     _log_market_decision(
         market.market_id,
         "strategy_executed",
-        planned_count=offer_execution["planned_count"],
-        executed_count=offer_execution["executed_count"],
+        planned_count=offer_execution.planned_count,
+        executed_count=offer_execution.executed_count,
     )
     store.add_audit_event(
         "strategy_offer_execution",
         {
             "market_id": market.market_id,
-            "planned_count": offer_execution["planned_count"],
-            "executed_count": offer_execution["executed_count"],
-            "items": offer_execution["items"],
+            "planned_count": offer_execution.planned_count,
+            "executed_count": offer_execution.executed_count,
+            "items": offer_execution.items,
         },
         market_id=market.market_id,
     )
     health_payload = _managed_offer_market_health_payload(
         market_id=str(market.market_id),
-        current_items=list(offer_execution["items"]),
+        current_items=list(offer_execution.items),
         now=now,
     )
     store.add_audit_event(

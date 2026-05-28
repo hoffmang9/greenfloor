@@ -10,6 +10,18 @@ from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
+# Re-export for callers that build dispatch results.
+from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult, strategy_action_result
+
+__all__ = [
+    "StrategyActionResult",
+    "action_item",
+    "action_item_from_managed_outcome",
+    "managed_skip_item",
+    "parallel_offer_worker_error_item",
+    "strategy_action_result",
+]
+
 
 def action_item(
     action: PlannedAction,
@@ -58,16 +70,3 @@ def action_item_from_managed_outcome(
 
 def managed_skip_item(*, action: PlannedAction, reason: str) -> StrategyActionItem:
     return action_item(action, status="skipped", reason=reason, offer_id=None)
-
-
-def strategy_action_result(
-    *,
-    planned_count: int,
-    executed_count: int,
-    items: list[StrategyActionItem],
-) -> dict[str, Any]:
-    return {
-        "planned_count": planned_count,
-        "executed_count": executed_count,
-        "items": [item.to_audit_dict() for item in items],
-    }

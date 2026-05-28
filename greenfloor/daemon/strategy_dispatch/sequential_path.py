@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig, managed_offer_execution_backend
 from greenfloor.core.cycle import is_managed_worker_transient_error, sequential_action_route
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.market_logging import _log_offer_action_timing
-from greenfloor.daemon.strategy_dispatch.items import action_item, strategy_action_result
+from greenfloor.daemon.strategy_dispatch.items import action_item
+from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
 from greenfloor.daemon.strategy_dispatch.runtime import StrategyDispatchHooks
 from greenfloor.storage.sqlite import SqliteStore
 
@@ -28,7 +27,7 @@ def execute_actions_sequential(
     store: SqliteStore,
     keyring_yaml_path: str,
     hooks: StrategyDispatchHooks,
-) -> dict[str, Any]:
+) -> StrategyActionResult:
     items = []
     executed_count = 0
     for action in expanded_actions:
@@ -88,8 +87,8 @@ def execute_actions_sequential(
             executed_count += 1
         _log_offer_action_timing(str(market.market_id), item)
         items.append(item)
-    return strategy_action_result(
+    return StrategyActionResult(
         planned_count=len(expanded_actions),
         executed_count=executed_count,
-        items=items,
+        action_items=items,
     )

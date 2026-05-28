@@ -20,6 +20,7 @@ from greenfloor.daemon.market_helpers import (
     _normalize_offer_side,
 )
 from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision
+from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
 from greenfloor.daemon.watchlist import _watched_coin_ids_for_market
 from greenfloor.runtime.coin_ops.daemon_execution import execute_managed_coin_op_plans
 from greenfloor.storage.sqlite import SqliteStore
@@ -57,9 +58,14 @@ def _effective_sell_bucket_counts_for_coin_ops(
     return effective_counts
 
 
-def _executed_sell_offer_counts_by_size(offer_execution: dict[str, Any]) -> dict[int, int]:
+def _executed_sell_offer_counts_by_size(
+    offer_execution: dict[str, Any] | StrategyActionResult,
+) -> dict[int, int]:
     counts: dict[int, int] = {}
-    items = offer_execution.get("items", [])
+    if isinstance(offer_execution, StrategyActionResult):
+        items = offer_execution.items
+    else:
+        items = offer_execution.get("items", [])
     if not isinstance(items, list):
         return counts
     for item in items:

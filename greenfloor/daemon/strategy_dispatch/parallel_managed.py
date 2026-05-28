@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import concurrent.futures
 import time
-from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
@@ -27,12 +26,12 @@ from greenfloor.daemon.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.strategy_dispatch.items import (
     managed_skip_item,
     parallel_offer_worker_error_item,
-    strategy_action_result,
 )
 from greenfloor.daemon.strategy_dispatch.reservation_helpers import (
     parallel_reservation_context,
     reservation_wallet_id,
 )
+from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
 from greenfloor.daemon.strategy_dispatch.runtime import StrategyDispatchHooks
 
 
@@ -213,7 +212,7 @@ def execute_actions_parallel(
     dexie: DexieAdapter,
     reservation_coordinator: AssetReservationCoordinator,
     hooks: StrategyDispatchHooks,
-) -> dict[str, Any]:
+) -> StrategyActionResult:
     items: list[StrategyActionItem] = []
     executed_count = 0
     resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id = (
@@ -265,8 +264,8 @@ def execute_actions_parallel(
         executed_count += queued_executed
         items.extend(queued_items)
 
-    return strategy_action_result(
+    return StrategyActionResult(
         planned_count=len(expanded_actions),
         executed_count=executed_count,
-        items=items,
+        action_items=items,
     )

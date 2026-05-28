@@ -14,6 +14,7 @@ from greenfloor.config.models import (
     VaultWalletKeyConfig,
 )
 from greenfloor.core.strategy import PlannedAction
+from greenfloor.daemon.strategy_dispatch.results import StrategyActionResult
 from greenfloor.daemon.strategy_dispatch.runtime import hooks_from_module
 from greenfloor.daemon.testing import (
     expand_planned_actions,
@@ -33,10 +34,10 @@ def execute_local_strategy_actions(
     publish_venue: str = "dexie",
     keyring_yaml_path: str = "",
     **_: Any,
-) -> dict[str, Any]:
+) -> StrategyActionResult:
     expanded = expand_planned_actions(strategy_actions)
     hooks = hooks_from_module()
-    items: list[dict[str, Any]] = []
+    action_items = []
     executed_count = 0
     for action in expanded:
         item = hooks.local_action(
@@ -52,12 +53,12 @@ def execute_local_strategy_actions(
         )
         if item.is_executed:
             executed_count += 1
-        items.append(item.to_audit_dict())
-    return {
-        "planned_count": len(expanded),
-        "executed_count": executed_count,
-        "items": items,
-    }
+        action_items.append(item)
+    return StrategyActionResult(
+        planned_count=len(expanded),
+        executed_count=executed_count,
+        action_items=action_items,
+    )
 
 
 def signer_program_config(**overrides: Any) -> ProgramConfig:
