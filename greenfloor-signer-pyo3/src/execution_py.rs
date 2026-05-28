@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -10,38 +8,47 @@ use signer_core::{
     ParallelSubmissionEntry, SequentialActionRoute,
 };
 
-use crate::py_utils::{extract_spendable_profiles, i64_i64_map_to_py_dict, string_i64_map_to_py_dict};
+use crate::py_utils::{
+    extract_spendable_profiles, parallel_batch_plan_class, parallel_queue_item_class,
+    parallel_skip_item_class, string_i64_map_from_py_dict, string_i64_map_to_py_dict,
+};
 use crate::strategy_py::{planned_action_from_py, planned_actions_to_py_list};
 
-fn parallel_batch_plan_to_py_dict<'py>(
+fn parallel_batch_plan_to_py<'py>(
     py: Python<'py>,
     plan: &ParallelBatchPlan,
-) -> PyResult<Bound<'py, PyDict>> {
-    let result = PyDict::new(py);
+) -> PyResult<Bound<'py, PyAny>> {
+    let skip_item_cls = parallel_skip_item_class(py)?;
+    let queue_item_cls = parallel_queue_item_class(py)?;
+    let batch_plan_cls = parallel_batch_plan_class(py)?;
+
     let skip_items = PyList::empty(py);
     for skip in &plan.skip_items {
-        let item = PyDict::new(py);
-        item.set_item("submit_index", skip.submit_index)?;
-        item.set_item("reason", &skip.reason)?;
-        skip_items.append(item)?;
+        let kwargs = PyDict::new(py);
+        kwargs.set_item("submit_index", skip.submit_index)?;
+        kwargs.set_item("reason", &skip.reason)?;
+        skip_items.append(skip_item_cls.call((), Some(&kwargs))?)?;
     }
+
     let queue = PyList::empty(py);
     for entry in &plan.queue {
-        let item = PyDict::new(py);
-        item.set_item("submit_index", entry.submit_index)?;
-        item.set_item(
+        let kwargs = PyDict::new(py);
+        kwargs.set_item("submit_index", entry.submit_index)?;
+        kwargs.set_item(
             "requested_amounts",
             string_i64_map_to_py_dict(py, &entry.requested_amounts)?,
         )?;
-        item.set_item(
+        kwargs.set_item(
             "available_amounts",
             string_i64_map_to_py_dict(py, &entry.available_amounts)?,
         )?;
-        queue.append(item)?;
+        queue.append(queue_item_cls.call((), Some(&kwargs))?)?;
     }
-    result.set_item("skip_items", skip_items)?;
-    result.set_item("queue", queue)?;
-    Ok(result)
+
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("skip_items", skip_items)?;
+    kwargs.set_item("queue", queue)?;
+    batch_plan_cls.call((), Some(&kwargs))
 }
 
 #[pyfunction]
@@ -79,18 +86,14 @@ fn plan_parallel_submission_batch_py(entries: &Bound<'_, PyAny>) -> PyResult<Py<
             .get_item("spendable_profiles")?
             .ok_or_else(|| PyValueError::new_err("spendable_profiles required"))?;
         let profiles = profiles_any.downcast::<PyDict>()?;
-        let mut requested_amounts = BTreeMap::new();
-        for (asset_id, amount) in requested.iter() {
-            requested_amounts.insert(asset_id.extract::<String>()?, amount.extract::<i64>()?);
-        }
         rust_entries.push(ParallelSubmissionEntry {
             submit_index,
-            requested_amounts,
+            requested_amounts: string_i64_map_from_py_dict(requested)?,
             spendable_profiles: extract_spendable_profiles(profiles)?,
         });
     }
     let plan = plan_parallel_submission_batch(&rust_entries);
-    Python::attach(|py| Ok(parallel_batch_plan_to_py_dict(py, &plan)?.into()))
+    Python::attach(|py| Ok(parallel_batch_plan_to_py(py, &plan)?.into()))
 }
 
 #[pyfunction]

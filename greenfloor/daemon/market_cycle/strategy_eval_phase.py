@@ -12,7 +12,9 @@ from greenfloor.core.cycle import (
     one_sided_offer_counts_by_side,
     resolve_tracked_sizes,
 )
-from greenfloor.core.strategy import PlannedAction, evaluate_market
+from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.core.planned_action import PlannedAction
+from greenfloor.core.strategy import evaluate_market
 from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.strategy_reseed import _inject_reseed_action_if_no_active_offers
 from greenfloor.daemon.strategy_state import (
@@ -28,7 +30,9 @@ from greenfloor.daemon.watchlist import (
 from greenfloor.storage.sqlite import SqliteStore
 
 
-def resolve_tracked_sizes_for_market(*, market: Any, strategy_config: Any) -> list[int]:
+def resolve_tracked_sizes_for_market(
+    *, market: MarketConfig, strategy_config: Any
+) -> list[int]:
     ladder_sizes = [
         int(getattr(entry, "size_base_units", 0))
         for side_entries in (getattr(market, "ladders", {}) or {}).values()
@@ -42,7 +46,7 @@ def resolve_tracked_sizes_for_market(*, market: Any, strategy_config: Any) -> li
 
 def evaluate_strategy_for_market(
     *,
-    market: Any,
+    market: MarketConfig,
     store: SqliteStore,
     xch_price_usd: float | None,
     now: datetime,
@@ -108,7 +112,6 @@ def evaluate_strategy_for_market(
                 active_offer_counts_by_size, xch_price_usd=xch_price_usd
             ),
             config=strategy_config,
-            clock=now,
         )
     strategy_actions = filter_planned_actions_with_positive_repeat(strategy_actions)
     _log_market_decision(

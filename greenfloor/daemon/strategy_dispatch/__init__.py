@@ -1,24 +1,4 @@
-"""Daemon strategy action dispatch (managed signer + local fallback).
-
-Test injection today
---------------------
-Tests monkeypatch ``greenfloor.daemon.strategy_dispatch._<export>`` (for example
-``_build_offer_for_action``). ``hooks_from_module()`` reads those attributes at
-call time so patches apply inside parallel/sequential dispatch.
-
-Removal path (delete underscore alias layer)
---------------------------------------------
-1. Change tests to patch ``greenfloor.daemon.testing.strategy_dispatch`` symbols
-   (``build_offer_for_action``, ``execute_single_local_action``,
-   ``execute_single_managed_action``, ``managed_offer_post``,
-   ``execute_managed_action_with_retry``) or the underlying
-   ``greenfloor.daemon.strategy_dispatch.<submodule>.<fn>`` directly.
-2. Point ``hooks_from_module()`` at submodule callables (same targets as
-   ``daemon.testing.strategy_dispatch``) instead of ``pkg._*`` exports.
-3. Remove the ``_<name> = <name>`` assignments below and drop ``_*`` names from
-   ``__all__``.
-4. Keep ``StrategyDispatchHooks``; only the package-level indirection goes away.
-"""
+"""Daemon strategy action dispatch (managed signer + local fallback)."""
 
 from __future__ import annotations
 
@@ -47,45 +27,24 @@ from greenfloor.daemon.strategy_dispatch.parallel_path import execute_actions_pa
 from greenfloor.daemon.strategy_dispatch.reservation_helpers import (
     resolve_signer_offer_asset_ids_for_reservation,
 )
-from greenfloor.daemon.strategy_dispatch.runtime import (
-    StrategyDispatchHooks,
-    StrategyDispatchRuntime,
-    hooks_from_module,
-    runtime_from_module,
-)
+from greenfloor.daemon.strategy_dispatch.runtime import StrategyDispatchHooks, hooks_from_module
 from greenfloor.daemon.strategy_dispatch.sequential_path import execute_actions_sequential
 from greenfloor.storage.sqlite import SqliteStore
 
-_build_offer_for_action = build_offer_for_action
-_execute_single_local_action = execute_single_local_action
-_managed_offer_post = managed_offer_post
-_execute_single_managed_action = execute_single_managed_action
-_execute_managed_action_with_retry = execute_managed_action_with_retry
-
 __all__ = [
-    "_build_offer_for_action",
-    "_execute_managed_action_with_retry",
-    "_execute_single_managed_action",
-    "_execute_single_local_action",
-    "_execute_strategy_actions",
-    "_managed_offer_post",
-    "_resolve_signer_offer_asset_ids_for_reservation",
     "StrategyDispatchHooks",
-    "StrategyDispatchRuntime",
+    "build_offer_for_action",
+    "execute_managed_action_with_retry",
+    "execute_single_local_action",
+    "execute_single_managed_action",
+    "execute_strategy_actions",
     "hooks_from_module",
-    "runtime_from_module",
+    "managed_offer_post",
+    "resolve_signer_offer_asset_ids_for_reservation",
 ]
 
 
-def _resolve_signer_offer_asset_ids_for_reservation(
-    *,
-    program: ProgramConfig,
-    market: MarketConfig,
-) -> tuple[str, str, str]:
-    return resolve_signer_offer_asset_ids_for_reservation(program=program, market=market)
-
-
-def _execute_strategy_actions(
+def execute_strategy_actions(
     *,
     market: MarketConfig,
     strategy_actions: list[PlannedAction],
@@ -99,10 +58,10 @@ def _execute_strategy_actions(
     signer_key_registry: dict[str, Any] | None = None,
     program: ProgramConfig | None = None,
     reservation_coordinator: AssetReservationCoordinator | None = None,
-    runtime: StrategyDispatchHooks | None = None,
+    hooks: StrategyDispatchHooks | None = None,
 ) -> dict[str, Any]:
     _ = app_network
-    dispatch_hooks = runtime or hooks_from_module()
+    dispatch_hooks = hooks or hooks_from_module()
     signer_key_id = str(market.signer_key_id or "").strip()
     signer_key = (signer_key_registry or {}).get(signer_key_id)
     if isinstance(signer_key, dict):

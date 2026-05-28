@@ -46,12 +46,12 @@ def test_execute_strategy_actions_parallel_sets_post_cooldown_on_transient_worke
     )
     monkeypatch.setattr(
         strategy_dispatch,
-        "_resolve_signer_offer_asset_ids_for_reservation",
+        "resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
         strategy_dispatch,
-        "_execute_single_managed_action",
+        "execute_single_managed_action",
         lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
     )
 
@@ -117,7 +117,7 @@ def test_execute_strategy_actions_signer_managed_nonparallel_converts_worker_exc
     ]
     monkeypatch.setattr(
         strategy_dispatch,
-        "_execute_single_managed_action",
+        "execute_single_managed_action",
         lambda **_kwargs: (_ for _ in ()).throw(TimeoutError("The read operation timed out")),
     )
 
@@ -170,12 +170,12 @@ def test_execute_strategy_actions_parallel_prefers_single_input_offer(
 
     monkeypatch.setattr(
         strategy_dispatch,
-        "_resolve_signer_offer_asset_ids_for_reservation",
+        "resolve_signer_offer_asset_ids_for_reservation",
         lambda **_kwargs: ("asset_global", "quote_asset", "xch_asset"),
     )
     monkeypatch.setattr(
         strategy_dispatch,
-        "_managed_offer_post",
+        "managed_offer_post",
         lambda **_kwargs: {"success": True, "offer_id": "offer-should-not-post"},
     )
 

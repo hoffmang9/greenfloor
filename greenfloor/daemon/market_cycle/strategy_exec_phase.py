@@ -7,20 +7,21 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
-from greenfloor.core.strategy import PlannedAction
+from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.cooldowns import _managed_offer_market_health_payload
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.market_cycle.result import MarketCycleResult
 from greenfloor.daemon.reservations import AssetReservationCoordinator
-from greenfloor.daemon.strategy_dispatch import _execute_strategy_actions
+from greenfloor.daemon.strategy_dispatch import execute_strategy_actions
 from greenfloor.storage.sqlite import SqliteStore
 
 
 def execute_strategy_for_market(
     *,
-    market: Any,
-    program: Any,
+    market: MarketConfig,
+    program: ProgramConfig,
     strategy_actions: list[PlannedAction],
     dexie: DexieAdapter,
     splash: SplashAdapter,
@@ -52,7 +53,7 @@ def execute_strategy_for_market(
         },
         market_id=market.market_id,
     )
-    offer_execution = _execute_strategy_actions(
+    offer_execution = execute_strategy_actions(
         market=market,
         strategy_actions=strategy_actions,
         runtime_dry_run=program.runtime_dry_run,

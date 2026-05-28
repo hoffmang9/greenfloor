@@ -141,8 +141,8 @@ def evaluate_reseed_candidates(
     clock: datetime,
 ) -> list[PlannedAction]:
     """Evaluate seed actions for offer rehydration (empty bucket state)."""
+    _ = clock
     return evaluate_market(
         state=_strategy_state_from_bucket_counts({}, xch_price_usd=xch_price_usd),
         config=strategy_config,
-        clock=clock,
     )

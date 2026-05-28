@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
+from greenfloor.core.parallel_batch_plan import ParallelBatchPlan
 from greenfloor.core.planned_action import PlannedAction, planned_actions_from_signer_list
 
 _INSTALL_HINT = (
@@ -87,12 +88,12 @@ def filter_planned_actions_with_positive_repeat(
     )
 
 
-def plan_parallel_submission_batch(entries: list[dict[str, Any]]) -> dict[str, Any]:
+def plan_parallel_submission_batch(entries: list[dict[str, Any]]) -> ParallelBatchPlan:
     signer = _import_signer()
     result = signer.plan_parallel_submission_batch(entries)
-    if not isinstance(result, dict):
-        raise TypeError("plan_parallel_submission_batch returned non-dict result")
-    return dict(result)
+    if not isinstance(result, ParallelBatchPlan):
+        raise TypeError("plan_parallel_submission_batch returned non-ParallelBatchPlan result")
+    return result
 
 
 def apply_offer_signal(*, state: str, signal: str) -> dict[str, Any]:

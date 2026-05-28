@@ -199,7 +199,7 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
     )
     monkeypatch.setattr(
         strategy_dispatch,
-        "_build_offer_for_action",
+        "build_offer_for_action",
         lambda **_kwargs: {
             "status": "executed",
             "reason": "offer_builder_success",

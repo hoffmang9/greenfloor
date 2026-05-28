@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 from greenfloor.core.cycle import plan_parallel_submission_batch
+from greenfloor.core.parallel_batch_plan import ParallelBatchPlan
 from greenfloor.core.planned_action import PlannedAction
-from greenfloor.daemon.strategy_dispatch.items import managed_skip_item
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
+from greenfloor.daemon.strategy_dispatch.items import managed_skip_item
+
+
+@dataclass(frozen=True, slots=True)
+class ParallelSubmissionPlanEntry:
+    submit_index: int
+    requested_amounts: dict[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,42 +34,34 @@ class ParallelDispatchPlan:
 def build_parallel_dispatch_plan(
     *,
     expanded_actions: list[PlannedAction],
-    pending_entries: list[tuple[int, PlannedAction, dict[str, int]]],
+    entries: list[ParallelSubmissionPlanEntry],
     spendable_profiles: dict[str, dict[str, int | bool]],
 ) -> ParallelDispatchPlan:
     batch_entries = [
         {
-            "submit_index": submit_index,
-            "requested_amounts": requested_amounts,
+            "submit_index": entry.submit_index,
+            "requested_amounts": entry.requested_amounts,
             "spendable_profiles": spendable_profiles,
         }
-        for submit_index, _action, requested_amounts in pending_entries
+        for entry in entries
     ]
-    plan = plan_parallel_submission_batch(batch_entries)
+    plan: ParallelBatchPlan = plan_parallel_submission_batch(batch_entries)
     skip_items: list[StrategyActionItem] = []
-    for skip in plan.get("skip_items", []):
-        submit_index = int(skip["submit_index"])
+    for skip in plan.skip_items:
         skip_items.append(
             managed_skip_item(
-                action=expanded_actions[submit_index],
-                reason=str(skip.get("reason", "skipped")),
+                action=expanded_actions[skip.submit_index],
+                reason=skip.reason,
             )
         )
     submissions: list[PlannedParallelSubmission] = []
-    for queue in plan.get("queue", []):
-        submit_index = int(queue["submit_index"])
+    for queue in plan.queue:
         submissions.append(
             PlannedParallelSubmission(
-                submit_index=submit_index,
-                action=expanded_actions[submit_index],
-                requested_amounts={
-                    str(asset_id): int(amount)
-                    for asset_id, amount in dict(queue.get("requested_amounts", {})).items()
-                },
-                available_amounts={
-                    str(asset_id): int(amount)
-                    for asset_id, amount in dict(queue.get("available_amounts", {})).items()
-                },
+                submit_index=queue.submit_index,
+                action=expanded_actions[queue.submit_index],
+                requested_amounts=dict(queue.requested_amounts),
+                available_amounts=dict(queue.available_amounts),
             )
         )
     return ParallelDispatchPlan(skip_items=skip_items, submissions=submissions)

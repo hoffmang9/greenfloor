@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from greenfloor.core.strategy import (
     MarketState,
     PlannedAction,
@@ -10,15 +8,11 @@ from greenfloor.core.strategy import (
 )
 
 
-def _clock() -> datetime:
-    return datetime(2026, 2, 20, 12, 0, 0, tzinfo=UTC)
-
-
 def test_evaluate_market_returns_no_actions_when_targets_met() -> None:
     state = MarketState(ones=5, tens=2, hundreds=1, xch_price_usd=32.0)
     config = StrategyConfig(pair="xch")
 
-    actions = evaluate_market(state=state, config=config, clock=_clock())
+    actions = evaluate_market(state=state, config=config)
 
     assert actions == []
 
@@ -33,7 +27,7 @@ def test_evaluate_market_plans_missing_sizes_in_old_script_order() -> None:
         hundreds_target=1,
     )
 
-    actions = evaluate_market(state=state, config=config, clock=_clock())
+    actions = evaluate_market(state=state, config=config)
 
     assert actions == [
         PlannedAction(
@@ -70,7 +64,7 @@ def test_evaluate_market_uses_usdc_expiry_profile() -> None:
     state = MarketState(ones=4, tens=2, hundreds=1)
     config = StrategyConfig(pair="usdc")
 
-    actions = evaluate_market(state=state, config=config, clock=_clock())
+    actions = evaluate_market(state=state, config=config)
 
     assert actions == [
         PlannedAction(
@@ -89,7 +83,7 @@ def test_evaluate_market_falls_back_to_xch_expiry_for_unknown_pair() -> None:
     state = MarketState(ones=4, tens=2, hundreds=1)
     config = StrategyConfig(pair="unknown")
 
-    actions = evaluate_market(state=state, config=config, clock=_clock())
+    actions = evaluate_market(state=state, config=config)
 
     assert actions[0].expiry_unit == "minutes"
     assert actions[0].expiry_value == 10
@@ -99,7 +93,7 @@ def test_evaluate_market_xch_requires_price_before_planning() -> None:
     state = MarketState(ones=3, tens=1, hundreds=0, xch_price_usd=None)
     config = StrategyConfig(pair="xch")
 
-    actions = evaluate_market(state=state, config=config, clock=_clock())
+    actions = evaluate_market(state=state, config=config)
 
     assert actions == []
 
@@ -108,7 +102,7 @@ def test_evaluate_market_xch_plans_when_price_is_available() -> None:
     state = MarketState(ones=3, tens=1, hundreds=0, xch_price_usd=32.25)
     config = StrategyConfig(pair="xch")
 
-    actions = evaluate_market(state=state, config=config, clock=_clock())
+    actions = evaluate_market(state=state, config=config)
 
     assert [a.size for a in actions] == [1, 10, 100]
 
@@ -117,7 +111,7 @@ def test_evaluate_market_usdc_does_not_require_xch_price() -> None:
     state = MarketState(ones=4, tens=2, hundreds=1, xch_price_usd=None)
     config = StrategyConfig(pair="usdc")
 
-    actions = evaluate_market(state=state, config=config, clock=_clock())
+    actions = evaluate_market(state=state, config=config)
 
     assert len(actions) == 1
     assert actions[0].pair == "usdc"
@@ -132,17 +126,14 @@ def test_evaluate_market_xch_respects_configured_price_band() -> None:
     out_of_band_low = evaluate_market(
         state=MarketState(ones=0, tens=0, hundreds=0, xch_price_usd=24.9),
         config=config,
-        clock=_clock(),
     )
     out_of_band_high = evaluate_market(
         state=MarketState(ones=0, tens=0, hundreds=0, xch_price_usd=35.1),
         config=config,
-        clock=_clock(),
     )
     in_band = evaluate_market(
         state=MarketState(ones=0, tens=0, hundreds=0, xch_price_usd=30.0),
         config=config,
-        clock=_clock(),
     )
     assert out_of_band_low == []
     assert out_of_band_high == []
@@ -153,7 +144,6 @@ def test_evaluate_market_carries_target_spread_bps_into_actions() -> None:
     actions = evaluate_market(
         state=MarketState(ones=4, tens=2, hundreds=1, xch_price_usd=30.0),
         config=StrategyConfig(pair="xch", target_spread_bps=125),
-        clock=_clock(),
     )
     assert len(actions) == 1
     assert actions[0].target_spread_bps == 125
@@ -166,7 +156,6 @@ def test_evaluate_market_uses_configured_expiry_override() -> None:
             pair="xch",
             offer_expiry_minutes=120,
         ),
-        clock=_clock(),
     )
     assert len(actions) == 1
     assert actions[0].expiry_unit == "minutes"
@@ -186,7 +175,6 @@ def test_evaluate_market_respects_dynamic_target_sizes() -> None:
             pair="xch",
             target_counts_by_size={1: 5, 10: 2, 50: 1},
         ),
-        clock=_clock(),
     )
     assert [action.size for action in actions] == [50]
     assert [action.repeat for action in actions] == [1]

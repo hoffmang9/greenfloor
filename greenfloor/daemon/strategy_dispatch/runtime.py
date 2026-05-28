@@ -1,4 +1,4 @@
-"""Injectable dispatch hooks (tests patch package exports; hooks resolve at call time)."""
+"""Injectable dispatch hooks (tests patch package-level callables)."""
 
 from __future__ import annotations
 
@@ -151,15 +151,11 @@ def hooks_from_module() -> StrategyDispatchHooks:
 
     return StrategyDispatchHooks(
         resolve_signer_offer_asset_ids_for_reservation=(
-            pkg._resolve_signer_offer_asset_ids_for_reservation
+            pkg.resolve_signer_offer_asset_ids_for_reservation
         ),
-        build_offer_for_action=pkg._build_offer_for_action,
-        execute_single_local_action=pkg._execute_single_local_action,
-        managed_offer_post=pkg._managed_offer_post,
-        execute_single_managed_action=pkg._execute_single_managed_action,
-        execute_managed_action_with_retry=pkg._execute_managed_action_with_retry,
+        build_offer_for_action=pkg.build_offer_for_action,
+        execute_single_local_action=pkg.execute_single_local_action,
+        managed_offer_post=pkg.managed_offer_post,
+        execute_single_managed_action=pkg.execute_single_managed_action,
+        execute_managed_action_with_retry=pkg.execute_managed_action_with_retry,
     )
-
-
-StrategyDispatchRuntime = StrategyDispatchHooks
-runtime_from_module = hooks_from_module

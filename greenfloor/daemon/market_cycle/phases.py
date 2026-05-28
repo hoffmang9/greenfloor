@@ -9,6 +9,7 @@ from typing import Any
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
+from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.core.cycle import MARKET_CYCLE_PHASES
 from greenfloor.daemon.cancel_policy import _execute_cancel_policy_for_market
 from greenfloor.daemon.coin_ops_cycle import _plan_and_execute_coin_ops
@@ -23,8 +24,8 @@ from greenfloor.storage.sqlite import SqliteStore
 
 @dataclass(slots=True)
 class MarketCycleRun:
-    market: Any
-    program: Any
+    market: MarketConfig
+    program: ProgramConfig
     allowed_keys: set[str] | None
     dexie: DexieAdapter
     splash: SplashAdapter

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from greenfloor.adapters.wallet import WalletAdapter
-from greenfloor.config.models import ProgramConfig, signer_offer_path_configured
+from greenfloor.config.models import MarketConfig, ProgramConfig, signer_offer_path_configured
 from greenfloor.core.cycle import (
     needs_inventory_fallback,
     resolve_inventory_scan_source,
@@ -18,14 +18,16 @@ from greenfloor.daemon.inventory_scan import (
 )
 from greenfloor.daemon.market_helpers import _base_unit_mojo_multiplier_for_market
 from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision
-from greenfloor.daemon.strategy_dispatch import _resolve_signer_offer_asset_ids_for_reservation
+from greenfloor.daemon.strategy_dispatch.reservation_helpers import (
+    resolve_signer_offer_asset_ids_for_reservation,
+)
 from greenfloor.storage.sqlite import SqliteStore
 
 
 def run_market_cycle_inventory(
     *,
-    market: Any,
-    program: Any,
+    market: MarketConfig,
+    program: ProgramConfig,
     wallet: WalletAdapter,
     store: SqliteStore,
     sell_ladder: list[Any],
@@ -40,7 +42,7 @@ def run_market_cycle_inventory(
 
     if isinstance(program, ProgramConfig) and signer_offer_path_configured(program):
         try:
-            resolved_base_asset_id, _, _ = _resolve_signer_offer_asset_ids_for_reservation(
+            resolved_base_asset_id, _, _ = resolve_signer_offer_asset_ids_for_reservation(
                 program=program,
                 market=market,
             )

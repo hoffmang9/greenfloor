@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig, managed_offer_execution_backend

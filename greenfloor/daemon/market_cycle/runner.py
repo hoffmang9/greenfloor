@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
+from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.market_cycle.phases import MarketCycleRun, run_market_cycle_phases
 from greenfloor.daemon.market_cycle.result import MarketCycleResult
@@ -19,8 +19,8 @@ from greenfloor.storage.sqlite import SqliteStore
 
 def process_single_market(
     *,
-    market: Any,
-    program: Any,
+    market: MarketConfig,
+    program: ProgramConfig,
     allowed_keys: set[str] | None,
     dexie: DexieAdapter,
     splash: SplashAdapter,
@@ -70,8 +70,8 @@ def process_single_market(
 
 def process_single_market_with_store(
     *,
-    market: Any,
-    program: Any,
+    market: MarketConfig,
+    program: ProgramConfig,
     allowed_keys: set[str] | None,
     dexie: DexieAdapter,
     splash: SplashAdapter,

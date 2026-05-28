@@ -1,8 +1,67 @@
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyModule};
+
+static PLANNED_ACTION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static PARALLEL_SKIP_ITEM_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static PARALLEL_QUEUE_ITEM_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static PARALLEL_BATCH_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+
+fn cached_class<'py>(
+    py: Python<'py>,
+    cache: &OnceLock<Py<PyAny>>,
+    module: &str,
+    name: &str,
+) -> PyResult<Bound<'py, PyAny>> {
+    if let Some(cls) = cache.get() {
+        return Ok(cls.bind(py).clone());
+    }
+    let cls = PyModule::import(py, module)?.getattr(name)?.unbind();
+    let _ = cache.set(cls);
+    Ok(cache.get().expect("cached class").bind(py).clone())
+}
+
+pub fn planned_action_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(py, &PLANNED_ACTION_CLS, "greenfloor.core.planned_action", "PlannedAction")
+}
+
+pub fn parallel_skip_item_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &PARALLEL_SKIP_ITEM_CLS,
+        "greenfloor.core.parallel_batch_plan",
+        "ParallelSkipItem",
+    )
+}
+
+pub fn parallel_queue_item_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &PARALLEL_QUEUE_ITEM_CLS,
+        "greenfloor.core.parallel_batch_plan",
+        "ParallelQueueItem",
+    )
+}
+
+pub fn parallel_batch_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &PARALLEL_BATCH_PLAN_CLS,
+        "greenfloor.core.parallel_batch_plan",
+        "ParallelBatchPlan",
+    )
+}
+
+pub fn string_i64_map_from_py_dict(dict: &Bound<'_, PyDict>) -> PyResult<BTreeMap<String, i64>> {
+    let mut map = BTreeMap::new();
+    for (asset_id, amount) in dict.iter() {
+        map.insert(asset_id.extract::<String>()?, amount.extract::<i64>()?);
+    }
+    Ok(map)
+}
 
 pub fn to_py_err<E: std::fmt::Display>(err: E) -> PyErr {
     PyValueError::new_err(err.to_string())

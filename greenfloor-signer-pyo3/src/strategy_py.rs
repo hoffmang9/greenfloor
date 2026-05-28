@@ -1,12 +1,11 @@
 use std::collections::BTreeMap;
 
-use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyModule};
+use pyo3::types::{PyDict, PyList};
 
 use signer_core::{evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction, StrategyConfig};
 
-use crate::py_utils::dict_to_i64_i64_map;
+use crate::py_utils::{dict_to_i64_i64_map, planned_action_class};
 
 fn optional_i64_i64_map<'py>(
     obj: &Bound<'py, PyAny>,
@@ -93,8 +92,7 @@ pub fn planned_action_to_py<'py>(
     py: Python<'py>,
     action: &PlannedAction,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let planned_action_cls = PyModule::import(py, "greenfloor.core.planned_action")?
-        .getattr("PlannedAction")?;
+    let planned_action_cls = planned_action_class(py)?;
     let kwargs = PyDict::new(py);
     kwargs.set_item("size", action.size)?;
     kwargs.set_item("repeat", action.repeat)?;

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
+from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.daemon.coin_ops_cycle import _executed_sell_offer_counts_by_size
 from greenfloor.daemon.market_cycle.result import MarketCycleResult
 from greenfloor.daemon.market_cycle.strategy_eval_phase import (
@@ -27,8 +27,8 @@ __all__ = [
 
 def evaluate_and_execute_strategy(
     *,
-    market: Any,
-    program: Any,
+    market: MarketConfig,
+    program: ProgramConfig,
     dexie: DexieAdapter,
     splash: SplashAdapter,
     store: SqliteStore,
