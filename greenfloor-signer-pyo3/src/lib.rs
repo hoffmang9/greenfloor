@@ -5,7 +5,9 @@ mod cycle;
 mod execution_py;
 mod hex_py;
 mod notifications_py;
+mod offer_build_py;
 mod py_utils;
+mod retry_py;
 mod strategy_py;
 
 use std::future::Future;
@@ -24,7 +26,8 @@ use signer_core::{
     from_input_spend_bundle_xch_bytes, get_conservative_fee_estimate, get_fee_estimate,
     list_cat_coin_summaries, list_cat_coin_summaries_by_ids, load_bls_master_secret_key,
     load_signer_config, push_tx_hex, resolve_offer_asset_ids, resolve_vault_context,
-    validate_offer_text, BlsMixedSplitRequest, BlsOfferRequest, BlsXchCoinOpRequest,
+    validate_offer_structure, validate_offer_text, BlsMixedSplitRequest, BlsOfferRequest,
+    BlsXchCoinOpRequest,
     CreateOfferRequest, MixedSplitRequest,
 };
 
@@ -284,6 +287,12 @@ fn validate_offer_py(offer: &str) -> PyResult<()> {
 }
 
 #[pyfunction]
+#[pyo3(name = "validate_offer_structure")]
+fn validate_offer_structure_py(offer: &str) -> PyResult<()> {
+    validate_offer_structure(offer).map_err(to_py_err)
+}
+
+#[pyfunction]
 #[pyo3(name = "encode_offer")]
 fn encode_offer_py(spend_bundle_bytes: &[u8]) -> PyResult<String> {
     encode_offer_from_spend_bundle_bytes(spend_bundle_bytes).map_err(to_py_err)
@@ -401,6 +410,7 @@ fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(broadcast_bls_spend_bundle_py, m)?)?;
     m.add_function(wrap_pyfunction!(resolve_offer_asset_ids_py, m)?)?;
     m.add_function(wrap_pyfunction!(validate_offer_py, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_offer_structure_py, m)?)?;
     m.add_function(wrap_pyfunction!(encode_offer_py, m)?)?;
     m.add_function(wrap_pyfunction!(from_input_spend_bundle_py, m)?)?;
     m.add_function(wrap_pyfunction!(from_input_spend_bundle_xch_py, m)?)?;
@@ -415,5 +425,7 @@ fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     cycle::register(m)?;
     hex_py::register(m)?;
     notifications_py::register(m)?;
+    offer_build_py::register(m)?;
+    retry_py::register(m)?;
     Ok(())
 }

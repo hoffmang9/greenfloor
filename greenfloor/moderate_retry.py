@@ -1,23 +1,18 @@
-"""Shared transient-retry and deadline polling helpers for HTTP paths."""
+"""Shared transient-retry and deadline polling helpers (Rust-backed policy)."""
 
 from __future__ import annotations
 
 import collections.abc
-import re
 import time
 from typing import Any, TypeVar
 
+from greenfloor.core.retry_policy import (
+    moderate_retry_next_sleep,
+    moderate_retry_sleep_seconds,
+    parse_rate_limit_retry_seconds,
+)
+
 _T = TypeVar("_T")
-
-
-def parse_rate_limit_retry_seconds(error_text: str) -> float | None:
-    match = re.search(r"try again in (\d+) seconds", error_text, flags=re.IGNORECASE)
-    if not match:
-        return None
-    try:
-        return float(int(match.group(1)))
-    except (TypeError, ValueError):
-        return None
 
 
 def call_with_moderate_retry(
@@ -40,10 +35,13 @@ def call_with_moderate_retry(
             attempt += 1
             error_text = str(exc)
             rate_limit_wait = parse_rate_limit_retry_seconds(error_text)
-            if rate_limit_wait is not None:
-                sleep_seconds = max(sleep_seconds, min(30.0, rate_limit_wait + 0.25))
             if attempt >= max_attempts:
                 raise RuntimeError(f"{action}_retry_exhausted:{exc}") from exc
+            sleep_seconds = moderate_retry_sleep_seconds(
+                attempt=attempt,
+                current_sleep=sleep_seconds,
+                rate_limit_wait=rate_limit_wait,
+            )
             if events is not None:
                 events.append(
                     {
@@ -56,7 +54,7 @@ def call_with_moderate_retry(
                     }
                 )
             sleep_fn(sleep_seconds)
-            sleep_seconds = min(8.0, sleep_seconds * 2.0)
+            sleep_seconds = moderate_retry_next_sleep(sleep_seconds)
 
 
 def poll_with_exponential_backoff_until(
@@ -82,3 +80,12 @@ def poll_with_exponential_backoff_until(
             raise RuntimeError(timeout_error)
         sleep_fn(sleep_seconds)
         sleep_seconds = min(max_sleep, sleep_seconds * sleep_multiplier)
+
+
+__all__ = [
+    "call_with_moderate_retry",
+    "moderate_retry_next_sleep",
+    "moderate_retry_sleep_seconds",
+    "parse_rate_limit_retry_seconds",
+    "poll_with_exponential_backoff_until",
+]

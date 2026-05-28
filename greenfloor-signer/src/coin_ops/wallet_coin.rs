@@ -1,0 +1,54 @@
+use serde_json::Value;
+
+/// Whether a Cloud Wallet / signer coin row is spendable for coin-op selection.
+pub fn is_spendable_wallet_coin(coin: &Value) -> bool {
+    if coin.get("isLocked").and_then(Value::as_bool) == Some(true) {
+        return false;
+    }
+    let state = coin
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_uppercase();
+    if state.is_empty() {
+        return false;
+    }
+    const NON_SPENDABLE: &[&str] = &[
+        "PENDING",
+        "MEMPOOL",
+        "SPENT",
+        "SPENDING",
+        "LOCKED",
+        "RESERVED",
+        "UNCONFIRMED",
+    ];
+    if NON_SPENDABLE.contains(&state.as_str()) {
+        return false;
+    }
+    const SPENDABLE: &[&str] = &[
+        "CONFIRMED",
+        "UNSPENT",
+        "SPENDABLE",
+        "AVAILABLE",
+        "SETTLED",
+    ];
+    SPENDABLE.contains(&state.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn locked_or_pending_not_spendable() {
+        assert!(!is_spendable_wallet_coin(&json!({"state": "PENDING"})));
+        assert!(!is_spendable_wallet_coin(&json!({"isLocked": true, "state": "CONFIRMED"})));
+    }
+
+    #[test]
+    fn confirmed_is_spendable() {
+        assert!(is_spendable_wallet_coin(&json!({"state": "CONFIRMED"})));
+    }
+}

@@ -160,8 +160,9 @@ def _resolve_operation_fee(
                 return minimum_fee, "coinset_conservative_minimum_floor"
             return advised_fee, "coinset_conservative"
         if attempt < max_attempts - 1:
-            sleep_seconds = min(8.0, 0.5 * (2**attempt))
-            time.sleep(sleep_seconds)
+            from greenfloor.core.retry_policy import coinset_fee_lookup_retry_sleep
+
+            time.sleep(coinset_fee_lookup_retry_sleep(attempt))
 
     return minimum_fee, "config_minimum_fee_fallback"
 

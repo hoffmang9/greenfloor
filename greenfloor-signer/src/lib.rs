@@ -33,11 +33,12 @@ pub use bls::{
     BlsOfferRequest, BlsOfferResult, BlsXchCoinOpRequest, BlsXchCoinOpResult, CoinRecordSummary,
 };
 pub use coin_ops::{
-    amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_target_amount_allowed,
-    compute_bucket_counts_from_coins, fee_budget_allows_execution, partition_plans_by_budget,
+    amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_should_stop,
+    coin_op_target_amount_allowed, compute_bucket_counts_from_coins, evaluate_coin_split_gate,
+    fee_budget_allows_execution, is_spendable_wallet_coin, partition_plans_by_budget,
     plan_auto_combine_inputs, plan_auto_split_selection, plan_coin_ops,
     projected_coin_ops_fee_mojos, select_spendable_coins_for_target_amount,
-    split_would_create_sub_cat_change, BucketSpec, CoinOpKind, CoinOpPlan,
+    split_would_create_sub_cat_change, BucketSpec, CoinOpKind, CoinOpPlan, CoinSplitGateResult,
     CombineInputSelectionMode, SpendableCoin, SplitAutoSelectPlan, SplitCoinPlan,
     SplitCombinePrereqPlan, SplitPlanningProfile, SplitSkipPlan,
 };
@@ -68,6 +69,9 @@ pub use cycle::{
     should_try_cat_inventory_fallback, should_use_market_slot_dispatch,
     single_input_preferred_skip_reason, unchanged_offer_transition,
     unsupported_venue_offer_transition, wallet_fallback_source_label, CancelPolicyDecision,
+    coinset_fee_lookup_retry_sleep, dexie_invalid_offer_retry_sleep,
+    dexie_invalid_offer_should_retry, moderate_retry_next_sleep, moderate_retry_sleep_seconds,
+    parse_rate_limit_retry_seconds, poll_exponential_next_sleep,
     CycleOfferTransition, ManagedActionOutcome, ManagedActionStatus, ManagedRetryDecision,
     ManagedRetryDecisionKind, MarketBatchSelection, MarketCyclePhase, MarketCycleResultState,
     MarketState, OfferLifecycleState, OfferSignal, OfferStateRow, OfferTransition,
@@ -79,9 +83,12 @@ pub use cycle::{
 };
 pub use error::SignerError as Error;
 pub use hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
+pub use offer::build_context::{
+    mojo_multiplier_for_leg, resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
+};
 pub use offer::codec::{
     encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
-    from_input_spend_bundle_xch_bytes, validate_offer_text,
+    from_input_spend_bundle_xch_bytes, validate_offer_structure, validate_offer_text,
 };
 pub use offer::{build_vault_cat_offer, CreateOfferRequest, CreateOfferResult};
 pub use vault::{

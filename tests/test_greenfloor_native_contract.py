@@ -8,9 +8,7 @@ from greenfloor.runtime.offer_publish import (
 )
 
 
-def test_verify_offer_text_for_dexie_uses_greenfloor_signer_when_sdk_lacks_validate(
-    monkeypatch,
-) -> None:
+def test_verify_offer_text_for_dexie_uses_greenfloor_signer_only(monkeypatch) -> None:
     calls: dict[str, str] = {}
 
     class _Signer:
@@ -18,33 +16,24 @@ def test_verify_offer_text_for_dexie_uses_greenfloor_signer_when_sdk_lacks_valid
         def validate_offer(offer: str) -> None:
             calls["offer"] = offer
 
-    class _Sdk:
-        @staticmethod
-        def verify_offer(_offer: str) -> bool:
-            raise AssertionError("verify_offer fallback should not run when signer is available")
-
     monkeypatch.setitem(sys.modules, "greenfloor_signer", _Signer)
-    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
 
     assert _verify_offer_text_for_dexie("offer1contract") is None
     assert calls["offer"] == "offer1contract"
 
 
-def test_verify_offer_text_for_dexie_reports_missing_validators(monkeypatch) -> None:
+def test_verify_offer_text_for_dexie_reports_missing_kernel(monkeypatch) -> None:
     import greenfloor.runtime.offer_publish as offer_publish_mod
 
     def _fail_kernel():
         raise ImportError("disable signer path for this test")
 
     monkeypatch.setattr(offer_publish_mod, "import_kernel", _fail_kernel)
-
-    class _Sdk:
-        pass
-
     monkeypatch.delitem(sys.modules, "greenfloor_signer", raising=False)
-    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
 
-    assert _verify_offer_text_for_dexie("offer1contract") == "wallet_sdk_validate_offer_unavailable"
+    assert _verify_offer_text_for_dexie("offer1contract") == (
+        "wallet_sdk_import_error:greenfloor_signer_unavailable"
+    )
 
 
 def test_from_input_spend_bundle_xch_contract_bytes_in_bytes_out(monkeypatch) -> None:

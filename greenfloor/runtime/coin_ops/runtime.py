@@ -13,7 +13,10 @@ from greenfloor.config.io import (
     resolve_market_for_build,
 )
 from greenfloor.config.models import MarketConfig, MarketLadderEntry, ProgramConfig
-from greenfloor.runtime.coin_ops.coins import is_spendable_coin
+from greenfloor.core.coin_ops.gate_bridge import (
+    coin_op_should_stop as _coin_op_should_stop,
+    evaluate_coin_split_gate as _evaluate_coin_split_gate,
+)
 from greenfloor.runtime.coin_ops.models import DenominationTarget, denomination_target_payload
 from greenfloor.runtime.coin_ops_backend import (
     CoinOpBackend,
@@ -43,14 +46,13 @@ def coin_op_should_stop(
     iteration: int,
     max_iterations: int,
 ) -> tuple[bool, str]:
-    if not until_ready or final_readiness is None or bool(final_readiness["ready"]):
-        stop_reason = "ready" if until_ready and final_readiness is not None else "single_pass"
-        return True, stop_reason
-    if coin_ids:
-        return True, "requires_new_coin_selection"
-    if iteration == max_iterations:
-        return True, "max_iterations_reached"
-    return False, ""
+    return _coin_op_should_stop(
+        until_ready=until_ready,
+        final_readiness=final_readiness,
+        coin_ids=coin_ids,
+        iteration=iteration,
+        max_iterations=max_iterations,
+    )
 
 
 def evaluate_coin_split_gate(
@@ -60,28 +62,12 @@ def evaluate_coin_split_gate(
     size_base_units: int,
     required_count: int,
 ) -> dict[str, int | bool | str]:
-    spendable_asset_coins = [coin for coin in asset_scoped_coins if is_spendable_coin(coin)]
-    denom_coins = [
-        coin for coin in spendable_asset_coins if int(coin.get("amount", 0)) == int(size_base_units)
-    ]
-    larger_reserve_coins = [
-        coin for coin in spendable_asset_coins if int(coin.get("amount", 0)) > int(size_base_units)
-    ]
-    current_count = len(denom_coins)
-    extra_denom_count = max(0, current_count - int(required_count))
-    larger_reserve_count = len(larger_reserve_coins)
-    reserve_ready = larger_reserve_count >= 1 or extra_denom_count >= 1
-    ready = current_count >= int(required_count) and reserve_ready
-    return {
-        "asset_id": resolved_asset_id,
-        "size_base_units": int(size_base_units),
-        "required_min_count": int(required_count),
-        "current_count": current_count,
-        "larger_reserve_coin_count": larger_reserve_count,
-        "extra_denom_coin_count": extra_denom_count,
-        "reserve_ready": reserve_ready,
-        "ready": ready,
-    }
+    return _evaluate_coin_split_gate(
+        asset_scoped_coins=asset_scoped_coins,
+        resolved_asset_id=resolved_asset_id,
+        size_base_units=size_base_units,
+        required_count=required_count,
+    )
 
 
 def coin_op_result_payload(

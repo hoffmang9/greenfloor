@@ -8,6 +8,7 @@ pub mod notifications;
 pub mod orchestration;
 pub mod reconcile;
 pub mod reseed;
+pub mod retry;
 pub mod strategy;
 
 pub use cancel::{
@@ -57,6 +58,11 @@ pub use reconcile::{
 };
 pub use reseed::{
     plan_reseed_actions_from_gap, reseed_skip_reason_labels, ReseedGapPlan, ReseedSkipReason,
+};
+pub use retry::{
+    coinset_fee_lookup_retry_sleep, dexie_invalid_offer_retry_sleep,
+    dexie_invalid_offer_should_retry, moderate_retry_next_sleep, moderate_retry_sleep_seconds,
+    parse_rate_limit_retry_seconds, poll_exponential_next_sleep,
 };
 pub use strategy::{
     evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction, StrategyConfig,

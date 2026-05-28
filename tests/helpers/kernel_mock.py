@@ -40,6 +40,37 @@ class MinimalSignerKernel:
     def validate_offer(_offer: str) -> None:
         return None
 
+    @staticmethod
+    def resolve_offer_expiry_for_pricing(pricing: dict) -> tuple[str, int]:
+        raw = pricing.get("strategy_offer_expiry_minutes", 0)
+        try:
+            value = int(raw or 0)
+        except (TypeError, ValueError):
+            value = 0
+        return ("minutes", value if value > 0 else 10)
+
+    @staticmethod
+    def resolve_quote_price_for_pricing(pricing: dict) -> float:
+        fixed = pricing.get("fixed_quote_per_base")
+        if fixed is not None:
+            return float(fixed)
+        min_q = pricing.get("min_price_quote_per_base")
+        max_q = pricing.get("max_price_quote_per_base")
+        if min_q is not None and max_q is not None:
+            return (float(min_q) + float(max_q)) / 2.0
+        if min_q is not None:
+            return float(min_q)
+        if max_q is not None:
+            return float(max_q)
+        raise ValueError("market pricing must define fixed_quote_per_base or min/max")
+
+    @staticmethod
+    def mojo_multiplier_for_leg(pricing: dict, field: str, asset_id: str) -> int:
+        override = pricing.get(field)
+        if override is not None:
+            return int(override)
+        return mock_kernel_default_mojo_multiplier_for_asset(asset_id)
+
     normalize_hex_id = staticmethod(mock_kernel_normalize_hex_id)
     is_hex_id = staticmethod(mock_kernel_is_hex_id)
     canonical_is_xch = staticmethod(mock_kernel_canonical_is_xch)

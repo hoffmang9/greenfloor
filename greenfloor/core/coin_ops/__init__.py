@@ -7,6 +7,10 @@
   (caller passes ``allow_combine_prereq=False`` on retry).
 """
 
+from greenfloor.core.coin_ops.gate_bridge import (
+    coin_op_should_stop,
+    evaluate_coin_split_gate,
+)
 from greenfloor.core.coin_ops._bridge import (
     coin_meets_coin_op_min_amount,
     coin_op_min_amount_mojos,
@@ -33,6 +37,8 @@ from greenfloor.core.coin_ops.types import (
 )
 
 __all__ = [
+    "coin_op_should_stop",
+    "evaluate_coin_split_gate",
     "BucketSpec",
     "CoinOpPlan",
     "CombineInputSelectionMode",

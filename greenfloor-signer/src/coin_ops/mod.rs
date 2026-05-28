@@ -4,11 +4,13 @@
 //! See ADR 0010 for the planned crate rename to `greenfloor-kernel`.
 
 mod fee_budget;
+mod gate;
 mod inventory;
 mod plan;
 mod policy;
 mod selection;
 mod split_planning;
+mod wallet_coin;
 
 pub use fee_budget::{
     fee_budget_allows_execution, partition_plans_by_budget, projected_coin_ops_fee_mojos,
@@ -22,8 +24,10 @@ pub use selection::{
     select_exact_amount_coin_ids, select_largest_spendable_coin,
     select_spendable_coins_for_target_amount, split_would_create_sub_cat_change, SpendableCoin,
 };
+pub use gate::{coin_op_should_stop, evaluate_coin_split_gate, CoinSplitGateResult};
 pub use split_planning::{
     build_combine_prereq_plan, plan_auto_combine_inputs, plan_auto_split_selection,
     CombineInputSelectionMode, SplitAutoSelectPlan, SplitCoinPlan, SplitCombinePrereqPlan,
     SplitPlanningProfile, SplitSkipPlan, SubCatChangeSkipData,
 };
+pub use wallet_coin::is_spendable_wallet_coin;

@@ -1,5 +1,27 @@
 # Progress Log
 
+## 2026-05-28 (Rust migration steps 14–16 — offer validate, build context, retry, coin-op gates)
+
+- **Step 14 — Retry policy (`greenfloor-signer/src/cycle/retry.rs`):** `parse_rate_limit_retry_seconds`, Dexie invalid-offer retry gating/sleep, Coinset fee lookup sleep; PyO3 `retry_py.rs`; Python `greenfloor/core/retry_policy.py` + `moderate_retry.py` / `coinset_runtime.py` wired to kernel.
+- **Step 15 — Offer build context (`greenfloor-signer/src/offer/build_context.rs`):** `resolve_offer_expiry_for_pricing`, `resolve_quote_price_for_pricing`, `mojo_multiplier_for_leg`; PyO3 `offer_build_py.rs`; Python `greenfloor/core/offer_build.py`; `offer_publish.py` and `offer_build_context.py` delegate.
+- **Step 14 (offer validate) — `validate_offer_text`:** extended in `offer/codec.rs` with expiration + duplicate-spent-coin checks; `offer_publish.verify_offer_text_for_dexie` is kernel-only (~10 lines); `greenfloor/core/offer_validate.py` maps stable error codes.
+- **Step 16 — Coin-op gates (`greenfloor-signer/src/coin_ops/gate.rs`, `wallet_coin.rs`):** `evaluate_coin_split_gate`, `coin_op_should_stop`, `is_spendable_wallet_coin`; PyO3 on `coin_ops_py`; Python `greenfloor/core/coin_ops/gate_bridge.py`; `runtime/coin_ops/runtime.py` delegates.
+- **Tests:** `tests/test_retry_policy_parity.py`, `tests/test_coin_ops_gate_parity.py`; `test_offer_publish.py` rewritten for kernel path; `MinimalSignerKernel` extended for offer-build stubs.
+
+### Agent handoff — next phase (Later / structural)
+
+Steps 1–16 moved deterministic policy out of large Python modules. **Do not** continue extracting small pure-policy hunks unless a regression proves drift. Next work is **structural Python reduction**:
+
+| Priority | Target | Notes |
+| -------- | ------ | ----- |
+| L1 | `storage/sqlite.py` (~690) | Defer until daemon IO contract stabilizes; not on hot offer-post path |
+| L2 | `runtime/coin_ops/daemon_execution.py` (~585) | Keep Coinset/wallet IO in Python; only move more polling tables if needed |
+| L3 | `daemon/` + `cli/` (~8k) | Rust binary for `greenfloord` / `greenfloor-manager` subcommands calling `greenfloor-kernel` |
+| L4 | ADR 0010 rename | `greenfloor-signer` → `greenfloor-kernel`, `greenfloor_signer` shim one release |
+| L5 | `config/` | Keep YAML parse in Python unless Rust config loader reaches parity with `config/models.py` validation |
+
+**CI parity gates for Later steps:** integration tests against live `greenfloor_signer` wheel; daemon soak on mainnet canary market.
+
 ## 2026-05-28 (Rust hex utilities + low-inventory alerts — step 12)
 
 - **`greenfloor-signer/src/hex.rs`:** signer-boundary hex helpers (`is_hex_id`, `normalize_hex_id`, `default_mojo_multiplier_for_asset`).

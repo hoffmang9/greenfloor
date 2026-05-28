@@ -562,14 +562,14 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
             called["post_offer_called"] = True
             return {"success": True, "id": "should-not-post"}
 
-    def _import_kernel():
-        raise ImportError("disable native path for this test")
+    from tests.helpers.kernel_mock import MinimalSignerKernel
 
-    monkeypatch.setattr(
-        "greenfloor.runtime.offer_publish.import_kernel",
-        _import_kernel,
-    )
-    monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
+    class _Signer(MinimalSignerKernel):
+        @staticmethod
+        def validate_offer(_offer: str) -> None:
+            raise ValueError("offer_missing_expiration")
+
+    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Signer)
     monkeypatch.setattr(
         "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1noexpiry",
