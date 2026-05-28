@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::dispatch::{reservation_request_for_managed_offer, SpendableAssetProfile};
 use super::dispatch::{expand_inputs_by_repeat, PlannedActionInput};
+use super::dispatch::{reservation_request_for_managed_offer, SpendableAssetProfile};
 use super::managed::{prepare_parallel_managed_submission_decision, ParallelSubmissionDecision};
 use super::strategy::PlannedAction;
 
@@ -97,9 +97,7 @@ pub fn plan_parallel_managed_dispatch(
                     reason,
                 });
             }
-            ParallelSubmissionDecision::Proceed {
-                available_amounts,
-            } => {
+            ParallelSubmissionDecision::Proceed { available_amounts } => {
                 plan.queue.push(ParallelQueueItem {
                     submit_index: entry.submit_index,
                     requested_amounts: entry.requested_amounts.clone(),
@@ -158,7 +156,9 @@ pub fn sequential_action_route(
     }
 }
 
-pub fn filter_planned_actions_with_positive_repeat(actions: &[PlannedAction]) -> Vec<PlannedAction> {
+pub fn filter_planned_actions_with_positive_repeat(
+    actions: &[PlannedAction],
+) -> Vec<PlannedAction> {
     actions
         .iter()
         .filter(|action| action.repeat > 0)
@@ -241,27 +241,30 @@ mod tests {
     #[test]
     fn plan_parallel_managed_dispatch_splits_skip_and_queue() {
         let ctx = sample_reservation_context();
-        let actions = vec![PlannedAction {
-            size: 0,
-            repeat: 1,
-            pair: String::new(),
-            expiry_unit: String::new(),
-            expiry_value: 0,
-            cancel_after_create: false,
-            reason: String::new(),
-            target_spread_bps: None,
-            side: "sell".to_string(),
-        }, PlannedAction {
-            size: 10,
-            repeat: 1,
-            pair: String::new(),
-            expiry_unit: String::new(),
-            expiry_value: 0,
-            cancel_after_create: false,
-            reason: String::new(),
-            target_spread_bps: None,
-            side: "sell".to_string(),
-        }];
+        let actions = vec![
+            PlannedAction {
+                size: 0,
+                repeat: 1,
+                pair: String::new(),
+                expiry_unit: String::new(),
+                expiry_value: 0,
+                cancel_after_create: false,
+                reason: String::new(),
+                target_spread_bps: None,
+                side: "sell".to_string(),
+            },
+            PlannedAction {
+                size: 10,
+                repeat: 1,
+                pair: String::new(),
+                expiry_unit: String::new(),
+                expiry_value: 0,
+                cancel_after_create: false,
+                reason: String::new(),
+                target_spread_bps: None,
+                side: "sell".to_string(),
+            },
+        ];
         let spendable_profiles = BTreeMap::from([(
             "base_asset".to_string(),
             SpendableAssetProfile {

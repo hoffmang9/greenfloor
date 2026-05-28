@@ -147,12 +147,13 @@ pub fn plan_auto_split_selection(
     allow_combine_prereq: Option<bool>,
 ) -> SplitAutoSelectPlan {
     let behavior = behavior_for(profile);
-    let resolve_allow_combine_prereq = allow_combine_prereq
-        .unwrap_or(behavior.default_allow_combine_prereq);
+    let resolve_allow_combine_prereq =
+        allow_combine_prereq.unwrap_or(behavior.default_allow_combine_prereq);
     let enforce_required_amount = behavior.enforce_required_amount;
     let check_sub_cat_change = behavior.check_sub_cat_change;
 
-    let large_enough: Vec<&SpendableCoin> = if enforce_required_amount && required_amount_mojos > 0 {
+    let large_enough: Vec<&SpendableCoin> = if enforce_required_amount && required_amount_mojos > 0
+    {
         candidate_spendable
             .iter()
             .filter(|coin| coin.amount >= required_amount_mojos)
@@ -239,7 +240,8 @@ pub fn plan_auto_combine_inputs(
         None => number_of_coins,
     };
     if selection_mode == CombineInputSelectionMode::ExactAmount {
-        let amount = target_amount_mojos.ok_or("target_amount_mojos is required for exact-amount combine selection")?;
+        let amount = target_amount_mojos
+            .ok_or("target_amount_mojos is required for exact-amount combine selection")?;
         let excluded = exclude_coin_ids.cloned().unwrap_or_default();
         return Ok(select_exact_amount_coin_ids(
             spendable_coins,
@@ -254,9 +256,7 @@ pub fn plan_auto_combine_inputs(
         .unwrap_or_default();
     let mut eligible: Vec<&SpendableCoin> = spendable_coins
         .iter()
-        .filter(|coin| {
-            !coin.id.is_empty() && !excluded.contains(&coin.id.to_ascii_lowercase())
-        })
+        .filter(|coin| !coin.id.is_empty() && !excluded.contains(&coin.id.to_ascii_lowercase()))
         .collect();
     eligible.sort_by(|left, right| right.amount.cmp(&left.amount));
     Ok(eligible
@@ -342,7 +342,11 @@ mod tests {
         match plan {
             SplitAutoSelectPlan::CombinePrereq(prereq) => {
                 assert_eq!(
-                    prereq.input_coin_ids.iter().cloned().collect::<HashSet<_>>(),
+                    prereq
+                        .input_coin_ids
+                        .iter()
+                        .cloned()
+                        .collect::<HashSet<_>>(),
                     HashSet::from(["Coin_a".to_string(), "Coin_b".to_string()])
                 );
                 assert!(prereq.exact_match);

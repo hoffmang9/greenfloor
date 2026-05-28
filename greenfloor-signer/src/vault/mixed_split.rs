@@ -12,10 +12,17 @@ use crate::vault::spend::VaultSpendContext;
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct MixedSplitRequest {
     pub receive_address: String,
-    #[serde(deserialize_with = "crate::offer::types::deserialize_bytes32", serialize_with = "crate::offer::types::serialize_bytes32")]
+    #[serde(
+        deserialize_with = "crate::offer::types::deserialize_bytes32",
+        serialize_with = "crate::offer::types::serialize_bytes32"
+    )]
     pub asset_id: Bytes32,
     pub output_amounts: Vec<u64>,
-    #[serde(default, deserialize_with = "crate::offer::types::deserialize_coin_ids", serialize_with = "crate::offer::types::serialize_coin_ids")]
+    #[serde(
+        default,
+        deserialize_with = "crate::offer::types::deserialize_coin_ids",
+        serialize_with = "crate::offer::types::serialize_coin_ids"
+    )]
     pub coin_ids: Vec<Bytes32>,
     pub allow_sub_cat_output: bool,
     pub fee_mojos: u64,

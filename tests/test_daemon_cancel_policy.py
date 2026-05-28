@@ -86,7 +86,7 @@ def test_cancel_policy_requires_strong_price_move() -> None:
 def test_cancel_policy_uses_market_specific_threshold_when_present() -> None:
     CANCEL_COOLDOWN_UNTIL.clear()
     market = _market("unstable", stable_vs_unstable=True)
-    market.pricing["cancel_move_threshold_bps"] = 100
+    market.cancel_move_threshold_bps = 100
     out = execute_cancel_policy(
         market=market,
         offers=[{"id": "o1", "status": 0}],

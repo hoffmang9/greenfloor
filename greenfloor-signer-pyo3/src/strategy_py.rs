@@ -112,7 +112,10 @@ pub fn planned_action_to_py<'py>(
     planned_action_cls.call((), Some(&kwargs))
 }
 
-pub fn planned_actions_to_py_list(py: Python<'_>, actions: &[PlannedAction]) -> PyResult<Py<PyAny>> {
+pub fn planned_actions_to_py_list(
+    py: Python<'_>,
+    actions: &[PlannedAction],
+) -> PyResult<Py<PyAny>> {
     let list = PyList::empty(py);
     for action in actions {
         list.append(planned_action_to_py(py, action)?)?;
@@ -122,7 +125,10 @@ pub fn planned_actions_to_py_list(py: Python<'_>, actions: &[PlannedAction]) -> 
 
 #[pyfunction]
 #[pyo3(name = "evaluate_market")]
-fn evaluate_market_typed_py(state: &Bound<'_, PyAny>, config: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+fn evaluate_market_typed_py(
+    state: &Bound<'_, PyAny>,
+    config: &Bound<'_, PyAny>,
+) -> PyResult<Py<PyAny>> {
     let state = market_state_from_py(state)?;
     let config = strategy_config_from_py(config)?;
     let actions = evaluate_market(&state, &config);
@@ -141,12 +147,8 @@ fn evaluate_two_sided_market_actions_py(
     let sell_state = market_state_from_py(sell_state)?;
     let buy_config = strategy_config_from_py(buy_config)?;
     let sell_config = strategy_config_from_py(sell_config)?;
-    let actions = evaluate_two_sided_market_actions(
-        &buy_state,
-        &sell_state,
-        &buy_config,
-        &sell_config,
-    );
+    let actions =
+        evaluate_two_sided_market_actions(&buy_state, &sell_state, &buy_config, &sell_config);
     Python::attach(|py| planned_actions_to_py_list(py, &actions))
 }
 

@@ -78,8 +78,8 @@ pub fn reservation_request_for_managed_offer(
 
     let side = side.trim().to_ascii_lowercase();
     let base_amount = size_base_units * base_unit_mojo_multiplier;
-    let quote_amount = (size_base_units as f64 * quote_price * quote_unit_mojo_multiplier as f64)
-        .round() as i64;
+    let quote_amount =
+        (size_base_units as f64 * quote_price * quote_unit_mojo_multiplier as f64).round() as i64;
     let (offer_asset_id, offer_amount) = if side == "buy" {
         (quote_asset_id, quote_amount)
     } else {
@@ -201,6 +201,8 @@ mod tests {
         )]);
         let reason = single_input_preferred_skip_reason(&requested, &profiles);
         assert!(reason.is_some());
-        assert!(reason.unwrap().contains("single_input_preferred_requires_combine"));
+        assert!(reason
+            .unwrap()
+            .contains("single_input_preferred_requires_combine"));
     }
 }

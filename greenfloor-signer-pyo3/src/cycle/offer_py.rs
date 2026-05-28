@@ -3,7 +3,9 @@ use pyo3::prelude::*;
 
 use crate::py_utils::{dict_from_json_value, to_py_err};
 
-use signer_core::{apply_offer_signal, expiry_seconds_for_action, OfferLifecycleState, OfferSignal};
+use signer_core::{
+    apply_offer_signal, expiry_seconds_for_action, OfferLifecycleState, OfferSignal,
+};
 
 pub(crate) fn parse_lifecycle_state(value: &str) -> PyResult<OfferLifecycleState> {
     match value.trim() {
@@ -25,7 +27,9 @@ pub(crate) fn parse_offer_signal(value: &str) -> PyResult<OfferSignal> {
         "expiry_near" => Ok(OfferSignal::ExpiryNear),
         "expired" => Ok(OfferSignal::Expired),
         "refresh_posted" => Ok(OfferSignal::RefreshPosted),
-        other => Err(PyValueError::new_err(format!("unknown offer signal: {other}"))),
+        other => Err(PyValueError::new_err(format!(
+            "unknown offer signal: {other}"
+        ))),
     }
 }
 
@@ -36,10 +40,7 @@ fn apply_offer_signal_py(state: &str, signal: &str) -> PyResult<Py<PyAny>> {
     let signal = parse_offer_signal(signal)?;
     let transition = apply_offer_signal(state, signal);
     Python::attach(|py| {
-        dict_from_json_value(
-            py,
-            serde_json::to_value(&transition).map_err(to_py_err)?,
-        )
+        dict_from_json_value(py, serde_json::to_value(&transition).map_err(to_py_err)?)
     })
 }
 

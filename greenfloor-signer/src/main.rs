@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand};
 use greenfloor_signer::vault::members::hex_to_bytes32;
 use greenfloor_signer::{
-    build_and_optionally_broadcast_vault_cat_mixed_split, build_vault_cat_offer, load_signer_config,
-    parse_coin_ids, resolve_vault_context, CreateOfferRequest, MixedSplitRequest,
+    build_and_optionally_broadcast_vault_cat_mixed_split, build_vault_cat_offer,
+    load_signer_config, parse_coin_ids, resolve_vault_context, CreateOfferRequest,
+    MixedSplitRequest,
 };
 
 #[derive(Debug, Parser)]

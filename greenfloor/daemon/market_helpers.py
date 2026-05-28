@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 from greenfloor.config.io import default_cats_config_path, resolve_quote_asset_for_offer
+from greenfloor.core.cancel_policy import abs_move_bps, cancel_move_threshold_bps
+from greenfloor.core.threshold_parsing import (
+    market_cancel_move_threshold_bps,
+    unstable_cancel_move_threshold_bps_from_env,
+)
 from greenfloor.hex_utils import default_mojo_multiplier_for_asset, is_hex_id
-
-_DEFAULT_CANCEL_MOVE_THRESHOLD_BPS = 500
 
 
 def _normalize_strategy_pair(quote_asset: str) -> str:
@@ -30,31 +32,15 @@ def _default_cats_config_path() -> Path | None:
 
 
 def _cancel_move_threshold_bps(*, market: Any | None = None) -> int:
-    pricing = dict(getattr(market, "pricing", {}) or {}) if market is not None else {}
-    threshold_raw = pricing.get("cancel_move_threshold_bps")
-    if threshold_raw is not None:
-        try:
-            parsed_threshold = int(threshold_raw)
-        except (TypeError, ValueError):
-            parsed_threshold = 0
-        if parsed_threshold > 0:
-            return parsed_threshold
-    raw = os.getenv("GREENFLOOR_UNSTABLE_CANCEL_MOVE_BPS", "").strip()
-    if not raw:
-        return _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS
-    try:
-        parsed = int(raw)
-    except ValueError:
-        return _DEFAULT_CANCEL_MOVE_THRESHOLD_BPS
-    return max(1, parsed)
+    market_threshold = market_cancel_move_threshold_bps(market) if market is not None else None
+    return cancel_move_threshold_bps(
+        market_threshold=market_threshold,
+        env_threshold=unstable_cancel_move_threshold_bps_from_env(),
+    )
 
 
 def _abs_move_bps(current: float | None, previous: float | None) -> float | None:
-    if current is None or previous is None:
-        return None
-    if current <= 0 or previous <= 0:
-        return None
-    return abs((current - previous) / previous) * 10_000.0
+    return abs_move_bps(current, previous)
 
 
 def _resolve_quote_asset_for_offer(*, quote_asset: str, network: str) -> str:

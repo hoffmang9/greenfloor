@@ -6,9 +6,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use super::common::cached_class;
-use signer_core::{
-    CombineInputSelectionMode, SplitAutoSelectPlan, SplitPlanningProfile,
-};
+use signer_core::{CombineInputSelectionMode, SplitAutoSelectPlan, SplitPlanningProfile};
 
 const COIN_OPS_MODULE: &str = "greenfloor.core.coin_ops";
 
@@ -27,18 +25,16 @@ fn enum_label_from_py(obj: &Bound<'_, PyAny>) -> PyResult<String> {
 
 pub fn split_planning_profile_from_py(obj: &Bound<'_, PyAny>) -> PyResult<SplitPlanningProfile> {
     let label = enum_label_from_py(obj)?;
-    SplitPlanningProfile::from_label(&label).ok_or_else(|| {
-        PyValueError::new_err(format!("invalid split planning profile: {label}"))
-    })
+    SplitPlanningProfile::from_label(&label)
+        .ok_or_else(|| PyValueError::new_err(format!("invalid split planning profile: {label}")))
 }
 
 pub fn combine_input_selection_mode_from_py(
     obj: &Bound<'_, PyAny>,
 ) -> PyResult<CombineInputSelectionMode> {
     let label = enum_label_from_py(obj)?;
-    CombineInputSelectionMode::from_label(&label).ok_or_else(|| {
-        PyValueError::new_err(format!("invalid combine selection mode: {label}"))
-    })
+    CombineInputSelectionMode::from_label(&label)
+        .ok_or_else(|| PyValueError::new_err(format!("invalid combine selection mode: {label}")))
 }
 
 pub fn bucket_spec_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -54,7 +50,9 @@ fn coin_op_kind_from_py(obj: &Bound<'_, PyAny>) -> PyResult<signer_core::CoinOpK
     match op_type.as_str() {
         "split" => Ok(signer_core::CoinOpKind::Split),
         "combine" => Ok(signer_core::CoinOpKind::Combine),
-        other => Err(PyValueError::new_err(format!("invalid coin op type: {other}"))),
+        other => Err(PyValueError::new_err(format!(
+            "invalid coin op type: {other}"
+        ))),
     }
 }
 
@@ -98,7 +96,9 @@ pub fn coin_op_plan_to_py<'py>(
     cls.call((), Some(&kwargs))
 }
 
-pub fn coin_op_plans_from_py_list(plans: &Bound<'_, PyList>) -> PyResult<Vec<signer_core::CoinOpPlan>> {
+pub fn coin_op_plans_from_py_list(
+    plans: &Bound<'_, PyList>,
+) -> PyResult<Vec<signer_core::CoinOpPlan>> {
     let mut parsed = Vec::with_capacity(plans.len());
     for item in plans.iter() {
         parsed.push(coin_op_plan_from_py(&item)?);

@@ -15,7 +15,9 @@ pub fn bls_reason(err: SignerError, op: BlsOp) -> String {
     match (err, op) {
         (SignerError::MissingOutputAmounts, BlsOp::MixedSplit) => "missing_output_amounts".into(),
         (SignerError::InvalidOutputAmount, BlsOp::MixedSplit) => "invalid_output_amount".into(),
-        (SignerError::InvalidOutputAmount, BlsOp::Offer) => "invalid_offer_or_request_amount".into(),
+        (SignerError::InvalidOutputAmount, BlsOp::Offer) => {
+            "invalid_offer_or_request_amount".into()
+        }
         (SignerError::CatOutputBelowMinimum, BlsOp::MixedSplit) => {
             "cat_output_below_minimum_mojos".into()
         }

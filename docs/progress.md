@@ -1,5 +1,56 @@
 # Progress Log
 
+## 2026-05-28 (Rust hex utilities + low-inventory alerts — step 12)
+
+- **`greenfloor-signer/src/hex.rs`:** signer-boundary hex helpers (`is_hex_id`, `normalize_hex_id`, `default_mojo_multiplier_for_asset`).
+- **`greenfloor-signer/src/cycle/notifications.rs`:** low-inventory threshold resolution, hysteresis clear, dedup cooldown, and alert event shaping.
+- **PyO3:** `hex_py.rs` + `notifications_py.rs`; `greenfloor/hex_utils.py` is pure Python for CLI/daemon hot paths; `greenfloor/core/notifications.py` is a typed `policy_kernel()` bridge.
+- **`DeterministicPolicyKernelProtocol`:** composed cycle/cancel/notification protocol in `greenfloor/core/kernel_protocol.py`; `_bridge.py` calls `policy_kernel()` directly.
+- **Parity:** `tests/test_coin_ops_policy_parity.py` gates `canonical_is_xch`, `normalize_hex_id`, `is_hex_id`, and `default_mojo_multiplier_for_asset` against the kernel; `tests/test_low_inventory_alerts.py` remains the notification parity gate.
+- **Migration status:** step 12 complete for shared hex helpers and v1 notification policy.
+
+## 2026-05-28 (Rust cancel-policy decision kernel — step 13)
+
+- **`greenfloor-signer/src/cycle/cancel.rs`:** `abs_move_bps`, threshold resolution, eligibility/trigger decision, and open-offer ID selection (Dexie status `0`).
+- **PyO3 + core surface:** `cycle/cancel_py.rs`; policy in `greenfloor/core/cancel_policy.py` with typed `OpenOfferRow` and `CancelPolicyDecision`; daemon `cancel_policy.py` keeps Dexie cancel IO, cooldown, and SQLite persistence only (~110 lines).
+- **`MarketConfig.cancel_move_threshold_bps`:** parsed once at config load (removed from runtime `pricing` dict); env override via `unstable_cancel_move_threshold_bps_from_env()`.
+- **`market_helpers.py`:** `_abs_move_bps` and `_cancel_move_threshold_bps` delegate to core using typed market/env thresholds.
+- **Tests:** Rust unit tests in `cancel.rs`; `tests/test_cancel_policy_kernel.py` + existing `tests/test_daemon_cancel_policy.py` remain parity gates.
+- **Migration status:** step 13 complete for cancel-policy decision kernel.
+
+### Agent handoff — next migration steps (post step 13)
+
+Steps 1–13 moved deterministic daemon/coin-op/shared policy into `greenfloor-signer`. Remaining large Python modules are mostly **IO adapters** (SQLite, Dexie, Coinset, websocket, CLI). Do not migrate them wholesale; extract **pure decision** hunks first (same pattern as steps 9–13).
+
+**Largest tracked Python modules (line counts approximate, 2026-05-28):**
+
+| Module                                            | Lines | Role                                  | Migration stance                                                                                           |
+| ------------------------------------------------- | ----: | ------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `greenfloor/storage/sqlite.py`                    |  ~690 | Schema, queries, audit persistence    | **Defer** — not on critical offer-post path; high coupling to SQLite                                       |
+| `greenfloor/config/models.py`                     |  ~656 | Config parse/validate                 | **Keep Python** — `greenfloor/config` boundary per AGENTS.md                                               |
+| `greenfloor/runtime/coin_ops/daemon_execution.py` |  ~585 | Coin-op Coinset/wallet execution loop | IO glue; policy already in Rust (steps 10–11)                                                              |
+| `greenfloor/runtime/offer_publish.py`             |  ~489 | Venue publish helpers                 | IO; audit any retry/classify helpers already in Rust                                                       |
+| `greenfloor/daemon/watchlist.py`                  |  ~486 | Websocket watchlist                   | **Keep Python** — network IO                                                                               |
+| `greenfloor/runtime/offer_orchestration.py`       |  ~485 | Bootstrap → create → verify → publish | IO orchestration; split only if a pure planning hunk emerges                                               |
+| `greenfloor/runtime/offer_runtime.py`             |  ~484 | Vault KMS offer build/post runtime    | IO; signing canonical path is `greenfloor-signer`                                                          |
+| `greenfloor/core/cycle/_bridge.py`                |  ~440 | Cycle PyO3 bridge                     | **Hygiene only** — typed via `DeterministicPolicyKernelProtocol`; shrink by moving wrappers to `policy.py` |
+| `greenfloor/adapters/coinset.py`                  |  ~440 | Coinset HTTP adapter                  | **Keep Python** — adapter boundary                                                                         |
+
+**Recommended step 14 (next pure-policy target):** **`moderate_retry.py` + offer publish transient classification** — `parse_rate_limit_retry_seconds`, exponential backoff loop inputs, and any remaining string-matching retry gates in `runtime/offer_publish.py` that duplicate Rust managed-path classifiers. Small surface (~80 lines), high reuse across Dexie/Coinset paths.
+
+**Recommended step 15:** **`offer_build_context.py` pricing/expiry shaping** — extract deterministic `OfferBuildContext` validation and expiry derivation (if any logic remains outside Rust `expiry_seconds_for_action`) into `greenfloor-signer/src/offer/`; Python keeps YAML/config IO only.
+
+**Recommended step 16 (optional, larger):** **`runtime/coin_ops/steps.py` + `daemon_execution.py` iteration skeleton** — only after steps 14–15; move step-gating / skip-reason tables to Rust; Python retains spend-bundle broadcast and Coinset polling.
+
+**Explicitly out of scope for near-term migration:**
+
+- `config/models.py`, `config/io.py` — config layer stays Python.
+- `storage/sqlite.py` — defer until daemon glue stabilizes (noted in step 4 handoff).
+- `daemon/offer_dispatch/*` — already consolidated IO; do not re-split without a Rust policy hunk to absorb.
+- Submodule / SDK trees (`chia-wallet-sdk/`) — out of repo migration scope.
+
+**CI parity gates for new steps:** Rust unit tests in the new `*.rs` module; Python parity test file or extension of an existing kernel test; run `pre-commit run --all-files` (with `SKIP=pytest` for lint-only pass) before PR.
+
 ## 2026-05-27 (strategy_dispatch exit criteria — package shrink)
 
 - **`greenfloor/daemon/offer_dispatch/`:** new home for managed/local/parallel offer build+post IO (~760 lines): `managed.py`, `local.py`, `parallel.py`, `reservation.py`, `items.py`.
@@ -17,7 +68,7 @@
 - **Python IO glue:** `runtime/coin_ops/planning.py` and `selection.py` are thin re-exports (~80 lines total); CLI/daemon execution modules unchanged.
 - **Tests:** Rust unit tests in `selection.rs` and `split_planning.rs`; existing `tests/test_coin_ops_planning.py` and daemon parallel selection tests remain parity gates.
 - **Migration status:** step 11 complete for coin-op selection/planning helpers.
-- **Next step (deferred hygiene):** `CycleKernelProtocol` on `core/cycle/_bridge.py`, `py_utils.rs` domain split before ~500 lines, dual XCH identity parity gate in `test_coin_ops_policy_parity.py`.
+- **Next step (deferred hygiene):** split `kernel_protocol.py` by domain before ~300 lines, keep hex parity gates in `test_coin_ops_policy_parity.py`.
 
 ## 2026-05-27 (Rust coin-op policy kernel — step 10)
 
@@ -31,11 +82,11 @@
 
 ### Agent handoff — deferred follow-up (post step 11)
 
-Record these for the next migration agent; none are merge blockers for step 11.
+Record these for the next migration agent; none are merge blockers for step 12.
 
-1. **`greenfloor/core/cycle/_bridge.py` (~440 lines, untyped FFI):** add a `CycleKernelProtocol` (mirror `CoinOpsKernelProtocol`) when the cycle epic is touched next.
-2. **Dual XCH asset identity (Python + Rust):** `hex_utils.canonical_is_xch` and `coinset::is_canonical_xch_asset` remain separate; keep `tests/test_coin_ops_policy_parity.py` as the parity gate.
-3. **`greenfloor-signer-pyo3/src/py_utils.rs` (~420 lines):** split into domain submodules (for example `py_utils/coin_ops.rs`, `py_utils/cycle.rs`) before the file reaches ~500 lines.
+1. **`DeterministicPolicyKernelProtocol`:** ✅ composed in step 12/13 follow-up (`greenfloor/core/kernel_protocol.py`).
+2. **Dual XCH / hex asset identity (Python + Rust):** ✅ `hex_utils.py` pure Python for CLI paths; kernel `hex.rs` at signer boundary; parity gated in `tests/test_coin_ops_policy_parity.py`.
+3. **`greenfloor-signer-pyo3/src/py_utils.rs` (~420 lines):** split into domain submodules (for example `py_utils/coin_ops.rs`, `py_utils/cycle.rs`) before the file reaches ~500 lines. ✅ split done in step 11 follow-up.
 4. **`strategy_dispatch/` line-count exit (~400 target):** ✅ met (386 lines); execution IO in `offer_dispatch/`.
 
 ## 2026-05-27 (Rust offer reconciliation kernel — step 9)
@@ -184,10 +235,12 @@ Large Python daemon modules remain intentionally unsplit pending Rust migration 
 9. **Offer reconciliation transition kernel (ninth)** ✅ — `cycle/reconcile.rs` + typed PyO3 `CycleOfferTransition`; Python keeps Dexie fetch, SQLite tx-signal lookup, and audit persistence in `runtime/offer_reconciliation.py`.
 10. **Core coin-op policy bundle (tenth)** ✅ — `coin_ops/{plan,fee_budget,inventory,policy}.rs` + PyO3 `coin_ops_py.rs`; Python keeps `runtime/coin_ops/` execution IO and `daemon/coin_ops_cycle.py` glue.
 11. **Coin-op selection/planning helpers (eleventh)** ✅ — `coin_ops/selection.rs` + `split_planning.rs`; Python keeps CLI/daemon execution IO only (`runtime/coin_ops/planning.py` / `selection.py` re-exports).
+12. **Shared hex utilities + low-inventory alerts (twelfth)** ✅ — `hex.rs` + `cycle/notifications.rs` + PyO3 bindings; pure-Python `hex_utils.py`; typed `DeterministicPolicyKernelProtocol`.
+13. **Cancel-policy decision kernel (thirteenth)** ✅ — `cycle/cancel.rs` + typed `OpenOfferRow`; Python keeps Dexie cancel IO and SQLite persistence.
 
 **Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch/` each under ~400 lines of Python glue; Rust crates absorb complexity; Python keeps SQLite, Dexie, websocket, and CLI. **`strategy_dispatch/` ✅ (386 lines).** `main.py` satisfied via `cycle_runner.py` extraction (step 6).
 
-**Tracking:** milestone checkpoints recorded here; offer execution IO consolidated under `greenfloor/daemon/offer_dispatch/`.
+**Tracking:** milestone checkpoints recorded here; offer execution IO consolidated under `greenfloor/daemon/offer_dispatch/`. Post-step-13 next targets documented in the **Agent handoff — next migration steps** section under the 2026-05-28 step 13 entry.
 
 ## 2026-05-26 (offer runtime modularization — F1–F14)
 

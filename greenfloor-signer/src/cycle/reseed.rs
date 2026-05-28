@@ -211,7 +211,8 @@ mod tests {
     fn plan_reseed_injects_gap_actions_for_empty_planner() {
         let config = sample_config();
         let targets = BTreeMap::from([(1, 5), (10, 2), (100, 1)]);
-        let plan = plan_reseed_actions_from_gap(&[], &BTreeMap::new(), &targets, &config, Some(30.0));
+        let plan =
+            plan_reseed_actions_from_gap(&[], &BTreeMap::new(), &targets, &config, Some(30.0));
         assert!(plan.skip_reason.is_none());
         assert_eq!(plan.actions.len(), 3);
         assert!(plan

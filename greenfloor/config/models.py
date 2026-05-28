@@ -246,6 +246,7 @@ class MarketConfig:
     signer_key_id: str
     inventory: MarketInventoryConfig
     pricing: dict[str, Any] = field(default_factory=dict)
+    cancel_move_threshold_bps: int | None = None
     ladders: dict[str, list[MarketLadderEntry]] = field(default_factory=dict)
 
 
@@ -637,6 +638,8 @@ def parse_markets_config(raw: dict[str, Any]) -> MarketsConfig:
             market_id,
             quote_asset_type=str(row.get("quote_asset_type", "")).strip().lower(),
         )
+        threshold_raw = pricing.pop("cancel_move_threshold_bps", None)
+        cancel_move_threshold_bps = int(threshold_raw) if threshold_raw is not None else None
         markets.append(
             MarketConfig(
                 market_id=market_id,
@@ -650,6 +653,7 @@ def parse_markets_config(raw: dict[str, Any]) -> MarketsConfig:
                 signer_key_id=str(_req(row, "signer_key_id")),
                 inventory=inv,
                 pricing=pricing,
+                cancel_move_threshold_bps=cancel_move_threshold_bps,
                 ladders=ladders,
             )
         )

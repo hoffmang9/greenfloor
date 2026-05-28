@@ -27,7 +27,10 @@ pub fn cycle_offer_transition_to_py<'py>(
     kwargs.set_item("taker_signal", &transition.taker_signal)?;
     kwargs.set_item("taker_diagnostic", &transition.taker_diagnostic)?;
     kwargs.set_item("coinset_tx_ids", &transition.coinset_tx_ids)?;
-    kwargs.set_item("coinset_confirmed_tx_ids", &transition.coinset_confirmed_tx_ids)?;
+    kwargs.set_item(
+        "coinset_confirmed_tx_ids",
+        &transition.coinset_confirmed_tx_ids,
+    )?;
     kwargs.set_item("coinset_mempool_tx_ids", &transition.coinset_mempool_tx_ids)?;
     cls.call((), Some(&kwargs))
 }
@@ -65,7 +68,11 @@ fn resolve_watched_offer_transition_from_signals_py(
 
 #[pyfunction]
 #[pyo3(name = "unchanged_offer_transition")]
-fn unchanged_offer_transition_py(py: Python<'_>, current_state: &str, reason: &str) -> PyResult<Py<PyAny>> {
+fn unchanged_offer_transition_py(
+    py: Python<'_>,
+    current_state: &str,
+    reason: &str,
+) -> PyResult<Py<PyAny>> {
     let transition = unchanged_offer_transition(current_state, reason).map_err(to_py_err)?;
     Ok(cycle_offer_transition_to_py(py, &transition)?.into())
 }
@@ -82,7 +89,10 @@ fn unsupported_venue_offer_transition_py(
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(resolve_missing_watched_offer_transition_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        resolve_missing_watched_offer_transition_py,
+        m
+    )?)?;
     m.add_function(wrap_pyfunction!(
         resolve_watched_offer_transition_from_signals_py,
         m
