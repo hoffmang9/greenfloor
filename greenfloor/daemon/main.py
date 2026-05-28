@@ -11,7 +11,7 @@ import os
 import time
 from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -43,6 +43,7 @@ from greenfloor.core.cycle import (
 from greenfloor.core.cycle import (
     select_market_batch as select_market_batch_kernel,
 )
+from greenfloor.core.cycle_orchestration import OfferStateRow, StaleSweepHit, StaleSweepProgress
 from greenfloor.core.cycle import (
     should_log_disabled_market as should_log_disabled_market_kernel,
 )
@@ -224,20 +225,20 @@ def _select_market_batch(
         cursor=int(dispatch_state.cursor),
         immediate_requeue_ids=list(dispatch_state.immediate_requeue_ids),
     )
-    dispatch_state.cursor = int(selection.get("cursor", dispatch_state.cursor))
+    dispatch_state.cursor = int(selection.cursor)
     dispatch_state.immediate_requeue_ids = deque(
         str(market_id)
-        for market_id in selection.get("immediate_requeue_ids", [])
+        for market_id in selection.immediate_requeue_ids
         if str(market_id).strip()
     )
     selected_markets = [
         enabled_by_id[str(market_id)]
-        for market_id in selection.get("selected_market_ids", [])
+        for market_id in selection.selected_market_ids
         if str(market_id).strip() in enabled_by_id
     ]
     consumed = [
         str(market_id)
-        for market_id in selection.get("consumed_immediate_requeues", [])
+        for market_id in selection.consumed_immediate_requeues
         if str(market_id).strip()
     ]
     return selected_markets, consumed
@@ -250,17 +251,17 @@ def _detect_stale_open_offers_for_requeue(
     enabled_market_ids: set[str],
     per_market_limit: int = _GLOBAL_STALE_OPEN_SWEEP_MAX_OFFERS_PER_MARKET,
     max_offer_checks: int = _GLOBAL_STALE_OPEN_SWEEP_MAX_OFFER_CHECKS,
-) -> dict[str, Any]:
+) -> StaleSweepProgress:
     if not enabled_market_ids:
         return empty_stale_sweep_payload()
 
     rows = store.list_offer_states(limit=5000)
     offer_rows = [
-        {
-            "market_id": str(row.get("market_id", "")),
-            "offer_id": str(row.get("offer_id", "")),
-            "state": str(row.get("state", "")),
-        }
+        OfferStateRow(
+            market_id=str(row.get("market_id", "")),
+            offer_id=str(row.get("offer_id", "")),
+            state=str(row.get("state", "")),
+        )
         for row in rows
     ]
     candidates = collect_stale_sweep_candidates(
@@ -271,12 +272,16 @@ def _detect_stale_open_offers_for_requeue(
     progress = empty_stale_sweep_payload()
     check_limit = max(1, int(max_offer_checks))
     for candidate in candidates:
-        if int(progress["checked_offer_count"]) >= check_limit:
-            progress["truncated"] = True
-            return progress
-        market_id = str(candidate.get("market_id", "")).strip()
-        offer_id = str(candidate.get("offer_id", "")).strip()
-        hit: dict[str, str] | None = None
+        if int(progress.checked_offer_count) >= check_limit:
+            return StaleSweepProgress(
+                checked_offer_count=progress.checked_offer_count,
+                requeue_market_ids=list(progress.requeue_market_ids),
+                hits=list(progress.hits),
+                truncated=True,
+            )
+        market_id = str(candidate.market_id).strip()
+        offer_id = str(candidate.offer_id).strip()
+        hit: StaleSweepHit | None = None
         try:
             payload = dexie.get_offer(offer_id, timeout=5)
             offer = payload.get("offer") if isinstance(payload, dict) else None
@@ -287,18 +292,18 @@ def _detect_stale_open_offers_for_requeue(
                     status = -1
                 reason = classify_dexie_stale_offer_status(status)
                 if reason:
-                    hit = {
-                        "market_id": market_id,
-                        "offer_id": offer_id,
-                        "reason": reason,
-                    }
+                    hit = StaleSweepHit(
+                        market_id=market_id,
+                        offer_id=offer_id,
+                        reason=reason,
+                    )
         except Exception as exc:  # pragma: no cover - network dependent
             if is_dexie_offer_missing_error_text(str(exc)):
-                hit = {
-                    "market_id": market_id,
-                    "offer_id": offer_id,
-                    "reason": "offer_missing_404",
-                }
+                hit = StaleSweepHit(
+                    market_id=market_id,
+                    offer_id=offer_id,
+                    reason="offer_missing_404",
+                )
         progress = record_stale_sweep_check(progress=progress, hit=hit)
     return progress
 
@@ -394,12 +399,7 @@ def run_once(
             _DISABLED_MARKET_NEXT_LOG_AT.pop(market.market_id, None)
             enabled_markets.append(market)
 
-        stale_open_sweep_payload: dict[str, Any] = {
-            "checked_offer_count": 0,
-            "requeue_market_ids": [],
-            "hits": [],
-            "truncated": False,
-        }
+        stale_open_sweep_payload: StaleSweepProgress = empty_stale_sweep_payload()
         if enabled_markets:
             stale_open_sweep_payload = _detect_stale_open_offers_for_requeue(
                 store=store,
@@ -410,7 +410,7 @@ def run_once(
             )
             stale_requeues = [
                 str(mid).strip()
-                for mid in stale_open_sweep_payload.get("requeue_market_ids", [])
+                for mid in stale_open_sweep_payload.requeue_market_ids
                 if str(mid).strip()
             ]
             if market_dispatch_state is not None:
@@ -421,11 +421,9 @@ def run_once(
                     "stale_open_offer_requeue_detected",
                     {
                         "market_ids": stale_requeues,
-                        "checked_offer_count": int(
-                            stale_open_sweep_payload.get("checked_offer_count", 0)
-                        ),
-                        "truncated": bool(stale_open_sweep_payload.get("truncated", False)),
-                        "hits": list(stale_open_sweep_payload.get("hits", []))[:50],
+                        "checked_offer_count": int(stale_open_sweep_payload.checked_offer_count),
+                        "truncated": bool(stale_open_sweep_payload.truncated),
+                        "hits": [asdict(hit) for hit in stale_open_sweep_payload.hits][:50],
                     },
                 )
 
@@ -578,17 +576,15 @@ def run_once(
                 "markets_processed": markets_processed,
                 "runtime_market_slot_count": configured_market_slot_count,
                 "stale_open_sweep_checked_offer_count": int(
-                    stale_open_sweep_payload.get("checked_offer_count", 0)
+                    stale_open_sweep_payload.checked_offer_count
                 ),
                 "stale_open_sweep_requeue_market_ids": list(
-                    stale_open_sweep_payload.get("requeue_market_ids", [])
+                    stale_open_sweep_payload.requeue_market_ids
                 ),
                 "stale_open_sweep_requeue_count": len(
-                    list(stale_open_sweep_payload.get("requeue_market_ids", []))
+                    stale_open_sweep_payload.requeue_market_ids
                 ),
-                "stale_open_sweep_truncated": bool(
-                    stale_open_sweep_payload.get("truncated", False)
-                ),
+                "stale_open_sweep_truncated": bool(stale_open_sweep_payload.truncated),
                 "immediate_requeue_market_ids": deduped_requeue_market_ids,
                 "immediate_requeue_count": len(deduped_requeue_market_ids),
                 "error_count": cycle_error_count,

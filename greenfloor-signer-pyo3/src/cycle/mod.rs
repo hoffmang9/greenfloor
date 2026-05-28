@@ -2,6 +2,7 @@ mod inventory_py;
 mod managed_py;
 mod market_py;
 mod offer_py;
+mod orchestration_py;
 mod stale_sweep_py;
 mod strategy_counts_py;
 

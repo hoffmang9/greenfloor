@@ -1,11 +1,14 @@
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
-
-use crate::py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
+use pyo3::types::PyList;
 
 use signer_core::{
     classify_dexie_stale_offer_status, collect_stale_sweep_candidates, is_dexie_offer_missing_error_text,
-    record_stale_sweep_check, OfferStateRow, StaleSweepProgress,
+    record_stale_sweep_check,
+};
+
+use crate::cycle::orchestration_py::{
+    offer_state_row_from_py, stale_sweep_candidates_to_py_list, stale_sweep_hit_from_py,
+    stale_sweep_progress_from_py, stale_sweep_progress_to_py,
 };
 
 #[pyfunction]
@@ -15,17 +18,13 @@ fn collect_stale_sweep_candidates_py(
     enabled_market_ids: Vec<String>,
     per_market_limit: usize,
 ) -> PyResult<Py<PyAny>> {
-    let mut offer_rows = Vec::new();
+    let mut offer_rows = Vec::with_capacity(rows.len());
     for item in rows.iter() {
-        let dict = item.cast::<PyDict>()?;
-        let payload = request_dict_to_json(&dict)?;
-        offer_rows.push(serde_json::from_value::<OfferStateRow>(payload).map_err(to_py_err)?);
+        offer_rows.push(offer_state_row_from_py(&item)?);
     }
     let candidates =
         collect_stale_sweep_candidates(&offer_rows, &enabled_market_ids, per_market_limit);
-    Python::attach(|py| {
-        dict_from_json_value(py, serde_json::to_value(candidates).map_err(to_py_err)?)
-    })
+    Python::attach(|py| stale_sweep_candidates_to_py_list(py, &candidates))
 }
 
 #[pyfunction]
@@ -43,22 +42,13 @@ fn is_dexie_offer_missing_error_text_py(error_text: &str) -> bool {
 #[pyfunction]
 #[pyo3(name = "record_stale_sweep_check")]
 fn record_stale_sweep_check_py(
-    progress: &Bound<'_, PyDict>,
-    hit: Option<&Bound<'_, PyDict>>,
+    progress: &Bound<'_, PyAny>,
+    hit: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<Py<PyAny>> {
-    let progress_json = request_dict_to_json(progress)?;
-    let mut current: StaleSweepProgress =
-        serde_json::from_value(progress_json).map_err(to_py_err)?;
-    let hit_value = if let Some(hit_dict) = hit {
-        let hit_json = request_dict_to_json(hit_dict)?;
-        Some(serde_json::from_value(hit_json).map_err(to_py_err)?)
-    } else {
-        None
-    };
+    let mut current = stale_sweep_progress_from_py(progress)?;
+    let hit_value = hit.map(stale_sweep_hit_from_py).transpose()?;
     current = record_stale_sweep_check(&current, hit_value);
-    Python::attach(|py| {
-        dict_from_json_value(py, serde_json::to_value(&current).map_err(to_py_err)?)
-    })
+    Python::attach(|py| Ok(stale_sweep_progress_to_py(py, &current)?.into()))
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {

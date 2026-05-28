@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.cycle import reservation_request_for_managed_offer
@@ -49,15 +47,15 @@ def reservation_request_for_action(
 def resolve_signer_offer_asset_ids_for_reservation(
     *,
     program: ProgramConfig,
-    market: Any,
+    market: MarketConfig,
 ) -> tuple[str, str, str]:
     quote_asset = _resolve_quote_asset_for_offer(
-        quote_asset=str(getattr(market, "quote_asset", "")),
-        network=str(getattr(program, "app_network", "mainnet")),
+        quote_asset=str(market.quote_asset),
+        network=str(program.app_network),
     )
     resolved_base_asset_id, resolved_quote_asset_id = signer_resolve_offer_asset_ids(
         program=program,
-        base_asset_id=str(getattr(market, "base_asset", "")).strip(),
+        base_asset_id=str(market.base_asset).strip(),
         quote_asset_id=str(quote_asset).strip(),
     )
     resolved_xch_asset_id, _ = signer_resolve_offer_asset_ids(

@@ -70,9 +70,9 @@ def test_detect_stale_open_offers_for_requeue_marks_expired_status(tmp_path: Pat
     finally:
         store.close()
 
-    assert payload["checked_offer_count"] == 1
-    assert payload["requeue_market_ids"] == ["m1"]
-    assert payload["hits"][0]["reason"] == "offer_expired"
+    assert payload.checked_offer_count == 1
+    assert payload.requeue_market_ids == ["m1"]
+    assert payload.hits[0].reason == "offer_expired"
 
 
 def test_detect_stale_open_offers_for_requeue_marks_missing_404(tmp_path: Path) -> None:
@@ -99,9 +99,9 @@ def test_detect_stale_open_offers_for_requeue_marks_missing_404(tmp_path: Path) 
     finally:
         store.close()
 
-    assert payload["checked_offer_count"] == 1
-    assert payload["requeue_market_ids"] == ["m2"]
-    assert payload["hits"][0]["reason"] == "offer_missing_404"
+    assert payload.checked_offer_count == 1
+    assert payload.requeue_market_ids == ["m2"]
+    assert payload.hits[0].reason == "offer_missing_404"
 
 
 def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:

@@ -8,6 +8,7 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.core.cycle_orchestration import ParallelActionOutcome
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.cycle import (
     count_parallel_transient_failures,
@@ -213,10 +214,10 @@ def execute_actions_parallel(
     _, _, cooldown_seconds = _post_retry_config()
     transient_parallel_failures = count_parallel_transient_failures(
         [
-            {
-                "status": item.status,
-                "transient_upstream": item.transient_upstream,
-            }
+            ParallelActionOutcome(
+                status=item.status,
+                transient_upstream=item.transient_upstream,
+            )
             for _submit_idx, item in submitted_items
         ]
     )

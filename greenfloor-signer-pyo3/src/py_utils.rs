@@ -9,6 +9,14 @@ static PLANNED_ACTION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_SKIP_ITEM_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_QUEUE_ITEM_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static PARALLEL_BATCH_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static PARALLEL_ACTION_OUTCOME_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static MARKET_BATCH_SELECTION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static OFFER_STATE_ROW_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static STALE_SWEEP_CANDIDATE_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static STALE_SWEEP_HIT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static STALE_SWEEP_PROGRESS_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+
+const ORCHESTRATION_MODULE: &str = "greenfloor.core.cycle_orchestration";
 
 fn cached_class<'py>(
     py: Python<'py>,
@@ -53,6 +61,30 @@ pub fn parallel_batch_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, Py
         "greenfloor.core.parallel_batch_plan",
         "ParallelBatchPlan",
     )
+}
+
+pub fn parallel_action_outcome_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(py, &PARALLEL_ACTION_OUTCOME_CLS, ORCHESTRATION_MODULE, "ParallelActionOutcome")
+}
+
+pub fn market_batch_selection_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(py, &MARKET_BATCH_SELECTION_CLS, ORCHESTRATION_MODULE, "MarketBatchSelection")
+}
+
+pub fn offer_state_row_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(py, &OFFER_STATE_ROW_CLS, ORCHESTRATION_MODULE, "OfferStateRow")
+}
+
+pub fn stale_sweep_candidate_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(py, &STALE_SWEEP_CANDIDATE_CLS, ORCHESTRATION_MODULE, "StaleSweepCandidate")
+}
+
+pub fn stale_sweep_hit_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(py, &STALE_SWEEP_HIT_CLS, ORCHESTRATION_MODULE, "StaleSweepHit")
+}
+
+pub fn stale_sweep_progress_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(py, &STALE_SWEEP_PROGRESS_CLS, ORCHESTRATION_MODULE, "StaleSweepProgress")
 }
 
 pub fn string_i64_map_from_py_dict(dict: &Bound<'_, PyDict>) -> PyResult<BTreeMap<String, i64>> {

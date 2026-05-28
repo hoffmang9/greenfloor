@@ -1,12 +1,12 @@
 use pyo3::prelude::*;
 
-use crate::py_utils::{dict_from_json_value, to_py_err};
-
 use signer_core::{
     dedupe_sorted_market_ids, enqueue_immediate_requeue, market_cycle_phases, next_disabled_market_log_deadline,
     select_market_batch, should_log_disabled_market, should_try_cat_inventory_fallback,
     should_use_market_slot_dispatch,
 };
+
+use crate::cycle::orchestration_py::market_batch_selection_to_py;
 
 #[pyfunction]
 #[pyo3(name = "select_market_batch")]
@@ -22,9 +22,7 @@ fn select_market_batch_py(
         cursor,
         &immediate_requeue_ids,
     );
-    Python::attach(|py| {
-        dict_from_json_value(py, serde_json::to_value(&selection).map_err(to_py_err)?)
-    })
+    Python::attach(|py| Ok(market_batch_selection_to_py(py, &selection)?.into()))
 }
 
 #[pyfunction]

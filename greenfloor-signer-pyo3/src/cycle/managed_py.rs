@@ -1,6 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
+use crate::cycle::orchestration_py::parallel_action_outcomes_from_py_list;
 use crate::py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
 
 use signer_core::{
@@ -232,17 +233,7 @@ fn classify_dexie_visibility_outcome_py(visible: bool, visibility_error: &str) -
 #[pyfunction]
 #[pyo3(name = "count_parallel_transient_failures")]
 fn count_parallel_transient_failures_py(items: &Bound<'_, PyList>) -> PyResult<usize> {
-    let mut pairs = Vec::new();
-    for item in items.iter() {
-        let dict = item.cast::<PyDict>()?;
-        let status: String = dict.get_item("status")?.unwrap().extract()?;
-        let transient_upstream: bool = dict
-            .get_item("transient_upstream")?
-            .map(|value| value.extract())
-            .transpose()?
-            .unwrap_or(false);
-        pairs.push((status, transient_upstream));
-    }
+    let pairs = parallel_action_outcomes_from_py_list(items)?;
     Ok(count_parallel_transient_failures(&pairs))
 }
 

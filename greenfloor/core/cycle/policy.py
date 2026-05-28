@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from . import _bridge as bridge
+from greenfloor.core.cycle_orchestration import StaleSweepProgress
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.strategy_types import MarketState, StrategyConfig
 
@@ -187,10 +188,5 @@ def one_sided_offer_counts_by_side(
     return dict(payload["buy"]), dict(payload["sell"])
 
 
-def empty_stale_sweep_payload() -> dict[str, Any]:
-    return {
-        "checked_offer_count": 0,
-        "requeue_market_ids": [],
-        "hits": [],
-        "truncated": False,
-    }
+def empty_stale_sweep_payload() -> StaleSweepProgress:
+    return StaleSweepProgress()
