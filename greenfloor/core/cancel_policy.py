@@ -17,6 +17,12 @@ class CancelPolicyDecision:
     threshold_bps: int
 
 
+@dataclass(frozen=True, slots=True)
+class OpenOfferRow:
+    offer_id: str
+    status: int
+
+
 def abs_move_bps(current: float | None, previous: float | None) -> float | None:
     result = policy_kernel().abs_move_bps(current, previous)
     return None if result is None else float(result)
@@ -52,7 +58,19 @@ def evaluate_cancel_policy_decision(
     return result
 
 
-def collect_open_offer_ids_for_cancel(offers: list[dict[str, Any]]) -> list[str]:
+def open_offer_rows_from_dicts(offers: list[dict[str, Any]]) -> list[OpenOfferRow]:
+    rows: list[OpenOfferRow] = []
+    for offer in offers:
+        raw_status = offer.get("status", -1)
+        try:
+            status = int(raw_status)
+        except (TypeError, ValueError):
+            status = -1
+        rows.append(OpenOfferRow(offer_id=str(offer.get("id", "")), status=status))
+    return rows
+
+
+def collect_open_offer_ids_for_cancel(offers: list[OpenOfferRow]) -> list[str]:
     result = policy_kernel().collect_open_offer_ids_for_cancel(offers)
     if not isinstance(result, list):
         raise TypeError("collect_open_offer_ids_for_cancel returned non-list result")

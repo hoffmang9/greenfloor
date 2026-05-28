@@ -8,7 +8,7 @@ from typing import Any
 from greenfloor.config.io import default_cats_config_path, resolve_quote_asset_for_offer
 from greenfloor.core.cancel_policy import abs_move_bps, cancel_move_threshold_bps
 from greenfloor.core.threshold_parsing import (
-    resolved_market_cancel_move_threshold_bps,
+    market_cancel_move_threshold_bps,
     unstable_cancel_move_threshold_bps_from_env,
 )
 from greenfloor.hex_utils import default_mojo_multiplier_for_asset, is_hex_id
@@ -32,9 +32,7 @@ def _default_cats_config_path() -> Path | None:
 
 
 def _cancel_move_threshold_bps(*, market: Any | None = None) -> int:
-    market_threshold = (
-        resolved_market_cancel_move_threshold_bps(market) if market is not None else None
-    )
+    market_threshold = market_cancel_move_threshold_bps(market) if market is not None else None
     return cancel_move_threshold_bps(
         market_threshold=market_threshold,
         env_threshold=unstable_cancel_move_threshold_bps_from_env(),

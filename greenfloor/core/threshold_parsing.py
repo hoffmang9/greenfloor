@@ -30,9 +30,6 @@ def unstable_cancel_move_threshold_bps_from_env() -> int | None:
     return parse_optional_positive_int(os.getenv("GREENFLOOR_UNSTABLE_CANCEL_MOVE_BPS", "").strip())
 
 
-def resolved_market_cancel_move_threshold_bps(market: Any) -> int | None:
-    typed = getattr(market, "cancel_move_threshold_bps", None)
-    if typed is not None:
-        return int(typed)
-    pricing = dict(getattr(market, "pricing", {}) or {})
-    return parse_optional_positive_int(pricing.get("cancel_move_threshold_bps"))
+def market_cancel_move_threshold_bps(market: Any) -> int | None:
+    value = getattr(market, "cancel_move_threshold_bps", None)
+    return None if value is None else int(value)

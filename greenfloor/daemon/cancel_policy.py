@@ -9,9 +9,10 @@ from greenfloor.core.cancel_policy import (
     cancel_policy_audit_payload,
     collect_open_offer_ids_for_cancel,
     evaluate_cancel_policy_decision,
+    open_offer_rows_from_dicts,
 )
 from greenfloor.core.threshold_parsing import (
-    resolved_market_cancel_move_threshold_bps,
+    market_cancel_move_threshold_bps,
     unstable_cancel_move_threshold_bps_from_env,
 )
 from greenfloor.daemon.cooldowns import (
@@ -44,13 +45,13 @@ def _execute_cancel_policy_for_market(
         ),
         current_xch_price_usd=current_xch_price_usd,
         previous_xch_price_usd=previous_xch_price_usd,
-        market_threshold=resolved_market_cancel_move_threshold_bps(market),
+        market_threshold=market_cancel_move_threshold_bps(market),
         env_threshold=unstable_cancel_move_threshold_bps_from_env(),
     )
     if not decision.triggered:
         return cancel_policy_audit_payload(decision)
 
-    target_offer_ids = collect_open_offer_ids_for_cancel(offers)
+    target_offer_ids = collect_open_offer_ids_for_cancel(open_offer_rows_from_dicts(offers))
     executed_count = 0
     _, _, cooldown_seconds = _cancel_retry_config()
     cooldown_key = f"cancel:{market.market_id}"

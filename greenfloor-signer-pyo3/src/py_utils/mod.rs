@@ -21,5 +21,5 @@ pub use cycle::{
 };
 pub use policy::{
     cancel_policy_decision_to_py, low_inventory_evaluation_to_py, low_inventory_input_from_py,
-    offer_status_pairs_from_py_list, string_list_to_py_list,
+    open_offer_rows_from_py_list, string_list_to_py_list,
 };

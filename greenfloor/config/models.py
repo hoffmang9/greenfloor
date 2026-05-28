@@ -638,7 +638,7 @@ def parse_markets_config(raw: dict[str, Any]) -> MarketsConfig:
             market_id,
             quote_asset_type=str(row.get("quote_asset_type", "")).strip().lower(),
         )
-        threshold_raw = pricing.get("cancel_move_threshold_bps")
+        threshold_raw = pricing.pop("cancel_move_threshold_bps", None)
         cancel_move_threshold_bps = int(threshold_raw) if threshold_raw is not None else None
         markets.append(
             MarketConfig(

@@ -37,8 +37,5 @@ def policy_kernel() -> DeterministicPolicyKernelProtocol:
     return import_kernel()  # type: ignore[return-value]
 
 
-# Migration alias — prefer policy_kernel for deterministic policy bridges.
-signer_kernel = policy_kernel
-
 # Migration alias — prefer import_kernel for new code.
 import_signer = import_kernel

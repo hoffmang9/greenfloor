@@ -6,8 +6,10 @@ import pytest
 
 from greenfloor.core.cancel_policy import (
     CancelPolicyDecision,
+    OpenOfferRow,
     abs_move_bps,
     cancel_move_threshold_bps,
+    collect_open_offer_ids_for_cancel,
     evaluate_cancel_policy_decision,
 )
 
@@ -110,3 +112,14 @@ def test_evaluate_cancel_policy_decision_uses_market_threshold() -> None:
     )
     assert decision.triggered is True
     assert decision.threshold_bps == 100
+
+
+def test_collect_open_offer_ids_for_cancel_uses_open_offer_row() -> None:
+    offer_ids = collect_open_offer_ids_for_cancel(
+        [
+            OpenOfferRow(offer_id="o1", status=0),
+            OpenOfferRow(offer_id="o2", status=4),
+            OpenOfferRow(offer_id="  ", status=0),
+        ]
+    )
+    assert offer_ids == ["o1"]

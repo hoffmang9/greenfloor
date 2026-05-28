@@ -24,7 +24,7 @@ from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
 if TYPE_CHECKING:
-    from greenfloor.core.cancel_policy import CancelPolicyDecision
+    from greenfloor.core.cancel_policy import CancelPolicyDecision, OpenOfferRow
     from greenfloor.core.notifications import (
         LowInventoryEvaluation,
         LowInventoryInput,
@@ -243,7 +243,7 @@ class CancelPolicyKernelProtocol(Protocol):
         env_threshold: int | None,
     ) -> CancelPolicyDecision: ...
 
-    def collect_open_offer_ids_for_cancel(self, offers: list[dict[str, Any]]) -> list[str]: ...
+    def collect_open_offer_ids_for_cancel(self, offers: list[OpenOfferRow]) -> list[str]: ...
 
 
 class NotificationKernelProtocol(Protocol):

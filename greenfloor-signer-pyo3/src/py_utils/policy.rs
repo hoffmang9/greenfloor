@@ -1,8 +1,7 @@
 use std::sync::OnceLock;
 
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAnyMethods, PyDict, PyList};
+use pyo3::types::{PyDict, PyList};
 
 use super::common::cached_class;
 
@@ -113,23 +112,18 @@ pub fn low_inventory_input_from_py(input: &Bound<'_, PyAny>) -> PyResult<signer_
     })
 }
 
-pub fn offer_status_pairs_from_py_list(
+pub fn open_offer_rows_from_py_list(
     offers: &Bound<'_, PyList>,
 ) -> PyResult<Vec<(String, i64)>> {
     let mut pairs = Vec::new();
-    for (index, item) in offers.iter().enumerate() {
-        let offer = item
-            .cast::<PyDict>()
-            .map_err(|_| PyValueError::new_err(format!("offer item {index} must be a dict")))?;
-        let offer_id = offer
-            .get_item("id")?
-            .map(|value| value.extract::<String>())
-            .transpose()?
+    for item in offers.iter() {
+        let offer_id = item
+            .getattr("offer_id")
+            .and_then(|value| value.extract::<String>())
             .unwrap_or_default();
-        let status = offer
-            .get_item("status")?
-            .map(|value| value.extract::<i64>())
-            .transpose()?
+        let status = item
+            .getattr("status")
+            .and_then(|value| value.extract::<i64>())
             .unwrap_or(-1);
         pairs.push((offer_id, status));
     }

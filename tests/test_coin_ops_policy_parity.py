@@ -10,9 +10,15 @@ from greenfloor.core.coin_ops import (
     coin_op_target_amount_allowed,
     select_spendable_coins_for_target_amount,
 )
-from greenfloor.hex_utils import canonical_is_xch
+from greenfloor.hex_utils import (
+    canonical_is_xch,
+    default_mojo_multiplier_for_asset,
+    is_hex_id,
+    normalize_hex_id,
+)
 
 _CAT_ID = "0000000000000000000000000000000000000000000000000000000000000001"
+_VALID_HEX_ID = "a" * 64
 
 
 @pytest.mark.parametrize(
@@ -36,6 +42,40 @@ def test_canonical_xch_parity_with_hex_utils(asset_id: str, expected_xch: bool) 
         assert coin_op_min_amount_mojos(canonical_asset_id=asset_id) == 0
     else:
         assert coin_op_min_amount_mojos(canonical_asset_id=asset_id) == 1000
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (_VALID_HEX_ID, _VALID_HEX_ID),
+        (f"0x{_VALID_HEX_ID}", _VALID_HEX_ID),
+        ("abc", ""),
+        ("g" * 64, ""),
+    ],
+)
+def test_normalize_hex_id_parity_with_kernel(value: str, expected: str) -> None:
+    from greenfloor.core.kernel_bridge import import_kernel
+
+    kernel = import_kernel()
+    assert normalize_hex_id(value) == expected
+    assert str(kernel.normalize_hex_id(value)) == expected
+    assert is_hex_id(value) is bool(expected)
+    assert bool(kernel.is_hex_id(value)) is bool(expected)
+
+
+@pytest.mark.parametrize(
+    ("asset_id", "expected"),
+    [
+        ("xch", 1_000_000_000_000),
+        (_CAT_ID, 1_000),
+    ],
+)
+def test_default_mojo_multiplier_parity_with_kernel(asset_id: str, expected: int) -> None:
+    from greenfloor.core.kernel_bridge import import_kernel
+
+    kernel = import_kernel()
+    assert default_mojo_multiplier_for_asset(asset_id) == expected
+    assert int(kernel.default_mojo_multiplier_for_asset(asset_id)) == expected
 
 
 def test_coin_meets_min_amount_rejects_invalid_amount_type() -> None:

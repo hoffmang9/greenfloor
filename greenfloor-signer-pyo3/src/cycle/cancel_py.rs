@@ -6,7 +6,7 @@ use signer_core::{
 };
 
 use crate::py_utils::{
-    cancel_policy_decision_to_py, offer_status_pairs_from_py_list, string_list_to_py_list,
+    cancel_policy_decision_to_py, open_offer_rows_from_py_list, string_list_to_py_list,
 };
 
 #[pyfunction]
@@ -52,7 +52,7 @@ fn collect_open_offer_ids_for_cancel_py(
     py: Python<'_>,
     offers: &Bound<'_, PyList>,
 ) -> PyResult<Py<PyAny>> {
-    let pairs = offer_status_pairs_from_py_list(offers)?;
+    let pairs = open_offer_rows_from_py_list(offers)?;
     let offer_ids = collect_open_offer_ids_for_cancel(&pairs);
     Ok(string_list_to_py_list(py, &offer_ids)?.into())
 }
