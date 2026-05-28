@@ -1,4 +1,4 @@
-from greenfloor.core.inventory import compute_bucket_counts_from_coins
+from greenfloor.core.coin_ops import compute_bucket_counts_from_coins
 
 
 def test_bucket_counts_exact_matches_only() -> None:

@@ -562,14 +562,12 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
             called["post_offer_called"] = True
             return {"success": True, "id": "should-not-post"}
 
-    def _import_module(name: str):
-        if name == "greenfloor_signer":
-            raise ImportError("disable native path for this test")
-        return __import__(name)
+    def _import_kernel():
+        raise ImportError("disable native path for this test")
 
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_publish.importlib.import_module",
-        _import_module,
+        "greenfloor.runtime.offer_publish.import_kernel",
+        _import_kernel,
     )
     monkeypatch.setitem(sys.modules, "chia_wallet_sdk", _Sdk)
     monkeypatch.setattr(

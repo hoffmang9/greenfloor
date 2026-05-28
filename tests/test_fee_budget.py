@@ -1,5 +1,5 @@
-from greenfloor.core.coin_ops import CoinOpPlan
-from greenfloor.core.fee_budget import (
+from greenfloor.core.coin_ops import (
+    CoinOpPlan,
     fee_budget_allows_execution,
     partition_plans_by_budget,
     projected_coin_ops_fee_mojos,

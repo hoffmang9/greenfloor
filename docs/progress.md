@@ -1,5 +1,24 @@
 # Progress Log
 
+## 2026-05-27 (Rust coin-op policy kernel — step 10)
+
+- **`greenfloor-signer/src/coin_ops/`:** deterministic coin-op policy bundle — `plan_coin_ops`, fee-budget partitioning, bucket counting, and CAT min-amount guard.
+- **PyO3 + core surface:** `coin_ops_py.rs` exposes typed `BucketSpec` / `CoinOpPlan` round-trip via `greenfloor.core.coin_ops` dataclasses; Python policy is consolidated in `greenfloor/core/coin_ops/_bridge.py` with `CoinOpsKernelProtocol` typing.
+- **Python IO glue:** `runtime/coin_ops/` and `daemon/coin_ops_cycle.py` unchanged — still own Coinset/wallet execution, fee lookup, and SQLite budget accounting.
+- **Tests:** Rust unit tests in `coin_ops/{plan,fee_budget,inventory,policy}.rs`; Python parity/FFI contract in `tests/test_coin_ops_policy_parity.py`; existing planner/fee/inventory tests remain parity gates.
+- **Follow-up:** consolidated Python surface into `greenfloor/core/coin_ops/` package + shared `kernel_bridge`; deduplicated PyO3 class caching; `amount_meets_coin_op_min_mojos` is the single Rust threshold check (ADR 0010).
+- **Migration status:** step 10 complete for core coin-op policy.
+- **Next step (step 11):** move **coin-op selection/planning helpers** from `runtime/coin_ops/planning.py` and `runtime/coin_ops/selection.py` into Rust (auto-split profile selection, combine-prereq gating, sub-CAT change rejection). Python keeps CLI/daemon execution IO only.
+
+### Agent handoff — deferred follow-up (post step 10 review)
+
+Record these for the next migration agent; none are merge blockers for step 10.
+
+1. **`greenfloor/core/cycle/_bridge.py` (~440 lines, untyped FFI):** add a `CycleKernelProtocol` (mirror `CoinOpsKernelProtocol`) when the cycle epic is touched next; shrink wrapper boilerplate only if it deletes real complexity.
+2. **`greenfloor/runtime/coin_ops/planning.py` + `selection.py` (~315 lines, step 11 scope):** migrate auto-split profile selection, combine-prereq gating, and sub-CAT change rejection to Rust; Python keeps wallet/coinset execution IO only.
+3. **Dual XCH asset identity (Python + Rust):** `hex_utils.canonical_is_xch` and `coinset::is_canonical_xch_asset` remain separate until more asset policy moves to Rust; keep `tests/test_coin_ops_policy_parity.py` as the parity gate.
+4. **`greenfloor-signer-pyo3/src/py_utils.rs` (~320 lines):** split into domain submodules (for example `py_utils/coin_ops.rs`, `py_utils/cycle.rs`) before the file reaches ~500 lines.
+
 ## 2026-05-27 (Rust offer reconciliation kernel — step 9)
 
 - **`greenfloor-signer/src/cycle/reconcile.rs`:** Coinset-first watched-offer transition kernel — Dexie status fallback, missing-offer (404) handling, taker field shaping, and `CycleOfferTransition` outputs.
@@ -7,7 +26,7 @@
 - **Python IO glue:** `greenfloor/runtime/offer_reconciliation.py` keeps Dexie fetch, SQLite tx-signal lookup (`_coinset_signal_lists`), audit persistence, and batch reconcile loops only.
 - **Tests:** Rust unit tests in `reconcile.rs`; Python wiring in `tests/test_offer_reconcile_kernel.py`; existing manager/daemon reconcile integration tests remain parity gates.
 - **Migration status:** step 9 complete for offer lifecycle reconciliation policy.
-- **Next step (step 10):** move the **core coin-op policy bundle** to Rust — `plan_coin_ops`, `fee_budget` partitioning, `compute_bucket_counts_from_coins`, and `coin_ops_policy` min-amount guard (`greenfloor/core/coin_ops.py`, `fee_budget.py`, `inventory.py`, `coin_ops_policy.py`). Python keeps coin-op IO orchestration under `runtime/coin_ops/` and `daemon/coin_ops_cycle.py`.
+- **Completed (step 10):** core coin-op policy bundle — see step 10 entry above (`greenfloor-signer/src/coin_ops/`, `greenfloor/core/coin_ops/`).
 
 ## 2026-05-27 (Rust cycle kernel step 8 — reseed gap planning)
 
@@ -144,7 +163,8 @@ Large Python daemon modules remain intentionally unsplit pending Rust migration 
 7. **`strategy_dispatch` reservation + retry kernel (seventh)** ✅ — typed `ManagedActionOutcome`, `PlannedAction` parallel planning, `parallel_pool` extract.
 8. **Market-cycle reseed gap planning (eighth)** ✅ — `cycle/reseed.rs` + typed PyO3 `ReseedGapPlan`; Python keeps SQLite offer-count IO and structured reseed logging; `tests/test_cycle_reseed.py` enforces skip-reason label parity.
 9. **Offer reconciliation transition kernel (ninth)** ✅ — `cycle/reconcile.rs` + typed PyO3 `CycleOfferTransition`; Python keeps Dexie fetch, SQLite tx-signal lookup, and audit persistence in `runtime/offer_reconciliation.py`.
-10. **Core coin-op policy bundle (tenth, next)** — `plan_coin_ops`, fee-budget partitioning, bucket counting, and CAT min-amount policy in Rust; Python keeps `runtime/coin_ops/` execution IO and `daemon/coin_ops_cycle.py` glue.
+10. **Core coin-op policy bundle (tenth)** ✅ — `coin_ops/{plan,fee_budget,inventory,policy}.rs` + PyO3 `coin_ops_py.rs`; Python keeps `runtime/coin_ops/` execution IO and `daemon/coin_ops_cycle.py` glue.
+11. **Coin-op selection/planning helpers (eleventh, next)** — auto-split profile selection, combine-prereq gating, and sub-CAT change rejection from `runtime/coin_ops/planning.py` / `selection.py` in Rust; Python keeps CLI/daemon execution IO only.
 
 **Exit criteria:** `greenfloor/daemon/main.py` and `greenfloor/daemon/strategy_dispatch/` each under ~400 lines of Python glue; Rust crates absorb complexity; Python keeps SQLite, Dexie, websocket, and CLI.
 
@@ -166,7 +186,7 @@ Large Python daemon modules remain intentionally unsplit pending Rust migration 
 - Extracted offer reconciliation to `greenfloor/runtime/offer_reconciliation.py`; daemon/tests import runtime, not CLI.
 - Canonical config helpers: `resolve_state_db_path()`, `resolve_market_for_build()` in `greenfloor/config/io.py`.
 - Promoted `format_json_output()` on `greenfloor/runtime/cloud_wallet/adapter.py`.
-- Extracted shared coin-op minimum-amount policy to `greenfloor/core/coin_ops_policy.py` and coin ID resolution helpers to `greenfloor/runtime/cloud_wallet/coins.py`.
+- Extracted shared coin-op minimum-amount policy to `greenfloor/core/coin_ops/` (Rust-backed; superseded `coin_ops_policy.py` in step 10) and coin ID resolution helpers to `greenfloor/runtime/cloud_wallet/coins.py`.
 - `manager.py` is now argparse + dispatch only (~400 lines).
 - Recorded in ADR 0009 (manager CLI) and ADR 0008 (offer runtime).
 

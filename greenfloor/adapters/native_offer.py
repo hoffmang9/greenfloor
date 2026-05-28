@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import importlib
 from typing import Any
 
-
-def _import_greenfloor_signer() -> Any:
-    return importlib.import_module("greenfloor_signer")
+from greenfloor.core.kernel_bridge import import_kernel
 
 
 def encode_offer_from_spend_bundle_hex(raw_hex: str) -> str:
     """Encode a spend bundle hex string to offer1... via ``greenfloor_signer``."""
-    return str(_import_greenfloor_signer().encode_offer(bytes.fromhex(raw_hex)))
+    return str(import_kernel().encode_offer(bytes.fromhex(raw_hex)))
 
 
 def _as_bytes(value: Any) -> bytes:
@@ -39,7 +36,7 @@ def from_input_spend_bundle_xch(
     input_spend_bundle: Any,
     requested_payments_xch: list[Any],
 ) -> Any:
-    signer = _import_greenfloor_signer()
+    signer = import_kernel()
     requested: list[tuple[bytes, list[tuple[bytes, int]]]] = []
     for notarized_payment in requested_payments_xch:
         payments: list[tuple[bytes, int]] = []

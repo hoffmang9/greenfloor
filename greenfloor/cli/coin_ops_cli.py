@@ -9,7 +9,7 @@ from pathlib import Path
 
 from greenfloor.cli.prompts import prompt_yes_no
 from greenfloor.config.models import MarketConfig
-from greenfloor.core.coin_ops_policy import coin_op_min_amount_mojos
+from greenfloor.core.coin_ops import coin_op_min_amount_mojos
 from greenfloor.runtime.coin_ops.errors import coin_op_unresolved_error_payload
 from greenfloor.runtime.coin_ops.models import (
     CombineDenominationTarget,

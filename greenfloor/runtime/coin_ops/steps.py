@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from greenfloor.config.models import MarketConfig
-from greenfloor.core.coin_ops_policy import coin_meets_coin_op_min_amount
+from greenfloor.core.coin_ops import coin_meets_coin_op_min_amount
 from greenfloor.runtime.coin_ops.coins import classify_resolved_coin_ids_by_asset
 from greenfloor.runtime.coin_ops.errors import (
     coin_combine_asset_mismatch_error_payload,

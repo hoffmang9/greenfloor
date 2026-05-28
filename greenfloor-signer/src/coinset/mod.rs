@@ -14,6 +14,7 @@ pub(crate) use coin_select::{
     finalize_selected_cats, list_and_select_cats, select_xch_for_amount, CoinSelectionMode,
 };
 
+pub use asset::is_canonical_xch_asset;
 pub use asset::is_xch_like_asset;
 
 pub use backend::{LiveCoinset, OfferCoinsetBackend};

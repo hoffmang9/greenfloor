@@ -29,7 +29,7 @@ Severity tags:
 ## Architecture Boundaries
 
 - `[MUST]` `greenfloor/core`: deterministic policy only (no IO).
-- `[MUST]` `greenfloor/core/coin_ops_policy.py`: coin-op minimum-amount policy shared by CLI and daemon.
+- `[MUST]` `greenfloor/core/coin_ops/`: coin-op deterministic policy (plan, fee budget, inventory, min-amount guard) shared by CLI and daemon.
 - `[MUST]` `greenfloor/config`: parse/validate config, resolve paths, resolve quote assets.
 - `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet, notifications).
 - `[MUST]` `greenfloor/signing.py`: legacy Python signing entry point during Rust migration (see ADR 0006).

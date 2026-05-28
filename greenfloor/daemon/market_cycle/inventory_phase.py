@@ -6,12 +6,12 @@ from typing import Any
 
 from greenfloor.adapters.wallet import WalletAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig, signer_offer_path_configured
+from greenfloor.core.coin_ops import compute_bucket_counts_from_coins
 from greenfloor.core.cycle import (
     needs_inventory_fallback,
     resolve_inventory_scan_source,
     should_try_cat_inventory_fallback,
 )
-from greenfloor.core.inventory import compute_bucket_counts_from_coins
 from greenfloor.daemon.inventory_scan import (
     _coinset_cat_spendable_base_unit_coin_amounts,
     _coinset_spendable_base_unit_coin_amounts,

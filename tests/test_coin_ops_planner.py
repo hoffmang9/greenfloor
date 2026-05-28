@@ -1,4 +1,4 @@
-from greenfloor.core.coin_ops import BucketSpec, plan_coin_ops
+from greenfloor.core.coin_ops import BucketSpec, CoinOpPlan, plan_coin_ops
 
 
 def test_plan_splits_when_deficit_exists() -> None:
@@ -25,6 +25,7 @@ def test_plan_splits_when_deficit_exists() -> None:
         combine_fee_mojos=1,
     )
     assert plans
+    assert isinstance(plans[0], CoinOpPlan)
     assert plans[0].op_type == "split"
     assert plans[0].size_base_units == 1
 

@@ -6,14 +6,14 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.adapters.wallet import WalletAdapter
-from greenfloor.core.coin_ops import BucketSpec, plan_coin_ops
-from greenfloor.core.coin_ops_policy import (
-    coin_op_min_amount_mojos as _coin_op_min_amount_mojos,
+from greenfloor.core.coin_ops import (
+    BucketSpec,
+    coin_op_min_amount_mojos,
+    coin_op_target_amount_allowed,
+    partition_plans_by_budget,
+    plan_coin_ops,
+    projected_coin_ops_fee_mojos,
 )
-from greenfloor.core.coin_ops_policy import (
-    coin_op_target_amount_allowed as _coin_op_target_amount_allowed,
-)
-from greenfloor.core.fee_budget import partition_plans_by_budget, projected_coin_ops_fee_mojos
 from greenfloor.daemon.cooldowns import _combine_input_coin_cap
 from greenfloor.daemon.market_helpers import (
     _base_unit_mojo_multiplier_for_market,
@@ -102,7 +102,7 @@ def _plan_and_execute_coin_ops(
         if size_base_units <= 0:
             continue
         target_amount_mojos = size_base_units * int(base_unit_mojo_multiplier)
-        if _coin_op_target_amount_allowed(
+        if coin_op_target_amount_allowed(
             amount_mojos=target_amount_mojos,
             canonical_asset_id=canonical_base_asset_id,
         ):
@@ -113,7 +113,7 @@ def _plan_and_execute_coin_ops(
                 "size_base_units": size_base_units,
                 "target_amount_mojos": int(target_amount_mojos),
                 "minimum_allowed_mojos": int(
-                    _coin_op_min_amount_mojos(canonical_asset_id=canonical_base_asset_id)
+                    coin_op_min_amount_mojos(canonical_asset_id=canonical_base_asset_id)
                 ),
             }
         )

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from greenfloor.core.coin_ops_policy import coin_op_min_amount_mojos
+from greenfloor.core.coin_ops import coin_op_min_amount_mojos
 from greenfloor.runtime.coin_ops.selection import (
     select_exact_amount_coin_ids,
     select_largest_spendable_coin,

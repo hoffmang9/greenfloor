@@ -6,9 +6,9 @@ Vault KMS uses ``greenfloor.adapters.rust_signer``.
 
 from __future__ import annotations
 
-import importlib
 from typing import Any
 
+from greenfloor.core.kernel_bridge import import_kernel
 from greenfloor.hex_utils import canonical_is_xch
 
 
@@ -21,16 +21,12 @@ def _hex_to_bytes(value: str) -> bytes:
     return bytes.fromhex(raw)
 
 
-def _import_greenfloor_signer() -> Any:
-    return importlib.import_module("greenfloor_signer")
-
-
 def _load_master_private_key(
     keyring_yaml_path: str, key_id: str
 ) -> tuple[bytes | None, str | None]:
     _ = keyring_yaml_path
     try:
-        signer = _import_greenfloor_signer()
+        signer = import_kernel()
         result = signer.load_bls_master_sk(str(key_id).strip())
     except Exception as exc:
         return None, f"greenfloor_signer_import_error:{exc}"
@@ -52,7 +48,7 @@ def _call_signer_build(
     request: dict[str, Any],
 ) -> tuple[str | None, str | None]:
     try:
-        signer = _import_greenfloor_signer()
+        signer = import_kernel()
         build = getattr(signer, method_name)
     except Exception as exc:
         return None, f"greenfloor_signer_import_error:{exc}"
@@ -135,7 +131,7 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
 
 def _broadcast_bls_spend_bundle_rust(*, network: str, spend_bundle_hex: str) -> dict[str, Any]:
     try:
-        signer = _import_greenfloor_signer()
+        signer = import_kernel()
         result = signer.broadcast_bls_spend_bundle(network, spend_bundle_hex)
     except Exception as exc:
         return {

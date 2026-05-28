@@ -1,5 +1,6 @@
 extern crate greenfloor_signer as signer_core;
 
+mod coin_ops_py;
 mod cycle;
 mod execution_py;
 mod py_utils;
@@ -420,6 +421,7 @@ fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(coinset_push_tx_py, m)?)?;
     m.add_function(wrap_pyfunction!(coinset_get_fee_estimate_py, m)?)?;
     m.add_function(wrap_pyfunction!(coinset_get_conservative_fee_estimate_py, m)?)?;
+    coin_ops_py::register(m)?;
     cycle::register(m)?;
     Ok(())
 }

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import collections.abc
-import importlib
 import logging
 import time
 import urllib.parse
@@ -13,6 +12,7 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.cycle import is_transient_dexie_visibility_404_error
+from greenfloor.core.kernel_bridge import import_kernel
 from greenfloor.hex_utils import normalize_hex_id
 from greenfloor.logging_setup import initialize_service_file_logging
 from greenfloor.offer_decode import (
@@ -215,8 +215,8 @@ def _offer_has_duplicate_spent_coin_ids(sdk: object, offer_text: str) -> bool:
 def verify_offer_text_for_dexie(offer_text: str) -> str | None:
     native_validated = False
     try:
-        native = importlib.import_module("greenfloor_signer")
-    except Exception:
+        native = import_kernel()
+    except ImportError:
         native = None
     else:
         try:
