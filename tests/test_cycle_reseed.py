@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from greenfloor.core.cycle._bridge import (
+from greenfloor.core.cycle._bridge_orchestration import (
     reseed_skip_reason_labels as rust_reseed_skip_reason_labels,
 )
 from greenfloor.core.cycle_reseed import ReseedSkipReason, python_reseed_skip_reason_labels

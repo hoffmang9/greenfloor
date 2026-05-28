@@ -7,6 +7,7 @@ mod tests {
     use crate::offer::CreateOfferRequest;
     use crate::test_support::simulator::offer_roundtrips::{
         export_offer_fixture, export_offer_leg_fixture, OfferLegScenario, OfferRoundtripScenario,
+        SignerFixtureRuntimeParity,
     };
 
     #[derive(Serialize)]
@@ -19,8 +20,8 @@ mod tests {
         selected_coin_ids: Vec<String>,
         split_spend_bundle_hex: Option<String>,
         presplit_coin_id: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        create_offer_request: Option<CreateOfferRequest>,
+        runtime_parity: SignerFixtureRuntimeParity,
+        create_offer_request: CreateOfferRequest,
     }
 
     #[tokio::test]
@@ -37,40 +38,33 @@ mod tests {
             },
             OfferRoundtripScenario::PresplitExisting,
         ] {
-            let result = export_offer_fixture(scenario).await;
-            let fixture = OfferFixture {
-                scenario: scenario.name().to_string(),
-                execution_mode: result.execution_mode.to_string(),
-                offer: result.offer,
-                spend_bundle_hex: result.spend_bundle_hex,
-                offer_nonce: result.offer_nonce,
-                selected_coin_ids: result.selected_coin_ids,
-                split_spend_bundle_hex: result.split_spend_bundle_hex,
-                presplit_coin_id: result.presplit_coin_id,
-                create_offer_request: None,
-            };
-            let path = out.join(format!("{}.json", fixture.scenario));
-            std::fs::write(&path, serde_json::to_string_pretty(&fixture).unwrap()).expect("write");
+            let built = export_offer_fixture(scenario).await;
+            write_fixture(out, scenario.name(), &built);
         }
-        for scenario in [
-            OfferLegScenario::BuySideDirect,
-            OfferLegScenario::CatCatDirect,
-        ] {
-            let export = export_offer_leg_fixture(scenario).await;
-            let result = export.result;
-            let fixture = OfferFixture {
-                scenario: export.scenario.name().to_string(),
-                execution_mode: result.execution_mode.to_string(),
-                offer: result.offer,
-                spend_bundle_hex: result.spend_bundle_hex,
-                offer_nonce: result.offer_nonce,
-                selected_coin_ids: result.selected_coin_ids,
-                split_spend_bundle_hex: result.split_spend_bundle_hex,
-                presplit_coin_id: result.presplit_coin_id,
-                create_offer_request: Some(export.request),
-            };
-            let path = out.join(format!("{}.json", fixture.scenario));
-            std::fs::write(&path, serde_json::to_string_pretty(&fixture).unwrap()).expect("write");
+        for scenario in [OfferLegScenario::BuySideDirect, OfferLegScenario::CatCatDirect] {
+            let built = export_offer_leg_fixture(scenario).await;
+            write_fixture(out, scenario.name(), &built);
         }
+    }
+
+    fn write_fixture(
+        out: &Path,
+        scenario_name: &str,
+        built: &crate::test_support::simulator::offer_roundtrips::OfferBuildExport,
+    ) {
+        let fixture = OfferFixture {
+            scenario: scenario_name.to_string(),
+            execution_mode: built.result.execution_mode.to_string(),
+            offer: built.result.offer.clone(),
+            spend_bundle_hex: built.result.spend_bundle_hex.clone(),
+            offer_nonce: built.result.offer_nonce.clone(),
+            selected_coin_ids: built.result.selected_coin_ids.clone(),
+            split_spend_bundle_hex: built.result.split_spend_bundle_hex.clone(),
+            presplit_coin_id: built.result.presplit_coin_id.clone(),
+            runtime_parity: built.runtime_parity.clone(),
+            create_offer_request: built.request.clone(),
+        };
+        let path = out.join(format!("{scenario_name}.json"));
+        std::fs::write(&path, serde_json::to_string_pretty(&fixture).unwrap()).expect("write");
     }
 }

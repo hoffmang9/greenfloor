@@ -21,6 +21,7 @@ from greenfloor.runtime.offer_orchestration import (
     build_and_post_offer,
     default_offer_post_deps,
 )
+from greenfloor.core.signer_offer_request import build_signer_create_offer_request
 from greenfloor.runtime.offer_publish import normalize_offer_side
 
 _runtime_logger = logging.getLogger("greenfloor.manager")
@@ -301,61 +302,19 @@ def signer_create_offer_phase(
     split_input_coins: bool = True,
     broadcast_split: bool = True,
 ) -> dict[str, Any]:
-    side = normalize_offer_side(action_side)
-    offer_amount = int(
-        size_base_units
-        * int(
-            (market.pricing or {}).get(
-                "base_unit_mojo_multiplier",
-                default_mojo_multiplier_for_asset(str(resolved_base_asset_id)),
-            )
-        )
-    )
-    request_amount = int(
-        round(
-            float(size_base_units)
-            * float(quote_price)
-            * int(
-                (market.pricing or {}).get(
-                    "quote_unit_mojo_multiplier",
-                    default_mojo_multiplier_for_asset(str(resolved_quote_asset_id)),
-                )
-            )
-        )
-    )
-    if request_amount <= 0:
-        raise ValueError("request_amount must be positive")
-
-    if side == "buy":
-        offer_asset_id = str(resolved_quote_asset_id).strip()
-        request_asset_id = str(resolved_base_asset_id).strip()
-        offer_amount_mojos = request_amount
-        request_amount_mojos = offer_amount
-    else:
-        offer_asset_id = str(resolved_base_asset_id).strip()
-        request_asset_id = str(resolved_quote_asset_id).strip()
-        offer_amount_mojos = offer_amount
-        request_amount_mojos = request_amount
-
     expires_at_dt = dt.datetime.now(dt.UTC) + dt.timedelta(**{expiry_unit: int(expiry_value)})
-    expires_at_unix = int(expires_at_dt.timestamp())
-    receive_address = str(market.receive_address or "").strip()
-    if not receive_address:
-        raise ValueError("market.receive_address is required for signer offer build")
-
+    request = build_signer_create_offer_request(
+        market=market,
+        size_base_units=size_base_units,
+        quote_price=quote_price,
+        resolved_base_asset_id=resolved_base_asset_id,
+        resolved_quote_asset_id=resolved_quote_asset_id,
+        action_side=action_side,
+        split_input_coins=split_input_coins,
+        broadcast_split=broadcast_split,
+        expires_at_unix=int(expires_at_dt.timestamp()),
+    )
     config_path = _signer_config_path(program)
-    request = {
-        "receive_address": receive_address,
-        "offer_asset_id": offer_asset_id.removeprefix("0x"),
-        "offer_amount": int(offer_amount_mojos),
-        "request_asset_id": request_asset_id.removeprefix("0x"),
-        "request_amount": int(request_amount_mojos),
-        "offer_coin_ids": [],
-        "presplit_coin_ids": [],
-        "split_input_coins": bool(split_input_coins),
-        "broadcast_split": bool(broadcast_split),
-        "expires_at": expires_at_unix,
-    }
     result = rust_signer.build_vault_cat_offer(config_path, request)
     offer_text = str(result.get("offer", "")).strip()
     if not offer_text.startswith("offer1"):
@@ -363,9 +322,9 @@ def signer_create_offer_phase(
     return {
         "offer_text": offer_text,
         "expires_at": expires_at_dt.isoformat(),
-        "offer_amount": offer_amount,
-        "request_amount": request_amount,
-        "side": side,
+        "offer_amount": int(request["offer_amount"]),
+        "request_amount": int(request["request_amount"]),
+        "side": normalize_offer_side(action_side),
         "execution_mode": str(result.get("execution_mode", "")).strip(),
         "create_result": dict(result) if isinstance(result, dict) else {},
     }

@@ -9,6 +9,15 @@
   ],
   "split_spend_bundle_hex": null,
   "presplit_coin_id": null,
+  "runtime_parity": {
+    "action_side": "buy",
+    "resolved_base_asset_id": "457275a8b9926058d8c9c2ebae52ac5938a4034345cafef6e87f4c7c24b749d8",
+    "resolved_quote_asset_id": "664799fc173e0d9d4d024c42e411d26f275eeb1095dad980ccd11df09c8bb6fb",
+    "size_base_units": 1,
+    "quote_price": 5.0,
+    "base_unit_mojo_multiplier": 1000,
+    "quote_unit_mojo_multiplier": 1000
+  },
   "create_offer_request": {
     "receive_address": "xch1llh50uwrps0p8pjspk0u5zmufwwhs3lxtx8q6r2cwsm94qt9sqcq33aemc",
     "offer_asset_id": "664799fc173e0d9d4d024c42e411d26f275eeb1095dad980ccd11df09c8bb6fb",

@@ -1,16 +1,98 @@
-"""Parity tests for vault create-offer request shape (PyO3 JSON ↔ runtime)."""
+"""Golden signer fixtures vs core create-offer request builder."""
 
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from greenfloor.core.signer_offer_request import build_signer_create_offer_request
+from tests.helpers.config_fixtures import minimal_market_config
+
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "signer"
 
-CREATE_OFFER_REQUEST_KEYS = frozenset(
-    {
+_RUNTIME_REQUEST_FIELDS = (
+    "offer_asset_id",
+    "request_asset_id",
+    "offer_amount",
+    "request_amount",
+    "split_input_coins",
+    "broadcast_split",
+    "expires_at",
+)
+
+
+def _comparable_request_fields(request: dict) -> dict:
+    normalized: dict = {}
+    for key in _RUNTIME_REQUEST_FIELDS:
+        value = request[key]
+        if key.endswith("_asset_id"):
+            normalized[key] = str(value).strip().lower().removeprefix("0x")
+        else:
+            normalized[key] = value
+    return normalized
+
+
+def _market_from_parity(parity: dict) -> object:
+    return replace(
+        minimal_market_config(),
+        receive_address="txch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqstg4h8",
+        pricing={
+            "base_unit_mojo_multiplier": int(parity["base_unit_mojo_multiplier"]),
+            "quote_unit_mojo_multiplier": int(parity["quote_unit_mojo_multiplier"]),
+        },
+    )
+
+
+@pytest.mark.parametrize("fixture_path", sorted(FIXTURE_DIR.glob("*.json")))
+def test_fixture_runtime_parity_matches_core_builder(fixture_path: Path) -> None:
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    parity = payload["runtime_parity"]
+    fixture_req = payload["create_offer_request"]
+    assert str(payload["offer"]).startswith("offer1")
+
+    runtime_req = build_signer_create_offer_request(
+        market=_market_from_parity(parity),
+        size_base_units=int(parity["size_base_units"]),
+        quote_price=float(parity["quote_price"]),
+        resolved_base_asset_id=str(parity["resolved_base_asset_id"]),
+        resolved_quote_asset_id=str(parity["resolved_quote_asset_id"]),
+        action_side=str(parity["action_side"]),
+        split_input_coins=bool(fixture_req["split_input_coins"]),
+        broadcast_split=bool(fixture_req["broadcast_split"]),
+        expires_at_unix=fixture_req.get("expires_at"),
+    )
+
+    assert _comparable_request_fields(runtime_req) == _comparable_request_fields(fixture_req)
+
+
+@pytest.mark.parametrize("fixture_path", sorted(FIXTURE_DIR.glob("*.json")))
+def test_signer_golden_offer_validates(fixture_path: Path) -> None:
+    try:
+        import greenfloor_signer  # type: ignore[import-not-found]
+    except ImportError:
+        pytest.skip("greenfloor_signer not installed")
+
+    validate = getattr(greenfloor_signer, "validate_offer_structure", None)
+    if not callable(validate):
+        pytest.skip("greenfloor_signer.validate_offer_structure not available")
+
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    offer = str(payload.get("offer", "")).strip()
+    assert offer.startswith("offer1")
+    assert "create_offer_request" in payload
+    assert "runtime_parity" in payload
+    validate(offer)
+
+
+@pytest.mark.parametrize("fixture_path", sorted(FIXTURE_DIR.glob("*.json")))
+def test_create_offer_request_fixture_has_required_fields(fixture_path: Path) -> None:
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    request = payload["create_offer_request"]
+    parity = payload["runtime_parity"]
+    for key in (
         "receive_address",
         "offer_asset_id",
         "offer_amount",
@@ -20,71 +102,15 @@ CREATE_OFFER_REQUEST_KEYS = frozenset(
         "presplit_coin_ids",
         "split_input_coins",
         "broadcast_split",
-        "expires_at",
-    }
-)
-
-
-def _load_fixture(name: str) -> dict:
-    path = FIXTURE_DIR / name
-    if not path.is_file():
-        pytest.skip(f"missing fixture: {path}")
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def test_create_offer_request_json_roundtrip_via_serde_shape() -> None:
-    """PyO3 deserializes the same JSON object the Rust CLI builds from flags."""
-    payload = {
-        "receive_address": "xch1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqslas8z",
-        "offer_asset_id": "aa" * 32,
-        "offer_amount": 1_000,
-        "request_asset_id": "bb" * 32,
-        "request_amount": 2_000,
-        "offer_coin_ids": [],
-        "presplit_coin_ids": [],
-        "split_input_coins": True,
-        "broadcast_split": False,
-        "expires_at": 1_700_000_000,
-    }
-    assert CREATE_OFFER_REQUEST_KEYS.issubset(payload.keys())
-    roundtrip = json.loads(json.dumps(payload))
-    assert roundtrip == payload
-
-
-@pytest.mark.parametrize(
-    ("fixture_name", "expect_distinct_assets"),
-    [
-        ("buy_side.json", True),
-        ("cat_cat.json", True),
-        ("direct.json", False),
-    ],
-)
-def test_leg_fixture_create_offer_request_shape(
-    fixture_name: str,
-    *,
-    expect_distinct_assets: bool,
-) -> None:
-    payload = _load_fixture(fixture_name)
-    request = payload.get("create_offer_request")
-    if request is None:
-        pytest.skip(f"{fixture_name} has no create_offer_request (legacy fixture)")
-    assert CREATE_OFFER_REQUEST_KEYS.issubset(request.keys())
-    offer_asset = str(request["offer_asset_id"]).strip().lower()
-    request_asset = str(request["request_asset_id"]).strip().lower()
-    assert offer_asset
-    assert request_asset
-    if expect_distinct_assets:
-        assert offer_asset != request_asset
-    assert int(request["offer_amount"]) > 0
-    assert int(request["request_amount"]) > 0
-    offer = str(payload.get("offer", "")).strip()
-    assert offer.startswith("offer1")
-
-
-def test_buy_side_fixture_swaps_offer_and_request_legs() -> None:
-    payload = _load_fixture("buy_side.json")
-    request = payload.get("create_offer_request")
-    if request is None:
-        pytest.skip("buy_side.json missing create_offer_request")
-    # Buy side offers quote CAT and requests base CAT (amounts differ from sell-side).
-    assert int(request["offer_amount"]) >= int(request["request_amount"])
+    ):
+        assert key in request
+    for key in (
+        "action_side",
+        "resolved_base_asset_id",
+        "resolved_quote_asset_id",
+        "size_base_units",
+        "quote_price",
+        "base_unit_mojo_multiplier",
+        "quote_unit_mojo_multiplier",
+    ):
+        assert key in parity

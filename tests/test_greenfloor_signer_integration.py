@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -45,3 +47,36 @@ def test_greenfloor_signer_from_input_spend_bundle_xch_round_trip_offer() -> Non
     offer_text = signer.encode_offer(offer_spend_bundle_bytes)
     assert str(offer_text).startswith("offer1")
     signer.validate_offer(offer_text)
+
+
+def test_greenfloor_signer_config_yaml_roundtrip(tmp_path: Path) -> None:
+    _require_signer_integration_enabled()
+    _sdk, signer = _require_importable_modules()
+
+    program = tmp_path / "program.yaml"
+    program.write_text(
+        """
+app:
+  network: testnet11
+signer:
+  kms_key_id: arn:aws:kms:us-west-2:123:key/abc
+  kms_region: us-west-2
+  kms_public_key_hex: "020202020202020202020202020202020202020202020202020202020202020202"
+  coinset_msp_base_url: https://api-msp.coinset.org
+vault:
+  launcher_id: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  custody_threshold: 1
+  recovery_threshold: 1
+  recovery_clawback_timelock: 3600
+  custody_keys:
+    - public_key_hex: "020202020202020202020202020202020202020202020202020202020202020202"
+      curve: SECP256R1
+  recovery_keys:
+    - public_key_hex: "ab3cb61463a695fa094f7c30526c8097fb813a0c5fa67bab261a7cd354cb6363b2d726218135b25b814f94df4749fc58"
+      curve: BLS12_381
+""".strip(),
+        encoding="utf-8",
+    )
+    context: Any = signer.resolve_vault_context(str(program))
+    assert context["launcher_id"] == "aa" * 32
+    assert context["custody_threshold"] == 1
