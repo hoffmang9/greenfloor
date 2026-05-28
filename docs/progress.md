@@ -5,7 +5,7 @@
 - **Step 14 — Retry policy (`greenfloor-signer/src/cycle/retry.rs`):** `parse_rate_limit_retry_seconds`, Dexie invalid-offer retry gating/sleep, Coinset fee lookup sleep; PyO3 `retry_py.rs`; Python `greenfloor/core/retry_policy.py` + `moderate_retry.py` / `coinset_runtime.py` wired to kernel.
 - **Step 15 — Offer build context (`greenfloor-signer/src/offer/build_context.rs`):** `resolve_offer_expiry_for_pricing`, `resolve_quote_price_for_pricing`, `mojo_multiplier_for_leg`; PyO3 `offer_build_py.rs`; Python `greenfloor/core/offer_policy.py`; `offer_build_context.py` delegates.
 - **Step 14 (offer validate) — `validate_offer_text` / `verify_offer_for_dexie`:** extended in `offer/codec.rs` with typed `SignerError` variants, single-decode validation, and stable Dexie error codes; callers use `offer_policy.verify_offer_for_dexie` (ImportError mapped there).
-- **Step 16 — Coin-op gates (`greenfloor-signer/src/coin_ops/gate.rs`, `wallet_coin.rs`):** `evaluate_coin_split_gate`, `coin_op_should_stop`, `is_spendable_wallet_coin`; PyO3 typed `CoinSplitGateResult`; Python `greenfloor/core/coin_ops/_bridge.py` (`evaluate_denomination_readiness`, `DenominationReadiness`); loop/CLI serialize via `to_payload()` only.
+- **Step 16 — Coin-op gates (`greenfloor-signer/src/coin_ops/gate.rs`, `wallet_coin.rs`):** `evaluate_coin_split_gate`, `coin_op_should_stop`, `is_spendable_wallet_coin`; PyO3 `CoinSplitGateResult` converted at bridge to `DenominationReadiness`; `runtime/coin_ops/readiness.py` owns iteration payload + target-based evaluation; dict JSON via `to_payload()` only.
 - **Policy bridge:** `greenfloor/core/policy_bridge.py` (offer + retry); stable paths `offer_policy.py` / `retry_policy.py`; `policy_kernel()` / `coin_ops_kernel()` on `PolicyKernelProtocol`.
 - **Tests:** `tests/test_retry_policy_parity.py`, `tests/test_coin_ops_gate_parity.py`; `test_offer_publish.py` rewritten for kernel path; `tests/helpers/kernel_mock.MinimalSignerKernel` for partial signer stubs.
 
@@ -20,6 +20,7 @@ Steps 1–16 moved deterministic policy out of large Python modules. **Do not** 
 | L3 | `daemon/` + `cli/` (~8k) | Rust binary for `greenfloord` / `greenfloor-manager` subcommands calling `greenfloor-kernel` |
 | L4 | ADR 0010 rename | `greenfloor-signer` → `greenfloor-kernel`, `greenfloor_signer` shim one release |
 | L5 | `config/` | Keep YAML parse in Python unless Rust config loader reaches parity with `config/models.py` validation |
+| L6 | Combine-until-ready gate | Move `combine_denomination_readiness` cap logic to Rust (split gate already in `coin_ops/gate.rs`) |
 
 **CI parity gates for Later steps:** integration tests against live `greenfloor_signer` wheel; daemon soak on mainnet canary market.
 

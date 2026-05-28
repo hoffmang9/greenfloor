@@ -8,13 +8,9 @@ from typing import Any
 
 from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
-from greenfloor.core.coin_ops import (
-    coin_op_min_amount_mojos,
-    evaluate_denomination_readiness as evaluate_denomination_readiness_policy,
-)
-from greenfloor.core.coin_ops.types import DenominationReadiness
+from greenfloor.core.coin_ops import coin_op_min_amount_mojos
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
-from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode, DenominationTarget
+from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode
 from greenfloor.runtime.coin_ops_scope import CoinOpScope
 from greenfloor.runtime.coinset_coins import (
     list_unspent_coins_by_receive_address,
@@ -221,51 +217,3 @@ class SignerCoinOpBackend:
             initial_coin_ids=existing_ids,
         )
 
-    def evaluate_denomination_readiness(
-        self,
-        *,
-        asset_id: str,
-        size_base_units: int,
-        required_min_count: int | None = None,
-        max_allowed_count: int | None = None,
-    ) -> DenominationReadiness:
-        return evaluate_denomination_readiness_policy(
-            asset_scoped_coins=self.list_asset_scoped_coins(),
-            asset_id=asset_id,
-            size_base_units=int(size_base_units),
-            required_min_count=required_min_count,
-            max_allowed_count=max_allowed_count,
-        )
-
-    def build_iteration_payload(
-        self,
-        *,
-        operation_id: str,
-        operation_state: str,
-        no_wait: bool,
-        network: str,
-        existing_coin_ids: set[str],
-        iteration: int,
-        readiness_asset_id: str,
-        readiness_kwargs: dict[str, int],
-        denomination_target: DenominationTarget | None,
-    ) -> tuple[dict[str, object], DenominationReadiness | None]:
-        _ = network, existing_coin_ids
-        iteration_payload: dict[str, object] = {
-            "iteration": iteration,
-            "operation_id": operation_id,
-            "operation_state": operation_state,
-            "signature_request_id": operation_id,
-            "signature_state": operation_state,
-            "waited": not no_wait,
-            "wait_events": [],
-        }
-        final_readiness = None
-        if denomination_target is not None:
-            final_readiness = self.evaluate_denomination_readiness(
-                asset_id=readiness_asset_id,
-                size_base_units=denomination_target.size_base_units,
-                **readiness_kwargs,
-            )
-            iteration_payload["denomination_readiness"] = final_readiness.to_payload()
-        return iteration_payload, final_readiness

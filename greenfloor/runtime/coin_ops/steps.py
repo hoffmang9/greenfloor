@@ -16,7 +16,7 @@ from greenfloor.core.coin_ops import (
     plan_auto_combine_inputs,
     plan_auto_split_selection,
 )
-from greenfloor.core.coin_ops.types import CoinSplitGateResult
+from greenfloor.core.coin_ops.types import DenominationReadiness
 from greenfloor.runtime.coin_ops.coins import classify_resolved_coin_ids_by_asset
 from greenfloor.runtime.coin_ops.errors import (
     coin_combine_asset_mismatch_error_payload,
@@ -62,7 +62,7 @@ class CoinSplitStepResult:
         | CoinOpIterationSkipLoop
         | CoinOpIterationNeedsConfirmation
     )
-    split_gate: CoinSplitGateResult | None = None
+    split_gate: DenominationReadiness | None = None
 
 
 def run_coin_split_step(
@@ -84,7 +84,7 @@ def run_coin_split_step(
         for c in spendable_scoped
         if str(c.get("id", c.get("name", ""))).strip()
     }
-    split_gate: CoinSplitGateResult | None = None
+    split_gate: DenominationReadiness | None = None
     if params.denomination_target is not None:
         gate = evaluate_coin_split_gate(
             asset_scoped_coins=asset_scoped_coins,
@@ -186,14 +186,10 @@ def run_coin_split_step(
     if not operation_id:
         raise RuntimeError("coin_split_failed:missing_operation_id")
 
-    readiness_kwargs: dict[str, int] = {}
-    if params.denomination_target is not None:
-        readiness_kwargs = params.denomination_target.split_readiness_kwargs()
     return CoinSplitStepResult(
         step=CoinOpIterationExecuteResult(
             signature_request_id=operation_id,
             initial_signature_state=str(split_result.get("status", "UNKNOWN")),
-            readiness_kwargs=readiness_kwargs,
         ),
         split_gate=split_gate,
     )
@@ -216,7 +212,7 @@ class CoinCombineStepParams:
 @dataclass(slots=True)
 class CoinCombineStepResult:
     step: CoinOpIterationExecuteResult | CoinOpIterationEarlyExit
-    split_gate: CoinSplitGateResult | None = None
+    split_gate: DenominationReadiness | None = None
 
 
 def run_coin_combine_step(
@@ -304,13 +300,9 @@ def run_coin_combine_step(
     if not operation_id:
         raise RuntimeError("coin_combine_failed:missing_operation_id")
 
-    readiness_kwargs: dict[str, int] = {}
-    if params.denomination_target is not None:
-        readiness_kwargs = params.denomination_target.combine_readiness_kwargs()
     return CoinCombineStepResult(
         step=CoinOpIterationExecuteResult(
             signature_request_id=operation_id,
             initial_signature_state=str(combine_result.get("status", "UNKNOWN")),
-            readiness_kwargs=readiness_kwargs,
         ),
     )

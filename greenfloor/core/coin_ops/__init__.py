@@ -13,7 +13,6 @@ from greenfloor.core.coin_ops._bridge import (
     evaluate_coin_split_gate,
     evaluate_denomination_readiness,
     is_spendable_wallet_coin,
-    split_denomination_readiness,
     coin_meets_coin_op_min_amount,
     coin_op_min_amount_mojos,
     coin_op_target_amount_allowed,
@@ -30,7 +29,7 @@ from greenfloor.core.coin_ops._bridge import (
 from greenfloor.core.coin_ops.types import (
     BucketSpec,
     CoinOpPlan,
-    CoinSplitGateResult,
+    CoinSplitGateResult,  # PyO3 FFI shape; bridge converts to DenominationReadiness
     DenominationReadiness,
     CombineInputSelectionMode,
     SplitAutoSelectPlan,
@@ -47,7 +46,6 @@ __all__ = [
     "DenominationReadiness",
     "is_spendable_wallet_coin",
     "BucketSpec",
-    "CoinSplitGateResult",
     "CoinOpPlan",
     "CombineInputSelectionMode",
     "SplitAutoSelectPlan",

@@ -7,10 +7,11 @@ from greenfloor.core.coin_ops import (
     evaluate_coin_split_gate,
     evaluate_denomination_readiness,
     is_spendable_wallet_coin,
-    split_denomination_readiness,
 )
 from greenfloor.core.coin_ops.types import DenominationReadiness
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
+from greenfloor.runtime.coin_ops.models import SplitDenominationTarget
+from greenfloor.runtime.coin_ops.readiness import evaluate_readiness_for_denomination_target
 
 
 def test_is_spendable_coin_matches_kernel() -> None:
@@ -20,26 +21,43 @@ def test_is_spendable_coin_matches_kernel() -> None:
     assert is_spendable_coin(locked) is False
 
 
-def test_split_denomination_readiness_matches_gate() -> None:
+def test_evaluate_coin_split_gate_returns_denomination_readiness() -> None:
     coins = [
         {"amount": 100, "state": "CONFIRMED"},
         {"amount": 100, "state": "CONFIRMED"},
         {"amount": 200, "state": "CONFIRMED"},
     ]
-    gate = evaluate_coin_split_gate(
+    readiness = evaluate_coin_split_gate(
         asset_scoped_coins=coins,
         resolved_asset_id="cat",
         size_base_units=100,
         required_count=2,
     )
-    readiness = split_denomination_readiness(
+    assert isinstance(readiness, DenominationReadiness)
+    assert readiness.ready is True
+    assert readiness.reserve_ready is True
+    assert readiness.current_count == 2
+
+
+def test_evaluate_readiness_for_split_denomination_target() -> None:
+    coins = [
+        {"amount": 100, "state": "CONFIRMED"},
+        {"amount": 200, "state": "CONFIRMED"},
+    ]
+    target = SplitDenominationTarget(
+        size_base_units=100,
+        target_count=1,
+        split_buffer_count=1,
+        required_count=2,
+    )
+    readiness = evaluate_readiness_for_denomination_target(
         asset_scoped_coins=coins,
         asset_id="cat",
-        size_base_units=100,
-        required_min_count=2,
+        target=target,
     )
-    assert readiness == DenominationReadiness.from_split_gate(gate)
-    assert readiness.ready is True
+    assert readiness is not None
+    assert readiness.ready is False
+    assert readiness.reserve_ready is True
 
 
 def test_evaluate_denomination_readiness_split_path() -> None:
@@ -55,23 +73,6 @@ def test_evaluate_denomination_readiness_split_path() -> None:
     )
     assert readiness.ready is False
     assert readiness.reserve_ready is True
-
-
-def test_evaluate_coin_split_gate_ready() -> None:
-    coins = [
-        {"amount": 100, "state": "CONFIRMED"},
-        {"amount": 100, "state": "CONFIRMED"},
-        {"amount": 200, "state": "CONFIRMED"},
-    ]
-    gate = evaluate_coin_split_gate(
-        asset_scoped_coins=coins,
-        resolved_asset_id="cat",
-        size_base_units=100,
-        required_count=2,
-    )
-    assert gate.ready is True
-    assert gate.reserve_ready is True
-    assert gate.current_count == 2
 
 
 def test_coin_op_should_stop_max_iterations() -> None:

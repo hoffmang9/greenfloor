@@ -24,13 +24,12 @@ from typing import Any
 from greenfloor.core.coin_ops.types import (
     BucketSpec,
     CoinOpPlan,
-    CoinSplitGateResult,
     CombineInputSelectionMode,
     DenominationReadiness,
     SplitAutoSelectPlan,
     SplitPlanningProfile,
 )
-from greenfloor.core.kernel_bridge import coin_ops_kernel
+from greenfloor.core import kernel_bridge
 
 
 def _require_coin_op_plans(value: object) -> list[CoinOpPlan]:
@@ -53,7 +52,7 @@ def plan_coin_ops(
     combine_fee_mojos: int,
 ) -> list[CoinOpPlan]:
     return _require_coin_op_plans(
-        coin_ops_kernel().plan_coin_ops(
+        kernel_bridge.coin_ops_kernel().plan_coin_ops(
             buckets,
             int(max_operations_per_run),
             int(max_fee_budget_mojos),
@@ -70,7 +69,7 @@ def projected_coin_ops_fee_mojos(
     combine_fee_mojos: int,
 ) -> int:
     return int(
-        coin_ops_kernel().projected_coin_ops_fee_mojos(
+        kernel_bridge.coin_ops_kernel().projected_coin_ops_fee_mojos(
             plans,
             int(split_fee_mojos),
             int(combine_fee_mojos),
@@ -85,7 +84,7 @@ def fee_budget_allows_execution(
     projected_mojos: int,
 ) -> bool:
     return bool(
-        coin_ops_kernel().fee_budget_allows_execution(
+        kernel_bridge.coin_ops_kernel().fee_budget_allows_execution(
             int(max_daily_fee_budget_mojos),
             int(spent_today_mojos),
             int(projected_mojos),
@@ -106,7 +105,7 @@ def partition_plans_by_budget(
     Preserves input order. If budget is unlimited (<=0), all plans are executable.
     Can split a plan by op_count if only partial operations fit.
     """
-    allowed, skipped = coin_ops_kernel().partition_plans_by_budget(
+    allowed, skipped = kernel_bridge.coin_ops_kernel().partition_plans_by_budget(
         plans,
         int(split_fee_mojos),
         int(combine_fee_mojos),
@@ -125,7 +124,7 @@ def compute_bucket_counts_from_coins(
 
     V1 logic is exact-match by ladder size to keep behavior deterministic and auditable.
     """
-    raw = coin_ops_kernel().compute_bucket_counts_from_coins(
+    raw = kernel_bridge.coin_ops_kernel().compute_bucket_counts_from_coins(
         [int(amount) for amount in coin_amounts_base_units],
         [int(size) for size in ladder_sizes],
     )
@@ -139,16 +138,16 @@ def coin_op_min_amount_mojos(*, canonical_asset_id: str) -> int:
     # bug documented in docs/ent-wallet-upstream-byc-coin-query-issue.md.
     # Ignore sub-1-CAT dust during local split/combine candidate selection so
     # tiny stray rows do not get pulled into operational coin management.
-    return int(coin_ops_kernel().coin_op_min_amount_mojos(str(canonical_asset_id)))
+    return int(kernel_bridge.coin_ops_kernel().coin_op_min_amount_mojos(str(canonical_asset_id)))
 
 
 def coin_meets_coin_op_min_amount(coin: dict, *, canonical_asset_id: str) -> bool:
-    return bool(coin_ops_kernel().coin_meets_coin_op_min_amount(coin, str(canonical_asset_id)))
+    return bool(kernel_bridge.coin_ops_kernel().coin_meets_coin_op_min_amount(coin, str(canonical_asset_id)))
 
 
 def coin_op_target_amount_allowed(*, amount_mojos: int, canonical_asset_id: str) -> bool:
     return bool(
-        coin_ops_kernel().coin_op_target_amount_allowed(
+        kernel_bridge.coin_ops_kernel().coin_op_target_amount_allowed(
             int(amount_mojos),
             str(canonical_asset_id),
         )
@@ -161,7 +160,7 @@ def select_spendable_coins_for_target_amount(
     target_amount: int,
 ) -> tuple[list[str], int, bool]:
     return _select_spendable_coins_for_target_amount(
-        coin_ops_kernel(),
+        kernel_bridge.coin_ops_kernel(),
         coins=coins,
         target_amount=target_amount,
     )
@@ -174,7 +173,7 @@ def split_would_create_sub_cat_change(
     canonical_asset_id: str,
 ) -> tuple[bool, int]:
     return _split_would_create_sub_cat_change(
-        coin_ops_kernel(),
+        kernel_bridge.coin_ops_kernel(),
         selected_amount_mojos=selected_amount_mojos,
         required_amount_mojos=required_amount_mojos,
         canonical_asset_id=canonical_asset_id,
@@ -191,7 +190,7 @@ def plan_auto_split_selection(
     allow_combine_prereq: bool | None = None,
 ) -> SplitAutoSelectPlan:
     return _plan_auto_split_selection(
-        coin_ops_kernel(),
+        kernel_bridge.coin_ops_kernel(),
         candidate_spendable=candidate_spendable,
         required_amount_mojos=required_amount_mojos,
         canonical_asset_id=canonical_asset_id,
@@ -211,7 +210,7 @@ def plan_auto_combine_inputs(
     max_count: int | None = None,
 ) -> list[str]:
     return _plan_auto_combine_inputs(
-        coin_ops_kernel(),
+        kernel_bridge.coin_ops_kernel(),
         spendable_coins=spendable_coins,
         number_of_coins=number_of_coins,
         selection_mode=selection_mode,
@@ -222,13 +221,7 @@ def plan_auto_combine_inputs(
 
 
 def is_spendable_wallet_coin(coin: dict[str, Any]) -> bool:
-    return bool(coin_ops_kernel().is_spendable_wallet_coin(coin))
-
-
-def _require_coin_split_gate_result(value: object) -> CoinSplitGateResult:
-    if not isinstance(value, CoinSplitGateResult):
-        raise TypeError("kernel returned non-CoinSplitGateResult result")
-    return value
+    return bool(kernel_bridge.coin_ops_kernel().is_spendable_wallet_coin(coin))
 
 
 def evaluate_coin_split_gate(
@@ -237,32 +230,16 @@ def evaluate_coin_split_gate(
     resolved_asset_id: str,
     size_base_units: int,
     required_count: int,
-) -> CoinSplitGateResult:
-    return _require_coin_split_gate_result(
-        coin_ops_kernel().evaluate_coin_split_gate(
-            asset_scoped_coins,
-            str(resolved_asset_id),
-            int(size_base_units),
-            int(required_count),
-        )
-    )
-
-
-def split_denomination_readiness(
-    *,
-    asset_scoped_coins: list[dict[str, Any]],
-    asset_id: str,
-    size_base_units: int,
-    required_min_count: int,
 ) -> DenominationReadiness:
-    """Split-until-ready readiness using the Rust coin-split gate (reserve-aware)."""
-    gate = evaluate_coin_split_gate(
-        asset_scoped_coins=asset_scoped_coins,
-        resolved_asset_id=str(asset_id),
-        size_base_units=int(size_base_units),
-        required_count=int(required_min_count),
+    gate = kernel_bridge.coin_ops_kernel().evaluate_coin_split_gate(
+        asset_scoped_coins,
+        str(resolved_asset_id),
+        int(size_base_units),
+        int(required_count),
     )
-    return DenominationReadiness.from_split_gate(gate)
+    if isinstance(gate, DenominationReadiness):
+        return gate
+    return DenominationReadiness.from_kernel_gate(gate)
 
 
 def combine_denomination_readiness(
@@ -290,11 +267,11 @@ def evaluate_denomination_readiness(
     max_allowed_count: int | None = None,
 ) -> DenominationReadiness:
     if required_min_count is not None and max_allowed_count is None:
-        return split_denomination_readiness(
+        return evaluate_coin_split_gate(
             asset_scoped_coins=asset_scoped_coins,
-            asset_id=asset_id,
+            resolved_asset_id=str(asset_id),
             size_base_units=int(size_base_units),
-            required_min_count=int(required_min_count),
+            required_count=int(required_min_count),
         )
     matching = [
         coin
@@ -324,7 +301,7 @@ def coin_op_should_stop(
     iteration: int,
     max_iterations: int,
 ) -> tuple[bool, str]:
-    stop, reason = coin_ops_kernel().coin_op_should_stop(
+    stop, reason = kernel_bridge.coin_ops_kernel().coin_op_should_stop(
         bool(until_ready),
         readiness_ready,
         bool(coin_ids),

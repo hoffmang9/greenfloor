@@ -323,13 +323,11 @@ def execute_split_cli(
     if isinstance(result, int):
         return result
 
-    final_readiness = result.loop_result.final_readiness
-    if final_readiness is None and result.loop_result.split_gate is not None:
-        final_readiness = DenominationReadiness.from_split_gate(result.loop_result.split_gate)
+    final_readiness = result.loop_result.final_readiness or result.loop_result.split_gate
     split_gate_payload = (
         None
         if result.loop_result.split_gate is None
-        else result.loop_result.split_gate.to_readiness_payload()
+        else result.loop_result.split_gate.to_payload()
     )
     return _finish_coin_op_cli(
         setup=result.setup,

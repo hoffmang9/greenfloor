@@ -14,7 +14,8 @@ from greenfloor.config.io import (
 )
 from greenfloor.config.models import MarketConfig, MarketLadderEntry, ProgramConfig
 from greenfloor.core.coin_ops import coin_op_should_stop
-from greenfloor.core.coin_ops.types import CoinSplitGateResult, DenominationReadiness
+from greenfloor.core.coin_ops.types import DenominationReadiness
+from greenfloor.runtime.coin_ops.readiness import build_coin_op_iteration_payload
 from greenfloor.runtime.coin_ops.models import DenominationTarget, denomination_target_payload
 from greenfloor.runtime.coin_ops_backend import (
     CoinOpBackend,
@@ -178,7 +179,6 @@ def coin_op_setup(
 class CoinOpIterationExecuteResult:
     signature_request_id: str
     initial_signature_state: str
-    readiness_kwargs: dict[str, int]
 
 
 @dataclass(slots=True)
@@ -212,7 +212,7 @@ CoinOpIterationStep = (
 @dataclass(slots=True)
 class CoinOpStepOutcome:
     step: CoinOpIterationStep
-    split_gate: CoinSplitGateResult | None = None
+    split_gate: DenominationReadiness | None = None
 
 
 @dataclass(slots=True)
@@ -221,7 +221,7 @@ class CoinOpLoopResult:
     final_readiness: DenominationReadiness | None
     stop_reason: str
     unresolved_coin_ids: list[str]
-    split_gate: CoinSplitGateResult | None = None
+    split_gate: DenominationReadiness | None = None
     early_return_code: int | None = None
     error_payload: dict[str, object] | None = None
 
@@ -243,7 +243,7 @@ def run_coin_op_iteration_loop(
         backend.no_wait = no_wait
     operations: list[dict[str, object]] = []
     final_readiness: DenominationReadiness | None = None
-    split_gate: CoinSplitGateResult | None = None
+    split_gate: DenominationReadiness | None = None
     stop_reason = "single_pass"
     unresolved_coin_ids: list[str] = []
 
@@ -277,16 +277,14 @@ def run_coin_op_iteration_loop(
                 "coin_op_iteration_needs_confirmation must be handled before the loop"
             )
 
-        iteration_payload, final_readiness = backend.build_iteration_payload(
+        iteration_payload, final_readiness = build_coin_op_iteration_payload(
             operation_id=step.signature_request_id,
             operation_state=step.initial_signature_state,
             no_wait=no_wait,
-            network=network,
-            existing_coin_ids=existing_coin_ids,
             iteration=iteration,
             readiness_asset_id=readiness_asset_id,
-            readiness_kwargs=step.readiness_kwargs,
             denomination_target=denomination_target,
+            asset_scoped_coins=backend.list_asset_scoped_coins(),
         )
         operations.append(iteration_payload)
 

@@ -60,6 +60,8 @@ SplitAutoSelectPlan = SplitCoinPlan | SplitCombinePrereqPlan | SplitSkipPlan
 
 @dataclass(frozen=True, slots=True)
 class CoinSplitGateResult:
+    """PyO3/kernel FFI shape for ``evaluate_coin_split_gate``; convert at the bridge."""
+
     asset_id: str
     size_base_units: int
     required_min_count: int
@@ -68,9 +70,6 @@ class CoinSplitGateResult:
     extra_denom_coin_count: int
     reserve_ready: bool
     ready: bool
-
-    def to_readiness_payload(self) -> dict[str, int | bool | str]:
-        return DenominationReadiness.from_split_gate(self).to_payload()
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +87,7 @@ class DenominationReadiness:
     reserve_ready: bool = False
 
     @classmethod
-    def from_split_gate(cls, gate: CoinSplitGateResult) -> DenominationReadiness:
+    def from_kernel_gate(cls, gate: CoinSplitGateResult) -> DenominationReadiness:
         return cls(
             asset_id=gate.asset_id,
             size_base_units=gate.size_base_units,

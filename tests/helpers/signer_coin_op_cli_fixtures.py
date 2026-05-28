@@ -137,60 +137,6 @@ class SignerCoinOpBackendFake:
             input_coin_ids=input_coin_ids,
         )
 
-    def evaluate_denomination_readiness(
-        self,
-        *,
-        asset_id: str,
-        size_base_units: int,
-        required_min_count: int | None = None,
-        max_allowed_count: int | None = None,
-    ):
-        from greenfloor.core.coin_ops import (
-            evaluate_denomination_readiness as evaluate_denomination_readiness_policy,
-        )
-
-        return evaluate_denomination_readiness_policy(
-            asset_scoped_coins=self.list_asset_scoped_coins(),
-            asset_id=asset_id,
-            size_base_units=int(size_base_units),
-            required_min_count=required_min_count,
-            max_allowed_count=max_allowed_count,
-        )
-
-    def build_iteration_payload(
-        self,
-        *,
-        operation_id: str,
-        operation_state: str,
-        no_wait: bool,
-        network: str,
-        existing_coin_ids: set[str],
-        iteration: int,
-        readiness_asset_id: str,
-        readiness_kwargs: dict[str, int],
-        denomination_target: Any,
-    ) -> tuple[dict[str, object], object | None]:
-        _ = network, existing_coin_ids
-        final_readiness = None
-        if denomination_target is not None:
-            final_readiness = self.evaluate_denomination_readiness(
-                asset_id=readiness_asset_id,
-                size_base_units=int(denomination_target.size_base_units),
-                **readiness_kwargs,
-            )
-        payload: dict[str, object] = {
-            "iteration": iteration,
-            "operation_id": operation_id,
-            "operation_state": operation_state,
-            "signature_request_id": operation_id,
-            "signature_state": operation_state,
-            "waited": not no_wait,
-            "wait_events": [],
-        }
-        if final_readiness is not None:
-            payload["denomination_readiness"] = final_readiness.to_payload()
-        return payload, final_readiness
-
 
 def _patch_signer_asset_resolvers(
     monkeypatch,

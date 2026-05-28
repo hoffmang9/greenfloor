@@ -104,7 +104,7 @@ class CoinOpsKernelProtocol(Protocol):
         resolved_asset_id: str,
         size_base_units: int,
         required_count: int,
-    ) -> CoinSplitGateResult: ...
+    ) -> CoinSplitGateResult: ...  # PyO3 returns kernel shape; bridge converts to DenominationReadiness
 
     def coin_op_should_stop(
         self,
