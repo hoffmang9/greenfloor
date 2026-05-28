@@ -10,7 +10,7 @@ from typing import Any
 from greenfloor.adapters.coinset import extract_coin_ids_from_offer_payload
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.core.strategy import StrategyConfig
-from greenfloor.daemon.cooldowns import PENDING_VISIBILITY_REASON
+from greenfloor.daemon.cooldowns import LEGACY_PENDING_VISIBILITY_REASON
 from greenfloor.daemon.market_helpers import _normalize_offer_side
 from greenfloor.daemon.market_logging import _daemon_logger
 from greenfloor.storage.sqlite import SqliteStore
@@ -29,6 +29,7 @@ _WATCHED_COIN_IDS_LOCK = threading.Lock()
 class _OfferExecutionMetadata:
     size: int
     side: str | None
+    status: str
     reason: str
     created_at: str
 
@@ -90,7 +91,10 @@ def _recent_offer_sizes_by_offer_id(*, store: SqliteStore, market_id: str) -> di
         for item in items:
             if not isinstance(item, dict):
                 continue
-            if str(item.get("status", "")).strip().lower() != "executed":
+            if str(item.get("status", "")).strip().lower() not in (
+                "executed",
+                "pending_visibility",
+            ):
                 continue
             offer_id = str(item.get("offer_id", "")).strip()
             if not offer_id:
@@ -134,7 +138,10 @@ def _recent_offer_metadata_by_offer_id(
         for item in items:
             if not isinstance(item, dict):
                 continue
-            if str(item.get("status", "")).strip().lower() != "executed":
+            if str(item.get("status", "")).strip().lower() not in (
+                "executed",
+                "pending_visibility",
+            ):
                 continue
             offer_id = str(item.get("offer_id", "")).strip()
             if not offer_id:
@@ -146,12 +153,14 @@ def _recent_offer_metadata_by_offer_id(
             if size <= 0:
                 continue
             side = _parse_offer_side_metadata(item.get("side"))
+            status = str(item.get("status", "")).strip().lower()
             reason = str(item.get("reason", "")).strip()
             # Events are returned newest-first; keep first (latest) mapping.
             if offer_id not in metadata_by_offer_id:
                 metadata_by_offer_id[offer_id] = _OfferExecutionMetadata(
                     size=size,
                     side=side,
+                    status=status,
                     reason=reason,
                     created_at=created_at,
                 )
@@ -172,6 +181,13 @@ def _parse_event_created_at(value: Any) -> datetime | None:
     return parsed
 
 
+def _is_pending_visibility_metadata(metadata: _OfferExecutionMetadata) -> bool:
+    if metadata.status == "pending_visibility":
+        return True
+    # Legacy audit rows before status-only pending visibility.
+    return metadata.reason == LEGACY_PENDING_VISIBILITY_REASON
+
+
 def _is_stale_pending_visibility_offer(
     *,
     offer_id: str,
@@ -180,7 +196,7 @@ def _is_stale_pending_visibility_offer(
     clock: datetime,
     max_age_seconds: int = _PENDING_VISIBILITY_RECHECK_MAX_AGE_SECONDS,
 ) -> bool:
-    if metadata.reason != PENDING_VISIBILITY_REASON:
+    if not _is_pending_visibility_metadata(metadata):
         return False
     if dexie_size_by_offer_id is None:
         # No Dexie visibility snapshot available this cycle.
@@ -226,7 +242,10 @@ def _recent_executed_offer_ids(*, store: SqliteStore, market_id: str) -> set[str
         for item in items:
             if not isinstance(item, dict):
                 continue
-            if str(item.get("status", "")).strip().lower() != "executed":
+            if str(item.get("status", "")).strip().lower() not in (
+                "executed",
+                "pending_visibility",
+            ):
                 continue
             item_offer_id = str(item.get("offer_id", "")).strip()
             if item_offer_id:

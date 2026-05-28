@@ -19,6 +19,8 @@ from greenfloor.core.cycle import (
 from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
 _PENDING_VISIBILITY_REASON = "managed_offer_post_success_dexie_visibility_pending"
+# Deprecated: pending visibility is expressed via status="pending_visibility".
+LEGACY_PENDING_VISIBILITY_REASON = _PENDING_VISIBILITY_REASON
 PENDING_VISIBILITY_REASON = _PENDING_VISIBILITY_REASON
 
 _POST_COOLDOWN_UNTIL: dict[str, float] = {}
@@ -89,9 +91,12 @@ def _managed_offer_reason_is_503(reason_text: str) -> bool:
 def _managed_offer_item_is_success(item: dict[str, Any]) -> bool:
     status = str(item.get("status", "")).strip().lower()
     reason = str(item.get("reason", "")).strip().lower()
-    return status == "executed" and (
-        reason == "managed_offer_post_success" or reason == _PENDING_VISIBILITY_REASON.lower()
-    )
+    if status == "pending_visibility":
+        return True
+    if status == "executed" and reason == "managed_offer_post_success":
+        return True
+    # Legacy audit rows before status-only pending visibility.
+    return status == "executed" and reason == _PENDING_VISIBILITY_REASON.lower()
 
 
 def _parse_iso_datetime(value: str) -> datetime | None:

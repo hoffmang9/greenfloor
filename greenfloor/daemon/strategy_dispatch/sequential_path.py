@@ -84,7 +84,7 @@ def execute_actions_sequential(
                 publish_venue=publish_venue,
                 store=store,
             )
-        if item.is_executed:
+        if item.counts_as_executed:
             executed_count += 1
         _log_offer_action_timing(str(market.market_id), item)
         items.append(item)

@@ -5,7 +5,6 @@ from typing import Any, cast
 from greenfloor.config.models import ProgramConfig
 from greenfloor.core.strategy import PlannedAction
 from greenfloor.daemon.testing import (
-    PENDING_VISIBILITY_REASON,
     POST_COOLDOWN_UNTIL,
     execute_strategy_actions,
     strategy_dispatch,
@@ -110,8 +109,8 @@ def test_execute_strategy_actions_signer_managed_accepts_transient_dexie_http_40
 ) -> None:
     """A transient 404 from Dexie is treated as pending-visibility, not a hard failure.
 
-    The offer is counted as executed with _PENDING_VISIBILITY_REASON so the
-    active-offer reader keeps it in scope until the grace period expires.
+    The offer is counted as executed so the active-offer reader keeps it in scope
+    until the grace period expires.
     """
     POST_COOLDOWN_UNTIL.clear()
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
@@ -154,8 +153,8 @@ def test_execute_strategy_actions_signer_managed_accepts_transient_dexie_http_40
     )
 
     assert result["executed_count"] == 1
-    assert result["items"][0]["status"] == "executed"
-    assert result["items"][0]["reason"] == PENDING_VISIBILITY_REASON
+    assert result["items"][0]["status"] == "pending_visibility"
+    assert result["items"][0]["reason"] == "managed_offer_post_success"
     assert result["items"][0]["offer_id"] == "offer-fallback-pending"
 
 

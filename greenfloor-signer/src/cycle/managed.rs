@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 
 use super::dispatch::{single_input_preferred_skip_reason, SpendableAssetProfile};
 
-const PENDING_VISIBILITY_REASON: &str = "managed_offer_post_success_dexie_visibility_pending";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ManagedActionStatus {
@@ -272,8 +270,8 @@ pub fn classify_dexie_visibility_outcome(
     }
     if is_transient_dexie_visibility_404_error(visibility_error) {
         return ManagedActionOutcome {
-            status: ManagedActionStatus::Executed,
-            reason: PENDING_VISIBILITY_REASON.to_string(),
+            status: ManagedActionStatus::PendingVisibility,
+            reason: "managed_offer_post_success".to_string(),
             offer_id: None,
             transient_upstream: false,
         };
@@ -354,8 +352,8 @@ mod tests {
     fn dexie_visibility_404_is_pending() {
         let outcome =
             classify_dexie_visibility_outcome(false, "dexie_http_error:404 not found");
-        assert_eq!(outcome.reason, PENDING_VISIBILITY_REASON);
-        assert_eq!(outcome.status, ManagedActionStatus::Executed);
+        assert_eq!(outcome.status, ManagedActionStatus::PendingVisibility);
+        assert_eq!(outcome.reason, "managed_offer_post_success");
     }
 
     #[test]

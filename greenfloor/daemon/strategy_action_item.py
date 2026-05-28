@@ -46,6 +46,11 @@ class StrategyActionItem:
     def is_executed(self) -> bool:
         return self.status.strip().lower() == "executed"
 
+    @property
+    def counts_as_executed(self) -> bool:
+        normalized = self.status.strip().lower()
+        return normalized in ("executed", "pending_visibility")
+
     @classmethod
     def from_action(
         cls,

@@ -8,7 +8,6 @@ from typing import Any
 from greenfloor.core.cycle_orchestration import (
     MarketBatchSelection,
     OfferStateRow,
-    ParallelActionOutcome,
     StaleSweepCandidate,
     StaleSweepHit,
     StaleSweepProgress,
@@ -18,6 +17,7 @@ from greenfloor.core.managed_retry import ManagedRetryDecision
 from greenfloor.core.parallel_batch_plan import ParallelBatchPlan
 from greenfloor.core.parallel_reservation_context import ParallelReservationContext
 from greenfloor.core.planned_action import PlannedAction, planned_actions_from_signer_list
+from greenfloor.daemon.strategy_action_item import StrategyActionItem
 
 _INSTALL_HINT = (
     "Install the greenfloor_signer extension (for example: "
@@ -252,11 +252,11 @@ def classify_dexie_visibility_outcome(
     return result
 
 
-def count_parallel_transient_failures(items: list[ParallelActionOutcome]) -> int:
+def count_parallel_transient_failures(items: list[StrategyActionItem]) -> int:
     for index, item in enumerate(items):
-        if not isinstance(item, ParallelActionOutcome):
+        if not isinstance(item, StrategyActionItem):
             raise TypeError(
-                f"parallel outcome list item {index} must be ParallelActionOutcome, "
+                f"parallel outcome list item {index} must be StrategyActionItem, "
                 f"got {type(item).__name__}"
             )
     return int(_import_signer().count_parallel_transient_failures(items))

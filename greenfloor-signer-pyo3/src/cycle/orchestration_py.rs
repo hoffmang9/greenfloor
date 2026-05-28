@@ -119,7 +119,7 @@ fn parse_managed_action_status(status: &str) -> ManagedActionStatus {
     }
 }
 
-pub fn parallel_action_outcomes_from_py_list(
+pub fn strategy_action_item_status_pairs_from_py_list(
     items: &Bound<'_, PyList>,
 ) -> PyResult<Vec<(ManagedActionStatus, bool)>> {
     let mut pairs = Vec::with_capacity(items.len());

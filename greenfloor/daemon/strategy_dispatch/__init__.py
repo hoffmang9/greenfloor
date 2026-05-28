@@ -23,7 +23,7 @@ from greenfloor.daemon.strategy_dispatch.managed_path import (
     execute_single_managed_action,
     managed_offer_post,
 )
-from greenfloor.daemon.strategy_dispatch.parallel_path import execute_actions_parallel
+from greenfloor.daemon.strategy_dispatch.parallel_managed import execute_actions_parallel
 from greenfloor.daemon.strategy_dispatch.reservation_helpers import (
     resolve_signer_offer_asset_ids_for_reservation,
 )
