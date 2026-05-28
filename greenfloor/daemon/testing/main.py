@@ -26,11 +26,8 @@ from greenfloor.daemon.main import (
 )
 from greenfloor.daemon.market_cycle import MarketCycleResult
 
-_MarketCycleResult = MarketCycleResult
-
 __all__ = [
     "MarketCycleResult",
-    "_MarketCycleResult",
     "MarketDispatchState",
     "consume_reload_marker",
     "detect_stale_open_offers_for_requeue",

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -21,4 +23,23 @@ pub fn request_dict_to_json(request: &Bound<'_, PyDict>) -> PyResult<serde_json:
     let raw = dumps.call1((request,))?;
     let raw_str: String = raw.extract()?;
     serde_json::from_str(&raw_str).map_err(to_py_err)
+}
+
+pub fn dict_to_i64_i64_map(dict: &Bound<'_, PyDict>) -> PyResult<BTreeMap<i64, i64>> {
+    let mut map = BTreeMap::new();
+    for (key, value) in dict.iter() {
+        map.insert(key.extract::<i64>()?, value.extract::<i64>()?);
+    }
+    Ok(map)
+}
+
+pub fn i64_i64_map_to_py_dict<'py>(
+    py: Python<'py>,
+    map: &BTreeMap<i64, i64>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    for (key, value) in map {
+        dict.set_item(*key, *value)?;
+    }
+    Ok(dict)
 }

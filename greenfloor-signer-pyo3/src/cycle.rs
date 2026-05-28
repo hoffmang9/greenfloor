@@ -1,10 +1,11 @@
-use std::collections::BTreeMap;
-
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use crate::py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
+use crate::py_utils::{
+    dict_from_json_value, dict_to_i64_i64_map, i64_i64_map_to_py_dict, request_dict_to_json,
+    to_py_err,
+};
 
 use signer_core::{
     apply_offer_signal, can_parallelize_managed_offers, classify_dexie_stale_offer_status,
@@ -475,14 +476,10 @@ fn aggregate_two_sided_offer_counts_py(
     sell_counts: &Bound<'_, PyDict>,
     tracked_sizes: Vec<i64>,
 ) -> PyResult<Py<PyAny>> {
-    let buy_json = request_dict_to_json(buy_counts)?;
-    let sell_json = request_dict_to_json(sell_counts)?;
-    let buy: BTreeMap<i64, i64> = serde_json::from_value(buy_json).map_err(to_py_err)?;
-    let sell: BTreeMap<i64, i64> = serde_json::from_value(sell_json).map_err(to_py_err)?;
+    let buy = dict_to_i64_i64_map(buy_counts)?;
+    let sell = dict_to_i64_i64_map(sell_counts)?;
     let aggregated = aggregate_two_sided_offer_counts(&buy, &sell, &tracked_sizes);
-    Python::attach(|py| {
-        dict_from_json_value(py, serde_json::to_value(aggregated).map_err(to_py_err)?)
-    })
+    Python::attach(|py| Ok(i64_i64_map_to_py_dict(py, &aggregated)?.into()))
 }
 
 #[pyfunction]
@@ -491,19 +488,12 @@ fn one_sided_offer_counts_by_side_py(
     sell_counts: &Bound<'_, PyDict>,
     tracked_sizes: Vec<i64>,
 ) -> PyResult<Py<PyAny>> {
-    let sell_json = request_dict_to_json(sell_counts)?;
-    let sell: BTreeMap<i64, i64> = serde_json::from_value(sell_json).map_err(to_py_err)?;
+    let sell = dict_to_i64_i64_map(sell_counts)?;
     let (buy, sell_side) = one_sided_offer_counts_by_side(&sell, &tracked_sizes);
     Python::attach(|py| {
         let dict = PyDict::new(py);
-        dict.set_item(
-            "buy",
-            dict_from_json_value(py, serde_json::to_value(buy).map_err(to_py_err)?)?,
-        )?;
-        dict.set_item(
-            "sell",
-            dict_from_json_value(py, serde_json::to_value(sell_side).map_err(to_py_err)?)?,
-        )?;
+        dict.set_item("buy", i64_i64_map_to_py_dict(py, &buy)?)?;
+        dict.set_item("sell", i64_i64_map_to_py_dict(py, &sell_side)?)?;
         Ok(dict.into())
     })
 }

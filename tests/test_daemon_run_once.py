@@ -16,7 +16,7 @@ from tests.logging_helpers import reset_concurrent_log_handlers
 
 
 def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path) -> None:
-    from greenfloor.daemon.testing import main as daemon_mod
+    from greenfloor.daemon.market_cycle import MarketCycleResult
 
     home = tmp_path / "home"
     state_dir = home / "state"
@@ -53,14 +53,14 @@ def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path
             if len(started) == 2:
                 both_started.set()
         assert both_started.wait(timeout=1.0)
-        return daemon_mod._MarketCycleResult()
+        return MarketCycleResult()
 
     monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
     monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
-        "greenfloor.daemon.main._process_single_market_with_store", _fake_process_single_market
+        "greenfloor.daemon.main.process_single_market_with_store", _fake_process_single_market
     )
 
     code = run_once(
@@ -77,7 +77,7 @@ def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path
 
 
 def test_run_once_parallel_market_failure_isolated(monkeypatch, tmp_path: Path) -> None:
-    from greenfloor.daemon.testing import main as daemon_mod
+    from greenfloor.daemon.market_cycle import MarketCycleResult
 
     home = tmp_path / "home"
     state_dir = home / "state"
@@ -107,14 +107,14 @@ def test_run_once_parallel_market_failure_isolated(monkeypatch, tmp_path: Path) 
         market = kwargs["market"]
         if str(market.market_id) == "m1":
             raise RuntimeError("boom")
-        return daemon_mod._MarketCycleResult(strategy_planned=2, strategy_executed=1)
+        return MarketCycleResult(strategy_planned=2, strategy_executed=1)
 
     monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
     monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
-        "greenfloor.daemon.main._process_single_market_with_store", _fake_process_single_market
+        "greenfloor.daemon.main.process_single_market_with_store", _fake_process_single_market
     )
 
     code = run_once(
@@ -141,7 +141,7 @@ def test_run_once_parallel_market_failure_isolated(monkeypatch, tmp_path: Path) 
 
 
 def test_run_once_sequential_market_failure_isolated(monkeypatch, tmp_path: Path) -> None:
-    from greenfloor.daemon.testing import main as daemon_mod
+    from greenfloor.daemon.market_cycle import MarketCycleResult
 
     home = tmp_path / "home"
     state_dir = home / "state"
@@ -171,15 +171,13 @@ def test_run_once_sequential_market_failure_isolated(monkeypatch, tmp_path: Path
         market = kwargs["market"]
         if str(market.market_id) == "m1":
             raise RuntimeError("boom-sequential")
-        return daemon_mod._MarketCycleResult(strategy_planned=2, strategy_executed=1)
+        return MarketCycleResult(strategy_planned=2, strategy_executed=1)
 
     monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
     monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
-    monkeypatch.setattr(
-        "greenfloor.daemon.main._process_single_market", _fake_process_single_market
-    )
+    monkeypatch.setattr("greenfloor.daemon.main.process_single_market", _fake_process_single_market)
 
     code = run_once(
         program_path=program,
@@ -205,7 +203,7 @@ def test_run_once_sequential_market_failure_isolated(monkeypatch, tmp_path: Path
 
 
 def test_run_once_parallel_picks_up_new_market_next_cycle(monkeypatch, tmp_path: Path) -> None:
-    from greenfloor.daemon.testing import main as daemon_mod
+    from greenfloor.daemon.market_cycle import MarketCycleResult
 
     home = tmp_path / "home"
     state_dir = home / "state"
@@ -237,22 +235,20 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(monkeypatch, tmp_path:
     def _fake_process_single_market(**kwargs):
         market = kwargs["market"]
         sequential_seen.append(str(market.market_id))
-        return daemon_mod._MarketCycleResult()
+        return MarketCycleResult()
 
     def _fake_process_single_market_with_store(**kwargs):
         market = kwargs["market"]
         parallel_seen.append(str(market.market_id))
-        return daemon_mod._MarketCycleResult()
+        return MarketCycleResult()
 
     monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
     monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
     monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr("greenfloor.daemon.main.process_single_market", _fake_process_single_market)
     monkeypatch.setattr(
-        "greenfloor.daemon.main._process_single_market", _fake_process_single_market
-    )
-    monkeypatch.setattr(
-        "greenfloor.daemon.main._process_single_market_with_store",
+        "greenfloor.daemon.main.process_single_market_with_store",
         _fake_process_single_market_with_store,
     )
 

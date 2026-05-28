@@ -55,11 +55,8 @@ from greenfloor.daemon.inventory_scan import (
     _run_coinset_signal_capture_once,
 )
 from greenfloor.daemon.market_cycle import (
-    MarketCycleResult as _MarketCycleResult,  # noqa: F401 — test patch point re-export
-)
-from greenfloor.daemon.market_cycle import (
-    _process_single_market,
-    _process_single_market_with_store,
+    process_single_market,
+    process_single_market_with_store,
 )
 from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision
 from greenfloor.daemon.reservations import AssetReservationCoordinator
@@ -469,7 +466,7 @@ def run_once(
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
                 future_to_market = {
                     pool.submit(
-                        _process_single_market_with_store,
+                        process_single_market_with_store,
                         market=market,
                         program=program,
                         allowed_keys=allowed_keys,
@@ -527,7 +524,7 @@ def run_once(
             for market in selected_markets:
                 market_id = str(getattr(market, "market_id", "")).strip()
                 try:
-                    mr = _process_single_market(
+                    mr = process_single_market(
                         market=market,
                         program=program,
                         allowed_keys=allowed_keys,

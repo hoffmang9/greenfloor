@@ -4,8 +4,10 @@
 
 - Split cycle PyO3 bindings into `greenfloor-signer-pyo3/src/cycle.rs` + shared `py_utils.rs`; `lib.rs` back under 500 lines.
 - Collapsed four pass-through `core/cycle_*.py` modules into single `greenfloor/core/cycle.py`.
-- Merged `greenfloor/adapters/cycle_kernel.py` into `core/cycle.py` (single Python policy surface; PyO3 bridge is private `_signer_*` helpers).
-- Centralized size-count int↔str conversion at the PyO3 boundary (`_size_counts_to_signer` / `_size_counts_from_signer`).
+- Split `core/cycle` into package: `_bridge.py` (PyO3 only) + `__init__.py` (re-exports and API-shaping wrappers only).
+- Typed PyO3 dict extraction for size-count maps (`dict_to_i64_i64_map`); no JSON round-trip on aggregate/one-sided paths.
+- Added sibling-core payload helpers: `evaluate_market_payload`, `apply_offer_signal_payload`, `size_counts_to_signer`.
+- `market_cycle.process_single_market` dispatches via Rust `MARKET_CYCLE_PHASES` table; tests patch `main.process_single_market*` directly.
 - Removed fake Rust validator for `expand_strategy_actions` — expansion is pure Python in `core/cycle.py`.
 - Moved `MarketCycleResult` merge/error accounting to dataclass methods (no dict-shuttle FFI).
 - Single source of truth for phase order: Rust `market_cycle_phases()` → Python `MARKET_CYCLE_PHASES`.
@@ -15,7 +17,7 @@
 
 - Added `greenfloor-signer/src/cycle/market.rs`: cycle phase enum/order, `MarketCycleResultState` merge helpers, inventory fallback gating, inventory scan source resolution, tracked-size resolution, and two-sided offer count aggregation.
 - Exposed market-phase helpers via PyO3; Python `greenfloor/core/cycle.py` is the policy surface.
-- Extracted `greenfloor/daemon/market_cycle.py` from `main.py`: setup → reconcile → inventory → strategy → cancel → coin-ops phase runners; `main.py` delegates per-market execution and re-exports `_MarketCycleResult` / `_process_single_market*` for test patch points.
+- Extracted `greenfloor/daemon/market_cycle.py` from `main.py`; `process_single_market` now walks Rust `MARKET_CYCLE_PHASES` via a phase runner table.
 - **Step 4 scope note:** this extraction was a **relocation** of existing per-market logic into a dedicated module — phase bodies and IO flow are unchanged. A **phase-table-driven restructure** (Rust-owned phase dispatch with thin Python IO hooks per phase) is deferred to the secondary follow-up below.
 - `main.py` is now ~850 lines (orchestration glue only); per-market IO remains in Python adapters.
 

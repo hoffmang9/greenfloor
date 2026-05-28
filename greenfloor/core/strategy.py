@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from greenfloor.core.cycle import _signer_evaluate_market, _size_counts_to_signer
+from greenfloor.core.cycle import evaluate_market_payload, size_counts_to_signer
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +51,7 @@ def _market_state_payload(state: MarketState) -> dict[str, Any]:
     if state.xch_price_usd is not None:
         payload["xch_price_usd"] = float(state.xch_price_usd)
     if state.bucket_counts_by_size is not None:
-        payload["bucket_counts_by_size"] = _size_counts_to_signer(state.bucket_counts_by_size)
+        payload["bucket_counts_by_size"] = size_counts_to_signer(state.bucket_counts_by_size)
     return payload
 
 
@@ -71,7 +71,7 @@ def _strategy_config_payload(config: StrategyConfig) -> dict[str, Any]:
     if config.offer_expiry_minutes is not None:
         payload["offer_expiry_minutes"] = int(config.offer_expiry_minutes)
     if config.target_counts_by_size is not None:
-        payload["target_counts_by_size"] = _size_counts_to_signer(config.target_counts_by_size)
+        payload["target_counts_by_size"] = size_counts_to_signer(config.target_counts_by_size)
     return payload
 
 
@@ -99,7 +99,7 @@ def evaluate_market(
     clock: datetime,
 ) -> list[PlannedAction]:
     _ = clock
-    raw_actions = _signer_evaluate_market(
+    raw_actions = evaluate_market_payload(
         state=_market_state_payload(state),
         config=_strategy_config_payload(config),
     )

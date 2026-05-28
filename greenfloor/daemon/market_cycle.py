@@ -14,6 +14,7 @@ from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.adapters.wallet import WalletAdapter
 from greenfloor.config.models import ProgramConfig, signer_offer_path_configured
 from greenfloor.core.cycle import (
+    MARKET_CYCLE_PHASES,
     aggregate_two_sided_offer_counts,
     is_two_sided_market_mode,
     needs_inventory_fallback,
@@ -92,10 +93,6 @@ class MarketCycleResult:
             self.cancel_triggered = True
         self.cancel_planned += max(0, int(planned))
         self.cancel_executed += max(0, int(executed))
-
-
-# Backward-compatible alias for tests and internal imports.
-_MarketCycleResult = MarketCycleResult
 
 
 def _log_daemon_event(*, level: int, payload: dict[str, Any]) -> None:
@@ -497,6 +494,164 @@ def _run_market_cycle_inventory(
     return bucket_counts
 
 
+@dataclass(slots=True)
+class _MarketCycleRun:
+    market: Any
+    program: Any
+    allowed_keys: set[str] | None
+    dexie: DexieAdapter
+    splash: SplashAdapter
+    wallet: WalletAdapter
+    store: SqliteStore
+    xch_price_usd: float | None
+    previous_xch_price_usd: float | None
+    now: datetime
+    state_dir: Path
+    reservation_coordinator: AssetReservationCoordinator | None
+    result: MarketCycleResult
+    signer_selection: Any = None
+    dexie_size_by_offer_id: dict[str, int] = field(default_factory=dict)
+    offers: list[Any] = field(default_factory=list)
+    sell_ladder: list[Any] = field(default_factory=list)
+    bucket_counts: dict[int, int] | None = None
+    offer_counts_by_side: dict[str, dict[int, int]] = field(
+        default_factory=lambda: {"buy": {}, "sell": {}}
+    )
+    newly_executed_sell_offer_counts_by_size: dict[int, int] = field(default_factory=dict)
+
+
+def _run_market_cycle_reconcile_phase(run: _MarketCycleRun) -> None:
+    _, run.dexie_size_by_offer_id, _, run.offers = reconcile_market_cycle_offers(
+        market=run.market,
+        network=run.program.app_network,
+        dexie=run.dexie,
+        store=run.store,
+        now=run.now,
+        result=run.result,
+    )
+
+
+def _run_market_cycle_inventory_phase(run: _MarketCycleRun) -> None:
+    run.sell_ladder = run.market.ladders.get("sell", [])
+    run.bucket_counts = _run_market_cycle_inventory(
+        market=run.market,
+        program=run.program,
+        wallet=run.wallet,
+        store=run.store,
+        sell_ladder=run.sell_ladder,
+    )
+
+
+def _run_market_cycle_strategy_phase(run: _MarketCycleRun) -> None:
+    try:
+        run.offer_counts_by_side, run.newly_executed_sell_offer_counts_by_size = (
+            evaluate_and_execute_strategy(
+                market=run.market,
+                program=run.program,
+                dexie=run.dexie,
+                splash=run.splash,
+                store=run.store,
+                xch_price_usd=run.xch_price_usd,
+                now=run.now,
+                dexie_size_by_offer_id=run.dexie_size_by_offer_id,
+                result=run.result,
+                reservation_coordinator=run.reservation_coordinator,
+            )
+        )
+    except Exception as exc:
+        run.result.record_phase_error()
+        _log_market_decision(
+            run.market.market_id,
+            "strategy_failed",
+            error=str(exc),
+        )
+        run.store.add_audit_event(
+            "strategy_execution_error",
+            {"market_id": run.market.market_id, "error": str(exc)},
+            market_id=run.market.market_id,
+        )
+
+
+def _run_market_cycle_cancel_phase(run: _MarketCycleRun) -> None:
+    cancel_policy = _execute_cancel_policy_for_market(
+        market=run.market,
+        offers=run.offers,
+        runtime_dry_run=run.program.runtime_dry_run,
+        current_xch_price_usd=run.xch_price_usd,
+        previous_xch_price_usd=run.previous_xch_price_usd,
+        dexie=run.dexie,
+        store=run.store,
+    )
+    run.result.merge_cancel_policy(
+        triggered=bool(cancel_policy.get("triggered", False)),
+        planned=int(cancel_policy.get("planned_count", 0)),
+        executed=int(cancel_policy.get("executed_count", 0)),
+    )
+    _log_market_decision(
+        run.market.market_id,
+        "cancel_policy_evaluated",
+        eligible=cancel_policy["eligible"],
+        triggered=cancel_policy["triggered"],
+        reason=cancel_policy["reason"],
+        move_bps=cancel_policy["move_bps"],
+        threshold_bps=cancel_policy["threshold_bps"],
+        planned_count=cancel_policy["planned_count"],
+        executed_count=cancel_policy["executed_count"],
+    )
+    run.store.add_audit_event(
+        "offer_cancel_policy",
+        {
+            "market_id": run.market.market_id,
+            "eligible": cancel_policy["eligible"],
+            "triggered": cancel_policy["triggered"],
+            "reason": cancel_policy["reason"],
+            "move_bps": cancel_policy["move_bps"],
+            "threshold_bps": cancel_policy["threshold_bps"],
+            "planned_count": cancel_policy["planned_count"],
+            "executed_count": cancel_policy["executed_count"],
+            "items": cancel_policy["items"],
+        },
+        market_id=run.market.market_id,
+    )
+
+
+def _run_market_cycle_coin_ops_phase(run: _MarketCycleRun) -> None:
+    try:
+        _plan_and_execute_coin_ops(
+            market=run.market,
+            program=run.program,
+            wallet=run.wallet,
+            store=run.store,
+            sell_ladder=run.sell_ladder,
+            wallet_bucket_counts=run.bucket_counts or dict(run.market.inventory.bucket_counts),
+            active_sell_offer_counts_by_size=run.offer_counts_by_side.get("sell", {}),
+            newly_executed_sell_offer_counts_by_size=run.newly_executed_sell_offer_counts_by_size,
+            signer_selection=run.signer_selection,
+            state_dir=run.state_dir,
+        )
+    except Exception as exc:
+        run.result.record_phase_error()
+        _log_market_decision(
+            run.market.market_id,
+            "coin_ops_failed",
+            error=str(exc),
+        )
+        run.store.add_audit_event(
+            "coin_ops_execution_error",
+            {"market_id": run.market.market_id, "error": str(exc)},
+            market_id=run.market.market_id,
+        )
+
+
+_MARKET_CYCLE_PHASE_RUNNERS = {
+    "reconcile": _run_market_cycle_reconcile_phase,
+    "inventory": _run_market_cycle_inventory_phase,
+    "strategy": _run_market_cycle_strategy_phase,
+    "cancel": _run_market_cycle_cancel_phase,
+    "coin_ops": _run_market_cycle_coin_ops_phase,
+}
+
+
 def process_single_market(
     *,
     market: Any,
@@ -512,141 +667,41 @@ def process_single_market(
     state_dir: Path,
     reservation_coordinator: AssetReservationCoordinator | None = None,
 ) -> MarketCycleResult:
-    result = MarketCycleResult()
-    signer_selection = _run_market_cycle_setup(
+    run = _MarketCycleRun(
         market=market,
         program=program,
         allowed_keys=allowed_keys,
-        store=store,
-        now=now,
-    )
-
-    _, dexie_size_by_offer_id, _, offers = reconcile_market_cycle_offers(
-        market=market,
-        network=program.app_network,
         dexie=dexie,
-        store=store,
-        now=now,
-        result=result,
-    )
-
-    sell_ladder = market.ladders.get("sell", [])
-    bucket_counts = _run_market_cycle_inventory(
-        market=market,
-        program=program,
+        splash=splash,
         wallet=wallet,
         store=store,
-        sell_ladder=sell_ladder,
-    )
-
-    offer_counts_by_side: dict[str, dict[int, int]] = {"buy": {}, "sell": {}}
-    newly_executed_sell_offer_counts_by_size: dict[int, int] = {}
-    try:
-        offer_counts_by_side, newly_executed_sell_offer_counts_by_size = (
-            evaluate_and_execute_strategy(
-                market=market,
-                program=program,
-                dexie=dexie,
-                splash=splash,
-                store=store,
-                xch_price_usd=xch_price_usd,
-                now=now,
-                dexie_size_by_offer_id=dexie_size_by_offer_id,
-                result=result,
-                reservation_coordinator=reservation_coordinator,
-            )
-        )
-    except Exception as exc:
-        result.record_phase_error()
-        _log_market_decision(
-            market.market_id,
-            "strategy_failed",
-            error=str(exc),
-        )
-        store.add_audit_event(
-            "strategy_execution_error",
-            {"market_id": market.market_id, "error": str(exc)},
-            market_id=market.market_id,
-        )
-
-    cancel_policy = _execute_cancel_policy_for_market(
-        market=market,
-        offers=offers,
-        runtime_dry_run=program.runtime_dry_run,
-        current_xch_price_usd=xch_price_usd,
+        xch_price_usd=xch_price_usd,
         previous_xch_price_usd=previous_xch_price_usd,
-        dexie=dexie,
-        store=store,
+        now=now,
+        state_dir=state_dir,
+        reservation_coordinator=reservation_coordinator,
+        result=MarketCycleResult(),
     )
-    result.merge_cancel_policy(
-        triggered=bool(cancel_policy.get("triggered", False)),
-        planned=int(cancel_policy.get("planned_count", 0)),
-        executed=int(cancel_policy.get("executed_count", 0)),
+    run.signer_selection = _run_market_cycle_setup(
+        market=run.market,
+        program=run.program,
+        allowed_keys=run.allowed_keys,
+        store=run.store,
+        now=run.now,
     )
+    for phase in MARKET_CYCLE_PHASES:
+        _MARKET_CYCLE_PHASE_RUNNERS[phase](run)
     _log_market_decision(
-        market.market_id,
-        "cancel_policy_evaluated",
-        eligible=cancel_policy["eligible"],
-        triggered=cancel_policy["triggered"],
-        reason=cancel_policy["reason"],
-        move_bps=cancel_policy["move_bps"],
-        threshold_bps=cancel_policy["threshold_bps"],
-        planned_count=cancel_policy["planned_count"],
-        executed_count=cancel_policy["executed_count"],
-    )
-    store.add_audit_event(
-        "offer_cancel_policy",
-        {
-            "market_id": market.market_id,
-            "eligible": cancel_policy["eligible"],
-            "triggered": cancel_policy["triggered"],
-            "reason": cancel_policy["reason"],
-            "move_bps": cancel_policy["move_bps"],
-            "threshold_bps": cancel_policy["threshold_bps"],
-            "planned_count": cancel_policy["planned_count"],
-            "executed_count": cancel_policy["executed_count"],
-            "items": cancel_policy["items"],
-        },
-        market_id=market.market_id,
-    )
-
-    try:
-        _plan_and_execute_coin_ops(
-            market=market,
-            program=program,
-            wallet=wallet,
-            store=store,
-            sell_ladder=sell_ladder,
-            wallet_bucket_counts=bucket_counts or dict(market.inventory.bucket_counts),
-            active_sell_offer_counts_by_size=offer_counts_by_side.get("sell", {}),
-            newly_executed_sell_offer_counts_by_size=newly_executed_sell_offer_counts_by_size,
-            signer_selection=signer_selection,
-            state_dir=state_dir,
-        )
-    except Exception as exc:
-        result.record_phase_error()
-        _log_market_decision(
-            market.market_id,
-            "coin_ops_failed",
-            error=str(exc),
-        )
-        store.add_audit_event(
-            "coin_ops_execution_error",
-            {"market_id": market.market_id, "error": str(exc)},
-            market_id=market.market_id,
-        )
-
-    _log_market_decision(
-        market.market_id,
+        run.market.market_id,
         "cycle_complete",
-        cycle_errors=result.cycle_errors,
-        strategy_planned=result.strategy_planned,
-        strategy_executed=result.strategy_executed,
-        cancel_triggered=result.cancel_triggered,
-        cancel_planned=result.cancel_planned,
-        cancel_executed=result.cancel_executed,
+        cycle_errors=run.result.cycle_errors,
+        strategy_planned=run.result.strategy_planned,
+        strategy_executed=run.result.strategy_executed,
+        cancel_triggered=run.result.cancel_triggered,
+        cancel_planned=run.result.cancel_planned,
+        cancel_executed=run.result.cancel_executed,
     )
-    return result
+    return run.result
 
 
 def process_single_market_with_store(
@@ -683,9 +738,3 @@ def process_single_market_with_store(
         )
     finally:
         store.close()
-
-
-# Private aliases preserved for main.py re-exports.
-_evaluate_and_execute_strategy = evaluate_and_execute_strategy
-_process_single_market = process_single_market
-_process_single_market_with_store = process_single_market_with_store
