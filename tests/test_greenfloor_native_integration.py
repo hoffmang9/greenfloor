@@ -43,4 +43,7 @@ def test_greenfloor_signer_from_input_spend_bundle_xch_round_trip_offer() -> Non
 
     offer_text = encode_offer_from_spend_bundle_hex(offer_spend_bundle_bytes.hex())
     assert offer_text.startswith("offer1")
-    signer.validate_offer(offer_text)
+    # Structural round-trip only; minimal fixture has no ASSERT_BEFORE_* expiry legs.
+    signer.validate_offer_structure(offer_text)
+    with pytest.raises(ValueError, match="offer_missing_expiration"):
+        signer.validate_offer(offer_text)
