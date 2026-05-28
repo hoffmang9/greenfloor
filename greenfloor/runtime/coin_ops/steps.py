@@ -16,6 +16,7 @@ from greenfloor.core.coin_ops import (
     plan_auto_combine_inputs,
     plan_auto_split_selection,
 )
+from greenfloor.core.coin_ops.types import CoinSplitGateResult
 from greenfloor.runtime.coin_ops.coins import classify_resolved_coin_ids_by_asset
 from greenfloor.runtime.coin_ops.errors import (
     coin_combine_asset_mismatch_error_payload,
@@ -61,7 +62,7 @@ class CoinSplitStepResult:
         | CoinOpIterationSkipLoop
         | CoinOpIterationNeedsConfirmation
     )
-    split_gate: dict[str, int | bool | str] | None = None
+    split_gate: CoinSplitGateResult | None = None
 
 
 def run_coin_split_step(
@@ -83,7 +84,7 @@ def run_coin_split_step(
         for c in spendable_scoped
         if str(c.get("id", c.get("name", ""))).strip()
     }
-    split_gate: dict[str, int | bool | str] | None = None
+    split_gate: CoinSplitGateResult | None = None
     if params.denomination_target is not None:
         gate = evaluate_coin_split_gate(
             asset_scoped_coins=asset_scoped_coins,
@@ -91,7 +92,7 @@ def run_coin_split_step(
             size_base_units=params.denomination_target.size_base_units,
             required_count=params.denomination_target.required_count,
         )
-        split_gate = gate.to_readiness_payload()
+        split_gate = gate
         if gate.ready and not params.force_split_when_ready:
             return CoinSplitStepResult(
                 step=CoinOpIterationNeedsConfirmation(
@@ -215,7 +216,7 @@ class CoinCombineStepParams:
 @dataclass(slots=True)
 class CoinCombineStepResult:
     step: CoinOpIterationExecuteResult | CoinOpIterationEarlyExit
-    split_gate: dict[str, int | bool | str] | None = None
+    split_gate: CoinSplitGateResult | None = None
 
 
 def run_coin_combine_step(

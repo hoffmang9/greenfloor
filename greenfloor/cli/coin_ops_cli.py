@@ -10,6 +10,7 @@ from pathlib import Path
 from greenfloor.cli.prompts import prompt_yes_no
 from greenfloor.config.models import MarketConfig
 from greenfloor.core.coin_ops import coin_op_min_amount_mojos
+from greenfloor.core.coin_ops.types import DenominationReadiness
 from greenfloor.runtime.coin_ops.errors import coin_op_unresolved_error_payload
 from greenfloor.runtime.coin_ops.models import (
     CombineDenominationTarget,
@@ -129,7 +130,7 @@ def _build_success_payload(
     coin_ids: list[str],
     until_ready: bool,
     max_iterations: int,
-    final_readiness: dict[str, int | bool | str] | None,
+    final_readiness: DenominationReadiness | None,
     extra_fields: dict[str, object] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
@@ -322,7 +323,14 @@ def execute_split_cli(
     if isinstance(result, int):
         return result
 
-    final_readiness = result.loop_result.final_readiness or result.loop_result.split_gate
+    final_readiness = result.loop_result.final_readiness
+    if final_readiness is None and result.loop_result.split_gate is not None:
+        final_readiness = DenominationReadiness.from_split_gate(result.loop_result.split_gate)
+    split_gate_payload = (
+        None
+        if result.loop_result.split_gate is None
+        else result.loop_result.split_gate.to_readiness_payload()
+    )
     return _finish_coin_op_cli(
         setup=result.setup,
         loop_result=result.loop_result,
@@ -333,7 +341,7 @@ def execute_split_cli(
             until_ready=until_ready,
             max_iterations=max_iterations,
             final_readiness=final_readiness,
-            extra_fields={"split_gate": result.loop_result.split_gate},
+            extra_fields={"split_gate": split_gate_payload},
         ),
     )
 

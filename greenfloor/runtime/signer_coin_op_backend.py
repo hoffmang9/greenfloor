@@ -10,9 +10,9 @@ from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.core.coin_ops import (
     coin_op_min_amount_mojos,
-    combine_denomination_readiness,
-    split_denomination_readiness,
+    evaluate_denomination_readiness as evaluate_denomination_readiness_policy,
 )
+from greenfloor.core.coin_ops.types import DenominationReadiness
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode, DenominationTarget
 from greenfloor.runtime.coin_ops_scope import CoinOpScope
@@ -228,35 +228,14 @@ class SignerCoinOpBackend:
         size_base_units: int,
         required_min_count: int | None = None,
         max_allowed_count: int | None = None,
-    ) -> dict[str, int | bool | str]:
-        coins = self.list_asset_scoped_coins()
-        if required_min_count is not None and max_allowed_count is None:
-            return split_denomination_readiness(
-                asset_scoped_coins=coins,
-                asset_id=asset_id,
-                size_base_units=int(size_base_units),
-                required_min_count=int(required_min_count),
-            )
-        spendable = [
-            c
-            for c in coins
-            if is_spendable_coin(c) and int(c.get("amount", 0)) == int(size_base_units)
-        ]
-        if max_allowed_count is not None:
-            return combine_denomination_readiness(
-                asset_id=asset_id,
-                size_base_units=int(size_base_units),
-                max_allowed_count=int(max_allowed_count),
-                matching_count=len(spendable),
-            )
-        return {
-            "asset_id": asset_id,
-            "size_base_units": int(size_base_units),
-            "current_count": len(spendable),
-            "required_min_count": -1,
-            "max_allowed_count": -1,
-            "ready": True,
-        }
+    ) -> DenominationReadiness:
+        return evaluate_denomination_readiness_policy(
+            asset_scoped_coins=self.list_asset_scoped_coins(),
+            asset_id=asset_id,
+            size_base_units=int(size_base_units),
+            required_min_count=required_min_count,
+            max_allowed_count=max_allowed_count,
+        )
 
     def build_iteration_payload(
         self,
@@ -270,7 +249,7 @@ class SignerCoinOpBackend:
         readiness_asset_id: str,
         readiness_kwargs: dict[str, int],
         denomination_target: DenominationTarget | None,
-    ) -> tuple[dict[str, object], dict[str, int | bool | str] | None]:
+    ) -> tuple[dict[str, object], DenominationReadiness | None]:
         _ = network, existing_coin_ids
         iteration_payload: dict[str, object] = {
             "iteration": iteration,
@@ -288,5 +267,5 @@ class SignerCoinOpBackend:
                 size_base_units=denomination_target.size_base_units,
                 **readiness_kwargs,
             )
-            iteration_payload["denomination_readiness"] = final_readiness
+            iteration_payload["denomination_readiness"] = final_readiness.to_payload()
         return iteration_payload, final_readiness

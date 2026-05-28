@@ -4,9 +4,9 @@ The compiled extension is still named ``greenfloor_signer`` (see ADR 0010). Pyth
 callers should use :func:`import_kernel`; ``import_signer`` remains as a migration alias.
 
 Deterministic policy bridges use :func:`policy_kernel` with
-``DeterministicPolicyKernelProtocol``. Coin operations use
-``CoinOpsKernelProtocol``; adapters and signing paths call ``import_kernel()``
-directly.
+``PolicyKernelProtocol`` (cycle, cancel, notification, offer, retry, coin-ops).
+Coin-operation bridges call :func:`coin_ops_kernel`; adapters and signing paths
+call ``import_kernel()`` directly.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from greenfloor.core.coin_ops.kernel_protocol import CoinOpsKernelProtocol
     from greenfloor.core.kernel_protocol import PolicyKernelProtocol
 
 _KERNEL_MODULE = "greenfloor_signer"
@@ -35,6 +36,10 @@ def import_kernel() -> Any:
 
 def policy_kernel() -> PolicyKernelProtocol:
     return import_kernel()  # type: ignore[return-value]
+
+
+def coin_ops_kernel() -> CoinOpsKernelProtocol:
+    return policy_kernel()  # type: ignore[return-value]
 
 
 # Migration alias — prefer import_kernel for new code.

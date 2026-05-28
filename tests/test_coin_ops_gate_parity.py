@@ -5,9 +5,11 @@ from __future__ import annotations
 from greenfloor.core.coin_ops import (
     coin_op_should_stop,
     evaluate_coin_split_gate,
+    evaluate_denomination_readiness,
     is_spendable_wallet_coin,
     split_denomination_readiness,
 )
+from greenfloor.core.coin_ops.types import DenominationReadiness
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 
 
@@ -30,14 +32,29 @@ def test_split_denomination_readiness_matches_gate() -> None:
         size_base_units=100,
         required_count=2,
     )
-    payload = split_denomination_readiness(
+    readiness = split_denomination_readiness(
         asset_scoped_coins=coins,
         asset_id="cat",
         size_base_units=100,
         required_min_count=2,
     )
-    assert payload == gate.to_readiness_payload()
-    assert payload["ready"] is True
+    assert readiness == DenominationReadiness.from_split_gate(gate)
+    assert readiness.ready is True
+
+
+def test_evaluate_denomination_readiness_split_path() -> None:
+    coins = [
+        {"amount": 100, "state": "CONFIRMED"},
+        {"amount": 200, "state": "CONFIRMED"},
+    ]
+    readiness = evaluate_denomination_readiness(
+        asset_scoped_coins=coins,
+        asset_id="cat",
+        size_base_units=100,
+        required_min_count=2,
+    )
+    assert readiness.ready is False
+    assert readiness.reserve_ready is True
 
 
 def test_evaluate_coin_split_gate_ready() -> None:

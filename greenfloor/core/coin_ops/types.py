@@ -70,13 +70,66 @@ class CoinSplitGateResult:
     ready: bool
 
     def to_readiness_payload(self) -> dict[str, int | bool | str]:
-        return {
+        return DenominationReadiness.from_split_gate(self).to_payload()
+
+
+@dataclass(frozen=True, slots=True)
+class DenominationReadiness:
+    """Typed until-ready readiness for split or combine denomination targets."""
+
+    asset_id: str
+    size_base_units: int
+    current_count: int
+    ready: bool
+    required_min_count: int = -1
+    max_allowed_count: int = -1
+    larger_reserve_coin_count: int = 0
+    extra_denom_coin_count: int = 0
+    reserve_ready: bool = False
+
+    @classmethod
+    def from_split_gate(cls, gate: CoinSplitGateResult) -> DenominationReadiness:
+        return cls(
+            asset_id=gate.asset_id,
+            size_base_units=gate.size_base_units,
+            required_min_count=gate.required_min_count,
+            current_count=gate.current_count,
+            larger_reserve_coin_count=gate.larger_reserve_coin_count,
+            extra_denom_coin_count=gate.extra_denom_coin_count,
+            reserve_ready=gate.reserve_ready,
+            ready=gate.ready,
+        )
+
+    @classmethod
+    def from_combine(
+        cls,
+        *,
+        asset_id: str,
+        size_base_units: int,
+        max_allowed_count: int,
+        matching_count: int,
+    ) -> DenominationReadiness:
+        current_count = int(matching_count)
+        return cls(
+            asset_id=str(asset_id),
+            size_base_units=int(size_base_units),
+            current_count=current_count,
+            max_allowed_count=int(max_allowed_count),
+            ready=current_count <= int(max_allowed_count),
+        )
+
+    def to_payload(self) -> dict[str, int | bool | str]:
+        payload: dict[str, int | bool | str] = {
             "asset_id": self.asset_id,
             "size_base_units": self.size_base_units,
-            "required_min_count": self.required_min_count,
             "current_count": self.current_count,
-            "larger_reserve_coin_count": self.larger_reserve_coin_count,
-            "extra_denom_coin_count": self.extra_denom_coin_count,
-            "reserve_ready": self.reserve_ready,
+            "required_min_count": self.required_min_count,
             "ready": self.ready,
         }
+        if self.max_allowed_count >= 0:
+            payload["max_allowed_count"] = self.max_allowed_count
+        if self.required_min_count >= 0:
+            payload["larger_reserve_coin_count"] = self.larger_reserve_coin_count
+            payload["extra_denom_coin_count"] = self.extra_denom_coin_count
+            payload["reserve_ready"] = self.reserve_ready
+        return payload

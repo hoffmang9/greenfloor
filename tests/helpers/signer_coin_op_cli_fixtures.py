@@ -144,42 +144,18 @@ class SignerCoinOpBackendFake:
         size_base_units: int,
         required_min_count: int | None = None,
         max_allowed_count: int | None = None,
-    ) -> dict[str, int | bool | str]:
+    ):
         from greenfloor.core.coin_ops import (
-            combine_denomination_readiness,
-            split_denomination_readiness,
+            evaluate_denomination_readiness as evaluate_denomination_readiness_policy,
         )
 
-        coins = self.list_asset_scoped_coins()
-        if required_min_count is not None and max_allowed_count is None:
-            return split_denomination_readiness(
-                asset_scoped_coins=coins,
-                asset_id=asset_id,
-                size_base_units=int(size_base_units),
-                required_min_count=int(required_min_count),
-            )
-        spendable = [
-            coin
-            for coin in coins
-            if str(coin.get("state", "CONFIRMED")).upper() in _spendable_states()
-        ]
-        matching = [
-            coin for coin in spendable if int(coin.get("amount", 0)) == int(size_base_units)
-        ]
-        if max_allowed_count is not None:
-            return combine_denomination_readiness(
-                asset_id=asset_id,
-                size_base_units=int(size_base_units),
-                max_allowed_count=int(max_allowed_count),
-                matching_count=len(matching),
-            )
-        return {
-            "asset_id": asset_id,
-            "size_base_units": int(size_base_units),
-            "required_min_count": -1,
-            "current_count": len(matching),
-            "ready": True,
-        }
+        return evaluate_denomination_readiness_policy(
+            asset_scoped_coins=self.list_asset_scoped_coins(),
+            asset_id=asset_id,
+            size_base_units=int(size_base_units),
+            required_min_count=required_min_count,
+            max_allowed_count=max_allowed_count,
+        )
 
     def build_iteration_payload(
         self,
@@ -193,7 +169,7 @@ class SignerCoinOpBackendFake:
         readiness_asset_id: str,
         readiness_kwargs: dict[str, int],
         denomination_target: Any,
-    ) -> tuple[dict[str, object], dict[str, int | bool | str] | None]:
+    ) -> tuple[dict[str, object], object | None]:
         _ = network, existing_coin_ids
         final_readiness = None
         if denomination_target is not None:
@@ -212,7 +188,7 @@ class SignerCoinOpBackendFake:
             "wait_events": [],
         }
         if final_readiness is not None:
-            payload["denomination_readiness"] = final_readiness
+            payload["denomination_readiness"] = final_readiness.to_payload()
         return payload, final_readiness
 
 
