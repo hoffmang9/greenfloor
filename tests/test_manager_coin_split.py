@@ -674,7 +674,7 @@ def test_coin_split_until_ready_succeeds_when_denominations_met(
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["stop_reason"] == "ready"
     assert payload["denomination_readiness"]["ready"] is True
-    assert payload["split_gate"]["reserve_ready"] is True
+    assert payload["denomination_readiness"]["reserve_ready"] is True
 
 
 def test_coin_split_gate_ready_skips_split_in_non_interactive_mode(
@@ -750,4 +750,4 @@ def test_coin_split_gate_ready_skips_split_in_non_interactive_mode(
     assert split_called[0] is False
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["stop_reason"] == "ready"
-    assert payload["split_gate"]["ready"] is True
+    assert payload["denomination_readiness"]["ready"] is True

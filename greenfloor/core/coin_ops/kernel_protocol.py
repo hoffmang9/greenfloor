@@ -6,11 +6,11 @@ from typing import Any, Protocol
 
 from greenfloor.core.coin_ops.types import (
     BucketSpec,
-    CoinCombineGateResult,
     CoinOpPlan,
-    CoinSplitGateResult,
+    CombineDenominationReadiness,
     CombineInputSelectionMode,
     SplitAutoSelectPlan,
+    SplitDenominationReadiness,
     SplitPlanningProfile,
 )
 
@@ -103,7 +103,7 @@ class CoinOpsKernelProtocol(Protocol):
         resolved_asset_id: str,
         size_base_units: int,
         required_count: int,
-    ) -> CoinSplitGateResult: ...  # PyO3 FFI; bridge converts to SplitDenominationReadiness
+    ) -> SplitDenominationReadiness: ...
 
     def evaluate_coin_combine_gate(
         self,
@@ -111,7 +111,7 @@ class CoinOpsKernelProtocol(Protocol):
         asset_id: str,
         size_base_units: int,
         max_allowed_count: int,
-    ) -> CoinCombineGateResult: ...  # PyO3 FFI; bridge converts to CombineDenominationReadiness
+    ) -> CombineDenominationReadiness: ...
 
     def coin_op_should_stop(
         self,

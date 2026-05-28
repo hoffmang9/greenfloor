@@ -27,9 +27,7 @@ from greenfloor.core.coin_ops._bridge import (
 )
 from greenfloor.core.coin_ops.types import (
     BucketSpec,
-    CoinCombineGateResult,  # PyO3 FFI shape; bridge converts to CombineDenominationReadiness
     CoinOpPlan,
-    CoinSplitGateResult,  # PyO3 FFI shape; bridge converts to SplitDenominationReadiness
     CombineDenominationReadiness,
     CombineInputSelectionMode,
     DenominationReadiness,
@@ -39,15 +37,12 @@ from greenfloor.core.coin_ops.types import (
     SplitDenominationReadiness,
     SplitPlanningProfile,
     SplitSkipPlan,
-    readiness_to_payload,
 )
 
 __all__ = [
     "coin_op_should_stop",
     "evaluate_coin_combine_gate",
     "evaluate_coin_split_gate",
-    "CoinCombineGateResult",
-    "CoinSplitGateResult",
     "CombineDenominationReadiness",
     "DenominationReadiness",
     "SplitDenominationReadiness",
@@ -72,5 +67,4 @@ __all__ = [
     "projected_coin_ops_fee_mojos",
     "select_spendable_coins_for_target_amount",
     "split_would_create_sub_cat_change",
-    "readiness_to_payload",
 ]

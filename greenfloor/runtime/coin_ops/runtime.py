@@ -182,6 +182,7 @@ def coin_op_setup(
 class CoinOpIterationExecuteResult:
     signature_request_id: str
     initial_signature_state: str
+    refresh_readiness_after_execute: bool = True
 
 
 @dataclass(slots=True)
@@ -297,7 +298,7 @@ def run_coin_op_iteration_loop(
             denomination_target=denomination_target,
             asset_scoped_coins=backend.list_asset_scoped_coins(),
             readiness=pre_readiness,
-            refresh_readiness=True,
+            refresh_readiness=step.refresh_readiness_after_execute,
         )
         operations.append(iteration_payload)
 

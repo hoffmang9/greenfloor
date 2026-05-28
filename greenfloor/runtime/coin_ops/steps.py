@@ -51,6 +51,7 @@ class CoinSplitStepParams:
     min_coin_amount_mojos: int
     allow_lock_all_spendable: bool
     force_split_when_ready: bool
+    pre_readiness: SplitDenominationReadiness | None = None
 
 
 @dataclass(slots=True)
@@ -68,7 +69,6 @@ def run_coin_split_step(
     *,
     params: CoinSplitStepParams,
     wallet_coins: list[dict[str, Any]],
-    pre_readiness: SplitDenominationReadiness | None = None,
 ) -> CoinSplitStepResult:
     scope = params.backend.scope
     asset_scoped_coins = params.backend.list_asset_scoped_coins()
@@ -86,10 +86,12 @@ def run_coin_split_step(
     }
     denomination_readiness: SplitDenominationReadiness | None = None
     if params.denomination_target is not None:
-        if pre_readiness is None:
-            raise RuntimeError("split step requires pre_readiness when denomination_target is set")
-        denomination_readiness = pre_readiness
-        if pre_readiness.ready and not params.force_split_when_ready:
+        if params.pre_readiness is None:
+            raise ValueError(
+                "pre_readiness is required when denomination_target is set on CoinSplitStepParams"
+            )
+        denomination_readiness = params.pre_readiness
+        if denomination_readiness.ready and not params.force_split_when_ready:
             return CoinSplitStepResult(
                 step=CoinOpIterationNeedsConfirmation(
                     message=(
@@ -186,6 +188,7 @@ def run_coin_split_step(
         step=CoinOpIterationExecuteResult(
             signature_request_id=operation_id,
             initial_signature_state=str(split_result.get("status", "UNKNOWN")),
+            refresh_readiness_after_execute=True,
         ),
         denomination_readiness=denomination_readiness,
     )
@@ -300,5 +303,6 @@ def run_coin_combine_step(
         step=CoinOpIterationExecuteResult(
             signature_request_id=operation_id,
             initial_signature_state=str(combine_result.get("status", "UNKNOWN")),
+            refresh_readiness_after_execute=True,
         ),
     )

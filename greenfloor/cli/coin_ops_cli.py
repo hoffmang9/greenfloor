@@ -233,14 +233,14 @@ def _build_split_run_step(
         pre_readiness: DenominationReadiness | None,
     ) -> CoinOpStepOutcome:
         _ = iteration, existing_coin_ids
-        split_pre_readiness = (
-            pre_readiness if isinstance(pre_readiness, SplitDenominationReadiness) else None
-        )
+        if step_params.denomination_target is not None:
+            if not isinstance(pre_readiness, SplitDenominationReadiness):
+                raise TypeError("split run_step expected SplitDenominationReadiness pre_readiness")
+            step_params.pre_readiness = pre_readiness
         while True:
             step_result = run_coin_split_step(
                 params=step_params,
                 wallet_coins=wallet_coins,
-                pre_readiness=split_pre_readiness,
             )
             step = step_result.step
             if isinstance(step, CoinOpIterationNeedsConfirmation):
@@ -344,10 +344,6 @@ def execute_split_cli(
     if isinstance(result, int):
         return result
 
-    readiness = result.loop_result.denomination_readiness
-    split_gate_payload = (
-        None if not isinstance(readiness, SplitDenominationReadiness) else readiness.to_payload()
-    )
     return _finish_coin_op_cli(
         setup=result.setup,
         loop_result=result.loop_result,
@@ -357,8 +353,7 @@ def execute_split_cli(
             coin_ids=coin_ids,
             until_ready=until_ready,
             max_iterations=max_iterations,
-            denomination_readiness=readiness,
-            extra_fields={"split_gate": split_gate_payload},
+            denomination_readiness=result.loop_result.denomination_readiness,
         ),
     )
 

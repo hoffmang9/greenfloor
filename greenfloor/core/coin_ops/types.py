@@ -59,31 +59,6 @@ SplitAutoSelectPlan = SplitCoinPlan | SplitCombinePrereqPlan | SplitSkipPlan
 
 
 @dataclass(frozen=True, slots=True)
-class CoinSplitGateResult:
-    """PyO3/kernel FFI shape for ``evaluate_coin_split_gate``; convert at the bridge."""
-
-    asset_id: str
-    size_base_units: int
-    required_min_count: int
-    current_count: int
-    larger_reserve_coin_count: int
-    extra_denom_coin_count: int
-    reserve_ready: bool
-    ready: bool
-
-
-@dataclass(frozen=True, slots=True)
-class CoinCombineGateResult:
-    """PyO3/kernel FFI shape for ``evaluate_coin_combine_gate``; convert at the bridge."""
-
-    asset_id: str
-    size_base_units: int
-    max_allowed_count: int
-    current_count: int
-    ready: bool
-
-
-@dataclass(frozen=True, slots=True)
 class SplitDenominationReadiness:
     """Split-until-ready denomination readiness."""
 
@@ -95,19 +70,6 @@ class SplitDenominationReadiness:
     extra_denom_coin_count: int
     reserve_ready: bool
     ready: bool
-
-    @classmethod
-    def from_kernel_gate(cls, gate: CoinSplitGateResult) -> SplitDenominationReadiness:
-        return cls(
-            asset_id=gate.asset_id,
-            size_base_units=gate.size_base_units,
-            required_min_count=gate.required_min_count,
-            current_count=gate.current_count,
-            larger_reserve_coin_count=gate.larger_reserve_coin_count,
-            extra_denom_coin_count=gate.extra_denom_coin_count,
-            reserve_ready=gate.reserve_ready,
-            ready=gate.ready,
-        )
 
     def to_payload(self) -> dict[str, int | bool | str]:
         return {
@@ -132,16 +94,6 @@ class CombineDenominationReadiness:
     current_count: int
     ready: bool
 
-    @classmethod
-    def from_kernel_gate(cls, gate: CoinCombineGateResult) -> CombineDenominationReadiness:
-        return cls(
-            asset_id=gate.asset_id,
-            size_base_units=gate.size_base_units,
-            max_allowed_count=gate.max_allowed_count,
-            current_count=gate.current_count,
-            ready=gate.ready,
-        )
-
     def to_payload(self) -> dict[str, int | bool | str]:
         return {
             "asset_id": self.asset_id,
@@ -153,7 +105,3 @@ class CombineDenominationReadiness:
 
 
 DenominationReadiness = SplitDenominationReadiness | CombineDenominationReadiness
-
-
-def readiness_to_payload(readiness: DenominationReadiness) -> dict[str, int | bool | str]:
-    return readiness.to_payload()

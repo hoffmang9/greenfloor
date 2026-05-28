@@ -132,6 +132,32 @@ def test_build_coin_op_iteration_payload_reuses_readiness_without_refresh() -> N
     assert payload["denomination_readiness"] == readiness.to_payload()
 
 
+def test_build_coin_op_iteration_payload_skips_refresh_when_not_requested() -> None:
+    stale = SplitDenominationReadiness(
+        asset_id="cat",
+        size_base_units=100,
+        required_min_count=2,
+        current_count=0,
+        larger_reserve_coin_count=0,
+        extra_denom_coin_count=0,
+        reserve_ready=False,
+        ready=False,
+    )
+    payload, result = build_coin_op_iteration_payload(
+        operation_id="op-1",
+        operation_state="UNSIGNED",
+        no_wait=True,
+        iteration=1,
+        readiness_asset_id="cat",
+        denomination_target=None,
+        asset_scoped_coins=[],
+        readiness=stale,
+        refresh_readiness=False,
+    )
+    assert result is stale
+    assert payload["denomination_readiness"] == stale.to_payload()
+
+
 def test_build_coin_op_iteration_payload_refreshes_when_requested() -> None:
     coins = [
         {"amount": 100, "state": "CONFIRMED"},

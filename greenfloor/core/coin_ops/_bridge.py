@@ -234,15 +234,15 @@ def evaluate_coin_split_gate(
     size_base_units: int,
     required_count: int,
 ) -> SplitDenominationReadiness:
-    gate = kernel_bridge.coin_ops_kernel().evaluate_coin_split_gate(
+    result = kernel_bridge.coin_ops_kernel().evaluate_coin_split_gate(
         asset_scoped_coins,
         str(resolved_asset_id),
         int(size_base_units),
         int(required_count),
     )
-    if isinstance(gate, SplitDenominationReadiness):
-        return gate
-    return SplitDenominationReadiness.from_kernel_gate(gate)
+    if not isinstance(result, SplitDenominationReadiness):
+        raise TypeError("kernel returned non-SplitDenominationReadiness result")
+    return result
 
 
 def evaluate_coin_combine_gate(
@@ -252,15 +252,15 @@ def evaluate_coin_combine_gate(
     size_base_units: int,
     max_allowed_count: int,
 ) -> CombineDenominationReadiness:
-    gate = kernel_bridge.coin_ops_kernel().evaluate_coin_combine_gate(
+    result = kernel_bridge.coin_ops_kernel().evaluate_coin_combine_gate(
         asset_scoped_coins,
         str(asset_id),
         int(size_base_units),
         int(max_allowed_count),
     )
-    if isinstance(gate, CombineDenominationReadiness):
-        return gate
-    return CombineDenominationReadiness.from_kernel_gate(gate)
+    if not isinstance(result, CombineDenominationReadiness):
+        raise TypeError("kernel returned non-CombineDenominationReadiness result")
+    return result
 
 
 def coin_op_should_stop(

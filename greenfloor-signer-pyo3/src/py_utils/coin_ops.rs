@@ -15,8 +15,8 @@ static COIN_OP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static SPLIT_COIN_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static SPLIT_COMBINE_PREREQ_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static SPLIT_SKIP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
-static COIN_SPLIT_GATE_RESULT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
-static COIN_COMBINE_GATE_RESULT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static SPLIT_DENOMINATION_READINESS_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static COMBINE_DENOMINATION_READINESS_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 
 fn enum_label_from_py(obj: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(label) = obj.extract::<String>() {
@@ -47,20 +47,20 @@ pub fn coin_op_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     cached_class(py, &COIN_OP_PLAN_CLS, COIN_OPS_MODULE, "CoinOpPlan")
 }
 
-pub fn coin_split_gate_result_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn split_denomination_readiness_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     cached_class(
         py,
-        &COIN_SPLIT_GATE_RESULT_CLS,
+        &SPLIT_DENOMINATION_READINESS_CLS,
         COIN_OPS_MODULE,
-        "CoinSplitGateResult",
+        "SplitDenominationReadiness",
     )
 }
 
-pub fn coin_split_gate_result_to_py<'py>(
+pub fn split_denomination_readiness_to_py<'py>(
     py: Python<'py>,
     gate: &signer_core::CoinSplitGateResult,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let cls = coin_split_gate_result_class(py)?;
+    let cls = split_denomination_readiness_class(py)?;
     let kwargs = PyDict::new(py);
     kwargs.set_item("asset_id", &gate.asset_id)?;
     kwargs.set_item("size_base_units", gate.size_base_units)?;
@@ -73,20 +73,20 @@ pub fn coin_split_gate_result_to_py<'py>(
     cls.call((), Some(&kwargs))
 }
 
-pub fn coin_combine_gate_result_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+pub fn combine_denomination_readiness_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     cached_class(
         py,
-        &COIN_COMBINE_GATE_RESULT_CLS,
+        &COMBINE_DENOMINATION_READINESS_CLS,
         COIN_OPS_MODULE,
-        "CoinCombineGateResult",
+        "CombineDenominationReadiness",
     )
 }
 
-pub fn coin_combine_gate_result_to_py<'py>(
+pub fn combine_denomination_readiness_to_py<'py>(
     py: Python<'py>,
     gate: &signer_core::CoinCombineGateResult,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let cls = coin_combine_gate_result_class(py)?;
+    let cls = combine_denomination_readiness_class(py)?;
     let kwargs = PyDict::new(py);
     kwargs.set_item("asset_id", &gate.asset_id)?;
     kwargs.set_item("size_base_units", gate.size_base_units)?;
