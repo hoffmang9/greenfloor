@@ -4,7 +4,7 @@ from greenfloor.core.offer_policy import verify_offer_for_dexie
 from tests.helpers.kernel_mock import install_kernel_stub
 
 
-def test_verify_offer_for_dexie_uses_greenfloor_signer_only(monkeypatch) -> None:
+def test_verify_offer_for_dexie_uses_greenfloor_kernel_only(monkeypatch) -> None:
     calls: dict[str, str] = {}
 
     class _Signer:
@@ -25,5 +25,5 @@ def test_verify_offer_for_dexie_reports_missing_kernel(monkeypatch) -> None:
     )
 
     assert verify_offer_for_dexie("offer1contract") == (
-        "wallet_sdk_import_error:greenfloor_signer_unavailable"
+        "wallet_sdk_import_error:greenfloor_kernel_unavailable"
     )

@@ -1,4 +1,4 @@
-"""Thin wrapper around the Rust kernel vault path (PyO3 module ``greenfloor_signer`` until ADR 0010)."""
+"""Thin wrapper around the Rust kernel vault path (PyO3 module ``greenfloor_kernel``)."""
 
 from __future__ import annotations
 

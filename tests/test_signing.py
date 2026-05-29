@@ -158,7 +158,7 @@ def test_build_signed_spend_bundle_invalid_plan(monkeypatch) -> None:
 
 def test_build_signed_spend_bundle_signer_import_error(monkeypatch) -> None:
     def _fail_import():
-        raise ImportError("no greenfloor_signer")
+        raise ImportError("no greenfloor_kernel")
 
     monkeypatch.setattr(
         signing_mod,
@@ -177,7 +177,7 @@ def test_build_signed_spend_bundle_signer_import_error(monkeypatch) -> None:
         }
     )
     assert result["status"] == "skipped"
-    assert result["reason"] == "signing_failed:greenfloor_signer_import_error:no greenfloor_signer"
+    assert result["reason"] == "signing_failed:greenfloor_kernel_import_error:no greenfloor_kernel"
 
 
 def test_build_signed_spend_bundle_no_coins(monkeypatch) -> None:

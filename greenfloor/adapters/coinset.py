@@ -132,10 +132,10 @@ def _require_rust_coinset(name: str, *args: Any, **kwargs: Any) -> Any:
     try:
         kernel = import_kernel()
     except ImportError as exc:
-        raise RuntimeError(f"greenfloor_signer_required_for_coinset_io: {exc}") from exc
+        raise RuntimeError(f"greenfloor_kernel_required_for_coinset_io: {exc}") from exc
     fn = getattr(kernel, name, None)
     if not callable(fn):
-        raise RuntimeError(f"greenfloor_signer_missing_coinset_fn:{name}")
+        raise RuntimeError(f"greenfloor_kernel_missing_coinset_fn:{name}")
     return fn(*args, **kwargs)
 
 

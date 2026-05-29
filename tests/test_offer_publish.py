@@ -80,10 +80,10 @@ def test_verify_offer_for_dexie_maps_structure_validate_failed(monkeypatch) -> N
 def test_verify_offer_for_dexie_reports_missing_kernel(monkeypatch) -> None:
     monkeypatch.setattr(
         "greenfloor.core.kernel_bridge.import_kernel",
-        lambda: (_ for _ in ()).throw(ImportError("greenfloor_signer_unavailable")),
+        lambda: (_ for _ in ()).throw(ImportError("greenfloor_kernel_unavailable")),
     )
     assert verify_offer_for_dexie("offer1contract") == (
-        "wallet_sdk_import_error:greenfloor_signer_unavailable"
+        "wallet_sdk_import_error:greenfloor_kernel_unavailable"
     )
 
 
