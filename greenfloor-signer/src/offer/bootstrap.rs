@@ -1,4 +1,7 @@
 //! Deterministic bootstrap mixed-output planner for offer denomination preflight.
+//!
+//! `output_amounts_base_units` is the authoritative mixed-split output list for
+//! `signer_bootstrap_phase` (passed to vault mixed-split as `output_amounts`).
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootstrapLadderEntry {
@@ -46,7 +49,7 @@ fn count_exact_amount_coins(
         ladder_sizes.iter().map(|size| (*size, 0)).collect();
     for amount in spendable_coin_amounts {
         if ladder.contains(amount) {
-            *counts.entry(*amount).or_insert(0) += 1;
+            *counts.get_mut(amount).expect("ladder size pre-seeded") += 1;
         }
     }
     counts
@@ -79,13 +82,14 @@ pub fn plan_bootstrap_mixed_outputs(
         if deficit <= 0 {
             continue;
         }
+        let deficit_count = usize::try_from(deficit).expect("deficit is positive");
         deficits.push(LadderDeficit {
             size_base_units: size,
             required_count: required,
             current_count: current,
             deficit_count: deficit,
         });
-        output_amounts.extend(std::iter::repeat(size).take(deficit as usize));
+        output_amounts.extend(std::iter::repeat(size).take(deficit_count));
     }
 
     if deficits.is_empty() {

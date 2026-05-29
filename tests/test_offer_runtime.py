@@ -9,7 +9,7 @@ from typing import Any, cast
 import pytest
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
+from greenfloor.core.offer_policy import plan_bootstrap_mixed_outputs
 from greenfloor.runtime.offer_runtime import signer_bootstrap_phase, signer_create_offer_phase
 from tests.helpers.config_fixtures import (
     minimal_market_config,
@@ -131,11 +131,51 @@ def test_signer_bootstrap_phase_blocks_nonzero_fee_before_split() -> None:
 
     assert result["status"] == "failed"
     assert "signer_mixed_split_fee_not_supported" in result["reason"]
-    plan = plan_bootstrap_mixed_outputs(
-        sell_ladder=list(market.ladders["sell"]),
-        spendable_coins=spendable,
+
+
+def test_signer_bootstrap_phase_submits_planner_mixed_output_amounts(monkeypatch) -> None:
+    ladder = [
+        {"size_base_units": 1, "target_count": 3, "split_buffer_count": 0},
+        {"size_base_units": 10, "target_count": 2, "split_buffer_count": 1},
+        {"size_base_units": 100, "target_count": 1, "split_buffer_count": 0},
+    ]
+    market = minimal_market_with_sell_ladder(size_base_units=1, target_count=3)
+    market = replace(market, ladders={"sell": ladder})
+    program = minimal_program_config()
+    spendable = [
+        _spendable_coin(coin_id="coin-small-1", amount=1),
+        _spendable_coin(coin_id="coin-big", amount=1000),
+        _spendable_coin(coin_id="coin-hundred", amount=100),
+    ]
+    captured: dict[str, Any] = {}
+
+    def _fake_split(_config_path: str, request: dict[str, Any]) -> dict[str, str]:
+        captured.update(request)
+        return {"status": "executed"}
+
+    monkeypatch.setattr(
+        "greenfloor.adapters.rust_signer.build_mixed_split",
+        _fake_split,
     )
-    assert plan is not None
+    monkeypatch.setattr(
+        "greenfloor.runtime.offer_runtime.prepare_signer_runtime",
+        lambda _program: "/tmp/signer.yaml",
+    )
+
+    result = signer_bootstrap_phase(
+        program=program,
+        market=market,
+        resolved_base_asset_id="basecat",
+        resolved_quote_asset_id="xch",
+        quote_price=1.0,
+        list_bootstrap_coins_fn=lambda **_kwargs: spendable,
+        wait_for_confirmation_fn=lambda **_kwargs: [],
+        resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
+    )
+
+    assert result["status"] == "executed"
+    assert captured["output_amounts"] == [1, 1, 10, 10, 10]
+    assert captured["coin_ids"] == ["coin-big"]
 
 
 def test_signer_bootstrap_phase_executes_split_from_planner_deficit(monkeypatch) -> None:

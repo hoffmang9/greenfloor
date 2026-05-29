@@ -17,7 +17,10 @@ from greenfloor.core.signer_offer_request import (
     signer_split_asset_id,
 )
 from greenfloor.hex_utils import canonical_is_xch
-from greenfloor.offer_bootstrap import BootstrapLadderEntry, plan_bootstrap_mixed_outputs
+from greenfloor.core.offer_policy import (
+    BootstrapLadderEntry,
+    plan_bootstrap_mixed_outputs,
+)
 from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.offer_build_context import OfferBuildContext
@@ -205,24 +208,16 @@ def signer_bootstrap_phase(
     existing_coin_ids = {
         str(c.get("id", "")).strip() for c in asset_scoped_coins if str(c.get("id", "")).strip()
     }
-    selected_deficit = max(
-        bootstrap_plan.deficits,
-        key=lambda row: (int(row.size_base_units), int(row.deficit_count)),
-    )
-    amount_per_coin = int(selected_deficit.size_base_units)
-    desired_coin_count = max(2, int(selected_deficit.deficit_count))
-    max_coin_count = int(bootstrap_plan.source_amount) // max(1, amount_per_coin)
-    number_of_coins = min(desired_coin_count, max_coin_count)
-    if number_of_coins < 2:
+    # Mixed split uses the planner's per-denomination output list (one transaction).
+    output_amounts = [int(amount) for amount in bootstrap_plan.output_amounts_base_units]
+    if len(output_amounts) < 2:
         return {
             "status": "failed",
-            "reason": "bootstrap_failed:insufficient_source_coin_for_signer_split",
+            "reason": "bootstrap_failed:insufficient_planned_outputs_for_mixed_split",
             "fee_mojos": int(fee_mojos),
             "fee_source": fee_source,
             "fee_lookup_error": fee_lookup_error,
         }
-
-    output_amounts = [amount_per_coin] * number_of_coins
     config_path = _signer_config_path(program)
     split_request = {
         "receive_address": receive_address,
@@ -290,7 +285,7 @@ def signer_bootstrap_phase(
         "plan": {
             "source_coin_id": bootstrap_plan.source_coin_id,
             "source_amount": bootstrap_plan.source_amount,
-            "output_count": len(output_amounts),
+            "output_count": len(bootstrap_plan.output_amounts_base_units),
             "total_output_amount": bootstrap_plan.total_output_amount,
             "change_amount": bootstrap_plan.change_amount,
         },
