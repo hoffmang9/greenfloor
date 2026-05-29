@@ -507,7 +507,7 @@ def test_build_and_post_offer_returns_nonzero_when_offer_verification_fails(
     assert payload["results"][0]["result"]["success"] is False
 
 
-def test_build_and_post_offer_surfaces_stale_kernel_symbol_as_user_error(
+def test_build_and_post_offer_surfaces_stale_engine_symbol_as_user_error(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     from tests.helpers.engine_mock import MinimalSignerEngine
@@ -517,12 +517,12 @@ def test_build_and_post_offer_surfaces_stale_kernel_symbol_as_user_error(
     write_manager_program(program, tmp_path=tmp_path)
     write_markets(markets)
 
-    class _StaleKernel(MinimalSignerEngine):
+    class _StaleEngine(MinimalSignerEngine):
         expected_publish_asset_fields = None
 
     monkeypatch.setattr(
         "greenfloor.core.engine_bridge.import_engine",
-        lambda: _StaleKernel,
+        lambda: _StaleEngine,
     )
     monkeypatch.setattr(
         "greenfloor.cli.offer_build_post.build_offer",

@@ -18,7 +18,7 @@ def test_verify_offer_for_dexie_uses_greenfloor_engine_only(monkeypatch) -> None
     assert calls["offer"] == "offer1contract"
 
 
-def test_verify_offer_for_dexie_reports_missing_kernel(monkeypatch) -> None:
+def test_verify_offer_for_dexie_reports_missing_engine(monkeypatch) -> None:
     monkeypatch.setattr(
         "greenfloor.core.engine_bridge.import_engine",
         lambda: (_ for _ in ()).throw(ImportError("disable signer path for this test")),

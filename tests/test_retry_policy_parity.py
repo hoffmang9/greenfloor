@@ -30,7 +30,7 @@ def test_coinset_fee_lookup_retry_sleep_parity() -> None:
     assert coinset_fee_lookup_retry_sleep(2) == 2.0
 
 
-def test_call_with_moderate_retry_uses_kernel_backoff() -> None:
+def test_call_with_moderate_retry_uses_engine_backoff() -> None:
     sleeps: list[float] = []
     attempts = {"count": 0}
 

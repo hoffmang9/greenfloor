@@ -23,7 +23,7 @@ from greenfloor.runtime.coin_ops.readiness import (
 )
 
 
-def test_is_spendable_coin_matches_kernel() -> None:
+def test_is_spendable_coin_matches_engine() -> None:
     coin = {"amount": 100, "state": "CONFIRMED"}
     assert is_spendable_coin(coin) is is_spendable_wallet_coin(coin)
     locked = {"amount": 100, "state": "CONFIRMED", "isLocked": True}

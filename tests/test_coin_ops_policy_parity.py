@@ -55,7 +55,7 @@ def test_canonical_xch_parity_with_hex_utils(asset_id: str, expected_xch: bool) 
         ("g" * 64, ""),
     ],
 )
-def test_normalize_hex_id_parity_with_kernel(value: str, expected: str) -> None:
+def test_normalize_hex_id_parity_with_engine(value: str, expected: str) -> None:
     from greenfloor.core.engine_bridge import import_engine
 
     engine = import_engine()
@@ -72,7 +72,7 @@ def test_normalize_hex_id_parity_with_kernel(value: str, expected: str) -> None:
         (_CAT_ID, 1_000),
     ],
 )
-def test_default_mojo_multiplier_parity_with_kernel(asset_id: str, expected: int) -> None:
+def test_default_mojo_multiplier_parity_with_engine(asset_id: str, expected: int) -> None:
     from greenfloor.core.engine_bridge import import_engine
 
     engine = import_engine()

@@ -8,7 +8,7 @@ from greenfloor.core.cycle._bridge_orchestration import (
 from greenfloor.core.cycle_reseed import ReseedSkipReason, python_reseed_skip_reason_labels
 
 
-def test_reseed_skip_reason_labels_match_rust_kernel() -> None:
+def test_reseed_skip_reason_labels_match_rust_engine() -> None:
     rust_labels = frozenset(rust_reseed_skip_reason_labels())
     python_labels = python_reseed_skip_reason_labels()
     assert rust_labels == python_labels

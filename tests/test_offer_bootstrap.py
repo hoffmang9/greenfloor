@@ -112,7 +112,7 @@ def test_plan_bootstrap_mixed_outputs_rejects_non_string_coin_id() -> None:
         plan_bootstrap_mixed_outputs(ladder_entries=ladder, spendable_coins=spendable)
 
 
-def test_plan_bootstrap_mixed_outputs_requires_kernel_symbol(monkeypatch) -> None:
+def test_plan_bootstrap_mixed_outputs_requires_engine_symbol(monkeypatch) -> None:
     import greenfloor.core.engine_bridge as bridge
 
     class _Kernel:

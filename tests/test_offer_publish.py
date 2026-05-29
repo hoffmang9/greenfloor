@@ -77,7 +77,7 @@ def test_verify_offer_for_dexie_maps_structure_validate_failed(monkeypatch) -> N
     )
 
 
-def test_verify_offer_for_dexie_reports_missing_kernel(monkeypatch) -> None:
+def test_verify_offer_for_dexie_reports_missing_engine(monkeypatch) -> None:
     monkeypatch.setattr(
         "greenfloor.core.engine_bridge.import_engine",
         lambda: (_ for _ in ()).throw(ImportError("greenfloor_engine_unavailable")),
@@ -87,7 +87,7 @@ def test_verify_offer_for_dexie_reports_missing_kernel(monkeypatch) -> None:
     )
 
 
-def test_bootstrap_block_error_delegates_to_kernel(monkeypatch) -> None:
+def test_bootstrap_block_error_delegates_to_engine(monkeypatch) -> None:
     class _Native(MinimalSignerEngine):
         @staticmethod
         def bootstrap_block_error(
@@ -109,7 +109,7 @@ def test_bootstrap_block_error_delegates_to_kernel(monkeypatch) -> None:
     )
 
 
-def test_bootstrap_block_error_requires_kernel_symbol(monkeypatch) -> None:
+def test_bootstrap_block_error_requires_engine_symbol(monkeypatch) -> None:
     class _Native:
         pass
 
@@ -122,7 +122,7 @@ def test_bootstrap_block_error_requires_kernel_symbol(monkeypatch) -> None:
         )
 
 
-def test_expected_publish_asset_fields_delegates_to_kernel(monkeypatch) -> None:
+def test_expected_publish_asset_fields_delegates_to_engine(monkeypatch) -> None:
     class _Native(MinimalSignerEngine):
         @staticmethod
         def expected_publish_asset_fields(
@@ -154,7 +154,7 @@ def test_expected_publish_asset_fields_delegates_to_kernel(monkeypatch) -> None:
     }
 
 
-def test_expected_publish_asset_fields_requires_kernel_symbol(monkeypatch) -> None:
+def test_expected_publish_asset_fields_requires_engine_symbol(monkeypatch) -> None:
     class _Native:
         pass
 
@@ -215,7 +215,7 @@ def test_resolve_offer_expiry_and_quote_price_use_kernel(monkeypatch) -> None:
     assert resolve_quote_price_for_pricing(pricing) == 1.5
 
 
-def test_dexie_offer_asset_expectation_error_delegates_to_kernel(monkeypatch) -> None:
+def test_dexie_offer_asset_expectation_error_delegates_to_engine(monkeypatch) -> None:
     class _Native(MinimalSignerEngine):
         @staticmethod
         def dexie_offer_asset_expectation_error(
@@ -249,7 +249,7 @@ def test_dexie_offer_asset_expectation_error_delegates_to_kernel(monkeypatch) ->
     )
 
 
-def test_dexie_offer_asset_expectation_error_requires_kernel_symbol(monkeypatch) -> None:
+def test_dexie_offer_asset_expectation_error_requires_engine_symbol(monkeypatch) -> None:
     class _Native:
         pass
 
@@ -265,7 +265,7 @@ def test_dexie_offer_asset_expectation_error_requires_kernel_symbol(monkeypatch)
         )
 
 
-def test_verify_dexie_offer_visible_by_id_uses_kernel_asset_expectation(monkeypatch) -> None:
+def test_verify_dexie_offer_visible_by_id_uses_engine_asset_expectation(monkeypatch) -> None:
     class _Dexie:
         @staticmethod
         def get_offer(_offer_id: str) -> dict[str, object]:

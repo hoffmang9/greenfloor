@@ -13,7 +13,7 @@ from tests.helpers.offer_runtime_fixtures import (
 )
 
 
-def test_resolve_action_assets_uses_kernel_for_ticker_symbols(monkeypatch) -> None:
+def test_resolve_action_assets_uses_engine_for_ticker_symbols(monkeypatch) -> None:
     market = replace(
         market_config_for_local_offer(),
         base_asset="HOA",

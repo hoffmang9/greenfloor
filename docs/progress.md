@@ -39,7 +39,7 @@
 - **Bootstrap block gate:** moved `bootstrap_blocks_offer` decision shaping into `greenfloor-engine/src/offer/publish.rs` (`bootstrap_block_error`); Python orchestration delegates via `core.offer_policy`.
 - **Publish asset-field shaping:** moved `expected_publish_asset_fields` mapping into `greenfloor-engine/src/offer/publish.rs`; orchestration now calls `core.offer_policy.expected_publish_asset_fields` directly.
 - **Offer policy bridge contract:** removed silent Python fallbacks for migrated offer policy helpers; bridge now requires engine symbols and fails fast with rebuild guidance when extensions are stale.
-- **CLI stale-symbol UX:** `runtime/offer_orchestration.py` now catches offer-policy bridge exceptions and emits structured `offer_policy_error:*` result payloads; `test_build_and_post_offer_surfaces_stale_kernel_symbol_as_user_error` proves the manager CLI path returns a user-facing failure string.
+- **CLI stale-symbol UX:** `runtime/offer_orchestration.py` now catches offer-policy bridge exceptions and emits structured `offer_policy_error:*` result payloads; `test_build_and_post_offer_surfaces_stale_engine_symbol_as_user_error` proves the manager CLI path returns a user-facing failure string.
 - **Rust tests:** `offer_leg_scenarios_build_on_simulator` (renamed from roundtrip; build-only on sim for CAT:CAT legs).
 - **Python tests:** `test_signer_golden_fixture_contract` (schema + core parity + validate in one parametrized test); `test_offer_runtime.py` covers signer IO shell only (leg math owned by parity fixtures).
 - **Fixtures:** all golden JSON embed `runtime_parity` (action_side, resolved assets, size/price, multipliers).
@@ -171,7 +171,7 @@ Record these for the next migration agent; none are merge blockers for step 12.
 - **`greenfloor-engine/src/cycle/reconcile.rs`:** Coinset-first watched-offer transition engine — Dexie status fallback, missing-offer (404) handling, taker field shaping, and `CycleOfferTransition` outputs.
 - **PyO3 + core surface:** typed `CycleOfferTransition` via `reconcile_py.rs` + `py_utils.rs`; policy in `greenfloor/core/offer_reconcile/`.
 - **Python IO glue:** `greenfloor/runtime/offer_reconciliation.py` keeps Dexie fetch, SQLite tx-signal lookup (`_coinset_signal_lists`), audit persistence, and batch reconcile loops only.
-- **Tests:** Rust unit tests in `reconcile.rs`; Python wiring in `tests/test_offer_reconcile_kernel.py`; existing manager/daemon reconcile integration tests remain parity gates.
+- **Tests:** Rust unit tests in `reconcile.rs`; Python wiring in `tests/test_offer_reconcile_engine.py`; existing manager/daemon reconcile integration tests remain parity gates.
 - **Migration status:** step 9 complete for offer lifecycle reconciliation policy.
 - **Completed (step 10):** core coin-op policy bundle — see step 10 entry above (`greenfloor-engine/src/coin_ops/`, `greenfloor/core/coin_ops/`).
 
