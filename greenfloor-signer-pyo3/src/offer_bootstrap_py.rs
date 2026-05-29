@@ -17,23 +17,21 @@ fn plan_bootstrap_mixed_outputs_py(
 }
 
 #[pyfunction]
-#[pyo3(name = "bootstrap_early_phase", signature = (*, outcome_kind, total_output_amount=0))]
+#[pyo3(name = "bootstrap_early_phase", signature = (*, outcome))]
 fn bootstrap_early_phase_py(
     py: Python<'_>,
-    outcome_kind: &str,
-    total_output_amount: i64,
+    outcome: &Bound<'_, PyAny>,
 ) -> PyResult<Option<Py<PyAny>>> {
-    Ok(bootstrap_early_phase_from_py(py, outcome_kind, total_output_amount)?.map(Bound::unbind))
+    Ok(bootstrap_early_phase_from_py(py, outcome)?.map(Bound::unbind))
 }
 
 #[pyfunction]
-#[pyo3(name = "bootstrap_executed_phase", signature = (*, remaining_kind, total_output_amount=0))]
+#[pyo3(name = "bootstrap_executed_phase", signature = (*, remaining))]
 fn bootstrap_executed_phase_py(
     py: Python<'_>,
-    remaining_kind: &str,
-    total_output_amount: i64,
+    remaining: &Bound<'_, PyAny>,
 ) -> PyResult<Py<PyAny>> {
-    Ok(bootstrap_executed_phase_from_py(py, remaining_kind, total_output_amount)?.unbind())
+    Ok(bootstrap_executed_phase_from_py(py, remaining)?.unbind())
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {

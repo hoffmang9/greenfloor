@@ -179,18 +179,18 @@ fn early_phase_from_kind(
         }),
         "invalid_ladder" => Some(BootstrapPhaseSnapshot {
             status: "failed",
-            reason: "bootstrap_failed:bootstrap_invalid_ladder".to_string(),
+            reason: "bootstrap_invalid_ladder".to_string(),
             ready: false,
         }),
         "invalid_coins" => Some(BootstrapPhaseSnapshot {
             status: "failed",
-            reason: "bootstrap_failed:bootstrap_invalid_coins".to_string(),
+            reason: "bootstrap_invalid_coins".to_string(),
             ready: false,
         }),
         "needs_split" => None,
         other => Some(BootstrapPhaseSnapshot {
             status: "failed",
-            reason: format!("bootstrap_failed:unsupported_plan_outcome:{other}"),
+            reason: format!("unsupported_plan_outcome:{other}"),
             ready: false,
         }),
     }
@@ -260,22 +260,6 @@ pub fn bootstrap_executed_phase(remaining: &BootstrapPlanOutcome) -> BootstrapPh
         BootstrapPlanOutcome::InvalidLadder => executed_phase_from_kind("invalid_ladder", 0),
         BootstrapPlanOutcome::InvalidCoins => executed_phase_from_kind("invalid_coins", 0),
     }
-}
-
-/// Kernel entry for PyO3 when only outcome kind and total output amount are available.
-pub fn bootstrap_early_phase_from_kind(
-    outcome_kind: &str,
-    total_output_amount: i64,
-) -> Option<BootstrapPhaseSnapshot> {
-    early_phase_from_kind(outcome_kind, total_output_amount)
-}
-
-/// Kernel entry for PyO3 post-split phase shaping.
-pub fn bootstrap_executed_phase_from_kind(
-    remaining_kind: &str,
-    total_output_amount: i64,
-) -> BootstrapPhaseSnapshot {
-    executed_phase_from_kind(remaining_kind, total_output_amount)
 }
 
 #[cfg(test)]

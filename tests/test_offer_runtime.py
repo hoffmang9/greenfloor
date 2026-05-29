@@ -9,7 +9,12 @@ from typing import Any, cast
 import pytest
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.runtime.offer_runtime import signer_bootstrap_phase, signer_create_offer_phase
+from greenfloor.runtime.offer_bootstrap import BootstrapRuntimeDeps
+from greenfloor.runtime.offer_runtime import (
+    default_bootstrap_runtime_deps,
+    signer_bootstrap_phase,
+    signer_create_offer_phase,
+)
 from tests.helpers.config_fixtures import (
     minimal_market_config,
     minimal_market_with_sell_ladder,
@@ -95,6 +100,10 @@ def _spendable_coin(*, coin_id: str, amount: int) -> dict[str, object]:
     return {"id": coin_id, "amount": amount, "state": "CONFIRMED"}
 
 
+def _bootstrap_deps(**overrides: object) -> BootstrapRuntimeDeps:
+    return replace(default_bootstrap_runtime_deps(), **overrides)
+
+
 def test_signer_bootstrap_phase_skips_when_planner_reports_ready() -> None:
     market = minimal_market_with_sell_ladder(size_base_units=10, target_count=1)
     program = minimal_program_config()
@@ -106,7 +115,7 @@ def test_signer_bootstrap_phase_skips_when_planner_reports_ready() -> None:
         resolved_base_asset_id="basecat",
         resolved_quote_asset_id="xch",
         quote_price=1.0,
-        list_bootstrap_coins_fn=lambda **_kwargs: spendable,
+        bootstrap_deps=_bootstrap_deps(list_bootstrap_coins_fn=lambda **_kwargs: spendable),
         resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
     )
 
@@ -125,7 +134,7 @@ def test_signer_bootstrap_phase_skips_when_underfunded() -> None:
         resolved_base_asset_id="basecat",
         resolved_quote_asset_id="xch",
         quote_price=1.0,
-        list_bootstrap_coins_fn=lambda **_kwargs: spendable,
+        bootstrap_deps=_bootstrap_deps(list_bootstrap_coins_fn=lambda **_kwargs: spendable),
         resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
     )
 
@@ -144,12 +153,12 @@ def test_signer_bootstrap_phase_blocks_nonzero_fee_before_split() -> None:
         resolved_base_asset_id="basecat",
         resolved_quote_asset_id="xch",
         quote_price=1.0,
-        list_bootstrap_coins_fn=lambda **_kwargs: spendable,
+        bootstrap_deps=_bootstrap_deps(list_bootstrap_coins_fn=lambda **_kwargs: spendable),
         resolve_bootstrap_split_fee_fn=lambda **_kwargs: (1, "coinset", None),
     )
 
     assert result.status == "failed"
-    assert "signer_mixed_split_fee_not_supported" in result.reason
+    assert result.reason == "signer_mixed_split_fee_not_supported"
 
 
 def test_signer_bootstrap_phase_submits_planner_mixed_output_amounts(monkeypatch) -> None:
@@ -181,8 +190,10 @@ def test_signer_bootstrap_phase_submits_planner_mixed_output_amounts(monkeypatch
         resolved_base_asset_id="basecat",
         resolved_quote_asset_id="xch",
         quote_price=1.0,
-        list_bootstrap_coins_fn=lambda **_kwargs: spendable,
-        wait_for_confirmation_fn=lambda **_kwargs: [],
+        bootstrap_deps=_bootstrap_deps(
+            list_bootstrap_coins_fn=lambda **_kwargs: spendable,
+            wait_for_confirmation_fn=lambda **_kwargs: [],
+        ),
         resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
     )
 
@@ -216,8 +227,10 @@ def test_signer_bootstrap_phase_submits_single_planner_output(monkeypatch) -> No
         resolved_base_asset_id="basecat",
         resolved_quote_asset_id="xch",
         quote_price=1.0,
-        list_bootstrap_coins_fn=lambda **_kwargs: spendable,
-        wait_for_confirmation_fn=lambda **_kwargs: [],
+        bootstrap_deps=_bootstrap_deps(
+            list_bootstrap_coins_fn=lambda **_kwargs: spendable,
+            wait_for_confirmation_fn=lambda **_kwargs: [],
+        ),
         resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
     )
 
@@ -261,8 +274,10 @@ def test_signer_bootstrap_phase_executes_split_from_planner_deficit(monkeypatch)
         resolved_base_asset_id="basecat",
         resolved_quote_asset_id="xch",
         quote_price=1.0,
-        list_bootstrap_coins_fn=_list_coins,
-        wait_for_confirmation_fn=lambda **_kwargs: [{"coin_id": "coin-10-a", "amount": "10"}],
+        bootstrap_deps=_bootstrap_deps(
+            list_bootstrap_coins_fn=_list_coins,
+            wait_for_confirmation_fn=lambda **_kwargs: [{"coin_id": "coin-10-a", "amount": "10"}],
+        ),
         resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
     )
 
@@ -271,5 +286,5 @@ def test_signer_bootstrap_phase_executes_split_from_planner_deficit(monkeypatch)
     assert captured["coin_ids"] == ["coin-big"]
     assert captured["output_amounts"] == [10, 10]
     assert result.plan is not None
-    assert result.plan["source_coin_id"] == "coin-big"
+    assert result.plan.source_coin_id == "coin-big"
     assert result.ready is True

@@ -6,9 +6,8 @@ use pyo3::types::{PyDict, PyList};
 
 use super::common::cached_class;
 use signer_core::{
-    bootstrap_early_phase_from_kind, bootstrap_executed_phase_from_kind,
-    plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome,
-    BootstrapPhaseSnapshot, LadderDeficit, PlannerLadderRow,
+    bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,
+    BootstrapPlan, BootstrapPlanOutcome, BootstrapPhaseSnapshot, LadderDeficit, PlannerLadderRow,
 };
 
 const BOOTSTRAP_MODULE: &str = "greenfloor.offer_bootstrap";
@@ -78,6 +77,29 @@ fn extract_i64(obj: &Bound<'_, PyAny>, name: &str, label: &str) -> PyResult<i64>
         .map_err(|_| PyTypeError::new_err(format!("{label} missing attribute: {name}")))?
         .extract::<i64>()
         .map_err(|_| PyTypeError::new_err(format!("{label}.{name} must be an integer")))
+}
+
+fn extract_string(obj: &Bound<'_, PyAny>, name: &str, label: &str) -> PyResult<String> {
+    obj.getattr(name)
+        .map_err(|_| PyTypeError::new_err(format!("{label} missing attribute: {name}")))?
+        .extract::<String>()
+        .map_err(|_| PyTypeError::new_err(format!("{label}.{name} must be a string")))
+}
+
+fn extract_i64_list(obj: &Bound<'_, PyAny>, name: &str, label: &str) -> PyResult<Vec<i64>> {
+    let list = obj
+        .getattr(name)
+        .map_err(|_| PyTypeError::new_err(format!("{label} missing attribute: {name}")))?;
+    let py_list = list
+        .downcast::<PyList>()
+        .map_err(|_| PyTypeError::new_err(format!("{label}.{name} must be a list")))?;
+    let mut values = Vec::with_capacity(py_list.len());
+    for (index, item) in py_list.iter().enumerate() {
+        values.push(item.extract::<i64>().map_err(|_| {
+            PyTypeError::new_err(format!("{label}.{name}[{index}] must be an integer"))
+        })?);
+    }
+    Ok(values)
 }
 
 fn planner_ladder_rows_from_py_list(
@@ -153,6 +175,88 @@ fn bootstrap_plan_to_py<'py>(
     cls.call((), Some(&kwargs))
 }
 
+fn ladder_deficit_from_py<'py>(
+    py: Python<'py>,
+    deficit: &Bound<'py, PyAny>,
+    label: &str,
+) -> PyResult<LadderDeficit> {
+    let cls = ladder_deficit_class(py)?;
+    let item = require_instance(deficit, &cls, label, "LadderDeficit")?;
+    Ok(LadderDeficit {
+        size_base_units: extract_i64(item, "size_base_units", label)?,
+        required_count: extract_i64(item, "required_count", label)?,
+        current_count: extract_i64(item, "current_count", label)?,
+        deficit_count: extract_i64(item, "deficit_count", label)?,
+    })
+}
+
+fn bootstrap_plan_from_py<'py>(
+    py: Python<'py>,
+    plan: &Bound<'py, PyAny>,
+    label: &str,
+) -> PyResult<BootstrapPlan> {
+    let cls = bootstrap_plan_class(py)?;
+    let item = require_instance(plan, &cls, label, "BootstrapPlan")?;
+    let deficits_attr = item.getattr("deficits").map_err(|_| {
+        PyTypeError::new_err(format!("{label} missing attribute: deficits"))
+    })?;
+    let deficits_list = deficits_attr.downcast::<PyList>().map_err(|_| {
+        PyTypeError::new_err(format!("{label}.deficits must be a list"))
+    })?;
+    let mut deficits = Vec::with_capacity(deficits_list.len());
+    for (index, deficit) in deficits_list.iter().enumerate() {
+        deficits.push(ladder_deficit_from_py(
+            py,
+            &deficit,
+            &format!("{label}.deficits[{index}]"),
+        )?);
+    }
+    Ok(BootstrapPlan {
+        source_coin_id: extract_string(item, "source_coin_id", label)?,
+        source_amount: extract_i64(item, "source_amount", label)?,
+        output_amounts_base_units: extract_i64_list(item, "output_amounts_base_units", label)?,
+        total_output_amount: extract_i64(item, "total_output_amount", label)?,
+        change_amount: extract_i64(item, "change_amount", label)?,
+        deficits,
+    })
+}
+
+fn bootstrap_plan_outcome_from_py<'py>(
+    py: Python<'py>,
+    outcome: &Bound<'py, PyAny>,
+    label: &str,
+) -> PyResult<BootstrapPlanOutcome> {
+    let cls = bootstrap_plan_outcome_class(py)?;
+    let item = require_instance(outcome, &cls, label, "BootstrapPlanOutcome")?;
+    let kind = extract_string(item, "kind", label)?;
+    match kind.trim() {
+        "ready" => Ok(BootstrapPlanOutcome::Ready),
+        "needs_split" => {
+            let plan_attr = item.getattr("plan").map_err(|_| {
+                PyTypeError::new_err(format!("{label} missing attribute: plan"))
+            })?;
+            if plan_attr.is_none() {
+                return Err(PyTypeError::new_err(format!(
+                    "{label}.plan is required for needs_split"
+                )));
+            }
+            let plan = bootstrap_plan_from_py(py, &plan_attr, &format!("{label}.plan"))?;
+            Ok(BootstrapPlanOutcome::NeedsSplit(plan))
+        }
+        "cannot_fund" => {
+            let total_output_amount = extract_i64(item, "total_output_amount", label)?;
+            Ok(BootstrapPlanOutcome::CannotFund {
+                total_output_amount,
+            })
+        }
+        "invalid_ladder" => Ok(BootstrapPlanOutcome::InvalidLadder),
+        "invalid_coins" => Ok(BootstrapPlanOutcome::InvalidCoins),
+        other => Err(PyTypeError::new_err(format!(
+            "{label}.kind unsupported: {other}"
+        ))),
+    }
+}
+
 fn bootstrap_plan_outcome_to_py<'py>(
     py: Python<'py>,
     outcome: BootstrapPlanOutcome,
@@ -205,11 +309,10 @@ fn bootstrap_phase_result_to_py<'py>(
 
 pub(crate) fn bootstrap_early_phase_from_py<'py>(
     py: Python<'py>,
-    outcome_kind: &str,
-    total_output_amount: i64,
+    outcome: &Bound<'py, PyAny>,
 ) -> PyResult<Option<Bound<'py, PyAny>>> {
-    let snapshot = bootstrap_early_phase_from_kind(outcome_kind, total_output_amount);
-    match snapshot {
+    let rust_outcome = bootstrap_plan_outcome_from_py(py, outcome, "outcome")?;
+    match bootstrap_early_phase(&rust_outcome) {
         Some(snapshot) => Ok(Some(bootstrap_phase_result_to_py(py, snapshot)?)),
         None => Ok(None),
     }
@@ -217,10 +320,10 @@ pub(crate) fn bootstrap_early_phase_from_py<'py>(
 
 pub(crate) fn bootstrap_executed_phase_from_py<'py>(
     py: Python<'py>,
-    remaining_kind: &str,
-    total_output_amount: i64,
+    remaining: &Bound<'py, PyAny>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let snapshot = bootstrap_executed_phase_from_kind(remaining_kind, total_output_amount);
+    let rust_outcome = bootstrap_plan_outcome_from_py(py, remaining, "remaining")?;
+    let snapshot = bootstrap_executed_phase(&rust_outcome);
     bootstrap_phase_result_to_py(py, snapshot)
 }
 

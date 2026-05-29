@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 __all__ = [
@@ -37,7 +37,7 @@ class BootstrapPhaseResult:
     wait_error: str | None = None
     split_result: dict[str, Any] = field(default_factory=dict)
     wait_events: list[dict[str, str]] = field(default_factory=list)
-    plan: dict[str, Any] | None = None
+    plan: BootstrapPlan | None = None
 
     def to_manager_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -55,7 +55,9 @@ class BootstrapPhaseResult:
         if self.wait_events:
             payload["wait_events"] = list(self.wait_events)
         if self.plan is not None:
-            payload["plan"] = dict(self.plan)
+            plan_payload = asdict(self.plan)
+            plan_payload["output_count"] = len(self.plan.output_amounts_base_units)
+            payload["plan"] = plan_payload
         return payload
 
 

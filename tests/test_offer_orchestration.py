@@ -32,12 +32,12 @@ def test_bootstrap_blocks_offer_blocks_invalid_ladder_failure() -> None:
     blocked, error = bootstrap_blocks_offer(
         BootstrapPhaseResult(
             status="failed",
-            reason="bootstrap_failed:bootstrap_invalid_ladder",
+            reason="bootstrap_invalid_ladder",
             ready=False,
         )
     )
     assert blocked is True
-    assert error == "bootstrap_failed:bootstrap_failed:bootstrap_invalid_ladder"
+    assert error == "bootstrap_failed:bootstrap_invalid_ladder"
 
 
 def test_bootstrap_blocks_offer_allows_offer_when_policy_returns_none(monkeypatch) -> None:

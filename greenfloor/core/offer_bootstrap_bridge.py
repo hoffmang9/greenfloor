@@ -102,10 +102,7 @@ def bootstrap_early_phase(
     outcome: BootstrapPlanOutcome,
 ) -> BootstrapPhaseResult | None:
     """Map a planner outcome to an early phase result, if mixed-split should not run."""
-    phase = _require_bootstrap_method("bootstrap_early_phase")(
-        outcome_kind=str(outcome.kind),
-        total_output_amount=int(outcome.total_output_amount or 0),
-    )
+    phase = _require_bootstrap_method("bootstrap_early_phase")(outcome=outcome)
     if phase is None:
         return None
     return _coerce_phase_result(phase)
@@ -117,8 +114,5 @@ def bootstrap_executed_phase(
 ) -> BootstrapPhaseResult:
     """Map a post-split replan outcome to executed-phase status/reason/ready."""
     return _coerce_phase_result(
-        _require_bootstrap_method("bootstrap_executed_phase")(
-            remaining_kind=str(remaining.kind),
-            total_output_amount=int(remaining.total_output_amount or 0),
-        )
+        _require_bootstrap_method("bootstrap_executed_phase")(remaining=remaining)
     )

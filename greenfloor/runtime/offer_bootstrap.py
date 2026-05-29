@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from greenfloor.adapters import rust_signer
@@ -102,6 +102,18 @@ class BootstrapSplitExecution:
     config_path: str
 
 
+@dataclass(frozen=True)
+class BootstrapPreflightOutcome:
+    """Either a terminal early phase result or inputs ready for mixed-split."""
+
+    early: BootstrapPhaseResult | None = None
+    preflight: BootstrapPreflight | None = None
+
+    def __post_init__(self) -> None:
+        if (self.early is None) == (self.preflight is None):
+            raise ValueError("exactly one of early or preflight must be set")
+
+
 def bootstrap_ladder_entries_for_side(
     *,
     side: str,
@@ -151,15 +163,15 @@ def run_bootstrap_preflight(
     minimum_fee_mojos: int,
     deps: BootstrapRuntimeDeps,
     resolve_bootstrap_split_fee_fn: ResolveBootstrapSplitFeeFn,
-) -> BootstrapPhaseResult | BootstrapPreflight:
-    """Plan bootstrap, resolve fees, and return either an early result or execution context."""
+) -> BootstrapPreflightOutcome:
+    """Plan bootstrap, resolve fees, and return early exit or execution context."""
     outcome = deps.plan_bootstrap_mixed_outputs_fn(
         ladder_entries=ladder_entries,
         spendable_coins=spendable_coins,
     )
     early = bootstrap_early_phase(outcome=outcome)
     if early is not None:
-        return early
+        return BootstrapPreflightOutcome(early=early, preflight=None)
     if outcome.plan is None:
         raise RuntimeError("bootstrap_failed:planner_missing_plan")
 
@@ -170,29 +182,35 @@ def run_bootstrap_preflight(
         output_count=len(bootstrap_plan.output_amounts_base_units),
     )
     if int(fee_mojos) > 0:
-        return BootstrapPhaseResult(
-            status="failed",
-            reason="bootstrap_failed:signer_mixed_split_fee_not_supported",
-            fee_mojos=int(fee_mojos),
-            fee_source=fee_source,
-            fee_lookup_error=fee_lookup_error,
+        return BootstrapPreflightOutcome(
+            early=BootstrapPhaseResult(
+                status="failed",
+                reason="signer_mixed_split_fee_not_supported",
+                fee_mojos=int(fee_mojos),
+                fee_source=fee_source,
+                fee_lookup_error=fee_lookup_error,
+            ),
+            preflight=None,
         )
 
     existing_coin_ids = {
         str(c.get("id", "")).strip() for c in asset_scoped_coins if str(c.get("id", "")).strip()
     }
-    return BootstrapPreflight(
-        program=program,
-        bootstrap_plan=bootstrap_plan,
-        split_asset_id=split_asset_id,
-        receive_address=receive_address,
-        fee_mojos=int(fee_mojos),
-        fee_source=fee_source,
-        fee_lookup_error=fee_lookup_error,
-        existing_coin_ids=existing_coin_ids,
-        bootstrap_wait_timeout_seconds=bootstrap_wait_timeout_seconds,
-        ladder_entries=ladder_entries,
-        deps=deps,
+    return BootstrapPreflightOutcome(
+        early=None,
+        preflight=BootstrapPreflight(
+            program=program,
+            bootstrap_plan=bootstrap_plan,
+            split_asset_id=split_asset_id,
+            receive_address=receive_address,
+            fee_mojos=int(fee_mojos),
+            fee_source=fee_source,
+            fee_lookup_error=fee_lookup_error,
+            existing_coin_ids=existing_coin_ids,
+            bootstrap_wait_timeout_seconds=bootstrap_wait_timeout_seconds,
+            ladder_entries=ladder_entries,
+            deps=deps,
+        ),
     )
 
 
@@ -216,7 +234,7 @@ def execute_bootstrap_mixed_split(execution: BootstrapSplitExecution) -> Bootstr
     except Exception as exc:
         return BootstrapPhaseResult(
             status="failed",
-            reason=f"bootstrap_failed:signer_mixed_split_error:{exc}",
+            reason=f"signer_mixed_split_error:{exc}",
             fee_mojos=int(preflight.fee_mojos),
             fee_source=preflight.fee_source,
             fee_lookup_error=preflight.fee_lookup_error,
@@ -258,21 +276,13 @@ def execute_bootstrap_mixed_split(execution: BootstrapSplitExecution) -> Bootstr
         spendable_coins=refreshed_spendable,
     )
     executed = bootstrap_executed_phase(remaining=remaining_outcome)
-    return BootstrapPhaseResult(
-        status=executed.status,
-        reason=executed.reason,
-        ready=executed.ready,
+    return replace(
+        executed,
         fee_mojos=int(preflight.fee_mojos),
         fee_source=preflight.fee_source,
         fee_lookup_error=preflight.fee_lookup_error,
         wait_error=wait_error,
         split_result=dict(split_result) if isinstance(split_result, dict) else {},
         wait_events=wait_events,
-        plan={
-            "source_coin_id": bootstrap_plan.source_coin_id,
-            "source_amount": bootstrap_plan.source_amount,
-            "output_count": len(bootstrap_plan.output_amounts_base_units),
-            "total_output_amount": bootstrap_plan.total_output_amount,
-            "change_amount": bootstrap_plan.change_amount,
-        },
+        plan=bootstrap_plan,
     )

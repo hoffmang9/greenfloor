@@ -272,15 +272,13 @@ class BootstrapKernelProtocol(Protocol):
     def bootstrap_early_phase(
         self,
         *,
-        outcome_kind: str,
-        total_output_amount: int = 0,
+        outcome: BootstrapPlanOutcome,
     ) -> BootstrapPhaseResult | None: ...
 
     def bootstrap_executed_phase(
         self,
         *,
-        remaining_kind: str,
-        total_output_amount: int = 0,
+        remaining: BootstrapPlanOutcome,
     ) -> BootstrapPhaseResult: ...
 
 

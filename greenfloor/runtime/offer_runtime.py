@@ -11,7 +11,6 @@ from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.core.offer_bootstrap_policy import (
     BootstrapPhaseResult,
-    BootstrapPlanOutcome,
     plan_bootstrap_mixed_outputs,
 )
 from greenfloor.core.offer_policy import normalize_offer_side
@@ -25,6 +24,7 @@ from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.offer_bootstrap import (
     BootstrapRuntimeDeps,
     BootstrapSplitExecution,
+    ResolveBootstrapSplitFeeFn,
     bootstrap_ladder_entries_for_side,
     execute_bootstrap_mixed_split,
     run_bootstrap_preflight,
@@ -106,6 +106,15 @@ def _wait_for_coinset_confirmation(
     )
 
 
+def default_bootstrap_runtime_deps() -> BootstrapRuntimeDeps:
+    return BootstrapRuntimeDeps(
+        list_bootstrap_coins_fn=_list_coinset_bootstrap_coins,
+        wait_for_confirmation_fn=_wait_for_coinset_confirmation,
+        is_spendable_coin_fn=is_spendable_coin,
+        plan_bootstrap_mixed_outputs_fn=plan_bootstrap_mixed_outputs,
+    )
+
+
 def signer_bootstrap_phase(
     *,
     program: ProgramConfig,
@@ -115,24 +124,11 @@ def signer_bootstrap_phase(
     quote_price: float,
     action_side: str = "sell",
     bootstrap_wait_timeout_seconds: int = 120,
-    plan_bootstrap_mixed_outputs_fn: collections.abc.Callable[..., BootstrapPlanOutcome]
-    | None = None,
-    resolve_bootstrap_split_fee_fn: collections.abc.Callable[..., tuple[int, str, str | None]]
-    | None = None,
-    list_bootstrap_coins_fn: collections.abc.Callable[..., list[dict[str, Any]]] | None = None,
-    wait_for_confirmation_fn: collections.abc.Callable[..., list[dict[str, str]]] | None = None,
-    is_spendable_coin_fn: collections.abc.Callable[[dict], bool] | None = None,
+    bootstrap_deps: BootstrapRuntimeDeps | None = None,
+    resolve_bootstrap_split_fee_fn: ResolveBootstrapSplitFeeFn | None = None,
 ) -> BootstrapPhaseResult:
-    if plan_bootstrap_mixed_outputs_fn is None:
-        plan_bootstrap_mixed_outputs_fn = plan_bootstrap_mixed_outputs
-    if resolve_bootstrap_split_fee_fn is None:
-        resolve_bootstrap_split_fee_fn = resolve_bootstrap_split_fee
-    if list_bootstrap_coins_fn is None:
-        list_bootstrap_coins_fn = _list_coinset_bootstrap_coins
-    if wait_for_confirmation_fn is None:
-        wait_for_confirmation_fn = _wait_for_coinset_confirmation
-    if is_spendable_coin_fn is None:
-        is_spendable_coin_fn = is_spendable_coin
+    deps = bootstrap_deps or default_bootstrap_runtime_deps()
+    resolve_fee_fn = resolve_bootstrap_split_fee_fn or resolve_bootstrap_split_fee
 
     side = normalize_offer_side(action_side)
     side_ladder = list(market.ladders.get(side, []))
@@ -174,7 +170,7 @@ def signer_bootstrap_phase(
         )
 
     try:
-        asset_scoped_coins = list_bootstrap_coins_fn(
+        asset_scoped_coins = deps.list_bootstrap_coins_fn(
             network=str(program.app_network),
             receive_address=receive_address,
             asset_id=split_asset_id,
@@ -185,14 +181,8 @@ def signer_bootstrap_phase(
             reason=f"bootstrap_coin_list_failed:{exc}",
         )
 
-    spendable_asset_coins = [coin for coin in asset_scoped_coins if is_spendable_coin_fn(coin)]
-    bootstrap_deps = BootstrapRuntimeDeps(
-        list_bootstrap_coins_fn=list_bootstrap_coins_fn,
-        wait_for_confirmation_fn=wait_for_confirmation_fn,
-        is_spendable_coin_fn=is_spendable_coin_fn,
-        plan_bootstrap_mixed_outputs_fn=plan_bootstrap_mixed_outputs_fn,
-    )
-    preflight_or_result = run_bootstrap_preflight(
+    spendable_asset_coins = [coin for coin in asset_scoped_coins if deps.is_spendable_coin_fn(coin)]
+    preflight_outcome = run_bootstrap_preflight(
         program=program,
         ladder_entries=ladder_entries,
         split_asset_id=split_asset_id,
@@ -201,15 +191,17 @@ def signer_bootstrap_phase(
         asset_scoped_coins=asset_scoped_coins,
         bootstrap_wait_timeout_seconds=bootstrap_wait_timeout_seconds,
         minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
-        deps=bootstrap_deps,
-        resolve_bootstrap_split_fee_fn=resolve_bootstrap_split_fee_fn,
+        deps=deps,
+        resolve_bootstrap_split_fee_fn=resolve_fee_fn,
     )
-    if isinstance(preflight_or_result, BootstrapPhaseResult):
-        return preflight_or_result
+    if preflight_outcome.early is not None:
+        return preflight_outcome.early
+    if preflight_outcome.preflight is None:
+        raise RuntimeError("bootstrap_failed:planner_missing_preflight")
 
     return execute_bootstrap_mixed_split(
         BootstrapSplitExecution(
-            preflight=preflight_or_result,
+            preflight=preflight_outcome.preflight,
             config_path=_signer_config_path(program),
         )
     )
