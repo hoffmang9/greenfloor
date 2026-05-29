@@ -2,7 +2,7 @@ use engine_core::offer::action::{
     build_bls_offer_for_action, build_signer_offer_for_action, try_normalize_resolved_assets,
     BuildOfferForActionRequest,
 };
-use engine_core::{load_bls_master_secret_key, load_signer_config};
+use engine_core::{load_bls_master_secret_key, load_signer_config, Error};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
 
@@ -19,9 +19,13 @@ fn asset_pair_to_py_dict(py: Python<'_>, base: String, quote: String) -> PyResul
 #[pyfunction]
 #[pyo3(name = "try_normalize_offer_asset_ids")]
 fn try_normalize_offer_asset_ids_py(base_asset: &str, quote_asset: &str) -> PyResult<Py<PyAny>> {
-    let (base, quote) =
-        try_normalize_resolved_assets(base_asset, quote_asset).map_err(to_py_err)?;
-    Python::attach(|py| asset_pair_to_py_dict(py, base, quote))
+    match try_normalize_resolved_assets(base_asset, quote_asset) {
+        Ok((base, quote)) => Python::attach(|py| asset_pair_to_py_dict(py, base, quote)),
+        Err(Error::ResolvedAssetsCollideForNonXchPair) => {
+            Err(to_py_err(Error::ResolvedAssetsCollideForNonXchPair))
+        }
+        Err(_) => Python::attach(|py| Ok(py.None())),
+    }
 }
 
 #[pyfunction]

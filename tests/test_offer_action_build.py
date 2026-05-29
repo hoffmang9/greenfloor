@@ -35,7 +35,7 @@ def test_resolve_action_assets_uses_engine_normalization_for_canonical_assets(mo
         raise AssertionError("canonical asset normalization should not call Coinset resolution")
 
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_action_build.rust_signer.try_normalize_offer_asset_ids",
+        "greenfloor.runtime.offer_action_build.try_normalize_offer_asset_ids",
         lambda _base, _quote: {"base_asset_id": "aa" * 32, "quote_asset_id": "xch"},
     )
     monkeypatch.setattr(
@@ -74,7 +74,7 @@ def test_resolve_action_assets_uses_engine_for_ticker_symbols(monkeypatch) -> No
         return {"base_asset_id": "aa" * 32, "quote_asset_id": "xch"}
 
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_action_build.rust_signer.try_normalize_offer_asset_ids",
+        "greenfloor.runtime.offer_action_build.try_normalize_offer_asset_ids",
         lambda _base, _quote: None,
     )
     monkeypatch.setattr(

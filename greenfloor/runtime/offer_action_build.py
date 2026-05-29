@@ -10,6 +10,7 @@ from greenfloor.core.offer_action import (
     build_action_request,
     to_create_phase_outcome,
 )
+from greenfloor.core.offer_request_bridge import try_normalize_offer_asset_ids
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 
 __all__ = [
@@ -54,7 +55,7 @@ def resolve_action_assets_for_build_context(
     """Resolve market symbols to canonical asset ids for local BLS offer-action builds."""
     base = str(build_ctx.market.base_asset)
     quote = str(build_ctx.resolved_quote_asset)
-    normalized = rust_signer.try_normalize_offer_asset_ids(base, quote)
+    normalized = try_normalize_offer_asset_ids(base, quote)
     if normalized is not None:
         return normalized["base_asset_id"], normalized["quote_asset_id"]
     config_path = prepare_signer_runtime(build_ctx.program)

@@ -13,15 +13,6 @@ from greenfloor.core.signer_offer_request import (
     signer_create_offer_request_from_fields,
 )
 
-_NON_XCH_COLLISION_MESSAGE = "resolved offer assets collide for non-xch pair"
-_NON_XCH_COLLISION_CODE = "signer_asset_resolution_failed:resolved_assets_collide_for_non_xch_pair"
-
-
-def _normalize_asset_resolution_error(exc: Exception) -> Exception:
-    if _NON_XCH_COLLISION_MESSAGE in str(exc):
-        return RuntimeError(_NON_XCH_COLLISION_CODE)
-    return exc
-
 
 def resolve_vault_context(program_path: str) -> dict[str, Any]:
     """Load vault display context from program config via the Rust engine."""
@@ -62,40 +53,13 @@ def resolve_offer_asset_ids(program_path: str, base_asset: str, quote_asset: str
     """Resolve market symbols or asset ids to canonical offer asset ids."""
     engine = import_engine()
     resolve = require_engine_method(engine, "resolve_offer_asset_ids", missing="offer action")
-    try:
-        result = resolve(str(program_path), base_asset, quote_asset)
-    except Exception as exc:
-        raise _normalize_asset_resolution_error(exc) from exc
+    result = resolve(str(program_path), base_asset, quote_asset)
     if not isinstance(result, dict):
         raise TypeError("resolve_offer_asset_ids returned non-dict result")
     base_asset_id = str(result.get("base_asset_id", "")).strip()
     quote_asset_id = str(result.get("quote_asset_id", "")).strip()
     if not base_asset_id or not quote_asset_id:
         raise ValueError("resolve_offer_asset_ids_missing_fields")
-    return {"base_asset_id": base_asset_id, "quote_asset_id": quote_asset_id}
-
-
-def try_normalize_offer_asset_ids(base_asset: str, quote_asset: str) -> dict[str, str] | None:
-    """Normalize already-resolved offer asset ids with Rust engine semantics."""
-    engine = import_engine()
-    normalize = require_engine_method(
-        engine,
-        "try_normalize_offer_asset_ids",
-        missing="offer action",
-    )
-    try:
-        result = normalize(base_asset, quote_asset)
-    except Exception as exc:
-        normalized = _normalize_asset_resolution_error(exc)
-        if normalized is not exc:
-            raise normalized from exc
-        return None
-    if not isinstance(result, dict):
-        raise TypeError("try_normalize_offer_asset_ids returned non-dict result")
-    base_asset_id = str(result.get("base_asset_id", "")).strip()
-    quote_asset_id = str(result.get("quote_asset_id", "")).strip()
-    if not base_asset_id or not quote_asset_id:
-        raise ValueError("try_normalize_offer_asset_ids_missing_fields")
     return {"base_asset_id": base_asset_id, "quote_asset_id": quote_asset_id}
 
 
