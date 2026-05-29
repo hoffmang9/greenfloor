@@ -85,11 +85,8 @@ pub fn compute_signer_offer_leg_amounts(
     pricing: &Value,
 ) -> SignerResult<SignerOfferLegAmounts> {
     let side = normalize_offer_side(action_side);
-    let base_mult = mojo_multiplier_for_leg(
-        pricing,
-        "base_unit_mojo_multiplier",
-        resolved_base_asset_id,
-    );
+    let base_mult =
+        mojo_multiplier_for_leg(pricing, "base_unit_mojo_multiplier", resolved_base_asset_id);
     let quote_mult = mojo_multiplier_for_leg(
         pricing,
         "quote_unit_mojo_multiplier",
@@ -148,7 +145,10 @@ mod tests {
 
     #[test]
     fn quote_mojos_matches_python_rounding() {
-        assert_eq!(quote_mojos_for_base_size(1, 1.0, 1_000_000_000_000), 1_000_000_000_000);
+        assert_eq!(
+            quote_mojos_for_base_size(1, 1.0, 1_000_000_000_000),
+            1_000_000_000_000
+        );
         assert_eq!(quote_mojos_for_base_size(1, 5.0, 1_000), 5_000);
     }
 
