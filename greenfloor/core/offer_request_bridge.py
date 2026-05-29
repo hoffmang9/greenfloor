@@ -88,7 +88,7 @@ def compute_signer_offer_leg_amounts(
     resolved_quote_asset_id: str,
     action_side: str,
     pricing: dict[str, Any],
-) -> "SignerOfferLegAmounts":
+) -> SignerOfferLegAmounts:
     compute = _require_offer_request_method("compute_signer_offer_leg_amounts")
     payload = compute(
         int(size_base_units),

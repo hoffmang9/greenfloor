@@ -19,10 +19,10 @@ without growing `policy_bridge.py` into a flat FFI catalog.
 
 ### Python modules (import from here, not `policy_bridge`)
 
-| Module | Use for |
-|--------|---------|
-| `greenfloor.core.offer_request_bridge` | Direct kernel access to offer-request symbols (internal bridge). |
-| `greenfloor.core.offer_policy` | **Stable runtime/daemon/BLS imports** — re-exports leg math + Dexie/publish helpers. |
+| Module                                 | Use for                                                                                   |
+| -------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `greenfloor.core.offer_request_bridge` | Direct kernel access to offer-request symbols (internal bridge).                          |
+| `greenfloor.core.offer_policy`         | **Stable runtime/daemon/BLS imports** — re-exports leg math + Dexie/publish helpers.      |
 | `greenfloor.core.signer_offer_request` | `SignerCreateOfferRequest`, `SignerOfferLegAmounts`, `build_signer_create_offer_request`. |
 
 ### `policy_bridge.py` role

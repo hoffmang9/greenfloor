@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -36,6 +38,8 @@ def _require_signer_kernel():
         pytest.skip("greenfloor_signer not installed")
     if not callable(getattr(kernel, "compute_signer_offer_leg_amounts", None)):
         pytest.skip("greenfloor_signer.compute_signer_offer_leg_amounts not available")
+    if not callable(getattr(kernel, "normalize_offer_side", None)):
+        pytest.skip("greenfloor_signer.normalize_offer_side not available")
     return kernel
 
 
@@ -51,7 +55,11 @@ def _require_signer_kernel():
 def test_normalize_offer_side_matches_kernel(raw: str, expected: str) -> None:
     kernel = _require_signer_kernel()
     assert normalize_offer_side(raw) == expected
-    assert str(kernel.normalize_offer_side(str(raw))) == expected
+    kernel_normalize = cast(
+        Callable[[str], str],
+        kernel.normalize_offer_side,  # pyright: ignore[reportAttributeAccessIssue]
+    )
+    assert str(kernel_normalize(str(raw))) == expected
 
 
 def test_planned_action_side_avoids_kernel_for_canonical_labels() -> None:
