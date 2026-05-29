@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketLadderEntry, ProgramConfig
@@ -13,6 +13,8 @@ from greenfloor.core.offer_bootstrap_policy import (
     BootstrapPlan,
     BootstrapPlanOutcome,
     PlannerLadderRow,
+    bootstrap_early_phase,
+    bootstrap_executed_phase,
 )
 from greenfloor.core.signer_offer_request import (
     quote_mojos_for_base_size,
@@ -20,14 +22,59 @@ from greenfloor.core.signer_offer_request import (
 )
 
 
+class ListBootstrapCoinsFn(Protocol):
+    def __call__(
+        self,
+        *,
+        network: str,
+        receive_address: str,
+        asset_id: str,
+    ) -> list[dict[str, Any]]: ...
+
+
+class WaitForBootstrapConfirmationFn(Protocol):
+    def __call__(
+        self,
+        *,
+        network: str,
+        receive_address: str,
+        asset_id: str,
+        initial_coin_ids: set[str],
+        timeout_seconds: int,
+    ) -> list[dict[str, str]]: ...
+
+
+class IsSpendableBootstrapCoinFn(Protocol):
+    def __call__(self, coin: dict[str, Any], /) -> bool: ...
+
+
+class PlanBootstrapMixedOutputsFn(Protocol):
+    def __call__(
+        self,
+        *,
+        ladder_entries: list[PlannerLadderRow],
+        spendable_coins: list[Any],
+    ) -> BootstrapPlanOutcome: ...
+
+
+class ResolveBootstrapSplitFeeFn(Protocol):
+    def __call__(
+        self,
+        *,
+        network: str,
+        minimum_fee_mojos: int,
+        output_count: int,
+    ) -> tuple[int, str, str | None]: ...
+
+
 @dataclass(frozen=True)
 class BootstrapRuntimeDeps:
     """Injectable runtime adapters for bootstrap coin I/O and replanning."""
 
-    list_bootstrap_coins_fn: Callable[..., list[dict[str, Any]]]
-    wait_for_confirmation_fn: Callable[..., list[dict[str, str]]]
-    is_spendable_coin_fn: Callable[[dict], bool]
-    plan_bootstrap_mixed_outputs_fn: Callable[..., BootstrapPlanOutcome]
+    list_bootstrap_coins_fn: ListBootstrapCoinsFn
+    wait_for_confirmation_fn: WaitForBootstrapConfirmationFn
+    is_spendable_coin_fn: IsSpendableBootstrapCoinFn
+    plan_bootstrap_mixed_outputs_fn: PlanBootstrapMixedOutputsFn
 
 
 @dataclass(frozen=True)
@@ -103,18 +150,20 @@ def run_bootstrap_preflight(
     bootstrap_wait_timeout_seconds: int,
     minimum_fee_mojos: int,
     deps: BootstrapRuntimeDeps,
-    resolve_bootstrap_split_fee_fn: Callable[..., tuple[int, str, str | None]],
+    resolve_bootstrap_split_fee_fn: ResolveBootstrapSplitFeeFn,
 ) -> BootstrapPhaseResult | BootstrapPreflight:
     """Plan bootstrap, resolve fees, and return either an early result or execution context."""
     outcome = deps.plan_bootstrap_mixed_outputs_fn(
         ladder_entries=ladder_entries,
         spendable_coins=spendable_coins,
     )
-    early = outcome.to_early_phase_result()
+    early = bootstrap_early_phase(outcome=outcome)
     if early is not None:
         return early
+    if outcome.plan is None:
+        raise RuntimeError("bootstrap_failed:planner_missing_plan")
 
-    bootstrap_plan = outcome.require_plan()
+    bootstrap_plan = outcome.plan
     fee_mojos, fee_source, fee_lookup_error = resolve_bootstrap_split_fee_fn(
         network=str(program.app_network),
         minimum_fee_mojos=int(minimum_fee_mojos),
@@ -208,10 +257,11 @@ def execute_bootstrap_mixed_split(execution: BootstrapSplitExecution) -> Bootstr
         ladder_entries=preflight.ladder_entries,
         spendable_coins=refreshed_spendable,
     )
+    executed = bootstrap_executed_phase(remaining=remaining_outcome)
     return BootstrapPhaseResult(
-        status="executed",
-        reason="bootstrap_submitted",
-        ready=remaining_outcome.kind == "ready",
+        status=executed.status,
+        reason=executed.reason,
+        ready=executed.ready,
         fee_mojos=int(preflight.fee_mojos),
         fee_source=preflight.fee_source,
         fee_lookup_error=preflight.fee_lookup_error,

@@ -154,11 +154,135 @@ pub fn plan_bootstrap_mixed_outputs(
     })
 }
 
+/// Manager-visible bootstrap phase fields (status / reason / ready).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootstrapPhaseSnapshot {
+    pub status: &'static str,
+    pub reason: String,
+    pub ready: bool,
+}
+
+fn early_phase_from_kind(
+    outcome_kind: &str,
+    total_output_amount: i64,
+) -> Option<BootstrapPhaseSnapshot> {
+    match outcome_kind.trim() {
+        "ready" => Some(BootstrapPhaseSnapshot {
+            status: "skipped",
+            reason: "already_ready".to_string(),
+            ready: false,
+        }),
+        "cannot_fund" => Some(BootstrapPhaseSnapshot {
+            status: "skipped",
+            reason: format!("bootstrap_underfunded:total_output_amount={total_output_amount}"),
+            ready: false,
+        }),
+        "invalid_ladder" => Some(BootstrapPhaseSnapshot {
+            status: "failed",
+            reason: "bootstrap_failed:bootstrap_invalid_ladder".to_string(),
+            ready: false,
+        }),
+        "invalid_coins" => Some(BootstrapPhaseSnapshot {
+            status: "failed",
+            reason: "bootstrap_failed:bootstrap_invalid_coins".to_string(),
+            ready: false,
+        }),
+        "needs_split" => None,
+        other => Some(BootstrapPhaseSnapshot {
+            status: "failed",
+            reason: format!("bootstrap_failed:unsupported_plan_outcome:{other}"),
+            ready: false,
+        }),
+    }
+}
+
+fn executed_phase_from_kind(
+    remaining_kind: &str,
+    total_output_amount: i64,
+) -> BootstrapPhaseSnapshot {
+    match remaining_kind.trim() {
+        "ready" => BootstrapPhaseSnapshot {
+            status: "executed",
+            reason: "bootstrap_submitted".to_string(),
+            ready: true,
+        },
+        "cannot_fund" => BootstrapPhaseSnapshot {
+            status: "executed",
+            reason: format!(
+                "bootstrap_submitted:still_underfunded:total_output_amount={total_output_amount}"
+            ),
+            ready: false,
+        },
+        "needs_split" => BootstrapPhaseSnapshot {
+            status: "executed",
+            reason: "bootstrap_submitted:still_needs_split".to_string(),
+            ready: false,
+        },
+        "invalid_ladder" => BootstrapPhaseSnapshot {
+            status: "executed",
+            reason: "bootstrap_submitted:still_invalid_ladder".to_string(),
+            ready: false,
+        },
+        "invalid_coins" => BootstrapPhaseSnapshot {
+            status: "executed",
+            reason: "bootstrap_submitted:still_invalid_coins".to_string(),
+            ready: false,
+        },
+        other => BootstrapPhaseSnapshot {
+            status: "executed",
+            reason: format!("bootstrap_submitted:remaining_{other}"),
+            ready: false,
+        },
+    }
+}
+
+/// Map a planner outcome to an early bootstrap phase snapshot, if mixed-split should not run.
+pub fn bootstrap_early_phase(outcome: &BootstrapPlanOutcome) -> Option<BootstrapPhaseSnapshot> {
+    match outcome {
+        BootstrapPlanOutcome::Ready => early_phase_from_kind("ready", 0),
+        BootstrapPlanOutcome::CannotFund {
+            total_output_amount,
+        } => early_phase_from_kind("cannot_fund", *total_output_amount),
+        BootstrapPlanOutcome::InvalidLadder => early_phase_from_kind("invalid_ladder", 0),
+        BootstrapPlanOutcome::InvalidCoins => early_phase_from_kind("invalid_coins", 0),
+        BootstrapPlanOutcome::NeedsSplit(_) => None,
+    }
+}
+
+/// Map a post-split replan outcome to executed-phase status/reason/ready.
+pub fn bootstrap_executed_phase(remaining: &BootstrapPlanOutcome) -> BootstrapPhaseSnapshot {
+    match remaining {
+        BootstrapPlanOutcome::Ready => executed_phase_from_kind("ready", 0),
+        BootstrapPlanOutcome::CannotFund {
+            total_output_amount,
+        } => executed_phase_from_kind("cannot_fund", *total_output_amount),
+        BootstrapPlanOutcome::NeedsSplit(_) => executed_phase_from_kind("needs_split", 0),
+        BootstrapPlanOutcome::InvalidLadder => executed_phase_from_kind("invalid_ladder", 0),
+        BootstrapPlanOutcome::InvalidCoins => executed_phase_from_kind("invalid_coins", 0),
+    }
+}
+
+/// Kernel entry for PyO3 when only outcome kind and total output amount are available.
+pub fn bootstrap_early_phase_from_kind(
+    outcome_kind: &str,
+    total_output_amount: i64,
+) -> Option<BootstrapPhaseSnapshot> {
+    early_phase_from_kind(outcome_kind, total_output_amount)
+}
+
+/// Kernel entry for PyO3 post-split phase shaping.
+pub fn bootstrap_executed_phase_from_kind(
+    remaining_kind: &str,
+    total_output_amount: i64,
+) -> BootstrapPhaseSnapshot {
+    executed_phase_from_kind(remaining_kind, total_output_amount)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome,
-        LadderDeficit, PlannerLadderRow,
+        bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs,
+        BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
     };
 
     fn row(size: i64, target: i64, buffer: i64) -> PlannerLadderRow {
@@ -306,6 +430,29 @@ mod tests {
         assert_eq!(
             plan_bootstrap_mixed_outputs(&ladder, &[coin("bad", -5)]),
             BootstrapPlanOutcome::InvalidCoins
+        );
+    }
+
+    #[test]
+    fn early_phase_skips_when_needs_split() {
+        let ladder = vec![row(10, 2, 0)];
+        let spendable = vec![coin("coin-big", 100)];
+        let outcome = plan_bootstrap_mixed_outputs(&ladder, &spendable);
+        assert!(bootstrap_early_phase(&outcome).is_none());
+    }
+
+    #[test]
+    fn executed_phase_reports_still_underfunded() {
+        let remaining = BootstrapPlanOutcome::CannotFund {
+            total_output_amount: 20,
+        };
+        let phase = bootstrap_executed_phase(&remaining);
+        assert_eq!(phase.status, "executed");
+        assert!(!phase.ready);
+        assert!(
+            phase
+                .reason
+                .contains("still_underfunded:total_output_amount=20")
         );
     }
 

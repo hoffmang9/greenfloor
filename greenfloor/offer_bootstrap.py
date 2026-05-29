@@ -8,6 +8,7 @@ __all__ = [
     "BootstrapPhaseResult",
     "BootstrapPlan",
     "BootstrapPlanOutcome",
+    "BootstrapPlanKind",
     "LadderDeficit",
     "PlannerLadderRow",
 ]
@@ -94,52 +95,3 @@ class BootstrapPlanOutcome:
     kind: BootstrapPlanKind
     plan: BootstrapPlan | None = None
     total_output_amount: int | None = None
-
-    @classmethod
-    def ready(cls) -> BootstrapPlanOutcome:
-        return cls(kind="ready")
-
-    @classmethod
-    def needs_split(cls, plan: BootstrapPlan) -> BootstrapPlanOutcome:
-        return cls(kind="needs_split", plan=plan)
-
-    @classmethod
-    def cannot_fund(cls, *, total_output_amount: int) -> BootstrapPlanOutcome:
-        return cls(kind="cannot_fund", total_output_amount=total_output_amount)
-
-    @classmethod
-    def invalid_ladder(cls) -> BootstrapPlanOutcome:
-        return cls(kind="invalid_ladder")
-
-    @classmethod
-    def invalid_coins(cls) -> BootstrapPlanOutcome:
-        return cls(kind="invalid_coins")
-
-    def to_early_phase_result(self) -> BootstrapPhaseResult | None:
-        """Map to a phase result when offer creation should not proceed to mixed-split."""
-        if self.kind == "ready":
-            return BootstrapPhaseResult(status="skipped", reason="already_ready")
-        if self.kind == "cannot_fund":
-            total = int(self.total_output_amount or 0)
-            return BootstrapPhaseResult(
-                status="skipped",
-                reason=f"bootstrap_underfunded:total_output_amount={total}",
-            )
-        if self.kind == "invalid_ladder":
-            return BootstrapPhaseResult(
-                status="failed",
-                reason="bootstrap_failed:bootstrap_invalid_ladder",
-            )
-        if self.kind == "invalid_coins":
-            return BootstrapPhaseResult(
-                status="failed",
-                reason="bootstrap_failed:bootstrap_invalid_coins",
-            )
-        if self.kind == "needs_split":
-            return None
-        raise ValueError(f"unsupported_bootstrap_plan_outcome:{self.kind}")
-
-    def require_plan(self) -> BootstrapPlan:
-        if self.kind != "needs_split" or self.plan is None:
-            raise ValueError("bootstrap planner outcome is not needs_split")
-        return self.plan

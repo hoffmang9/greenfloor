@@ -9,6 +9,7 @@ from greenfloor.config.models import MarketLadderEntry
 from greenfloor.core.offer_bootstrap_policy import (
     BootstrapCoin,
     PlannerLadderRow,
+    bootstrap_early_phase,
     plan_bootstrap_mixed_outputs,
 )
 from greenfloor.offer_bootstrap import BootstrapPlanOutcome
@@ -122,9 +123,12 @@ def test_plan_bootstrap_mixed_outputs_requires_kernel_symbol(monkeypatch) -> Non
         plan_bootstrap_mixed_outputs(ladder_entries=_sample_ladder(), spendable_coins=[])
 
 
-def test_phase_result_maps_cannot_fund_to_underfunded_skip() -> None:
-    outcome = BootstrapPlanOutcome.cannot_fund(total_output_amount=32)
-    result = outcome.to_early_phase_result()
+def test_bootstrap_early_phase_maps_cannot_fund_to_underfunded_skip() -> None:
+    outcome = BootstrapPlanOutcome(
+        kind="cannot_fund",
+        total_output_amount=32,
+    )
+    result = bootstrap_early_phase(outcome=outcome)
     assert result is not None
     assert result.status == "skipped"
     assert result.reason == "bootstrap_underfunded:total_output_amount=32"

@@ -110,8 +110,8 @@ def test_signer_bootstrap_phase_skips_when_planner_reports_ready() -> None:
         resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
     )
 
-    assert result["status"] == "skipped"
-    assert result["reason"] == "already_ready"
+    assert result.status == "skipped"
+    assert result.reason == "already_ready"
 
 
 def test_signer_bootstrap_phase_skips_when_underfunded() -> None:
@@ -129,8 +129,8 @@ def test_signer_bootstrap_phase_skips_when_underfunded() -> None:
         resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
     )
 
-    assert result["status"] == "skipped"
-    assert result["reason"] == "bootstrap_underfunded:total_output_amount=20"
+    assert result.status == "skipped"
+    assert result.reason == "bootstrap_underfunded:total_output_amount=20"
 
 
 def test_signer_bootstrap_phase_blocks_nonzero_fee_before_split() -> None:
@@ -148,8 +148,8 @@ def test_signer_bootstrap_phase_blocks_nonzero_fee_before_split() -> None:
         resolve_bootstrap_split_fee_fn=lambda **_kwargs: (1, "coinset", None),
     )
 
-    assert result["status"] == "failed"
-    assert "signer_mixed_split_fee_not_supported" in result["reason"]
+    assert result.status == "failed"
+    assert "signer_mixed_split_fee_not_supported" in result.reason
 
 
 def test_signer_bootstrap_phase_submits_planner_mixed_output_amounts(monkeypatch) -> None:
@@ -186,7 +186,7 @@ def test_signer_bootstrap_phase_submits_planner_mixed_output_amounts(monkeypatch
         resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
     )
 
-    assert result["status"] == "executed"
+    assert result.status == "executed"
     assert captured["output_amounts"] == [1, 1, 10, 10, 10]
     assert captured["coin_ids"] == ["coin-big"]
 
@@ -221,7 +221,7 @@ def test_signer_bootstrap_phase_submits_single_planner_output(monkeypatch) -> No
         resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
     )
 
-    assert result["status"] == "executed"
+    assert result.status == "executed"
     assert captured["output_amounts"] == [10]
 
 
@@ -266,9 +266,10 @@ def test_signer_bootstrap_phase_executes_split_from_planner_deficit(monkeypatch)
         resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
     )
 
-    assert result["status"] == "executed"
-    assert result["reason"] == "bootstrap_submitted"
+    assert result.status == "executed"
+    assert result.reason == "bootstrap_submitted"
     assert captured["coin_ids"] == ["coin-big"]
     assert captured["output_amounts"] == [10, 10]
-    assert result["plan"]["source_coin_id"] == "coin-big"
-    assert result["ready"] is True
+    assert result.plan is not None
+    assert result.plan["source_coin_id"] == "coin-big"
+    assert result.ready is True

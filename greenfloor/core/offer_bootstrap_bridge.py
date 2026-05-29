@@ -1,8 +1,8 @@
 """Rust-backed bootstrap mixed-output planner (canonical Python bridge).
 
-Call ``plan_bootstrap_mixed_outputs`` here (or via ``offer_bootstrap_policy``), not
-``kernel_bridge.bootstrap_kernel()`` directly. Coinset coin dicts are coerced to
-``BootstrapCoin`` in this module; the PyO3 layer accepts ``BootstrapCoin`` instances only.
+Call symbols here (or via ``offer_bootstrap_policy``), not ``kernel_bridge.bootstrap_kernel()``
+directly. Coinset coin dicts are coerced to ``BootstrapCoin`` in this module; PyO3 accepts
+``BootstrapCoin`` instances only.
 """
 
 from __future__ import annotations
@@ -12,20 +12,29 @@ from typing import TYPE_CHECKING, Any
 from greenfloor.core import kernel_bridge
 
 if TYPE_CHECKING:
-    from greenfloor.offer_bootstrap import BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow
+    from greenfloor.offer_bootstrap import (
+        BootstrapCoin,
+        BootstrapPhaseResult,
+        BootstrapPlanOutcome,
+        PlannerLadderRow,
+    )
 
 _KERNEL_REBUILD_HINT = (
-    "greenfloor_signer extension is missing plan_bootstrap_mixed_outputs. "
+    "greenfloor_signer extension is missing bootstrap planner symbols. "
     "Rebuild it (for example: `maturin develop --manifest-path "
     "greenfloor-signer-pyo3/Cargo.toml`)."
 )
 
 
-def _require_bootstrap_planner():
-    planner = getattr(kernel_bridge.bootstrap_kernel(), "plan_bootstrap_mixed_outputs", None)
-    if planner is None:
-        raise RuntimeError(f"{_KERNEL_REBUILD_HINT} Missing symbol: plan_bootstrap_mixed_outputs")
-    return planner
+def _require_bootstrap_kernel():
+    return kernel_bridge.bootstrap_kernel()
+
+
+def _require_bootstrap_method(method_name: str):
+    method = getattr(_require_bootstrap_kernel(), method_name, None)
+    if method is None:
+        raise RuntimeError(f"{_KERNEL_REBUILD_HINT} Missing symbol: {method_name}")
+    return method
 
 
 def _coerce_spendable_coins(spendable_coins: list[Any]) -> list[BootstrapCoin]:
@@ -62,6 +71,14 @@ def _coerce_planner_outcome(payload: object) -> BootstrapPlanOutcome:
     raise TypeError("plan_bootstrap_mixed_outputs returned unexpected result type")
 
 
+def _coerce_phase_result(payload: object) -> BootstrapPhaseResult:
+    from greenfloor.offer_bootstrap import BootstrapPhaseResult
+
+    if isinstance(payload, BootstrapPhaseResult):
+        return payload
+    raise TypeError("bootstrap phase kernel call returned unexpected result type")
+
+
 def plan_bootstrap_mixed_outputs(
     *,
     ladder_entries: list[PlannerLadderRow],
@@ -73,8 +90,35 @@ def plan_bootstrap_mixed_outputs(
     if not all(isinstance(row, PlannerLadderRow) for row in ladder_entries):
         raise TypeError("ladder_entries must contain PlannerLadderRow instances")
 
-    outcome = _require_bootstrap_planner()(
+    outcome = _require_bootstrap_method("plan_bootstrap_mixed_outputs")(
         ladder_entries=ladder_entries,
         spendable_coins=_coerce_spendable_coins(spendable_coins),
     )
     return _coerce_planner_outcome(outcome)
+
+
+def bootstrap_early_phase(
+    *,
+    outcome: BootstrapPlanOutcome,
+) -> BootstrapPhaseResult | None:
+    """Map a planner outcome to an early phase result, if mixed-split should not run."""
+    phase = _require_bootstrap_method("bootstrap_early_phase")(
+        outcome_kind=str(outcome.kind),
+        total_output_amount=int(outcome.total_output_amount or 0),
+    )
+    if phase is None:
+        return None
+    return _coerce_phase_result(phase)
+
+
+def bootstrap_executed_phase(
+    *,
+    remaining: BootstrapPlanOutcome,
+) -> BootstrapPhaseResult:
+    """Map a post-split replan outcome to executed-phase status/reason/ready."""
+    return _coerce_phase_result(
+        _require_bootstrap_method("bootstrap_executed_phase")(
+            remaining_kind=str(remaining.kind),
+            total_output_amount=int(remaining.total_output_amount or 0),
+        )
+    )

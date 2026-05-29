@@ -6,8 +6,9 @@ use pyo3::types::{PyDict, PyList};
 
 use super::common::cached_class;
 use signer_core::{
-    plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit,
-    PlannerLadderRow,
+    bootstrap_early_phase_from_kind, bootstrap_executed_phase_from_kind,
+    plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome,
+    BootstrapPhaseSnapshot, LadderDeficit, PlannerLadderRow,
 };
 
 const BOOTSTRAP_MODULE: &str = "greenfloor.offer_bootstrap";
@@ -17,6 +18,7 @@ static BOOTSTRAP_COIN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static LADDER_DEFICIT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static BOOTSTRAP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static BOOTSTRAP_PLAN_OUTCOME_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static BOOTSTRAP_PHASE_RESULT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 
 fn planner_ladder_row_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     cached_class(
@@ -37,6 +39,15 @@ fn ladder_deficit_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 fn bootstrap_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     cached_class(py, &BOOTSTRAP_PLAN_CLS, BOOTSTRAP_MODULE, "BootstrapPlan")
+}
+
+fn bootstrap_phase_result_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &BOOTSTRAP_PHASE_RESULT_CLS,
+        BOOTSTRAP_MODULE,
+        "BootstrapPhaseResult",
+    )
 }
 
 fn bootstrap_plan_outcome_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -178,6 +189,39 @@ fn bootstrap_plan_outcome_to_py<'py>(
             cls.call((), Some(&kwargs))
         }
     }
+}
+
+fn bootstrap_phase_result_to_py<'py>(
+    py: Python<'py>,
+    snapshot: BootstrapPhaseSnapshot,
+) -> PyResult<Bound<'py, PyAny>> {
+    let cls = bootstrap_phase_result_class(py)?;
+    let kwargs = PyDict::new(py);
+    kwargs.set_item("status", snapshot.status)?;
+    kwargs.set_item("reason", snapshot.reason)?;
+    kwargs.set_item("ready", snapshot.ready)?;
+    cls.call((), Some(&kwargs))
+}
+
+pub(crate) fn bootstrap_early_phase_from_py<'py>(
+    py: Python<'py>,
+    outcome_kind: &str,
+    total_output_amount: i64,
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let snapshot = bootstrap_early_phase_from_kind(outcome_kind, total_output_amount);
+    match snapshot {
+        Some(snapshot) => Ok(Some(bootstrap_phase_result_to_py(py, snapshot)?)),
+        None => Ok(None),
+    }
+}
+
+pub(crate) fn bootstrap_executed_phase_from_py<'py>(
+    py: Python<'py>,
+    remaining_kind: &str,
+    total_output_amount: i64,
+) -> PyResult<Bound<'py, PyAny>> {
+    let snapshot = bootstrap_executed_phase_from_kind(remaining_kind, total_output_amount);
+    bootstrap_phase_result_to_py(py, snapshot)
 }
 
 pub(crate) fn plan_bootstrap_mixed_outputs_from_py<'py>(

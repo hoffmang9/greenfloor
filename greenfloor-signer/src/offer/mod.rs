@@ -11,8 +11,9 @@ pub mod request;
 pub mod types;
 
 pub use bootstrap::{
-    plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit,
-    PlannerLadderRow,
+    bootstrap_early_phase, bootstrap_early_phase_from_kind, bootstrap_executed_phase,
+    bootstrap_executed_phase_from_kind, plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlan,
+    BootstrapPlanOutcome, BootstrapPhaseSnapshot, LadderDeficit, PlannerLadderRow,
 };
 pub use build::build_vault_cat_offer;
 pub use build_context::{

@@ -122,7 +122,7 @@ def signer_bootstrap_phase(
     list_bootstrap_coins_fn: collections.abc.Callable[..., list[dict[str, Any]]] | None = None,
     wait_for_confirmation_fn: collections.abc.Callable[..., list[dict[str, str]]] | None = None,
     is_spendable_coin_fn: collections.abc.Callable[[dict], bool] | None = None,
-) -> dict[str, Any]:
+) -> BootstrapPhaseResult:
     if plan_bootstrap_mixed_outputs_fn is None:
         plan_bootstrap_mixed_outputs_fn = plan_bootstrap_mixed_outputs
     if resolve_bootstrap_split_fee_fn is None:
@@ -140,7 +140,7 @@ def signer_bootstrap_phase(
         return BootstrapPhaseResult(
             status="skipped",
             reason=f"missing_{side}_ladder",
-        ).to_manager_dict()
+        )
 
     ladder_entries = bootstrap_ladder_entries_for_side(
         side=side,
@@ -153,7 +153,7 @@ def signer_bootstrap_phase(
         return BootstrapPhaseResult(
             status="skipped",
             reason=f"missing_{side}_ladder",
-        ).to_manager_dict()
+        )
 
     split_asset_id = signer_split_asset_id(
         action_side=action_side,
@@ -164,14 +164,14 @@ def signer_bootstrap_phase(
         return BootstrapPhaseResult(
             status="skipped",
             reason=f"missing_{side}_asset_for_bootstrap",
-        ).to_manager_dict()
+        )
 
     receive_address = str(market.receive_address or "").strip()
     if not receive_address:
         return BootstrapPhaseResult(
             status="skipped",
             reason="missing_receive_address_for_bootstrap",
-        ).to_manager_dict()
+        )
 
     try:
         asset_scoped_coins = list_bootstrap_coins_fn(
@@ -183,7 +183,7 @@ def signer_bootstrap_phase(
         return BootstrapPhaseResult(
             status="skipped",
             reason=f"bootstrap_coin_list_failed:{exc}",
-        ).to_manager_dict()
+        )
 
     spendable_asset_coins = [coin for coin in asset_scoped_coins if is_spendable_coin_fn(coin)]
     bootstrap_deps = BootstrapRuntimeDeps(
@@ -205,14 +205,14 @@ def signer_bootstrap_phase(
         resolve_bootstrap_split_fee_fn=resolve_bootstrap_split_fee_fn,
     )
     if isinstance(preflight_or_result, BootstrapPhaseResult):
-        return preflight_or_result.to_manager_dict()
+        return preflight_or_result
 
     return execute_bootstrap_mixed_split(
         BootstrapSplitExecution(
             preflight=preflight_or_result,
             config_path=_signer_config_path(program),
         )
-    ).to_manager_dict()
+    )
 
 
 def signer_create_offer_phase(
@@ -262,7 +262,7 @@ def signer_create_offer_phase(
 class SignerOfferDeps:
     post_deps: OfferPostDeps
     resolve_signer_offer_asset_ids_fn: collections.abc.Callable[..., tuple[str, str]]
-    signer_bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]]
+    signer_bootstrap_phase_fn: collections.abc.Callable[..., BootstrapPhaseResult]
     signer_create_offer_phase_fn: collections.abc.Callable[..., dict[str, Any]]
 
 
@@ -305,7 +305,7 @@ def build_and_post_offer_signer(
     expiry_unit = build_ctx.expiry_unit
     expiry_value = int(build_ctx.expiry_value)
 
-    def bootstrap(**kwargs: Any) -> dict[str, Any]:
+    def bootstrap(**kwargs: Any) -> BootstrapPhaseResult:
         return resolved_deps.signer_bootstrap_phase_fn(
             bootstrap_wait_timeout_seconds=int(
                 program.runtime_offer_bootstrap_wait_timeout_seconds

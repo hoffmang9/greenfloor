@@ -83,8 +83,9 @@ pub use cycle::{
 pub use error::SignerError as Error;
 pub use hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
 pub use offer::bootstrap::{
-    plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit,
-    PlannerLadderRow,
+    bootstrap_early_phase, bootstrap_early_phase_from_kind, bootstrap_executed_phase,
+    bootstrap_executed_phase_from_kind, plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlan,
+    BootstrapPlanOutcome, BootstrapPhaseSnapshot, LadderDeficit, PlannerLadderRow,
 };
 pub use offer::build_context::{
     mojo_multiplier_for_leg, resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
