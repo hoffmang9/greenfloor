@@ -1,4 +1,4 @@
-"""Unified signing entrypoint: vault KMS via Rust signer, BLS via adapters.bls_signing."""
+"""Legacy signing router; prefer ``greenfloor.adapters.bls_signing`` and ``rust_signer``."""
 
 from __future__ import annotations
 

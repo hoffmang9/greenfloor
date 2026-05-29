@@ -29,7 +29,7 @@ def _load_master_private_key(
         kernel = import_kernel()
         result = kernel.load_bls_master_sk(str(key_id).strip())
     except Exception as exc:
-        return None, f"greenfloor_signer_import_error:{exc}"
+        return None, f"greenfloor_kernel_import_error:{exc}"
     if not isinstance(result, dict):
         return None, "invalid_load_bls_master_sk_response"
     error = result.get("error")
@@ -51,7 +51,7 @@ def _call_signer_build(
         kernel = import_kernel()
         build = getattr(kernel, method_name)
     except Exception as exc:
-        return None, f"greenfloor_signer_import_error:{exc}"
+        return None, f"greenfloor_kernel_import_error:{exc}"
     try:
         result = build(network, master_sk_bytes, request)
     except Exception as exc:
@@ -136,7 +136,7 @@ def _broadcast_bls_spend_bundle_rust(*, network: str, spend_bundle_hex: str) -> 
     except Exception as exc:
         return {
             "status": "skipped",
-            "reason": f"greenfloor_signer_import_error:{exc}",
+            "reason": f"greenfloor_kernel_import_error:{exc}",
             "operation_id": None,
         }
     if not isinstance(result, dict):

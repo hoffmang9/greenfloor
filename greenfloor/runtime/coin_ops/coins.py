@@ -1,4 +1,4 @@
-"""Public coin-state helpers shared by Cloud Wallet runtime and CLI."""
+"""Public coin-state helpers shared by coin-op runtime and CLI."""
 
 from __future__ import annotations
 
@@ -30,11 +30,11 @@ def is_spendable_coin(coin: dict) -> bool:
 def resolve_coin_global_ids(
     wallet_coins: list[dict], raw_coin_ids: list[str]
 ) -> tuple[list[str], list[str]]:
-    """Map operator hex coin names (or Coin_* global IDs) to Cloud Wallet global IDs.
+    """Map operator hex coin names to backend coin global IDs.
 
-    Returns (resolved_ids, unresolved_ids).  Operators usually copy hex coin names
-    from ``coins-list`` output; Cloud Wallet mutations require the ``Coin_*`` GraphQL
-    global-ID form.  Direct ``Coin_*`` IDs are passed through unchanged for power users.
+    Returns (resolved_ids, unresolved_ids). Operators usually copy hex coin names
+    from ``coins-list`` output; some backends require a ``Coin_*`` GraphQL global-ID
+    form. Direct ``Coin_*`` IDs are passed through unchanged for power users.
     """
     mapping: dict[str, str] = {}
     for coin in wallet_coins:

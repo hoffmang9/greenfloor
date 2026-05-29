@@ -6,7 +6,9 @@ import collections.abc
 from pathlib import Path
 from typing import Any
 
+from greenfloor.core.offer_action import expires_at_iso_from_build_context
 from greenfloor.core.planned_action import PlannedAction, planned_action_side
+from greenfloor.runtime.offer_action_build import build_bls_create_phase_from_build_context
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import OfferCreateFailure, OfferCreateOutcome
 
@@ -82,21 +84,37 @@ def make_local_offer_create_fn(
     *,
     dry_run: bool,
     capture_dir_path: Path | None = None,
-    build_offer_fn: collections.abc.Callable[[dict[str, Any]], str],
+    build_offer_fn: collections.abc.Callable[[dict[str, Any]], str] | None = None,
 ) -> collections.abc.Callable[..., OfferCreateOutcome]:
     offer_iteration = [0]
 
     def create(**kwargs: Any) -> OfferCreateOutcome:
         index = offer_iteration[0]
         offer_iteration[0] += 1
-        payload = build_local_offer_payload(
-            build_ctx,
-            size_base_units=int(kwargs["size_base_units"]),
-            quote_price=float(kwargs["quote_price"]),
-            dry_run=dry_run,
-        )
         try:
-            offer_text = build_offer_fn(payload)
+            expires_at = expires_at_iso_from_build_context(
+                expiry_unit=build_ctx.expiry_unit,
+                expiry_value=int(build_ctx.expiry_value),
+            )
+            if build_offer_fn is not None:
+                payload = build_local_offer_payload(
+                    build_ctx,
+                    size_base_units=int(kwargs["size_base_units"]),
+                    quote_price=float(kwargs["quote_price"]),
+                    dry_run=dry_run,
+                )
+                offer_text = build_offer_fn(payload)
+                side = str(kwargs.get("action_side", build_ctx.action_side))
+            else:
+                outcome = build_bls_create_phase_from_build_context(
+                    build_ctx,
+                    size_base_units=int(kwargs["size_base_units"]),
+                    quote_price=float(kwargs["quote_price"]),
+                    action_side=str(kwargs.get("action_side", build_ctx.action_side)),
+                )
+                offer_text = outcome.offer_text
+                expires_at = outcome.expires_at
+                side = outcome.side
         except Exception as exc:
             raise OfferCreateFailure(f"offer_builder_failed:{exc}") from exc
 
@@ -108,10 +126,15 @@ def make_local_offer_create_fn(
             capture_file.write_text(offer_text, encoding="utf-8")
             extra["dry_run_preview"] = {"offer_capture_path": str(capture_file)}
 
-        return OfferCreateOutcome(
-            offer_text=offer_text,
-            expires_at=f"{int(build_ctx.expiry_value)} {build_ctx.expiry_unit}",
-            side=str(kwargs.get("action_side", build_ctx.action_side)),
+        if build_offer_fn is not None:
+            return OfferCreateOutcome(
+                offer_text=offer_text,
+                expires_at=expires_at,
+                side=side,
+                extra=extra,
+            )
+        return OfferCreateOutcome.from_create_phase(
+            outcome,
             extra=extra,
         )
 

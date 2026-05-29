@@ -4,7 +4,7 @@ GreenFloor is a long-running Python application for Chia CAT market making.
 
 ## Components
 
-- `greenfloor-manager`: manager CLI for config validation, key onboarding, cloud-wallet coin inventory/reshaping, offer building/posting, and operational checks.
+- `greenfloor-manager`: manager CLI for config validation, key onboarding, coin inventory/reshaping, offer building/posting, and operational checks.
 - `greenfloord`: daemon process that evaluates configured markets, executes offers, and emits low-inventory alerts.
 
 ## V1 Plan
@@ -63,7 +63,7 @@ greenfloor-manager build-and-post-offer --pair ECO.181.2022:xch --size-base-unit
 greenfloor-manager build-and-post-offer --pair TDBX:txch --size-base-units 1 --network testnet11
 ```
 
-Cloud Wallet vault operations:
+Vault KMS / signer operations:
 
 ```bash
 # List vault inventory (XCH + CAT)
@@ -120,12 +120,14 @@ Operator overrides (all optional):
 - `GREENFLOOR_COINSET_BASE_URL` — custom Coinset API base URL for coin queries and `push_tx`; when unset, `CoinsetAdapter` defaults to mainnet and can be forced to testnet11 by network selection.
 - `coin_ops.minimum_fee_mojos` (in program config) — fallback minimum fee for coin operations when Coinset advice is unavailable (default `10000000` mojos / `0.00001 XCH`; can be set to `0`).
 
-Cloud Wallet program config contract (`program.yaml`):
+Signer program config contract (`program.yaml`):
 
-- `cloud_wallet.base_url` — GraphQL API root URL.
-- `cloud_wallet.user_key_id` — user auth key id used in `chia-user-key-id`.
-- `cloud_wallet.private_key_pem_path` — PEM private key path for RSA-SHA256 header signatures.
-- `cloud_wallet.vault_id` — target wallet/vault ID for coin and offer operations.
+- `signer.kms_key_id` — AWS KMS key for vault member signing.
+- `signer.kms_region` — AWS region for KMS calls.
+- `vault.launcher_id` — vault singleton launcher id (hex).
+- `vault.custody_keys` / `vault.recovery_keys` — member public keys for the vault puzzle.
+
+Legacy `cloud_wallet:` blocks are rejected at config load; use `signer:` + `vault:` instead.
 
 CI secret for optional live testnet workflow:
 

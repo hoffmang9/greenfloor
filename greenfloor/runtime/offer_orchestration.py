@@ -12,6 +12,7 @@ from typing import Any
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.core import offer_policy
+from greenfloor.core.offer_action import OfferCreatePhaseOutcome
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.offer_bootstrap import (
     BootstrapPhaseResult,
@@ -36,6 +37,30 @@ class OfferCreateOutcome:
     artifact_wait_ms: int | None = None
     create_total_ms: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_create_phase(
+        cls,
+        phase: OfferCreatePhaseOutcome,
+        *,
+        create_phase_ms: int | None = None,
+        artifact_wait_ms: int | None = None,
+        create_total_ms: int | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> OfferCreateOutcome:
+        execution_mode = phase.execution_mode.strip()
+        merged_extra = dict(extra or {})
+        if execution_mode and "execution_mode" not in merged_extra:
+            merged_extra["execution_mode"] = execution_mode
+        return cls(
+            offer_text=phase.offer_text,
+            expires_at=phase.expires_at,
+            side=phase.side,
+            create_phase_ms=create_phase_ms,
+            artifact_wait_ms=artifact_wait_ms,
+            create_total_ms=create_total_ms,
+            extra=merged_extra,
+        )
 
 
 class OfferCreateFailure(Exception):

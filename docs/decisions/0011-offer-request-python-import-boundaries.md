@@ -19,13 +19,24 @@ without growing `policy_bridge.py` into a flat FFI catalog.
 
 ### Python modules (import from here, not `policy_bridge`)
 
-| Module                                   | Use for                                                                                   |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `greenfloor.core.offer_request_bridge`   | Direct kernel access to offer-request symbols (internal bridge).                          |
-| `greenfloor.core.offer_bootstrap_bridge` | **Stable runtime imports** — bootstrap DTOs, planner, and phase kernel wrappers.          |
-| `greenfloor.core.offer_bootstrap_policy` | Backward-compatible re-export of `offer_bootstrap_bridge` (no logic).                     |
-| `greenfloor.core.offer_policy`           | **Stable runtime/daemon/BLS imports** — re-exports leg math + Dexie/publish helpers.      |
-| `greenfloor.core.signer_offer_request`   | `SignerCreateOfferRequest`, `SignerOfferLegAmounts`, `build_signer_create_offer_request`. |
+| Module                                   | Use for                                                                                                                 |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `greenfloor.core.offer_request_bridge`   | Direct kernel access to offer-request symbols (internal bridge).                                                        |
+| `greenfloor.core.offer_bootstrap_bridge` | **Stable runtime imports** — bootstrap DTOs, planner, and phase kernel wrappers.                                        |
+| `greenfloor.core.offer_bootstrap_policy` | Backward-compatible re-export of `offer_bootstrap_bridge` (no logic).                                                   |
+| `greenfloor.core.offer_policy`           | **Stable runtime/daemon/BLS imports** — re-exports leg math + Dexie/publish helpers.                                    |
+| `greenfloor.core.signer_offer_request`   | Low-level `SignerCreateOfferRequest` / `signer_create_offer_request_from_fields` (KMS plan-dict spends only).           |
+| `greenfloor.core.offer_action`           | **Canonical offer create** — typed action request/result, pure shaping, create-phase outcome mapping.                   |
+| `greenfloor.runtime.offer_action_build`  | Build action requests from `OfferBuildContext` plus local/signer runtime orchestration (asset resolution + BLS create). |
+| `greenfloor.adapters.offer_action`       | Kernel IO only (`build_*_offer_for_action`).                                                                            |
+
+### Offer-action create path (2026-05)
+
+- **New market-action offer creation** must use `core/offer_action` + `adapters/offer_action`
+  (signer) or `runtime/offer_action_build` (local BLS). Do not add call sites to
+  `rust_signer.build_vault_cat_offer` for that flow.
+- Local BLS resolves ticker symbols via `resolve_action_assets_for_build_context` before kernel
+  dispatch when ids are not already canonical.
 
 ### `policy_bridge.py` role
 

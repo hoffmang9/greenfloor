@@ -89,7 +89,7 @@ def verify_offer_for_dexie(offer_text: str) -> str | None:
         verify_offer = _require_policy_method("verify_offer_for_dexie")
         error = verify_offer(offer_text)
     except ImportError:
-        return "wallet_sdk_import_error:greenfloor_signer_unavailable"
+        return "wallet_sdk_import_error:greenfloor_kernel_unavailable"
     return None if error is None else str(error)
 
 

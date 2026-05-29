@@ -134,9 +134,7 @@ pub async fn resolve_offer_asset_ids(
         && !is_xch_like_asset(&resolved_base)
         && !is_xch_like_asset(&resolved_quote)
     {
-        return Err(SignerError::Other(
-            "resolved_assets_collide_for_non_xch_pair".to_string(),
-        ));
+        return Err(SignerError::ResolvedAssetsCollideForNonXchPair);
     }
     Ok((resolved_base, resolved_quote))
 }

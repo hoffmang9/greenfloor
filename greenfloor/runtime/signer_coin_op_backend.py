@@ -34,7 +34,7 @@ def _operation_id_from_spend_bundle_hex(spend_bundle_hex: str) -> str | None:
 
 @dataclass(slots=True)
 class SignerCoinOpBackend:
-    """BLS/signer coin-ops via Rust mixed-split (coinset listing, no Cloud Wallet fees API)."""
+    """BLS/signer coin-ops via Rust mixed-split (coinset listing)."""
 
     program: ProgramConfig
     market: MarketConfig
@@ -183,7 +183,7 @@ class SignerCoinOpBackend:
     ) -> dict[str, Any]:
         """Combine via Rust mixed-split.
 
-        ``largest_first`` and ``target_amount`` are Cloud Wallet-only; the signer path
+        ``largest_first`` and ``target_amount`` are legacy wallet-only modes; the signer path
         always uses explicit ``input_coin_ids`` totals and even output splitting.
         ``fee_mojos`` is forwarded to the Rust mixed-split builder when non-zero.
         """

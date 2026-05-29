@@ -1,4 +1,4 @@
-"""Thin wrapper around the Rust kernel vault path (PyO3 module ``greenfloor_signer`` until ADR 0010)."""
+"""Thin wrapper around the Rust kernel vault path (PyO3 module ``greenfloor_kernel``)."""
 
 from __future__ import annotations
 
@@ -27,7 +27,12 @@ def build_vault_cat_offer(
     program_path: str,
     request_dict: SignerCreateOfferPayload | dict[str, Any],
 ) -> dict[str, Any]:
-    """Build a vault CAT offer using the canonical Rust kernel vault path."""
+    """Build a vault CAT offer using the low-level Rust kernel vault path.
+
+    Deprecated for market-action offer creation: use
+    ``greenfloor.adapters.offer_action.build_signer_offer_for_action`` instead.
+    Retained for KMS signing router plan-dict spends and parity tests.
+    """
     kernel = import_kernel()
     result = kernel.build_vault_cat_offer(str(program_path), request_dict)
     if not isinstance(result, dict):

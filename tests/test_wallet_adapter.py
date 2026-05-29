@@ -99,7 +99,7 @@ def test_wallet_adapter_non_dry_run_requires_signer_selection(tmp_path: Path) ->
 
 
 def test_wallet_adapter_non_dry_run_direct_signing(tmp_path: Path, monkeypatch) -> None:
-    """Uses signing.sign_and_broadcast directly for non-dry-run execution."""
+    """Uses bls_signing.sign_and_broadcast directly for non-dry-run execution."""
     from greenfloor.core.coin_ops import CoinOpPlan
     from greenfloor.keys.onboarding import KeyOnboardingSelection, save_key_onboarding_selection
 
@@ -115,7 +115,7 @@ def test_wallet_adapter_non_dry_run_direct_signing(tmp_path: Path, monkeypatch) 
         ),
     )
 
-    import greenfloor.signing as signing_mod
+    import greenfloor.adapters.bls_signing as signing_mod
 
     captured: dict = {}
 

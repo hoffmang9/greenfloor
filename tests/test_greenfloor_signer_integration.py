@@ -1,4 +1,4 @@
-"""Integration tests for the greenfloor_signer PyO3 extension."""
+"""Integration tests for the greenfloor_kernel PyO3 extension."""
 
 from __future__ import annotations
 
@@ -20,9 +20,9 @@ def _require_importable_modules():
     except Exception:
         pytest.skip("chia_wallet_sdk import unavailable")
     try:
-        import greenfloor_signer as signer  # type: ignore
+        import greenfloor_kernel as signer  # type: ignore
     except Exception:
-        pytest.skip("greenfloor_signer import unavailable")
+        pytest.skip("greenfloor_kernel import unavailable")
     return sdk, signer
 
 

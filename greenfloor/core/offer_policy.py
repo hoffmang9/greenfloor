@@ -16,14 +16,12 @@ from greenfloor.core.policy_bridge import (
 from greenfloor.core.signer_offer_request import (
     SignerCreateOfferPayload,
     SignerCreateOfferRequest,
-    build_signer_create_offer_request,
 )
 
 __all__ = [
     "SignerCreateOfferPayload",
     "SignerCreateOfferRequest",
     "bootstrap_block_error",
-    "build_signer_create_offer_request",
     "compute_signer_offer_leg_amounts",
     "dexie_offer_asset_expectation_error",
     "expected_publish_asset_fields",

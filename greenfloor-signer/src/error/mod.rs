@@ -167,6 +167,9 @@ pub enum SignerError {
     #[error("invalid_offer_amount")]
     InvalidOfferAmount,
 
+    #[error("resolved offer assets collide for non-xch pair")]
+    ResolvedAssetsCollideForNonXchPair,
+
     #[error("{0}")]
     Other(String),
 }

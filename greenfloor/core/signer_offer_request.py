@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
-from greenfloor.config.models import MarketConfig
 from greenfloor.core.offer_request_bridge import (
     compute_signer_offer_leg_amounts,
     normalize_offer_asset_id,
@@ -23,7 +22,6 @@ __all__ = [
     "SignerCreateOfferPayload",
     "SignerCreateOfferRequest",
     "SignerOfferLegAmounts",
-    "build_signer_create_offer_request",
     "compute_signer_offer_leg_amounts",
     "normalize_offer_asset_id",
     "quote_mojos_for_base_size",
@@ -105,45 +103,6 @@ def resolve_quote_unit_multiplier(
             "quote_unit_mojo_multiplier",
             str(resolved_quote_asset_id),
         )
-    )
-
-
-def build_signer_create_offer_request(
-    *,
-    market: MarketConfig,
-    size_base_units: int,
-    quote_price: float,
-    resolved_base_asset_id: str,
-    resolved_quote_asset_id: str,
-    action_side: str = "sell",
-    split_input_coins: bool = True,
-    broadcast_split: bool = True,
-    expires_at_unix: int | None = None,
-) -> SignerCreateOfferRequest:
-    """Build the request passed to ``rust_signer.build_vault_cat_offer``."""
-    pricing = dict(market.pricing or {})
-    leg = compute_signer_offer_leg_amounts(
-        size_base_units=size_base_units,
-        quote_price=quote_price,
-        resolved_base_asset_id=resolved_base_asset_id,
-        resolved_quote_asset_id=resolved_quote_asset_id,
-        action_side=action_side,
-        pricing=pricing,
-    )
-
-    receive_address = str(market.receive_address or "").strip()
-    if not receive_address:
-        raise ValueError("market.receive_address is required for signer offer build")
-
-    return SignerCreateOfferRequest(
-        receive_address=receive_address,
-        offer_asset_id=leg.offer_asset_id,
-        offer_amount=int(leg.offer_amount_mojos),
-        request_asset_id=leg.request_asset_id,
-        request_amount=int(leg.request_amount_mojos),
-        split_input_coins=bool(split_input_coins),
-        broadcast_split=bool(broadcast_split),
-        expires_at=expires_at_unix,
     )
 
 

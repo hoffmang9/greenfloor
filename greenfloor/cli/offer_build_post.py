@@ -14,7 +14,6 @@ from greenfloor.config.io import (
 )
 from greenfloor.config.models import offer_execution_backend
 from greenfloor.logging_setup import warn_if_log_level_auto_healed
-from greenfloor.offer_builder import build_offer
 from greenfloor.runtime.json_output import format_json_output
 from greenfloor.runtime.offer_build_context import prepare_offer_build_context
 from greenfloor.runtime.offer_execution import default_offer_post_deps
@@ -64,6 +63,13 @@ def resolve_offer_publish_settings(
     else:
         splash_base = str(program.splash_api_base).strip().rstrip("/")
     return venue, dexie_base, splash_base
+
+
+def build_offer(payload: dict) -> str:
+    """Legacy test/CLI hook for local BLS offer build (delegates to offer_builder)."""
+    from greenfloor.offer_builder import build_offer as legacy_build_offer
+
+    return legacy_build_offer(payload)
 
 
 def build_and_post_offer_cli(

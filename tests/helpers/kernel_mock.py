@@ -1,10 +1,17 @@
-"""Minimal greenfloor_signer stub helpers for partial kernel mocks in tests."""
+"""Minimal greenfloor kernel stub helpers for partial kernel mocks in tests."""
 
 from __future__ import annotations
 
+from typing import Any
+
+
+def install_kernel_stub(monkeypatch: Any, stub: Any) -> None:
+    """Register a stub for the ADR 0010 kernel module name."""
+    monkeypatch.setitem(__import__("sys").modules, "greenfloor_kernel", stub)
+
 
 def mock_kernel_normalize_hex_id(value: str) -> str:
-    """Mirror ``hex_utils.normalize_hex_id`` for tests that stub ``greenfloor_signer``."""
+    """Mirror ``hex_utils.normalize_hex_id`` for tests that stub ``greenfloor_kernel``."""
     normalized = value.strip().lower()
     if normalized.startswith("0x"):
         normalized = normalized[2:]
@@ -125,7 +132,7 @@ def mock_kernel_expected_publish_asset_fields(
 
 
 class MinimalSignerKernel:
-    """Base stub for tests that patch ``sys.modules['greenfloor_signer']``.
+    """Base stub for tests that patch ``sys.modules['greenfloor_kernel']``.
 
     Subclass and override only the symbols your test exercises. Hex helpers,
     offer-build pricing helpers, and Dexie verification are provided by default

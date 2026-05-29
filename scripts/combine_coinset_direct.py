@@ -7,12 +7,12 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from greenfloor.adapters.bls_signing import sign_and_broadcast_mixed_split
 from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.adapters.kms_signer import get_public_key_compressed_hex, sign_digest
 from greenfloor.config.launcher import launcher_id_from_program_config
 from greenfloor.constants import MIN_CAT_OUTPUT_MOJOS
 from greenfloor.hex_utils import normalize_hex_id
-from greenfloor.signing import sign_and_broadcast_mixed_split
 
 
 @dataclass(frozen=True, slots=True)

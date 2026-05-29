@@ -21,11 +21,11 @@ from greenfloor.daemon.cooldowns import (
     _set_cooldown,
 )
 from greenfloor.daemon.offer_dispatch.items import action_item
+from greenfloor.runtime.offer_action_build import build_bls_offer_from_build_context
 from greenfloor.runtime.offer_build_context import (
     default_program_config_path,
     prepare_offer_build_context,
 )
-from greenfloor.runtime.offer_execution import build_daemon_action_offer_payload
 from greenfloor.storage.sqlite import SqliteStore
 
 
@@ -38,8 +38,7 @@ def build_offer_for_action(
     program_path: Path | None = None,
     keyring_yaml_path: str | None = None,
 ) -> dict[str, Any]:
-    from greenfloor.offer_builder import build_offer
-
+    del xch_price_usd
     resolved_program_path = default_program_config_path(program, program_path)
     try:
         build_ctx = prepare_offer_build_context(
@@ -56,13 +55,13 @@ def build_offer_for_action(
             "reason": f"offer_builder_failed:{exc}",
             "offer": None,
         }
-    payload = build_daemon_action_offer_payload(
-        build_ctx,
-        action=action,
-        xch_price_usd=xch_price_usd,
-    )
     try:
-        offer = build_offer(payload)
+        result = build_bls_offer_from_build_context(
+            build_ctx,
+            size_base_units=int(action.size),
+            action_side=planned_action_side(action),
+        )
+        offer = result["offer_text"]
     except Exception as exc:
         return {"status": "skipped", "reason": f"offer_builder_failed:{exc}", "offer": None}
     return {"status": "executed", "reason": "offer_builder_success", "offer": offer}

@@ -39,10 +39,18 @@ def test_signer_create_offer_phase_calls_signer_and_returns_offer_text(monkeypat
 
     def _fake_build(_config_path: str, request: dict) -> dict:
         captured.update(request)
-        return {"offer": "offer1test", "execution_mode": "direct"}
+        return {
+            "offer_text": "offer1test",
+            "execution_mode": "direct",
+            "side": "buy",
+            "expires_at_unix": 1_700_000_000,
+            "offer_amount": 10_000,
+            "request_amount": 20_000,
+            "create_result": {"execution_mode": "direct"},
+        }
 
     monkeypatch.setattr(
-        "greenfloor.adapters.rust_signer.build_vault_cat_offer",
+        "greenfloor.adapters.offer_action.build_signer_offer_for_action",
         _fake_build,
     )
     monkeypatch.setattr(
@@ -59,31 +67,33 @@ def test_signer_create_offer_phase_calls_signer_and_returns_offer_text(monkeypat
         quote_price=2.0,
         resolved_base_asset_id="basecat",
         resolved_quote_asset_id="quotecat",
-        expiry_unit="hours",
-        expiry_value=1,
         action_side="buy",
     )
 
     assert captured
     assert captured["receive_address"] == market.receive_address
-    assert captured["expires_at"] is not None
-    assert result["side"] == "buy"
-    assert result["offer_text"] == "offer1test"
-    assert result["execution_mode"] == "direct"
-    assert result["expires_at"]
+    assert captured["base_asset"] == "basecat"
+    assert captured["quote_asset"] == "quotecat"
+    assert result.side == "buy"
+    assert result.offer_text == "offer1test"
+    assert result.execution_mode == "direct"
+    assert result.expires_at
 
 
 def test_signer_create_offer_phase_requires_offer_text(monkeypatch) -> None:
+    def _raise_missing(_path: str, _req: dict) -> dict:
+        raise RuntimeError("offer_action_failed:missing_offer_text")
+
     monkeypatch.setattr(
-        "greenfloor.adapters.rust_signer.build_vault_cat_offer",
-        lambda _path, _req: {"offer": "", "execution_mode": "direct"},
+        "greenfloor.adapters.offer_action.build_signer_offer_for_action",
+        _raise_missing,
     )
     monkeypatch.setattr(
         "greenfloor.runtime.offer_runtime.prepare_signer_runtime",
         lambda _program: "/tmp/signer.yaml",
     )
 
-    with pytest.raises(RuntimeError, match="missing_offer_text"):
+    with pytest.raises(RuntimeError, match="offer_action_failed:missing_offer_text"):
         signer_create_offer_phase(
             program=cast(ProgramConfig, SimpleNamespace()),
             market=_sample_market(),
@@ -91,8 +101,6 @@ def test_signer_create_offer_phase_requires_offer_text(monkeypatch) -> None:
             quote_price=1.0,
             resolved_base_asset_id="basecat",
             resolved_quote_asset_id="xch",
-            expiry_unit="hours",
-            expiry_value=1,
         )
 
 

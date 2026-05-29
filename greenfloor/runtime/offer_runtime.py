@@ -1,23 +1,24 @@
 from __future__ import annotations
 
 import collections.abc
-import datetime as dt
 import logging
 import time
 from dataclasses import dataclass
 from typing import Any
 
-from greenfloor.adapters import rust_signer
+from greenfloor.adapters import offer_action, rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
+from greenfloor.core.offer_action import (
+    OfferCreatePhaseOutcome,
+    build_action_request,
+    to_create_phase_outcome,
+)
 from greenfloor.core.offer_bootstrap_bridge import (
     BootstrapPhaseResult,
     plan_bootstrap_mixed_outputs,
 )
 from greenfloor.core.offer_policy import normalize_offer_side
-from greenfloor.core.signer_offer_request import (
-    build_signer_create_offer_request,
-    signer_split_asset_id,
-)
+from greenfloor.core.signer_offer_request import signer_split_asset_id
 from greenfloor.hex_utils import canonical_is_xch
 from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
@@ -204,39 +205,25 @@ def signer_create_offer_phase(
     quote_price: float,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
-    expiry_unit: str,
-    expiry_value: int,
     action_side: str = "sell",
     split_input_coins: bool = True,
     broadcast_split: bool = True,
-) -> dict[str, Any]:
+) -> OfferCreatePhaseOutcome:
     side = normalize_offer_side(action_side)
-    expires_at_dt = dt.datetime.now(dt.UTC) + dt.timedelta(**{expiry_unit: int(expiry_value)})
-    request = build_signer_create_offer_request(
-        market=market,
-        size_base_units=size_base_units,
-        quote_price=quote_price,
-        resolved_base_asset_id=resolved_base_asset_id,
-        resolved_quote_asset_id=resolved_quote_asset_id,
+    request = build_action_request(
+        receive_address=str(market.receive_address or ""),
+        base_asset=str(resolved_base_asset_id),
+        quote_asset=str(resolved_quote_asset_id),
+        pricing=dict(market.pricing or {}),
+        size_base_units=int(size_base_units),
         action_side=side,
+        quote_price=float(quote_price),
         split_input_coins=split_input_coins,
         broadcast_split=broadcast_split,
-        expires_at_unix=int(expires_at_dt.timestamp()),
     )
     config_path = _signer_config_path(program)
-    result = rust_signer.build_vault_cat_offer(config_path, request.to_payload())
-    offer_text = str(result.get("offer", "")).strip()
-    if not offer_text.startswith("offer1"):
-        raise RuntimeError("signer_create_offer_failed:missing_offer_text")
-    return {
-        "offer_text": offer_text,
-        "expires_at": expires_at_dt.isoformat(),
-        "offer_amount": request.offer_amount,
-        "request_amount": request.request_amount,
-        "side": side,
-        "execution_mode": str(result.get("execution_mode", "")).strip(),
-        "create_result": dict(result) if isinstance(result, dict) else {},
-    }
+    result = offer_action.build_signer_offer_for_action(config_path, request)
+    return to_create_phase_outcome(result, action_side=side)
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,7 +231,7 @@ class SignerOfferDeps:
     post_deps: OfferPostDeps
     resolve_signer_offer_asset_ids_fn: collections.abc.Callable[..., tuple[str, str]]
     signer_bootstrap_phase_fn: collections.abc.Callable[..., BootstrapPhaseResult]
-    signer_create_offer_phase_fn: collections.abc.Callable[..., dict[str, Any]]
+    signer_create_offer_phase_fn: collections.abc.Callable[..., OfferCreatePhaseOutcome]
 
 
 def default_signer_offer_deps(*, post_deps: OfferPostDeps | None = None) -> SignerOfferDeps:
@@ -283,8 +270,6 @@ def build_and_post_offer_signer(
             quote_asset_id=str(market.quote_asset),
         )
     )
-    expiry_unit = build_ctx.expiry_unit
-    expiry_value = int(build_ctx.expiry_value)
 
     def bootstrap(**kwargs: Any) -> BootstrapPhaseResult:
         return resolved_deps.signer_bootstrap_phase_fn(
@@ -304,8 +289,6 @@ def build_and_post_offer_signer(
                 quote_price=kwargs["quote_price"],
                 resolved_base_asset_id=kwargs["resolved_base_asset_id"],
                 resolved_quote_asset_id=kwargs["resolved_quote_asset_id"],
-                expiry_unit=expiry_unit,
-                expiry_value=expiry_value,
                 action_side=kwargs["action_side"],
             )
         except RuntimeError as exc:
@@ -314,20 +297,16 @@ def build_and_post_offer_signer(
                 create_phase_ms=int((time.monotonic() - started) * 1000),
                 extra={"signer_path": True},
             ) from exc
-        execution_mode = str(create_phase.get("execution_mode", "")).strip()
-        offer_text = str(create_phase.get("offer_text", "")).strip()
-        if not offer_text:
+        execution_mode = create_phase.execution_mode.strip()
+        if not create_phase.offer_text.strip():
             raise OfferCreateFailure(
                 "signer_create_offer_failed:missing_offer_text",
                 create_phase_ms=int((time.monotonic() - started) * 1000),
                 extra={"signer_path": True, "execution_mode": execution_mode},
             )
-        return OfferCreateOutcome(
-            offer_text=str(create_phase.get("offer_text", "")).strip(),
-            expires_at=str(create_phase.get("expires_at", "")),
-            side=str(create_phase.get("side", kwargs["action_side"])),
+        return OfferCreateOutcome.from_create_phase(
+            create_phase,
             create_phase_ms=int((time.monotonic() - started) * 1000),
-            extra={"execution_mode": execution_mode} if execution_mode else {},
         )
 
     return build_and_post_offer(
