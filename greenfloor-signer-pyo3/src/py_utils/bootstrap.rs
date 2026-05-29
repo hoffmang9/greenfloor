@@ -14,51 +14,39 @@ const BOOTSTRAP_MODULE: &str = "greenfloor.offer_bootstrap";
 static LADDER_DEFICIT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static BOOTSTRAP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 
-fn required_i64_attr(obj: &Bound<'_, PyAny>, name: &str, label: &str) -> PyResult<i64> {
+fn field_value<'a>(
+    obj: &'a Bound<'_, PyAny>,
+    name: &str,
+    label: &str,
+) -> PyResult<Bound<'a, PyAny>> {
     if let Ok(dict) = obj.downcast::<PyDict>() {
-        let value = dict
-            .get_item(name)?
-            .ok_or_else(|| PyValueError::new_err(format!("{label} missing required field: {name}")))?;
-        return value
-            .extract::<i64>()
-            .map_err(|_| PyValueError::new_err(format!("{label}.{name} must be an integer")));
+        return dict.get_item(name)?.ok_or_else(|| {
+            PyValueError::new_err(format!("{label} missing required field: {name}"))
+        });
     }
-    let value = obj.getattr(name).map_err(|_| {
+    obj.getattr(name).map_err(|_| {
         PyValueError::new_err(format!("{label} missing required attribute: {name}"))
-    })?;
-    value
-        .extract::<i64>()
-        .map_err(|_| PyValueError::new_err(format!("{label}.{name} must be an integer")))
+    })
 }
 
-fn required_coin_amount(obj: &Bound<'_, PyAny>, index: usize) -> PyResult<i64> {
-    let label = format!("spendable_coins[{index}]");
-    if let Ok(dict) = obj.downcast::<PyDict>() {
-        let value = dict.get_item("amount")?.ok_or_else(|| {
-            PyValueError::new_err(format!("{label} missing required field: amount"))
-        })?;
-        return value
-            .extract::<i64>()
-            .map_err(|_| PyValueError::new_err(format!("{label}.amount must be an integer")));
-    }
-    let value = obj.getattr("amount").map_err(|_| {
-        PyValueError::new_err(format!("{label} missing required attribute: amount"))
-    })?;
-    value
-        .extract::<i64>()
-        .map_err(|_| PyValueError::new_err(format!("{label}.amount must be an integer")))
+fn extract_i64(obj: &Bound<'_, PyAny>, name: &str, label: &str) -> PyResult<i64> {
+    field_value(obj, name, label)?.extract::<i64>().map_err(|_| {
+        PyValueError::new_err(format!("{label}.{name} must be an integer"))
+    })
 }
 
-fn optional_coin_id(obj: &Bound<'_, PyAny>) -> PyResult<String> {
-    if let Ok(dict) = obj.downcast::<PyDict>() {
-        return match dict.get_item("id")? {
-            None => Ok(String::new()),
-            Some(value) => Ok(value.extract::<String>().unwrap_or_default().trim().to_string()),
-        };
-    }
-    match obj.getattr("id") {
-        Ok(value) => Ok(value.extract::<String>().unwrap_or_default().trim().to_string()),
-        Err(_) => Ok(String::new()),
+fn extract_optional_str(obj: &Bound<'_, PyAny>, name: &str, label: &str) -> PyResult<String> {
+    let value = if let Ok(dict) = obj.downcast::<PyDict>() {
+        dict.get_item(name)?
+    } else {
+        obj.getattr(name).ok()
+    };
+    match value {
+        None => Ok(String::new()),
+        Some(raw) => raw
+            .extract::<String>()
+            .map_err(|_| PyValueError::new_err(format!("{label}.{name} must be a string")))
+            .map(|text| text.trim().to_string()),
     }
 }
 
@@ -69,9 +57,9 @@ fn bootstrap_ladder_entries_from_py_list(
     for (index, item) in list.iter().enumerate() {
         let label = format!("sell_ladder[{index}]");
         entries.push(BootstrapLadderEntry {
-            size_base_units: required_i64_attr(&item, "size_base_units", &label)?,
-            target_count: required_i64_attr(&item, "target_count", &label)?,
-            split_buffer_count: required_i64_attr(&item, "split_buffer_count", &label)?,
+            size_base_units: extract_i64(&item, "size_base_units", &label)?,
+            target_count: extract_i64(&item, "target_count", &label)?,
+            split_buffer_count: extract_i64(&item, "split_buffer_count", &label)?,
         });
     }
     Ok(entries)
@@ -80,9 +68,10 @@ fn bootstrap_ladder_entries_from_py_list(
 fn bootstrap_coins_from_py_list(list: &Bound<'_, PyList>) -> PyResult<Vec<BootstrapCoin>> {
     let mut coins = Vec::with_capacity(list.len());
     for (index, item) in list.iter().enumerate() {
+        let label = format!("spendable_coins[{index}]");
         coins.push(BootstrapCoin {
-            id: optional_coin_id(&item)?,
-            amount: required_coin_amount(&item, index)?,
+            id: extract_optional_str(&item, "id", &label)?,
+            amount: extract_i64(&item, "amount", &label)?,
         });
     }
     Ok(coins)

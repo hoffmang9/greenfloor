@@ -9,7 +9,7 @@ from typing import Any, cast
 import pytest
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.offer_policy import plan_bootstrap_mixed_outputs
+from greenfloor.core.offer_bootstrap_policy import plan_bootstrap_mixed_outputs
 from greenfloor.runtime.offer_runtime import signer_bootstrap_phase, signer_create_offer_phase
 from tests.helpers.config_fixtures import (
     minimal_market_config,
@@ -176,6 +176,40 @@ def test_signer_bootstrap_phase_submits_planner_mixed_output_amounts(monkeypatch
     assert result["status"] == "executed"
     assert captured["output_amounts"] == [1, 1, 10, 10, 10]
     assert captured["coin_ids"] == ["coin-big"]
+
+
+def test_signer_bootstrap_phase_submits_single_planner_output(monkeypatch) -> None:
+    market = minimal_market_with_sell_ladder(size_base_units=10, target_count=1)
+    program = minimal_program_config()
+    spendable = [_spendable_coin(coin_id="coin-big", amount=100)]
+    captured: dict[str, Any] = {}
+
+    def _fake_split(_config_path: str, request: dict[str, Any]) -> dict[str, str]:
+        captured.update(request)
+        return {"status": "executed"}
+
+    monkeypatch.setattr(
+        "greenfloor.adapters.rust_signer.build_mixed_split",
+        _fake_split,
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.offer_runtime.prepare_signer_runtime",
+        lambda _program: "/tmp/signer.yaml",
+    )
+
+    result = signer_bootstrap_phase(
+        program=program,
+        market=market,
+        resolved_base_asset_id="basecat",
+        resolved_quote_asset_id="xch",
+        quote_price=1.0,
+        list_bootstrap_coins_fn=lambda **_kwargs: spendable,
+        wait_for_confirmation_fn=lambda **_kwargs: [],
+        resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
+    )
+
+    assert result["status"] == "executed"
+    assert captured["output_amounts"] == [10]
 
 
 def test_signer_bootstrap_phase_executes_split_from_planner_deficit(monkeypatch) -> None:

@@ -223,6 +223,15 @@ mod tests {
     }
 
     #[test]
+    fn single_output_plan_when_only_one_deficit_coin_needed() {
+        let ladder = vec![entry(10, 1, 0)];
+        let spendable = vec![coin("coin-big", 100)];
+        let plan = plan_bootstrap_mixed_outputs(&ladder, &spendable).expect("plan");
+        assert_eq!(plan.output_amounts_base_units, vec![10]);
+        assert_eq!(plan.total_output_amount, 10);
+    }
+
+    #[test]
     fn change_amount_matches_source_minus_outputs() {
         let ladder = vec![entry(10, 2, 0)];
         let spendable = vec![coin("coin-big", 100)];

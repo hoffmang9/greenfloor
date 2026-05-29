@@ -9,20 +9,19 @@ from typing import Any
 
 from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
+from greenfloor.core.offer_bootstrap_policy import plan_bootstrap_mixed_outputs
 from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.core.signer_offer_request import (
     build_signer_create_offer_request,
-    quote_mojos_for_base_size,
-    resolve_quote_unit_multiplier,
     signer_split_asset_id,
 )
 from greenfloor.hex_utils import canonical_is_xch
-from greenfloor.core.offer_policy import (
-    BootstrapLadderEntry,
-    plan_bootstrap_mixed_outputs,
-)
 from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
+from greenfloor.runtime.offer_bootstrap import (
+    bootstrap_ladder_entries_for_side,
+    execute_bootstrap_mixed_split,
+)
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import (
     OfferCreateFailure,
@@ -133,30 +132,15 @@ def signer_bootstrap_phase(
     if not side_ladder:
         return {"status": "skipped", "reason": f"missing_{side}_ladder"}
 
-    pricing = dict(market.pricing or {})
-    quote_unit_multiplier = resolve_quote_unit_multiplier(
-        pricing=pricing,
+    ladder_for_split = bootstrap_ladder_entries_for_side(
+        side=side,
+        side_ladder=side_ladder,
+        pricing=dict(market.pricing or {}),
+        quote_price=float(quote_price),
         resolved_quote_asset_id=str(resolved_quote_asset_id),
     )
-    if side == "buy":
-        ladder_for_split = []
-        for entry in side_ladder:
-            quote_amount = quote_mojos_for_base_size(
-                size_base_units=int(entry.size_base_units),
-                quote_price=float(quote_price),
-                quote_unit_multiplier=quote_unit_multiplier,
-            )
-            if quote_amount <= 0:
-                continue
-            ladder_for_split.append(
-                BootstrapLadderEntry(
-                    size_base_units=quote_amount,
-                    target_count=int(entry.target_count),
-                    split_buffer_count=int(entry.split_buffer_count),
-                )
-            )
-    else:
-        ladder_for_split = side_ladder
+    if not ladder_for_split:
+        return {"status": "skipped", "reason": f"missing_{side}_ladder"}
 
     split_asset_id = signer_split_asset_id(
         action_side=action_side,
@@ -208,88 +192,23 @@ def signer_bootstrap_phase(
     existing_coin_ids = {
         str(c.get("id", "")).strip() for c in asset_scoped_coins if str(c.get("id", "")).strip()
     }
-    # Mixed split uses the planner's per-denomination output list (one transaction).
-    output_amounts = [int(amount) for amount in bootstrap_plan.output_amounts_base_units]
-    if len(output_amounts) < 2:
-        return {
-            "status": "failed",
-            "reason": "bootstrap_failed:insufficient_planned_outputs_for_mixed_split",
-            "fee_mojos": int(fee_mojos),
-            "fee_source": fee_source,
-            "fee_lookup_error": fee_lookup_error,
-        }
-    config_path = _signer_config_path(program)
-    split_request = {
-        "receive_address": receive_address,
-        "asset_id": split_asset_id.removeprefix("0x"),
-        "output_amounts": output_amounts,
-        "coin_ids": [bootstrap_plan.source_coin_id.removeprefix("0x")],
-        "allow_sub_cat_output": False,
-        "fee_mojos": 0,
-        "broadcast": True,
-    }
-    try:
-        split_result = rust_signer.build_mixed_split(config_path, split_request)
-    except Exception as exc:
-        return {
-            "status": "failed",
-            "reason": f"bootstrap_failed:signer_mixed_split_error:{exc}",
-            "fee_mojos": int(fee_mojos),
-            "fee_source": fee_source,
-            "fee_lookup_error": fee_lookup_error,
-        }
-
-    wait_events: list[dict[str, str]] = []
-    wait_error: str | None = None
-    try:
-        wait_events = wait_for_confirmation_fn(
-            network=str(program.app_network),
-            receive_address=receive_address,
-            asset_id=split_asset_id,
-            initial_coin_ids=existing_coin_ids,
-            timeout_seconds=max(10, int(bootstrap_wait_timeout_seconds)),
-        )
-    except Exception as exc:
-        wait_error = str(exc)
-        return {
-            "status": "failed",
-            "reason": "bootstrap_wait_failed",
-            "wait_error": wait_error,
-            "fee_mojos": int(fee_mojos),
-            "fee_source": fee_source,
-            "fee_lookup_error": fee_lookup_error,
-            "split_result": dict(split_result) if isinstance(split_result, dict) else {},
-            "wait_events": wait_events,
-        }
-
-    refreshed_asset_coins = list_bootstrap_coins_fn(
-        network=str(program.app_network),
+    return execute_bootstrap_mixed_split(
+        program=program,
+        config_path=_signer_config_path(program),
+        bootstrap_plan=bootstrap_plan,
+        split_asset_id=split_asset_id,
         receive_address=receive_address,
-        asset_id=split_asset_id,
+        fee_mojos=int(fee_mojos),
+        fee_source=fee_source,
+        fee_lookup_error=fee_lookup_error,
+        existing_coin_ids=existing_coin_ids,
+        bootstrap_wait_timeout_seconds=bootstrap_wait_timeout_seconds,
+        ladder_for_split=ladder_for_split,
+        list_bootstrap_coins_fn=list_bootstrap_coins_fn,
+        wait_for_confirmation_fn=wait_for_confirmation_fn,
+        is_spendable_coin_fn=is_spendable_coin_fn,
+        plan_bootstrap_mixed_outputs_fn=plan_bootstrap_mixed_outputs_fn,
     )
-    refreshed_spendable = [coin for coin in refreshed_asset_coins if is_spendable_coin_fn(coin)]
-    remaining_plan = plan_bootstrap_mixed_outputs_fn(
-        sell_ladder=ladder_for_split,
-        spendable_coins=refreshed_spendable,
-    )
-    return {
-        "status": "executed",
-        "reason": "bootstrap_submitted",
-        "ready": remaining_plan is None,
-        "fee_mojos": int(fee_mojos),
-        "fee_source": fee_source,
-        "fee_lookup_error": fee_lookup_error,
-        "wait_error": wait_error,
-        "split_result": dict(split_result) if isinstance(split_result, dict) else {},
-        "wait_events": wait_events,
-        "plan": {
-            "source_coin_id": bootstrap_plan.source_coin_id,
-            "source_amount": bootstrap_plan.source_amount,
-            "output_count": len(bootstrap_plan.output_amounts_base_units),
-            "total_output_amount": bootstrap_plan.total_output_amount,
-            "change_amount": bootstrap_plan.change_amount,
-        },
-    }
 
 
 def signer_create_offer_phase(
