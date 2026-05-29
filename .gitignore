@@ -17,6 +17,7 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+target/
 greenfloor-native/target/
 greenfloor-engine-pyo3/target/
 greenfloor-engine-pyo3/python/
