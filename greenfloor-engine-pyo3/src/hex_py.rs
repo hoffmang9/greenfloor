@@ -1,7 +1,7 @@
-use pyo3::prelude::*;
 use engine_core::{
     default_mojo_multiplier_for_asset, is_canonical_xch_asset, is_hex_id, normalize_hex_id,
 };
+use pyo3::prelude::*;
 
 #[pyfunction]
 #[pyo3(name = "is_hex_id")]

@@ -167,7 +167,7 @@ pub enum SignerError {
     #[error("invalid_offer_amount")]
     InvalidOfferAmount,
 
-    #[error("resolved offer assets collide for non-xch pair")]
+    #[error("signer_asset_resolution_failed:resolved_assets_collide_for_non_xch_pair")]
     ResolvedAssetsCollideForNonXchPair,
 
     #[error("{0}")]
@@ -222,6 +222,10 @@ mod tests {
             (
                 SignerError::MissingConfigField("signer"),
                 "missing config field: signer",
+            ),
+            (
+                SignerError::ResolvedAssetsCollideForNonXchPair,
+                "signer_asset_resolution_failed:resolved_assets_collide_for_non_xch_pair",
             ),
         ];
         for (err, expected) in cases {

@@ -54,10 +54,11 @@ def test_legacy_action_request_rejects_invalid_plan_inputs(
 def test_build_offer_calls_kernel_action(monkeypatch) -> None:
     captured: dict = {}
 
-    def _fake_build(*, network: str, key_id: str, request: dict) -> dict:
+    def _fake_build(*, network: str, key_id: str, request: dict, config_path=None) -> dict:
         captured["network"] = network
         captured["key_id"] = key_id
         captured["request"] = request
+        captured["config_path"] = config_path
         return {"offer_text": "offer1fake"}
 
     monkeypatch.setattr(

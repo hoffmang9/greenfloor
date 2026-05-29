@@ -21,14 +21,21 @@ pub async fn resolve_vault_context(config: SignerConfig) -> SignerResult<vault::
     Ok(vault::session::resolve_vault_session(config).await?.display)
 }
 
+pub async fn resolve_offer_assets_via_coinset(
+    config: SignerConfig,
+    base_asset: &str,
+    quote_asset: &str,
+) -> SignerResult<(String, String)> {
+    offer::resolve_offer_assets_via_coinset(&config, base_asset, quote_asset).await
+}
+
+/// Deprecated alias for [`resolve_offer_assets_via_coinset`].
 pub async fn resolve_offer_asset_ids(
     config: SignerConfig,
     base_asset: &str,
     quote_asset: &str,
 ) -> SignerResult<(String, String)> {
-    let msp =
-        coinset::MspCoinset::for_network(&config.network, Some(&config.coinset_msp_base_url))?;
-    coinset::resolve_offer_asset_ids(&msp, base_asset, quote_asset).await
+    resolve_offer_assets_via_coinset(config, base_asset, quote_asset).await
 }
 
 pub use bls::{
@@ -110,8 +117,8 @@ pub use offer::request::{
 };
 pub use offer::{
     build_bls_offer_for_action, build_signer_offer_for_action, build_vault_cat_offer,
-    expires_at_unix_from_pricing, BuildOfferForActionRequest, BuildOfferForActionResult,
-    CreateOfferRequest, CreateOfferResult,
+    expires_at_unix_from_pricing, resolve_offer_assets_for_action, try_normalize_resolved_assets,
+    BuildOfferForActionRequest, BuildOfferForActionResult, CreateOfferRequest, CreateOfferResult,
 };
 pub use vault::{
     build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,

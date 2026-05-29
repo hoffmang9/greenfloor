@@ -288,6 +288,18 @@ class BootstrapEngineProtocol(Protocol):
 
 
 class OfferPolicyEngineProtocol(Protocol):
+    def try_normalize_offer_asset_ids(
+        self, base_asset: str, quote_asset: str
+    ) -> tuple[str, str] | None: ...
+
+    def resolve_offer_assets_via_coinset(
+        self, config_path: str, base_asset: str, quote_asset: str
+    ) -> tuple[str, str]: ...
+
+    def resolve_offer_asset_ids(
+        self, config_path: str, base_asset: str, quote_asset: str
+    ) -> tuple[str, str]: ...
+
     def resolve_offer_expiry_for_pricing(self, pricing: dict[str, Any]) -> tuple[str, int]: ...
 
     def resolve_quote_price_for_pricing(self, pricing: dict[str, Any]) -> float: ...

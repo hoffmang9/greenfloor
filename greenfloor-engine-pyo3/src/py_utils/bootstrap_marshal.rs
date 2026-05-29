@@ -7,7 +7,7 @@ use pyo3::types::{PyDict, PyList};
 use super::common::cached_class;
 use engine_core::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,
-    BootstrapPlan, BootstrapPlanOutcome, BootstrapPhaseSnapshot, LadderDeficit, PlannerLadderRow,
+    BootstrapPhaseSnapshot, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
 };
 
 const BOOTSTRAP_MODULE: &str = "greenfloor.offer_bootstrap";
@@ -91,7 +91,7 @@ fn extract_i64_list(obj: &Bound<'_, PyAny>, name: &str, label: &str) -> PyResult
         .getattr(name)
         .map_err(|_| PyTypeError::new_err(format!("{label} missing attribute: {name}")))?;
     let py_list = list
-        .downcast::<PyList>()
+        .cast::<PyList>()
         .map_err(|_| PyTypeError::new_err(format!("{label}.{name} must be a list")))?;
     let mut values = Vec::with_capacity(py_list.len());
     for (index, item) in py_list.iter().enumerate() {
@@ -142,7 +142,10 @@ fn bootstrap_coins_from_py_list(
     Ok(coins)
 }
 
-fn ladder_deficit_to_py<'py>(py: Python<'py>, deficit: &LadderDeficit) -> PyResult<Bound<'py, PyAny>> {
+fn ladder_deficit_to_py<'py>(
+    py: Python<'py>,
+    deficit: &LadderDeficit,
+) -> PyResult<Bound<'py, PyAny>> {
     let cls = ladder_deficit_class(py)?;
     let kwargs = PyDict::new(py);
     kwargs.set_item("size_base_units", deficit.size_base_units)?;
@@ -152,10 +155,7 @@ fn ladder_deficit_to_py<'py>(py: Python<'py>, deficit: &LadderDeficit) -> PyResu
     cls.call((), Some(&kwargs))
 }
 
-fn bootstrap_plan_to_py<'py>(
-    py: Python<'py>,
-    plan: &BootstrapPlan,
-) -> PyResult<Bound<'py, PyAny>> {
+fn bootstrap_plan_to_py<'py>(py: Python<'py>, plan: &BootstrapPlan) -> PyResult<Bound<'py, PyAny>> {
     let cls = bootstrap_plan_class(py)?;
     let deficits = PyList::empty(py);
     for deficit in &plan.deficits {
@@ -197,12 +197,12 @@ fn bootstrap_plan_from_py<'py>(
 ) -> PyResult<BootstrapPlan> {
     let cls = bootstrap_plan_class(py)?;
     let item = require_instance(plan, &cls, label, "BootstrapPlan")?;
-    let deficits_attr = item.getattr("deficits").map_err(|_| {
-        PyTypeError::new_err(format!("{label} missing attribute: deficits"))
-    })?;
-    let deficits_list = deficits_attr.downcast::<PyList>().map_err(|_| {
-        PyTypeError::new_err(format!("{label}.deficits must be a list"))
-    })?;
+    let deficits_attr = item
+        .getattr("deficits")
+        .map_err(|_| PyTypeError::new_err(format!("{label} missing attribute: deficits")))?;
+    let deficits_list = deficits_attr
+        .cast::<PyList>()
+        .map_err(|_| PyTypeError::new_err(format!("{label}.deficits must be a list")))?;
     let mut deficits = Vec::with_capacity(deficits_list.len());
     for (index, deficit) in deficits_list.iter().enumerate() {
         deficits.push(ladder_deficit_from_py(
@@ -232,9 +232,9 @@ fn bootstrap_plan_outcome_from_py<'py>(
     match kind.trim() {
         "ready" => Ok(BootstrapPlanOutcome::Ready),
         "needs_split" => {
-            let plan_attr = item.getattr("plan").map_err(|_| {
-                PyTypeError::new_err(format!("{label} missing attribute: plan"))
-            })?;
+            let plan_attr = item
+                .getattr("plan")
+                .map_err(|_| PyTypeError::new_err(format!("{label} missing attribute: plan")))?;
             if plan_attr.is_none() {
                 return Err(PyTypeError::new_err(format!(
                     "{label}.plan is required for needs_split"

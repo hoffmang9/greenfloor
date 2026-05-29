@@ -1,4 +1,4 @@
-use super::plan::{CoinOpKind, CoinOpPlan};
+use super::plan::CoinOpPlan;
 
 pub fn projected_coin_ops_fee_mojos(
     plans: &[CoinOpPlan],

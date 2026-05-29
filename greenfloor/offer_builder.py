@@ -6,6 +6,7 @@ from typing import Any
 
 from greenfloor.adapters.native_offer import encode_offer_from_spend_bundle_hex
 from greenfloor.adapters.offer_action import build_bls_offer_for_action
+from greenfloor.adapters.rust_signer import program_config_path_from_payload
 from greenfloor.core.offer_action import legacy_action_request_from_payload
 
 
@@ -21,6 +22,7 @@ def _build_offer(payload: dict[str, Any]) -> str:
         network=str(payload.get("network", "")).strip(),
         key_id=str(payload.get("key_id", "")).strip(),
         request=request,
+        config_path=program_config_path_from_payload(payload),
     )
     return result["offer_text"]
 

@@ -38,7 +38,7 @@ pub fn request_dict_to_json(request: &Bound<'_, PyDict>) -> PyResult<serde_json:
 }
 
 pub fn pricing_dict_from_py(pricing: &Bound<'_, PyAny>) -> PyResult<Value> {
-    if let Ok(dict) = pricing.downcast::<PyDict>() {
+    if let Ok(dict) = pricing.cast::<PyDict>() {
         return request_dict_to_json(dict);
     }
     Err(PyValueError::new_err("pricing must be a dict"))
@@ -70,14 +70,6 @@ pub fn i64_i64_map_to_py_dict<'py>(
         dict.set_item(*key, *value)?;
     }
     Ok(dict)
-}
-
-pub fn string_i64_map_from_py_dict(dict: &Bound<'_, PyDict>) -> PyResult<BTreeMap<String, i64>> {
-    let mut map = BTreeMap::new();
-    for (asset_id, amount) in dict.iter() {
-        map.insert(asset_id.extract::<String>()?, amount.extract::<i64>()?);
-    }
-    Ok(map)
 }
 
 pub fn string_i64_map_to_py_dict<'py>(

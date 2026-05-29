@@ -1,5 +1,12 @@
 # Progress Log
 
+## 2026-05-29 (Offer asset resolution — Rust action boundary)
+
+- **`greenfloor-engine/src/offer/action.rs`:** `try_normalize_resolved_assets` and `resolve_offer_assets_for_action` compose normalize + Coinset fallback; `resolve_offer_assets_via_coinset` is Coinset-only. Signer and BLS action builds both use the composed path when signer config is available.
+- **PyO3:** `try_normalize_offer_asset_ids` exposes Rust normalization; `resolve_offer_assets_via_coinset` is the canonical Coinset-only binding (`resolve_offer_asset_ids` remains a deprecated alias).
+- **Python bridge:** `offer_assets_bridge.resolve_offer_assets` composes normalize then Coinset once; runtime callers delegate through it.
+- **Tests:** Real-engine bridge tests cover normalize, collision, composition, and Coinset fallback; successful MSP lookup is covered by Rust mockito tests.
+
 ## 2026-05-29 (ADR 0010 Rust engine rename)
 
 - **Source layout:** Rust crates now live under `greenfloor-engine/` and `greenfloor-engine-pyo3/`.

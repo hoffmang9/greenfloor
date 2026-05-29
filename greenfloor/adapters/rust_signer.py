@@ -49,19 +49,6 @@ def build_mixed_split(program_path: str, request_dict: dict[str, Any]) -> dict[s
     return result
 
 
-def resolve_offer_asset_ids(program_path: str, base_asset: str, quote_asset: str) -> dict[str, str]:
-    """Resolve market symbols or asset ids to canonical offer asset ids."""
-    engine = import_engine()
-    result = engine.resolve_offer_asset_ids(str(program_path), base_asset, quote_asset)
-    if not isinstance(result, dict):
-        raise TypeError("resolve_offer_asset_ids returned non-dict result")
-    base_asset_id = str(result.get("base_asset_id", "")).strip()
-    quote_asset_id = str(result.get("quote_asset_id", "")).strip()
-    if not base_asset_id or not quote_asset_id:
-        raise ValueError("resolve_offer_asset_ids_missing_fields")
-    return {"base_asset_id": base_asset_id, "quote_asset_id": quote_asset_id}
-
-
 def program_config_path_from_payload(payload: dict[str, Any]) -> str | None:
     """Resolve program.yaml path from signing/offer payload fields."""
     for key in ("program_config_path", "program_config", "program_path"):

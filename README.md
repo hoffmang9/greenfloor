@@ -1,17 +1,23 @@
 # GreenFloor
 
-GreenFloor is a long-running Python application for Chia CAT market making.
+GreenFloor is a Chia CAT market-making system with a Python operator surface backed by
+the canonical `greenfloor-engine` Rust engine (`greenfloor_engine` PyO3 module).
+Python owns CLI/daemon orchestration, config parsing, storage, and network adapters;
+Rust owns vault signing, offer construction/validation, coin-op policy, and deterministic
+market-cycle policy.
 
 ## Components
 
 - `greenfloor-manager`: manager CLI for config validation, key onboarding, coin inventory/reshaping, offer building/posting, and operational checks.
 - `greenfloord`: daemon process that evaluates configured markets, executes offers, and emits low-inventory alerts.
+- `greenfloor-engine/`: Rust crate for canonical signing, offer, coin-op, and cycle policy.
+- `greenfloor-engine-pyo3/`: PyO3 extension exported as `greenfloor_engine` for in-process Python calls.
 
 ## V1 Plan
 
 - The current implementation plan is tracked in `docs/plan.md`.
 - Operator deployment/recovery runbook is in `docs/runbook.md`.
-- Syncing, signing, and offer-generation baseline: GreenFloor uses `chia-wallet-sdk` (included as a repo submodule) for default blockchain sync/sign and offer-file execution paths.
+- Syncing, signing, and offer-generation baseline: GreenFloor uses `chia-wallet-sdk` (included as a repo submodule) through the Rust engine for signing and offer-file execution paths.
 
 ## Offer Files
 
@@ -109,6 +115,13 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 pre-commit run --all-files
+```
+
+Rust engine checks:
+
+```bash
+cargo test --manifest-path greenfloor-engine/Cargo.toml
+cargo test --manifest-path greenfloor-engine-pyo3/Cargo.toml --no-run
 ```
 
 ## Environment Variables

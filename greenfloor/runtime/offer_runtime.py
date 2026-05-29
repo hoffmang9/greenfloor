@@ -6,20 +6,20 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from greenfloor.adapters import offer_action, rust_signer
+from greenfloor.adapters import offer_action
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.core.offer_action import (
     OfferCreatePhaseOutcome,
     build_action_request,
     to_create_phase_outcome,
 )
+from greenfloor.core.offer_assets_bridge import resolve_offer_assets
 from greenfloor.core.offer_bootstrap_bridge import (
     BootstrapPhaseResult,
     plan_bootstrap_mixed_outputs,
 )
 from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.core.signer_offer_request import signer_split_asset_id
-from greenfloor.hex_utils import canonical_is_xch
 from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.offer_bootstrap import (
@@ -44,33 +44,6 @@ _runtime_logger = logging.getLogger("greenfloor.manager")
 
 def _signer_config_path(program: ProgramConfig) -> str:
     return prepare_signer_runtime(program)
-
-
-def signer_resolve_offer_asset_ids(
-    *,
-    program: ProgramConfig,
-    base_asset_id: str,
-    quote_asset_id: str,
-) -> tuple[str, str]:
-    config_path = _signer_config_path(program)
-    payload = rust_signer.resolve_offer_asset_ids(
-        config_path,
-        str(base_asset_id).strip(),
-        str(quote_asset_id).strip(),
-    )
-    resolved_base = str(payload.get("base_asset_id", "")).strip()
-    resolved_quote = str(payload.get("quote_asset_id", "")).strip()
-    if not resolved_base or not resolved_quote:
-        raise RuntimeError("signer_asset_resolution_failed:empty_resolved_asset_id")
-    if (
-        resolved_base == resolved_quote
-        and not canonical_is_xch(base_asset_id)
-        and not canonical_is_xch(quote_asset_id)
-    ):
-        raise RuntimeError(
-            "signer_asset_resolution_failed:resolved_assets_collide_for_non_xch_pair"
-        )
-    return resolved_base, resolved_quote
 
 
 def _list_coinset_bootstrap_coins(
@@ -229,7 +202,7 @@ def signer_create_offer_phase(
 @dataclass(frozen=True, slots=True)
 class SignerOfferDeps:
     post_deps: OfferPostDeps
-    resolve_signer_offer_asset_ids_fn: collections.abc.Callable[..., tuple[str, str]]
+    resolve_offer_assets_fn: collections.abc.Callable[..., tuple[str, str]]
     signer_bootstrap_phase_fn: collections.abc.Callable[..., BootstrapPhaseResult]
     signer_create_offer_phase_fn: collections.abc.Callable[..., OfferCreatePhaseOutcome]
 
@@ -237,7 +210,7 @@ class SignerOfferDeps:
 def default_signer_offer_deps(*, post_deps: OfferPostDeps | None = None) -> SignerOfferDeps:
     return SignerOfferDeps(
         post_deps=post_deps or default_offer_post_deps(),
-        resolve_signer_offer_asset_ids_fn=signer_resolve_offer_asset_ids,
+        resolve_offer_assets_fn=resolve_offer_assets,
         signer_bootstrap_phase_fn=signer_bootstrap_phase,
         signer_create_offer_phase_fn=signer_create_offer_phase,
     )
@@ -263,12 +236,10 @@ def build_and_post_offer_signer(
     resolved_deps = deps or default_signer_offer_deps()
 
     prepare_signer_runtime(program)
-    resolved_base_asset_id, resolved_quote_asset_id = (
-        resolved_deps.resolve_signer_offer_asset_ids_fn(
-            program=program,
-            base_asset_id=str(market.base_asset),
-            quote_asset_id=str(market.quote_asset),
-        )
+    resolved_base_asset_id, resolved_quote_asset_id = resolved_deps.resolve_offer_assets_fn(
+        str(market.base_asset),
+        str(market.quote_asset),
+        program=program,
     )
 
     def bootstrap(**kwargs: Any) -> BootstrapPhaseResult:

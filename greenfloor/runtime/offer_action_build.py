@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from greenfloor.adapters import offer_action, rust_signer
+from greenfloor.adapters import offer_action
 from greenfloor.config.models import prepare_signer_runtime
 from greenfloor.core.offer_action import (
     OfferActionRequest,
@@ -10,8 +10,7 @@ from greenfloor.core.offer_action import (
     build_action_request,
     to_create_phase_outcome,
 )
-from greenfloor.core.offer_request_bridge import normalize_offer_asset_id
-from greenfloor.hex_utils import canonical_is_xch, normalize_hex_id
+from greenfloor.core.offer_assets_bridge import resolve_offer_assets
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 
 __all__ = [
@@ -50,24 +49,15 @@ def action_request_from_context(
     )
 
 
-def _is_canonical_offer_asset_id(asset_id: str) -> bool:
-    normalized = str(asset_id or "").strip()
-    if canonical_is_xch(normalized):
-        return True
-    return bool(normalize_hex_id(normalized))
-
-
 def resolve_action_assets_for_build_context(
     build_ctx: OfferBuildContext,
 ) -> tuple[str, str]:
     """Resolve market symbols to canonical asset ids for local BLS offer-action builds."""
-    base = str(build_ctx.market.base_asset)
-    quote = str(build_ctx.resolved_quote_asset)
-    if _is_canonical_offer_asset_id(base) and _is_canonical_offer_asset_id(quote):
-        return normalize_offer_asset_id(base), normalize_offer_asset_id(quote)
-    config_path = prepare_signer_runtime(build_ctx.program)
-    payload = rust_signer.resolve_offer_asset_ids(config_path, base, quote)
-    return payload["base_asset_id"], payload["quote_asset_id"]
+    return resolve_offer_assets(
+        str(build_ctx.market.base_asset),
+        str(build_ctx.resolved_quote_asset),
+        program=build_ctx.program,
+    )
 
 
 def build_bls_offer_from_build_context(
@@ -99,6 +89,7 @@ def build_bls_offer_from_build_context(
         network=str(build_ctx.network),
         key_id=key_id,
         request=request,
+        config_path=prepare_signer_runtime(build_ctx.program),
     )
 
 
