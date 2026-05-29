@@ -170,13 +170,12 @@ def expires_at_iso_from_unix(expires_at_unix: int) -> str:
 
 
 def expires_at_iso_from_build_context(*, expiry_unit: str, expiry_value: int) -> str:
-    """ISO expiry for offer create outcomes using build-context pricing expiry."""
-    unit = str(expiry_unit or "minutes").strip().lower()
+    """ISO expiry from build-context pricing (minutes-only contract)."""
+    del expiry_unit
     value = int(expiry_value)
     if value <= 0:
         return ""
-    seconds = value * 60 if unit == "minutes" else value
-    return expires_at_iso_from_unix(int(time.time()) + seconds)
+    return expires_at_iso_from_unix(int(time.time()) + value * 60)
 
 
 def to_create_phase_outcome(

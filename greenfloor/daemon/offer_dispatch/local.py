@@ -7,7 +7,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from greenfloor.adapters import offer_action
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
@@ -22,6 +21,7 @@ from greenfloor.daemon.cooldowns import (
     _set_cooldown,
 )
 from greenfloor.daemon.offer_dispatch.items import action_item
+from greenfloor.runtime.offer_action_build import build_bls_offer_from_build_context
 from greenfloor.runtime.offer_build_context import (
     default_program_config_path,
     prepare_offer_build_context,
@@ -56,7 +56,7 @@ def build_offer_for_action(
             "offer": None,
         }
     try:
-        result = offer_action.build_bls_offer_from_build_context(
+        result = build_bls_offer_from_build_context(
             build_ctx,
             size_base_units=int(action.size),
             action_side=planned_action_side(action),

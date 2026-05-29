@@ -272,7 +272,7 @@ def test_build_offer_for_action_direct_builder_call(monkeypatch) -> None:
         return {"offer_text": f"offer1direct-{kwargs['size_base_units']}"}
 
     monkeypatch.setattr(
-        "greenfloor.adapters.offer_action.build_bls_offer_from_build_context",
+        "greenfloor.daemon.offer_dispatch.local.build_bls_offer_from_build_context",
         _capture_build,
     )
     action = PlannedAction(

@@ -120,7 +120,13 @@ def build_signer_create_offer_request(
     broadcast_split: bool = True,
     expires_at_unix: int | None = None,
 ) -> SignerCreateOfferRequest:
-    """Build the request passed to ``rust_signer.build_vault_cat_offer``."""
+    """Build a low-level signer vault create request.
+
+    Deprecated for market-action offer creation: use
+    ``greenfloor.core.offer_action.build_action_request`` and
+    ``greenfloor.adapters.offer_action.build_signer_offer_for_action`` instead.
+    Retained for parity tests and KMS signing router plan-dict spends.
+    """
     pricing = dict(market.pricing or {})
     leg = compute_signer_offer_leg_amounts(
         size_base_units=size_base_units,

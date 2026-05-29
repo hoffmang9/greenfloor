@@ -298,19 +298,15 @@ def build_and_post_offer_signer(
                 extra={"signer_path": True},
             ) from exc
         execution_mode = create_phase.execution_mode.strip()
-        offer_text = create_phase.offer_text.strip()
-        if not offer_text:
+        if not create_phase.offer_text.strip():
             raise OfferCreateFailure(
                 "signer_create_offer_failed:missing_offer_text",
                 create_phase_ms=int((time.monotonic() - started) * 1000),
                 extra={"signer_path": True, "execution_mode": execution_mode},
             )
-        return OfferCreateOutcome(
-            offer_text=offer_text,
-            expires_at=create_phase.expires_at,
-            side=create_phase.side,
+        return OfferCreateOutcome.from_create_phase(
+            create_phase,
             create_phase_ms=int((time.monotonic() - started) * 1000),
-            extra={"execution_mode": execution_mode} if execution_mode else {},
         )
 
     return build_and_post_offer(

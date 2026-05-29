@@ -76,9 +76,7 @@ fn resolved_assets_or_collision_error(
         && !is_xch_like_asset(&resolved_base)
         && !is_xch_like_asset(&resolved_quote)
     {
-        return Err(SignerError::Other(
-            "resolved_assets_collide_for_non_xch_pair".to_string(),
-        ));
+        return Err(SignerError::ResolvedAssetsCollideForNonXchPair);
     }
     Ok((resolved_base, resolved_quote))
 }
@@ -101,8 +99,8 @@ async fn resolve_signer_assets(
 ) -> SignerResult<(String, String)> {
     match try_normalize_resolved_assets(base_asset, quote_asset) {
         Ok(resolved) => Ok(resolved),
-        Err(SignerError::Other(msg)) if msg == "resolved_assets_collide_for_non_xch_pair" => {
-            Err(SignerError::Other(msg))
+        Err(SignerError::ResolvedAssetsCollideForNonXchPair) => {
+            Err(SignerError::ResolvedAssetsCollideForNonXchPair)
         }
         Err(_) => {
             let msp =
@@ -236,5 +234,15 @@ mod tests {
             try_normalize_resolved_assets(&cat, "xch").expect("normalized assets");
         assert_eq!(base, cat);
         assert_eq!(quote, "xch");
+    }
+
+    #[test]
+    fn collision_error_does_not_use_other_variant() {
+        let cat = "a".repeat(64);
+        let err = try_normalize_resolved_assets(&cat, &cat).expect_err("collision");
+        assert!(matches!(
+            err,
+            SignerError::ResolvedAssetsCollideForNonXchPair
+        ));
     }
 }
