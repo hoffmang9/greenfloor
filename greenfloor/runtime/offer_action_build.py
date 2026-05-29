@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from greenfloor.adapters import offer_action
+from greenfloor.config.models import prepare_signer_runtime
 from greenfloor.core.offer_action import (
     OfferActionRequest,
     OfferActionResult,
@@ -88,6 +89,7 @@ def build_bls_offer_from_build_context(
         network=str(build_ctx.network),
         key_id=key_id,
         request=request,
+        config_path=prepare_signer_runtime(build_ctx.program),
     )
 
 

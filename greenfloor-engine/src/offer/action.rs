@@ -183,10 +183,15 @@ pub async fn build_signer_offer_for_action(
 pub async fn build_bls_offer_for_action(
     network: &str,
     master_sk: &SecretKey,
+    config: Option<&SignerConfig>,
     request: BuildOfferForActionRequest,
 ) -> SignerResult<BuildOfferForActionResult> {
-    let (resolved_base, resolved_quote) =
-        try_normalize_resolved_assets(&request.base_asset, &request.quote_asset)?;
+    let (resolved_base, resolved_quote) = match config {
+        Some(cfg) => {
+            resolve_offer_assets_for_action(cfg, &request.base_asset, &request.quote_asset).await?
+        }
+        None => try_normalize_resolved_assets(&request.base_asset, &request.quote_asset)?,
+    };
     let quote_price = resolve_quote_price(&request)?;
     let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
     let expires_at_unix = expires_at_unix_from_pricing(&request.pricing);

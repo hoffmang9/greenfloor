@@ -11,8 +11,8 @@ from greenfloor.config.io import load_program_config
 from greenfloor.config.models import invalidate_signer_runtime_cache
 from greenfloor.core.engine_bridge import import_engine
 from greenfloor.core.offer_assets_bridge import (
-    resolve_offer_asset_ids_by_config_path,
     resolve_offer_assets,
+    resolve_offer_assets_via_coinset_config_path,
     try_normalize_offer_asset_ids,
 )
 from tests.helpers.msp_mock_server import write_signer_program_yaml
@@ -90,7 +90,7 @@ def test_resolve_offer_assets_reaches_coinset_for_ticker_symbols(tmp_path: Path)
         resolve_offer_assets("HOA", "xch", program=program)
 
 
-def test_resolve_offer_asset_ids_by_config_path_is_coinset_only(tmp_path: Path) -> None:
+def test_resolve_offer_assets_via_coinset_config_path_is_coinset_only(tmp_path: Path) -> None:
     _require_engine()
     home = tmp_path / "home"
     home.mkdir()
@@ -102,7 +102,7 @@ def test_resolve_offer_asset_ids_by_config_path_is_coinset_only(tmp_path: Path) 
     )
 
     with pytest.raises(ValueError, match="asset_resolution_failed:HOA"):
-        resolve_offer_asset_ids_by_config_path(str(program_path), "HOA", "xch")
+        resolve_offer_assets_via_coinset_config_path(str(program_path), "HOA", "xch")
 
 
 def test_rust_coinset_resolution_for_ticker_symbols() -> None:

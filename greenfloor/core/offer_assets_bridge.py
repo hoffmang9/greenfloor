@@ -10,9 +10,9 @@ if TYPE_CHECKING:
     from greenfloor.config.models import ProgramConfig
 
 __all__ = [
-    "resolve_offer_asset_ids_by_config_path",
-    "resolve_offer_asset_ids_for_program",
     "resolve_offer_assets",
+    "resolve_offer_assets_via_coinset_config_path",
+    "resolve_offer_assets_for_program",
     "try_normalize_offer_asset_ids",
 ]
 
@@ -49,18 +49,18 @@ def try_normalize_offer_asset_ids(base_asset: str, quote_asset: str) -> tuple[st
     return _coerce_asset_pair(payload)
 
 
-def resolve_offer_asset_ids_by_config_path(
+def resolve_offer_assets_via_coinset_config_path(
     config_path: str,
     base_asset: str,
     quote_asset: str,
 ) -> tuple[str, str]:
-    """Resolve offer assets via signer config path and Coinset (no normalize retry)."""
-    resolve = _require_offer_action_method("resolve_offer_asset_ids")
+    """Resolve offer assets via signer config and Coinset MSP (no normalize retry)."""
+    resolve = _require_offer_action_method("resolve_offer_assets_via_coinset")
     payload = resolve(str(config_path), str(base_asset).strip(), str(quote_asset).strip())
     return _coerce_asset_pair(payload)
 
 
-def resolve_offer_asset_ids_for_program(
+def resolve_offer_assets_for_program(
     program: ProgramConfig,
     base_asset: str,
     quote_asset: str,
@@ -69,7 +69,7 @@ def resolve_offer_asset_ids_for_program(
     from greenfloor.config.models import prepare_signer_runtime
 
     config_path = prepare_signer_runtime(program)
-    return resolve_offer_asset_ids_by_config_path(config_path, base_asset, quote_asset)
+    return resolve_offer_assets_via_coinset_config_path(config_path, base_asset, quote_asset)
 
 
 def resolve_offer_assets(
@@ -84,4 +84,4 @@ def resolve_offer_assets(
     normalized = try_normalize_offer_asset_ids(base, quote)
     if normalized is not None:
         return normalized
-    return resolve_offer_asset_ids_for_program(program, base, quote)
+    return resolve_offer_assets_for_program(program, base, quote)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.offer_assets_bridge import resolve_offer_assets
+from greenfloor.core.offer_assets_bridge import resolve_offer_assets, try_normalize_offer_asset_ids
 from greenfloor.core.offer_policy import resolve_quote_price_for_pricing
 from greenfloor.core.parallel_reservation_context import ParallelReservationContext
 from greenfloor.daemon.market_helpers import _resolve_quote_asset_for_offer
@@ -52,5 +52,8 @@ def resolve_signer_offer_asset_ids_for_reservation(
         quote_asset,
         program=program,
     )
-    resolved_xch_asset_id, _ = resolve_offer_assets("xch", quote_asset, program=program)
+    xch_pair = try_normalize_offer_asset_ids("xch", quote_asset)
+    if xch_pair is None:
+        raise RuntimeError("signer_asset_resolution_failed:empty_resolved_asset_id")
+    resolved_xch_asset_id = xch_pair[0]
     return resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id

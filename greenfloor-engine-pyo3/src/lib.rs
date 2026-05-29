@@ -29,7 +29,7 @@ use engine_core::{
     encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
     from_input_spend_bundle_xch_bytes, get_conservative_fee_estimate, get_fee_estimate,
     list_cat_coin_summaries, list_cat_coin_summaries_by_ids, load_bls_master_secret_key,
-    load_signer_config, push_tx_hex, resolve_offer_asset_ids, resolve_vault_context,
+    load_signer_config, push_tx_hex, resolve_offer_assets_via_coinset, resolve_vault_context,
     validate_offer_structure, validate_offer_text, verify_offer_for_dexie, BlsMixedSplitRequest,
     BlsOfferRequest, BlsXchCoinOpRequest, CreateOfferRequest, MixedSplitRequest,
 };
@@ -266,6 +266,32 @@ fn broadcast_bls_spend_bundle_py(network: &str, spend_bundle_hex: &str) -> PyRes
     })
 }
 
+fn resolve_offer_assets_via_coinset_py_impl(
+    config_path: &str,
+    base_asset: &str,
+    quote_asset: &str,
+) -> PyResult<Py<PyAny>> {
+    let config = load_signer_config(Path::new(config_path)).map_err(to_py_err)?;
+    let (base, quote) = runtime()
+        .block_on(resolve_offer_assets_via_coinset(
+            config,
+            base_asset,
+            quote_asset,
+        ))
+        .map_err(to_py_err)?;
+    Python::attach(|py| Ok(PyTuple::new(py, [base, quote])?.into()))
+}
+
+#[pyfunction]
+#[pyo3(name = "resolve_offer_assets_via_coinset")]
+fn resolve_offer_assets_via_coinset_py(
+    config_path: &str,
+    base_asset: &str,
+    quote_asset: &str,
+) -> PyResult<Py<PyAny>> {
+    resolve_offer_assets_via_coinset_py_impl(config_path, base_asset, quote_asset)
+}
+
 #[pyfunction]
 #[pyo3(name = "resolve_offer_asset_ids")]
 fn resolve_offer_asset_ids_py(
@@ -273,11 +299,7 @@ fn resolve_offer_asset_ids_py(
     base_asset: &str,
     quote_asset: &str,
 ) -> PyResult<Py<PyAny>> {
-    let config = load_signer_config(Path::new(config_path)).map_err(to_py_err)?;
-    let (base, quote) = runtime()
-        .block_on(resolve_offer_asset_ids(config, base_asset, quote_asset))
-        .map_err(to_py_err)?;
-    Python::attach(|py| Ok(PyTuple::new(py, [base, quote])?.into()))
+    resolve_offer_assets_via_coinset_py_impl(config_path, base_asset, quote_asset)
 }
 
 /// Full Dexie pre-post validation (structure, expiry, duplicate spends).
@@ -416,6 +438,7 @@ fn greenfloor_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(list_bls_cat_coins_py, m)?)?;
     m.add_function(wrap_pyfunction!(list_bls_cat_coins_by_ids_py, m)?)?;
     m.add_function(wrap_pyfunction!(broadcast_bls_spend_bundle_py, m)?)?;
+    m.add_function(wrap_pyfunction!(resolve_offer_assets_via_coinset_py, m)?)?;
     m.add_function(wrap_pyfunction!(resolve_offer_asset_ids_py, m)?)?;
     m.add_function(wrap_pyfunction!(validate_offer_py, m)?)?;
     m.add_function(wrap_pyfunction!(validate_offer_structure_py, m)?)?;

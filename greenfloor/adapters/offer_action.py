@@ -29,7 +29,13 @@ def build_bls_offer_for_action(
     network: str,
     key_id: str,
     request: OfferActionRequest,
+    config_path: str | None = None,
 ) -> OfferActionResult:
     engine = import_engine()
-    result = engine.build_bls_offer_for_action_key(str(network), str(key_id), dict(request))
+    result = engine.build_bls_offer_for_action_key(
+        str(network),
+        str(key_id),
+        dict(request),
+        config_path=str(config_path).strip() if config_path else None,
+    )
     return parse_action_result(result)

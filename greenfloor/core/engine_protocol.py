@@ -292,6 +292,10 @@ class OfferPolicyEngineProtocol(Protocol):
         self, base_asset: str, quote_asset: str
     ) -> tuple[str, str] | None: ...
 
+    def resolve_offer_assets_via_coinset(
+        self, config_path: str, base_asset: str, quote_asset: str
+    ) -> tuple[str, str]: ...
+
     def resolve_offer_asset_ids(
         self, config_path: str, base_asset: str, quote_asset: str
     ) -> tuple[str, str]: ...
