@@ -1,11 +1,17 @@
 use pyo3::prelude::*;
 
 use signer_core::{
-    compute_signer_offer_leg_amounts, normalize_offer_asset_id, quote_mojos_for_base_size,
-    signer_split_asset_id,
+    compute_signer_offer_leg_amounts, normalize_offer_asset_id, normalize_offer_side,
+    quote_mojos_for_base_size, signer_split_asset_id,
 };
 
 use crate::py_utils::{pricing_dict_from_py, signer_offer_leg_amounts_to_py, to_py_err};
+
+#[pyfunction]
+#[pyo3(name = "normalize_offer_side")]
+fn normalize_offer_side_py(action_side: &str) -> String {
+    normalize_offer_side(action_side).to_string()
+}
 
 #[pyfunction]
 #[pyo3(name = "quote_mojos_for_base_size")]
@@ -58,6 +64,7 @@ fn compute_signer_offer_leg_amounts_py(
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(normalize_offer_side_py, m)?)?;
     m.add_function(wrap_pyfunction!(quote_mojos_for_base_size_py, m)?)?;
     m.add_function(wrap_pyfunction!(signer_split_asset_id_py, m)?)?;
     m.add_function(wrap_pyfunction!(normalize_offer_asset_id_py, m)?)?;

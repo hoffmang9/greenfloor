@@ -1,7 +1,10 @@
 """Stable import path for offer-build and Dexie validation policy."""
 
-from greenfloor.core.policy_bridge import (
+from greenfloor.core.offer_request_bridge import (
+    compute_signer_offer_leg_amounts,
     normalize_offer_side,
+)
+from greenfloor.core.policy_bridge import (
     bootstrap_block_error,
     dexie_offer_asset_expectation_error,
     expected_publish_asset_fields,
@@ -21,6 +24,7 @@ __all__ = [
     "SignerCreateOfferRequest",
     "bootstrap_block_error",
     "build_signer_create_offer_request",
+    "compute_signer_offer_leg_amounts",
     "dexie_offer_asset_expectation_error",
     "expected_publish_asset_fields",
     "mojo_multiplier_for_leg",

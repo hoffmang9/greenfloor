@@ -4,7 +4,7 @@
 
 - **`greenfloor-signer/src/offer/request.rs`:** canonical leg math — `quote_mojos_for_base_size`, `signer_split_asset_id`, `compute_signer_offer_leg_amounts` (normalized asset ids), `normalize_offer_asset_id`; Rust-only `normalize_offer_side`.
 - **PyO3:** `offer_request_py.rs` exposes leg-math symbols; `offer_build_py.rs` keeps pricing/publish helpers; shared `pricing_dict_from_py` in `py_utils/common.rs`.
-- **Python bridges:** `policy_bridge` for kernel leg math; `signer_offer_request.py` for dataclasses + `build_signer_create_offer_request`; `normalize_offer_side` is pure Python in `policy_bridge` (stable import via `offer_policy`). Removed `core/offer_side.py`.
+- **Python bridges:** `offer_request_bridge.py` for kernel leg math; `signer_offer_request.py` for dataclasses + `build_signer_create_offer_request`; `normalize_offer_side` and asset helpers delegate to Rust (stable import via `offer_policy`). Removed `core/offer_side.py`.
 - **Tests:** Rust unit tests in `request.rs`; golden + validation in `tests/test_signer_create_offer_parity.py`; BLS input contracts in `tests/test_offer_builder_sdk.py`.
 
 ## 2026-05-28 (Signer fixture hygiene follow-up — consolidate protocols and tests)

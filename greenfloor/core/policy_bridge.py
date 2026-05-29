@@ -5,6 +5,37 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 from greenfloor.core import kernel_bridge
+from greenfloor.core.offer_request_bridge import (
+    compute_signer_offer_leg_amounts,
+    normalize_offer_asset_id,
+    normalize_offer_side,
+    quote_mojos_for_base_size,
+    signer_split_asset_id,
+)
+
+__all__ = [
+    "ExpectedPublishAssetFields",
+    "bootstrap_block_error",
+    "coinset_fee_lookup_retry_sleep",
+    "compute_signer_offer_leg_amounts",
+    "dexie_invalid_offer_retry_sleep",
+    "dexie_invalid_offer_should_retry",
+    "dexie_offer_asset_expectation_error",
+    "expected_publish_asset_fields",
+    "moderate_retry_next_sleep",
+    "moderate_retry_sleep_seconds",
+    "mojo_multiplier_for_leg",
+    "normalize_offer_asset_id",
+    "normalize_offer_side",
+    "parse_rate_limit_retry_seconds",
+    "poll_exponential_advance_sleep",
+    "poll_exponential_sleep_now",
+    "quote_mojos_for_base_size",
+    "resolve_offer_expiry_for_pricing",
+    "resolve_quote_price_for_pricing",
+    "signer_split_asset_id",
+    "verify_offer_for_dexie",
+]
 
 _KERNEL_REBUILD_HINT = (
     "greenfloor_signer extension is missing required policy symbols. "
@@ -59,79 +90,6 @@ def resolve_quote_price_for_pricing(pricing: dict[str, Any]) -> float:
 
 def mojo_multiplier_for_leg(pricing: dict[str, Any], field: str, asset_id: str) -> int:
     return int(kernel_bridge.policy_kernel().mojo_multiplier_for_leg(pricing, field, asset_id))
-
-
-def _coerce_signer_offer_leg_amounts(payload: object):
-    from greenfloor.core.signer_offer_request import SignerOfferLegAmounts
-
-    if isinstance(payload, SignerOfferLegAmounts):
-        return payload
-    raise TypeError("compute_signer_offer_leg_amounts must return SignerOfferLegAmounts")
-
-
-def normalize_offer_side(action_side: str) -> str:
-    """Normalize offer action side to ``buy`` or ``sell`` (pure Python; matches Rust kernel)."""
-    value = str(action_side or "").strip()
-    if value.lower() == "buy":
-        return "buy"
-    return "sell"
-
-
-def quote_mojos_for_base_size(
-    *,
-    size_base_units: int,
-    quote_price: float,
-    quote_unit_multiplier: int,
-) -> int:
-    compute = _require_policy_method("quote_mojos_for_base_size")
-    return int(
-        compute(
-            int(size_base_units),
-            float(quote_price),
-            int(quote_unit_multiplier),
-        )
-    )
-
-
-def signer_split_asset_id(
-    *,
-    action_side: str,
-    resolved_base_asset_id: str,
-    resolved_quote_asset_id: str,
-) -> str:
-    resolve = _require_policy_method("signer_split_asset_id")
-    return str(
-        resolve(
-            str(action_side),
-            str(resolved_base_asset_id),
-            str(resolved_quote_asset_id),
-        )
-    )
-
-
-def normalize_offer_asset_id(asset_id: str) -> str:
-    return str(_require_policy_method("normalize_offer_asset_id")(str(asset_id)))
-
-
-def compute_signer_offer_leg_amounts(
-    *,
-    size_base_units: int,
-    quote_price: float,
-    resolved_base_asset_id: str,
-    resolved_quote_asset_id: str,
-    action_side: str,
-    pricing: dict[str, Any],
-) -> SignerOfferLegAmounts:
-    compute = _require_policy_method("compute_signer_offer_leg_amounts")
-    payload = compute(
-        int(size_base_units),
-        float(quote_price),
-        str(resolved_base_asset_id),
-        str(resolved_quote_asset_id),
-        str(action_side),
-        dict(pricing),
-    )
-    return _coerce_signer_offer_leg_amounts(payload)
 
 
 def verify_offer_for_dexie(offer_text: str) -> str | None:

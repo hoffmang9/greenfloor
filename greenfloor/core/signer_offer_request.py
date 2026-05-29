@@ -1,7 +1,7 @@
 """Signer create-offer request types and builders (no IO).
 
 Leg math and asset normalization live in the Rust kernel; Python reaches them via
-``greenfloor.core.policy_bridge``. This module owns dataclasses and request assembly.
+``greenfloor.core.offer_request_bridge``. This module owns dataclasses and request assembly.
 """
 
 from __future__ import annotations
@@ -10,13 +10,13 @@ from dataclasses import dataclass
 from typing import Any, TypedDict
 
 from greenfloor.config.models import MarketConfig
-from greenfloor.core.policy_bridge import (
+from greenfloor.core.offer_request_bridge import (
     compute_signer_offer_leg_amounts,
-    mojo_multiplier_for_leg,
     normalize_offer_asset_id,
     quote_mojos_for_base_size,
     signer_split_asset_id,
 )
+from greenfloor.core.policy_bridge import mojo_multiplier_for_leg
 
 __all__ = [
     "COMPARABLE_RUNTIME_REQUEST_FIELDS",

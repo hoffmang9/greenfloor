@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from greenfloor.adapters.native_offer import encode_offer_from_spend_bundle_hex
-from greenfloor.core.signer_offer_request import compute_signer_offer_leg_amounts
+from greenfloor.core.offer_policy import compute_signer_offer_leg_amounts
 
 
 def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:

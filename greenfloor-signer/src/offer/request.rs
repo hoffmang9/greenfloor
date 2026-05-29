@@ -30,9 +30,9 @@ pub fn signer_split_asset_id(
     resolved_quote_asset_id: &str,
 ) -> String {
     if normalize_offer_side(action_side) == "buy" {
-        resolved_quote_asset_id.trim().to_string()
+        normalize_offer_asset_id(resolved_quote_asset_id)
     } else {
-        resolved_base_asset_id.trim().to_string()
+        normalize_offer_asset_id(resolved_base_asset_id)
     }
 }
 
@@ -232,6 +232,19 @@ mod tests {
     #[test]
     fn normalize_offer_asset_id_strips_prefix() {
         assert_eq!(normalize_offer_asset_id("0xAbCd"), "abcd");
+    }
+
+    #[test]
+    fn signer_split_asset_id_normalizes_selected_asset() {
+        assert_eq!(
+            signer_split_asset_id("sell", &format!("0x{BASE_ASSET}"), QUOTE_XCH),
+            BASE_ASSET
+        );
+        let quote_cat = "664799fc173e0d9d4d024c42e411d26f275eeb1095dad980ccd11df09c8bb6fb";
+        assert_eq!(
+            signer_split_asset_id("buy", BASE_ASSET, &format!("0x{quote_cat}")),
+            quote_cat
+        );
     }
 
     #[test]
