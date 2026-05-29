@@ -1,5 +1,12 @@
 # Progress Log
 
+## 2026-05-29 (Offer asset resolution — Rust action boundary)
+
+- **`greenfloor-engine/src/offer/action.rs`:** `try_normalize_resolved_assets` and `resolve_offer_assets_for_action` are public Rust action-boundary helpers; the top-level `resolve_offer_asset_ids` now uses the same normalize/fallback/collision path as signer offer creation.
+- **PyO3:** `try_normalize_offer_asset_ids` exposes Rust normalization for already-resolved BLS/local paths without requiring signer config; symbol fallback still uses Coinset-backed Rust resolution.
+- **Python shrink:** `offer_action_build.py` no longer owns XCH/hex canonical checks; `offer_runtime.py` no longer duplicates non-XCH collision checks.
+- **Tests:** Rust normalization test plus focused Python offer-action/runtime wiring tests cover canonical fast path, ticker fallback, and collision propagation.
+
 ## 2026-05-29 (ADR 0010 Rust engine rename)
 
 - **Source layout:** Rust crates now live under `greenfloor-engine/` and `greenfloor-engine-pyo3/`.

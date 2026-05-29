@@ -1,5 +1,5 @@
-use pyo3::prelude::*;
 use engine_core::evaluate_low_inventory_alert;
+use pyo3::prelude::*;
 
 use crate::py_utils::{low_inventory_evaluation_to_py, low_inventory_input_from_py};
 

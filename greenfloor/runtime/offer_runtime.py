@@ -19,7 +19,6 @@ from greenfloor.core.offer_bootstrap_bridge import (
 )
 from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.core.signer_offer_request import signer_split_asset_id
-from greenfloor.hex_utils import canonical_is_xch
 from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.offer_bootstrap import (
@@ -62,14 +61,6 @@ def signer_resolve_offer_asset_ids(
     resolved_quote = str(payload.get("quote_asset_id", "")).strip()
     if not resolved_base or not resolved_quote:
         raise RuntimeError("signer_asset_resolution_failed:empty_resolved_asset_id")
-    if (
-        resolved_base == resolved_quote
-        and not canonical_is_xch(base_asset_id)
-        and not canonical_is_xch(quote_asset_id)
-    ):
-        raise RuntimeError(
-            "signer_asset_resolution_failed:resolved_assets_collide_for_non_xch_pair"
-        )
     return resolved_base, resolved_quote
 
 

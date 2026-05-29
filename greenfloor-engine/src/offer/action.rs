@@ -7,11 +7,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::bls::{build_bls_offer_spend_bundle, BlsOfferRequest};
-use crate::coinset::{self, is_xch_like_asset, normalize_asset_id, resolve_offer_asset_ids, MspCoinset};
+use crate::coinset::{
+    self, is_xch_like_asset, normalize_asset_id, resolve_offer_asset_ids, MspCoinset,
+};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::build::build_vault_cat_offer;
-use crate::offer::build_context::{resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing};
+use crate::offer::build_context::{
+    resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
+};
 use crate::offer::codec::encode_offer_from_spend_bundle_bytes;
 use crate::offer::request::{compute_signer_offer_leg_amounts, normalize_offer_side};
 use crate::offer::types::{CreateOfferRequest, CreateOfferResult};
@@ -81,7 +85,7 @@ fn resolved_assets_or_collision_error(
     Ok((resolved_base, resolved_quote))
 }
 
-fn try_normalize_resolved_assets(
+pub fn try_normalize_resolved_assets(
     base_asset: &str,
     quote_asset: &str,
 ) -> SignerResult<(String, String)> {
@@ -92,7 +96,7 @@ fn try_normalize_resolved_assets(
     resolved_assets_or_collision_error(resolved_base, resolved_quote)
 }
 
-async fn resolve_signer_assets(
+pub async fn resolve_offer_assets_for_action(
     config: &SignerConfig,
     base_asset: &str,
     quote_asset: &str,
@@ -103,8 +107,7 @@ async fn resolve_signer_assets(
             Err(SignerError::ResolvedAssetsCollideForNonXchPair)
         }
         Err(_) => {
-            let msp =
-                MspCoinset::for_network(&config.network, Some(&config.coinset_msp_base_url))?;
+            let msp = MspCoinset::for_network(&config.network, Some(&config.coinset_msp_base_url))?;
             resolve_offer_asset_ids(&msp, base_asset, quote_asset).await
         }
     }
@@ -116,7 +119,8 @@ fn leg_amounts_for_request(
     resolved_quote_asset_id: &str,
     quote_price: f64,
 ) -> SignerResult<crate::offer::request::SignerOfferLegAmounts> {
-    let size = i64::try_from(request.size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
+    let size =
+        i64::try_from(request.size_base_units).map_err(|_| SignerError::InvalidSizeBaseUnits)?;
     compute_signer_offer_leg_amounts(
         size,
         quote_price,
@@ -151,7 +155,7 @@ pub async fn build_signer_offer_for_action(
     request: BuildOfferForActionRequest,
 ) -> SignerResult<BuildOfferForActionResult> {
     let (resolved_base, resolved_quote) =
-        resolve_signer_assets(&config, &request.base_asset, &request.quote_asset).await?;
+        resolve_offer_assets_for_action(&config, &request.base_asset, &request.quote_asset).await?;
     let quote_price = resolve_quote_price(&request)?;
     let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
     let expires_at_unix = expires_at_unix_from_pricing(&request.pricing);
@@ -230,8 +234,7 @@ mod tests {
     #[test]
     fn try_normalize_accepts_pre_resolved_assets() {
         let cat = "a".repeat(64);
-        let (base, quote) =
-            try_normalize_resolved_assets(&cat, "xch").expect("normalized assets");
+        let (base, quote) = try_normalize_resolved_assets(&cat, "xch").expect("normalized assets");
         assert_eq!(base, cat);
         assert_eq!(quote, "xch");
     }

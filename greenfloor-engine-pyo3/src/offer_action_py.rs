@@ -1,12 +1,28 @@
-use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyModule};
 use engine_core::offer::action::{
-    build_bls_offer_for_action, build_signer_offer_for_action, BuildOfferForActionRequest,
+    build_bls_offer_for_action, build_signer_offer_for_action, try_normalize_resolved_assets,
+    BuildOfferForActionRequest,
 };
 use engine_core::{load_bls_master_secret_key, load_signer_config};
+use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyModule};
 
 use crate::py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
 use crate::{block_on_engine, parse_master_sk_bytes, runtime};
+
+fn asset_pair_to_py_dict(py: Python<'_>, base: String, quote: String) -> PyResult<Py<PyAny>> {
+    let dict = PyDict::new(py);
+    dict.set_item("base_asset_id", base)?;
+    dict.set_item("quote_asset_id", quote)?;
+    Ok(dict.into())
+}
+
+#[pyfunction]
+#[pyo3(name = "try_normalize_offer_asset_ids")]
+fn try_normalize_offer_asset_ids_py(base_asset: &str, quote_asset: &str) -> PyResult<Py<PyAny>> {
+    let (base, quote) =
+        try_normalize_resolved_assets(base_asset, quote_asset).map_err(to_py_err)?;
+    Python::attach(|py| asset_pair_to_py_dict(py, base, quote))
+}
 
 #[pyfunction]
 #[pyo3(name = "build_signer_offer_for_action")]
@@ -66,6 +82,7 @@ fn build_bls_offer_for_action_sk_py(
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(try_normalize_offer_asset_ids_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_signer_offer_for_action_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_bls_offer_for_action_key_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_bls_offer_for_action_sk_py, m)?)?;

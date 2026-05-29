@@ -10,8 +10,6 @@ from greenfloor.core.offer_action import (
     build_action_request,
     to_create_phase_outcome,
 )
-from greenfloor.core.offer_request_bridge import normalize_offer_asset_id
-from greenfloor.hex_utils import canonical_is_xch, normalize_hex_id
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 
 __all__ = [
@@ -50,21 +48,15 @@ def action_request_from_context(
     )
 
 
-def _is_canonical_offer_asset_id(asset_id: str) -> bool:
-    normalized = str(asset_id or "").strip()
-    if canonical_is_xch(normalized):
-        return True
-    return bool(normalize_hex_id(normalized))
-
-
 def resolve_action_assets_for_build_context(
     build_ctx: OfferBuildContext,
 ) -> tuple[str, str]:
     """Resolve market symbols to canonical asset ids for local BLS offer-action builds."""
     base = str(build_ctx.market.base_asset)
     quote = str(build_ctx.resolved_quote_asset)
-    if _is_canonical_offer_asset_id(base) and _is_canonical_offer_asset_id(quote):
-        return normalize_offer_asset_id(base), normalize_offer_asset_id(quote)
+    normalized = rust_signer.try_normalize_offer_asset_ids(base, quote)
+    if normalized is not None:
+        return normalized["base_asset_id"], normalized["quote_asset_id"]
     config_path = prepare_signer_runtime(build_ctx.program)
     payload = rust_signer.resolve_offer_asset_ids(config_path, base, quote)
     return payload["base_asset_id"], payload["quote_asset_id"]

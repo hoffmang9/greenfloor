@@ -14,6 +14,7 @@ from greenfloor.runtime.offer_runtime import (
     default_bootstrap_runtime_deps,
     signer_bootstrap_phase,
     signer_create_offer_phase,
+    signer_resolve_offer_asset_ids,
 )
 from tests.helpers.config_fixtures import (
     minimal_market_config,
@@ -32,6 +33,30 @@ def _sample_market(*, base_multiplier: int = 1000, quote_multiplier: int = 1000)
             "quote_unit_mojo_multiplier": quote_multiplier,
         },
     )
+
+
+def test_signer_resolve_offer_asset_ids_delegates_collision_to_engine(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "greenfloor.runtime.offer_runtime.prepare_signer_runtime",
+        lambda _program: "/tmp/signer.yaml",
+    )
+
+    def _raise_collision(_path: str, _base: str, _quote: str) -> dict[str, str]:
+        raise RuntimeError(
+            "signer_asset_resolution_failed:resolved_assets_collide_for_non_xch_pair"
+        )
+
+    monkeypatch.setattr(
+        "greenfloor.runtime.offer_runtime.rust_signer.resolve_offer_asset_ids",
+        _raise_collision,
+    )
+
+    with pytest.raises(RuntimeError, match="resolved_assets_collide_for_non_xch_pair"):
+        signer_resolve_offer_asset_ids(
+            program=cast(ProgramConfig, SimpleNamespace()),
+            base_asset_id="CAT_A",
+            quote_asset_id="CAT_B",
+        )
 
 
 def test_signer_create_offer_phase_calls_signer_and_returns_offer_text(monkeypatch) -> None:
