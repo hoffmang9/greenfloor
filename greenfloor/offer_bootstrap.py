@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 __all__ = [
     "BootstrapCoin",
+    "BootstrapPhaseResult",
     "BootstrapPlan",
     "BootstrapPlanOutcome",
     "LadderDeficit",
@@ -18,6 +19,43 @@ BootstrapPlanKind = Literal[
     "invalid_ladder",
     "invalid_coins",
 ]
+
+BootstrapPhaseStatus = Literal["skipped", "failed", "executed"]
+
+
+@dataclass(frozen=True, slots=True)
+class BootstrapPhaseResult:
+    """Typed bootstrap phase output for offer orchestration."""
+
+    status: BootstrapPhaseStatus
+    reason: str
+    ready: bool = False
+    fee_mojos: int = 0
+    fee_source: str = ""
+    fee_lookup_error: str | None = None
+    wait_error: str | None = None
+    split_result: dict[str, Any] = field(default_factory=dict)
+    wait_events: list[dict[str, str]] = field(default_factory=list)
+    plan: dict[str, Any] | None = None
+
+    def to_manager_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "status": self.status,
+            "reason": self.reason,
+            "ready": self.ready,
+            "fee_mojos": self.fee_mojos,
+            "fee_source": self.fee_source,
+            "fee_lookup_error": self.fee_lookup_error,
+        }
+        if self.wait_error is not None:
+            payload["wait_error"] = self.wait_error
+        if self.split_result:
+            payload["split_result"] = dict(self.split_result)
+        if self.wait_events:
+            payload["wait_events"] = list(self.wait_events)
+        if self.plan is not None:
+            payload["plan"] = dict(self.plan)
+        return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,3 +114,32 @@ class BootstrapPlanOutcome:
     @classmethod
     def invalid_coins(cls) -> BootstrapPlanOutcome:
         return cls(kind="invalid_coins")
+
+    def to_early_phase_result(self) -> BootstrapPhaseResult | None:
+        """Map to a phase result when offer creation should not proceed to mixed-split."""
+        if self.kind == "ready":
+            return BootstrapPhaseResult(status="skipped", reason="already_ready")
+        if self.kind == "cannot_fund":
+            total = int(self.total_output_amount or 0)
+            return BootstrapPhaseResult(
+                status="skipped",
+                reason=f"bootstrap_underfunded:total_output_amount={total}",
+            )
+        if self.kind == "invalid_ladder":
+            return BootstrapPhaseResult(
+                status="failed",
+                reason="bootstrap_failed:bootstrap_invalid_ladder",
+            )
+        if self.kind == "invalid_coins":
+            return BootstrapPhaseResult(
+                status="failed",
+                reason="bootstrap_failed:bootstrap_invalid_coins",
+            )
+        if self.kind == "needs_split":
+            return None
+        raise ValueError(f"unsupported_bootstrap_plan_outcome:{self.kind}")
+
+    def require_plan(self) -> BootstrapPlan:
+        if self.kind != "needs_split" or self.plan is None:
+            raise ValueError("bootstrap planner outcome is not needs_split")
+        return self.plan

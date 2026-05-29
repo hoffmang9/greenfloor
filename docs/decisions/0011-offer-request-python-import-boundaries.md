@@ -52,6 +52,7 @@ without growing `policy_bridge.py` into a flat FFI catalog.
   (`BootstrapKernelProtocol`). Kernel API: `plan_bootstrap_mixed_outputs(ladder_entries=...)` returns
   `BootstrapPlanOutcome` (`ready` / `needs_split` / `cannot_fund` / `invalid_ladder` / `invalid_coins`).
 - Runtime orchestration lives in `greenfloor/runtime/offer_bootstrap.py`
-  (`BootstrapPreflight`, `BootstrapSplitExecution`, `BootstrapPhaseResult`).
+  (`BootstrapRuntimeDeps`, `BootstrapPreflight`, `BootstrapSplitExecution`). Phase DTOs and
+  `BootstrapPlanOutcome.to_early_phase_result()` live in `greenfloor.offer_bootstrap`.
 - Planner input DTO: `PlannerLadderRow` (config uses `MarketLadderEntry`).
 - Removing `core/offer_side.py` was intentional; do not reintroduce a pass-through module.

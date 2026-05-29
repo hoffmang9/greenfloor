@@ -15,6 +15,18 @@ def test_bootstrap_blocks_offer_uses_kernel_policy_result(monkeypatch) -> None:
     assert error == "bootstrap_pending:split_submitted"
 
 
+def test_bootstrap_blocks_offer_blocks_underfunded_skip() -> None:
+    blocked, error = bootstrap_blocks_offer(
+        {
+            "status": "skipped",
+            "reason": "bootstrap_underfunded:total_output_amount=20",
+            "ready": False,
+        }
+    )
+    assert blocked is True
+    assert error == "bootstrap_precheck_skipped:bootstrap_underfunded:total_output_amount=20"
+
+
 def test_bootstrap_blocks_offer_allows_offer_when_policy_returns_none(monkeypatch) -> None:
     monkeypatch.setattr(
         "greenfloor.core.offer_policy.bootstrap_block_error",

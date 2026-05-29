@@ -10,6 +10,7 @@ from typing import Any
 from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.core.offer_bootstrap_policy import (
+    BootstrapPhaseResult,
     BootstrapPlanOutcome,
     plan_bootstrap_mixed_outputs,
 )
@@ -22,7 +23,7 @@ from greenfloor.hex_utils import canonical_is_xch
 from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.offer_bootstrap import (
-    BootstrapPhaseResult,
+    BootstrapRuntimeDeps,
     BootstrapSplitExecution,
     bootstrap_ladder_entries_for_side,
     execute_bootstrap_mixed_split,
@@ -185,6 +186,12 @@ def signer_bootstrap_phase(
         ).to_manager_dict()
 
     spendable_asset_coins = [coin for coin in asset_scoped_coins if is_spendable_coin_fn(coin)]
+    bootstrap_deps = BootstrapRuntimeDeps(
+        list_bootstrap_coins_fn=list_bootstrap_coins_fn,
+        wait_for_confirmation_fn=wait_for_confirmation_fn,
+        is_spendable_coin_fn=is_spendable_coin_fn,
+        plan_bootstrap_mixed_outputs_fn=plan_bootstrap_mixed_outputs_fn,
+    )
     preflight_or_result = run_bootstrap_preflight(
         program=program,
         ladder_entries=ladder_entries,
@@ -194,10 +201,7 @@ def signer_bootstrap_phase(
         asset_scoped_coins=asset_scoped_coins,
         bootstrap_wait_timeout_seconds=bootstrap_wait_timeout_seconds,
         minimum_fee_mojos=int(program.coin_ops_minimum_fee_mojos),
-        list_bootstrap_coins_fn=list_bootstrap_coins_fn,
-        wait_for_confirmation_fn=wait_for_confirmation_fn,
-        is_spendable_coin_fn=is_spendable_coin_fn,
-        plan_bootstrap_mixed_outputs_fn=plan_bootstrap_mixed_outputs_fn,
+        deps=bootstrap_deps,
         resolve_bootstrap_split_fee_fn=resolve_bootstrap_split_fee_fn,
     )
     if isinstance(preflight_or_result, BootstrapPhaseResult):

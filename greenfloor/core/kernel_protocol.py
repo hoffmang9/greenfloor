@@ -22,6 +22,7 @@ from greenfloor.core.strategy_action_item import StrategyActionItem
 if TYPE_CHECKING:
     from greenfloor.core.cancel_policy import CancelPolicyDecision, OpenOfferRow
     from greenfloor.core.notifications import LowInventoryEvaluation, LowInventoryInput
+    from greenfloor.offer_bootstrap import BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow
 
 __all__ = [
     "BootstrapKernelProtocol",
@@ -259,9 +260,9 @@ class BootstrapKernelProtocol(Protocol):
     def plan_bootstrap_mixed_outputs(
         self,
         *,
-        ladder_entries: list[object],
-        spendable_coins: list[object],
-    ) -> object: ...
+        ladder_entries: list[PlannerLadderRow],
+        spendable_coins: list[BootstrapCoin],
+    ) -> BootstrapPlanOutcome: ...
 
 
 class OfferPolicyKernelProtocol(Protocol):

@@ -1,4 +1,9 @@
-"""Rust-backed bootstrap mixed-output planner (canonical Python bridge)."""
+"""Rust-backed bootstrap mixed-output planner (canonical Python bridge).
+
+Call ``plan_bootstrap_mixed_outputs`` here (or via ``offer_bootstrap_policy``), not
+``kernel_bridge.bootstrap_kernel()`` directly. Coinset coin dicts are coerced to
+``BootstrapCoin`` in this module; the PyO3 layer accepts ``BootstrapCoin`` instances only.
+"""
 
 from __future__ import annotations
 

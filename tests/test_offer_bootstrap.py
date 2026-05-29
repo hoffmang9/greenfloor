@@ -12,10 +12,7 @@ from greenfloor.core.offer_bootstrap_policy import (
     plan_bootstrap_mixed_outputs,
 )
 from greenfloor.offer_bootstrap import BootstrapPlanOutcome
-from greenfloor.runtime.offer_bootstrap import (
-    bootstrap_ladder_entries_for_side,
-    phase_result_for_planner_outcome,
-)
+from greenfloor.runtime.offer_bootstrap import bootstrap_ladder_entries_for_side
 from tests.helpers.config_fixtures import minimal_market_config, minimal_market_with_sell_ladder
 
 
@@ -127,7 +124,7 @@ def test_plan_bootstrap_mixed_outputs_requires_kernel_symbol(monkeypatch) -> Non
 
 def test_phase_result_maps_cannot_fund_to_underfunded_skip() -> None:
     outcome = BootstrapPlanOutcome.cannot_fund(total_output_amount=32)
-    result = phase_result_for_planner_outcome(outcome)
+    result = outcome.to_early_phase_result()
     assert result is not None
     assert result.status == "skipped"
     assert result.reason == "bootstrap_underfunded:total_output_amount=32"
