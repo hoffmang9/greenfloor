@@ -2,9 +2,50 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypedDict
 
 from greenfloor.core import kernel_bridge
+
+_KERNEL_REBUILD_HINT = (
+    "greenfloor_signer extension is missing required policy symbols. "
+    "Rebuild it (for example: `maturin develop --manifest-path "
+    "greenfloor-signer-pyo3/Cargo.toml`)."
+)
+
+
+def _require_policy_method(method_name: str):
+    kernel = kernel_bridge.policy_kernel()
+    method = getattr(kernel, method_name, None)
+    if method is None:
+        raise RuntimeError(f"{_KERNEL_REBUILD_HINT} Missing symbol: {method_name}")
+    return method
+
+
+class ExpectedPublishAssetFields(TypedDict):
+    expected_offered_asset_id: str
+    expected_offered_symbol: str
+    expected_requested_asset_id: str
+    expected_requested_symbol: str
+
+
+def _coerce_expected_publish_asset_fields(payload: object) -> ExpectedPublishAssetFields:
+    if not isinstance(payload, dict):
+        raise TypeError("expected_publish_asset_fields must return dict payload")
+    required_keys = (
+        "expected_offered_asset_id",
+        "expected_offered_symbol",
+        "expected_requested_asset_id",
+        "expected_requested_symbol",
+    )
+    missing = [key for key in required_keys if key not in payload]
+    if missing:
+        raise TypeError("expected_publish_asset_fields missing keys: " + ", ".join(sorted(missing)))
+    return {
+        "expected_offered_asset_id": str(payload["expected_offered_asset_id"]),
+        "expected_offered_symbol": str(payload["expected_offered_symbol"]),
+        "expected_requested_asset_id": str(payload["expected_requested_asset_id"]),
+        "expected_requested_symbol": str(payload["expected_requested_symbol"]),
+    }
 
 
 def resolve_offer_expiry_for_pricing(pricing: dict[str, Any]) -> tuple[str, int]:
@@ -22,9 +63,65 @@ def mojo_multiplier_for_leg(pricing: dict[str, Any], field: str, asset_id: str) 
 
 def verify_offer_for_dexie(offer_text: str) -> str | None:
     try:
-        error = kernel_bridge.policy_kernel().verify_offer_for_dexie(offer_text)
+        verify_offer = _require_policy_method("verify_offer_for_dexie")
+        error = verify_offer(offer_text)
     except ImportError:
         return "wallet_sdk_import_error:greenfloor_signer_unavailable"
+    return None if error is None else str(error)
+
+
+def bootstrap_block_error(
+    *,
+    bootstrap_status: str,
+    bootstrap_reason: str,
+    bootstrap_ready: bool,
+) -> str | None:
+    compute_error = _require_policy_method("bootstrap_block_error")
+    error = compute_error(
+        str(bootstrap_status),
+        str(bootstrap_reason),
+        bool(bootstrap_ready),
+    )
+    return None if error is None else str(error)
+
+
+def expected_publish_asset_fields(
+    *,
+    side: str,
+    base_symbol: str,
+    quote_asset: str,
+    resolved_base_asset_id: str,
+    resolved_quote_asset_id: str,
+) -> ExpectedPublishAssetFields:
+    resolve_fields = _require_policy_method("expected_publish_asset_fields")
+    payload = resolve_fields(
+        str(side),
+        str(base_symbol),
+        str(quote_asset),
+        str(resolved_base_asset_id),
+        str(resolved_quote_asset_id),
+    )
+    return _coerce_expected_publish_asset_fields(payload)
+
+
+def dexie_offer_asset_expectation_error(
+    *,
+    offered: object,
+    requested: object,
+    expected_offered_asset_id: str,
+    expected_offered_symbol: str,
+    expected_requested_asset_id: str,
+    expected_requested_symbol: str,
+) -> str | None:
+    verify_assets = _require_policy_method("dexie_offer_asset_expectation_error")
+    error = verify_assets(
+        offered,
+        requested,
+        str(expected_offered_asset_id),
+        str(expected_offered_symbol),
+        str(expected_requested_asset_id),
+        str(expected_requested_symbol),
+    )
     return None if error is None else str(error)
 
 

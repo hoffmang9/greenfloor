@@ -205,8 +205,8 @@ fn runtime_parity_sell(
     quote_unit_mojo_multiplier: u64,
 ) -> SignerFixtureRuntimeParity {
     let size_base_units = offer_amount / base_unit_mojo_multiplier;
-    let quote_price = request_amount as f64
-        / (size_base_units as f64 * quote_unit_mojo_multiplier as f64);
+    let quote_price =
+        request_amount as f64 / (size_base_units as f64 * quote_unit_mojo_multiplier as f64);
     SignerFixtureRuntimeParity {
         action_side: "sell".to_string(),
         resolved_base_asset_id: resolved_base_asset_id.to_string(),
@@ -479,7 +479,10 @@ async fn leg_offer_builds_on_simulator(scenario: OfferLegScenario) {
 
 #[tokio::test]
 async fn offer_leg_scenarios_build_on_simulator() {
-    for scenario in [OfferLegScenario::BuySideDirect, OfferLegScenario::CatCatDirect] {
+    for scenario in [
+        OfferLegScenario::BuySideDirect,
+        OfferLegScenario::CatCatDirect,
+    ] {
         leg_offer_builds_on_simulator(scenario).await;
     }
 }

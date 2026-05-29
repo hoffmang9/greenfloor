@@ -4,6 +4,11 @@
 
 - **Kernel protocols:** re-collapsed domain splits back into single `greenfloor/core/kernel_protocol.py` (five-file split removed).
 - **Offer side + request:** canonical `normalize_offer_side` in `core/offer_side.py`; signer request builder in `core/signer_offer_request.py` (uses `mojo_multiplier_for_le`).
+- **Dexie visibility asset checks:** moved offered/requested asset-match validation from `runtime/offer_publish.py` into `greenfloor-signer/src/offer/publish.rs`; PyO3 exposes `dexie_offer_asset_expectation_error` and Python runtime delegates via `core.offer_policy`.
+- **Bootstrap block gate:** moved `bootstrap_blocks_offer` decision shaping into `greenfloor-signer/src/offer/publish.rs` (`bootstrap_block_error`); Python orchestration delegates via `core.offer_policy`.
+- **Publish asset-field shaping:** moved `expected_publish_asset_fields` mapping into `greenfloor-signer/src/offer/publish.rs`; orchestration now calls `core.offer_policy.expected_publish_asset_fields` directly.
+- **Offer policy bridge contract:** removed silent Python fallbacks for migrated offer policy helpers; bridge now requires kernel symbols and fails fast with rebuild guidance when extensions are stale.
+- **CLI stale-symbol UX:** `runtime/offer_orchestration.py` now catches offer-policy bridge exceptions and emits structured `offer_policy_error:*` result payloads; `test_build_and_post_offer_surfaces_stale_kernel_symbol_as_user_error` proves the manager CLI path returns a user-facing failure string.
 - **Rust tests:** `offer_leg_scenarios_build_on_simulator` (renamed from roundtrip; build-only on sim for CAT:CAT legs).
 - **Python tests:** `test_signer_golden_fixture_contract` (schema + core parity + validate in one parametrized test); `test_offer_runtime.py` covers signer IO shell only (leg math owned by parity fixtures).
 - **Fixtures:** all golden JSON embed `runtime_parity` (action_side, resolved assets, size/price, multipliers).

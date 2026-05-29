@@ -18,7 +18,6 @@ from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_publish import (
     dexie_offer_view_url,
-    expected_publish_asset_fields,
     log_signed_offer_artifact,
     post_offer_phase,
 )
@@ -55,19 +54,17 @@ class OfferCreateFailure(Exception):
         self.extra = dict(extra or {})
 
 
+def _offer_policy_error(exc: Exception) -> str:
+    return f"offer_policy_error:{exc}"
+
+
 def bootstrap_blocks_offer(bootstrap_result: dict[str, Any]) -> tuple[bool, str | None]:
-    bootstrap_status = str(bootstrap_result.get("status", "")).strip().lower()
-    bootstrap_reason = (
-        str(bootstrap_result.get("reason", "")).strip() or "bootstrap_precheck_failed"
+    error = offer_policy.bootstrap_block_error(
+        bootstrap_status=str(bootstrap_result.get("status", "")),
+        bootstrap_reason=str(bootstrap_result.get("reason", "")),
+        bootstrap_ready=bool(bootstrap_result.get("ready", False)),
     )
-    bootstrap_ready = bool(bootstrap_result.get("ready", False))
-    if bootstrap_status == "failed":
-        return True, f"bootstrap_failed:{bootstrap_reason}"
-    if bootstrap_status == "executed" and not bootstrap_ready:
-        return True, f"bootstrap_pending:{bootstrap_reason}"
-    if bootstrap_status == "skipped" and bootstrap_reason != "already_ready":
-        return True, f"bootstrap_precheck_skipped:{bootstrap_reason}"
-    return False, None
+    return (error is not None), error
 
 
 def _iteration_timing_payload(
@@ -294,7 +291,7 @@ def execute_build_and_post_offer(
             )
             publish_failures += 1
             continue
-        except Exception as exc:
+        except (RuntimeError, TypeError, ValueError) as exc:
             _append_post_failure(
                 post_results,
                 publish_venue=publish_venue,
@@ -339,7 +336,20 @@ def execute_build_and_post_offer(
             trading_pair=f"{market.base_symbol}:{market.quote_asset}",
             expiry=str(created.expires_at),
         )
-        verify_error = resolved_post_deps.verify_offer_for_dexie_fn(offer_text)
+        try:
+            verify_error = resolved_post_deps.verify_offer_for_dexie_fn(offer_text)
+        except (RuntimeError, TypeError, ValueError) as exc:
+            publish_failures += 1
+            _append_post_failure(
+                post_results,
+                publish_venue=publish_venue,
+                started_ms=started_ms,
+                error=_offer_policy_error(exc),
+                create_phase_ms=created.create_phase_ms,
+                artifact_wait_ms=created.artifact_wait_ms,
+                create_total_ms=created.create_total_ms,
+            )
+            continue
         if verify_error:
             publish_failures += 1
             _append_post_failure(
@@ -354,12 +364,26 @@ def execute_build_and_post_offer(
             continue
 
         publish_started = time.monotonic()
-        asset_fields = expected_publish_asset_fields(
-            side=created.side,
-            market=market,
-            resolved_base_asset_id=resolved_base_asset_id,
-            resolved_quote_asset_id=resolved_quote_asset_id,
-        )
+        try:
+            asset_fields = offer_policy.expected_publish_asset_fields(
+                side=created.side,
+                base_symbol=str(market.base_symbol),
+                quote_asset=str(market.quote_asset),
+                resolved_base_asset_id=resolved_base_asset_id,
+                resolved_quote_asset_id=resolved_quote_asset_id,
+            )
+        except (RuntimeError, TypeError, ValueError) as exc:
+            publish_failures += 1
+            _append_post_failure(
+                post_results,
+                publish_venue=publish_venue,
+                started_ms=started_ms,
+                error=_offer_policy_error(exc),
+                create_phase_ms=created.create_phase_ms,
+                artifact_wait_ms=created.artifact_wait_ms,
+                create_total_ms=created.create_total_ms,
+            )
+            continue
         result = resolved_post_deps.post_offer_phase_fn(
             publish_venue=publish_venue,
             dexie=dexie,

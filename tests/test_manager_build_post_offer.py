@@ -508,6 +508,55 @@ def test_build_and_post_offer_returns_nonzero_when_offer_verification_fails(
     assert payload["results"][0]["result"]["success"] is False
 
 
+def test_build_and_post_offer_surfaces_stale_kernel_symbol_as_user_error(
+    monkeypatch, tmp_path: Path, capsys
+) -> None:
+    from tests.helpers.kernel_mock import MinimalSignerKernel
+
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    write_manager_program(program, tmp_path=tmp_path)
+    write_markets(markets)
+
+    class _StaleKernel(MinimalSignerKernel):
+        expected_publish_asset_fields = None
+
+    monkeypatch.setattr(
+        "greenfloor.core.kernel_bridge.import_kernel",
+        lambda: _StaleKernel,
+    )
+    monkeypatch.setattr(
+        "greenfloor.cli.offer_build_post.build_offer",
+        lambda _payload: "offer1abc",
+    )
+    monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", FakeDexie)
+
+    code = build_and_post_offer_cli(
+        program_path=program,
+        markets_path=markets,
+        network="mainnet",
+        market_id="m1",
+        pair=None,
+        size_base_units=1,
+        repeat=1,
+        publish_venue="dexie",
+        dexie_base_url="https://api.dexie.space",
+        splash_base_url="http://localhost:4000",
+        drop_only=True,
+        claim_rewards=False,
+        dry_run=False,
+    )
+    assert code == 2
+    payload = json.loads(capsys.readouterr().out.strip())
+    assert payload["publish_attempts"] == 1
+    assert payload["publish_failures"] == 1
+    assert payload["results"][0]["result"]["success"] is False
+    assert payload["results"][0]["result"]["error"].startswith("offer_policy_error:")
+    assert (
+        "Missing symbol: expected_publish_asset_fields" in payload["results"][0]["result"]["error"]
+    )
+
+
 def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:

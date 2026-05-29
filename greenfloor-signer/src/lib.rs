@@ -90,6 +90,10 @@ pub use offer::codec::{
     from_input_spend_bundle_xch_bytes, validate_offer_structure, validate_offer_text,
     verify_offer_for_dexie,
 };
+pub use offer::publish::{
+    bootstrap_block_error, dexie_offer_asset_expectation_error, expected_publish_asset_fields,
+    ExpectedPublishAssetFields,
+};
 pub use offer::{build_vault_cat_offer, CreateOfferRequest, CreateOfferResult};
 pub use vault::{
     build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,

@@ -16,13 +16,17 @@ pub fn dict_from_json_value(py: Python<'_>, value: serde_json::Value) -> PyResul
     Ok(obj.unbind())
 }
 
-pub fn request_dict_to_json(request: &Bound<'_, PyDict>) -> PyResult<serde_json::Value> {
-    let py = request.py();
+pub fn py_any_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
+    let py = value.py();
     let json_mod = py.import("json")?;
     let dumps = json_mod.getattr("dumps")?;
-    let raw = dumps.call1((request,))?;
+    let raw = dumps.call1((value,))?;
     let raw_str: String = raw.extract()?;
     serde_json::from_str(&raw_str).map_err(to_py_err)
+}
+
+pub fn request_dict_to_json(request: &Bound<'_, PyDict>) -> PyResult<serde_json::Value> {
+    py_any_to_json(request.as_any())
 }
 
 pub fn dict_to_i64_i64_map(dict: &Bound<'_, PyDict>) -> PyResult<BTreeMap<i64, i64>> {
