@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from typing import Any, cast
 
 import pytest
@@ -18,7 +17,7 @@ from greenfloor.runtime.offer_publish import (
     post_offer_phase,
     verify_dexie_offer_visible_by_id,
 )
-from tests.helpers.kernel_mock import MinimalSignerKernel
+from tests.helpers.kernel_mock import MinimalSignerKernel, install_kernel_stub
 
 
 def test_verify_offer_for_dexie_success(monkeypatch) -> None:
@@ -29,7 +28,7 @@ def test_verify_offer_for_dexie_success(monkeypatch) -> None:
         def verify_offer_for_dexie(offer: str) -> None:
             calls.append(offer)
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     assert verify_offer_for_dexie("offer1ok") is None
     assert calls == ["offer1ok"]
 
@@ -40,7 +39,7 @@ def test_verify_offer_for_dexie_maps_duplicate_spends(monkeypatch) -> None:
         def verify_offer_for_dexie(_offer: str) -> str:
             return "wallet_sdk_offer_duplicate_spent_coin_ids"
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     assert verify_offer_for_dexie("offer1duplicate") == "wallet_sdk_offer_duplicate_spent_coin_ids"
 
 
@@ -50,7 +49,7 @@ def test_verify_offer_for_dexie_maps_missing_expiration(monkeypatch) -> None:
         def verify_offer_for_dexie(_offer: str) -> str:
             return "wallet_sdk_offer_missing_expiration"
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     assert verify_offer_for_dexie("offer1noexpiry") == "wallet_sdk_offer_missing_expiration"
 
 
@@ -60,7 +59,7 @@ def test_verify_offer_for_dexie_returns_native_validation_error(monkeypatch) -> 
         def verify_offer_for_dexie(_offer: str) -> str:
             return "wallet_sdk_offer_validate_failed:native_invalid_offer"
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     assert verify_offer_for_dexie("offer1bad") == (
         "wallet_sdk_offer_validate_failed:native_invalid_offer"
     )
@@ -72,7 +71,7 @@ def test_verify_offer_for_dexie_maps_structure_validate_failed(monkeypatch) -> N
         def verify_offer_for_dexie(_offer: str) -> str:
             return "wallet_sdk_offer_validate_failed:malformed_offer"
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     assert verify_offer_for_dexie("offer1malformed") == (
         "wallet_sdk_offer_validate_failed:malformed_offer"
     )
@@ -99,7 +98,7 @@ def test_bootstrap_block_error_delegates_to_kernel(monkeypatch) -> None:
             _ = bootstrap_ready
             return f"kernel_bootstrap:{bootstrap_status}:{bootstrap_reason}"
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     assert (
         bootstrap_block_error(
             bootstrap_status="failed",
@@ -114,7 +113,7 @@ def test_bootstrap_block_error_requires_kernel_symbol(monkeypatch) -> None:
     class _Native:
         pass
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     with pytest.raises(RuntimeError, match="Missing symbol: bootstrap_block_error"):
         bootstrap_block_error(
             bootstrap_status="executed",
@@ -140,7 +139,7 @@ def test_expected_publish_asset_fields_delegates_to_kernel(monkeypatch) -> None:
                 "expected_requested_symbol": base_symbol,
             }
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     assert expected_publish_asset_fields(
         side="buy",
         base_symbol="A1",
@@ -159,7 +158,7 @@ def test_expected_publish_asset_fields_requires_kernel_symbol(monkeypatch) -> No
     class _Native:
         pass
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     with pytest.raises(RuntimeError, match="Missing symbol: expected_publish_asset_fields"):
         expected_publish_asset_fields(
             side="buy",
@@ -186,7 +185,7 @@ def test_expected_publish_asset_fields_requires_complete_payload(monkeypatch) ->
                 "expected_requested_symbol": "A1",
             }
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     with pytest.raises(
         TypeError,
         match="expected_publish_asset_fields missing keys: expected_offered_symbol",
@@ -210,7 +209,7 @@ def test_resolve_offer_expiry_and_quote_price_use_kernel(monkeypatch) -> None:
         def resolve_quote_price_for_pricing(_pricing):
             return 1.5
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     pricing = {"strategy_offer_expiry_minutes": 12}
     assert resolve_offer_expiry_for_pricing(pricing) == ("minutes", 12)
     assert resolve_quote_price_for_pricing(pricing) == 1.5
@@ -236,7 +235,7 @@ def test_dexie_offer_asset_expectation_error_delegates_to_kernel(monkeypatch) ->
                 f"offered_symbol={expected_offered_symbol}"
             )
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     assert dexie_offer_asset_expectation_error(
         offered=[],
         requested=[],
@@ -254,7 +253,7 @@ def test_dexie_offer_asset_expectation_error_requires_kernel_symbol(monkeypatch)
     class _Native:
         pass
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Native)
+    install_kernel_stub(monkeypatch, _Native)
     with pytest.raises(RuntimeError, match="Missing symbol: dexie_offer_asset_expectation_error"):
         dexie_offer_asset_expectation_error(
             offered=[],

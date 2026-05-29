@@ -156,7 +156,7 @@ class OfferPostRequest:
         self,
         *,
         capture_dir_path: Path | None,
-        build_offer_fn: collections.abc.Callable[[dict[str, Any]], str],
+        build_offer_fn: collections.abc.Callable[[dict[str, Any]], str] | None = None,
         post_deps: OfferPostDeps,
         path_label: str = "local",
         path_extra_fields: dict[str, Any] | None = None,
@@ -194,7 +194,7 @@ class OfferPostRequest:
         backend: OfferExecutionBackend,
         *,
         capture_dir_path: Path | None,
-        build_offer_fn: collections.abc.Callable[[dict[str, Any]], str],
+        build_offer_fn: collections.abc.Callable[[dict[str, Any]], str] | None = None,
         post_deps: OfferPostDeps,
         path_extra_fields: dict[str, Any] | None = None,
     ) -> int:

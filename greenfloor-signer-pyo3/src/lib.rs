@@ -1,12 +1,13 @@
 //! PyO3 bindings for the GreenFloor Rust kernel (`greenfloor-signer` crate).
 //!
-//! The extension module is still exported as `greenfloor_signer` (ADR 0010). Python
+//! The extension module is exported as `greenfloor_kernel` (ADR 0010). Python
 //! callers should import through `greenfloor.core.kernel_bridge.import_kernel`.
 extern crate greenfloor_signer as signer_core;
 
 mod coin_ops_py;
 mod cycle;
 mod execution_py;
+mod offer_action_py;
 mod hex_py;
 mod notifications_py;
 mod offer_bootstrap_py;
@@ -411,7 +412,7 @@ fn coinset_get_conservative_fee_estimate_py(
 }
 
 #[pymodule]
-fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn greenfloor_kernel(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(resolve_vault_context_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_vault_cat_offer_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_mixed_split_py, m)?)?;
@@ -435,6 +436,7 @@ fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
         coinset_get_conservative_fee_estimate_py,
         m
     )?)?;
+    offer_action_py::register(m)?;
     coin_ops_py::register(m)?;
     cycle::register(m)?;
     hex_py::register(m)?;

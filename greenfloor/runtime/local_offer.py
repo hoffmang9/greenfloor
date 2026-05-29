@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.core.planned_action import PlannedAction, planned_action_side
+from greenfloor.adapters.offer_action import build_offer_text_from_build_context
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import OfferCreateFailure, OfferCreateOutcome
 
@@ -82,21 +83,29 @@ def make_local_offer_create_fn(
     *,
     dry_run: bool,
     capture_dir_path: Path | None = None,
-    build_offer_fn: collections.abc.Callable[[dict[str, Any]], str],
+    build_offer_fn: collections.abc.Callable[[dict[str, Any]], str] | None = None,
 ) -> collections.abc.Callable[..., OfferCreateOutcome]:
     offer_iteration = [0]
 
     def create(**kwargs: Any) -> OfferCreateOutcome:
         index = offer_iteration[0]
         offer_iteration[0] += 1
-        payload = build_local_offer_payload(
-            build_ctx,
-            size_base_units=int(kwargs["size_base_units"]),
-            quote_price=float(kwargs["quote_price"]),
-            dry_run=dry_run,
-        )
         try:
-            offer_text = build_offer_fn(payload)
+            if build_offer_fn is not None:
+                payload = build_local_offer_payload(
+                    build_ctx,
+                    size_base_units=int(kwargs["size_base_units"]),
+                    quote_price=float(kwargs["quote_price"]),
+                    dry_run=dry_run,
+                )
+                offer_text = build_offer_fn(payload)
+            else:
+                offer_text = build_offer_text_from_build_context(
+                    build_ctx,
+                    size_base_units=int(kwargs["size_base_units"]),
+                    quote_price=float(kwargs["quote_price"]),
+                    action_side=str(kwargs.get("action_side", build_ctx.action_side)),
+                )
         except Exception as exc:
             raise OfferCreateFailure(f"offer_builder_failed:{exc}") from exc
 

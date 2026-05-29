@@ -110,7 +110,11 @@ pub use offer::request::{
     compute_signer_offer_leg_amounts, normalize_offer_asset_id, normalize_offer_side,
     quote_mojos_for_base_size, signer_split_asset_id, SignerOfferLegAmounts,
 };
-pub use offer::{build_vault_cat_offer, CreateOfferRequest, CreateOfferResult};
+pub use offer::{
+    build_bls_offer_for_action, build_signer_offer_for_action, build_vault_cat_offer,
+    expires_at_unix_from_pricing, BuildOfferForActionRequest, BuildOfferForActionResult,
+    CreateOfferRequest, CreateOfferResult,
+};
 pub use vault::{
     build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,
 };

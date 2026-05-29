@@ -26,22 +26,7 @@ def test_kernel_rebuild_hint_uses_module_argument() -> None:
     assert "offer-request" in hint
 
 
-def test_import_kernel_prefers_legacy_module(monkeypatch) -> None:
-    calls: list[str] = []
-
-    def _fake_import(name: str) -> ModuleType:
-        calls.append(name)
-        if name == kernel_bridge.KERNEL_MODULE_LEGACY:
-            return ModuleType(name)
-        raise ImportError(f"missing {name}")
-
-    monkeypatch.setattr(importlib, "import_module", _fake_import)
-    mod = kernel_bridge.import_kernel()
-    assert mod.__name__ == kernel_bridge.KERNEL_MODULE_LEGACY
-    assert calls == [kernel_bridge.KERNEL_MODULE_LEGACY]
-
-
-def test_import_kernel_falls_back_to_target_module(monkeypatch) -> None:
+def test_import_kernel_prefers_target_module(monkeypatch) -> None:
     calls: list[str] = []
 
     def _fake_import(name: str) -> ModuleType:
@@ -53,7 +38,22 @@ def test_import_kernel_falls_back_to_target_module(monkeypatch) -> None:
     monkeypatch.setattr(importlib, "import_module", _fake_import)
     mod = kernel_bridge.import_kernel()
     assert mod.__name__ == kernel_bridge.KERNEL_MODULE_TARGET
-    assert calls == [kernel_bridge.KERNEL_MODULE_LEGACY, kernel_bridge.KERNEL_MODULE_TARGET]
+    assert calls == [kernel_bridge.KERNEL_MODULE_TARGET]
+
+
+def test_import_kernel_falls_back_to_legacy_module(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def _fake_import(name: str) -> ModuleType:
+        calls.append(name)
+        if name == kernel_bridge.KERNEL_MODULE_LEGACY:
+            return ModuleType(name)
+        raise ImportError(f"missing {name}")
+
+    monkeypatch.setattr(importlib, "import_module", _fake_import)
+    mod = kernel_bridge.import_kernel()
+    assert mod.__name__ == kernel_bridge.KERNEL_MODULE_LEGACY
+    assert calls == [kernel_bridge.KERNEL_MODULE_TARGET, kernel_bridge.KERNEL_MODULE_LEGACY]
 
 
 def test_import_kernel_error_lists_candidates(monkeypatch) -> None:

@@ -1,23 +1,19 @@
 from __future__ import annotations
 
 import collections.abc
-import datetime as dt
 import logging
 import time
 from dataclasses import dataclass
 from typing import Any
 
-from greenfloor.adapters import rust_signer
+from greenfloor.adapters import offer_action, rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.core.offer_bootstrap_bridge import (
     BootstrapPhaseResult,
     plan_bootstrap_mixed_outputs,
 )
 from greenfloor.core.offer_policy import normalize_offer_side
-from greenfloor.core.signer_offer_request import (
-    build_signer_create_offer_request,
-    signer_split_asset_id,
-)
+from greenfloor.core.signer_offer_request import signer_split_asset_id
 from greenfloor.hex_utils import canonical_is_xch
 from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
@@ -210,32 +206,33 @@ def signer_create_offer_phase(
     split_input_coins: bool = True,
     broadcast_split: bool = True,
 ) -> dict[str, Any]:
+    del expiry_unit, expiry_value
     side = normalize_offer_side(action_side)
-    expires_at_dt = dt.datetime.now(dt.UTC) + dt.timedelta(**{expiry_unit: int(expiry_value)})
-    request = build_signer_create_offer_request(
+    request = offer_action.action_request_from_market(
         market=market,
-        size_base_units=size_base_units,
-        quote_price=quote_price,
-        resolved_base_asset_id=resolved_base_asset_id,
-        resolved_quote_asset_id=resolved_quote_asset_id,
+        resolved_quote_asset=str(resolved_quote_asset_id),
+        size_base_units=int(size_base_units),
+        quote_price=float(quote_price),
         action_side=side,
         split_input_coins=split_input_coins,
         broadcast_split=broadcast_split,
-        expires_at_unix=int(expires_at_dt.timestamp()),
     )
+    request["base_asset"] = str(resolved_base_asset_id)
+    request["quote_asset"] = str(resolved_quote_asset_id)
     config_path = _signer_config_path(program)
-    result = rust_signer.build_vault_cat_offer(config_path, request.to_payload())
-    offer_text = str(result.get("offer", "")).strip()
+    result = offer_action.build_signer_offer_for_action(config_path, request)
+    mapped = offer_action.create_offer_outcome_from_action_result(result, action_side=side)
+    offer_text = str(mapped["offer_text"]).strip()
     if not offer_text.startswith("offer1"):
         raise RuntimeError("signer_create_offer_failed:missing_offer_text")
     return {
         "offer_text": offer_text,
-        "expires_at": expires_at_dt.isoformat(),
-        "offer_amount": request.offer_amount,
-        "request_amount": request.request_amount,
-        "side": side,
-        "execution_mode": str(result.get("execution_mode", "")).strip(),
-        "create_result": dict(result) if isinstance(result, dict) else {},
+        "expires_at": mapped["expires_at"],
+        "offer_amount": mapped["offer_amount"],
+        "request_amount": mapped["request_amount"],
+        "side": mapped["side"],
+        "execution_mode": mapped["execution_mode"],
+        "create_result": mapped["create_result"],
     }
 
 

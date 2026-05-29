@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from greenfloor.adapters.coinset import CoinsetAdapter
+from greenfloor.adapters import bls_signing
 from greenfloor.core.coin_ops import CoinOpPlan
 from greenfloor.keys.onboarding import load_key_onboarding_selection
 
@@ -185,10 +186,7 @@ class WalletAdapter:
         if signer_fingerprint is not None:
             payload["key_id_fingerprint_map"] = {str(key_id): str(int(signer_fingerprint))}
 
-        # Direct in-process signing + broadcast
-        from greenfloor.signing import sign_and_broadcast
-
-        result = sign_and_broadcast(payload)
+        result = bls_signing.sign_and_broadcast(payload)
         status = str(result.get("status", "skipped")).strip()
         return CoinOpExecutionItem(
             op_type=plan.op_type,

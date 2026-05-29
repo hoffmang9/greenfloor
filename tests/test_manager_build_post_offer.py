@@ -575,14 +575,14 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
             called["post_offer_called"] = True
             return {"success": True, "id": "should-not-post"}
 
-    from tests.helpers.kernel_mock import MinimalSignerKernel
+    from tests.helpers.kernel_mock import MinimalSignerKernel, install_kernel_stub
 
     class _Signer(MinimalSignerKernel):
         @staticmethod
         def verify_offer_for_dexie(_offer: str) -> str:
             return "wallet_sdk_offer_missing_expiration"
 
-    monkeypatch.setitem(sys.modules, "greenfloor_signer", _Signer)
+    install_kernel_stub(monkeypatch, _Signer)
     monkeypatch.setattr(
         "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1noexpiry",

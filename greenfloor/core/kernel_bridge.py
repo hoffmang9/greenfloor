@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 # ADR 0010 naming map — legacy until the post-migration rename ships.
 KERNEL_MODULE_LEGACY = "greenfloor_signer"
 KERNEL_MODULE_TARGET = "greenfloor_kernel"
-_KERNEL_MODULE_CANDIDATES = (KERNEL_MODULE_LEGACY, KERNEL_MODULE_TARGET)
+_KERNEL_MODULE_CANDIDATES = (KERNEL_MODULE_TARGET, KERNEL_MODULE_LEGACY)
 
 _MATURIN_INSTALL = (
     "`maturin develop --manifest-path greenfloor-signer-pyo3/Cargo.toml` from the repo root"

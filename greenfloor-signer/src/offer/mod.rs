@@ -2,6 +2,7 @@
 //!
 //! See ADR 0010 for the planned crate rename to `greenfloor-kernel`.
 
+pub mod action;
 pub mod assemble;
 pub mod bootstrap;
 pub mod build;
@@ -17,6 +18,10 @@ pub mod types;
 pub use bootstrap::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,
     BootstrapPhaseSnapshot, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
+};
+pub use action::{
+    build_bls_offer_for_action, build_signer_offer_for_action, expires_at_unix_from_pricing,
+    BuildOfferForActionRequest, BuildOfferForActionResult,
 };
 pub use build::build_vault_cat_offer;
 pub use build_context::{

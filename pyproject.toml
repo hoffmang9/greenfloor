@@ -46,5 +46,5 @@ ignore = ["E501"]
 testpaths = ["tests"]
 addopts = "--basetemp=.pytest_tmp"
 markers = [
-    "signer: requires compiled greenfloor_signer (validate_offer_structure)",
+    "signer: requires compiled greenfloor_kernel (validate_offer_structure)",
 ]

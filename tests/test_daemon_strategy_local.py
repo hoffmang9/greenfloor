@@ -259,13 +259,22 @@ def test_execute_strategy_dispatch_applies_post_cooldown_after_retry_exhaust(mon
 
 
 def test_build_offer_for_action_direct_builder_call(monkeypatch) -> None:
-    captured = {}
+    captured_before = {}
 
-    def _fake_build_offer(payload):
-        captured["payload"] = payload
-        return f"offer1direct-{payload['size_base_units']}"
+    def _capture_build(build_ctx, **kwargs):
+        captured_before["quote_price"] = float(kwargs.get("quote_price", build_ctx.quote_price))
+        captured_before["size_base_units"] = int(kwargs["size_base_units"])
+        captured_before["key_id"] = build_ctx.market.signer_key_id
+        captured_before["network"] = build_ctx.network
+        captured_before["keyring_yaml_path"] = build_ctx.keyring_yaml_path
+        captured_before["base_unit_mojo_multiplier"] = build_ctx.base_unit_mojo_multiplier
+        captured_before["quote_unit_mojo_multiplier"] = build_ctx.quote_unit_mojo_multiplier
+        return f"offer1direct-{kwargs['size_base_units']}"
 
-    monkeypatch.setattr("greenfloor.offer_builder.build_offer", _fake_build_offer)
+    monkeypatch.setattr(
+        "greenfloor.adapters.offer_action.build_offer_text_from_build_context",
+        _capture_build,
+    )
     action = PlannedAction(
         size=10,
         repeat=1,
@@ -287,12 +296,12 @@ def test_build_offer_for_action_direct_builder_call(monkeypatch) -> None:
     assert built["status"] == "executed"
     assert built["reason"] == "offer_builder_success"
     assert built["offer"] == "offer1direct-10"
-    assert captured["payload"]["quote_price_quote_per_base"] == 0.5
-    assert captured["payload"]["base_unit_mojo_multiplier"] == 1000
-    assert captured["payload"]["quote_unit_mojo_multiplier"] == 1000
-    assert captured["payload"]["key_id"] == "key-main-1"
-    assert captured["payload"]["network"] == "mainnet"
-    assert captured["payload"]["keyring_yaml_path"] == "/tmp/keyring.yaml"
+    assert captured_before["quote_price"] == 0.5
+    assert captured_before["base_unit_mojo_multiplier"] == 1000
+    assert captured_before["quote_unit_mojo_multiplier"] == 1000
+    assert captured_before["key_id"] == "key-main-1"
+    assert captured_before["network"] == "mainnet"
+    assert captured_before["keyring_yaml_path"] == "/tmp/keyring.yaml"
 
 
 def test_inject_reseed_action_when_no_active_offers() -> None:

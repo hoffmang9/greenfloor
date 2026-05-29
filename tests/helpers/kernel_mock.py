@@ -1,6 +1,14 @@
-"""Minimal greenfloor_signer stub helpers for partial kernel mocks in tests."""
+"""Minimal greenfloor kernel stub helpers for partial kernel mocks in tests."""
 
 from __future__ import annotations
+
+from typing import Any
+
+
+def install_kernel_stub(monkeypatch: Any, stub: Any) -> None:
+    """Register a stub for both ADR 0010 module names."""
+    monkeypatch.setitem(__import__("sys").modules, "greenfloor_kernel", stub)
+    monkeypatch.setitem(__import__("sys").modules, "greenfloor_signer", stub)
 
 
 def mock_kernel_normalize_hex_id(value: str) -> str:

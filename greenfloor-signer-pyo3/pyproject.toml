@@ -3,6 +3,9 @@ requires = ["maturin>=1.8,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "greenfloor_signer"
+name = "greenfloor_kernel"
 version = "0.1.0"
 requires-python = ">=3.11"
+
+[tool.maturin]
+module-name = "greenfloor_kernel"
