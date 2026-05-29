@@ -26,7 +26,7 @@ pub async fn resolve_offer_asset_ids(
     base_asset: &str,
     quote_asset: &str,
 ) -> SignerResult<(String, String)> {
-    offer::resolve_offer_assets_for_action(&config, base_asset, quote_asset).await
+    offer::resolve_offer_assets_via_coinset(&config, base_asset, quote_asset).await
 }
 
 pub use bls::{
@@ -108,7 +108,8 @@ pub use offer::request::{
 };
 pub use offer::{
     build_bls_offer_for_action, build_signer_offer_for_action, build_vault_cat_offer,
-    expires_at_unix_from_pricing, resolve_offer_assets_for_action, try_normalize_resolved_assets,
+    expires_at_unix_from_pricing, resolve_offer_assets_for_action, resolve_offer_assets_via_coinset,
+    try_normalize_resolved_assets,
     BuildOfferForActionRequest, BuildOfferForActionResult, CreateOfferRequest, CreateOfferResult,
 };
 pub use vault::{

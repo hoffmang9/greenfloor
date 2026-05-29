@@ -4,23 +4,20 @@ use engine_core::offer::action::{
 };
 use engine_core::{load_bls_master_secret_key, load_signer_config, Error};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyModule};
+use pyo3::types::{PyDict, PyModule, PyTuple};
 
 use crate::py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
 use crate::{block_on_engine, parse_master_sk_bytes, runtime};
 
-fn asset_pair_to_py_dict(py: Python<'_>, base: String, quote: String) -> PyResult<Py<PyAny>> {
-    let dict = PyDict::new(py);
-    dict.set_item("base_asset_id", base)?;
-    dict.set_item("quote_asset_id", quote)?;
-    Ok(dict.into())
+fn asset_pair_to_py_tuple(py: Python<'_>, base: String, quote: String) -> PyResult<Py<PyAny>> {
+    Ok(PyTuple::new(py, [base, quote])?.into())
 }
 
 #[pyfunction]
 #[pyo3(name = "try_normalize_offer_asset_ids")]
 fn try_normalize_offer_asset_ids_py(base_asset: &str, quote_asset: &str) -> PyResult<Py<PyAny>> {
     match try_normalize_resolved_assets(base_asset, quote_asset) {
-        Ok((base, quote)) => Python::attach(|py| asset_pair_to_py_dict(py, base, quote)),
+        Ok((base, quote)) => Python::attach(|py| asset_pair_to_py_tuple(py, base, quote)),
         Err(Error::ResolvedAssetsCollideForNonXchPair) => {
             Err(to_py_err(Error::ResolvedAssetsCollideForNonXchPair))
         }

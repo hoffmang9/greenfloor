@@ -48,7 +48,7 @@ def _coins_list_signer(
     resolved_asset_filter: str | None = None
     if canonical_filter:
         resolved_asset_filter = resolve_signer_asset_id(
-            program, canonical_asset_id=canonical_filter, symbol_hint=canonical_filter
+            program, canonical_asset_id=canonical_filter
         )
     list_asset_id = resolved_asset_filter or str(market.base_asset)
     backend = build_coin_op_backend(

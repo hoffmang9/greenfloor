@@ -17,8 +17,8 @@ pub mod types;
 
 pub use action::{
     build_bls_offer_for_action, build_signer_offer_for_action, expires_at_unix_from_pricing,
-    resolve_offer_assets_for_action, try_normalize_resolved_assets, BuildOfferForActionRequest,
-    BuildOfferForActionResult,
+    resolve_offer_assets_for_action, resolve_offer_assets_via_coinset, try_normalize_resolved_assets,
+    BuildOfferForActionRequest, BuildOfferForActionResult,
 };
 pub use bootstrap::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,

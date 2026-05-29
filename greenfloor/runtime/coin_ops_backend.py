@@ -28,10 +28,8 @@ def resolve_signer_asset_id(
     program: ProgramConfig,
     *,
     canonical_asset_id: str,
-    symbol_hint: str | None = None,
 ) -> str:
-    _ = symbol_hint
-    base, _quote = resolve_offer_assets(str(canonical_asset_id).strip(), "xch", program=program)
+    base, _quote = resolve_offer_assets(canonical_asset_id, "xch", program=program)
     return base.lower()
 
 
@@ -45,7 +43,6 @@ def resolve_coin_op_base_asset_id(
     return resolve_signer_asset_id(
         program,
         canonical_asset_id=str(market.base_asset).strip(),
-        symbol_hint=str(market.base_symbol).strip() or None,
     )
 
 

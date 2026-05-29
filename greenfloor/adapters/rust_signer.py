@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.core.engine_bridge import import_engine
-from greenfloor.core.offer_assets_bridge import resolve_offer_asset_ids_by_config_path
 from greenfloor.core.signer_offer_request import (
     SignerCreateOfferPayload,
     signer_create_offer_request_from_fields,
@@ -48,16 +47,6 @@ def build_mixed_split(program_path: str, request_dict: dict[str, Any]) -> dict[s
     if not isinstance(result, dict):
         raise TypeError("build_mixed_split returned non-dict result")
     return result
-
-
-def resolve_offer_asset_ids(program_path: str, base_asset: str, quote_asset: str) -> dict[str, str]:
-    """Resolve market symbols or asset ids to canonical offer asset ids."""
-    base_asset_id, quote_asset_id = resolve_offer_asset_ids_by_config_path(
-        str(program_path),
-        base_asset,
-        quote_asset,
-    )
-    return {"base_asset_id": base_asset_id, "quote_asset_id": quote_asset_id}
 
 
 def program_config_path_from_payload(payload: dict[str, Any]) -> str | None:

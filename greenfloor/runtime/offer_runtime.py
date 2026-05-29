@@ -46,19 +46,6 @@ def _signer_config_path(program: ProgramConfig) -> str:
     return prepare_signer_runtime(program)
 
 
-def signer_resolve_offer_asset_ids(
-    *,
-    program: ProgramConfig,
-    base_asset_id: str,
-    quote_asset_id: str,
-) -> tuple[str, str]:
-    return resolve_offer_assets(
-        str(base_asset_id).strip(),
-        str(quote_asset_id).strip(),
-        program=program,
-    )
-
-
 def _list_coinset_bootstrap_coins(
     *,
     network: str,
@@ -215,7 +202,7 @@ def signer_create_offer_phase(
 @dataclass(frozen=True, slots=True)
 class SignerOfferDeps:
     post_deps: OfferPostDeps
-    resolve_signer_offer_asset_ids_fn: collections.abc.Callable[..., tuple[str, str]]
+    resolve_offer_assets_fn: collections.abc.Callable[..., tuple[str, str]]
     signer_bootstrap_phase_fn: collections.abc.Callable[..., BootstrapPhaseResult]
     signer_create_offer_phase_fn: collections.abc.Callable[..., OfferCreatePhaseOutcome]
 
@@ -223,7 +210,7 @@ class SignerOfferDeps:
 def default_signer_offer_deps(*, post_deps: OfferPostDeps | None = None) -> SignerOfferDeps:
     return SignerOfferDeps(
         post_deps=post_deps or default_offer_post_deps(),
-        resolve_signer_offer_asset_ids_fn=signer_resolve_offer_asset_ids,
+        resolve_offer_assets_fn=resolve_offer_assets,
         signer_bootstrap_phase_fn=signer_bootstrap_phase,
         signer_create_offer_phase_fn=signer_create_offer_phase,
     )
@@ -249,12 +236,10 @@ def build_and_post_offer_signer(
     resolved_deps = deps or default_signer_offer_deps()
 
     prepare_signer_runtime(program)
-    resolved_base_asset_id, resolved_quote_asset_id = (
-        resolved_deps.resolve_signer_offer_asset_ids_fn(
-            program=program,
-            base_asset_id=str(market.base_asset),
-            quote_asset_id=str(market.quote_asset),
-        )
+    resolved_base_asset_id, resolved_quote_asset_id = resolved_deps.resolve_offer_assets_fn(
+        str(market.base_asset),
+        str(market.quote_asset),
+        program=program,
     )
 
     def bootstrap(**kwargs: Any) -> BootstrapPhaseResult:

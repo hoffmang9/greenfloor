@@ -144,12 +144,9 @@ def coin_op_setup(
         network=network,
     )
     canonical = canonical_asset_id_override or str(market.base_asset)
-    hint = canonical_asset_id_override or str(market.base_symbol)
     try:
         if canonical_asset_id_override:
-            resolved_asset_id = resolve_signer_asset_id(
-                program, canonical_asset_id=canonical, symbol_hint=hint
-            )
+            resolved_asset_id = resolve_signer_asset_id(program, canonical_asset_id=canonical)
         else:
             resolved_asset_id = resolve_coin_op_base_asset_id(program=program, market=market)
         backend = build_coin_op_backend(

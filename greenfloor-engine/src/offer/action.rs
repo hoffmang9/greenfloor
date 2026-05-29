@@ -96,6 +96,15 @@ pub fn try_normalize_resolved_assets(
     resolved_assets_or_collision_error(resolved_base, resolved_quote)
 }
 
+pub async fn resolve_offer_assets_via_coinset(
+    config: &SignerConfig,
+    base_asset: &str,
+    quote_asset: &str,
+) -> SignerResult<(String, String)> {
+    let msp = MspCoinset::for_network(&config.network, Some(&config.coinset_msp_base_url))?;
+    resolve_offer_asset_ids(&msp, base_asset, quote_asset).await
+}
+
 pub async fn resolve_offer_assets_for_action(
     config: &SignerConfig,
     base_asset: &str,
@@ -106,10 +115,7 @@ pub async fn resolve_offer_assets_for_action(
         Err(SignerError::ResolvedAssetsCollideForNonXchPair) => {
             Err(SignerError::ResolvedAssetsCollideForNonXchPair)
         }
-        Err(_) => {
-            let msp = MspCoinset::for_network(&config.network, Some(&config.coinset_msp_base_url))?;
-            resolve_offer_asset_ids(&msp, base_asset, quote_asset).await
-        }
+        Err(_) => resolve_offer_assets_via_coinset(config, base_asset, quote_asset).await,
     }
 }
 
@@ -247,5 +253,46 @@ mod tests {
             err,
             SignerError::ResolvedAssetsCollideForNonXchPair
         ));
+    }
+
+    fn test_signer_config(msp_base_url: &str) -> SignerConfig {
+        use crate::vault::context::VaultCustodySnapshot;
+        use chia_protocol::Bytes32;
+
+        SignerConfig {
+            network: "mainnet".to_string(),
+            coinset_msp_base_url: msp_base_url.to_string(),
+            kms_key_id: "kms-test".to_string(),
+            kms_region: "us-west-2".to_string(),
+            kms_public_key_hex: None,
+            vault: VaultCustodySnapshot {
+                launcher_id: Bytes32::default(),
+                custody_threshold: 1,
+                recovery_threshold: 1,
+                recovery_clawback_timelock: 3600,
+                custody_keys: Vec::new(),
+                recovery_keys: Vec::new(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_via_coinset_looks_up_ticker_symbols() {
+        let mut server = mockito::Server::new_async().await;
+        let cat_id = "b".repeat(64);
+        let _mock = server
+            .mock("POST", "/lookup_asset_by_symbol")
+            .with_status(200)
+            .with_body(format!(
+                r#"{{"success":true,"asset":{{"asset_id":"{cat_id}","symbol":"HOA"}}}}"#
+            ))
+            .create_async()
+            .await;
+        let config = test_signer_config(&server.url());
+        let (base, quote) = resolve_offer_assets_via_coinset(&config, "HOA", "xch")
+            .await
+            .expect("coinset resolution");
+        assert_eq!(base, cat_id);
+        assert_eq!(quote, "xch");
     }
 }

@@ -24,11 +24,11 @@ _require_offer_action_method = engine_bridge.engine_method_getter(
 _EMPTY_RESOLVED_ASSET_ERROR = "signer_asset_resolution_failed:empty_resolved_asset_id"
 
 
-def _require_offer_asset_pair(payload: object) -> tuple[str, str]:
-    if not isinstance(payload, dict):
-        raise TypeError("offer asset resolution returned non-dict result")
-    base_asset_id = str(payload.get("base_asset_id", "")).strip()
-    quote_asset_id = str(payload.get("quote_asset_id", "")).strip()
+def _coerce_asset_pair(result: object) -> tuple[str, str]:
+    if not isinstance(result, tuple) or len(result) != 2:
+        raise TypeError("offer asset resolution returned non-pair result")
+    base_asset_id = str(result[0]).strip()
+    quote_asset_id = str(result[1]).strip()
     if not base_asset_id or not quote_asset_id:
         raise RuntimeError(_EMPTY_RESOLVED_ASSET_ERROR)
     return base_asset_id, quote_asset_id
@@ -43,10 +43,10 @@ def try_normalize_offer_asset_ids(base_asset: str, quote_asset: str) -> tuple[st
     structurally but the pair collides for a non-XCH market.
     """
     normalize = _require_offer_action_method("try_normalize_offer_asset_ids")
-    payload = normalize(str(base_asset), str(quote_asset))
+    payload = normalize(str(base_asset).strip(), str(quote_asset).strip())
     if payload is None:
         return None
-    return _require_offer_asset_pair(payload)
+    return _coerce_asset_pair(payload)
 
 
 def resolve_offer_asset_ids_by_config_path(
@@ -54,10 +54,10 @@ def resolve_offer_asset_ids_by_config_path(
     base_asset: str,
     quote_asset: str,
 ) -> tuple[str, str]:
-    """Resolve offer assets via signer config path and Coinset when needed."""
+    """Resolve offer assets via signer config path and Coinset (no normalize retry)."""
     resolve = _require_offer_action_method("resolve_offer_asset_ids")
-    payload = resolve(str(config_path), str(base_asset), str(quote_asset))
-    return _require_offer_asset_pair(payload)
+    payload = resolve(str(config_path), str(base_asset).strip(), str(quote_asset).strip())
+    return _coerce_asset_pair(payload)
 
 
 def resolve_offer_asset_ids_for_program(
@@ -79,7 +79,9 @@ def resolve_offer_assets(
     program: ProgramConfig,
 ) -> tuple[str, str]:
     """Resolve market symbols or asset ids to canonical offer asset ids."""
-    normalized = try_normalize_offer_asset_ids(base_asset, quote_asset)
+    base = str(base_asset).strip()
+    quote = str(quote_asset).strip()
+    normalized = try_normalize_offer_asset_ids(base, quote)
     if normalized is not None:
         return normalized
-    return resolve_offer_asset_ids_for_program(program, base_asset, quote_asset)
+    return resolve_offer_asset_ids_for_program(program, base, quote)

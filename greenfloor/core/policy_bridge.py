@@ -5,11 +5,6 @@ from __future__ import annotations
 from typing import Any, TypedDict
 
 from greenfloor.core import engine_bridge
-from greenfloor.core.offer_assets_bridge import (
-    resolve_offer_asset_ids_for_program,
-    resolve_offer_assets,
-    try_normalize_offer_asset_ids,
-)
 from greenfloor.core.offer_request_bridge import (
     compute_signer_offer_leg_amounts,
     normalize_offer_asset_id,
@@ -36,12 +31,9 @@ __all__ = [
     "poll_exponential_advance_sleep",
     "poll_exponential_sleep_now",
     "quote_mojos_for_base_size",
-    "resolve_offer_asset_ids_for_program",
-    "resolve_offer_assets",
     "resolve_offer_expiry_for_pricing",
     "resolve_quote_price_for_pricing",
     "signer_split_asset_id",
-    "try_normalize_offer_asset_ids",
     "verify_offer_for_dexie",
 ]
 

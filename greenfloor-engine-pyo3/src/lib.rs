@@ -37,7 +37,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
-use pyo3::types::{PyDict, PyList, PyModule};
+use pyo3::types::{PyDict, PyList, PyModule, PyTuple};
 
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
@@ -277,12 +277,7 @@ fn resolve_offer_asset_ids_py(
     let (base, quote) = runtime()
         .block_on(resolve_offer_asset_ids(config, base_asset, quote_asset))
         .map_err(to_py_err)?;
-    Python::attach(|py| {
-        let dict = PyDict::new(py);
-        dict.set_item("base_asset_id", base)?;
-        dict.set_item("quote_asset_id", quote)?;
-        Ok(dict.into())
-    })
+    Python::attach(|py| Ok(PyTuple::new(py, [base, quote])?.into()))
 }
 
 /// Full Dexie pre-post validation (structure, expiry, duplicate spends).

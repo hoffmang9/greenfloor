@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.core.offer_assets_bridge import resolve_offer_assets
 from greenfloor.core.offer_policy import resolve_quote_price_for_pricing
 from greenfloor.core.parallel_reservation_context import ParallelReservationContext
 from greenfloor.daemon.market_helpers import _resolve_quote_asset_for_offer
-from greenfloor.runtime.offer_runtime import signer_resolve_offer_asset_ids
 
 
 def reservation_wallet_id(program: ProgramConfig) -> str:
@@ -47,14 +47,10 @@ def resolve_signer_offer_asset_ids_for_reservation(
         quote_asset=str(market.quote_asset),
         network=str(program.app_network),
     )
-    resolved_base_asset_id, resolved_quote_asset_id = signer_resolve_offer_asset_ids(
+    resolved_base_asset_id, resolved_quote_asset_id = resolve_offer_assets(
+        str(market.base_asset),
+        quote_asset,
         program=program,
-        base_asset_id=str(market.base_asset).strip(),
-        quote_asset_id=str(quote_asset).strip(),
     )
-    resolved_xch_asset_id, _ = signer_resolve_offer_asset_ids(
-        program=program,
-        base_asset_id="xch",
-        quote_asset_id=str(quote_asset).strip(),
-    )
+    resolved_xch_asset_id, _ = resolve_offer_assets("xch", quote_asset, program=program)
     return resolved_base_asset_id, resolved_quote_asset_id, resolved_xch_asset_id

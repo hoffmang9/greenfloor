@@ -5,79 +5,75 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
+from greenfloor.config.io import load_program_config
+from greenfloor.config.models import invalidate_signer_runtime_cache
+from greenfloor.core.engine_bridge import import_engine
 from greenfloor.runtime.offer_action_build import resolve_action_assets_for_build_context
 from greenfloor.runtime.offer_build_context import prepare_offer_build_context
+from tests.helpers.msp_mock_server import write_signer_program_yaml
 from tests.helpers.offer_runtime_fixtures import (
     market_config_for_local_offer,
     program_config_for_local_offer,
 )
 
+_CAT = "c" * 64
 
-def test_resolve_action_assets_uses_engine_normalization_for_canonical_assets(monkeypatch) -> None:
+
+def _require_engine() -> None:
+    try:
+        import_engine()
+    except ImportError as exc:
+        pytest.skip(f"greenfloor_engine unavailable: {exc}")
+
+
+def test_resolve_action_assets_normalizes_canonical_market_assets(tmp_path: Path) -> None:
+    _require_engine()
     market = replace(
         market_config_for_local_offer(),
-        base_asset="AA" * 32,
+        base_asset=_CAT.upper(),
         quote_asset="XCH",
         pricing={"fixed_quote_per_base": 0.5, "strategy_offer_expiry_minutes": 12},
     )
     build_ctx = prepare_offer_build_context(
         program=program_config_for_local_offer(),
         market=market,
-        program_path=Path("/tmp/program.yaml"),
+        program_path=tmp_path / "program.yaml",
         network="mainnet",
-        keyring_yaml_path="/tmp/keyring.yaml",
-    )
-
-    def _fail_program_resolve(_program, _base: str, _quote: str) -> tuple[str, str]:
-        raise AssertionError("canonical asset normalization should not call Coinset resolution")
-
-    monkeypatch.setattr(
-        "greenfloor.core.offer_assets_bridge.try_normalize_offer_asset_ids",
-        lambda _base, _quote: ("aa" * 32, "xch"),
-    )
-    monkeypatch.setattr(
-        "greenfloor.core.offer_assets_bridge.resolve_offer_asset_ids_for_program",
-        _fail_program_resolve,
+        keyring_yaml_path=str(tmp_path / "keyring.yaml"),
     )
 
     base, quote = resolve_action_assets_for_build_context(build_ctx)
 
-    assert base == "aa" * 32
+    assert base == _CAT
     assert quote == "xch"
 
 
-def test_resolve_action_assets_uses_engine_for_ticker_symbols(monkeypatch) -> None:
+def test_resolve_action_assets_reaches_coinset_for_ticker_symbols(tmp_path: Path) -> None:
+    _require_engine()
+    home = tmp_path / "home"
+    home.mkdir()
+    program_path = tmp_path / "program.yaml"
+    write_signer_program_yaml(
+        program_path,
+        home_dir=str(home),
+        msp_base_url="http://127.0.0.1:1/unreachable",
+    )
+    invalidate_signer_runtime_cache(home_dir=str(home))
+    program = load_program_config(program_path)
     market = replace(
         market_config_for_local_offer(),
         base_asset="HOA",
         pricing={"fixed_quote_per_base": 0.5, "strategy_offer_expiry_minutes": 12},
     )
     build_ctx = prepare_offer_build_context(
-        program=program_config_for_local_offer(),
+        program=program,
         market=market,
-        program_path=Path("/tmp/program.yaml"),
+        program_path=program_path,
         network="mainnet",
-        keyring_yaml_path="/tmp/keyring.yaml",
-    )
-    captured: dict[str, str] = {}
-
-    def _fake_program_resolve(_program, base: str, quote: str) -> tuple[str, str]:
-        captured["base"] = base
-        captured["quote"] = quote
-        return "aa" * 32, "xch"
-
-    monkeypatch.setattr(
-        "greenfloor.core.offer_assets_bridge.try_normalize_offer_asset_ids",
-        lambda _base, _quote: None,
-    )
-    monkeypatch.setattr(
-        "greenfloor.core.offer_assets_bridge.resolve_offer_asset_ids_for_program",
-        _fake_program_resolve,
+        keyring_yaml_path=str(tmp_path / "keyring.yaml"),
     )
 
-    base, quote = resolve_action_assets_for_build_context(build_ctx)
-
-    assert captured["base"] == "HOA"
-    assert captured["quote"] == "xch"
-    assert base == "aa" * 32
-    assert quote == "xch"
+    with pytest.raises(ValueError, match="asset_resolution_failed:HOA"):
+        resolve_action_assets_for_build_context(build_ctx)
