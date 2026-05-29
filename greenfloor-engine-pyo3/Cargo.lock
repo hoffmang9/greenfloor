@@ -1666,7 +1666,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
-name = "greenfloor-signer"
+name = "greenfloor-engine"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1703,11 +1703,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "greenfloor-signer-pyo3"
+name = "greenfloor-engine-pyo3"
 version = "0.1.0"
 dependencies = [
  "chia-bls 0.36.1",
- "greenfloor-signer",
+ "greenfloor-engine",
  "pyo3",
  "serde_json",
  "tokio",

@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 
-use signer_core::{needs_inventory_fallback, resolve_inventory_scan_source};
+use engine_core::{needs_inventory_fallback, resolve_inventory_scan_source};
 
 #[pyfunction]
 #[pyo3(name = "needs_inventory_fallback")]

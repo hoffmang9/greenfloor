@@ -32,16 +32,16 @@ from tests.helpers.signer_fixtures import (
 )
 
 
-def _require_signer_kernel():
+def _require_signer_engine():
     try:
-        import greenfloor_kernel as kernel  # type: ignore[import-not-found]
+        import greenfloor_engine as engine  # type: ignore[import-not-found]
     except ImportError:
-        pytest.skip("greenfloor_kernel not installed")
-    if not callable(getattr(kernel, "compute_signer_offer_leg_amounts", None)):
-        pytest.skip("greenfloor_kernel.compute_signer_offer_leg_amounts not available")
-    if not callable(getattr(kernel, "normalize_offer_side", None)):
-        pytest.skip("greenfloor_kernel.normalize_offer_side not available")
-    return kernel
+        pytest.skip("greenfloor_engine not installed")
+    if not callable(getattr(engine, "compute_signer_offer_leg_amounts", None)):
+        pytest.skip("greenfloor_engine.compute_signer_offer_leg_amounts not available")
+    if not callable(getattr(engine, "normalize_offer_side", None)):
+        pytest.skip("greenfloor_engine.normalize_offer_side not available")
+    return engine
 
 
 @pytest.mark.parametrize(
@@ -53,17 +53,17 @@ def _require_signer_kernel():
         ("", "sell"),
     ],
 )
-def test_normalize_offer_side_matches_kernel(raw: str, expected: str) -> None:
-    kernel = _require_signer_kernel()
+def test_normalize_offer_side_matches_engine(raw: str, expected: str) -> None:
+    engine = _require_signer_engine()
     assert normalize_offer_side(raw) == expected
-    kernel_normalize = cast(
+    engine_normalize = cast(
         Callable[[str], str],
-        kernel.normalize_offer_side,  # pyright: ignore[reportAttributeAccessIssue]
+        engine.normalize_offer_side,  # pyright: ignore[reportAttributeAccessIssue]
     )
-    assert str(kernel_normalize(str(raw))) == expected
+    assert str(engine_normalize(str(raw))) == expected
 
 
-def test_planned_action_side_avoids_kernel_for_canonical_labels() -> None:
+def test_planned_action_side_avoids_engine_for_canonical_labels() -> None:
     action = PlannedAction(
         size=1,
         repeat=1,
@@ -78,6 +78,7 @@ def test_planned_action_side_avoids_kernel_for_canonical_labels() -> None:
 
 
 def test_prepare_offer_build_context_caches_normalized_side(tmp_path: Path) -> None:
+    _require_signer_engine()
     program = program_config_for_local_offer(home_dir=str(tmp_path))
     market = replace(
         market_config_for_local_offer(),
@@ -96,7 +97,7 @@ def test_prepare_offer_build_context_caches_normalized_side(tmp_path: Path) -> N
 
 @pytest.mark.parametrize("fixture_path", sorted(SIGNER_FIXTURE_DIR.glob("*.json")))
 def test_signer_golden_fixture_contract(fixture_path: Path) -> None:
-    _require_signer_kernel()
+    _require_signer_engine()
     payload = json.loads(fixture_path.read_text(encoding="utf-8"))
     fixture_req, expires_at_unix = parse_create_offer_request(payload["create_offer_request"])
     parity = parse_runtime_parity(payload["runtime_parity"])
@@ -155,7 +156,7 @@ def test_compute_signer_offer_leg_amounts_rejects_invalid_inputs(
     quote_price: float,
     match: str,
 ) -> None:
-    _require_signer_kernel()
+    _require_signer_engine()
     pricing = {
         "base_unit_mojo_multiplier": 1000,
         "quote_unit_mojo_multiplier": 1000,
@@ -173,13 +174,13 @@ def test_compute_signer_offer_leg_amounts_rejects_invalid_inputs(
         )
 
 
-@pytest.mark.signer
+@pytest.mark.engine
 @pytest.mark.parametrize("fixture_path", sorted(SIGNER_FIXTURE_DIR.glob("*.json")))
 def test_signer_golden_offer_validates(fixture_path: Path) -> None:
-    kernel = _require_signer_kernel()
-    validate = getattr(kernel, "validate_offer_structure", None)
+    engine = _require_signer_engine()
+    validate = getattr(engine, "validate_offer_structure", None)
     if not callable(validate):
-        pytest.skip("greenfloor_kernel.validate_offer_structure not available")
+        pytest.skip("greenfloor_engine.validate_offer_structure not available")
 
     payload = json.loads(fixture_path.read_text(encoding="utf-8"))
     offer = str(payload.get("offer", "")).strip()

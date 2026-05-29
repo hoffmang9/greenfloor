@@ -6,7 +6,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use super::common::{cached_class, require_i64_attr};
-use signer_core::{CombineInputSelectionMode, SplitAutoSelectPlan, SplitPlanningProfile};
+use engine_core::{CombineInputSelectionMode, SplitAutoSelectPlan, SplitPlanningProfile};
 
 const COIN_OPS_MODULE: &str = "greenfloor.core.coin_ops";
 
@@ -58,7 +58,7 @@ pub fn split_denomination_readiness_class<'py>(py: Python<'py>) -> PyResult<Boun
 
 pub fn split_denomination_readiness_to_py<'py>(
     py: Python<'py>,
-    gate: &signer_core::CoinSplitGateResult,
+    gate: &engine_core::CoinSplitGateResult,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = split_denomination_readiness_class(py)?;
     let kwargs = PyDict::new(py);
@@ -84,7 +84,7 @@ pub fn combine_denomination_readiness_class<'py>(py: Python<'py>) -> PyResult<Bo
 
 pub fn combine_denomination_readiness_to_py<'py>(
     py: Python<'py>,
-    gate: &signer_core::CoinCombineGateResult,
+    gate: &engine_core::CoinCombineGateResult,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = combine_denomination_readiness_class(py)?;
     let kwargs = PyDict::new(py);
@@ -96,23 +96,23 @@ pub fn combine_denomination_readiness_to_py<'py>(
     cls.call((), Some(&kwargs))
 }
 
-fn coin_op_kind_from_py(obj: &Bound<'_, PyAny>) -> PyResult<signer_core::CoinOpKind> {
+fn coin_op_kind_from_py(obj: &Bound<'_, PyAny>) -> PyResult<engine_core::CoinOpKind> {
     let op_type: String = obj.getattr("op_type")?.extract()?;
     match op_type.as_str() {
-        "split" => Ok(signer_core::CoinOpKind::Split),
-        "combine" => Ok(signer_core::CoinOpKind::Combine),
+        "split" => Ok(engine_core::CoinOpKind::Split),
+        "combine" => Ok(engine_core::CoinOpKind::Combine),
         other => Err(PyValueError::new_err(format!(
             "invalid coin op type: {other}"
         ))),
     }
 }
 
-pub fn bucket_spec_from_py(obj: &Bound<'_, PyAny>) -> PyResult<signer_core::BucketSpec> {
+pub fn bucket_spec_from_py(obj: &Bound<'_, PyAny>) -> PyResult<engine_core::BucketSpec> {
     let cls = bucket_spec_class(obj.py())?;
     if !obj.is_instance(&cls)? {
         return Err(PyTypeError::new_err("expected BucketSpec"));
     }
-    Ok(signer_core::BucketSpec {
+    Ok(engine_core::BucketSpec {
         size_base_units: obj.getattr("size_base_units")?.extract()?,
         target_count: obj.getattr("target_count")?.extract()?,
         split_buffer_count: obj.getattr("split_buffer_count")?.extract()?,
@@ -121,12 +121,12 @@ pub fn bucket_spec_from_py(obj: &Bound<'_, PyAny>) -> PyResult<signer_core::Buck
     })
 }
 
-pub fn coin_op_plan_from_py(obj: &Bound<'_, PyAny>) -> PyResult<signer_core::CoinOpPlan> {
+pub fn coin_op_plan_from_py(obj: &Bound<'_, PyAny>) -> PyResult<engine_core::CoinOpPlan> {
     let cls = coin_op_plan_class(obj.py())?;
     if !obj.is_instance(&cls)? {
         return Err(PyTypeError::new_err("expected CoinOpPlan"));
     }
-    Ok(signer_core::CoinOpPlan {
+    Ok(engine_core::CoinOpPlan {
         op_type: coin_op_kind_from_py(obj)?,
         size_base_units: obj.getattr("size_base_units")?.extract()?,
         op_count: obj.getattr("op_count")?.extract()?,
@@ -136,7 +136,7 @@ pub fn coin_op_plan_from_py(obj: &Bound<'_, PyAny>) -> PyResult<signer_core::Coi
 
 pub fn coin_op_plan_to_py<'py>(
     py: Python<'py>,
-    plan: &signer_core::CoinOpPlan,
+    plan: &engine_core::CoinOpPlan,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = coin_op_plan_class(py)?;
     let kwargs = PyDict::new(py);
@@ -149,7 +149,7 @@ pub fn coin_op_plan_to_py<'py>(
 
 pub fn coin_op_plans_from_py_list(
     plans: &Bound<'_, PyList>,
-) -> PyResult<Vec<signer_core::CoinOpPlan>> {
+) -> PyResult<Vec<engine_core::CoinOpPlan>> {
     let mut parsed = Vec::with_capacity(plans.len());
     for item in plans.iter() {
         parsed.push(coin_op_plan_from_py(&item)?);
@@ -176,7 +176,7 @@ fn split_skip_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 pub fn spendable_coins_from_py_list(
     list: &Bound<'_, PyList>,
-) -> PyResult<Vec<signer_core::SpendableCoin>> {
+) -> PyResult<Vec<engine_core::SpendableCoin>> {
     let mut coins = Vec::with_capacity(list.len());
     for item in list.iter() {
         let dict = item
@@ -201,7 +201,7 @@ pub fn spendable_coins_from_py_list(
         if amount <= 0 {
             continue;
         }
-        coins.push(signer_core::SpendableCoin { id, amount });
+        coins.push(engine_core::SpendableCoin { id, amount });
     }
     Ok(coins)
 }
@@ -273,12 +273,12 @@ pub fn split_auto_select_plan_to_py<'py>(
 
 pub fn ladder_target_rows_from_py_list(
     list: &Bound<'_, PyList>,
-) -> PyResult<Vec<signer_core::coin_ops::LadderTargetRow>> {
+) -> PyResult<Vec<engine_core::coin_ops::LadderTargetRow>> {
     list.iter()
         .enumerate()
         .map(|(index, item)| {
             let label = format!("ladder entry {index}");
-            Ok(signer_core::coin_ops::LadderTargetRow {
+            Ok(engine_core::coin_ops::LadderTargetRow {
                 size_base_units: require_i64_attr(&item, &label, "size_base_units")?,
                 target_count: require_i64_attr(&item, &label, "target_count")?,
             })

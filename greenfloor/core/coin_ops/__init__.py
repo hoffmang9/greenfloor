@@ -1,4 +1,4 @@
-"""Coin-operation deterministic policy (Rust-backed kernel).
+"""Coin-operation deterministic policy (Rust-backed engine).
 
 ``SplitPlanningProfile`` controls ``plan_auto_split_selection()``:
 

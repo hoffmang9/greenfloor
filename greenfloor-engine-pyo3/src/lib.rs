@@ -1,8 +1,7 @@
-//! PyO3 bindings for the GreenFloor Rust kernel (`greenfloor-signer` crate).
+//! PyO3 bindings for the GreenFloor Rust engine (`greenfloor-engine` crate).
 //!
-//! The extension module is exported as `greenfloor_kernel` (ADR 0010). Python
-//! callers should import through `greenfloor.core.kernel_bridge.import_kernel`.
-extern crate greenfloor_signer as signer_core;
+//! The extension module is exported as `greenfloor_engine` (ADR 0010). Python
+//! callers should import through `greenfloor.core.engine_bridge.import_engine`.
 
 mod coin_ops_py;
 mod cycle;
@@ -24,8 +23,8 @@ use std::sync::OnceLock;
 use chia_bls::SecretKey;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use signer_core::error::{bls_reason, broadcast_reason, BlsOp};
-use signer_core::{
+use engine_core::error::{bls_reason, broadcast_reason, BlsOp};
+use engine_core::{
     broadcast_bls_spend_bundle, build_and_optionally_broadcast_vault_cat_mixed_split,
     build_bls_mixed_split_spend_bundle, build_bls_offer_spend_bundle,
     build_bls_xch_coin_op_spend_bundle, build_vault_cat_offer,
@@ -57,9 +56,9 @@ fn parse_master_sk_bytes(master_sk_bytes: &[u8]) -> PyResult<SecretKey> {
     SecretKey::from_bytes(&bytes).map_err(to_py_err)
 }
 
-fn block_on_signer<F, T>(future: F) -> Result<T, signer_core::Error>
+fn block_on_engine<F, T>(future: F) -> Result<T, engine_core::Error>
 where
-    F: Future<Output = Result<T, signer_core::Error>>,
+    F: Future<Output = Result<T, engine_core::Error>>,
 {
     runtime().block_on(future)
 }
@@ -67,7 +66,7 @@ where
 fn bls_build_dict_py<T>(
     py: Python<'_>,
     op: BlsOp,
-    result: Result<T, signer_core::Error>,
+    result: Result<T, engine_core::Error>,
     fill_ok: impl FnOnce(&Bound<'_, PyDict>, T) -> PyResult<()>,
 ) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
@@ -136,7 +135,7 @@ fn build_bls_mixed_split_py(
         let payload = request_dict_to_json(request)?;
         let split_request: BlsMixedSplitRequest =
             serde_json::from_value(payload).map_err(to_py_err)?;
-        let result = block_on_signer(build_bls_mixed_split_spend_bundle(
+        let result = block_on_engine(build_bls_mixed_split_spend_bundle(
             network,
             &master_sk,
             split_request,
@@ -162,7 +161,7 @@ fn build_bls_offer_py(
         let master_sk = parse_master_sk_bytes(master_sk_bytes)?;
         let payload = request_dict_to_json(request)?;
         let offer_request: BlsOfferRequest = serde_json::from_value(payload).map_err(to_py_err)?;
-        let result = block_on_signer(build_bls_offer_spend_bundle(
+        let result = block_on_engine(build_bls_offer_spend_bundle(
             network,
             &master_sk,
             offer_request,
@@ -186,7 +185,7 @@ fn build_bls_xch_coin_op_py(
         let payload = request_dict_to_json(request)?;
         let coin_op_request: BlsXchCoinOpRequest =
             serde_json::from_value(payload).map_err(to_py_err)?;
-        let result = block_on_signer(build_bls_xch_coin_op_spend_bundle(
+        let result = block_on_engine(build_bls_xch_coin_op_spend_bundle(
             network,
             &master_sk,
             coin_op_request,
@@ -226,7 +225,7 @@ fn list_bls_cat_coins_by_ids_py(network: &str, coin_ids: Vec<String>) -> PyResul
 
 fn summaries_to_py_list(
     py: Python<'_>,
-    summaries: Vec<signer_core::CoinRecordSummary>,
+    summaries: Vec<engine_core::CoinRecordSummary>,
 ) -> PyResult<Py<PyAny>> {
     let list = PyList::empty(py);
     for summary in summaries {
@@ -412,7 +411,7 @@ fn coinset_get_conservative_fee_estimate_py(
 }
 
 #[pymodule]
-fn greenfloor_kernel(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn greenfloor_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(resolve_vault_context_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_vault_cat_offer_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_mixed_split_py, m)?)?;

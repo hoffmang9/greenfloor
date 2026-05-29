@@ -12,6 +12,6 @@ runs:
     - uses: Swatinem/rust-cache@v2
       with:
         workspaces: |
-          greenfloor-signer -> target
-          greenfloor-signer-pyo3 -> target
+          greenfloor-engine -> target
+          greenfloor-engine-pyo3 -> target
         cache-workspace-crates: true

@@ -1,4 +1,4 @@
-"""Legacy offer-builder entry point; ``build_offer`` uses the Rust kernel BLS action path."""
+"""Legacy offer-builder entry point; ``build_offer`` uses the Rust engine BLS action path."""
 
 from __future__ import annotations
 

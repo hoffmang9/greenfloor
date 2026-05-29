@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use signer_core::SignerOfferLegAmounts;
+use engine_core::SignerOfferLegAmounts;
 
 use super::common::cached_class;
 

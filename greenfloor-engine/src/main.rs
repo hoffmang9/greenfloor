@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use greenfloor_signer::vault::members::hex_to_bytes32;
-use greenfloor_signer::{
+use greenfloor_engine::vault::members::hex_to_bytes32;
+use greenfloor_engine::{
     build_and_optionally_broadcast_vault_cat_mixed_split, build_vault_cat_offer,
     load_signer_config, parse_coin_ids, resolve_vault_context, CreateOfferRequest,
     MixedSplitRequest,
@@ -10,7 +10,7 @@ use greenfloor_signer::{
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "greenfloor-signer",
+    name = "greenfloor-engine",
     about = "Local Chia vault signing backed by chia-wallet-sdk"
 )]
 struct Cli {
@@ -91,7 +91,7 @@ async fn main() {
     }
 }
 
-async fn run() -> Result<(), greenfloor_signer::Error> {
+async fn run() -> Result<(), greenfloor_engine::Error> {
     let cli = Cli::parse();
     match cli.command {
         Commands::VaultInfo { config, json } => {
@@ -101,7 +101,7 @@ async fn run() -> Result<(), greenfloor_signer::Error> {
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&context).map_err(|err| {
-                        greenfloor_signer::Error::Other(format!("json encode failed: {err}"))
+                        greenfloor_engine::Error::Other(format!("json encode failed: {err}"))
                     })?
                 );
             } else {
@@ -185,7 +185,7 @@ async fn run_mixed_split(
     coin_ids: Vec<String>,
     allow_sub_cat_output: bool,
     broadcast: bool,
-) -> Result<greenfloor_signer::MixedSplitResult, greenfloor_signer::Error> {
+) -> Result<greenfloor_engine::MixedSplitResult, greenfloor_engine::Error> {
     let config = load_signer_config(config_path)?;
     let parsed_coin_ids = if coin_ids.is_empty() {
         Vec::new()
@@ -207,7 +207,7 @@ async fn run_mixed_split(
     .await
 }
 
-fn print_vault_info(context: &greenfloor_signer::vault::VaultContext) {
+fn print_vault_info(context: &greenfloor_engine::vault::VaultContext) {
     println!("network: {}", context.network);
     println!("launcher_id: {}", context.launcher_id);
     println!("inner_puzzle_hash: {}", context.inner_puzzle_hash);
@@ -232,14 +232,14 @@ fn print_vault_info(context: &greenfloor_signer::vault::VaultContext) {
 }
 
 fn print_mixed_split_result(
-    result: &greenfloor_signer::MixedSplitResult,
+    result: &greenfloor_engine::MixedSplitResult,
     json: bool,
-) -> Result<(), greenfloor_signer::Error> {
+) -> Result<(), greenfloor_engine::Error> {
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(result).map_err(|err| {
-                greenfloor_signer::Error::Other(format!("json encode failed: {err}"))
+                greenfloor_engine::Error::Other(format!("json encode failed: {err}"))
             })?
         );
         return Ok(());
@@ -259,14 +259,14 @@ fn print_mixed_split_result(
 }
 
 fn print_create_offer_result(
-    result: &greenfloor_signer::CreateOfferResult,
+    result: &greenfloor_engine::CreateOfferResult,
     json: bool,
-) -> Result<(), greenfloor_signer::Error> {
+) -> Result<(), greenfloor_engine::Error> {
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(result).map_err(|err| {
-                greenfloor_signer::Error::Other(format!("json encode failed: {err}"))
+                greenfloor_engine::Error::Other(format!("json encode failed: {err}"))
             })?
         );
         return Ok(());

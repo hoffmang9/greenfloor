@@ -5,7 +5,7 @@ use crate::py_utils::{
     dict_to_i64_i64_map, i64_i64_map_to_py_dict, strategy_action_sell_counts_from_py_list,
 };
 
-use signer_core::{
+use engine_core::{
     aggregate_two_sided_offer_counts, executed_sell_offer_counts_by_size, is_two_sided_market_mode,
     one_sided_offer_counts_by_side, resolve_tracked_sizes,
 };

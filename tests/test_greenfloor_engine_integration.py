@@ -1,4 +1,4 @@
-"""Integration tests for the greenfloor_kernel PyO3 extension."""
+"""Integration tests for the greenfloor_engine PyO3 extension."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ from typing import Any
 import pytest
 
 
-def _require_signer_integration_enabled() -> None:
-    if os.getenv("GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS", "").strip() != "1":
-        pytest.skip("set GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS=1 to run greenfloor-signer tests")
+def _require_kernel_integration_enabled() -> None:
+    if os.getenv("GREENFLOOR_RUN_ENGINE_INTEGRATION_TESTS", "").strip() != "1":
+        pytest.skip("set GREENFLOOR_RUN_ENGINE_INTEGRATION_TESTS=1 to run greenfloor-engine tests")
 
 
 def _require_importable_modules():
@@ -20,37 +20,37 @@ def _require_importable_modules():
     except Exception:
         pytest.skip("chia_wallet_sdk import unavailable")
     try:
-        import greenfloor_kernel as signer  # type: ignore
+        import greenfloor_engine as engine  # type: ignore
     except Exception:
-        pytest.skip("greenfloor_kernel import unavailable")
-    return sdk, signer
+        pytest.skip("greenfloor_engine import unavailable")
+    return sdk, engine
 
 
-def test_greenfloor_signer_validate_offer_rejects_garbage() -> None:
-    _require_signer_integration_enabled()
-    _sdk, signer = _require_importable_modules()
+def test_greenfloor_engine_validate_offer_rejects_garbage() -> None:
+    _require_kernel_integration_enabled()
+    _sdk, engine = _require_importable_modules()
     with pytest.raises(ValueError):
-        signer.validate_offer("not-an-offer")
+        engine.validate_offer("not-an-offer")
 
 
-def test_greenfloor_signer_from_input_spend_bundle_xch_round_trip_offer() -> None:
-    _require_signer_integration_enabled()
-    sdk, signer = _require_importable_modules()
+def test_greenfloor_engine_from_input_spend_bundle_xch_round_trip_offer() -> None:
+    _require_kernel_integration_enabled()
+    sdk, engine = _require_importable_modules()
 
     input_spend_bundle = sdk.SpendBundle([], sdk.Signature.infinity())
-    offer_spend_bundle_bytes = signer.from_input_spend_bundle_xch(
+    offer_spend_bundle_bytes = engine.from_input_spend_bundle_xch(
         input_spend_bundle.to_bytes(),
         [(bytes([3]) * 32, [(bytes([4]) * 32, 42)])],
     )
-    offer_text = signer.encode_offer(offer_spend_bundle_bytes)
+    offer_text = engine.encode_offer(offer_spend_bundle_bytes)
     assert str(offer_text).startswith("offer1")
     # Synthetic round-trip offers have no expiry; structure validation is the contract here.
-    signer.validate_offer_structure(offer_text)
+    engine.validate_offer_structure(offer_text)
 
 
-def test_greenfloor_signer_config_yaml_roundtrip(tmp_path: Path) -> None:
-    _require_signer_integration_enabled()
-    _sdk, signer = _require_importable_modules()
+def test_greenfloor_engine_config_yaml_roundtrip(tmp_path: Path) -> None:
+    _require_kernel_integration_enabled()
+    _sdk, engine = _require_importable_modules()
 
     program = tmp_path / "program.yaml"
     program.write_text(
@@ -76,6 +76,6 @@ vault:
 """.strip(),
         encoding="utf-8",
     )
-    context: Any = signer.resolve_vault_context(str(program))
+    context: Any = engine.resolve_vault_context(str(program))
     assert context["launcher_id"] == "aa" * 32
     assert context["custody_threshold"] == 1

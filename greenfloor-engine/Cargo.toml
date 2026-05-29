@@ -1,16 +1,16 @@
 [package]
-name = "greenfloor-signer"
+name = "greenfloor-engine"
 version = "0.1.0"
 edition = "2021"
-description = "GreenFloor Rust kernel: vault KMS signing and deterministic daemon policy"
+description = "GreenFloor Rust engine: vault KMS signing and deterministic daemon policy"
 license = "Apache-2.0"
 
 [lib]
-name = "greenfloor_signer"
+name = "greenfloor_engine"
 path = "src/lib.rs"
 
 [[bin]]
-name = "greenfloor-signer"
+name = "greenfloor-engine"
 path = "src/main.rs"
 
 [dependencies]

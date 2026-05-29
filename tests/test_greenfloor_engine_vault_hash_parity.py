@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 # Expected hash vectors are canonical in tests/fixtures/vault_hash_golden.json
-# (mirrored by greenfloor-signer/src/test_support/golden.rs during migration).
+# (mirrored by greenfloor-engine/src/test_support/golden.rs during migration).
 FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "vault_hash_golden.json"
 
 
@@ -78,7 +78,7 @@ def _compute_vault_hashes(fixture: dict[str, str]) -> dict[str, bytes]:
     }
 
 
-def test_greenfloor_signer_vault_hash_parity_matches_python_sdk() -> None:
+def test_greenfloor_engine_vault_hash_parity_matches_python_sdk() -> None:
     fixture = _load_golden_fixture()
     hashes = _compute_vault_hashes(fixture)
     assert hashes["inner_puzzle_hash"].hex() == fixture["inner_puzzle_hash"]

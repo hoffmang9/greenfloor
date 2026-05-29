@@ -35,11 +35,11 @@ _VALID_HEX_ID = "a" * 64
     ],
 )
 def test_canonical_xch_parity_with_hex_utils(asset_id: str, expected_xch: bool) -> None:
-    from greenfloor.core.kernel_bridge import import_kernel
+    from greenfloor.core.engine_bridge import import_engine
 
-    kernel = import_kernel()
+    engine = import_engine()
     assert canonical_is_xch(asset_id) is expected_xch
-    assert bool(kernel.canonical_is_xch(asset_id)) is expected_xch
+    assert bool(engine.canonical_is_xch(asset_id)) is expected_xch
     if expected_xch:
         assert coin_op_min_amount_mojos(canonical_asset_id=asset_id) == 0
     else:
@@ -56,13 +56,13 @@ def test_canonical_xch_parity_with_hex_utils(asset_id: str, expected_xch: bool) 
     ],
 )
 def test_normalize_hex_id_parity_with_kernel(value: str, expected: str) -> None:
-    from greenfloor.core.kernel_bridge import import_kernel
+    from greenfloor.core.engine_bridge import import_engine
 
-    kernel = import_kernel()
+    engine = import_engine()
     assert normalize_hex_id(value) == expected
-    assert str(kernel.normalize_hex_id(value)) == expected
+    assert str(engine.normalize_hex_id(value)) == expected
     assert is_hex_id(value) is bool(expected)
-    assert bool(kernel.is_hex_id(value)) is bool(expected)
+    assert bool(engine.is_hex_id(value)) is bool(expected)
 
 
 @pytest.mark.parametrize(
@@ -73,11 +73,11 @@ def test_normalize_hex_id_parity_with_kernel(value: str, expected: str) -> None:
     ],
 )
 def test_default_mojo_multiplier_parity_with_kernel(asset_id: str, expected: int) -> None:
-    from greenfloor.core.kernel_bridge import import_kernel
+    from greenfloor.core.engine_bridge import import_engine
 
-    kernel = import_kernel()
+    engine = import_engine()
     assert default_mojo_multiplier_for_asset(asset_id) == expected
-    assert int(kernel.default_mojo_multiplier_for_asset(asset_id)) == expected
+    assert int(engine.default_mojo_multiplier_for_asset(asset_id)) == expected
 
 
 def test_coin_meets_min_amount_rejects_invalid_amount_type() -> None:

@@ -78,7 +78,7 @@ def build_bls_offer_from_build_context(
     quote_price: float | None = None,
     offer_coin_ids: list[str] | None = None,
 ) -> OfferActionResult:
-    """Build an offer via the Rust kernel BLS path."""
+    """Build an offer via the Rust engine BLS path."""
     market = build_ctx.market
     key_id = str(market.signer_key_id or "").strip()
     if not key_id:

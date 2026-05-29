@@ -41,7 +41,7 @@ pub fn low_inventory_evaluation_class<'py>(py: Python<'py>) -> PyResult<Bound<'p
 
 pub fn cancel_policy_decision_to_py<'py>(
     py: Python<'py>,
-    decision: &signer_core::CancelPolicyDecision,
+    decision: &engine_core::CancelPolicyDecision,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = cancel_policy_decision_class(py)?;
     let kwargs = PyDict::new(py);
@@ -55,7 +55,7 @@ pub fn cancel_policy_decision_to_py<'py>(
 
 pub fn alert_event_to_py<'py>(
     py: Python<'py>,
-    event: &signer_core::AlertEvent,
+    event: &engine_core::AlertEvent,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = alert_event_class(py)?;
     let kwargs = PyDict::new(py);
@@ -69,7 +69,7 @@ pub fn alert_event_to_py<'py>(
 
 pub fn alert_state_to_py<'py>(
     py: Python<'py>,
-    state: &signer_core::AlertState,
+    state: &engine_core::AlertState,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = alert_state_class(py)?;
     let kwargs = PyDict::new(py);
@@ -80,7 +80,7 @@ pub fn alert_state_to_py<'py>(
 
 pub fn low_inventory_evaluation_to_py<'py>(
     py: Python<'py>,
-    evaluation: &signer_core::LowInventoryEvaluation,
+    evaluation: &engine_core::LowInventoryEvaluation,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = low_inventory_evaluation_class(py)?;
     let kwargs = PyDict::new(py);
@@ -95,8 +95,8 @@ pub fn low_inventory_evaluation_to_py<'py>(
 
 pub fn low_inventory_input_from_py(
     input: &Bound<'_, PyAny>,
-) -> PyResult<signer_core::LowInventoryInput> {
-    Ok(signer_core::LowInventoryInput {
+) -> PyResult<engine_core::LowInventoryInput> {
+    Ok(engine_core::LowInventoryInput {
         now_unix: input.getattr("now_unix")?.extract()?,
         low_inventory_enabled: input.getattr("low_inventory_enabled")?.extract()?,
         program_default_threshold: input.getattr("program_default_threshold")?.extract()?,

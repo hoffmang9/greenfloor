@@ -1,6 +1,6 @@
 //! Deterministic cycle orchestration, managed dispatch, and offer reconciliation.
 //!
-//! See ADR 0010 for the planned crate rename to `greenfloor-kernel`.
+//! Deterministic daemon cycle policy.
 
 pub mod cancel;
 pub mod dispatch;

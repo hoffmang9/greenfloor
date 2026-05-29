@@ -73,7 +73,7 @@ pub fn reseed_gap_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>
 
 pub fn reseed_skip_reason_to_py<'py>(
     py: Python<'py>,
-    reason: signer_core::ReseedSkipReason,
+    reason: engine_core::ReseedSkipReason,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = cached_class(
         py,
@@ -86,7 +86,7 @@ pub fn reseed_skip_reason_to_py<'py>(
 
 pub fn reseed_gap_plan_to_py<'py>(
     py: Python<'py>,
-    plan: &signer_core::ReseedGapPlan,
+    plan: &engine_core::ReseedGapPlan,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = reseed_gap_plan_class(py)?;
     let kwargs = PyDict::new(py);
@@ -125,7 +125,7 @@ pub fn managed_action_outcome_class<'py>(py: Python<'py>) -> PyResult<Bound<'py,
 
 pub fn managed_action_outcome_to_py<'py>(
     py: Python<'py>,
-    outcome: &signer_core::ManagedActionOutcome,
+    outcome: &engine_core::ManagedActionOutcome,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = managed_action_outcome_class(py)?;
     let kwargs = PyDict::new(py);
@@ -193,7 +193,7 @@ pub fn cycle_offer_transition_class<'py>(py: Python<'py>) -> PyResult<Bound<'py,
 
 pub fn extract_spendable_profiles(
     profiles: &Bound<'_, PyDict>,
-) -> PyResult<BTreeMap<String, signer_core::SpendableAssetProfile>> {
+) -> PyResult<BTreeMap<String, engine_core::SpendableAssetProfile>> {
     let mut map = BTreeMap::new();
     for (asset_id, value) in profiles.iter() {
         let profile = value
@@ -207,7 +207,7 @@ pub fn extract_spendable_profiles(
             .extract::<bool>()?;
         map.insert(
             asset_id.extract::<String>()?,
-            signer_core::SpendableAssetProfile {
+            engine_core::SpendableAssetProfile {
                 total: profile
                     .get_item("total")?
                     .and_then(|item| item.extract::<i64>().ok())
@@ -225,7 +225,7 @@ pub fn extract_spendable_profiles(
 
 pub fn strategy_action_sell_counts_from_py_list(
     list: &Bound<'_, PyList>,
-) -> PyResult<Vec<signer_core::cycle::StrategyActionSellCountInput>> {
+) -> PyResult<Vec<engine_core::cycle::StrategyActionSellCountInput>> {
     list.iter()
         .enumerate()
         .map(|(index, item)| {
@@ -244,7 +244,7 @@ pub fn strategy_action_sell_counts_from_py_list(
                 .map_err(|_| {
                     PyValueError::new_err(format!("{label}.counts_as_executed must be a bool"))
                 })?;
-            Ok(signer_core::cycle::StrategyActionSellCountInput {
+            Ok(engine_core::cycle::StrategyActionSellCountInput {
                 size: require_i64_attr(&item, &label, "size")?,
                 side,
                 counts_as_executed,

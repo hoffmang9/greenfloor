@@ -1,7 +1,6 @@
 //! Deterministic coin-operation policy (planning, fee budget, inventory buckets).
 //!
-//! Lives in the `greenfloor-signer` crate alongside vault signing and cycle policy.
-//! See ADR 0010 for the planned crate rename to `greenfloor-kernel`.
+//! Lives in the `greenfloor-engine` crate alongside vault signing and cycle policy.
 
 mod effective_counts;
 mod fee_budget;

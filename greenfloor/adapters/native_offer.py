@@ -1,15 +1,15 @@
-"""Offer codec helpers via the Rust kernel (``kernel_bridge.import_kernel``)."""
+"""Offer codec helpers via the Rust engine (``engine_bridge.import_engine``)."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from greenfloor.core.kernel_bridge import import_kernel
+from greenfloor.core.engine_bridge import import_engine
 
 
 def encode_offer_from_spend_bundle_hex(raw_hex: str) -> str:
-    """Encode a spend bundle hex string to offer1... via the Rust kernel."""
-    return str(import_kernel().encode_offer(bytes.fromhex(raw_hex)))
+    """Encode a spend bundle hex string to offer1... via the Rust engine."""
+    return str(import_engine().encode_offer(bytes.fromhex(raw_hex)))
 
 
 def _as_bytes(value: Any) -> bytes:
@@ -36,14 +36,14 @@ def from_input_spend_bundle_xch(
     input_spend_bundle: Any,
     requested_payments_xch: list[Any],
 ) -> Any:
-    kernel = import_kernel()
+    engine = import_engine()
     requested: list[tuple[bytes, list[tuple[bytes, int]]]] = []
     for notarized_payment in requested_payments_xch:
         payments: list[tuple[bytes, int]] = []
         for payment in notarized_payment.payments:
             payments.append((_as_bytes(payment.puzzle_hash), int(payment.amount)))
         requested.append((_as_bytes(notarized_payment.nonce), payments))
-    spend_bundle_bytes = kernel.from_input_spend_bundle_xch(
+    spend_bundle_bytes = engine.from_input_spend_bundle_xch(
         input_spend_bundle.to_bytes(),
         requested,
     )

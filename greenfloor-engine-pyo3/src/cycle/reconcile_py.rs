@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use signer_core::{
+use engine_core::{
     resolve_missing_watched_offer_transition, resolve_watched_offer_transition_from_signals,
     unchanged_offer_transition, unsupported_venue_offer_transition, CycleOfferTransition,
 };

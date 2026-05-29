@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 
-use signer_core::{
+use engine_core::{
     compute_signer_offer_leg_amounts, normalize_offer_asset_id, normalize_offer_side,
     quote_mojos_for_base_size, signer_split_asset_id,
 };

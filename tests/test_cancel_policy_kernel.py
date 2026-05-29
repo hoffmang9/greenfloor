@@ -1,4 +1,4 @@
-"""Cancel-policy kernel parity tests."""
+"""Cancel-policy engine parity tests."""
 
 from __future__ import annotations
 

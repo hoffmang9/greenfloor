@@ -1,9 +1,9 @@
-"""Coinset adapter: query helpers in Python, mutations via Rust kernel bindings.
+"""Coinset adapter: query helpers in Python, mutations via Rust engine bindings.
 
 Read-only Coinset HTTP calls (coin lookups, offer payload parsing) live here and
 use ``_post_json`` against the configured MSP base URL. Transaction push and fee
-estimation for signed spend bundles are delegated to the Rust kernel PyO3 module
-(``kernel_bridge.import_kernel``) so mutation paths share the same Rust IO stack.
+estimation for signed spend bundles are delegated to the Rust engine PyO3 module
+(``engine_bridge.import_engine``) so mutation paths share the same Rust IO stack.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from greenfloor.core.kernel_bridge import import_kernel
+from greenfloor.core.engine_bridge import import_engine
 from greenfloor.hex_utils import normalize_hex_id
 
 _COINSET_TX_ID_KEYS = (
@@ -130,12 +130,12 @@ def extract_coin_ids_from_offer_payload(payload: dict[str, Any]) -> list[str]:
 
 def _require_rust_coinset(name: str, *args: Any, **kwargs: Any) -> Any:
     try:
-        kernel = import_kernel()
+        engine = import_engine()
     except ImportError as exc:
-        raise RuntimeError(f"greenfloor_kernel_required_for_coinset_io: {exc}") from exc
-    fn = getattr(kernel, name, None)
+        raise RuntimeError(f"greenfloor_engine_required_for_coinset_io: {exc}") from exc
+    fn = getattr(engine, name, None)
     if not callable(fn):
-        raise RuntimeError(f"greenfloor_kernel_missing_coinset_fn:{name}")
+        raise RuntimeError(f"greenfloor_engine_missing_coinset_fn:{name}")
     return fn(*args, **kwargs)
 
 

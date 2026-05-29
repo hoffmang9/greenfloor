@@ -36,8 +36,8 @@ Severity tags:
 - `[MUST]` `greenfloor/core/coin_ops/`: coin-op deterministic policy (plan, fee budget, inventory, min-amount guard) shared by CLI and daemon.
 - `[MUST]` `greenfloor/config`: parse/validate config, resolve paths, resolve quote assets.
 - `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet, notifications).
-- `[MUST]` Signing/execution path is adapter -> canonical Rust kernel (`greenfloor-signer` / `greenfloor_kernel` PyO3); legacy `greenfloor/signing.py` re-exports adapters only.
-- `[MUST]` `greenfloor-signer/`: canonical vault KMS signing implementation; new vault spend/offer logic lands here first.
+- `[MUST]` Signing/execution path is adapter -> canonical Rust engine (`greenfloor-engine` crate / `greenfloor_engine` PyO3); legacy `greenfloor/signing.py` re-exports adapters only.
+- `[MUST]` `greenfloor-engine/`: canonical Rust engine crate; new vault spend/offer logic lands here first.
 - `[MUST]` `greenfloor/cli/manager.py`: operator CLI router (argparse + dispatch).
 - `[MUST]` `greenfloor/cli/coin_ops_list.py`, `coin_ops_split.py`, `coin_ops_combine.py`: coin list/split/combine CLI commands (`coin_ops.py` re-exports).
 - `[MUST]` `greenfloor/cli/cats.py`: local CAT catalog CLI commands.
@@ -57,7 +57,7 @@ Severity tags:
 ## Design Constraints
 
 - `[MUST]` Prefer direct function calls within the package; do not spawn subprocesses for same-env Python calls unless isolation/security is documented in `docs/decisions/`.
-- `[MUST]` Signing/execution path is adapter -> canonical Rust kernel (`greenfloor-signer` crate, `greenfloor_kernel` PyO3 module).
+- `[MUST]` Signing/execution path is adapter -> canonical Rust engine (`greenfloor-engine` crate, `greenfloor_engine` PyO3 module).
 - `[MUST]` Avoid unnecessary indirection layers (`executor`, `worker`, `engine`, etc.).
 - `[MUST]` Keep one distinct responsibility per file; merge pass-through modules into functions.
 - `[MUST]` Eliminate duplicated logic blocks (>10 lines) by extracting shared helpers.

@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 use pyo3::types::PyList;
-use signer_core::{
+use engine_core::{
     abs_move_bps, cancel_move_threshold_bps, collect_open_offer_ids_for_cancel,
     evaluate_cancel_policy_decision,
 };

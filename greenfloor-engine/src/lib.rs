@@ -1,9 +1,7 @@
-//! GreenFloor Rust kernel: vault KMS signing and deterministic daemon policy.
+//! GreenFloor Rust engine: vault KMS signing and deterministic daemon policy.
 //!
-//! The Cargo crate is still named `greenfloor-signer` and the PyO3 module is
-//! `greenfloor_signer` during the Python migration (ADR 0010). Policy is grouped
-//! by domain (`cycle/`, `coin_ops/`, `offer/`, `vault/`) regardless of the legacy
-//! crate name; the post-migration target is `greenfloor-kernel`.
+//! The Rust crate and PyO3 module are named `greenfloor_engine` (ADR 0010).
+//! Policy is grouped by domain (`cycle/`, `coin_ops/`, `offer/`, `vault/`).
 
 pub mod bls;
 pub mod coin_ops;

@@ -1,6 +1,6 @@
 //! Offer build, validation, bootstrap planning, and publish policy.
 //!
-//! See ADR 0010 for the planned crate rename to `greenfloor-kernel`.
+//! Offer construction, validation, and deterministic offer policy.
 
 pub mod action;
 pub mod assemble;

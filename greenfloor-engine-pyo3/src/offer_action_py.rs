@@ -1,12 +1,12 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
-use signer_core::offer::action::{
+use engine_core::offer::action::{
     build_bls_offer_for_action, build_signer_offer_for_action, BuildOfferForActionRequest,
 };
-use signer_core::{load_bls_master_secret_key, load_signer_config};
+use engine_core::{load_bls_master_secret_key, load_signer_config};
 
 use crate::py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
-use crate::{block_on_signer, parse_master_sk_bytes, runtime};
+use crate::{block_on_engine, parse_master_sk_bytes, runtime};
 
 #[pyfunction]
 #[pyo3(name = "build_signer_offer_for_action")]
@@ -35,7 +35,7 @@ fn build_bls_offer_for_action_key_py(
     let payload = request_dict_to_json(request)?;
     let offer_request: BuildOfferForActionRequest =
         serde_json::from_value(payload).map_err(to_py_err)?;
-    let result = block_on_signer(build_bls_offer_for_action(
+    let result = block_on_engine(build_bls_offer_for_action(
         network,
         &master_sk,
         offer_request,
@@ -56,7 +56,7 @@ fn build_bls_offer_for_action_sk_py(
     let payload = request_dict_to_json(request)?;
     let offer_request: BuildOfferForActionRequest =
         serde_json::from_value(payload).map_err(to_py_err)?;
-    let result = block_on_signer(build_bls_offer_for_action(
+    let result = block_on_engine(build_bls_offer_for_action(
         network,
         &master_sk,
         offer_request,

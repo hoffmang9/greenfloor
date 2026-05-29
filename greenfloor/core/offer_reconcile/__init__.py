@@ -1,4 +1,4 @@
-"""Offer reconciliation transition kernel (Rust-backed)."""
+"""Offer reconciliation transition engine (Rust-backed)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TypeVar
 
-from greenfloor.core.kernel_bridge import import_kernel
+from greenfloor.core.engine_bridge import import_engine
 
 __all__ = [
     "CycleOfferTransition",
@@ -47,7 +47,7 @@ def _typed_transition(call: _CallableT, /, *args: object, **kwargs: object) -> C
 
 def resolve_missing_watched_offer_transition(*, current_state: str) -> CycleOfferTransition:
     return _typed_transition(
-        import_kernel().resolve_missing_watched_offer_transition,
+        import_engine().resolve_missing_watched_offer_transition,
         str(current_state),
     )
 
@@ -61,7 +61,7 @@ def resolve_watched_offer_transition_from_signals(
     coinset_mempool_tx_ids: list[str],
 ) -> CycleOfferTransition:
     return _typed_transition(
-        import_kernel().resolve_watched_offer_transition_from_signals,
+        import_engine().resolve_watched_offer_transition_from_signals,
         str(current_state),
         status,
         list(coinset_tx_ids),
@@ -72,7 +72,7 @@ def resolve_watched_offer_transition_from_signals(
 
 def unchanged_offer_transition(*, current_state: str, reason: str) -> CycleOfferTransition:
     return _typed_transition(
-        import_kernel().unchanged_offer_transition,
+        import_engine().unchanged_offer_transition,
         str(current_state),
         str(reason),
     )
@@ -80,7 +80,7 @@ def unchanged_offer_transition(*, current_state: str, reason: str) -> CycleOffer
 
 def unsupported_venue_offer_transition(*, current_state: str, venue: str) -> CycleOfferTransition:
     return _typed_transition(
-        import_kernel().unsupported_venue_offer_transition,
+        import_engine().unsupported_venue_offer_transition,
         str(current_state),
         str(venue),
     )

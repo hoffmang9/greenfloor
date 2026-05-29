@@ -1,4 +1,4 @@
-"""Cycle reseed kernel contract tests."""
+"""Cycle reseed engine contract tests."""
 
 from __future__ import annotations
 

@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 
 use crate::py_utils::{dict_from_json_value, to_py_err};
 
-use signer_core::{
+use engine_core::{
     apply_offer_signal, expiry_seconds_for_action, OfferLifecycleState, OfferSignal,
 };
 

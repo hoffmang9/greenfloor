@@ -1,14 +1,14 @@
-"""BLS keyring signing: thin Python wrappers over Rust kernel BLS paths.
+"""BLS keyring signing: thin Python wrappers over Rust engine BLS paths.
 
 Offer, mixed-split, XCH split/combine spend bundles and key loading run in the
-``greenfloor-signer`` crate. Vault KMS uses ``greenfloor.adapters.rust_signer``.
+``greenfloor-engine`` crate. Vault KMS uses ``greenfloor.adapters.rust_signer``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from greenfloor.core.kernel_bridge import import_kernel
+from greenfloor.core.engine_bridge import import_engine
 from greenfloor.hex_utils import canonical_is_xch
 
 
@@ -26,10 +26,10 @@ def _load_master_private_key(
 ) -> tuple[bytes | None, str | None]:
     _ = keyring_yaml_path
     try:
-        kernel = import_kernel()
-        result = kernel.load_bls_master_sk(str(key_id).strip())
+        engine = import_engine()
+        result = engine.load_bls_master_sk(str(key_id).strip())
     except Exception as exc:
-        return None, f"greenfloor_kernel_import_error:{exc}"
+        return None, f"greenfloor_engine_import_error:{exc}"
     if not isinstance(result, dict):
         return None, "invalid_load_bls_master_sk_response"
     error = result.get("error")
@@ -48,10 +48,10 @@ def _call_signer_build(
     request: dict[str, Any],
 ) -> tuple[str | None, str | None]:
     try:
-        kernel = import_kernel()
-        build = getattr(kernel, method_name)
+        engine = import_engine()
+        build = getattr(engine, method_name)
     except Exception as exc:
-        return None, f"greenfloor_kernel_import_error:{exc}"
+        return None, f"greenfloor_engine_import_error:{exc}"
     try:
         result = build(network, master_sk_bytes, request)
     except Exception as exc:
@@ -131,12 +131,12 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
 
 def _broadcast_bls_spend_bundle_rust(*, network: str, spend_bundle_hex: str) -> dict[str, Any]:
     try:
-        kernel = import_kernel()
-        result = kernel.broadcast_bls_spend_bundle(network, spend_bundle_hex)
+        engine = import_engine()
+        result = engine.broadcast_bls_spend_bundle(network, spend_bundle_hex)
     except Exception as exc:
         return {
             "status": "skipped",
-            "reason": f"greenfloor_kernel_import_error:{exc}",
+            "reason": f"greenfloor_engine_import_error:{exc}",
             "operation_id": None,
         }
     if not isinstance(result, dict):

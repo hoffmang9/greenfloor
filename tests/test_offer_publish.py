@@ -17,61 +17,61 @@ from greenfloor.runtime.offer_publish import (
     post_offer_phase,
     verify_dexie_offer_visible_by_id,
 )
-from tests.helpers.kernel_mock import MinimalSignerKernel, install_kernel_stub
+from tests.helpers.engine_mock import MinimalSignerEngine, install_engine_stub
 
 
 def test_verify_offer_for_dexie_success(monkeypatch) -> None:
     calls: list[str] = []
 
-    class _Native(MinimalSignerKernel):
+    class _Native(MinimalSignerEngine):
         @staticmethod
         def verify_offer_for_dexie(offer: str) -> None:
             calls.append(offer)
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     assert verify_offer_for_dexie("offer1ok") is None
     assert calls == ["offer1ok"]
 
 
 def test_verify_offer_for_dexie_maps_duplicate_spends(monkeypatch) -> None:
-    class _Native(MinimalSignerKernel):
+    class _Native(MinimalSignerEngine):
         @staticmethod
         def verify_offer_for_dexie(_offer: str) -> str:
             return "wallet_sdk_offer_duplicate_spent_coin_ids"
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     assert verify_offer_for_dexie("offer1duplicate") == "wallet_sdk_offer_duplicate_spent_coin_ids"
 
 
 def test_verify_offer_for_dexie_maps_missing_expiration(monkeypatch) -> None:
-    class _Native(MinimalSignerKernel):
+    class _Native(MinimalSignerEngine):
         @staticmethod
         def verify_offer_for_dexie(_offer: str) -> str:
             return "wallet_sdk_offer_missing_expiration"
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     assert verify_offer_for_dexie("offer1noexpiry") == "wallet_sdk_offer_missing_expiration"
 
 
 def test_verify_offer_for_dexie_returns_native_validation_error(monkeypatch) -> None:
-    class _Native(MinimalSignerKernel):
+    class _Native(MinimalSignerEngine):
         @staticmethod
         def verify_offer_for_dexie(_offer: str) -> str:
             return "wallet_sdk_offer_validate_failed:native_invalid_offer"
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     assert verify_offer_for_dexie("offer1bad") == (
         "wallet_sdk_offer_validate_failed:native_invalid_offer"
     )
 
 
 def test_verify_offer_for_dexie_maps_structure_validate_failed(monkeypatch) -> None:
-    class _Native(MinimalSignerKernel):
+    class _Native(MinimalSignerEngine):
         @staticmethod
         def verify_offer_for_dexie(_offer: str) -> str:
             return "wallet_sdk_offer_validate_failed:malformed_offer"
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     assert verify_offer_for_dexie("offer1malformed") == (
         "wallet_sdk_offer_validate_failed:malformed_offer"
     )
@@ -79,16 +79,16 @@ def test_verify_offer_for_dexie_maps_structure_validate_failed(monkeypatch) -> N
 
 def test_verify_offer_for_dexie_reports_missing_kernel(monkeypatch) -> None:
     monkeypatch.setattr(
-        "greenfloor.core.kernel_bridge.import_kernel",
-        lambda: (_ for _ in ()).throw(ImportError("greenfloor_kernel_unavailable")),
+        "greenfloor.core.engine_bridge.import_engine",
+        lambda: (_ for _ in ()).throw(ImportError("greenfloor_engine_unavailable")),
     )
     assert verify_offer_for_dexie("offer1contract") == (
-        "wallet_sdk_import_error:greenfloor_kernel_unavailable"
+        "wallet_sdk_import_error:greenfloor_engine_unavailable"
     )
 
 
 def test_bootstrap_block_error_delegates_to_kernel(monkeypatch) -> None:
-    class _Native(MinimalSignerKernel):
+    class _Native(MinimalSignerEngine):
         @staticmethod
         def bootstrap_block_error(
             bootstrap_status: str,
@@ -98,7 +98,7 @@ def test_bootstrap_block_error_delegates_to_kernel(monkeypatch) -> None:
             _ = bootstrap_ready
             return f"kernel_bootstrap:{bootstrap_status}:{bootstrap_reason}"
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     assert (
         bootstrap_block_error(
             bootstrap_status="failed",
@@ -113,7 +113,7 @@ def test_bootstrap_block_error_requires_kernel_symbol(monkeypatch) -> None:
     class _Native:
         pass
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     with pytest.raises(RuntimeError, match="Missing symbol: bootstrap_block_error"):
         bootstrap_block_error(
             bootstrap_status="executed",
@@ -123,7 +123,7 @@ def test_bootstrap_block_error_requires_kernel_symbol(monkeypatch) -> None:
 
 
 def test_expected_publish_asset_fields_delegates_to_kernel(monkeypatch) -> None:
-    class _Native(MinimalSignerKernel):
+    class _Native(MinimalSignerEngine):
         @staticmethod
         def expected_publish_asset_fields(
             side: str,
@@ -139,7 +139,7 @@ def test_expected_publish_asset_fields_delegates_to_kernel(monkeypatch) -> None:
                 "expected_requested_symbol": base_symbol,
             }
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     assert expected_publish_asset_fields(
         side="buy",
         base_symbol="A1",
@@ -158,7 +158,7 @@ def test_expected_publish_asset_fields_requires_kernel_symbol(monkeypatch) -> No
     class _Native:
         pass
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     with pytest.raises(RuntimeError, match="Missing symbol: expected_publish_asset_fields"):
         expected_publish_asset_fields(
             side="buy",
@@ -170,7 +170,7 @@ def test_expected_publish_asset_fields_requires_kernel_symbol(monkeypatch) -> No
 
 
 def test_expected_publish_asset_fields_requires_complete_payload(monkeypatch) -> None:
-    class _Native(MinimalSignerKernel):
+    class _Native(MinimalSignerEngine):
         @staticmethod
         def expected_publish_asset_fields(
             _side: str,
@@ -185,7 +185,7 @@ def test_expected_publish_asset_fields_requires_complete_payload(monkeypatch) ->
                 "expected_requested_symbol": "A1",
             }
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     with pytest.raises(
         TypeError,
         match="expected_publish_asset_fields missing keys: expected_offered_symbol",
@@ -200,7 +200,7 @@ def test_expected_publish_asset_fields_requires_complete_payload(monkeypatch) ->
 
 
 def test_resolve_offer_expiry_and_quote_price_use_kernel(monkeypatch) -> None:
-    class _Native(MinimalSignerKernel):
+    class _Native(MinimalSignerEngine):
         @staticmethod
         def resolve_offer_expiry_for_pricing(_pricing):
             return ("minutes", 12)
@@ -209,14 +209,14 @@ def test_resolve_offer_expiry_and_quote_price_use_kernel(monkeypatch) -> None:
         def resolve_quote_price_for_pricing(_pricing):
             return 1.5
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     pricing = {"strategy_offer_expiry_minutes": 12}
     assert resolve_offer_expiry_for_pricing(pricing) == ("minutes", 12)
     assert resolve_quote_price_for_pricing(pricing) == 1.5
 
 
 def test_dexie_offer_asset_expectation_error_delegates_to_kernel(monkeypatch) -> None:
-    class _Native(MinimalSignerKernel):
+    class _Native(MinimalSignerEngine):
         @staticmethod
         def dexie_offer_asset_expectation_error(
             offered: object,
@@ -235,7 +235,7 @@ def test_dexie_offer_asset_expectation_error_delegates_to_kernel(monkeypatch) ->
                 f"offered_symbol={expected_offered_symbol}"
             )
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     assert dexie_offer_asset_expectation_error(
         offered=[],
         requested=[],
@@ -253,7 +253,7 @@ def test_dexie_offer_asset_expectation_error_requires_kernel_symbol(monkeypatch)
     class _Native:
         pass
 
-    install_kernel_stub(monkeypatch, _Native)
+    install_engine_stub(monkeypatch, _Native)
     with pytest.raises(RuntimeError, match="Missing symbol: dexie_offer_asset_expectation_error"):
         dexie_offer_asset_expectation_error(
             offered=[],

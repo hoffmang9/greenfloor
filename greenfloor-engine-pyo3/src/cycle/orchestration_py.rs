@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use signer_core::{
+use engine_core::{
     ManagedActionStatus, MarketBatchSelection, OfferStateRow, StaleSweepCandidate, StaleSweepHit,
     StaleSweepProgress,
 };

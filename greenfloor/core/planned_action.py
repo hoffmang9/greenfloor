@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Cycle kernel and strategy evaluation emit only these labels.
+# Cycle engine and strategy evaluation emit only these labels.
 _PLANNED_OFFER_SIDES = frozenset({"buy", "sell"})
 
 
@@ -22,7 +22,7 @@ class PlannedAction:
 
 
 def planned_action_side(action: PlannedAction) -> str:
-    """Return ``buy`` or ``sell`` without a kernel round-trip when side is already canonical."""
+    """Return ``buy`` or ``sell`` without a engine round-trip when side is already canonical."""
     side = str(action.side or "sell").strip().lower()
     if side in _PLANNED_OFFER_SIDES:
         return side

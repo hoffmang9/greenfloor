@@ -1,31 +1,29 @@
-"""Shared PyO3 bridge for the Rust deterministic policy kernel.
+"""Compatibility shim for the renamed engine bridge.
 
-The compiled extension is published as ``greenfloor_kernel`` (ADR 0010). Python
-callers should use :func:`import_kernel`; ``import_signer`` remains as a migration alias.
-
-``policy_kernel``, ``coin_ops_kernel``, and ``bootstrap_kernel`` are typed views of
-the same PyO3 module — use the name that matches the ``Protocol`` at the call site.
-
-Deterministic policy bridges bind :func:`kernel_method_getter` with the matching
-typed view and ``missing`` label. Adapters and signing paths call ``import_kernel()``
-directly.
+New code should import from :mod:`greenfloor.core.engine_bridge`.
 """
 
-from __future__ import annotations
-
-import importlib
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal, overload
-
-if TYPE_CHECKING:
-    from greenfloor.core.coin_ops.kernel_protocol import CoinOpsKernelProtocol
-    from greenfloor.core.kernel_protocol import BootstrapKernelProtocol, PolicyKernelProtocol
-
-KERNEL_MODULE = "greenfloor_kernel"
-
-_MATURIN_INSTALL = (
-    "`maturin develop --manifest-path greenfloor-signer-pyo3/Cargo.toml` from the repo root"
+from greenfloor.core.engine_bridge import (
+    ENGINE_MODULE as KERNEL_MODULE,
 )
+from greenfloor.core.engine_bridge import (
+    bootstrap_engine,
+    coin_ops_engine,
+    engine_method_getter,
+    engine_rebuild_hint,
+    import_engine,
+    import_signer,
+    policy_engine,
+    require_engine_method,
+)
+
+import_kernel = import_engine
+policy_kernel = policy_engine
+coin_ops_kernel = coin_ops_engine
+bootstrap_kernel = bootstrap_engine
+kernel_method_getter = engine_method_getter
+kernel_rebuild_hint = engine_rebuild_hint
+require_kernel_method = require_engine_method
 
 __all__ = [
     "KERNEL_MODULE",
@@ -38,87 +36,3 @@ __all__ = [
     "policy_kernel",
     "require_kernel_method",
 ]
-
-
-def kernel_rebuild_hint(*, module: str, missing: str = "required kernel") -> str:
-    """Operator-facing rebuild message for stale or incomplete PyO3 wheels."""
-    return (
-        f"{module} extension is missing {missing} symbols. "
-        f"Rebuild it (for example: {_MATURIN_INSTALL})."
-    )
-
-
-def import_kernel() -> Any:
-    try:
-        return importlib.import_module(KERNEL_MODULE)
-    except ImportError as exc:
-        raise ImportError(
-            "Rust kernel extension is not available "
-            f"(tried {KERNEL_MODULE}). "
-            f"Install via {_MATURIN_INSTALL}. {KERNEL_MODULE}: {exc}"
-        ) from exc
-
-
-def _loaded_kernel_module() -> Any:
-    return import_kernel()
-
-
-@overload
-def typed_kernel_view() -> PolicyKernelProtocol: ...
-
-
-@overload
-def typed_kernel_view(*, kind: Literal["coin_ops"]) -> CoinOpsKernelProtocol: ...
-
-
-@overload
-def typed_kernel_view(*, kind: Literal["bootstrap"]) -> BootstrapKernelProtocol: ...
-
-
-def typed_kernel_view(*, kind: str | None = None) -> Any:
-    del kind
-    return _loaded_kernel_module()
-
-
-def _kernel_module_label(kernel: Any) -> str:
-    name = getattr(kernel, "__name__", None)
-    if isinstance(name, str) and name:
-        return name
-    return KERNEL_MODULE
-
-
-def require_kernel_method(kernel: Any, method_name: str, *, missing: str) -> Any:
-    method = getattr(kernel, method_name, None)
-    if method is None:
-        raise RuntimeError(
-            f"{kernel_rebuild_hint(module=_kernel_module_label(kernel), missing=missing)} "
-            f"Missing symbol: {method_name}"
-        )
-    return method
-
-
-def kernel_method_getter(
-    load_kernel: Callable[[], Any],
-    *,
-    missing: str,
-) -> Callable[[str], Any]:
-    def get_kernel_method(method_name: str) -> Any:
-        return require_kernel_method(load_kernel(), method_name, missing=missing)
-
-    return get_kernel_method
-
-
-def policy_kernel() -> PolicyKernelProtocol:
-    return typed_kernel_view()
-
-
-def coin_ops_kernel() -> CoinOpsKernelProtocol:
-    return typed_kernel_view(kind="coin_ops")
-
-
-def bootstrap_kernel() -> BootstrapKernelProtocol:
-    return typed_kernel_view(kind="bootstrap")
-
-
-# Migration alias — prefer import_kernel for new code.
-import_signer = import_kernel

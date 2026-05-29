@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from greenfloor.core.kernel_bridge import policy_kernel
+from greenfloor.core.engine_bridge import policy_engine
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,7 +24,7 @@ class OpenOfferRow:
 
 
 def abs_move_bps(current: float | None, previous: float | None) -> float | None:
-    result = policy_kernel().abs_move_bps(current, previous)
+    result = policy_engine().abs_move_bps(current, previous)
     return None if result is None else float(result)
 
 
@@ -33,7 +33,7 @@ def cancel_move_threshold_bps(
     market_threshold: int | None = None,
     env_threshold: int | None = None,
 ) -> int:
-    return int(policy_kernel().cancel_move_threshold_bps(market_threshold, env_threshold))
+    return int(policy_engine().cancel_move_threshold_bps(market_threshold, env_threshold))
 
 
 def evaluate_cancel_policy_decision(
@@ -45,7 +45,7 @@ def evaluate_cancel_policy_decision(
     market_threshold: int | None = None,
     env_threshold: int | None = None,
 ) -> CancelPolicyDecision:
-    result = policy_kernel().evaluate_cancel_policy_decision(
+    result = policy_engine().evaluate_cancel_policy_decision(
         str(quote_asset_type),
         bool(cancel_policy_stable_vs_unstable),
         current_xch_price_usd,
@@ -71,7 +71,7 @@ def open_offer_rows_from_dicts(offers: list[dict[str, Any]]) -> list[OpenOfferRo
 
 
 def collect_open_offer_ids_for_cancel(offers: list[OpenOfferRow]) -> list[str]:
-    result = policy_kernel().collect_open_offer_ids_for_cancel(offers)
+    result = policy_engine().collect_open_offer_ids_for_cancel(offers)
     if not isinstance(result, list):
         raise TypeError("collect_open_offer_ids_for_cancel returned non-list result")
     return [str(offer_id) for offer_id in result]

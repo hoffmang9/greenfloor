@@ -1,17 +1,17 @@
-"""Minimal greenfloor kernel stub helpers for partial kernel mocks in tests."""
+"""Minimal greenfloor engine stub helpers for partial engine mocks in tests."""
 
 from __future__ import annotations
 
 from typing import Any
 
 
-def install_kernel_stub(monkeypatch: Any, stub: Any) -> None:
-    """Register a stub for the ADR 0010 kernel module name."""
-    monkeypatch.setitem(__import__("sys").modules, "greenfloor_kernel", stub)
+def install_engine_stub(monkeypatch: Any, stub: Any) -> None:
+    """Register a stub for the ADR 0010 engine module name."""
+    monkeypatch.setitem(__import__("sys").modules, "greenfloor_engine", stub)
 
 
-def mock_kernel_normalize_hex_id(value: str) -> str:
-    """Mirror ``hex_utils.normalize_hex_id`` for tests that stub ``greenfloor_kernel``."""
+def mock_engine_normalize_hex_id(value: str) -> str:
+    """Mirror ``hex_utils.normalize_hex_id`` for tests that stub ``greenfloor_engine``."""
     normalized = value.strip().lower()
     if normalized.startswith("0x"):
         normalized = normalized[2:]
@@ -22,20 +22,20 @@ def mock_kernel_normalize_hex_id(value: str) -> str:
     return normalized
 
 
-def mock_kernel_is_hex_id(value: str) -> bool:
-    return bool(mock_kernel_normalize_hex_id(value))
+def mock_engine_is_hex_id(value: str) -> bool:
+    return bool(mock_engine_normalize_hex_id(value))
 
 
-def mock_kernel_canonical_is_xch(asset_id: str) -> bool:
+def mock_engine_canonical_is_xch(asset_id: str) -> bool:
     lowered = str(asset_id or "").strip().lower()
     return lowered in {"xch", "txch", "1"}
 
 
-def mock_kernel_default_mojo_multiplier_for_asset(asset_id: str) -> int:
-    return 1_000_000_000_000 if mock_kernel_canonical_is_xch(asset_id) else 1_000
+def mock_engine_default_mojo_multiplier_for_asset(asset_id: str) -> int:
+    return 1_000_000_000_000 if mock_engine_canonical_is_xch(asset_id) else 1_000
 
 
-def mock_kernel_bootstrap_block_error(
+def mock_engine_bootstrap_block_error(
     bootstrap_status: str,
     bootstrap_reason: str,
     bootstrap_ready: bool,
@@ -51,7 +51,7 @@ def mock_kernel_bootstrap_block_error(
     return None
 
 
-def mock_kernel_dexie_offer_asset_expectation_error(
+def mock_engine_dexie_offer_asset_expectation_error(
     offered: object,
     requested: object,
     expected_offered_asset_id: str,
@@ -108,7 +108,7 @@ def mock_kernel_dexie_offer_asset_expectation_error(
     return None
 
 
-def mock_kernel_expected_publish_asset_fields(
+def mock_engine_expected_publish_asset_fields(
     side: str,
     base_symbol: str,
     quote_asset: str,
@@ -131,12 +131,12 @@ def mock_kernel_expected_publish_asset_fields(
     }
 
 
-class MinimalSignerKernel:
-    """Base stub for tests that patch ``sys.modules['greenfloor_kernel']``.
+class MinimalSignerEngine:
+    """Base stub for tests that patch ``sys.modules['greenfloor_engine']``.
 
     Subclass and override only the symbols your test exercises. Hex helpers,
     offer-build pricing helpers, and Dexie verification are provided by default
-    so CLI/offer tests do not need to enumerate every kernel export.
+    so CLI/offer tests do not need to enumerate every engine export.
     """
 
     @staticmethod
@@ -152,7 +152,7 @@ class MinimalSignerKernel:
         pricing_dict = pricing if isinstance(pricing, dict) else {}
         if field in pricing_dict:
             return int(pricing_dict[field])
-        return mock_kernel_default_mojo_multiplier_for_asset(asset_id)
+        return mock_engine_default_mojo_multiplier_for_asset(asset_id)
 
     @staticmethod
     def resolve_offer_expiry_for_pricing(pricing: object) -> tuple[str, int]:
@@ -164,13 +164,13 @@ class MinimalSignerKernel:
         pricing_dict = pricing if isinstance(pricing, dict) else {}
         return float(pricing_dict.get("fixed_quote_per_base", 1.0))
 
-    bootstrap_block_error = staticmethod(mock_kernel_bootstrap_block_error)
-    expected_publish_asset_fields = staticmethod(mock_kernel_expected_publish_asset_fields)
+    bootstrap_block_error = staticmethod(mock_engine_bootstrap_block_error)
+    expected_publish_asset_fields = staticmethod(mock_engine_expected_publish_asset_fields)
     dexie_offer_asset_expectation_error = staticmethod(
-        mock_kernel_dexie_offer_asset_expectation_error
+        mock_engine_dexie_offer_asset_expectation_error
     )
 
-    normalize_hex_id = staticmethod(mock_kernel_normalize_hex_id)
-    is_hex_id = staticmethod(mock_kernel_is_hex_id)
-    canonical_is_xch = staticmethod(mock_kernel_canonical_is_xch)
-    default_mojo_multiplier_for_asset = staticmethod(mock_kernel_default_mojo_multiplier_for_asset)
+    normalize_hex_id = staticmethod(mock_engine_normalize_hex_id)
+    is_hex_id = staticmethod(mock_engine_is_hex_id)
+    canonical_is_xch = staticmethod(mock_engine_canonical_is_xch)
+    default_mojo_multiplier_for_asset = staticmethod(mock_engine_default_mojo_multiplier_for_asset)
