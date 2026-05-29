@@ -1,5 +1,5 @@
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyAny, PyDict};
 
 use signer_core::{
     bootstrap_block_error, dexie_offer_asset_expectation_error, expected_publish_asset_fields,

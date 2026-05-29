@@ -13,6 +13,10 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.core import offer_policy
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
+from greenfloor.offer_bootstrap import (
+    BootstrapPhaseResult,
+    append_bootstrap_manager_action,
+)
 from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_publish import (
@@ -57,11 +61,16 @@ def _offer_policy_error(exc: Exception) -> str:
     return f"offer_policy_error:{exc}"
 
 
-def bootstrap_blocks_offer(bootstrap_result: dict[str, Any]) -> tuple[bool, str | None]:
+def bootstrap_blocks_offer(bootstrap_result: BootstrapPhaseResult) -> tuple[bool, str | None]:
+    if not isinstance(bootstrap_result, BootstrapPhaseResult):
+        raise TypeError(
+            "bootstrap_blocks_offer requires BootstrapPhaseResult; "
+            "use BootstrapPhaseResult.to_manager_dict for manager dicts"
+        )
     error = offer_policy.bootstrap_block_error(
-        bootstrap_status=str(bootstrap_result.get("status", "")),
-        bootstrap_reason=str(bootstrap_result.get("reason", "")),
-        bootstrap_ready=bool(bootstrap_result.get("ready", False)),
+        bootstrap_status=bootstrap_result.status,
+        bootstrap_reason=bootstrap_result.reason,
+        bootstrap_ready=bootstrap_result.ready,
     )
     return (error is not None), error
 
@@ -207,7 +216,7 @@ def execute_build_and_post_offer(
     dry_run: bool,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
-    bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]] | None,
+    bootstrap_phase_fn: collections.abc.Callable[..., BootstrapPhaseResult] | None,
     create_offer_fn: collections.abc.Callable[..., OfferCreateOutcome],
     path_label: str,
     path_extra_fields: dict[str, Any] | None = None,
@@ -239,12 +248,15 @@ def execute_build_and_post_offer(
 
     for _ in range(repeat):
         started_ms = int(time.monotonic() * 1000)
-        bootstrap_result: dict[str, Any] = {"status": "skipped", "reason": "dry_run"}
+        bootstrap_result = BootstrapPhaseResult(status="skipped", reason="dry_run")
         if dry_run:
-            bootstrap_actions.append(dict(bootstrap_result))
+            append_bootstrap_manager_action(bootstrap_actions, bootstrap_result)
         elif bootstrap_phase_fn is None:
-            bootstrap_result = {"status": "skipped", "reason": "already_ready"}
-            bootstrap_actions.append(dict(bootstrap_result))
+            bootstrap_result = BootstrapPhaseResult(
+                status="skipped",
+                reason="already_ready",
+            )
+            append_bootstrap_manager_action(bootstrap_actions, bootstrap_result)
         else:
             bootstrap_result = bootstrap_phase_fn(
                 program=program,
@@ -254,7 +266,7 @@ def execute_build_and_post_offer(
                 quote_price=float(quote_price),
                 action_side=side,
             )
-            bootstrap_actions.append(bootstrap_result)
+            append_bootstrap_manager_action(bootstrap_actions, bootstrap_result)
             blocked, error = bootstrap_blocks_offer(bootstrap_result)
             if blocked:
                 _append_post_failure(
@@ -262,7 +274,7 @@ def execute_build_and_post_offer(
                     publish_venue=publish_venue,
                     started_ms=started_ms,
                     error=str(error),
-                    bootstrap=bootstrap_result,
+                    bootstrap=bootstrap_result.to_manager_dict(),
                 )
                 publish_failures += 1
                 continue
@@ -468,7 +480,7 @@ def build_and_post_offer(
     dry_run: bool,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
-    bootstrap_phase_fn: collections.abc.Callable[..., dict[str, Any]] | None,
+    bootstrap_phase_fn: collections.abc.Callable[..., BootstrapPhaseResult] | None,
     create_offer_fn: collections.abc.Callable[..., OfferCreateOutcome],
     path_label: str,
     path_extra_fields: dict[str, Any] | None = None,

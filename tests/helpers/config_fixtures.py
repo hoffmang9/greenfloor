@@ -81,3 +81,37 @@ def minimal_market_with_sell_ladder(
         },
         **overrides,
     )
+
+
+def minimal_market_with_tiered_sell_ladder(
+    *,
+    market_id: str = "m1",
+    **overrides: object,
+) -> MarketConfig:
+    """Sell ladder with 1 / 10 / 100 base-unit tiers (matches bootstrap planner tests)."""
+    return replace(
+        minimal_market_config(market_id=market_id),
+        ladders={
+            "sell": [
+                MarketLadderEntry(
+                    size_base_units=1,
+                    target_count=3,
+                    split_buffer_count=0,
+                    combine_when_excess_factor=2.0,
+                ),
+                MarketLadderEntry(
+                    size_base_units=10,
+                    target_count=2,
+                    split_buffer_count=1,
+                    combine_when_excess_factor=2.0,
+                ),
+                MarketLadderEntry(
+                    size_base_units=100,
+                    target_count=1,
+                    split_buffer_count=0,
+                    combine_when_excess_factor=2.0,
+                ),
+            ]
+        },
+        **overrides,
+    )

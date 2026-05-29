@@ -1,9 +1,15 @@
+mod bootstrap;
+mod bootstrap_marshal;
 mod coin_ops;
 mod common;
 mod cycle;
 mod offer_request;
 mod policy;
 
+pub(crate) use bootstrap::{
+    bootstrap_early_phase_from_py, bootstrap_executed_phase_from_py,
+    plan_bootstrap_mixed_outputs_from_py,
+};
 pub use coin_ops::{
     bucket_spec_from_py, coin_op_plan_to_py, coin_op_plans_from_py_list,
     combine_denomination_readiness_to_py, combine_input_selection_mode_from_py,

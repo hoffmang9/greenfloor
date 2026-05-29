@@ -1,7 +1,74 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import asdict, dataclass, field
+from typing import Any, Literal
+
+__all__ = [
+    "BootstrapCoin",
+    "BootstrapPhaseResult",
+    "BootstrapPlan",
+    "BootstrapPlanOutcome",
+    "BootstrapPlanKind",
+    "LadderDeficit",
+    "PlannerLadderRow",
+]
+
+BootstrapPlanKind = Literal[
+    "ready",
+    "needs_split",
+    "cannot_fund",
+    "invalid_ladder",
+    "invalid_coins",
+]
+
+BootstrapPhaseStatus = Literal["skipped", "failed", "executed"]
+
+
+@dataclass(frozen=True, slots=True)
+class BootstrapPhaseResult:
+    """Typed bootstrap phase output for offer orchestration."""
+
+    status: BootstrapPhaseStatus
+    reason: str
+    ready: bool = False
+    fee_mojos: int = 0
+    fee_source: str = ""
+    fee_lookup_error: str | None = None
+    wait_error: str | None = None
+    split_result: dict[str, Any] = field(default_factory=dict)
+    wait_events: list[dict[str, str]] = field(default_factory=list)
+    plan: BootstrapPlan | None = None
+
+    def to_manager_dict(self) -> dict[str, Any]:
+        """Serialize for manager/JSON consumers; not for ``bootstrap_blocks_offer``."""
+        payload: dict[str, Any] = {
+            "status": self.status,
+            "reason": self.reason,
+            "ready": self.ready,
+            "fee_mojos": self.fee_mojos,
+            "fee_source": self.fee_source,
+            "fee_lookup_error": self.fee_lookup_error,
+        }
+        if self.wait_error is not None:
+            payload["wait_error"] = self.wait_error
+        if self.split_result:
+            payload["split_result"] = dict(self.split_result)
+        if self.wait_events:
+            payload["wait_events"] = list(self.wait_events)
+        if self.plan is not None:
+            plan_payload = asdict(self.plan)
+            plan_payload["output_count"] = len(self.plan.output_amounts_base_units)
+            payload["plan"] = plan_payload
+        return payload
+
+
+def append_bootstrap_manager_action(
+    actions: list[dict[str, Any]],
+    phase: BootstrapPhaseResult,
+) -> BootstrapPhaseResult:
+    """Record manager payload and return the typed phase for policy gates."""
+    actions.append(phase.to_manager_dict())
+    return phase
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,10 +80,16 @@ class LadderDeficit:
 
 
 @dataclass(frozen=True, slots=True)
-class BootstrapLadderEntry:
+class PlannerLadderRow:
     size_base_units: int
     target_count: int
     split_buffer_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class BootstrapCoin:
+    id: str
+    amount: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,94 +102,28 @@ class BootstrapPlan:
     deficits: list[LadderDeficit]
 
 
-def _sorted_ladder_entries(sell_ladder: list[Any]) -> list[Any]:
-    return sorted(sell_ladder, key=lambda row: int(row.size_base_units))
+@dataclass(frozen=True, slots=True)
+class BootstrapPlanOutcome:
+    kind: BootstrapPlanKind
+    plan: BootstrapPlan | None = None
+    total_output_amount: int | None = None
 
-
-def _count_exact_amount_coins(
-    *, spendable_coin_amounts: list[int], ladder_sizes: list[int]
-) -> dict[int, int]:
-    ladder = set(ladder_sizes)
-    counts = {size: 0 for size in ladder_sizes}
-    for amount in spendable_coin_amounts:
-        if amount in ladder:
-            counts[amount] += 1
-    return counts
-
-
-def _coin_value(coin: Any, field: str, default: Any) -> Any:
-    if isinstance(coin, dict):
-        return coin.get(field, default)
-    return getattr(coin, field, default)
-
-
-def plan_bootstrap_mixed_outputs(
-    *,
-    sell_ladder: list[Any],
-    spendable_coins: list[Any],
-) -> BootstrapPlan | None:
-    """Build a one-shot mixed-output bootstrap plan from ladder deficits.
-
-    `spendable_coins` may be dict-like wallet payloads or lightweight objects
-    exposing `id` and `amount` attributes.
-    """
-    sorted_ladder = _sorted_ladder_entries(sell_ladder)
-    if not sorted_ladder:
-        return None
-
-    ladder_sizes = [int(row.size_base_units) for row in sorted_ladder]
-    spendable_amounts = [int(_coin_value(coin, "amount", 0)) for coin in spendable_coins]
-    counts = _count_exact_amount_coins(
-        spendable_coin_amounts=spendable_amounts,
-        ladder_sizes=ladder_sizes,
-    )
-
-    deficits: list[LadderDeficit] = []
-    output_amounts: list[int] = []
-    for row in sorted_ladder:
-        size = int(row.size_base_units)
-        required = int(row.target_count) + int(row.split_buffer_count)
-        current = int(counts.get(size, 0))
-        deficit = required - current
-        if deficit <= 0:
-            continue
-        deficits.append(
-            LadderDeficit(
-                size_base_units=size,
-                required_count=required,
-                current_count=current,
-                deficit_count=deficit,
-            )
-        )
-        output_amounts.extend([size] * deficit)
-
-    if not deficits:
-        return None
-
-    total_output_amount = sum(output_amounts)
-    if total_output_amount <= 0:
-        return None
-
-    candidate = None
-    for coin in sorted(
-        spendable_coins, key=lambda c: int(_coin_value(c, "amount", 0)), reverse=True
-    ):
-        amount = int(_coin_value(coin, "amount", 0))
-        coin_id = str(_coin_value(coin, "id", "")).strip()
-        if not coin_id:
-            continue
-        if amount >= total_output_amount:
-            candidate = (coin_id, amount)
-            break
-    if candidate is None:
-        return None
-
-    source_coin_id, source_amount = candidate
-    return BootstrapPlan(
-        source_coin_id=source_coin_id,
-        source_amount=source_amount,
-        output_amounts_base_units=output_amounts,
-        total_output_amount=total_output_amount,
-        change_amount=source_amount - total_output_amount,
-        deficits=deficits,
-    )
+    def __post_init__(self) -> None:
+        if self.kind == "needs_split":
+            if self.plan is None:
+                raise ValueError("BootstrapPlanOutcome needs_split requires plan")
+            if self.total_output_amount is not None:
+                raise ValueError(
+                    "BootstrapPlanOutcome needs_split must not set total_output_amount"
+                )
+            return
+        if self.kind == "cannot_fund":
+            if self.plan is not None:
+                raise ValueError("BootstrapPlanOutcome cannot_fund must not set plan")
+            if self.total_output_amount is None:
+                raise ValueError("BootstrapPlanOutcome cannot_fund requires total_output_amount")
+            return
+        if self.plan is not None:
+            raise ValueError(f"BootstrapPlanOutcome {self.kind} must not set plan")
+        if self.total_output_amount is not None:
+            raise ValueError(f"BootstrapPlanOutcome {self.kind} must not set total_output_amount")

@@ -22,8 +22,15 @@ from greenfloor.core.strategy_action_item import StrategyActionItem
 if TYPE_CHECKING:
     from greenfloor.core.cancel_policy import CancelPolicyDecision, OpenOfferRow
     from greenfloor.core.notifications import LowInventoryEvaluation, LowInventoryInput
+    from greenfloor.offer_bootstrap import (
+        BootstrapCoin,
+        BootstrapPhaseResult,
+        BootstrapPlanOutcome,
+        PlannerLadderRow,
+    )
 
 __all__ = [
+    "BootstrapKernelProtocol",
     "CancelPolicyKernelProtocol",
     "CoinOpsKernelProtocol",
     "CycleKernelProtocol",
@@ -254,6 +261,27 @@ class NotificationKernelProtocol(Protocol):
     def evaluate_low_inventory_alert(self, input: LowInventoryInput) -> LowInventoryEvaluation: ...
 
 
+class BootstrapKernelProtocol(Protocol):
+    def plan_bootstrap_mixed_outputs(
+        self,
+        *,
+        ladder_entries: list[PlannerLadderRow],
+        spendable_coins: list[BootstrapCoin],
+    ) -> BootstrapPlanOutcome: ...
+
+    def bootstrap_early_phase(
+        self,
+        *,
+        outcome: BootstrapPlanOutcome,
+    ) -> BootstrapPhaseResult | None: ...
+
+    def bootstrap_executed_phase(
+        self,
+        *,
+        remaining: BootstrapPlanOutcome,
+    ) -> BootstrapPhaseResult: ...
+
+
 class OfferPolicyKernelProtocol(Protocol):
     def resolve_offer_expiry_for_pricing(self, pricing: dict[str, Any]) -> tuple[str, int]: ...
 
@@ -339,6 +367,7 @@ class DeterministicPolicyKernelProtocol(
 class PolicyKernelProtocol(
     DeterministicPolicyKernelProtocol,
     CoinOpsKernelProtocol,
+    BootstrapKernelProtocol,
     OfferPolicyKernelProtocol,
     RetryPolicyKernelProtocol,
     Protocol,

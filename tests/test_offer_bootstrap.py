@@ -1,63 +1,197 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import replace
+from typing import Any, cast
 
-from greenfloor.offer_bootstrap import plan_bootstrap_mixed_outputs
+import pytest
+
+from greenfloor.config.models import MarketLadderEntry
+from greenfloor.core.offer_bootstrap_bridge import (
+    BootstrapCoin,
+    PlannerLadderRow,
+    bootstrap_early_phase,
+    plan_bootstrap_mixed_outputs,
+)
+from greenfloor.offer_bootstrap import BootstrapPlan, BootstrapPlanOutcome
+from greenfloor.runtime.offer_bootstrap import bootstrap_ladder_entries_for_side
+from tests.helpers.config_fixtures import minimal_market_config, minimal_market_with_sell_ladder
 
 
-@dataclass
-class _Entry:
-    size_base_units: int
-    target_count: int
-    split_buffer_count: int
+def _sample_ladder() -> list[PlannerLadderRow]:
+    return [
+        PlannerLadderRow(size_base_units=1, target_count=3, split_buffer_count=0),
+        PlannerLadderRow(size_base_units=10, target_count=2, split_buffer_count=1),
+        PlannerLadderRow(size_base_units=100, target_count=1, split_buffer_count=0),
+    ]
+
+
+def _sample_spendable() -> list[BootstrapCoin]:
+    return [
+        BootstrapCoin(id="coin-small-1", amount=1),
+        BootstrapCoin(id="coin-big", amount=1000),
+        BootstrapCoin(id="coin-hundred", amount=100),
+    ]
 
 
 def test_plan_bootstrap_mixed_outputs_builds_deficit_outputs() -> None:
+    outcome = plan_bootstrap_mixed_outputs(
+        ladder_entries=_sample_ladder(),
+        spendable_coins=_sample_spendable(),
+    )
+    assert outcome.kind == "needs_split"
+    assert outcome.plan is not None
+    assert outcome.plan.source_coin_id == "coin-big"
+    assert sorted(outcome.plan.output_amounts_base_units) == [1, 1, 10, 10, 10]
+    assert outcome.plan.total_output_amount == 32
+
+
+def test_plan_bootstrap_mixed_outputs_returns_ready_when_inventory_satisfied() -> None:
     ladder = [
-        _Entry(size_base_units=1, target_count=3, split_buffer_count=0),
-        _Entry(size_base_units=10, target_count=2, split_buffer_count=1),
-        _Entry(size_base_units=100, target_count=1, split_buffer_count=0),
+        PlannerLadderRow(size_base_units=1, target_count=1, split_buffer_count=0),
+        PlannerLadderRow(size_base_units=10, target_count=1, split_buffer_count=0),
     ]
     spendable = [
-        {"id": "coin-small-1", "amount": 1},
-        {"id": "coin-big", "amount": 1000},
-        # This exact 100 coin satisfies the 100-size ladder bucket and avoids
-        # creating an unnecessary 100 output in the bootstrap fanout plan.
-        {"id": "coin-hundred", "amount": 100},
+        BootstrapCoin(id="coin-1", amount=1),
+        BootstrapCoin(id="coin-10", amount=10),
+        BootstrapCoin(id="coin-extra", amount=500),
     ]
 
-    plan = plan_bootstrap_mixed_outputs(sell_ladder=ladder, spendable_coins=spendable)
-    assert plan is not None
-    assert plan.source_coin_id == "coin-big"
-    # Needs two 1s and three 10s (target+buffer for 10 is 3).
-    assert sorted(plan.output_amounts_base_units) == [1, 1, 10, 10, 10]
-    assert plan.total_output_amount == 32
+    outcome = plan_bootstrap_mixed_outputs(ladder_entries=ladder, spendable_coins=spendable)
+    assert outcome.kind == "ready"
 
 
-def test_plan_bootstrap_mixed_outputs_returns_none_when_ready() -> None:
-    ladder = [
-        _Entry(size_base_units=1, target_count=1, split_buffer_count=0),
-        _Entry(size_base_units=10, target_count=1, split_buffer_count=0),
-    ]
-    spendable = [
-        {"id": "coin-1", "amount": 1},
-        {"id": "coin-10", "amount": 10},
-        {"id": "coin-extra", "amount": 500},
-    ]
+def test_plan_bootstrap_mixed_outputs_returns_cannot_fund() -> None:
+    ladder = [PlannerLadderRow(size_base_units=10, target_count=2, split_buffer_count=0)]
+    spendable = [BootstrapCoin(id="small", amount=5)]
 
-    assert plan_bootstrap_mixed_outputs(sell_ladder=ladder, spendable_coins=spendable) is None
+    outcome = plan_bootstrap_mixed_outputs(ladder_entries=ladder, spendable_coins=spendable)
+    assert outcome.kind == "cannot_fund"
+    assert outcome.total_output_amount == 20
 
 
-def test_plan_bootstrap_mixed_outputs_accepts_object_coin_shape() -> None:
-    @dataclass
-    class _Coin:
-        id: str
-        amount: int
+def test_plan_bootstrap_mixed_outputs_single_output_deficit() -> None:
+    ladder = [PlannerLadderRow(size_base_units=10, target_count=1, split_buffer_count=0)]
+    spendable = [BootstrapCoin(id="coin-big", amount=100)]
 
-    ladder = [_Entry(size_base_units=10, target_count=2, split_buffer_count=0)]
-    spendable = [_Coin(id="coin-big-object", amount=100)]
+    outcome = plan_bootstrap_mixed_outputs(ladder_entries=ladder, spendable_coins=spendable)
+    assert outcome.kind == "needs_split"
+    assert outcome.plan is not None
+    assert outcome.plan.output_amounts_base_units == [10]
 
-    plan = plan_bootstrap_mixed_outputs(sell_ladder=ladder, spendable_coins=spendable)
-    assert plan is not None
-    assert plan.source_coin_id == "coin-big-object"
-    assert plan.output_amounts_base_units == [10, 10]
+
+def test_plan_bootstrap_mixed_outputs_returns_invalid_ladder_for_negative_fields() -> None:
+    ladder = [PlannerLadderRow(size_base_units=-1, target_count=1, split_buffer_count=0)]
+    outcome = plan_bootstrap_mixed_outputs(ladder_entries=ladder, spendable_coins=[])
+    assert outcome.kind == "invalid_ladder"
+
+
+def test_plan_bootstrap_mixed_outputs_returns_invalid_coins_for_negative_amount() -> None:
+    ladder = [PlannerLadderRow(size_base_units=10, target_count=2, split_buffer_count=0)]
+    spendable = [BootstrapCoin(id="coin-a", amount=-1)]
+    outcome = plan_bootstrap_mixed_outputs(ladder_entries=ladder, spendable_coins=spendable)
+    assert outcome.kind == "invalid_coins"
+
+
+def test_plan_bootstrap_mixed_outputs_rejects_non_planner_ladder_rows() -> None:
+    ladder = cast(Any, [{"size_base_units": 10, "target_count": 1, "split_buffer_count": 0}])
+    with pytest.raises(TypeError, match="PlannerLadderRow"):
+        plan_bootstrap_mixed_outputs(ladder_entries=ladder, spendable_coins=[])
+
+
+def test_plan_bootstrap_mixed_outputs_rejects_invalid_coin_amount() -> None:
+    ladder = [PlannerLadderRow(size_base_units=10, target_count=2, split_buffer_count=0)]
+    spendable = [{"id": "coin-a"}]
+    with pytest.raises(ValueError, match="amount"):
+        plan_bootstrap_mixed_outputs(ladder_entries=ladder, spendable_coins=spendable)
+
+
+def test_plan_bootstrap_mixed_outputs_rejects_non_string_coin_id() -> None:
+    ladder = [PlannerLadderRow(size_base_units=10, target_count=1, split_buffer_count=0)]
+    spendable = [{"id": 42, "amount": 100}]
+    with pytest.raises(ValueError, match="id must be a string"):
+        plan_bootstrap_mixed_outputs(ladder_entries=ladder, spendable_coins=spendable)
+
+
+def test_plan_bootstrap_mixed_outputs_requires_kernel_symbol(monkeypatch) -> None:
+    import greenfloor.core.kernel_bridge as bridge
+
+    class _Kernel:
+        pass
+
+    monkeypatch.setattr(bridge, "bootstrap_kernel", lambda: _Kernel())
+    with pytest.raises(RuntimeError, match="plan_bootstrap_mixed_outputs"):
+        plan_bootstrap_mixed_outputs(ladder_entries=_sample_ladder(), spendable_coins=[])
+
+
+def test_bootstrap_plan_outcome_rejects_invalid_field_combinations() -> None:
+    with pytest.raises(ValueError, match="needs_split requires plan"):
+        BootstrapPlanOutcome(kind="needs_split")
+    with pytest.raises(ValueError, match="cannot_fund requires total_output_amount"):
+        BootstrapPlanOutcome(kind="cannot_fund")
+    with pytest.raises(ValueError, match="ready must not set plan"):
+        BootstrapPlanOutcome(
+            kind="ready",
+            plan=BootstrapPlan(
+                source_coin_id="x",
+                source_amount=1,
+                output_amounts_base_units=[1],
+                total_output_amount=1,
+                change_amount=0,
+                deficits=[],
+            ),
+        )
+
+
+def test_bootstrap_early_phase_maps_cannot_fund_to_underfunded_skip() -> None:
+    outcome = BootstrapPlanOutcome(
+        kind="cannot_fund",
+        total_output_amount=32,
+    )
+    result = bootstrap_early_phase(outcome=outcome)
+    assert result is not None
+    assert result.status == "skipped"
+    assert result.reason == "bootstrap_underfunded:total_output_amount=32"
+
+
+def test_bootstrap_ladder_entries_for_side_normalizes_sell_rows() -> None:
+    market = minimal_market_with_sell_ladder(size_base_units=10, target_count=2)
+    entries = bootstrap_ladder_entries_for_side(
+        side="sell",
+        side_ladder=list(market.ladders["sell"]),
+        pricing={},
+        quote_price=1.0,
+        resolved_quote_asset_id="xch",
+    )
+    assert len(entries) == 1
+    assert entries[0].size_base_units == 10
+    assert entries[0].target_count == 2
+
+
+def test_bootstrap_ladder_entries_for_side_normalizes_buy_rows_to_quote_mojos() -> None:
+    market = replace(
+        minimal_market_config(),
+        pricing={
+            "quote_unit_mojo_multiplier": 1000,
+            "base_unit_mojo_multiplier": 1000,
+        },
+        ladders={
+            "buy": [
+                MarketLadderEntry(
+                    size_base_units=2,
+                    target_count=1,
+                    split_buffer_count=0,
+                    combine_when_excess_factor=2.0,
+                )
+            ]
+        },
+    )
+    entries = bootstrap_ladder_entries_for_side(
+        side="buy",
+        side_ladder=list(market.ladders["buy"]),
+        pricing=dict(market.pricing),
+        quote_price=1.5,
+        resolved_quote_asset_id="quotecat",
+    )
+    assert len(entries) == 1
+    assert entries[0].size_base_units == 3000
+    assert entries[0].target_count == 1
