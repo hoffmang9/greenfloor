@@ -121,3 +121,11 @@ class CoinOpsKernelProtocol(Protocol):
         iteration: int,
         max_iterations: int,
     ) -> tuple[bool, str]: ...
+
+    def effective_sell_bucket_counts_for_coin_ops(
+        self,
+        sell_ladder: list[Any],
+        wallet_bucket_counts: dict[int, int],
+        active_sell_offer_counts_by_size: dict[int, int] | None,
+        newly_executed_sell_offer_counts_by_size: dict[int, int] | None,
+    ) -> dict[int, int]: ...

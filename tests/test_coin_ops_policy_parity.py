@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import pytest
 
+from greenfloor.config.models import MarketLadderEntry
 from greenfloor.core.coin_ops import (
     coin_meets_coin_op_min_amount,
     coin_op_min_amount_mojos,
     coin_op_target_amount_allowed,
+    effective_sell_bucket_counts_for_coin_ops,
     select_spendable_coins_for_target_amount,
 )
 from greenfloor.hex_utils import (
@@ -108,3 +110,43 @@ def test_target_amount_allowed_matches_coin_meets_for_same_amount() -> None:
     assert coin_meets_coin_op_min_amount({"amount": amount}, canonical_asset_id=_CAT_ID)
     assert not coin_op_target_amount_allowed(amount_mojos=500, canonical_asset_id=_CAT_ID)
     assert not coin_meets_coin_op_min_amount({"amount": 500}, canonical_asset_id=_CAT_ID)
+
+
+def _sell_ladder(*entries: tuple[int, int]) -> list[MarketLadderEntry]:
+    return [
+        MarketLadderEntry(
+            size_base_units=size,
+            target_count=target,
+            split_buffer_count=1,
+            combine_when_excess_factor=2.0,
+        )
+        for size, target in entries
+    ]
+
+
+def test_effective_sell_bucket_counts_for_coin_ops_counts_live_sells_toward_target_only() -> None:
+    effective = effective_sell_bucket_counts_for_coin_ops(
+        sell_ladder=_sell_ladder((10, 3)),
+        wallet_bucket_counts={10: 0},
+        active_sell_offer_counts_by_size={10: 3},
+    )
+    assert effective[10] == 3
+
+
+def test_effective_sell_bucket_counts_for_coin_ops_caps_live_sell_credit_at_target() -> None:
+    effective = effective_sell_bucket_counts_for_coin_ops(
+        sell_ladder=_sell_ladder((10, 3)),
+        wallet_bucket_counts={10: 0},
+        active_sell_offer_counts_by_size={10: 4},
+    )
+    assert effective[10] == 3
+
+
+def test_effective_sell_bucket_counts_for_coin_ops_accounts_for_new_sell_posts_in_cycle() -> None:
+    effective = effective_sell_bucket_counts_for_coin_ops(
+        sell_ladder=_sell_ladder((10, 2)),
+        wallet_bucket_counts={10: 2},
+        active_sell_offer_counts_by_size={10: 0},
+        newly_executed_sell_offer_counts_by_size={10: 2},
+    )
+    assert effective[10] == 2

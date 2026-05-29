@@ -6,6 +6,9 @@ Implementation policy for coding agents and contributors.
 
 When rules conflict, apply this order: correctness > safety > architecture > style > convenience.
 
+When "minimize diff scope" conflicts with commit scope or pre-commit (see **Commit scope** below),
+**commit scope wins**.
+
 Severity tags:
 
 - `[MUST]`: required.
@@ -23,6 +26,7 @@ Severity tags:
 - `[MUST]` Network symbol discipline: mainnet uses `xch`, testnet11 uses `txch` in examples, defaults, runbooks, workflows, and operator commands.
 - `[MUST]` CAT denomination discipline: 1000 mojos of a CAT is exactly 1 unit of that CAT in examples, operator output, runbooks, tests, and code comments.
 - `[SHOULD]` When debugging, prefer the existing log pipeline: set the host log level to `DEBUG` in `program.yaml` and use the service logs instead of adding ad hoc debug code or one-off debug files.
+- `[MUST]` Do not create new markdown, scripts, or notes outside `docs/`, `.cursor/`, or paths the user requested. Prefer editing existing project files.
 - `[SHOULD]` Offer cancellation is exceptional (stable-vs-unstable only, and only on strong unstable-side moves).
 - `[MUST]` All posted offers must include expiry; stable-vs-unstable pairs should use shorter expiries.
 
@@ -77,6 +81,16 @@ Severity tags:
 - `[MUST]` Every `while True` + `time.sleep` loop has deterministic timeout/warning tests (mock `time.sleep` and `time.monotonic`).
 - `[MUST]` Extract repeated test setup into a named helper when it appears in more than two tests.
 - `[SHOULD]` Deterministic test harness runtime stays under 10 minutes wall clock (target under 5).
+
+## Commit scope
+
+- `[MUST]` After `pre-commit run --all-files` passes, include every tracked change
+  required for CI — not only hand-edited feature lines.
+- `[MUST]` Hook and formatter output is never "unrelated."
+- `[MUST]` **Unrelated** means should-not-be-in-the-repo, not "outside the feature story."
+
+**Canonical:** `.cursor/rules/git-workflow.mdc` → **Commit scope** (pre-commit bundle,
+include/exclude lists).
 
 ## Review and Decisions
 

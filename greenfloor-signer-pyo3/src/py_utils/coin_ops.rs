@@ -5,7 +5,7 @@ use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use super::common::cached_class;
+use super::common::{cached_class, require_i64_attr};
 use signer_core::{CombineInputSelectionMode, SplitAutoSelectPlan, SplitPlanningProfile};
 
 const COIN_OPS_MODULE: &str = "greenfloor.core.coin_ops";
@@ -269,4 +269,22 @@ pub fn split_auto_select_plan_to_py<'py>(
             cls.call((), Some(&kwargs))
         }
     }
+}
+
+pub fn ladder_bucket_specs_from_py_list(
+    list: &Bound<'_, PyList>,
+) -> PyResult<Vec<signer_core::BucketSpec>> {
+    list.iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let label = format!("ladder entry {index}");
+            Ok(signer_core::BucketSpec {
+                size_base_units: require_i64_attr(&item, &label, "size_base_units")?,
+                target_count: require_i64_attr(&item, &label, "target_count")?,
+                split_buffer_count: 0,
+                combine_when_excess_factor: 0.0,
+                current_count: 0,
+            })
+        })
+        .collect()
 }

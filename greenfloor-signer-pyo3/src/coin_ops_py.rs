@@ -4,7 +4,8 @@ use pyo3::types::{PyAny, PyDict, PyList};
 
 use signer_core::{
     amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_should_stop,
-    coin_op_target_amount_allowed, compute_bucket_counts_from_coins, evaluate_coin_combine_gate,
+    coin_op_target_amount_allowed, compute_bucket_counts_from_coins,
+    effective_sell_bucket_counts_for_coin_ops, evaluate_coin_combine_gate,
     evaluate_coin_split_gate, fee_budget_allows_execution, is_spendable_wallet_coin,
     partition_plans_by_budget, plan_auto_combine_inputs, plan_auto_split_selection, plan_coin_ops,
     projected_coin_ops_fee_mojos, select_spendable_coins_for_target_amount,
@@ -14,7 +15,8 @@ use signer_core::{
 use crate::py_utils::{
     bucket_spec_from_py, coin_op_plan_to_py, coin_op_plans_from_py_list,
     combine_denomination_readiness_to_py, combine_input_selection_mode_from_py,
-    exclude_coin_ids_from_py_optional, i64_i64_map_to_py_dict, request_dict_to_json,
+    dict_to_i64_i64_map, exclude_coin_ids_from_py_optional, i64_i64_map_to_py_dict,
+    ladder_bucket_specs_from_py_list, optional_dict_to_i64_i64_map, request_dict_to_json,
     spendable_coins_from_py_list, split_auto_select_plan_to_py, split_denomination_readiness_to_py,
     split_planning_profile_from_py,
 };
@@ -293,6 +295,29 @@ fn coin_op_should_stop_py(
     Ok((stop, reason.to_string()))
 }
 
+#[pyfunction]
+#[pyo3(name = "effective_sell_bucket_counts_for_coin_ops")]
+fn effective_sell_bucket_counts_for_coin_ops_py(
+    py: Python<'_>,
+    sell_ladder: &Bound<'_, PyList>,
+    wallet_bucket_counts: &Bound<'_, PyDict>,
+    active_sell_offer_counts_by_size: Option<&Bound<'_, PyDict>>,
+    newly_executed_sell_offer_counts_by_size: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Py<PyAny>> {
+    let ladder = ladder_bucket_specs_from_py_list(sell_ladder)?;
+    let wallet_counts = dict_to_i64_i64_map(wallet_bucket_counts)?;
+    let active_counts = optional_dict_to_i64_i64_map(active_sell_offer_counts_by_size)?;
+    let newly_executed_counts =
+        optional_dict_to_i64_i64_map(newly_executed_sell_offer_counts_by_size)?;
+    let effective = effective_sell_bucket_counts_for_coin_ops(
+        &ladder,
+        &wallet_counts,
+        active_counts.as_ref(),
+        newly_executed_counts.as_ref(),
+    );
+    Ok(i64_i64_map_to_py_dict(py, &effective)?.into())
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(plan_coin_ops_py, m)?)?;
     m.add_function(wrap_pyfunction!(projected_coin_ops_fee_mojos_py, m)?)?;
@@ -313,5 +338,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(evaluate_coin_split_gate_py, m)?)?;
     m.add_function(wrap_pyfunction!(evaluate_coin_combine_gate_py, m)?)?;
     m.add_function(wrap_pyfunction!(coin_op_should_stop_py, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        effective_sell_bucket_counts_for_coin_ops_py,
+        m
+    )?)?;
     Ok(())
 }

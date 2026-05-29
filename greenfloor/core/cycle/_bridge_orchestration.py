@@ -12,6 +12,7 @@ from greenfloor.core.cycle_orchestration import (
     StaleSweepProgress,
 )
 from greenfloor.core.kernel_bridge import policy_kernel
+from greenfloor.core.kernel_maps import require_i64_i64_map
 from greenfloor.core.planned_action import PlannedAction, planned_actions_from_signer_list
 
 __all__ = [
@@ -23,6 +24,7 @@ __all__ = [
     "enqueue_immediate_requeue",
     "evaluate_market",
     "evaluate_two_sided_market_actions",
+    "executed_sell_offer_counts_by_size",
     "expiry_seconds_for_action",
     "is_dexie_offer_missing_error_text",
     "is_two_sided_market_mode",
@@ -248,9 +250,7 @@ def aggregate_two_sided_offer_counts(
         sell_counts,
         [int(size) for size in tracked_sizes],
     )
-    if not isinstance(result, dict):
-        raise TypeError("aggregate_two_sided_offer_counts returned non-dict result")
-    return {int(key): int(value) for key, value in result.items()}
+    return require_i64_i64_map(result, label="aggregate_two_sided_offer_counts")
 
 
 def one_sided_offer_counts_by_side(
@@ -267,3 +267,8 @@ def one_sided_offer_counts_by_side(
         "buy": {int(key): int(value) for key, value in dict(result.get("buy", {})).items()},
         "sell": {int(key): int(value) for key, value in dict(result.get("sell", {})).items()},
     }
+
+
+def executed_sell_offer_counts_by_size(action_items: list[Any]) -> dict[int, int]:
+    result = policy_kernel().executed_sell_offer_counts_by_size(action_items)
+    return require_i64_i64_map(result, label="executed_sell_offer_counts_by_size")

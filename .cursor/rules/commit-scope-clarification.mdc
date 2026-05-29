@@ -1,0 +1,16 @@
+---
+description: Clarifies "unrelated" for git commits (hook/fmt always included)
+alwaysApply: true
+---
+
+# Commit scope clarification
+
+When committing, staging, or using diff-tab actions that say "exclude unrelated files":
+
+- Hook and formatter output is **never** unrelated — include it after `pre-commit run --all-files` passes.
+- **Unrelated** means `.gitignore`-class paths, secrets, build artifacts, agent scratch not
+  requested as product code/tests/docs, or work the user explicitly excluded — **not** "outside
+  the feature story."
+
+**Canonical rule:** `.cursor/rules/git-workflow.mdc` → **Commit scope** (pre-commit bundle,
+include/exclude lists). Also summarized in `AGENTS.md` → **Commit scope**.

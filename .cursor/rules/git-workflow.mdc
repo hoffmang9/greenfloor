@@ -43,16 +43,49 @@ gh pr create --title "..." --body "..."
 ## Commit scope
 
 When committing work on a branch, **include all changes required for CI to pass**, not
-only the feature diff:
+only the feature diff.
 
-- **Always include:** edits from `pre-commit` hooks (ruff, ruff-format, prettier,
-  yamllint), `cargo fmt` on touched Rust crates, and any test fixes those tools
-  surface. These are part of the change, not "unrelated" noise.
-- **Exclude:** genuinely unrelated work (different feature, accidental edits in
-  other directories, local-only config, secrets, `.pytest_tmp/`, build artifacts).
+**Do not** treat "outside the feature diff" as unrelated. Unrelated means "should not
+be in the repository," not "not part of the story." Diff-tab prompts that say "exclude
+unrelated files" use the same definition.
 
-Do not leave hook-driven formatting on the branch while committing the feature —
-that creates a dirty tree and risks CI failure on the next push.
+### Pre-commit bundle (required)
+
+1. Make changes.
+2. Run `PATH="$(pwd)/.venv/bin:$PATH" pre-commit run --all-files`.
+3. If hooks modify files, fix any remaining failures and re-run until green.
+4. `git status --short` → stage **all** modified tracked files except the exclude list
+   below.
+5. Commit. The working tree should be clean except deliberately excluded items.
+
+### Always include
+
+- Edits from `pre-commit` hooks (ruff, ruff-format, prettier, yamllint), including
+  auto-fixes on any tracked file.
+- `cargo fmt` output in any crate you built, tested, or ran maturin/cargo against for
+  the change — including files you did not edit by hand.
+- Test fixes those tools surface.
+
+These are part of the change, not "unrelated" noise. Do not leave hook-driven formatting
+on the branch while committing feature work — that creates a dirty tree and risks CI
+failure on the next push.
+
+### Exclude only (unrelated)
+
+- **`.gitignore`-class paths:** build artifacts, caches, venv, local env (`.env`),
+  runtime state (`.greenfloor/`, `.tmp-artifacts/`, logs), `.pytest_tmp/`, Rust
+  `target/`, and similar. Use `git check-ignore -v <path>` when unsure.
+- **Agent scratch output** not requested and not part of the deliverable: debug dumps,
+  temp scripts, one-off notes in random directories, duplicate docs.
+- **A different feature** the user explicitly asked to keep out of this commit/PR.
+
+### Anti-pattern (do not do this)
+
+"Commit the feature files but leave `some_module.rs` fmt unstaged because it wasn't
+part of the story." If pre-commit passed with that file modified, it belongs in the
+commit.
+
+**When unsure, include it.** A slightly broader commit beats a dirty tree or CI surprise.
 
 ## Retroactive branch (already pushed to main)
 
