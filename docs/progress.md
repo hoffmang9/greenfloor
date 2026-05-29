@@ -13,6 +13,7 @@
 - **Kernel protocols:** re-collapsed domain splits back into single `greenfloor/core/kernel_protocol.py` (five-file split removed).
 - **Offer side + request:** signer request builder in `core/signer_offer_request.py` (uses `mojo_multiplier_for_le`); side normalization later moved to Rust (`offer/request.rs`) via `offer_request_bridge` / `offer_policy`.
 - **Dexie visibility asset checks:** moved offered/requested asset-match validation from `runtime/offer_publish.py` into `greenfloor-signer/src/offer/publish.rs`; PyO3 exposes `dexie_offer_asset_expectation_error` and Python runtime delegates via `core.offer_policy`.
+- **Bootstrap mixed-output planner:** `plan_bootstrap_mixed_outputs` canonical implementation in `greenfloor-signer/src/offer/bootstrap.rs`; PyO3 `plan_bootstrap_mixed_outputs` returns `greenfloor.offer_bootstrap` dataclasses; Python module keeps DTOs and delegates.
 - **Bootstrap block gate:** moved `bootstrap_blocks_offer` decision shaping into `greenfloor-signer/src/offer/publish.rs` (`bootstrap_block_error`); Python orchestration delegates via `core.offer_policy`.
 - **Publish asset-field shaping:** moved `expected_publish_asset_fields` mapping into `greenfloor-signer/src/offer/publish.rs`; orchestration now calls `core.offer_policy.expected_publish_asset_fields` directly.
 - **Offer policy bridge contract:** removed silent Python fallbacks for migrated offer policy helpers; bridge now requires kernel symbols and fails fast with rebuild guidance when extensions are stale.

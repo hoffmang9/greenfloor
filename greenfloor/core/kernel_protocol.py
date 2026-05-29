@@ -291,6 +291,13 @@ class OfferPolicyKernelProtocol(Protocol):
         expected_requested_symbol: str,
     ) -> str | None: ...
 
+    def plan_bootstrap_mixed_outputs(
+        self,
+        *,
+        sell_ladder: list[object],
+        spendable_coins: list[object],
+    ) -> object | None: ...
+
 
 class RetryPolicyKernelProtocol(Protocol):
     def parse_rate_limit_retry_seconds(self, error_text: str) -> float | None: ...

@@ -1,4 +1,5 @@
 pub mod assemble;
+pub mod bootstrap;
 pub mod build;
 pub mod build_context;
 pub mod codec;
@@ -9,6 +10,9 @@ pub mod publish;
 pub mod request;
 pub mod types;
 
+pub use bootstrap::{
+    plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapLadderEntry, BootstrapPlan, LadderDeficit,
+};
 pub use build::build_vault_cat_offer;
 pub use build_context::{
     mojo_multiplier_for_leg, resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
