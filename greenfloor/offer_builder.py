@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from greenfloor.adapters.native_offer import encode_offer_from_spend_bundle_hex
+from greenfloor.core.offer_policy import compute_signer_offer_leg_amounts
 
 
 def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
@@ -48,18 +49,17 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
             raise ValueError("invalid_quote_asset_id")
         request_asset_id = quote_asset
 
-    offer_amount = int(size_base_units) * int(base_unit_mojo_multiplier)
-    request_amount = int(
-        round(
-            float(size_base_units)
-            * float(quote_price_quote_per_base)
-            * float(quote_unit_mojo_multiplier)
-        )
+    leg = compute_signer_offer_leg_amounts(
+        size_base_units=size_base_units,
+        quote_price=quote_price_quote_per_base,
+        resolved_base_asset_id=asset_id,
+        resolved_quote_asset_id=request_asset_id,
+        action_side="sell",
+        pricing={
+            "base_unit_mojo_multiplier": base_unit_mojo_multiplier,
+            "quote_unit_mojo_multiplier": quote_unit_mojo_multiplier,
+        },
     )
-    if offer_amount <= 0:
-        raise ValueError("invalid_offer_amount")
-    if request_amount <= 0:
-        raise ValueError("invalid_request_amount")
 
     program_config_path = str(payload.get("program_config_path", "")).strip()
     if not program_config_path:
@@ -83,9 +83,9 @@ def _build_coin_backed_spend_bundle_hex(payload: dict[str, Any]) -> str:
             "plan": {
                 "op_type": "offer",
                 "offer_asset_id": asset_id,
-                "offer_amount": offer_amount,
+                "offer_amount": int(leg.offer_amount_mojos),
                 "request_asset_id": request_asset_id,
-                "request_amount": request_amount,
+                "request_amount": int(leg.request_amount_mojos),
                 "offer_coin_ids": offer_coin_ids,
             },
         }

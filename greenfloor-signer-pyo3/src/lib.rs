@@ -6,6 +6,7 @@ mod execution_py;
 mod hex_py;
 mod notifications_py;
 mod offer_build_py;
+mod offer_request_py;
 mod py_utils;
 mod retry_py;
 mod strategy_py;
@@ -434,6 +435,7 @@ fn greenfloor_signer(m: &Bound<'_, PyModule>) -> PyResult<()> {
     hex_py::register(m)?;
     notifications_py::register(m)?;
     offer_build_py::register(m)?;
+    offer_request_py::register(m)?;
     retry_py::register(m)?;
     Ok(())
 }

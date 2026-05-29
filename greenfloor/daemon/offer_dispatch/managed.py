@@ -14,8 +14,7 @@ from greenfloor.core.cycle import (
     is_managed_upstream_transient_error,
     managed_retry_decision,
 )
-from greenfloor.core.offer_side import normalize_offer_side
-from greenfloor.core.planned_action import PlannedAction
+from greenfloor.core.planned_action import PlannedAction, planned_action_side
 from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.cooldowns import (
     _post_retry_config,
@@ -92,7 +91,7 @@ def execute_single_managed_action(
         size_base_units=action.size,
         publish_venue=publish_venue,
         runtime_dry_run=runtime_dry_run,
-        side=normalize_offer_side(action.side),
+        side=planned_action_side(action),
     )
     timing_fields = managed_post.timing_extra()
     post_outcome = classify_managed_post_result(

@@ -6,7 +6,7 @@ import collections.abc
 from pathlib import Path
 from typing import Any
 
-from greenfloor.core.offer_side import normalize_offer_side
+from greenfloor.core.planned_action import PlannedAction, planned_action_side
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import OfferCreateFailure, OfferCreateOutcome
 
@@ -17,7 +17,11 @@ def build_daemon_action_offer_payload(
     action: Any,
     xch_price_usd: float | None,
 ) -> dict[str, Any]:
-    side = normalize_offer_side(getattr(action, "side", "sell"))
+    side = (
+        planned_action_side(action)
+        if isinstance(action, PlannedAction)
+        else str(getattr(action, "side", "sell"))
+    )
     payload = build_local_offer_payload(
         build_ctx,
         size_base_units=int(action.size),
@@ -107,7 +111,7 @@ def make_local_offer_create_fn(
         return OfferCreateOutcome(
             offer_text=offer_text,
             expires_at=f"{int(build_ctx.expiry_value)} {build_ctx.expiry_unit}",
-            side=normalize_offer_side(kwargs.get("action_side", build_ctx.action_side)),
+            side=str(kwargs.get("action_side", build_ctx.action_side)),
             extra=extra,
         )
 

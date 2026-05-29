@@ -9,7 +9,7 @@ from typing import Any
 
 from greenfloor.adapters.coinset import extract_coin_ids_from_offer_payload
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
-from greenfloor.core.offer_side import normalize_offer_side
+from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.core.strategy import StrategyConfig
 from greenfloor.daemon.market_logging import _daemon_logger
 from greenfloor.storage.sqlite import SqliteStore

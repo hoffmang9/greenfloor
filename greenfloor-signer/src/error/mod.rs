@@ -158,6 +158,15 @@ pub enum SignerError {
     #[error("offer_duplicate_spent_coin_ids")]
     OfferDuplicateSpentCoinIds,
 
+    #[error("invalid_size_base_units")]
+    InvalidSizeBaseUnits,
+
+    #[error("request_amount must be positive")]
+    InvalidOfferRequestAmount,
+
+    #[error("invalid_offer_amount")]
+    InvalidOfferAmount,
+
     #[error("{0}")]
     Other(String),
 }

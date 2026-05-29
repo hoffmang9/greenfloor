@@ -1,9 +1,17 @@
 # Progress Log
 
+## 2026-05-28 (Offer request leg math — Rust kernel + PyO3)
+
+- **`greenfloor-signer/src/offer/request.rs`:** canonical leg math — `quote_mojos_for_base_size`, `signer_split_asset_id`, `compute_signer_offer_leg_amounts` (normalized asset ids), `normalize_offer_asset_id`; Rust-only `normalize_offer_side`.
+- **PyO3:** `offer_request_py.rs` exposes leg-math symbols; `offer_build_py.rs` keeps pricing/publish helpers; shared `pricing_dict_from_py` in `py_utils/common.rs`.
+- **Python bridges:** `offer_request_bridge.py` for kernel leg math; `signer_offer_request.py` for dataclasses + `build_signer_create_offer_request`; `normalize_offer_side` and asset helpers delegate to Rust (stable import via `offer_policy`). Removed `core/offer_side.py`.
+- **Tests:** Rust unit tests in `request.rs`; golden + validation in `tests/test_signer_create_offer_parity.py`; BLS input contracts in `tests/test_offer_builder_sdk.py`.
+- **Follow-up:** `docs/decisions/0011-offer-request-python-import-boundaries.md`; `OfferBuildContext.action_side` cached at prepare; daemon dispatch uses `planned_action_side()` (no per-hop kernel); `normalize_offer_side` fast path in `offer_request_bridge`.
+
 ## 2026-05-28 (Signer fixture hygiene follow-up — consolidate protocols and tests)
 
 - **Kernel protocols:** re-collapsed domain splits back into single `greenfloor/core/kernel_protocol.py` (five-file split removed).
-- **Offer side + request:** canonical `normalize_offer_side` in `core/offer_side.py`; signer request builder in `core/signer_offer_request.py` (uses `mojo_multiplier_for_le`).
+- **Offer side + request:** signer request builder in `core/signer_offer_request.py` (uses `mojo_multiplier_for_le`); side normalization later moved to Rust (`offer/request.rs`) via `offer_request_bridge` / `offer_policy`.
 - **Dexie visibility asset checks:** moved offered/requested asset-match validation from `runtime/offer_publish.py` into `greenfloor-signer/src/offer/publish.rs`; PyO3 exposes `dexie_offer_asset_expectation_error` and Python runtime delegates via `core.offer_policy`.
 - **Bootstrap block gate:** moved `bootstrap_blocks_offer` decision shaping into `greenfloor-signer/src/offer/publish.rs` (`bootstrap_block_error`); Python orchestration delegates via `core.offer_policy`.
 - **Publish asset-field shaping:** moved `expected_publish_asset_fields` mapping into `greenfloor-signer/src/offer/publish.rs`; orchestration now calls `core.offer_policy.expected_publish_asset_fields` directly.

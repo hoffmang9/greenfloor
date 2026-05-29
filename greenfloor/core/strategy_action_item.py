@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from greenfloor.core.offer_side import normalize_offer_side
+from greenfloor.core.planned_action import PlannedAction, planned_action_side
 
 # Statuses that count toward strategy executed_count, coin-op sell adjustment,
 # and reservation release_success.
@@ -100,7 +100,11 @@ class StrategyActionItem:
     ) -> StrategyActionItem:
         return cls(
             size=int(getattr(action, "size", 0)),
-            side=normalize_offer_side(getattr(action, "side", "sell")),
+            side=(
+                planned_action_side(action)
+                if isinstance(action, PlannedAction)
+                else str(getattr(action, "side", "sell"))
+            ),
             status="skipped",
             reason=f"parallel_offer_worker_error:{exc}",
             offer_id=None,

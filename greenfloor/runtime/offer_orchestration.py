@@ -13,7 +13,6 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.core import offer_policy
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
-from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_publish import (
@@ -218,7 +217,7 @@ def execute_build_and_post_offer(
     program = build_ctx.program
     market = build_ctx.market
     quote_price = float(build_ctx.quote_price)
-    side = normalize_offer_side(build_ctx.action_side)
+    side = build_ctx.action_side
     post_results: list[dict[str, Any]] = []
     built_offers_preview: list[dict[str, str]] = []
     bootstrap_actions: list[dict[str, Any]] = []
