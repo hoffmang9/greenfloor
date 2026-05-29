@@ -79,8 +79,7 @@ pub use cycle::{
     OfferLifecycleState, OfferSignal, OfferStateRow, OfferTransition, ParallelBatchPlan,
     ParallelQueueItem, ParallelReservationContext, ParallelSkipItem, ParallelSubmissionDecision,
     PlannedAction, PlannedActionInput, ReseedGapPlan, ReseedSkipReason, SequentialActionRoute,
-    SpendableAssetProfile, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
-    StrategyActionSellCountInput, StrategyConfig,
+    SpendableAssetProfile, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress, StrategyConfig,
 };
 pub use error::SignerError as Error;
 pub use hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};

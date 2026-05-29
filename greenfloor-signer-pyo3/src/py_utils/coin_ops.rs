@@ -271,19 +271,16 @@ pub fn split_auto_select_plan_to_py<'py>(
     }
 }
 
-pub fn ladder_bucket_specs_from_py_list(
+pub fn ladder_target_rows_from_py_list(
     list: &Bound<'_, PyList>,
-) -> PyResult<Vec<signer_core::BucketSpec>> {
+) -> PyResult<Vec<signer_core::coin_ops::LadderTargetRow>> {
     list.iter()
         .enumerate()
         .map(|(index, item)| {
             let label = format!("ladder entry {index}");
-            Ok(signer_core::BucketSpec {
+            Ok(signer_core::coin_ops::LadderTargetRow {
                 size_base_units: require_i64_attr(&item, &label, "size_base_units")?,
                 target_count: require_i64_attr(&item, &label, "target_count")?,
-                split_buffer_count: 0,
-                combine_when_excess_factor: 0.0,
-                current_count: 0,
             })
         })
         .collect()

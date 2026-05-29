@@ -22,7 +22,7 @@ pub use gate::{
     CoinCombineGateResult, CoinSplitGateResult,
 };
 pub use inventory::compute_bucket_counts_from_coins;
-pub use plan::{plan_coin_ops, BucketSpec, CoinOpKind, CoinOpPlan};
+pub use plan::{plan_coin_ops, BucketSpec, CoinOpKind, CoinOpPlan, LadderTargetRow};
 pub use policy::{
     amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_target_amount_allowed,
 };

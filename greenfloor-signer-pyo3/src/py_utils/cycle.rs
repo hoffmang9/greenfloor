@@ -225,7 +225,7 @@ pub fn extract_spendable_profiles(
 
 pub fn strategy_action_sell_counts_from_py_list(
     list: &Bound<'_, PyList>,
-) -> PyResult<Vec<signer_core::StrategyActionSellCountInput>> {
+) -> PyResult<Vec<signer_core::cycle::StrategyActionSellCountInput>> {
     list.iter()
         .enumerate()
         .map(|(index, item)| {
@@ -244,7 +244,7 @@ pub fn strategy_action_sell_counts_from_py_list(
                 .map_err(|_| {
                     PyValueError::new_err(format!("{label}.counts_as_executed must be a bool"))
                 })?;
-            Ok(signer_core::StrategyActionSellCountInput {
+            Ok(signer_core::cycle::StrategyActionSellCountInput {
                 size: require_i64_attr(&item, &label, "size")?,
                 side,
                 counts_as_executed,

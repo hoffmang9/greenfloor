@@ -13,7 +13,7 @@ pub(crate) use bootstrap::{
 pub use coin_ops::{
     bucket_spec_from_py, coin_op_plan_to_py, coin_op_plans_from_py_list,
     combine_denomination_readiness_to_py, combine_input_selection_mode_from_py,
-    exclude_coin_ids_from_py_optional, ladder_bucket_specs_from_py_list,
+    exclude_coin_ids_from_py_optional, ladder_target_rows_from_py_list,
     spendable_coins_from_py_list, split_auto_select_plan_to_py, split_denomination_readiness_to_py,
     split_planning_profile_from_py,
 };

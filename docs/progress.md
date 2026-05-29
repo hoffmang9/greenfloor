@@ -1,5 +1,13 @@
 # Progress Log
 
+## 2026-05-28 (Coin-op effective counts — Rust kernel by domain)
+
+- **`greenfloor-signer/src/coin_ops/effective_counts.rs`:** `effective_sell_bucket_counts_for_coin_ops` takes `LadderTargetRow` slices (size + target only); merges wallet counts with live and in-cycle sell offers toward ladder targets.
+- **`greenfloor-signer/src/cycle/strategy_action.rs`:** `executed_sell_offer_counts_by_size` aggregates executed sell actions; Rust reads Python `counts_as_executed` (single owner for status semantics in `StrategyActionItem`).
+- **PyO3:** `coin_ops_py.rs` + `ladder_target_rows_from_py_list`; `cycle/strategy_counts_py.rs` + `strategy_action_sell_counts_from_py_list`; shared `require_i64_attr` in `py_utils/common.rs`.
+- **Python bridges:** `core/coin_ops/_bridge.py`, `core/cycle/_bridge_orchestration.py`, `core/kernel_maps.py` (`require_i64_i64_map`, `require_side_offer_count_maps`); daemon imports canonical core helpers directly (no pass-through wrappers).
+- **Tests:** `tests/test_coin_ops_policy_parity.py`, `tests/test_cycle_strategy_action_parity.py`; removed duplicate gates from `tests/test_daemon_strategy_integration.py`.
+
 ## 2026-05-28 (Offer request leg math — Rust kernel + PyO3)
 
 - **`greenfloor-signer/src/offer/request.rs`:** canonical leg math — `quote_mojos_for_base_size`, `signer_split_asset_id`, `compute_signer_offer_leg_amounts` (normalized asset ids), `normalize_offer_asset_id`; Rust-only `normalize_offer_side`.

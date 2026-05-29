@@ -20,6 +20,12 @@ impl CoinOpKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LadderTargetRow {
+    pub size_base_units: i64,
+    pub target_count: i64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BucketSpec {
     pub size_base_units: i64,

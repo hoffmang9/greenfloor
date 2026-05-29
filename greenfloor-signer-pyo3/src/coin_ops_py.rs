@@ -16,7 +16,7 @@ use crate::py_utils::{
     bucket_spec_from_py, coin_op_plan_to_py, coin_op_plans_from_py_list,
     combine_denomination_readiness_to_py, combine_input_selection_mode_from_py,
     dict_to_i64_i64_map, exclude_coin_ids_from_py_optional, i64_i64_map_to_py_dict,
-    ladder_bucket_specs_from_py_list, optional_dict_to_i64_i64_map, request_dict_to_json,
+    ladder_target_rows_from_py_list, optional_dict_to_i64_i64_map, request_dict_to_json,
     spendable_coins_from_py_list, split_auto_select_plan_to_py, split_denomination_readiness_to_py,
     split_planning_profile_from_py,
 };
@@ -304,7 +304,7 @@ fn effective_sell_bucket_counts_for_coin_ops_py(
     active_sell_offer_counts_by_size: Option<&Bound<'_, PyDict>>,
     newly_executed_sell_offer_counts_by_size: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<Py<PyAny>> {
-    let ladder = ladder_bucket_specs_from_py_list(sell_ladder)?;
+    let ladder = ladder_target_rows_from_py_list(sell_ladder)?;
     let wallet_counts = dict_to_i64_i64_map(wallet_bucket_counts)?;
     let active_counts = optional_dict_to_i64_i64_map(active_sell_offer_counts_by_size)?;
     let newly_executed_counts =

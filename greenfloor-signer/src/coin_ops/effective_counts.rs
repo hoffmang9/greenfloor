@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
-use super::plan::BucketSpec;
+use super::plan::LadderTargetRow;
 
 pub fn effective_sell_bucket_counts_for_coin_ops(
-    sell_ladder: &[BucketSpec],
+    sell_ladder: &[LadderTargetRow],
     wallet_bucket_counts: &BTreeMap<i64, i64>,
     active_sell_offer_counts_by_size: Option<&BTreeMap<i64, i64>>,
     newly_executed_sell_offer_counts_by_size: Option<&BTreeMap<i64, i64>>,
@@ -50,18 +50,14 @@ pub fn effective_sell_bucket_counts_for_coin_ops(
 #[cfg(test)]
 mod tests {
     use super::effective_sell_bucket_counts_for_coin_ops;
-    use crate::coin_ops::BucketSpec;
+    use crate::coin_ops::LadderTargetRow;
     use std::collections::BTreeMap;
-
-    fn sell_ladder(entries: &[(i64, i64)]) -> Vec<BucketSpec> {
+    fn sell_ladder(entries: &[(i64, i64)]) -> Vec<LadderTargetRow> {
         entries
             .iter()
-            .map(|(size, target)| BucketSpec {
+            .map(|(size, target)| LadderTargetRow {
                 size_base_units: *size,
                 target_count: *target,
-                split_buffer_count: 0,
-                combine_when_excess_factor: 0.0,
-                current_count: 0,
             })
             .collect()
     }

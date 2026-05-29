@@ -12,7 +12,7 @@ from greenfloor.core.cycle_orchestration import (
     StaleSweepProgress,
 )
 from greenfloor.core.kernel_bridge import policy_kernel
-from greenfloor.core.kernel_maps import require_i64_i64_map
+from greenfloor.core.kernel_maps import require_i64_i64_map, require_side_offer_count_maps
 from greenfloor.core.planned_action import PlannedAction, planned_actions_from_signer_list
 
 __all__ = [
@@ -261,12 +261,10 @@ def one_sided_offer_counts_by_side(
     result = signer.one_sided_offer_counts_by_side(
         sell_counts, [int(size) for size in tracked_sizes]
     )
-    if not isinstance(result, dict):
-        raise TypeError("one_sided_offer_counts_by_side returned non-dict result")
-    return {
-        "buy": {int(key): int(value) for key, value in dict(result.get("buy", {})).items()},
-        "sell": {int(key): int(value) for key, value in dict(result.get("sell", {})).items()},
-    }
+    return require_side_offer_count_maps(
+        result,
+        label="one_sided_offer_counts_by_side",
+    )
 
 
 def executed_sell_offer_counts_by_size(action_items: list[Any]) -> dict[int, int]:
