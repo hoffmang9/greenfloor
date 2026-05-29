@@ -7,7 +7,8 @@ import importlib
 from pathlib import Path
 from typing import Any
 
-from greenfloor.core.engine_bridge import import_engine, require_engine_method
+from greenfloor.core.engine_bridge import import_engine
+from greenfloor.core.offer_assets_bridge import resolve_offer_asset_ids_by_config_path
 from greenfloor.core.signer_offer_request import (
     SignerCreateOfferPayload,
     signer_create_offer_request_from_fields,
@@ -51,15 +52,11 @@ def build_mixed_split(program_path: str, request_dict: dict[str, Any]) -> dict[s
 
 def resolve_offer_asset_ids(program_path: str, base_asset: str, quote_asset: str) -> dict[str, str]:
     """Resolve market symbols or asset ids to canonical offer asset ids."""
-    engine = import_engine()
-    resolve = require_engine_method(engine, "resolve_offer_asset_ids", missing="offer action")
-    result = resolve(str(program_path), base_asset, quote_asset)
-    if not isinstance(result, dict):
-        raise TypeError("resolve_offer_asset_ids returned non-dict result")
-    base_asset_id = str(result.get("base_asset_id", "")).strip()
-    quote_asset_id = str(result.get("quote_asset_id", "")).strip()
-    if not base_asset_id or not quote_asset_id:
-        raise ValueError("resolve_offer_asset_ids_missing_fields")
+    base_asset_id, quote_asset_id = resolve_offer_asset_ids_by_config_path(
+        str(program_path),
+        base_asset,
+        quote_asset,
+    )
     return {"base_asset_id": base_asset_id, "quote_asset_id": quote_asset_id}
 
 

@@ -36,18 +36,14 @@ def _sample_market(*, base_multiplier: int = 1000, quote_multiplier: int = 1000)
 
 
 def test_signer_resolve_offer_asset_ids_delegates_collision_to_engine(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "greenfloor.runtime.offer_runtime.prepare_signer_runtime",
-        lambda _program: "/tmp/signer.yaml",
-    )
-
-    def _raise_collision(_path: str, _base: str, _quote: str) -> dict[str, str]:
+    def _raise_collision(_base: str, _quote: str, *, program) -> tuple[str, str]:
+        _ = program
         raise RuntimeError(
             "signer_asset_resolution_failed:resolved_assets_collide_for_non_xch_pair"
         )
 
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_runtime.rust_signer.resolve_offer_asset_ids",
+        "greenfloor.runtime.offer_runtime.resolve_offer_assets",
         _raise_collision,
     )
 

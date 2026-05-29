@@ -99,8 +99,8 @@ def test_signer_daemon_split_submits(monkeypatch) -> None:
         lambda _program: "/tmp/signer.yaml",
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.coin_ops_backend.rust_signer.resolve_offer_asset_ids",
-        lambda *_args, **_kwargs: {"base_asset_id": "asset_byc", "quote_asset_id": "xch"},
+        "greenfloor.runtime.coin_ops_backend.resolve_offer_assets",
+        lambda _base, _quote, *, program: ("asset_byc", "xch"),
     )
     monkeypatch.setattr(
         "greenfloor.runtime.signer_coin_op_backend.list_unspent_coins_by_receive_address",
@@ -243,6 +243,10 @@ def test_resolve_coin_op_base_asset_id_signer_xch(monkeypatch) -> None:
     monkeypatch.setattr(
         "greenfloor.runtime.coin_ops.daemon_execution.coin_ops_execution_backend",
         lambda _program: "signer",
+    )
+    monkeypatch.setattr(
+        "greenfloor.runtime.coin_ops_backend.resolve_offer_assets",
+        lambda _base, _quote, *, program: ("xch", "xch"),
     )
     market = _signer_market()
     market.base_asset = "xch"

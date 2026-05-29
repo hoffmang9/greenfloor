@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from greenfloor.adapters import rust_signer
-from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
-from greenfloor.hex_utils import canonical_is_xch
+from greenfloor.config.models import MarketConfig, ProgramConfig
+from greenfloor.core.offer_assets_bridge import resolve_offer_assets
 from greenfloor.runtime.coin_ops_scope import (
     CoinOpBackend,
     CoinOpExecutionBackend,
@@ -32,12 +31,8 @@ def resolve_signer_asset_id(
     symbol_hint: str | None = None,
 ) -> str:
     _ = symbol_hint
-    base = str(canonical_asset_id).strip()
-    if canonical_is_xch(base):
-        return "xch"
-    config_path = prepare_signer_runtime(program)
-    resolved = rust_signer.resolve_offer_asset_ids(config_path, base, "xch")
-    return str(resolved["base_asset_id"]).strip().lower()
+    base, _quote = resolve_offer_assets(str(canonical_asset_id).strip(), "xch", program=program)
+    return base.lower()
 
 
 def resolve_coin_op_base_asset_id(

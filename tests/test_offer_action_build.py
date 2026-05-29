@@ -28,23 +28,16 @@ def test_resolve_action_assets_uses_engine_normalization_for_canonical_assets(mo
         keyring_yaml_path="/tmp/keyring.yaml",
     )
 
-    def _fail_prepare(_program):
-        raise AssertionError("canonical asset normalization should not prepare signer runtime")
-
-    def _fail_resolve(_path: str, _base: str, _quote: str) -> dict[str, str]:
+    def _fail_program_resolve(_program, _base: str, _quote: str) -> tuple[str, str]:
         raise AssertionError("canonical asset normalization should not call Coinset resolution")
 
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_action_build.try_normalize_offer_asset_ids",
-        lambda _base, _quote: {"base_asset_id": "aa" * 32, "quote_asset_id": "xch"},
+        "greenfloor.core.offer_assets_bridge.try_normalize_offer_asset_ids",
+        lambda _base, _quote: ("aa" * 32, "xch"),
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_action_build.rust_signer.resolve_offer_asset_ids",
-        _fail_resolve,
-    )
-    monkeypatch.setattr(
-        "greenfloor.runtime.offer_action_build.prepare_signer_runtime",
-        _fail_prepare,
+        "greenfloor.core.offer_assets_bridge.resolve_offer_asset_ids_for_program",
+        _fail_program_resolve,
     )
 
     base, quote = resolve_action_assets_for_build_context(build_ctx)
@@ -68,26 +61,23 @@ def test_resolve_action_assets_uses_engine_for_ticker_symbols(monkeypatch) -> No
     )
     captured: dict[str, str] = {}
 
-    def _fake_resolve(_path: str, base: str, quote: str) -> dict[str, str]:
+    def _fake_program_resolve(_program, base: str, quote: str) -> tuple[str, str]:
         captured["base"] = base
         captured["quote"] = quote
-        return {"base_asset_id": "aa" * 32, "quote_asset_id": "xch"}
+        return "aa" * 32, "xch"
 
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_action_build.try_normalize_offer_asset_ids",
+        "greenfloor.core.offer_assets_bridge.try_normalize_offer_asset_ids",
         lambda _base, _quote: None,
     )
     monkeypatch.setattr(
-        "greenfloor.runtime.offer_action_build.rust_signer.resolve_offer_asset_ids",
-        _fake_resolve,
-    )
-    monkeypatch.setattr(
-        "greenfloor.runtime.offer_action_build.prepare_signer_runtime",
-        lambda _program: "/tmp/signer.yaml",
+        "greenfloor.core.offer_assets_bridge.resolve_offer_asset_ids_for_program",
+        _fake_program_resolve,
     )
 
     base, quote = resolve_action_assets_for_build_context(build_ctx)
 
     assert captured["base"] == "HOA"
+    assert captured["quote"] == "xch"
     assert base == "aa" * 32
     assert quote == "xch"

@@ -13,10 +13,6 @@ _require_offer_request_method = engine_bridge.engine_method_getter(
     lambda: engine_bridge.policy_engine(),
     missing="offer-request",
 )
-_require_offer_action_method = engine_bridge.engine_method_getter(
-    lambda: engine_bridge.policy_engine(),
-    missing="offer-action",
-)
 
 
 def _coerce_signer_offer_leg_amounts(payload: object):
@@ -74,21 +70,6 @@ def signer_split_asset_id(
 
 def normalize_offer_asset_id(asset_id: str) -> str:
     return str(_require_offer_request_method("normalize_offer_asset_id")(str(asset_id)))
-
-
-def try_normalize_offer_asset_ids(base_asset: str, quote_asset: str) -> dict[str, str] | None:
-    """Normalize already-resolved offer asset ids with Rust action-boundary semantics."""
-    normalize = _require_offer_action_method("try_normalize_offer_asset_ids")
-    payload = normalize(str(base_asset), str(quote_asset))
-    if payload is None:
-        return None
-    if not isinstance(payload, dict):
-        raise TypeError("try_normalize_offer_asset_ids returned non-dict result")
-    base_asset_id = str(payload.get("base_asset_id", "")).strip()
-    quote_asset_id = str(payload.get("quote_asset_id", "")).strip()
-    if not base_asset_id or not quote_asset_id:
-        raise ValueError("try_normalize_offer_asset_ids_missing_fields")
-    return {"base_asset_id": base_asset_id, "quote_asset_id": quote_asset_id}
 
 
 def compute_signer_offer_leg_amounts(

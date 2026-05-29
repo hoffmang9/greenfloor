@@ -6,13 +6,14 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from greenfloor.adapters import offer_action, rust_signer
+from greenfloor.adapters import offer_action
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.core.offer_action import (
     OfferCreatePhaseOutcome,
     build_action_request,
     to_create_phase_outcome,
 )
+from greenfloor.core.offer_assets_bridge import resolve_offer_assets
 from greenfloor.core.offer_bootstrap_bridge import (
     BootstrapPhaseResult,
     plan_bootstrap_mixed_outputs,
@@ -51,17 +52,11 @@ def signer_resolve_offer_asset_ids(
     base_asset_id: str,
     quote_asset_id: str,
 ) -> tuple[str, str]:
-    config_path = _signer_config_path(program)
-    payload = rust_signer.resolve_offer_asset_ids(
-        config_path,
+    return resolve_offer_assets(
         str(base_asset_id).strip(),
         str(quote_asset_id).strip(),
+        program=program,
     )
-    resolved_base = str(payload.get("base_asset_id", "")).strip()
-    resolved_quote = str(payload.get("quote_asset_id", "")).strip()
-    if not resolved_base or not resolved_quote:
-        raise RuntimeError("signer_asset_resolution_failed:empty_resolved_asset_id")
-    return resolved_base, resolved_quote
 
 
 def _list_coinset_bootstrap_coins(
