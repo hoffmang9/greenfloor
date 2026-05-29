@@ -79,13 +79,13 @@ pub fn stale_sweep_progress_from_py(obj: &Bound<'_, PyAny>) -> PyResult<StaleSwe
     let checked_offer_count = obj.getattr("checked_offer_count")?.extract::<usize>()?;
     let truncated = obj.getattr("truncated")?.extract::<bool>()?;
     let requeue_attr = obj.getattr("requeue_market_ids")?;
-    let requeue_list = requeue_attr.downcast::<PyList>()?;
+    let requeue_list = requeue_attr.cast::<PyList>()?;
     let mut requeue_market_ids = Vec::with_capacity(requeue_list.len());
     for item in requeue_list.iter() {
         requeue_market_ids.push(item.extract::<String>()?);
     }
     let hits_attr = obj.getattr("hits")?;
-    let hits_list = hits_attr.downcast::<PyList>()?;
+    let hits_list = hits_attr.cast::<PyList>()?;
     let mut hits = Vec::with_capacity(hits_list.len());
     for item in hits_list.iter() {
         hits.push(stale_sweep_hit_from_py(&item)?);

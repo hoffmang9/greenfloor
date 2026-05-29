@@ -83,7 +83,7 @@ fn sequential_action_route_py(
 #[pyfunction]
 #[pyo3(name = "expand_planned_actions")]
 fn expand_planned_actions_py(actions: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-    let list = actions.downcast::<PyList>()?;
+    let list = actions.cast::<PyList>()?;
     let mut rust_actions = Vec::with_capacity(list.len());
     for item in list.iter() {
         rust_actions.push(planned_action_from_py(&item)?);
@@ -97,7 +97,7 @@ fn expand_planned_actions_py(actions: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> 
 fn filter_planned_actions_with_positive_repeat_py(
     actions: &Bound<'_, PyAny>,
 ) -> PyResult<Py<PyAny>> {
-    let list = actions.downcast::<PyList>()?;
+    let list = actions.cast::<PyList>()?;
     let mut rust_actions = Vec::with_capacity(list.len());
     for item in list.iter() {
         rust_actions.push(planned_action_from_py(&item)?);

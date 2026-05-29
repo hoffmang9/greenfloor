@@ -235,7 +235,7 @@ fn wallet_coins_from_py_list(coins: &Bound<'_, PyList>) -> PyResult<Vec<serde_js
     coins
         .iter()
         .map(|item| {
-            let dict = item.downcast::<PyDict>()?;
+            let dict = item.cast::<PyDict>()?;
             request_dict_to_json(dict)
         })
         .collect()

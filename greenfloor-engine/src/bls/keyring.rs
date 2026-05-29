@@ -4,7 +4,7 @@ use std::str::FromStr;
 use bip39::Mnemonic;
 use chia_bls::SecretKey;
 
-use crate::error::{bls_reason, BlsOp, SignerError, SignerResult};
+use crate::error::{SignerError, SignerResult};
 
 fn env_trimmed(name: &str) -> Option<String> {
     std::env::var(name)

@@ -91,7 +91,7 @@ fn extract_i64_list(obj: &Bound<'_, PyAny>, name: &str, label: &str) -> PyResult
         .getattr(name)
         .map_err(|_| PyTypeError::new_err(format!("{label} missing attribute: {name}")))?;
     let py_list = list
-        .downcast::<PyList>()
+        .cast::<PyList>()
         .map_err(|_| PyTypeError::new_err(format!("{label}.{name} must be a list")))?;
     let mut values = Vec::with_capacity(py_list.len());
     for (index, item) in py_list.iter().enumerate() {
@@ -201,7 +201,7 @@ fn bootstrap_plan_from_py<'py>(
         .getattr("deficits")
         .map_err(|_| PyTypeError::new_err(format!("{label} missing attribute: deficits")))?;
     let deficits_list = deficits_attr
-        .downcast::<PyList>()
+        .cast::<PyList>()
         .map_err(|_| PyTypeError::new_err(format!("{label}.deficits must be a list")))?;
     let mut deficits = Vec::with_capacity(deficits_list.len());
     for (index, deficit) in deficits_list.iter().enumerate() {

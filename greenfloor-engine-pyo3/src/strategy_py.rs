@@ -21,7 +21,7 @@ fn optional_i64_i64_map<'py>(
     if value.is_none() {
         return Ok(None);
     }
-    let dict = value.downcast::<PyDict>()?;
+    let dict = value.cast::<PyDict>()?;
     Ok(Some(dict_to_i64_i64_map(dict)?))
 }
 

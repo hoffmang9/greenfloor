@@ -18,7 +18,6 @@ static PARALLEL_BATCH_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static MANAGED_RETRY_DECISION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static MANAGED_ACTION_OUTCOME_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static MARKET_BATCH_SELECTION_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
-static OFFER_STATE_ROW_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static STALE_SWEEP_CANDIDATE_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static STALE_SWEEP_HIT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static STALE_SWEEP_PROGRESS_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
@@ -146,15 +145,6 @@ pub fn market_batch_selection_class<'py>(py: Python<'py>) -> PyResult<Bound<'py,
     )
 }
 
-pub fn offer_state_row_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
-    cached_class(
-        py,
-        &OFFER_STATE_ROW_CLS,
-        ORCHESTRATION_MODULE,
-        "OfferStateRow",
-    )
-}
-
 pub fn stale_sweep_candidate_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     cached_class(
         py,
@@ -197,7 +187,7 @@ pub fn extract_spendable_profiles(
     let mut map = BTreeMap::new();
     for (asset_id, value) in profiles.iter() {
         let profile = value
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyValueError::new_err("spendable profile values must be dicts"))?;
         let max_single_known = profile
             .get_item("max_single_known")?

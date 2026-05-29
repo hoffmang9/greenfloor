@@ -180,7 +180,7 @@ pub fn spendable_coins_from_py_list(
     let mut coins = Vec::with_capacity(list.len());
     for item in list.iter() {
         let dict = item
-            .downcast::<PyDict>()
+            .cast::<PyDict>()
             .map_err(|_| PyTypeError::new_err("spendable coins must be dict rows"))?;
         let id = dict
             .get_item("id")?
