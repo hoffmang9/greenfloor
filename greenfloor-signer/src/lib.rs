@@ -85,6 +85,10 @@ pub use hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
 pub use offer::build_context::{
     mojo_multiplier_for_leg, resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
 };
+pub use offer::request::{
+    compute_signer_offer_leg_amounts, normalize_offer_asset_id, normalize_offer_side,
+    quote_mojos_for_base_size, signer_split_asset_id, SignerOfferLegAmounts,
+};
 pub use offer::codec::{
     encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
     from_input_spend_bundle_xch_bytes, validate_offer_structure, validate_offer_text,
