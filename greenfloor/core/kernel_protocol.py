@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from greenfloor.core.notifications import LowInventoryEvaluation, LowInventoryInput
 
 __all__ = [
+    "BootstrapKernelProtocol",
     "CancelPolicyKernelProtocol",
     "CoinOpsKernelProtocol",
     "CycleKernelProtocol",
@@ -254,6 +255,15 @@ class NotificationKernelProtocol(Protocol):
     def evaluate_low_inventory_alert(self, input: LowInventoryInput) -> LowInventoryEvaluation: ...
 
 
+class BootstrapKernelProtocol(Protocol):
+    def plan_bootstrap_mixed_outputs(
+        self,
+        *,
+        sell_ladder: list[object],
+        spendable_coins: list[object],
+    ) -> object | None: ...
+
+
 class OfferPolicyKernelProtocol(Protocol):
     def resolve_offer_expiry_for_pricing(self, pricing: dict[str, Any]) -> tuple[str, int]: ...
 
@@ -290,13 +300,6 @@ class OfferPolicyKernelProtocol(Protocol):
         expected_requested_asset_id: str,
         expected_requested_symbol: str,
     ) -> str | None: ...
-
-    def plan_bootstrap_mixed_outputs(
-        self,
-        *,
-        sell_ladder: list[object],
-        spendable_coins: list[object],
-    ) -> object | None: ...
 
 
 class RetryPolicyKernelProtocol(Protocol):
@@ -346,6 +349,7 @@ class DeterministicPolicyKernelProtocol(
 class PolicyKernelProtocol(
     DeterministicPolicyKernelProtocol,
     CoinOpsKernelProtocol,
+    BootstrapKernelProtocol,
     OfferPolicyKernelProtocol,
     RetryPolicyKernelProtocol,
     Protocol,

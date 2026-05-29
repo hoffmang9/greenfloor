@@ -34,6 +34,14 @@ pub struct BootstrapPlan {
     pub deficits: Vec<LadderDeficit>,
 }
 
+fn ladder_entry_valid(row: &BootstrapLadderEntry) -> bool {
+    row.size_base_units >= 0 && row.target_count >= 0 && row.split_buffer_count >= 0
+}
+
+fn spendable_coins_valid(coins: &[BootstrapCoin]) -> bool {
+    coins.iter().all(|coin| coin.amount >= 0)
+}
+
 fn sorted_ladder_entries(sell_ladder: &[BootstrapLadderEntry]) -> Vec<BootstrapLadderEntry> {
     let mut sorted = sell_ladder.to_vec();
     sorted.sort_by_key(|row| row.size_base_units);
@@ -60,6 +68,13 @@ pub fn plan_bootstrap_mixed_outputs(
     sell_ladder: &[BootstrapLadderEntry],
     spendable_coins: &[BootstrapCoin],
 ) -> Option<BootstrapPlan> {
+    if !sell_ladder.iter().all(ladder_entry_valid) {
+        return None;
+    }
+    if !spendable_coins_valid(spendable_coins) {
+        return None;
+    }
+
     let sorted_ladder = sorted_ladder_entries(sell_ladder);
     if sorted_ladder.is_empty() {
         return None;
@@ -229,6 +244,25 @@ mod tests {
         let plan = plan_bootstrap_mixed_outputs(&ladder, &spendable).expect("plan");
         assert_eq!(plan.output_amounts_base_units, vec![10]);
         assert_eq!(plan.total_output_amount, 10);
+    }
+
+    #[test]
+    fn returns_none_for_negative_ladder_fields() {
+        assert!(
+            plan_bootstrap_mixed_outputs(&[entry(-1, 1, 0)], &[coin("x", 100)]).is_none()
+        );
+        assert!(
+            plan_bootstrap_mixed_outputs(&[entry(10, -1, 0)], &[coin("x", 100)]).is_none()
+        );
+        assert!(
+            plan_bootstrap_mixed_outputs(&[entry(10, 1, -1)], &[coin("x", 100)]).is_none()
+        );
+    }
+
+    #[test]
+    fn returns_none_for_negative_coin_amount() {
+        let ladder = vec![entry(10, 1, 0)];
+        assert!(plan_bootstrap_mixed_outputs(&ladder, &[coin("bad", -5)]).is_none());
     }
 
     #[test]

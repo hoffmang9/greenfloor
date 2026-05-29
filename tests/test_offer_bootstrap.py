@@ -71,6 +71,11 @@ def test_plan_bootstrap_mixed_outputs_accepts_object_coin_shape() -> None:
     assert plan.output_amounts_base_units == [10, 10]
 
 
+def test_plan_bootstrap_mixed_outputs_returns_none_for_negative_ladder() -> None:
+    ladder = [_Entry(size_base_units=-1, target_count=1, split_buffer_count=0)]
+    assert plan_bootstrap_mixed_outputs(sell_ladder=ladder, spendable_coins=[]) is None
+
+
 def test_plan_bootstrap_mixed_outputs_single_output_deficit() -> None:
     ladder = [_Entry(size_base_units=10, target_count=1, split_buffer_count=0)]
     spendable = [{"id": "coin-big", "amount": 100}]
@@ -106,7 +111,7 @@ def test_plan_bootstrap_mixed_outputs_requires_kernel_symbol(monkeypatch) -> Non
     class _Kernel:
         pass
 
-    monkeypatch.setattr(bridge, "policy_kernel", lambda: _Kernel())
+    monkeypatch.setattr(bridge, "bootstrap_kernel", lambda: _Kernel())
     with pytest.raises(RuntimeError, match="plan_bootstrap_mixed_outputs"):
         plan_bootstrap_mixed_outputs(sell_ladder=_sample_ladder(), spendable_coins=[])
 

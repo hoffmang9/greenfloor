@@ -17,7 +17,7 @@ _KERNEL_REBUILD_HINT = (
 
 
 def _require_bootstrap_planner():
-    planner = getattr(kernel_bridge.policy_kernel(), "plan_bootstrap_mixed_outputs", None)
+    planner = getattr(kernel_bridge.bootstrap_kernel(), "plan_bootstrap_mixed_outputs", None)
     if planner is None:
         raise RuntimeError(f"{_KERNEL_REBUILD_HINT} Missing symbol: plan_bootstrap_mixed_outputs")
     return planner

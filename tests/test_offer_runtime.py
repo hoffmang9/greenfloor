@@ -9,11 +9,11 @@ from typing import Any, cast
 import pytest
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.offer_bootstrap_policy import plan_bootstrap_mixed_outputs
 from greenfloor.runtime.offer_runtime import signer_bootstrap_phase, signer_create_offer_phase
 from tests.helpers.config_fixtures import (
     minimal_market_config,
     minimal_market_with_sell_ladder,
+    minimal_market_with_tiered_sell_ladder,
     minimal_program_config,
 )
 
@@ -134,13 +134,7 @@ def test_signer_bootstrap_phase_blocks_nonzero_fee_before_split() -> None:
 
 
 def test_signer_bootstrap_phase_submits_planner_mixed_output_amounts(monkeypatch) -> None:
-    ladder = [
-        {"size_base_units": 1, "target_count": 3, "split_buffer_count": 0},
-        {"size_base_units": 10, "target_count": 2, "split_buffer_count": 1},
-        {"size_base_units": 100, "target_count": 1, "split_buffer_count": 0},
-    ]
-    market = minimal_market_with_sell_ladder(size_base_units=1, target_count=3)
-    market = replace(market, ladders={"sell": ladder})
+    market = minimal_market_with_tiered_sell_ladder()
     program = minimal_program_config()
     spendable = [
         _spendable_coin(coin_id="coin-small-1", amount=1),

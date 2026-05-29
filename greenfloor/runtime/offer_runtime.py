@@ -19,6 +19,7 @@ from greenfloor.hex_utils import canonical_is_xch
 from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.offer_bootstrap import (
+    BootstrapSplitExecution,
     bootstrap_ladder_entries_for_side,
     execute_bootstrap_mixed_split,
 )
@@ -193,21 +194,23 @@ def signer_bootstrap_phase(
         str(c.get("id", "")).strip() for c in asset_scoped_coins if str(c.get("id", "")).strip()
     }
     return execute_bootstrap_mixed_split(
-        program=program,
-        config_path=_signer_config_path(program),
-        bootstrap_plan=bootstrap_plan,
-        split_asset_id=split_asset_id,
-        receive_address=receive_address,
-        fee_mojos=int(fee_mojos),
-        fee_source=fee_source,
-        fee_lookup_error=fee_lookup_error,
-        existing_coin_ids=existing_coin_ids,
-        bootstrap_wait_timeout_seconds=bootstrap_wait_timeout_seconds,
-        ladder_for_split=ladder_for_split,
-        list_bootstrap_coins_fn=list_bootstrap_coins_fn,
-        wait_for_confirmation_fn=wait_for_confirmation_fn,
-        is_spendable_coin_fn=is_spendable_coin_fn,
-        plan_bootstrap_mixed_outputs_fn=plan_bootstrap_mixed_outputs_fn,
+        BootstrapSplitExecution(
+            program=program,
+            config_path=_signer_config_path(program),
+            bootstrap_plan=bootstrap_plan,
+            split_asset_id=split_asset_id,
+            receive_address=receive_address,
+            fee_mojos=int(fee_mojos),
+            fee_source=fee_source,
+            fee_lookup_error=fee_lookup_error,
+            existing_coin_ids=existing_coin_ids,
+            bootstrap_wait_timeout_seconds=bootstrap_wait_timeout_seconds,
+            ladder_for_split=ladder_for_split,
+            list_bootstrap_coins_fn=list_bootstrap_coins_fn,
+            wait_for_confirmation_fn=wait_for_confirmation_fn,
+            is_spendable_coin_fn=is_spendable_coin_fn,
+            plan_bootstrap_mixed_outputs_fn=plan_bootstrap_mixed_outputs_fn,
+        )
     )
 
 

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from greenfloor.core.coin_ops.kernel_protocol import CoinOpsKernelProtocol
-    from greenfloor.core.kernel_protocol import PolicyKernelProtocol
+    from greenfloor.core.kernel_protocol import BootstrapKernelProtocol, PolicyKernelProtocol
 
 _KERNEL_MODULE = "greenfloor_signer"
 _INSTALL_HINT = (
@@ -40,6 +40,10 @@ def policy_kernel() -> PolicyKernelProtocol:
 
 def coin_ops_kernel() -> CoinOpsKernelProtocol:
     return policy_kernel()  # type: ignore[return-value]
+
+
+def bootstrap_kernel() -> BootstrapKernelProtocol:
+    return import_kernel()  # type: ignore[return-value]
 
 
 # Migration alias — prefer import_kernel for new code.

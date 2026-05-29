@@ -19,11 +19,11 @@ without growing `policy_bridge.py` into a flat FFI catalog.
 
 ### Python modules (import from here, not `policy_bridge`)
 
-| Module                                 | Use for                                                                                   |
-| -------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Module                                   | Use for                                                                                   |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `greenfloor.core.offer_request_bridge`   | Direct kernel access to offer-request symbols (internal bridge).                          |
 | `greenfloor.core.offer_bootstrap_bridge` | Direct kernel access to bootstrap planner (internal bridge).                              |
-| `greenfloor.core.offer_bootstrap_policy` | **Stable runtime imports** — bootstrap DTOs + `plan_bootstrap_mixed_outputs`.           |
+| `greenfloor.core.offer_bootstrap_policy` | **Stable runtime imports** — bootstrap DTOs + `plan_bootstrap_mixed_outputs`.             |
 | `greenfloor.core.offer_policy`           | **Stable runtime/daemon/BLS imports** — re-exports leg math + Dexie/publish helpers.      |
 | `greenfloor.core.signer_offer_request`   | `SignerCreateOfferRequest`, `SignerOfferLegAmounts`, `build_signer_create_offer_request`. |
 
@@ -47,6 +47,7 @@ without growing `policy_bridge.py` into a flat FFI catalog.
 
 - Next offer-migration PRs add symbols to `offer_request_py.rs` + `offer_request_bridge.py`, not
   `offer_build_py.rs` / `policy_bridge.py` bodies.
-- Bootstrap planner symbols use `offer_bootstrap_bridge.py` + `offer_bootstrap_policy.py`; runtime
-  orchestration lives in `greenfloor/runtime/offer_bootstrap.py`.
+- Bootstrap planner symbols use `offer_bootstrap_bridge.py` + `offer_bootstrap_policy.py`; bridges
+  call `kernel_bridge.bootstrap_kernel()` (`BootstrapKernelProtocol`), not `OfferPolicyKernelProtocol`.
+- Runtime orchestration lives in `greenfloor/runtime/offer_bootstrap.py` (`BootstrapSplitExecution`).
 - Removing `core/offer_side.py` was intentional; do not reintroduce a pass-through module.
