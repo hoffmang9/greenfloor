@@ -1,8 +1,8 @@
-"""BLS CAT coin discovery via ``greenfloor_signer`` (canonical Rust coinset parse path).
+"""BLS CAT coin discovery via the Rust kernel (canonical Rust coinset parse path).
 
 Returns lightweight stand-in objects with ``.coin`` and ``.info.asset_id`` shaped like
 ``chia_wallet_sdk`` ``Cat`` instances. They are **not** full SDK ``Cat`` values — callers
-that need puzzle parsing or driver spends must use the Rust signer paths instead.
+that need puzzle parsing or driver spends must use the Rust kernel BLS paths instead.
 """
 
 from __future__ import annotations
@@ -86,16 +86,16 @@ def _fetch_cat_summaries(
     receive_address: str,
     asset_id: str,
 ) -> list[dict[str, Any]]:
-    signer = import_kernel()
-    raw = signer.list_bls_cat_coins(network, receive_address, asset_id)
+    kernel = import_kernel()
+    raw = kernel.list_bls_cat_coins(network, receive_address, asset_id)
     if not isinstance(raw, list):
         return []
     return [item for item in raw if isinstance(item, dict)]
 
 
 def _fetch_cat_summaries_by_ids(*, network: str, coin_ids: list[str]) -> list[dict[str, Any]]:
-    signer = import_kernel()
-    raw = signer.list_bls_cat_coins_by_ids(network, coin_ids)
+    kernel = import_kernel()
+    raw = kernel.list_bls_cat_coins_by_ids(network, coin_ids)
     if not isinstance(raw, list):
         return []
     return [item for item in raw if isinstance(item, dict)]

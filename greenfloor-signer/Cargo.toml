@@ -2,7 +2,7 @@
 name = "greenfloor-signer"
 version = "0.1.0"
 edition = "2021"
-description = "Local Chia vault signing CLI backed by chia-wallet-sdk"
+description = "GreenFloor Rust kernel: vault KMS signing and deterministic daemon policy"
 license = "Apache-2.0"
 
 [lib]

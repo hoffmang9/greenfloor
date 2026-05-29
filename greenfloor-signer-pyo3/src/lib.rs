@@ -1,3 +1,7 @@
+//! PyO3 bindings for the GreenFloor Rust kernel (`greenfloor-signer` crate).
+//!
+//! The extension module is still exported as `greenfloor_signer` (ADR 0010). Python
+//! callers should import through `greenfloor.core.kernel_bridge.import_kernel`.
 extern crate greenfloor_signer as signer_core;
 
 mod coin_ops_py;

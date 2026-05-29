@@ -1,4 +1,4 @@
-"""Thin wrapper around the ``greenfloor_signer`` PyO3 extension."""
+"""Thin wrapper around the Rust kernel vault path (PyO3 module ``greenfloor_signer`` until ADR 0010)."""
 
 from __future__ import annotations
 
@@ -15,9 +15,9 @@ from greenfloor.core.signer_offer_request import (
 
 
 def resolve_vault_context(program_path: str) -> dict[str, Any]:
-    """Load vault display context from program config via the Rust signer."""
-    signer = import_kernel()
-    result = signer.resolve_vault_context(str(program_path))
+    """Load vault display context from program config via the Rust kernel."""
+    kernel = import_kernel()
+    result = kernel.resolve_vault_context(str(program_path))
     if not isinstance(result, dict):
         raise TypeError("resolve_vault_context returned non-dict result")
     return result
@@ -27,18 +27,18 @@ def build_vault_cat_offer(
     program_path: str,
     request_dict: SignerCreateOfferPayload | dict[str, Any],
 ) -> dict[str, Any]:
-    """Build a vault CAT offer using the canonical Rust signer."""
-    signer = import_kernel()
-    result = signer.build_vault_cat_offer(str(program_path), request_dict)
+    """Build a vault CAT offer using the canonical Rust kernel vault path."""
+    kernel = import_kernel()
+    result = kernel.build_vault_cat_offer(str(program_path), request_dict)
     if not isinstance(result, dict):
         raise TypeError("build_vault_cat_offer returned non-dict result")
     return result
 
 
 def build_mixed_split(program_path: str, request_dict: dict[str, Any]) -> dict[str, Any]:
-    """Build (and optionally broadcast) a vault CAT mixed split via the Rust signer."""
-    signer = import_kernel()
-    result = signer.build_mixed_split(str(program_path), request_dict)
+    """Build (and optionally broadcast) a vault CAT mixed split via the Rust kernel."""
+    kernel = import_kernel()
+    result = kernel.build_mixed_split(str(program_path), request_dict)
     if not isinstance(result, dict):
         raise TypeError("build_mixed_split returned non-dict result")
     return result
@@ -46,8 +46,8 @@ def build_mixed_split(program_path: str, request_dict: dict[str, Any]) -> dict[s
 
 def resolve_offer_asset_ids(program_path: str, base_asset: str, quote_asset: str) -> dict[str, str]:
     """Resolve market symbols or asset ids to canonical offer asset ids."""
-    signer = import_kernel()
-    result = signer.resolve_offer_asset_ids(str(program_path), base_asset, quote_asset)
+    kernel = import_kernel()
+    result = kernel.resolve_offer_asset_ids(str(program_path), base_asset, quote_asset)
     if not isinstance(result, dict):
         raise TypeError("resolve_offer_asset_ids returned non-dict result")
     base_asset_id = str(result.get("base_asset_id", "")).strip()
@@ -70,7 +70,7 @@ def program_config_path_from_payload(payload: dict[str, Any]) -> str | None:
 
 
 def is_vault_kms_payload(payload: dict[str, Any]) -> bool:
-    """True when payload should use vault KMS signing (Rust signer)."""
+    """True when payload should use vault KMS signing (Rust kernel vault path)."""
     return bool(str(payload.get("signer_kms_key_id", "")).strip())
 
 

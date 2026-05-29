@@ -1,4 +1,4 @@
-"""Offer codec helpers via ``greenfloor_signer`` (merged from greenfloor-native)."""
+"""Offer codec helpers via the Rust kernel (``kernel_bridge.import_kernel``)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from greenfloor.core.kernel_bridge import import_kernel
 
 
 def encode_offer_from_spend_bundle_hex(raw_hex: str) -> str:
-    """Encode a spend bundle hex string to offer1... via ``greenfloor_signer``."""
+    """Encode a spend bundle hex string to offer1... via the Rust kernel."""
     return str(import_kernel().encode_offer(bytes.fromhex(raw_hex)))
 
 
@@ -36,14 +36,14 @@ def from_input_spend_bundle_xch(
     input_spend_bundle: Any,
     requested_payments_xch: list[Any],
 ) -> Any:
-    signer = import_kernel()
+    kernel = import_kernel()
     requested: list[tuple[bytes, list[tuple[bytes, int]]]] = []
     for notarized_payment in requested_payments_xch:
         payments: list[tuple[bytes, int]] = []
         for payment in notarized_payment.payments:
             payments.append((_as_bytes(payment.puzzle_hash), int(payment.amount)))
         requested.append((_as_bytes(notarized_payment.nonce), payments))
-    spend_bundle_bytes = signer.from_input_spend_bundle_xch(
+    spend_bundle_bytes = kernel.from_input_spend_bundle_xch(
         input_spend_bundle.to_bytes(),
         requested,
     )

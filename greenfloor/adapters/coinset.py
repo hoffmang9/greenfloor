@@ -1,10 +1,9 @@
-"""Coinset adapter: query helpers in Python, mutations via Rust signer bindings.
+"""Coinset adapter: query helpers in Python, mutations via Rust kernel bindings.
 
 Read-only Coinset HTTP calls (coin lookups, offer payload parsing) live here and
 use ``_post_json`` against the configured MSP base URL. Transaction push and fee
-estimation for signed spend bundles are delegated to ``greenfloor_native`` /
-``greenfloor-signer-pyo3`` so mutation paths share the same Rust IO stack as the
-signer.
+estimation for signed spend bundles are delegated to the Rust kernel PyO3 module
+(``kernel_bridge.import_kernel``) so mutation paths share the same Rust IO stack.
 """
 
 from __future__ import annotations
@@ -131,10 +130,10 @@ def extract_coin_ids_from_offer_payload(payload: dict[str, Any]) -> list[str]:
 
 def _require_rust_coinset(name: str, *args: Any, **kwargs: Any) -> Any:
     try:
-        signer = import_kernel()
+        kernel = import_kernel()
     except ImportError as exc:
         raise RuntimeError(f"greenfloor_signer_required_for_coinset_io: {exc}") from exc
-    fn = getattr(signer, name, None)
+    fn = getattr(kernel, name, None)
     if not callable(fn):
         raise RuntimeError(f"greenfloor_signer_missing_coinset_fn:{name}")
     return fn(*args, **kwargs)

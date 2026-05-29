@@ -37,19 +37,11 @@ __all__ = [
     "verify_offer_for_dexie",
 ]
 
-_KERNEL_REBUILD_HINT = (
-    "greenfloor_signer extension is missing required policy symbols. "
-    "Rebuild it (for example: `maturin develop --manifest-path "
-    "greenfloor-signer-pyo3/Cargo.toml`)."
+
+_require_policy_method = kernel_bridge.kernel_method_getter(
+    lambda: kernel_bridge.policy_kernel(),
+    missing="required policy",
 )
-
-
-def _require_policy_method(method_name: str):
-    kernel = kernel_bridge.policy_kernel()
-    method = getattr(kernel, method_name, None)
-    if method is None:
-        raise RuntimeError(f"{_KERNEL_REBUILD_HINT} Missing symbol: {method_name}")
-    return method
 
 
 class ExpectedPublishAssetFields(TypedDict):
