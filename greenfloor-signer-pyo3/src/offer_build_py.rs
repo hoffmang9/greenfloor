@@ -1,7 +1,5 @@
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList};
-
-use crate::py_utils::plan_bootstrap_mixed_outputs_from_py;
+use pyo3::types::{PyAny, PyDict};
 
 use signer_core::{
     bootstrap_block_error, dexie_offer_asset_expectation_error, expected_publish_asset_fields,
@@ -103,19 +101,7 @@ fn expected_publish_asset_fields_py(
     })
 }
 
-#[pyfunction]
-#[pyo3(name = "plan_bootstrap_mixed_outputs", signature = (*, sell_ladder, spendable_coins))]
-fn plan_bootstrap_mixed_outputs_py(
-    py: Python<'_>,
-    sell_ladder: &Bound<'_, PyList>,
-    spendable_coins: &Bound<'_, PyList>,
-) -> PyResult<Option<Py<PyAny>>> {
-    let plan = plan_bootstrap_mixed_outputs_from_py(py, sell_ladder, spendable_coins)?;
-    Ok(plan.map(Bound::unbind))
-}
-
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(plan_bootstrap_mixed_outputs_py, m)?)?;
     m.add_function(wrap_pyfunction!(resolve_offer_expiry_for_pricing_py, m)?)?;
     m.add_function(wrap_pyfunction!(resolve_quote_price_for_pricing_py, m)?)?;
     m.add_function(wrap_pyfunction!(mojo_multiplier_for_leg_py, m)?)?;

@@ -4,7 +4,7 @@
 //! `signer_bootstrap_phase` (passed to vault mixed-split as `output_amounts`).
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BootstrapLadderEntry {
+pub struct PlannerLadderRow {
     pub size_base_units: i64,
     pub target_count: i64,
     pub split_buffer_count: i64,
@@ -34,7 +34,16 @@ pub struct BootstrapPlan {
     pub deficits: Vec<LadderDeficit>,
 }
 
-fn ladder_entry_valid(row: &BootstrapLadderEntry) -> bool {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BootstrapPlanOutcome {
+    Ready,
+    NeedsSplit(BootstrapPlan),
+    CannotFund { total_output_amount: i64 },
+    InvalidLadder,
+    InvalidCoins,
+}
+
+fn ladder_row_valid(row: &PlannerLadderRow) -> bool {
     row.size_base_units >= 0 && row.target_count >= 0 && row.split_buffer_count >= 0
 }
 
@@ -42,8 +51,8 @@ fn spendable_coins_valid(coins: &[BootstrapCoin]) -> bool {
     coins.iter().all(|coin| coin.amount >= 0)
 }
 
-fn sorted_ladder_entries(sell_ladder: &[BootstrapLadderEntry]) -> Vec<BootstrapLadderEntry> {
-    let mut sorted = sell_ladder.to_vec();
+fn sorted_ladder_rows(ladder_entries: &[PlannerLadderRow]) -> Vec<PlannerLadderRow> {
+    let mut sorted = ladder_entries.to_vec();
     sorted.sort_by_key(|row| row.size_base_units);
     sorted
 }
@@ -65,19 +74,19 @@ fn count_exact_amount_coins(
 
 /// Build a one-shot mixed-output bootstrap plan from ladder deficits.
 pub fn plan_bootstrap_mixed_outputs(
-    sell_ladder: &[BootstrapLadderEntry],
+    ladder_entries: &[PlannerLadderRow],
     spendable_coins: &[BootstrapCoin],
-) -> Option<BootstrapPlan> {
-    if !sell_ladder.iter().all(ladder_entry_valid) {
-        return None;
+) -> BootstrapPlanOutcome {
+    if !ladder_entries.iter().all(ladder_row_valid) {
+        return BootstrapPlanOutcome::InvalidLadder;
     }
     if !spendable_coins_valid(spendable_coins) {
-        return None;
+        return BootstrapPlanOutcome::InvalidCoins;
     }
 
-    let sorted_ladder = sorted_ladder_entries(sell_ladder);
+    let sorted_ladder = sorted_ladder_rows(ladder_entries);
     if sorted_ladder.is_empty() {
-        return None;
+        return BootstrapPlanOutcome::InvalidLadder;
     }
 
     let ladder_sizes: Vec<i64> = sorted_ladder
@@ -108,12 +117,12 @@ pub fn plan_bootstrap_mixed_outputs(
     }
 
     if deficits.is_empty() {
-        return None;
+        return BootstrapPlanOutcome::Ready;
     }
 
     let total_output_amount: i64 = output_amounts.iter().sum();
     if total_output_amount <= 0 {
-        return None;
+        return BootstrapPlanOutcome::InvalidLadder;
     }
 
     let mut sorted_coins: Vec<&BootstrapCoin> = spendable_coins.iter().collect();
@@ -131,9 +140,11 @@ pub fn plan_bootstrap_mixed_outputs(
         }
     });
 
-    let (source_coin_id, source_amount) = candidate?;
+    let Some((source_coin_id, source_amount)) = candidate else {
+        return BootstrapPlanOutcome::CannotFund { total_output_amount };
+    };
 
-    Some(BootstrapPlan {
+    BootstrapPlanOutcome::NeedsSplit(BootstrapPlan {
         source_coin_id,
         source_amount,
         output_amounts_base_units: output_amounts,
@@ -146,12 +157,12 @@ pub fn plan_bootstrap_mixed_outputs(
 #[cfg(test)]
 mod tests {
     use super::{
-        plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapLadderEntry, BootstrapPlan,
-        LadderDeficit,
+        plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome,
+        LadderDeficit, PlannerLadderRow,
     };
 
-    fn entry(size: i64, target: i64, buffer: i64) -> BootstrapLadderEntry {
-        BootstrapLadderEntry {
+    fn row(size: i64, target: i64, buffer: i64) -> PlannerLadderRow {
+        PlannerLadderRow {
             size_base_units: size,
             target_count: target,
             split_buffer_count: buffer,
@@ -167,17 +178,17 @@ mod tests {
 
     #[test]
     fn builds_deficit_outputs() {
-        let ladder = vec![
-            entry(1, 3, 0),
-            entry(10, 2, 1),
-            entry(100, 1, 0),
-        ];
+        let ladder = vec![row(1, 3, 0), row(10, 2, 1), row(100, 1, 0)];
         let spendable = vec![
             coin("coin-small-1", 1),
             coin("coin-big", 1000),
             coin("coin-hundred", 100),
         ];
-        let plan = plan_bootstrap_mixed_outputs(&ladder, &spendable).expect("plan");
+        let BootstrapPlanOutcome::NeedsSplit(plan) =
+            plan_bootstrap_mixed_outputs(&ladder, &spendable)
+        else {
+            panic!("expected needs_split")
+        };
         assert_eq!(plan.source_coin_id, "coin-big");
         let mut outputs = plan.output_amounts_base_units;
         outputs.sort_unstable();
@@ -186,41 +197,61 @@ mod tests {
     }
 
     #[test]
-    fn returns_none_when_ready() {
-        let ladder = vec![entry(1, 1, 0), entry(10, 1, 0)];
+    fn returns_ready_when_inventory_satisfied() {
+        let ladder = vec![row(1, 1, 0), row(10, 1, 0)];
         let spendable = vec![coin("coin-1", 1), coin("coin-10", 10), coin("coin-extra", 500)];
-        assert!(plan_bootstrap_mixed_outputs(&ladder, &spendable).is_none());
+        assert_eq!(
+            plan_bootstrap_mixed_outputs(&ladder, &spendable),
+            BootstrapPlanOutcome::Ready
+        );
     }
 
     #[test]
     fn selects_largest_funding_coin() {
-        let ladder = vec![entry(10, 2, 0)];
+        let ladder = vec![row(10, 2, 0)];
         let spendable = vec![coin("coin-big-object", 100)];
-        let plan = plan_bootstrap_mixed_outputs(&ladder, &spendable).expect("plan");
+        let BootstrapPlanOutcome::NeedsSplit(plan) =
+            plan_bootstrap_mixed_outputs(&ladder, &spendable)
+        else {
+            panic!("expected needs_split")
+        };
         assert_eq!(plan.source_coin_id, "coin-big-object");
         assert_eq!(plan.output_amounts_base_units, vec![10, 10]);
     }
 
     #[test]
     fn skips_coins_without_id() {
-        let ladder = vec![entry(10, 2, 0)];
+        let ladder = vec![row(10, 2, 0)];
         let spendable = vec![coin("", 1000), coin("valid", 100)];
-        let plan = plan_bootstrap_mixed_outputs(&ladder, &spendable).expect("plan");
+        let BootstrapPlanOutcome::NeedsSplit(plan) =
+            plan_bootstrap_mixed_outputs(&ladder, &spendable)
+        else {
+            panic!("expected needs_split")
+        };
         assert_eq!(plan.source_coin_id, "valid");
     }
 
     #[test]
-    fn returns_none_when_no_funding_coin() {
-        let ladder = vec![entry(10, 2, 0)];
+    fn returns_cannot_fund_when_no_funding_coin() {
+        let ladder = vec![row(10, 2, 0)];
         let spendable = vec![coin("small", 5)];
-        assert!(plan_bootstrap_mixed_outputs(&ladder, &spendable).is_none());
+        assert_eq!(
+            plan_bootstrap_mixed_outputs(&ladder, &spendable),
+            BootstrapPlanOutcome::CannotFund {
+                total_output_amount: 20
+            }
+        );
     }
 
     #[test]
     fn preserves_deficit_metadata() {
-        let ladder = vec![entry(10, 2, 1)];
+        let ladder = vec![row(10, 2, 1)];
         let spendable = vec![coin("coin-big", 1000)];
-        let plan = plan_bootstrap_mixed_outputs(&ladder, &spendable).expect("plan");
+        let BootstrapPlanOutcome::NeedsSplit(plan) =
+            plan_bootstrap_mixed_outputs(&ladder, &spendable)
+        else {
+            panic!("expected needs_split")
+        };
         assert_eq!(
             plan.deficits,
             vec![LadderDeficit {
@@ -233,48 +264,64 @@ mod tests {
     }
 
     #[test]
-    fn empty_ladder_returns_none() {
-        assert!(plan_bootstrap_mixed_outputs(&[], &[coin("x", 1)]).is_none());
+    fn empty_ladder_is_invalid() {
+        assert_eq!(
+            plan_bootstrap_mixed_outputs(&[], &[coin("x", 1)]),
+            BootstrapPlanOutcome::InvalidLadder
+        );
     }
 
     #[test]
     fn single_output_plan_when_only_one_deficit_coin_needed() {
-        let ladder = vec![entry(10, 1, 0)];
+        let ladder = vec![row(10, 1, 0)];
         let spendable = vec![coin("coin-big", 100)];
-        let plan = plan_bootstrap_mixed_outputs(&ladder, &spendable).expect("plan");
+        let BootstrapPlanOutcome::NeedsSplit(plan) =
+            plan_bootstrap_mixed_outputs(&ladder, &spendable)
+        else {
+            panic!("expected needs_split")
+        };
         assert_eq!(plan.output_amounts_base_units, vec![10]);
         assert_eq!(plan.total_output_amount, 10);
     }
 
     #[test]
-    fn returns_none_for_negative_ladder_fields() {
-        assert!(
-            plan_bootstrap_mixed_outputs(&[entry(-1, 1, 0)], &[coin("x", 100)]).is_none()
+    fn returns_invalid_ladder_for_negative_fields() {
+        assert_eq!(
+            plan_bootstrap_mixed_outputs(&[row(-1, 1, 0)], &[coin("x", 100)]),
+            BootstrapPlanOutcome::InvalidLadder
         );
-        assert!(
-            plan_bootstrap_mixed_outputs(&[entry(10, -1, 0)], &[coin("x", 100)]).is_none()
+        assert_eq!(
+            plan_bootstrap_mixed_outputs(&[row(10, -1, 0)], &[coin("x", 100)]),
+            BootstrapPlanOutcome::InvalidLadder
         );
-        assert!(
-            plan_bootstrap_mixed_outputs(&[entry(10, 1, -1)], &[coin("x", 100)]).is_none()
+        assert_eq!(
+            plan_bootstrap_mixed_outputs(&[row(10, 1, -1)], &[coin("x", 100)]),
+            BootstrapPlanOutcome::InvalidLadder
         );
     }
 
     #[test]
-    fn returns_none_for_negative_coin_amount() {
-        let ladder = vec![entry(10, 1, 0)];
-        assert!(plan_bootstrap_mixed_outputs(&ladder, &[coin("bad", -5)]).is_none());
+    fn returns_invalid_coins_for_negative_amount() {
+        let ladder = vec![row(10, 1, 0)];
+        assert_eq!(
+            plan_bootstrap_mixed_outputs(&ladder, &[coin("bad", -5)]),
+            BootstrapPlanOutcome::InvalidCoins
+        );
     }
 
     #[test]
     fn change_amount_matches_source_minus_outputs() {
-        let ladder = vec![entry(10, 2, 0)];
+        let ladder = vec![row(10, 2, 0)];
         let spendable = vec![coin("coin-big", 100)];
-        let BootstrapPlan {
+        let BootstrapPlanOutcome::NeedsSplit(BootstrapPlan {
             source_amount,
             total_output_amount,
             change_amount,
             ..
-        } = plan_bootstrap_mixed_outputs(&ladder, &spendable).expect("plan");
+        }) = plan_bootstrap_mixed_outputs(&ladder, &spendable)
+        else {
+            panic!("expected needs_split")
+        };
         assert_eq!(change_amount, source_amount - total_output_amount);
     }
 }

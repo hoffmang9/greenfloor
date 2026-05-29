@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 from greenfloor.core import kernel_bridge
 
 if TYPE_CHECKING:
-    from greenfloor.offer_bootstrap import BootstrapPlan
+    from greenfloor.offer_bootstrap import BootstrapCoin, BootstrapPlanOutcome, PlannerLadderRow
 
 _KERNEL_REBUILD_HINT = (
     "greenfloor_signer extension is missing plan_bootstrap_mixed_outputs. "
@@ -23,20 +23,53 @@ def _require_bootstrap_planner():
     return planner
 
 
+def _coerce_spendable_coins(spendable_coins: list[Any]) -> list[BootstrapCoin]:
+    from greenfloor.offer_bootstrap import BootstrapCoin
+
+    coerced: list[BootstrapCoin] = []
+    for index, coin in enumerate(spendable_coins):
+        if isinstance(coin, BootstrapCoin):
+            coerced.append(coin)
+            continue
+        if isinstance(coin, dict):
+            if "amount" not in coin:
+                raise ValueError(f"spendable_coins[{index}] missing required field: amount")
+            coin_id = coin.get("id", "")
+            if not isinstance(coin_id, str):
+                raise ValueError(f"spendable_coins[{index}].id must be a string")
+            coerced.append(BootstrapCoin(id=coin_id.strip(), amount=int(coin["amount"])))
+            continue
+        amount = getattr(coin, "amount", None)
+        if amount is None:
+            raise ValueError(f"spendable_coins[{index}] missing required attribute: amount")
+        coin_id = getattr(coin, "id", "")
+        if not isinstance(coin_id, str):
+            raise ValueError(f"spendable_coins[{index}].id must be a string")
+        coerced.append(BootstrapCoin(id=coin_id.strip(), amount=int(amount)))
+    return coerced
+
+
+def _coerce_planner_outcome(payload: object) -> BootstrapPlanOutcome:
+    from greenfloor.offer_bootstrap import BootstrapPlanOutcome
+
+    if isinstance(payload, BootstrapPlanOutcome):
+        return payload
+    raise TypeError("plan_bootstrap_mixed_outputs returned unexpected result type")
+
+
 def plan_bootstrap_mixed_outputs(
     *,
-    sell_ladder: list[Any],
+    ladder_entries: list[PlannerLadderRow],
     spendable_coins: list[Any],
-) -> BootstrapPlan | None:
-    """Build a one-shot mixed-output bootstrap plan from ladder deficits."""
-    from greenfloor.offer_bootstrap import BootstrapPlan
+) -> BootstrapPlanOutcome:
+    """Evaluate bootstrap inventory against denomination ladder rows."""
+    from greenfloor.offer_bootstrap import PlannerLadderRow
 
-    plan = _require_bootstrap_planner()(
-        sell_ladder=sell_ladder,
-        spendable_coins=spendable_coins,
+    if not all(isinstance(row, PlannerLadderRow) for row in ladder_entries):
+        raise TypeError("ladder_entries must contain PlannerLadderRow instances")
+
+    outcome = _require_bootstrap_planner()(
+        ladder_entries=ladder_entries,
+        spendable_coins=_coerce_spendable_coins(spendable_coins),
     )
-    if plan is None:
-        return None
-    if isinstance(plan, BootstrapPlan):
-        return plan
-    raise TypeError("plan_bootstrap_mixed_outputs returned unexpected result type")
+    return _coerce_planner_outcome(outcome)

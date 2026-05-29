@@ -1,80 +1,34 @@
 use std::sync::OnceLock;
 
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use super::common::cached_class;
 use signer_core::{
-    plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapLadderEntry, BootstrapPlan, LadderDeficit,
+    plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit,
+    PlannerLadderRow,
 };
 
 const BOOTSTRAP_MODULE: &str = "greenfloor.offer_bootstrap";
 
+static PLANNER_LADDER_ROW_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static BOOTSTRAP_COIN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static LADDER_DEFICIT_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 static BOOTSTRAP_PLAN_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
+static BOOTSTRAP_PLAN_OUTCOME_CLS: OnceLock<Py<PyAny>> = OnceLock::new();
 
-fn field_value<'a>(
-    obj: &'a Bound<'_, PyAny>,
-    name: &str,
-    label: &str,
-) -> PyResult<Bound<'a, PyAny>> {
-    if let Ok(dict) = obj.downcast::<PyDict>() {
-        return dict.get_item(name)?.ok_or_else(|| {
-            PyValueError::new_err(format!("{label} missing required field: {name}"))
-        });
-    }
-    obj.getattr(name).map_err(|_| {
-        PyValueError::new_err(format!("{label} missing required attribute: {name}"))
-    })
+fn planner_ladder_row_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &PLANNER_LADDER_ROW_CLS,
+        BOOTSTRAP_MODULE,
+        "PlannerLadderRow",
+    )
 }
 
-fn extract_i64(obj: &Bound<'_, PyAny>, name: &str, label: &str) -> PyResult<i64> {
-    field_value(obj, name, label)?.extract::<i64>().map_err(|_| {
-        PyValueError::new_err(format!("{label}.{name} must be an integer"))
-    })
-}
-
-fn extract_optional_str(obj: &Bound<'_, PyAny>, name: &str, label: &str) -> PyResult<String> {
-    let value = if let Ok(dict) = obj.downcast::<PyDict>() {
-        dict.get_item(name)?
-    } else {
-        obj.getattr(name).ok()
-    };
-    match value {
-        None => Ok(String::new()),
-        Some(raw) => raw
-            .extract::<String>()
-            .map_err(|_| PyValueError::new_err(format!("{label}.{name} must be a string")))
-            .map(|text| text.trim().to_string()),
-    }
-}
-
-fn bootstrap_ladder_entries_from_py_list(
-    list: &Bound<'_, PyList>,
-) -> PyResult<Vec<BootstrapLadderEntry>> {
-    let mut entries = Vec::with_capacity(list.len());
-    for (index, item) in list.iter().enumerate() {
-        let label = format!("sell_ladder[{index}]");
-        entries.push(BootstrapLadderEntry {
-            size_base_units: extract_i64(&item, "size_base_units", &label)?,
-            target_count: extract_i64(&item, "target_count", &label)?,
-            split_buffer_count: extract_i64(&item, "split_buffer_count", &label)?,
-        });
-    }
-    Ok(entries)
-}
-
-fn bootstrap_coins_from_py_list(list: &Bound<'_, PyList>) -> PyResult<Vec<BootstrapCoin>> {
-    let mut coins = Vec::with_capacity(list.len());
-    for (index, item) in list.iter().enumerate() {
-        let label = format!("spendable_coins[{index}]");
-        coins.push(BootstrapCoin {
-            id: extract_optional_str(&item, "id", &label)?,
-            amount: extract_i64(&item, "amount", &label)?,
-        });
-    }
-    Ok(coins)
+fn bootstrap_coin_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(py, &BOOTSTRAP_COIN_CLS, BOOTSTRAP_MODULE, "BootstrapCoin")
 }
 
 fn ladder_deficit_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
@@ -83,6 +37,76 @@ fn ladder_deficit_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
 
 fn bootstrap_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
     cached_class(py, &BOOTSTRAP_PLAN_CLS, BOOTSTRAP_MODULE, "BootstrapPlan")
+}
+
+fn bootstrap_plan_outcome_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    cached_class(
+        py,
+        &BOOTSTRAP_PLAN_OUTCOME_CLS,
+        BOOTSTRAP_MODULE,
+        "BootstrapPlanOutcome",
+    )
+}
+
+fn require_instance<'a, 'py>(
+    item: &'a Bound<'py, PyAny>,
+    cls: &Bound<'py, PyAny>,
+    label: &str,
+    expected: &str,
+) -> PyResult<&'a Bound<'py, PyAny>> {
+    if !item.is_instance(cls)? {
+        return Err(PyTypeError::new_err(format!(
+            "{label} must be a {expected} instance"
+        )));
+    }
+    Ok(item)
+}
+
+fn extract_i64(obj: &Bound<'_, PyAny>, name: &str, label: &str) -> PyResult<i64> {
+    obj.getattr(name)
+        .map_err(|_| PyTypeError::new_err(format!("{label} missing attribute: {name}")))?
+        .extract::<i64>()
+        .map_err(|_| PyTypeError::new_err(format!("{label}.{name} must be an integer")))
+}
+
+fn planner_ladder_rows_from_py_list(
+    py: Python<'_>,
+    list: &Bound<'_, PyList>,
+) -> PyResult<Vec<PlannerLadderRow>> {
+    let cls = planner_ladder_row_class(py)?;
+    let mut entries = Vec::with_capacity(list.len());
+    for (index, item) in list.iter().enumerate() {
+        let label = format!("ladder_entries[{index}]");
+        let item = require_instance(&item, &cls, &label, "PlannerLadderRow")?;
+        entries.push(PlannerLadderRow {
+            size_base_units: extract_i64(item, "size_base_units", &label)?,
+            target_count: extract_i64(item, "target_count", &label)?,
+            split_buffer_count: extract_i64(item, "split_buffer_count", &label)?,
+        });
+    }
+    Ok(entries)
+}
+
+fn bootstrap_coins_from_py_list(
+    py: Python<'_>,
+    list: &Bound<'_, PyList>,
+) -> PyResult<Vec<BootstrapCoin>> {
+    let cls = bootstrap_coin_class(py)?;
+    let mut coins = Vec::with_capacity(list.len());
+    for (index, item) in list.iter().enumerate() {
+        let label = format!("spendable_coins[{index}]");
+        let item = require_instance(&item, &cls, &label, "BootstrapCoin")?;
+        let id = item
+            .getattr("id")
+            .map_err(|_| PyTypeError::new_err(format!("{label} missing attribute: id")))?
+            .extract::<String>()
+            .map_err(|_| PyTypeError::new_err(format!("{label}.id must be a string")))?;
+        coins.push(BootstrapCoin {
+            id: id.trim().to_string(),
+            amount: extract_i64(item, "amount", &label)?,
+        });
+    }
+    Ok(coins)
 }
 
 fn ladder_deficit_to_py<'py>(py: Python<'py>, deficit: &LadderDeficit) -> PyResult<Bound<'py, PyAny>> {
@@ -118,16 +142,51 @@ fn bootstrap_plan_to_py<'py>(
     cls.call((), Some(&kwargs))
 }
 
+fn bootstrap_plan_outcome_to_py<'py>(
+    py: Python<'py>,
+    outcome: BootstrapPlanOutcome,
+) -> PyResult<Bound<'py, PyAny>> {
+    let cls = bootstrap_plan_outcome_class(py)?;
+    match outcome {
+        BootstrapPlanOutcome::Ready => {
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("kind", "ready")?;
+            cls.call((), Some(&kwargs))
+        }
+        BootstrapPlanOutcome::NeedsSplit(plan) => {
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("kind", "needs_split")?;
+            kwargs.set_item("plan", bootstrap_plan_to_py(py, &plan)?)?;
+            cls.call((), Some(&kwargs))
+        }
+        BootstrapPlanOutcome::CannotFund {
+            total_output_amount,
+        } => {
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("kind", "cannot_fund")?;
+            kwargs.set_item("total_output_amount", total_output_amount)?;
+            cls.call((), Some(&kwargs))
+        }
+        BootstrapPlanOutcome::InvalidLadder => {
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("kind", "invalid_ladder")?;
+            cls.call((), Some(&kwargs))
+        }
+        BootstrapPlanOutcome::InvalidCoins => {
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("kind", "invalid_coins")?;
+            cls.call((), Some(&kwargs))
+        }
+    }
+}
+
 pub(crate) fn plan_bootstrap_mixed_outputs_from_py<'py>(
     py: Python<'py>,
-    sell_ladder: &Bound<'py, PyList>,
+    ladder_entries: &Bound<'py, PyList>,
     spendable_coins: &Bound<'py, PyList>,
-) -> PyResult<Option<Bound<'py, PyAny>>> {
-    let ladder = bootstrap_ladder_entries_from_py_list(sell_ladder)?;
-    let coins = bootstrap_coins_from_py_list(spendable_coins)?;
-    let plan = plan_bootstrap_mixed_outputs(&ladder, &coins);
-    match plan {
-        Some(plan) => Ok(Some(bootstrap_plan_to_py(py, &plan)?)),
-        None => Ok(None),
-    }
+) -> PyResult<Bound<'py, PyAny>> {
+    let ladder = planner_ladder_rows_from_py_list(py, ladder_entries)?;
+    let coins = bootstrap_coins_from_py_list(py, spendable_coins)?;
+    let outcome = plan_bootstrap_mixed_outputs(&ladder, &coins);
+    bootstrap_plan_outcome_to_py(py, outcome)
 }

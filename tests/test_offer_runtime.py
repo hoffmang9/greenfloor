@@ -114,6 +114,25 @@ def test_signer_bootstrap_phase_skips_when_planner_reports_ready() -> None:
     assert result["reason"] == "already_ready"
 
 
+def test_signer_bootstrap_phase_skips_when_underfunded() -> None:
+    market = minimal_market_with_sell_ladder(size_base_units=10, target_count=2)
+    program = minimal_program_config()
+    spendable = [_spendable_coin(coin_id="coin-small", amount=5)]
+
+    result = signer_bootstrap_phase(
+        program=program,
+        market=market,
+        resolved_base_asset_id="basecat",
+        resolved_quote_asset_id="xch",
+        quote_price=1.0,
+        list_bootstrap_coins_fn=lambda **_kwargs: spendable,
+        resolve_bootstrap_split_fee_fn=lambda **_kwargs: (0, "zero", None),
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "bootstrap_underfunded:total_output_amount=20"
+
+
 def test_signer_bootstrap_phase_blocks_nonzero_fee_before_split() -> None:
     market = minimal_market_with_sell_ladder(size_base_units=10, target_count=2)
     program = minimal_program_config()

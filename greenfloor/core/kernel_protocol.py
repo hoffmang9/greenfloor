@@ -259,9 +259,9 @@ class BootstrapKernelProtocol(Protocol):
     def plan_bootstrap_mixed_outputs(
         self,
         *,
-        sell_ladder: list[object],
+        ladder_entries: list[object],
         spendable_coins: list[object],
-    ) -> object | None: ...
+    ) -> object: ...
 
 
 class OfferPolicyKernelProtocol(Protocol):

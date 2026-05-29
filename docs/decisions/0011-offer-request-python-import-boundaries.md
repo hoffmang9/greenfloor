@@ -47,7 +47,11 @@ without growing `policy_bridge.py` into a flat FFI catalog.
 
 - Next offer-migration PRs add symbols to `offer_request_py.rs` + `offer_request_bridge.py`, not
   `offer_build_py.rs` / `policy_bridge.py` bodies.
-- Bootstrap planner symbols use `offer_bootstrap_bridge.py` + `offer_bootstrap_policy.py`; bridges
-  call `kernel_bridge.bootstrap_kernel()` (`BootstrapKernelProtocol`), not `OfferPolicyKernelProtocol`.
-- Runtime orchestration lives in `greenfloor/runtime/offer_bootstrap.py` (`BootstrapSplitExecution`).
+- Bootstrap planner symbols use `offer_bootstrap_bridge.py` + `offer_bootstrap_policy.py` and
+  `offer_bootstrap_py.rs` (not `offer_build_py.rs`). Bridges call `kernel_bridge.bootstrap_kernel()`
+  (`BootstrapKernelProtocol`). Kernel API: `plan_bootstrap_mixed_outputs(ladder_entries=...)` returns
+  `BootstrapPlanOutcome` (`ready` / `needs_split` / `cannot_fund` / `invalid_ladder` / `invalid_coins`).
+- Runtime orchestration lives in `greenfloor/runtime/offer_bootstrap.py`
+  (`BootstrapPreflight`, `BootstrapSplitExecution`, `BootstrapPhaseResult`).
+- Planner input DTO: `PlannerLadderRow` (config uses `MarketLadderEntry`).
 - Removing `core/offer_side.py` was intentional; do not reintroduce a pass-through module.
