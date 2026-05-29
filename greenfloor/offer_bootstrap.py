@@ -40,6 +40,7 @@ class BootstrapPhaseResult:
     plan: BootstrapPlan | None = None
 
     def to_manager_dict(self) -> dict[str, Any]:
+        """Serialize for manager/JSON consumers; not for ``bootstrap_blocks_offer``."""
         payload: dict[str, Any] = {
             "status": self.status,
             "reason": self.reason,
@@ -59,6 +60,20 @@ class BootstrapPhaseResult:
             plan_payload["output_count"] = len(self.plan.output_amounts_base_units)
             payload["plan"] = plan_payload
         return payload
+
+
+def bootstrap_phase_manager_payload(phase: BootstrapPhaseResult) -> dict[str, Any]:
+    """Manager/JSON boundary: convert typed phase output to a manager dict."""
+    return phase.to_manager_dict()
+
+
+def append_bootstrap_manager_action(
+    actions: list[dict[str, Any]],
+    phase: BootstrapPhaseResult,
+) -> BootstrapPhaseResult:
+    """Record manager payload and return the typed phase for policy gates."""
+    actions.append(bootstrap_phase_manager_payload(phase))
+    return phase
 
 
 @dataclass(frozen=True, slots=True)

@@ -106,6 +106,10 @@ def _wait_for_coinset_confirmation(
     )
 
 
+def _bootstrap_skip(reason: str) -> BootstrapPhaseResult:
+    return BootstrapPhaseResult(status="skipped", reason=reason)
+
+
 def default_bootstrap_runtime_deps() -> BootstrapRuntimeDeps:
     return BootstrapRuntimeDeps(
         list_bootstrap_coins_fn=_list_coinset_bootstrap_coins,
@@ -133,10 +137,7 @@ def signer_bootstrap_phase(
     side = normalize_offer_side(action_side)
     side_ladder = list(market.ladders.get(side, []))
     if not side_ladder:
-        return BootstrapPhaseResult(
-            status="skipped",
-            reason=f"missing_{side}_ladder",
-        )
+        return _bootstrap_skip(f"missing_{side}_ladder")
 
     ladder_entries = bootstrap_ladder_entries_for_side(
         side=side,
@@ -146,10 +147,7 @@ def signer_bootstrap_phase(
         resolved_quote_asset_id=str(resolved_quote_asset_id),
     )
     if not ladder_entries:
-        return BootstrapPhaseResult(
-            status="skipped",
-            reason=f"missing_{side}_ladder",
-        )
+        return _bootstrap_skip(f"missing_{side}_ladder")
 
     split_asset_id = signer_split_asset_id(
         action_side=action_side,
@@ -157,17 +155,11 @@ def signer_bootstrap_phase(
         resolved_quote_asset_id=resolved_quote_asset_id,
     )
     if not split_asset_id:
-        return BootstrapPhaseResult(
-            status="skipped",
-            reason=f"missing_{side}_asset_for_bootstrap",
-        )
+        return _bootstrap_skip(f"missing_{side}_asset_for_bootstrap")
 
     receive_address = str(market.receive_address or "").strip()
     if not receive_address:
-        return BootstrapPhaseResult(
-            status="skipped",
-            reason="missing_receive_address_for_bootstrap",
-        )
+        return _bootstrap_skip("missing_receive_address_for_bootstrap")
 
     try:
         asset_scoped_coins = deps.list_bootstrap_coins_fn(
@@ -176,10 +168,7 @@ def signer_bootstrap_phase(
             asset_id=split_asset_id,
         )
     except Exception as exc:
-        return BootstrapPhaseResult(
-            status="skipped",
-            reason=f"bootstrap_coin_list_failed:{exc}",
-        )
+        return _bootstrap_skip(f"bootstrap_coin_list_failed:{exc}")
 
     spendable_asset_coins = [coin for coin in asset_scoped_coins if deps.is_spendable_coin_fn(coin)]
     preflight_outcome = run_bootstrap_preflight(

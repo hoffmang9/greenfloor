@@ -162,89 +162,31 @@ pub struct BootstrapPhaseSnapshot {
     pub ready: bool,
 }
 
-fn early_phase_from_kind(
-    outcome_kind: &str,
-    total_output_amount: i64,
-) -> Option<BootstrapPhaseSnapshot> {
-    match outcome_kind.trim() {
-        "ready" => Some(BootstrapPhaseSnapshot {
+/// Map a planner outcome to an early bootstrap phase snapshot, if mixed-split should not run.
+pub fn bootstrap_early_phase(outcome: &BootstrapPlanOutcome) -> Option<BootstrapPhaseSnapshot> {
+    match outcome {
+        BootstrapPlanOutcome::Ready => Some(BootstrapPhaseSnapshot {
             status: "skipped",
             reason: "already_ready".to_string(),
             ready: false,
         }),
-        "cannot_fund" => Some(BootstrapPhaseSnapshot {
+        BootstrapPlanOutcome::CannotFund {
+            total_output_amount,
+        } => Some(BootstrapPhaseSnapshot {
             status: "skipped",
             reason: format!("bootstrap_underfunded:total_output_amount={total_output_amount}"),
             ready: false,
         }),
-        "invalid_ladder" => Some(BootstrapPhaseSnapshot {
+        BootstrapPlanOutcome::InvalidLadder => Some(BootstrapPhaseSnapshot {
             status: "failed",
             reason: "bootstrap_invalid_ladder".to_string(),
             ready: false,
         }),
-        "invalid_coins" => Some(BootstrapPhaseSnapshot {
+        BootstrapPlanOutcome::InvalidCoins => Some(BootstrapPhaseSnapshot {
             status: "failed",
             reason: "bootstrap_invalid_coins".to_string(),
             ready: false,
         }),
-        "needs_split" => None,
-        other => Some(BootstrapPhaseSnapshot {
-            status: "failed",
-            reason: format!("unsupported_plan_outcome:{other}"),
-            ready: false,
-        }),
-    }
-}
-
-fn executed_phase_from_kind(
-    remaining_kind: &str,
-    total_output_amount: i64,
-) -> BootstrapPhaseSnapshot {
-    match remaining_kind.trim() {
-        "ready" => BootstrapPhaseSnapshot {
-            status: "executed",
-            reason: "bootstrap_submitted".to_string(),
-            ready: true,
-        },
-        "cannot_fund" => BootstrapPhaseSnapshot {
-            status: "executed",
-            reason: format!(
-                "bootstrap_submitted:still_underfunded:total_output_amount={total_output_amount}"
-            ),
-            ready: false,
-        },
-        "needs_split" => BootstrapPhaseSnapshot {
-            status: "executed",
-            reason: "bootstrap_submitted:still_needs_split".to_string(),
-            ready: false,
-        },
-        "invalid_ladder" => BootstrapPhaseSnapshot {
-            status: "executed",
-            reason: "bootstrap_submitted:still_invalid_ladder".to_string(),
-            ready: false,
-        },
-        "invalid_coins" => BootstrapPhaseSnapshot {
-            status: "executed",
-            reason: "bootstrap_submitted:still_invalid_coins".to_string(),
-            ready: false,
-        },
-        other => BootstrapPhaseSnapshot {
-            status: "executed",
-            reason: format!("bootstrap_submitted:remaining_{other}"),
-            ready: false,
-        },
-    }
-}
-
-/// Map a planner outcome to an early bootstrap phase snapshot, if mixed-split should not run.
-pub fn bootstrap_early_phase(outcome: &BootstrapPlanOutcome) -> Option<BootstrapPhaseSnapshot> {
-    match outcome {
-        BootstrapPlanOutcome::Ready => early_phase_from_kind("ready", 0),
-        BootstrapPlanOutcome::CannotFund {
-            total_output_amount,
-        } => early_phase_from_kind("cannot_fund", *total_output_amount),
-        BootstrapPlanOutcome::InvalidLadder => early_phase_from_kind("invalid_ladder", 0),
-        BootstrapPlanOutcome::InvalidCoins => early_phase_from_kind("invalid_coins", 0),
         BootstrapPlanOutcome::NeedsSplit(_) => None,
     }
 }
@@ -252,13 +194,35 @@ pub fn bootstrap_early_phase(outcome: &BootstrapPlanOutcome) -> Option<Bootstrap
 /// Map a post-split replan outcome to executed-phase status/reason/ready.
 pub fn bootstrap_executed_phase(remaining: &BootstrapPlanOutcome) -> BootstrapPhaseSnapshot {
     match remaining {
-        BootstrapPlanOutcome::Ready => executed_phase_from_kind("ready", 0),
+        BootstrapPlanOutcome::Ready => BootstrapPhaseSnapshot {
+            status: "executed",
+            reason: "bootstrap_submitted".to_string(),
+            ready: true,
+        },
         BootstrapPlanOutcome::CannotFund {
             total_output_amount,
-        } => executed_phase_from_kind("cannot_fund", *total_output_amount),
-        BootstrapPlanOutcome::NeedsSplit(_) => executed_phase_from_kind("needs_split", 0),
-        BootstrapPlanOutcome::InvalidLadder => executed_phase_from_kind("invalid_ladder", 0),
-        BootstrapPlanOutcome::InvalidCoins => executed_phase_from_kind("invalid_coins", 0),
+        } => BootstrapPhaseSnapshot {
+            status: "executed",
+            reason: format!(
+                "bootstrap_submitted:still_underfunded:total_output_amount={total_output_amount}"
+            ),
+            ready: false,
+        },
+        BootstrapPlanOutcome::NeedsSplit(_) => BootstrapPhaseSnapshot {
+            status: "executed",
+            reason: "bootstrap_submitted:still_needs_split".to_string(),
+            ready: false,
+        },
+        BootstrapPlanOutcome::InvalidLadder => BootstrapPhaseSnapshot {
+            status: "executed",
+            reason: "bootstrap_submitted:still_invalid_ladder".to_string(),
+            ready: false,
+        },
+        BootstrapPlanOutcome::InvalidCoins => BootstrapPhaseSnapshot {
+            status: "executed",
+            reason: "bootstrap_submitted:still_invalid_coins".to_string(),
+            ready: false,
+        },
     }
 }
 

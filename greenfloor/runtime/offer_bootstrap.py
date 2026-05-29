@@ -113,6 +113,14 @@ class BootstrapPreflightOutcome:
         if (self.early is None) == (self.preflight is None):
             raise ValueError("exactly one of early or preflight must be set")
 
+    @classmethod
+    def early_exit(cls, result: BootstrapPhaseResult) -> BootstrapPreflightOutcome:
+        return cls(early=result, preflight=None)
+
+    @classmethod
+    def ready(cls, preflight: BootstrapPreflight) -> BootstrapPreflightOutcome:
+        return cls(early=None, preflight=preflight)
+
 
 def bootstrap_ladder_entries_for_side(
     *,
@@ -171,7 +179,7 @@ def run_bootstrap_preflight(
     )
     early = bootstrap_early_phase(outcome=outcome)
     if early is not None:
-        return BootstrapPreflightOutcome(early=early, preflight=None)
+        return BootstrapPreflightOutcome.early_exit(early)
     if outcome.plan is None:
         raise RuntimeError("bootstrap_failed:planner_missing_plan")
 
@@ -182,23 +190,21 @@ def run_bootstrap_preflight(
         output_count=len(bootstrap_plan.output_amounts_base_units),
     )
     if int(fee_mojos) > 0:
-        return BootstrapPreflightOutcome(
-            early=BootstrapPhaseResult(
+        return BootstrapPreflightOutcome.early_exit(
+            BootstrapPhaseResult(
                 status="failed",
                 reason="signer_mixed_split_fee_not_supported",
                 fee_mojos=int(fee_mojos),
                 fee_source=fee_source,
                 fee_lookup_error=fee_lookup_error,
-            ),
-            preflight=None,
+            )
         )
 
     existing_coin_ids = {
         str(c.get("id", "")).strip() for c in asset_scoped_coins if str(c.get("id", "")).strip()
     }
-    return BootstrapPreflightOutcome(
-        early=None,
-        preflight=BootstrapPreflight(
+    return BootstrapPreflightOutcome.ready(
+        BootstrapPreflight(
             program=program,
             bootstrap_plan=bootstrap_plan,
             split_asset_id=split_asset_id,
@@ -210,7 +216,7 @@ def run_bootstrap_preflight(
             bootstrap_wait_timeout_seconds=bootstrap_wait_timeout_seconds,
             ladder_entries=ladder_entries,
             deps=deps,
-        ),
+        )
     )
 
 

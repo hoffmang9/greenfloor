@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from greenfloor.offer_bootstrap import BootstrapPhaseResult
 from greenfloor.runtime.offer_orchestration import bootstrap_blocks_offer
 
@@ -38,6 +40,17 @@ def test_bootstrap_blocks_offer_blocks_invalid_ladder_failure() -> None:
     )
     assert blocked is True
     assert error == "bootstrap_failed:bootstrap_invalid_ladder"
+
+
+def test_bootstrap_blocks_offer_rejects_manager_dict_payload() -> None:
+    with pytest.raises(TypeError, match="BootstrapPhaseResult"):
+        bootstrap_blocks_offer(
+            {
+                "status": "failed",
+                "reason": "bootstrap_invalid_ladder",
+                "ready": False,
+            }  # type: ignore[arg-type]
+        )
 
 
 def test_bootstrap_blocks_offer_allows_offer_when_policy_returns_none(monkeypatch) -> None:
