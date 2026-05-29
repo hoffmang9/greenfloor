@@ -31,6 +31,7 @@ from greenfloor.core.coin_ops.types import (
     SplitDenominationReadiness,
     SplitPlanningProfile,
 )
+from greenfloor.core.kernel_maps import require_i64_i64_map
 
 
 def _require_coin_op_plans(value: object) -> list[CoinOpPlan]:
@@ -129,9 +130,7 @@ def compute_bucket_counts_from_coins(
         [int(amount) for amount in coin_amounts_base_units],
         [int(size) for size in ladder_sizes],
     )
-    if not isinstance(raw, dict):
-        raise TypeError("kernel returned non-dict result")
-    return {int(key): int(value) for key, value in raw.items()}
+    return require_i64_i64_map(raw, label="compute_bucket_counts_from_coins")
 
 
 def coin_op_min_amount_mojos(*, canonical_asset_id: str) -> int:
@@ -279,3 +278,21 @@ def coin_op_should_stop(
         int(max_iterations),
     )
     return bool(stop), str(reason)
+
+
+def effective_sell_bucket_counts_for_coin_ops(
+    *,
+    sell_ladder: list[Any],
+    wallet_bucket_counts: dict[int, int],
+    active_sell_offer_counts_by_size: dict[int, int] | None = None,
+    newly_executed_sell_offer_counts_by_size: dict[int, int] | None = None,
+) -> dict[int, int]:
+    return require_i64_i64_map(
+        kernel_bridge.coin_ops_kernel().effective_sell_bucket_counts_for_coin_ops(
+            sell_ladder,
+            wallet_bucket_counts,
+            active_sell_offer_counts_by_size,
+            newly_executed_sell_offer_counts_by_size,
+        ),
+        label="effective_sell_bucket_counts_for_coin_ops",
+    )

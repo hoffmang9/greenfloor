@@ -1,11 +1,13 @@
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
 
-use crate::py_utils::{dict_to_i64_i64_map, i64_i64_map_to_py_dict};
+use crate::py_utils::{
+    dict_to_i64_i64_map, i64_i64_map_to_py_dict, strategy_action_sell_counts_from_py_list,
+};
 
 use signer_core::{
-    aggregate_two_sided_offer_counts, is_two_sided_market_mode, one_sided_offer_counts_by_side,
-    resolve_tracked_sizes,
+    aggregate_two_sided_offer_counts, executed_sell_offer_counts_by_size, is_two_sided_market_mode,
+    one_sided_offer_counts_by_side, resolve_tracked_sizes,
 };
 
 #[pyfunction]
@@ -49,10 +51,22 @@ fn one_sided_offer_counts_by_side_py(
     })
 }
 
+#[pyfunction]
+#[pyo3(name = "executed_sell_offer_counts_by_size")]
+fn executed_sell_offer_counts_by_size_py(
+    py: Python<'_>,
+    action_items: &Bound<'_, PyList>,
+) -> PyResult<Py<PyAny>> {
+    let items = strategy_action_sell_counts_from_py_list(action_items)?;
+    let counts = executed_sell_offer_counts_by_size(&items);
+    Ok(i64_i64_map_to_py_dict(py, &counts)?.into())
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(resolve_tracked_sizes_py, m)?)?;
     m.add_function(wrap_pyfunction!(is_two_sided_market_mode_py, m)?)?;
     m.add_function(wrap_pyfunction!(aggregate_two_sided_offer_counts_py, m)?)?;
     m.add_function(wrap_pyfunction!(one_sided_offer_counts_by_side_py, m)?)?;
+    m.add_function(wrap_pyfunction!(executed_sell_offer_counts_by_size_py, m)?)?;
     Ok(())
 }

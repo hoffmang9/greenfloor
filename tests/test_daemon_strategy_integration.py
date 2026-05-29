@@ -3,13 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from greenfloor.config.models import MarketConfig, MarketInventoryConfig, MarketLadderEntry
-from greenfloor.core.strategy_action_item import StrategyActionItem
-from greenfloor.daemon.coin_ops_cycle import (
-    _effective_sell_bucket_counts_for_coin_ops,
-    _executed_sell_offer_counts_by_size,
-)
 from greenfloor.daemon.market_helpers import _normalize_strategy_pair
-from greenfloor.daemon.strategy_execution import StrategyActionResult
 from greenfloor.daemon.strategy_state import (
     _evaluate_two_sided_market_actions,
     _strategy_config_from_market,
@@ -119,79 +113,6 @@ def test_strategy_state_from_bucket_counts_includes_xch_price() -> None:
     assert state.tens == 1
     assert state.hundreds == 0
     assert state.xch_price_usd == 32.5
-
-
-def _sell_ladder(*entries: tuple[int, int]) -> list[MarketLadderEntry]:
-    """Build a sell ladder from (size_base_units, target_count) pairs."""
-    return [
-        MarketLadderEntry(
-            size_base_units=size,
-            target_count=target,
-            split_buffer_count=1,
-            combine_when_excess_factor=2.0,
-        )
-        for size, target in entries
-    ]
-
-
-def test_effective_sell_bucket_counts_for_coin_ops_counts_live_sells_toward_target_only() -> None:
-    effective = _effective_sell_bucket_counts_for_coin_ops(
-        sell_ladder=_sell_ladder((10, 3)),
-        wallet_bucket_counts={10: 0},
-        active_sell_offer_counts_by_size={10: 3},
-    )
-    assert effective[10] == 3
-
-
-def test_effective_sell_bucket_counts_for_coin_ops_caps_live_sell_credit_at_target() -> None:
-    effective = _effective_sell_bucket_counts_for_coin_ops(
-        sell_ladder=_sell_ladder((10, 3)),
-        wallet_bucket_counts={10: 0},
-        active_sell_offer_counts_by_size={10: 4},
-    )
-    assert effective[10] == 3
-
-
-def test_effective_sell_bucket_counts_for_coin_ops_accounts_for_new_sell_posts_in_cycle() -> None:
-    effective = _effective_sell_bucket_counts_for_coin_ops(
-        sell_ladder=_sell_ladder((10, 2)),
-        wallet_bucket_counts={10: 2},
-        active_sell_offer_counts_by_size={10: 0},
-        newly_executed_sell_offer_counts_by_size={10: 2},
-    )
-    assert effective[10] == 2
-
-
-def test_executed_sell_offer_counts_by_size_counts_only_executed_sell_items() -> None:
-    result = StrategyActionResult.from_items(
-        planned_count=5,
-        action_items=[
-            StrategyActionItem(size=10, side="sell", status="executed", reason="ok"),
-            StrategyActionItem(size=10, side="sell", status="executed", reason="ok"),
-            StrategyActionItem(size=10, side="buy", status="executed", reason="ok"),
-            StrategyActionItem(size=10, side="sell", status="skipped", reason="skip"),
-            StrategyActionItem(size=1, side="sell", status="executed", reason="ok"),
-        ],
-    )
-    counts = _executed_sell_offer_counts_by_size(result)
-    assert counts == {10: 2, 1: 1}
-
-
-def test_executed_sell_offer_counts_by_size_includes_pending_visibility_sells() -> None:
-    result = StrategyActionResult.from_items(
-        planned_count=2,
-        action_items=[
-            StrategyActionItem(
-                size=10,
-                side="sell",
-                status="pending_visibility",
-                reason="managed_offer_post_success",
-                offer_id="offer-pending",
-            ),
-            StrategyActionItem(size=10, side="sell", status="skipped", reason="skip"),
-        ],
-    )
-    assert _executed_sell_offer_counts_by_size(result) == {10: 1}
 
 
 def test_evaluate_two_sided_market_actions_uses_side_targets_from_ladders() -> None:

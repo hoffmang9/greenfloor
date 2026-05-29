@@ -10,6 +10,7 @@ pub mod reconcile;
 pub mod reseed;
 pub mod retry;
 pub mod strategy;
+pub mod strategy_action;
 
 pub use cancel::{
     abs_move_bps, cancel_move_threshold_bps, collect_open_offer_ids_for_cancel,
@@ -66,3 +67,4 @@ pub use retry::{
 pub use strategy::{
     evaluate_market, evaluate_two_sided_market_actions, MarketState, PlannedAction, StrategyConfig,
 };
+pub use strategy_action::{executed_sell_offer_counts_by_size, StrategyActionSellCountInput};

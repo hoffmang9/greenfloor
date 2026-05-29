@@ -18,6 +18,7 @@ __all__ = [
     "classify_managed_transient_error",
     "empty_stale_sweep_payload",
     "evaluate_market_payload",
+    "executed_sell_offer_counts_by_size",
     "expiry_seconds_for_action",
     "is_managed_upstream_transient_error",
     "is_managed_worker_transient_error",
@@ -162,6 +163,13 @@ def one_sided_offer_counts_by_side(
         [int(size) for size in tracked_sizes],
     )
     return dict(payload["buy"]), dict(payload["sell"])
+
+
+def executed_sell_offer_counts_by_size(
+    *,
+    action_items: list[Any],
+) -> dict[int, int]:
+    return _orchestration.executed_sell_offer_counts_by_size(list(action_items))
 
 
 def empty_stale_sweep_payload() -> StaleSweepProgress:

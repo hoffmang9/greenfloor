@@ -10,6 +10,7 @@ from greenfloor.core.coin_ops import (
     BucketSpec,
     coin_op_min_amount_mojos,
     coin_op_target_amount_allowed,
+    effective_sell_bucket_counts_for_coin_ops,
     partition_plans_by_budget,
     plan_coin_ops,
     projected_coin_ops_fee_mojos,
@@ -17,57 +18,9 @@ from greenfloor.core.coin_ops import (
 from greenfloor.daemon.cooldowns import _combine_input_coin_cap
 from greenfloor.daemon.market_helpers import _base_unit_mojo_multiplier_for_market
 from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision
-from greenfloor.daemon.strategy_execution import StrategyActionResult
 from greenfloor.daemon.watchlist import _watched_coin_ids_for_market
 from greenfloor.runtime.coin_ops.daemon_execution import execute_managed_coin_op_plans
 from greenfloor.storage.sqlite import SqliteStore
-
-
-def _effective_sell_bucket_counts_for_coin_ops(
-    *,
-    sell_ladder: list[Any],
-    wallet_bucket_counts: dict[int, int],
-    active_sell_offer_counts_by_size: dict[int, int] | None,
-    newly_executed_sell_offer_counts_by_size: dict[int, int] | None = None,
-) -> dict[int, int]:
-    effective_counts = dict(wallet_bucket_counts)
-    active_sell_counts = active_sell_offer_counts_by_size or {}
-    newly_executed_sell_counts = newly_executed_sell_offer_counts_by_size or {}
-    for entry in sell_ladder:
-        size_base_units = int(getattr(entry, "size_base_units", 0))
-        if size_base_units <= 0:
-            continue
-        target_count = max(0, int(getattr(entry, "target_count", 0)))
-        newly_executed_sell_count = max(0, int(newly_executed_sell_counts.get(size_base_units, 0)))
-        wallet_count = max(
-            0,
-            int(wallet_bucket_counts.get(size_base_units, 0)) - newly_executed_sell_count,
-        )
-        active_sell_count = max(0, int(active_sell_counts.get(size_base_units, 0)))
-        effective_active_sell_count = active_sell_count + newly_executed_sell_count
-        # Count live sell offers toward the market target, but not toward the
-        # split buffer. That preserves at most one extra ready coin above the
-        # active sell ladder coverage.
-        effective_counts[size_base_units] = wallet_count + min(
-            effective_active_sell_count,
-            target_count,
-        )
-    return effective_counts
-
-
-def _executed_sell_offer_counts_by_size(
-    offer_execution: StrategyActionResult,
-) -> dict[int, int]:
-    counts: dict[int, int] = {}
-    for item in offer_execution.action_items:
-        if not item.counts_as_executed:
-            continue
-        if item.side != "sell":
-            continue
-        if item.size <= 0:
-            continue
-        counts[item.size] = counts.get(item.size, 0) + 1
-    return counts
 
 
 def _plan_and_execute_coin_ops(
@@ -84,7 +37,7 @@ def _plan_and_execute_coin_ops(
     state_dir: Path,
 ) -> None:
     """Plan and execute coin split/combine operations for a market."""
-    bucket_counts = _effective_sell_bucket_counts_for_coin_ops(
+    bucket_counts = effective_sell_bucket_counts_for_coin_ops(
         sell_ladder=sell_ladder,
         wallet_bucket_counts=wallet_bucket_counts,
         active_sell_offer_counts_by_size=active_sell_offer_counts_by_size,

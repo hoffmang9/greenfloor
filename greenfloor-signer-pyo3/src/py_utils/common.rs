@@ -1,12 +1,19 @@
 use std::collections::BTreeMap;
 
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::Value;
 
 pub fn to_py_err<E: std::fmt::Display>(err: E) -> PyErr {
     PyValueError::new_err(err.to_string())
+}
+
+pub fn require_i64_attr(item: &Bound<'_, PyAny>, label: &str, attr: &str) -> PyResult<i64> {
+    item.getattr(attr)
+        .map_err(|_| PyTypeError::new_err(format!("{label} missing attribute: {attr}")))?
+        .extract::<i64>()
+        .map_err(|_| PyValueError::new_err(format!("{label}.{attr} must be an integer")))
 }
 
 pub fn dict_from_json_value(py: Python<'_>, value: serde_json::Value) -> PyResult<Py<PyAny>> {
@@ -43,6 +50,15 @@ pub fn dict_to_i64_i64_map(dict: &Bound<'_, PyDict>) -> PyResult<BTreeMap<i64, i
         map.insert(key.extract::<i64>()?, value.extract::<i64>()?);
     }
     Ok(map)
+}
+
+pub fn optional_dict_to_i64_i64_map(
+    dict: Option<&Bound<'_, PyDict>>,
+) -> PyResult<Option<BTreeMap<i64, i64>>> {
+    match dict {
+        None => Ok(None),
+        Some(value) => Ok(Some(dict_to_i64_i64_map(value)?)),
+    }
 }
 
 pub fn i64_i64_map_to_py_dict<'py>(

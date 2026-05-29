@@ -236,6 +236,11 @@ class CycleKernelProtocol(Protocol):
         tracked_sizes: list[int],
     ) -> dict[str, dict[int, int]]: ...
 
+    def executed_sell_offer_counts_by_size(
+        self,
+        action_items: list[Any],
+    ) -> dict[int, int]: ...
+
 
 class CancelPolicyKernelProtocol(Protocol):
     def abs_move_bps(self, current: float | None, previous: float | None) -> float | None: ...

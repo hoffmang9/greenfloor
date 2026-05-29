@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
 
-use super::common::{cached_class, i64_i64_map_to_py_dict};
+use super::common::{cached_class, i64_i64_map_to_py_dict, require_i64_attr};
 
 const ORCHESTRATION_MODULE: &str = "greenfloor.core.cycle_orchestration";
 const CYCLE_RESEED_MODULE: &str = "greenfloor.core.cycle_reseed";
@@ -221,4 +221,34 @@ pub fn extract_spendable_profiles(
         );
     }
     Ok(map)
+}
+
+pub fn strategy_action_sell_counts_from_py_list(
+    list: &Bound<'_, PyList>,
+) -> PyResult<Vec<signer_core::cycle::StrategyActionSellCountInput>> {
+    list.iter()
+        .enumerate()
+        .map(|(index, item)| {
+            let label = format!("action item {index}");
+            let side = item
+                .getattr("side")
+                .map_err(|_| PyTypeError::new_err(format!("{label} missing attribute: side")))?
+                .extract::<String>()
+                .map_err(|_| PyValueError::new_err(format!("{label}.side must be a string")))?;
+            let counts_as_executed = item
+                .getattr("counts_as_executed")
+                .map_err(|_| {
+                    PyTypeError::new_err(format!("{label} missing attribute: counts_as_executed"))
+                })?
+                .extract::<bool>()
+                .map_err(|_| {
+                    PyValueError::new_err(format!("{label}.counts_as_executed must be a bool"))
+                })?;
+            Ok(signer_core::cycle::StrategyActionSellCountInput {
+                size: require_i64_attr(&item, &label, "size")?,
+                side,
+                counts_as_executed,
+            })
+        })
+        .collect()
 }
