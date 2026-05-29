@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from greenfloor.core.signer_offer_request import (
+    SignerOfferLegAmounts,
     build_signer_create_offer_request,
     compute_signer_offer_leg_amounts,
     quote_mojos_for_base_size,
@@ -22,7 +23,8 @@ from tests.helpers.signer_fixtures import (
     parse_runtime_parity,
 )
 
-def _require_signer_kernel():
+
+def _require_signer_kernel() -> None:
     try:
         import greenfloor_signer  # type: ignore[import-not-found]  # noqa: F401
     except ImportError:
@@ -41,8 +43,21 @@ def test_signer_golden_fixture_contract(fixture_path: Path) -> None:
 
     assert str(payload["offer"]).startswith("offer1")
 
+    market = market_config_from_fixture(create_offer_request=fixture_req, parity=parity)
+    leg = compute_signer_offer_leg_amounts(
+        size_base_units=parity["size_base_units"],
+        quote_price=parity["quote_price"],
+        resolved_base_asset_id=parity["resolved_base_asset_id"],
+        resolved_quote_asset_id=parity["resolved_quote_asset_id"],
+        action_side=parity["action_side"],
+        pricing=dict(market.pricing or {}),
+    )
+    assert isinstance(leg, SignerOfferLegAmounts)
+    assert leg.offer_amount_mojos == int(fixture_req["offer_amount"])
+    assert leg.request_amount_mojos == int(fixture_req["request_amount"])
+
     runtime_req = build_signer_create_offer_request(
-        market=market_config_from_fixture(create_offer_request=fixture_req, parity=parity),
+        market=market,
         size_base_units=parity["size_base_units"],
         quote_price=parity["quote_price"],
         resolved_base_asset_id=parity["resolved_base_asset_id"],
@@ -58,26 +73,6 @@ def test_signer_golden_fixture_contract(fixture_path: Path) -> None:
         fixture_req,
         expires_at_unix=expires_at_unix,
     )
-
-
-@pytest.mark.parametrize("fixture_path", sorted(SIGNER_FIXTURE_DIR.glob("*.json")))
-def test_compute_signer_offer_leg_amounts_matches_fixture_amounts(fixture_path: Path) -> None:
-    _require_signer_kernel()
-    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
-    fixture_req, _expires_at_unix = parse_create_offer_request(payload["create_offer_request"])
-    parity = parse_runtime_parity(payload["runtime_parity"])
-    market = market_config_from_fixture(create_offer_request=fixture_req, parity=parity)
-
-    leg = compute_signer_offer_leg_amounts(
-        size_base_units=parity["size_base_units"],
-        quote_price=parity["quote_price"],
-        resolved_base_asset_id=parity["resolved_base_asset_id"],
-        resolved_quote_asset_id=parity["resolved_quote_asset_id"],
-        action_side=parity["action_side"],
-        pricing=dict(market.pricing or {}),
-    )
-    assert leg.offer_amount_mojos == int(fixture_req["offer_amount"])
-    assert leg.request_amount_mojos == int(fixture_req["request_amount"])
 
 
 def test_quote_mojos_for_base_size_matches_direct_fixture_pricing() -> None:
@@ -111,12 +106,23 @@ def test_signer_split_asset_id_selects_side_asset() -> None:
     )
 
 
-def test_compute_signer_offer_leg_amounts_rejects_zero_quote_price() -> None:
+@pytest.mark.parametrize(
+    ("size_base_units", "quote_price", "match"),
+    [
+        (1, 0.0, "request_amount must be positive"),
+        (0, 1.0, "invalid_size_base_units"),
+    ],
+)
+def test_compute_signer_offer_leg_amounts_rejects_invalid_inputs(
+    size_base_units: int,
+    quote_price: float,
+    match: str,
+) -> None:
     _require_signer_kernel()
-    with pytest.raises(Exception, match="request_amount must be positive"):
+    with pytest.raises(ValueError, match=match):
         compute_signer_offer_leg_amounts(
-            size_base_units=1,
-            quote_price=0.0,
+            size_base_units=size_base_units,
+            quote_price=quote_price,
             resolved_base_asset_id="457275a8b9926058d8c9c2ebae52ac5938a4034345cafef6e87f4c7c24b749d8",
             resolved_quote_asset_id="xch",
             action_side="sell",

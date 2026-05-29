@@ -50,6 +50,31 @@ pub struct SignerOfferLegAmounts {
     pub request_amount_mojos: u64,
 }
 
+fn base_and_quote_leg_mojos(
+    size_base_units: i64,
+    quote_price: f64,
+    base_mult: i64,
+    quote_mult: i64,
+) -> SignerResult<(u64, u64)> {
+    if size_base_units <= 0 {
+        return Err(SignerError::InvalidSizeBaseUnits);
+    }
+    let base_offer = size_base_units
+        .checked_mul(base_mult)
+        .ok_or(SignerError::InvalidOfferAmount)?;
+    if base_offer <= 0 {
+        return Err(SignerError::InvalidOfferAmount);
+    }
+    let request_amount = quote_mojos_for_base_size(size_base_units, quote_price, quote_mult);
+    if request_amount <= 0 {
+        return Err(SignerError::InvalidOfferRequestAmount);
+    }
+    let offer_u = u64::try_from(base_offer).map_err(|_| SignerError::InvalidOfferAmount)?;
+    let request_u =
+        u64::try_from(request_amount).map_err(|_| SignerError::InvalidOfferRequestAmount)?;
+    Ok((offer_u, request_u))
+}
+
 /// Compute offer/request legs for vault CAT offer construction.
 pub fn compute_signer_offer_leg_amounts(
     size_base_units: i64,
@@ -70,37 +95,32 @@ pub fn compute_signer_offer_leg_amounts(
         "quote_unit_mojo_multiplier",
         resolved_quote_asset_id,
     );
-    let offer_amount = size_base_units.saturating_mul(base_mult);
-    let request_amount = quote_mojos_for_base_size(size_base_units, quote_price, quote_mult);
-    if request_amount <= 0 {
-        return Err(SignerError::Other(
-            "request_amount must be positive".to_string(),
-        ));
-    }
+    let (base_offer_mojos, quote_request_mojos) =
+        base_and_quote_leg_mojos(size_base_units, quote_price, base_mult, quote_mult)?;
 
-    if side == "buy" {
-        Ok(SignerOfferLegAmounts {
-            offer_asset_id: resolved_quote_asset_id.trim().to_string(),
-            request_asset_id: resolved_base_asset_id.trim().to_string(),
-            offer_amount_mojos: u64::try_from(request_amount).map_err(|_| {
-                SignerError::Other("offer_amount_mojos overflow".to_string())
-            })?,
-            request_amount_mojos: u64::try_from(offer_amount).map_err(|_| {
-                SignerError::Other("request_amount_mojos overflow".to_string())
-            })?,
-        })
-    } else {
-        Ok(SignerOfferLegAmounts {
-            offer_asset_id: resolved_base_asset_id.trim().to_string(),
-            request_asset_id: resolved_quote_asset_id.trim().to_string(),
-            offer_amount_mojos: u64::try_from(offer_amount).map_err(|_| {
-                SignerError::Other("offer_amount_mojos overflow".to_string())
-            })?,
-            request_amount_mojos: u64::try_from(request_amount).map_err(|_| {
-                SignerError::Other("request_amount_mojos overflow".to_string())
-            })?,
-        })
-    }
+    let (offer_asset_id, request_asset_id, offer_amount_mojos, request_amount_mojos) =
+        if side == "buy" {
+            (
+                resolved_quote_asset_id.trim().to_string(),
+                resolved_base_asset_id.trim().to_string(),
+                quote_request_mojos,
+                base_offer_mojos,
+            )
+        } else {
+            (
+                resolved_base_asset_id.trim().to_string(),
+                resolved_quote_asset_id.trim().to_string(),
+                base_offer_mojos,
+                quote_request_mojos,
+            )
+        };
+
+    Ok(SignerOfferLegAmounts {
+        offer_asset_id,
+        request_asset_id,
+        offer_amount_mojos,
+        request_amount_mojos,
+    })
 }
 
 #[cfg(test)]
@@ -178,14 +198,39 @@ mod tests {
             &pricing(1_000, 1_000),
         )
         .unwrap_err();
-        assert!(err.to_string().contains("request_amount must be positive"));
+        assert!(matches!(err, SignerError::InvalidOfferRequestAmount));
+    }
+
+    #[test]
+    fn rejects_non_positive_size_base_units() {
+        let err = compute_signer_offer_leg_amounts(
+            0,
+            1.0,
+            BASE_ASSET,
+            QUOTE_XCH,
+            "sell",
+            &pricing(1_000, 1_000),
+        )
+        .unwrap_err();
+        assert!(matches!(err, SignerError::InvalidSizeBaseUnits));
+    }
+
+    #[test]
+    fn rejects_zero_base_multiplier_offer_amount() {
+        let err = compute_signer_offer_leg_amounts(
+            1,
+            1.0,
+            BASE_ASSET,
+            QUOTE_XCH,
+            "sell",
+            &pricing(0, 1_000),
+        )
+        .unwrap_err();
+        assert!(matches!(err, SignerError::InvalidOfferAmount));
     }
 
     #[test]
     fn normalize_offer_asset_id_strips_prefix() {
-        assert_eq!(
-            normalize_offer_asset_id("0xAbCd"),
-            "abcd"
-        );
+        assert_eq!(normalize_offer_asset_id("0xAbCd"), "abcd");
     }
 }
