@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from greenfloor.core.offer_policy import verify_offer_for_dexie
-from tests.helpers.kernel_mock import install_kernel_stub
+from tests.helpers.engine_mock import install_engine_stub
 
 
-def test_verify_offer_for_dexie_uses_greenfloor_kernel_only(monkeypatch) -> None:
+def test_verify_offer_for_dexie_uses_greenfloor_engine_only(monkeypatch) -> None:
     calls: dict[str, str] = {}
 
     class _Signer:
@@ -12,18 +12,18 @@ def test_verify_offer_for_dexie_uses_greenfloor_kernel_only(monkeypatch) -> None
         def verify_offer_for_dexie(offer: str) -> None:
             calls["offer"] = offer
 
-    install_kernel_stub(monkeypatch, _Signer)
+    install_engine_stub(monkeypatch, _Signer)
 
     assert verify_offer_for_dexie("offer1contract") is None
     assert calls["offer"] == "offer1contract"
 
 
-def test_verify_offer_for_dexie_reports_missing_kernel(monkeypatch) -> None:
+def test_verify_offer_for_dexie_reports_missing_engine(monkeypatch) -> None:
     monkeypatch.setattr(
-        "greenfloor.core.kernel_bridge.import_kernel",
+        "greenfloor.core.engine_bridge.import_engine",
         lambda: (_ for _ in ()).throw(ImportError("disable signer path for this test")),
     )
 
     assert verify_offer_for_dexie("offer1contract") == (
-        "wallet_sdk_import_error:greenfloor_kernel_unavailable"
+        "wallet_sdk_import_error:greenfloor_engine_unavailable"
     )

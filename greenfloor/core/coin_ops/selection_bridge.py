@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from greenfloor.core.coin_ops.kernel_protocol import CoinOpsKernelProtocol
+from greenfloor.core.coin_ops.engine_protocol import CoinOpsEngineProtocol
 from greenfloor.core.coin_ops.types import (
     CombineInputSelectionMode,
     SplitAutoSelectPlan,
@@ -16,16 +16,16 @@ from greenfloor.core.coin_ops.types import (
 def _require_split_auto_select_plan(value: object) -> SplitAutoSelectPlan:
     if isinstance(value, SplitCoinPlan | SplitCombinePrereqPlan | SplitSkipPlan):
         return value
-    raise TypeError("kernel returned invalid split auto-select plan")
+    raise TypeError("engine returned invalid split auto-select plan")
 
 
 def select_spendable_coins_for_target_amount(
-    kernel: CoinOpsKernelProtocol,
+    engine: CoinOpsEngineProtocol,
     *,
     coins: list[dict],
     target_amount: int,
 ) -> tuple[list[str], int, bool]:
-    coin_ids, total, exact = kernel.select_spendable_coins_for_target_amount(
+    coin_ids, total, exact = engine.select_spendable_coins_for_target_amount(
         coins,
         int(target_amount),
     )
@@ -33,13 +33,13 @@ def select_spendable_coins_for_target_amount(
 
 
 def split_would_create_sub_cat_change(
-    kernel: CoinOpsKernelProtocol,
+    engine: CoinOpsEngineProtocol,
     *,
     selected_amount_mojos: int,
     required_amount_mojos: int,
     canonical_asset_id: str,
 ) -> tuple[bool, int]:
-    would_create, remainder = kernel.split_would_create_sub_cat_change(
+    would_create, remainder = engine.split_would_create_sub_cat_change(
         int(selected_amount_mojos),
         int(required_amount_mojos),
         str(canonical_asset_id),
@@ -48,7 +48,7 @@ def split_would_create_sub_cat_change(
 
 
 def plan_auto_split_selection(
-    kernel: CoinOpsKernelProtocol,
+    engine: CoinOpsEngineProtocol,
     *,
     candidate_spendable: list[dict],
     required_amount_mojos: int,
@@ -58,7 +58,7 @@ def plan_auto_split_selection(
     allow_combine_prereq: bool | None = None,
 ) -> SplitAutoSelectPlan:
     return _require_split_auto_select_plan(
-        kernel.plan_auto_split_selection(
+        engine.plan_auto_split_selection(
             candidate_spendable,
             int(required_amount_mojos),
             str(canonical_asset_id),
@@ -70,7 +70,7 @@ def plan_auto_split_selection(
 
 
 def plan_auto_combine_inputs(
-    kernel: CoinOpsKernelProtocol,
+    engine: CoinOpsEngineProtocol,
     *,
     spendable_coins: list[dict],
     number_of_coins: int,
@@ -81,7 +81,7 @@ def plan_auto_combine_inputs(
 ) -> list[str]:
     return [
         str(coin_id)
-        for coin_id in kernel.plan_auto_combine_inputs(
+        for coin_id in engine.plan_auto_combine_inputs(
             spendable_coins,
             int(number_of_coins),
             selection_mode,

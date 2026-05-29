@@ -1,0 +1,15 @@
+[package]
+name = "greenfloor-engine-pyo3"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "greenfloor_engine"
+crate-type = ["cdylib"]
+
+[dependencies]
+chia-bls = "0.36.1"
+engine-core = { package = "greenfloor-engine", path = "../greenfloor-engine" }
+pyo3 = { version = "0.28.2", features = ["extension-module"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread"] }

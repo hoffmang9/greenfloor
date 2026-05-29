@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.kernel_bridge import policy_kernel
+from greenfloor.core.engine_bridge import policy_engine
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +102,7 @@ def evaluate_low_inventory_alert(
     market: MarketConfig,
     state: AlertState,
 ) -> tuple[AlertState, AlertEvent | None]:
-    evaluation = policy_kernel().evaluate_low_inventory_alert(
+    evaluation = policy_engine().evaluate_low_inventory_alert(
         _low_inventory_input(now=now, program=program, market=market, state=state)
     )
     if not isinstance(evaluation, LowInventoryEvaluation):

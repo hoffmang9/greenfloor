@@ -13,8 +13,8 @@ FIXTURE_DIR = REPO / "tests" / "fixtures" / "signer"
 EXPORT_RS = """
 use std::path::Path;
 use serde::Serialize;
-use greenfloor_signer::offer::CreateOfferResult;
-use greenfloor_signer::test_support::simulator::offer_roundtrips::{
+use greenfloor_engine::offer::CreateOfferResult;
+use greenfloor_engine::test_support::simulator::offer_roundtrips::{
     export_offer_fixture, OfferRoundtripScenario,
 };
 
@@ -60,7 +60,7 @@ async fn main() {
 
 def main() -> int:
     FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
-    src_dir = REPO / "greenfloor-signer" / "tools"
+    src_dir = REPO / "greenfloor-engine" / "tools"
     src_dir.mkdir(exist_ok=True)
     src_path = src_dir / "export_fixtures.rs"
     src_path.write_text(EXPORT_RS.strip() + "\n", encoding="utf-8")
@@ -70,7 +70,7 @@ def main() -> int:
 async fn export_signer_fixtures_to_disk() {
     use std::path::Path;
     use serde::Serialize;
-    use greenfloor_signer::test_support::simulator::offer_roundtrips::{
+    use greenfloor_engine::test_support::simulator::offer_roundtrips::{
         export_offer_fixture, OfferRoundtripScenario,
     };
     #[derive(Serialize)]
@@ -107,8 +107,8 @@ async fn export_signer_fixtures_to_disk() {
     }
 }
 """
-    test_path = REPO / "greenfloor-signer" / "src" / "test_support" / "export_fixtures_test.rs"
-    mod_path = REPO / "greenfloor-signer" / "src" / "test_support" / "mod.rs"
+    test_path = REPO / "greenfloor-engine" / "src" / "test_support" / "export_fixtures_test.rs"
+    mod_path = REPO / "greenfloor-engine" / "src" / "test_support" / "mod.rs"
     if "export_fixtures_test" not in mod_path.read_text(encoding="utf-8"):
         mod_path.write_text(
             mod_path.read_text(encoding="utf-8") + "\npub mod export_fixtures_test;\n",
@@ -117,7 +117,7 @@ async fn export_signer_fixtures_to_disk() {
     test_path.write_text(f"#[cfg(test)]\nmod tests {{\n{code}\n}}\n", encoding="utf-8")
     subprocess.run(
         ["cargo", "test", "export_signer_fixtures_to_disk", "--", "--nocapture"],
-        cwd=REPO / "greenfloor-signer",
+        cwd=REPO / "greenfloor-engine",
         check=True,
     )
     print(f"exported fixtures to {FIXTURE_DIR}")

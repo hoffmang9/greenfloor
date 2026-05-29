@@ -1,6 +1,6 @@
 ---
 name: GreenFloor maturin wheels
-description: Ensure and optionally install the GreenFloor signer PyO3 wheel.
+description: Ensure and optionally install the GreenFloor engine PyO3 wheel.
 
 inputs:
   operation:
@@ -18,8 +18,8 @@ runs:
       with:
         operation: ${{ inputs.operation }}
         builder: maturin
-        tree-path: greenfloor-signer-pyo3
-        source-path: greenfloor-signer-pyo3/Cargo.toml
-        cache-key-prefix: signer-pyo3-wheelhouse
-        wheelhouse-subdir: greenfloor-signer-pyo3
+        tree-path: greenfloor-engine-pyo3
+        source-path: greenfloor-engine-pyo3/Cargo.toml
+        cache-key-prefix: engine-pyo3-wheelhouse
+        wheelhouse-subdir: greenfloor-engine-pyo3
         rust-already-configured: ${{ inputs.rust-already-configured }}

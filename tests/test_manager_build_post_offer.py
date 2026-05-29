@@ -507,22 +507,22 @@ def test_build_and_post_offer_returns_nonzero_when_offer_verification_fails(
     assert payload["results"][0]["result"]["success"] is False
 
 
-def test_build_and_post_offer_surfaces_stale_kernel_symbol_as_user_error(
+def test_build_and_post_offer_surfaces_stale_engine_symbol_as_user_error(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
-    from tests.helpers.kernel_mock import MinimalSignerKernel
+    from tests.helpers.engine_mock import MinimalSignerEngine
 
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
     write_manager_program(program, tmp_path=tmp_path)
     write_markets(markets)
 
-    class _StaleKernel(MinimalSignerKernel):
+    class _StaleEngine(MinimalSignerEngine):
         expected_publish_asset_fields = None
 
     monkeypatch.setattr(
-        "greenfloor.core.kernel_bridge.import_kernel",
-        lambda: _StaleKernel,
+        "greenfloor.core.engine_bridge.import_engine",
+        lambda: _StaleEngine,
     )
     monkeypatch.setattr(
         "greenfloor.cli.offer_build_post.build_offer",
@@ -574,14 +574,14 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
             called["post_offer_called"] = True
             return {"success": True, "id": "should-not-post"}
 
-    from tests.helpers.kernel_mock import MinimalSignerKernel, install_kernel_stub
+    from tests.helpers.engine_mock import MinimalSignerEngine, install_engine_stub
 
-    class _Signer(MinimalSignerKernel):
+    class _Signer(MinimalSignerEngine):
         @staticmethod
         def verify_offer_for_dexie(_offer: str) -> str:
             return "wallet_sdk_offer_missing_expiration"
 
-    install_kernel_stub(monkeypatch, _Signer)
+    install_engine_stub(monkeypatch, _Signer)
     monkeypatch.setattr(
         "greenfloor.cli.offer_build_post.build_offer",
         lambda _payload: "offer1noexpiry",

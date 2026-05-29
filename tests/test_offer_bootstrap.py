@@ -112,13 +112,13 @@ def test_plan_bootstrap_mixed_outputs_rejects_non_string_coin_id() -> None:
         plan_bootstrap_mixed_outputs(ladder_entries=ladder, spendable_coins=spendable)
 
 
-def test_plan_bootstrap_mixed_outputs_requires_kernel_symbol(monkeypatch) -> None:
-    import greenfloor.core.kernel_bridge as bridge
+def test_plan_bootstrap_mixed_outputs_requires_engine_symbol(monkeypatch) -> None:
+    import greenfloor.core.engine_bridge as bridge
 
     class _Kernel:
         pass
 
-    monkeypatch.setattr(bridge, "bootstrap_kernel", lambda: _Kernel())
+    monkeypatch.setattr(bridge, "bootstrap_engine", lambda: _Kernel())
     with pytest.raises(RuntimeError, match="plan_bootstrap_mixed_outputs"):
         plan_bootstrap_mixed_outputs(ladder_entries=_sample_ladder(), spendable_coins=[])
 

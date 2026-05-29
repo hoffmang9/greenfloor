@@ -1,11 +1,11 @@
 """Stable runtime import path for bootstrap planner, phase policy, and DTOs.
 
-Kernel-backed symbols live here. Call via this module (not ``kernel_bridge.bootstrap_kernel()``).
+Engine-backed symbols live here. Call via this module (not ``engine_bridge.bootstrap_engine()``).
 Coinset coin dicts are coerced to ``BootstrapCoin`` at the planner boundary; PyO3 requires
 ``BootstrapCoin`` instances.
 
 **Policy ownership:** deterministic planner + early/executed phase mapping are Rust
-(``greenfloor-signer/src/offer/bootstrap/``). **Fee eligibility** and mixed-split I/O are
+(``greenfloor-engine/src/offer/bootstrap/``). **Fee eligibility** and mixed-split I/O are
 Python-only (``greenfloor/runtime/offer_bootstrap.py``).
 """
 
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from greenfloor.core import kernel_bridge
+from greenfloor.core import engine_bridge
 from greenfloor.offer_bootstrap import (
     BootstrapCoin,
     BootstrapPhaseResult,
@@ -36,8 +36,8 @@ __all__ = [
 ]
 
 
-_require_bootstrap_method = kernel_bridge.kernel_method_getter(
-    lambda: kernel_bridge.bootstrap_kernel(),
+_require_bootstrap_method = engine_bridge.engine_method_getter(
+    lambda: engine_bridge.bootstrap_engine(),
     missing="bootstrap planner",
 )
 
@@ -75,7 +75,7 @@ def _coerce_planner_outcome(payload: object) -> BootstrapPlanOutcome:
 def _coerce_phase_result(payload: object) -> BootstrapPhaseResult:
     if isinstance(payload, BootstrapPhaseResult):
         return payload
-    raise TypeError("bootstrap phase kernel call returned unexpected result type")
+    raise TypeError("bootstrap phase engine call returned unexpected result type")
 
 
 def plan_bootstrap_mixed_outputs(

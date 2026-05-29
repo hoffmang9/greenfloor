@@ -1,6 +1,6 @@
 """Signer create-offer request types and builders (no IO).
 
-Leg math and asset normalization live in the Rust kernel; Python reaches them via
+Leg math and asset normalization live in the Rust engine; Python reaches them via
 ``greenfloor.core.offer_request_bridge``. This module owns dataclasses and request assembly.
 """
 

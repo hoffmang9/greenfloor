@@ -70,11 +70,11 @@ jobs:
       - uses: ./.github/actions/rust-cache-greenfloor
         if: matrix.run_rust_tests
 
-      - name: Build and test greenfloor-signer
+      - name: Build and test greenfloor-engine
         if: matrix.run_rust_tests
         run: |
-          cargo build --manifest-path greenfloor-signer/Cargo.toml
-          cargo test --manifest-path greenfloor-signer/Cargo.toml
+          cargo build --manifest-path greenfloor-engine/Cargo.toml
+          cargo test --manifest-path greenfloor-engine/Cargo.toml
 
       - uses: ./.github/actions/greenfloor-maturin-wheels
         with:
@@ -98,9 +98,9 @@ jobs:
       - name: "Test suite (pytest)"
         run: pytest -v --tb=short
 
-      - name: Pytest (signer marker)
+      - name: Pytest (engine marker)
         if: matrix.run_rust_tests
-        run: pytest -v --tb=short -m signer
+        run: pytest -v --tb=short -m engine
 
       - uses: ./.github/actions/wheel-cache
         if: matrix.run_sdk_integration
@@ -113,6 +113,6 @@ jobs:
           wheelhouse-subdir: chia-wallet-sdk
           rust-already-configured: ${{ matrix.run_rust_tests }}
 
-      - name: Pytest (greenfloor_signer + chia-wallet-sdk offer round-trip on Ubuntu)
+      - name: Pytest (greenfloor_engine + chia-wallet-sdk offer round-trip on Ubuntu)
         if: matrix.run_sdk_integration
-        run: GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS=1 pytest -vv -s tests/test_greenfloor_signer_integration.py
+        run: GREENFLOOR_RUN_ENGINE_INTEGRATION_TESTS=1 pytest -vv -s tests/test_greenfloor_engine_integration.py

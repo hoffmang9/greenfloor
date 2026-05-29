@@ -1,4 +1,4 @@
-"""Typed strategy offer action outcome (shared by cycle kernel and daemon dispatch)."""
+"""Typed strategy offer action outcome (shared by cycle engine and daemon dispatch)."""
 
 from __future__ import annotations
 

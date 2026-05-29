@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from greenfloor.core.signer_offer_request import SignerOfferLegAmounts
 
-from greenfloor.core import kernel_bridge
+from greenfloor.core import engine_bridge
 
-_require_offer_request_method = kernel_bridge.kernel_method_getter(
-    lambda: kernel_bridge.policy_kernel(),
+_require_offer_request_method = engine_bridge.engine_method_getter(
+    lambda: engine_bridge.policy_engine(),
     missing="offer-request",
 )
 
@@ -24,7 +24,7 @@ def _coerce_signer_offer_leg_amounts(payload: object):
 
 
 def normalize_offer_side(action_side: str) -> str:
-    """Normalize to ``buy`` or ``sell``. Fast path for common inputs; kernel for the rest."""
+    """Normalize to ``buy`` or ``sell``. Fast path for common inputs; engine for the rest."""
     trimmed = str(action_side or "").strip()
     if not trimmed:
         return "sell"

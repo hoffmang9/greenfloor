@@ -6,7 +6,7 @@ from greenfloor.offer_bootstrap import BootstrapPhaseResult
 from greenfloor.runtime.offer_orchestration import bootstrap_blocks_offer
 
 
-def test_bootstrap_blocks_offer_uses_kernel_policy_result(monkeypatch) -> None:
+def test_bootstrap_blocks_offer_uses_engine_policy_result(monkeypatch) -> None:
     monkeypatch.setattr(
         "greenfloor.core.offer_policy.bootstrap_block_error",
         lambda **_kwargs: "bootstrap_pending:split_submitted",

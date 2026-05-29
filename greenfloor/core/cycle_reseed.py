@@ -9,7 +9,7 @@ from greenfloor.core.planned_action import PlannedAction
 
 
 class ReseedSkipReason(StrEnum):
-    """Member values must match `reseed_skip_reason_labels()` from the Rust reseed kernel."""
+    """Member values must match `reseed_skip_reason_labels()` from the Rust reseed engine."""
 
     STRATEGY_ACTIONS_PRESENT = "strategy_actions_present"
     ACTIVE_OFFER_TARGETS_SATISFIED = "active_offer_targets_satisfied"

@@ -38,5 +38,5 @@ To avoid signing-path drift, the canonical in-process entrypoints are:
 
 New signing integrations should route through these APIs instead of introducing alternate signing stacks.
 
-**Update (2026-05):** ADR 0006 makes `greenfloor-signer` the canonical vault signing
+**Update (2026-05):** ADR 0006 makes `greenfloor-engine` the canonical vault signing
 implementation. Python APIs above are migration wrappers until Rust paths replace them.

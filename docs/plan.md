@@ -152,12 +152,12 @@ These are the only priorities. Do not start new feature work until G1-G3 are com
 
 - `tests/test_chia_wallet_sdk_simulator_harness.py` was deleted (2026-02-25): all six tests
   ran `cargo test` on `chia-sdk-driver` Rust internals (CAT issuance, catalog, reward distributor)
-  and tested no GreenFloor code. SDK has its own CI. `tests/test_greenfloor_signer_integration.py`
+  and tested no GreenFloor code. SDK has its own CI. `tests/test_greenfloor_engine_integration.py`
   covers the signer surface GreenFloor actually uses.
 - CI pytest runs as a standalone step (`"Test suite (pytest)"`) with `-v --tb=short`, giving each test its own line in logs and a dedicated collapsible section with pass/fail badge. The `pre-commit` step skips pytest via `SKIP: pytest` so lint/type-check and tests have independent status indicators. Locally, `pre-commit run --all-files` still runs pytest as part of the hook set.
 - Three tests are intentionally skipped in CI:
   - `test_replay_captured_cat_parse_cases` — requires `GREENFLOOR_CAT_PARSE_REPLAY_CASES_DIR` (operator-provided fixture directory).
-  - `test_greenfloor_signer_validate_offer_rejects_garbage` and `test_greenfloor_signer_from_input_spend_bundle_xch_round_trip_offer` in `tests/test_greenfloor_signer_integration.py` — require `GREENFLOOR_RUN_SIGNER_INTEGRATION_TESTS=1` (compiled `greenfloor_signer` + `chia-wallet-sdk` bindings).
+  - `test_greenfloor_engine_validate_offer_rejects_garbage` and `test_greenfloor_engine_from_input_spend_bundle_xch_round_trip_offer` in `tests/test_greenfloor_engine_integration.py` — require `GREENFLOOR_RUN_ENGINE_INTEGRATION_TESTS=1` (compiled `greenfloor_engine` + `chia-wallet-sdk` bindings).
 
 ## Deferred Backlog (Post-Testnet Proof)
 

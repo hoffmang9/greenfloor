@@ -54,11 +54,11 @@ from greenfloor.core.cycle.policy import (
     size_counts_to_signer,
 )
 from greenfloor.core.cycle_reseed import ReseedGapPlan, ReseedSkipReason
-from greenfloor.core.kernel_bridge import import_kernel
+from greenfloor.core.engine_bridge import import_engine
 
 
 def market_cycle_phases() -> tuple[str, ...]:
-    return tuple(import_kernel().market_cycle_phases())
+    return tuple(import_engine().market_cycle_phases())
 
 
 MARKET_CYCLE_PHASES: tuple[str, ...] = market_cycle_phases()

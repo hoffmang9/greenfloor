@@ -68,7 +68,7 @@ def build_action_request(
     broadcast_split: bool = True,
     offer_coin_ids: list[str] | None = None,
 ) -> OfferActionRequest:
-    """Shape a kernel ``BuildOfferForActionRequest`` dict."""
+    """Shape a engine ``BuildOfferForActionRequest`` dict."""
     address = str(receive_address or "").strip()
     if not address:
         raise ValueError("market.receive_address is required for offer build")
@@ -146,7 +146,7 @@ def legacy_action_request_from_payload(payload: dict[str, Any]) -> OfferActionRe
 
 def parse_action_result(payload: object) -> OfferActionResult:
     if not isinstance(payload, dict):
-        raise TypeError("offer action kernel returned non-dict result")
+        raise TypeError("offer action engine returned non-dict result")
     offer_text = str(payload.get("offer_text", "")).strip()
     if not offer_text.startswith("offer1"):
         raise RuntimeError("offer_action_failed:missing_offer_text")
@@ -183,7 +183,7 @@ def to_create_phase_outcome(
     *,
     action_side: str,
 ) -> OfferCreatePhaseOutcome:
-    """Map kernel action result to signer/local create-phase fields."""
+    """Map engine action result to signer/local create-phase fields."""
     return OfferCreatePhaseOutcome(
         offer_text=result["offer_text"],
         expires_at=expires_at_iso_from_unix(result["expires_at_unix"]),
