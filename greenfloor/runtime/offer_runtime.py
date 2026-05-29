@@ -200,39 +200,33 @@ def signer_create_offer_phase(
     quote_price: float,
     resolved_base_asset_id: str,
     resolved_quote_asset_id: str,
-    expiry_unit: str,
-    expiry_value: int,
     action_side: str = "sell",
     split_input_coins: bool = True,
     broadcast_split: bool = True,
 ) -> dict[str, Any]:
-    del expiry_unit, expiry_value
     side = normalize_offer_side(action_side)
-    request = offer_action.action_request_from_market(
-        market=market,
-        resolved_quote_asset=str(resolved_quote_asset_id),
+    request = offer_action.build_action_request(
+        receive_address=str(market.receive_address or ""),
+        base_asset=str(resolved_base_asset_id),
+        quote_asset=str(resolved_quote_asset_id),
+        pricing=dict(market.pricing or {}),
         size_base_units=int(size_base_units),
-        quote_price=float(quote_price),
         action_side=side,
+        quote_price=float(quote_price),
         split_input_coins=split_input_coins,
         broadcast_split=broadcast_split,
     )
-    request["base_asset"] = str(resolved_base_asset_id)
-    request["quote_asset"] = str(resolved_quote_asset_id)
     config_path = _signer_config_path(program)
     result = offer_action.build_signer_offer_for_action(config_path, request)
-    mapped = offer_action.create_offer_outcome_from_action_result(result, action_side=side)
-    offer_text = str(mapped["offer_text"]).strip()
-    if not offer_text.startswith("offer1"):
-        raise RuntimeError("signer_create_offer_failed:missing_offer_text")
+    outcome = offer_action.to_create_phase_outcome(result, action_side=side)
     return {
-        "offer_text": offer_text,
-        "expires_at": mapped["expires_at"],
-        "offer_amount": mapped["offer_amount"],
-        "request_amount": mapped["request_amount"],
-        "side": mapped["side"],
-        "execution_mode": mapped["execution_mode"],
-        "create_result": mapped["create_result"],
+        "offer_text": outcome.offer_text,
+        "expires_at": outcome.expires_at,
+        "offer_amount": outcome.offer_amount,
+        "request_amount": outcome.request_amount,
+        "side": outcome.side,
+        "execution_mode": outcome.execution_mode,
+        "create_result": outcome.create_result,
     }
 
 
@@ -280,8 +274,6 @@ def build_and_post_offer_signer(
             quote_asset_id=str(market.quote_asset),
         )
     )
-    expiry_unit = build_ctx.expiry_unit
-    expiry_value = int(build_ctx.expiry_value)
 
     def bootstrap(**kwargs: Any) -> BootstrapPhaseResult:
         return resolved_deps.signer_bootstrap_phase_fn(
@@ -301,8 +293,6 @@ def build_and_post_offer_signer(
                 quote_price=kwargs["quote_price"],
                 resolved_base_asset_id=kwargs["resolved_base_asset_id"],
                 resolved_quote_asset_id=kwargs["resolved_quote_asset_id"],
-                expiry_unit=expiry_unit,
-                expiry_value=expiry_value,
                 action_side=kwargs["action_side"],
             )
         except RuntimeError as exc:

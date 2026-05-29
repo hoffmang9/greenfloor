@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::bls::{build_bls_offer_spend_bundle, BlsOfferRequest};
-use crate::coinset::{self, resolve_offer_asset_ids, MspCoinset};
+use crate::coinset::{self, is_xch_like_asset, normalize_asset_id, resolve_offer_asset_ids, MspCoinset};
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::build::build_vault_cat_offer;
@@ -72,6 +72,30 @@ fn resolve_quote_price(request: &BuildOfferForActionRequest) -> SignerResult<f64
     resolve_quote_price_for_pricing(&request.pricing)
 }
 
+async fn resolve_signer_assets(
+    msp: &MspCoinset,
+    base_asset: &str,
+    quote_asset: &str,
+) -> SignerResult<(String, String)> {
+    match (
+        normalize_asset_id(base_asset),
+        normalize_asset_id(quote_asset),
+    ) {
+        (Ok(resolved_base), Ok(resolved_quote)) => {
+            if resolved_base == resolved_quote
+                && !is_xch_like_asset(&resolved_base)
+                && !is_xch_like_asset(&resolved_quote)
+            {
+                return Err(SignerError::Other(
+                    "resolved_assets_collide_for_non_xch_pair".to_string(),
+                ));
+            }
+            Ok((resolved_base, resolved_quote))
+        }
+        _ => resolve_offer_asset_ids(msp, base_asset, quote_asset).await,
+    }
+}
+
 fn leg_amounts_for_request(
     request: &BuildOfferForActionRequest,
     resolved_base_asset_id: &str,
@@ -114,7 +138,7 @@ pub async fn build_signer_offer_for_action(
 ) -> SignerResult<BuildOfferForActionResult> {
     let msp = MspCoinset::for_network(&config.network, Some(&config.coinset_msp_base_url))?;
     let (resolved_base, resolved_quote) =
-        resolve_offer_asset_ids(&msp, &request.base_asset, &request.quote_asset).await?;
+        resolve_signer_assets(&msp, &request.base_asset, &request.quote_asset).await?;
     let quote_price = resolve_quote_price(&request)?;
     let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
     let expires_at_unix = expires_at_unix_from_pricing(&request.pricing);
@@ -152,6 +176,7 @@ pub async fn build_bls_offer_for_action(
         request_asset_id: leg.request_asset_id.clone(),
         request_amount: leg.request_amount_mojos,
         offer_coin_ids: request.offer_coin_ids.clone(),
+        expires_at: Some(expires_at_unix),
     };
     let built = build_bls_offer_spend_bundle(network, master_sk, bls_request).await?;
     let raw_hex = built

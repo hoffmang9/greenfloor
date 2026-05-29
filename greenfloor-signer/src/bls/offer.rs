@@ -26,6 +26,8 @@ pub struct BlsOfferRequest {
     pub request_amount: u64,
     #[serde(default)]
     pub offer_coin_ids: Vec<String>,
+    #[serde(default)]
+    pub expires_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -134,7 +136,7 @@ pub async fn build_bls_offer_spend_bundle(
         offer_amount: request.offer_amount,
         request_asset_id: request.request_asset_id.trim().to_lowercase(),
         request_amount: request.request_amount,
-        expires_at: None,
+        expires_at: request.expires_at,
     };
 
     // Assertion nodes for requested payments only (not merged into the driver spend graph).

@@ -1,11 +1,10 @@
 """Shared PyO3 bridge for the Rust deterministic policy kernel.
 
-The compiled extension is still named ``greenfloor_signer`` (see ADR 0010). Python
+The compiled extension is published as ``greenfloor_kernel`` (ADR 0010). Python
 callers should use :func:`import_kernel`; ``import_signer`` remains as a migration alias.
 
-:func:`import_kernel` tries :data:`KERNEL_MODULE_LEGACY` first, then
-:data:`KERNEL_MODULE_TARGET`, so the ADR 0010 rename can flip module names without
-touching bridge call sites.
+:func:`import_kernel` tries :data:`KERNEL_MODULE_TARGET` first, then
+:data:`KERNEL_MODULE_LEGACY`, so installs can expose either module name during the rename.
 
 ``policy_kernel``, ``coin_ops_kernel``, and ``bootstrap_kernel`` are typed views of
 the same PyO3 module — use the name that matches the ``Protocol`` at the call site.

@@ -6,8 +6,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.adapters import bls_signing
+from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.core.coin_ops import CoinOpPlan
 from greenfloor.keys.onboarding import load_key_onboarding_selection
 

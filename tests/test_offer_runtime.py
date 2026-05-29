@@ -67,13 +67,13 @@ def test_signer_create_offer_phase_calls_signer_and_returns_offer_text(monkeypat
         quote_price=2.0,
         resolved_base_asset_id="basecat",
         resolved_quote_asset_id="quotecat",
-        expiry_unit="hours",
-        expiry_value=1,
         action_side="buy",
     )
 
     assert captured
     assert captured["receive_address"] == market.receive_address
+    assert captured["base_asset"] == "basecat"
+    assert captured["quote_asset"] == "quotecat"
     assert result["side"] == "buy"
     assert result["offer_text"] == "offer1test"
     assert result["execution_mode"] == "direct"
@@ -81,23 +81,19 @@ def test_signer_create_offer_phase_calls_signer_and_returns_offer_text(monkeypat
 
 
 def test_signer_create_offer_phase_requires_offer_text(monkeypatch) -> None:
+    def _raise_missing(_path: str, _req: dict) -> dict:
+        raise RuntimeError("offer_action_failed:missing_offer_text")
+
     monkeypatch.setattr(
         "greenfloor.adapters.offer_action.build_signer_offer_for_action",
-        lambda _path, _req: {
-            "offer_text": "",
-            "execution_mode": "direct",
-            "side": "sell",
-            "expires_at_unix": 0,
-            "offer_amount": 0,
-            "request_amount": 0,
-        },
+        _raise_missing,
     )
     monkeypatch.setattr(
         "greenfloor.runtime.offer_runtime.prepare_signer_runtime",
         lambda _program: "/tmp/signer.yaml",
     )
 
-    with pytest.raises(RuntimeError, match="missing_offer_text"):
+    with pytest.raises(RuntimeError, match="offer_action_failed:missing_offer_text"):
         signer_create_offer_phase(
             program=cast(ProgramConfig, SimpleNamespace()),
             market=_sample_market(),
@@ -105,8 +101,6 @@ def test_signer_create_offer_phase_requires_offer_text(monkeypatch) -> None:
             quote_price=1.0,
             resolved_base_asset_id="basecat",
             resolved_quote_asset_id="xch",
-            expiry_unit="hours",
-            expiry_value=1,
         )
 
 

@@ -38,55 +38,37 @@ def test_build_offer_rejects_missing_coin_backed_inputs() -> None:
         ("quote_unit_mojo_multiplier", 0, "invalid_quote_unit_mojo_multiplier"),
     ],
 )
-def test_build_coin_backed_rejects_invalid_plan_inputs(
+def test_legacy_action_request_rejects_invalid_plan_inputs(
     field: str,
     value: int | float,
     message: str,
 ) -> None:
+    from greenfloor.adapters import offer_action
+
     payload = dict(_BLS_COIN_BACKED_BASE)
     payload[field] = value
     with pytest.raises(ValueError, match=message):
-        offer_builder._build_coin_backed_spend_bundle_hex(payload)
+        offer_action.legacy_action_request_from_payload(payload)
 
 
-def test_build_coin_backed_rejects_rounded_zero_request_amount() -> None:
-    try:
-        import greenfloor_signer  # type: ignore[import-not-found]  # noqa: F401
-    except ImportError:
-        pytest.skip("greenfloor_signer not installed")
+def test_build_offer_calls_kernel_action(monkeypatch) -> None:
+    captured: dict = {}
 
-    payload = dict(_BLS_COIN_BACKED_BASE)
-    payload.update(
-        {
-            "size_base_units": 1,
-            "quote_price_quote_per_base": 1e-15,
-            "base_unit_mojo_multiplier": 1,
-            "quote_unit_mojo_multiplier": 1,
-        }
+    def _fake_build(*, network: str, key_id: str, request: dict) -> dict:
+        captured["network"] = network
+        captured["key_id"] = key_id
+        captured["request"] = request
+        return {"offer_text": "offer1fake"}
+
+    monkeypatch.setattr(
+        "greenfloor.offer_builder.build_bls_offer_for_action",
+        _fake_build,
     )
-    with pytest.raises(ValueError, match="request_amount must be positive"):
-        offer_builder._build_coin_backed_spend_bundle_hex(payload)
-
-
-def test_build_coin_backed_spend_bundle_hex_maps_payload(monkeypatch) -> None:
-    import greenfloor.adapters.bls_signing as bls_signing_mod
-
-    captured = {}
-
-    def _fake_build(payload):
-        captured["payload"] = payload
-        return {
-            "status": "executed",
-            "reason": "ok",
-            "spend_bundle_hex": "deadbeef",
-        }
-
-    monkeypatch.setattr(bls_signing_mod, "build_signed_spend_bundle", _fake_build)
-    result = offer_builder._build_coin_backed_spend_bundle_hex(dict(_BLS_COIN_BACKED_BASE))
-    assert result == "deadbeef"
-    assert captured["payload"]["key_id"] == "k1"
-    assert captured["payload"]["plan"]["op_type"] == "offer"
-    assert captured["payload"]["plan"]["offer_amount"] == 10000
+    offer_text = offer_builder.build_offer(dict(_BLS_COIN_BACKED_BASE))
+    assert offer_text == "offer1fake"
+    assert captured["network"] == "mainnet"
+    assert captured["key_id"] == "k1"
+    assert captured["request"]["size_base_units"] == 10
 
 
 def test_main_outputs_executed_json(monkeypatch, capsys) -> None:

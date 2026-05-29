@@ -6,8 +6,11 @@ import collections.abc
 from pathlib import Path
 from typing import Any
 
+from greenfloor.adapters.offer_action import (
+    build_bls_offer_from_build_context,
+    to_create_phase_outcome,
+)
 from greenfloor.core.planned_action import PlannedAction, planned_action_side
-from greenfloor.adapters.offer_action import build_offer_text_from_build_context
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import OfferCreateFailure, OfferCreateOutcome
 
@@ -91,6 +94,7 @@ def make_local_offer_create_fn(
         index = offer_iteration[0]
         offer_iteration[0] += 1
         try:
+            expires_at = f"{int(build_ctx.expiry_value)} {build_ctx.expiry_unit}"
             if build_offer_fn is not None:
                 payload = build_local_offer_payload(
                     build_ctx,
@@ -100,12 +104,18 @@ def make_local_offer_create_fn(
                 )
                 offer_text = build_offer_fn(payload)
             else:
-                offer_text = build_offer_text_from_build_context(
+                action_result = build_bls_offer_from_build_context(
                     build_ctx,
                     size_base_units=int(kwargs["size_base_units"]),
                     quote_price=float(kwargs["quote_price"]),
                     action_side=str(kwargs.get("action_side", build_ctx.action_side)),
                 )
+                outcome = to_create_phase_outcome(
+                    action_result,
+                    action_side=str(kwargs.get("action_side", build_ctx.action_side)),
+                )
+                offer_text = outcome.offer_text
+                expires_at = outcome.expires_at
         except Exception as exc:
             raise OfferCreateFailure(f"offer_builder_failed:{exc}") from exc
 
@@ -119,7 +129,7 @@ def make_local_offer_create_fn(
 
         return OfferCreateOutcome(
             offer_text=offer_text,
-            expires_at=f"{int(build_ctx.expiry_value)} {build_ctx.expiry_unit}",
+            expires_at=expires_at,
             side=str(kwargs.get("action_side", build_ctx.action_side)),
             extra=extra,
         )
