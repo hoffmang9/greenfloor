@@ -62,17 +62,12 @@ class BootstrapPhaseResult:
         return payload
 
 
-def bootstrap_phase_manager_payload(phase: BootstrapPhaseResult) -> dict[str, Any]:
-    """Manager/JSON boundary: convert typed phase output to a manager dict."""
-    return phase.to_manager_dict()
-
-
 def append_bootstrap_manager_action(
     actions: list[dict[str, Any]],
     phase: BootstrapPhaseResult,
 ) -> BootstrapPhaseResult:
     """Record manager payload and return the typed phase for policy gates."""
-    actions.append(bootstrap_phase_manager_payload(phase))
+    actions.append(phase.to_manager_dict())
     return phase
 
 
@@ -112,3 +107,23 @@ class BootstrapPlanOutcome:
     kind: BootstrapPlanKind
     plan: BootstrapPlan | None = None
     total_output_amount: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind == "needs_split":
+            if self.plan is None:
+                raise ValueError("BootstrapPlanOutcome needs_split requires plan")
+            if self.total_output_amount is not None:
+                raise ValueError(
+                    "BootstrapPlanOutcome needs_split must not set total_output_amount"
+                )
+            return
+        if self.kind == "cannot_fund":
+            if self.plan is not None:
+                raise ValueError("BootstrapPlanOutcome cannot_fund must not set plan")
+            if self.total_output_amount is None:
+                raise ValueError("BootstrapPlanOutcome cannot_fund requires total_output_amount")
+            return
+        if self.plan is not None:
+            raise ValueError(f"BootstrapPlanOutcome {self.kind} must not set plan")
+        if self.total_output_amount is not None:
+            raise ValueError(f"BootstrapPlanOutcome {self.kind} must not set total_output_amount")

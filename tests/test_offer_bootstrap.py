@@ -6,13 +6,13 @@ from typing import Any, cast
 import pytest
 
 from greenfloor.config.models import MarketLadderEntry
-from greenfloor.core.offer_bootstrap_policy import (
+from greenfloor.core.offer_bootstrap_bridge import (
     BootstrapCoin,
     PlannerLadderRow,
     bootstrap_early_phase,
     plan_bootstrap_mixed_outputs,
 )
-from greenfloor.offer_bootstrap import BootstrapPlanOutcome
+from greenfloor.offer_bootstrap import BootstrapPlan, BootstrapPlanOutcome
 from greenfloor.runtime.offer_bootstrap import bootstrap_ladder_entries_for_side
 from tests.helpers.config_fixtures import minimal_market_config, minimal_market_with_sell_ladder
 
@@ -121,6 +121,25 @@ def test_plan_bootstrap_mixed_outputs_requires_kernel_symbol(monkeypatch) -> Non
     monkeypatch.setattr(bridge, "bootstrap_kernel", lambda: _Kernel())
     with pytest.raises(RuntimeError, match="plan_bootstrap_mixed_outputs"):
         plan_bootstrap_mixed_outputs(ladder_entries=_sample_ladder(), spendable_coins=[])
+
+
+def test_bootstrap_plan_outcome_rejects_invalid_field_combinations() -> None:
+    with pytest.raises(ValueError, match="needs_split requires plan"):
+        BootstrapPlanOutcome(kind="needs_split")
+    with pytest.raises(ValueError, match="cannot_fund requires total_output_amount"):
+        BootstrapPlanOutcome(kind="cannot_fund")
+    with pytest.raises(ValueError, match="ready must not set plan"):
+        BootstrapPlanOutcome(
+            kind="ready",
+            plan=BootstrapPlan(
+                source_coin_id="x",
+                source_amount=1,
+                output_amounts_base_units=[1],
+                total_output_amount=1,
+                change_amount=0,
+                deficits=[],
+            ),
+        )
 
 
 def test_bootstrap_early_phase_maps_cannot_fund_to_underfunded_skip() -> None:

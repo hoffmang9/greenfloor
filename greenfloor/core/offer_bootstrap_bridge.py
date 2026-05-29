@@ -1,23 +1,39 @@
-"""Rust-backed bootstrap mixed-output planner (canonical Python bridge).
+"""Stable runtime import path for bootstrap planner, phase policy, and DTOs.
 
-Call symbols here (or via ``offer_bootstrap_policy``), not ``kernel_bridge.bootstrap_kernel()``
-directly. Coinset coin dicts are coerced to ``BootstrapCoin`` in this module; PyO3 accepts
-``BootstrapCoin`` instances only.
+Kernel-backed symbols live here. Call via this module (not ``kernel_bridge.bootstrap_kernel()``).
+Coinset coin dicts are coerced to ``BootstrapCoin`` at the planner boundary; PyO3 requires
+``BootstrapCoin`` instances.
+
+**Policy ownership:** deterministic planner + early/executed phase mapping are Rust
+(``greenfloor-signer/src/offer/bootstrap/``). **Fee eligibility** and mixed-split I/O are
+Python-only (``greenfloor/runtime/offer_bootstrap.py``).
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from greenfloor.core import kernel_bridge
+from greenfloor.offer_bootstrap import (
+    BootstrapCoin,
+    BootstrapPhaseResult,
+    BootstrapPlan,
+    BootstrapPlanOutcome,
+    LadderDeficit,
+    PlannerLadderRow,
+)
 
-if TYPE_CHECKING:
-    from greenfloor.offer_bootstrap import (
-        BootstrapCoin,
-        BootstrapPhaseResult,
-        BootstrapPlanOutcome,
-        PlannerLadderRow,
-    )
+__all__ = [
+    "BootstrapCoin",
+    "BootstrapPhaseResult",
+    "BootstrapPlan",
+    "BootstrapPlanOutcome",
+    "LadderDeficit",
+    "PlannerLadderRow",
+    "bootstrap_early_phase",
+    "bootstrap_executed_phase",
+    "plan_bootstrap_mixed_outputs",
+]
 
 _KERNEL_REBUILD_HINT = (
     "greenfloor_signer extension is missing bootstrap planner symbols. "
@@ -38,8 +54,6 @@ def _require_bootstrap_method(method_name: str):
 
 
 def _coerce_spendable_coins(spendable_coins: list[Any]) -> list[BootstrapCoin]:
-    from greenfloor.offer_bootstrap import BootstrapCoin
-
     coerced: list[BootstrapCoin] = []
     for index, coin in enumerate(spendable_coins):
         if isinstance(coin, BootstrapCoin):
@@ -64,16 +78,12 @@ def _coerce_spendable_coins(spendable_coins: list[Any]) -> list[BootstrapCoin]:
 
 
 def _coerce_planner_outcome(payload: object) -> BootstrapPlanOutcome:
-    from greenfloor.offer_bootstrap import BootstrapPlanOutcome
-
     if isinstance(payload, BootstrapPlanOutcome):
         return payload
     raise TypeError("plan_bootstrap_mixed_outputs returned unexpected result type")
 
 
 def _coerce_phase_result(payload: object) -> BootstrapPhaseResult:
-    from greenfloor.offer_bootstrap import BootstrapPhaseResult
-
     if isinstance(payload, BootstrapPhaseResult):
         return payload
     raise TypeError("bootstrap phase kernel call returned unexpected result type")
@@ -85,8 +95,6 @@ def plan_bootstrap_mixed_outputs(
     spendable_coins: list[Any],
 ) -> BootstrapPlanOutcome:
     """Evaluate bootstrap inventory against denomination ladder rows."""
-    from greenfloor.offer_bootstrap import PlannerLadderRow
-
     if not all(isinstance(row, PlannerLadderRow) for row in ladder_entries):
         raise TypeError("ladder_entries must contain PlannerLadderRow instances")
 

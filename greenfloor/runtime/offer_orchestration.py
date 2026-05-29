@@ -16,7 +16,6 @@ from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.offer_bootstrap import (
     BootstrapPhaseResult,
     append_bootstrap_manager_action,
-    bootstrap_phase_manager_payload,
 )
 from greenfloor.runtime.coinset_runtime import resolve_maker_offer_fee
 from greenfloor.runtime.offer_build_context import OfferBuildContext
@@ -66,7 +65,7 @@ def bootstrap_blocks_offer(bootstrap_result: BootstrapPhaseResult) -> tuple[bool
     if not isinstance(bootstrap_result, BootstrapPhaseResult):
         raise TypeError(
             "bootstrap_blocks_offer requires BootstrapPhaseResult; "
-            "use bootstrap_phase_manager_payload for manager dicts"
+            "use BootstrapPhaseResult.to_manager_dict for manager dicts"
         )
     error = offer_policy.bootstrap_block_error(
         bootstrap_status=bootstrap_result.status,
@@ -275,7 +274,7 @@ def execute_build_and_post_offer(
                     publish_venue=publish_venue,
                     started_ms=started_ms,
                     error=str(error),
-                    bootstrap=bootstrap_phase_manager_payload(bootstrap_result),
+                    bootstrap=bootstrap_result.to_manager_dict(),
                 )
                 publish_failures += 1
                 continue

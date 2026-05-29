@@ -1,4 +1,5 @@
 mod bootstrap;
+mod bootstrap_marshal;
 mod coin_ops;
 mod common;
 mod cycle;

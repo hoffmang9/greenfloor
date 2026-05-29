@@ -2,6 +2,10 @@
 //!
 //! `output_amounts_base_units` is the authoritative mixed-split output list for
 //! `signer_bootstrap_phase` (passed to vault mixed-split as `output_amounts`).
+//! Deterministic bootstrap mixed-output planner for offer denomination preflight.
+//!
+//! `output_amounts_base_units` is the authoritative mixed-split output list for
+//! `signer_bootstrap_phase` (passed to vault mixed-split as `output_amounts`).
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannerLadderRow {
@@ -141,7 +145,9 @@ pub fn plan_bootstrap_mixed_outputs(
     });
 
     let Some((source_coin_id, source_amount)) = candidate else {
-        return BootstrapPlanOutcome::CannotFund { total_output_amount };
+        return BootstrapPlanOutcome::CannotFund {
+            total_output_amount,
+        };
     };
 
     BootstrapPlanOutcome::NeedsSplit(BootstrapPlan {
@@ -154,83 +160,11 @@ pub fn plan_bootstrap_mixed_outputs(
     })
 }
 
-/// Manager-visible bootstrap phase fields (status / reason / ready).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BootstrapPhaseSnapshot {
-    pub status: &'static str,
-    pub reason: String,
-    pub ready: bool,
-}
-
-/// Map a planner outcome to an early bootstrap phase snapshot, if mixed-split should not run.
-pub fn bootstrap_early_phase(outcome: &BootstrapPlanOutcome) -> Option<BootstrapPhaseSnapshot> {
-    match outcome {
-        BootstrapPlanOutcome::Ready => Some(BootstrapPhaseSnapshot {
-            status: "skipped",
-            reason: "already_ready".to_string(),
-            ready: false,
-        }),
-        BootstrapPlanOutcome::CannotFund {
-            total_output_amount,
-        } => Some(BootstrapPhaseSnapshot {
-            status: "skipped",
-            reason: format!("bootstrap_underfunded:total_output_amount={total_output_amount}"),
-            ready: false,
-        }),
-        BootstrapPlanOutcome::InvalidLadder => Some(BootstrapPhaseSnapshot {
-            status: "failed",
-            reason: "bootstrap_invalid_ladder".to_string(),
-            ready: false,
-        }),
-        BootstrapPlanOutcome::InvalidCoins => Some(BootstrapPhaseSnapshot {
-            status: "failed",
-            reason: "bootstrap_invalid_coins".to_string(),
-            ready: false,
-        }),
-        BootstrapPlanOutcome::NeedsSplit(_) => None,
-    }
-}
-
-/// Map a post-split replan outcome to executed-phase status/reason/ready.
-pub fn bootstrap_executed_phase(remaining: &BootstrapPlanOutcome) -> BootstrapPhaseSnapshot {
-    match remaining {
-        BootstrapPlanOutcome::Ready => BootstrapPhaseSnapshot {
-            status: "executed",
-            reason: "bootstrap_submitted".to_string(),
-            ready: true,
-        },
-        BootstrapPlanOutcome::CannotFund {
-            total_output_amount,
-        } => BootstrapPhaseSnapshot {
-            status: "executed",
-            reason: format!(
-                "bootstrap_submitted:still_underfunded:total_output_amount={total_output_amount}"
-            ),
-            ready: false,
-        },
-        BootstrapPlanOutcome::NeedsSplit(_) => BootstrapPhaseSnapshot {
-            status: "executed",
-            reason: "bootstrap_submitted:still_needs_split".to_string(),
-            ready: false,
-        },
-        BootstrapPlanOutcome::InvalidLadder => BootstrapPhaseSnapshot {
-            status: "executed",
-            reason: "bootstrap_submitted:still_invalid_ladder".to_string(),
-            ready: false,
-        },
-        BootstrapPlanOutcome::InvalidCoins => BootstrapPhaseSnapshot {
-            status: "executed",
-            reason: "bootstrap_submitted:still_invalid_coins".to_string(),
-            ready: false,
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs,
-        BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
+        plan_bootstrap_mixed_outputs, BootstrapCoin, BootstrapPlan, BootstrapPlanOutcome,
+        LadderDeficit, PlannerLadderRow,
     };
 
     fn row(size: i64, target: i64, buffer: i64) -> PlannerLadderRow {
@@ -271,7 +205,11 @@ mod tests {
     #[test]
     fn returns_ready_when_inventory_satisfied() {
         let ladder = vec![row(1, 1, 0), row(10, 1, 0)];
-        let spendable = vec![coin("coin-1", 1), coin("coin-10", 10), coin("coin-extra", 500)];
+        let spendable = vec![
+            coin("coin-1", 1),
+            coin("coin-10", 10),
+            coin("coin-extra", 500),
+        ];
         assert_eq!(
             plan_bootstrap_mixed_outputs(&ladder, &spendable),
             BootstrapPlanOutcome::Ready
@@ -378,29 +316,6 @@ mod tests {
         assert_eq!(
             plan_bootstrap_mixed_outputs(&ladder, &[coin("bad", -5)]),
             BootstrapPlanOutcome::InvalidCoins
-        );
-    }
-
-    #[test]
-    fn early_phase_skips_when_needs_split() {
-        let ladder = vec![row(10, 2, 0)];
-        let spendable = vec![coin("coin-big", 100)];
-        let outcome = plan_bootstrap_mixed_outputs(&ladder, &spendable);
-        assert!(bootstrap_early_phase(&outcome).is_none());
-    }
-
-    #[test]
-    fn executed_phase_reports_still_underfunded() {
-        let remaining = BootstrapPlanOutcome::CannotFund {
-            total_output_amount: 20,
-        };
-        let phase = bootstrap_executed_phase(&remaining);
-        assert_eq!(phase.status, "executed");
-        assert!(!phase.ready);
-        assert!(
-            phase
-                .reason
-                .contains("still_underfunded:total_output_amount=20")
         );
     }
 

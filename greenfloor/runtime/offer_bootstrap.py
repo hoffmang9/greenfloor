@@ -1,4 +1,9 @@
-"""Bootstrap ladder shaping and mixed-split execution for signer offer runtime."""
+"""Bootstrap ladder shaping and mixed-split execution for signer offer runtime.
+
+Rust owns deterministic planner and phase status/reason mapping (via
+``core.offer_bootstrap_bridge``). This module owns fee resolution, Coinset coin I/O,
+vault mixed-split submission, confirmation wait, and post-split replan orchestration.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,7 @@ from typing import Any, Protocol
 
 from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketLadderEntry, ProgramConfig
-from greenfloor.core.offer_bootstrap_policy import (
+from greenfloor.core.offer_bootstrap_bridge import (
     BootstrapPhaseResult,
     BootstrapPlan,
     BootstrapPlanOutcome,

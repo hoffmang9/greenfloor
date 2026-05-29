@@ -9,7 +9,7 @@ from typing import Any
 
 from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
-from greenfloor.core.offer_bootstrap_policy import (
+from greenfloor.core.offer_bootstrap_bridge import (
     BootstrapPhaseResult,
     plan_bootstrap_mixed_outputs,
 )
@@ -147,7 +147,7 @@ def signer_bootstrap_phase(
         resolved_quote_asset_id=str(resolved_quote_asset_id),
     )
     if not ladder_entries:
-        return _bootstrap_skip(f"missing_{side}_ladder")
+        return _bootstrap_skip(f"empty_{side}_ladder_after_quote_conversion")
 
     split_asset_id = signer_split_asset_id(
         action_side=action_side,
