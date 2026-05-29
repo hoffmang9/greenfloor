@@ -14,7 +14,6 @@ from greenfloor.core.coin_ops import (
     plan_coin_ops,
     projected_coin_ops_fee_mojos,
 )
-from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.daemon.cooldowns import _combine_input_coin_cap
 from greenfloor.daemon.market_helpers import _base_unit_mojo_multiplier_for_market
 from greenfloor.daemon.market_logging import _daemon_logger, _log_market_decision
@@ -63,7 +62,7 @@ def _executed_sell_offer_counts_by_size(
     for item in offer_execution.action_items:
         if not item.counts_as_executed:
             continue
-        if normalize_offer_side(item.side) != "sell":
+        if item.side != "sell":
             continue
         if item.size <= 0:
             continue

@@ -7,7 +7,7 @@ from datetime import datetime
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.offer_policy import normalize_offer_side
+from greenfloor.core.planned_action import PlannedAction, planned_action_side
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.cooldowns import _managed_offer_market_health_payload
 from greenfloor.daemon.market_cycle.result import MarketCycleResult
@@ -45,7 +45,11 @@ def execute_strategy_for_market(
                     "cancel_after_create": action.cancel_after_create,
                     "reason": action.reason,
                     "target_spread_bps": action.target_spread_bps,
-                    "side": normalize_offer_side(getattr(action, "side", "sell")),
+                    "side": (
+                        planned_action_side(action)
+                        if isinstance(action, PlannedAction)
+                        else str(getattr(action, "side", "sell"))
+                    ),
                 }
                 for action in strategy_actions
             ],

@@ -32,7 +32,16 @@ def _coerce_signer_offer_leg_amounts(payload: object):
 
 
 def normalize_offer_side(action_side: str) -> str:
-    return str(_require_offer_request_method("normalize_offer_side")(str(action_side)))
+    """Normalize to ``buy`` or ``sell``. Fast path for common inputs; kernel for the rest."""
+    trimmed = str(action_side or "").strip()
+    if not trimmed:
+        return "sell"
+    lower = trimmed.lower()
+    if lower == "buy":
+        return "buy"
+    if lower == "sell":
+        return "sell"
+    return str(_require_offer_request_method("normalize_offer_side")(trimmed))
 
 
 def quote_mojos_for_base_size(

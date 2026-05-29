@@ -14,7 +14,7 @@ from greenfloor.core.cycle import (
     reservation_release_status,
     should_apply_parallel_transient_cooldown,
 )
-from greenfloor.core.offer_policy import normalize_offer_side
+from greenfloor.core.planned_action import planned_action_side
 from greenfloor.core.parallel_batch_plan import ParallelBatchPlan, ParallelQueueItem
 from greenfloor.core.parallel_reservation_context import parallel_reservation_asset_ids
 from greenfloor.core.planned_action import PlannedAction
@@ -57,7 +57,7 @@ def _run_parallel_submission(
         "parallel_offer_queue_wait",
         submit_index=submit_index,
         size=action.size,
-        side=normalize_offer_side(action.side),
+        side=planned_action_side(action),
         queue_wait_ms=queue_wait_ms,
     )
     acquire_started = time.monotonic()

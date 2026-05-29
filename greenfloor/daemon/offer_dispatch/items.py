@@ -6,8 +6,7 @@ from typing import Any
 
 from greenfloor.core.cycle import is_managed_worker_transient_error
 from greenfloor.core.managed_action_outcome import ManagedActionOutcome
-from greenfloor.core.offer_policy import normalize_offer_side
-from greenfloor.core.planned_action import PlannedAction
+from greenfloor.core.planned_action import PlannedAction, planned_action_side
 from greenfloor.core.strategy_action_item import StrategyActionItem
 
 __all__ = [
@@ -31,7 +30,7 @@ def action_item(
         action,
         status=status,
         reason=reason,
-        side=normalize_offer_side(action.side),
+        side=planned_action_side(action),
         offer_id=offer_id,
         transient_upstream=transient_upstream,
         **extra,

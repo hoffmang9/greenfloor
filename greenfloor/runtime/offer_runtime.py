@@ -311,6 +311,7 @@ def signer_create_offer_phase(
     split_input_coins: bool = True,
     broadcast_split: bool = True,
 ) -> dict[str, Any]:
+    side = normalize_offer_side(action_side)
     expires_at_dt = dt.datetime.now(dt.UTC) + dt.timedelta(**{expiry_unit: int(expiry_value)})
     request = build_signer_create_offer_request(
         market=market,
@@ -318,7 +319,7 @@ def signer_create_offer_phase(
         quote_price=quote_price,
         resolved_base_asset_id=resolved_base_asset_id,
         resolved_quote_asset_id=resolved_quote_asset_id,
-        action_side=action_side,
+        action_side=side,
         split_input_coins=split_input_coins,
         broadcast_split=broadcast_split,
         expires_at_unix=int(expires_at_dt.timestamp()),
@@ -333,7 +334,7 @@ def signer_create_offer_phase(
         "expires_at": expires_at_dt.isoformat(),
         "offer_amount": request.offer_amount,
         "request_amount": request.request_amount,
-        "side": normalize_offer_side(action_side),
+        "side": side,
         "execution_mode": str(result.get("execution_mode", "")).strip(),
         "create_result": dict(result) if isinstance(result, dict) else {},
     }

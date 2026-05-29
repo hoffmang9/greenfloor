@@ -9,10 +9,10 @@ from greenfloor.config.io import resolve_quote_asset_for_offer
 from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.core.offer_policy import (
     mojo_multiplier_for_leg,
+    normalize_offer_side,
     resolve_offer_expiry_for_pricing,
     resolve_quote_price_for_pricing,
 )
-from greenfloor.core.offer_policy import normalize_offer_side
 
 
 def keyring_yaml_path_for_market(program: ProgramConfig, market: MarketConfig) -> str:
@@ -29,6 +29,13 @@ def default_program_config_path(
 
 @dataclass(frozen=True, slots=True)
 class OfferBuildContext:
+    """Shared manual-offer build inputs.
+
+    ``action_side`` is normalized once in ``prepare_offer_build_context`` to ``buy`` or
+    ``sell``. Downstream code should use it directly instead of calling
+    ``normalize_offer_side`` again.
+    """
+
     program: ProgramConfig
     market: MarketConfig
     program_path: Path

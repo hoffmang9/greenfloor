@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from greenfloor.core.offer_policy import normalize_offer_side
+from greenfloor.core.planned_action import PlannedAction, planned_action_side
 from greenfloor.core.signer_offer_request import (
     build_signer_create_offer_request,
     compute_signer_offer_leg_amounts,
+)
+from tests.helpers.offer_runtime_fixtures import (
+    market_config_for_local_offer,
+    offer_build_context_for_program_market,
+    program_config_for_local_offer,
 )
 from tests.helpers.signer_fixtures import (
     SIGNER_FIXTURE_DIR,
@@ -45,6 +52,37 @@ def test_normalize_offer_side_matches_kernel(raw: str, expected: str) -> None:
     kernel = _require_signer_kernel()
     assert normalize_offer_side(raw) == expected
     assert str(kernel.normalize_offer_side(str(raw))) == expected
+
+
+def test_planned_action_side_avoids_kernel_for_canonical_labels() -> None:
+    action = PlannedAction(
+        size=1,
+        repeat=1,
+        pair="xch",
+        expiry_unit="minutes",
+        expiry_value=10,
+        cancel_after_create=False,
+        reason="test",
+        side="buy",
+    )
+    assert planned_action_side(action) == "buy"
+
+
+def test_prepare_offer_build_context_caches_normalized_side(tmp_path: Path) -> None:
+    program = program_config_for_local_offer(home_dir=str(tmp_path))
+    market = replace(
+        market_config_for_local_offer(),
+        pricing={"fixed_quote_per_base": 1.0},
+    )
+    program_path = tmp_path / "program.yaml"
+    program_path.write_text("app:\n  network: mainnet\n", encoding="utf-8")
+    build_ctx = offer_build_context_for_program_market(
+        program=program,
+        market=market,
+        program_path=program_path,
+        action_side="BUY",
+    )
+    assert build_ctx.action_side == "buy"
 
 
 @pytest.mark.parametrize("fixture_path", sorted(SIGNER_FIXTURE_DIR.glob("*.json")))
