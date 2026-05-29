@@ -1,5 +1,13 @@
 # Progress Log
 
+## 2026-05-28 (ADR 0010 rename-prep hygiene)
+
+- **`greenfloor/core/kernel_bridge.py`:** `KERNEL_MODULE_LEGACY` / `KERNEL_MODULE_TARGET` constants; `import_kernel()` tries legacy then target module; shared `kernel_rebuild_hint()` for stale-wheel operator text; `resolved_kernel_module_name()` for diagnostics.
+- **Policy bridges:** `policy_bridge`, `offer_bootstrap_bridge`, and `offer_request_bridge` delegate rebuild hints to `kernel_bridge` (no duplicated maturin strings).
+- **Rust docs:** crate-level `lib.rs` doc + `cycle/` / `offer/` module headers; `greenfloor-signer` Cargo description updated; PyO3 `lib.rs` module comment points callers at `kernel_bridge`.
+- **Adapter docstrings:** `rust_signer`, `native_offer`, `bls_signing`, `bls_cat_coins`, `coinset` use "Rust kernel" wording; stable error-code prefixes unchanged.
+- **Tests:** `tests/test_kernel_bridge.py` covers alias, rebuild hint, and import candidate order.
+
 ## 2026-05-28 (Coin-op effective counts — Rust kernel by domain)
 
 - **`greenfloor-signer/src/coin_ops/effective_counts.rs`:** `effective_sell_bucket_counts_for_coin_ops` takes `LadderTargetRow` slices (size + target only); merges wallet counts with live and in-cycle sell offers toward ladder targets.

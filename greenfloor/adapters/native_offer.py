@@ -1,4 +1,4 @@
-"""Offer codec helpers via ``greenfloor_signer`` (merged from greenfloor-native)."""
+"""Offer codec helpers via the Rust kernel (``kernel_bridge.import_kernel``)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from greenfloor.core.kernel_bridge import import_kernel
 
 
 def encode_offer_from_spend_bundle_hex(raw_hex: str) -> str:
-    """Encode a spend bundle hex string to offer1... via ``greenfloor_signer``."""
+    """Encode a spend bundle hex string to offer1... via the Rust kernel."""
     return str(import_kernel().encode_offer(bytes.fromhex(raw_hex)))
 
 

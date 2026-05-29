@@ -1,10 +1,9 @@
-"""Coinset adapter: query helpers in Python, mutations via Rust signer bindings.
+"""Coinset adapter: query helpers in Python, mutations via Rust kernel bindings.
 
 Read-only Coinset HTTP calls (coin lookups, offer payload parsing) live here and
 use ``_post_json`` against the configured MSP base URL. Transaction push and fee
-estimation for signed spend bundles are delegated to ``greenfloor_native`` /
-``greenfloor-signer-pyo3`` so mutation paths share the same Rust IO stack as the
-signer.
+estimation for signed spend bundles are delegated to the Rust kernel PyO3 module
+(``kernel_bridge.import_kernel``) so mutation paths share the same Rust IO stack.
 """
 
 from __future__ import annotations

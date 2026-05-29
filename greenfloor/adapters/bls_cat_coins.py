@@ -1,8 +1,8 @@
-"""BLS CAT coin discovery via ``greenfloor_signer`` (canonical Rust coinset parse path).
+"""BLS CAT coin discovery via the Rust kernel (canonical Rust coinset parse path).
 
 Returns lightweight stand-in objects with ``.coin`` and ``.info.asset_id`` shaped like
 ``chia_wallet_sdk`` ``Cat`` instances. They are **not** full SDK ``Cat`` values — callers
-that need puzzle parsing or driver spends must use the Rust signer paths instead.
+that need puzzle parsing or driver spends must use the Rust kernel BLS paths instead.
 """
 
 from __future__ import annotations

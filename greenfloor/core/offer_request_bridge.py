@@ -9,17 +9,12 @@ if TYPE_CHECKING:
 
 from greenfloor.core import kernel_bridge
 
-_KERNEL_REBUILD_HINT = (
-    "greenfloor_signer extension is missing required offer-request symbols. "
-    "Rebuild it (for example: `maturin develop --manifest-path "
-    "greenfloor-signer-pyo3/Cargo.toml`)."
-)
-
 
 def _require_offer_request_method(method_name: str):
     method = getattr(kernel_bridge.policy_kernel(), method_name, None)
     if method is None:
-        raise RuntimeError(f"{_KERNEL_REBUILD_HINT} Missing symbol: {method_name}")
+        hint = kernel_bridge.kernel_rebuild_hint(missing="offer-request")
+        raise RuntimeError(f"{hint} Missing symbol: {method_name}")
     return method
 
 

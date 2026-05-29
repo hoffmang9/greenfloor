@@ -1,3 +1,7 @@
+//! Offer build, validation, bootstrap planning, and publish policy.
+//!
+//! See ADR 0010 for the planned crate rename to `greenfloor-kernel`.
+
 pub mod assemble;
 pub mod bootstrap;
 pub mod build;

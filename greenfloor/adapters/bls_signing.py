@@ -1,7 +1,7 @@
-"""BLS keyring signing: thin Python wrappers over ``greenfloor_signer`` Rust paths.
+"""BLS keyring signing: thin Python wrappers over Rust kernel BLS paths.
 
-Offer, mixed-split, XCH split/combine spend bundles and key loading run in ``greenfloor-signer``.
-Vault KMS uses ``greenfloor.adapters.rust_signer``.
+Offer, mixed-split, XCH split/combine spend bundles and key loading run in the
+``greenfloor-signer`` crate. Vault KMS uses ``greenfloor.adapters.rust_signer``.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Thin wrapper around the ``greenfloor_signer`` PyO3 extension."""
+"""Thin wrapper around the Rust kernel vault path (PyO3 module ``greenfloor_signer`` until ADR 0010)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from greenfloor.core.signer_offer_request import (
 
 
 def resolve_vault_context(program_path: str) -> dict[str, Any]:
-    """Load vault display context from program config via the Rust signer."""
+    """Load vault display context from program config via the Rust kernel."""
     signer = import_kernel()
     result = signer.resolve_vault_context(str(program_path))
     if not isinstance(result, dict):
@@ -27,7 +27,7 @@ def build_vault_cat_offer(
     program_path: str,
     request_dict: SignerCreateOfferPayload | dict[str, Any],
 ) -> dict[str, Any]:
-    """Build a vault CAT offer using the canonical Rust signer."""
+    """Build a vault CAT offer using the canonical Rust kernel vault path."""
     signer = import_kernel()
     result = signer.build_vault_cat_offer(str(program_path), request_dict)
     if not isinstance(result, dict):
@@ -36,7 +36,7 @@ def build_vault_cat_offer(
 
 
 def build_mixed_split(program_path: str, request_dict: dict[str, Any]) -> dict[str, Any]:
-    """Build (and optionally broadcast) a vault CAT mixed split via the Rust signer."""
+    """Build (and optionally broadcast) a vault CAT mixed split via the Rust kernel."""
     signer = import_kernel()
     result = signer.build_mixed_split(str(program_path), request_dict)
     if not isinstance(result, dict):
@@ -70,7 +70,7 @@ def program_config_path_from_payload(payload: dict[str, Any]) -> str | None:
 
 
 def is_vault_kms_payload(payload: dict[str, Any]) -> bool:
-    """True when payload should use vault KMS signing (Rust signer)."""
+    """True when payload should use vault KMS signing (Rust kernel vault path)."""
     return bool(str(payload.get("signer_kms_key_id", "")).strip())
 
 

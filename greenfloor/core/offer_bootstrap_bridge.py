@@ -35,12 +35,6 @@ __all__ = [
     "plan_bootstrap_mixed_outputs",
 ]
 
-_KERNEL_REBUILD_HINT = (
-    "greenfloor_signer extension is missing bootstrap planner symbols. "
-    "Rebuild it (for example: `maturin develop --manifest-path "
-    "greenfloor-signer-pyo3/Cargo.toml`)."
-)
-
 
 def _require_bootstrap_kernel():
     return kernel_bridge.bootstrap_kernel()
@@ -49,7 +43,8 @@ def _require_bootstrap_kernel():
 def _require_bootstrap_method(method_name: str):
     method = getattr(_require_bootstrap_kernel(), method_name, None)
     if method is None:
-        raise RuntimeError(f"{_KERNEL_REBUILD_HINT} Missing symbol: {method_name}")
+        hint = kernel_bridge.kernel_rebuild_hint(missing="bootstrap planner")
+        raise RuntimeError(f"{hint} Missing symbol: {method_name}")
     return method
 
 

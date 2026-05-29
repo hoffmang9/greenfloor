@@ -1,3 +1,7 @@
+//! Deterministic cycle orchestration, managed dispatch, and offer reconciliation.
+//!
+//! See ADR 0010 for the planned crate rename to `greenfloor-kernel`.
+
 pub mod cancel;
 pub mod dispatch;
 pub mod execution;
