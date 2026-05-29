@@ -6,7 +6,7 @@ from typing import Any
 
 from greenfloor.core.cycle import is_managed_worker_transient_error
 from greenfloor.core.managed_action_outcome import ManagedActionOutcome
-from greenfloor.core.offer_side import normalize_offer_side
+from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.strategy_action_item import StrategyActionItem
 

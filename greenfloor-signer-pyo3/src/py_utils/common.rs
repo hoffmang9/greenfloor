@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use serde_json::Value;
 
 pub fn to_py_err<E: std::fmt::Display>(err: E) -> PyErr {
     PyValueError::new_err(err.to_string())
@@ -27,6 +28,13 @@ pub fn py_any_to_json(value: &Bound<'_, PyAny>) -> PyResult<serde_json::Value> {
 
 pub fn request_dict_to_json(request: &Bound<'_, PyDict>) -> PyResult<serde_json::Value> {
     py_any_to_json(request.as_any())
+}
+
+pub fn pricing_dict_from_py(pricing: &Bound<'_, PyAny>) -> PyResult<Value> {
+    if let Ok(dict) = pricing.downcast::<PyDict>() {
+        return request_dict_to_json(dict);
+    }
+    Err(PyValueError::new_err("pricing must be a dict"))
 }
 
 pub fn dict_to_i64_i64_map(dict: &Bound<'_, PyDict>) -> PyResult<BTreeMap<i64, i64>> {

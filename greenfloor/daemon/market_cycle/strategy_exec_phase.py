@@ -7,7 +7,7 @@ from datetime import datetime
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.offer_side import normalize_offer_side
+from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.daemon.cooldowns import _managed_offer_market_health_payload
 from greenfloor.daemon.market_cycle.result import MarketCycleResult

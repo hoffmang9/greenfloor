@@ -9,7 +9,7 @@ from typing import Any
 
 from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
-from greenfloor.core.offer_side import normalize_offer_side
+from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.core.signer_offer_request import (
     build_signer_create_offer_request,
     quote_mojos_for_base_size,

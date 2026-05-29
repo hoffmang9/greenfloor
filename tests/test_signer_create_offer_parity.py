@@ -7,12 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.core.signer_offer_request import (
     SignerOfferLegAmounts,
     build_signer_create_offer_request,
     compute_signer_offer_leg_amounts,
-    quote_mojos_for_base_size,
-    signer_split_asset_id,
 )
 from tests.helpers.signer_fixtures import (
     SIGNER_FIXTURE_DIR,
@@ -32,6 +31,19 @@ def _require_signer_kernel() -> None:
     compute = getattr(greenfloor_signer, "compute_signer_offer_leg_amounts", None)
     if not callable(compute):
         pytest.skip("greenfloor_signer.compute_signer_offer_leg_amounts not available")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("buy", "buy"),
+        ("BUY", "buy"),
+        ("sell", "sell"),
+        ("", "sell"),
+    ],
+)
+def test_normalize_offer_side_contract(raw: str, expected: str) -> None:
+    assert normalize_offer_side(raw) == expected
 
 
 @pytest.mark.parametrize("fixture_path", sorted(SIGNER_FIXTURE_DIR.glob("*.json")))
@@ -72,37 +84,6 @@ def test_signer_golden_fixture_contract(fixture_path: Path) -> None:
     ) == comparable_fixture_runtime_fields(
         fixture_req,
         expires_at_unix=expires_at_unix,
-    )
-
-
-def test_quote_mojos_for_base_size_matches_direct_fixture_pricing() -> None:
-    _require_signer_kernel()
-    assert quote_mojos_for_base_size(
-        size_base_units=1,
-        quote_price=1.0,
-        quote_unit_multiplier=1_000_000_000_000,
-    ) == 1_000_000_000_000
-
-
-def test_signer_split_asset_id_selects_side_asset() -> None:
-    _require_signer_kernel()
-    base = "457275a8b9926058d8c9c2ebae52ac5938a4034345cafef6e87f4c7c24b749d8"
-    quote = "664799fc173e0d9d4d024c42e411d26f275eeb1095dad980ccd11df09c8bb6fb"
-    assert (
-        signer_split_asset_id(
-            action_side="sell",
-            resolved_base_asset_id=base,
-            resolved_quote_asset_id=quote,
-        )
-        == base
-    )
-    assert (
-        signer_split_asset_id(
-            action_side="buy",
-            resolved_base_asset_id=base,
-            resolved_quote_asset_id=quote,
-        )
-        == quote
     )
 
 

@@ -1,7 +1,7 @@
 """Stable import path for offer-build and Dexie validation policy."""
 
-from greenfloor.core.offer_side import normalize_offer_side
 from greenfloor.core.policy_bridge import (
+    normalize_offer_side,
     bootstrap_block_error,
     dexie_offer_asset_expectation_error,
     expected_publish_asset_fields,

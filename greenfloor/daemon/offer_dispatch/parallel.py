@@ -14,7 +14,7 @@ from greenfloor.core.cycle import (
     reservation_release_status,
     should_apply_parallel_transient_cooldown,
 )
-from greenfloor.core.offer_side import normalize_offer_side
+from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.core.parallel_batch_plan import ParallelBatchPlan, ParallelQueueItem
 from greenfloor.core.parallel_reservation_context import parallel_reservation_asset_ids
 from greenfloor.core.planned_action import PlannedAction

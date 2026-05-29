@@ -14,7 +14,7 @@ from greenfloor.core.cycle import (
     is_managed_upstream_transient_error,
     managed_retry_decision,
 )
-from greenfloor.core.offer_side import normalize_offer_side
+from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.cooldowns import (

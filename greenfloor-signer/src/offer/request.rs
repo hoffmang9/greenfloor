@@ -101,15 +101,15 @@ pub fn compute_signer_offer_leg_amounts(
     let (offer_asset_id, request_asset_id, offer_amount_mojos, request_amount_mojos) =
         if side == "buy" {
             (
-                resolved_quote_asset_id.trim().to_string(),
-                resolved_base_asset_id.trim().to_string(),
+                normalize_offer_asset_id(resolved_quote_asset_id),
+                normalize_offer_asset_id(resolved_base_asset_id),
                 quote_request_mojos,
                 base_offer_mojos,
             )
         } else {
             (
-                resolved_base_asset_id.trim().to_string(),
-                resolved_quote_asset_id.trim().to_string(),
+                normalize_offer_asset_id(resolved_base_asset_id),
+                normalize_offer_asset_id(resolved_quote_asset_id),
                 base_offer_mojos,
                 quote_request_mojos,
             )
@@ -232,5 +232,20 @@ mod tests {
     #[test]
     fn normalize_offer_asset_id_strips_prefix() {
         assert_eq!(normalize_offer_asset_id("0xAbCd"), "abcd");
+    }
+
+    #[test]
+    fn compute_normalizes_offer_and_request_asset_ids() {
+        let leg = compute_signer_offer_leg_amounts(
+            1,
+            1.0,
+            &format!("0x{BASE_ASSET}"),
+            QUOTE_XCH,
+            "sell",
+            &pricing(1_000, 1_000),
+        )
+        .expect("leg amounts");
+        assert_eq!(leg.offer_asset_id, BASE_ASSET);
+        assert_eq!(leg.request_asset_id, QUOTE_XCH);
     }
 }

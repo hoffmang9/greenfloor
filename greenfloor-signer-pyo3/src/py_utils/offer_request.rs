@@ -1,6 +1,5 @@
 use std::sync::OnceLock;
 
-use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use signer_core::SignerOfferLegAmounts;
@@ -31,17 +30,4 @@ pub fn signer_offer_leg_amounts_to_py<'py>(
     kwargs.set_item("offer_amount_mojos", leg.offer_amount_mojos)?;
     kwargs.set_item("request_amount_mojos", leg.request_amount_mojos)?;
     cls.call((), Some(&kwargs))
-}
-
-pub fn signer_offer_leg_amounts_from_py(obj: &Bound<'_, PyAny>) -> PyResult<SignerOfferLegAmounts> {
-    let cls = signer_offer_leg_amounts_class(obj.py())?;
-    if !obj.is_instance(&cls)? {
-        return Err(PyTypeError::new_err("expected SignerOfferLegAmounts"));
-    }
-    Ok(SignerOfferLegAmounts {
-        offer_asset_id: obj.getattr("offer_asset_id")?.extract()?,
-        request_asset_id: obj.getattr("request_asset_id")?.extract()?,
-        offer_amount_mojos: obj.getattr("offer_amount_mojos")?.extract()?,
-        request_amount_mojos: obj.getattr("request_amount_mojos")?.extract()?,
-    })
 }

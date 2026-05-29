@@ -1,26 +1,17 @@
-use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use serde_json::Value;
 
 use signer_core::{
     bootstrap_block_error, dexie_offer_asset_expectation_error, expected_publish_asset_fields,
     mojo_multiplier_for_leg, resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
 };
 
-use crate::py_utils::{py_any_to_json, request_dict_to_json, to_py_err};
-
-fn pricing_from_py(pricing: &Bound<'_, PyAny>) -> PyResult<Value> {
-    if let Ok(dict) = pricing.downcast::<PyDict>() {
-        return request_dict_to_json(dict);
-    }
-    Err(PyValueError::new_err("pricing must be a dict"))
-}
+use crate::py_utils::{pricing_dict_from_py, py_any_to_json, to_py_err};
 
 #[pyfunction]
 #[pyo3(name = "resolve_offer_expiry_for_pricing")]
 fn resolve_offer_expiry_for_pricing_py(pricing: &Bound<'_, PyAny>) -> PyResult<(String, i64)> {
-    let pricing = pricing_from_py(pricing)?;
+    let pricing = pricing_dict_from_py(pricing)?;
     let (unit, value) = resolve_offer_expiry_for_pricing(&pricing);
     Ok((unit.to_string(), value))
 }
@@ -28,7 +19,7 @@ fn resolve_offer_expiry_for_pricing_py(pricing: &Bound<'_, PyAny>) -> PyResult<(
 #[pyfunction]
 #[pyo3(name = "resolve_quote_price_for_pricing")]
 fn resolve_quote_price_for_pricing_py(pricing: &Bound<'_, PyAny>) -> PyResult<f64> {
-    let pricing = pricing_from_py(pricing)?;
+    let pricing = pricing_dict_from_py(pricing)?;
     resolve_quote_price_for_pricing(&pricing).map_err(to_py_err)
 }
 
@@ -39,7 +30,7 @@ fn mojo_multiplier_for_leg_py(
     field: &str,
     asset_id: &str,
 ) -> PyResult<i64> {
-    let pricing = pricing_from_py(pricing)?;
+    let pricing = pricing_dict_from_py(pricing)?;
     Ok(mojo_multiplier_for_leg(&pricing, field, asset_id))
 }
 

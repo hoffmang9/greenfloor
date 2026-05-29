@@ -1,4 +1,8 @@
-"""Deterministic signer ``create_offer`` request construction (no IO)."""
+"""Signer create-offer request types and builders (no IO).
+
+Leg math and asset normalization live in the Rust kernel; Python reaches them via
+``greenfloor.core.policy_bridge``. This module owns dataclasses and request assembly.
+"""
 
 from __future__ import annotations
 
@@ -133,9 +137,9 @@ def build_signer_create_offer_request(
 
     return SignerCreateOfferRequest(
         receive_address=receive_address,
-        offer_asset_id=normalize_offer_asset_id(leg.offer_asset_id),
+        offer_asset_id=leg.offer_asset_id,
         offer_amount=int(leg.offer_amount_mojos),
-        request_asset_id=normalize_offer_asset_id(leg.request_asset_id),
+        request_asset_id=leg.request_asset_id,
         request_amount=int(leg.request_amount_mojos),
         split_input_coins=bool(split_input_coins),
         broadcast_split=bool(broadcast_split),

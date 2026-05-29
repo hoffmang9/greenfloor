@@ -11,7 +11,7 @@ from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
-from greenfloor.core.offer_side import normalize_offer_side
+from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.strategy_action_item import StrategyActionItem
 from greenfloor.daemon.cooldowns import (

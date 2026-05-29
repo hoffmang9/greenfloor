@@ -70,7 +70,11 @@ def _coerce_signer_offer_leg_amounts(payload: object):
 
 
 def normalize_offer_side(action_side: str) -> str:
-    return str(_require_policy_method("normalize_offer_side")(str(action_side)))
+    """Normalize offer action side to ``buy`` or ``sell`` (pure Python; matches Rust kernel)."""
+    value = str(action_side or "").strip()
+    if value.lower() == "buy":
+        return "buy"
+    return "sell"
 
 
 def quote_mojos_for_base_size(

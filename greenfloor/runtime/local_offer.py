@@ -6,7 +6,7 @@ import collections.abc
 from pathlib import Path
 from typing import Any
 
-from greenfloor.core.offer_side import normalize_offer_side
+from greenfloor.core.offer_policy import normalize_offer_side
 from greenfloor.runtime.offer_build_context import OfferBuildContext
 from greenfloor.runtime.offer_orchestration import OfferCreateFailure, OfferCreateOutcome
 
