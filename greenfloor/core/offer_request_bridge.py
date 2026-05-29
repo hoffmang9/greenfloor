@@ -9,13 +9,10 @@ if TYPE_CHECKING:
 
 from greenfloor.core import kernel_bridge
 
-
-def _require_offer_request_method(method_name: str):
-    return kernel_bridge.require_kernel_method(
-        kernel_bridge.policy_kernel(),
-        method_name,
-        missing="offer-request",
-    )
+_require_offer_request_method = kernel_bridge.kernel_method_getter(
+    lambda: kernel_bridge.policy_kernel(),
+    missing="offer-request",
+)
 
 
 def _coerce_signer_offer_leg_amounts(payload: object):

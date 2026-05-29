@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import sys
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -89,7 +90,22 @@ def test_require_kernel_method_with_sys_modules_stub(monkeypatch) -> None:
 
 def test_policy_coin_ops_and_bootstrap_kernels_share_import(monkeypatch) -> None:
     module = ModuleType(kernel_bridge.KERNEL_MODULE_LEGACY)
-    monkeypatch.setattr(kernel_bridge, "import_kernel", lambda: module)
+    monkeypatch.setattr(kernel_bridge, "_loaded_kernel_module", lambda: module)
     assert kernel_bridge.policy_kernel() is module
     assert kernel_bridge.coin_ops_kernel() is module
     assert kernel_bridge.bootstrap_kernel() is module
+
+
+def test_kernel_method_getter_delegates_to_require_kernel_method(monkeypatch) -> None:
+    module = ModuleType(kernel_bridge.KERNEL_MODULE_LEGACY)
+    calls: list[tuple[Any, str, str]] = []
+    sentinel = object()
+
+    def _record_require(kernel: Any, method_name: str, *, missing: str) -> object:
+        calls.append((kernel, method_name, missing))
+        return sentinel
+
+    monkeypatch.setattr(kernel_bridge, "require_kernel_method", _record_require)
+    getter = kernel_bridge.kernel_method_getter(lambda: module, missing="offer-request")
+    assert getter("normalize_offer_side") is sentinel
+    assert calls == [(module, "normalize_offer_side", "offer-request")]

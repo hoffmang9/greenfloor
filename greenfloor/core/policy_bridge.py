@@ -38,12 +38,10 @@ __all__ = [
 ]
 
 
-def _require_policy_method(method_name: str):
-    return kernel_bridge.require_kernel_method(
-        kernel_bridge.policy_kernel(),
-        method_name,
-        missing="required policy",
-    )
+_require_policy_method = kernel_bridge.kernel_method_getter(
+    lambda: kernel_bridge.policy_kernel(),
+    missing="required policy",
+)
 
 
 class ExpectedPublishAssetFields(TypedDict):

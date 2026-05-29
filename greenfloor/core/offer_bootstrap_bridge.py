@@ -36,12 +36,10 @@ __all__ = [
 ]
 
 
-def _require_bootstrap_method(method_name: str):
-    return kernel_bridge.require_kernel_method(
-        kernel_bridge.bootstrap_kernel(),
-        method_name,
-        missing="bootstrap planner",
-    )
+_require_bootstrap_method = kernel_bridge.kernel_method_getter(
+    lambda: kernel_bridge.bootstrap_kernel(),
+    missing="bootstrap planner",
+)
 
 
 def _coerce_spendable_coins(spendable_coins: list[Any]) -> list[BootstrapCoin]:

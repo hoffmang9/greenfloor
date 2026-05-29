@@ -10,15 +10,16 @@ touching bridge call sites.
 ``policy_kernel``, ``coin_ops_kernel``, and ``bootstrap_kernel`` are typed views of
 the same PyO3 module — use the name that matches the ``Protocol`` at the call site.
 
-Deterministic policy bridges use :func:`require_kernel_method` with
-``PolicyKernelProtocol`` symbols. Adapters and signing paths call
-``import_kernel()`` directly.
+Deterministic policy bridges bind :func:`kernel_method_getter` with the matching
+typed view and ``missing`` label. Adapters and signing paths call ``import_kernel()``
+directly.
 """
 
 from __future__ import annotations
 
 import importlib
-from typing import TYPE_CHECKING, Any, cast
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 if TYPE_CHECKING:
     from greenfloor.core.coin_ops.kernel_protocol import CoinOpsKernelProtocol
@@ -40,6 +41,7 @@ __all__ = [
     "coin_ops_kernel",
     "import_kernel",
     "import_signer",
+    "kernel_method_getter",
     "kernel_rebuild_hint",
     "policy_kernel",
     "require_kernel_method",
@@ -68,6 +70,27 @@ def import_kernel() -> Any:
     )
 
 
+def _loaded_kernel_module() -> Any:
+    return import_kernel()
+
+
+@overload
+def typed_kernel_view() -> PolicyKernelProtocol: ...
+
+
+@overload
+def typed_kernel_view(*, kind: Literal["coin_ops"]) -> CoinOpsKernelProtocol: ...
+
+
+@overload
+def typed_kernel_view(*, kind: Literal["bootstrap"]) -> BootstrapKernelProtocol: ...
+
+
+def typed_kernel_view(*, kind: str | None = None) -> Any:
+    del kind
+    return _loaded_kernel_module()
+
+
 def _kernel_module_label(kernel: Any) -> str:
     name = getattr(kernel, "__name__", None)
     if isinstance(name, str) and name:
@@ -85,16 +108,27 @@ def require_kernel_method(kernel: Any, method_name: str, *, missing: str) -> Any
     return method
 
 
+def kernel_method_getter(
+    load_kernel: Callable[[], Any],
+    *,
+    missing: str,
+) -> Callable[[str], Any]:
+    def get_kernel_method(method_name: str) -> Any:
+        return require_kernel_method(load_kernel(), method_name, missing=missing)
+
+    return get_kernel_method
+
+
 def policy_kernel() -> PolicyKernelProtocol:
-    return cast(Any, import_kernel())
+    return typed_kernel_view()
 
 
 def coin_ops_kernel() -> CoinOpsKernelProtocol:
-    return cast(Any, import_kernel())
+    return typed_kernel_view(kind="coin_ops")
 
 
 def bootstrap_kernel() -> BootstrapKernelProtocol:
-    return cast(Any, import_kernel())
+    return typed_kernel_view(kind="bootstrap")
 
 
 # Migration alias — prefer import_kernel for new code.
