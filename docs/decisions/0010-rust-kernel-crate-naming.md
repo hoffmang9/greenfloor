@@ -19,7 +19,8 @@ offer reconciliation, and coin-op planning. The name "signer" no longer describe
 - Introduce Python `greenfloor.core.kernel_bridge.import_kernel()` as the canonical import for
   in-process Rust policy; `import_signer` remains a migration alias.
 - `kernel_bridge` tries `greenfloor_signer` then `greenfloor_kernel` so the PyO3 rename can
-  ship without touching bridge call sites; use `kernel_rebuild_hint()` for operator rebuild text.
+  ship without touching bridge call sites; use `kernel_rebuild_hint(module=...)` and
+  `require_kernel_method()` for operator rebuild text and stale-symbol errors.
 - Group Rust policy by domain module (`cycle/`, `coin_ops/`, `offer/`, `vault/`) inside the
   crate regardless of the legacy crate name.
 

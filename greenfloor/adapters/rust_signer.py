@@ -16,8 +16,8 @@ from greenfloor.core.signer_offer_request import (
 
 def resolve_vault_context(program_path: str) -> dict[str, Any]:
     """Load vault display context from program config via the Rust kernel."""
-    signer = import_kernel()
-    result = signer.resolve_vault_context(str(program_path))
+    kernel = import_kernel()
+    result = kernel.resolve_vault_context(str(program_path))
     if not isinstance(result, dict):
         raise TypeError("resolve_vault_context returned non-dict result")
     return result
@@ -28,8 +28,8 @@ def build_vault_cat_offer(
     request_dict: SignerCreateOfferPayload | dict[str, Any],
 ) -> dict[str, Any]:
     """Build a vault CAT offer using the canonical Rust kernel vault path."""
-    signer = import_kernel()
-    result = signer.build_vault_cat_offer(str(program_path), request_dict)
+    kernel = import_kernel()
+    result = kernel.build_vault_cat_offer(str(program_path), request_dict)
     if not isinstance(result, dict):
         raise TypeError("build_vault_cat_offer returned non-dict result")
     return result
@@ -37,8 +37,8 @@ def build_vault_cat_offer(
 
 def build_mixed_split(program_path: str, request_dict: dict[str, Any]) -> dict[str, Any]:
     """Build (and optionally broadcast) a vault CAT mixed split via the Rust kernel."""
-    signer = import_kernel()
-    result = signer.build_mixed_split(str(program_path), request_dict)
+    kernel = import_kernel()
+    result = kernel.build_mixed_split(str(program_path), request_dict)
     if not isinstance(result, dict):
         raise TypeError("build_mixed_split returned non-dict result")
     return result
@@ -46,8 +46,8 @@ def build_mixed_split(program_path: str, request_dict: dict[str, Any]) -> dict[s
 
 def resolve_offer_asset_ids(program_path: str, base_asset: str, quote_asset: str) -> dict[str, str]:
     """Resolve market symbols or asset ids to canonical offer asset ids."""
-    signer = import_kernel()
-    result = signer.resolve_offer_asset_ids(str(program_path), base_asset, quote_asset)
+    kernel = import_kernel()
+    result = kernel.resolve_offer_asset_ids(str(program_path), base_asset, quote_asset)
     if not isinstance(result, dict):
         raise TypeError("resolve_offer_asset_ids returned non-dict result")
     base_asset_id = str(result.get("base_asset_id", "")).strip()

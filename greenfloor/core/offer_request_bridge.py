@@ -11,11 +11,11 @@ from greenfloor.core import kernel_bridge
 
 
 def _require_offer_request_method(method_name: str):
-    method = getattr(kernel_bridge.policy_kernel(), method_name, None)
-    if method is None:
-        hint = kernel_bridge.kernel_rebuild_hint(missing="offer-request")
-        raise RuntimeError(f"{hint} Missing symbol: {method_name}")
-    return method
+    return kernel_bridge.require_kernel_method(
+        kernel_bridge.policy_kernel(),
+        method_name,
+        missing="offer-request",
+    )
 
 
 def _coerce_signer_offer_leg_amounts(payload: object):

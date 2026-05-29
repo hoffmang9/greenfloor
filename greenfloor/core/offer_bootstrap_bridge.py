@@ -36,16 +36,12 @@ __all__ = [
 ]
 
 
-def _require_bootstrap_kernel():
-    return kernel_bridge.bootstrap_kernel()
-
-
 def _require_bootstrap_method(method_name: str):
-    method = getattr(_require_bootstrap_kernel(), method_name, None)
-    if method is None:
-        hint = kernel_bridge.kernel_rebuild_hint(missing="bootstrap planner")
-        raise RuntimeError(f"{hint} Missing symbol: {method_name}")
-    return method
+    return kernel_bridge.require_kernel_method(
+        kernel_bridge.bootstrap_kernel(),
+        method_name,
+        missing="bootstrap planner",
+    )
 
 
 def _coerce_spendable_coins(spendable_coins: list[Any]) -> list[BootstrapCoin]:

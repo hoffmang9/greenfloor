@@ -7,18 +7,18 @@ callers should use :func:`import_kernel`; ``import_signer`` remains as a migrati
 :data:`KERNEL_MODULE_TARGET`, so the ADR 0010 rename can flip module names without
 touching bridge call sites.
 
-Deterministic policy bridges use :func:`policy_kernel` with
-``PolicyKernelProtocol`` (cycle, cancel, notification, offer, retry, coin-ops).
-Coin-operation bridges call :func:`coin_ops_kernel`; adapters and signing paths
-call ``import_kernel()`` directly.
+``policy_kernel``, ``coin_ops_kernel``, and ``bootstrap_kernel`` are typed views of
+the same PyO3 module — use the name that matches the ``Protocol`` at the call site.
+
+Deterministic policy bridges use :func:`require_kernel_method` with
+``PolicyKernelProtocol`` symbols. Adapters and signing paths call
+``import_kernel()`` directly.
 """
 
 from __future__ import annotations
 
 import importlib
-import importlib.util
-import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from greenfloor.core.coin_ops.kernel_protocol import CoinOpsKernelProtocol
@@ -42,27 +42,12 @@ __all__ = [
     "import_signer",
     "kernel_rebuild_hint",
     "policy_kernel",
-    "resolved_kernel_module_name",
+    "require_kernel_method",
 ]
 
 
-def resolved_kernel_module_name() -> str:
-    """Return the PyO3 module name :func:`import_kernel` would load first."""
-    for module_name in _KERNEL_MODULE_CANDIDATES:
-        if module_name in sys.modules:
-            return module_name
-        try:
-            spec = importlib.util.find_spec(module_name)
-        except (ImportError, ModuleNotFoundError, ValueError):
-            continue
-        if spec is not None:
-            return module_name
-    return KERNEL_MODULE_LEGACY
-
-
-def kernel_rebuild_hint(*, missing: str = "required kernel") -> str:
+def kernel_rebuild_hint(*, module: str, missing: str = "required kernel") -> str:
     """Operator-facing rebuild message for stale or incomplete PyO3 wheels."""
-    module = resolved_kernel_module_name()
     return (
         f"{module} extension is missing {missing} symbols. "
         f"Rebuild it (for example: {_MATURIN_INSTALL})."
@@ -83,16 +68,33 @@ def import_kernel() -> Any:
     )
 
 
+def _kernel_module_label(kernel: Any) -> str:
+    name = getattr(kernel, "__name__", None)
+    if isinstance(name, str) and name:
+        return name
+    return KERNEL_MODULE_LEGACY
+
+
+def require_kernel_method(kernel: Any, method_name: str, *, missing: str) -> Any:
+    method = getattr(kernel, method_name, None)
+    if method is None:
+        raise RuntimeError(
+            f"{kernel_rebuild_hint(module=_kernel_module_label(kernel), missing=missing)} "
+            f"Missing symbol: {method_name}"
+        )
+    return method
+
+
 def policy_kernel() -> PolicyKernelProtocol:
-    return import_kernel()  # type: ignore[return-value]
+    return cast(Any, import_kernel())
 
 
 def coin_ops_kernel() -> CoinOpsKernelProtocol:
-    return policy_kernel()  # type: ignore[return-value]
+    return cast(Any, import_kernel())
 
 
 def bootstrap_kernel() -> BootstrapKernelProtocol:
-    return import_kernel()  # type: ignore[return-value]
+    return cast(Any, import_kernel())
 
 
 # Migration alias — prefer import_kernel for new code.

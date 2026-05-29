@@ -36,14 +36,14 @@ def from_input_spend_bundle_xch(
     input_spend_bundle: Any,
     requested_payments_xch: list[Any],
 ) -> Any:
-    signer = import_kernel()
+    kernel = import_kernel()
     requested: list[tuple[bytes, list[tuple[bytes, int]]]] = []
     for notarized_payment in requested_payments_xch:
         payments: list[tuple[bytes, int]] = []
         for payment in notarized_payment.payments:
             payments.append((_as_bytes(payment.puzzle_hash), int(payment.amount)))
         requested.append((_as_bytes(notarized_payment.nonce), payments))
-    spend_bundle_bytes = signer.from_input_spend_bundle_xch(
+    spend_bundle_bytes = kernel.from_input_spend_bundle_xch(
         input_spend_bundle.to_bytes(),
         requested,
     )

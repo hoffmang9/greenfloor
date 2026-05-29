@@ -2,7 +2,7 @@
 
 ## 2026-05-28 (ADR 0010 rename-prep hygiene)
 
-- **`greenfloor/core/kernel_bridge.py`:** `KERNEL_MODULE_LEGACY` / `KERNEL_MODULE_TARGET` constants; `import_kernel()` tries legacy then target module; shared `kernel_rebuild_hint()` for stale-wheel operator text; `resolved_kernel_module_name()` for diagnostics.
+- **`greenfloor/core/kernel_bridge.py`:** `KERNEL_MODULE_LEGACY` / `KERNEL_MODULE_TARGET` constants; `import_kernel()` tries legacy then target module; `require_kernel_method()` + `kernel_rebuild_hint(module=...)` for stale-wheel operator text; typed kernel views share one `import_kernel()` load.
 - **Policy bridges:** `policy_bridge`, `offer_bootstrap_bridge`, and `offer_request_bridge` delegate rebuild hints to `kernel_bridge` (no duplicated maturin strings).
 - **Rust docs:** crate-level `lib.rs` doc + `cycle/` / `offer/` module headers; `greenfloor-signer` Cargo description updated; PyO3 `lib.rs` module comment points callers at `kernel_bridge`.
 - **Adapter docstrings:** `rust_signer`, `native_offer`, `bls_signing`, `bls_cat_coins`, `coinset` use "Rust kernel" wording; stable error-code prefixes unchanged.

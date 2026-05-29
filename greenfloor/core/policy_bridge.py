@@ -39,12 +39,11 @@ __all__ = [
 
 
 def _require_policy_method(method_name: str):
-    kernel = kernel_bridge.policy_kernel()
-    method = getattr(kernel, method_name, None)
-    if method is None:
-        hint = kernel_bridge.kernel_rebuild_hint(missing="required policy")
-        raise RuntimeError(f"{hint} Missing symbol: {method_name}")
-    return method
+    return kernel_bridge.require_kernel_method(
+        kernel_bridge.policy_kernel(),
+        method_name,
+        missing="required policy",
+    )
 
 
 class ExpectedPublishAssetFields(TypedDict):

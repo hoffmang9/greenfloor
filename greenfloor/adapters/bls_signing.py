@@ -26,8 +26,8 @@ def _load_master_private_key(
 ) -> tuple[bytes | None, str | None]:
     _ = keyring_yaml_path
     try:
-        signer = import_kernel()
-        result = signer.load_bls_master_sk(str(key_id).strip())
+        kernel = import_kernel()
+        result = kernel.load_bls_master_sk(str(key_id).strip())
     except Exception as exc:
         return None, f"greenfloor_signer_import_error:{exc}"
     if not isinstance(result, dict):
@@ -48,8 +48,8 @@ def _call_signer_build(
     request: dict[str, Any],
 ) -> tuple[str | None, str | None]:
     try:
-        signer = import_kernel()
-        build = getattr(signer, method_name)
+        kernel = import_kernel()
+        build = getattr(kernel, method_name)
     except Exception as exc:
         return None, f"greenfloor_signer_import_error:{exc}"
     try:
@@ -131,8 +131,8 @@ def _build_mixed_split_spend_bundle(payload: dict[str, Any]) -> tuple[str | None
 
 def _broadcast_bls_spend_bundle_rust(*, network: str, spend_bundle_hex: str) -> dict[str, Any]:
     try:
-        signer = import_kernel()
-        result = signer.broadcast_bls_spend_bundle(network, spend_bundle_hex)
+        kernel = import_kernel()
+        result = kernel.broadcast_bls_spend_bundle(network, spend_bundle_hex)
     except Exception as exc:
         return {
             "status": "skipped",
