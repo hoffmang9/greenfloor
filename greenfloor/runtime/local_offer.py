@@ -6,8 +6,9 @@ import collections.abc
 from pathlib import Path
 from typing import Any
 
-from greenfloor.adapters.offer_action import (
-    build_bls_offer_from_build_context,
+from greenfloor.adapters.offer_action import build_bls_offer_from_build_context
+from greenfloor.core.offer_action import (
+    expires_at_iso_from_build_context,
     to_create_phase_outcome,
 )
 from greenfloor.core.planned_action import PlannedAction, planned_action_side
@@ -94,7 +95,10 @@ def make_local_offer_create_fn(
         index = offer_iteration[0]
         offer_iteration[0] += 1
         try:
-            expires_at = f"{int(build_ctx.expiry_value)} {build_ctx.expiry_unit}"
+            expires_at = expires_at_iso_from_build_context(
+                expiry_unit=build_ctx.expiry_unit,
+                expiry_value=int(build_ctx.expiry_value),
+            )
             if build_offer_fn is not None:
                 payload = build_local_offer_payload(
                     build_ctx,

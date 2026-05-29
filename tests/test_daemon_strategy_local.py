@@ -269,10 +269,10 @@ def test_build_offer_for_action_direct_builder_call(monkeypatch) -> None:
         captured_before["keyring_yaml_path"] = build_ctx.keyring_yaml_path
         captured_before["base_unit_mojo_multiplier"] = build_ctx.base_unit_mojo_multiplier
         captured_before["quote_unit_mojo_multiplier"] = build_ctx.quote_unit_mojo_multiplier
-        return f"offer1direct-{kwargs['size_base_units']}"
+        return {"offer_text": f"offer1direct-{kwargs['size_base_units']}"}
 
     monkeypatch.setattr(
-        "greenfloor.adapters.offer_action.build_offer_text_from_build_context",
+        "greenfloor.adapters.offer_action.build_bls_offer_from_build_context",
         _capture_build,
     )
     action = PlannedAction(

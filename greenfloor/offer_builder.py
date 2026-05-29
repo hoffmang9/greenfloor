@@ -5,10 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from greenfloor.adapters.native_offer import encode_offer_from_spend_bundle_hex
-from greenfloor.adapters.offer_action import (
-    build_bls_offer_for_action,
-    legacy_action_request_from_payload,
-)
+from greenfloor.adapters.offer_action import build_bls_offer_for_action
+from greenfloor.core.offer_action import legacy_action_request_from_payload
 
 
 def _build_offer(payload: dict[str, Any]) -> str:
@@ -24,7 +22,7 @@ def _build_offer(payload: dict[str, Any]) -> str:
         key_id=str(payload.get("key_id", "")).strip(),
         request=request,
     )
-    return str(result["offer_text"])
+    return result["offer_text"]
 
 
 def build_offer(payload: dict[str, Any]) -> str:

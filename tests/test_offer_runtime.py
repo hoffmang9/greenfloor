@@ -74,10 +74,10 @@ def test_signer_create_offer_phase_calls_signer_and_returns_offer_text(monkeypat
     assert captured["receive_address"] == market.receive_address
     assert captured["base_asset"] == "basecat"
     assert captured["quote_asset"] == "quotecat"
-    assert result["side"] == "buy"
-    assert result["offer_text"] == "offer1test"
-    assert result["execution_mode"] == "direct"
-    assert result["expires_at"]
+    assert result.side == "buy"
+    assert result.offer_text == "offer1test"
+    assert result.execution_mode == "direct"
+    assert result.expires_at
 
 
 def test_signer_create_offer_phase_requires_offer_text(monkeypatch) -> None:

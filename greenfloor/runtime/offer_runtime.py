@@ -8,6 +8,11 @@ from typing import Any
 
 from greenfloor.adapters import offer_action, rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
+from greenfloor.core.offer_action import (
+    OfferCreatePhaseOutcome,
+    build_action_request,
+    to_create_phase_outcome,
+)
 from greenfloor.core.offer_bootstrap_bridge import (
     BootstrapPhaseResult,
     plan_bootstrap_mixed_outputs,
@@ -203,9 +208,9 @@ def signer_create_offer_phase(
     action_side: str = "sell",
     split_input_coins: bool = True,
     broadcast_split: bool = True,
-) -> dict[str, Any]:
+) -> OfferCreatePhaseOutcome:
     side = normalize_offer_side(action_side)
-    request = offer_action.build_action_request(
+    request = build_action_request(
         receive_address=str(market.receive_address or ""),
         base_asset=str(resolved_base_asset_id),
         quote_asset=str(resolved_quote_asset_id),
@@ -218,16 +223,7 @@ def signer_create_offer_phase(
     )
     config_path = _signer_config_path(program)
     result = offer_action.build_signer_offer_for_action(config_path, request)
-    outcome = offer_action.to_create_phase_outcome(result, action_side=side)
-    return {
-        "offer_text": outcome.offer_text,
-        "expires_at": outcome.expires_at,
-        "offer_amount": outcome.offer_amount,
-        "request_amount": outcome.request_amount,
-        "side": outcome.side,
-        "execution_mode": outcome.execution_mode,
-        "create_result": outcome.create_result,
-    }
+    return to_create_phase_outcome(result, action_side=side)
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,7 +231,7 @@ class SignerOfferDeps:
     post_deps: OfferPostDeps
     resolve_signer_offer_asset_ids_fn: collections.abc.Callable[..., tuple[str, str]]
     signer_bootstrap_phase_fn: collections.abc.Callable[..., BootstrapPhaseResult]
-    signer_create_offer_phase_fn: collections.abc.Callable[..., dict[str, Any]]
+    signer_create_offer_phase_fn: collections.abc.Callable[..., OfferCreatePhaseOutcome]
 
 
 def default_signer_offer_deps(*, post_deps: OfferPostDeps | None = None) -> SignerOfferDeps:
@@ -301,8 +297,8 @@ def build_and_post_offer_signer(
                 create_phase_ms=int((time.monotonic() - started) * 1000),
                 extra={"signer_path": True},
             ) from exc
-        execution_mode = str(create_phase.get("execution_mode", "")).strip()
-        offer_text = str(create_phase.get("offer_text", "")).strip()
+        execution_mode = create_phase.execution_mode.strip()
+        offer_text = create_phase.offer_text.strip()
         if not offer_text:
             raise OfferCreateFailure(
                 "signer_create_offer_failed:missing_offer_text",
@@ -310,9 +306,9 @@ def build_and_post_offer_signer(
                 extra={"signer_path": True, "execution_mode": execution_mode},
             )
         return OfferCreateOutcome(
-            offer_text=str(create_phase.get("offer_text", "")).strip(),
-            expires_at=str(create_phase.get("expires_at", "")),
-            side=str(create_phase.get("side", kwargs["action_side"])),
+            offer_text=offer_text,
+            expires_at=create_phase.expires_at,
+            side=create_phase.side,
             create_phase_ms=int((time.monotonic() - started) * 1000),
             extra={"execution_mode": execution_mode} if execution_mode else {},
         )

@@ -43,12 +43,12 @@ def test_legacy_action_request_rejects_invalid_plan_inputs(
     value: int | float,
     message: str,
 ) -> None:
-    from greenfloor.adapters import offer_action
+    from greenfloor.core import offer_action as offer_action_core
 
     payload = dict(_BLS_COIN_BACKED_BASE)
     payload[field] = value
     with pytest.raises(ValueError, match=message):
-        offer_action.legacy_action_request_from_payload(payload)
+        offer_action_core.validate_legacy_offer_payload(payload)
 
 
 def test_build_offer_calls_kernel_action(monkeypatch) -> None:

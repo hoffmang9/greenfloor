@@ -56,11 +56,12 @@ def build_offer_for_action(
             "offer": None,
         }
     try:
-        offer = offer_action.build_offer_text_from_build_context(
+        result = offer_action.build_bls_offer_from_build_context(
             build_ctx,
             size_base_units=int(action.size),
             action_side=planned_action_side(action),
         )
+        offer = result["offer_text"]
     except Exception as exc:
         return {"status": "skipped", "reason": f"offer_builder_failed:{exc}", "offer": None}
     return {"status": "executed", "reason": "offer_builder_success", "offer": offer}

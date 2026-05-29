@@ -13,7 +13,7 @@ use crate::error::{SignerError, SignerResult};
 use crate::offer::build::build_vault_cat_offer;
 use crate::offer::build_context::{resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing};
 use crate::offer::codec::encode_offer_from_spend_bundle_bytes;
-use crate::offer::request::{compute_signer_offer_leg_amounts, normalize_offer_asset_id, normalize_offer_side};
+use crate::offer::request::{compute_signer_offer_leg_amounts, normalize_offer_side};
 use crate::offer::types::{CreateOfferRequest, CreateOfferResult};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -51,12 +51,8 @@ pub struct BuildOfferForActionResult {
 }
 
 pub fn expires_at_unix_from_pricing(pricing: &Value) -> u64 {
-    let (unit, value) = resolve_offer_expiry_for_pricing(pricing);
-    let secs = match unit {
-        "hours" => value.saturating_mul(3600),
-        "days" => value.saturating_mul(86400),
-        _ => value.saturating_mul(60),
-    };
+    let (_unit, minutes) = resolve_offer_expiry_for_pricing(pricing);
+    let secs = minutes.saturating_mul(60);
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs().saturating_add(secs as u64))
@@ -72,27 +68,47 @@ fn resolve_quote_price(request: &BuildOfferForActionRequest) -> SignerResult<f64
     resolve_quote_price_for_pricing(&request.pricing)
 }
 
-async fn resolve_signer_assets(
-    msp: &MspCoinset,
+fn resolved_assets_or_collision_error(
+    resolved_base: String,
+    resolved_quote: String,
+) -> SignerResult<(String, String)> {
+    if resolved_base == resolved_quote
+        && !is_xch_like_asset(&resolved_base)
+        && !is_xch_like_asset(&resolved_quote)
+    {
+        return Err(SignerError::Other(
+            "resolved_assets_collide_for_non_xch_pair".to_string(),
+        ));
+    }
+    Ok((resolved_base, resolved_quote))
+}
+
+fn try_normalize_resolved_assets(
     base_asset: &str,
     quote_asset: &str,
 ) -> SignerResult<(String, String)> {
-    match (
-        normalize_asset_id(base_asset),
-        normalize_asset_id(quote_asset),
-    ) {
-        (Ok(resolved_base), Ok(resolved_quote)) => {
-            if resolved_base == resolved_quote
-                && !is_xch_like_asset(&resolved_base)
-                && !is_xch_like_asset(&resolved_quote)
-            {
-                return Err(SignerError::Other(
-                    "resolved_assets_collide_for_non_xch_pair".to_string(),
-                ));
-            }
-            Ok((resolved_base, resolved_quote))
+    let (resolved_base, resolved_quote) = (
+        normalize_asset_id(base_asset)?,
+        normalize_asset_id(quote_asset)?,
+    );
+    resolved_assets_or_collision_error(resolved_base, resolved_quote)
+}
+
+async fn resolve_signer_assets(
+    config: &SignerConfig,
+    base_asset: &str,
+    quote_asset: &str,
+) -> SignerResult<(String, String)> {
+    match try_normalize_resolved_assets(base_asset, quote_asset) {
+        Ok(resolved) => Ok(resolved),
+        Err(SignerError::Other(msg)) if msg == "resolved_assets_collide_for_non_xch_pair" => {
+            Err(SignerError::Other(msg))
         }
-        _ => resolve_offer_asset_ids(msp, base_asset, quote_asset).await,
+        Err(_) => {
+            let msp =
+                MspCoinset::for_network(&config.network, Some(&config.coinset_msp_base_url))?;
+            resolve_offer_asset_ids(&msp, base_asset, quote_asset).await
+        }
     }
 }
 
@@ -136,9 +152,8 @@ pub async fn build_signer_offer_for_action(
     config: SignerConfig,
     request: BuildOfferForActionRequest,
 ) -> SignerResult<BuildOfferForActionResult> {
-    let msp = MspCoinset::for_network(&config.network, Some(&config.coinset_msp_base_url))?;
     let (resolved_base, resolved_quote) =
-        resolve_signer_assets(&msp, &request.base_asset, &request.quote_asset).await?;
+        resolve_signer_assets(&config, &request.base_asset, &request.quote_asset).await?;
     let quote_price = resolve_quote_price(&request)?;
     let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
     let expires_at_unix = expires_at_unix_from_pricing(&request.pricing);
@@ -162,8 +177,8 @@ pub async fn build_bls_offer_for_action(
     master_sk: &SecretKey,
     request: BuildOfferForActionRequest,
 ) -> SignerResult<BuildOfferForActionResult> {
-    let resolved_base = normalize_offer_asset_id(&request.base_asset);
-    let resolved_quote = normalize_offer_asset_id(&request.quote_asset);
+    let (resolved_base, resolved_quote) =
+        try_normalize_resolved_assets(&request.base_asset, &request.quote_asset)?;
     let quote_price = resolve_quote_price(&request)?;
     let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
     let expires_at_unix = expires_at_unix_from_pricing(&request.pricing);
@@ -212,5 +227,14 @@ mod tests {
         let expires = expires_at_unix_from_pricing(&json!({"strategy_offer_expiry_minutes": 5}));
         assert!(expires >= before + 300);
         assert!(expires <= before + 301);
+    }
+
+    #[test]
+    fn try_normalize_accepts_pre_resolved_assets() {
+        let cat = "a".repeat(64);
+        let (base, quote) =
+            try_normalize_resolved_assets(&cat, "xch").expect("normalized assets");
+        assert_eq!(base, cat);
+        assert_eq!(quote, "xch");
     }
 }
