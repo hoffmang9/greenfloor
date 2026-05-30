@@ -45,6 +45,25 @@ pub(crate) fn is_parallel_dispatch_transient_signer_error(err: &SignerError) -> 
         || is_transient_managed_upstream_error_text(&message)
 }
 
+/// Outcome of a parallel managed-offer dispatch attempt.
+pub(crate) enum ParallelDispatchDecision {
+    Success(OfferDispatchOutput),
+    FallbackTransient(SignerError),
+    Fatal(SignerError),
+}
+
+pub(crate) fn classify_parallel_dispatch(
+    result: Result<OfferDispatchOutput, SignerError>,
+) -> ParallelDispatchDecision {
+    match result {
+        Ok(output) => ParallelDispatchDecision::Success(output),
+        Err(err) if is_parallel_dispatch_transient_signer_error(&err) => {
+            ParallelDispatchDecision::FallbackTransient(err)
+        }
+        Err(err) => ParallelDispatchDecision::Fatal(err),
+    }
+}
+
 pub(crate) async fn record_parallel_fallback_audit(
     store: &SqliteStore,
     market_id: &str,
@@ -93,24 +112,25 @@ pub async fn execute_strategy_actions(
     }
 
     if parallel_managed_dispatch_enabled(program) {
-        match parallel::execute_actions_parallel(
-            store,
-            db_path,
-            program,
-            market,
-            network,
-            program_path,
-            markets_path,
-            testnet_markets_path,
-            actions,
-        )
-        .await
-        {
-            Ok(output) => return Ok(output),
-            Err(err) if is_parallel_dispatch_transient_signer_error(&err) => {
+        match classify_parallel_dispatch(
+            parallel::execute_actions_parallel(
+                store,
+                db_path,
+                program,
+                market,
+                network,
+                program_path,
+                markets_path,
+                testnet_markets_path,
+                actions,
+            )
+            .await,
+        ) {
+            ParallelDispatchDecision::Success(output) => return Ok(output),
+            ParallelDispatchDecision::FallbackTransient(err) => {
                 record_parallel_fallback_audit(store, &market.market_id, &err).await?;
             }
-            Err(err) => return Err(err),
+            ParallelDispatchDecision::Fatal(err) => return Err(err),
         }
     }
 

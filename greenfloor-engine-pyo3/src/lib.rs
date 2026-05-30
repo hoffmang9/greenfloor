@@ -3,13 +3,12 @@
 //! The extension module is exported as `greenfloor_engine` (ADR 0010). Python
 //! callers should import through `greenfloor.core.engine_bridge.import_engine`.
 
-mod daemon_py;
-mod watchlist_py;
-mod manager_py;
 mod coin_ops_py;
 mod cycle;
+mod daemon_py;
 mod execution_py;
 mod hex_py;
+mod manager_py;
 mod notifications_py;
 mod offer_action_py;
 mod offer_bootstrap_py;
@@ -19,6 +18,7 @@ mod py_utils;
 mod retry_py;
 mod strategy_py;
 mod wallet_io_py;
+mod watchlist_py;
 
 use std::path::Path;
 use std::sync::OnceLock;

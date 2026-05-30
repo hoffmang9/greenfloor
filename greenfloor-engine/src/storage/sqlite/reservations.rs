@@ -49,21 +49,24 @@ impl SqliteStore {
             SignerError::Other(format!("failed to begin reservation transaction: {err}"))
         })?;
         let result = (|| -> SignerResult<Option<String>> {
-            self.conn.execute(
-                r#"
+            self.conn
+                .execute(
+                    r#"
                 UPDATE offer_reservation_lease
                 SET status = 'expired',
                     released_at = COALESCE(released_at, ?1)
                 WHERE status = 'active'
                   AND expires_at <= ?2
                 "#,
-                params![now_iso, now_iso],
-            )
-            .map_err(|err| {
-                SignerError::Other(format!("failed to expire stale reservation leases: {err}"))
-            })?;
-            let mut stmt = self.conn.prepare(
-                r#"
+                    params![now_iso, now_iso],
+                )
+                .map_err(|err| {
+                    SignerError::Other(format!("failed to expire stale reservation leases: {err}"))
+                })?;
+            let mut stmt = self
+                .conn
+                .prepare(
+                    r#"
                 SELECT asset_id, COALESCE(SUM(amount), 0) AS reserved_amount
                 FROM offer_reservation_lease
                 WHERE wallet_id = ?1
@@ -71,9 +74,10 @@ impl SqliteStore {
                   AND expires_at > ?2
                 GROUP BY asset_id
                 "#,
-            ).map_err(|err| {
-                SignerError::Other(format!("failed to prepare reserved amounts query: {err}"))
-            })?;
+                )
+                .map_err(|err| {
+                    SignerError::Other(format!("failed to prepare reserved amounts query: {err}"))
+                })?;
             let mut rows = stmt.query(params![wallet_id, now_iso]).map_err(|err| {
                 SignerError::Other(format!("failed to query reserved amounts: {err}"))
             })?;
@@ -81,9 +85,9 @@ impl SqliteStore {
             while let Some(row) = rows.next().map_err(|err| {
                 SignerError::Other(format!("failed to read reserved amount row: {err}"))
             })? {
-                let asset_id: String = row.get(0).map_err(|err| {
-                    SignerError::Other(format!("failed to read asset_id: {err}"))
-                })?;
+                let asset_id: String = row
+                    .get(0)
+                    .map_err(|err| SignerError::Other(format!("failed to read asset_id: {err}")))?;
                 let reserved: i64 = row.get(1).map_err(|err| {
                     SignerError::Other(format!("failed to read reserved_amount: {err}"))
                 })?;

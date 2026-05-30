@@ -125,19 +125,13 @@ mod tests {
         let _mock = server
             .mock("GET", "/v1/offers/offer-expired")
             .with_status(200)
-            .with_body(
-                r#"{"success":true,"offer":{"id":"offer-expired","status":6}}"#,
-            )
+            .with_body(r#"{"success":true,"offer":{"id":"offer-expired","status":6}}"#)
             .create();
         let dexie = DexieClient::new(server.url());
 
-        let progress = detect_stale_open_offers_for_requeue(
-            &store,
-            &dexie,
-            &["m1".to_string()],
-        )
-        .await
-        .expect("sweep");
+        let progress = detect_stale_open_offers_for_requeue(&store, &dexie, &["m1".to_string()])
+            .await
+            .expect("sweep");
 
         assert_eq!(progress.checked_offer_count, 1);
         assert_eq!(progress.requeue_market_ids, vec!["m1".to_string()]);
@@ -161,13 +155,9 @@ mod tests {
             .create();
         let dexie = DexieClient::new(server.url());
 
-        let progress = detect_stale_open_offers_for_requeue(
-            &store,
-            &dexie,
-            &["m2".to_string()],
-        )
-        .await
-        .expect("sweep");
+        let progress = detect_stale_open_offers_for_requeue(&store, &dexie, &["m2".to_string()])
+            .await
+            .expect("sweep");
 
         assert_eq!(progress.checked_offer_count, 1);
         assert_eq!(progress.requeue_market_ids, vec!["m2".to_string()]);

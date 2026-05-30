@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.config.io import load_program_config
+from greenfloor.core.engine_bridge import import_engine, require_engine_method
 from greenfloor.daemon.bootstrap import (
     initialize_daemon_file_logging,
     log_daemon_event,
@@ -32,8 +33,13 @@ from greenfloor.daemon.market_logging import _daemon_logger
 def resolve_cycle_websocket_capture(*, program, loop_websocket_active: bool) -> bool:
     if loop_websocket_active:
         return False
-    mode = str(getattr(program, "tx_block_trigger_mode", "websocket")).strip().lower()
-    return mode == "websocket"
+    mode = str(getattr(program, "tx_block_trigger_mode", "websocket"))
+    use_websocket = require_engine_method(
+        import_engine(),
+        "use_websocket_capture_for_trigger_mode",
+        missing="daemon websocket capture policy",
+    )
+    return bool(use_websocket(mode))
 
 
 def consume_reload_marker(state_dir: Path) -> bool:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -15,19 +15,28 @@ from greenfloor.daemon.cycle_runner import run_once
 from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
 
 
+@dataclass
+class _FakeDispatchState:
+    cursor: int
+    immediate_requeue_ids: list[str]
+
+
+@dataclass
+class _FakeCycleResponse:
+    exit_code: int
+    dispatch_state: _FakeDispatchState
+
+
 def test_run_daemon_cycle_once_via_engine_delegates_to_pyo3(monkeypatch, tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
     dispatch_state = MarketDispatchState(cursor=2, immediate_requeue_ids=deque(["m-old"]))
 
-    def _fake_run(request: Mapping[str, Any]) -> dict[str, Any]:
+    def _fake_run(request: Any) -> _FakeCycleResponse:
         captured["request"] = request
-        return {
-            "exit_code": 0,
-            "dispatch_state": {
-                "cursor": 3,
-                "immediate_requeue_ids": ["m-new"],
-            },
-        }
+        return _FakeCycleResponse(
+            exit_code=0,
+            dispatch_state=_FakeDispatchState(cursor=3, immediate_requeue_ids=["m-new"]),
+        )
 
     exit_code, updated = run_daemon_cycle_once_via_engine(
         program_path=tmp_path / "program.yaml",
@@ -46,10 +55,10 @@ def test_run_daemon_cycle_once_via_engine_delegates_to_pyo3(monkeypatch, tmp_pat
     assert updated.cursor == 3
     assert updated.immediate_requeue_ids == deque(["m-new"])
     request = captured["request"]
-    assert request["poll_coinset_mempool"] is False
-    assert request["use_websocket_capture"] is True
-    assert request["dispatch_state"]["cursor"] == 2
-    assert request["allowed_key_ids"] == ["key-a"]
+    assert request.poll_coinset_mempool is False
+    assert request.use_websocket_capture is True
+    assert request.dispatch_state.cursor == 2
+    assert request.allowed_key_ids == ["key-a"]
 
 
 def test_run_once_is_thin_wrapper_over_engine_cycle(monkeypatch, tmp_path: Path) -> None:
@@ -69,11 +78,15 @@ def test_run_once_is_thin_wrapper_over_engine_cycle(monkeypatch, tmp_path: Path)
     mock.assert_called_once()
 
 
-def test_run_daemon_cycle_once_requires_json_object(tmp_path: Path) -> None:
-    def _bad_run(_request: dict[str, Any]) -> str:
-        return "not-a-dict"
+def test_run_daemon_cycle_once_requires_dispatch_state(tmp_path: Path) -> None:
+    class _BadResponse:
+        exit_code = 0
+        dispatch_state = None
 
-    with pytest.raises(TypeError, match="non-object"):
+    def _bad_run(_request: Any) -> _BadResponse:
+        return _BadResponse()
+
+    with pytest.raises(TypeError, match="dispatch_state"):
         run_daemon_cycle_once_via_engine(
             program_path=tmp_path / "program.yaml",
             markets_path=tmp_path / "markets.yaml",
@@ -85,5 +98,5 @@ def test_run_daemon_cycle_once_requires_json_object(tmp_path: Path) -> None:
             poll_coinset_mempool=False,
             use_websocket_capture=False,
             market_dispatch_state=None,
-            run_fn=_bad_run,  # type: ignore[arg-type]
+            run_fn=_bad_run,
         )

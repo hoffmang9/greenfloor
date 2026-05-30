@@ -41,12 +41,8 @@ pub async fn execute_actions_parallel(
     let expanded = expand_planned_actions(actions);
     let reservation_ctx = parallel_reservation_context(program_path, market, 0).await?;
     let asset_ids = parallel_reservation_asset_ids(&reservation_ctx);
-    let spendable_profiles = coinset_spendable_profiles_by_asset(
-        network,
-        &market.receive_address,
-        &asset_ids,
-    )
-    .await?;
+    let spendable_profiles =
+        coinset_spendable_profiles_by_asset(network, &market.receive_address, &asset_ids).await?;
     let batch_plan =
         plan_parallel_managed_dispatch(&expanded, &reservation_ctx, &spendable_profiles);
     let coordinator = Arc::new(OfferReservationCoordinator::new(db_path, Some(300)));
@@ -96,7 +92,8 @@ pub async fn execute_actions_parallel(
         })
         .collect();
 
-    let max_workers = parallel_max_workers(jobs.len(), program.runtime_offer_parallelism_max_workers);
+    let max_workers =
+        parallel_max_workers(jobs.len(), program.runtime_offer_parallelism_max_workers);
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_workers));
     let mut handles = Vec::with_capacity(jobs.len());
 

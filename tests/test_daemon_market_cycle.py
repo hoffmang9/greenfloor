@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 
 from greenfloor.config import io as config_io
+from greenfloor.core.cycle import enqueue_immediate_requeue, select_market_batch
+from greenfloor.daemon.cycle_market_batch import MarketDispatchState
 from greenfloor.daemon.testing import (
-    MarketDispatchState,
-    enqueue_immediate_requeue_market,
     match_watched_coin_ids,
     resolve_quote_asset_for_offer,
-    select_market_batch,
     set_watched_coin_ids_for_market,
 )
 
@@ -20,25 +20,33 @@ def test_select_market_batch_prioritizes_immediate_requeue_then_round_robin() ->
         enabled: bool = True
 
     markets = [_Market("m1"), _Market("m2"), _Market("m3"), _Market("m4")]
+    enabled_ids = [market.market_id for market in markets]
     state = MarketDispatchState()
-    enqueue_immediate_requeue_market(state, "m3")
-
-    selected, consumed = select_market_batch(
-        enabled_markets=markets,
-        slot_count=2,
-        dispatch_state=state,
+    state.immediate_requeue_ids = deque(
+        enqueue_immediate_requeue(list(state.immediate_requeue_ids), "m3")
     )
-    assert [m.market_id for m in selected] == ["m3", "m1"]
-    assert consumed == ["m3"]
+
+    first = select_market_batch(
+        enabled_market_ids=enabled_ids,
+        slot_count=2,
+        cursor=state.cursor,
+        immediate_requeue_ids=list(state.immediate_requeue_ids),
+    )
+    state.cursor = first.cursor
+    state.immediate_requeue_ids = deque(first.immediate_requeue_ids)
+    assert first.selected_market_ids == ["m3", "m1"]
+    assert first.consumed_immediate_requeues == ["m3"]
     assert list(state.immediate_requeue_ids) == []
 
-    selected_next, consumed_next = select_market_batch(
-        enabled_markets=markets,
+    second = select_market_batch(
+        enabled_market_ids=enabled_ids,
         slot_count=2,
-        dispatch_state=state,
+        cursor=state.cursor,
+        immediate_requeue_ids=list(state.immediate_requeue_ids),
     )
-    assert [m.market_id for m in selected_next] == ["m2", "m3"]
-    assert consumed_next == []
+    state.cursor = second.cursor
+    assert second.selected_market_ids == ["m2", "m3"]
+    assert second.consumed_immediate_requeues == []
 
 
 def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:

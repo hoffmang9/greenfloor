@@ -7,17 +7,20 @@ use super::{utcnow_iso, AuditEventRow, SqliteStore};
 
 impl SqliteStore {
     pub fn get_latest_xch_price_snapshot(&self) -> SignerResult<Option<f64>> {
-        let mut stmt = self.conn.prepare(
-            r#"
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT payload_json
             FROM audit_event
             WHERE event_type = 'xch_price_snapshot'
             ORDER BY id DESC
             LIMIT 1
             "#,
-        ).map_err(|err| {
-            SignerError::Other(format!("failed to prepare xch price snapshot query: {err}"))
-        })?;
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("failed to prepare xch price snapshot query: {err}"))
+            })?;
         let mut rows = stmt.query([]).map_err(|err| {
             SignerError::Other(format!("failed to query xch price snapshot: {err}"))
         })?;
@@ -155,7 +158,11 @@ impl SqliteStore {
     }
 
     #[cfg(test)]
-    pub(crate) fn count_audit_events(&self, event_type: &str, market_id: &str) -> SignerResult<i64> {
+    pub(crate) fn count_audit_events(
+        &self,
+        event_type: &str,
+        market_id: &str,
+    ) -> SignerResult<i64> {
         self.conn
             .query_row(
                 "SELECT COUNT(*) FROM audit_event WHERE event_type = ?1 AND market_id = ?2",
@@ -171,15 +178,18 @@ impl SqliteStore {
         event_type: &str,
         market_id: &str,
     ) -> SignerResult<Option<Value>> {
-        let mut stmt = self.conn.prepare(
-            r#"
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT payload_json
             FROM audit_event
             WHERE event_type = ?1 AND market_id = ?2
             ORDER BY id DESC
             LIMIT 1
             "#,
-        ).map_err(|err| SignerError::Other(format!("failed to prepare audit query: {err}")))?;
+            )
+            .map_err(|err| SignerError::Other(format!("failed to prepare audit query: {err}")))?;
         let mut rows = stmt
             .query(params![event_type, market_id])
             .map_err(|err| SignerError::Other(format!("failed to query audit events: {err}")))?;

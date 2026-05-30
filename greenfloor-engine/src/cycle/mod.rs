@@ -32,21 +32,20 @@ pub use execution::{
 pub use lifecycle::{apply_offer_signal, OfferLifecycleState, OfferSignal, OfferTransition};
 pub use managed::{
     can_parallelize_managed_offers, classify_dexie_visibility_outcome,
-    parallel_managed_dispatch_enabled,
     classify_managed_post_result, classify_managed_transient_error,
     count_parallel_transient_failures, is_managed_upstream_transient_error,
     is_managed_worker_transient_error, is_parallel_dispatch_transient_error,
     is_transient_dexie_visibility_404_error, is_transient_managed_upstream_error_text,
-    managed_retry_decision, parallel_max_workers, prepare_parallel_managed_submission_decision,
-    reservation_release_status, should_apply_parallel_transient_cooldown, ManagedActionOutcome,
-    ManagedActionStatus, ManagedRetryDecision, ManagedRetryDecisionKind,
-    ParallelSubmissionDecision,
+    managed_retry_decision, parallel_managed_dispatch_enabled, parallel_max_workers,
+    prepare_parallel_managed_submission_decision, reservation_release_status,
+    should_apply_parallel_transient_cooldown, ManagedActionOutcome, ManagedActionStatus,
+    ManagedRetryDecision, ManagedRetryDecisionKind, ParallelSubmissionDecision,
 };
 pub use market::{
     aggregate_two_sided_offer_counts, is_two_sided_market_mode, market_cycle_phases,
-    post_reconcile_market_cycle_phases,
-    needs_inventory_fallback, one_sided_offer_counts_by_side, resolve_inventory_scan_source,
-    resolve_tracked_sizes, wallet_fallback_source_label, MarketCyclePhase, MarketCycleResultState,
+    needs_inventory_fallback, one_sided_offer_counts_by_side, post_reconcile_market_cycle_phases,
+    resolve_inventory_scan_source, resolve_tracked_sizes, wallet_fallback_source_label,
+    MarketCyclePhase, MarketCycleResultState,
 };
 pub use notifications::{
     evaluate_low_inventory_alert, AlertEvent, AlertState, LowInventoryEvaluation, LowInventoryInput,
@@ -57,6 +56,7 @@ pub use orchestration::{
     next_disabled_market_log_deadline, record_stale_sweep_check, select_market_batch,
     should_log_disabled_market, should_try_cat_inventory_fallback, should_use_market_slot_dispatch,
     MarketBatchSelection, OfferStateRow, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress,
+    DEFAULT_DISABLED_MARKET_LOG_INTERVAL_SECONDS, MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS,
 };
 pub use reconcile::{
     resolve_missing_watched_offer_transition, resolve_watched_offer_transition_from_signals,

@@ -22,7 +22,9 @@ fn parse_clock(clock_iso: Option<&str>) -> PyResult<DateTime<Utc>> {
     if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S") {
         return Ok(naive.and_utc());
     }
-    Err(pyo3::exceptions::PyValueError::new_err(format!("invalid clock: {raw}")))
+    Err(pyo3::exceptions::PyValueError::new_err(format!(
+        "invalid clock: {raw}"
+    )))
 }
 
 fn counts_dict(py: Python<'_>, counts: &BTreeMap<i64, i64>) -> PyResult<Py<PyAny>> {
@@ -54,14 +56,9 @@ fn active_offer_counts_by_size(
     let clock = parse_clock(clock_iso.as_deref())?;
     let tracked = tracked_sizes.unwrap_or_default();
     let dexie_ref = dexie_size_by_offer_id.as_ref();
-    let (counts, state_counts, unmapped) = active_offer_counts_by_size_detail(
-        &store,
-        &market_id,
-        dexie_ref,
-        &tracked,
-        clock,
-    )
-    .map_err(to_py_err)?;
+    let (counts, state_counts, unmapped) =
+        active_offer_counts_by_size_detail(&store, &market_id, dexie_ref, &tracked, clock)
+            .map_err(to_py_err)?;
     Python::attach(|py| {
         let out = PyDict::new(py);
         out.set_item("counts_by_size", counts_dict(py, &counts)?)?;
@@ -85,14 +82,8 @@ fn active_offer_counts_by_size_and_side(
     let tracked = tracked_sizes.unwrap_or_default();
     let dexie_ref = dexie_size_by_offer_id.as_ref();
     let (buy_counts, sell_counts, state_counts, unmapped) =
-        active_offer_counts_by_size_and_side_detail(
-            &store,
-            &market_id,
-            dexie_ref,
-            &tracked,
-            clock,
-        )
-        .map_err(to_py_err)?;
+        active_offer_counts_by_size_and_side_detail(&store, &market_id, dexie_ref, &tracked, clock)
+            .map_err(to_py_err)?;
     Python::attach(|py| {
         let counts_by_side = PyDict::new(py);
         counts_by_side.set_item("buy", counts_dict(py, &buy_counts)?)?;

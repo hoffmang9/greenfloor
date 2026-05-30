@@ -4,7 +4,7 @@ use rusqlite::params;
 
 use crate::error::{SignerError, SignerResult};
 
-use super::{utcnow_iso, TxSignalStateRow, SqliteStore};
+use super::{utcnow_iso, SqliteStore, TxSignalStateRow};
 
 impl SqliteStore {
     pub fn get_tx_signal_state(

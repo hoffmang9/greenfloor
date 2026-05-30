@@ -148,8 +148,7 @@ fn active_offer_counts_by_size_and_side_unknown_metadata_stays_unmapped() {
         .expect("upsert");
 
     let (buy_counts, sell_counts, unmapped) =
-        active_offer_counts_by_size_and_side_at(&store, "m1", None, &[], clock)
-            .expect("counts");
+        active_offer_counts_by_size_and_side_at(&store, "m1", None, &[], clock).expect("counts");
 
     assert_eq!(buy_counts.get(&1), Some(&0));
     assert_eq!(sell_counts.get(&1), Some(&0));
@@ -187,8 +186,7 @@ fn active_offer_counts_by_size_and_side_malformed_side_stays_unmapped() {
     );
 
     let (_buy_counts, _sell_counts, unmapped) =
-        active_offer_counts_by_size_and_side_at(&store, "m1", None, &[], clock)
-            .expect("counts");
+        active_offer_counts_by_size_and_side_at(&store, "m1", None, &[], clock).expect("counts");
 
     assert_eq!(unmapped, 2);
 }
@@ -256,8 +254,7 @@ fn active_offer_counts_by_size_tracks_non_legacy_size() {
     );
 
     let (counts, unmapped) =
-        active_offer_counts_by_size_at(&store, "m1", None, &[1, 10, 50], clock)
-            .expect("counts");
+        active_offer_counts_by_size_at(&store, "m1", None, &[1, 10, 50], clock).expect("counts");
 
     assert_eq!(counts.get(&50), Some(&1));
     assert_eq!(unmapped, 0);
@@ -313,8 +310,7 @@ fn active_offer_counts_keeps_pending_visibility_offer_when_seen_on_dexie() {
 
     let dexie = HashMap::from([("pending-50".to_string(), 50)]);
     let (counts, unmapped) =
-        active_offer_counts_by_size_at(&store, "m1", Some(&dexie), &[50], clock)
-            .expect("counts");
+        active_offer_counts_by_size_at(&store, "m1", Some(&dexie), &[50], clock).expect("counts");
 
     assert_eq!(counts.get(&50), Some(&1));
     assert_eq!(unmapped, 0);

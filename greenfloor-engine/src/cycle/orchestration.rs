@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 
 const TRACKED_STALE_SWEEP_STATES: &[&str] = &["open", "refresh_due"];
 
+pub const DEFAULT_DISABLED_MARKET_LOG_INTERVAL_SECONDS: u64 = 3600;
+pub const MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS: u64 = 60;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarketBatchSelection {
     pub selected_market_ids: Vec<String>,

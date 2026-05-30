@@ -8,8 +8,8 @@ use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
 use super::market_phases::MarketPhaseMetrics;
-use super::reconcile_phase::ReconcilePhaseResult;
 use super::offer_dispatch::execute_strategy_actions;
+use super::reconcile_phase::ReconcilePhaseResult;
 use super::strategy_support::evaluate_strategy_actions_for_market;
 
 pub struct StrategyPhaseResult {

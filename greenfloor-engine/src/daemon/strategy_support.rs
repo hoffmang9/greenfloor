@@ -4,8 +4,8 @@ use std::collections::HashMap;
 use crate::config::{resolve_quote_asset_for_offer, MarketConfig};
 use crate::cycle::{
     filter_planned_actions_with_positive_repeat, is_two_sided_market_mode,
-    one_sided_offer_counts_by_side, plan_reseed_actions_from_gap, resolve_tracked_sizes,
-    MarketState, PlannedAction, StrategyConfig,
+    plan_reseed_actions_from_gap, resolve_tracked_sizes, MarketState, PlannedAction,
+    StrategyConfig,
 };
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
@@ -99,9 +99,6 @@ pub fn evaluate_strategy_actions_for_market(
         &config,
         xch_price_usd,
     );
-    let (buy_side, sell_side) =
-        one_sided_offer_counts_by_side(&active_offer_counts_by_size, &tracked_sizes_list);
-    let _ = (buy_side, sell_side);
     Ok((reseed.actions, active_offer_counts_by_size))
 }
 

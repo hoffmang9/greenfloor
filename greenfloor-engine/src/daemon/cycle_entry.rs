@@ -62,17 +62,23 @@ async fn process_one_market(
     };
     let phases = run_post_reconcile_market_phases(&store, &phase_context, market).await?;
     let immediate_requeue_requested = reconcile.metrics.immediate_requeue_requested;
+    let state = &phases.state;
     let io = IoPhaseMetrics {
-        cycle_error_count: phases.metrics.cycle_error_count,
-        strategy_planned_total: phases.metrics.strategy_planned_total,
-        strategy_executed_total: phases.metrics.strategy_executed_total,
+        cycle_error_count: state.cycle_errors.max(0) as u64,
+        strategy_planned_total: state.strategy_planned.max(0) as u64,
+        strategy_executed_total: state.strategy_executed.max(0) as u64,
+    };
+    let cancel = super::cancel_phase::CancelPhaseMetrics {
+        cancel_triggered: state.cancel_triggered,
+        cancel_planned: state.cancel_planned.max(0) as u64,
+        cancel_executed: state.cancel_executed.max(0) as u64,
     };
 
     Ok(SingleMarketCycleOutput {
         market_id: market.market_id.clone(),
         reconcile,
         io,
-        cancel: phases.cancel,
+        cancel,
         immediate_requeue_requested,
     })
 }
@@ -154,6 +160,7 @@ async fn run_daemon_cycle_once_inner(
 ) -> SignerResult<DaemonCycleOnceResponse> {
     let started: Instant = cycle_started_instant();
     let resources = load_cycle_resources(request)?;
+    super::disabled_markets::log_disabled_markets_periodic(&resources.markets);
     let plan = build_cycle_plan(request, &resources).await?;
     write_stale_sweep_audit(&plan.db_path, &plan)?;
 

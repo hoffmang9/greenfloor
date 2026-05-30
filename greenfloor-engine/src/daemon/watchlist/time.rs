@@ -19,7 +19,10 @@ pub(crate) fn parse_event_created_at(value: &str) -> Option<DateTime<Utc>> {
         })
 }
 
-pub(crate) fn is_recent_mempool_observed_offer_state(updated_at: &str, clock: DateTime<Utc>) -> bool {
+pub(crate) fn is_recent_mempool_observed_offer_state(
+    updated_at: &str,
+    clock: DateTime<Utc>,
+) -> bool {
     let Some(parsed) = parse_event_created_at(updated_at) else {
         return false;
     };

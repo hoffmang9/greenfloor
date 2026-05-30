@@ -24,7 +24,10 @@ pub fn load_daemon_program_runtime(program_path: &Path) -> SignerResult<DaemonPr
 }
 
 pub fn use_websocket_capture_for_once(runtime: &DaemonProgramRuntime) -> bool {
-    runtime.tx_block_trigger_mode == "websocket"
+    runtime
+        .tx_block_trigger_mode
+        .trim()
+        .eq_ignore_ascii_case("websocket")
 }
 
 pub fn resolve_testnet_markets_path(raw: &str) -> Option<PathBuf> {

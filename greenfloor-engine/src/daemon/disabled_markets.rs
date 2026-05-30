@@ -1,22 +1,32 @@
-use std::collections::HashMap;
 use std::sync::{Mutex, Once};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::config::MarketsConfig;
-
-const DEFAULT_LOG_INTERVAL_SECONDS: u64 = 3600;
-const MIN_LOG_INTERVAL_SECONDS: u64 = 60;
+use crate::cycle::{
+    next_disabled_market_log_deadline, should_log_disabled_market,
+    DEFAULT_DISABLED_MARKET_LOG_INTERVAL_SECONDS, MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS,
+};
 
 static STARTUP_LOGGED: Once = Once::new();
-static NEXT_LOG_AT: std::sync::LazyLock<Mutex<HashMap<String, Instant>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+static NEXT_LOG_DEADLINE: std::sync::LazyLock<Mutex<Option<f64>>> =
+    std::sync::LazyLock::new(|| Mutex::new(None));
+
+fn monotonic_seconds() -> f64 {
+    static START: Once = Once::new();
+    static mut ORIGIN: Option<Instant> = None;
+    START.call_once(|| unsafe {
+        ORIGIN = Some(Instant::now());
+    });
+    let origin = unsafe { ORIGIN.expect("monotonic origin") };
+    origin.elapsed().as_secs_f64()
+}
 
 pub fn disabled_market_log_interval_seconds() -> u64 {
     std::env::var("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS")
         .ok()
         .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .map(|value| value.max(MIN_LOG_INTERVAL_SECONDS))
-        .unwrap_or(DEFAULT_LOG_INTERVAL_SECONDS)
+        .map(|value| value.max(MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS))
+        .unwrap_or(DEFAULT_DISABLED_MARKET_LOG_INTERVAL_SECONDS)
 }
 
 pub fn log_disabled_markets_startup_once(markets: &MarketsConfig) {
@@ -40,40 +50,37 @@ pub fn log_disabled_markets_startup_once(markets: &MarketsConfig) {
             market_ids = ?disabled_market_ids,
             "disabled_markets_startup"
         );
-        let throttle_until =
-            Instant::now() + Duration::from_secs(interval_seconds);
-        if let Ok(mut next_log_at) = NEXT_LOG_AT.lock() {
-            for market_id in disabled_market_ids {
-                next_log_at.insert(market_id, throttle_until);
-            }
+        let now = monotonic_seconds();
+        if let Ok(mut next_log_deadline) = NEXT_LOG_DEADLINE.lock() {
+            *next_log_deadline = Some(next_disabled_market_log_deadline(now, interval_seconds));
         }
     });
 }
 
-pub fn log_disabled_market_skip(market_id: &str) {
-    let market_id = market_id.trim();
-    if market_id.is_empty() {
-        return;
-    }
-    let now = Instant::now();
-    let Ok(mut next_log_at) = NEXT_LOG_AT.lock() else {
+pub fn log_disabled_markets_periodic(markets: &MarketsConfig) {
+    let interval_seconds = disabled_market_log_interval_seconds();
+    let now = monotonic_seconds();
+    let Ok(mut next_log_deadline) = NEXT_LOG_DEADLINE.lock() else {
         return;
     };
-    let allowed = next_log_at
-        .get(market_id)
-        .is_none_or(|deadline| now >= *deadline);
-    if !allowed {
+    let deadline = next_log_deadline.unwrap_or(0.0);
+    if !should_log_disabled_market(now, deadline) {
         return;
     }
-    next_log_at.insert(
-        market_id.to_string(),
-        now + Duration::from_secs(disabled_market_log_interval_seconds()),
-    );
+    let disabled_count = markets
+        .markets
+        .iter()
+        .filter(|market| !market.enabled)
+        .count();
+    if disabled_count == 0 {
+        return;
+    }
+    *next_log_deadline = Some(next_disabled_market_log_deadline(now, interval_seconds));
     tracing::info!(
-        market_id,
-        event = "market_skipped",
-        reason = "disabled",
-        "market_decision"
+        count = disabled_count,
+        interval_seconds,
+        event = "disabled_markets_periodic",
+        "disabled_markets"
     );
 }
 
@@ -104,7 +111,10 @@ mod tests {
     #[test]
     fn disabled_market_log_interval_respects_minimum() {
         std::env::set_var("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS", "10");
-        assert_eq!(disabled_market_log_interval_seconds(), MIN_LOG_INTERVAL_SECONDS);
+        assert_eq!(
+            disabled_market_log_interval_seconds(),
+            MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS
+        );
         std::env::remove_var("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS");
     }
 

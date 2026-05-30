@@ -1,11 +1,11 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::adapters::DexieClient;
 use crate::config::{ManagerProgramConfig, MarketConfig, MarketsConfig};
 use crate::error::SignerResult;
 
 use super::reconcile_phase::ReconcilePhaseResult;
-use super::run_once::{CyclePlan, DaemonCycleTestControls, DaemonRunOnceRequest};
+use super::run_once::{CyclePlan, DaemonRunOnceRequest};
 
 /// Config and clients loaded once per daemon cycle.
 #[derive(Debug, Clone)]
@@ -45,69 +45,16 @@ pub struct MarketDispatchContext {
     pub previous_xch_price_usd: Option<f64>,
     pub parallel_markets_enabled: bool,
     pub runtime_dry_run: bool,
-    pub test_controls: DaemonCycleTestControls,
+    pub test_controls: super::run_once::DaemonCycleTestControls,
 }
 
+/// Per-market inputs for inventory → strategy → cancel → coin_ops.
 #[derive(Debug, Clone)]
 pub struct MarketCycleContext<'a> {
     pub resources: &'a DaemonCycleResources,
     pub dispatch: &'a MarketDispatchContext,
     pub plan: &'a CyclePlan,
     pub reconcile: &'a ReconcilePhaseResult,
-}
-
-impl MarketCycleContext<'_> {
-    pub fn program(&self) -> &ManagerProgramConfig {
-        &self.resources.program
-    }
-
-    pub fn network(&self) -> &str {
-        &self.resources.network
-    }
-
-    pub fn dexie(&self) -> &DexieClient {
-        &self.resources.dexie
-    }
-
-    pub fn db_path(&self) -> &Path {
-        &self.dispatch.db_path
-    }
-
-    pub fn program_path(&self) -> &Path {
-        &self.resources.program_path
-    }
-
-    pub fn markets_path(&self) -> &Path {
-        &self.resources.markets_path
-    }
-
-    pub fn testnet_markets_path(&self) -> Option<&Path> {
-        self.resources.testnet_markets_path.as_deref()
-    }
-
-    pub fn allowed_key_ids(&self) -> &[String] {
-        &self.dispatch.allowed_key_ids
-    }
-
-    pub fn xch_price_usd(&self) -> Option<f64> {
-        self.dispatch.xch_price_usd
-    }
-
-    pub fn previous_xch_price_usd(&self) -> Option<f64> {
-        self.dispatch.previous_xch_price_usd
-    }
-
-    pub fn runtime_dry_run(&self) -> bool {
-        self.dispatch.runtime_dry_run
-    }
-
-    pub fn test_controls(&self) -> &DaemonCycleTestControls {
-        &self.dispatch.test_controls
-    }
-
-    pub fn skip_strategy_execution(&self) -> bool {
-        self.dispatch.test_controls.skip_strategy_execution
-    }
 }
 
 pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<DaemonCycleResources> {

@@ -36,11 +36,9 @@ from greenfloor.daemon.testing.main import (
     MarketCycleResult,
     MarketDispatchState,
     consume_reload_marker,
-    enqueue_immediate_requeue_market,
     main,
     run_loop,
     run_once,
-    select_market_batch,
 )
 from greenfloor.daemon.testing.market_helpers import resolve_quote_asset_for_offer
 from greenfloor.daemon.testing.reconcile import reconcile_market_cycle_offers
@@ -82,7 +80,6 @@ __all__ = [
     "cooldown_remaining_ms",
     "cooldowns",
     "drop_zero_repeat_strategy_actions",
-    "enqueue_immediate_requeue_market",
     "execute_cancel_policy",
     "expand_planned_actions",
     "inject_reseed_action_if_no_active_offers",
@@ -94,7 +91,6 @@ __all__ = [
     "resolve_quote_asset_for_offer",
     "run_loop",
     "run_once",
-    "select_market_batch",
     "set_cooldown",
     "set_watched_coin_ids_for_market",
     "single_input_preferred_skip_reason",

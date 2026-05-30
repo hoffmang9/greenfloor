@@ -24,10 +24,8 @@ pub async fn parallel_reservation_context(
 ) -> SignerResult<ParallelReservationContext> {
     let signer_config = load_signer_config(program_path)?;
     let program = load_program_config(program_path)?;
-    let quote_asset = crate::config::resolve_quote_asset_for_offer(
-        market.quote_asset.trim(),
-        &program.network,
-    );
+    let quote_asset =
+        crate::config::resolve_quote_asset_for_offer(market.quote_asset.trim(), &program.network);
     let (base_asset_id, quote_asset_id) =
         resolve_offer_assets_for_action(&signer_config, market.base_asset.trim(), &quote_asset)
             .await?;
@@ -61,10 +59,14 @@ pub async fn parallel_reservation_context(
 }
 
 pub fn parallel_reservation_asset_ids(ctx: &ParallelReservationContext) -> BTreeSet<String> {
-    [ctx.base_asset_id.clone(), ctx.quote_asset_id.clone(), ctx.fee_asset_id.clone()]
-        .into_iter()
-        .filter(|asset_id| !asset_id.trim().is_empty())
-        .collect()
+    [
+        ctx.base_asset_id.clone(),
+        ctx.quote_asset_id.clone(),
+        ctx.fee_asset_id.clone(),
+    ]
+    .into_iter()
+    .filter(|asset_id| !asset_id.trim().is_empty())
+    .collect()
 }
 
 #[cfg(test)]

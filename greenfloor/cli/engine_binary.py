@@ -203,37 +203,3 @@ def daemon_run_once_argv(
     if json_output:
         argv.append("--json")
     return argv
-
-
-def run_daemon_once_via_engine(
-    *,
-    program_path: Path,
-    markets_path: Path,
-    testnet_markets_path: Path | None = None,
-    key_ids: str | None = None,
-    state_db: str | None = None,
-    coinset_base_url: str = "https://api.coinset.org",
-    state_dir: Path,
-    use_websocket_capture: bool = True,
-    run_fn: Callable[..., object] | None = None,
-) -> int:
-    binary = resolve_greenfloor_engine_binary()
-    argv = daemon_run_once_argv(
-        binary=binary,
-        program_path=program_path,
-        markets_path=markets_path,
-        testnet_markets_path=testnet_markets_path,
-        key_ids=key_ids,
-        state_db=state_db,
-        coinset_base_url=coinset_base_url,
-        state_dir=state_dir,
-        use_websocket_capture=use_websocket_capture,
-    )
-    runner = run_fn or subprocess.run
-    completed = runner(argv, check=False)
-    returncode = getattr(completed, "returncode", completed)
-    if not isinstance(returncode, int):
-        raise GreenfloorEngineBinaryError(
-            f"unexpected subprocess return value from greenfloor-engine: {returncode!r}"
-        )
-    return returncode

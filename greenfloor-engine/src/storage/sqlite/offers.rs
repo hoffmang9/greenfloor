@@ -1,5 +1,5 @@
-use rusqlite::params;
 use crate::error::{SignerError, SignerResult};
+use rusqlite::params;
 
 use super::{utcnow_iso, OfferStateDetailRow, OfferStateListRow, SqliteStore};
 
@@ -27,17 +27,20 @@ impl SqliteStore {
         })?;
         let mut out = Vec::new();
         if let Some(market_id) = market_id.map(str::trim).filter(|value| !value.is_empty()) {
-            let mut stmt = self.conn.prepare(
-                r#"
+            let mut stmt = self
+                .conn
+                .prepare(
+                    r#"
                 SELECT offer_id, market_id, state
                 FROM offer_state
                 WHERE market_id = ?1
                 ORDER BY updated_at DESC
                 LIMIT ?2
                 "#,
-            ).map_err(|err| {
-                SignerError::Other(format!("failed to prepare offer_state query: {err}"))
-            })?;
+                )
+                .map_err(|err| {
+                    SignerError::Other(format!("failed to prepare offer_state query: {err}"))
+                })?;
             let mut rows = stmt
                 .query(params![market_id, limit_i64])
                 .map_err(|err| SignerError::Other(format!("failed to query offer_state: {err}")))?;
@@ -57,16 +60,19 @@ impl SqliteStore {
                 });
             }
         } else {
-            let mut stmt = self.conn.prepare(
-                r#"
+            let mut stmt = self
+                .conn
+                .prepare(
+                    r#"
                 SELECT offer_id, market_id, state
                 FROM offer_state
                 ORDER BY updated_at DESC
                 LIMIT ?1
                 "#,
-            ).map_err(|err| {
-                SignerError::Other(format!("failed to prepare offer_state query: {err}"))
-            })?;
+                )
+                .map_err(|err| {
+                    SignerError::Other(format!("failed to prepare offer_state query: {err}"))
+                })?;
             let mut rows = stmt
                 .query(params![limit_i64])
                 .map_err(|err| SignerError::Other(format!("failed to query offer_state: {err}")))?;
@@ -100,17 +106,20 @@ impl SqliteStore {
         let limit_i64 = i64::try_from(limit).map_err(|_| {
             SignerError::Other("list_offer_state_details limit exceeds i64 max".to_string())
         })?;
-        let mut stmt = self.conn.prepare(
-            r#"
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
             SELECT offer_id, market_id, state, last_seen_status, updated_at
             FROM offer_state
             WHERE market_id = ?1
             ORDER BY updated_at DESC
             LIMIT ?2
             "#,
-        ).map_err(|err| {
-            SignerError::Other(format!("failed to prepare offer_state detail query: {err}"))
-        })?;
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("failed to prepare offer_state detail query: {err}"))
+            })?;
         let mut rows = stmt.query(params![market_id, limit_i64]).map_err(|err| {
             SignerError::Other(format!("failed to query offer_state details: {err}"))
         })?;
