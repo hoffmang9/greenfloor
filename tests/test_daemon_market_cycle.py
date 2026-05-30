@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, cast
+from dataclasses import dataclass, field
 
 from greenfloor.config import io as config_io
+from greenfloor.core.cycle import enqueue_immediate_requeue, select_market_batch
 from greenfloor.daemon.testing import (
-    MarketDispatchState,
-    detect_stale_open_offers_for_requeue,
-    enqueue_immediate_requeue_market,
     match_watched_coin_ids,
     resolve_quote_asset_for_offer,
-    select_market_batch,
     set_watched_coin_ids_for_market,
 )
-from greenfloor.storage.sqlite import SqliteStore
+from greenfloor.daemon.testing.watchlist import new_coin_watchlist_cache
+
+
+@dataclass
+class _DispatchState:
+    cursor: int = 0
+    immediate_requeue_ids: list[str] = field(default_factory=list)
 
 
 def test_select_market_batch_prioritizes_immediate_requeue_then_round_robin() -> None:
@@ -24,89 +25,47 @@ def test_select_market_batch_prioritizes_immediate_requeue_then_round_robin() ->
         enabled: bool = True
 
     markets = [_Market("m1"), _Market("m2"), _Market("m3"), _Market("m4")]
-    state = MarketDispatchState()
-    enqueue_immediate_requeue_market(state, "m3")
+    enabled_ids = [market.market_id for market in markets]
+    state = _DispatchState()
+    state.immediate_requeue_ids = enqueue_immediate_requeue(list(state.immediate_requeue_ids), "m3")
 
-    selected, consumed = select_market_batch(
-        enabled_markets=markets,
+    first = select_market_batch(
+        enabled_market_ids=enabled_ids,
         slot_count=2,
-        dispatch_state=state,
+        cursor=state.cursor,
+        immediate_requeue_ids=list(state.immediate_requeue_ids),
     )
-    assert [m.market_id for m in selected] == ["m3", "m1"]
-    assert consumed == ["m3"]
+    state.cursor = first.cursor
+    state.immediate_requeue_ids = list(first.immediate_requeue_ids)
+    assert first.selected_market_ids == ["m3", "m1"]
+    assert first.consumed_immediate_requeues == ["m3"]
     assert list(state.immediate_requeue_ids) == []
 
-    selected_next, consumed_next = select_market_batch(
-        enabled_markets=markets,
+    second = select_market_batch(
+        enabled_market_ids=enabled_ids,
         slot_count=2,
-        dispatch_state=state,
+        cursor=state.cursor,
+        immediate_requeue_ids=list(state.immediate_requeue_ids),
     )
-    assert [m.market_id for m in selected_next] == ["m2", "m3"]
-    assert consumed_next == []
-
-
-def test_detect_stale_open_offers_for_requeue_marks_expired_status(tmp_path: Path) -> None:
-    store = SqliteStore(tmp_path / "state.db")
-    try:
-        store.upsert_offer_state(
-            offer_id="offer-expired",
-            market_id="m1",
-            state="open",
-            last_seen_status=0,
-        )
-
-        class _FakeDexie:
-            @staticmethod
-            def get_offer(offer_id: str, *, timeout: int = 5) -> dict[str, Any]:
-                _ = timeout
-                assert offer_id == "offer-expired"
-                return {"offer": {"id": offer_id, "status": 6}}
-
-        payload = detect_stale_open_offers_for_requeue(
-            store=store,
-            dexie=cast(Any, _FakeDexie()),
-            enabled_market_ids={"m1"},
-        )
-    finally:
-        store.close()
-
-    assert payload.checked_offer_count == 1
-    assert payload.requeue_market_ids == ["m1"]
-    assert payload.hits[0].reason == "offer_expired"
-
-
-def test_detect_stale_open_offers_for_requeue_marks_missing_404(tmp_path: Path) -> None:
-    store = SqliteStore(tmp_path / "state.db")
-    try:
-        store.upsert_offer_state(
-            offer_id="offer-missing",
-            market_id="m2",
-            state="open",
-            last_seen_status=0,
-        )
-
-        class _FakeDexie:
-            @staticmethod
-            def get_offer(offer_id: str, *, timeout: int = 5) -> dict[str, Any]:
-                _ = offer_id, timeout
-                raise RuntimeError("HTTP Error 404: Not Found")
-
-        payload = detect_stale_open_offers_for_requeue(
-            store=store,
-            dexie=cast(Any, _FakeDexie()),
-            enabled_market_ids={"m2"},
-        )
-    finally:
-        store.close()
-
-    assert payload.checked_offer_count == 1
-    assert payload.requeue_market_ids == ["m2"]
-    assert payload.hits[0].reason == "offer_missing_404"
+    state.cursor = second.cursor
+    assert second.selected_market_ids == ["m2", "m3"]
+    assert second.consumed_immediate_requeues == []
 
 
 def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:
-    set_watched_coin_ids_for_market(market_id="m-empty", coin_ids={"c" * 64})
-    assert match_watched_coin_ids(observed_coin_ids=["d" * 64]) == {}
+    coin_watchlist = new_coin_watchlist_cache()
+    set_watched_coin_ids_for_market(
+        coin_watchlist=coin_watchlist,
+        market_id="m-empty",
+        coin_ids={"c" * 64},
+    )
+    assert (
+        match_watched_coin_ids(
+            coin_watchlist=coin_watchlist,
+            observed_coin_ids=["d" * 64],
+        )
+        == {}
+    )
 
 
 def test_resolve_quote_asset_for_offer_maps_symbol_from_cats(monkeypatch, tmp_path) -> None:

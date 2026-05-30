@@ -170,7 +170,6 @@ class ProgramConfig:
     pushover_user_key_env: str
     pushover_app_token_env: str
     pushover_recipient_key_env: str
-    runtime_parallel_markets: bool = False
     runtime_market_slot_count: int = 0
     runtime_offer_parallelism_enabled: bool = False
     runtime_offer_parallelism_max_workers: int = 4
@@ -508,7 +507,6 @@ def parse_program_config(raw: dict[str, Any]) -> ProgramConfig:
         home_dir=str(_req(app, "home_dir")),
         runtime_loop_interval_seconds=int(_req(runtime, "loop_interval_seconds")),
         runtime_dry_run=bool(runtime.get("dry_run", False)),
-        runtime_parallel_markets=bool(runtime.get("parallel_markets", False)),
         runtime_market_slot_count=max(0, int(runtime.get("market_slot_count", 0))),
         runtime_offer_parallelism_enabled=bool(runtime.get("offer_parallelism_enabled", False)),
         runtime_offer_parallelism_max_workers=max(

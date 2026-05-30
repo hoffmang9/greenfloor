@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::ManagerProgramConfig;
+
 use super::dispatch::{single_input_preferred_skip_reason, SpendableAssetProfile};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,6 +117,11 @@ pub fn can_parallelize_managed_offers(
     has_coordinator: bool,
 ) -> bool {
     signer_path_configured && parallelism_enabled && !runtime_dry_run && has_coordinator
+}
+
+/// Parallel managed dispatch after signer path is confirmed (daemon strategy phase).
+pub fn parallel_managed_dispatch_enabled(program: &ManagerProgramConfig) -> bool {
+    program.runtime_offer_parallelism_enabled && !program.runtime_dry_run
 }
 
 pub fn parallel_max_workers(submission_count: usize, configured_max: usize) -> usize {
@@ -369,6 +376,35 @@ mod tests {
         let decision = managed_retry_decision(1, 3, 250, true);
         assert_eq!(decision.decision, ManagedRetryDecisionKind::Retry);
         assert_eq!(decision.sleep_ms, 500);
+    }
+
+    #[test]
+    fn parallel_managed_dispatch_enabled_requires_parallelism_and_live_runtime() {
+        let program = ManagerProgramConfig {
+            network: "mainnet".to_string(),
+            home_dir: std::path::PathBuf::from("/tmp/gf"),
+            app_log_level: "INFO".to_string(),
+            app_log_level_was_missing: false,
+            dexie_api_base: String::new(),
+            splash_api_base: String::new(),
+            offer_publish_venue: "dexie".to_string(),
+            coin_ops_minimum_fee_mojos: 0,
+            coin_ops_max_operations_per_run: 0,
+            coin_ops_max_daily_fee_budget_mojos: 0,
+            coin_ops_split_fee_mojos: 0,
+            coin_ops_combine_fee_mojos: 0,
+            runtime_offer_bootstrap_wait_timeout_seconds: 120,
+            runtime_market_slot_count: 1,
+            runtime_offer_parallelism_enabled: true,
+            runtime_offer_parallelism_max_workers: 2,
+            runtime_dry_run: false,
+            runtime_loop_interval_seconds: 30,
+            tx_block_trigger_mode: "websocket".to_string(),
+            tx_block_websocket_url: String::new(),
+            tx_block_websocket_reconnect_interval_seconds: 1,
+            tx_block_fallback_poll_interval_seconds: 1,
+        };
+        assert!(parallel_managed_dispatch_enabled(&program));
     }
 
     #[test]

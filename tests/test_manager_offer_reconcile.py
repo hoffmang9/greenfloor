@@ -1,16 +1,41 @@
 from __future__ import annotations
 
 import json
-import urllib.error
-from email.message import Message
 from pathlib import Path
 
-from greenfloor.cli.offers_lifecycle import offers_reconcile, offers_status
 from greenfloor.storage.sqlite import SqliteStore
+from tests.helpers.dexie_http_mock import DexieHttpMock
 from tests.helpers.offer_runtime_fixtures import write_manager_program
+from tests.helpers.offers_engine_cli import offers_reconcile, offers_status
+
+_DEFAULT_DEXIE_BASE = "https://api.dexie.space"
 
 
-def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path, capsys) -> None:
+def _run_offers_reconcile_with_mock(
+    *,
+    program: Path,
+    db_path: Path,
+    dexie: DexieHttpMock,
+    market_id: str | None = None,
+    limit: int = 20,
+) -> int:
+    base_url = dexie.start()
+    original = program.read_text(encoding="utf-8")
+    program.write_text(original.replace(_DEFAULT_DEXIE_BASE, base_url), encoding="utf-8")
+    try:
+        return offers_reconcile(
+            program_path=program,
+            state_db=str(db_path),
+            market_id=market_id,
+            limit=limit,
+            venue="dexie",
+        )
+    finally:
+        dexie.stop()
+        program.write_text(original, encoding="utf-8")
+
+
+def test_offers_reconcile_updates_states_from_dexie(tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
     write_manager_program(program, tmp_path=tmp_path)
@@ -34,30 +59,17 @@ def test_offers_reconcile_updates_states_from_dexie(monkeypatch, tmp_path: Path,
     finally:
         store.close()
 
-    class _FakeDexie:
-        def __init__(self, _base_url: str) -> None:
-            pass
-
-        def get_offer(self, offer_id: str) -> dict:
-            if offer_id == "offer-ok":
-                return {"id": "offer-ok", "status": 4, "tx_id": confirmed_tx_id}
-            raise urllib.error.HTTPError(
-                url=f"https://api.dexie.space/v1/offers/{offer_id}",
-                code=404,
-                msg="not found",
-                hdrs=Message(),
-                fp=None,
-            )
-
-    monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexie)
-
-    code = offers_reconcile(
-        program_path=program,
-        state_db=str(db_path),
-        market_id=None,
-        limit=20,
-        venue="dexie",
+    dexie = DexieHttpMock()
+    dexie.set_offers(
+        {
+            "offer-ok": {
+                "id": "offer-ok",
+                "status": 4,
+                "tx_id": confirmed_tx_id,
+            },
+        }
     )
+    code = _run_offers_reconcile_with_mock(program=program, db_path=db_path, dexie=dexie)
     assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["reconciled_count"] == 2
@@ -121,7 +133,7 @@ def test_offers_status_reports_compact_summary(tmp_path: Path, capsys) -> None:
     assert len(payload["recent_events"]) == 1
 
 
-def test_offers_reconcile_coinset_signal_matrix(monkeypatch, tmp_path: Path, capsys) -> None:
+def test_offers_reconcile_coinset_signal_matrix(tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
     write_manager_program(program, tmp_path=tmp_path)
@@ -147,29 +159,16 @@ def test_offers_reconcile_coinset_signal_matrix(monkeypatch, tmp_path: Path, cap
     finally:
         store.close()
 
-    class _FakeDexie:
-        def __init__(self, _base_url: str) -> None:
-            pass
-
-        def get_offer(self, offer_id: str) -> dict:
-            if offer_id == "offer-confirmed":
-                return {"id": offer_id, "status": 0, "tx_id": tx_confirmed}
-            if offer_id == "offer-mempool":
-                return {"id": offer_id, "status": 0, "tx_id": tx_mempool}
-            if offer_id == "offer-no-signal":
-                return {"id": offer_id, "status": 0, "tx_id": tx_no_signal}
-            if offer_id == "offer-missing-status":
-                return {"id": offer_id}
-            raise RuntimeError("unexpected_offer_id")
-
-    monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexie)
-    code = offers_reconcile(
-        program_path=program,
-        state_db=str(db_path),
-        market_id=None,
-        limit=20,
-        venue="dexie",
+    dexie = DexieHttpMock()
+    dexie.set_offers(
+        {
+            "offer-confirmed": {"id": "offer-confirmed", "status": 0, "tx_id": tx_confirmed},
+            "offer-mempool": {"id": "offer-mempool", "status": 0, "tx_id": tx_mempool},
+            "offer-no-signal": {"id": "offer-no-signal", "status": 0, "tx_id": tx_no_signal},
+            "offer-missing-status": {"id": "offer-missing-status"},
+        }
     )
+    code = _run_offers_reconcile_with_mock(program=program, db_path=db_path, dexie=dexie)
     assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     by_offer = {row["offer_id"]: row for row in payload["items"]}
@@ -193,9 +192,7 @@ def test_offers_reconcile_coinset_signal_matrix(monkeypatch, tmp_path: Path, cap
     assert by_offer["offer-missing-status"]["signal_source"] == "none"
 
 
-def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(
-    monkeypatch, tmp_path: Path, capsys
-) -> None:
+def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
     write_manager_program(program, tmp_path=tmp_path)
@@ -216,25 +213,14 @@ def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(
     finally:
         store.close()
 
-    class _FakeDexie:
-        def __init__(self, _base_url: str) -> None:
-            pass
-
-        def get_offer(self, offer_id: str) -> dict:
-            if offer_id == "offer-status-confirmed":
-                return {"id": offer_id, "status": 4}
-            if offer_id == "offer-status-cancelled":
-                return {"id": offer_id, "status": 3}
-            raise RuntimeError("unexpected_offer_id")
-
-    monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexie)
-    code = offers_reconcile(
-        program_path=program,
-        state_db=str(db_path),
-        market_id=None,
-        limit=20,
-        venue="dexie",
+    dexie = DexieHttpMock()
+    dexie.set_offers(
+        {
+            "offer-status-confirmed": {"id": "offer-status-confirmed", "status": 4},
+            "offer-status-cancelled": {"id": "offer-status-cancelled", "status": 3},
+        }
     )
+    code = _run_offers_reconcile_with_mock(program=program, db_path=db_path, dexie=dexie)
     assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     by_offer = {row["offer_id"]: row for row in payload["items"]}
@@ -249,9 +235,7 @@ def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(
     assert by_offer["offer-status-cancelled"]["taker_signal"] == "none"
 
 
-def test_offers_reconcile_reads_nested_dexie_offer_payload_shape(
-    monkeypatch, tmp_path: Path, capsys
-) -> None:
+def test_offers_reconcile_reads_nested_dexie_offer_payload_shape(tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
     write_manager_program(program, tmp_path=tmp_path)
@@ -267,30 +251,18 @@ def test_offers_reconcile_reads_nested_dexie_offer_payload_shape(
     finally:
         store.close()
 
-    class _FakeDexie:
-        def __init__(self, _base_url: str) -> None:
-            pass
-
-        def get_offer(self, offer_id: str) -> dict:
-            if offer_id != "offer-nested":
-                raise RuntimeError("unexpected_offer_id")
-            return {
-                "success": True,
-                "offer": {
-                    "id": offer_id,
-                    "status": 4,
-                    "tx_id": tx_id,
-                },
-            }
-
-    monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexie)
-    code = offers_reconcile(
-        program_path=program,
-        state_db=str(db_path),
-        market_id=None,
-        limit=20,
-        venue="dexie",
+    dexie = DexieHttpMock()
+    dexie.set_offers(
+        {
+            "offer-nested": {
+                "id": "offer-nested",
+                "status": 4,
+                "tx_id": tx_id,
+            },
+        }
     )
+    code = _run_offers_reconcile_with_mock(program=program, db_path=db_path, dexie=dexie)
+
     assert code == 0
     payload = json.loads(capsys.readouterr().out.strip())
     by_offer = {row["offer_id"]: row for row in payload["items"]}

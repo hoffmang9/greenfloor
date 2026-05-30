@@ -70,6 +70,47 @@ impl DexieClient {
         Self::parse_response(response).await
     }
 
+    pub async fn get_offers(&self, offered: &str, requested: &str) -> SignerResult<Vec<Value>> {
+        let query = format!(
+            "offered={}&requested={}",
+            urlencoding::encode(offered.trim()),
+            urlencoding::encode(requested.trim())
+        );
+        let url = format!("{}/v1/offers?{query}", self.base_url);
+        let response = self
+            .http
+            .get(url)
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|err| SignerError::Other(format!("dexie_get_offers_error:{err}")))?;
+        let payload = Self::parse_response(response).await?;
+        let offers = payload
+            .get("offers")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        Ok(offers)
+    }
+
+    pub async fn cancel_offer(&self, offer_id: &str) -> SignerResult<Value> {
+        let clean_offer_id = offer_id.trim();
+        if clean_offer_id.is_empty() {
+            return Err(SignerError::Other("offer_id is required".to_string()));
+        }
+        let encoded = urlencoding::encode(clean_offer_id);
+        let url = format!("{}/v1/offers/{encoded}/cancel", self.base_url);
+        let response = self
+            .http
+            .post(url)
+            .json(&json!({"id": clean_offer_id}))
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|err| SignerError::Other(format!("dexie_cancel_offer_error:{err}")))?;
+        Self::parse_response(response).await
+    }
+
     async fn parse_response(response: reqwest::Response) -> SignerResult<Value> {
         let status = response.status();
         let body = response
@@ -130,17 +171,11 @@ pub async fn post_dexie_offer_with_invalid_offer_retry(
             .unwrap_or("")
             .trim()
             .to_string();
-        if !dexie_invalid_offer_should_retry(
-            &error,
-            attempt,
-            INVALID_OFFER_RETRY_MAX_ATTEMPTS,
-        ) {
+        if !dexie_invalid_offer_should_retry(&error, attempt, INVALID_OFFER_RETRY_MAX_ATTEMPTS) {
             return Ok(result);
         }
-        let sleep_seconds = dexie_invalid_offer_retry_sleep(
-            attempt,
-            INVALID_OFFER_RETRY_INITIAL_SLEEP_SECONDS,
-        );
+        let sleep_seconds =
+            dexie_invalid_offer_retry_sleep(attempt, INVALID_OFFER_RETRY_INITIAL_SLEEP_SECONDS);
         tokio::time::sleep(std::time::Duration::from_secs_f64(sleep_seconds)).await;
         attempt += 1;
     }
@@ -212,16 +247,13 @@ pub async fn post_offer_phase_dexie(
     expected_requested_asset_id: &str,
     expected_requested_symbol: &str,
 ) -> SignerResult<Value> {
-    let mut last_result = json!({"success": false, "error": "dexie_offer_not_visible_after_publish"});
+    let mut last_result =
+        json!({"success": false, "error": "dexie_offer_not_visible_after_publish"});
     let mut last_visibility_error = String::new();
     for attempt in 1..=VISIBILITY_POST_MAX_ATTEMPTS {
-        let result = post_dexie_offer_with_invalid_offer_retry(
-            dexie,
-            offer_text,
-            drop_only,
-            claim_rewards,
-        )
-        .await?;
+        let result =
+            post_dexie_offer_with_invalid_offer_retry(dexie, offer_text, drop_only, claim_rewards)
+                .await?;
         last_result = result.clone();
         if result.get("success").and_then(Value::as_bool) != Some(true) {
             return Ok(result);
@@ -247,7 +279,10 @@ pub async fn post_offer_phase_dexie(
                 let mut failed = result;
                 if let Value::Object(obj) = &mut failed {
                     obj.insert("success".to_string(), Value::Bool(false));
-                    obj.insert("error".to_string(), Value::String(last_visibility_error.clone()));
+                    obj.insert(
+                        "error".to_string(),
+                        Value::String(last_visibility_error.clone()),
+                    );
                 }
                 return Ok(failed);
             }

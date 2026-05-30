@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from greenfloor.runtime.json_output import format_json_output
-
 
 def default_build_post_success_payload(**overrides: Any) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -55,13 +53,12 @@ def patch_engine_build_and_post(
 ) -> None:
     captured = capture if capture is not None else {}
 
-    def _fake_run(**kwargs: Any) -> int:
+    def _fake_run(**kwargs: Any) -> tuple[int, dict[str, Any]]:
         captured.update(kwargs)
-        if payload is not None:
-            print(format_json_output(payload))
-        return exit_code
+        body = payload if payload is not None else {}
+        return exit_code, body
 
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.run_build_and_post_offer_via_engine",
+        "greenfloor.cli.offer_build_post.run_build_and_post_offer_in_process",
         _fake_run,
     )

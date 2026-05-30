@@ -5,7 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def write_program(path: Path, home_dir: Path, *, parallel_markets: bool = False) -> None:
+def write_program(
+    path: Path,
+    home_dir: Path,
+    *,
+    dexie_api_base: str = "https://api.dexie.space",
+) -> None:
     path.write_text(
         "\n".join(
             [
@@ -16,7 +21,6 @@ def write_program(path: Path, home_dir: Path, *, parallel_markets: bool = False)
                 "runtime:",
                 "  loop_interval_seconds: 30",
                 "  dry_run: false",
-                f"  parallel_markets: {'true' if parallel_markets else 'false'}",
                 "chain_signals:",
                 "  tx_block_trigger:",
                 '    mode: "websocket"',
@@ -41,7 +45,7 @@ def write_program(path: Path, home_dir: Path, *, parallel_markets: bool = False)
                 '      recipient_key_env: "PUSHOVER_RECIPIENT_KEY"',
                 "venues:",
                 "  dexie:",
-                '    api_base: "https://api.dexie.space"',
+                f'    api_base: "{dexie_api_base}"',
                 "  splash:",
                 '    api_base: "http://localhost:4000"',
                 "  offer_publish:",

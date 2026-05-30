@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
 
 if TYPE_CHECKING:
     from greenfloor.core.coin_ops.engine_protocol import CoinOpsEngineProtocol
     from greenfloor.core.engine_protocol import BootstrapEngineProtocol, PolicyEngineProtocol
+    from greenfloor.storage.sqlite import SqliteStore
 
 ENGINE_MODULE = "greenfloor_engine"
 
@@ -31,6 +33,7 @@ __all__ = [
     "ENGINE_MODULE",
     "bootstrap_engine",
     "coin_ops_engine",
+    "db_path_from_store",
     "import_engine",
     "engine_method_getter",
     "engine_rebuild_hint",
@@ -60,6 +63,16 @@ def import_engine() -> Any:
 
 def _loaded_engine_module() -> Any:
     return import_engine()
+
+
+def db_path_from_store(store: SqliteStore) -> str:
+    """Return the SQLite path for a store opened by GreenFloor adapters."""
+    db_path = getattr(store, "db_path", None)
+    if db_path is None:
+        raise TypeError("SqliteStore requires db_path")
+    if isinstance(db_path, Path):
+        return str(db_path)
+    return str(db_path)
 
 
 @overload

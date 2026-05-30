@@ -155,8 +155,40 @@ pub enum SignerError {
     #[error("signer_asset_resolution_failed:resolved_assets_collide_for_non_xch_pair")]
     ResolvedAssetsCollideForNonXchPair,
 
+    #[error("reservation contention: {0}")]
+    ReservationContention(String),
+
+    #[error("managed upstream transient: {0}")]
+    ManagedUpstreamTransient(String),
+
+    #[error("database is locked")]
+    DatabaseLocked,
+
+    #[error("daemon_already_running:{path}{detail}")]
+    DaemonAlreadyRunning { path: String, detail: String },
+
     #[error("{0}")]
     Other(String),
+}
+
+impl SignerError {
+    pub fn is_parallel_dispatch_transient(&self) -> bool {
+        match self {
+            Self::ReservationContention(_) | Self::ManagedUpstreamTransient(_) | Self::DatabaseLocked => {
+                true
+            }
+            Self::Other(message) => {
+                let message = message.as_str();
+                if message.contains("database is locked") {
+                    return true;
+                }
+                let class = message.split(':').next().unwrap_or(message).trim();
+                crate::cycle::is_parallel_dispatch_transient_error(class, message)
+                    || crate::cycle::is_transient_managed_upstream_error_text(message)
+            }
+            _ => false,
+        }
+    }
 }
 
 pub type SignerResult<T> = Result<T, SignerError>;

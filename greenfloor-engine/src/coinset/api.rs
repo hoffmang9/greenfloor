@@ -18,6 +18,15 @@ struct FeeEstimateResponse {
     fee_estimate: Option<Value>,
 }
 
+#[derive(Debug, Deserialize)]
+struct MempoolTxIdsResponse {
+    success: bool,
+    #[serde(default)]
+    tx_ids: Option<Vec<Value>>,
+    #[serde(default)]
+    mempool_tx_ids: Option<Vec<Value>>,
+}
+
 fn coinset_client(
     network: &str,
     base_url: Option<&str>,
@@ -119,6 +128,33 @@ pub fn conservative_fee_from_payload(payload: &Value) -> Option<u64> {
             .as_u64()
             .or_else(|| value.as_i64().filter(|v| *v >= 0).map(|v| v as u64))
     })
+}
+
+pub async fn get_all_mempool_tx_ids(
+    network: &str,
+    base_url: Option<&str>,
+) -> SignerResult<Vec<String>> {
+    let msp = if let Some(url) = base_url.map(str::trim).filter(|value| !value.is_empty()) {
+        MspCoinset::for_network(network, Some(url))?
+    } else {
+        MspCoinset::for_network(network, None)?
+    };
+    let response: MempoolTxIdsResponse = msp
+        .client()
+        .make_post_request("get_all_mempool_tx_ids", json!({}))
+        .await
+        .map_err(SignerError::from)?;
+    if !response.success {
+        return Ok(Vec::new());
+    }
+    let tx_ids = response
+        .tx_ids
+        .or(response.mempool_tx_ids)
+        .unwrap_or_default();
+    Ok(tx_ids
+        .into_iter()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect())
 }
 
 pub async fn get_conservative_fee_estimate(

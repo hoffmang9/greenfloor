@@ -10,7 +10,9 @@ from tests.helpers.offer_runtime_fixtures import (
 )
 
 
-def test_build_and_post_offer_cli_delegates_to_engine_binary(monkeypatch, tmp_path: Path) -> None:
+def test_build_and_post_offer_cli_delegates_to_engine_in_process(
+    monkeypatch, tmp_path: Path
+) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
     write_manager_program_with_signer(program, tmp_path=tmp_path)
@@ -35,6 +37,6 @@ def test_build_and_post_offer_cli_delegates_to_engine_binary(monkeypatch, tmp_pa
         dry_run=False,
     )
     assert code == 0
-    assert captured["program_path"] == program
-    assert captured["markets_path"] == markets
+    assert captured["program_path"] == program.expanduser().resolve()
+    assert captured["markets_path"] == markets.expanduser().resolve()
     assert captured["market_id"] == "m1"

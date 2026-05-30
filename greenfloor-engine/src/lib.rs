@@ -3,11 +3,14 @@
 //! The Rust crate and PyO3 module are named `greenfloor_engine` (ADR 0010).
 //! Policy is grouped by domain (`cycle/`, `coin_ops/`, `offer/`, `vault/`).
 
+#![recursion_limit = "1024"]
+
 pub mod adapters;
 pub mod coin_ops;
 pub mod coinset;
 pub mod config;
 pub mod cycle;
+pub mod daemon;
 pub mod error;
 pub mod hex;
 pub mod kms;
@@ -40,11 +43,6 @@ pub async fn resolve_offer_asset_ids(
     resolve_offer_assets_via_coinset(config, base_asset, quote_asset).await
 }
 
-pub use coinset::{
-    extract_coin_id_hints_from_offer_text, get_conservative_fee_estimate, get_fee_estimate,
-    is_canonical_xch_asset, is_xch_like_asset, list_wallet_unspent_coins, parse_coin_ids,
-    push_tx_hex, spend_bundle_hash_from_hex, WalletUnspentCoin,
-};
 pub use coin_ops::{
     amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_should_stop,
     coin_op_target_amount_allowed, compute_bucket_counts_from_coins,
@@ -56,7 +54,17 @@ pub use coin_ops::{
     CoinSplitGateResult, CombineInputSelectionMode, SpendableCoin, SplitAutoSelectPlan,
     SplitCoinPlan, SplitCombinePrereqPlan, SplitPlanningProfile, SplitSkipPlan,
 };
+pub use coinset::{
+    extract_coin_id_hints_from_offer_text, get_conservative_fee_estimate, get_fee_estimate,
+    is_canonical_xch_asset, is_xch_like_asset, list_wallet_unspent_coins, parse_coin_ids,
+    push_tx_hex, spend_bundle_hash_from_hex, WalletUnspentCoin,
+};
 pub use config::load_signer_config;
+pub use config::{
+    load_markets_config, load_markets_config_with_overlay, load_program_config,
+    require_signer_offer_path, resolve_market_for_build, ManagerProgramConfig, MarketConfig,
+    MarketsConfig,
+};
 pub use cycle::{
     abs_move_bps, aggregate_two_sided_offer_counts, apply_offer_signal,
     can_parallelize_managed_offers, cancel_move_threshold_bps, classify_dexie_stale_offer_status,
@@ -87,10 +95,20 @@ pub use cycle::{
     MarketBatchSelection, MarketCyclePhase, MarketCycleResultState, MarketState,
     OfferLifecycleState, OfferSignal, OfferStateRow, OfferTransition, ParallelBatchPlan,
     ParallelQueueItem, ParallelReservationContext, ParallelSkipItem, ParallelSubmissionDecision,
-    PlannedAction, PlannedActionInput, ReseedGapPlan, ReseedSkipReason, SpendableAssetProfile, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress, StrategyConfig,
+    PlannedAction, PlannedActionInput, ReseedGapPlan, ReseedSkipReason, SpendableAssetProfile,
+    StaleSweepCandidate, StaleSweepHit, StaleSweepProgress, StrategyConfig,
 };
 pub use error::SignerError as Error;
 pub use hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
+pub use manager::{
+    build_and_post_offer, format_build_and_post_output, BuildAndPostOfferRequest,
+    BuildAndPostOfferResponse,
+};
+pub use daemon::{
+    run_daemon_command, run_daemon_cycle_once_from_json, run_daemon_loop_from_json,
+    run_offers_cancel_command, run_offers_reconcile_command, run_offers_status_command,
+    DaemonCliArgs, OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
+};
 pub use offer::bootstrap::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,
     BootstrapPhaseSnapshot, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
@@ -118,12 +136,6 @@ pub use offer::{
 };
 pub use vault::{
     build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,
-};
-pub use manager::{build_and_post_offer, format_build_and_post_output, BuildAndPostOfferRequest, BuildAndPostOfferResponse};
-pub use config::{
-    load_markets_config, load_markets_config_with_overlay, load_program_config,
-    require_signer_offer_path, resolve_market_for_build, ManagerProgramConfig, MarketConfig,
-    MarketsConfig,
 };
 
 #[cfg(test)]

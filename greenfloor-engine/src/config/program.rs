@@ -21,13 +21,27 @@ pub struct ManagerProgramConfig {
     pub splash_api_base: String,
     pub offer_publish_venue: String,
     pub coin_ops_minimum_fee_mojos: u64,
+    pub coin_ops_max_operations_per_run: i64,
+    pub coin_ops_max_daily_fee_budget_mojos: i64,
+    pub coin_ops_split_fee_mojos: i64,
+    pub coin_ops_combine_fee_mojos: i64,
     pub runtime_offer_bootstrap_wait_timeout_seconds: u64,
+    pub runtime_market_slot_count: u64,
+    pub runtime_offer_parallelism_enabled: bool,
+    pub runtime_offer_parallelism_max_workers: usize,
+    pub runtime_dry_run: bool,
+    pub runtime_loop_interval_seconds: u64,
+    pub tx_block_trigger_mode: String,
+    pub tx_block_websocket_url: String,
+    pub tx_block_websocket_reconnect_interval_seconds: u64,
+    pub tx_block_fallback_poll_interval_seconds: u64,
 }
 
 #[derive(Debug, Deserialize)]
 struct ProgramYaml {
     app: Option<AppYaml>,
     runtime: Option<RuntimeYaml>,
+    chain_signals: Option<ChainSignalsYaml>,
     venues: Option<VenuesYaml>,
     coin_ops: Option<CoinOpsYaml>,
     signer: Option<SignerPresence>,
@@ -44,6 +58,24 @@ struct AppYaml {
 #[derive(Debug, Deserialize)]
 struct RuntimeYaml {
     offer_bootstrap_wait_timeout_seconds: Option<u64>,
+    market_slot_count: Option<u64>,
+    offer_parallelism_enabled: Option<bool>,
+    offer_parallelism_max_workers: Option<u64>,
+    dry_run: Option<bool>,
+    loop_interval_seconds: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChainSignalsYaml {
+    tx_block_trigger: Option<TxBlockTriggerYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TxBlockTriggerYaml {
+    mode: Option<String>,
+    websocket_url: Option<String>,
+    websocket_reconnect_interval_seconds: Option<u64>,
+    fallback_poll_interval_seconds: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -66,6 +98,10 @@ struct OfferPublishYaml {
 #[derive(Debug, Deserialize)]
 struct CoinOpsYaml {
     minimum_fee_mojos: Option<u64>,
+    max_operations_per_run: Option<i64>,
+    max_daily_fee_budget_mojos: Option<i64>,
+    split_fee_mojos: Option<i64>,
+    combine_fee_mojos: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -139,16 +175,68 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
 
     let coin_ops = parsed.coin_ops.unwrap_or(CoinOpsYaml {
         minimum_fee_mojos: None,
+        max_operations_per_run: None,
+        max_daily_fee_budget_mojos: None,
+        split_fee_mojos: None,
+        combine_fee_mojos: None,
     });
     let coin_ops_minimum_fee_mojos = coin_ops.minimum_fee_mojos.unwrap_or(10_000_000);
+    let coin_ops_max_operations_per_run = coin_ops.max_operations_per_run.unwrap_or(20);
+    let coin_ops_max_daily_fee_budget_mojos = coin_ops.max_daily_fee_budget_mojos.unwrap_or(0);
+    let coin_ops_split_fee_mojos = coin_ops.split_fee_mojos.unwrap_or(0);
+    let coin_ops_combine_fee_mojos = coin_ops.combine_fee_mojos.unwrap_or(0);
 
     let runtime = parsed.runtime.unwrap_or(RuntimeYaml {
         offer_bootstrap_wait_timeout_seconds: None,
+        market_slot_count: None,
+        offer_parallelism_enabled: None,
+        offer_parallelism_max_workers: None,
+        dry_run: None,
+        loop_interval_seconds: None,
     });
     let runtime_offer_bootstrap_wait_timeout_seconds = runtime
         .offer_bootstrap_wait_timeout_seconds
         .unwrap_or(120)
         .max(10);
+    let runtime_market_slot_count = runtime.market_slot_count.unwrap_or(0);
+    let runtime_offer_parallelism_enabled = runtime.offer_parallelism_enabled.unwrap_or(false);
+    let runtime_offer_parallelism_max_workers = runtime
+        .offer_parallelism_max_workers
+        .map(|value| value as usize)
+        .unwrap_or(4)
+        .max(1);
+    let runtime_dry_run = runtime.dry_run.unwrap_or(false);
+    let runtime_loop_interval_seconds = runtime.loop_interval_seconds.unwrap_or(30).max(1);
+    let tx_block_trigger = parsed
+        .chain_signals
+        .and_then(|section| section.tx_block_trigger);
+    let tx_block_trigger_mode = tx_block_trigger
+        .as_ref()
+        .and_then(|trigger| trigger.mode.clone())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "websocket".to_string());
+    let mut tx_block_websocket_url = tx_block_trigger
+        .as_ref()
+        .and_then(|trigger| trigger.websocket_url.clone())
+        .map(|value| value.trim().to_string())
+        .unwrap_or_default();
+    if tx_block_websocket_url.is_empty() {
+        tx_block_websocket_url = if is_testnet_network(&network) {
+            "wss://testnet11.api.coinset.org/ws".to_string()
+        } else {
+            "wss://api.coinset.org/ws".to_string()
+        };
+    }
+    let tx_block_websocket_reconnect_interval_seconds = tx_block_trigger
+        .as_ref()
+        .and_then(|trigger| trigger.websocket_reconnect_interval_seconds)
+        .unwrap_or(30)
+        .max(1);
+    let tx_block_fallback_poll_interval_seconds = tx_block_trigger
+        .as_ref()
+        .and_then(|trigger| trigger.fallback_poll_interval_seconds)
+        .unwrap_or(60);
 
     Ok(ManagerProgramConfig {
         network,
@@ -159,7 +247,20 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
         splash_api_base,
         offer_publish_venue,
         coin_ops_minimum_fee_mojos,
+        coin_ops_max_operations_per_run,
+        coin_ops_max_daily_fee_budget_mojos,
+        coin_ops_split_fee_mojos,
+        coin_ops_combine_fee_mojos,
         runtime_offer_bootstrap_wait_timeout_seconds,
+        runtime_market_slot_count,
+        runtime_offer_parallelism_enabled,
+        runtime_offer_parallelism_max_workers,
+        runtime_dry_run,
+        runtime_loop_interval_seconds,
+        tx_block_trigger_mode,
+        tx_block_websocket_url,
+        tx_block_websocket_reconnect_interval_seconds,
+        tx_block_fallback_poll_interval_seconds,
     })
 }
 
@@ -298,7 +399,8 @@ mod tests {
 
     #[test]
     fn resolves_testnet_dexie_default() {
-        let url = resolve_dexie_base_url("testnet11", None, "https://api.dexie.space").expect("url");
+        let url =
+            resolve_dexie_base_url("testnet11", None, "https://api.dexie.space").expect("url");
         assert_eq!(url, "https://api-testnet.dexie.space");
     }
 

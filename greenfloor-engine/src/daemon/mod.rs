@@ -1,0 +1,90 @@
+//! Daemon cycle orchestration (native Rust). Reconcile, inventory/strategy/coin_ops planning, and cancel run in Rust.
+
+mod cli;
+mod cancel_executor;
+mod cancel_phase;
+mod coin_ops_execution;
+mod coin_ops_phase;
+mod coinset_spendable;
+mod coinset_tx;
+mod coinset_ws;
+mod cycle_entry;
+mod cycle_paths;
+mod daemon_loop;
+mod dexie_offer;
+mod disabled_markets;
+mod inventory_phase;
+mod lock;
+mod logging;
+mod market_context;
+mod market_cycle;
+mod market_dispatch;
+mod market_gate;
+mod markets;
+mod offer_lifecycle_cli;
+mod offer_dispatch;
+mod preamble;
+mod program_runtime;
+mod reconcile_augment;
+mod reconcile_batch;
+mod reconcile_offer;
+mod reconcile_persist;
+mod reconcile_phase;
+mod reload;
+mod run_once;
+mod stale_sweep;
+mod strategy_phase;
+mod strategy_support;
+pub mod watchlist;
+
+pub use cancel_phase::run_market_cancel_phase;
+pub use coinset_tx::build_dexie_size_by_offer_id;
+pub use coinset_ws::{
+    resolve_coinset_ws_url, start_coinset_websocket_loop, CoinsetWebsocketLoopHandle,
+};
+pub use cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
+pub use cycle_paths::DaemonCyclePaths;
+pub use daemon_loop::{run_daemon_loop, DaemonLoopRequest};
+pub use lock::DaemonInstanceLock;
+pub use logging::{
+    default_log_level, initialize_daemon_file_logging, warn_if_daemon_log_level_auto_healed,
+};
+pub use market_context::{
+    load_cycle_resources, DaemonCycleResources, MarketCycleContext, MarketDispatchContext,
+};
+pub use market_dispatch::{
+    aggregate_market_dispatch_metrics, record_market_worker_error, SingleMarketCycleOutput,
+};
+pub use markets::enabled_market_ids;
+pub use program_runtime::{
+    default_testnet_markets_path, load_daemon_program_runtime, resolve_testnet_markets_path,
+    use_websocket_capture_for_once, websocket_capture_enabled, DaemonProgramRuntime,
+};
+pub use offer_lifecycle_cli::{
+    offers_cancel_cli, offers_status_cli, OffersCancelCliResult, OffersStatusCliResult,
+};
+pub use reconcile_batch::{
+    reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,
+    ReconcileCliResult,
+};
+pub use reconcile_phase::{
+    run_market_reconcile_phase, ReconcilePhaseMetrics, ReconcilePhaseResult,
+};
+pub use reload::consume_reload_marker;
+pub use cli::{
+    run_daemon_command, run_daemon_cycle_once_from_json, run_daemon_loop_from_json,
+    run_offers_cancel_command, run_offers_reconcile_command, run_offers_status_command,
+    DaemonCliArgs, OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
+};
+pub use run_once::{
+    build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
+    elapsed_ms, CyclePlan, DaemonCycleSummary, DaemonCycleTestControls, DaemonDispatchState,
+    DaemonRunOnceRequest, DaemonRunOnceRequestBody, MarketDispatchMetrics,
+};
+pub use watchlist::{
+    active_offer_counts_by_size, active_offer_counts_by_size_and_side,
+    active_offer_counts_by_size_and_side_detail, active_offer_counts_by_size_detail,
+    match_watched_coin_ids, set_watched_coin_ids_for_market, update_market_coin_watchlist_from_offers,
+    watched_coin_ids_for_market, watchlist_offer_ids, CoinWatchlistCache,
+    RESEED_MEMPOOL_MAX_AGE_SECONDS,
+};

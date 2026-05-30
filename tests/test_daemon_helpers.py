@@ -7,26 +7,12 @@ from datetime import UTC, datetime
 from typing import Any
 
 from greenfloor.core.strategy_action_item import StrategyActionItem
-from greenfloor.daemon import cycle_market_batch
 from greenfloor.daemon.cooldowns import _env_int
-from greenfloor.daemon.cycle_market_batch import (
-    _DISABLED_MARKET_NEXT_LOG_AT,
-)
-from greenfloor.daemon.cycle_market_batch import (
-    disabled_market_log_interval_seconds as _disabled_market_log_interval_seconds,
-)
-from greenfloor.daemon.cycle_market_batch import (
-    log_disabled_markets_startup_once as _log_disabled_markets_startup_once,
-)
-from greenfloor.daemon.cycle_market_batch import (
-    should_log_disabled_market as _should_log_disabled_market,
-)
 from greenfloor.daemon.market_helpers import (
     _abs_move_bps,
     _market_pricing,
     _resolve_quote_asset_for_offer,
 )
-from greenfloor.daemon.market_logging import _daemon_logger
 from greenfloor.daemon.testing import (
     cancel_retry_config,
     cooldown_remaining_ms,
@@ -178,50 +164,6 @@ def testcancel_retry_config_respects_env(monkeypatch) -> None:
     assert attempts == 5
     assert backoff_ms == 100
     assert cooldown == 60
-
-
-def test_disabled_market_log_interval_defaults(monkeypatch) -> None:
-    monkeypatch.delenv("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS", raising=False)
-    assert _disabled_market_log_interval_seconds() == 3600
-
-
-def test_disabled_market_log_interval_applies_minimum(monkeypatch) -> None:
-    monkeypatch.setenv("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS", "1")
-    assert _disabled_market_log_interval_seconds() == 60
-
-
-def test_should_log_disabled_market_throttles(monkeypatch) -> None:
-    monkeypatch.setenv("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS", "3600")
-    _DISABLED_MARKET_NEXT_LOG_AT.clear()
-    assert _should_log_disabled_market(market_id="m-disabled", now_monotonic=100.0) is True
-    assert _should_log_disabled_market(market_id="m-disabled", now_monotonic=200.0) is False
-    assert _should_log_disabled_market(market_id="m-disabled", now_monotonic=3701.0) is True
-
-
-def test_log_disabled_markets_startup_once_logs_and_seeds_throttle(monkeypatch) -> None:
-    monkeypatch.setenv("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS", "3600")
-    _DISABLED_MARKET_NEXT_LOG_AT.clear()
-    cycle_market_batch._DISABLED_MARKET_STARTUP_LOGGED = False
-
-    class _Market:
-        def __init__(self, market_id: str, enabled: bool) -> None:
-            self.market_id = market_id
-            self.enabled = enabled
-
-    logged: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(_daemon_logger, "info", lambda *args: logged.append(args))
-
-    _log_disabled_markets_startup_once(
-        markets=[_Market("enabled-market", True), _Market("disabled-market", False)]
-    )
-    _log_disabled_markets_startup_once(
-        markets=[_Market("enabled-market", True), _Market("disabled-market", False)]
-    )
-
-    assert len(logged) == 1
-    assert "disabled_markets_startup" in str(logged[0][0])
-    assert "disabled-market" in _DISABLED_MARKET_NEXT_LOG_AT
-    cycle_market_batch._DISABLED_MARKET_STARTUP_LOGGED = False
 
 
 def test_managed_offer_market_health_payload_tracks_503_and_last_success() -> None:

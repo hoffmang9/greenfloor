@@ -27,7 +27,11 @@ fn list_wallet_unspent_coins_py(
 ) -> PyResult<Py<PyAny>> {
     Python::attach(|py| {
         let coins = crate::runtime()
-            .block_on(list_wallet_unspent_coins(network, receive_address, asset_id))
+            .block_on(list_wallet_unspent_coins(
+                network,
+                receive_address,
+                asset_id,
+            ))
             .map_err(to_py_err)?;
         let list = PyList::empty(py);
         for coin in coins {

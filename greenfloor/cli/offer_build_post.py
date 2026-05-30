@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from greenfloor.cli.engine_binary import run_build_and_post_offer_via_engine
-from greenfloor.runtime.json_output import json_output_compact
+from greenfloor.config.io import load_program_config
+from greenfloor.runtime.engine_build_and_post import run_build_and_post_offer_in_process
+from greenfloor.runtime.json_output import format_json_output
 
 
 def build_and_post_offer_cli(
@@ -30,20 +31,27 @@ def build_and_post_offer_cli(
     if repeat <= 0:
         raise ValueError("repeat must be positive")
 
-    return run_build_and_post_offer_via_engine(
-        program_path=program_path,
-        markets_path=markets_path,
-        testnet_markets_path=testnet_markets_path,
+    program = load_program_config(program_path)
+    exit_code, payload = run_build_and_post_offer_in_process(
+        program_path=program_path.expanduser().resolve(),
+        markets_path=markets_path.expanduser().resolve(),
+        testnet_markets_path=(
+            testnet_markets_path.expanduser().resolve()
+            if testnet_markets_path is not None
+            else None
+        ),
         network=network,
         market_id=market_id,
         pair=pair,
         size_base_units=size_base_units,
         repeat=repeat,
-        publish_venue=publish_venue,
-        dexie_base_url=dexie_base_url,
-        splash_base_url=splash_base_url,
+        publish_venue=publish_venue or program.offer_publish_venue,
+        dexie_base_url=dexie_base_url or program.dexie_api_base,
+        splash_base_url=splash_base_url or program.splash_api_base,
         drop_only=drop_only,
         claim_rewards=claim_rewards,
         dry_run=dry_run,
-        compact_json=json_output_compact(),
+        persist_results=True,
     )
+    print(format_json_output(payload))
+    return exit_code

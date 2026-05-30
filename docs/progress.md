@@ -1,5 +1,57 @@
 # Progress Log
 
+## 2026-05-30 (Reconcile/watchlist consolidation — single Rust orchestration surface)
+
+- **Offer reconcile (canonical Rust):** `daemon/reconcile_batch.rs` implements CLI `offers-reconcile` (`reconcile_offers_batch`); daemon per-market path remains `run_market_reconcile_phase` in `reconcile_phase.rs`. Shared audit/state writes live in `reconcile_persist.rs` (`offers_reconcile` vs `reconcile_coins_and_offers` action).
+- **PyO3:** `reconcile_offers_batch` exposed from `daemon_py.rs`; `runtime/offer_reconciliation.py` is a thin delegate (~65 lines). Removed Python `reconcile_market_watched_offers` and duplicate Dexie/transition orchestration.
+- **Watchlist:** deleted unused `greenfloor/daemon/watchlist.py` re-export shim; callers use `runtime/offer_watchlist.py` → engine watchlist bindings only.
+- **Daemon entry:** production path is `greenfloord` in-process PyO3 `run_daemon_cycle_once` only; removed `greenfloor-engine daemon run-once` subcommand and `tests/test_daemon_native_engine.py`.
+- **Build-and-post:** manager CLI and daemon managed post both use `runtime/engine_build_and_post.run_build_and_post_offer_in_process`; `cli/engine_binary.py` is binary discovery only (no subprocess manager/daemon wrappers).
+- **Tests:** Rust `reconcile_batch` unit test; Python reconcile tests drive `DexieHttpMock` against the real engine batch API; build/post fixtures patch in-process path.
+
+## 2026-05-29 (Phase 5 — full native Rust daemon cycle; Python bridge removed)
+
+- **Native cycle phases:** `daemon/preamble.rs`, `strategy_support.rs`, `market_phases.rs` — XCH price fetch, inventory scan, strategy evaluation/planning, coin-op planning all in Rust.
+- **Unified entrypoints:** `run_daemon_cycle_once` no longer takes a Python bridge; production `greenfloord` uses in-process PyO3 (native `daemon run-once` CLI removed 2026-05-30).
+- **Market dispatch:** Daemon cycles always process selected markets sequentially on one SQLite connection (in-process PyO3; no cross-market parallelism).
+- **Exit codes:** non-zero when all selected markets fail (`compute_cycle_exit_code`).
+- **Removed:** `python_bridge.rs`, `daemon_inprocess_bridge.rs`, `rust_cycle_bridge.py`, `bridge_subprocess.py`, dead split-phase APIs in `runner.py`.
+- **Tests:** env-hook fixtures (`GREENFLOOR_XCH_PRICE_USD`, `GREENFLOOR_TEST_FORCE_MARKET_ERROR`, `GREENFLOOR_TEST_SKIP_STRATEGY_EXEC`); `tests/test_daemon_cycle_speed.py`.
+- **Next:** Rust coin-op broadcast execution; full websocket-once capture in Rust; native `daemon run-loop`.
+
+## 2026-05-29 (Phase 4 — native greenfloord `--once` via greenfloor-engine)
+
+- **Historical:** `greenfloor-engine daemon run-once` CLI (removed 2026-05-30); superseded by in-process PyO3 from `greenfloord --once`.
+- **Thin `greenfloord`:** `--once` and loop both call `run_daemon_cycle_once` via PyO3; loop keeps Python websocket sidecar (`start_coinset_websocket_loop`).
+- **PyO3:** `daemon_py.rs` calls shared `run_daemon_cycle_once` in `daemon/cycle_entry.rs`.
+
+## 2026-05-29 (Phase 3 — Rust reconcile/cancel market phases)
+
+- **Rust native phases:** `daemon/reconcile_phase.rs` and `daemon/cancel_phase.rs` run Dexie + SQLite reconcile and cancel-on-price-move policy in-process.
+- **Market dispatch:** `daemon/market_dispatch.rs` orchestrates per-market cycle: Rust reconcile → Python IO (inventory/strategy) → Rust cancel → Python coin_ops.
+- **PyO3:** `run_daemon_cycle_once` no longer calls Python `execute_market_dispatch`; uses `run_market_cycle_io_phases` / `run_market_coin_ops_phase` bridge callbacks.
+- **SQLite/Dexie extensions:** `get_tx_signal_state`, `list_offer_state_details`, Dexie `get_offers`/`cancel_offer`.
+- **Tests:** multi-cycle integration fix (shim reads previous XCH price; drop invalid `XchPriceProvider` monkeypatch); 19 daemon cycle tests pass.
+- **Next:** parallel Rust market dispatch, port inventory/strategy to Rust, collapse Python `storage/sqlite.py`.
+
+## 2026-05-29 (Phase 2 — Rust daemon cycle orchestration)
+
+- **Rust `daemon/` module:** `run_once.rs` builds cycle plan (enabled markets, stale sweep, slot dispatch); `stale_sweep.rs` uses Rust Dexie + SQLite.
+- **SQLite extensions:** `list_offer_states`, `get_latest_xch_price_snapshot` on Rust `SqliteStore`.
+- **PyO3:** `run_daemon_cycle_once` orchestrates Rust plan + Python bridge callbacks.
+- **Python bridge:** `rust_cycle_bridge.py` (preamble IO + market dispatch); `engine_cycle.py` thin wrapper; `cycle_runner.run_once` delegates to engine.
+- **Tests:** `tests/test_daemon_engine_cycle.py`; integration tests use `daemon_engine_cycle_shim` when Rust plan is bypassed.
+- **Next (Phase 3):** port market cycle phases + collapse duplicate Python SQLite/adapters.
+
+## 2026-05-29 (Phase 1 — daemon offer post via Rust engine)
+
+- **PyO3:** `manager_py.rs` exposes in-process `build_and_post_offer` returning `{exit_code, payload}`.
+- **Rust:** `BuildAndPostOfferRequest.action_side` optional override for daemon buy/sell planned actions.
+- **Python:** `runtime/engine_build_and_post.py` + `runtime/resolved_daemon_paths.py`; `managed_offer_post` and `OfferPostRequest.run_managed` delegate to Rust (no Python orchestration on daemon post path).
+- **Cycle:** `cycle_runner` sets daemon config paths context so `--markets-config` overrides resolve correctly.
+- **Tests:** `tests/test_daemon_engine_build_and_post.py`; existing daemon strategy tests pass.
+- **Next (Phase 2):** native `greenfloord` cycle loop in Rust; delete `offer_orchestration.py` / `offer_runtime.py` once unused.
+
 ## 2026-05-29 (Manager CLI Rust cutover — logging, typed post results, ADR 0012)
 
 - **Logging:** `manager/logging.rs` restores `{home_dir}/logs/debug.log` for Rust manager path; `app.log_level` parsed in `config/program.rs`.
@@ -26,8 +78,8 @@
 
 ## 2026-05-29 (Python manager delegates build-and-post-offer to Rust binary)
 
-- **`greenfloor/cli/engine_binary.py`:** resolves `greenfloor-engine` (`GREENFLOOR_ENGINE_BIN`, PATH, or `target/{debug,release}/`) and runs `build-and-post-offer` subprocess with manager flag mapping.
-- **`greenfloor/cli/offer_build_post.py`:** thin subprocess wrapper only (no YAML preflight).
+- **`greenfloor/cli/engine_binary.py` (historical):** previously subprocess `build-and-post-offer`; manager path now in-process PyO3 (2026-05-30). Module retains binary discovery for vault/coin-op CLI.
+- **`greenfloor/cli/offer_build_post.py`:** delegates to `runtime/engine_build_and_post.run_build_and_post_offer_in_process`.
 - **CI:** Ubuntu CI installs debug `greenfloor-engine` into `.venv/bin`; live-testnet-e2e builds release binary and adds it to `PATH`.
 - **Tests:** manager build/post tests mock engine delegation; 544 pytest tests pass.
 
@@ -35,7 +87,7 @@
 
 - **Routing:** removed `offer_execution_backend()` / `managed_offer_execution_backend()` / `coin_ops_execution_backend()` and Rust `sequential_action_route`; daemon sequential dispatch uses explicit dry-run / program / signer checks.
 - **Cycle bridge:** merged `_bridge_managed.py` + `_bridge_orchestration.py` into `core/cycle/_bridge.py`; split offer-build helpers into `core/offer_build_bridge.py`; `policy_bridge` is Dexie publish + retry only.
-- **Reconciliation:** `reconcile_market_watched_offers()` in `runtime/offer_reconciliation.py`; daemon cycle is a thin logging wrapper.
+- **Reconciliation (historical):** per-market reconcile later moved fully to Rust `run_market_reconcile_phase`; Python orchestration removed 2026-05-30.
 - **Tests:** restored `test_signer_create_offer_parity`, `test_retry_policy_parity`, `test_coin_ops_policy_parity` with updated bridge imports.
 - **Cleanup:** `offer_decode` propagates engine errors; removed unused crate-root puzzle-hash exports and Cloud Wallet PEM/GraphQL error variants; simplified `coinset_coins` pass-through.
 
@@ -44,7 +96,7 @@
 - **Removed Python paths:** local BLS offer builder, Cloud Wallet runtime, `offer_policy` / `retry_policy` facades, `cycle/_bridge_common.py`.
 - **Rust:** deleted `greenfloor-engine/src/bls/` and BLS PyO3 bindings; added `coinset/wallet_io.rs` (`list_wallet_unspent_coins`, `spend_bundle_hash_hex`, `extract_coin_id_hints_from_offer`).
 - **Python wallet IO:** production code no longer imports `chia_wallet_sdk`; coin listing, offer decode hints, and spend-bundle hashing go through `greenfloor_engine`.
-- **Reconciliation:** `transition_from_dexie_offer_payload()` in `runtime/offer_reconciliation.py` shared by CLI batch reconcile and daemon cycle transitions.
+- **Reconciliation (historical):** transition rules in `cycle/reconcile.rs`; orchestration now Rust-only (`reconcile_phase` + `reconcile_batch`).
 - **Imports:** runtime/daemon use `policy_bridge` + `offer_request_bridge` directly.
 - **Docs:** ADR 0003, 0008, 0011 updated for signer-only architecture.
 
@@ -156,17 +208,17 @@ Steps 1–13 moved deterministic daemon/coin-op/shared policy into `greenfloor-e
 
 **Largest tracked Python modules (line counts approximate, 2026-05-28):**
 
-| Module                                            | Lines | Role                                  | Migration stance                                                                                           |
-| ------------------------------------------------- | ----: | ------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `greenfloor/storage/sqlite.py`                    |  ~690 | Schema, queries, audit persistence    | **Defer** — not on critical offer-post path; high coupling to SQLite                                       |
-| `greenfloor/config/models.py`                     |  ~656 | Config parse/validate                 | **Keep Python** — `greenfloor/config` boundary per AGENTS.md                                               |
-| `greenfloor/runtime/coin_ops/daemon_execution.py` |  ~585 | Coin-op Coinset/wallet execution loop | IO glue; policy already in Rust (steps 10–11)                                                              |
-| `greenfloor/runtime/offer_publish.py`             |  ~489 | Venue publish helpers                 | IO; audit any retry/classify helpers already in Rust                                                       |
-| `greenfloor/daemon/watchlist.py`                  |  ~486 | Websocket watchlist                   | **Keep Python** — network IO                                                                               |
-| `greenfloor/runtime/offer_orchestration.py`       |  ~485 | Bootstrap → create → verify → publish | IO orchestration; split only if a pure planning hunk emerges                                               |
-| `greenfloor/runtime/offer_runtime.py`             |  ~484 | Vault KMS offer build/post runtime    | IO; signing canonical path is `greenfloor-engine`                                                          |
-| `greenfloor/core/cycle/_bridge.py`                |  ~440 | Cycle PyO3 bridge                     | **Hygiene only** — typed via `DeterministicPolicyEngineProtocol`; shrink by moving wrappers to `policy.py` |
-| `greenfloor/adapters/coinset.py`                  |  ~440 | Coinset HTTP adapter                  | **Keep Python** — adapter boundary                                                                         |
+| Module                                            |   Lines | Role                                  | Migration stance                                                                                           |
+| ------------------------------------------------- | ------: | ------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `greenfloor/storage/sqlite.py`                    |    ~690 | Schema, queries, audit persistence    | **Defer** — not on critical offer-post path; high coupling to SQLite                                       |
+| `greenfloor/config/models.py`                     |    ~656 | Config parse/validate                 | **Keep Python** — `greenfloor/config` boundary per AGENTS.md                                               |
+| `greenfloor/runtime/coin_ops/daemon_execution.py` |    ~585 | Coin-op Coinset/wallet execution loop | IO glue; policy already in Rust (steps 10–11)                                                              |
+| `greenfloor/runtime/offer_publish.py`             |    ~489 | Venue publish helpers                 | IO; audit any retry/classify helpers already in Rust                                                       |
+| `greenfloor/daemon/watchlist.py`                  | deleted | Re-export shim removed 2026-05-30     | Use `runtime/offer_watchlist.py` + Rust watchlist; websocket loop in engine                                |
+| `greenfloor/runtime/offer_orchestration.py`       |    ~485 | Bootstrap → create → verify → publish | IO orchestration; split only if a pure planning hunk emerges                                               |
+| `greenfloor/runtime/offer_runtime.py`             |    ~484 | Vault KMS offer build/post runtime    | IO; signing canonical path is `greenfloor-engine`                                                          |
+| `greenfloor/core/cycle/_bridge.py`                |    ~440 | Cycle PyO3 bridge                     | **Hygiene only** — typed via `DeterministicPolicyEngineProtocol`; shrink by moving wrappers to `policy.py` |
+| `greenfloor/adapters/coinset.py`                  |    ~440 | Coinset HTTP adapter                  | **Keep Python** — adapter boundary                                                                         |
 
 **Recommended step 14 (next pure-policy target):** **`moderate_retry.py` + offer publish transient classification** — `parse_rate_limit_retry_seconds`, exponential backoff loop inputs, and any remaining string-matching retry gates in `runtime/offer_publish.py` that duplicate Rust managed-path classifiers. Small surface (~80 lines), high reuse across Dexie/Coinset paths.
 
@@ -206,7 +258,7 @@ Steps 1–13 moved deterministic daemon/coin-op/shared policy into `greenfloor-e
 
 - **`greenfloor-engine/src/coin_ops/`:** deterministic coin-op policy bundle — `plan_coin_ops`, fee-budget partitioning, bucket counting, and CAT min-amount guard.
 - **PyO3 + core surface:** `coin_ops_py.rs` exposes typed `BucketSpec` / `CoinOpPlan` round-trip via `greenfloor.core.coin_ops` dataclasses; Python policy is consolidated in `greenfloor/core/coin_ops/_bridge.py` with `CoinOpsEngineProtocol` typing.
-- **Python IO glue:** `runtime/coin_ops/` and `daemon/coin_ops_cycle.py` unchanged — still own Coinset/wallet execution, fee lookup, and SQLite budget accounting.
+- **Python IO glue:** `runtime/coin_ops/` still owns Coinset/wallet execution, fee lookup, and SQLite budget accounting; per-market coin-op planning runs in Rust `daemon/coin_ops_phase.rs`.
 - **Tests:** Rust unit tests in `coin_ops/{plan,fee_budget,inventory,policy}.rs`; Python parity/FFI contract in `tests/test_coin_ops_policy_parity.py`; existing planner/fee/inventory tests remain parity gates.
 - **Follow-up:** consolidated Python surface into `greenfloor/core/coin_ops/` package + shared `engine_bridge`; deduplicated PyO3 class caching; `amount_meets_coin_op_min_mojos` is the single Rust threshold check (ADR 0010).
 - **Migration status:** step 10 complete for core coin-op policy.
@@ -225,7 +277,7 @@ Record these for the next migration agent; none are merge blockers for step 12.
 
 - **`greenfloor-engine/src/cycle/reconcile.rs`:** Coinset-first watched-offer transition engine — Dexie status fallback, missing-offer (404) handling, taker field shaping, and `CycleOfferTransition` outputs.
 - **PyO3 + core surface:** typed `CycleOfferTransition` via `reconcile_py.rs` + `py_utils.rs`; policy in `greenfloor/core/offer_reconcile/`.
-- **Python IO glue:** `greenfloor/runtime/offer_reconciliation.py` keeps Dexie fetch, SQLite tx-signal lookup (`_coinset_signal_lists`), audit persistence, and batch reconcile loops only.
+- **Python IO glue (historical):** reconcile orchestration removed from `offer_reconciliation.py` 2026-05-30; file is CLI wrapper over `reconcile_offers_batch` only.
 - **Tests:** Rust unit tests in `reconcile.rs`; Python wiring in `tests/test_offer_reconcile_engine.py`; existing manager/daemon reconcile integration tests remain parity gates.
 - **Migration status:** step 9 complete for offer lifecycle reconciliation policy.
 - **Completed (step 10):** core coin-op policy bundle — see step 10 entry above (`greenfloor-engine/src/coin_ops/`, `greenfloor/core/coin_ops/`).
@@ -365,7 +417,7 @@ Large Python daemon modules remain intentionally unsplit pending Rust migration 
 7. **`strategy_dispatch` reservation + retry engine (seventh)** ✅ — typed `ManagedActionOutcome`, `PlannedAction` parallel planning, `parallel_pool` extract.
 8. **Market-cycle reseed gap planning (eighth)** ✅ — `cycle/reseed.rs` + typed PyO3 `ReseedGapPlan`; Python keeps SQLite offer-count IO and structured reseed logging; `tests/test_cycle_reseed.py` enforces skip-reason label parity.
 9. **Offer reconciliation transition engine (ninth)** ✅ — `cycle/reconcile.rs` + typed PyO3 `CycleOfferTransition`; Python keeps Dexie fetch, SQLite tx-signal lookup, and audit persistence in `runtime/offer_reconciliation.py`.
-10. **Core coin-op policy bundle (tenth)** ✅ — `coin_ops/{plan,fee_budget,inventory,policy}.rs` + PyO3 `coin_ops_py.rs`; Python keeps `runtime/coin_ops/` execution IO and `daemon/coin_ops_cycle.py` glue.
+10. **Core coin-op policy bundle (tenth)** ✅ — `coin_ops/{plan,fee_budget,inventory,policy}.rs` + PyO3 `coin_ops_py.rs`; Python keeps `runtime/coin_ops/` execution IO; daemon planning in `coin_ops_phase.rs`.
 11. **Coin-op selection/planning helpers (eleventh)** ✅ — `coin_ops/selection.rs` + `split_planning.rs`; Python keeps CLI/daemon execution IO only (`runtime/coin_ops/planning.py` / `selection.py` re-exports).
 12. **Shared hex utilities + low-inventory alerts (twelfth)** ✅ — `hex.rs` + `cycle/notifications.rs` + PyO3 bindings; pure-Python `hex_utils.py`; typed `DeterministicPolicyEngineProtocol`.
 13. **Cancel-policy decision engine (thirteenth)** ✅ — `cycle/cancel.rs` + typed `OpenOfferRow`; Python keeps Dexie cancel IO and SQLite persistence.

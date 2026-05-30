@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use serde_json::{json, Value};
 
-use crate::coinset::{get_conservative_fee_estimate, list_wallet_unspent_coins, WalletUnspentCoin};
 use crate::coin_ops::is_spendable_wallet_coin;
+use crate::coinset::{get_conservative_fee_estimate, list_wallet_unspent_coins, WalletUnspentCoin};
 use crate::config::{LadderEntry, ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::cycle::retry::{poll_exponential_advance_sleep, poll_exponential_sleep_now};
 use crate::error::{SignerError, SignerResult};
@@ -13,7 +13,9 @@ use crate::offer::bootstrap::{
 };
 use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::publish::bootstrap_block_error;
-use crate::offer::request::{normalize_offer_side, quote_mojos_for_base_size, signer_split_asset_id};
+use crate::offer::request::{
+    normalize_offer_side, quote_mojos_for_base_size, signer_split_asset_id,
+};
 use crate::vault::{build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest};
 
 #[derive(Debug, Clone)]
@@ -117,11 +119,7 @@ fn bootstrap_ladder_entries_for_side(
     for entry in side_ladder {
         let mut size_base_units = entry.size_base_units;
         if let Some(multiplier) = quote_unit_multiplier {
-            size_base_units = quote_mojos_for_base_size(
-                size_base_units,
-                quote_price,
-                multiplier,
-            );
+            size_base_units = quote_mojos_for_base_size(size_base_units, quote_price, multiplier);
             if size_base_units <= 0 {
                 continue;
             }
@@ -149,7 +147,11 @@ async fn resolve_bootstrap_split_fee(
     let spend_count = output_count.max(1) as u64;
     match get_conservative_fee_estimate(network, None, fee_cost, Some(spend_count)).await {
         Ok(Some(fee_mojos)) => (fee_mojos, "coinset_conservative_fee".to_string(), None),
-        Ok(None) => (minimum_fee_mojos, "config_minimum_fee_fallback".to_string(), None),
+        Ok(None) => (
+            minimum_fee_mojos,
+            "config_minimum_fee_fallback".to_string(),
+            None,
+        ),
         Err(err) => (
             minimum_fee_mojos,
             "config_minimum_fee_fallback".to_string(),
@@ -185,9 +187,7 @@ async fn wait_for_coinset_confirmation(
             initial_sleep,
             max_sleep,
         ) else {
-            return Err(SignerError::Other(
-                "confirmation_wait_timeout".to_string(),
-            ));
+            return Err(SignerError::Other("confirmation_wait_timeout".to_string()));
         };
         let coins = list_wallet_unspent_coins(network, receive_address, asset_id).await?;
         let new_confirmed: Vec<_> = coins
@@ -202,7 +202,8 @@ async fn wait_for_coinset_confirmation(
             })]);
         }
         tokio::time::sleep(std::time::Duration::from_secs_f64(next_sleep)).await;
-        sleep_seconds = poll_exponential_advance_sleep(sleep_seconds, initial_sleep, max_sleep, 1.5);
+        sleep_seconds =
+            poll_exponential_advance_sleep(sleep_seconds, initial_sleep, max_sleep, 1.5);
     }
 }
 
@@ -216,13 +217,11 @@ pub async fn signer_bootstrap_phase(
     action_side: &str,
 ) -> SignerResult<BootstrapPhaseResult> {
     let side = normalize_offer_side(action_side);
-    let side_ladder = market
-        .ladders
-        .get(side)
-        .cloned()
-        .unwrap_or_default();
+    let side_ladder = market.ladders.get(side).cloned().unwrap_or_default();
     if side_ladder.is_empty() {
-        return Ok(BootstrapPhaseResult::skipped(format!("missing_{side}_ladder")));
+        return Ok(BootstrapPhaseResult::skipped(format!(
+            "missing_{side}_ladder"
+        )));
     }
 
     let ladder_entries = bootstrap_ladder_entries_for_side(
@@ -238,11 +237,8 @@ pub async fn signer_bootstrap_phase(
         )));
     }
 
-    let split_asset_id = signer_split_asset_id(
-        side,
-        resolved_base_asset_id,
-        resolved_quote_asset_id,
-    );
+    let split_asset_id =
+        signer_split_asset_id(side, resolved_base_asset_id, resolved_quote_asset_id);
     if split_asset_id.trim().is_empty() {
         return Ok(BootstrapPhaseResult::skipped(format!(
             "missing_{side}_asset_for_bootstrap"
@@ -256,20 +252,15 @@ pub async fn signer_bootstrap_phase(
         ));
     }
 
-    let asset_scoped_coins = match list_wallet_unspent_coins(
-        &program.network,
-        receive_address,
-        &split_asset_id,
-    )
-    .await
-    {
-        Ok(coins) => coins,
-        Err(err) => {
-            return Ok(BootstrapPhaseResult::skipped(format!(
-                "bootstrap_coin_list_failed:{err}"
-            )));
-        }
-    };
+    let asset_scoped_coins =
+        match list_wallet_unspent_coins(&program.network, receive_address, &split_asset_id).await {
+            Ok(coins) => coins,
+            Err(err) => {
+                return Ok(BootstrapPhaseResult::skipped(format!(
+                    "bootstrap_coin_list_failed:{err}"
+                )));
+            }
+        };
 
     let spendable_coins: Vec<BootstrapCoin> = asset_scoped_coins
         .iter()

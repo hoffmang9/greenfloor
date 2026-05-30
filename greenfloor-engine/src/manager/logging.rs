@@ -9,8 +9,8 @@ use tracing_subscriber::{EnvFilter, Layer};
 use crate::error::{SignerError, SignerResult};
 
 const SERVICE_NAME: &str = "manager";
-const DEFAULT_LOG_LEVEL: &str = "INFO";
-const LOG_FILE: &str = "logs/debug.log";
+pub(crate) const DEFAULT_LOG_LEVEL: &str = "INFO";
+pub(crate) const LOG_FILE: &str = "logs/debug.log";
 
 static INIT: Once = Once::new();
 
@@ -67,10 +67,7 @@ pub fn initialize_manager_file_logging(home_dir: &Path, log_level: &str) -> Sign
     Ok(())
 }
 
-pub fn warn_if_log_level_auto_healed(
-    log_level_was_missing: bool,
-    program_config_path: &Path,
-) {
+pub fn warn_if_log_level_auto_healed(log_level_was_missing: bool, program_config_path: &Path) {
     if log_level_was_missing {
         tracing::warn!(
             program_config = %program_config_path.display(),

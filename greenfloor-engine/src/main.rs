@@ -5,7 +5,9 @@ use greenfloor_engine::vault::members::hex_to_bytes32;
 use greenfloor_engine::{
     build_and_optionally_broadcast_vault_cat_mixed_split, build_and_post_offer,
     build_vault_cat_offer, load_signer_config, parse_coin_ids, resolve_vault_context,
-    BuildAndPostOfferRequest, CreateOfferRequest, MixedSplitRequest,
+    run_daemon_command, run_offers_cancel_command, run_offers_reconcile_command,
+    run_offers_status_command, BuildAndPostOfferRequest, CreateOfferRequest, MixedSplitRequest,
+    DaemonCliArgs, OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
 };
 
 #[derive(Debug, Parser)]
@@ -81,6 +83,14 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Run the GreenFloor daemon loop or a single cycle.
+    Daemon(DaemonCliArgs),
+    /// Reconcile watched offer states against the venue.
+    OffersReconcile(OffersReconcileCliArgs),
+    /// Report offer lifecycle status from the state DB.
+    OffersStatus(OffersStatusCliArgs),
+    /// Cancel offers on the configured venue (Dexie only).
+    OffersCancel(OffersCancelCliArgs),
     /// Build a vault-signed offer and post it to Dexie or Splash (manager CLI path).
     BuildAndPostOffer {
         #[arg(long, default_value = "config/program.yaml")]
@@ -208,6 +218,30 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
             .await?;
             print_create_offer_result(&result, json)?;
         }
+        Commands::Daemon(args) => {
+            let code = run_daemon_command(args).await?;
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
+        Commands::OffersReconcile(args) => {
+            let code = run_offers_reconcile_command(args).await?;
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
+        Commands::OffersStatus(args) => {
+            let code = run_offers_status_command(args)?;
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
+        Commands::OffersCancel(args) => {
+            let code = run_offers_cancel_command(args).await?;
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
         Commands::BuildAndPostOffer {
             program_config,
             markets_config,
@@ -253,6 +287,7 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
                 dry_run,
                 compact_json: json,
                 persist_results: !no_persist_results,
+                action_side: None,
             })
             .await?;
             println!("{}", response.output);
