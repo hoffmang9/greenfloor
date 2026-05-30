@@ -1,6 +1,6 @@
 mod counting;
 mod metadata;
-mod time;
+pub mod time;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{LazyLock, Mutex};
@@ -16,6 +16,8 @@ use super::coinset_tx::extract_coin_ids_from_offer_payload;
 use counting::{bucket_active_offers_by_side, bucket_active_offers_by_size};
 use metadata::{recent_offer_metadata_by_offer_id, OfferExecutionMetadata};
 use time::is_recent_mempool_observed_offer_state;
+
+pub use time::RESEED_MEMPOOL_MAX_AGE_SECONDS;
 
 pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult<HashSet<String>> {
     let tracked_states: HashSet<&str> = [
@@ -34,6 +36,20 @@ pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult
             offer_ids.insert(row.offer_id);
         }
     }
+    Ok(offer_ids)
+}
+
+pub fn recent_executed_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult<HashSet<String>> {
+    let metadata = recent_offer_metadata_by_offer_id(store, market_id)?;
+    Ok(metadata.into_keys().collect())
+}
+
+pub fn watchlist_offer_ids_for_coin_tracking(
+    store: &SqliteStore,
+    market_id: &str,
+) -> SignerResult<HashSet<String>> {
+    let mut offer_ids = watchlist_offer_ids(store, market_id)?;
+    offer_ids.extend(recent_executed_offer_ids(store, market_id)?);
     Ok(offer_ids)
 }
 
@@ -198,6 +214,17 @@ fn active_offer_counts_by_size_and_side_at(
 static WATCHED_COIN_IDS_BY_MARKET: LazyLock<Mutex<HashMap<String, HashSet<String>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+pub fn watched_coin_ids_for_market(market_id: &str) -> HashSet<String> {
+    let key = market_id.trim();
+    if key.is_empty() {
+        return HashSet::new();
+    }
+    let Ok(cache) = WATCHED_COIN_IDS_BY_MARKET.lock() else {
+        return HashSet::new();
+    };
+    cache.get(key).cloned().unwrap_or_default()
+}
+
 pub fn set_watched_coin_ids_for_market(market_id: &str, coin_ids: HashSet<String>) {
     let key = market_id.trim();
     if key.is_empty() {
@@ -245,7 +272,7 @@ pub fn update_market_coin_watchlist_from_offers(
     market_id: &str,
     offers: &[Value],
 ) -> SignerResult<()> {
-    let watch_offer_ids = watchlist_offer_ids(store, market_id)?;
+    let watch_offer_ids = watchlist_offer_ids_for_coin_tracking(store, market_id)?;
     let mut watched_coin_ids = HashSet::new();
     let mut matched_offer_count = 0_u64;
     for offer in offers {

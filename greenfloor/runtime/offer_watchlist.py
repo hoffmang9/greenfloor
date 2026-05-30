@@ -1,29 +1,21 @@
-"""Offer watchlist state and Dexie reconciliation helpers (shared runtime)."""
+"""Rust-backed offer watchlist helpers (PyO3)."""
 
 from __future__ import annotations
 
-import logging
-import threading
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
-from greenfloor.adapters.coinset import extract_coin_ids_from_offer_payload
 from greenfloor.core.cycle import is_dexie_offer_missing_error_text
+from greenfloor.core.engine_bridge import import_engine, require_engine_method
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.storage.sqlite import SqliteStore
 
-_logger = logging.getLogger(__name__)
-
-_RESEED_MEMPOOL_MAX_AGE_SECONDS = 3 * 60
-_WATCHED_COIN_IDS_BY_MARKET: dict[str, set[str]] = {}
-_WATCHED_COIN_IDS_LOCK = threading.Lock()
-
 __all__ = [
+    "RESEED_MEMPOOL_MAX_AGE_SECONDS",
     "build_dexie_size_by_offer_id",
     "is_dexie_offer_missing_error",
     "is_recent_mempool_observed_offer_state",
     "match_watched_coin_ids",
-    "recent_executed_offer_ids",
     "set_watched_coin_ids_for_market",
     "update_market_coin_watchlist_from_dexie",
     "watched_coin_ids_for_market",
@@ -31,11 +23,33 @@ __all__ = [
 ]
 
 
+def _engine():
+    return import_engine()
+
+
+def _require(name: str, *, missing: str):
+    return require_engine_method(_engine(), name, missing=missing)
+
+
+def _db_path(store: SqliteStore) -> str:
+    db_path = getattr(store, "db_path", None)
+    if db_path is None:
+        raise TypeError("watchlist helpers require SqliteStore with db_path")
+    return str(db_path)
+
+
+RESEED_MEMPOOL_MAX_AGE_SECONDS = 3 * 60
+
+
+def is_dexie_offer_missing_error(error: Exception) -> bool:
+    return is_dexie_offer_missing_error_text(str(error))
+
+
 def is_recent_mempool_observed_offer_state(
     *,
     offer_state: dict[str, Any],
     clock: datetime,
-    max_age_seconds: int = _RESEED_MEMPOOL_MAX_AGE_SECONDS,
+    max_age_seconds: int = RESEED_MEMPOOL_MAX_AGE_SECONDS,
 ) -> bool:
     state = str(offer_state.get("state", "")).strip().lower()
     if state != OfferLifecycleState.MEMPOOL_OBSERVED.value:
@@ -49,91 +63,33 @@ def is_recent_mempool_observed_offer_state(
     except ValueError:
         return False
     if updated_at.tzinfo is None:
-        _logger.warning("offer state timestamp missing timezone, assuming UTC: %s", updated_at_raw)
-        updated_at = updated_at.replace(tzinfo=UTC)
+        updated_at = updated_at.replace(tzinfo=clock.tzinfo)
     age_seconds = (clock - updated_at).total_seconds()
     return 0 <= age_seconds <= float(max_age_seconds)
 
 
-def is_dexie_offer_missing_error(error: Exception) -> bool:
-    return is_dexie_offer_missing_error_text(str(error))
-
-
-def recent_executed_offer_ids(*, store: SqliteStore, market_id: str) -> set[str]:
-    events = store.list_recent_audit_events(
-        event_types=["strategy_offer_execution"],
-        market_id=market_id,
-        limit=1500,
-    )
-    offer_ids: set[str] = set()
-    for event in events:
-        payload = event.get("payload")
-        if not isinstance(payload, dict):
-            continue
-        single_offer_id = str(payload.get("offer_id", "")).strip()
-        if single_offer_id:
-            offer_ids.add(single_offer_id)
-        items = payload.get("items")
-        if not isinstance(items, list):
-            continue
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            if str(item.get("status", "")).strip().lower() not in (
-                "executed",
-                "pending_visibility",
-            ):
-                continue
-            item_offer_id = str(item.get("offer_id", "")).strip()
-            if item_offer_id:
-                offer_ids.add(item_offer_id)
-    return offer_ids
-
-
 def watchlist_offer_ids_from_store(
-    *, store: SqliteStore, market_id: str, clock: datetime
+    *, store: SqliteStore, market_id: str, clock: datetime | None = None
 ) -> set[str]:
-    tracked_states = {
-        OfferLifecycleState.OPEN.value,
-        OfferLifecycleState.REFRESH_DUE.value,
-        "unknown_orphaned",
-    }
-    offer_ids: set[str] = set()
-    for item in store.list_offer_states(market_id=market_id, limit=500):
-        state = str(item.get("state", "")).strip().lower()
-        offer_id = str(item.get("offer_id", "")).strip()
-        if not offer_id:
-            continue
-        if state in tracked_states or is_recent_mempool_observed_offer_state(
-            offer_state=item, clock=clock
-        ):
-            offer_ids.add(offer_id)
-    return offer_ids
+    del clock
+    fn = _require("watchlist_offer_ids_from_store", missing="watchlist")
+    return set(fn(_db_path(store), market_id))
 
 
 def set_watched_coin_ids_for_market(*, market_id: str, coin_ids: set[str]) -> None:
-    with _WATCHED_COIN_IDS_LOCK:
-        _WATCHED_COIN_IDS_BY_MARKET[market_id] = set(coin_ids)
+    fn = _require("set_watched_coin_ids_for_market", missing="watchlist")
+    fn(market_id, sorted(coin_ids))
 
 
 def match_watched_coin_ids(*, observed_coin_ids: list[str]) -> dict[str, list[str]]:
-    normalized = {
-        str(coin_id).strip().lower() for coin_id in observed_coin_ids if str(coin_id).strip()
-    }
-    if not normalized:
-        return {}
-    matches: dict[str, list[str]] = {}
-    with _WATCHED_COIN_IDS_LOCK:
-        for market_id, watched in _WATCHED_COIN_IDS_BY_MARKET.items():
-            intersection = sorted(normalized.intersection(watched))
-            if intersection:
-                matches[market_id] = intersection
-    return matches
+    fn = _require("match_watched_coin_ids", missing="watchlist")
+    payload = fn(observed_coin_ids)
+    return {str(market_id): list(coin_ids) for market_id, coin_ids in dict(payload).items()}
 
 
 def watched_coin_ids_for_market(*, market_id: str) -> set[str]:
-    with _WATCHED_COIN_IDS_LOCK:
-        return set(_WATCHED_COIN_IDS_BY_MARKET.get(market_id, set()))
+    fn = _require("watched_coin_ids_for_market", missing="watchlist")
+    return set(fn(market_id))
 
 
 def update_market_coin_watchlist_from_dexie(
@@ -141,57 +97,16 @@ def update_market_coin_watchlist_from_dexie(
     market: Any,
     offers: list[dict[str, Any]],
     store: SqliteStore,
-    clock: datetime,
+    clock: datetime | None = None,
 ) -> None:
-    watch_offer_ids = watchlist_offer_ids_from_store(
-        store=store,
-        market_id=market.market_id,
-        clock=clock,
-    )
-    watch_offer_ids.update(recent_executed_offer_ids(store=store, market_id=market.market_id))
-    watched_coin_ids: set[str] = set()
-    matched_offer_count = 0
-    for offer in offers:
-        offer_id = str(offer.get("id", "")).strip()
-        if not offer_id or offer_id not in watch_offer_ids:
-            continue
-        matched_offer_count += 1
-        watched_coin_ids.update(extract_coin_ids_from_offer_payload(offer))
-    set_watched_coin_ids_for_market(market_id=market.market_id, coin_ids=watched_coin_ids)
-    store.add_audit_event(
-        "coin_watchlist_updated",
-        {
-            "market_id": market.market_id,
-            "watch_offer_count": len(watch_offer_ids),
-            "matched_offer_count": matched_offer_count,
-            "watch_coin_count": len(watched_coin_ids),
-            "watch_coin_sample": sorted(watched_coin_ids)[:10],
-        },
-        market_id=market.market_id,
-    )
+    del clock
+    fn = _require("update_market_coin_watchlist_from_offers", missing="watchlist")
+    fn(_db_path(store), market.market_id, offers)
 
 
 def build_dexie_size_by_offer_id(
     offers: list[dict[str, Any]], base_asset_id: str
 ) -> dict[str, int]:
-    """Extract {offer_id -> size_base_units} from flat Dexie offer dicts."""
-    result: dict[str, int] = {}
-    clean_base = str(base_asset_id).strip().lower()
-    for offer in offers:
-        if not isinstance(offer, dict):
-            continue
-        offer_id = str(offer.get("id", "")).strip()
-        if not offer_id:
-            continue
-        for offered_item in offer.get("offered") or []:
-            if not isinstance(offered_item, dict):
-                continue
-            if str(offered_item.get("id", "")).strip().lower() != clean_base:
-                continue
-            try:
-                size = int(offered_item["amount"])
-            except (TypeError, ValueError, KeyError):
-                continue
-            if size > 0:
-                result[offer_id] = size
-    return result
+    fn = _require("build_dexie_size_by_offer_id", missing="watchlist")
+    payload = fn(offers, base_asset_id)
+    return {str(offer_id): int(size) for offer_id, size in dict(payload).items()}

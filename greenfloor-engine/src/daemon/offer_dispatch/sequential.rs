@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::{
@@ -8,15 +7,14 @@ use crate::cycle::{
 use crate::error::SignerResult;
 use crate::offer::request::normalize_offer_side;
 
+use crate::daemon::config_paths::DaemonConfigPaths;
 use super::managed_post::post_managed_planned_action;
 use super::OfferDispatchOutput;
 
 pub async fn execute_actions_sequential(
     program: &ManagerProgramConfig,
+    paths: &DaemonConfigPaths,
     market: &MarketConfig,
-    program_path: &Path,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
     expanded: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
     let mut executed = 0_u64;
@@ -24,15 +22,8 @@ pub async fn execute_actions_sequential(
 
     for action in expanded {
         let side = normalize_offer_side(&action.side).to_string();
-        let counts_as_executed = post_managed_planned_action(
-            program,
-            market,
-            program_path,
-            markets_path,
-            testnet_markets_path,
-            &action,
-        )
-        .await?;
+        let counts_as_executed =
+            post_managed_planned_action(program, paths, market, action).await?;
         if counts_as_executed {
             executed += 1;
         }

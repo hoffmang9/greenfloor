@@ -6,16 +6,22 @@ import logging
 import os
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from greenfloor.config.io import load_program_config, resolve_state_db_path
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
 from greenfloor.daemon.bootstrap import log_daemon_event
-from greenfloor.daemon.cycle_market_batch import MarketDispatchState
 from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
 from greenfloor.daemon.engine_logging import initialize_daemon_logging
 from greenfloor.daemon.market_logging import _daemon_logger
+
+
+@dataclass
+class LoopDispatchState:
+    cursor: int = 0
+    immediate_requeue_ids: list[str] = field(default_factory=list)
 
 
 def _engine():
@@ -53,7 +59,7 @@ def run_once(
     use_websocket_capture: bool = False,
     program=None,
     testnet_markets_path: Path | None = None,
-    market_dispatch_state: MarketDispatchState | None = None,
+    market_dispatch_state: Any | None = None,
     test_controls: Mapping[str, Any] | None = None,
 ) -> int:
     del program
@@ -67,11 +73,11 @@ def run_once(
         state_dir=state_dir,
         poll_coinset_mempool=poll_coinset_mempool,
         use_websocket_capture=use_websocket_capture,
-        market_dispatch_state=market_dispatch_state,
+        dispatch_state=market_dispatch_state,
         test_controls=test_controls,
     )
     if market_dispatch_state is not None:
-        market_dispatch_state.cursor = updated_state.cursor
+        market_dispatch_state.cursor = int(updated_state.cursor)
         market_dispatch_state.immediate_requeue_ids = list(updated_state.immediate_requeue_ids)
     return exit_code
 
@@ -87,7 +93,7 @@ def run_loop(
     state_dir: Path,
 ) -> int:
     current_program = load_program_config(program_path)
-    market_dispatch_state = MarketDispatchState()
+    market_dispatch_state = LoopDispatchState()
     initialize_daemon_logging(program=current_program, program_path=program_path)
     _daemon_logger.info(
         "daemon_starting mode=loop program_config=%s markets_config=%s",

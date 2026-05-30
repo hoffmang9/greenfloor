@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 
 use crate::adapters::DexieClient;
-use crate::config::{ManagerProgramConfig, MarketConfig, MarketsConfig};
+use crate::config::{load_program_config, load_markets_config_with_overlay, require_signer_offer_path, ManagerProgramConfig, MarketConfig, MarketsConfig};
 use crate::error::SignerResult;
 
+use super::config_paths::DaemonConfigPaths;
 use super::reconcile_phase::ReconcilePhaseResult;
 use super::run_once::{CyclePlan, DaemonRunOnceRequest};
 
@@ -14,12 +15,15 @@ pub struct DaemonCycleResources {
     pub markets: MarketsConfig,
     pub network: String,
     pub dexie: DexieClient,
-    pub program_path: PathBuf,
-    pub markets_path: PathBuf,
-    pub testnet_markets_path: Option<PathBuf>,
+    pub paths: DaemonConfigPaths,
+    pub signer_offer_path_configured: bool,
 }
 
 impl DaemonCycleResources {
+    pub fn program_path(&self) -> &std::path::Path {
+        &self.paths.program_path
+    }
+
     pub fn selected_markets(&self, selected_market_ids: &[String]) -> Vec<MarketConfig> {
         let selected: std::collections::HashSet<String> = selected_market_ids
             .iter()
@@ -57,22 +61,26 @@ pub struct MarketCycleContext<'a> {
 }
 
 pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<DaemonCycleResources> {
-    let program = crate::config::load_program_config(&request.program_path)?;
-    let markets = crate::config::load_markets_config_with_overlay(
+    let program = load_program_config(&request.program_path)?;
+    let markets = load_markets_config_with_overlay(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
     )?;
     super::disabled_markets::log_disabled_markets_startup_once(&markets);
     let network = program.network.clone();
     let dexie = DexieClient::new(program.dexie_api_base.clone());
+    let signer_offer_path_configured = require_signer_offer_path(&request.program_path).is_ok();
     Ok(DaemonCycleResources {
         program,
         markets,
         network,
         dexie,
-        program_path: request.program_path.clone(),
-        markets_path: request.markets_path.clone(),
-        testnet_markets_path: request.testnet_markets_path.clone(),
+        paths: DaemonConfigPaths::new(
+            request.program_path.clone(),
+            request.markets_path.clone(),
+            request.testnet_markets_path.clone(),
+        ),
+        signer_offer_path_configured,
     })
 }
 
@@ -129,9 +137,12 @@ mod tests {
             markets: MarketsConfig { markets },
             network: "mainnet".to_string(),
             dexie: DexieClient::new("https://api.dexie.space"),
-            program_path: PathBuf::from("/tmp/program.yaml"),
-            markets_path: PathBuf::from("/tmp/markets.yaml"),
-            testnet_markets_path: None,
+            paths: DaemonConfigPaths::new(
+                PathBuf::from("/tmp/program.yaml"),
+                PathBuf::from("/tmp/markets.yaml"),
+                None,
+            ),
+            signer_offer_path_configured: false,
         }
     }
 

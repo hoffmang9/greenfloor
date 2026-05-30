@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
-from greenfloor.daemon.cycle_market_batch import MarketDispatchState
 
 
 def _engine():
@@ -76,7 +75,7 @@ def test_run_daemon_cycle_once_accepts_typed_request(tmp_path: Path) -> None:
 def test_daemon_dispatch_state_round_trip_via_engine_cycle(tmp_path: Path) -> None:
     from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
 
-    captured: list[MarketDispatchState] = []
+    captured: list[Any] = []
     dispatch_cls = require_engine_method(
         _engine(),
         "DaemonDispatchState",
@@ -86,9 +85,9 @@ def test_daemon_dispatch_state_round_trip_via_engine_cycle(tmp_path: Path) -> No
     def _fake_run(request: Any) -> object:
         dispatch = request.dispatch_state
         captured.append(
-            MarketDispatchState(
-                cursor=int(dispatch.cursor),
-                immediate_requeue_ids=list(dispatch.immediate_requeue_ids),
+            dispatch_cls(
+                int(dispatch.cursor),
+                list(dispatch.immediate_requeue_ids),
             )
         )
 
@@ -98,7 +97,7 @@ def test_daemon_dispatch_state_round_trip_via_engine_cycle(tmp_path: Path) -> No
 
         return _Response()
 
-    dispatch = MarketDispatchState(cursor=2, immediate_requeue_ids=["m-old"])
+    dispatch = dispatch_cls(2, ["m-old"])
     exit_code, updated = run_daemon_cycle_once_via_engine(
         program_path=tmp_path / "program.yaml",
         markets_path=tmp_path / "markets.yaml",

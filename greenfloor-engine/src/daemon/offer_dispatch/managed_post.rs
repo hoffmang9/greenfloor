@@ -6,12 +6,12 @@ use crate::error::SignerResult;
 use crate::manager::{build_and_post_offer, BuildAndPostOfferRequest};
 use crate::offer::request::normalize_offer_side;
 
+use crate::daemon::config_paths::DaemonConfigPaths;
+
 pub async fn post_managed_planned_action(
     program: &ManagerProgramConfig,
+    paths: &DaemonConfigPaths,
     market: &MarketConfig,
-    program_path: &Path,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
     action: &PlannedAction,
 ) -> SignerResult<bool> {
     #[cfg(test)]
@@ -23,9 +23,9 @@ pub async fn post_managed_planned_action(
     }
     let side = normalize_offer_side(&action.side).to_string();
     let response = build_and_post_offer(BuildAndPostOfferRequest {
-        program_path: program_path.to_path_buf(),
-        markets_path: markets_path.to_path_buf(),
-        testnet_markets_path: testnet_markets_path.map(Path::to_path_buf),
+        program_path: paths.program_path.clone(),
+        markets_path: paths.markets_path.clone(),
+        testnet_markets_path: paths.testnet_markets_path.clone(),
         network: program.network.clone(),
         market_id: Some(market.market_id.clone()),
         pair: None,
@@ -44,4 +44,3 @@ pub async fn post_managed_planned_action(
     .await?;
     Ok(response.exit_code == 0)
 }
-

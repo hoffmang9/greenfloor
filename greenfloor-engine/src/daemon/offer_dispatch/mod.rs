@@ -16,13 +16,14 @@ use std::path::Path;
 
 use serde_json::json;
 
-use crate::config::{require_signer_offer_path, ManagerProgramConfig, MarketConfig};
+use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::{
-    expand_planned_actions, is_parallel_dispatch_transient_error,
-    is_transient_managed_upstream_error_text, parallel_managed_dispatch_enabled, PlannedAction,
+    expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction,
 };
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
+
+use crate::daemon::config_paths::DaemonConfigPaths;
 
 pub use coordinator::OfferReservationCoordinator;
 
@@ -32,18 +33,8 @@ pub struct OfferDispatchOutput {
     pub newly_executed_sell_counts: BTreeMap<i64, i64>,
 }
 
-fn exception_class_prefix(message: &str) -> &str {
-    message.split(':').next().unwrap_or(message).trim()
-}
-
 pub(crate) fn is_parallel_dispatch_transient_signer_error(err: &SignerError) -> bool {
-    let message = err.to_string();
-    if message.contains("database is locked") {
-        return true;
-    }
-    let class = exception_class_prefix(&message);
-    is_parallel_dispatch_transient_error(class, &message)
-        || is_transient_managed_upstream_error_text(&message)
+    err.is_parallel_dispatch_transient()
 }
 
 /// Outcome of a parallel managed-offer dispatch attempt.
@@ -85,14 +76,13 @@ pub async fn execute_strategy_actions(
     store: &SqliteStore,
     db_path: &Path,
     program: &ManagerProgramConfig,
+    paths: &DaemonConfigPaths,
     market: &MarketConfig,
     network: &str,
-    program_path: &Path,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
     actions: &[PlannedAction],
+    signer_offer_path_configured: bool,
 ) -> SignerResult<OfferDispatchOutput> {
-    if require_signer_offer_path(program_path).is_err() {
+    if !signer_offer_path_configured {
         store.add_audit_event(
             "strategy_exec_skipped_no_signer",
             &json!({"market_id": market.market_id, "planned_count": actions.len()}),
@@ -118,11 +108,9 @@ pub async fn execute_strategy_actions(
                 store,
                 db_path,
                 program,
+                paths,
                 market,
                 network,
-                program_path,
-                markets_path,
-                testnet_markets_path,
                 &expanded,
             )
             .await,
@@ -135,13 +123,5 @@ pub async fn execute_strategy_actions(
         }
     }
 
-    sequential::execute_actions_sequential(
-        program,
-        market,
-        program_path,
-        markets_path,
-        testnet_markets_path,
-        &expanded,
-    )
-    .await
+    sequential::execute_actions_sequential(program, paths, market, &expanded).await
 }

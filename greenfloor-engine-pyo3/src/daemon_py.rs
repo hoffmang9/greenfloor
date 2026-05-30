@@ -6,12 +6,13 @@ use engine_core::load_program_config;
 use engine_core::daemon::{
     initialize_daemon_file_logging, resolve_coinset_ws_url, run_daemon_cycle_once,
     start_coinset_websocket_loop, websocket_capture_enabled, DaemonCycleOnceResponse,
-    DaemonCycleTestControls, DaemonDispatchState, DaemonInstanceLock, DaemonRunOnceRequest,
+    DaemonCycleSummary, DaemonCycleTestControls, DaemonDispatchState, DaemonInstanceLock,
+    DaemonRunOnceRequest,
 };
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
-use crate::py_utils::{dict_from_json_value, to_py_err};
+use crate::py_utils::to_py_err;
 
 #[pyclass(name = "DaemonDispatchState")]
 #[derive(Clone)]
@@ -174,6 +175,72 @@ impl From<PyDaemonRunOnceRequest> for DaemonRunOnceRequest {
     }
 }
 
+#[pyclass(name = "DaemonCycleSummary")]
+#[derive(Clone)]
+struct PyDaemonCycleSummary {
+    #[pyo3(get)]
+    duration_ms: u64,
+    #[pyo3(get)]
+    enabled_markets: usize,
+    #[pyo3(get)]
+    markets_attempted: usize,
+    #[pyo3(get)]
+    markets_processed: u64,
+    #[pyo3(get)]
+    runtime_market_slot_count: u64,
+    #[pyo3(get)]
+    stale_open_sweep_checked_offer_count: u64,
+    #[pyo3(get)]
+    stale_open_sweep_requeue_market_ids: Vec<String>,
+    #[pyo3(get)]
+    stale_open_sweep_requeue_count: usize,
+    #[pyo3(get)]
+    stale_open_sweep_truncated: bool,
+    #[pyo3(get)]
+    immediate_requeue_market_ids: Vec<String>,
+    #[pyo3(get)]
+    immediate_requeue_count: usize,
+    #[pyo3(get)]
+    error_count: u64,
+    #[pyo3(get)]
+    strategy_planned_total: u64,
+    #[pyo3(get)]
+    strategy_executed_total: u64,
+    #[pyo3(get)]
+    cancel_triggered_count: u64,
+    #[pyo3(get)]
+    cancel_planned_total: u64,
+    #[pyo3(get)]
+    cancel_executed_total: u64,
+    #[pyo3(get)]
+    consumed_immediate_requeues: Vec<String>,
+}
+
+impl PyDaemonCycleSummary {
+    fn from_engine(summary: &DaemonCycleSummary) -> Self {
+        Self {
+            duration_ms: summary.duration_ms,
+            enabled_markets: summary.enabled_markets,
+            markets_attempted: summary.markets_attempted,
+            markets_processed: summary.markets_processed,
+            runtime_market_slot_count: summary.runtime_market_slot_count,
+            stale_open_sweep_checked_offer_count: summary.stale_open_sweep_checked_offer_count,
+            stale_open_sweep_requeue_market_ids: summary.stale_open_sweep_requeue_market_ids.clone(),
+            stale_open_sweep_requeue_count: summary.stale_open_sweep_requeue_count,
+            stale_open_sweep_truncated: summary.stale_open_sweep_truncated,
+            immediate_requeue_market_ids: summary.immediate_requeue_market_ids.clone(),
+            immediate_requeue_count: summary.immediate_requeue_count,
+            error_count: summary.error_count,
+            strategy_planned_total: summary.strategy_planned_total,
+            strategy_executed_total: summary.strategy_executed_total,
+            cancel_triggered_count: summary.cancel_triggered_count,
+            cancel_planned_total: summary.cancel_planned_total,
+            cancel_executed_total: summary.cancel_executed_total,
+            consumed_immediate_requeues: summary.consumed_immediate_requeues.clone(),
+        }
+    }
+}
+
 #[pyclass(name = "DaemonCycleOnceResponse")]
 struct PyDaemonCycleOnceResponse {
     #[pyo3(get)]
@@ -181,18 +248,15 @@ struct PyDaemonCycleOnceResponse {
     #[pyo3(get)]
     dispatch_state: PyDaemonDispatchState,
     #[pyo3(get)]
-    cycle_summary: Py<PyAny>,
+    cycle_summary: PyDaemonCycleSummary,
 }
 
 impl PyDaemonCycleOnceResponse {
-    fn from_engine(py: Python<'_>, response: DaemonCycleOnceResponse) -> PyResult<Self> {
+    fn from_engine(_py: Python<'_>, response: DaemonCycleOnceResponse) -> PyResult<Self> {
         Ok(Self {
             exit_code: response.exit_code,
             dispatch_state: response.dispatch_state.into(),
-            cycle_summary: dict_from_json_value(
-                py,
-                serde_json::to_value(response.cycle_summary).map_err(to_py_err)?,
-            )?,
+            cycle_summary: PyDaemonCycleSummary::from_engine(&response.cycle_summary),
         })
     }
 }
@@ -325,6 +389,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDaemonDispatchState>()?;
     m.add_class::<PyDaemonCycleTestControls>()?;
     m.add_class::<PyDaemonRunOnceRequest>()?;
+    m.add_class::<PyDaemonCycleSummary>()?;
     m.add_class::<PyDaemonCycleOnceResponse>()?;
     Ok(())
 }

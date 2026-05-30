@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -13,6 +12,7 @@ use crate::error::SignerResult;
 use crate::storage::{state_db_path_for_home, SqliteStore};
 
 use super::market_context::DaemonCycleResources;
+use super::markets::enabled_market_ids;
 use super::stale_sweep::detect_stale_open_offers_for_requeue;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -93,20 +93,7 @@ pub async fn build_cycle_plan(
     let program = &resources.program;
     let db_path = resolve_state_db_path(&program.home_dir, request.state_db_override.as_deref());
     let previous_xch_price_usd = store.get_latest_xch_price_snapshot()?;
-
-    let mut enabled_market_ids: Vec<String> = Vec::new();
-    let mut enabled_set: HashSet<String> = HashSet::new();
-    for market in &resources.markets.markets {
-        if !market.enabled {
-            continue;
-        }
-        let market_id = market.market_id.trim();
-        if market_id.is_empty() || enabled_set.contains(market_id) {
-            continue;
-        }
-        enabled_set.insert(market_id.to_string());
-        enabled_market_ids.push(market_id.to_string());
-    }
+    let enabled_market_ids = enabled_market_ids(&resources.markets);
 
     let stale_open_sweep = if enabled_market_ids.is_empty() {
         StaleSweepProgress {

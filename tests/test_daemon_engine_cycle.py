@@ -8,14 +8,23 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from greenfloor.daemon.cycle_market_batch import MarketDispatchState
+from greenfloor.core.engine_bridge import import_engine, require_engine_method
 from greenfloor.daemon.cycle_runner import run_once
 from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
 
 
+def _dispatch_state(cursor: int = 0, immediate_requeue_ids: list[str] | None = None) -> Any:
+    cls = require_engine_method(
+        import_engine(),
+        "DaemonDispatchState",
+        missing="daemon dispatch state",
+    )
+    return cls(cursor, immediate_requeue_ids or [])
+
+
 def test_run_daemon_cycle_once_via_engine_delegates_to_pyo3(monkeypatch, tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
-    dispatch_state = MarketDispatchState(cursor=2, immediate_requeue_ids=["m-old"])
+    dispatch_state = _dispatch_state(cursor=2, immediate_requeue_ids=["m-old"])
 
     class _FakeDispatch:
         cursor = 3
@@ -24,7 +33,7 @@ def test_run_daemon_cycle_once_via_engine_delegates_to_pyo3(monkeypatch, tmp_pat
     class _FakeResponse:
         exit_code = 0
         dispatch_state = _FakeDispatch()
-        cycle_summary = {}
+        cycle_summary = object()
 
     def _fake_run(request: Any) -> _FakeResponse:
         captured["request"] = request
@@ -40,7 +49,7 @@ def test_run_daemon_cycle_once_via_engine_delegates_to_pyo3(monkeypatch, tmp_pat
         state_dir=tmp_path / "state",
         poll_coinset_mempool=False,
         use_websocket_capture=True,
-        market_dispatch_state=dispatch_state,
+        dispatch_state=dispatch_state,
         run_fn=_fake_run,
     )
     assert exit_code == 0
@@ -54,7 +63,7 @@ def test_run_daemon_cycle_once_via_engine_delegates_to_pyo3(monkeypatch, tmp_pat
 
 
 def test_run_once_is_thin_wrapper_over_engine_cycle(monkeypatch, tmp_path: Path) -> None:
-    mock = MagicMock(return_value=(0, MarketDispatchState()))
+    mock = MagicMock(return_value=(0, _dispatch_state()))
     monkeypatch.setattr("greenfloor.daemon.cycle_runner.run_daemon_cycle_once_via_engine", mock)
     code = run_once(
         tmp_path / "program.yaml",
@@ -88,6 +97,6 @@ def test_run_daemon_cycle_once_requires_dispatch_state(tmp_path: Path) -> None:
             state_dir=tmp_path / "state",
             poll_coinset_mempool=False,
             use_websocket_capture=False,
-            market_dispatch_state=None,
+            dispatch_state=None,
             run_fn=_bad_run,
         )

@@ -13,6 +13,7 @@ use crate::error::{SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
 use crate::storage::SqliteStore;
 
+use crate::daemon::config_paths::DaemonConfigPaths;
 use super::coordinator::OfferReservationCoordinator;
 use super::managed_post::post_managed_planned_action;
 use super::reservation_ctx::{
@@ -32,18 +33,16 @@ pub async fn execute_actions_parallel(
     store: &SqliteStore,
     db_path: &Path,
     program: &ManagerProgramConfig,
+    paths: &DaemonConfigPaths,
     market: &MarketConfig,
     network: &str,
-    program_path: &Path,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
     expanded: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
     #[cfg(test)]
     if let Some(result) = super::test_hooks::parallel_dispatch_test_override() {
         return result;
     }
-    let reservation_ctx = parallel_reservation_context(program_path, market, 0).await?;
+    let reservation_ctx = parallel_reservation_context(paths, market, 0).await?;
     let asset_ids = parallel_reservation_asset_ids(&reservation_ctx);
     let spendable_profiles =
         coinset_spendable_profiles_by_asset(network, &market.receive_address, &asset_ids).await?;
@@ -51,7 +50,7 @@ pub async fn execute_actions_parallel(
         plan_parallel_managed_dispatch(&expanded, &reservation_ctx, &spendable_profiles);
     let coordinator = Arc::new(OfferReservationCoordinator::new(db_path, Some(300))?);
     let _ = coordinator.expire_stale();
-    let wallet_id = reservation_wallet_id(program_path)?;
+    let wallet_id = reservation_wallet_id(paths)?;
 
     store.add_audit_event(
         "parallel_offer_dispatch",
@@ -110,9 +109,7 @@ pub async fn execute_actions_parallel(
         let coordinator = coordinator.clone();
         let program = program.clone();
         let market = market.clone();
-        let program_path = program_path.to_path_buf();
-        let markets_path = markets_path.to_path_buf();
-        let testnet_markets_path = testnet_markets_path.map(Path::to_path_buf);
+        let paths = paths.clone();
         let market_id = market.market_id.clone();
         let wallet_id = wallet_id.clone();
 
@@ -129,10 +126,8 @@ pub async fn execute_actions_parallel(
                     let reservation_id = acquired.reservation_id.expect("reservation id");
                     let post_result = post_managed_planned_action(
                         &program,
+                        &paths,
                         &market,
-                        &program_path,
-                        &markets_path,
-                        testnet_markets_path.as_deref(),
                         &job.action,
                     )
                     .await?;
@@ -140,7 +135,13 @@ pub async fn execute_actions_parallel(
                     let _ = coordinator.release(&reservation_id, release_status);
                     post_result
                 }
-                Ok(_) | Err(_) => false,
+                Ok(acquired) => {
+                    if let Some(error) = acquired.error {
+                        return Err(SignerError::ReservationContention(error));
+                    }
+                    false
+                }
+                Err(err) => return Err(err),
             };
             Ok::<(PlannedAction, bool), SignerError>((job.action, counts_as_executed))
         }));
@@ -167,4 +168,3 @@ pub async fn execute_actions_parallel(
         newly_executed_sell_counts: crate::cycle::executed_sell_offer_counts_by_size(&action_items),
     })
 }
-

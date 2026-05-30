@@ -82,7 +82,18 @@ pub async fn augment_dexie_offers_for_watchlist(
                     Some(&err.to_string()),
                 )?;
             }
-            Err(_) => {}
+            Err(err) => {
+                metrics.cycle_errors += 1;
+                store.add_audit_event(
+                    "dexie_watchlist_augment_error",
+                    &serde_json::json!({
+                        "market_id": market_id,
+                        "offer_id": watched_offer_id,
+                        "error": err.to_string(),
+                    }),
+                    Some(market_id),
+                )?;
+            }
         }
     }
 
@@ -90,9 +101,23 @@ pub async fn augment_dexie_offers_for_watchlist(
         if augmented_by_id.contains_key(beyond_offer_id) {
             continue;
         }
-        if let Ok(payload) = dexie.get_offer(beyond_offer_id).await {
-            if let Some(single_offer) = payload.get("offer") {
-                augmented_by_id.insert(beyond_offer_id.clone(), single_offer.clone());
+        match dexie.get_offer(beyond_offer_id).await {
+            Ok(payload) => {
+                if let Some(single_offer) = payload.get("offer") {
+                    augmented_by_id.insert(beyond_offer_id.clone(), single_offer.clone());
+                }
+            }
+            Err(err) => {
+                metrics.cycle_errors += 1;
+                store.add_audit_event(
+                    "dexie_watchlist_augment_error",
+                    &serde_json::json!({
+                        "market_id": market_id,
+                        "offer_id": beyond_offer_id,
+                        "error": err.to_string(),
+                    }),
+                    Some(market_id),
+                )?;
             }
         }
     }

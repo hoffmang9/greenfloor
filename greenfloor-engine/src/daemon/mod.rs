@@ -6,6 +6,7 @@ mod coin_ops_phase;
 mod coinset_spendable;
 mod coinset_tx;
 mod coinset_ws;
+mod config_paths;
 mod cycle_entry;
 mod disabled_markets;
 mod inventory_phase;
@@ -15,6 +16,7 @@ mod market_context;
 mod market_cycle;
 mod market_dispatch;
 mod market_gate;
+mod markets;
 mod offer_dispatch;
 mod preamble;
 mod program_runtime;
@@ -32,9 +34,13 @@ pub use coinset_ws::{
 pub use watchlist::{
     active_offer_counts_by_size, active_offer_counts_by_size_and_side,
     active_offer_counts_by_size_and_side_detail, active_offer_counts_by_size_detail,
-    watchlist_offer_ids,
+    match_watched_coin_ids, set_watched_coin_ids_for_market, update_market_coin_watchlist_from_offers,
+    watched_coin_ids_for_market, watchlist_offer_ids, RESEED_MEMPOOL_MAX_AGE_SECONDS,
 };
+pub use coinset_tx::build_dexie_size_by_offer_id;
 
+pub use config_paths::DaemonConfigPaths;
+pub use markets::enabled_market_ids;
 pub use cancel_phase::run_market_cancel_phase;
 pub use cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
 pub use lock::DaemonInstanceLock;

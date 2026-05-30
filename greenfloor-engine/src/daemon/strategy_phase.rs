@@ -1,15 +1,15 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde_json::json;
 
-use crate::config::{ManagerProgramConfig, MarketConfig};
+use crate::config::MarketConfig;
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
 use crate::cycle::MarketCycleResultState;
+
+use super::market_context::MarketCycleContext;
 use super::offer_dispatch::execute_strategy_actions;
-use super::reconcile_phase::ReconcilePhaseResult;
 use super::strategy_support::evaluate_strategy_actions_for_market;
 
 pub struct StrategyPhaseResult {
@@ -19,24 +19,17 @@ pub struct StrategyPhaseResult {
 
 pub async fn run_strategy_phase(
     store: &SqliteStore,
-    db_path: &Path,
-    program: &ManagerProgramConfig,
+    ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
-    network: &str,
-    program_path: &Path,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
-    reconcile: &ReconcilePhaseResult,
-    xch_price_usd: Option<f64>,
-    skip_strategy_execution: bool,
     state: &mut MarketCycleResultState,
+    _bucket_counts: &BTreeMap<i64, i64>,
 ) -> SignerResult<StrategyPhaseResult> {
     let (strategy_actions, sell_active_counts) = evaluate_strategy_actions_for_market(
         store,
         market,
-        network,
-        &reconcile.dexie_size_by_offer_id,
-        xch_price_usd,
+        &ctx.resources.network,
+        &ctx.reconcile.dexie_size_by_offer_id,
+        ctx.dispatch.xch_price_usd,
     )?;
     state.merge_strategy_execution(strategy_actions.len() as i64, 0);
 
@@ -44,24 +37,23 @@ pub async fn run_strategy_phase(
         "strategy_actions_planned",
         &json!({
             "market_id": market.market_id,
-            "xch_price_usd": xch_price_usd,
+            "xch_price_usd": ctx.dispatch.xch_price_usd,
             "action_count": strategy_actions.len(),
         }),
         Some(&market.market_id),
     )?;
 
     let mut newly_executed_sell_counts = BTreeMap::new();
-    if !strategy_actions.is_empty() && !skip_strategy_execution {
+    if !strategy_actions.is_empty() && !ctx.dispatch.test_controls.skip_strategy_execution {
         match execute_strategy_actions(
             store,
-            db_path,
-            program,
+            &ctx.dispatch.db_path,
+            &ctx.resources.program,
+            &ctx.resources.paths,
             market,
-            network,
-            program_path,
-            markets_path,
-            testnet_markets_path,
+            &ctx.resources.network,
             &strategy_actions,
+            ctx.resources.signer_offer_path_configured,
         )
         .await
         {

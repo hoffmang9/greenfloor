@@ -94,6 +94,7 @@ async fn dispatch_markets(
     let mut worker_errors = 0u64;
 
     if parallel {
+        let runtime = tokio::runtime::Handle::current();
         let mut blocking_tasks = Vec::with_capacity(markets.len());
         for market in markets {
             let resources = resources.clone();
@@ -101,22 +102,19 @@ async fn dispatch_markets(
             let plan = plan.clone();
             let db_path = plan.db_path.clone();
             let market_id = market.market_id.clone();
+            let runtime = runtime.clone();
             blocking_tasks.push(tokio::task::spawn_blocking(move || {
-                let result = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("market worker runtime")
-                    .block_on(async {
-                        let store = SqliteStore::open(&db_path)?;
-                        process_one_market(
-                            &store,
-                            &resources,
-                            &dispatch_context,
-                            &plan,
-                            &market,
-                        )
-                        .await
-                    });
+                let result = runtime.block_on(async {
+                    let store = SqliteStore::open(&db_path)?;
+                    process_one_market(
+                        &store,
+                        &resources,
+                        &dispatch_context,
+                        &plan,
+                        &market,
+                    )
+                    .await
+                });
                 (market_id, result)
             }));
         }

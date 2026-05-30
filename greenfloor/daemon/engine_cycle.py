@@ -7,43 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
-from greenfloor.daemon.cycle_market_batch import MarketDispatchState
 
 
 def _engine_module():
     return import_engine()
 
 
-def _daemon_run_once_request_class():
-    return require_engine_method(
-        _engine_module(),
-        "DaemonRunOnceRequest",
-        missing="daemon cycle request",
-    )
-
-
-def _daemon_dispatch_state_class():
-    return require_engine_method(
-        _engine_module(),
-        "DaemonDispatchState",
-        missing="daemon dispatch state",
-    )
-
-
-def _daemon_test_controls_class():
-    return require_engine_method(
-        _engine_module(),
-        "DaemonCycleTestControls",
-        missing="daemon cycle test controls",
-    )
-
-
-def _run_daemon_cycle_once_engine():
-    return require_engine_method(
-        _engine_module(),
-        "run_daemon_cycle_once",
-        missing="daemon cycle",
-    )
+def _require(name: str, *, missing: str):
+    return require_engine_method(_engine_module(), name, missing=missing)
 
 
 def _build_engine_request(
@@ -57,12 +28,12 @@ def _build_engine_request(
     state_dir: Path,
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
-    dispatch_state: MarketDispatchState,
+    dispatch_state: Any,
     test_controls: Mapping[str, Any] | None = None,
 ) -> Any:
-    dispatch_cls = _daemon_dispatch_state_class()
-    controls_cls = _daemon_test_controls_class()
-    request_cls = _daemon_run_once_request_class()
+    dispatch_cls = _require("DaemonDispatchState", missing="daemon dispatch state")
+    controls_cls = _require("DaemonCycleTestControls", missing="daemon cycle test controls")
+    request_cls = _require("DaemonRunOnceRequest", missing="daemon cycle request")
 
     forced = None
     skip_strategy = False
@@ -70,6 +41,14 @@ def _build_engine_request(
         skip_strategy = bool(test_controls.get("skip_strategy_execution", False))
         raw_forced = test_controls.get("force_market_error_for")
         forced = str(raw_forced) if raw_forced is not None else None
+
+    if not hasattr(dispatch_state, "cursor"):
+        dispatch_state = dispatch_cls(0, [])
+    elif "greenfloor_engine" not in type(dispatch_state).__module__:
+        dispatch_state = dispatch_cls(
+            int(dispatch_state.cursor),
+            list(getattr(dispatch_state, "immediate_requeue_ids", [])),
+        )
 
     return request_cls(
         program_path,
@@ -81,10 +60,7 @@ def _build_engine_request(
         poll_coinset_mempool=poll_coinset_mempool,
         use_websocket_capture=use_websocket_capture,
         allowed_key_ids=sorted(allowed_keys or []),
-        dispatch_state=dispatch_cls(
-            int(dispatch_state.cursor),
-            list(dispatch_state.immediate_requeue_ids),
-        ),
+        dispatch_state=dispatch_state,
         test_controls=controls_cls(
             skip_strategy_execution=skip_strategy,
             force_market_error_for=forced,
@@ -103,11 +79,13 @@ def run_daemon_cycle_once_via_engine(
     state_dir: Path,
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
-    market_dispatch_state: MarketDispatchState | None,
+    dispatch_state: Any | None = None,
+    market_dispatch_state: Any | None = None,
     run_fn: Callable[[Any], Any] | None = None,
     test_controls: Mapping[str, Any] | None = None,
-) -> tuple[int, MarketDispatchState]:
-    dispatch_state = market_dispatch_state or MarketDispatchState()
+) -> tuple[int, Any]:
+    dispatch_cls = _require("DaemonDispatchState", missing="daemon dispatch state")
+    state = dispatch_state or market_dispatch_state or dispatch_cls(0, [])
     request = _build_engine_request(
         program_path=program_path,
         markets_path=markets_path,
@@ -118,20 +96,14 @@ def run_daemon_cycle_once_via_engine(
         state_dir=state_dir,
         poll_coinset_mempool=poll_coinset_mempool,
         use_websocket_capture=use_websocket_capture,
-        dispatch_state=dispatch_state,
+        dispatch_state=state,
         test_controls=test_controls,
     )
 
-    runner = run_fn or _run_daemon_cycle_once_engine()
+    runner = run_fn or _require("run_daemon_cycle_once", missing="daemon cycle")
     response = runner(request)
     exit_code = int(getattr(response, "exit_code", 1))
-    state_payload = getattr(response, "dispatch_state", None)
-    if state_payload is None:
+    updated = getattr(response, "dispatch_state", None)
+    if updated is None:
         raise TypeError("engine run_daemon_cycle_once returned response without dispatch_state")
-    updated = MarketDispatchState(
-        cursor=int(getattr(state_payload, "cursor", dispatch_state.cursor)),
-        immediate_requeue_ids=list(
-            getattr(state_payload, "immediate_requeue_ids", dispatch_state.immediate_requeue_ids)
-        ),
-    )
     return exit_code, updated

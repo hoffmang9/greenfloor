@@ -1,20 +1,18 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde_json::json;
 
 use crate::coin_ops::compute_bucket_counts_from_coins;
-use crate::config::{
-    load_signer_config, require_signer_offer_path, ManagerProgramConfig, MarketConfig,
-};
+use crate::config::load_signer_config;
+use crate::config::MarketConfig;
+use crate::cycle::MarketCycleResultState;
 use crate::error::SignerResult;
 use crate::hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
 use crate::offer::resolve_offer_assets_for_action;
 use crate::storage::SqliteStore;
 
-use crate::cycle::MarketCycleResultState;
-
 use super::coinset_spendable::list_spendable_base_unit_amounts;
+use super::market_context::DaemonCycleResources;
 
 /// When `market.base_asset` is a hex CAT id, it must match the signer-resolved id used for coinset.
 pub fn assert_inventory_asset_resolution_matches_config(
@@ -44,10 +42,8 @@ pub fn assert_inventory_asset_resolution_matches_config(
 
 pub async fn run_inventory_phase(
     store: &SqliteStore,
-    program_path: &Path,
-    _program: &ManagerProgramConfig,
+    resources: &DaemonCycleResources,
     market: &MarketConfig,
-    network: &str,
     state: &mut MarketCycleResultState,
 ) -> SignerResult<BTreeMap<i64, i64>> {
     let ladder_sizes: Vec<i64> = market
@@ -61,7 +57,7 @@ pub async fn run_inventory_phase(
         return Ok(BTreeMap::new());
     }
 
-    if require_signer_offer_path(program_path).is_err() {
+    if !resources.signer_offer_path_configured {
         store.add_audit_event(
             "inventory_bucket_scan",
             &json!({
@@ -76,13 +72,13 @@ pub async fn run_inventory_phase(
 
     let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim()) as i64;
     let scan_result: SignerResult<(String, usize, BTreeMap<i64, i64>)> = async {
-        let signer_config = load_signer_config(program_path)?;
+        let signer_config = load_signer_config(resources.program_path())?;
         let (resolved_base_asset_id, _) =
             resolve_offer_assets_for_action(&signer_config, market.base_asset.trim(), "xch")
                 .await?;
         assert_inventory_asset_resolution_matches_config(market, &resolved_base_asset_id)?;
         let amounts = list_spendable_base_unit_amounts(
-            network,
+            &resources.network,
             &market.receive_address,
             &resolved_base_asset_id,
             base_unit_multiplier,
@@ -123,7 +119,6 @@ pub async fn run_inventory_phase(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::MarketConfig;
     use serde_json::json;
     use std::collections::HashMap;
 

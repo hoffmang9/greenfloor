@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
 
 import pytest
 
@@ -12,7 +11,7 @@ from greenfloor.daemon.testing import (
     match_watched_coin_ids,
     update_market_coin_watchlist_from_dexie,
 )
-from tests.helpers.daemon_test_fixtures import FakeStore, market_config
+from tests.helpers.daemon_test_fixtures import market_config
 from tests.helpers.watchlist_store import (
     open_watchlist_test_store,
     seed_offer_state,
@@ -143,17 +142,16 @@ def test_active_offer_counts_by_size_and_side_malformed_side_stays_unmapped(tmp_
     assert unmapped == 2
 
 
-def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers() -> None:
-    store = FakeStore()
+def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers(tmp_path) -> None:
+    store = open_watchlist_test_store(tmp_path)
     now = datetime.now(UTC)
-    store.offer_states = [{"offer_id": "offer-1", "market_id": "m1", "state": "open"}]
-    store.audit_events = [
-        {
-            "event_type": "strategy_offer_execution",
-            "market_id": "m1",
-            "payload": {"offer_id": "offer-1"},
-        }
-    ]
+    seed_offer_state(store, offer_id="offer-1", market_id="m1", state="open", updated_at=now)
+    seed_strategy_execution_event(
+        store,
+        market_id="m1",
+        created_at=now,
+        items=[{"offer_id": "offer-1", "status": "executed"}],
+    )
     market = market_config()
     offers = [
         {"id": "offer-1", "involved_coins": ["0x" + ("a" * 64)]},
@@ -163,7 +161,7 @@ def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers()
     update_market_coin_watchlist_from_dexie(
         market=market,
         offers=offers,
-        store=cast(Any, store),
+        store=store,
         clock=now,
     )
 

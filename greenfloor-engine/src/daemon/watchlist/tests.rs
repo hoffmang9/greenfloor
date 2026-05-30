@@ -342,3 +342,34 @@ fn active_offer_counts_keeps_pending_when_no_dexie_snapshot() {
     assert_eq!(counts.get(&50), Some(&1));
     assert_eq!(unmapped, 0);
 }
+
+#[test]
+fn update_market_coin_watchlist_tracks_coins_for_owned_offers() {
+    let (_dir, store) = open_test_store();
+    store
+        .upsert_offer_state("offer-1", "m1", "open", Some(0))
+        .expect("upsert");
+    store
+        .add_audit_event(
+            "strategy_offer_execution",
+            &json!({"offer_id": "offer-1"}),
+            Some("m1"),
+        )
+        .expect("audit");
+    let coin_a = "a".repeat(64);
+    let offers = vec![
+        json!({"id": "offer-1", "involved_coins": [format!("0x{coin_a}")]}),
+        json!({"id": "offer-2", "involved_coins": [format!("0x{}", "b".repeat(64))]}),
+    ];
+    update_market_coin_watchlist_from_offers(&store, "m1", &offers).expect("update");
+    let hits = match_watched_coin_ids(&[coin_a.clone(), "b".repeat(64)]);
+    assert_eq!(hits.get("m1"), Some(&vec![coin_a]));
+}
+
+#[test]
+fn watched_coin_ids_for_market_reads_process_cache() {
+    let coin_a = "c".repeat(64);
+    set_watched_coin_ids_for_market("m1", HashSet::from([coin_a.clone()]));
+    let cached = watched_coin_ids_for_market("m1");
+    assert!(cached.contains(&coin_a));
+}

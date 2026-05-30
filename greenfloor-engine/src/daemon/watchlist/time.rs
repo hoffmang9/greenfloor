@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 
-pub(crate) const RESEED_MEMPOOL_MAX_AGE_SECONDS: i64 = 3 * 60;
+pub const RESEED_MEMPOOL_MAX_AGE_SECONDS: i64 = 3 * 60;
 pub(crate) const PENDING_VISIBILITY_RECHECK_MAX_AGE_SECONDS: i64 = 2 * 60;
 
 pub(crate) fn parse_event_created_at(value: &str) -> Option<DateTime<Utc>> {

@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from greenfloor.config import io as config_io
 from greenfloor.core.cycle import enqueue_immediate_requeue, select_market_batch
-from greenfloor.daemon.cycle_market_batch import MarketDispatchState
 from greenfloor.daemon.testing import (
     match_watched_coin_ids,
     resolve_quote_asset_for_offer,
     set_watched_coin_ids_for_market,
 )
+
+
+@dataclass
+class _DispatchState:
+    cursor: int = 0
+    immediate_requeue_ids: list[str] = field(default_factory=list)
 
 
 def test_select_market_batch_prioritizes_immediate_requeue_then_round_robin() -> None:
@@ -20,7 +25,7 @@ def test_select_market_batch_prioritizes_immediate_requeue_then_round_robin() ->
 
     markets = [_Market("m1"), _Market("m2"), _Market("m3"), _Market("m4")]
     enabled_ids = [market.market_id for market in markets]
-    state = MarketDispatchState()
+    state = _DispatchState()
     state.immediate_requeue_ids = enqueue_immediate_requeue(list(state.immediate_requeue_ids), "m3")
 
     first = select_market_batch(

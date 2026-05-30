@@ -59,7 +59,24 @@ fn walk_node(node: &Value, tx_ids: &mut Vec<String>) {
     }
 }
 
-const COINSET_COIN_ID_KEYS: &[&str] = &["id", "coin_id", "coinId", "name", "coin_name", "coinName"];
+const COINSET_COIN_ID_KEYS: &[&str] = &[
+    "id",
+    "coin_id",
+    "coinId",
+    "name",
+    "coin_name",
+    "coinName",
+    "involved_coins",
+    "involvedCoins",
+    "input_coins",
+    "inputCoins",
+    "output_coins",
+    "outputCoins",
+    "spent_coins",
+    "spentCoins",
+    "additions",
+    "removals",
+];
 
 fn add_coin_id_candidate(candidate: &Value, coin_ids: &mut Vec<String>) {
     match candidate {

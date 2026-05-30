@@ -1,15 +1,22 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 use chrono::{DateTime, Utc};
-use engine_core::daemon::watchlist::{
-    active_offer_counts_by_size_and_side_detail, active_offer_counts_by_size_detail,
+use engine_core::daemon::{
+    build_dexie_size_by_offer_id,
+    watchlist::{
+        active_offer_counts_by_size_and_side_detail, active_offer_counts_by_size_detail,
+        match_watched_coin_ids, set_watched_coin_ids_for_market,
+        time::RESEED_MEMPOOL_MAX_AGE_SECONDS, update_market_coin_watchlist_from_offers,
+        watched_coin_ids_for_market, watchlist_offer_ids,
+    },
 };
 use engine_core::storage::SqliteStore;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyModule};
+use pyo3::types::{PyDict, PyList, PyModule};
+use serde_json::Value;
 
-use crate::py_utils::to_py_err;
+use crate::py_utils::{py_any_to_json, to_py_err};
 
 fn parse_clock(clock_iso: Option<&str>) -> PyResult<DateTime<Utc>> {
     let Some(raw) = clock_iso.map(str::trim).filter(|value| !value.is_empty()) else {
@@ -41,6 +48,13 @@ fn state_counts_dict(py: Python<'_>, counts: &HashMap<String, i64>) -> PyResult<
         out.set_item(state, count)?;
     }
     Ok(out.into())
+}
+
+fn offers_from_py_list(offers: &Bound<'_, PyList>) -> PyResult<Vec<Value>> {
+    offers
+        .iter()
+        .map(|item| py_any_to_json(&item))
+        .collect()
 }
 
 #[pyfunction]
@@ -96,8 +110,95 @@ fn active_offer_counts_by_size_and_side(
     })
 }
 
+#[pyfunction]
+#[pyo3(name = "match_watched_coin_ids", signature = (observed_coin_ids, /))]
+fn match_watched_coin_ids_py(observed_coin_ids: Vec<String>) -> PyResult<Py<PyAny>> {
+    let matches = match_watched_coin_ids(&observed_coin_ids);
+    Python::attach(|py| {
+        let out = PyDict::new(py);
+        for (market_id, coin_ids) in matches {
+            out.set_item(market_id, coin_ids)?;
+        }
+        Ok(out.into())
+    })
+}
+
+#[pyfunction]
+#[pyo3(name = "set_watched_coin_ids_for_market", signature = (market_id, coin_ids, /))]
+fn set_watched_coin_ids_for_market_py(market_id: String, coin_ids: Vec<String>) -> PyResult<()> {
+    let normalized: HashSet<String> = coin_ids
+        .into_iter()
+        .map(|coin_id| coin_id.trim().to_ascii_lowercase())
+        .filter(|coin_id| !coin_id.is_empty())
+        .collect();
+    set_watched_coin_ids_for_market(&market_id, normalized);
+    Ok(())
+}
+
+#[pyfunction]
+#[pyo3(name = "watched_coin_ids_for_market", signature = (market_id, /))]
+fn watched_coin_ids_for_market_py(market_id: String) -> PyResult<Vec<String>> {
+    let mut coin_ids: Vec<String> = watched_coin_ids_for_market(&market_id).into_iter().collect();
+    coin_ids.sort();
+    Ok(coin_ids)
+}
+
+#[pyfunction]
+#[pyo3(name = "watchlist_offer_ids_from_store", signature = (db_path, market_id, /))]
+fn watchlist_offer_ids_from_store_py(db_path: PathBuf, market_id: String) -> PyResult<Vec<String>> {
+    let store = SqliteStore::open(&db_path).map_err(to_py_err)?;
+    let mut offer_ids: Vec<String> = watchlist_offer_ids(&store, &market_id)
+        .map_err(to_py_err)?
+        .into_iter()
+        .collect();
+    offer_ids.sort();
+    Ok(offer_ids)
+}
+
+#[pyfunction]
+#[pyo3(name = "update_market_coin_watchlist_from_offers", signature = (db_path, market_id, offers, /))]
+fn update_market_coin_watchlist_from_offers_py(
+    db_path: PathBuf,
+    market_id: String,
+    offers: &Bound<'_, PyList>,
+) -> PyResult<()> {
+    let store = SqliteStore::open(&db_path).map_err(to_py_err)?;
+    let offers = offers_from_py_list(offers)?;
+    update_market_coin_watchlist_from_offers(&store, &market_id, &offers).map_err(to_py_err)
+}
+
+#[pyfunction]
+#[pyo3(name = "build_dexie_size_by_offer_id", signature = (offers, base_asset_id, /))]
+fn build_dexie_size_by_offer_id_py(
+    offers: &Bound<'_, PyList>,
+    base_asset_id: &str,
+) -> PyResult<Py<PyAny>> {
+    let offers = offers_from_py_list(offers)?;
+    let sizes = build_dexie_size_by_offer_id(&offers, base_asset_id);
+    Python::attach(|py| {
+        let out = PyDict::new(py);
+        for (offer_id, size) in sizes {
+            out.set_item(offer_id, size)?;
+        }
+        Ok(out.into())
+    })
+}
+
+#[pyfunction]
+#[pyo3(name = "reseed_mempool_max_age_seconds")]
+fn reseed_mempool_max_age_seconds_py() -> i64 {
+    RESEED_MEMPOOL_MAX_AGE_SECONDS
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(active_offer_counts_by_size, m)?)?;
     m.add_function(wrap_pyfunction!(active_offer_counts_by_size_and_side, m)?)?;
+    m.add_function(wrap_pyfunction!(match_watched_coin_ids_py, m)?)?;
+    m.add_function(wrap_pyfunction!(set_watched_coin_ids_for_market_py, m)?)?;
+    m.add_function(wrap_pyfunction!(watched_coin_ids_for_market_py, m)?)?;
+    m.add_function(wrap_pyfunction!(watchlist_offer_ids_from_store_py, m)?)?;
+    m.add_function(wrap_pyfunction!(update_market_coin_watchlist_from_offers_py, m)?)?;
+    m.add_function(wrap_pyfunction!(build_dexie_size_by_offer_id_py, m)?)?;
+    m.add_function(wrap_pyfunction!(reseed_mempool_max_age_seconds_py, m)?)?;
     Ok(())
 }

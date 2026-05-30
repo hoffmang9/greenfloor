@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use crate::coinset::is_xch_like_asset;
 use crate::config::{load_program_config, load_signer_config, MarketConfig};
@@ -8,8 +7,10 @@ use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
 use crate::offer::resolve_offer_assets_for_action;
 
-pub fn reservation_wallet_id(program_path: &Path) -> SignerResult<String> {
-    let config = load_signer_config(program_path)?;
+use crate::daemon::config_paths::DaemonConfigPaths;
+
+pub fn reservation_wallet_id(paths: &DaemonConfigPaths) -> SignerResult<String> {
+    let config = load_signer_config(&paths.program_path)?;
     let encoded = hex::encode(config.vault.launcher_id);
     if encoded.is_empty() {
         return Ok("signer".to_string());
@@ -18,12 +19,12 @@ pub fn reservation_wallet_id(program_path: &Path) -> SignerResult<String> {
 }
 
 pub async fn parallel_reservation_context(
-    program_path: &Path,
+    paths: &DaemonConfigPaths,
     market: &MarketConfig,
     fee_amount_mojos: i64,
 ) -> SignerResult<ParallelReservationContext> {
-    let signer_config = load_signer_config(program_path)?;
-    let program = load_program_config(program_path)?;
+    let signer_config = load_signer_config(&paths.program_path)?;
+    let program = load_program_config(&paths.program_path)?;
     let quote_asset =
         crate::config::resolve_quote_asset_for_offer(market.quote_asset.trim(), &program.network);
     let (base_asset_id, quote_asset_id) =
@@ -104,7 +105,12 @@ vault:
         )
         .expect("write");
 
-        let wallet_id = reservation_wallet_id(&program_path).expect("wallet id");
+        let paths = DaemonConfigPaths::new(
+            program_path.clone(),
+            dir.path().join("markets.yaml"),
+            None,
+        );
+        let wallet_id = reservation_wallet_id(&paths).expect("wallet id");
         assert_eq!(wallet_id, launcher_id);
     }
 }

@@ -11,8 +11,17 @@ use super::{
 };
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::{parallel_managed_dispatch_enabled, PlannedAction};
+use crate::daemon::config_paths::DaemonConfigPaths;
 use crate::error::SignerError;
 use crate::storage::SqliteStore;
+
+fn sample_paths(dir: &tempfile::TempDir) -> DaemonConfigPaths {
+    DaemonConfigPaths::new(
+        dir.path().join("program.yaml"),
+        dir.path().join("markets.yaml"),
+        None,
+    )
+}
 
 fn sample_program(parallelism_enabled: bool, dry_run: bool) -> ManagerProgramConfig {
     ManagerProgramConfig {
@@ -55,11 +64,11 @@ fn parallel_managed_dispatch_enabled_requires_parallelism_and_live_runtime() {
 
 #[test]
 fn parallel_transient_signer_error_classifies_reservation_and_upstream() {
-    let contention = SignerError::Other("ReservationContentionError: busy".to_string());
+    let contention = SignerError::ReservationContention("busy".to_string());
     assert!(is_parallel_dispatch_transient_signer_error(&contention));
-    let upstream = SignerError::Other("ManagedUpstreamTransientError: timeout".to_string());
+    let upstream = SignerError::ManagedUpstreamTransient("timeout".to_string());
     assert!(is_parallel_dispatch_transient_signer_error(&upstream));
-    let locked = SignerError::Other("database is locked".to_string());
+    let locked = SignerError::DatabaseLocked;
     assert!(is_parallel_dispatch_transient_signer_error(&locked));
     let fatal = SignerError::Other("permanent_offer_build_failure: bad puzzle".to_string());
     assert!(!is_parallel_dispatch_transient_signer_error(&fatal));
@@ -196,12 +205,11 @@ async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() 
         &store,
         &db_path,
         &program,
+        &sample_paths(&dir),
         &market,
         "mainnet",
-        &program_path,
-        &markets_path,
-        None,
         &actions,
+        false,
     )
     .await
     .expect("dispatch");
@@ -309,12 +317,11 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
         &store,
         &db_path,
         &program,
+        &sample_paths(&dir),
         &sample_market(),
         "mainnet",
-        &program_path,
-        &markets_path,
-        None,
         &[sample_action()],
+        true,
     )
     .await
     .expect("dispatch");
@@ -352,12 +359,11 @@ async fn execute_strategy_actions_parallel_fatal_propagates() {
         &store,
         &db_path,
         &program,
+        &sample_paths(&dir),
         &sample_market(),
         "mainnet",
-        &program_path,
-        &markets_path,
-        None,
         &[sample_action()],
+        true,
     )
     .await
     .expect_err("fatal parallel error");
@@ -384,12 +390,11 @@ async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
         &store,
         &db_path,
         &program,
+        &sample_paths(&dir),
         &sample_market(),
         "mainnet",
-        &program_path,
-        &markets_path,
-        None,
         &[sample_action()],
+        true,
     )
     .await
     .expect("dispatch");
