@@ -32,6 +32,7 @@ pub use execution::{
 pub use lifecycle::{apply_offer_signal, OfferLifecycleState, OfferSignal, OfferTransition};
 pub use managed::{
     can_parallelize_managed_offers, classify_dexie_visibility_outcome,
+    parallel_managed_dispatch_enabled,
     classify_managed_post_result, classify_managed_transient_error,
     count_parallel_transient_failures, is_managed_upstream_transient_error,
     is_managed_worker_transient_error, is_parallel_dispatch_transient_error,

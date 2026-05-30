@@ -1,7 +1,5 @@
 use std::time::Instant;
 
-use serde_json::Value;
-
 use crate::config::{load_program_config, ManagerProgramConfig, MarketConfig};
 use crate::cycle::enqueue_immediate_requeue;
 use crate::error::{SignerError, SignerResult};
@@ -16,14 +14,15 @@ use super::preamble::run_cycle_preamble;
 use super::reconcile_phase::run_market_reconcile_phase;
 use super::run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
-    elapsed_ms, CyclePlan, DaemonDispatchState, DaemonRunOnceRequest, MarketDispatchMetrics,
+    elapsed_ms, CyclePlan, DaemonCycleSummary, DaemonDispatchState, DaemonRunOnceRequest,
+    MarketDispatchMetrics,
 };
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DaemonCycleOnceResponse {
     pub exit_code: i32,
     pub dispatch_state: DaemonDispatchState,
-    pub cycle_summary: Value,
+    pub cycle_summary: DaemonCycleSummary,
 }
 
 fn write_stale_sweep_audit(store_path: &std::path::Path, plan: &CyclePlan) -> SignerResult<()> {
@@ -69,6 +68,7 @@ async fn process_one_market(
         dispatch_context.xch_price_usd,
         plan.previous_xch_price_usd,
         plan.runtime_dry_run,
+        &plan.test_controls,
     )
     .await?;
     let io = IoPhaseMetrics {
@@ -164,7 +164,7 @@ async fn dispatch_markets(
     Ok((outputs, worker_errors))
 }
 
-pub async fn run_daemon_cycle_once(
+async fn run_daemon_cycle_once_inner(
     request: &DaemonRunOnceRequest,
 ) -> SignerResult<DaemonCycleOnceResponse> {
     let started: Instant = cycle_started_instant();
@@ -193,6 +193,7 @@ pub async fn run_daemon_cycle_once(
         previous_xch_price_usd: plan.previous_xch_price_usd,
         parallel_markets_enabled: plan.parallel_markets_enabled,
         runtime_dry_run: plan.runtime_dry_run,
+        test_controls: plan.test_controls.clone(),
     };
     let network = program_network(&dispatch_context)?;
     let markets = selected_markets(&dispatch_context)?;
@@ -216,11 +217,20 @@ pub async fn run_daemon_cycle_once(
         elapsed_ms(started),
     );
     let summary_store = SqliteStore::open(&plan.db_path)?;
-    summary_store.add_audit_event("daemon_cycle_summary", &summary, None)?;
+    let summary_payload = serde_json::to_value(&summary).map_err(|err| {
+        SignerError::Other(format!("failed to encode daemon_cycle_summary: {err}"))
+    })?;
+    summary_store.add_audit_event("daemon_cycle_summary", &summary_payload, None)?;
 
     Ok(DaemonCycleOnceResponse {
         exit_code: compute_cycle_exit_code(&plan, &metrics),
         dispatch_state,
         cycle_summary: summary,
     })
+}
+
+pub async fn run_daemon_cycle_once(
+    request: &DaemonRunOnceRequest,
+) -> SignerResult<DaemonCycleOnceResponse> {
+    Box::pin(run_daemon_cycle_once_inner(request)).await
 }

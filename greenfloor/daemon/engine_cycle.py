@@ -31,6 +31,7 @@ def _build_engine_request(
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
     dispatch_state: MarketDispatchState,
+    test_controls: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     request: dict[str, Any] = {
         "program_path": str(program_path),
@@ -49,6 +50,8 @@ def _build_engine_request(
         request["testnet_markets_path"] = str(testnet_markets_path)
     if db_path_override:
         request["state_db_override"] = db_path_override
+    if test_controls:
+        request["test_controls"] = dict(test_controls)
     return request
 
 
@@ -65,6 +68,7 @@ def run_daemon_cycle_once_via_engine(
     use_websocket_capture: bool,
     market_dispatch_state: MarketDispatchState | None,
     run_fn: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None,
+    test_controls: Mapping[str, Any] | None = None,
 ) -> tuple[int, MarketDispatchState]:
     dispatch_state = market_dispatch_state or MarketDispatchState()
     request = _build_engine_request(
@@ -78,6 +82,7 @@ def run_daemon_cycle_once_via_engine(
         poll_coinset_mempool=poll_coinset_mempool,
         use_websocket_capture=use_websocket_capture,
         dispatch_state=dispatch_state,
+        test_controls=test_controls,
     )
 
     runner = run_fn or _run_daemon_cycle_once_engine()

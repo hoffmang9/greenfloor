@@ -25,9 +25,21 @@ def dexie_mock() -> Generator[DexieHttpMock, None, None]:
 @pytest.fixture(autouse=True)
 def rust_cycle_test_env(monkeypatch) -> None:
     monkeypatch.setenv("GREENFLOOR_XCH_PRICE_USD", "30")
-    monkeypatch.setenv("GREENFLOOR_TEST_SKIP_STRATEGY_EXEC", "1")
-    monkeypatch.delenv("GREENFLOOR_TEST_FORCE_MARKET_ERROR", raising=False)
     monkeypatch.setenv("GREENFLOOR_ENGINE_BIN", str(engine_binary_path()))
+
+    import greenfloor.daemon.cycle_runner as cycle_runner
+    import greenfloor.daemon.testing.main as testing_main
+
+    original_run_once = cycle_runner.run_once
+
+    def _run_once_with_test_defaults(*args, test_controls=None, **kwargs):
+        controls = (
+            dict(test_controls) if test_controls is not None else {"skip_strategy_execution": True}
+        )
+        return original_run_once(*args, test_controls=controls, **kwargs)
+
+    monkeypatch.setattr(cycle_runner, "run_once", _run_once_with_test_defaults)
+    monkeypatch.setattr(testing_main, "run_once", _run_once_with_test_defaults)
 
 
 def test_daemon_cycle_completes_under_one_second(tmp_path: Path, dexie_mock: DexieHttpMock) -> None:

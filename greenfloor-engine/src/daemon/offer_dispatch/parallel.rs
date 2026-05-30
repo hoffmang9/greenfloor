@@ -10,11 +10,11 @@ use crate::cycle::{
     reservation_release_status, PlannedAction, StrategyActionSellCountInput,
 };
 use crate::error::{SignerError, SignerResult};
-use crate::manager::{build_and_post_offer, BuildAndPostOfferRequest};
 use crate::offer::request::normalize_offer_side;
 use crate::storage::SqliteStore;
 
 use super::coordinator::OfferReservationCoordinator;
+use super::managed_post::post_managed_planned_action;
 use super::reservation_ctx::{
     parallel_reservation_asset_ids, parallel_reservation_context, reservation_wallet_id,
 };
@@ -22,42 +22,9 @@ use super::spendable::coinset_spendable_profiles_by_asset;
 use super::OfferDispatchOutput;
 
 struct ParallelPostJob {
-    submit_index: usize,
     action: PlannedAction,
     requested_amounts: BTreeMap<String, i64>,
     available_amounts: BTreeMap<String, i64>,
-}
-
-async fn post_one_managed_action(
-    program: &ManagerProgramConfig,
-    market: &MarketConfig,
-    program_path: &Path,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
-    action: &PlannedAction,
-) -> SignerResult<bool> {
-    let side = normalize_offer_side(&action.side).to_string();
-    let response = build_and_post_offer(BuildAndPostOfferRequest {
-        program_path: program_path.to_path_buf(),
-        markets_path: markets_path.to_path_buf(),
-        testnet_markets_path: testnet_markets_path.map(Path::to_path_buf),
-        network: program.network.clone(),
-        market_id: Some(market.market_id.clone()),
-        pair: None,
-        size_base_units: action.size as u64,
-        repeat: 1,
-        publish_venue: Some(program.offer_publish_venue.clone()),
-        dexie_base_url: Some(program.dexie_api_base.clone()),
-        splash_base_url: Some(program.splash_api_base.clone()),
-        drop_only: true,
-        claim_rewards: false,
-        dry_run: program.runtime_dry_run,
-        compact_json: false,
-        persist_results: true,
-        action_side: Some(side),
-    })
-    .await?;
-    Ok(response.exit_code == 0)
 }
 
 pub async fn execute_actions_parallel(
@@ -123,7 +90,6 @@ pub async fn execute_actions_parallel(
         .queue
         .into_iter()
         .map(|item| ParallelPostJob {
-            submit_index: item.submit_index,
             action: expanded[item.submit_index].clone(),
             requested_amounts: item.requested_amounts,
             available_amounts: item.available_amounts,
@@ -160,7 +126,7 @@ pub async fn execute_actions_parallel(
             let counts_as_executed = match acquired {
                 Ok(acquired) if acquired.ok => {
                     let reservation_id = acquired.reservation_id.expect("reservation id");
-                    let post_result = post_one_managed_action(
+                    let post_result = post_managed_planned_action(
                         &program,
                         &market,
                         &program_path,
@@ -176,19 +142,18 @@ pub async fn execute_actions_parallel(
                 }
                 _ => false,
             };
-            (job.submit_index, job.action, counts_as_executed)
+            (job.action, counts_as_executed)
         }));
     }
 
     let mut executed = 0_u64;
     for handle in handles {
-        let (submit_index, action, counts_as_executed) = handle
+        let (action, counts_as_executed) = handle
             .await
             .map_err(|err| SignerError::Other(format!("parallel worker join failed: {err}")))?;
         if counts_as_executed {
             executed += 1;
         }
-        let _ = submit_index;
         action_items.push(StrategyActionSellCountInput {
             size: action.size,
             side: normalize_offer_side(&action.side).to_string(),
@@ -196,7 +161,6 @@ pub async fn execute_actions_parallel(
         });
     }
 
-    let _ = store;
     Ok(OfferDispatchOutput {
         executed_count: executed,
         newly_executed_sell_counts: crate::cycle::executed_sell_offer_counts_by_size(&action_items),

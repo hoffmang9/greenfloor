@@ -4,7 +4,7 @@ use crate::error::SignerResult;
 
 use super::cancel_phase::CancelPhaseMetrics;
 use super::reconcile_phase::ReconcilePhaseResult;
-use super::run_once::MarketDispatchMetrics;
+use super::run_once::{DaemonCycleTestControls, MarketDispatchMetrics};
 
 #[derive(Debug, Clone)]
 pub struct MarketDispatchContext {
@@ -19,6 +19,7 @@ pub struct MarketDispatchContext {
     pub previous_xch_price_usd: Option<f64>,
     pub parallel_markets_enabled: bool,
     pub runtime_dry_run: bool,
+    pub test_controls: DaemonCycleTestControls,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]

@@ -3,6 +3,8 @@
 //! The Rust crate and PyO3 module are named `greenfloor_engine` (ADR 0010).
 //! Policy is grouped by domain (`cycle/`, `coin_ops/`, `offer/`, `vault/`).
 
+#![recursion_limit = "1024"]
+
 pub mod adapters;
 pub mod coin_ops;
 pub mod coinset;

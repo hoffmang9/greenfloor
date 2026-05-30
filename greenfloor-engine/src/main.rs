@@ -414,6 +414,7 @@ async fn run_daemon_cli_once(
             cursor: dispatch_cursor,
             immediate_requeue_ids,
         },
+        test_controls: Default::default(),
     })
     .await?;
 

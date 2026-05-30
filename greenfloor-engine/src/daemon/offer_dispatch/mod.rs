@@ -1,10 +1,14 @@
 //! Managed offer dispatch for the daemon strategy phase (sequential and parallel).
 
 mod coordinator;
+mod managed_post;
 mod parallel;
 mod reservation_ctx;
 mod sequential;
 mod spendable;
+
+#[cfg(test)]
+mod tests;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -13,8 +17,8 @@ use serde_json::json;
 
 use crate::config::{require_signer_offer_path, ManagerProgramConfig, MarketConfig};
 use crate::cycle::{
-    can_parallelize_managed_offers, expand_planned_actions, is_parallel_dispatch_transient_error,
-    PlannedAction,
+    expand_planned_actions, is_parallel_dispatch_transient_error,
+    is_transient_managed_upstream_error_text, parallel_managed_dispatch_enabled, PlannedAction,
 };
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
@@ -27,15 +31,34 @@ pub struct OfferDispatchOutput {
     pub newly_executed_sell_counts: BTreeMap<i64, i64>,
 }
 
-pub fn skip_strategy_execution() -> bool {
-    std::env::var_os("GREENFLOOR_TEST_SKIP_STRATEGY_EXEC").is_some()
+fn exception_class_prefix(message: &str) -> &str {
+    message.split(':').next().unwrap_or(message).trim()
 }
 
-fn parallel_transient_error(err: &SignerError) -> bool {
+pub(crate) fn is_parallel_dispatch_transient_signer_error(err: &SignerError) -> bool {
     let message = err.to_string();
-    is_parallel_dispatch_transient_error("ManagedUpstreamTransientError", &message)
-        || is_parallel_dispatch_transient_error("ReservationContentionError", &message)
-        || message.contains("database is locked")
+    if message.contains("database is locked") {
+        return true;
+    }
+    let class = exception_class_prefix(&message);
+    is_parallel_dispatch_transient_error(class, &message)
+        || is_transient_managed_upstream_error_text(&message)
+}
+
+pub(crate) async fn record_parallel_fallback_audit(
+    store: &SqliteStore,
+    market_id: &str,
+    err: &SignerError,
+) -> SignerResult<()> {
+    store.add_audit_event(
+        "offer_parallel_fallback",
+        &json!({
+            "market_id": market_id,
+            "error": err.to_string(),
+            "reason": "reservation_parallel_path_failed",
+        }),
+        Some(market_id),
+    )
 }
 
 pub async fn execute_strategy_actions(
@@ -69,14 +92,7 @@ pub async fn execute_strategy_actions(
         });
     }
 
-    let use_parallel = can_parallelize_managed_offers(
-        true,
-        program.runtime_offer_parallelism_enabled,
-        program.runtime_dry_run,
-        true,
-    );
-
-    if use_parallel {
+    if parallel_managed_dispatch_enabled(program) {
         match parallel::execute_actions_parallel(
             store,
             db_path,
@@ -91,23 +107,14 @@ pub async fn execute_strategy_actions(
         .await
         {
             Ok(output) => return Ok(output),
-            Err(err) if parallel_transient_error(&err) => {
-                store.add_audit_event(
-                    "offer_parallel_fallback",
-                    &json!({
-                        "market_id": market.market_id,
-                        "error": err.to_string(),
-                        "reason": "reservation_parallel_path_failed",
-                    }),
-                    Some(&market.market_id),
-                )?;
+            Err(err) if is_parallel_dispatch_transient_signer_error(&err) => {
+                record_parallel_fallback_audit(store, &market.market_id, &err).await?;
             }
             Err(err) => return Err(err),
         }
     }
 
     sequential::execute_actions_sequential(
-        store,
         program,
         market,
         program_path,

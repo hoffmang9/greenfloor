@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use engine_core::daemon::{run_daemon_cycle_once, DaemonDispatchState, DaemonRunOnceRequest};
+use engine_core::daemon::{
+    run_daemon_cycle_once, DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest,
+};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
 use serde::Deserialize;
@@ -14,6 +16,14 @@ struct DaemonDispatchStatePy {
     cursor: usize,
     #[serde(default)]
     immediate_requeue_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DaemonCycleTestControlsPy {
+    #[serde(default)]
+    skip_strategy_execution: bool,
+    #[serde(default)]
+    force_market_error_for: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -35,6 +45,8 @@ struct DaemonRunOnceRequestPy {
     allowed_key_ids: Vec<String>,
     #[serde(default)]
     dispatch_state: DaemonDispatchStatePy,
+    #[serde(default)]
+    test_controls: DaemonCycleTestControlsPy,
 }
 
 fn default_true() -> bool {
@@ -62,6 +74,10 @@ fn engine_request_from_py(parsed: DaemonRunOnceRequestPy) -> DaemonRunOnceReques
             cursor: parsed.dispatch_state.cursor,
             immediate_requeue_ids: parsed.dispatch_state.immediate_requeue_ids,
         },
+        test_controls: DaemonCycleTestControls {
+            skip_strategy_execution: parsed.test_controls.skip_strategy_execution,
+            force_market_error_for: parsed.test_controls.force_market_error_for,
+        },
     }
 }
 
@@ -87,7 +103,8 @@ fn run_daemon_cycle_once_py(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyRes
                 serde_json::to_value(&response.dispatch_state).map_err(to_py_err)?,
             )?,
         )?;
-        out.set_item("cycle_summary", dict_from_json_value(py, response.cycle_summary)?)?;
+        let summary_value = serde_json::to_value(&response.cycle_summary).map_err(to_py_err)?;
+        out.set_item("cycle_summary", dict_from_json_value(py, summary_value)?)?;
         Ok(out.into())
     })
 }

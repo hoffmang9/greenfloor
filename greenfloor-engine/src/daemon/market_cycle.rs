@@ -13,6 +13,7 @@ use super::inventory_phase::run_inventory_phase;
 use super::market_gate::enforce_market_key_allowlist;
 use super::market_phases::MarketPhaseMetrics;
 use super::reconcile_phase::ReconcilePhaseResult;
+use super::run_once::DaemonCycleTestControls;
 use super::strategy_phase::run_strategy_phase;
 
 pub struct PostReconcilePhaseOutput {
@@ -35,8 +36,13 @@ pub async fn run_post_reconcile_market_phases(
     xch_price_usd: Option<f64>,
     previous_xch_price_usd: Option<f64>,
     runtime_dry_run: bool,
+    test_controls: &DaemonCycleTestControls,
 ) -> SignerResult<PostReconcilePhaseOutput> {
-    if test_forced_market_error(&market.market_id) {
+    if test_controls
+        .force_market_error_for
+        .as_deref()
+        .is_some_and(|forced| forced.trim() == market.market_id)
+    {
         return Err(SignerError::Other(format!(
             "forced market error for {}",
             market.market_id
@@ -75,6 +81,7 @@ pub async fn run_post_reconcile_market_phases(
                     testnet_markets_path,
                     reconcile,
                     xch_price_usd,
+                    test_controls.skip_strategy_execution,
                     &mut metrics,
                 )
                 .await?;
@@ -107,17 +114,11 @@ pub async fn run_post_reconcile_market_phases(
                 )
                 .await?;
             }
-            _ => {}
+            crate::cycle::MarketCyclePhase::Reconcile => {}
         }
     }
 
     Ok(PostReconcilePhaseOutput { metrics, cancel })
-}
-
-fn test_forced_market_error(market_id: &str) -> bool {
-    std::env::var("GREENFLOOR_TEST_FORCE_MARKET_ERROR")
-        .map(|value| value.trim() == market_id)
-        .unwrap_or(false)
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ use crate::storage::SqliteStore;
 
 use super::market_phases::MarketPhaseMetrics;
 use super::reconcile_phase::ReconcilePhaseResult;
-use super::offer_dispatch::{execute_strategy_actions, skip_strategy_execution};
+use super::offer_dispatch::execute_strategy_actions;
 use super::strategy_support::evaluate_strategy_actions_for_market;
 
 pub struct StrategyPhaseResult {
@@ -28,6 +28,7 @@ pub async fn run_strategy_phase(
     testnet_markets_path: Option<&Path>,
     reconcile: &ReconcilePhaseResult,
     xch_price_usd: Option<f64>,
+    skip_strategy_execution: bool,
     metrics: &mut MarketPhaseMetrics,
 ) -> SignerResult<StrategyPhaseResult> {
     let (strategy_actions, sell_active_counts) = evaluate_strategy_actions_for_market(
@@ -50,7 +51,7 @@ pub async fn run_strategy_phase(
     )?;
 
     let mut newly_executed_sell_counts = BTreeMap::new();
-    if !strategy_actions.is_empty() && !skip_strategy_execution() {
+    if !strategy_actions.is_empty() && !skip_strategy_execution {
         match execute_strategy_actions(
             store,
             db_path,

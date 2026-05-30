@@ -48,6 +48,6 @@ pub use reconcile_phase::{
 };
 pub use run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
-    elapsed_ms, resolve_state_db_path, CyclePlan, DaemonDispatchState, DaemonRunOnceRequest,
-    MarketDispatchMetrics,
+    elapsed_ms, resolve_state_db_path, CyclePlan, DaemonCycleSummary, DaemonCycleTestControls,
+    DaemonDispatchState, DaemonRunOnceRequest, MarketDispatchMetrics,
 };

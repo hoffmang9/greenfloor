@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::config::{load_markets_config_with_overlay, load_program_config};
 use crate::cycle::{
@@ -22,6 +22,14 @@ pub struct DaemonDispatchState {
     pub immediate_requeue_ids: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DaemonCycleTestControls {
+    #[serde(default)]
+    pub skip_strategy_execution: bool,
+    #[serde(default)]
+    pub force_market_error_for: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonRunOnceRequest {
     pub program_path: PathBuf,
@@ -34,6 +42,8 @@ pub struct DaemonRunOnceRequest {
     pub use_websocket_capture: bool,
     pub allowed_key_ids: Vec<String>,
     pub dispatch_state: DaemonDispatchState,
+    #[serde(default)]
+    pub test_controls: DaemonCycleTestControls,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +60,7 @@ pub struct CyclePlan {
     pub previous_xch_price_usd: Option<f64>,
     pub dexie_base_url: String,
     pub splash_base_url: String,
+    pub test_controls: DaemonCycleTestControls,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -155,7 +166,30 @@ pub async fn build_cycle_plan(request: &DaemonRunOnceRequest) -> SignerResult<Cy
         previous_xch_price_usd,
         dexie_base_url: program.dexie_api_base,
         splash_base_url: program.splash_api_base,
+        test_controls: request.test_controls.clone(),
     })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DaemonCycleSummary {
+    pub duration_ms: u64,
+    pub enabled_markets: usize,
+    pub markets_attempted: usize,
+    pub markets_processed: u64,
+    pub runtime_market_slot_count: u64,
+    pub stale_open_sweep_checked_offer_count: u64,
+    pub stale_open_sweep_requeue_market_ids: Vec<String>,
+    pub stale_open_sweep_requeue_count: usize,
+    pub stale_open_sweep_truncated: bool,
+    pub immediate_requeue_market_ids: Vec<String>,
+    pub immediate_requeue_count: usize,
+    pub error_count: u64,
+    pub strategy_planned_total: u64,
+    pub strategy_executed_total: u64,
+    pub cancel_triggered_count: u64,
+    pub cancel_planned_total: u64,
+    pub cancel_executed_total: u64,
+    pub consumed_immediate_requeues: Vec<String>,
 }
 
 pub fn build_cycle_summary(
@@ -163,29 +197,29 @@ pub fn build_cycle_summary(
     metrics: &MarketDispatchMetrics,
     preamble_error_count: u64,
     duration_ms: u64,
-) -> Value {
+) -> DaemonCycleSummary {
     let deduped_requeue_market_ids =
         dedupe_sorted_market_ids(&metrics.immediate_requeue_market_ids);
-    json!({
-        "duration_ms": duration_ms,
-        "enabled_markets": plan.enabled_market_ids.len(),
-        "markets_attempted": plan.selected_market_ids.len(),
-        "markets_processed": metrics.markets_processed,
-        "runtime_market_slot_count": plan.configured_market_slot_count,
-        "stale_open_sweep_checked_offer_count": plan.stale_open_sweep.checked_offer_count,
-        "stale_open_sweep_requeue_market_ids": plan.stale_open_sweep.requeue_market_ids,
-        "stale_open_sweep_requeue_count": plan.stale_open_sweep.requeue_market_ids.len(),
-        "stale_open_sweep_truncated": plan.stale_open_sweep.truncated,
-        "immediate_requeue_market_ids": deduped_requeue_market_ids,
-        "immediate_requeue_count": deduped_requeue_market_ids.len(),
-        "error_count": preamble_error_count + metrics.cycle_error_count,
-        "strategy_planned_total": metrics.strategy_planned_total,
-        "strategy_executed_total": metrics.strategy_executed_total,
-        "cancel_triggered_count": metrics.cancel_triggered_count,
-        "cancel_planned_total": metrics.cancel_planned_total,
-        "cancel_executed_total": metrics.cancel_executed_total,
-        "consumed_immediate_requeues": plan.consumed_immediate_requeues,
-    })
+    DaemonCycleSummary {
+        duration_ms,
+        enabled_markets: plan.enabled_market_ids.len(),
+        markets_attempted: plan.selected_market_ids.len(),
+        markets_processed: metrics.markets_processed,
+        runtime_market_slot_count: plan.configured_market_slot_count,
+        stale_open_sweep_checked_offer_count: plan.stale_open_sweep.checked_offer_count as u64,
+        stale_open_sweep_requeue_market_ids: plan.stale_open_sweep.requeue_market_ids.clone(),
+        stale_open_sweep_requeue_count: plan.stale_open_sweep.requeue_market_ids.len(),
+        stale_open_sweep_truncated: plan.stale_open_sweep.truncated,
+        immediate_requeue_market_ids: deduped_requeue_market_ids.clone(),
+        immediate_requeue_count: deduped_requeue_market_ids.len(),
+        error_count: preamble_error_count + metrics.cycle_error_count,
+        strategy_planned_total: metrics.strategy_planned_total,
+        strategy_executed_total: metrics.strategy_executed_total,
+        cancel_triggered_count: metrics.cancel_triggered_count,
+        cancel_planned_total: metrics.cancel_planned_total,
+        cancel_executed_total: metrics.cancel_executed_total,
+        consumed_immediate_requeues: plan.consumed_immediate_requeues.clone(),
+    }
 }
 
 pub fn cycle_started_instant() -> Instant {
@@ -228,6 +262,7 @@ mod tests {
             previous_xch_price_usd: None,
             dexie_base_url: String::new(),
             splash_base_url: String::new(),
+            test_controls: DaemonCycleTestControls::default(),
         };
         let metrics = MarketDispatchMetrics {
             markets_processed: 0,

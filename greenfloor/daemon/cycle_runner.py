@@ -6,7 +6,9 @@ import logging
 import os
 import time
 from collections import deque
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from greenfloor.config.io import load_program_config
 from greenfloor.daemon.bootstrap import (
@@ -50,6 +52,7 @@ def run_once(
     program=None,
     testnet_markets_path: Path | None = None,
     market_dispatch_state: MarketDispatchState | None = None,
+    test_controls: Mapping[str, Any] | None = None,
 ) -> int:
     del program
     exit_code, updated_state = run_daemon_cycle_once_via_engine(
@@ -63,6 +66,7 @@ def run_once(
         poll_coinset_mempool=poll_coinset_mempool,
         use_websocket_capture=use_websocket_capture,
         market_dispatch_state=market_dispatch_state,
+        test_controls=test_controls,
     )
     if market_dispatch_state is not None:
         market_dispatch_state.cursor = updated_state.cursor
