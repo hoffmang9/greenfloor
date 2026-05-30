@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::config::{load_program_config, ManagerProgramConfig, MarketConfig};
 use crate::cycle::enqueue_immediate_requeue;
-use crate::error::SignerResult;
+use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
 use super::cancel_phase::run_market_cancel_phase;
@@ -45,7 +45,6 @@ fn write_stale_sweep_audit(store_path: &std::path::Path, plan: &CyclePlan) -> Si
 }
 
 async fn process_one_market(
-    _request: &DaemonRunOnceRequest,
     plan: &CyclePlan,
     program: &ManagerProgramConfig,
     dispatch_context: &MarketDispatchContext,
@@ -61,6 +60,7 @@ async fn process_one_market(
         program,
         market,
         network,
+        &dispatch_context.allowed_key_ids,
         &dispatch_context.program_path,
         &dispatch_context.markets_path,
         dispatch_context.testnet_markets_path.as_deref(),
@@ -96,7 +96,6 @@ async fn process_one_market(
 }
 
 async fn dispatch_markets(
-    request: &DaemonRunOnceRequest,
     plan: &CyclePlan,
     program: &ManagerProgramConfig,
     dispatch_context: &MarketDispatchContext,
@@ -109,44 +108,36 @@ async fn dispatch_markets(
     let mut worker_errors = 0u64;
 
     if parallel {
-        let mut tasks = tokio::task::JoinSet::new();
+        let mut blocking_tasks = Vec::with_capacity(markets.len());
         for market in markets {
-            let request = request.clone();
             let plan = plan.clone();
             let program = program.clone();
             let dispatch_context = dispatch_context.clone();
             let network = network.clone();
             let dexie = dexie.clone();
             let market_id = market.market_id.clone();
-            tasks.spawn(async move {
-                let result = tokio::task::spawn_blocking(move || {
-                    tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                        .expect("market worker runtime")
-                        .block_on(process_one_market(
-                            &request,
-                            &plan,
-                            &program,
-                            &dispatch_context,
-                            &network,
-                            &dexie,
-                            &market,
-                        ))
-                })
-                .await;
+            blocking_tasks.push(tokio::task::spawn_blocking(move || {
+                let result = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("market worker runtime")
+                    .block_on(process_one_market(
+                        &plan,
+                        &program,
+                        &dispatch_context,
+                        &network,
+                        &dexie,
+                        &market,
+                    ));
                 (market_id, result)
-            });
+            }));
         }
         let mut outputs = Vec::new();
-        while let Some(joined) = tasks.join_next().await {
-            let (market_id, worker_result) = joined.map_err(|err| {
-                crate::error::SignerError::Other(format!("parallel market task failed: {err}"))
-            })?;
-            let blocking_result = worker_result.map_err(|err| {
-                crate::error::SignerError::Other(format!("parallel market join failed: {err}"))
-            })?;
-            match blocking_result {
+        for task in blocking_tasks {
+            let (market_id, result) = task
+                .await
+                .map_err(|err| SignerError::Other(format!("parallel market join failed: {err}")))?;
+            match result {
                 Ok(output) => outputs.push(output),
                 Err(err) => {
                     record_market_worker_error(
@@ -165,7 +156,6 @@ async fn dispatch_markets(
     let mut outputs = Vec::with_capacity(markets.len());
     for market in markets {
         match process_one_market(
-            request,
             plan,
             program,
             dispatch_context,
@@ -225,7 +215,6 @@ pub async fn run_daemon_cycle_once(
     let dexie = dexie_client(&dispatch_context)?;
 
     let (cycle_outputs, worker_errors) = dispatch_markets(
-        request,
         &plan,
         &program,
         &dispatch_context,

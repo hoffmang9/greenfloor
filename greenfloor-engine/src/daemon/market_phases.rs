@@ -3,15 +3,15 @@ use std::path::Path;
 
 use serde_json::json;
 
-use crate::coin_ops::{compute_bucket_counts_from_coins, plan_coin_ops, BucketSpec};
 use crate::coinset::list_wallet_unspent_coins;
-use crate::config::{action_side_from_pricing, require_signer_offer_path, MarketConfig,
-    ManagerProgramConfig};
+use crate::config::{require_signer_offer_path, action_side_from_pricing, MarketConfig, ManagerProgramConfig};
 use crate::cycle::PlannedAction;
 use crate::error::{SignerError, SignerResult};
 use crate::manager::{build_and_post_offer, BuildAndPostOfferRequest};
 use crate::storage::SqliteStore;
 
+use super::coin_ops_phase::run_coin_ops_phase;
+use super::market_gate::enforce_market_key_allowlist;
 use super::reconcile_phase::ReconcilePhaseResult;
 use super::strategy_support::{active_offer_counts_by_size, evaluate_strategy_actions};
 
@@ -27,6 +27,7 @@ pub async fn run_market_phases(
     program: &ManagerProgramConfig,
     market: &MarketConfig,
     network: &str,
+    allowed_key_ids: &[String],
     program_path: &Path,
     markets_path: &Path,
     testnet_markets_path: Option<&Path>,
@@ -39,9 +40,10 @@ pub async fn run_market_phases(
             market.market_id
         )));
     }
+    enforce_market_key_allowlist(market, allowed_key_ids)?;
 
     let mut metrics = MarketPhaseMetrics::default();
-    let bucket_counts = scan_inventory_buckets(store, program, market, network, &mut metrics).await?;
+    let bucket_counts = scan_inventory_buckets(store, market, network, &mut metrics).await?;
     let active_counts = active_offer_counts_by_size(&reconcile.offers, &reconcile.dexie_size_by_offer_id);
     let strategy_actions =
         evaluate_strategy_actions(market, network, &active_counts, xch_price_usd);
@@ -92,13 +94,23 @@ pub async fn run_market_phases(
         }
     }
 
-    plan_coin_ops_phase(store, market, program, &bucket_counts, &active_counts, &mut metrics)?;
+    let newly_executed = BTreeMap::new();
+    run_coin_ops_phase(
+        store,
+        market,
+        program,
+        program_path,
+        &reconcile.offers,
+        &bucket_counts,
+        &active_counts,
+        &newly_executed,
+    )
+    .await?;
     Ok(metrics)
 }
 
 async fn scan_inventory_buckets(
     store: &SqliteStore,
-    _program: &ManagerProgramConfig,
     market: &MarketConfig,
     network: &str,
     metrics: &mut MarketPhaseMetrics,
@@ -122,7 +134,8 @@ async fn scan_inventory_buckets(
                 .into_iter()
                 .map(|coin| i64::try_from(coin.amount).unwrap_or(i64::MAX))
                 .collect();
-            let bucket_counts = compute_bucket_counts_from_coins(&amounts, &ladder_sizes);
+            let bucket_counts =
+                crate::coin_ops::compute_bucket_counts_from_coins(&amounts, &ladder_sizes);
             store.add_audit_event(
                 "inventory_bucket_scan",
                 &json!({
@@ -195,59 +208,6 @@ async fn execute_strategy_actions(
         }
     }
     Ok(executed)
-}
-
-fn plan_coin_ops_phase(
-    store: &SqliteStore,
-    market: &MarketConfig,
-    program: &ManagerProgramConfig,
-    bucket_counts: &BTreeMap<i64, i64>,
-    active_counts: &BTreeMap<i64, i64>,
-    metrics: &mut MarketPhaseMetrics,
-) -> SignerResult<()> {
-    let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
-    if sell_ladder.is_empty() {
-        store.add_audit_event(
-            "coin_ops_no_plans",
-            &json!({"market_id": market.market_id, "reason": "empty_sell_ladder"}),
-            Some(&market.market_id),
-        )?;
-        return Ok(());
-    }
-    let buckets: Vec<BucketSpec> = sell_ladder
-        .into_iter()
-        .map(|entry| BucketSpec {
-            size_base_units: entry.size_base_units,
-            target_count: entry.target_count,
-            split_buffer_count: entry.split_buffer_count,
-            combine_when_excess_factor: 2.0,
-            current_count: bucket_counts
-                .get(&entry.size_base_units)
-                .copied()
-                .unwrap_or(0)
-                .max(*active_counts.get(&entry.size_base_units).unwrap_or(&0)),
-        })
-        .collect();
-    let plans = plan_coin_ops(&buckets, 0, 0, 0, 0);
-    store.add_audit_event(
-        if plans.is_empty() {
-            "coin_ops_no_plans"
-        } else {
-            "coin_ops_planned"
-        },
-        &json!({
-            "market_id": market.market_id,
-            "planned_count": plans.len(),
-            "dry_run": program.runtime_dry_run,
-        }),
-        Some(&market.market_id),
-    )?;
-    if plans.is_empty() {
-        return Ok(());
-    }
-    // Coin-op broadcast remains on the Rust execution backlog; planning stays canonical here.
-    let _ = metrics;
-    Ok(())
 }
 
 fn skip_strategy_execution() -> bool {

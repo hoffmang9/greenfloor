@@ -57,6 +57,69 @@ fn walk_node(node: &Value, tx_ids: &mut Vec<String>) {
     }
 }
 
+const COINSET_COIN_ID_KEYS: &[&str] = &[
+    "id",
+    "coin_id",
+    "coinId",
+    "name",
+    "coin_name",
+    "coinName",
+];
+
+fn add_coin_id_candidate(candidate: &Value, coin_ids: &mut Vec<String>) {
+    match candidate {
+        Value::String(raw) => {
+            let normalized = normalize_hex_hash(raw);
+            if looks_like_tx_id(&normalized) && !coin_ids.iter().any(|existing| existing == &normalized)
+            {
+                coin_ids.push(normalized);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                add_coin_id_candidate(item, coin_ids);
+            }
+        }
+        Value::Object(map) => {
+            for key in COINSET_COIN_ID_KEYS {
+                if let Some(value) = map.get(*key) {
+                    add_coin_id_candidate(value, coin_ids);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn walk_coin_id_node(node: &Value, coin_ids: &mut Vec<String>) {
+    match node {
+        Value::Object(map) => {
+            for (key, value) in map {
+                if COINSET_COIN_ID_KEYS.iter().any(|candidate| candidate == key) {
+                    add_coin_id_candidate(value, coin_ids);
+                }
+                if matches!(value, Value::Object(_) | Value::Array(_)) {
+                    walk_coin_id_node(value, coin_ids);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                if matches!(item, Value::Object(_) | Value::Array(_)) {
+                    walk_coin_id_node(item, coin_ids);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+pub fn extract_coin_ids_from_offer_payload(payload: &Value) -> Vec<String> {
+    let mut coin_ids = Vec::new();
+    walk_coin_id_node(payload, &mut coin_ids);
+    coin_ids
+}
+
 pub fn extract_coinset_tx_ids_from_offer_payload(payload: &Value) -> Vec<String> {
     let mut tx_ids = Vec::new();
     walk_node(payload, &mut tx_ids);
@@ -71,6 +134,34 @@ pub fn dexie_offer_status(payload: &Value) -> Option<i64> {
         .get("offer")
         .and_then(|offer| offer.get("status"))
         .and_then(Value::as_i64)
+}
+
+pub fn classify_ws_payload_tx_ids(payload: &Value) -> (Vec<String>, Vec<String>) {
+    let event_hint = payload
+        .get("event")
+        .or_else(|| payload.get("type"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let tx_ids = extract_coinset_tx_ids_from_offer_payload(payload);
+    if tx_ids.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let is_confirmed = payload
+        .get("confirmed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || payload
+            .get("in_block")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        || event_hint.contains("confirm")
+        || event_hint.contains("block");
+    if is_confirmed {
+        return (Vec::new(), tx_ids);
+    }
+    (tx_ids, Vec::new())
 }
 
 pub fn build_dexie_size_by_offer_id(offers: &[Value], base_asset_id: &str) -> std::collections::HashMap<String, i64> {
@@ -126,6 +217,16 @@ mod tests {
         assert_eq!(
             extract_coinset_tx_ids_from_offer_payload(&payload),
             vec!["a".repeat(64)]
+        );
+    }
+
+    #[test]
+    fn extracts_coin_id_from_nested_payload() {
+        let coin = "b".repeat(64);
+        let payload = json!({"offer": {"coin_id": coin}});
+        assert_eq!(
+            extract_coin_ids_from_offer_payload(&payload),
+            vec![coin]
         );
     }
 

@@ -12,6 +12,7 @@ pub struct LadderEntry {
     pub size_base_units: i64,
     pub target_count: i64,
     pub split_buffer_count: i64,
+    pub combine_when_excess_factor: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -23,6 +24,7 @@ pub struct MarketConfig {
     pub quote_asset: String,
     pub quote_asset_type: String,
     pub receive_address: String,
+    pub signer_key_id: String,
     pub mode: String,
     pub pricing: Value,
     pub cancel_move_threshold_bps: Option<i64>,
@@ -48,6 +50,7 @@ struct MarketYaml {
     quote_asset: Option<String>,
     quote_asset_type: Option<String>,
     receive_address: Option<String>,
+    signer_key_id: Option<String>,
     mode: Option<String>,
     pricing: Option<Value>,
     ladders: Option<HashMap<String, Vec<LadderEntryYaml>>>,
@@ -58,6 +61,7 @@ struct LadderEntryYaml {
     size_base_units: Option<i64>,
     target_count: Option<i64>,
     split_buffer_count: Option<i64>,
+    combine_when_excess_factor: Option<f64>,
 }
 
 pub fn load_markets_config(path: &Path) -> SignerResult<MarketsConfig> {
@@ -120,6 +124,7 @@ pub fn parse_markets_config(raw: &Value) -> SignerResult<MarketsConfig> {
                         size_base_units: entry.size_base_units.unwrap_or(0),
                         target_count: entry.target_count.unwrap_or(0),
                         split_buffer_count: entry.split_buffer_count.unwrap_or(0),
+                        combine_when_excess_factor: entry.combine_when_excess_factor.unwrap_or(2.0),
                     })
                     .collect();
                 ladders.insert(side, parsed_entries);
@@ -150,6 +155,11 @@ pub fn parse_markets_config(raw: &Value) -> SignerResult<MarketsConfig> {
                 .to_ascii_lowercase(),
             receive_address: row
                 .receive_address
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            signer_key_id: row
+                .signer_key_id
                 .unwrap_or_default()
                 .trim()
                 .to_string(),

@@ -432,6 +432,88 @@ impl SqliteStore {
         Ok(inserted)
     }
 
+    pub fn confirm_tx_ids(&self, tx_ids: &[String]) -> SignerResult<u64> {
+        if tx_ids.is_empty() {
+            return Ok(0);
+        }
+        let now = utcnow_iso();
+        let mut updated = 0_u64;
+        for tx_id in tx_ids {
+            let normalized = tx_id.trim();
+            if normalized.is_empty() {
+                continue;
+            }
+            let changed = self
+                .conn
+                .execute(
+                    r#"
+                    UPDATE tx_signal_state
+                    SET tx_block_confirmed_at = COALESCE(tx_block_confirmed_at, ?1)
+                    WHERE tx_id = ?2
+                    "#,
+                    params![now, normalized],
+                )
+                .map_err(|err| {
+                    SignerError::Other(format!("failed to confirm tx id: {err}"))
+                })?;
+            updated += u64::try_from(changed).unwrap_or(0);
+        }
+        Ok(updated)
+    }
+
+    pub fn get_daily_fee_spent_mojos_utc(&self) -> SignerResult<i64> {
+        let total: i64 = self
+            .conn
+            .query_row(
+                r#"
+                SELECT COALESCE(SUM(fee_mojos), 0)
+                FROM coin_op_ledger
+                WHERE date(created_at) = date('now')
+                  AND status = 'executed'
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("failed to query daily coin-op fee total: {err}"))
+            })?;
+        Ok(total)
+    }
+
+    pub fn add_coin_op_ledger_entry(
+        &self,
+        market_id: &str,
+        op_type: &str,
+        op_count: i64,
+        fee_mojos: i64,
+        status: &str,
+        reason: &str,
+        operation_id: Option<&str>,
+    ) -> SignerResult<()> {
+        self.conn
+            .execute(
+                r#"
+                INSERT INTO coin_op_ledger
+                  (market_id, op_type, op_count, fee_mojos, status, reason, operation_id, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                "#,
+                params![
+                    market_id,
+                    op_type,
+                    op_count,
+                    fee_mojos,
+                    status,
+                    reason,
+                    operation_id,
+                    utcnow_iso(),
+                ],
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("failed to insert coin_op_ledger row: {err}"))
+            })?;
+        Ok(())
+    }
+
     pub fn add_audit_event(
         &self,
         event_type: &str,

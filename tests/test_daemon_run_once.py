@@ -201,7 +201,7 @@ def test_run_once_uses_websocket_capture_when_enabled(
         markets_path=markets,
         allowed_keys=None,
         db_path_override=str(tmp_path / "state.sqlite"),
-        coinset_base_url="https://coinset.org",
+        coinset_base_url="https://api.coinset.org",
         state_dir=state_dir,
         poll_coinset_mempool=False,
         use_websocket_capture=True,
@@ -211,14 +211,14 @@ def test_run_once_uses_websocket_capture_when_enabled(
     store = SqliteStore(tmp_path / "state.sqlite")
     try:
         events = store.list_recent_audit_events(
-            event_types=["coinset_ws_once_started", "coinset_ws_once_recovery_poll"],
+            event_types=["coinset_ws_once_started", "coinset_ws_recovery_poll"],
             limit=5,
         )
     finally:
         store.close()
     event_types = {str(event["event_type"]) for event in events}
     assert "coinset_ws_once_started" in event_types
-    assert "coinset_ws_once_recovery_poll" in event_types
+    assert "coinset_ws_recovery_poll" in event_types
 
 
 def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:

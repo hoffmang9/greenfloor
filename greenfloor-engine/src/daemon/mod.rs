@@ -1,11 +1,15 @@
 //! Daemon cycle orchestration (native Rust). Reconcile, inventory/strategy/coin_ops planning, and cancel run in Rust.
 
 mod cancel_phase;
+mod coin_ops_execution;
+mod coin_ops_phase;
 mod coinset_tx;
+mod coinset_ws;
 mod cycle_entry;
 mod lock;
 mod logging;
 mod market_dispatch;
+mod market_gate;
 mod market_phases;
 mod preamble;
 mod program_runtime;

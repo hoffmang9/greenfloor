@@ -28,9 +28,7 @@ def rust_cycle_test_env(monkeypatch) -> None:
     monkeypatch.delenv("GREENFLOOR_TEST_FORCE_MARKET_ERROR", raising=False)
 
 
-def test_daemon_cycle_completes_under_one_second(
-    tmp_path: Path, dexie_mock: DexieHttpMock
-) -> None:
+def test_daemon_cycle_completes_under_one_second(tmp_path: Path, dexie_mock: DexieHttpMock) -> None:
     home = tmp_path / "home"
     state_dir = home / "state"
     state_dir.mkdir(parents=True, exist_ok=True)

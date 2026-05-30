@@ -4,9 +4,11 @@ use reqwest::Client;
 use serde_json::json;
 
 use crate::coinset::get_all_mempool_tx_ids;
-use crate::config::load_program_config;
+use crate::config::{load_program_config, ManagerProgramConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
+
+use super::coinset_ws::capture_coinset_websocket_once;
 
 const DEFAULT_XCH_PRICE_URL: &str = "https://coincodex.com/api/coincodex/get_coin/xch";
 
@@ -47,7 +49,8 @@ pub async fn run_cycle_preamble(
     }
 
     if use_websocket_capture {
-        if let Err(err) = run_coinset_ws_once_capture(&store, &program.network, coinset_base_url).await
+        if let Err(err) =
+            capture_coinset_websocket_once(&store, &program, coinset_base_url).await
         {
             result.cycle_error_count += 1;
             store.add_audit_event(
@@ -57,9 +60,7 @@ pub async fn run_cycle_preamble(
             )?;
         }
     } else if poll_coinset_mempool {
-        if let Err(err) =
-            poll_coinset_mempool_snapshot(&store, &program.network, coinset_base_url).await
-        {
+        if let Err(err) = poll_coinset_mempool_snapshot(&store, &program, coinset_base_url).await {
             result.cycle_error_count += 1;
             store.add_audit_event(
                 "coinset_mempool_error",
@@ -74,7 +75,7 @@ pub async fn run_cycle_preamble(
 
 async fn poll_coinset_mempool_snapshot(
     store: &SqliteStore,
-    network: &str,
+    program: &ManagerProgramConfig,
     coinset_base_url: &str,
 ) -> SignerResult<()> {
     let base_url = coinset_base_url.trim();
@@ -83,7 +84,7 @@ async fn poll_coinset_mempool_snapshot(
     } else {
         Some(base_url)
     };
-    let tx_ids = get_all_mempool_tx_ids(network, base_opt).await?;
+    let tx_ids = get_all_mempool_tx_ids(&program.network, base_opt).await?;
     let new_count = store.observe_mempool_tx_ids(&tx_ids)?;
     store.add_audit_event(
         "coinset_mempool_snapshot",
@@ -98,25 +99,6 @@ async fn poll_coinset_mempool_snapshot(
         )?;
     }
     Ok(())
-}
-
-async fn run_coinset_ws_once_capture(
-    store: &SqliteStore,
-    network: &str,
-    coinset_base_url: &str,
-) -> SignerResult<()> {
-    store.add_audit_event(
-        "coinset_ws_once_started",
-        &json!({"coinset_base_url": coinset_base_url}),
-        None,
-    )?;
-    let poll_result = poll_coinset_mempool_snapshot(store, network, coinset_base_url).await;
-    store.add_audit_event(
-        "coinset_ws_once_recovery_poll",
-        &json!({"ok": poll_result.is_ok()}),
-        None,
-    )?;
-    poll_result
 }
 
 async fn fetch_xch_price_usd() -> SignerResult<f64> {

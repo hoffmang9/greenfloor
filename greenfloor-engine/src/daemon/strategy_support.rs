@@ -211,6 +211,7 @@ mod tests {
                 size_base_units: 1,
                 target_count: 1,
                 split_buffer_count: 0,
+                combine_when_excess_factor: 2.0,
             }],
         );
         MarketConfig {
@@ -221,6 +222,7 @@ mod tests {
             quote_asset: "xch".to_string(),
             quote_asset_type: "unstable".to_string(),
             receive_address: "xch1test".to_string(),
+            signer_key_id: "key-main-1".to_string(),
             mode: "sell_only".to_string(),
             pricing: json!({"cancel_policy_stable_vs_unstable": true}),
             cancel_move_threshold_bps: None,

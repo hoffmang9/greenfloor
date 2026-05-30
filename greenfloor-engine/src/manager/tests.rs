@@ -127,12 +127,19 @@ fn resolve_offer_publish_settings_uses_program_defaults() {
         splash_api_base: "http://localhost:4000".to_string(),
         offer_publish_venue: "splash".to_string(),
         coin_ops_minimum_fee_mojos: 0,
+        coin_ops_max_operations_per_run: 0,
+        coin_ops_max_daily_fee_budget_mojos: 0,
+        coin_ops_split_fee_mojos: 0,
+        coin_ops_combine_fee_mojos: 0,
         runtime_offer_bootstrap_wait_timeout_seconds: 120,
         runtime_market_slot_count: 0,
         runtime_parallel_markets: false,
         runtime_dry_run: false,
         runtime_loop_interval_seconds: 30,
         tx_block_trigger_mode: "websocket".to_string(),
+        tx_block_websocket_url: String::new(),
+        tx_block_websocket_reconnect_interval_seconds: 1,
+        tx_block_fallback_poll_interval_seconds: 1,
     };
     let (venue, dexie_base, splash_base) =
         resolve_offer_publish_settings(&program, "mainnet", None, None, None).expect("settings");
