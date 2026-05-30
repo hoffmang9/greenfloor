@@ -15,33 +15,14 @@ def list_unspent_coins_by_receive_address(
     asset_id: str,
 ) -> list[dict[str, Any]]:
     engine = import_engine()
-    raw_coins = engine.list_wallet_unspent_coins(
-        str(network).strip(),
-        str(receive_address).strip(),
-        str(asset_id).strip(),
-    )
-    coins: list[dict[str, Any]] = []
-    for coin in raw_coins or []:
-        if not isinstance(coin, dict):
-            continue
-        try:
-            amount = int(coin.get("amount", 0))
-        except (TypeError, ValueError):
-            continue
-        if amount <= 0:
-            continue
-        coin_id = str(coin.get("id") or coin.get("name") or "").strip().lower()
-        if not coin_id:
-            continue
-        coins.append(
-            {
-                "id": coin_id,
-                "name": coin_id,
-                "amount": amount,
-                "state": str(coin.get("state") or "CONFIRMED"),
-            }
+    return list(
+        engine.list_wallet_unspent_coins(
+            str(network).strip(),
+            str(receive_address).strip(),
+            str(asset_id).strip(),
         )
-    return coins
+        or []
+    )
 
 
 def wait_for_coinset_confirmation(

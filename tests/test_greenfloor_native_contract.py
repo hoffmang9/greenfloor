@@ -25,5 +25,5 @@ def test_verify_offer_for_dexie_reports_missing_engine(monkeypatch) -> None:
     )
 
     assert verify_offer_for_dexie("offer1contract") == (
-        "wallet_sdk_import_error:greenfloor_engine_unavailable"
+        "greenfloor_engine_unavailable:verify_offer_for_dexie"
     )

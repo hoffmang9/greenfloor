@@ -502,7 +502,7 @@ def test_build_and_post_offer_surfaces_stale_engine_symbol_as_user_error(
     assert payload["publish_attempts"] == 1
     assert payload["publish_failures"] == 1
     assert payload["results"][0]["result"]["success"] is False
-    assert payload["results"][0]["result"]["error"].startswith("offer_policy_error:")
+    assert payload["results"][0]["result"]["error"].startswith("policy_bridge_error:")
     assert (
         "Missing symbol: expected_publish_asset_fields" in payload["results"][0]["result"]["error"]
     )

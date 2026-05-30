@@ -23,5 +23,5 @@ Adopt `greenfloor.runtime.offer_execution` as the single named runtime compositi
 
 - New runtime wiring should import via `greenfloor.runtime.offer_execution`.
 - CLI `build-and-post-offer` lives in `greenfloor/cli/offer_build_post.py`; manager re-exports only.
-- Daemon managed offer post uses `OfferPostRequest` + `managed_offer_execution_backend()` — no CLI import, no injectable `build_and_post_fn`.
+- Daemon managed offer post uses `OfferPostRequest` + `require_signer_offer_path()` — no CLI import, no injectable `build_and_post_fn`.
 - Follow-up work belongs in the existing runtime modules (ADR 0008), not new top-level runtime entry files.

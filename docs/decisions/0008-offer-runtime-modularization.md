@@ -30,8 +30,8 @@ Replace the monolithic `greenfloor/runtime/cloud_wallet_offer_runtime.py` with f
 
 ### Routing gates (`greenfloor/config/models.py`)
 
-- `offer_execution_backend()` → `"signer"` only (requires KMS + vault in `program.yaml`).
-- `managed_offer_execution_backend()` → `"signer" | None` for daemon managed post.
+- `require_signer_offer_path()` / `require_coin_ops_signer_path()` — raise when KMS + vault are not configured.
+- `signer_offer_path_configured()` — boolean gate for daemon skip reasons.
 
 ### Backend contracts
 

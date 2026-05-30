@@ -1,5 +1,13 @@
 # Progress Log
 
+## 2026-05-29 (Review follow-ups — routing collapse + bridge merge)
+
+- **Routing:** removed `offer_execution_backend()` / `managed_offer_execution_backend()` / `coin_ops_execution_backend()` and Rust `sequential_action_route`; daemon sequential dispatch uses explicit dry-run / program / signer checks.
+- **Cycle bridge:** merged `_bridge_managed.py` + `_bridge_orchestration.py` into `core/cycle/_bridge.py`; split offer-build helpers into `core/offer_build_bridge.py`; `policy_bridge` is Dexie publish + retry only.
+- **Reconciliation:** `reconcile_market_watched_offers()` in `runtime/offer_reconciliation.py`; daemon cycle is a thin logging wrapper.
+- **Tests:** restored `test_signer_create_offer_parity`, `test_retry_policy_parity`, `test_coin_ops_policy_parity` with updated bridge imports.
+- **Cleanup:** `offer_decode` propagates engine errors; removed unused crate-root puzzle-hash exports and Cloud Wallet PEM/GraphQL error variants; simplified `coinset_coins` pass-through.
+
 ## 2026-05-29 (Stack simplification — BLS removal + engine wallet IO)
 
 - **Removed Python paths:** local BLS offer builder, Cloud Wallet runtime, `offer_policy` / `retry_policy` facades, `cycle/_bridge_common.py`.

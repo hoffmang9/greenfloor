@@ -9,7 +9,7 @@ from typing import Any
 from greenfloor.config.models import (
     MarketConfig,
     ProgramConfig,
-    coin_ops_execution_backend,
+    require_coin_ops_signer_path,
 )
 from greenfloor.core.coin_ops import (
     CoinOpPlan,
@@ -468,10 +468,19 @@ def execute_managed_coin_op_plans(
     logger: logging.Logger,
     deps: Any = None,
 ) -> dict[str, Any]:
-    backend_name = coin_ops_execution_backend(program)
+    try:
+        require_coin_ops_signer_path(program)
+    except ValueError as exc:
+        return _skip_all_plans(
+            program=program,
+            plans=plans,
+            reason=str(exc),
+            status="skipped",
+            signer_selection=signer_selection,
+        )
 
     try:
-        if backend_name == "signer" and not str(market.receive_address).strip():
+        if not str(market.receive_address).strip():
             raise ValueError("signer_coin_ops_missing_receive_address")
         resolved_base_asset_id = resolve_coin_op_base_asset_id(
             program=program, market=market, deps=deps

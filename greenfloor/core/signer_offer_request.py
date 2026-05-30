@@ -9,13 +9,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, TypedDict
 
+from greenfloor.core.offer_build_bridge import mojo_multiplier_for_leg
 from greenfloor.core.offer_request_bridge import (
     compute_signer_offer_leg_amounts,
     normalize_offer_asset_id,
     quote_mojos_for_base_size,
     signer_split_asset_id,
 )
-from greenfloor.core.policy_bridge import mojo_multiplier_for_leg
 
 __all__ = [
     "COMPARABLE_RUNTIME_REQUEST_FIELDS",

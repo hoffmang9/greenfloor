@@ -5,10 +5,12 @@ from __future__ import annotations
 import urllib.error
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from datetime import datetime
+from typing import Any, Protocol
 
 from greenfloor.adapters.coinset import extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter
+from greenfloor.config.io import resolve_trade_asset_for_dexie
 from greenfloor.core.offer_reconcile import (
     CycleOfferTransition,
     resolve_missing_watched_offer_transition,
@@ -23,18 +25,35 @@ OFFER_LIFECYCLE_TRANSITION_EVENT = "offer_lifecycle_transition"
 
 __all__ = [
     "OFFER_LIFECYCLE_TRANSITION_EVENT",
+    "MarketWatchedOffersReconcileResult",
     "ReconcileBatchResult",
+    "ReconcileCycleEffects",
     "ReconcileOfferResult",
     "ReconcileOfferRowOutcome",
     "dexie_offer_status",
     "persist_offer_lifecycle_transition",
     "persist_reconcile_outcome",
+    "reconcile_market_watched_offers",
     "reconcile_offer_row",
     "reconcile_offers",
     "reconcile_result_from_transition",
     "resolve_watched_offer_transition",
     "transition_from_dexie_offer_payload",
 ]
+
+
+class ReconcileCycleEffects(Protocol):
+    cycle_errors: int
+    immediate_requeue_requested: bool
+    immediate_requeue_signals: list[str]
+
+
+@dataclass(slots=True)
+class MarketWatchedOffersReconcileResult:
+    augmented_offers: list[dict[str, Any]]
+    dexie_size_by_offer_id: dict[str, int]
+    dexie_fetch_error: str | None
+    offers: list[dict[str, Any]]
 
 
 def dexie_offer_status(payload: dict[str, Any]) -> int | None:
@@ -349,4 +368,183 @@ def reconcile_offers(
         items=items,
         reconciled_count=reconciled,
         changed_count=changed,
+    )
+
+
+def _apply_reconcile_transition(
+    *,
+    store: SqliteStore,
+    market_id: str,
+    offer_id: str,
+    transition: CycleOfferTransition,
+    result: ReconcileCycleEffects,
+    state_by_offer_id: dict[str, str],
+    last_seen_status: int | None,
+    on_transition: Callable[..., None] | None = None,
+    dexie_status: int | None = None,
+    dexie_error: str | None = None,
+) -> None:
+    if on_transition is not None:
+        on_transition(
+            offer_id=offer_id,
+            transition=transition,
+            dexie_status=dexie_status,
+            dexie_error=dexie_error,
+        )
+    persist_offer_lifecycle_transition(
+        store=store,
+        offer_id=offer_id,
+        market_id=market_id,
+        transition=transition,
+        last_seen_status=last_seen_status,
+        action="reconcile_coins_and_offers",
+        dexie_error=dexie_error,
+    )
+    if transition.changed:
+        state_by_offer_id[offer_id] = transition.new_state
+    if transition.immediate_requeue:
+        result.immediate_requeue_requested = True
+        if transition.signal is not None:
+            result.immediate_requeue_signals.append(transition.signal)
+
+
+def reconcile_market_watched_offers(
+    *,
+    market: Any,
+    network: str,
+    dexie: DexieAdapter,
+    store: SqliteStore,
+    now: datetime,
+    result: ReconcileCycleEffects,
+    resolve_quote_asset: Callable[..., str],
+    watchlist_offer_ids: Callable[..., set[str]],
+    is_dexie_offer_missing: Callable[[Exception], bool],
+    build_dexie_size_map: Callable[..., dict[str, int]],
+    update_watchlist_from_dexie: Callable[..., None],
+    on_decision: Callable[..., None] | None = None,
+    on_transition: Callable[..., None] | None = None,
+) -> MarketWatchedOffersReconcileResult:
+    """Fetch Dexie offers for a market, augment beyond-cap watched offers, and transition states."""
+    dexie_fetch_error: str | None = None
+    market_id = str(market.market_id)
+    dexie_offered_asset = resolve_trade_asset_for_dexie(
+        asset=str(market.base_asset),
+        network=network,
+    )
+    dexie_requested_asset = resolve_quote_asset(
+        quote_asset=str(market.quote_asset),
+        network=network,
+    )
+    try:
+        offers = dexie.get_offers(dexie_offered_asset, dexie_requested_asset)
+        if on_decision is not None:
+            on_decision(
+                "dexie_offers_fetched",
+                offered=dexie_offered_asset,
+                requested=dexie_requested_asset,
+                count=len(offers),
+            )
+    except Exception as exc:  # pragma: no cover - network dependent
+        dexie_fetch_error = str(exc)
+        result.cycle_errors += 1
+        if on_decision is not None:
+            on_decision("dexie_offers_error", error=str(exc))
+        store.add_audit_event(
+            "dexie_offers_error",
+            {"market_id": market_id, "error": str(exc)},
+            market_id=market_id,
+        )
+        offers = []
+
+    our_offer_ids = watchlist_offer_ids(store=store, market_id=market_id, clock=now)
+    state_by_offer_id = {
+        str(row["offer_id"]): str(row["state"])
+        for row in store.list_offer_states(market_id=market_id, limit=5000)
+    }
+    dexie_offer_ids_in_list = {str(o.get("id", "")).strip() for o in offers if o.get("id")}
+    beyond_cap_ids = our_offer_ids - dexie_offer_ids_in_list
+    augmented_by_id: dict[str, dict[str, Any]] = {}
+    for offer in offers:
+        if not isinstance(offer, dict):
+            continue
+        offer_id = str(offer.get("id", "")).strip()
+        if not offer_id:
+            continue
+        augmented_by_id[offer_id] = offer
+
+    missing_watched_offer_ids: set[str] = set()
+    for watched_offer_id in sorted(our_offer_ids):
+        try:
+            single_payload = dexie.get_offer(watched_offer_id, timeout=5)
+            single_offer = single_payload.get("offer") if isinstance(single_payload, dict) else None
+            if isinstance(single_offer, dict):
+                augmented_by_id[watched_offer_id] = single_offer
+        except Exception as exc:  # pragma: no cover - network dependent
+            if is_dexie_offer_missing(exc):
+                current_state = state_by_offer_id.get(watched_offer_id, "open")
+                transition = resolve_missing_watched_offer_transition(
+                    current_state=current_state,
+                )
+                missing_watched_offer_ids.add(watched_offer_id)
+                _apply_reconcile_transition(
+                    store=store,
+                    market_id=market_id,
+                    offer_id=watched_offer_id,
+                    transition=transition,
+                    result=result,
+                    state_by_offer_id=state_by_offer_id,
+                    last_seen_status=None,
+                    on_transition=on_transition,
+                    dexie_error=str(exc),
+                )
+            continue
+
+    for beyond_offer_id in beyond_cap_ids - missing_watched_offer_ids:
+        try:
+            single_payload = dexie.get_offer(beyond_offer_id, timeout=5)
+            single_offer = single_payload.get("offer") if isinstance(single_payload, dict) else None
+            if isinstance(single_offer, dict):
+                augmented_by_id[beyond_offer_id] = single_offer
+        except Exception:  # pragma: no cover - network dependent
+            pass
+
+    augmented_offers = list(augmented_by_id.values())
+    dexie_size_by_offer_id = build_dexie_size_map(augmented_offers, str(market.base_asset))
+    if dexie_fetch_error is None:
+        update_watchlist_from_dexie(
+            market=market,
+            offers=augmented_offers,
+            store=store,
+            clock=now,
+        )
+
+    for offer in augmented_offers:
+        offer_id = str(offer.get("id", ""))
+        if not offer_id or offer_id not in our_offer_ids:
+            continue
+        raw_status = offer.get("status", -1)
+        status = int(raw_status) if raw_status is not None else None
+        current_state = state_by_offer_id.get(offer_id, "open")
+        transition = transition_from_dexie_offer_payload(
+            current_state=current_state,
+            offer_payload=offer,
+            get_tx_signal_state=store.get_tx_signal_state,
+        )
+        _apply_reconcile_transition(
+            store=store,
+            market_id=market_id,
+            offer_id=offer_id,
+            transition=transition,
+            result=result,
+            state_by_offer_id=state_by_offer_id,
+            last_seen_status=status,
+            on_transition=on_transition,
+            dexie_status=status,
+        )
+
+    return MarketWatchedOffersReconcileResult(
+        augmented_offers=augmented_offers,
+        dexie_size_by_offer_id=dexie_size_by_offer_id,
+        dexie_fetch_error=dexie_fetch_error,
+        offers=offers,
     )

@@ -9,8 +9,8 @@ from greenfloor.core.cycle_reseed import ReseedGapPlan
 from greenfloor.core.planned_action import PlannedAction
 from greenfloor.core.strategy_types import MarketState, StrategyConfig
 
-from . import _bridge_managed as _managed
-from . import _bridge_orchestration as _orchestration
+from . import _bridge as _managed
+from . import _bridge as _orchestration
 
 __all__ = [
     "aggregate_two_sided_offer_counts",

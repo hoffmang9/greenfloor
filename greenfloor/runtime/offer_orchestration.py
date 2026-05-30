@@ -82,8 +82,8 @@ class OfferCreateFailure(Exception):
         self.extra = dict(extra or {})
 
 
-def _offer_policy_error(exc: Exception) -> str:
-    return f"offer_policy_error:{exc}"
+def _policy_bridge_error(exc: Exception) -> str:
+    return f"policy_bridge_error:{exc}"
 
 
 def bootstrap_blocks_offer(bootstrap_result: BootstrapPhaseResult) -> tuple[bool, str | None]:
@@ -380,7 +380,7 @@ def execute_build_and_post_offer(
                 post_results,
                 publish_venue=publish_venue,
                 started_ms=started_ms,
-                error=_offer_policy_error(exc),
+                error=_policy_bridge_error(exc),
                 create_phase_ms=created.create_phase_ms,
                 artifact_wait_ms=created.artifact_wait_ms,
                 create_total_ms=created.create_total_ms,
@@ -414,7 +414,7 @@ def execute_build_and_post_offer(
                 post_results,
                 publish_venue=publish_venue,
                 started_ms=started_ms,
-                error=_offer_policy_error(exc),
+                error=_policy_bridge_error(exc),
                 create_phase_ms=created.create_phase_ms,
                 artifact_wait_ms=created.artifact_wait_ms,
                 create_total_ms=created.create_total_ms,

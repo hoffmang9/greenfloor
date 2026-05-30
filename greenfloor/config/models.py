@@ -3,13 +3,9 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from greenfloor.logging_setup import normalize_log_level_name
-
-OfferExecutionBackend = Literal["signer"]
-ManagedOfferExecutionBackend = Literal["signer"]
-CoinOpsExecutionBackend = Literal["signer"]
 
 _CANONICAL_CAT_UNIT_MOJOS = 1000
 _CANONICAL_XCH_UNIT_MOJOS = 1_000_000_000_000
@@ -140,31 +136,8 @@ def require_signer_offer_path(program: ProgramConfig) -> None:
         )
 
 
-def coin_ops_execution_backend(program: ProgramConfig) -> CoinOpsExecutionBackend:
+def require_coin_ops_signer_path(program: ProgramConfig) -> None:
     require_signer_offer_path(program)
-    return "signer"
-
-
-def offer_execution_backend(
-    program: ProgramConfig,
-    *,
-    size_base_units: int = 0,
-    local_build_min_size_base_units: int | None = None,
-) -> OfferExecutionBackend:
-    del size_base_units, local_build_min_size_base_units
-    require_signer_offer_path(program)
-    return "signer"
-
-
-def managed_offer_execution_backend(
-    program: ProgramConfig,
-    *,
-    size_base_units: int = 0,
-    local_build_min_size_base_units: int | None = None,
-) -> ManagedOfferExecutionBackend:
-    del size_base_units, local_build_min_size_base_units
-    require_signer_offer_path(program)
-    return "signer"
 
 
 @dataclass(slots=True)

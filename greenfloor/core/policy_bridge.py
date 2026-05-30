@@ -1,39 +1,24 @@
-"""Rust-backed offer-build and retry policy (single canonical bridge)."""
+"""Rust-backed Dexie publish gates and retry policy."""
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import TypedDict
 
 from greenfloor.core import engine_bridge
-from greenfloor.core.offer_request_bridge import (
-    compute_signer_offer_leg_amounts,
-    normalize_offer_asset_id,
-    normalize_offer_side,
-    quote_mojos_for_base_size,
-    signer_split_asset_id,
-)
 
 __all__ = [
     "ExpectedPublishAssetFields",
     "bootstrap_block_error",
     "coinset_fee_lookup_retry_sleep",
-    "compute_signer_offer_leg_amounts",
     "dexie_invalid_offer_retry_sleep",
     "dexie_invalid_offer_should_retry",
     "dexie_offer_asset_expectation_error",
     "expected_publish_asset_fields",
     "moderate_retry_next_sleep",
     "moderate_retry_sleep_seconds",
-    "mojo_multiplier_for_leg",
-    "normalize_offer_asset_id",
-    "normalize_offer_side",
     "parse_rate_limit_retry_seconds",
     "poll_exponential_advance_sleep",
     "poll_exponential_sleep_now",
-    "quote_mojos_for_base_size",
-    "resolve_offer_expiry_for_pricing",
-    "resolve_quote_price_for_pricing",
-    "signer_split_asset_id",
     "verify_offer_for_dexie",
 ]
 
@@ -71,25 +56,12 @@ def _coerce_expected_publish_asset_fields(payload: object) -> ExpectedPublishAss
     }
 
 
-def resolve_offer_expiry_for_pricing(pricing: dict[str, Any]) -> tuple[str, int]:
-    unit, value = engine_bridge.policy_engine().resolve_offer_expiry_for_pricing(pricing)
-    return str(unit), int(value)
-
-
-def resolve_quote_price_for_pricing(pricing: dict[str, Any]) -> float:
-    return float(engine_bridge.policy_engine().resolve_quote_price_for_pricing(pricing))
-
-
-def mojo_multiplier_for_leg(pricing: dict[str, Any], field: str, asset_id: str) -> int:
-    return int(engine_bridge.policy_engine().mojo_multiplier_for_leg(pricing, field, asset_id))
-
-
 def verify_offer_for_dexie(offer_text: str) -> str | None:
     try:
         verify_offer = _require_policy_method("verify_offer_for_dexie")
         error = verify_offer(offer_text)
     except ImportError:
-        return "wallet_sdk_import_error:greenfloor_engine_unavailable"
+        return "greenfloor_engine_unavailable:verify_offer_for_dexie"
     return None if error is None else str(error)
 
 

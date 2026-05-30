@@ -10,9 +10,8 @@ from greenfloor.config.models import (
     ProgramConfig,
     VaultConfig,
     VaultWalletKeyConfig,
-    coin_ops_execution_backend,
-    managed_offer_execution_backend,
-    offer_execution_backend,
+    require_coin_ops_signer_path,
+    require_signer_offer_path,
     signer_offer_path_configured,
 )
 from tests.helpers.config_fixtures import minimal_program_config
@@ -55,23 +54,18 @@ def test_signer_offer_path_requires_kms_and_vault() -> None:
     assert signer_offer_path_configured(program_no_vault) is False
 
 
-def test_coin_ops_execution_backend_prefers_signer() -> None:
+def test_require_signer_offer_path_accepts_configured_program() -> None:
     program = _program_with_signer()
-    assert coin_ops_execution_backend(program) == "signer"
+    require_signer_offer_path(program)
+    require_coin_ops_signer_path(program)
 
 
-def test_offer_execution_backend_requires_signer() -> None:
-    program = _program_with_signer()
-    assert offer_execution_backend(program, size_base_units=50) == "signer"
-    assert managed_offer_execution_backend(program, size_base_units=50) == "signer"
-
-
-def test_offer_execution_backend_raises_without_signer() -> None:
+def test_require_signer_offer_path_raises_without_signer() -> None:
     program = replace(_program_with_signer(kms_key_id=""), vault_config=None)
     with pytest.raises(ValueError, match="offer execution requires signer"):
-        offer_execution_backend(program, size_base_units=50)
+        require_signer_offer_path(program)
     with pytest.raises(ValueError, match="offer execution requires signer"):
-        managed_offer_execution_backend(program, size_base_units=50)
+        require_coin_ops_signer_path(program)
 
 
 def test_invalidate_signer_runtime_cache_clears_entries() -> None:

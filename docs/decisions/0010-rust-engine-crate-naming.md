@@ -44,7 +44,7 @@ the scope.
 ## Consequences
 
 - New Python policy surfaces use `engine_bridge`, not ad-hoc `importlib` copies.
-- Adapter IO paths (`rust_signer`, `coinset`, `bls_signing`, `native_offer`, etc.) import
+- Adapter IO paths (`rust_signer`, `coinset`, `native_offer`, etc.) import
   the engine through `engine_bridge.import_engine()`.
 - Legacy module shims (`greenfloor.core.fee_budget`, `inventory`, `coin_ops_policy`) were
   removed once call sites imported `greenfloor.core.coin_ops` only; coin-op policy now lives

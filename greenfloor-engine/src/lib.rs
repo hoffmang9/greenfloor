@@ -38,10 +38,9 @@ pub async fn resolve_offer_asset_ids(
 }
 
 pub use coinset::{
-    cat_outer_puzzle_hash_hex, extract_coin_id_hints_from_offer_text, get_conservative_fee_estimate,
-    get_fee_estimate, is_canonical_xch_asset, is_xch_like_asset, list_wallet_unspent_coins,
-    parse_coin_ids, puzzle_hash_hex_for_receive_address, push_tx_hex,
-    spend_bundle_hash_from_hex, WalletUnspentCoin,
+    extract_coin_id_hints_from_offer_text, get_conservative_fee_estimate, get_fee_estimate,
+    is_canonical_xch_asset, is_xch_like_asset, list_wallet_unspent_coins, parse_coin_ids,
+    push_tx_hex, spend_bundle_hash_from_hex, WalletUnspentCoin,
 };
 pub use coin_ops::{
     amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_should_stop,
@@ -75,7 +74,7 @@ pub use cycle::{
     plan_reseed_actions_from_gap, poll_exponential_advance_sleep, poll_exponential_sleep_now,
     record_stale_sweep_check, reseed_skip_reason_labels, reservation_release_status,
     resolve_inventory_scan_source, resolve_missing_watched_offer_transition, resolve_tracked_sizes,
-    resolve_watched_offer_transition_from_signals, select_market_batch, sequential_action_route,
+    resolve_watched_offer_transition_from_signals, select_market_batch,
     should_apply_parallel_transient_cooldown, should_log_disabled_market,
     should_try_cat_inventory_fallback, should_use_market_slot_dispatch,
     single_input_preferred_skip_reason, unchanged_offer_transition,
@@ -85,8 +84,7 @@ pub use cycle::{
     MarketBatchSelection, MarketCyclePhase, MarketCycleResultState, MarketState,
     OfferLifecycleState, OfferSignal, OfferStateRow, OfferTransition, ParallelBatchPlan,
     ParallelQueueItem, ParallelReservationContext, ParallelSkipItem, ParallelSubmissionDecision,
-    PlannedAction, PlannedActionInput, ReseedGapPlan, ReseedSkipReason, SequentialActionRoute,
-    SpendableAssetProfile, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress, StrategyConfig,
+    PlannedAction, PlannedActionInput, ReseedGapPlan, ReseedSkipReason, SpendableAssetProfile, StaleSweepCandidate, StaleSweepHit, StaleSweepProgress, StrategyConfig,
 };
 pub use error::SignerError as Error;
 pub use hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};

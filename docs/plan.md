@@ -21,10 +21,10 @@ Ten core commands are in scope. Do not add commands without explicit need tied t
 2. `config-validate` — validate program + markets config and key routing.
 3. `doctor` — readiness check (config, key routing, DB, env overrides).
 4. `keys-onboard` — interactive key selection and onboarding persistence.
-5. `build-and-post-offer` — build offer via vault KMS signer, Cloud Wallet, or local BLS (`offer_execution_backend()` routing) and post to venue (Dexie or Splash).
+5. `build-and-post-offer` — build offer via vault KMS signer and post to venue (Dexie or Splash). Requires `signer.kms_key_id` and `vault.launcher_id` in program config.
 6. `offers-status` — compact view of current offer states and recent events.
 7. `offers-reconcile` — refresh offer states using venue payloads plus Coinset tx-signal state (websocket/mempool) and flag orphaned/unknown.
-8. `coins-list` — list Vault coin inventory with spendability/lock state (Cloud Wallet).
+8. `coins-list` — list vault coin inventory via Coinset (signer receive address scope).
 9. `coin-split` — split a Vault coin into target denominations; default waits through signature + mempool + 1-block confirmation.
 10. `coin-combine` — combine Vault coins into fewer coins; default waits through signature + mempool + 1-block confirmation.
 
@@ -52,7 +52,7 @@ Operator output/coin-op behavior notes:
 - `WalletAdapter` (daemon coin-op path) calls `signing.sign_and_broadcast()` directly.
 - Local BLS offer text construction lives in `greenfloor/offer_builder.py` (canonical); `greenfloor/cli/offer_builder_sdk.py` is a thin stdin/stdout wrapper for external tooling only.
 - Offer build/post orchestration (bootstrap → create → verify → publish) lives under `greenfloor/runtime/` with composition root `greenfloor/runtime/offer_execution.py` (see ADR 0005, ADR 0008).
-- Routing gates: `offer_execution_backend()` and `managed_offer_execution_backend()` in `greenfloor/config/models.py` select the vault KMS signer path when `signer.kms_key_id` and `vault.launcher_id` are set, otherwise local BLS for manual CLI sizes.
+- Signer path gate: `require_signer_offer_path()` / `signer_offer_path_configured()` in `greenfloor/config/models.py` (requires `signer.kms_key_id` and `vault.launcher_id`).
 - Vault KMS installs use `greenfloor/runtime/offer_runtime.py` (Rust signer via PyO3). Legacy `cloud_wallet:` blocks in `program.yaml` are rejected at config load.
 - No intermediate subprocess layers for in-process Python paths. See `AGENTS.md` for design discipline rules.
 

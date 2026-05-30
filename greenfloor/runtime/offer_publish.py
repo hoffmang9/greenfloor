@@ -61,7 +61,10 @@ def log_signed_offer_artifact(
     trading_pair: str,
     expiry: str,
 ) -> None:
-    coin_id_hints = _extract_coin_id_hints_from_offer_text(offer_text)
+    try:
+        coin_id_hints = _extract_coin_id_hints_from_offer_text(offer_text)
+    except Exception:
+        coin_id_hints = []
     coin_id = coin_id_hints[0] if coin_id_hints else ""
     _runtime_logger.debug("signed_offer_file:%s", offer_text)
     _runtime_logger.info(
