@@ -44,6 +44,12 @@ jobs:
           operation: ensure-and-install
           rust-already-configured: true
 
+      - name: Build greenfloor-engine CLI binary
+        run: |
+          cargo build --release --manifest-path greenfloor-engine/Cargo.toml --bin greenfloor-engine
+          echo "$GITHUB_WORKSPACE/target/release" >> "$GITHUB_PATH"
+          greenfloor-engine --help >/dev/null
+
       - uses: ./.github/actions/wheel-cache
         with:
           operation: ensure-and-install
@@ -95,6 +101,7 @@ jobs:
             --size-base-units "${{ inputs.size_base_units }}" \
             --network "${{ inputs.network_profile }}" \
             --dry-run | tee ./artifacts/build-and-post-offer.dry-run.log
+          # build-and-post-offer delegates to the native greenfloor-engine binary.
           if [ "${{ inputs.dry_run }}" = "false" ]; then
             greenfloor-manager \
               --program-config config/program.yaml \

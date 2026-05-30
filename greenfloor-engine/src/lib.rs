@@ -3,6 +3,7 @@
 //! The Rust crate and PyO3 module are named `greenfloor_engine` (ADR 0010).
 //! Policy is grouped by domain (`cycle/`, `coin_ops/`, `offer/`, `vault/`).
 
+pub mod adapters;
 pub mod coin_ops;
 pub mod coinset;
 pub mod config;
@@ -10,7 +11,9 @@ pub mod cycle;
 pub mod error;
 pub mod hex;
 pub mod kms;
+pub mod manager;
 pub mod offer;
+pub mod storage;
 pub mod vault;
 
 use config::SignerConfig;
@@ -115,6 +118,12 @@ pub use offer::{
 };
 pub use vault::{
     build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,
+};
+pub use manager::{build_and_post_offer, format_build_and_post_output, BuildAndPostOfferRequest, BuildAndPostOfferResponse};
+pub use config::{
+    load_markets_config, load_markets_config_with_overlay, load_program_config,
+    require_signer_offer_path, resolve_market_for_build, ManagerProgramConfig, MarketConfig,
+    MarketsConfig,
 };
 
 #[cfg(test)]

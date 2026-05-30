@@ -1,17 +1,17 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use greenfloor_engine::vault::members::hex_to_bytes32;
 use greenfloor_engine::{
-    build_and_optionally_broadcast_vault_cat_mixed_split, build_vault_cat_offer,
-    load_signer_config, parse_coin_ids, resolve_vault_context, CreateOfferRequest,
-    MixedSplitRequest,
+    build_and_optionally_broadcast_vault_cat_mixed_split, build_and_post_offer,
+    build_vault_cat_offer, load_signer_config, parse_coin_ids, resolve_vault_context,
+    BuildAndPostOfferRequest, CreateOfferRequest, MixedSplitRequest,
 };
 
 #[derive(Debug, Parser)]
 #[command(
     name = "greenfloor-engine",
-    about = "Local Chia vault signing backed by chia-wallet-sdk"
+    about = "GreenFloor Rust engine: vault KMS signing and manager CLI"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -80,6 +80,41 @@ enum Commands {
         expires_at: Option<u64>,
         #[arg(long)]
         json: bool,
+    },
+    /// Build a vault-signed offer and post it to Dexie or Splash (manager CLI path).
+    BuildAndPostOffer {
+        #[arg(long, default_value = "config/program.yaml")]
+        program_config: PathBuf,
+        #[arg(long, default_value = "config/markets.yaml")]
+        markets_config: PathBuf,
+        #[arg(long, default_value = "")]
+        testnet_markets_config: PathBuf,
+        #[arg(long, default_value = "mainnet")]
+        network: String,
+        #[arg(long)]
+        market_id: Option<String>,
+        #[arg(long)]
+        pair: Option<String>,
+        #[arg(long)]
+        size_base_units: u64,
+        #[arg(long, default_value = "1")]
+        repeat: u32,
+        #[arg(long)]
+        venue: Option<String>,
+        #[arg(long)]
+        dexie_base_url: Option<String>,
+        #[arg(long)]
+        splash_base_url: Option<String>,
+        #[arg(long)]
+        allow_take: bool,
+        #[arg(long)]
+        claim_rewards: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        no_persist_results: bool,
     },
 }
 
@@ -173,12 +208,64 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
             .await?;
             print_create_offer_result(&result, json)?;
         }
+        Commands::BuildAndPostOffer {
+            program_config,
+            markets_config,
+            testnet_markets_config,
+            network,
+            market_id,
+            pair,
+            size_base_units,
+            repeat,
+            venue,
+            dexie_base_url,
+            splash_base_url,
+            allow_take,
+            claim_rewards,
+            dry_run,
+            json,
+            no_persist_results,
+        } => {
+            if market_id.is_none() == pair.is_none() {
+                return Err(greenfloor_engine::Error::Other(
+                    "provide exactly one of --market-id or --pair".to_string(),
+                ));
+            }
+            let testnet_overlay = if testnet_markets_config.as_os_str().is_empty() {
+                None
+            } else {
+                Some(testnet_markets_config)
+            };
+            let response = build_and_post_offer(BuildAndPostOfferRequest {
+                program_path: program_config,
+                markets_path: markets_config,
+                testnet_markets_path: testnet_overlay,
+                network,
+                market_id,
+                pair,
+                size_base_units,
+                repeat,
+                publish_venue: venue,
+                dexie_base_url,
+                splash_base_url,
+                drop_only: !allow_take,
+                claim_rewards,
+                dry_run,
+                compact_json: json,
+                persist_results: !no_persist_results,
+            })
+            .await?;
+            println!("{}", response.output);
+            if response.exit_code != 0 {
+                std::process::exit(response.exit_code);
+            }
+        }
     }
     Ok(())
 }
 
 async fn run_mixed_split(
-    config_path: &Path,
+    config_path: &std::path::Path,
     receive_address: String,
     asset_id: String,
     output_amounts: Vec<u64>,

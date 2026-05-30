@@ -73,8 +73,15 @@ jobs:
       - name: Build and test greenfloor-engine
         if: matrix.run_rust_tests
         run: |
-          cargo build --manifest-path greenfloor-engine/Cargo.toml
+          cargo build --manifest-path greenfloor-engine/Cargo.toml --bin greenfloor-engine
           cargo test --manifest-path greenfloor-engine/Cargo.toml
+
+      - name: Install greenfloor-engine CLI on PATH
+        if: matrix.run_rust_tests
+        run: |
+          install -m 755 \
+            target/debug/greenfloor-engine \
+            "$GITHUB_WORKSPACE/.venv/bin/greenfloor-engine"
 
       - uses: ./.github/actions/greenfloor-maturin-wheels
         with:
@@ -96,7 +103,7 @@ jobs:
         run: pre-commit run --all-files
 
       - name: "Test suite (pytest)"
-        run: pytest -v --tb=short
+        run: pytest -v --tb=short -m "not engine"
 
       - name: Pytest (engine marker)
         if: matrix.run_rust_tests
