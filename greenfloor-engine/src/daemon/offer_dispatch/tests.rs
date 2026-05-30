@@ -317,8 +317,12 @@ fn sample_action() -> PlannedAction {
 
 #[tokio::test]
 async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() {
-    use super::test_hooks::{set_managed_post_override, set_parallel_dispatch_override};
+    use super::test_hooks::{
+        set_managed_post_override, set_parallel_dispatch_override, TestHooksScope,
+    };
     use super::execute_strategy_actions;
+
+    let _hooks = TestHooksScope::begin();
 
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
@@ -344,8 +348,6 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
     )
     .await
     .expect("dispatch");
-    set_parallel_dispatch_override(None);
-    set_managed_post_override(None);
 
     assert_eq!(output.executed_count, 1);
     let events = store
@@ -360,8 +362,10 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
 
 #[tokio::test]
 async fn execute_strategy_actions_parallel_fatal_propagates() {
-    use super::test_hooks::{set_managed_post_override, set_parallel_dispatch_override};
+    use super::test_hooks::{set_parallel_dispatch_override, TestHooksScope};
     use super::execute_strategy_actions;
+
+    let _hooks = TestHooksScope::begin();
 
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
@@ -386,14 +390,15 @@ async fn execute_strategy_actions_parallel_fatal_propagates() {
     )
     .await
     .expect_err("fatal parallel error");
-    set_parallel_dispatch_override(None);
     assert!(err.to_string().contains("permanent_offer_build_failure"));
 }
 
 #[tokio::test]
 async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
-    use super::test_hooks::{set_managed_post_override, set_parallel_dispatch_override};
+    use super::test_hooks::{set_managed_post_override, TestHooksScope};
     use super::execute_strategy_actions;
+
+    let _hooks = TestHooksScope::begin();
 
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
@@ -417,7 +422,6 @@ async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
     )
     .await
     .expect("dispatch");
-    set_managed_post_override(None);
 
     assert_eq!(output.executed_count, 1);
 }
@@ -491,24 +495,26 @@ fn coordinator_multi_asset_acquire_requires_all_assets() {
 
 #[test]
 fn parallel_dispatch_override_success_returns_output() {
-    use super::test_hooks::{parallel_dispatch_test_override, set_parallel_dispatch_override};
+    use super::test_hooks::{
+        parallel_dispatch_test_override, set_parallel_dispatch_override, TestHooksScope,
+    };
 
+    let _hooks = TestHooksScope::begin();
     set_parallel_dispatch_override(Some("success"));
     let output = parallel_dispatch_test_override()
         .expect("override configured")
         .expect("success output");
-    set_parallel_dispatch_override(None);
     assert_eq!(output.executed_count, 1);
 }
 
 #[test]
 fn managed_post_override_success_returns_true() {
-    use super::test_hooks::{managed_post_test_override, set_managed_post_override};
+    use super::test_hooks::{managed_post_test_override, set_managed_post_override, TestHooksScope};
 
+    let _hooks = TestHooksScope::begin();
     set_managed_post_override(Some("success"));
     let posted = managed_post_test_override()
         .expect("override configured")
         .expect("success post");
-    set_managed_post_override(None);
     assert!(posted);
 }
