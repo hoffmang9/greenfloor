@@ -49,9 +49,7 @@ def is_recent_mempool_observed_offer_state(
     except ValueError:
         return False
     if updated_at.tzinfo is None:
-        _logger.warning(
-            "offer state timestamp missing timezone, assuming UTC: %s", updated_at_raw
-        )
+        _logger.warning("offer state timestamp missing timezone, assuming UTC: %s", updated_at_raw)
         updated_at = updated_at.replace(tzinfo=UTC)
     age_seconds = (clock - updated_at).total_seconds()
     return 0 <= age_seconds <= float(max_age_seconds)
