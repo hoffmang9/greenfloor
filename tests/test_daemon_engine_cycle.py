@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -16,15 +15,20 @@ from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
 
 def test_run_daemon_cycle_once_via_engine_delegates_to_pyo3(monkeypatch, tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
-    dispatch_state = MarketDispatchState(cursor=2, immediate_requeue_ids=deque(["m-old"]))
+    dispatch_state = MarketDispatchState(cursor=2, immediate_requeue_ids=["m-old"])
 
-    def _fake_run(request: Any) -> dict[str, Any]:
+    class _FakeDispatch:
+        cursor = 3
+        immediate_requeue_ids = ["m-new"]
+
+    class _FakeResponse:
+        exit_code = 0
+        dispatch_state = _FakeDispatch()
+        cycle_summary = {}
+
+    def _fake_run(request: Any) -> _FakeResponse:
         captured["request"] = request
-        return {
-            "exit_code": 0,
-            "dispatch_state": {"cursor": 3, "immediate_requeue_ids": ["m-new"]},
-            "cycle_summary": {},
-        }
+        return _FakeResponse()
 
     exit_code, updated = run_daemon_cycle_once_via_engine(
         program_path=tmp_path / "program.yaml",
@@ -41,13 +45,12 @@ def test_run_daemon_cycle_once_via_engine_delegates_to_pyo3(monkeypatch, tmp_pat
     )
     assert exit_code == 0
     assert updated.cursor == 3
-    assert updated.immediate_requeue_ids == deque(["m-new"])
+    assert updated.immediate_requeue_ids == ["m-new"]
     request = captured["request"]
-    assert isinstance(request, dict)
-    assert request["poll_coinset_mempool"] is False
-    assert request["use_websocket_capture"] is True
-    assert request["dispatch_state"]["cursor"] == 2
-    assert request["allowed_key_ids"] == ["key-a"]
+    assert request.poll_coinset_mempool is False
+    assert request.use_websocket_capture is True
+    assert request.dispatch_state.cursor == 2
+    assert request.allowed_key_ids == ["key-a"]
 
 
 def test_run_once_is_thin_wrapper_over_engine_cycle(monkeypatch, tmp_path: Path) -> None:
@@ -68,8 +71,11 @@ def test_run_once_is_thin_wrapper_over_engine_cycle(monkeypatch, tmp_path: Path)
 
 
 def test_run_daemon_cycle_once_requires_dispatch_state(tmp_path: Path) -> None:
-    def _bad_run(_request: Any) -> dict[str, Any]:
-        return {"exit_code": 0}
+    class _BadResponse:
+        exit_code = 0
+
+    def _bad_run(_request: Any) -> _BadResponse:
+        return _BadResponse()
 
     with pytest.raises(TypeError, match="dispatch_state"):
         run_daemon_cycle_once_via_engine(

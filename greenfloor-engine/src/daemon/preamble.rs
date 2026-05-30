@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use reqwest::Client;
 use serde_json::json;
 
@@ -20,12 +18,11 @@ pub struct CyclePreambleResult {
 
 pub async fn run_cycle_preamble(
     program: &ManagerProgramConfig,
-    db_path: &Path,
+    store: &SqliteStore,
     coinset_base_url: &str,
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
 ) -> SignerResult<CyclePreambleResult> {
-    let store = SqliteStore::open(db_path)?;
     let mut result = CyclePreambleResult::default();
 
     match fetch_xch_price_usd().await {

@@ -25,7 +25,11 @@ def _patch_engine(monkeypatch, *, ws_client_factory, init_logging=None, warn_hea
             if warn_healed is not None:
                 warn_healed(missing, path)
 
-    monkeypatch.setattr(main, "_engine", lambda: _FakeEngine())
+    fake_engine = _FakeEngine()
+    monkeypatch.setattr(main, "_engine", lambda: fake_engine)
+    import greenfloor.daemon.engine_logging as engine_logging
+
+    monkeypatch.setattr(engine_logging, "_engine", lambda: fake_engine)
 
 
 def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path, caplog) -> None:

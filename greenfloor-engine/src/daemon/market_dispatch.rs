@@ -1,7 +1,7 @@
 use crate::error::SignerResult;
 use crate::cycle::MarketCycleResultState;
 
-use super::reconcile_phase::ReconcilePhaseResult;
+use super::reconcile_phase::{ReconcilePhaseMetrics, ReconcilePhaseResult};
 use super::run_once::MarketDispatchMetrics;
 
 #[derive(Debug, Clone)]
@@ -26,7 +26,7 @@ pub fn aggregate_market_dispatch_metrics(
         }
         metrics.cancel_planned_total += output.state.cancel_planned.max(0) as u64;
         metrics.cancel_executed_total += output.state.cancel_executed.max(0) as u64;
-        if output.reconcile.metrics.immediate_requeue_requested {
+        if output.state.immediate_requeue_requested {
             metrics
                 .immediate_requeue_market_ids
                 .push(output.market_id.clone());
@@ -50,4 +50,35 @@ pub fn record_market_worker_error(
         }),
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_output(immediate_requeue: bool) -> SingleMarketCycleOutput {
+        let mut state = MarketCycleResultState::default();
+        if immediate_requeue {
+            state.request_immediate_requeue(Some("taker_fill".to_string()));
+        }
+        SingleMarketCycleOutput {
+            market_id: "m1".to_string(),
+            reconcile: ReconcilePhaseResult {
+                offers: Vec::new(),
+                dexie_size_by_offer_id: Default::default(),
+                dexie_fetch_error: None,
+                metrics: ReconcilePhaseMetrics::default(),
+            },
+            state,
+        }
+    }
+
+    #[test]
+    fn aggregate_metrics_uses_cycle_state_immediate_requeue() {
+        let metrics = aggregate_market_dispatch_metrics(&[
+            sample_output(false),
+            sample_output(true),
+        ]);
+        assert_eq!(metrics.immediate_requeue_market_ids, vec!["m1".to_string()]);
+    }
 }

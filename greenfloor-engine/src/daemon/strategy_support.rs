@@ -13,26 +13,7 @@ use crate::storage::SqliteStore;
 use super::watchlist::{active_offer_counts_by_size, active_offer_counts_by_size_and_side};
 
 pub fn strategy_config_from_market(market: &MarketConfig, network: &str) -> StrategyConfig {
-    let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
-    let mut targets_by_size: BTreeMap<i64, i64> = BTreeMap::new();
-    for entry in &sell_ladder {
-        if entry.size_base_units > 0 {
-            targets_by_size.insert(entry.size_base_units, entry.target_count.max(0));
-        }
-    }
-    let normalized = normalize_target_counts(&targets_by_size, Some(&default_target_counts()));
-    let pricing = &market.pricing;
-    StrategyConfig {
-        pair: normalize_strategy_pair(&market.quote_asset, network),
-        ones_target: *normalized.get(&1).unwrap_or(&0),
-        tens_target: *normalized.get(&10).unwrap_or(&0),
-        hundreds_target: *normalized.get(&100).unwrap_or(&0),
-        target_spread_bps: pricing_int(pricing, "strategy_target_spread_bps"),
-        min_xch_price_usd: pricing_float(pricing, "strategy_min_xch_price_usd"),
-        max_xch_price_usd: pricing_float(pricing, "strategy_max_xch_price_usd"),
-        offer_expiry_minutes: pricing_int(pricing, "strategy_offer_expiry_minutes"),
-        target_counts_by_size: Some(normalized),
-    }
+    strategy_config_for_ladder(market, network, "sell", true)
 }
 
 pub fn strategy_state_from_bucket_counts(
@@ -67,8 +48,8 @@ pub fn evaluate_strategy_actions_for_market(
             Some(dexie_size_by_offer_id),
             &tracked_sizes_list,
         )?;
-        let buy_config = strategy_config_for_side(market, network, "buy");
-        let sell_config = strategy_config_for_side(market, network, "sell");
+        let buy_config = strategy_config_for_ladder(market, network, "buy", false);
+        let sell_config = strategy_config_for_ladder(market, network, "sell", false);
         let buy_state = strategy_state_from_bucket_counts(&buy_counts, xch_price_usd);
         let sell_state = strategy_state_from_bucket_counts(&sell_counts, xch_price_usd);
         let actions = crate::cycle::evaluate_two_sided_market_actions(
@@ -102,6 +83,35 @@ pub fn evaluate_strategy_actions_for_market(
     Ok((reseed.actions, active_offer_counts_by_size))
 }
 
+fn strategy_config_for_ladder(
+    market: &MarketConfig,
+    network: &str,
+    side: &str,
+    include_pricing_bounds: bool,
+) -> StrategyConfig {
+    let ladder = market.ladders.get(side).cloned().unwrap_or_default();
+    let mut targets_by_size: BTreeMap<i64, i64> = BTreeMap::new();
+    for entry in &ladder {
+        if entry.size_base_units > 0 {
+            targets_by_size.insert(entry.size_base_units, entry.target_count.max(0));
+        }
+    }
+    let defaults = include_pricing_bounds.then(default_target_counts);
+    let normalized = normalize_target_counts(&targets_by_size, defaults.as_ref());
+    let pricing = &market.pricing;
+    StrategyConfig {
+        pair: normalize_strategy_pair(&market.quote_asset, network),
+        ones_target: *normalized.get(&1).unwrap_or(&0),
+        tens_target: *normalized.get(&10).unwrap_or(&0),
+        hundreds_target: *normalized.get(&100).unwrap_or(&0),
+        target_spread_bps: include_pricing_bounds.then(|| pricing_int(pricing, "strategy_target_spread_bps")).flatten(),
+        min_xch_price_usd: include_pricing_bounds.then(|| pricing_float(pricing, "strategy_min_xch_price_usd")).flatten(),
+        max_xch_price_usd: include_pricing_bounds.then(|| pricing_float(pricing, "strategy_max_xch_price_usd")).flatten(),
+        offer_expiry_minutes: pricing_int(pricing, "strategy_offer_expiry_minutes"),
+        target_counts_by_size: Some(normalized),
+    }
+}
+
 fn resolve_tracked_sizes_for_market(
     market: &MarketConfig,
     strategy_config: &StrategyConfig,
@@ -113,29 +123,6 @@ fn resolve_tracked_sizes_for_market(
         .filter(|size| *size > 0)
         .collect();
     resolve_tracked_sizes(&ladder_sizes, &target_sizes_from_config(strategy_config))
-}
-
-fn strategy_config_for_side(market: &MarketConfig, network: &str, side: &str) -> StrategyConfig {
-    let ladder = market.ladders.get(side).cloned().unwrap_or_default();
-    let mut targets_by_size: BTreeMap<i64, i64> = BTreeMap::new();
-    for entry in &ladder {
-        if entry.size_base_units > 0 {
-            targets_by_size.insert(entry.size_base_units, entry.target_count.max(0));
-        }
-    }
-    let normalized = normalize_target_counts(&targets_by_size, None);
-    let pricing = &market.pricing;
-    StrategyConfig {
-        pair: normalize_strategy_pair(&market.quote_asset, network),
-        ones_target: *normalized.get(&1).unwrap_or(&0),
-        tens_target: *normalized.get(&10).unwrap_or(&0),
-        hundreds_target: *normalized.get(&100).unwrap_or(&0),
-        target_spread_bps: None,
-        min_xch_price_usd: None,
-        max_xch_price_usd: None,
-        offer_expiry_minutes: pricing_int(pricing, "strategy_offer_expiry_minutes"),
-        target_counts_by_size: Some(normalized),
-    }
 }
 
 fn normalize_strategy_pair(quote_asset: &str, network: &str) -> String {
@@ -226,5 +213,14 @@ mod tests {
         let config = strategy_config_from_market(&market, "mainnet");
         assert_eq!(config.ones_target, 1);
         assert_eq!(config.pair, "xch");
+    }
+
+    #[test]
+    fn buy_side_config_omits_spread_and_price_bounds() {
+        let market = sample_market();
+        let buy = strategy_config_for_ladder(&market, "mainnet", "buy", false);
+        assert!(buy.target_spread_bps.is_none());
+        assert!(buy.min_xch_price_usd.is_none());
+        assert!(buy.max_xch_price_usd.is_none());
     }
 }

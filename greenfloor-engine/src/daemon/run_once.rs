@@ -88,10 +88,10 @@ pub fn resolve_state_db_path(home_dir: &Path, explicit_db_path: Option<&str>) ->
 pub async fn build_cycle_plan(
     request: &DaemonRunOnceRequest,
     resources: &DaemonCycleResources,
+    store: &SqliteStore,
 ) -> SignerResult<CyclePlan> {
     let program = &resources.program;
     let db_path = resolve_state_db_path(&program.home_dir, request.state_db_override.as_deref());
-    let store = SqliteStore::open(&db_path)?;
     let previous_xch_price_usd = store.get_latest_xch_price_snapshot()?;
 
     let mut enabled_market_ids: Vec<String> = Vec::new();

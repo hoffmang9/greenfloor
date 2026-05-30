@@ -10,28 +10,11 @@ from greenfloor.config.io import default_state_dir_path, load_program_config
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
 from greenfloor.daemon.bootstrap import log_daemon_event
 from greenfloor.daemon.cycle_runner import resolve_cycle_websocket_capture, run_loop, run_once
+from greenfloor.daemon.engine_logging import initialize_daemon_logging
 
 
 def _engine():
     return import_engine()
-
-
-def _initialize_daemon_logging(*, program, program_path: Path) -> None:
-    init_logging = require_engine_method(
-        _engine(),
-        "initialize_daemon_file_logging",
-        missing="daemon logging",
-    )
-    warn_healed = require_engine_method(
-        _engine(),
-        "warn_if_daemon_log_level_auto_healed",
-        missing="daemon logging heal warning",
-    )
-    init_logging(program.home_dir, getattr(program, "app_log_level", "INFO"))
-    warn_healed(
-        bool(getattr(program, "app_log_level_was_missing", False)),
-        str(program_path),
-    )
 
 
 def _acquire_daemon_instance_lock(*, state_dir: Path, mode: str):
@@ -100,7 +83,7 @@ def main() -> None:
     try:
         if args.once:
             program = load_program_config(Path(args.program_config))
-            _initialize_daemon_logging(program=program, program_path=Path(args.program_config))
+            initialize_daemon_logging(program=program, program_path=Path(args.program_config))
             use_websocket_capture = resolve_cycle_websocket_capture(
                 program=program,
                 loop_websocket_active=False,
@@ -137,7 +120,7 @@ def main() -> None:
             raise
         try:
             program = load_program_config(Path(args.program_config))
-            _initialize_daemon_logging(program=program, program_path=Path(args.program_config))
+            initialize_daemon_logging(program=program, program_path=Path(args.program_config))
         except Exception:
             pass
         log_daemon_event(

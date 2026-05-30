@@ -52,14 +52,3 @@ pub fn managed_post_test_override() -> Option<crate::error::SignerResult<bool>> 
         Some(other) => panic!("unknown managed post test override: {other}"),
     }
 }
-
-#[cfg(not(test))]
-pub fn parallel_dispatch_test_override(
-) -> Option<crate::error::SignerResult<super::OfferDispatchOutput>> {
-    None
-}
-
-#[cfg(not(test))]
-pub fn managed_post_test_override() -> Option<crate::error::SignerResult<bool>> {
-    None
-}

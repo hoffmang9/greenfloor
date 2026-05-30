@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -13,6 +12,30 @@ from greenfloor.daemon.cycle_market_batch import MarketDispatchState
 
 def _engine_module():
     return import_engine()
+
+
+def _daemon_run_once_request_class():
+    return require_engine_method(
+        _engine_module(),
+        "DaemonRunOnceRequest",
+        missing="daemon cycle request",
+    )
+
+
+def _daemon_dispatch_state_class():
+    return require_engine_method(
+        _engine_module(),
+        "DaemonDispatchState",
+        missing="daemon dispatch state",
+    )
+
+
+def _daemon_test_controls_class():
+    return require_engine_method(
+        _engine_module(),
+        "DaemonCycleTestControls",
+        missing="daemon cycle test controls",
+    )
 
 
 def _run_daemon_cycle_once_engine():
@@ -36,31 +59,37 @@ def _build_engine_request(
     use_websocket_capture: bool,
     dispatch_state: MarketDispatchState,
     test_controls: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    controls: dict[str, Any] = {}
-    if test_controls:
-        controls["skip_strategy_execution"] = bool(
-            test_controls.get("skip_strategy_execution", False)
-        )
-        forced = test_controls.get("force_market_error_for")
-        controls["force_market_error_for"] = str(forced) if forced is not None else None
+) -> Any:
+    dispatch_cls = _daemon_dispatch_state_class()
+    controls_cls = _daemon_test_controls_class()
+    request_cls = _daemon_run_once_request_class()
 
-    return {
-        "program_path": str(program_path),
-        "markets_path": str(markets_path),
-        "testnet_markets_path": str(testnet_markets_path) if testnet_markets_path else None,
-        "state_db_override": db_path_override,
-        "coinset_base_url": coinset_base_url,
-        "state_dir": str(state_dir),
-        "poll_coinset_mempool": poll_coinset_mempool,
-        "use_websocket_capture": use_websocket_capture,
-        "allowed_key_ids": sorted(allowed_keys or []),
-        "dispatch_state": {
-            "cursor": int(dispatch_state.cursor),
-            "immediate_requeue_ids": list(dispatch_state.immediate_requeue_ids),
-        },
-        "test_controls": controls,
-    }
+    forced = None
+    skip_strategy = False
+    if test_controls:
+        skip_strategy = bool(test_controls.get("skip_strategy_execution", False))
+        raw_forced = test_controls.get("force_market_error_for")
+        forced = str(raw_forced) if raw_forced is not None else None
+
+    return request_cls(
+        program_path,
+        markets_path,
+        coinset_base_url,
+        state_dir,
+        testnet_markets_path=testnet_markets_path,
+        state_db_override=db_path_override,
+        poll_coinset_mempool=poll_coinset_mempool,
+        use_websocket_capture=use_websocket_capture,
+        allowed_key_ids=sorted(allowed_keys or []),
+        dispatch_state=dispatch_cls(
+            int(dispatch_state.cursor),
+            list(dispatch_state.immediate_requeue_ids),
+        ),
+        test_controls=controls_cls(
+            skip_strategy_execution=skip_strategy,
+            force_market_error_for=forced,
+        ),
+    )
 
 
 def run_daemon_cycle_once_via_engine(
@@ -95,16 +124,14 @@ def run_daemon_cycle_once_via_engine(
 
     runner = run_fn or _run_daemon_cycle_once_engine()
     response = runner(request)
-    if not isinstance(response, dict):
-        raise TypeError("engine run_daemon_cycle_once must return a dict")
-    exit_code = int(response.get("exit_code", 1))
-    state_payload = response.get("dispatch_state")
-    if not isinstance(state_payload, dict):
+    exit_code = int(getattr(response, "exit_code", 1))
+    state_payload = getattr(response, "dispatch_state", None)
+    if state_payload is None:
         raise TypeError("engine run_daemon_cycle_once returned response without dispatch_state")
     updated = MarketDispatchState(
-        cursor=int(state_payload.get("cursor", dispatch_state.cursor)),
-        immediate_requeue_ids=deque(
-            str(market_id) for market_id in state_payload.get("immediate_requeue_ids", [])
+        cursor=int(getattr(state_payload, "cursor", dispatch_state.cursor)),
+        immediate_requeue_ids=list(
+            getattr(state_payload, "immediate_requeue_ids", dispatch_state.immediate_requeue_ids)
         ),
     )
     return exit_code, updated

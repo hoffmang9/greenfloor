@@ -5,7 +5,7 @@ mod managed_post;
 mod parallel;
 mod reservation_ctx;
 mod sequential;
-mod spendable;
+#[cfg(test)]
 mod test_hooks;
 
 #[cfg(test)]
@@ -123,7 +123,7 @@ pub async fn execute_strategy_actions(
                 program_path,
                 markets_path,
                 testnet_markets_path,
-                actions,
+                &expanded,
             )
             .await,
         ) {
@@ -141,7 +141,7 @@ pub async fn execute_strategy_actions(
         program_path,
         markets_path,
         testnet_markets_path,
-        actions,
+        &expanded,
     )
     .await
 }

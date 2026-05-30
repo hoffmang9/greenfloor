@@ -4,37 +4,17 @@ use std::path::Path;
 use serde_json::json;
 
 use crate::coin_ops::compute_bucket_counts_from_coins;
-use crate::coinset::list_wallet_unspent_coins;
 use crate::config::{
     load_signer_config, require_signer_offer_path, ManagerProgramConfig, MarketConfig,
 };
-use crate::error::{SignerError, SignerResult};
+use crate::error::SignerResult;
 use crate::hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
 use crate::offer::resolve_offer_assets_for_action;
 use crate::storage::SqliteStore;
 
 use crate::cycle::MarketCycleResultState;
 
-async fn list_spendable_base_unit_amounts(
-    network: &str,
-    receive_address: &str,
-    resolved_asset_id: &str,
-    base_unit_multiplier: i64,
-) -> SignerResult<Vec<i64>> {
-    let coins = list_wallet_unspent_coins(network, receive_address, resolved_asset_id).await?;
-    let multiplier = base_unit_multiplier.max(1);
-    Ok(coins
-        .into_iter()
-        .filter_map(|coin| {
-            let amount_mojos = i64::try_from(coin.amount).ok()?;
-            if amount_mojos <= 0 {
-                return None;
-            }
-            let base_units = amount_mojos / multiplier;
-            (base_units > 0).then_some(base_units)
-        })
-        .collect())
-}
+use super::coinset_spendable::list_spendable_base_unit_amounts;
 
 /// When `market.base_asset` is a hex CAT id, it must match the signer-resolved id used for coinset.
 pub fn assert_inventory_asset_resolution_matches_config(
@@ -48,13 +28,13 @@ pub fn assert_inventory_asset_resolution_matches_config(
     let config_hex = normalize_hex_id(configured);
     let resolved_hex = normalize_hex_id(resolved_base_asset_id);
     if resolved_hex.is_empty() {
-        return Err(SignerError::Other(format!(
+        return Err(crate::error::SignerError::Other(format!(
             "inventory_asset_resolution_invalid: market {} configured_base_asset={config_hex} resolved_base_asset={resolved_base_asset_id}",
             market.market_id
         )));
     }
     if config_hex != resolved_hex {
-        return Err(SignerError::Other(format!(
+        return Err(crate::error::SignerError::Other(format!(
             "inventory_asset_resolution_mismatch: market {} configured_base_asset={config_hex} resolved_base_asset={resolved_hex}",
             market.market_id
         )));

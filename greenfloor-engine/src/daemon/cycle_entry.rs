@@ -12,11 +12,12 @@ use super::market_cycle::run_post_reconcile_market_phases;
 use super::market_dispatch::{aggregate_market_dispatch_metrics, record_market_worker_error,
     SingleMarketCycleOutput};
 use super::preamble::run_cycle_preamble;
+use super::reconcile_augment::merge_reconcile_immediate_requeue;
 use super::reconcile_phase::run_market_reconcile_phase;
 use super::run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
-    elapsed_ms, CyclePlan, DaemonCycleSummary, DaemonDispatchState, DaemonRunOnceRequest,
-    MarketDispatchMetrics,
+    elapsed_ms, resolve_state_db_path, CyclePlan, DaemonCycleSummary, DaemonDispatchState,
+    DaemonRunOnceRequest, MarketDispatchMetrics,
 };
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -26,11 +27,10 @@ pub struct DaemonCycleOnceResponse {
     pub cycle_summary: DaemonCycleSummary,
 }
 
-fn write_stale_sweep_audit(store_path: &std::path::Path, plan: &CyclePlan) -> SignerResult<()> {
+fn write_stale_sweep_audit(store: &SqliteStore, plan: &CyclePlan) -> SignerResult<()> {
     if plan.stale_open_sweep.requeue_market_ids.is_empty() {
         return Ok(());
     }
-    let store = SqliteStore::open(store_path)?;
     store.add_audit_event(
         "stale_open_offer_requeue_detected",
         &serde_json::json!({
@@ -44,59 +44,79 @@ fn write_stale_sweep_audit(store_path: &std::path::Path, plan: &CyclePlan) -> Si
 }
 
 async fn process_one_market(
+    store: &SqliteStore,
     resources: &DaemonCycleResources,
     dispatch_context: &MarketDispatchContext,
     plan: &CyclePlan,
     market: &MarketConfig,
 ) -> SignerResult<SingleMarketCycleOutput> {
-    let store = SqliteStore::open(&plan.db_path)?;
     let reconcile =
-        run_market_reconcile_phase(&store, &resources.dexie, market, &resources.network).await?;
+        run_market_reconcile_phase(store, &resources.dexie, market, &resources.network).await?;
     let phase_context = MarketCycleContext {
         resources,
         dispatch: dispatch_context,
         plan,
         reconcile: &reconcile,
     };
-    let phases = run_post_reconcile_market_phases(&store, &phase_context, market).await?;
+    let mut state = run_post_reconcile_market_phases(store, &phase_context, market).await?;
+    merge_reconcile_immediate_requeue(&mut state, &reconcile.metrics);
 
     Ok(SingleMarketCycleOutput {
         market_id: market.market_id.clone(),
         reconcile,
-        state: phases.state,
+        state,
     })
 }
 
+fn record_market_result(
+    error_store: &SqliteStore,
+    market_id: &str,
+    result: SignerResult<SingleMarketCycleOutput>,
+    source: &str,
+) -> SignerResult<Result<SingleMarketCycleOutput, u64>> {
+    match result {
+        Ok(output) => Ok(Ok(output)),
+        Err(err) => {
+            record_market_worker_error(error_store, market_id, &err.to_string(), source)?;
+            Ok(Err(1))
+        }
+    }
+}
+
 async fn dispatch_markets(
+    cycle_store: &SqliteStore,
     resources: &DaemonCycleResources,
     dispatch_context: &MarketDispatchContext,
     plan: &CyclePlan,
     markets: Vec<MarketConfig>,
 ) -> SignerResult<(Vec<SingleMarketCycleOutput>, u64)> {
     let parallel = dispatch_context.parallel_markets_enabled && markets.len() > 1;
-    let error_store = SqliteStore::open(&plan.db_path)?;
     let mut worker_errors = 0u64;
 
     if parallel {
-        // rusqlite connections are !Send; run each market on a blocking thread with an
-        // isolated current-thread runtime so the SQLite handle can cross internal awaits.
         let mut blocking_tasks = Vec::with_capacity(markets.len());
         for market in markets {
             let resources = resources.clone();
             let dispatch_context = dispatch_context.clone();
             let plan = plan.clone();
+            let db_path = plan.db_path.clone();
             let market_id = market.market_id.clone();
             blocking_tasks.push(tokio::task::spawn_blocking(move || {
                 let result = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .expect("market worker runtime")
-                    .block_on(process_one_market(
-                        &resources,
-                        &dispatch_context,
-                        &plan,
-                        &market,
-                    ));
+                    .block_on(async {
+                        let store = SqliteStore::open(&db_path)?;
+                        process_one_market(
+                            &store,
+                            &resources,
+                            &dispatch_context,
+                            &plan,
+                            &market,
+                        )
+                        .await
+                    });
                 (market_id, result)
             }));
         }
@@ -105,17 +125,9 @@ async fn dispatch_markets(
             let (market_id, result) = task
                 .await
                 .map_err(|err| SignerError::Other(format!("parallel market join failed: {err}")))?;
-            match result {
+            match record_market_result(cycle_store, &market_id, result, "parallel_market_worker")? {
                 Ok(output) => outputs.push(output),
-                Err(err) => {
-                    record_market_worker_error(
-                        &error_store,
-                        &market_id,
-                        &err.to_string(),
-                        "parallel_market_worker",
-                    )?;
-                    worker_errors += 1;
-                }
+                Err(count) => worker_errors += count,
             }
         }
         return Ok((outputs, worker_errors));
@@ -123,17 +135,22 @@ async fn dispatch_markets(
 
     let mut outputs = Vec::with_capacity(markets.len());
     for market in markets {
-        match process_one_market(resources, dispatch_context, plan, &market).await {
+        let result = process_one_market(
+            cycle_store,
+            resources,
+            dispatch_context,
+            plan,
+            &market,
+        )
+        .await;
+        match record_market_result(
+            cycle_store,
+            &market.market_id,
+            result,
+            "sequential_market_worker",
+        )? {
             Ok(output) => outputs.push(output),
-            Err(err) => {
-                record_market_worker_error(
-                    &error_store,
-                    &market.market_id,
-                    &err.to_string(),
-                    "sequential_market_worker",
-                )?;
-                worker_errors += 1;
-            }
+            Err(count) => worker_errors += count,
         }
     }
     Ok((outputs, worker_errors))
@@ -145,12 +162,18 @@ async fn run_daemon_cycle_once_inner(
     let started: Instant = cycle_started_instant();
     let resources = load_cycle_resources(request)?;
     super::disabled_markets::log_disabled_markets_periodic(&resources.markets);
-    let plan = build_cycle_plan(request, &resources).await?;
-    write_stale_sweep_audit(&plan.db_path, &plan)?;
+
+    let db_path = resolve_state_db_path(
+        &resources.program.home_dir,
+        request.state_db_override.as_deref(),
+    );
+    let cycle_store = SqliteStore::open(&db_path)?;
+    let plan = build_cycle_plan(request, &resources, &cycle_store).await?;
+    write_stale_sweep_audit(&cycle_store, &plan)?;
 
     let preamble = run_cycle_preamble(
         &resources.program,
-        &plan.db_path,
+        &cycle_store,
         &request.coinset_base_url,
         request.poll_coinset_mempool,
         request.use_websocket_capture,
@@ -168,8 +191,14 @@ async fn run_daemon_cycle_once_inner(
     };
     let markets = resources.selected_markets(&plan.selected_market_ids);
 
-    let (cycle_outputs, worker_errors) =
-        dispatch_markets(&resources, &dispatch_context, &plan, markets).await?;
+    let (cycle_outputs, worker_errors) = dispatch_markets(
+        &cycle_store,
+        &resources,
+        &dispatch_context,
+        &plan,
+        markets,
+    )
+    .await?;
 
     let mut metrics: MarketDispatchMetrics = aggregate_market_dispatch_metrics(&cycle_outputs);
     metrics.cycle_error_count += worker_errors;
@@ -185,11 +214,10 @@ async fn run_daemon_cycle_once_inner(
         preamble.cycle_error_count,
         elapsed_ms(started),
     );
-    let summary_store = SqliteStore::open(&plan.db_path)?;
     let summary_payload = serde_json::to_value(&summary).map_err(|err| {
         SignerError::Other(format!("failed to encode daemon_cycle_summary: {err}"))
     })?;
-    summary_store.add_audit_event("daemon_cycle_summary", &summary_payload, None)?;
+    cycle_store.add_audit_event("daemon_cycle_summary", &summary_payload, None)?;
 
     Ok(DaemonCycleOnceResponse {
         exit_code: compute_cycle_exit_code(&plan, &metrics),

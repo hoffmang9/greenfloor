@@ -5,14 +5,197 @@ use crate::runtime;
 use engine_core::load_program_config;
 use engine_core::daemon::{
     initialize_daemon_file_logging, resolve_coinset_ws_url, run_daemon_cycle_once,
-    start_coinset_websocket_loop, use_websocket_capture_for_once, DaemonInstanceLock,
-    DaemonProgramRuntime, DaemonRunOnceRequest,
+    start_coinset_websocket_loop, websocket_capture_enabled, DaemonCycleOnceResponse,
+    DaemonCycleTestControls, DaemonDispatchState, DaemonInstanceLock, DaemonRunOnceRequest,
 };
-use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAnyMethods, PyDict, PyModule};
+use pyo3::types::PyModule;
 
-use crate::py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
+use crate::py_utils::{dict_from_json_value, to_py_err};
+
+#[pyclass(name = "DaemonDispatchState")]
+#[derive(Clone)]
+struct PyDaemonDispatchState {
+    #[pyo3(get, set)]
+    cursor: usize,
+    #[pyo3(get, set)]
+    immediate_requeue_ids: Vec<String>,
+}
+
+#[pymethods]
+impl PyDaemonDispatchState {
+    #[new]
+    #[pyo3(signature = (cursor=0, immediate_requeue_ids=None))]
+    fn new(cursor: usize, immediate_requeue_ids: Option<Vec<String>>) -> Self {
+        Self {
+            cursor,
+            immediate_requeue_ids: immediate_requeue_ids.unwrap_or_default(),
+        }
+    }
+}
+
+impl From<PyDaemonDispatchState> for DaemonDispatchState {
+    fn from(value: PyDaemonDispatchState) -> Self {
+        Self {
+            cursor: value.cursor,
+            immediate_requeue_ids: value.immediate_requeue_ids,
+        }
+    }
+}
+
+impl From<DaemonDispatchState> for PyDaemonDispatchState {
+    fn from(value: DaemonDispatchState) -> Self {
+        Self {
+            cursor: value.cursor,
+            immediate_requeue_ids: value.immediate_requeue_ids,
+        }
+    }
+}
+
+#[pyclass(name = "DaemonCycleTestControls")]
+#[derive(Clone, Default)]
+struct PyDaemonCycleTestControls {
+    #[pyo3(get, set)]
+    skip_strategy_execution: bool,
+    #[pyo3(get, set)]
+    force_market_error_for: Option<String>,
+}
+
+#[pymethods]
+impl PyDaemonCycleTestControls {
+    #[new]
+    #[pyo3(signature = (skip_strategy_execution=false, force_market_error_for=None))]
+    fn new(skip_strategy_execution: bool, force_market_error_for: Option<String>) -> Self {
+        Self {
+            skip_strategy_execution,
+            force_market_error_for,
+        }
+    }
+}
+
+impl From<PyDaemonCycleTestControls> for DaemonCycleTestControls {
+    fn from(value: PyDaemonCycleTestControls) -> Self {
+        Self {
+            skip_strategy_execution: value.skip_strategy_execution,
+            force_market_error_for: value.force_market_error_for,
+        }
+    }
+}
+
+#[pyclass(name = "DaemonRunOnceRequest")]
+#[derive(Clone)]
+struct PyDaemonRunOnceRequest {
+    #[pyo3(get, set)]
+    program_path: PathBuf,
+    #[pyo3(get, set)]
+    markets_path: PathBuf,
+    #[pyo3(get, set)]
+    testnet_markets_path: Option<PathBuf>,
+    #[pyo3(get, set)]
+    state_db_override: Option<String>,
+    #[pyo3(get, set)]
+    coinset_base_url: String,
+    #[pyo3(get, set)]
+    state_dir: PathBuf,
+    #[pyo3(get, set)]
+    poll_coinset_mempool: bool,
+    #[pyo3(get, set)]
+    use_websocket_capture: bool,
+    #[pyo3(get, set)]
+    allowed_key_ids: Vec<String>,
+    #[pyo3(get, set)]
+    dispatch_state: PyDaemonDispatchState,
+    #[pyo3(get, set)]
+    test_controls: PyDaemonCycleTestControls,
+}
+
+#[pymethods]
+impl PyDaemonRunOnceRequest {
+    #[allow(clippy::too_many_arguments)]
+    #[new]
+    #[pyo3(signature = (
+        program_path,
+        markets_path,
+        coinset_base_url,
+        state_dir,
+        *,
+        testnet_markets_path=None,
+        state_db_override=None,
+        poll_coinset_mempool=true,
+        use_websocket_capture=false,
+        allowed_key_ids=None,
+        dispatch_state=None,
+        test_controls=None,
+    ))]
+    fn new(
+        program_path: PathBuf,
+        markets_path: PathBuf,
+        coinset_base_url: String,
+        state_dir: PathBuf,
+        testnet_markets_path: Option<PathBuf>,
+        state_db_override: Option<String>,
+        poll_coinset_mempool: bool,
+        use_websocket_capture: bool,
+        allowed_key_ids: Option<Vec<String>>,
+        dispatch_state: Option<PyDaemonDispatchState>,
+        test_controls: Option<PyDaemonCycleTestControls>,
+    ) -> Self {
+        Self {
+            program_path,
+            markets_path,
+            testnet_markets_path,
+            state_db_override,
+            coinset_base_url,
+            state_dir,
+            poll_coinset_mempool,
+            use_websocket_capture,
+            allowed_key_ids: allowed_key_ids.unwrap_or_default(),
+            dispatch_state: dispatch_state.unwrap_or_else(|| PyDaemonDispatchState::new(0, None)),
+            test_controls: test_controls.unwrap_or_default(),
+        }
+    }
+}
+
+impl From<PyDaemonRunOnceRequest> for DaemonRunOnceRequest {
+    fn from(value: PyDaemonRunOnceRequest) -> Self {
+        Self {
+            program_path: value.program_path,
+            markets_path: value.markets_path,
+            testnet_markets_path: value.testnet_markets_path,
+            state_db_override: value.state_db_override,
+            coinset_base_url: value.coinset_base_url,
+            state_dir: value.state_dir,
+            poll_coinset_mempool: value.poll_coinset_mempool,
+            use_websocket_capture: value.use_websocket_capture,
+            allowed_key_ids: value.allowed_key_ids,
+            dispatch_state: value.dispatch_state.into(),
+            test_controls: value.test_controls.into(),
+        }
+    }
+}
+
+#[pyclass(name = "DaemonCycleOnceResponse")]
+struct PyDaemonCycleOnceResponse {
+    #[pyo3(get)]
+    exit_code: i32,
+    #[pyo3(get)]
+    dispatch_state: PyDaemonDispatchState,
+    #[pyo3(get)]
+    cycle_summary: Py<PyAny>,
+}
+
+impl PyDaemonCycleOnceResponse {
+    fn from_engine(py: Python<'_>, response: DaemonCycleOnceResponse) -> PyResult<Self> {
+        Ok(Self {
+            exit_code: response.exit_code,
+            dispatch_state: response.dispatch_state.into(),
+            cycle_summary: dict_from_json_value(
+                py,
+                serde_json::to_value(response.cycle_summary).map_err(to_py_err)?,
+            )?,
+        })
+    }
+}
 
 #[pyclass(name = "DaemonInstanceLock", unsendable)]
 struct PyDaemonInstanceLock {
@@ -102,37 +285,25 @@ fn start_coinset_websocket_loop_py(
 #[pyfunction]
 #[pyo3(name = "use_websocket_capture_for_trigger_mode", signature = (tx_block_trigger_mode, /))]
 fn use_websocket_capture_for_trigger_mode_py(tx_block_trigger_mode: &str) -> bool {
-    use_websocket_capture_for_once(&DaemonProgramRuntime {
-        home_dir: PathBuf::new(),
-        app_log_level: String::new(),
-        app_log_level_was_missing: false,
-        runtime_loop_interval_seconds: 30,
-        tx_block_trigger_mode: tx_block_trigger_mode.to_string(),
-    })
+    websocket_capture_enabled(tx_block_trigger_mode)
 }
 
 #[pyfunction]
 #[pyo3(name = "run_daemon_cycle_once", signature = (request, /))]
-fn run_daemon_cycle_once_py(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
-    let payload = if request.is_instance_of::<PyDict>() {
-        request_dict_to_json(request.cast::<PyDict>()?)?
-    } else {
-        return Err(PyRuntimeError::new_err(
-            "run_daemon_cycle_once request must be a dict",
-        ));
-    };
-    let engine_request: DaemonRunOnceRequest =
-        serde_json::from_value(payload).map_err(to_py_err)?;
-
+fn run_daemon_cycle_once_py(
+    py: Python<'_>,
+    request: PyRef<'_, PyDaemonRunOnceRequest>,
+) -> PyResult<Py<PyDaemonCycleOnceResponse>> {
+    let engine_request: DaemonRunOnceRequest = request.clone().into();
     let response = py.detach(move || {
         runtime()
             .block_on(run_daemon_cycle_once(&engine_request))
             .map_err(to_py_err)
     })?;
-
-    Python::attach(|py| {
-        dict_from_json_value(py, serde_json::to_value(&response).map_err(to_py_err)?)
-    })
+    Py::new(
+        py,
+        PyDaemonCycleOnceResponse::from_engine(py, response)?,
+    )
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -151,5 +322,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(start_coinset_websocket_loop_py, m)?)?;
     m.add_class::<PyDaemonInstanceLock>()?;
     m.add_class::<PyCoinsetWebsocketLoop>()?;
+    m.add_class::<PyDaemonDispatchState>()?;
+    m.add_class::<PyDaemonCycleTestControls>()?;
+    m.add_class::<PyDaemonRunOnceRequest>()?;
+    m.add_class::<PyDaemonCycleOnceResponse>()?;
     Ok(())
 }

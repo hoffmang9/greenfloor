@@ -24,8 +24,11 @@ pub fn load_daemon_program_runtime(program_path: &Path) -> SignerResult<DaemonPr
 }
 
 pub fn use_websocket_capture_for_once(runtime: &DaemonProgramRuntime) -> bool {
-    runtime
-        .tx_block_trigger_mode
+    websocket_capture_enabled(&runtime.tx_block_trigger_mode)
+}
+
+pub fn websocket_capture_enabled(tx_block_trigger_mode: &str) -> bool {
+    tx_block_trigger_mode
         .trim()
         .eq_ignore_ascii_case("websocket")
 }

@@ -7,7 +7,6 @@ Canonical monkeypatch targets (module-qualified paths):
 
 - ``greenfloor.daemon.testing.main`` — cycle orchestration (`run_once`, `run_loop`, adapters; aliases ``cycle_runner``)
 - ``greenfloor.daemon.main`` — CLI entrypoint and instance lock
-- ``greenfloor.daemon.testing.inventory_scan`` — coinset adapter factory
 - ``greenfloor.daemon.testing.strategy_state`` — reseed policy
 - ``greenfloor.daemon.testing.cooldowns`` — post/cancel cooldown globals
 - ``greenfloor.daemon.testing.cancel_policy`` — cancel policy entry
@@ -27,11 +26,6 @@ from greenfloor.daemon.testing.cooldowns import (
     set_cooldown,
 )
 from greenfloor.daemon.testing.helpers import PlannedAction, drop_zero_repeat_strategy_actions
-from greenfloor.daemon.testing.inventory_scan import (
-    CoinsetAdapter,
-    coinset_spendable_base_unit_coin_amounts,
-    inventory_scan,
-)
 from greenfloor.daemon.testing.main import (
     MarketCycleResult,
     MarketDispatchState,
@@ -57,7 +51,6 @@ from greenfloor.daemon.testing.watchlist import (
 )
 
 __all__ = [
-    "CoinsetAdapter",
     "MarketCycleResult",
     "MarketDispatchState",
     "PlannedAction",
@@ -67,7 +60,6 @@ __all__ = [
     "active_offer_counts_by_size_and_side",
     "build_dexie_size_by_offer_id",
     "cancel_retry_config",
-    "coinset_spendable_base_unit_coin_amounts",
     "consume_reload_marker",
     "cooldown_remaining_ms",
     "cooldowns",
@@ -75,7 +67,6 @@ __all__ = [
     "execute_cancel_policy",
     "expand_planned_actions",
     "inject_reseed_action_if_no_active_offers",
-    "inventory_scan",
     "main",
     "match_watched_coin_ids",
     "post_retry_config",

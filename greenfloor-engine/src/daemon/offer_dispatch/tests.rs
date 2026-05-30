@@ -105,7 +105,7 @@ fn classify_parallel_dispatch_fatal_error_propagates() {
 fn coordinator_concurrent_acquires_only_one_succeeds_for_full_capacity() {
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
-    let coordinator = OfferReservationCoordinator::new(&db_path, Some(300));
+    let coordinator = OfferReservationCoordinator::new(&db_path, Some(300)).expect("coordinator");
     let market_id = "m1";
     let wallet_id = "wallet-1";
     let mut requested = BTreeMap::from([("asset-a".to_string(), 100_i64)]);
@@ -129,7 +129,7 @@ fn coordinator_concurrent_acquires_only_one_succeeds_for_full_capacity() {
 fn coordinator_release_frees_capacity_for_next_acquire() {
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
-    let coordinator = OfferReservationCoordinator::new(&db_path, Some(300));
+    let coordinator = OfferReservationCoordinator::new(&db_path, Some(300)).expect("coordinator");
     let market_id = "m1";
     let wallet_id = "wallet-1";
     let requested = BTreeMap::from([("asset-a".to_string(), 50_i64)]);
@@ -396,4 +396,28 @@ async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
     set_managed_post_override(None);
 
     assert_eq!(output.executed_count, 1);
+}
+
+#[test]
+fn parallel_dispatch_override_success_returns_output() {
+    use super::test_hooks::{parallel_dispatch_test_override, set_parallel_dispatch_override};
+
+    set_parallel_dispatch_override(Some("success"));
+    let output = parallel_dispatch_test_override()
+        .expect("override configured")
+        .expect("success output");
+    set_parallel_dispatch_override(None);
+    assert_eq!(output.executed_count, 1);
+}
+
+#[test]
+fn managed_post_override_success_returns_true() {
+    use super::test_hooks::{managed_post_test_override, set_managed_post_override};
+
+    set_managed_post_override(Some("success"));
+    let posted = managed_post_test_override()
+        .expect("override configured")
+        .expect("success post");
+    set_managed_post_override(None);
+    assert!(posted);
 }

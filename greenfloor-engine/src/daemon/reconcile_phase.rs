@@ -5,7 +5,6 @@ use serde_json::{json, Value};
 use crate::adapters::DexieClient;
 use crate::config::{resolve_quote_asset_for_offer, resolve_trade_asset_for_network, MarketConfig};
 use crate::cycle::{
-    is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
     resolve_watched_offer_transition_from_signals, CycleOfferTransition,
 };
 use crate::error::SignerResult;
@@ -14,6 +13,7 @@ use crate::storage::SqliteStore;
 use super::coinset_tx::{
     build_dexie_size_by_offer_id, dexie_offer_status, extract_coinset_tx_ids_from_offer_payload,
 };
+use super::reconcile_augment::augment_dexie_offers_for_watchlist;
 use super::watchlist::{update_market_coin_watchlist_from_offers, watchlist_offer_ids};
 
 #[derive(Debug, Clone, Default)]
@@ -110,7 +110,7 @@ fn persist_offer_lifecycle_transition(
     Ok(())
 }
 
-fn apply_reconcile_transition(
+pub(crate) fn apply_reconcile_transition(
     store: &SqliteStore,
     market_id: &str,
     offer_id: &str,
@@ -191,90 +191,26 @@ pub async fn run_market_reconcile_phase(
         }
     };
 
-    let our_offer_ids = watchlist_offer_ids(store, market_id)?;
+    let our_offer_ids: HashSet<String> = watchlist_offer_ids(store, market_id)?
+        .into_iter()
+        .collect();
     let mut state_by_offer_id: HashMap<String, String> = store
         .list_offer_state_details(market_id, 5000)?
         .into_iter()
         .map(|row| (row.offer_id, row.state))
         .collect();
 
-    let dexie_offer_ids_in_list: HashSet<String> = offers
-        .iter()
-        .filter_map(|offer| {
-            offer
-                .as_object()
-                .and_then(|obj| obj.get("id"))
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-        })
-        .collect();
-
-    let mut augmented_by_id: HashMap<String, Value> = HashMap::new();
-    for offer in &offers {
-        if let Some(offer_id) = offer
-            .as_object()
-            .and_then(|obj| obj.get("id"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            augmented_by_id.insert(offer_id.to_string(), offer.clone());
-        }
-    }
-
-    let beyond_cap_ids: HashSet<String> = our_offer_ids
-        .difference(&dexie_offer_ids_in_list)
-        .cloned()
-        .collect();
-    let mut missing_watched_offer_ids = HashSet::new();
-
-    for watched_offer_id in our_offer_ids.iter() {
-        if augmented_by_id.contains_key(watched_offer_id) {
-            continue;
-        }
-        match dexie.get_offer(watched_offer_id).await {
-            Ok(payload) => {
-                if let Some(single_offer) = payload.get("offer") {
-                    augmented_by_id.insert(watched_offer_id.clone(), single_offer.clone());
-                }
-            }
-            Err(err) if is_dexie_offer_missing_error_text(&err.to_string()) => {
-                missing_watched_offer_ids.insert(watched_offer_id.clone());
-                let current_state = state_by_offer_id
-                    .get(watched_offer_id)
-                    .map(String::as_str)
-                    .unwrap_or("open");
-                let transition = resolve_missing_watched_offer_transition(current_state)
-                    .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;
-                apply_reconcile_transition(
-                    store,
-                    market_id,
-                    watched_offer_id,
-                    &transition,
-                    &mut metrics,
-                    &mut state_by_offer_id,
-                    None,
-                    Some(&err.to_string()),
-                )?;
-            }
-            Err(_) => {}
-        }
-    }
-
-    for beyond_offer_id in beyond_cap_ids.difference(&missing_watched_offer_ids) {
-        if augmented_by_id.contains_key(beyond_offer_id) {
-            continue;
-        }
-        if let Ok(payload) = dexie.get_offer(beyond_offer_id).await {
-            if let Some(single_offer) = payload.get("offer") {
-                augmented_by_id.insert(beyond_offer_id.clone(), single_offer.clone());
-            }
-        }
-    }
-
-    let augmented_offers: Vec<Value> = augmented_by_id.into_values().collect();
+    let augmented = augment_dexie_offers_for_watchlist(
+        dexie,
+        store,
+        market_id,
+        &offers,
+        &our_offer_ids,
+        &mut state_by_offer_id,
+        &mut metrics,
+    )
+    .await?;
+    let augmented_offers = augmented.offers;
     let dexie_size_by_offer_id =
         build_dexie_size_by_offer_id(&augmented_offers, &market.base_asset);
 

@@ -14,6 +14,7 @@ pub async fn post_managed_planned_action(
     testnet_markets_path: Option<&Path>,
     action: &PlannedAction,
 ) -> SignerResult<bool> {
+    #[cfg(test)]
     if let Some(result) = super::test_hooks::managed_post_test_override() {
         return result;
     }

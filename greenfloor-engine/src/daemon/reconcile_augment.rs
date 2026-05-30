@@ -1,0 +1,149 @@
+use std::collections::{HashMap, HashSet};
+
+use serde_json::Value;
+
+use crate::adapters::DexieClient;
+use crate::cycle::{
+    is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
+    CycleOfferTransition,
+};
+use crate::error::{SignerError, SignerResult};
+use crate::storage::SqliteStore;
+
+use super::reconcile_phase::{apply_reconcile_transition, ReconcilePhaseMetrics};
+
+pub struct AugmentedDexieOffers {
+    pub offers: Vec<Value>,
+}
+
+fn offer_id_from_payload(offer: &Value) -> Option<String> {
+    offer
+        .as_object()
+        .and_then(|obj| obj.get("id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+pub async fn augment_dexie_offers_for_watchlist(
+    dexie: &DexieClient,
+    store: &SqliteStore,
+    market_id: &str,
+    list_offers: &[Value],
+    our_offer_ids: &HashSet<String>,
+    state_by_offer_id: &mut HashMap<String, String>,
+    metrics: &mut ReconcilePhaseMetrics,
+) -> SignerResult<AugmentedDexieOffers> {
+    let dexie_offer_ids_in_list: HashSet<String> = list_offers
+        .iter()
+        .filter_map(offer_id_from_payload)
+        .collect();
+
+    let mut augmented_by_id: HashMap<String, Value> = HashMap::new();
+    for offer in list_offers {
+        if let Some(offer_id) = offer_id_from_payload(offer) {
+            augmented_by_id.insert(offer_id, offer.clone());
+        }
+    }
+
+    let beyond_cap_ids: HashSet<String> = our_offer_ids
+        .difference(&dexie_offer_ids_in_list)
+        .cloned()
+        .collect();
+    let mut missing_watched_offer_ids = HashSet::new();
+
+    for watched_offer_id in our_offer_ids.iter() {
+        if augmented_by_id.contains_key(watched_offer_id) {
+            continue;
+        }
+        match dexie.get_offer(watched_offer_id).await {
+            Ok(payload) => {
+                if let Some(single_offer) = payload.get("offer") {
+                    augmented_by_id.insert(watched_offer_id.clone(), single_offer.clone());
+                }
+            }
+            Err(err) if is_dexie_offer_missing_error_text(&err.to_string()) => {
+                missing_watched_offer_ids.insert(watched_offer_id.clone());
+                let current_state = state_by_offer_id
+                    .get(watched_offer_id)
+                    .map(String::as_str)
+                    .unwrap_or("open");
+                let transition = resolve_missing_watched_offer_transition(current_state)
+                    .map_err(|parse_err| SignerError::Other(parse_err.to_string()))?;
+                apply_reconcile_transition(
+                    store,
+                    market_id,
+                    watched_offer_id,
+                    &transition,
+                    metrics,
+                    state_by_offer_id,
+                    None,
+                    Some(&err.to_string()),
+                )?;
+            }
+            Err(_) => {}
+        }
+    }
+
+    for beyond_offer_id in beyond_cap_ids.difference(&missing_watched_offer_ids) {
+        if augmented_by_id.contains_key(beyond_offer_id) {
+            continue;
+        }
+        if let Ok(payload) = dexie.get_offer(beyond_offer_id).await {
+            if let Some(single_offer) = payload.get("offer") {
+                augmented_by_id.insert(beyond_offer_id.clone(), single_offer.clone());
+            }
+        }
+    }
+
+    Ok(AugmentedDexieOffers {
+        offers: augmented_by_id.into_values().collect(),
+    })
+}
+
+pub fn merge_reconcile_immediate_requeue(
+    state: &mut crate::cycle::MarketCycleResultState,
+    metrics: &ReconcilePhaseMetrics,
+) {
+    if !metrics.immediate_requeue_requested {
+        return;
+    }
+    for signal in &metrics.immediate_requeue_signals {
+        state.request_immediate_requeue(Some(signal.clone()));
+    }
+    if metrics.immediate_requeue_signals.is_empty() {
+        state.request_immediate_requeue(None);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cycle::MarketCycleResultState;
+
+    #[test]
+    fn merge_reconcile_immediate_requeue_populates_cycle_state() {
+        let mut state = MarketCycleResultState::default();
+        let metrics = ReconcilePhaseMetrics {
+            immediate_requeue_requested: true,
+            immediate_requeue_signals: vec!["taker_fill".to_string()],
+            ..ReconcilePhaseMetrics::default()
+        };
+        merge_reconcile_immediate_requeue(&mut state, &metrics);
+        assert!(state.immediate_requeue_requested);
+        assert_eq!(state.immediate_requeue_signals, vec!["taker_fill".to_string()]);
+    }
+
+    #[test]
+    fn merge_reconcile_immediate_requeue_without_signal_still_flags() {
+        let mut state = MarketCycleResultState::default();
+        let metrics = ReconcilePhaseMetrics {
+            immediate_requeue_requested: true,
+            ..ReconcilePhaseMetrics::default()
+        };
+        merge_reconcile_immediate_requeue(&mut state, &metrics);
+        assert!(state.immediate_requeue_requested);
+        assert!(state.immediate_requeue_signals.is_empty());
+    }
+}

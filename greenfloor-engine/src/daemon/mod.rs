@@ -3,6 +3,7 @@
 mod cancel_phase;
 mod coin_ops_execution;
 mod coin_ops_phase;
+mod coinset_spendable;
 mod coinset_tx;
 mod coinset_ws;
 mod cycle_entry;
@@ -17,6 +18,7 @@ mod market_gate;
 mod offer_dispatch;
 mod preamble;
 mod program_runtime;
+mod reconcile_augment;
 mod reconcile_phase;
 mod run_once;
 mod stale_sweep;
@@ -47,7 +49,7 @@ pub use market_dispatch::{
 };
 pub use program_runtime::{
     default_testnet_markets_path, load_daemon_program_runtime, resolve_testnet_markets_path,
-    use_websocket_capture_for_once, DaemonProgramRuntime,
+    use_websocket_capture_for_once, websocket_capture_enabled, DaemonProgramRuntime,
 };
 pub use reconcile_phase::{
     run_market_reconcile_phase, ReconcilePhaseMetrics, ReconcilePhaseResult,

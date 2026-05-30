@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass
 
 from greenfloor.config import io as config_io
@@ -22,9 +21,7 @@ def test_select_market_batch_prioritizes_immediate_requeue_then_round_robin() ->
     markets = [_Market("m1"), _Market("m2"), _Market("m3"), _Market("m4")]
     enabled_ids = [market.market_id for market in markets]
     state = MarketDispatchState()
-    state.immediate_requeue_ids = deque(
-        enqueue_immediate_requeue(list(state.immediate_requeue_ids), "m3")
-    )
+    state.immediate_requeue_ids = enqueue_immediate_requeue(list(state.immediate_requeue_ids), "m3")
 
     first = select_market_batch(
         enabled_market_ids=enabled_ids,
@@ -33,7 +30,7 @@ def test_select_market_batch_prioritizes_immediate_requeue_then_round_robin() ->
         immediate_requeue_ids=list(state.immediate_requeue_ids),
     )
     state.cursor = first.cursor
-    state.immediate_requeue_ids = deque(first.immediate_requeue_ids)
+    state.immediate_requeue_ids = list(first.immediate_requeue_ids)
     assert first.selected_market_ids == ["m3", "m1"]
     assert first.consumed_immediate_requeues == ["m3"]
     assert list(state.immediate_requeue_ids) == []
