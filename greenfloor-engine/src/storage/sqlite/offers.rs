@@ -31,7 +31,7 @@ impl SqliteStore {
                 .conn
                 .prepare(
                     r#"
-                SELECT offer_id, market_id, state
+                SELECT offer_id, market_id, state, last_seen_status, updated_at
                 FROM offer_state
                 WHERE market_id = ?1
                 ORDER BY updated_at DESC
@@ -57,6 +57,10 @@ impl SqliteStore {
                     state: row.get(2).map_err(|err| {
                         SignerError::Other(format!("failed to read state: {err}"))
                     })?,
+                    last_seen_status: row.get(3).ok(),
+                    updated_at: row.get(4).map_err(|err| {
+                        SignerError::Other(format!("failed to read updated_at: {err}"))
+                    })?,
                 });
             }
         } else {
@@ -64,7 +68,7 @@ impl SqliteStore {
                 .conn
                 .prepare(
                     r#"
-                SELECT offer_id, market_id, state
+                SELECT offer_id, market_id, state, last_seen_status, updated_at
                 FROM offer_state
                 ORDER BY updated_at DESC
                 LIMIT ?1
@@ -88,6 +92,10 @@ impl SqliteStore {
                     })?,
                     state: row.get(2).map_err(|err| {
                         SignerError::Other(format!("failed to read state: {err}"))
+                    })?,
+                    last_seen_status: row.get(3).ok(),
+                    updated_at: row.get(4).map_err(|err| {
+                        SignerError::Other(format!("failed to read updated_at: {err}"))
                     })?,
                 });
             }

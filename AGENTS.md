@@ -41,14 +41,12 @@ Severity tags:
 - `[MUST]` `greenfloor/cli/manager.py`: operator CLI router (argparse + dispatch).
 - `[MUST]` `greenfloor/cli/coin_ops_list.py`, `coin_ops_split.py`, `coin_ops_combine.py`: coin list/split/combine CLI commands (`coin_ops.py` re-exports).
 - `[MUST]` `greenfloor/cli/cats.py`: local CAT catalog CLI commands.
-- `[MUST]` `greenfloor/cli/offers_lifecycle.py`: offer reconcile/status/cancel CLI wrappers (reconcile calls Rust `reconcile_offers_cli` via PyO3).
+- `[MUST]` `greenfloor/cli/offers_lifecycle.py`: offer reconcile/status/cancel CLI wrappers (core logic in `greenfloor-engine/src/daemon/{reconcile_batch,offer_lifecycle_cli}.rs` via PyO3).
 - `[MUST]` `greenfloor/cli/manager_setup.py`: config validate, doctor, bootstrap-home, set-log-level.
 - `[MUST]` `greenfloor/cli/keys_onboard.py`: keys-onboard CLI command.
 - `[MUST]` `greenfloor/cli/offer_build_post.py`: manager `build-and-post-offer` command implementation.
 - `[MUST]` `greenfloor/runtime/coin_ops/runtime.py`: shared coin-op orchestration for CLI and daemon.
 - `[MUST]` `greenfloor/runtime/coin_ops/steps.py`: split/combine iteration step bodies.
-- `[MUST]` `greenfloor/runtime/offers_cancel.py`: venue offer cancel selection and Dexie execution.
-- `[MUST]` Offer reconcile CLI calls Rust `reconcile_offers_cli` via PyO3 (canonical orchestration in `greenfloor-engine/src/daemon/reconcile_{offer,batch,persist,phase}.rs`).
 - `[MUST]` Offer build/post uses `adapters/offer_action.build_signer_offer_for_action` and `runtime/offer_post_request.OfferPostRequest` (signer/KMS only).
 - `[MUST]` `greenfloor/runtime/offer_execution.py`: composition root for offer build/post runtime; import orchestration helpers here (see ADR 0005, ADR 0008).
 - `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`, `greenfloor/config/io.py`.

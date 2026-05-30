@@ -19,6 +19,7 @@ mod market_cycle;
 mod market_dispatch;
 mod market_gate;
 mod markets;
+mod offer_lifecycle_cli;
 mod offer_dispatch;
 mod preamble;
 mod program_runtime;
@@ -56,6 +57,9 @@ pub use markets::enabled_market_ids;
 pub use program_runtime::{
     default_testnet_markets_path, load_daemon_program_runtime, resolve_testnet_markets_path,
     use_websocket_capture_for_once, websocket_capture_enabled, DaemonProgramRuntime,
+};
+pub use offer_lifecycle_cli::{
+    offers_cancel_cli, offers_status_cli, OffersCancelCliResult, OffersStatusCliResult,
 };
 pub use reconcile_batch::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,

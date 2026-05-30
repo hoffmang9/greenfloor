@@ -64,9 +64,7 @@ class DaemonEngineTypes(Protocol):
     DaemonLoopRequest: type[DaemonLoopRequest]
     DaemonCycleOnceResponse: type[DaemonCycleOnceResponse]
 
-    def run_daemon_cycle_once(
-        self, request: DaemonRunOnceRequest
-    ) -> DaemonCycleOnceResponse: ...
+    def run_daemon_cycle_once(self, request: DaemonRunOnceRequest) -> DaemonCycleOnceResponse: ...
     def run_daemon_loop(self, request: DaemonLoopRequest) -> int: ...
     def reconcile_offers_cli(
         self,

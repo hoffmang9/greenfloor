@@ -5,7 +5,8 @@ use crate::runtime;
 
 use engine_core::load_program_config;
 use engine_core::daemon::{
-    consume_reload_marker, initialize_daemon_file_logging, reconcile_offers_cli, resolve_coinset_ws_url,
+    consume_reload_marker, initialize_daemon_file_logging, offers_cancel_cli, offers_status_cli,
+    reconcile_offers_cli, resolve_coinset_ws_url,
     run_daemon_cycle_once, run_daemon_loop, websocket_capture_enabled,
     CoinWatchlistCache, DaemonCycleOnceResponse, DaemonCycleTestControls, DaemonDispatchState,
     DaemonInstanceLock, DaemonLoopRequest, DaemonRunOnceRequest,
@@ -413,6 +414,59 @@ fn reconcile_offers_cli_py(
 }
 
 #[pyfunction]
+#[pyo3(
+    name = "offers_status_cli",
+    signature = (db_path, market_id=None, limit=50, events_limit=30, /)
+)]
+fn offers_status_cli_py(
+    py: Python<'_>,
+    db_path: PathBuf,
+    market_id: Option<String>,
+    limit: usize,
+    events_limit: usize,
+) -> PyResult<Py<PyAny>> {
+    let market_filter = market_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let market_ref = market_filter.as_deref();
+    let payload = offers_status_cli(&db_path, market_ref, limit, events_limit).map_err(to_py_err)?;
+    dict_from_json_value(
+        py,
+        serde_json::to_value(payload).map_err(to_py_err)?,
+    )
+}
+
+#[pyfunction]
+#[pyo3(
+    name = "offers_cancel_cli",
+    signature = (db_path, dexie_base_url, target_venue, offer_ids, cancel_open=false, /)
+)]
+fn offers_cancel_cli_py(
+    py: Python<'_>,
+    db_path: PathBuf,
+    dexie_base_url: String,
+    target_venue: String,
+    offer_ids: Vec<String>,
+    cancel_open: bool,
+) -> PyResult<Py<PyAny>> {
+    let payload = py.detach(move || {
+        runtime()
+            .block_on(offers_cancel_cli(
+                &db_path,
+                &dexie_base_url,
+                &target_venue,
+                &offer_ids,
+                cancel_open,
+            ))
+            .map_err(to_py_err)
+    })?;
+    dict_from_json_value(
+        py,
+        serde_json::to_value(payload).map_err(to_py_err)?,
+    )
+}
+
+#[pyfunction]
 #[pyo3(name = "run_daemon_cycle_once", signature = (request, /))]
 fn run_daemon_cycle_once_py(
     py: Python<'_>,
@@ -444,6 +498,8 @@ fn run_daemon_loop_py(py: Python<'_>, request: PyRef<'_, PyDaemonLoopRequest>) -
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(consume_reload_marker_py, m)?)?;
     m.add_function(wrap_pyfunction!(reconcile_offers_cli_py, m)?)?;
+    m.add_function(wrap_pyfunction!(offers_status_cli_py, m)?)?;
+    m.add_function(wrap_pyfunction!(offers_cancel_cli_py, m)?)?;
     m.add_function(wrap_pyfunction!(run_daemon_cycle_once_py, m)?)?;
     m.add_function(wrap_pyfunction!(run_daemon_loop_py, m)?)?;
     m.add_function(wrap_pyfunction!(

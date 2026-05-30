@@ -13,9 +13,13 @@ class DexieHttpMock:
     def __init__(self) -> None:
         self._offers: dict[str, dict[str, Any]] = {}
         self._list_offers: list[dict[str, Any]] = []
+        self._cancel_failures: dict[str, str] = {}
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self.base_url = "http://127.0.0.1:0"
+
+    def set_cancel_failure(self, offer_id: str, error: str) -> None:
+        self._cancel_failures[str(offer_id)] = str(error)
 
     def set_offers(self, offers: dict[str, dict[str, Any]]) -> None:
         self._offers = {str(key): dict(value) for key, value in offers.items()}
@@ -52,6 +56,11 @@ class DexieHttpMock:
                 payload = json.loads(raw.decode("utf-8") or "{}")
                 if parsed.path.startswith("/v1/offers/") and parsed.path.endswith("/cancel"):
                     offer_id = unquote(parsed.path.split("/")[3])
+                    failure = mock._cancel_failures.get(offer_id)
+                    if failure is not None:
+                        body = json.dumps({"success": False, "error": failure}).encode()
+                        self._write(200, body)
+                        return
                     row = mock._offers.setdefault(offer_id, {"id": offer_id, "status": 0})
                     row["status"] = 3
                     body = json.dumps({"success": True, "id": offer_id, "status": 3}).encode()

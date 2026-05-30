@@ -52,6 +52,8 @@ pub struct OfferStateListRow {
     pub offer_id: String,
     pub market_id: String,
     pub state: String,
+    pub last_seen_status: Option<i64>,
+    pub updated_at: String,
 }
 
 #[derive(Debug, Clone)]
