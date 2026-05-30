@@ -121,6 +121,8 @@ fn resolve_offer_publish_settings_uses_program_defaults() {
     let program = ManagerProgramConfig {
         network: "mainnet".to_string(),
         home_dir: std::path::PathBuf::from("/tmp/gf"),
+        app_log_level: "INFO".to_string(),
+        app_log_level_was_missing: false,
         dexie_api_base: "https://api.dexie.space".to_string(),
         splash_api_base: "http://localhost:4000".to_string(),
         offer_publish_venue: "splash".to_string(),

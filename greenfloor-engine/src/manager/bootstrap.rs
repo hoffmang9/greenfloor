@@ -1,11 +1,10 @@
 use std::collections::HashSet;
-use std::path::Path;
 
 use serde_json::{json, Value};
 
 use crate::coinset::{get_conservative_fee_estimate, list_wallet_unspent_coins, WalletUnspentCoin};
 use crate::coin_ops::is_spendable_wallet_coin;
-use crate::config::{load_signer_config, LadderEntry, ManagerProgramConfig, MarketConfig};
+use crate::config::{LadderEntry, ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::cycle::retry::{poll_exponential_advance_sleep, poll_exponential_sleep_now};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::bootstrap::{
@@ -210,7 +209,7 @@ async fn wait_for_coinset_confirmation(
 pub async fn signer_bootstrap_phase(
     program: &ManagerProgramConfig,
     market: &MarketConfig,
-    program_path: &Path,
+    signer_config: &SignerConfig,
     resolved_base_asset_id: &str,
     resolved_quote_asset_id: &str,
     quote_price: f64,
@@ -315,20 +314,17 @@ pub async fn signer_bootstrap_phase(
         .map(|coin| coin.id.clone())
         .collect();
 
-    let signer_config = load_signer_config(program_path)?;
-    let output_amounts: Vec<u64> = bootstrap_plan
-        .output_amounts_base_units
-        .iter()
-        .map(|amount| u64::try_from(*amount).unwrap_or(0))
-        .collect();
-    let coin_ids = vec![bootstrap_plan.source_coin_id.clone()];
     let split_result = match build_and_optionally_broadcast_vault_cat_mixed_split(
-        signer_config,
+        signer_config.clone(),
         MixedSplitRequest {
             receive_address: receive_address.to_string(),
             asset_id: crate::vault::members::hex_to_bytes32(&split_asset_id)?,
-            output_amounts,
-            coin_ids: crate::coinset::parse_coin_ids(&coin_ids)?,
+            output_amounts: bootstrap_plan
+                .output_amounts_base_units
+                .iter()
+                .map(|amount| u64::try_from(*amount).unwrap_or(0))
+                .collect(),
+            coin_ids: crate::coinset::parse_coin_ids(&[bootstrap_plan.source_coin_id.clone()])?,
             allow_sub_cat_output: false,
             fee_mojos: 0,
         },

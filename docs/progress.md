@@ -1,18 +1,33 @@
 # Progress Log
 
+## 2026-05-29 (Manager CLI Rust cutover — logging, typed post results, ADR 0012)
+
+- **Logging:** `manager/logging.rs` restores `{home_dir}/logs/debug.log` for Rust manager path; `app.log_level` parsed in `config/program.rs`.
+- **Bootstrap:** `signer_bootstrap_phase` takes `&SignerConfig` from resolved context (no second YAML read).
+- **Orchestration:** `PostAttemptSuccess` tracks publish outcome without re-parsing JSON for failure counts.
+- **Tests:** build/post fixtures extracted to `manager/fixtures/build_and_post.rs`.
+- **Decision:** ADR 0012 documents manager CLI = Rust, daemon orchestration = temporary Python until `greenfloord` migrates.
+
+## 2026-05-29 (Refactor — thin Python CLI, typed Rust orchestrator)
+
+- **Python:** `build-and-post-offer` is subprocess delegation only; no YAML preflight or venue resolution in Python.
+- **Rust:** `ResolvedBuildAndPostContext`, typed publish/persist helpers, shared coin-op spendability + retry polling.
+- **SQLite:** Rust schema is canonical for manager persistence (`storage/mod.rs`).
+
 ## 2026-05-29 (Rust manager CLI — build-and-post-offer vertical slice)
 
 - **`greenfloor-engine build-and-post-offer`:** native manager path for bootstrap → sign → verify → Dexie/Splash publish without PyO3.
 - **Config:** `config/program.rs` + `config/markets.rs` load manager program + markets YAML (market id/pair resolution, venue URLs).
 - **Adapters:** `adapters/dexie.rs` + `adapters/splash.rs` (post, invalid-offer retry, visibility polling).
 - **Orchestration:** `manager/build_and_post.rs` + `manager/bootstrap.rs` call in-process engine (`build_signer_offer_for_action`, bootstrap mixed-split).
-- **Tests:** Rust unit tests for config/market resolution and mockito Dexie publish phase; 202 existing engine tests still pass.
-- **Next:** wire CI live-testnet-e2e to Rust binary; port `coins-list` / coin-op CLIs; then `greenfloord` daemon without PyO3.
+- **Persistence:** sqlite audit records on successful post (`storage/sqlite.rs`).
+- **Tests:** Rust unit tests for config/market resolution and mockito Dexie publish phase; 210+ engine tests.
+- **Next:** port `greenfloord` daemon offer post to Rust; delete Python `offer_orchestration.py` manager path (see ADR 0012).
 
 ## 2026-05-29 (Python manager delegates build-and-post-offer to Rust binary)
 
 - **`greenfloor/cli/engine_binary.py`:** resolves `greenfloor-engine` (`GREENFLOOR_ENGINE_BIN`, PATH, or `target/{debug,release}/`) and runs `build-and-post-offer` subprocess with manager flag mapping.
-- **`greenfloor/cli/offer_build_post.py`:** Python preflight (config, signer path, market resolution, logging) then delegates; removed in-process `OfferPostRequest` path for this command.
+- **`greenfloor/cli/offer_build_post.py`:** thin subprocess wrapper only (no YAML preflight).
 - **CI:** Ubuntu CI installs debug `greenfloor-engine` into `.venv/bin`; live-testnet-e2e builds release binary and adds it to `PATH`.
 - **Tests:** manager build/post tests mock engine delegation; 544 pytest tests pass.
 

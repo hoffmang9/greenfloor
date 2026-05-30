@@ -15,6 +15,8 @@ const DEFAULT_HOME_DIR: &str = "~/.greenfloor";
 pub struct ManagerProgramConfig {
     pub network: String,
     pub home_dir: PathBuf,
+    pub app_log_level: String,
+    pub app_log_level_was_missing: bool,
     pub dexie_api_base: String,
     pub splash_api_base: String,
     pub offer_publish_venue: String,
@@ -36,6 +38,7 @@ struct ProgramYaml {
 struct AppYaml {
     network: Option<String>,
     home_dir: Option<String>,
+    log_level: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -86,7 +89,14 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
     let app = parsed.app.unwrap_or(AppYaml {
         network: None,
         home_dir: None,
+        log_level: None,
     });
+    let app_log_level_was_missing = app.log_level.is_none();
+    let app_log_level = app
+        .log_level
+        .as_deref()
+        .map(|value| normalize_manager_log_level(value))
+        .unwrap_or_else(|| "INFO".to_string());
     let network = app
         .network
         .unwrap_or_else(|| "mainnet".to_string())
@@ -143,6 +153,8 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
     Ok(ManagerProgramConfig {
         network,
         home_dir,
+        app_log_level,
+        app_log_level_was_missing,
         dexie_api_base,
         splash_api_base,
         offer_publish_venue,
@@ -255,6 +267,15 @@ pub fn action_side_from_pricing(pricing: &Value) -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or("sell")
         .to_string()
+}
+
+fn normalize_manager_log_level(log_level: &str) -> String {
+    match log_level.trim().to_ascii_uppercase().as_str() {
+        "CRITICAL" | "ERROR" | "WARNING" | "INFO" | "DEBUG" | "NOTSET" => {
+            log_level.trim().to_ascii_uppercase()
+        }
+        _ => "INFO".to_string(),
+    }
 }
 
 fn expand_home_dir(path: &str) -> PathBuf {

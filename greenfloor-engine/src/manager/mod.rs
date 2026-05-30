@@ -1,5 +1,6 @@
 mod bootstrap;
 mod build_and_post;
+mod logging;
 
 #[cfg(test)]
 mod tests;

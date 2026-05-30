@@ -23,6 +23,7 @@ use crate::storage::{
 };
 
 use super::bootstrap::{bootstrap_blocks_offer, signer_bootstrap_phase, BootstrapPhaseResult};
+use super::logging::{initialize_manager_file_logging, warn_if_log_level_auto_healed};
 
 #[derive(Debug, Clone)]
 pub struct BuildAndPostOfferRequest {
@@ -52,7 +53,7 @@ pub struct BuildAndPostOfferResponse {
 }
 
 #[derive(Debug, Clone)]
-struct ResolvedBuildAndPostContext {
+pub(crate) struct ResolvedBuildAndPostContext {
     program: ManagerProgramConfig,
     market: MarketConfig,
     signer_config: SignerConfig,
@@ -137,19 +138,12 @@ pub async fn build_and_post_offer(
                 publish_failures += 1;
                 post_results.push(failure.to_venue_result(&ctx.publish_venue));
             }
-            PostIterationOutcome::Success {
-                venue_result,
-                persist_record,
-            } => {
-                if venue_result
-                    .get("result")
-                    .and_then(|value| value.get("success"))
-                    .and_then(Value::as_bool)
-                    != Some(true)
-                {
+            PostIterationOutcome::Success(success) => {
+                if !success.success {
                     publish_failures += 1;
                 }
-                if let Some(record) = persist_record {
+                let venue_result = success.to_venue_result();
+                if let Some(record) = success.persist_record {
                     persist_records.push(record);
                 }
                 post_results.push(venue_result);
@@ -200,10 +194,24 @@ pub async fn build_and_post_offer(
 enum PostIterationOutcome {
     Preview(Value),
     Failure(PostFailure),
-    Success {
-        venue_result: Value,
-        persist_record: Option<OfferPostPersistRecord>,
-    },
+    Success(PostAttemptSuccess),
+}
+
+#[derive(Debug)]
+struct PostAttemptSuccess {
+    publish_venue: String,
+    result: Value,
+    success: bool,
+    persist_record: Option<OfferPostPersistRecord>,
+}
+
+impl PostAttemptSuccess {
+    fn to_venue_result(&self) -> Value {
+        json!({
+            "venue": self.publish_venue,
+            "result": self.result,
+        })
+    }
 }
 
 impl PostFailure {
@@ -236,6 +244,11 @@ async fn resolve_build_and_post_context(
 ) -> SignerResult<ResolvedBuildAndPostContext> {
     require_signer_offer_path(&request.program_path)?;
     let program = load_program_config(&request.program_path)?;
+    initialize_manager_file_logging(&program.home_dir, &program.app_log_level)?;
+    warn_if_log_level_auto_healed(
+        program.app_log_level_was_missing,
+        &request.program_path,
+    );
     let markets = load_markets_config_with_overlay(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
@@ -294,7 +307,7 @@ async fn run_post_iteration(
         signer_bootstrap_phase(
             &ctx.program,
             &ctx.market,
-            &request.program_path,
+            &ctx.signer_config,
             &ctx.resolved_base_asset_id,
             &ctx.resolved_quote_asset_id,
             ctx.quote_price,
@@ -410,6 +423,7 @@ async fn run_post_iteration(
         ctx,
         request.size_base_units,
     );
+    let publish_success = publish.success;
     let result_payload = finalize_publish_payload(
         publish,
         &created.execution_mode,
@@ -423,13 +437,12 @@ async fn run_post_iteration(
 
     Ok((
         bootstrap_action,
-        PostIterationOutcome::Success {
-            venue_result: json!({
-                "venue": ctx.publish_venue,
-                "result": result_payload,
-            }),
+        PostIterationOutcome::Success(PostAttemptSuccess {
+            publish_venue: ctx.publish_venue.clone(),
+            result: result_payload,
+            success: publish_success,
             persist_record,
-        },
+        }),
     ))
 }
 
@@ -599,10 +612,65 @@ fn timing_payload(
 }
 
 #[cfg(test)]
+pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostContext {
+    use std::collections::HashMap;
+
+    use chia_protocol::Bytes32;
+
+    use crate::vault::context::VaultCustodySnapshot;
+
+    ResolvedBuildAndPostContext {
+        program: ManagerProgramConfig {
+            network: "mainnet".to_string(),
+            home_dir: PathBuf::from("/tmp/gf"),
+            app_log_level: "INFO".to_string(),
+            app_log_level_was_missing: false,
+            dexie_api_base: "https://api.dexie.space".to_string(),
+            splash_api_base: "http://localhost:4000".to_string(),
+            offer_publish_venue: "dexie".to_string(),
+            coin_ops_minimum_fee_mojos: 0,
+            runtime_offer_bootstrap_wait_timeout_seconds: 120,
+        },
+        market: MarketConfig {
+            market_id: "m1".to_string(),
+            enabled: true,
+            base_asset: "a1".to_string(),
+            base_symbol: "A1".to_string(),
+            quote_asset: "xch".to_string(),
+            receive_address: "xch1".to_string(),
+            pricing: json!({}),
+            ladders: HashMap::new(),
+        },
+        signer_config: SignerConfig {
+            network: "mainnet".to_string(),
+            coinset_msp_base_url: String::new(),
+            kms_key_id: String::new(),
+            kms_region: String::new(),
+            kms_public_key_hex: None,
+            vault: VaultCustodySnapshot {
+                launcher_id: Bytes32::default(),
+                custody_threshold: 1,
+                recovery_threshold: 1,
+                recovery_clawback_timelock: 0,
+                custody_keys: Vec::new(),
+                recovery_keys: Vec::new(),
+            },
+        },
+        publish_venue: "dexie".to_string(),
+        dexie_base_url: "https://api.dexie.space".to_string(),
+        splash_base_url: "http://localhost:4000".to_string(),
+        resolved_base_asset_id: "a1".to_string(),
+        resolved_quote_asset_id: "xch".to_string(),
+        quote_price: 1.0,
+        action_side: "sell".to_string(),
+        offer_fee_mojos: 0,
+        offer_fee_source: "coinset_fee_unavailable".to_string(),
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use chia_protocol::Bytes32;
-    use crate::vault::context::VaultCustodySnapshot;
     use std::path::Path;
 
     #[test]
@@ -617,51 +685,7 @@ mod tests {
 
     #[test]
     fn offer_post_persist_record_requires_success_and_offer_id() {
-        let ctx = ResolvedBuildAndPostContext {
-            program: ManagerProgramConfig {
-                network: "mainnet".to_string(),
-                home_dir: PathBuf::from("/tmp/gf"),
-                dexie_api_base: "https://api.dexie.space".to_string(),
-                splash_api_base: "http://localhost:4000".to_string(),
-                offer_publish_venue: "dexie".to_string(),
-                coin_ops_minimum_fee_mojos: 0,
-                runtime_offer_bootstrap_wait_timeout_seconds: 120,
-            },
-            market: MarketConfig {
-                market_id: "m1".to_string(),
-                enabled: true,
-                base_asset: "a1".to_string(),
-                base_symbol: "A1".to_string(),
-                quote_asset: "xch".to_string(),
-                receive_address: "xch1".to_string(),
-                pricing: json!({}),
-                ladders: Default::default(),
-            },
-            signer_config: SignerConfig {
-                network: "mainnet".to_string(),
-                coinset_msp_base_url: String::new(),
-                kms_key_id: String::new(),
-                kms_region: String::new(),
-                kms_public_key_hex: None,
-                vault: VaultCustodySnapshot {
-                    launcher_id: Bytes32::default(),
-                    custody_threshold: 1,
-                    recovery_threshold: 1,
-                    recovery_clawback_timelock: 0,
-                    custody_keys: Vec::new(),
-                    recovery_keys: Vec::new(),
-                },
-            },
-            publish_venue: "dexie".to_string(),
-            dexie_base_url: "https://api.dexie.space".to_string(),
-            splash_base_url: "http://localhost:4000".to_string(),
-            resolved_base_asset_id: "a1".to_string(),
-            resolved_quote_asset_id: "xch".to_string(),
-            quote_price: 1.0,
-            action_side: "sell".to_string(),
-            offer_fee_mojos: 0,
-            offer_fee_source: "coinset_fee_unavailable".to_string(),
-        };
+        let ctx = sample_resolved_build_and_post_context();
         let failed = PublishResult {
             success: false,
             offer_id: Some("offer-1".to_string()),
@@ -678,6 +702,24 @@ mod tests {
             .expect("record");
         assert_eq!(record.offer_id, "offer-1");
         assert_eq!(record.market_id, "m1");
+    }
+
+    #[test]
+    fn post_attempt_success_tracks_publish_outcome_without_json_reparse() {
+        let success = PostAttemptSuccess {
+            publish_venue: "dexie".to_string(),
+            result: json!({"success": false, "error": "dexie_http_error:500"}),
+            success: false,
+            persist_record: None,
+        };
+        assert!(!success.success);
+        assert_eq!(
+            success.to_venue_result()
+                .get("result")
+                .and_then(|value| value.get("error"))
+                .and_then(Value::as_str),
+            Some("dexie_http_error:500")
+        );
     }
 
     #[test]
