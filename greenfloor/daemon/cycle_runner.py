@@ -5,46 +5,46 @@ from __future__ import annotations
 import logging
 import os
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from greenfloor.config.io import load_program_config
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
 from greenfloor.daemon.bootstrap import log_daemon_event
-from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
 from greenfloor.daemon.engine_logging import initialize_daemon_logging
 from greenfloor.daemon.market_logging import _daemon_logger
+from greenfloor.runtime.offer_watchlist import new_coin_watchlist_cache
+
+__all__ = [
+    "consume_reload_marker",
+    "new_coin_watchlist_cache",
+    "resolve_cycle_state_db_path",
+    "resolve_cycle_websocket_capture",
+    "run_daemon_cycle_once_via_engine",
+    "run_loop",
+    "run_once",
+]
 
 
 def _engine():
     return import_engine()
 
 
+def _require(name: str, *, missing: str):
+    return require_engine_method(_engine(), name, missing=missing)
+
+
 def _new_dispatch_state() -> Any:
-    dispatch_cls = require_engine_method(
-        _engine(),
-        "DaemonDispatchState",
-        missing="daemon dispatch state",
-    )
+    dispatch_cls = _require("DaemonDispatchState", missing="daemon dispatch state")
     return dispatch_cls(0, [])
-
-
-def new_coin_watchlist_cache() -> Any:
-    cache_cls = require_engine_method(
-        _engine(),
-        "CoinWatchlistCache",
-        missing="coin watchlist cache",
-    )
-    return cache_cls()
 
 
 def resolve_cycle_websocket_capture(*, program, loop_websocket_active: bool) -> bool:
     if loop_websocket_active:
         return False
     mode = str(getattr(program, "tx_block_trigger_mode", "websocket"))
-    use_websocket = require_engine_method(
-        _engine(),
+    use_websocket = _require(
         "use_websocket_capture_for_trigger_mode",
         missing="daemon websocket capture policy",
     )
@@ -60,12 +60,93 @@ def consume_reload_marker(state_dir: Path) -> bool:
 
 
 def resolve_cycle_state_db_path(*, program_home_dir: str, db_path_override: str | None) -> str:
-    resolve = require_engine_method(
-        _engine(),
-        "resolve_state_db_path",
-        missing="state db path resolution",
-    )
+    resolve = _require("resolve_state_db_path", missing="state db path resolution")
     return str(resolve(Path(program_home_dir).expanduser(), db_path_override))
+
+
+def _build_engine_request(
+    *,
+    program_path: Path,
+    markets_path: Path,
+    testnet_markets_path: Path | None,
+    allowed_keys: set[str] | None,
+    db_path_override: str | None,
+    coinset_base_url: str,
+    state_dir: Path,
+    poll_coinset_mempool: bool,
+    use_websocket_capture: bool,
+    dispatch_state: Any,
+    coin_watchlist: Any,
+    test_controls: Mapping[str, Any] | None = None,
+) -> Any:
+    controls_cls = _require("DaemonCycleTestControls", missing="daemon cycle test controls")
+    request_cls = _require("DaemonRunOnceRequest", missing="daemon cycle request")
+
+    forced = None
+    skip_strategy = False
+    if test_controls:
+        skip_strategy = bool(test_controls.get("skip_strategy_execution", False))
+        raw_forced = test_controls.get("force_market_error_for")
+        forced = str(raw_forced) if raw_forced is not None else None
+
+    return request_cls(
+        program_path,
+        markets_path,
+        coinset_base_url,
+        state_dir,
+        testnet_markets_path=testnet_markets_path,
+        state_db_override=db_path_override,
+        poll_coinset_mempool=poll_coinset_mempool,
+        use_websocket_capture=use_websocket_capture,
+        allowed_key_ids=sorted(allowed_keys or []),
+        dispatch_state=dispatch_state,
+        test_controls=controls_cls(
+            skip_strategy_execution=skip_strategy,
+            force_market_error_for=forced,
+        ),
+        coin_watchlist=coin_watchlist,
+    )
+
+
+def run_daemon_cycle_once_via_engine(
+    *,
+    program_path: Path,
+    markets_path: Path,
+    testnet_markets_path: Path | None,
+    allowed_keys: set[str] | None,
+    db_path_override: str | None,
+    coinset_base_url: str,
+    state_dir: Path,
+    poll_coinset_mempool: bool,
+    use_websocket_capture: bool,
+    dispatch_state: Any | None = None,
+    coin_watchlist: Any,
+    run_fn: Callable[[Any], Any] | None = None,
+    test_controls: Mapping[str, Any] | None = None,
+) -> tuple[int, Any]:
+    state = dispatch_state or _new_dispatch_state()
+    request = _build_engine_request(
+        program_path=program_path,
+        markets_path=markets_path,
+        testnet_markets_path=testnet_markets_path,
+        allowed_keys=allowed_keys,
+        db_path_override=db_path_override,
+        coinset_base_url=coinset_base_url,
+        state_dir=state_dir,
+        poll_coinset_mempool=poll_coinset_mempool,
+        use_websocket_capture=use_websocket_capture,
+        dispatch_state=state,
+        coin_watchlist=coin_watchlist,
+        test_controls=test_controls,
+    )
+
+    runner = run_fn or _require("run_daemon_cycle_once", missing="daemon cycle")
+    response = runner(request)
+    exit_code = int(getattr(response, "exit_code", 1))
+    updated = getattr(response, "dispatch_state", None)
+    if updated is None:
+        raise TypeError("engine run_daemon_cycle_once returned response without dispatch_state")
+    return exit_code, updated
 
 
 def run_once(
@@ -129,8 +210,7 @@ def run_loop(
         program_home_dir=current_program.home_dir,
         db_path_override=db_path_override,
     )
-    start_ws_loop = require_engine_method(
-        _engine(),
+    start_ws_loop = _require(
         "start_coinset_websocket_loop",
         missing="daemon coinset websocket loop",
     )

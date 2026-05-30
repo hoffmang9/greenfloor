@@ -9,8 +9,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
-from greenfloor.daemon.cycle_runner import new_coin_watchlist_cache, run_once
-from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
+from greenfloor.daemon.cycle_runner import (
+    new_coin_watchlist_cache,
+    run_daemon_cycle_once_via_engine,
+    run_once,
+)
 
 
 def _coin_watchlist() -> Any:

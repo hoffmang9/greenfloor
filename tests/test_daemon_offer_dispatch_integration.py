@@ -73,7 +73,7 @@ def test_run_daemon_cycle_once_accepts_typed_request(tmp_path: Path) -> None:
 
 
 def test_daemon_dispatch_state_round_trip_via_engine_cycle(tmp_path: Path) -> None:
-    from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
+    from greenfloor.daemon.cycle_runner import run_daemon_cycle_once_via_engine
 
     captured: list[Any] = []
     dispatch_cls = require_engine_method(

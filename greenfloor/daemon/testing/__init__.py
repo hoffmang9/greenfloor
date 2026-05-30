@@ -35,7 +35,6 @@ from greenfloor.daemon.testing.main import (
     run_once,
 )
 from greenfloor.daemon.testing.market_helpers import resolve_quote_asset_for_offer
-from greenfloor.daemon.testing.reconcile import reconcile_market_cycle_offers
 from greenfloor.daemon.testing.strategy_state import (
     inject_reseed_action_if_no_active_offers,
     strategy_config_from_market,
@@ -70,7 +69,6 @@ __all__ = [
     "main",
     "match_watched_coin_ids",
     "post_retry_config",
-    "reconcile_market_cycle_offers",
     "resolve_quote_asset_for_offer",
     "run_loop",
     "run_once",

@@ -46,7 +46,7 @@ def reseed_mempool_max_age_seconds() -> int:
     return int(fn())
 
 
-RESEED_MEMPOOL_MAX_AGE_SECONDS = 3 * 60
+RESEED_MEMPOOL_MAX_AGE_SECONDS = reseed_mempool_max_age_seconds()
 
 
 def is_dexie_offer_missing_error(error: Exception) -> bool:

@@ -164,6 +164,9 @@ pub enum SignerError {
     #[error("database is locked")]
     DatabaseLocked,
 
+    #[error("daemon_already_running:{path}{detail}")]
+    DaemonAlreadyRunning { path: String, detail: String },
+
     #[error("{0}")]
     Other(String),
 }

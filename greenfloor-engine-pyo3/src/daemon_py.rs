@@ -10,12 +10,26 @@ use engine_core::daemon::{
     DaemonCycleOnceResponse, DaemonCycleTestControls, DaemonDispatchState, DaemonInstanceLock,
     DaemonRunOnceRequest,
 };
-use crate::py_utils::dict_from_json_value;
+use crate::py_utils::{dict_from_json_value, to_py_err};
+use engine_core::error::SignerError;
 use engine_core::storage::resolve_state_db_path;
+use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
-use crate::py_utils::to_py_err;
+pyo3::create_exception!(
+    greenfloor_engine,
+    DaemonLockConflict,
+    PyException,
+    "Raised when another greenfloord instance holds the state-dir lock."
+);
+
+fn map_daemon_lock_err(err: SignerError) -> PyErr {
+    match err {
+        SignerError::DaemonAlreadyRunning { .. } => DaemonLockConflict::new_err(err.to_string()),
+        other => to_py_err(other),
+    }
+}
 
 #[pyclass(name = "CoinWatchlistCache")]
 #[derive(Clone)]
@@ -263,7 +277,7 @@ impl PyCoinsetWebsocketLoop {
 #[pyfunction]
 #[pyo3(name = "acquire_daemon_instance_lock", signature = (state_dir, mode, /))]
 fn acquire_daemon_instance_lock_py(state_dir: PathBuf, mode: &str) -> PyResult<PyDaemonInstanceLock> {
-    let lock = DaemonInstanceLock::acquire(&state_dir, mode).map_err(to_py_err)?;
+    let lock = DaemonInstanceLock::acquire(&state_dir, mode).map_err(map_daemon_lock_err)?;
     Ok(PyDaemonInstanceLock {
         inner: Some(lock),
     })
@@ -372,5 +386,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDaemonCycleTestControls>()?;
     m.add_class::<PyDaemonRunOnceRequest>()?;
     m.add_class::<PyDaemonCycleOnceResponse>()?;
+    m.add("DaemonLockConflict", m.py().get_type::<DaemonLockConflict>())?;
     Ok(())
 }

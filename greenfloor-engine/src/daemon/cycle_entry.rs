@@ -97,17 +97,6 @@ async fn dispatch_markets(
     plan: &CyclePlan,
     markets: Vec<MarketConfig>,
 ) -> SignerResult<(Vec<SingleMarketCycleOutput>, u64)> {
-    if dispatch_context.parallel_markets_enabled && markets.len() > 1 {
-        cycle_store.add_audit_event(
-            "parallel_markets_ignored",
-            &serde_json::json!({
-                "market_count": markets.len(),
-                "reason": "daemon runs markets sequentially on one sqlite connection",
-            }),
-            None,
-        )?;
-    }
-
     let mut worker_errors = 0u64;
     let mut outputs = Vec::with_capacity(markets.len());
     for market in markets {
@@ -162,7 +151,6 @@ async fn run_daemon_cycle_once_inner(
         allowed_key_ids: request.allowed_key_ids.clone(),
         xch_price_usd: preamble.xch_price_usd,
         previous_xch_price_usd: plan.previous_xch_price_usd,
-        parallel_markets_enabled: plan.parallel_markets_enabled,
         runtime_dry_run: plan.runtime_dry_run,
         test_controls: plan.test_controls.clone(),
     };

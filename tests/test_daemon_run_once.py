@@ -67,7 +67,7 @@ def test_run_once_multi_market_sequential_execution(
     finally:
         store.close()
     assert len(ignored) == 1
-    assert ignored[0]["payload"]["market_count"] == 2
+    assert ignored[0]["payload"]["enabled_market_count"] == 2
     assert len(events) == 1
     payload = events[0]["payload"]
     assert payload["markets_attempted"] == 2
@@ -197,11 +197,17 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(
 
 
 def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:
+    from greenfloor.core.engine_bridge import import_engine, require_engine_method
     from greenfloor.daemon.main import _acquire_daemon_instance_lock
 
+    lock_conflict = require_engine_method(
+        import_engine(),
+        "DaemonLockConflict",
+        missing="daemon lock conflict type",
+    )
     state_dir = tmp_path / "state"
     with _acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
-        with pytest.raises(Exception, match="daemon_already_running"):
+        with pytest.raises(lock_conflict):
             with _acquire_daemon_instance_lock(state_dir=state_dir, mode="once"):
                 pass
 

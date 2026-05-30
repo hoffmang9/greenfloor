@@ -58,7 +58,6 @@ pub struct CyclePlan {
     pub dispatch_state: DaemonDispatchState,
     pub stale_open_sweep: StaleSweepProgress,
     pub configured_market_slot_count: u64,
-    pub parallel_markets_enabled: bool,
     pub runtime_dry_run: bool,
     pub db_path: PathBuf,
     pub previous_xch_price_usd: Option<f64>,
@@ -101,8 +100,17 @@ pub async fn build_cycle_plan(
     };
 
     let runtime_market_slot_count = program.runtime_market_slot_count;
-    let parallel_markets_enabled = program.runtime_parallel_markets;
     let runtime_dry_run = program.runtime_dry_run;
+    if program.runtime_parallel_markets && enabled_market_ids.len() > 1 {
+        store.add_audit_event(
+            "parallel_markets_ignored",
+            &json!({
+                "enabled_market_count": enabled_market_ids.len(),
+                "reason": "daemon runs markets sequentially on one sqlite connection",
+            }),
+            None,
+        )?;
+    }
     let mut dispatch_state = request.dispatch_state.clone();
     for market_id in &stale_open_sweep.requeue_market_ids {
         dispatch_state.immediate_requeue_ids =
@@ -139,7 +147,6 @@ pub async fn build_cycle_plan(
         dispatch_state,
         stale_open_sweep,
         configured_market_slot_count: runtime_market_slot_count,
-        parallel_markets_enabled,
         runtime_dry_run,
         db_path,
         previous_xch_price_usd,
@@ -235,7 +242,6 @@ mod tests {
                 truncated: false,
             },
             configured_market_slot_count: 1,
-            parallel_markets_enabled: false,
             runtime_dry_run: false,
             db_path: PathBuf::from("/tmp/db.sqlite"),
             previous_xch_price_usd: None,

@@ -5,7 +5,6 @@ use serde_json::Value;
 use crate::adapters::DexieClient;
 use crate::cycle::{
     is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
-    CycleOfferTransition,
 };
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
@@ -24,6 +23,47 @@ fn offer_id_from_payload(offer: &Value) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn missing_offer_error_from_payload(payload: &Value) -> Option<String> {
+    if payload.get("success") != Some(&Value::Bool(false)) {
+        return None;
+    }
+    let error_text = payload
+        .get("error")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if is_dexie_offer_missing_error_text(error_text) {
+        Some(error_text.to_string())
+    } else {
+        None
+    }
+}
+
+fn apply_missing_watched_offer(
+    store: &SqliteStore,
+    market_id: &str,
+    watched_offer_id: &str,
+    error_text: &str,
+    state_by_offer_id: &mut HashMap<String, String>,
+    metrics: &mut ReconcilePhaseMetrics,
+) -> SignerResult<()> {
+    let current_state = state_by_offer_id
+        .get(watched_offer_id)
+        .map(String::as_str)
+        .unwrap_or("open");
+    let transition = resolve_missing_watched_offer_transition(current_state)
+        .map_err(|parse_err| SignerError::Other(parse_err.to_string()))?;
+    apply_reconcile_transition(
+        store,
+        market_id,
+        watched_offer_id,
+        &transition,
+        metrics,
+        state_by_offer_id,
+        None,
+        Some(error_text),
+    )
 }
 
 pub async fn augment_dexie_offers_for_watchlist(
@@ -59,27 +99,29 @@ pub async fn augment_dexie_offers_for_watchlist(
         }
         match dexie.get_offer(watched_offer_id).await {
             Ok(payload) => {
-                if let Some(single_offer) = payload.get("offer") {
+                if let Some(error_text) = missing_offer_error_from_payload(&payload) {
+                    missing_watched_offer_ids.insert(watched_offer_id.clone());
+                    apply_missing_watched_offer(
+                        store,
+                        market_id,
+                        watched_offer_id,
+                        &error_text,
+                        state_by_offer_id,
+                        metrics,
+                    )?;
+                } else if let Some(single_offer) = payload.get("offer") {
                     augmented_by_id.insert(watched_offer_id.clone(), single_offer.clone());
                 }
             }
             Err(err) if is_dexie_offer_missing_error_text(&err.to_string()) => {
                 missing_watched_offer_ids.insert(watched_offer_id.clone());
-                let current_state = state_by_offer_id
-                    .get(watched_offer_id)
-                    .map(String::as_str)
-                    .unwrap_or("open");
-                let transition = resolve_missing_watched_offer_transition(current_state)
-                    .map_err(|parse_err| SignerError::Other(parse_err.to_string()))?;
-                apply_reconcile_transition(
+                apply_missing_watched_offer(
                     store,
                     market_id,
                     watched_offer_id,
-                    &transition,
-                    metrics,
+                    &err.to_string(),
                     state_by_offer_id,
-                    None,
-                    Some(&err.to_string()),
+                    metrics,
                 )?;
             }
             Err(err) => {

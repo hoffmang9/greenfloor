@@ -49,7 +49,6 @@ pub struct MarketDispatchContext {
     pub allowed_key_ids: Vec<String>,
     pub xch_price_usd: Option<f64>,
     pub previous_xch_price_usd: Option<f64>,
-    pub parallel_markets_enabled: bool,
     pub runtime_dry_run: bool,
     pub test_controls: super::run_once::DaemonCycleTestControls,
 }

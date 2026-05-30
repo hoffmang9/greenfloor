@@ -31,6 +31,14 @@ def _acquire_daemon_instance_lock(*, state_dir: Path, mode: str):
     return acquire(state_dir, mode)
 
 
+def _daemon_lock_conflict_type():
+    return require_engine_method(
+        _engine(),
+        "DaemonLockConflict",
+        missing="daemon lock conflict type",
+    )
+
+
 def main() -> None:
     def _default_testnet_markets_config_path() -> str:
         candidate = Path("~/.greenfloor/config/testnet-markets.yaml").expanduser()
@@ -121,9 +129,7 @@ def main() -> None:
                 coinset_base_url=args.coinset_base_url,
                 state_dir=state_dir,
             )
-    except Exception as exc:
-        if "daemon_already_running" not in str(exc):
-            raise
+    except _daemon_lock_conflict_type() as exc:
         try:
             program = load_program_config(Path(args.program_config))
             initialize_daemon_logging(program=program, program_path=Path(args.program_config))

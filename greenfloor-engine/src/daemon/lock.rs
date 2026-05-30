@@ -34,7 +34,7 @@ impl DaemonInstanceLock {
                     path.display()
                 ))
             })?;
-        if let Err(err) = lock_exclusive_nonblocking(&file) {
+        if let Err(_err) = lock_exclusive_nonblocking(&file) {
             let mut existing = String::new();
             let _ = File::open(&path).and_then(|mut handle| handle.read_to_string(&mut existing));
             let detail = if existing.trim().is_empty() {
@@ -42,10 +42,10 @@ impl DaemonInstanceLock {
             } else {
                 format!(" daemon_lock_metadata={}", existing.trim())
             };
-            return Err(SignerError::Other(format!(
-                "daemon_already_running:{}{detail}: {err}",
-                path.display()
-            )));
+            return Err(SignerError::DaemonAlreadyRunning {
+                path: path.display().to_string(),
+                detail,
+            });
         }
         let payload = json!({
             "pid": std::process::id(),

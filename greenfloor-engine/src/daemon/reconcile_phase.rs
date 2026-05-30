@@ -259,3 +259,212 @@ pub async fn run_market_reconcile_phase(
         metrics,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use mockito::Matcher;
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::adapters::DexieClient;
+    use crate::config::MarketConfig;
+    use crate::daemon::watchlist::cache::CoinWatchlistCache;
+    use crate::storage::SqliteStore;
+
+    fn sample_market(base_asset: &str, quote_asset: &str) -> MarketConfig {
+        MarketConfig {
+            market_id: "m1".to_string(),
+            enabled: true,
+            base_asset: base_asset.to_string(),
+            base_symbol: "AS1".to_string(),
+            quote_asset: quote_asset.to_string(),
+            quote_asset_type: "unstable".to_string(),
+            receive_address: "xch1test".to_string(),
+            signer_key_id: "key-1".to_string(),
+            mode: "sell_only".to_string(),
+            pricing: json!({}),
+            cancel_move_threshold_bps: None,
+            ladders: HashMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn reconcile_expires_watched_offer_on_dexie_404() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        store
+            .upsert_offer_state("offer-50", "m1", "open", Some(0))
+            .expect("seed");
+
+        let mut server = mockito::Server::new_async().await;
+        let _list = server
+            .mock("GET", Matcher::Regex(r"/v1/offers\?.*".to_string()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"offers":[]}"#)
+            .create();
+        let _single = server
+            .mock("GET", "/v1/offers/offer-50")
+            .with_status(404)
+            .with_body(r#"{"success":false,"error":"Not Found"}"#)
+            .create();
+        let dexie = DexieClient::new(server.url());
+        let watchlist = CoinWatchlistCache::new();
+
+        let result = run_market_reconcile_phase(
+            &store,
+            &watchlist,
+            &dexie,
+            &sample_market("asset1", "xch"),
+            "mainnet",
+        )
+        .await
+        .expect("reconcile");
+
+        let rows = store
+            .list_offer_state_details("m1", 20)
+            .expect("rows");
+        let row = rows
+            .into_iter()
+            .find(|entry| entry.offer_id == "offer-50")
+            .expect("offer row");
+        let transitions = store
+            .list_recent_audit_events(
+                Some(&["offer_lifecycle_transition"]),
+                Some("m1"),
+                20,
+            )
+            .expect("audit");
+
+        assert_eq!(row.state, "expired");
+        assert!(row.last_seen_status.is_none());
+        assert_eq!(transitions[0].payload["offer_id"], "offer-50");
+        assert_eq!(transitions[0].payload["signal_source"], "dexie_get_offer_404");
+        assert!(result.metrics.immediate_requeue_requested);
+        assert!(result
+            .metrics
+            .immediate_requeue_signals
+            .iter()
+            .any(|signal| signal.contains("expired")));
+    }
+
+    #[tokio::test]
+    async fn reconcile_requests_immediate_requeue_on_dexie_status_confirmed() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        store
+            .upsert_offer_state("offer-confirmed", "m1", "open", Some(0))
+            .expect("seed");
+
+        let mut server = mockito::Server::new_async().await;
+        let _list = server
+            .mock("GET", Matcher::Regex(r"/v1/offers\?.*".to_string()))
+            .with_status(200)
+            .with_body(
+                r#"{"success":true,"offers":[{"id":"offer-confirmed","status":4,"offered":[{"asset_id":"asset1","amount":50000}],"requested":[{"asset_id":"xch","amount":1000}]}]}"#,
+            )
+            .create();
+        let dexie = DexieClient::new(server.url());
+        let watchlist = CoinWatchlistCache::new();
+
+        let result = run_market_reconcile_phase(
+            &store,
+            &watchlist,
+            &dexie,
+            &sample_market("asset1", "xch"),
+            "mainnet",
+        )
+        .await
+        .expect("reconcile");
+
+        let rows = store
+            .list_offer_state_details("m1", 20)
+            .expect("rows");
+        let row = rows
+            .into_iter()
+            .find(|entry| entry.offer_id == "offer-confirmed")
+            .expect("offer row");
+
+        assert_eq!(row.state, "tx_block_confirmed");
+        assert_eq!(row.last_seen_status, Some(4));
+        assert!(result.metrics.immediate_requeue_requested);
+        assert!(result
+            .metrics
+            .immediate_requeue_signals
+            .iter()
+            .any(|signal| signal.contains("tx_confirmed")));
+    }
+
+    #[tokio::test]
+    async fn reconcile_resolves_xch_quote_before_dexie_fetch() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+
+        let mut server = mockito::Server::new_async().await;
+        let _list = server
+            .mock(
+                "GET",
+                Matcher::Regex(r"/v1/offers\?offered=asset1&requested=xch".to_string()),
+            )
+            .with_status(200)
+            .with_body(r#"{"success":true,"offers":[]}"#)
+            .create();
+        let dexie = DexieClient::new(server.url());
+        let watchlist = CoinWatchlistCache::new();
+
+        run_market_reconcile_phase(
+            &store,
+            &watchlist,
+            &dexie,
+            &sample_market("asset1", "xch"),
+            "mainnet",
+        )
+        .await
+        .expect("reconcile");
+    }
+
+    #[tokio::test]
+    async fn reconcile_dexie_fallback_status_does_not_mark_mempool() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        store
+            .upsert_offer_state("offer-open", "m1", "open", Some(0))
+            .expect("seed");
+
+        let mut server = mockito::Server::new_async().await;
+        let _list = server
+            .mock("GET", Matcher::Regex(r"/v1/offers\?.*".to_string()))
+            .with_status(200)
+            .with_body(r#"{"success":true,"offers":[{"id":"offer-open","status":5}]}"#)
+            .create();
+        let dexie = DexieClient::new(server.url());
+        let watchlist = CoinWatchlistCache::new();
+
+        run_market_reconcile_phase(
+            &store,
+            &watchlist,
+            &dexie,
+            &sample_market("asset1", "xch"),
+            "mainnet",
+        )
+        .await
+        .expect("reconcile");
+
+        let rows = store
+            .list_offer_state_details("m1", 20)
+            .expect("rows");
+        let row = rows
+            .into_iter()
+            .find(|entry| entry.offer_id == "offer-open")
+            .expect("offer row");
+
+        assert_eq!(row.state, "open");
+        assert_eq!(row.last_seen_status, Some(5));
+    }
+}
