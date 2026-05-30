@@ -3,62 +3,44 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
-import fcntl
-import json
 import logging
-import os
-from datetime import UTC, datetime
 from pathlib import Path
 
 from greenfloor.config.io import default_state_dir_path, load_program_config
-from greenfloor.daemon.bootstrap import (
-    initialize_daemon_file_logging,
-    log_daemon_event,
-    warn_if_daemon_log_level_auto_healed,
-)
+from greenfloor.core.engine_bridge import import_engine, require_engine_method
+from greenfloor.daemon.bootstrap import log_daemon_event
 from greenfloor.daemon.cycle_runner import resolve_cycle_websocket_capture, run_loop, run_once
 
-_DAEMON_INSTANCE_LOCK_FILENAME = "daemon.lock"
+
+def _engine():
+    return import_engine()
 
 
-def _daemon_instance_lock_path(*, state_dir: Path) -> Path:
-    return state_dir / _DAEMON_INSTANCE_LOCK_FILENAME
+def _initialize_daemon_logging(*, program, program_path: Path) -> None:
+    init_logging = require_engine_method(
+        _engine(),
+        "initialize_daemon_file_logging",
+        missing="daemon logging",
+    )
+    warn_healed = require_engine_method(
+        _engine(),
+        "warn_if_daemon_log_level_auto_healed",
+        missing="daemon logging heal warning",
+    )
+    init_logging(program.home_dir, getattr(program, "app_log_level", "INFO"))
+    warn_healed(
+        bool(getattr(program, "app_log_level_was_missing", False)),
+        str(program_path),
+    )
 
 
-@contextlib.contextmanager
 def _acquire_daemon_instance_lock(*, state_dir: Path, mode: str):
-    state_dir.mkdir(parents=True, exist_ok=True)
-    lock_path = _daemon_instance_lock_path(state_dir=state_dir)
-    lock_file = lock_path.open("a+", encoding="utf-8")
-    try:
-        try:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            existing = ""
-            try:
-                lock_file.seek(0)
-                existing = lock_file.read().strip()
-            except Exception:
-                existing = ""
-            detail = f" daemon_lock_metadata={existing}" if existing else ""
-            raise RuntimeError(f"daemon_already_running:{lock_path}{detail}") from exc
-        payload = {
-            "pid": os.getpid(),
-            "mode": str(mode).strip(),
-            "acquired_at": datetime.now(UTC).isoformat(),
-        }
-        lock_file.seek(0)
-        lock_file.truncate()
-        lock_file.write(json.dumps(payload, sort_keys=True))
-        lock_file.flush()
-        yield
-    finally:
-        try:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-        except Exception:
-            pass
-        lock_file.close()
+    acquire = require_engine_method(
+        _engine(),
+        "acquire_daemon_instance_lock",
+        missing="daemon instance lock",
+    )
+    return acquire(state_dir, mode)
 
 
 def main() -> None:
@@ -118,12 +100,7 @@ def main() -> None:
     try:
         if args.once:
             program = load_program_config(Path(args.program_config))
-            initialize_daemon_file_logging(
-                program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
-            )
-            warn_if_daemon_log_level_auto_healed(
-                program=program, program_path=Path(args.program_config)
-            )
+            _initialize_daemon_logging(program=program, program_path=Path(args.program_config))
             use_websocket_capture = resolve_cycle_websocket_capture(
                 program=program,
                 loop_websocket_active=False,
@@ -155,15 +132,12 @@ def main() -> None:
                 coinset_base_url=args.coinset_base_url,
                 state_dir=state_dir,
             )
-    except RuntimeError as exc:
+    except Exception as exc:
+        if "daemon_already_running" not in str(exc):
+            raise
         try:
             program = load_program_config(Path(args.program_config))
-            initialize_daemon_file_logging(
-                program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
-            )
-            warn_if_daemon_log_level_auto_healed(
-                program=program, program_path=Path(args.program_config)
-            )
+            _initialize_daemon_logging(program=program, program_path=Path(args.program_config))
         except Exception:
             pass
         log_daemon_event(

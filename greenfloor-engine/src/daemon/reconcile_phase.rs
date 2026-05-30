@@ -14,7 +14,7 @@ use crate::storage::SqliteStore;
 use super::coinset_tx::{
     build_dexie_size_by_offer_id, dexie_offer_status, extract_coinset_tx_ids_from_offer_payload,
 };
-use super::watchlist::watchlist_offer_ids;
+use super::watchlist::{update_market_coin_watchlist_from_offers, watchlist_offer_ids};
 
 #[derive(Debug, Clone, Default)]
 pub struct ReconcilePhaseMetrics {
@@ -306,6 +306,8 @@ pub async fn run_market_reconcile_phase(
             None,
         )?;
     }
+
+    update_market_coin_watchlist_from_offers(store, market_id, &augmented_offers)?;
 
     Ok(ReconcilePhaseResult {
         offers: augmented_offers,

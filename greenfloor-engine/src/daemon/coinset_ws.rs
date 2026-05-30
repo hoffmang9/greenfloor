@@ -1,3 +1,7 @@
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
@@ -7,8 +11,10 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use crate::coinset::get_all_mempool_tx_ids;
 use crate::config::ManagerProgramConfig;
 use crate::daemon::coinset_tx::{
-    classify_ws_payload_tx_ids, extract_coinset_tx_ids_from_offer_payload,
+    classify_ws_payload_tx_ids, extract_coin_ids_from_offer_payload,
+    extract_coinset_tx_ids_from_offer_payload,
 };
+use crate::daemon::watchlist::match_watched_coin_ids;
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
@@ -37,12 +43,111 @@ pub fn resolve_coinset_ws_url(program: &ManagerProgramConfig, coinset_base_url: 
     }
     let trimmed = base_url.trim_end_matches('/');
     if trimmed.starts_with("https://") {
-        return format!("wss://{}", trimmed.trim_start_matches("https://"));
+        let host = trimmed.trim_start_matches("https://");
+        return format!("wss://{host}/ws");
     }
     if trimmed.starts_with("http://") {
-        return format!("ws://{}", trimmed.trim_start_matches("http://"));
+        let host = trimmed.trim_start_matches("http://");
+        return format!("ws://{host}/ws");
     }
     trimmed.to_string()
+}
+
+pub struct CoinsetWebsocketLoopHandle {
+    stop: Arc<AtomicBool>,
+    join: Option<JoinHandle<()>>,
+}
+
+impl CoinsetWebsocketLoopHandle {
+    pub fn stop(mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(join) = self.join.take() {
+            let _ = join.join();
+        }
+    }
+}
+
+pub fn start_coinset_websocket_loop(
+    db_path: PathBuf,
+    program: ManagerProgramConfig,
+    coinset_base_url: String,
+) -> CoinsetWebsocketLoopHandle {
+    ensure_rustls_crypto_provider();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_flag = stop.clone();
+    let join = thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("coinset websocket loop runtime");
+        runtime.block_on(run_coinset_websocket_loop(
+            db_path,
+            program,
+            coinset_base_url,
+            stop_flag,
+        ));
+    });
+    CoinsetWebsocketLoopHandle {
+        stop,
+        join: Some(join),
+    }
+}
+
+async fn run_coinset_websocket_loop(
+    db_path: PathBuf,
+    program: ManagerProgramConfig,
+    coinset_base_url: String,
+    stop: Arc<AtomicBool>,
+) {
+    let Ok(store) = SqliteStore::open(&db_path) else {
+        return;
+    };
+    let ws_url = resolve_coinset_ws_url(&program, &coinset_base_url);
+    let reconnect =
+        Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1) as u64);
+
+    while !stop.load(Ordering::SeqCst) {
+        let _ = run_recovery_poll(&store, &program, &coinset_base_url, "connected").await;
+        let _ = store.add_audit_event(
+            "coinset_ws_connecting",
+            &serde_json::json!({"ws_url": ws_url}),
+            None,
+        );
+        match connect_async(&ws_url).await {
+            Ok((mut ws, _response)) => {
+                let _ = store.add_audit_event(
+                    "coinset_ws_connected",
+                    &serde_json::json!({"ws_url": ws_url}),
+                    None,
+                );
+                while !stop.load(Ordering::SeqCst) {
+                    match tokio::time::timeout(Duration::from_secs(1), ws.next()).await {
+                        Ok(Some(Ok(Message::Text(text)))) => {
+                            let _ = handle_ws_text(&store, &text);
+                        }
+                        Ok(Some(Ok(Message::Ping(payload)))) => {
+                            let _ = ws.send(Message::Pong(payload)).await;
+                        }
+                        Ok(Some(Ok(Message::Close(_)))) => break,
+                        Ok(Some(Err(_))) | Ok(None) => break,
+                        Err(_) => continue,
+                        _ => {}
+                    }
+                }
+            }
+            Err(err) => {
+                let _ = store.add_audit_event(
+                    "coinset_ws_disconnected",
+                    &serde_json::json!({"error": err.to_string()}),
+                    None,
+                );
+            }
+        }
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
+        tokio::time::sleep(reconnect).await;
+    }
 }
 
 pub async fn capture_coinset_websocket_once(
@@ -162,6 +267,22 @@ fn handle_ws_text(store: &SqliteStore, raw: &str) -> SignerResult<()> {
             return Ok(());
         }
     };
+    if !payload.is_object() {
+        let kind = match &payload {
+            Value::Null => "null",
+            Value::Bool(_) => "bool",
+            Value::Number(_) => "number",
+            Value::String(_) => "string",
+            Value::Array(_) => "array",
+            Value::Object(_) => "object",
+        };
+        store.add_audit_event(
+            "coinset_ws_payload_ignored",
+            &serde_json::json!({"kind": kind}),
+            None,
+        )?;
+        return Ok(());
+    }
     let (mempool_tx_ids, confirmed_tx_ids) = classify_ws_payload_tx_ids(&payload);
     if !mempool_tx_ids.is_empty() {
         let new_count = store.observe_mempool_tx_ids(&mempool_tx_ids)?;
@@ -185,15 +306,59 @@ fn handle_ws_text(store: &SqliteStore, raw: &str) -> SignerResult<()> {
             &serde_json::json!({"tx_id_count": confirmed_tx_ids.len(), "confirmed_count": confirmed}),
             None,
         )?;
-    }
-    let coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(&payload);
-    if !coinset_tx_ids.is_empty() {
         store.add_audit_event(
-            "coinset_ws_coin_observed",
-            &serde_json::json!({"coin_id_count": coinset_tx_ids.len()}),
+            "tx_block_confirmed",
+            &serde_json::json!({
+                "tx_ids": confirmed_tx_ids,
+                "confirmed_count": confirmed,
+                "source": "coinset_websocket",
+            }),
             None,
         )?;
     }
+    let observed_coin_ids = extract_coin_ids_from_offer_payload(&payload);
+    if !observed_coin_ids.is_empty() {
+        store.add_audit_event(
+            "coinset_ws_coin_observed",
+            &serde_json::json!({"coin_id_count": observed_coin_ids.len()}),
+            None,
+        )?;
+        let hits = match_watched_coin_ids(&observed_coin_ids);
+        if !hits.is_empty() {
+            let mut sample: Vec<String> = observed_coin_ids
+                .iter()
+                .map(|coin_id| coin_id.trim().to_ascii_lowercase())
+                .collect();
+            sample.sort();
+            sample.truncate(10);
+            let market_hits: serde_json::Map<String, Value> = hits
+                .into_iter()
+                .map(|(market_id, coin_ids)| {
+                    (
+                        market_id,
+                        Value::Array(
+                            coin_ids
+                                .into_iter()
+                                .take(10)
+                                .map(Value::String)
+                                .collect(),
+                        ),
+                    )
+                })
+                .collect();
+            store.add_audit_event(
+                "coin_watch_hit",
+                &serde_json::json!({
+                    "coin_id_count": observed_coin_ids.len(),
+                    "coin_ids_sample": sample,
+                    "market_hits": market_hits,
+                    "source": "coinset_websocket",
+                }),
+                None,
+            )?;
+        }
+    }
+    let _coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(&payload);
     Ok(())
 }
 

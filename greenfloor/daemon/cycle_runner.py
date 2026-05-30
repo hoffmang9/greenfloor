@@ -10,24 +10,34 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from greenfloor.config.io import load_program_config
+from greenfloor.config.io import load_program_config, resolve_state_db_path
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
-from greenfloor.daemon.bootstrap import (
-    initialize_daemon_file_logging,
-    log_daemon_event,
-    warn_if_daemon_log_level_auto_healed,
-)
-from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient
-from greenfloor.daemon.cycle_market_batch import (
-    MarketDispatchState,
-)
-from greenfloor.daemon.cycle_ws_handlers import build_coinset_websocket_handlers
+from greenfloor.daemon.bootstrap import log_daemon_event
+from greenfloor.daemon.cycle_market_batch import MarketDispatchState
 from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
-from greenfloor.daemon.inventory_scan import (
-    _build_coinset_adapter,
-    _resolve_coinset_ws_url,
-)
 from greenfloor.daemon.market_logging import _daemon_logger
+
+
+def _engine():
+    return import_engine()
+
+
+def _initialize_daemon_logging(*, program, program_path: Path) -> None:
+    init_logging = require_engine_method(
+        _engine(),
+        "initialize_daemon_file_logging",
+        missing="daemon logging",
+    )
+    warn_healed = require_engine_method(
+        _engine(),
+        "warn_if_daemon_log_level_auto_healed",
+        missing="daemon logging heal warning",
+    )
+    init_logging(program.home_dir, getattr(program, "app_log_level", "INFO"))
+    warn_healed(
+        bool(getattr(program, "app_log_level_was_missing", False)),
+        str(program_path),
+    )
 
 
 def resolve_cycle_websocket_capture(*, program, loop_websocket_active: bool) -> bool:
@@ -35,7 +45,7 @@ def resolve_cycle_websocket_capture(*, program, loop_websocket_active: bool) -> 
         return False
     mode = str(getattr(program, "tx_block_trigger_mode", "websocket"))
     use_websocket = require_engine_method(
-        import_engine(),
+        _engine(),
         "use_websocket_capture_for_trigger_mode",
         missing="daemon websocket capture policy",
     )
@@ -96,43 +106,26 @@ def run_loop(
 ) -> int:
     current_program = load_program_config(program_path)
     market_dispatch_state = MarketDispatchState()
-    initialize_daemon_file_logging(
-        current_program.home_dir, log_level=getattr(current_program, "app_log_level", "INFO")
-    )
-    warn_if_daemon_log_level_auto_healed(program=current_program, program_path=program_path)
+    _initialize_daemon_logging(program=current_program, program_path=program_path)
     _daemon_logger.info(
         "daemon_starting mode=loop program_config=%s markets_config=%s",
         os.fspath(program_path),
         os.fspath(markets_path),
     )
-    from greenfloor.config.io import resolve_state_db_path
-
     db_path = resolve_state_db_path(
         program_home_dir=current_program.home_dir,
         explicit_db_path=db_path_override,
     )
-    coinset = _build_coinset_adapter(program=current_program, coinset_base_url=coinset_base_url)
-    ws_url = _resolve_coinset_ws_url(program=current_program, coinset_base_url=coinset_base_url)
-    ws_handlers = build_coinset_websocket_handlers(db_path=db_path)
-
-    ws_client = CoinsetWebsocketClient(
-        ws_url=ws_url,
-        reconnect_interval_seconds=current_program.tx_block_websocket_reconnect_interval_seconds,
-        on_mempool_tx_ids=ws_handlers.on_mempool_tx_ids,
-        on_confirmed_tx_ids=ws_handlers.on_confirmed_tx_ids,
-        on_audit_event=ws_handlers.on_audit_event,
-        on_observed_coin_ids=ws_handlers.on_observed_coin_ids,
-        recovery_poll=coinset.get_all_mempool_tx_ids,
+    start_ws_loop = require_engine_method(
+        _engine(),
+        "start_coinset_websocket_loop",
+        missing="daemon coinset websocket loop",
     )
-    ws_client.start()
+    ws_client = start_ws_loop(db_path, program_path, coinset_base_url)
 
     try:
         while True:
-            initialize_daemon_file_logging(
-                current_program.home_dir,
-                log_level=getattr(current_program, "app_log_level", "INFO"),
-            )
-            warn_if_daemon_log_level_auto_healed(program=current_program, program_path=program_path)
+            _initialize_daemon_logging(program=current_program, program_path=program_path)
             exit_code = run_once(
                 program_path=program_path,
                 markets_path=markets_path,

@@ -13,7 +13,7 @@ use crate::hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id}
 use crate::offer::resolve_offer_assets_for_action;
 use crate::storage::SqliteStore;
 
-use super::market_phases::MarketPhaseMetrics;
+use crate::cycle::MarketCycleResultState;
 
 async fn list_spendable_base_unit_amounts(
     network: &str,
@@ -68,7 +68,7 @@ pub async fn run_inventory_phase(
     _program: &ManagerProgramConfig,
     market: &MarketConfig,
     network: &str,
-    metrics: &mut MarketPhaseMetrics,
+    state: &mut MarketCycleResultState,
 ) -> SignerResult<BTreeMap<i64, i64>> {
     let ladder_sizes: Vec<i64> = market
         .ladders
@@ -129,7 +129,7 @@ pub async fn run_inventory_phase(
             Ok(bucket_counts)
         }
         Err(err) => {
-            metrics.cycle_error_count += 1;
+            state.record_phase_error();
             store.add_audit_event(
                 "inventory_bucket_scan_error",
                 &json!({"market_id": market.market_id, "error": err.to_string()}),

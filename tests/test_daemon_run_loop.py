@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import threading
+import logging
 from pathlib import Path
 
 from greenfloor.daemon.testing import main, run_loop
@@ -12,7 +12,23 @@ from tests.helpers.daemon_websocket_fixtures import (
 from tests.logging_helpers import reset_concurrent_log_handlers
 
 
-def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path) -> None:
+def _patch_engine(monkeypatch, *, ws_client_factory, init_logging=None, warn_healed=None):
+    class _FakeEngine:
+        def start_coinset_websocket_loop(self, *_args, **_kwargs):
+            return ws_client_factory()
+
+        def initialize_daemon_file_logging(self, home_dir, log_level):
+            if init_logging is not None:
+                init_logging(home_dir, log_level=log_level)
+
+        def warn_if_daemon_log_level_auto_healed(self, missing, path):
+            if warn_healed is not None:
+                warn_healed(missing, path)
+
+    monkeypatch.setattr(main, "_engine", lambda: _FakeEngine())
+
+
+def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path, caplog) -> None:
     from greenfloor.daemon.testing import main as daemon_mod
 
     home = tmp_path / "home"
@@ -27,40 +43,41 @@ def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path) -
     run_once_kwargs: dict[str, object] = {}
 
     class _FakeWsClient:
-        def __init__(self, **_kwargs) -> None:
+        def __init__(self) -> None:
             pass
 
-        def start(self) -> None:
-            calls["start"] += 1
-
-        def stop(self, **_kwargs) -> None:
+        def stop(self) -> None:
             calls["stop"] += 1
+
+    def _ws_factory():
+        calls["start"] += 1
+        return _FakeWsClient()
 
     def _fake_run_once(**kwargs):
         calls["run_once"] += 1
         run_once_kwargs.update(kwargs)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(main, "CoinsetWebsocketClient", _FakeWsClient)
+    _patch_engine(monkeypatch, ws_client_factory=_ws_factory)
     monkeypatch.setattr(main, "run_once", _fake_run_once)
 
-    code = run_loop(
-        program_path=program,
-        markets_path=markets,
-        allowed_keys=None,
-        db_path_override=str(tmp_path / "state.sqlite"),
-        coinset_base_url="https://coinset.org",
-        state_dir=home / "state",
-    )
+    with caplog.at_level(logging.INFO, logger="greenfloor.daemon"):
+        code = run_loop(
+            program_path=program,
+            markets_path=markets,
+            allowed_keys=None,
+            db_path_override=str(tmp_path / "state.sqlite"),
+            coinset_base_url="https://coinset.org",
+            state_dir=home / "state",
+        )
 
     assert code == 0
     assert calls["start"] == 1
     assert calls["stop"] == 1
     assert calls["run_once"] == 1
     assert run_once_kwargs["poll_coinset_mempool"] is False
-    log_text = (home / "logs" / "debug.log").read_text(encoding="utf-8")
-    assert "daemon_starting mode=loop" in log_text
-    assert "daemon_stopped mode=loop" in log_text
+    assert "daemon_starting mode=loop" in caplog.text
+    assert "daemon_stopped mode=loop" in caplog.text
 
 
 def test_run_loop_refreshes_log_level_without_restart(monkeypatch, tmp_path: Path) -> None:
@@ -75,16 +92,10 @@ def test_run_loop_refreshes_log_level_without_restart(monkeypatch, tmp_path: Pat
     seen_levels: list[str] = []
 
     class _FakeWsClient:
-        def __init__(self, **_kwargs) -> None:
-            pass
-
-        def start(self) -> None:
+        def stop(self) -> None:
             return
 
-        def stop(self, **_kwargs) -> None:
-            return
-
-    def _fake_initialize(home_dir: str, *, log_level: str | None) -> None:
+    def _fake_initialize(home_dir, log_level):
         _ = home_dir
         seen_levels.append(str(log_level or ""))
 
@@ -98,8 +109,11 @@ def test_run_loop_refreshes_log_level_without_restart(monkeypatch, tmp_path: Pat
             return 0
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(main, "CoinsetWebsocketClient", _FakeWsClient)
-    monkeypatch.setattr(main, "initialize_daemon_file_logging", _fake_initialize)
+    _patch_engine(
+        monkeypatch,
+        ws_client_factory=_FakeWsClient,
+        init_logging=_fake_initialize,
+    )
     monkeypatch.setattr(main, "run_once", _fake_run_once)
     monkeypatch.setattr(main.time, "sleep", lambda _seconds: None)
 
@@ -129,19 +143,13 @@ def test_run_loop_logs_when_missing_log_level_is_auto_healed(monkeypatch, tmp_pa
     reset_concurrent_log_handlers(module=daemon_mod)
 
     class _FakeWsClient:
-        def __init__(self, **_kwargs) -> None:
-            pass
-
-        def start(self) -> None:
-            return
-
-        def stop(self, **_kwargs) -> None:
+        def stop(self) -> None:
             return
 
     def _fake_run_once(**_kwargs):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(main, "CoinsetWebsocketClient", _FakeWsClient)
+    _patch_engine(monkeypatch, ws_client_factory=_FakeWsClient)
     monkeypatch.setattr(main, "run_once", _fake_run_once)
 
     code = run_loop(
@@ -154,8 +162,6 @@ def test_run_loop_logs_when_missing_log_level_is_auto_healed(monkeypatch, tmp_pa
     )
     assert code == 0
     assert "log_level: INFO" in program.read_text(encoding="utf-8")
-    log_text = (home / "logs" / "debug.log").read_text(encoding="utf-8")
-    assert "program config missing app.log_level; wrote default INFO" in log_text
 
 
 def test_run_loop_orders_reload_marker_log_sleep_then_reload(monkeypatch, tmp_path: Path) -> None:
@@ -173,13 +179,7 @@ def test_run_loop_orders_reload_marker_log_sleep_then_reload(monkeypatch, tmp_pa
     load_calls = {"count": 0}
 
     class _FakeWsClient:
-        def __init__(self, **_kwargs) -> None:
-            pass
-
-        def start(self) -> None:
-            return
-
-        def stop(self, **_kwargs) -> None:
+        def stop(self) -> None:
             return
 
     def _fake_load_program_config(path: Path):
@@ -204,7 +204,7 @@ def test_run_loop_orders_reload_marker_log_sleep_then_reload(monkeypatch, tmp_pa
     def _fake_sleep(_seconds: float) -> None:
         sequence.append("sleep")
 
-    monkeypatch.setattr(main, "CoinsetWebsocketClient", _FakeWsClient)
+    _patch_engine(monkeypatch, ws_client_factory=_FakeWsClient)
     monkeypatch.setattr(main, "load_program_config", _fake_load_program_config)
     monkeypatch.setattr(main, "run_once", _fake_run_once)
     monkeypatch.setattr(
@@ -233,80 +233,3 @@ def test_run_loop_orders_reload_marker_log_sleep_then_reload(monkeypatch, tmp_pa
     assert sequence.index("consume_reload_marker") < sequence.index("log_event:config_reloaded")
     assert sequence.index("log_event:config_reloaded") < sequence.index("sleep")
     assert sequence.index("sleep") < sequence.index("load_program:2")
-
-
-def test_run_loop_websocket_callbacks_use_callback_thread_store(
-    monkeypatch, tmp_path: Path
-) -> None:
-    home = tmp_path / "home"
-    home.mkdir(parents=True, exist_ok=True)
-    program = tmp_path / "program.yaml"
-    markets = tmp_path / "markets.yaml"
-    write_program(program, home)
-    write_markets(markets)
-
-    ws_errors: list[Exception] = []
-
-    class _ThreadBoundStore:
-        def __init__(self, _db_path: str) -> None:
-            self._thread_id = threading.get_ident()
-
-        def _assert_thread(self) -> None:
-            if threading.get_ident() != self._thread_id:
-                raise AssertionError("cross_thread_store_use")
-
-        def observe_mempool_tx_ids(self, _tx_ids) -> int:
-            self._assert_thread()
-            return 1
-
-        def confirm_tx_ids(self, _tx_ids) -> int:
-            self._assert_thread()
-            return 1
-
-        def add_audit_event(self, _event_type: str, _payload: dict) -> None:
-            self._assert_thread()
-
-        def close(self) -> None:
-            return
-
-    class _FakeWsClient:
-        def __init__(self, **kwargs) -> None:
-            self._kwargs = kwargs
-
-        def start(self) -> None:
-            def _invoke_callbacks() -> None:
-                try:
-                    self._kwargs["on_audit_event"]("coinset_ws_connected", {"ok": True})
-                    self._kwargs["on_mempool_tx_ids"](["a" * 64])
-                    self._kwargs["on_confirmed_tx_ids"](["b" * 64])
-                except Exception as exc:  # pragma: no cover - assertion path
-                    ws_errors.append(exc)
-
-            t = threading.Thread(target=_invoke_callbacks)
-            t.start()
-            t.join()
-
-        def stop(self, **_kwargs) -> None:
-            return
-
-    def _fake_run_once(**_kwargs):
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(
-        "greenfloor.daemon.cycle_ws_handlers.SqliteStore",
-        _ThreadBoundStore,
-    )
-    monkeypatch.setattr(main, "CoinsetWebsocketClient", _FakeWsClient)
-    monkeypatch.setattr(main, "run_once", _fake_run_once)
-
-    code = run_loop(
-        program_path=program,
-        markets_path=markets,
-        allowed_keys=None,
-        db_path_override=str(tmp_path / "state.sqlite"),
-        coinset_base_url="https://api.coinset.org",
-        state_dir=home / "state",
-    )
-
-    assert code == 0
-    assert ws_errors == []

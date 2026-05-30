@@ -39,7 +39,6 @@ impl DaemonCycleResources {
 #[derive(Debug, Clone)]
 pub struct MarketDispatchContext {
     pub db_path: PathBuf,
-    pub state_dir: PathBuf,
     pub allowed_key_ids: Vec<String>,
     pub xch_price_usd: Option<f64>,
     pub previous_xch_price_usd: Option<f64>,

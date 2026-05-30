@@ -6,6 +6,7 @@ mod parallel;
 mod reservation_ctx;
 mod sequential;
 mod spendable;
+mod test_hooks;
 
 #[cfg(test)]
 mod tests;

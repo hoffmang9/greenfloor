@@ -38,6 +38,9 @@ pub async fn execute_actions_parallel(
     testnet_markets_path: Option<&Path>,
     actions: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
+    if let Some(result) = super::test_hooks::parallel_dispatch_test_override() {
+        return result;
+    }
     let expanded = expand_planned_actions(actions);
     let reservation_ctx = parallel_reservation_context(program_path, market, 0).await?;
     let asset_ids = parallel_reservation_asset_ids(&reservation_ctx);
@@ -163,3 +166,4 @@ pub async fn execute_actions_parallel(
         newly_executed_sell_counts: crate::cycle::executed_sell_offer_counts_by_size(&action_items),
     })
 }
+

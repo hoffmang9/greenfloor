@@ -1,6 +1,7 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
+use serde_json::json;
 use tempfile::tempdir;
 
 use super::{
@@ -8,8 +9,8 @@ use super::{
     record_parallel_fallback_audit, OfferDispatchOutput, OfferReservationCoordinator,
     ParallelDispatchDecision,
 };
-use crate::config::ManagerProgramConfig;
-use crate::cycle::parallel_managed_dispatch_enabled;
+use crate::config::{ManagerProgramConfig, MarketConfig};
+use crate::cycle::{parallel_managed_dispatch_enabled, PlannedAction};
 use crate::error::SignerError;
 use crate::storage::SqliteStore;
 
@@ -150,6 +151,7 @@ fn coordinator_release_frees_capacity_for_next_acquire() {
 
 #[tokio::test]
 async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() {
+    use super::test_hooks::{set_managed_post_override, set_parallel_dispatch_override};
     use super::execute_strategy_actions;
     use crate::config::MarketConfig;
     use crate::cycle::PlannedAction;
@@ -225,4 +227,173 @@ async fn record_parallel_fallback_audit_persists_event() {
         .expect("events");
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_type, "offer_parallel_fallback");
+}
+
+fn write_signer_program(path: &std::path::Path) {
+    let launcher_id = "aa".repeat(32);
+    std::fs::write(
+        path,
+        format!(
+            r#"
+app:
+  network: mainnet
+signer:
+  kms_key_id: arn:aws:kms:us-west-2:123:key/abc
+  kms_region: us-west-2
+vault:
+  launcher_id: {launcher_id}
+  custody_threshold: 1
+  recovery_threshold: 1
+  recovery_clawback_timelock: 3600
+  custody_keys:
+    - public_key_hex: "020202020202020202020202020202020202020202020202020202020202020202"
+      curve: SECP256R1
+  recovery_keys:
+    - public_key_hex: "ab3cb61463a695fa094f7c30526c8097fb813a0c5fa67bab261a7cd354cb9901baa6b7a99d"
+      curve: SECP256R1
+"#
+        ),
+    )
+    .expect("write program");
+}
+
+fn sample_market() -> MarketConfig {
+    MarketConfig {
+        market_id: "m1".to_string(),
+        enabled: true,
+        base_asset: "xch".to_string(),
+        base_symbol: "XCH".to_string(),
+        quote_asset: "xch".to_string(),
+        quote_asset_type: "stable".to_string(),
+        receive_address: "xch1test".to_string(),
+        signer_key_id: "key-1".to_string(),
+        mode: "sell_only".to_string(),
+        pricing: json!({}),
+        cancel_move_threshold_bps: None,
+        ladders: HashMap::new(),
+    }
+}
+
+fn sample_action() -> PlannedAction {
+    PlannedAction {
+        size: 1,
+        repeat: 1,
+        pair: "xch".to_string(),
+        expiry_unit: "minutes".to_string(),
+        expiry_value: 10,
+        cancel_after_create: false,
+        reason: "test".to_string(),
+        target_spread_bps: None,
+        side: "sell".to_string(),
+    }
+}
+
+#[tokio::test]
+async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() {
+    use super::test_hooks::{set_managed_post_override, set_parallel_dispatch_override};
+    use super::execute_strategy_actions;
+
+    let dir = tempdir().expect("tempdir");
+    let db_path = dir.path().join("greenfloor.sqlite");
+    let store = SqliteStore::open(&db_path).expect("open");
+    let program_path = dir.path().join("program.yaml");
+    write_signer_program(&program_path);
+    let markets_path = dir.path().join("markets.yaml");
+    std::fs::write(&markets_path, "markets: []\n").expect("write markets");
+    let mut program = sample_program(true, false);
+    program.runtime_offer_parallelism_enabled = true;
+
+    set_parallel_dispatch_override(Some("transient"));
+    set_managed_post_override(Some("success"));
+    let output = execute_strategy_actions(
+        &store,
+        &db_path,
+        &program,
+        &sample_market(),
+        "mainnet",
+        &program_path,
+        &markets_path,
+        None,
+        &[sample_action()],
+    )
+    .await
+    .expect("dispatch");
+    set_parallel_dispatch_override(None);
+    set_managed_post_override(None);
+
+    assert_eq!(output.executed_count, 1);
+    let events = store
+        .list_recent_audit_events(
+            Some(&["offer_parallel_fallback"]),
+            Some("m1"),
+            5,
+        )
+        .expect("events");
+    assert_eq!(events.len(), 1);
+}
+
+#[tokio::test]
+async fn execute_strategy_actions_parallel_fatal_propagates() {
+    use super::test_hooks::{set_managed_post_override, set_parallel_dispatch_override};
+    use super::execute_strategy_actions;
+
+    let dir = tempdir().expect("tempdir");
+    let db_path = dir.path().join("greenfloor.sqlite");
+    let store = SqliteStore::open(&db_path).expect("open");
+    let program_path = dir.path().join("program.yaml");
+    write_signer_program(&program_path);
+    let markets_path = dir.path().join("markets.yaml");
+    std::fs::write(&markets_path, "markets: []\n").expect("write markets");
+    let mut program = sample_program(true, false);
+    program.runtime_offer_parallelism_enabled = true;
+
+    set_parallel_dispatch_override(Some("fatal"));
+    let err = execute_strategy_actions(
+        &store,
+        &db_path,
+        &program,
+        &sample_market(),
+        "mainnet",
+        &program_path,
+        &markets_path,
+        None,
+        &[sample_action()],
+    )
+    .await
+    .expect_err("fatal parallel error");
+    set_parallel_dispatch_override(None);
+    assert!(err.to_string().contains("permanent_offer_build_failure"));
+}
+
+#[tokio::test]
+async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
+    use super::test_hooks::{set_managed_post_override, set_parallel_dispatch_override};
+    use super::execute_strategy_actions;
+
+    let dir = tempdir().expect("tempdir");
+    let db_path = dir.path().join("greenfloor.sqlite");
+    let store = SqliteStore::open(&db_path).expect("open");
+    let program_path = dir.path().join("program.yaml");
+    write_signer_program(&program_path);
+    let markets_path = dir.path().join("markets.yaml");
+    std::fs::write(&markets_path, "markets: []\n").expect("write markets");
+    let program = sample_program(false, false);
+
+    set_managed_post_override(Some("success"));
+    let output = execute_strategy_actions(
+        &store,
+        &db_path,
+        &program,
+        &sample_market(),
+        "mainnet",
+        &program_path,
+        &markets_path,
+        None,
+        &[sample_action()],
+    )
+    .await
+    .expect("dispatch");
+    set_managed_post_override(None);
+
+    assert_eq!(output.executed_count, 1);
 }

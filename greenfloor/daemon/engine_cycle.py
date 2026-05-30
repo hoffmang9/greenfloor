@@ -36,36 +36,31 @@ def _build_engine_request(
     use_websocket_capture: bool,
     dispatch_state: MarketDispatchState,
     test_controls: Mapping[str, Any] | None = None,
-) -> Any:
-    engine = _engine_module()
-    request_cls = getattr(engine, "DaemonRunOnceRequest", None)
-    dispatch_cls = getattr(engine, "DaemonDispatchState", None)
-    controls_cls = getattr(engine, "DaemonCycleTestControls", None)
-    if request_cls is None or dispatch_cls is None or controls_cls is None:
-        raise TypeError("engine daemon cycle typed request classes are unavailable")
-
-    controls = controls_cls()
+) -> dict[str, Any]:
+    controls: dict[str, Any] = {}
     if test_controls:
-        controls.skip_strategy_execution = bool(test_controls.get("skip_strategy_execution", False))
+        controls["skip_strategy_execution"] = bool(
+            test_controls.get("skip_strategy_execution", False)
+        )
         forced = test_controls.get("force_market_error_for")
-        controls.force_market_error_for = str(forced) if forced is not None else None
+        controls["force_market_error_for"] = str(forced) if forced is not None else None
 
-    return request_cls(
-        program_path=program_path,
-        markets_path=markets_path,
-        testnet_markets_path=testnet_markets_path,
-        state_db_override=db_path_override,
-        coinset_base_url=coinset_base_url,
-        state_dir=state_dir,
-        poll_coinset_mempool=poll_coinset_mempool,
-        use_websocket_capture=use_websocket_capture,
-        allowed_key_ids=sorted(allowed_keys or []),
-        dispatch_state=dispatch_cls(
-            cursor=int(dispatch_state.cursor),
-            immediate_requeue_ids=list(dispatch_state.immediate_requeue_ids),
-        ),
-        test_controls=controls,
-    )
+    return {
+        "program_path": str(program_path),
+        "markets_path": str(markets_path),
+        "testnet_markets_path": str(testnet_markets_path) if testnet_markets_path else None,
+        "state_db_override": db_path_override,
+        "coinset_base_url": coinset_base_url,
+        "state_dir": str(state_dir),
+        "poll_coinset_mempool": poll_coinset_mempool,
+        "use_websocket_capture": use_websocket_capture,
+        "allowed_key_ids": sorted(allowed_keys or []),
+        "dispatch_state": {
+            "cursor": int(dispatch_state.cursor),
+            "immediate_requeue_ids": list(dispatch_state.immediate_requeue_ids),
+        },
+        "test_controls": controls,
+    }
 
 
 def run_daemon_cycle_once_via_engine(
@@ -100,14 +95,16 @@ def run_daemon_cycle_once_via_engine(
 
     runner = run_fn or _run_daemon_cycle_once_engine()
     response = runner(request)
-    exit_code = int(getattr(response, "exit_code", 1))
-    state_payload = getattr(response, "dispatch_state", None)
-    if state_payload is None:
+    if not isinstance(response, dict):
+        raise TypeError("engine run_daemon_cycle_once must return a dict")
+    exit_code = int(response.get("exit_code", 1))
+    state_payload = response.get("dispatch_state")
+    if not isinstance(state_payload, dict):
         raise TypeError("engine run_daemon_cycle_once returned response without dispatch_state")
     updated = MarketDispatchState(
-        cursor=int(getattr(state_payload, "cursor", dispatch_state.cursor)),
+        cursor=int(state_payload.get("cursor", dispatch_state.cursor)),
         immediate_requeue_ids=deque(
-            str(market_id) for market_id in getattr(state_payload, "immediate_requeue_ids", [])
+            str(market_id) for market_id in state_payload.get("immediate_requeue_ids", [])
         ),
     )
     return exit_code, updated

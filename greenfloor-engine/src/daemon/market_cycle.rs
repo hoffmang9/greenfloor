@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use crate::config::MarketConfig;
 use crate::cycle::MarketCycleResultState;
 use crate::error::{SignerError, SignerResult};
@@ -10,7 +8,6 @@ use super::coin_ops_phase::run_coin_ops_phase;
 use super::inventory_phase::run_inventory_phase;
 use super::market_context::MarketCycleContext;
 use super::market_gate::enforce_market_key_allowlist;
-use super::market_phases::MarketPhaseMetrics;
 use super::strategy_phase::run_strategy_phase;
 
 pub struct PostReconcilePhaseOutput {
@@ -36,7 +33,6 @@ pub async fn run_post_reconcile_market_phases(
     }
     enforce_market_key_allowlist(market, &ctx.dispatch.allowed_key_ids)?;
 
-    let mut phase_metrics = MarketPhaseMetrics::default();
     let mut state = MarketCycleResultState::default();
 
     let bucket_counts = run_inventory_phase(
@@ -45,7 +41,7 @@ pub async fn run_post_reconcile_market_phases(
         &ctx.resources.program,
         market,
         &ctx.resources.network,
-        &mut phase_metrics,
+        &mut state,
     )
     .await?;
 
@@ -61,11 +57,11 @@ pub async fn run_post_reconcile_market_phases(
         ctx.reconcile,
         ctx.dispatch.xch_price_usd,
         ctx.dispatch.test_controls.skip_strategy_execution,
-        &mut phase_metrics,
+        &mut state,
     )
     .await?;
 
-    let (cancel_metrics, _payload) = run_market_cancel_phase(
+    let _cancel_payload = run_market_cancel_phase(
         store,
         &ctx.resources.dexie,
         market,
@@ -73,6 +69,7 @@ pub async fn run_post_reconcile_market_phases(
         ctx.dispatch.runtime_dry_run,
         ctx.dispatch.xch_price_usd,
         ctx.plan.previous_xch_price_usd,
+        &mut state,
     )
     .await?;
 
@@ -87,19 +84,6 @@ pub async fn run_post_reconcile_market_phases(
         &strategy.newly_executed_sell_counts,
     )
     .await?;
-
-    for _ in 0..phase_metrics.cycle_error_count {
-        state.record_phase_error();
-    }
-    state.merge_strategy_execution(
-        phase_metrics.strategy_planned_total as i64,
-        phase_metrics.strategy_executed_total as i64,
-    );
-    state.merge_cancel_policy(
-        cancel_metrics.cancel_triggered,
-        cancel_metrics.cancel_planned as i64,
-        cancel_metrics.cancel_executed as i64,
-    );
 
     Ok(PostReconcilePhaseOutput { state })
 }

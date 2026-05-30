@@ -7,7 +7,7 @@ use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
-use super::market_phases::MarketPhaseMetrics;
+use crate::cycle::MarketCycleResultState;
 use super::offer_dispatch::execute_strategy_actions;
 use super::reconcile_phase::ReconcilePhaseResult;
 use super::strategy_support::evaluate_strategy_actions_for_market;
@@ -29,7 +29,7 @@ pub async fn run_strategy_phase(
     reconcile: &ReconcilePhaseResult,
     xch_price_usd: Option<f64>,
     skip_strategy_execution: bool,
-    metrics: &mut MarketPhaseMetrics,
+    state: &mut MarketCycleResultState,
 ) -> SignerResult<StrategyPhaseResult> {
     let (strategy_actions, sell_active_counts) = evaluate_strategy_actions_for_market(
         store,
@@ -38,7 +38,7 @@ pub async fn run_strategy_phase(
         &reconcile.dexie_size_by_offer_id,
         xch_price_usd,
     )?;
-    metrics.strategy_planned_total = strategy_actions.len() as u64;
+    state.merge_strategy_execution(strategy_actions.len() as i64, 0);
 
     store.add_audit_event(
         "strategy_actions_planned",
@@ -66,11 +66,11 @@ pub async fn run_strategy_phase(
         .await
         {
             Ok(output) => {
-                metrics.strategy_executed_total = output.executed_count;
+                state.merge_strategy_execution(0, output.executed_count as i64);
                 newly_executed_sell_counts = output.newly_executed_sell_counts;
             }
             Err(err) => {
-                metrics.cycle_error_count += 1;
+                state.record_phase_error();
                 store.add_audit_event(
                     "strategy_offer_execution_error",
                     &json!({"market_id": market.market_id, "error": err.to_string()}),

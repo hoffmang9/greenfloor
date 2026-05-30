@@ -14,7 +14,6 @@ mod market_context;
 mod market_cycle;
 mod market_dispatch;
 mod market_gate;
-mod market_phases;
 mod offer_dispatch;
 mod preamble;
 mod program_runtime;
@@ -25,13 +24,16 @@ mod strategy_phase;
 mod strategy_support;
 pub mod watchlist;
 
+pub use coinset_ws::{
+    resolve_coinset_ws_url, start_coinset_websocket_loop, CoinsetWebsocketLoopHandle,
+};
 pub use watchlist::{
     active_offer_counts_by_size, active_offer_counts_by_size_and_side,
     active_offer_counts_by_size_and_side_detail, active_offer_counts_by_size_detail,
     watchlist_offer_ids,
 };
 
-pub use cancel_phase::{run_market_cancel_phase, CancelPhaseMetrics};
+pub use cancel_phase::run_market_cancel_phase;
 pub use cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
 pub use lock::DaemonInstanceLock;
 pub use logging::{
@@ -41,8 +43,7 @@ pub use market_context::{
     load_cycle_resources, DaemonCycleResources, MarketCycleContext, MarketDispatchContext,
 };
 pub use market_dispatch::{
-    aggregate_market_dispatch_metrics, record_market_worker_error, IoPhaseMetrics,
-    SingleMarketCycleOutput,
+    aggregate_market_dispatch_metrics, record_market_worker_error, SingleMarketCycleOutput,
 };
 pub use program_runtime::{
     default_testnet_markets_path, load_daemon_program_runtime, resolve_testnet_markets_path,

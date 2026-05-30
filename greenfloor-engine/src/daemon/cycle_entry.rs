@@ -9,10 +9,8 @@ use super::market_context::{
     load_cycle_resources, DaemonCycleResources, MarketCycleContext, MarketDispatchContext,
 };
 use super::market_cycle::run_post_reconcile_market_phases;
-use super::market_dispatch::{
-    aggregate_market_dispatch_metrics, record_market_worker_error, IoPhaseMetrics,
-    SingleMarketCycleOutput,
-};
+use super::market_dispatch::{aggregate_market_dispatch_metrics, record_market_worker_error,
+    SingleMarketCycleOutput};
 use super::preamble::run_cycle_preamble;
 use super::reconcile_phase::run_market_reconcile_phase;
 use super::run_once::{
@@ -61,25 +59,11 @@ async fn process_one_market(
         reconcile: &reconcile,
     };
     let phases = run_post_reconcile_market_phases(&store, &phase_context, market).await?;
-    let immediate_requeue_requested = reconcile.metrics.immediate_requeue_requested;
-    let state = &phases.state;
-    let io = IoPhaseMetrics {
-        cycle_error_count: state.cycle_errors.max(0) as u64,
-        strategy_planned_total: state.strategy_planned.max(0) as u64,
-        strategy_executed_total: state.strategy_executed.max(0) as u64,
-    };
-    let cancel = super::cancel_phase::CancelPhaseMetrics {
-        cancel_triggered: state.cancel_triggered,
-        cancel_planned: state.cancel_planned.max(0) as u64,
-        cancel_executed: state.cancel_executed.max(0) as u64,
-    };
 
     Ok(SingleMarketCycleOutput {
         market_id: market.market_id.clone(),
         reconcile,
-        io,
-        cancel,
-        immediate_requeue_requested,
+        state: phases.state,
     })
 }
 
@@ -175,7 +159,6 @@ async fn run_daemon_cycle_once_inner(
 
     let dispatch_context = MarketDispatchContext {
         db_path: plan.db_path.clone(),
-        state_dir: request.state_dir.clone(),
         allowed_key_ids: request.allowed_key_ids.clone(),
         xch_price_usd: preamble.xch_price_usd,
         previous_xch_price_usd: plan.previous_xch_price_usd,

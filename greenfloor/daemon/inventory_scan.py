@@ -1,19 +1,12 @@
-"""Coinset inventory scans and websocket signal capture for the daemon."""
+"""Coinset inventory scans for the daemon testing harness."""
 
 from __future__ import annotations
 
-import urllib.parse
-from typing import Any
-
-from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.daemon.coinset_ws import capture_coinset_websocket_once
 from greenfloor.daemon.market_logging import _daemon_logger
-from greenfloor.daemon.watchlist import _match_watched_coin_ids
 from greenfloor.hex_utils import is_hex_id
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.coinset_coins import list_unspent_coins_by_receive_address
-from greenfloor.storage.sqlite import SqliteStore
 
 
 def coinset_spendable_profiles_by_asset(
@@ -140,93 +133,3 @@ def _coinset_cat_spendable_base_unit_coin_amounts(
         if amount_base_units > 0:
             amounts.append(amount_base_units)
     return amounts
-
-
-def _resolve_coinset_ws_url(*, program, coinset_base_url: str) -> str:
-    configured = str(getattr(program, "tx_block_websocket_url", "")).strip()
-    if configured:
-        return configured
-    base_url = coinset_base_url.strip()
-    if not base_url:
-        if program.app_network.strip().lower() in {"testnet", "testnet11"}:
-            return "wss://testnet11.api.coinset.org/ws"
-        return "wss://api.coinset.org/ws"
-    parsed = urllib.parse.urlparse(base_url)
-    scheme = "wss" if parsed.scheme == "https" else "ws"
-    host = parsed.netloc or parsed.path
-    if not host:
-        return "wss://api.coinset.org/ws"
-    return f"{scheme}://{host}/ws"
-
-
-def _build_coinset_adapter(*, program, coinset_base_url: str) -> CoinsetAdapter:
-    base_url = coinset_base_url.strip() or None
-    try:
-        return CoinsetAdapter(base_url, network=program.app_network)
-    except TypeError as exc:
-        if "network" not in str(exc):
-            raise
-        return CoinsetAdapter(base_url)
-
-
-def _run_coinset_signal_capture_once(
-    *,
-    program,
-    coinset_base_url: str,
-    store: SqliteStore,
-) -> None:
-    coinset = _build_coinset_adapter(program=program, coinset_base_url=coinset_base_url)
-    ws_url = _resolve_coinset_ws_url(program=program, coinset_base_url=coinset_base_url)
-
-    def _on_mempool_tx_ids(tx_ids: list[str]) -> None:
-        if not tx_ids:
-            return
-        new_count = store.observe_mempool_tx_ids(tx_ids)
-        if new_count:
-            store.add_audit_event(
-                "mempool_observed",
-                {"new_tx_ids": new_count, "source": "coinset_websocket"},
-            )
-
-    def _on_confirmed_tx_ids(tx_ids: list[str]) -> None:
-        if not tx_ids:
-            return
-        confirmed = store.confirm_tx_ids(tx_ids)
-        store.add_audit_event(
-            "tx_block_confirmed",
-            {
-                "tx_ids": tx_ids,
-                "confirmed_count": confirmed,
-                "source": "coinset_websocket",
-            },
-        )
-
-    def _on_audit_event(event_type: str, payload: dict[str, Any]) -> None:
-        store.add_audit_event(event_type, payload)
-
-    def _on_observed_coin_ids(coin_ids: list[str]) -> None:
-        if not coin_ids:
-            return
-        hits = _match_watched_coin_ids(observed_coin_ids=coin_ids)
-        if not hits:
-            return
-        store.add_audit_event(
-            "coin_watch_hit",
-            {
-                "coin_id_count": len(coin_ids),
-                "coin_ids_sample": sorted({str(c).strip().lower() for c in coin_ids})[:10],
-                "market_hits": {market_id: ids[:10] for market_id, ids in hits.items()},
-                "source": "coinset_websocket",
-            },
-        )
-
-    capture_coinset_websocket_once(
-        ws_url=ws_url,
-        reconnect_interval_seconds=program.tx_block_websocket_reconnect_interval_seconds,
-        capture_window_seconds=max(1, program.tx_block_fallback_poll_interval_seconds),
-        on_mempool_tx_ids=_on_mempool_tx_ids,
-        on_confirmed_tx_ids=_on_confirmed_tx_ids,
-        on_audit_event=_on_audit_event,
-        on_observed_coin_ids=_on_observed_coin_ids,
-        recovery_poll=coinset.get_all_mempool_tx_ids,
-    )

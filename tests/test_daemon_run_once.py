@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Generator
 from pathlib import Path
 
@@ -210,13 +211,13 @@ def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:
 
     state_dir = tmp_path / "state"
     with _acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
-        with pytest.raises(RuntimeError, match="daemon_already_running"):
+        with pytest.raises(Exception, match="daemon_already_running"):
             with _acquire_daemon_instance_lock(state_dir=state_dir, mode="once"):
                 pass
 
 
 def test_main_once_exits_with_lock_conflict(
-    monkeypatch, tmp_path: Path, capsys, dexie_mock: DexieHttpMock
+    monkeypatch, tmp_path: Path, caplog, dexie_mock: DexieHttpMock
 ) -> None:
     import greenfloor.daemon.main as daemon_main_module
     from greenfloor.daemon.main import _acquire_daemon_instance_lock
@@ -240,13 +241,11 @@ def test_main_once_exits_with_lock_conflict(
                 str(state_dir),
             ],
         )
-        with pytest.raises(SystemExit) as exc:
-            daemon_cli_main()
+        with caplog.at_level(logging.ERROR, logger="greenfloor.daemon"):
+            with pytest.raises(SystemExit) as exc:
+                daemon_cli_main()
         assert exc.value.code == 3
-        captured = capsys.readouterr()
-        assert captured.out == ""
-        log_text = (home / "logs" / "debug.log").read_text(encoding="utf-8")
-        assert "daemon_lock_conflict" in log_text
+        assert "daemon_lock_conflict" in caplog.text
 
 
 def test_run_once_all_markets_fail_exits_non_zero(

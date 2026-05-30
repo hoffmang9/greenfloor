@@ -40,6 +40,7 @@ pub struct DaemonRunOnceRequest {
     pub poll_coinset_mempool: bool,
     pub use_websocket_capture: bool,
     pub allowed_key_ids: Vec<String>,
+    #[serde(default)]
     pub dispatch_state: DaemonDispatchState,
     #[serde(default)]
     pub test_controls: DaemonCycleTestControls,

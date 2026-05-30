@@ -14,6 +14,9 @@ pub async fn post_managed_planned_action(
     testnet_markets_path: Option<&Path>,
     action: &PlannedAction,
 ) -> SignerResult<bool> {
+    if let Some(result) = super::test_hooks::managed_post_test_override() {
+        return result;
+    }
     if action.size <= 0 {
         return Ok(false);
     }
@@ -40,3 +43,4 @@ pub async fn post_managed_planned_action(
     .await?;
     Ok(response.exit_code == 0)
 }
+
