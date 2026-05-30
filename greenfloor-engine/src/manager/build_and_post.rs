@@ -654,6 +654,7 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
             quote_asset: "xch".to_string(),
             quote_asset_type: "unstable".to_string(),
             receive_address: "xch1".to_string(),
+            mode: "sell_only".to_string(),
             pricing: json!({}),
             cancel_move_threshold_bps: None,
             ladders: HashMap::new(),

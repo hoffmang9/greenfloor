@@ -404,6 +404,34 @@ impl SqliteStore {
         Ok(out)
     }
 
+    pub fn observe_mempool_tx_ids(&self, tx_ids: &[String]) -> SignerResult<u64> {
+        if tx_ids.is_empty() {
+            return Ok(0);
+        }
+        let mut inserted = 0_u64;
+        let now = utcnow_iso();
+        for tx_id in tx_ids {
+            let normalized = tx_id.trim();
+            if normalized.is_empty() {
+                continue;
+            }
+            let changed = self
+                .conn
+                .execute(
+                    r#"
+                    INSERT OR IGNORE INTO tx_signal_state (tx_id, mempool_observed_at, tx_block_confirmed_at)
+                    VALUES (?1, ?2, NULL)
+                    "#,
+                    params![normalized, now],
+                )
+                .map_err(|err| {
+                    SignerError::Other(format!("failed to observe mempool tx id: {err}"))
+                })?;
+            inserted += u64::try_from(changed).unwrap_or(0);
+        }
+        Ok(inserted)
+    }
+
     pub fn add_audit_event(
         &self,
         event_type: &str,

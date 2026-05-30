@@ -23,6 +23,7 @@ pub struct MarketConfig {
     pub quote_asset: String,
     pub quote_asset_type: String,
     pub receive_address: String,
+    pub mode: String,
     pub pricing: Value,
     pub cancel_move_threshold_bps: Option<i64>,
     pub ladders: HashMap<String, Vec<LadderEntry>>,
@@ -47,6 +48,7 @@ struct MarketYaml {
     quote_asset: Option<String>,
     quote_asset_type: Option<String>,
     receive_address: Option<String>,
+    mode: Option<String>,
     pricing: Option<Value>,
     ladders: Option<HashMap<String, Vec<LadderEntryYaml>>>,
 }
@@ -151,6 +153,11 @@ pub fn parse_markets_config(raw: &Value) -> SignerResult<MarketsConfig> {
                 .unwrap_or_default()
                 .trim()
                 .to_string(),
+            mode: row
+                .mode
+                .unwrap_or_else(|| "sell_only".to_string())
+                .trim()
+                .to_ascii_lowercase(),
             pricing: row.pricing.clone().unwrap_or_else(|| json!({})),
             cancel_move_threshold_bps: parse_cancel_move_threshold_bps(
                 row.pricing.as_ref(),

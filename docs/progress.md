@@ -1,5 +1,15 @@
 # Progress Log
 
+## 2026-05-29 (Phase 5 — full native Rust daemon cycle; Python bridge removed)
+
+- **Native cycle phases:** `daemon/preamble.rs`, `strategy_support.rs`, `market_phases.rs` — XCH price fetch, inventory scan, strategy evaluation/planning, coin-op planning all in Rust.
+- **Unified entrypoints:** `run_daemon_cycle_once` no longer takes a Python bridge; PyO3 and `greenfloor-engine daemon run-once` share the same Rust orchestrator.
+- **Parallel markets:** honest `parallel_markets` for loop and `--once`; parallel workers use `spawn_blocking` + per-market runtime (SQLite is not `Send` across await).
+- **Exit codes:** non-zero when all selected markets fail (`compute_cycle_exit_code`).
+- **Removed:** `python_bridge.rs`, `daemon_inprocess_bridge.rs`, `rust_cycle_bridge.py`, `bridge_subprocess.py`, dead split-phase APIs in `runner.py`.
+- **Tests:** env-hook fixtures (`GREENFLOOR_XCH_PRICE_USD`, `GREENFLOOR_TEST_FORCE_MARKET_ERROR`, `GREENFLOOR_TEST_SKIP_STRATEGY_EXEC`); `tests/test_daemon_cycle_speed.py`.
+- **Next:** Rust coin-op broadcast execution; full websocket-once capture in Rust; native `daemon run-loop`.
+
 ## 2026-05-29 (Phase 4 — native greenfloord `--once` via greenfloor-engine)
 
 - **`greenfloor-engine daemon run-once`:** native Rust CLI with instance lock, file logging, and full cycle orchestration (`daemon/cycle_entry.rs`).

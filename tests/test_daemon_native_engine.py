@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -30,36 +29,6 @@ def test_daemon_run_once_argv_includes_paths(tmp_path: Path) -> None:
     assert str(markets) in argv
     assert "--key-ids" in argv
     assert "key-a,key-b" in argv
-
-
-def test_bridge_subprocess_run_cycle_preamble_roundtrip(tmp_path: Path) -> None:
-    home = tmp_path / "home"
-    home.mkdir()
-    program = tmp_path / "program.yaml"
-    write_program(program, home)
-
-    request = {
-        "method": "run_cycle_preamble",
-        "kwargs": {
-            "program_path": str(program),
-            "db_path": str(tmp_path / "state.sqlite"),
-            "coinset_base_url": "http://coinset.local",
-            "poll_coinset_mempool": False,
-            "use_websocket_capture": False,
-        },
-    }
-    completed = subprocess.run(
-        [sys.executable, "-m", "greenfloor.daemon.bridge_subprocess"],
-        input=json.dumps(request),
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
-    payload = json.loads(completed.stdout)
-    assert payload["ok"] is True
-    assert "cycle_error_count" in payload["result"]
-    assert "xch_price_usd" in payload["result"]
 
 
 def _engine_binary_available() -> bool:

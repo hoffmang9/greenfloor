@@ -1,13 +1,10 @@
-use serde_json::Value;
-
 use crate::adapters::DexieClient;
 use crate::config::{load_markets_config_with_overlay, load_program_config, MarketConfig};
 use crate::error::SignerResult;
-use crate::storage::SqliteStore;
 
-use super::cancel_phase::{run_market_cancel_phase, CancelPhaseMetrics};
-use super::reconcile_phase::{run_market_reconcile_phase, ReconcilePhaseResult};
-use super::run_once::{CyclePlan, DaemonRunOnceRequest, MarketDispatchMetrics};
+use super::cancel_phase::CancelPhaseMetrics;
+use super::reconcile_phase::ReconcilePhaseResult;
+use super::run_once::MarketDispatchMetrics;
 
 #[derive(Debug, Clone)]
 pub struct MarketDispatchContext {
@@ -91,47 +88,8 @@ pub fn dexie_client(context: &MarketDispatchContext) -> SignerResult<DexieClient
     Ok(DexieClient::new(program.dexie_api_base))
 }
 
-pub fn reconcile_context_for_python(result: &ReconcilePhaseResult) -> Value {
-    serde_json::json!({
-        "offers": result.offers,
-        "dexie_size_by_offer_id": result.dexie_size_by_offer_id,
-        "dexie_fetch_error": result.dexie_fetch_error,
-    })
-}
-
-pub async fn run_market_reconcile_phase_for_market(
-    store: &SqliteStore,
-    dexie: &DexieClient,
-    market: &MarketConfig,
-    network: &str,
-) -> SignerResult<ReconcilePhaseResult> {
-    run_market_reconcile_phase(store, dexie, market, network).await
-}
-
-pub async fn run_market_cancel_phase_for_market(
-    store: &SqliteStore,
-    dexie: &DexieClient,
-    market: &MarketConfig,
-    offers: &[Value],
-    runtime_dry_run: bool,
-    current_xch_price_usd: Option<f64>,
-    previous_xch_price_usd: Option<f64>,
-) -> SignerResult<CancelPhaseMetrics> {
-    let (metrics, _payload) = run_market_cancel_phase(
-        store,
-        dexie,
-        market,
-        offers,
-        runtime_dry_run,
-        current_xch_price_usd,
-        previous_xch_price_usd,
-    )
-    .await?;
-    Ok(metrics)
-}
-
 pub fn record_market_worker_error(
-    store: &SqliteStore,
+    store: &crate::storage::SqliteStore,
     market_id: &str,
     error: &str,
     source: &str,
@@ -145,33 +103,4 @@ pub fn record_market_worker_error(
         }),
         None,
     )
-}
-
-pub fn io_metrics_from_value(value: &Value) -> SignerResult<IoPhaseMetrics> {
-    serde_json::from_value(value.clone()).map_err(|err| {
-        crate::error::SignerError::Other(format!("invalid io phase metrics payload: {err}"))
-    })
-}
-
-pub fn market_bridge_kwargs(
-    request: &DaemonRunOnceRequest,
-    plan: &CyclePlan,
-    market: &MarketConfig,
-    reconcile: &ReconcilePhaseResult,
-    xch_price_usd: Option<f64>,
-) -> Value {
-    let mut kwargs = serde_json::json!({
-        "program_path": request.program_path,
-        "markets_path": request.markets_path,
-        "market_id": market.market_id,
-        "allowed_key_ids": request.allowed_key_ids,
-        "db_path": plan.db_path,
-        "state_dir": request.state_dir,
-        "xch_price_usd": xch_price_usd,
-        "reconcile_context": reconcile_context_for_python(reconcile),
-    });
-    if let Some(path) = request.testnet_markets_path.as_ref() {
-        kwargs["testnet_markets_path"] = Value::String(path.to_string_lossy().into_owned());
-    }
-    kwargs
 }

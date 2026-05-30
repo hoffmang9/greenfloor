@@ -200,9 +200,46 @@ pub fn elapsed_ms(started: Instant) -> u64 {
     started.elapsed().as_millis() as u64
 }
 
+pub fn compute_cycle_exit_code(plan: &CyclePlan, metrics: &MarketDispatchMetrics) -> i32 {
+    let attempted = plan.selected_market_ids.len();
+    if attempted > 0 && metrics.markets_processed == 0 {
+        return 1;
+    }
+    0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compute_cycle_exit_code_non_zero_when_all_markets_fail() {
+        let plan = CyclePlan {
+            enabled_market_ids: vec!["m1".to_string()],
+            selected_market_ids: vec!["m1".to_string()],
+            consumed_immediate_requeues: Vec::new(),
+            dispatch_state: DaemonDispatchState::default(),
+            stale_open_sweep: StaleSweepProgress {
+                checked_offer_count: 0,
+                requeue_market_ids: Vec::new(),
+                hits: Vec::new(),
+                truncated: false,
+            },
+            configured_market_slot_count: 1,
+            parallel_markets_enabled: false,
+            runtime_dry_run: false,
+            db_path: PathBuf::from("/tmp/db.sqlite"),
+            previous_xch_price_usd: None,
+            dexie_base_url: String::new(),
+            splash_base_url: String::new(),
+        };
+        let metrics = MarketDispatchMetrics {
+            markets_processed: 0,
+            cycle_error_count: 1,
+            ..MarketDispatchMetrics::default()
+        };
+        assert_eq!(compute_cycle_exit_code(&plan, &metrics), 1);
+    }
 
     #[test]
     fn resolve_state_db_path_prefers_explicit_override() {

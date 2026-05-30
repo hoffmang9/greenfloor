@@ -8,7 +8,8 @@ mod wallet_io;
 mod xch;
 
 pub use api::{
-    conservative_fee_from_payload, get_conservative_fee_estimate, get_fee_estimate, push_tx_hex,
+    conservative_fee_from_payload, get_all_mempool_tx_ids, get_conservative_fee_estimate,
+    get_fee_estimate, push_tx_hex,
 };
 
 pub(crate) use coin_select::{

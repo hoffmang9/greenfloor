@@ -1,23 +1,23 @@
-use std::sync::Arc;
 use std::time::Instant;
 
 use serde_json::Value;
 
-use crate::config::MarketConfig;
+use crate::config::{load_program_config, ManagerProgramConfig, MarketConfig};
 use crate::cycle::enqueue_immediate_requeue;
-use crate::error::{SignerError, SignerResult};
+use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
+use super::cancel_phase::run_market_cancel_phase;
 use super::market_dispatch::{
-    aggregate_market_dispatch_metrics, dexie_client, io_metrics_from_value, market_bridge_kwargs,
-    program_network, record_market_worker_error, run_market_cancel_phase_for_market,
-    run_market_reconcile_phase_for_market, selected_markets, MarketDispatchContext,
-    SingleMarketCycleOutput,
+    aggregate_market_dispatch_metrics, dexie_client, program_network, record_market_worker_error,
+    selected_markets, IoPhaseMetrics, MarketDispatchContext, SingleMarketCycleOutput,
 };
-use super::python_bridge::DaemonPythonBridge;
+use super::market_phases::run_market_phases;
+use super::preamble::run_cycle_preamble;
+use super::reconcile_phase::run_market_reconcile_phase;
 use super::run_once::{
-    build_cycle_plan, build_cycle_summary, cycle_started_instant, elapsed_ms, CyclePlan,
-    DaemonDispatchState, DaemonRunOnceRequest, MarketDispatchMetrics,
+    build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
+    elapsed_ms, CyclePlan, DaemonDispatchState, DaemonRunOnceRequest, MarketDispatchMetrics,
 };
 
 #[derive(Debug, Clone)]
@@ -25,17 +25,6 @@ pub struct DaemonCycleOnceResponse {
     pub exit_code: i32,
     pub dispatch_state: DaemonDispatchState,
     pub cycle_summary: Value,
-}
-
-async fn call_python_bridge(
-    bridge: Arc<dyn DaemonPythonBridge>,
-    method: &str,
-    kwargs: Value,
-) -> SignerResult<Value> {
-    let method = method.to_string();
-    tokio::task::spawn_blocking(move || bridge.call_method(&method, &kwargs))
-        .await
-        .map_err(|err| SignerError::Other(format!("python bridge task failed: {err}")))?
 }
 
 fn write_stale_sweep_audit(store_path: &std::path::Path, plan: &CyclePlan) -> SignerResult<()> {
@@ -56,34 +45,37 @@ fn write_stale_sweep_audit(store_path: &std::path::Path, plan: &CyclePlan) -> Si
 }
 
 async fn process_one_market(
-    request: &DaemonRunOnceRequest,
+    _request: &DaemonRunOnceRequest,
     plan: &CyclePlan,
+    program: &ManagerProgramConfig,
     dispatch_context: &MarketDispatchContext,
     network: &str,
     dexie: &crate::adapters::DexieClient,
     market: &MarketConfig,
-    bridge: Arc<dyn DaemonPythonBridge>,
 ) -> SignerResult<SingleMarketCycleOutput> {
     let store = SqliteStore::open(&plan.db_path)?;
-    let reconcile =
-        run_market_reconcile_phase_for_market(&store, dexie, market, network).await?;
+    let reconcile = run_market_reconcile_phase(&store, dexie, market, network).await?;
 
-    let io_value = call_python_bridge(
-        Arc::clone(&bridge),
-        "run_market_cycle_python_phases",
-        market_bridge_kwargs(
-            request,
-            plan,
-            market,
-            &reconcile,
-            dispatch_context.xch_price_usd,
-        ),
+    let phase_metrics = run_market_phases(
+        &store,
+        program,
+        market,
+        network,
+        &dispatch_context.program_path,
+        &dispatch_context.markets_path,
+        dispatch_context.testnet_markets_path.as_deref(),
+        &reconcile,
+        dispatch_context.xch_price_usd,
     )
     .await?;
-    let io_metrics = io_metrics_from_value(&io_value)?;
+    let io = IoPhaseMetrics {
+        cycle_error_count: phase_metrics.cycle_error_count,
+        strategy_planned_total: phase_metrics.strategy_planned_total,
+        strategy_executed_total: phase_metrics.strategy_executed_total,
+    };
 
     let immediate_requeue_requested = reconcile.metrics.immediate_requeue_requested;
-    let cancel = run_market_cancel_phase_for_market(
+    let (cancel, _payload) = run_market_cancel_phase(
         &store,
         dexie,
         market,
@@ -97,7 +89,7 @@ async fn process_one_market(
     Ok(SingleMarketCycleOutput {
         market_id: market.market_id.clone(),
         reconcile,
-        io: io_metrics,
+        io,
         cancel,
         immediate_requeue_requested,
     })
@@ -106,25 +98,25 @@ async fn process_one_market(
 async fn dispatch_markets(
     request: &DaemonRunOnceRequest,
     plan: &CyclePlan,
+    program: &ManagerProgramConfig,
     dispatch_context: &MarketDispatchContext,
     network: String,
     dexie: crate::adapters::DexieClient,
     markets: Vec<MarketConfig>,
-    bridge: Arc<dyn DaemonPythonBridge>,
 ) -> SignerResult<(Vec<SingleMarketCycleOutput>, u64)> {
-    let parallel =
-        dispatch_context.parallel_markets_enabled && markets.len() > 1 && bridge.supports_parallel_workers();
+    let parallel = dispatch_context.parallel_markets_enabled && markets.len() > 1;
     let error_store = SqliteStore::open(&plan.db_path)?;
     let mut worker_errors = 0u64;
+
     if parallel {
         let mut tasks = tokio::task::JoinSet::new();
         for market in markets {
             let request = request.clone();
             let plan = plan.clone();
+            let program = program.clone();
             let dispatch_context = dispatch_context.clone();
             let network = network.clone();
             let dexie = dexie.clone();
-            let bridge = Arc::clone(&bridge);
             let market_id = market.market_id.clone();
             tasks.spawn(async move {
                 let result = tokio::task::spawn_blocking(move || {
@@ -135,11 +127,11 @@ async fn dispatch_markets(
                         .block_on(process_one_market(
                             &request,
                             &plan,
+                            &program,
                             &dispatch_context,
                             &network,
                             &dexie,
                             &market,
-                            bridge,
                         ))
                 })
                 .await;
@@ -175,11 +167,11 @@ async fn dispatch_markets(
         match process_one_market(
             request,
             plan,
+            program,
             dispatch_context,
             &network,
             &dexie,
             &market,
-            Arc::clone(&bridge),
         )
         .await
         {
@@ -200,25 +192,20 @@ async fn dispatch_markets(
 
 pub async fn run_daemon_cycle_once(
     request: &DaemonRunOnceRequest,
-    bridge: Arc<dyn DaemonPythonBridge>,
 ) -> SignerResult<DaemonCycleOnceResponse> {
     let started: Instant = cycle_started_instant();
     let plan = build_cycle_plan(request).await?;
     write_stale_sweep_audit(&plan.db_path, &plan)?;
 
-    let preamble_kwargs = serde_json::json!({
-        "program_path": request.program_path,
-        "db_path": plan.db_path,
-        "coinset_base_url": request.coinset_base_url,
-        "poll_coinset_mempool": request.poll_coinset_mempool,
-        "use_websocket_capture": request.use_websocket_capture,
-    });
-    let preamble = call_python_bridge(bridge.clone(), "run_cycle_preamble", preamble_kwargs).await?;
-    let preamble_error_count = preamble
-        .get("cycle_error_count")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let xch_price_usd = preamble.get("xch_price_usd").and_then(Value::as_f64);
+    let program = load_program_config(&request.program_path)?;
+    let preamble = run_cycle_preamble(
+        &request.program_path,
+        &plan.db_path,
+        &request.coinset_base_url,
+        request.poll_coinset_mempool,
+        request.use_websocket_capture,
+    )
+    .await?;
 
     let dispatch_context = MarketDispatchContext {
         program_path: request.program_path.clone(),
@@ -228,7 +215,7 @@ pub async fn run_daemon_cycle_once(
         state_dir: request.state_dir.clone(),
         selected_market_ids: plan.selected_market_ids.clone(),
         allowed_key_ids: request.allowed_key_ids.clone(),
-        xch_price_usd,
+        xch_price_usd: preamble.xch_price_usd,
         previous_xch_price_usd: plan.previous_xch_price_usd,
         parallel_markets_enabled: plan.parallel_markets_enabled,
         runtime_dry_run: plan.runtime_dry_run,
@@ -240,11 +227,11 @@ pub async fn run_daemon_cycle_once(
     let (cycle_outputs, worker_errors) = dispatch_markets(
         request,
         &plan,
+        &program,
         &dispatch_context,
         network,
         dexie,
         markets,
-        bridge,
     )
     .await?;
 
@@ -256,12 +243,17 @@ pub async fn run_daemon_cycle_once(
             enqueue_immediate_requeue(&dispatch_state.immediate_requeue_ids, market_id);
     }
 
-    let summary = build_cycle_summary(&plan, &metrics, preamble_error_count, elapsed_ms(started));
+    let summary = build_cycle_summary(
+        &plan,
+        &metrics,
+        preamble.cycle_error_count,
+        elapsed_ms(started),
+    );
     let summary_store = SqliteStore::open(&plan.db_path)?;
     summary_store.add_audit_event("daemon_cycle_summary", &summary, None)?;
 
     Ok(DaemonCycleOnceResponse {
-        exit_code: 0,
+        exit_code: compute_cycle_exit_code(&plan, &metrics),
         dispatch_state,
         cycle_summary: summary,
     })

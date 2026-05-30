@@ -26,8 +26,15 @@ def dexie_mock() -> Generator[DexieHttpMock, None, None]:
         mock.stop()
 
 
+@pytest.fixture(autouse=True)
+def rust_cycle_test_env(monkeypatch) -> None:
+    monkeypatch.setenv("GREENFLOOR_XCH_PRICE_USD", "30")
+    monkeypatch.setenv("GREENFLOOR_TEST_SKIP_STRATEGY_EXEC", "1")
+    monkeypatch.delenv("GREENFLOOR_TEST_FORCE_MARKET_ERROR", raising=False)
+
+
 def test_run_once_parallel_markets_overlap_execution(
-    monkeypatch, tmp_path: Path, dexie_mock: DexieHttpMock
+    tmp_path: Path, dexie_mock: DexieHttpMock
 ) -> None:
     home = tmp_path / "home"
     state_dir = home / "state"
@@ -37,26 +44,6 @@ def test_run_once_parallel_markets_overlap_execution(
     write_program(program, home, parallel_markets=True, dexie_api_base=dexie_mock.base_url)
     write_markets_two(markets)
     db_path = tmp_path / "state.sqlite"
-
-    class _FakePriceAdapter:
-        async def get_xch_price(self) -> float:
-            return 30.0
-
-    started: list[str] = []
-
-    def _fake_python_phases(**kwargs):
-        started.append(str(kwargs["market_id"]))
-        return {
-            "cycle_error_count": 0,
-            "strategy_planned_total": 0,
-            "strategy_executed_total": 0,
-        }
-
-    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr(
-        "greenfloor.daemon.rust_cycle_bridge.run_market_cycle_python_phases",
-        _fake_python_phases,
-    )
 
     code = run_once(
         program_path=program,
@@ -68,12 +55,22 @@ def test_run_once_parallel_markets_overlap_execution(
         poll_coinset_mempool=False,
     )
     assert code == 0
-    assert set(started) == {"m1", "m2"}
+
+    store = SqliteStore(db_path)
+    try:
+        events = store.list_recent_audit_events(event_types=["daemon_cycle_summary"], limit=1)
+    finally:
+        store.close()
+    assert len(events) == 1
+    payload = events[0]["payload"]
+    assert payload["markets_attempted"] == 2
+    assert payload["markets_processed"] == 2
 
 
 def test_run_once_parallel_market_failure_isolated(
     monkeypatch, tmp_path: Path, dexie_mock: DexieHttpMock
 ) -> None:
+    monkeypatch.setenv("GREENFLOOR_TEST_FORCE_MARKET_ERROR", "m1")
     home = tmp_path / "home"
     state_dir = home / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -82,25 +79,6 @@ def test_run_once_parallel_market_failure_isolated(
     write_program(program, home, parallel_markets=True, dexie_api_base=dexie_mock.base_url)
     write_markets_two(markets)
     db_path = tmp_path / "state.sqlite"
-
-    class _FakePriceAdapter:
-        async def get_xch_price(self) -> float:
-            return 30.0
-
-    def _fake_python_phases(**kwargs):
-        if str(kwargs["market_id"]) == "m1":
-            raise RuntimeError("boom")
-        return {
-            "cycle_error_count": 0,
-            "strategy_planned_total": 2,
-            "strategy_executed_total": 1,
-        }
-
-    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr(
-        "greenfloor.daemon.rust_cycle_bridge.run_market_cycle_python_phases",
-        _fake_python_phases,
-    )
 
     code = run_once(
         program_path=program,
@@ -128,6 +106,7 @@ def test_run_once_parallel_market_failure_isolated(
 def test_run_once_sequential_market_failure_isolated(
     monkeypatch, tmp_path: Path, dexie_mock: DexieHttpMock
 ) -> None:
+    monkeypatch.setenv("GREENFLOOR_TEST_FORCE_MARKET_ERROR", "m1")
     home = tmp_path / "home"
     state_dir = home / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -136,25 +115,6 @@ def test_run_once_sequential_market_failure_isolated(
     write_program(program, home, parallel_markets=False, dexie_api_base=dexie_mock.base_url)
     write_markets_two(markets)
     db_path = tmp_path / "state.sqlite"
-
-    class _FakePriceAdapter:
-        async def get_xch_price(self) -> float:
-            return 30.0
-
-    def _fake_python_phases(**kwargs):
-        if str(kwargs["market_id"]) == "m1":
-            raise RuntimeError("boom-sequential")
-        return {
-            "cycle_error_count": 0,
-            "strategy_planned_total": 2,
-            "strategy_executed_total": 1,
-        }
-
-    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr(
-        "greenfloor.daemon.rust_cycle_bridge.run_market_cycle_python_phases",
-        _fake_python_phases,
-    )
 
     code = run_once(
         program_path=program,
@@ -180,7 +140,7 @@ def test_run_once_sequential_market_failure_isolated(
 
 
 def test_run_once_parallel_picks_up_new_market_next_cycle(
-    monkeypatch, tmp_path: Path, dexie_mock: DexieHttpMock
+    tmp_path: Path, dexie_mock: DexieHttpMock
 ) -> None:
     home = tmp_path / "home"
     state_dir = home / "state"
@@ -188,29 +148,9 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
     write_program(program, home, parallel_markets=True, dexie_api_base=dexie_mock.base_url)
-    write_markets(markets)  # first cycle has one enabled market
+    write_markets(markets)
     db_path = tmp_path / "state.sqlite"
 
-    class _FakePriceAdapter:
-        async def get_xch_price(self) -> float:
-            return 30.0
-
-    seen: list[str] = []
-
-    def _fake_python_phases(**kwargs):
-        seen.append(str(kwargs["market_id"]))
-        return {
-            "cycle_error_count": 0,
-            "strategy_planned_total": 0,
-            "strategy_executed_total": 0,
-        }
-
-    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr(
-        "greenfloor.daemon.rust_cycle_bridge.run_market_cycle_python_phases",
-        _fake_python_phases,
-    )
-
     code = run_once(
         program_path=program,
         markets_path=markets,
@@ -221,10 +161,8 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(
         poll_coinset_mempool=False,
     )
     assert code == 0
-    assert seen == ["m1"]
-    cycle1_count = len(seen)
 
-    write_markets_two(markets)  # add a new enabled market while daemon keeps running
+    write_markets_two(markets)
     code = run_once(
         program_path=program,
         markets_path=markets,
@@ -235,8 +173,6 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(
         poll_coinset_mempool=False,
     )
     assert code == 0
-    assert len(seen) == cycle1_count + 2
-    assert set(seen[cycle1_count:]) == {"m1", "m2"}
 
     store = SqliteStore(db_path)
     try:
@@ -250,7 +186,7 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(
 
 
 def test_run_once_uses_websocket_capture_when_enabled(
-    monkeypatch, tmp_path: Path, dexie_mock: DexieHttpMock
+    tmp_path: Path, dexie_mock: DexieHttpMock
 ) -> None:
     home = tmp_path / "home"
     state_dir = home / "state"
@@ -259,36 +195,6 @@ def test_run_once_uses_websocket_capture_when_enabled(
     markets = tmp_path / "markets.yaml"
     write_program(program, home, dexie_api_base=dexie_mock.base_url)
     write_markets(markets)
-
-    class _FakePriceAdapter:
-        async def get_xch_price(self) -> float:
-            return 30.0
-
-    class _FakeWalletAdapter:
-        def list_asset_coins_base_units(self, **_kwargs) -> list[int]:
-            return []
-
-        def execute_coin_ops(self, **_kwargs) -> dict:
-            return {"dry_run": False, "planned_count": 0, "executed_count": 0, "items": []}
-
-    class _FakeDexieAdapter:
-        def __init__(self, _base_url: str) -> None:
-            pass
-
-        def get_offers(self, _offered: str, _requested: str) -> list[dict]:
-            return []
-
-    capture_calls = {"n": 0}
-
-    def _fake_capture(**_kwargs) -> None:
-        capture_calls["n"] += 1
-
-    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr(
-        "greenfloor.daemon.rust_cycle_bridge._run_coinset_signal_capture_once", _fake_capture
-    )
 
     code = run_once(
         program_path=program,
@@ -301,7 +207,18 @@ def test_run_once_uses_websocket_capture_when_enabled(
         use_websocket_capture=True,
     )
     assert code == 0
-    assert capture_calls["n"] == 1
+
+    store = SqliteStore(tmp_path / "state.sqlite")
+    try:
+        events = store.list_recent_audit_events(
+            event_types=["coinset_ws_once_started", "coinset_ws_once_recovery_poll"],
+            limit=5,
+        )
+    finally:
+        store.close()
+    event_types = {str(event["event_type"]) for event in events}
+    assert "coinset_ws_once_started" in event_types
+    assert "coinset_ws_once_recovery_poll" in event_types
 
 
 def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:
@@ -346,3 +263,28 @@ def test_main_once_exits_with_lock_conflict(
         assert captured.out == ""
         log_text = (home / "logs" / "debug.log").read_text(encoding="utf-8")
         assert "daemon_lock_conflict" in log_text
+
+
+def test_run_once_all_markets_fail_exits_non_zero(
+    monkeypatch, tmp_path: Path, dexie_mock: DexieHttpMock
+) -> None:
+    monkeypatch.setenv("GREENFLOOR_TEST_FORCE_MARKET_ERROR", "m1")
+    home = tmp_path / "home"
+    state_dir = home / "state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    write_program(program, home, parallel_markets=False, dexie_api_base=dexie_mock.base_url)
+    write_markets(markets)
+    db_path = tmp_path / "state.sqlite"
+
+    code = run_once(
+        program_path=program,
+        markets_path=markets,
+        allowed_keys=None,
+        db_path_override=str(db_path),
+        coinset_base_url="https://coinset.org",
+        state_dir=state_dir,
+        poll_coinset_mempool=False,
+    )
+    assert code == 1
