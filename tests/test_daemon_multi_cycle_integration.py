@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Generator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,19 +18,22 @@ from greenfloor.daemon.testing import (
 )
 from greenfloor.runtime.offer_reconciliation import reconcile_offers
 from greenfloor.storage.sqlite import SqliteStore
+from tests.helpers.dexie_http_mock import DexieHttpMock
 
 
-@pytest.fixture(autouse=True)
-def _daemon_cycle_engine_bridge_shim(monkeypatch) -> None:
-    from tests.helpers.daemon_engine_cycle_shim import run_daemon_cycle_once_via_bridge
+@pytest.fixture
+def dexie_mock() -> Generator[DexieHttpMock, None, None]:
+    mock = DexieHttpMock()
+    mock.start()
+    try:
+        yield mock
+    finally:
+        mock.stop()
 
-    monkeypatch.setattr(
-        "greenfloor.daemon.engine_cycle._engine_run_daemon_cycle_once",
-        lambda: run_daemon_cycle_once_via_bridge,
-    )
 
-
-def write_program(path: Path, home_dir: Path) -> None:
+def write_program(
+    path: Path, home_dir: Path, *, dexie_api_base: str = "https://api.dexie.space"
+) -> None:
     path.write_text(
         "\n".join(
             [
@@ -61,7 +65,7 @@ def write_program(path: Path, home_dir: Path) -> None:
                 '      recipient_key_env: "PUSHOVER_RECIPIENT_KEY"',
                 "venues:",
                 "  dexie:",
-                '    api_base: "https://api.dexie.space"',
+                f'    api_base: "{dexie_api_base}"',
                 "  splash:",
                 '    api_base: "http://localhost:4000"',
                 "  offer_publish:",
@@ -131,7 +135,7 @@ def write_markets(path: Path) -> None:
 
 
 def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
-    monkeypatch, tmp_path: Path
+    monkeypatch, tmp_path: Path, dexie_mock: DexieHttpMock
 ) -> None:
     POST_COOLDOWN_UNTIL.clear()
     CANCEL_COOLDOWN_UNTIL.clear()
@@ -141,8 +145,11 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
     db_path = tmp_path / "state.sqlite"
-    write_program(program, home)
+    write_program(program, home, dexie_api_base=dexie_mock.base_url)
     write_markets(markets)
+
+    def _sync_dexie_mock() -> None:
+        dexie_mock.set_offers(_FakeDexieAdapter.offers)
 
     class _FakePriceAdapter:
         prices = [30.0, 40.0]
@@ -214,7 +221,6 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
     monkeypatch.setattr("greenfloor.daemon.inventory_scan.CoinsetAdapter", _FakeCoinsetAdapter)
     monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.WalletAdapter", _FakeWalletAdapter)
     monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(
         "greenfloor.daemon.market_cycle.strategy_eval_phase.evaluate_market",
         _fake_evaluate_market,
@@ -231,6 +237,7 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
                 "status": 0,
                 "tx_id": _FakeDexieAdapter.take_tx_id,
             }
+            _sync_dexie_mock()
             store.upsert_offer_state(
                 offer_id="offer-1",
                 market_id=str(market.market_id),
@@ -277,6 +284,7 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
             "status": 0,
             "tx_id": _FakeDexieAdapter.take_tx_id,
         }
+        _sync_dexie_mock()
         interim_store.upsert_offer_state(
             offer_id="offer-1",
             market_id="m1",

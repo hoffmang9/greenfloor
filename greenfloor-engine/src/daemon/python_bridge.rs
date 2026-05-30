@@ -8,6 +8,16 @@ use crate::error::{SignerError, SignerResult};
 
 const BRIDGE_MODULE: &str = "greenfloor.daemon.bridge_subprocess";
 
+/// Python IO surface invoked by the Rust daemon orchestrator.
+pub trait DaemonPythonBridge: Send + Sync {
+    fn call_method(&self, method: &str, kwargs: &Value) -> SignerResult<Value>;
+
+    /// Subprocess bridge workers can run in parallel; in-process PyO3 bridge must stay sequential.
+    fn supports_parallel_workers(&self) -> bool {
+        false
+    }
+}
+
 pub struct SubprocessPythonBridge {
     python: PathBuf,
 }
@@ -40,8 +50,10 @@ impl SubprocessPythonBridge {
             "python interpreter not found; set GREENFLOOR_PYTHON or activate a venv".to_string(),
         ))
     }
+}
 
-    pub fn call_method(&self, method: &str, kwargs: &Value) -> SignerResult<Value> {
+impl DaemonPythonBridge for SubprocessPythonBridge {
+    fn call_method(&self, method: &str, kwargs: &Value) -> SignerResult<Value> {
         let request = json!({
             "method": method,
             "kwargs": kwargs,
@@ -78,24 +90,32 @@ impl SubprocessPythonBridge {
                 stderr.trim()
             )));
         }
-        let response: Value = serde_json::from_slice(&output.stdout).map_err(|err| {
-            SignerError::Other(format!(
-                "failed to decode python bridge stdout: {err}; raw={}",
-                String::from_utf8_lossy(&output.stdout)
-            ))
-        })?;
-        if response.get("ok").and_then(Value::as_bool) != Some(true) {
-            let message = response
-                .get("error")
-                .and_then(Value::as_str)
-                .unwrap_or("python bridge returned ok=false");
-            return Err(SignerError::Other(message.to_string()));
-        }
-        response
-            .get("result")
-            .cloned()
-            .ok_or_else(|| SignerError::Other("python bridge missing result payload".to_string()))
+        decode_bridge_response(&output.stdout)
     }
+
+    fn supports_parallel_workers(&self) -> bool {
+        true
+    }
+}
+
+pub fn decode_bridge_response(stdout: &[u8]) -> SignerResult<Value> {
+    let response: Value = serde_json::from_slice(stdout).map_err(|err| {
+        SignerError::Other(format!(
+            "failed to decode python bridge stdout: {err}; raw={}",
+            String::from_utf8_lossy(stdout)
+        ))
+    })?;
+    if response.get("ok").and_then(Value::as_bool) != Some(true) {
+        let message = response
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or("python bridge returned ok=false");
+        return Err(SignerError::Other(message.to_string()));
+    }
+    response
+        .get("result")
+        .cloned()
+        .ok_or_else(|| SignerError::Other("python bridge missing result payload".to_string()))
 }
 
 pub fn default_bridge() -> SignerResult<SubprocessPythonBridge> {

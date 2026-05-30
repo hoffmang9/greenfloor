@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+from collections import deque
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-
-from collections import deque
 
 from greenfloor.daemon.cycle_market_batch import MarketDispatchState
 from greenfloor.daemon.cycle_runner import run_once

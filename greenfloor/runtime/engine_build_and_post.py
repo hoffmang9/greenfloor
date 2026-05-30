@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, cast
 
 from greenfloor.core.engine_bridge import import_engine, require_engine_method

@@ -3,6 +3,7 @@
 //! The extension module is exported as `greenfloor_engine` (ADR 0010). Python
 //! callers should import through `greenfloor.core.engine_bridge.import_engine`.
 
+mod daemon_inprocess_bridge;
 mod daemon_py;
 mod manager_py;
 mod coin_ops_py;

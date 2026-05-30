@@ -10,7 +10,7 @@ use crate::cycle::{
     dedupe_sorted_market_ids, enqueue_immediate_requeue, select_market_batch,
     should_use_market_slot_dispatch, StaleSweepProgress,
 };
-use crate::error::{SignerError, SignerResult};
+use crate::error::SignerResult;
 use crate::storage::{state_db_path_for_home, SqliteStore};
 
 use super::stale_sweep::detect_stale_open_offers_for_requeue;
@@ -45,6 +45,7 @@ pub struct CyclePlan {
     pub stale_open_sweep: StaleSweepProgress,
     pub configured_market_slot_count: u64,
     pub parallel_markets_enabled: bool,
+    pub runtime_dry_run: bool,
     pub db_path: PathBuf,
     pub previous_xch_price_usd: Option<f64>,
     pub dexie_base_url: String,
@@ -112,20 +113,23 @@ pub async fn build_cycle_plan(request: &DaemonRunOnceRequest) -> SignerResult<Cy
         detect_stale_open_offers_for_requeue(&store, &dexie, &enabled_market_ids).await?
     };
 
-    let runtime_fields = load_daemon_runtime_fields(&request.program_path)?;
+    let runtime_market_slot_count = program.runtime_market_slot_count;
+    let parallel_markets_enabled = program.runtime_parallel_markets;
+    let runtime_dry_run = program.runtime_dry_run;
     let mut dispatch_state = request.dispatch_state.clone();
     for market_id in &stale_open_sweep.requeue_market_ids {
         dispatch_state.immediate_requeue_ids =
             enqueue_immediate_requeue(&dispatch_state.immediate_requeue_ids, market_id);
     }
 
-    let configured_market_slot_count = runtime_fields.runtime_market_slot_count;
     let (selected_market_ids, consumed_immediate_requeues) =
-        if should_use_market_slot_dispatch(enabled_market_ids.len(), configured_market_slot_count as usize)
-        {
+        if should_use_market_slot_dispatch(
+            enabled_market_ids.len(),
+            runtime_market_slot_count as usize,
+        ) {
             let selection = select_market_batch(
                 &enabled_market_ids,
-                configured_market_slot_count as usize,
+                runtime_market_slot_count as usize,
                 dispatch_state.cursor,
                 &dispatch_state.immediate_requeue_ids,
             );
@@ -148,8 +152,9 @@ pub async fn build_cycle_plan(request: &DaemonRunOnceRequest) -> SignerResult<Cy
         consumed_immediate_requeues,
         dispatch_state,
         stale_open_sweep,
-        configured_market_slot_count,
-        parallel_markets_enabled: runtime_fields.runtime_parallel_markets,
+        configured_market_slot_count: runtime_market_slot_count,
+        parallel_markets_enabled,
+        runtime_dry_run,
         db_path,
         previous_xch_price_usd,
         dexie_base_url: program.dexie_api_base,
@@ -184,33 +189,6 @@ pub fn build_cycle_summary(
         "cancel_planned_total": metrics.cancel_planned_total,
         "cancel_executed_total": metrics.cancel_executed_total,
         "consumed_immediate_requeues": plan.consumed_immediate_requeues,
-    })
-}
-
-struct DaemonRuntimeFields {
-    runtime_market_slot_count: u64,
-    runtime_parallel_markets: bool,
-}
-
-fn load_daemon_runtime_fields(program_path: &Path) -> SignerResult<DaemonRuntimeFields> {
-    let raw = std::fs::read_to_string(program_path).map_err(|err| {
-        SignerError::Other(format!("failed to read config {}: {err}", program_path.display()))
-    })?;
-    let parsed: serde_yaml::Value = serde_yaml::from_str(&raw).map_err(|err| {
-        SignerError::Other(format!("failed to parse config {}: {err}", program_path.display()))
-    })?;
-    let runtime = parsed.get("runtime");
-    let slot_count = runtime
-        .and_then(|value| value.get("market_slot_count"))
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0);
-    let parallel = runtime
-        .and_then(|value| value.get("parallel_markets"))
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    Ok(DaemonRuntimeFields {
-        runtime_market_slot_count: slot_count,
-        runtime_parallel_markets: parallel,
     })
 }
 

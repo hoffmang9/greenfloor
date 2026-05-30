@@ -22,12 +22,18 @@ pub struct ManagerProgramConfig {
     pub offer_publish_venue: String,
     pub coin_ops_minimum_fee_mojos: u64,
     pub runtime_offer_bootstrap_wait_timeout_seconds: u64,
+    pub runtime_market_slot_count: u64,
+    pub runtime_parallel_markets: bool,
+    pub runtime_dry_run: bool,
+    pub runtime_loop_interval_seconds: u64,
+    pub tx_block_trigger_mode: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct ProgramYaml {
     app: Option<AppYaml>,
     runtime: Option<RuntimeYaml>,
+    chain_signals: Option<ChainSignalsYaml>,
     venues: Option<VenuesYaml>,
     coin_ops: Option<CoinOpsYaml>,
     signer: Option<SignerPresence>,
@@ -44,6 +50,20 @@ struct AppYaml {
 #[derive(Debug, Deserialize)]
 struct RuntimeYaml {
     offer_bootstrap_wait_timeout_seconds: Option<u64>,
+    market_slot_count: Option<u64>,
+    parallel_markets: Option<bool>,
+    dry_run: Option<bool>,
+    loop_interval_seconds: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChainSignalsYaml {
+    tx_block_trigger: Option<TxBlockTriggerYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TxBlockTriggerYaml {
+    mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -144,11 +164,26 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
 
     let runtime = parsed.runtime.unwrap_or(RuntimeYaml {
         offer_bootstrap_wait_timeout_seconds: None,
+        market_slot_count: None,
+        parallel_markets: None,
+        dry_run: None,
+        loop_interval_seconds: None,
     });
     let runtime_offer_bootstrap_wait_timeout_seconds = runtime
         .offer_bootstrap_wait_timeout_seconds
         .unwrap_or(120)
         .max(10);
+    let runtime_market_slot_count = runtime.market_slot_count.unwrap_or(0);
+    let runtime_parallel_markets = runtime.parallel_markets.unwrap_or(false);
+    let runtime_dry_run = runtime.dry_run.unwrap_or(false);
+    let runtime_loop_interval_seconds = runtime.loop_interval_seconds.unwrap_or(30).max(1);
+    let tx_block_trigger_mode = parsed
+        .chain_signals
+        .and_then(|section| section.tx_block_trigger)
+        .and_then(|trigger| trigger.mode)
+        .map(|value| value.trim().to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "websocket".to_string());
 
     Ok(ManagerProgramConfig {
         network,
@@ -160,6 +195,11 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
         offer_publish_venue,
         coin_ops_minimum_fee_mojos,
         runtime_offer_bootstrap_wait_timeout_seconds,
+        runtime_market_slot_count,
+        runtime_parallel_markets,
+        runtime_dry_run,
+        runtime_loop_interval_seconds,
+        tx_block_trigger_mode,
     })
 }
 

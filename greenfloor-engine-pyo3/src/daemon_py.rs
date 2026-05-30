@@ -1,12 +1,12 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use engine_core::daemon::{
-    default_bridge, run_daemon_cycle_once, DaemonDispatchState, DaemonRunOnceRequest,
-};
+use engine_core::daemon::{run_daemon_cycle_once, DaemonDispatchState, DaemonRunOnceRequest};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
 use serde::Deserialize;
 
+use crate::daemon_inprocess_bridge::inprocess_bridge;
 use crate::py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
 use crate::runtime;
 
@@ -37,7 +37,7 @@ fn default_true() -> bool {
 
 #[pyfunction]
 #[pyo3(name = "run_daemon_cycle_once")]
-fn run_daemon_cycle_once_py(request: &Bound<'_, PyDict>) -> PyResult<Py<PyAny>> {
+fn run_daemon_cycle_once_py(py: Python<'_>, request: &Bound<'_, PyDict>) -> PyResult<Py<PyAny>> {
     let payload = request_dict_to_json(request)?;
     let parsed: DaemonRunOnceRequestPy = serde_json::from_value(payload).map_err(to_py_err)?;
     let engine_request = DaemonRunOnceRequest {
@@ -53,10 +53,14 @@ fn run_daemon_cycle_once_py(request: &Bound<'_, PyDict>) -> PyResult<Py<PyAny>> 
         dispatch_state: parsed.dispatch_state,
     };
 
-    let bridge = default_bridge().map_err(to_py_err)?;
-    let response = runtime()
-        .block_on(run_daemon_cycle_once(&engine_request, &bridge))
-        .map_err(to_py_err)?;
+    let bridge = inprocess_bridge();
+    // Detach from the interpreter so Tokio can poll HTTP I/O and the in-process Python
+    // bridge can run (ThreadingHTTPServer handlers need the GIL while the caller is in block_on).
+    let response = py.detach(move || {
+        runtime()
+            .block_on(run_daemon_cycle_once(&engine_request, bridge))
+            .map_err(to_py_err)
+    })?;
 
     Python::attach(|py| {
         let out = PyDict::new(py);

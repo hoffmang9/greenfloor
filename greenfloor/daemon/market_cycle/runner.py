@@ -67,6 +67,69 @@ def _build_market_cycle_run(
     )
 
 
+def process_single_market_python_phases(
+    *,
+    market: MarketConfig,
+    program: ProgramConfig,
+    allowed_keys: set[str] | None,
+    dexie: DexieAdapter,
+    splash: SplashAdapter,
+    wallet: WalletAdapter,
+    store: SqliteStore,
+    xch_price_usd: float | None,
+    now: datetime,
+    state_dir: Path,
+    reservation_coordinator: AssetReservationCoordinator | None,
+    reconcile_context: dict,
+) -> dict:
+    run = _build_market_cycle_run(
+        market=market,
+        program=program,
+        allowed_keys=allowed_keys,
+        dexie=dexie,
+        splash=splash,
+        wallet=wallet,
+        store=store,
+        xch_price_usd=xch_price_usd,
+        now=now,
+        state_dir=state_dir,
+        reservation_coordinator=reservation_coordinator,
+        reconcile_context=reconcile_context,
+    )
+    run.signer_selection = run_market_cycle_setup(
+        market=run.market,
+        program=run.program,
+        allowed_keys=run.allowed_keys,
+        store=run.store,
+        now=run.now,
+    )
+    if reconcile_context.get("dexie_fetch_error") is None:
+        update_market_coin_watchlist_from_dexie(
+            market=run.market,
+            offers=run.offers,
+            store=run.store,
+            clock=run.now,
+        )
+    run_market_cycle_inventory_phase(run)
+    run_market_cycle_strategy_phase(run)
+    run_market_cycle_coin_ops_phase(run)
+    _log_market_decision(
+        run.market.market_id,
+        "cycle_complete",
+        cycle_errors=run.result.cycle_errors,
+        strategy_planned=run.result.strategy_planned,
+        strategy_executed=run.result.strategy_executed,
+        cancel_triggered=run.result.cancel_triggered,
+        cancel_planned=run.result.cancel_planned,
+        cancel_executed=run.result.cancel_executed,
+    )
+    return {
+        "cycle_error_count": int(run.result.cycle_errors),
+        "strategy_planned_total": int(run.result.strategy_planned),
+        "strategy_executed_total": int(run.result.strategy_executed),
+    }
+
+
 def process_single_market_io_phases(
     *,
     market: MarketConfig,

@@ -5,20 +5,19 @@ from __future__ import annotations
 import json
 import sys
 import traceback
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from greenfloor.daemon.rust_cycle_bridge import (
     run_cycle_preamble,
-    run_market_coin_ops_phase,
-    run_market_cycle_io_phases,
+    run_market_cycle_python_phases,
 )
 
 BridgeFn = Callable[..., dict[str, Any]]
 
 _METHODS: dict[str, BridgeFn] = {
     "run_cycle_preamble": run_cycle_preamble,
-    "run_market_cycle_io_phases": run_market_cycle_io_phases,
-    "run_market_coin_ops_phase": run_market_coin_ops_phase,
+    "run_market_cycle_python_phases": run_market_cycle_python_phases,
 }
 
 

@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use greenfloor_engine::vault::members::hex_to_bytes32;
@@ -11,7 +12,7 @@ use greenfloor_engine::daemon::{
     default_bridge, default_testnet_markets_path, initialize_daemon_file_logging,
     load_daemon_program_runtime, resolve_testnet_markets_path, run_daemon_cycle_once,
     use_websocket_capture_for_once, warn_if_daemon_log_level_auto_healed, DaemonDispatchState,
-    DaemonInstanceLock, DaemonRunOnceRequest,
+    DaemonInstanceLock, DaemonPythonBridge, DaemonRunOnceRequest,
 };
 
 #[derive(Debug, Parser)]
@@ -371,7 +372,7 @@ async fn run_daemon_cli_once(
         Some(state_db.trim().to_string())
     };
 
-    let bridge = default_bridge()?;
+    let bridge: Arc<dyn DaemonPythonBridge> = Arc::new(default_bridge()?);
     let response = run_daemon_cycle_once(
         &DaemonRunOnceRequest {
             program_path: program_config,
@@ -385,7 +386,7 @@ async fn run_daemon_cli_once(
             allowed_key_ids,
             dispatch_state: DaemonDispatchState::default(),
         },
-        &bridge,
+        bridge,
     )
     .await?;
 

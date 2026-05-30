@@ -640,6 +640,11 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
             offer_publish_venue: "dexie".to_string(),
             coin_ops_minimum_fee_mojos: 0,
             runtime_offer_bootstrap_wait_timeout_seconds: 120,
+            runtime_market_slot_count: 0,
+            runtime_parallel_markets: false,
+            runtime_dry_run: false,
+            runtime_loop_interval_seconds: 30,
+            tx_block_trigger_mode: "websocket".to_string(),
         },
         market: MarketConfig {
             market_id: "m1".to_string(),
