@@ -9,7 +9,7 @@ use greenfloor_engine::{
 };
 use greenfloor_engine::daemon::{
     default_testnet_markets_path, initialize_daemon_file_logging, load_daemon_program_runtime,
-    resolve_testnet_markets_path, run_daemon_cycle_once, use_websocket_capture_for_once,
+    resolve_testnet_markets_path, run_daemon_cycle_once,
     warn_if_daemon_log_level_auto_healed, DaemonDispatchState, DaemonInstanceLock,
     DaemonRunOnceRequest,
 };
@@ -122,7 +122,7 @@ enum Commands {
         #[arg(long)]
         no_persist_results: bool,
     },
-    /// Daemon cycle orchestration (native Rust entry; IO phases use Python bridge subprocess).
+    /// Daemon cycle orchestration (native Rust entry).
     Daemon {
         #[command(subcommand)]
         command: DaemonCommands,
@@ -137,8 +137,8 @@ enum DaemonCommands {
         program_config: PathBuf,
         #[arg(long, default_value = "config/markets.yaml")]
         markets_config: PathBuf,
-        #[arg(long, default_value = "")]
-        testnet_markets_config: PathBuf,
+        #[arg(long)]
+        testnet_markets_config: Option<PathBuf>,
         #[arg(long, default_value = "")]
         key_ids: String,
         #[arg(long, default_value = "")]
@@ -147,6 +147,17 @@ enum DaemonCommands {
         coinset_base_url: String,
         #[arg(long, default_value = "~/.greenfloor/state")]
         state_dir: PathBuf,
+        /// Emit full cycle response JSON on stdout (exit code still reflects cycle outcome).
+        #[arg(long)]
+        json: bool,
+        #[arg(long, default_value = "0")]
+        dispatch_cursor: usize,
+        #[arg(long, default_value = "")]
+        dispatch_requeue_ids: String,
+        #[arg(long, default_value_t = false)]
+        poll_coinset_mempool: bool,
+        #[arg(long, default_value_t = false)]
+        use_websocket_capture: bool,
     },
 }
 
@@ -302,6 +313,11 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
                 state_db,
                 coinset_base_url,
                 state_dir,
+                json,
+                dispatch_cursor,
+                dispatch_requeue_ids,
+                poll_coinset_mempool,
+                use_websocket_capture,
             } => {
                 let exit_code = run_daemon_cli_once(
                     program_config,
@@ -311,6 +327,11 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
                     state_db,
                     coinset_base_url,
                     state_dir,
+                    json,
+                    dispatch_cursor,
+                    dispatch_requeue_ids,
+                    poll_coinset_mempool,
+                    use_websocket_capture,
                 )
                 .await?;
                 if exit_code != 0 {
@@ -325,11 +346,16 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
 async fn run_daemon_cli_once(
     program_config: PathBuf,
     markets_config: PathBuf,
-    testnet_markets_config: PathBuf,
+    testnet_markets_config: Option<PathBuf>,
     key_ids: String,
     state_db: String,
     coinset_base_url: String,
     state_dir: PathBuf,
+    json: bool,
+    dispatch_cursor: usize,
+    dispatch_requeue_ids: String,
+    poll_coinset_mempool: bool,
+    use_websocket_capture: bool,
 ) -> Result<i32, greenfloor_engine::Error> {
     let runtime = load_daemon_program_runtime(&program_config)?;
     initialize_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
@@ -354,10 +380,10 @@ async fn run_daemon_cli_once(
         "daemon_starting"
     );
 
-    let testnet_overlay = if testnet_markets_config.as_os_str().is_empty() {
-        default_testnet_markets_path()
-    } else {
-        resolve_testnet_markets_path(&testnet_markets_config.to_string_lossy())
+    let testnet_overlay = match testnet_markets_config {
+        None => default_testnet_markets_path(),
+        Some(path) if path.as_os_str().is_empty() => default_testnet_markets_path(),
+        Some(path) => resolve_testnet_markets_path(&path.to_string_lossy()),
     };
     let allowed_key_ids: Vec<String> = key_ids
         .split(',')
@@ -371,6 +397,13 @@ async fn run_daemon_cli_once(
         Some(state_db.trim().to_string())
     };
 
+    let immediate_requeue_ids: Vec<String> = dispatch_requeue_ids
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect();
+
     let response = run_daemon_cycle_once(
         &DaemonRunOnceRequest {
             program_path: program_config,
@@ -379,13 +412,25 @@ async fn run_daemon_cli_once(
             state_db_override,
             coinset_base_url,
             state_dir: expanded_state_dir,
-            poll_coinset_mempool: false,
-            use_websocket_capture: use_websocket_capture_for_once(&runtime),
+            poll_coinset_mempool,
+            use_websocket_capture,
             allowed_key_ids,
-            dispatch_state: DaemonDispatchState::default(),
+            dispatch_state: DaemonDispatchState {
+                cursor: dispatch_cursor,
+                immediate_requeue_ids,
+            },
         },
     )
     .await?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&response).map_err(|err| {
+                greenfloor_engine::Error::Other(format!("json encode failed: {err}"))
+            })?
+        );
+    }
 
     tracing::info!(mode = "once", exit_code = response.exit_code, "daemon_stopped");
     Ok(response.exit_code)

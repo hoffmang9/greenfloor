@@ -167,6 +167,11 @@ def daemon_run_once_argv(
     state_db: str | None,
     coinset_base_url: str,
     state_dir: Path,
+    poll_coinset_mempool: bool = False,
+    use_websocket_capture: bool = False,
+    dispatch_cursor: int = 0,
+    dispatch_requeue_ids: str = "",
+    json_output: bool = False,
 ) -> list[str]:
     argv: list[str] = [
         str(binary),
@@ -180,6 +185,10 @@ def daemon_run_once_argv(
         coinset_base_url.strip(),
         "--state-dir",
         str(state_dir),
+        "--dispatch-cursor",
+        str(int(dispatch_cursor)),
+        "--dispatch-requeue-ids",
+        dispatch_requeue_ids.strip(),
     ]
     if testnet_markets_path is not None:
         argv.extend(["--testnet-markets-config", str(testnet_markets_path)])
@@ -187,6 +196,12 @@ def daemon_run_once_argv(
         argv.extend(["--key-ids", key_ids.strip()])
     if state_db and state_db.strip():
         argv.extend(["--state-db", state_db.strip()])
+    if poll_coinset_mempool:
+        argv.append("--poll-coinset-mempool")
+    if use_websocket_capture:
+        argv.append("--use-websocket-capture")
+    if json_output:
+        argv.append("--json")
     return argv
 
 
@@ -199,6 +214,7 @@ def run_daemon_once_via_engine(
     state_db: str | None = None,
     coinset_base_url: str = "https://api.coinset.org",
     state_dir: Path,
+    use_websocket_capture: bool = True,
     run_fn: Callable[..., object] | None = None,
 ) -> int:
     binary = resolve_greenfloor_engine_binary()
@@ -211,6 +227,7 @@ def run_daemon_once_via_engine(
         state_db=state_db,
         coinset_base_url=coinset_base_url,
         state_dir=state_dir,
+        use_websocket_capture=use_websocket_capture,
     )
     runner = run_fn or subprocess.run
     completed = runner(argv, check=False)

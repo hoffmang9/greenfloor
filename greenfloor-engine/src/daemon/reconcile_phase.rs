@@ -14,6 +14,7 @@ use crate::storage::SqliteStore;
 use super::coinset_tx::{
     build_dexie_size_by_offer_id, dexie_offer_status, extract_coinset_tx_ids_from_offer_payload,
 };
+use super::watchlist::watchlist_offer_ids;
 
 #[derive(Debug, Clone, Default)]
 pub struct ReconcilePhaseMetrics {
@@ -28,20 +29,6 @@ pub struct ReconcilePhaseResult {
     pub dexie_size_by_offer_id: HashMap<String, i64>,
     pub dexie_fetch_error: Option<String>,
     pub metrics: ReconcilePhaseMetrics,
-}
-
-fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult<HashSet<String>> {
-    let tracked_states: HashSet<&str> = ["open", "refresh_due", "unknown_orphaned"]
-        .into_iter()
-        .collect();
-    let mut offer_ids = HashSet::new();
-    for row in store.list_offer_state_details(market_id, 500)? {
-        let state = row.state.trim().to_ascii_lowercase();
-        if tracked_states.contains(state.as_str()) || state == "mempool_observed" {
-            offer_ids.insert(row.offer_id);
-        }
-    }
-    Ok(offer_ids)
 }
 
 fn coinset_signal_lists(

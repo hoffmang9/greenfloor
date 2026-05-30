@@ -27,14 +27,7 @@ from greenfloor.daemon.inventory_scan import (
     _build_coinset_adapter,
     _resolve_coinset_ws_url,
 )
-
-# Backward-compatible re-exports for tests and legacy imports.
-from greenfloor.daemon.market_cycle import (  # noqa: F401
-    process_single_market,
-    process_single_market_with_store,
-)
 from greenfloor.daemon.market_logging import _daemon_logger
-from greenfloor.runtime.daemon_config_paths import DaemonConfigPaths, set_daemon_config_paths
 
 
 def consume_reload_marker(state_dir: Path) -> bool:
@@ -88,13 +81,6 @@ def run_loop(
     state_dir: Path,
 ) -> int:
     current_program = load_program_config(program_path)
-    set_daemon_config_paths(
-        DaemonConfigPaths(
-            program_path=program_path,
-            markets_path=markets_path,
-            testnet_markets_path=testnet_markets_path,
-        )
-    )
     market_dispatch_state = MarketDispatchState()
     initialize_daemon_file_logging(
         current_program.home_dir, log_level=getattr(current_program, "app_log_level", "INFO")

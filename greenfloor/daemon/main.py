@@ -126,6 +126,7 @@ def main() -> None:
                 state_db=args.state_db or None,
                 coinset_base_url=args.coinset_base_url,
                 state_dir=state_dir,
+                use_websocket_capture=True,
             )
             raise SystemExit(exit_code)
 

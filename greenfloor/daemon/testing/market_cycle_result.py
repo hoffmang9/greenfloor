@@ -1,12 +1,8 @@
-"""Per-market cycle result accumulator."""
+"""Per-market daemon cycle result accumulator (test helpers)."""
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
-from typing import Any
-
-from greenfloor.daemon.market_logging import _daemon_logger
 
 
 @dataclass(slots=True)
@@ -32,7 +28,3 @@ class MarketCycleResult:
             self.cancel_triggered = True
         self.cancel_planned += max(0, int(planned))
         self.cancel_executed += max(0, int(executed))
-
-
-def log_daemon_event(*, level: int, payload: dict[str, Any]) -> None:
-    _daemon_logger.log(level, "daemon_event %s", json.dumps(payload, sort_keys=True))

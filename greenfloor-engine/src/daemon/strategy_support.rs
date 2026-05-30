@@ -1,14 +1,16 @@
 use std::collections::BTreeMap;
-
-use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::config::{MarketConfig, resolve_quote_asset_for_offer};
 use crate::cycle::{
     filter_planned_actions_with_positive_repeat, is_two_sided_market_mode,
     one_sided_offer_counts_by_side, plan_reseed_actions_from_gap, resolve_tracked_sizes,
-    MarketState, StrategyConfig,
+    MarketState, PlannedAction, StrategyConfig,
 };
-use crate::daemon::coinset_tx::dexie_offer_status;
+use crate::error::SignerResult;
+use crate::storage::SqliteStore;
+
+use super::watchlist::{active_offer_counts_by_size, active_offer_counts_by_size_and_side};
 
 pub fn strategy_config_from_market(market: &MarketConfig, network: &str) -> StrategyConfig {
     let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
@@ -46,59 +48,46 @@ pub fn strategy_state_from_bucket_counts(
     }
 }
 
-pub fn active_offer_counts_by_size(
-    offers: &[Value],
-    dexie_size_by_offer_id: &std::collections::HashMap<String, i64>,
-) -> BTreeMap<i64, i64> {
-    let mut counts: BTreeMap<i64, i64> = BTreeMap::new();
-    for offer in offers {
-        let Some(offer_id) = offer
-            .get("id")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            continue;
-        };
-        if dexie_offer_status(offer).unwrap_or(-1) != 0 {
-            continue;
-        }
-        let size = dexie_size_by_offer_id.get(offer_id).copied().unwrap_or(0);
-        if size > 0 {
-            *counts.entry(size).or_insert(0) += 1;
-        }
-    }
-    counts
-}
-
-pub fn evaluate_strategy_actions(
+pub fn evaluate_strategy_actions_for_market(
+    store: &SqliteStore,
     market: &MarketConfig,
     network: &str,
-    active_counts: &BTreeMap<i64, i64>,
+    dexie_size_by_offer_id: &HashMap<String, i64>,
     xch_price_usd: Option<f64>,
-) -> Vec<crate::cycle::PlannedAction> {
+) -> SignerResult<(Vec<PlannedAction>, BTreeMap<i64, i64>)> {
     let config = strategy_config_from_market(market, network);
+    let tracked_sizes_list = resolve_tracked_sizes_for_market(market, &config);
     let market_mode = market_mode_label(market);
-    if is_two_sided_market_mode(&market_mode) {
-        let tracked: Vec<i64> = resolve_tracked_sizes(
-            &ladder_sizes(market),
-            &target_sizes_from_config(&config),
-        );
-        let (buy_side, sell_side) =
-            one_sided_offer_counts_by_side(active_counts, &tracked);
-        let buy_state = strategy_state_from_bucket_counts(&buy_side, xch_price_usd);
-        let sell_state = strategy_state_from_bucket_counts(&sell_side, xch_price_usd);
+    let two_sided = is_two_sided_market_mode(&market_mode);
+
+    if two_sided {
+        let (buy_counts, sell_counts, _unmapped) = active_offer_counts_by_size_and_side(
+            store,
+            &market.market_id,
+            Some(dexie_size_by_offer_id),
+            &tracked_sizes_list,
+        )?;
         let buy_config = strategy_config_for_side(market, network, "buy");
         let sell_config = strategy_config_for_side(market, network, "sell");
-        return crate::cycle::evaluate_two_sided_market_actions(
+        let buy_state = strategy_state_from_bucket_counts(&buy_counts, xch_price_usd);
+        let sell_state = strategy_state_from_bucket_counts(&sell_counts, xch_price_usd);
+        let actions = crate::cycle::evaluate_two_sided_market_actions(
             &buy_state,
             &sell_state,
             &buy_config,
             &sell_config,
         );
+        return Ok((actions, sell_counts));
     }
+
+    let (active_offer_counts_by_size, _unmapped) = active_offer_counts_by_size(
+        store,
+        &market.market_id,
+        Some(dexie_size_by_offer_id),
+        &tracked_sizes_list,
+    )?;
     let mut actions = crate::cycle::evaluate_market(
-        &strategy_state_from_bucket_counts(active_counts, xch_price_usd),
+        &strategy_state_from_bucket_counts(&active_offer_counts_by_size, xch_price_usd),
         &config,
     );
     actions = filter_planned_actions_with_positive_repeat(&actions);
@@ -108,12 +97,28 @@ pub fn evaluate_strategy_actions(
         .unwrap_or_default();
     let reseed = plan_reseed_actions_from_gap(
         &actions,
-        active_counts,
+        &active_offer_counts_by_size,
         &target_counts,
         &config,
         xch_price_usd,
     );
-    reseed.actions
+    let (buy_side, sell_side) =
+        one_sided_offer_counts_by_side(&active_offer_counts_by_size, &tracked_sizes_list);
+    let _ = (buy_side, sell_side);
+    Ok((reseed.actions, active_offer_counts_by_size))
+}
+
+fn resolve_tracked_sizes_for_market(market: &MarketConfig, strategy_config: &StrategyConfig) -> Vec<i64> {
+    let ladder_sizes: Vec<i64> = market
+        .ladders
+        .values()
+        .flat_map(|entries| entries.iter().map(|entry| entry.size_base_units))
+        .filter(|size| *size > 0)
+        .collect();
+    resolve_tracked_sizes(
+        &ladder_sizes,
+        &target_sizes_from_config(strategy_config),
+    )
 }
 
 fn strategy_config_for_side(market: &MarketConfig, network: &str, side: &str) -> StrategyConfig {
@@ -171,20 +176,11 @@ fn target_sizes_from_config(config: &StrategyConfig) -> Vec<i64> {
     vec![1, 10, 100]
 }
 
-fn ladder_sizes(market: &MarketConfig) -> Vec<i64> {
-    market
-        .ladders
-        .values()
-        .flat_map(|entries| entries.iter().map(|entry| entry.size_base_units))
-        .filter(|size| *size > 0)
-        .collect()
-}
-
 fn market_mode_label(market: &MarketConfig) -> String {
     market.mode.trim().to_ascii_lowercase()
 }
 
-fn pricing_int(pricing: &Value, key: &str) -> Option<i64> {
+fn pricing_int(pricing: &serde_json::Value, key: &str) -> Option<i64> {
     pricing.get(key).and_then(|value| {
         value
             .as_i64()
@@ -192,7 +188,7 @@ fn pricing_int(pricing: &Value, key: &str) -> Option<i64> {
     })
 }
 
-fn pricing_float(pricing: &Value, key: &str) -> Option<f64> {
+fn pricing_float(pricing: &serde_json::Value, key: &str) -> Option<f64> {
     pricing.get(key).and_then(|value| value.as_f64())
 }
 
@@ -236,14 +232,5 @@ mod tests {
         let config = strategy_config_from_market(&market, "mainnet");
         assert_eq!(config.ones_target, 1);
         assert_eq!(config.pair, "xch");
-    }
-
-    #[test]
-    fn active_offer_counts_only_open_offers() {
-        let offers = vec![json!({"id": "o1", "status": 0}), json!({"id": "o2", "status": 3})];
-        let sizes = HashMap::from([("o1".to_string(), 1_i64)]);
-        let counts = active_offer_counts_by_size(&offers, &sizes);
-        assert_eq!(counts.get(&1), Some(&1));
-        assert_eq!(counts.get(&2), None);
     }
 }

@@ -23,6 +23,7 @@ use crate::vault::{
 };
 
 use super::coinset_tx::extract_coin_ids_from_offer_payload;
+use super::watchlist::watchlist_offer_ids;
 
 const COIN_OP_ERROR_PREFIX: &str = "signer_coin_op_error";
 
@@ -62,20 +63,6 @@ pub fn combine_input_coin_cap() -> i64 {
         .and_then(|raw| raw.trim().parse::<i64>().ok())
         .map(|value| value.max(2))
         .unwrap_or(5)
-}
-
-fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult<HashSet<String>> {
-    let tracked_states: HashSet<&str> = ["open", "refresh_due", "unknown_orphaned"]
-        .into_iter()
-        .collect();
-    let mut offer_ids = HashSet::new();
-    for row in store.list_offer_state_details(market_id, 500)? {
-        let state = row.state.trim().to_ascii_lowercase();
-        if tracked_states.contains(state.as_str()) || state == "mempool_observed" {
-            offer_ids.insert(row.offer_id);
-        }
-    }
-    Ok(offer_ids)
 }
 
 pub fn watched_coin_ids_for_market(
@@ -546,7 +533,7 @@ async fn execute_daemon_combine_plan(
                 op_type,
                 size_base_units,
                 op_count,
-                format!("coin_op_error:{err}"),
+                format!("{COIN_OP_ERROR_PREFIX}:{err}"),
             )],
             0,
         ),

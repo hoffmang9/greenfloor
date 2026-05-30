@@ -8,6 +8,7 @@ import pytest
 from greenfloor.daemon.testing import run_once
 from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.dexie_http_mock import DexieHttpMock
+from tests.helpers.engine_binary import engine_binary_path
 
 
 @pytest.fixture
@@ -113,6 +114,7 @@ def rust_cycle_test_env(monkeypatch) -> None:
     monkeypatch.setenv("GREENFLOOR_XCH_PRICE_USD", "30")
     monkeypatch.setenv("GREENFLOOR_TEST_SKIP_STRATEGY_EXEC", "1")
     monkeypatch.delenv("GREENFLOOR_TEST_FORCE_MARKET_ERROR", raising=False)
+    monkeypatch.setenv("GREENFLOOR_ENGINE_BIN", str(engine_binary_path()))
 
 
 def test_daemon_multi_cycle_price_shift_cancel_and_reconcile(

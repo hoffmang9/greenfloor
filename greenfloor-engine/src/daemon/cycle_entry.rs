@@ -7,12 +7,11 @@ use crate::cycle::enqueue_immediate_requeue;
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
-use super::cancel_phase::run_market_cancel_phase;
 use super::market_dispatch::{
     aggregate_market_dispatch_metrics, dexie_client, program_network, record_market_worker_error,
     selected_markets, IoPhaseMetrics, MarketDispatchContext, SingleMarketCycleOutput,
 };
-use super::market_phases::run_market_phases;
+use super::market_cycle::run_post_reconcile_market_phases;
 use super::preamble::run_cycle_preamble;
 use super::reconcile_phase::run_market_reconcile_phase;
 use super::run_once::{
@@ -20,7 +19,7 @@ use super::run_once::{
     elapsed_ms, CyclePlan, DaemonDispatchState, DaemonRunOnceRequest, MarketDispatchMetrics,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DaemonCycleOnceResponse {
     pub exit_code: i32,
     pub dispatch_state: DaemonDispatchState,
@@ -55,8 +54,9 @@ async fn process_one_market(
     let store = SqliteStore::open(&plan.db_path)?;
     let reconcile = run_market_reconcile_phase(&store, dexie, market, network).await?;
 
-    let phase_metrics = run_market_phases(
+    let phases = run_post_reconcile_market_phases(
         &store,
+        dexie,
         program,
         market,
         network,
@@ -66,31 +66,23 @@ async fn process_one_market(
         dispatch_context.testnet_markets_path.as_deref(),
         &reconcile,
         dispatch_context.xch_price_usd,
+        plan.previous_xch_price_usd,
+        plan.runtime_dry_run,
     )
     .await?;
     let io = IoPhaseMetrics {
-        cycle_error_count: phase_metrics.cycle_error_count,
-        strategy_planned_total: phase_metrics.strategy_planned_total,
-        strategy_executed_total: phase_metrics.strategy_executed_total,
+        cycle_error_count: phases.metrics.cycle_error_count,
+        strategy_planned_total: phases.metrics.strategy_planned_total,
+        strategy_executed_total: phases.metrics.strategy_executed_total,
     };
 
     let immediate_requeue_requested = reconcile.metrics.immediate_requeue_requested;
-    let (cancel, _payload) = run_market_cancel_phase(
-        &store,
-        dexie,
-        market,
-        &reconcile.offers,
-        plan.runtime_dry_run,
-        dispatch_context.xch_price_usd,
-        plan.previous_xch_price_usd,
-    )
-    .await?;
 
     Ok(SingleMarketCycleOutput {
         market_id: market.market_id.clone(),
         reconcile,
         io,
-        cancel,
+        cancel: phases.cancel,
         immediate_requeue_requested,
     })
 }

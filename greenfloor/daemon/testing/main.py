@@ -14,7 +14,7 @@ from greenfloor.daemon.cycle_runner import (
 )
 from greenfloor.daemon.main import _acquire_daemon_instance_lock
 from greenfloor.daemon.main import main as cli_main
-from greenfloor.daemon.market_cycle import MarketCycleResult
+from greenfloor.daemon.testing.market_cycle_result import MarketCycleResult
 
 # Tests monkeypatch adapter imports on this module object.
 main = cycle_runner
