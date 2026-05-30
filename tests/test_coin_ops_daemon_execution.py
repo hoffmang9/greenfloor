@@ -121,7 +121,6 @@ def test_execute_daemon_split_plan_retry_disables_combine_prereq() -> None:
         scope=CoinOpScope(
             market=market,
             selected_venue=None,
-            execution_backend="signer",
         ),
         wallet=wallet,
     )

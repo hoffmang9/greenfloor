@@ -60,7 +60,6 @@ def test_coin_op_scope_disallows_signer_split_combine_prereq() -> None:
     scope = CoinOpScope(
         market=_signer_market(),
         selected_venue=None,
-        execution_backend="signer",
         vault_id="signer",
     )
     assert scope.allows_daemon_split_combine_prereq is True

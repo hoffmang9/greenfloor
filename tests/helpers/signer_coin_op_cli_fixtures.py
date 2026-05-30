@@ -45,7 +45,6 @@ class SignerCoinOpBackendFake:
         self.scope = CoinOpScope(
             market=market,
             selected_venue=None,
-            execution_backend="signer",
             vault_id="signer",
         )
 

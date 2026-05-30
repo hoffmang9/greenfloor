@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 
-from greenfloor.core.offer_build_bridge import (
+from greenfloor.core.offer_request_bridge import (
     resolve_offer_expiry_for_pricing,
     resolve_quote_price_for_pricing,
 )

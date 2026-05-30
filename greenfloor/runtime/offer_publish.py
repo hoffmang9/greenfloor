@@ -17,9 +17,7 @@ from greenfloor.core.policy_bridge import (
     dexie_invalid_offer_should_retry,
 )
 from greenfloor.logging_setup import initialize_service_file_logging
-from greenfloor.offer_decode import (
-    extract_coin_id_hints_from_offer_text as _extract_coin_id_hints_from_offer_text,
-)
+from greenfloor.offer_decode import extract_coin_id_hints_for_logging
 
 _MANAGER_SERVICE_NAME = "manager"
 _DEXIE_INVALID_OFFER_RETRY_MAX_ATTEMPTS = 4
@@ -61,10 +59,7 @@ def log_signed_offer_artifact(
     trading_pair: str,
     expiry: str,
 ) -> None:
-    try:
-        coin_id_hints = _extract_coin_id_hints_from_offer_text(offer_text)
-    except Exception:
-        coin_id_hints = []
+    coin_id_hints = extract_coin_id_hints_for_logging(offer_text)
     coin_id = coin_id_hints[0] if coin_id_hints else ""
     _runtime_logger.debug("signed_offer_file:%s", offer_text)
     _runtime_logger.info(

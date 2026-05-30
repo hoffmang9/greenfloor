@@ -294,8 +294,6 @@ def build_and_post_offer_signer(
         resolved_quote_asset_id=resolved_quote_asset_id,
         bootstrap_phase_fn=bootstrap,
         create_offer_fn=create,
-        path_label="signer",
-        path_extra_fields={"signer_path": True},
         post_deps=resolved_deps.post_deps,
         emit_output=emit_output,
         persist_results=persist_results,

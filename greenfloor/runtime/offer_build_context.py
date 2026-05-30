@@ -7,12 +7,12 @@ from pathlib import Path
 
 from greenfloor.config.io import resolve_quote_asset_for_offer
 from greenfloor.config.models import MarketConfig, ProgramConfig
-from greenfloor.core.offer_build_bridge import (
+from greenfloor.core.offer_request_bridge import (
     mojo_multiplier_for_leg,
+    normalize_offer_side,
     resolve_offer_expiry_for_pricing,
     resolve_quote_price_for_pricing,
 )
-from greenfloor.core.offer_request_bridge import normalize_offer_side
 
 
 def keyring_yaml_path_for_market(program: ProgramConfig, market: MarketConfig) -> str:

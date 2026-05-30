@@ -7,14 +7,7 @@ from typing import Any, Protocol
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.core.offer_reconcile import CycleOfferTransition
-from greenfloor.daemon.market_helpers import _resolve_quote_asset_for_offer
 from greenfloor.daemon.market_logging import _log_market_decision
-from greenfloor.daemon.watchlist import (
-    _build_dexie_size_by_offer_id,
-    _is_dexie_offer_missing_error,
-    _update_market_coin_watchlist_from_dexie,
-    _watchlist_offer_ids_from_store,
-)
 from greenfloor.runtime.offer_reconciliation import reconcile_market_watched_offers
 from greenfloor.storage.sqlite import SqliteStore
 
@@ -65,11 +58,6 @@ def reconcile_market_cycle_offers(
         store=store,
         now=now,
         result=result,
-        resolve_quote_asset=_resolve_quote_asset_for_offer,
-        watchlist_offer_ids=_watchlist_offer_ids_from_store,
-        is_dexie_offer_missing=_is_dexie_offer_missing_error,
-        build_dexie_size_map=_build_dexie_size_by_offer_id,
-        update_watchlist_from_dexie=_update_market_coin_watchlist_from_dexie,
         on_decision=_on_decision,
         on_transition=_on_transition,
     )

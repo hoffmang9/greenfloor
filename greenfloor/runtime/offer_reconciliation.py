@@ -10,7 +10,7 @@ from typing import Any, Protocol
 
 from greenfloor.adapters.coinset import extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter
-from greenfloor.config.io import resolve_trade_asset_for_dexie
+from greenfloor.config.io import resolve_quote_asset_for_offer, resolve_trade_asset_for_dexie
 from greenfloor.core.offer_reconcile import (
     CycleOfferTransition,
     resolve_missing_watched_offer_transition,
@@ -19,6 +19,12 @@ from greenfloor.core.offer_reconcile import (
     unsupported_venue_offer_transition,
 )
 from greenfloor.runtime.coin_ops.coins import safe_int
+from greenfloor.runtime.offer_watchlist import (
+    build_dexie_size_by_offer_id,
+    is_dexie_offer_missing_error,
+    update_market_coin_watchlist_from_dexie,
+    watchlist_offer_ids_from_store,
+)
 from greenfloor.storage.sqlite import SqliteStore
 
 OFFER_LIFECYCLE_TRANSITION_EVENT = "offer_lifecycle_transition"
@@ -416,11 +422,6 @@ def reconcile_market_watched_offers(
     store: SqliteStore,
     now: datetime,
     result: ReconcileCycleEffects,
-    resolve_quote_asset: Callable[..., str],
-    watchlist_offer_ids: Callable[..., set[str]],
-    is_dexie_offer_missing: Callable[[Exception], bool],
-    build_dexie_size_map: Callable[..., dict[str, int]],
-    update_watchlist_from_dexie: Callable[..., None],
     on_decision: Callable[..., None] | None = None,
     on_transition: Callable[..., None] | None = None,
 ) -> MarketWatchedOffersReconcileResult:
@@ -431,7 +432,7 @@ def reconcile_market_watched_offers(
         asset=str(market.base_asset),
         network=network,
     )
-    dexie_requested_asset = resolve_quote_asset(
+    dexie_requested_asset = resolve_quote_asset_for_offer(
         quote_asset=str(market.quote_asset),
         network=network,
     )
@@ -456,7 +457,7 @@ def reconcile_market_watched_offers(
         )
         offers = []
 
-    our_offer_ids = watchlist_offer_ids(store=store, market_id=market_id, clock=now)
+    our_offer_ids = watchlist_offer_ids_from_store(store=store, market_id=market_id, clock=now)
     state_by_offer_id = {
         str(row["offer_id"]): str(row["state"])
         for row in store.list_offer_states(market_id=market_id, limit=5000)
@@ -480,7 +481,7 @@ def reconcile_market_watched_offers(
             if isinstance(single_offer, dict):
                 augmented_by_id[watched_offer_id] = single_offer
         except Exception as exc:  # pragma: no cover - network dependent
-            if is_dexie_offer_missing(exc):
+            if is_dexie_offer_missing_error(exc):
                 current_state = state_by_offer_id.get(watched_offer_id, "open")
                 transition = resolve_missing_watched_offer_transition(
                     current_state=current_state,
@@ -509,9 +510,9 @@ def reconcile_market_watched_offers(
             pass
 
     augmented_offers = list(augmented_by_id.values())
-    dexie_size_by_offer_id = build_dexie_size_map(augmented_offers, str(market.base_asset))
+    dexie_size_by_offer_id = build_dexie_size_by_offer_id(augmented_offers, str(market.base_asset))
     if dexie_fetch_error is None:
-        update_watchlist_from_dexie(
+        update_market_coin_watchlist_from_dexie(
             market=market,
             offers=augmented_offers,
             store=store,

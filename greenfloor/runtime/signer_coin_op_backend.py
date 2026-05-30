@@ -43,7 +43,6 @@ class SignerCoinOpBackend:
         return CoinOpScope(
             market=self.market,
             selected_venue=self.selected_venue,
-            execution_backend="signer",
             vault_id="signer",
         )
 
