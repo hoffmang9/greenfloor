@@ -36,12 +36,12 @@ the daemon runtime migrates to Rust.
 
 ## Cutover milestones
 
-| Milestone | Owner | Delete when done |
-|-----------|-------|------------------|
-| Manager CLI subprocess delegation | Python CLI | N/A (keep thin wrapper) |
-| Rust build/post + sqlite persist | `greenfloor-engine` | — |
-| Daemon cycle offer post | Python today | `offer_orchestration.py` manager path |
-| Daemon sqlite / config | Python today | duplicate schema in `storage/sqlite.py` |
+| Milestone                         | Owner               | Delete when done                        |
+| --------------------------------- | ------------------- | --------------------------------------- |
+| Manager CLI subprocess delegation | Python CLI          | N/A (keep thin wrapper)                 |
+| Rust build/post + sqlite persist  | `greenfloor-engine` | —                                       |
+| Daemon cycle offer post           | Python today        | `offer_orchestration.py` manager path   |
+| Daemon sqlite / config            | Python today        | duplicate schema in `storage/sqlite.py` |
 
 **Target:** When `greenfloord` runs offer build/post through `greenfloor-engine`
 in-process or subprocess, delete Python `execute_build_and_post_offer` and shrink
