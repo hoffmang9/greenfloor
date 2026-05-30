@@ -2,9 +2,7 @@ use serde_json::{json, Value};
 
 use crate::adapters::DexieClient;
 use crate::config::{cancel_policy_stable_vs_unstable, MarketConfig};
-use crate::cycle::{
-    collect_open_offer_ids_for_cancel, evaluate_cancel_policy_decision,
-};
+use crate::cycle::{collect_open_offer_ids_for_cancel, evaluate_cancel_policy_decision};
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
@@ -43,12 +41,7 @@ pub async fn run_market_cancel_phase(
     let offer_rows: Vec<(String, i64)> = offers
         .iter()
         .filter_map(|offer| {
-            let offer_id = offer
-                .as_object()?
-                .get("id")?
-                .as_str()?
-                .trim()
-                .to_string();
+            let offer_id = offer.as_object()?.get("id")?.as_str()?.trim().to_string();
             if offer_id.is_empty() {
                 return None;
             }

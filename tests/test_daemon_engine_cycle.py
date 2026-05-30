@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -16,38 +14,19 @@ from greenfloor.daemon.cycle_runner import run_once
 from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
 
 
-def _fake_completed(payload: Any, *, returncode: int = 0) -> subprocess.CompletedProcess[str]:
-    return subprocess.CompletedProcess(
-        args=["greenfloor-engine"],
-        returncode=returncode,
-        stdout=json.dumps(payload),
-        stderr="",
-    )
-
-
-def test_run_daemon_cycle_once_via_engine_delegates_to_engine_binary(
-    monkeypatch, tmp_path: Path
-) -> None:
-    captured: dict[str, list[str]] = {}
+def test_run_daemon_cycle_once_via_engine_delegates_to_pyo3(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, Any] = {}
     dispatch_state = MarketDispatchState(cursor=2, immediate_requeue_ids=deque(["m-old"]))
 
-    def _fake_run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        captured["argv"] = argv
-        return _fake_completed(
-            {
-                "exit_code": 0,
-                "dispatch_state": {
-                    "cursor": 3,
-                    "immediate_requeue_ids": ["m-new"],
-                },
-            }
-        )
-
-    monkeypatch.setattr(
-        "greenfloor.daemon.engine_cycle.resolve_greenfloor_engine_binary",
-        lambda: tmp_path / "greenfloor-engine",
-    )
-    monkeypatch.setattr("greenfloor.daemon.engine_cycle.subprocess.run", _fake_run)
+    def _fake_run(request: dict[str, Any]) -> dict[str, Any]:
+        captured["request"] = request
+        return {
+            "exit_code": 0,
+            "dispatch_state": {
+                "cursor": 3,
+                "immediate_requeue_ids": ["m-new"],
+            },
+        }
 
     exit_code, updated = run_daemon_cycle_once_via_engine(
         program_path=tmp_path / "program.yaml",
@@ -60,14 +39,16 @@ def test_run_daemon_cycle_once_via_engine_delegates_to_engine_binary(
         poll_coinset_mempool=False,
         use_websocket_capture=True,
         market_dispatch_state=dispatch_state,
+        run_fn=_fake_run,
     )
     assert exit_code == 0
     assert updated.cursor == 3
     assert updated.immediate_requeue_ids == deque(["m-new"])
-    argv = captured["argv"]
-    assert "--json" in argv
-    assert "--dispatch-cursor" in argv
-    assert "--use-websocket-capture" in argv
+    request = captured["request"]
+    assert request["poll_coinset_mempool"] is False
+    assert request["use_websocket_capture"] is True
+    assert request["dispatch_state"]["cursor"] == 2
+    assert request["allowed_key_ids"] == ["key-a"]
 
 
 def test_run_once_is_thin_wrapper_over_engine_cycle(monkeypatch, tmp_path: Path) -> None:
@@ -87,15 +68,10 @@ def test_run_once_is_thin_wrapper_over_engine_cycle(monkeypatch, tmp_path: Path)
     mock.assert_called_once()
 
 
-def test_run_daemon_cycle_once_requires_json_object(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(
-        "greenfloor.daemon.engine_cycle.resolve_greenfloor_engine_binary",
-        lambda: tmp_path / "greenfloor-engine",
-    )
-    monkeypatch.setattr(
-        "greenfloor.daemon.engine_cycle.subprocess.run",
-        lambda *_args, **_kwargs: _fake_completed('"not-a-dict"'),
-    )
+def test_run_daemon_cycle_once_requires_json_object(tmp_path: Path) -> None:
+    def _bad_run(_request: dict[str, Any]) -> str:
+        return "not-a-dict"
+
     with pytest.raises(TypeError, match="non-object"):
         run_daemon_cycle_once_via_engine(
             program_path=tmp_path / "program.yaml",
@@ -108,4 +84,5 @@ def test_run_daemon_cycle_once_requires_json_object(monkeypatch, tmp_path: Path)
             poll_coinset_mempool=False,
             use_websocket_capture=False,
             market_dispatch_state=None,
+            run_fn=_bad_run,  # type: ignore[arg-type]
         )

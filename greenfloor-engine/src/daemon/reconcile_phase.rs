@@ -64,12 +64,7 @@ fn persist_offer_lifecycle_transition(
     last_seen_status: Option<i64>,
     dexie_error: Option<&str>,
 ) -> SignerResult<()> {
-    store.upsert_offer_state(
-        offer_id,
-        market_id,
-        &transition.new_state,
-        last_seen_status,
-    )?;
+    store.upsert_offer_state(offer_id, market_id, &transition.new_state, last_seen_status)?;
     let mut payload = json!({
         "offer_id": offer_id,
         "market_id": market_id,
@@ -93,11 +88,7 @@ fn persist_offer_lifecycle_transition(
             obj.insert("dexie_error".to_string(), Value::String(error.to_string()));
         }
     }
-    store.add_audit_event(
-        "offer_lifecycle_transition",
-        &payload,
-        Some(market_id),
-    )?;
+    store.add_audit_event("offer_lifecycle_transition", &payload, Some(market_id))?;
     if transition.taker_signal != "none" {
         store.add_audit_event(
             "taker_detection",

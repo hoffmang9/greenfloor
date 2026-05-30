@@ -79,7 +79,8 @@ pub fn cat_outer_puzzle_hash_hex(receive_address: &str, asset_id: &str) -> Signe
 }
 
 pub fn extract_coin_id_hints_from_offer_text(offer_text: &str) -> SignerResult<Vec<String>> {
-    let spend_bundle = decode_offer(offer_text).map_err(|err| SignerError::Driver(err.to_string()))?;
+    let spend_bundle =
+        decode_offer(offer_text).map_err(|err| SignerError::Driver(err.to_string()))?;
     let mut hints = Vec::new();
     let mut seen = HashSet::new();
     for coin_spend in &spend_bundle.coin_spends {

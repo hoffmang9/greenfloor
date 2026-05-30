@@ -21,7 +21,9 @@ fn add_candidate(candidate: &Value, tx_ids: &mut Vec<String>) {
     match candidate {
         Value::String(raw) => {
             let normalized = normalize_hex_hash(raw);
-            if looks_like_tx_id(&normalized) && !tx_ids.iter().any(|existing| existing == &normalized) {
+            if looks_like_tx_id(&normalized)
+                && !tx_ids.iter().any(|existing| existing == &normalized)
+            {
                 tx_ids.push(normalized);
             }
         }
@@ -57,20 +59,14 @@ fn walk_node(node: &Value, tx_ids: &mut Vec<String>) {
     }
 }
 
-const COINSET_COIN_ID_KEYS: &[&str] = &[
-    "id",
-    "coin_id",
-    "coinId",
-    "name",
-    "coin_name",
-    "coinName",
-];
+const COINSET_COIN_ID_KEYS: &[&str] = &["id", "coin_id", "coinId", "name", "coin_name", "coinName"];
 
 fn add_coin_id_candidate(candidate: &Value, coin_ids: &mut Vec<String>) {
     match candidate {
         Value::String(raw) => {
             let normalized = normalize_hex_hash(raw);
-            if looks_like_tx_id(&normalized) && !coin_ids.iter().any(|existing| existing == &normalized)
+            if looks_like_tx_id(&normalized)
+                && !coin_ids.iter().any(|existing| existing == &normalized)
             {
                 coin_ids.push(normalized);
             }
@@ -95,7 +91,10 @@ fn walk_coin_id_node(node: &Value, coin_ids: &mut Vec<String>) {
     match node {
         Value::Object(map) => {
             for (key, value) in map {
-                if COINSET_COIN_ID_KEYS.iter().any(|candidate| candidate == key) {
+                if COINSET_COIN_ID_KEYS
+                    .iter()
+                    .any(|candidate| candidate == key)
+                {
                     add_coin_id_candidate(value, coin_ids);
                 }
                 if matches!(value, Value::Object(_) | Value::Array(_)) {
@@ -164,7 +163,10 @@ pub fn classify_ws_payload_tx_ids(payload: &Value) -> (Vec<String>, Vec<String>)
     (tx_ids, Vec::new())
 }
 
-pub fn build_dexie_size_by_offer_id(offers: &[Value], base_asset_id: &str) -> std::collections::HashMap<String, i64> {
+pub fn build_dexie_size_by_offer_id(
+    offers: &[Value],
+    base_asset_id: &str,
+) -> std::collections::HashMap<String, i64> {
     let clean_base = base_asset_id.trim().to_ascii_lowercase();
     let mut result = std::collections::HashMap::new();
     for offer in offers {
@@ -224,10 +226,7 @@ mod tests {
     fn extracts_coin_id_from_nested_payload() {
         let coin = "b".repeat(64);
         let payload = json!({"offer": {"coin_id": coin}});
-        assert_eq!(
-            extract_coin_ids_from_offer_payload(&payload),
-            vec![coin]
-        );
+        assert_eq!(extract_coin_ids_from_offer_payload(&payload), vec![coin]);
     }
 
     #[test]

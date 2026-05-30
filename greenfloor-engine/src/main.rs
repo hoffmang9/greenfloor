@@ -1,17 +1,16 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use greenfloor_engine::daemon::{
+    default_testnet_markets_path, initialize_daemon_file_logging, load_daemon_program_runtime,
+    resolve_testnet_markets_path, run_daemon_cycle_once, warn_if_daemon_log_level_auto_healed,
+    DaemonDispatchState, DaemonInstanceLock, DaemonRunOnceRequest,
+};
 use greenfloor_engine::vault::members::hex_to_bytes32;
 use greenfloor_engine::{
     build_and_optionally_broadcast_vault_cat_mixed_split, build_and_post_offer,
     build_vault_cat_offer, load_signer_config, parse_coin_ids, resolve_vault_context,
     BuildAndPostOfferRequest, CreateOfferRequest, MixedSplitRequest,
-};
-use greenfloor_engine::daemon::{
-    default_testnet_markets_path, initialize_daemon_file_logging, load_daemon_program_runtime,
-    resolve_testnet_markets_path, run_daemon_cycle_once,
-    warn_if_daemon_log_level_auto_healed, DaemonDispatchState, DaemonInstanceLock,
-    DaemonRunOnceRequest,
 };
 
 #[derive(Debug, Parser)]
@@ -359,10 +358,7 @@ async fn run_daemon_cli_once(
 ) -> Result<i32, greenfloor_engine::Error> {
     let runtime = load_daemon_program_runtime(&program_config)?;
     initialize_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
-    warn_if_daemon_log_level_auto_healed(
-        runtime.app_log_level_was_missing,
-        &program_config,
-    );
+    warn_if_daemon_log_level_auto_healed(runtime.app_log_level_was_missing, &program_config);
 
     let expanded_state_dir = expand_user_path(&state_dir);
     let _lock = match DaemonInstanceLock::acquire(&expanded_state_dir, "once") {
@@ -404,23 +400,21 @@ async fn run_daemon_cli_once(
         .map(str::to_string)
         .collect();
 
-    let response = run_daemon_cycle_once(
-        &DaemonRunOnceRequest {
-            program_path: program_config,
-            markets_path: markets_config,
-            testnet_markets_path: testnet_overlay,
-            state_db_override,
-            coinset_base_url,
-            state_dir: expanded_state_dir,
-            poll_coinset_mempool,
-            use_websocket_capture,
-            allowed_key_ids,
-            dispatch_state: DaemonDispatchState {
-                cursor: dispatch_cursor,
-                immediate_requeue_ids,
-            },
+    let response = run_daemon_cycle_once(&DaemonRunOnceRequest {
+        program_path: program_config,
+        markets_path: markets_config,
+        testnet_markets_path: testnet_overlay,
+        state_db_override,
+        coinset_base_url,
+        state_dir: expanded_state_dir,
+        poll_coinset_mempool,
+        use_websocket_capture,
+        allowed_key_ids,
+        dispatch_state: DaemonDispatchState {
+            cursor: dispatch_cursor,
+            immediate_requeue_ids,
         },
-    )
+    })
     .await?;
 
     if json {
@@ -432,7 +426,11 @@ async fn run_daemon_cli_once(
         );
     }
 
-    tracing::info!(mode = "once", exit_code = response.exit_code, "daemon_stopped");
+    tracing::info!(
+        mode = "once",
+        exit_code = response.exit_code,
+        "daemon_stopped"
+    );
     Ok(response.exit_code)
 }
 

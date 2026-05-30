@@ -64,11 +64,11 @@ pub struct MarketDispatchMetrics {
     pub immediate_requeue_market_ids: Vec<String>,
 }
 
-pub fn resolve_state_db_path(
-    home_dir: &Path,
-    explicit_db_path: Option<&str>,
-) -> PathBuf {
-    if let Some(path) = explicit_db_path.map(str::trim).filter(|value| !value.is_empty()) {
+pub fn resolve_state_db_path(home_dir: &Path, explicit_db_path: Option<&str>) -> PathBuf {
+    if let Some(path) = explicit_db_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         return PathBuf::from(path);
     }
     state_db_path_for_home(home_dir)
@@ -80,10 +80,7 @@ pub async fn build_cycle_plan(request: &DaemonRunOnceRequest) -> SignerResult<Cy
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
     )?;
-    let db_path = resolve_state_db_path(
-        &program.home_dir,
-        request.state_db_override.as_deref(),
-    );
+    let db_path = resolve_state_db_path(&program.home_dir, request.state_db_override.as_deref());
     let store = SqliteStore::open(&db_path)?;
     let previous_xch_price_usd = store.get_latest_xch_price_snapshot()?;
 
@@ -122,29 +119,28 @@ pub async fn build_cycle_plan(request: &DaemonRunOnceRequest) -> SignerResult<Cy
             enqueue_immediate_requeue(&dispatch_state.immediate_requeue_ids, market_id);
     }
 
-    let (selected_market_ids, consumed_immediate_requeues) =
-        if should_use_market_slot_dispatch(
-            enabled_market_ids.len(),
+    let (selected_market_ids, consumed_immediate_requeues) = if should_use_market_slot_dispatch(
+        enabled_market_ids.len(),
+        runtime_market_slot_count as usize,
+    ) {
+        let selection = select_market_batch(
+            &enabled_market_ids,
             runtime_market_slot_count as usize,
-        ) {
-            let selection = select_market_batch(
-                &enabled_market_ids,
-                runtime_market_slot_count as usize,
-                dispatch_state.cursor,
-                &dispatch_state.immediate_requeue_ids,
-            );
-            dispatch_state.cursor = selection.cursor;
-            dispatch_state.immediate_requeue_ids = selection.immediate_requeue_ids;
-            (
-                selection.selected_market_ids,
-                selection.consumed_immediate_requeues,
-            )
-        } else {
-            if !enabled_market_ids.is_empty() {
-                dispatch_state.cursor %= enabled_market_ids.len();
-            }
-            (enabled_market_ids.clone(), Vec::new())
-        };
+            dispatch_state.cursor,
+            &dispatch_state.immediate_requeue_ids,
+        );
+        dispatch_state.cursor = selection.cursor;
+        dispatch_state.immediate_requeue_ids = selection.immediate_requeue_ids;
+        (
+            selection.selected_market_ids,
+            selection.consumed_immediate_requeues,
+        )
+    } else {
+        if !enabled_market_ids.is_empty() {
+            dispatch_state.cursor %= enabled_market_ids.len();
+        }
+        (enabled_market_ids.clone(), Vec::new())
+    };
 
     Ok(CyclePlan {
         enabled_market_ids,

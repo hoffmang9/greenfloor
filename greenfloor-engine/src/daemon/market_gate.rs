@@ -60,8 +60,7 @@ mod tests {
     #[test]
     fn configured_key_must_match_allowlist() {
         let market = sample_market("key-main-1");
-        enforce_market_key_allowlist(&market, &["key-other".to_string()])
-            .expect_err("not allowed");
+        enforce_market_key_allowlist(&market, &["key-other".to_string()]).expect_err("not allowed");
         enforce_market_key_allowlist(&market, &["key-main-1".to_string()]).expect("allowed");
     }
 }

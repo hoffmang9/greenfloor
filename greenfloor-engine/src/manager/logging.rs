@@ -67,10 +67,7 @@ pub fn initialize_manager_file_logging(home_dir: &Path, log_level: &str) -> Sign
     Ok(())
 }
 
-pub fn warn_if_log_level_auto_healed(
-    log_level_was_missing: bool,
-    program_config_path: &Path,
-) {
+pub fn warn_if_log_level_auto_healed(log_level_was_missing: bool, program_config_path: &Path) {
     if log_level_was_missing {
         tracing::warn!(
             program_config = %program_config_path.display(),

@@ -10,11 +10,9 @@ from greenfloor.daemon import offer_dispatch
 from greenfloor.daemon.offer_dispatch import (
     execute_managed_action_with_retry,
     execute_single_managed_action,
+    execute_strategy_dispatch,
     managed_offer_post,
     resolve_signer_offer_asset_ids_for_reservation,
-)
-from greenfloor.daemon.strategy_dispatch import (
-    execute_strategy_dispatch,
     resolve_strategy_dispatch_mode,
 )
 

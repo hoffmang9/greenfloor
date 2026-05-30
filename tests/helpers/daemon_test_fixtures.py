@@ -14,7 +14,7 @@ from greenfloor.config.models import (
     VaultWalletKeyConfig,
 )
 from greenfloor.core.strategy import PlannedAction
-from greenfloor.daemon.strategy_dispatch.sequential_path import execute_actions_sequential
+from greenfloor.daemon.offer_dispatch.sequential import execute_actions_sequential
 from greenfloor.daemon.strategy_execution import StrategyActionResult, hooks_from_module
 from greenfloor.daemon.testing import (
     expand_planned_actions,

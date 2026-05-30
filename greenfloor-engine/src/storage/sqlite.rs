@@ -143,7 +143,9 @@ impl SqliteStore {
             SignerError::Other(format!("failed to set sqlite busy_timeout: {err}"))
         })?;
         conn.execute_batch("PRAGMA busy_timeout = 30000;")
-            .map_err(|err| SignerError::Other(format!("failed to set busy_timeout pragma: {err}")))?;
+            .map_err(|err| {
+                SignerError::Other(format!("failed to set busy_timeout pragma: {err}"))
+            })?;
         conn.execute_batch(SCHEMA).map_err(|err| {
             SignerError::Other(format!("failed to initialize sqlite schema: {err}"))
         })?;
@@ -175,9 +177,9 @@ impl SqliteStore {
             .map_err(|err| {
                 SignerError::Other(format!("failed to prepare xch price snapshot query: {err}"))
             })?;
-        let mut rows = stmt
-            .query([])
-            .map_err(|err| SignerError::Other(format!("failed to query xch price snapshot: {err}")))?;
+        let mut rows = stmt.query([]).map_err(|err| {
+            SignerError::Other(format!("failed to query xch price snapshot: {err}"))
+        })?;
         let Some(row) = rows
             .next()
             .map_err(|err| SignerError::Other(format!("failed to read xch price row: {err}")))?
@@ -196,7 +198,9 @@ impl SqliteStore {
         let value = raw
             .as_f64()
             .or_else(|| raw.as_i64().map(|v| v as f64))
-            .ok_or_else(|| SignerError::Other("xch_price_snapshot price_usd is not numeric".to_string()))?;
+            .ok_or_else(|| {
+                SignerError::Other("xch_price_snapshot price_usd is not numeric".to_string())
+            })?;
         if value <= 0.0 {
             return Ok(None);
         }
@@ -227,14 +231,15 @@ impl SqliteStore {
                     LIMIT ?2
                     "#,
                 )
-                .map_err(|err| SignerError::Other(format!("failed to prepare offer_state query: {err}")))?;
+                .map_err(|err| {
+                    SignerError::Other(format!("failed to prepare offer_state query: {err}"))
+                })?;
             let mut rows = stmt
                 .query(params![market_id, limit_i64])
                 .map_err(|err| SignerError::Other(format!("failed to query offer_state: {err}")))?;
-            while let Some(row) = rows
-                .next()
-                .map_err(|err| SignerError::Other(format!("failed to read offer_state row: {err}")))?
-            {
+            while let Some(row) = rows.next().map_err(|err| {
+                SignerError::Other(format!("failed to read offer_state row: {err}"))
+            })? {
                 out.push(OfferStateListRow {
                     offer_id: row.get(0).map_err(|err| {
                         SignerError::Other(format!("failed to read offer_id: {err}"))
@@ -242,9 +247,9 @@ impl SqliteStore {
                     market_id: row.get(1).map_err(|err| {
                         SignerError::Other(format!("failed to read market_id: {err}"))
                     })?,
-                    state: row
-                        .get(2)
-                        .map_err(|err| SignerError::Other(format!("failed to read state: {err}")))?,
+                    state: row.get(2).map_err(|err| {
+                        SignerError::Other(format!("failed to read state: {err}"))
+                    })?,
                 });
             }
         } else {
@@ -258,14 +263,15 @@ impl SqliteStore {
                     LIMIT ?1
                     "#,
                 )
-                .map_err(|err| SignerError::Other(format!("failed to prepare offer_state query: {err}")))?;
+                .map_err(|err| {
+                    SignerError::Other(format!("failed to prepare offer_state query: {err}"))
+                })?;
             let mut rows = stmt
                 .query(params![limit_i64])
                 .map_err(|err| SignerError::Other(format!("failed to query offer_state: {err}")))?;
-            while let Some(row) = rows
-                .next()
-                .map_err(|err| SignerError::Other(format!("failed to read offer_state row: {err}")))?
-            {
+            while let Some(row) = rows.next().map_err(|err| {
+                SignerError::Other(format!("failed to read offer_state row: {err}"))
+            })? {
                 out.push(OfferStateListRow {
                     offer_id: row.get(0).map_err(|err| {
                         SignerError::Other(format!("failed to read offer_id: {err}"))
@@ -273,9 +279,9 @@ impl SqliteStore {
                     market_id: row.get(1).map_err(|err| {
                         SignerError::Other(format!("failed to read market_id: {err}"))
                     })?,
-                    state: row
-                        .get(2)
-                        .map_err(|err| SignerError::Other(format!("failed to read state: {err}")))?,
+                    state: row.get(2).map_err(|err| {
+                        SignerError::Other(format!("failed to read state: {err}"))
+                    })?,
                 });
             }
         }
@@ -307,17 +313,17 @@ impl SqliteStore {
             .map_err(|err| {
                 SignerError::Other(format!("failed to prepare offer_state detail query: {err}"))
             })?;
-        let mut rows = stmt
-            .query(params![market_id, limit_i64])
-            .map_err(|err| SignerError::Other(format!("failed to query offer_state details: {err}")))?;
+        let mut rows = stmt.query(params![market_id, limit_i64]).map_err(|err| {
+            SignerError::Other(format!("failed to query offer_state details: {err}"))
+        })?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().map_err(|err| {
             SignerError::Other(format!("failed to read offer_state detail row: {err}"))
         })? {
             out.push(OfferStateDetailRow {
-                offer_id: row.get(0).map_err(|err| {
-                    SignerError::Other(format!("failed to read offer_id: {err}"))
-                })?,
+                offer_id: row
+                    .get(0)
+                    .map_err(|err| SignerError::Other(format!("failed to read offer_id: {err}")))?,
                 market_id: row.get(1).map_err(|err| {
                     SignerError::Other(format!("failed to read market_id: {err}"))
                 })?,
@@ -364,10 +370,9 @@ impl SqliteStore {
             WHERE tx_id IN ({placeholders})
             "#
         );
-        let mut stmt = self
-            .conn
-            .prepare(&sql)
-            .map_err(|err| SignerError::Other(format!("failed to prepare tx_signal query: {err}")))?;
+        let mut stmt = self.conn.prepare(&sql).map_err(|err| {
+            SignerError::Other(format!("failed to prepare tx_signal query: {err}"))
+        })?;
         let params: Vec<&dyn rusqlite::ToSql> = unique
             .iter()
             .map(|value| value as &dyn rusqlite::ToSql)
@@ -376,9 +381,10 @@ impl SqliteStore {
             .query(params.as_slice())
             .map_err(|err| SignerError::Other(format!("failed to query tx_signal_state: {err}")))?;
         let mut out = HashMap::new();
-        while let Some(row) = rows.next().map_err(|err| {
-            SignerError::Other(format!("failed to read tx_signal row: {err}"))
-        })? {
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| SignerError::Other(format!("failed to read tx_signal row: {err}")))?
+        {
             let tx_id: String = row
                 .get(0)
                 .map_err(|err| SignerError::Other(format!("failed to read tx_id: {err}")))?;
@@ -442,9 +448,7 @@ impl SqliteStore {
                     "#,
                     params![now, normalized],
                 )
-                .map_err(|err| {
-                    SignerError::Other(format!("failed to confirm tx id: {err}"))
-                })?;
+                .map_err(|err| SignerError::Other(format!("failed to confirm tx id: {err}")))?;
             updated += u64::try_from(changed).unwrap_or(0);
         }
         Ok(updated)
@@ -518,11 +522,7 @@ impl SqliteStore {
         let mut where_clauses = Vec::new();
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(types) = event_types.filter(|values| !values.is_empty()) {
-            let placeholders = types
-                .iter()
-                .map(|_| "?")
-                .collect::<Vec<_>>()
-                .join(", ");
+            let placeholders = types.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
             where_clauses.push(format!("event_type IN ({placeholders})"));
             for event_type in types {
                 params.push(Box::new(event_type.to_string()));
@@ -547,11 +547,11 @@ impl SqliteStore {
             "#
         );
         params.push(Box::new(limit_i64));
-        let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|value| value.as_ref()).collect();
-        let mut stmt = self
-            .conn
-            .prepare(&sql)
-            .map_err(|err| SignerError::Other(format!("failed to prepare audit_event query: {err}")))?;
+        let param_refs: Vec<&dyn rusqlite::ToSql> =
+            params.iter().map(|value| value.as_ref()).collect();
+        let mut stmt = self.conn.prepare(&sql).map_err(|err| {
+            SignerError::Other(format!("failed to prepare audit_event query: {err}"))
+        })?;
         let mut rows = stmt
             .query(param_refs.as_slice())
             .map_err(|err| SignerError::Other(format!("failed to query audit_event: {err}")))?;
@@ -563,7 +563,8 @@ impl SqliteStore {
             let payload_json: String = row
                 .get(3)
                 .map_err(|err| SignerError::Other(format!("failed to read payload_json: {err}")))?;
-            let payload: Value = serde_json::from_str(&payload_json).unwrap_or(Value::String(payload_json));
+            let payload: Value =
+                serde_json::from_str(&payload_json).unwrap_or(Value::String(payload_json));
             out.push(AuditEventRow {
                 id: row
                     .get(0)
@@ -631,13 +632,7 @@ impl SqliteStore {
                   last_seen_status = excluded.last_seen_status,
                   updated_at = excluded.updated_at
                 "#,
-                params![
-                    offer_id,
-                    market_id,
-                    state,
-                    last_seen_status,
-                    updated_at,
-                ],
+                params![offer_id, market_id, state, last_seen_status, updated_at,],
             )
             .map_err(|err| SignerError::Other(format!("failed to upsert offer_state: {err}")))?;
         Ok(())
@@ -647,7 +642,9 @@ impl SqliteStore {
         let mut stmt = self
             .conn
             .prepare("SELECT state FROM offer_state WHERE offer_id = ?1")
-            .map_err(|err| SignerError::Other(format!("failed to prepare offer_state query: {err}")))?;
+            .map_err(|err| {
+                SignerError::Other(format!("failed to prepare offer_state query: {err}"))
+            })?;
         let mut rows = stmt
             .query(params![offer_id])
             .map_err(|err| SignerError::Other(format!("failed to query offer_state: {err}")))?;

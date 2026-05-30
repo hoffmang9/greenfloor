@@ -96,17 +96,22 @@ pub fn load_markets_config_with_overlay(
 
 fn read_yaml_mapping(path: &Path) -> SignerResult<Value> {
     let raw = std::fs::read_to_string(path).map_err(|err| {
-        SignerError::Other(format!("failed to read markets config {}: {err}", path.display()))
+        SignerError::Other(format!(
+            "failed to read markets config {}: {err}",
+            path.display()
+        ))
     })?;
     serde_yaml::from_str(&raw).map_err(|err| {
-        SignerError::Other(format!("failed to parse markets config {}: {err}", path.display()))
+        SignerError::Other(format!(
+            "failed to parse markets config {}: {err}",
+            path.display()
+        ))
     })
 }
 
 pub fn parse_markets_config(raw: &Value) -> SignerResult<MarketsConfig> {
-    let parsed: MarketsYaml = serde_json::from_value(raw.clone()).map_err(|err| {
-        SignerError::Other(format!("invalid markets config shape: {err}"))
-    })?;
+    let parsed: MarketsYaml = serde_json::from_value(raw.clone())
+        .map_err(|err| SignerError::Other(format!("invalid markets config shape: {err}")))?;
     let rows = parsed.markets.unwrap_or_default();
     let mut markets = Vec::with_capacity(rows.len());
     for row in rows {
@@ -133,45 +138,23 @@ pub fn parse_markets_config(raw: &Value) -> SignerResult<MarketsConfig> {
         markets.push(MarketConfig {
             market_id,
             enabled: row.enabled.unwrap_or(false),
-            base_asset: row
-                .base_asset
-                .unwrap_or_default()
-                .trim()
-                .to_string(),
-            base_symbol: row
-                .base_symbol
-                .unwrap_or_default()
-                .trim()
-                .to_string(),
-            quote_asset: row
-                .quote_asset
-                .unwrap_or_default()
-                .trim()
-                .to_string(),
+            base_asset: row.base_asset.unwrap_or_default().trim().to_string(),
+            base_symbol: row.base_symbol.unwrap_or_default().trim().to_string(),
+            quote_asset: row.quote_asset.unwrap_or_default().trim().to_string(),
             quote_asset_type: row
                 .quote_asset_type
                 .unwrap_or_default()
                 .trim()
                 .to_ascii_lowercase(),
-            receive_address: row
-                .receive_address
-                .unwrap_or_default()
-                .trim()
-                .to_string(),
-            signer_key_id: row
-                .signer_key_id
-                .unwrap_or_default()
-                .trim()
-                .to_string(),
+            receive_address: row.receive_address.unwrap_or_default().trim().to_string(),
+            signer_key_id: row.signer_key_id.unwrap_or_default().trim().to_string(),
             mode: row
                 .mode
                 .unwrap_or_else(|| "sell_only".to_string())
                 .trim()
                 .to_ascii_lowercase(),
             pricing: row.pricing.clone().unwrap_or_else(|| json!({})),
-            cancel_move_threshold_bps: parse_cancel_move_threshold_bps(
-                row.pricing.as_ref(),
-            ),
+            cancel_move_threshold_bps: parse_cancel_move_threshold_bps(row.pricing.as_ref()),
             ladders,
         });
     }
@@ -185,7 +168,9 @@ fn parse_cancel_move_threshold_bps(pricing: Option<&Value>) -> Option<i64> {
     let Some(raw) = pricing.get("cancel_move_threshold_bps") else {
         return None;
     };
-    let parsed = raw.as_i64().or_else(|| raw.as_u64().map(|value| value as i64))?;
+    let parsed = raw
+        .as_i64()
+        .or_else(|| raw.as_u64().map(|value| value as i64))?;
     if parsed <= 0 {
         return None;
     }
@@ -205,7 +190,9 @@ pub fn resolve_market_for_build(
     pair: Option<&str>,
     network: &str,
 ) -> SignerResult<MarketConfig> {
-    let has_market_id = market_id.map(str::trim).is_some_and(|value| !value.is_empty());
+    let has_market_id = market_id
+        .map(str::trim)
+        .is_some_and(|value| !value.is_empty());
     let has_pair = pair.map(str::trim).is_some_and(|value| !value.is_empty());
     if has_market_id == has_pair {
         return Err(SignerError::Other(
@@ -309,7 +296,8 @@ mod tests {
     #[test]
     fn resolves_market_by_id() {
         let markets = sample_markets();
-        let market = resolve_market_for_build(&markets, Some("m1"), None, "mainnet").expect("market");
+        let market =
+            resolve_market_for_build(&markets, Some("m1"), None, "mainnet").expect("market");
         assert_eq!(market.market_id, "m1");
     }
 

@@ -8,7 +8,7 @@ use crate::coinset::get_conservative_fee_estimate;
 use crate::config::{
     action_side_from_pricing, load_markets_config_with_overlay, load_program_config,
     load_signer_config, require_signer_offer_path, resolve_market_for_build,
-    resolve_offer_publish_settings, MarketConfig, ManagerProgramConfig, SignerConfig,
+    resolve_offer_publish_settings, ManagerProgramConfig, MarketConfig, SignerConfig,
 };
 use crate::error::{SignerError, SignerResult};
 use crate::offer::action::BuildOfferForActionResult;
@@ -127,13 +127,8 @@ pub async fn build_and_post_offer(
     };
 
     for _ in 0..request.repeat {
-        let (bootstrap_action, iteration) = run_post_iteration(
-            &request,
-            &ctx,
-            dexie.as_ref(),
-            splash.as_ref(),
-        )
-        .await?;
+        let (bootstrap_action, iteration) =
+            run_post_iteration(&request, &ctx, dexie.as_ref(), splash.as_ref()).await?;
         bootstrap_actions.push(bootstrap_action);
         match iteration {
             PostIterationOutcome::Preview(preview) => built_offers_preview.push(preview),
@@ -248,10 +243,7 @@ async fn resolve_build_and_post_context(
     require_signer_offer_path(&request.program_path)?;
     let program = load_program_config(&request.program_path)?;
     initialize_manager_file_logging(&program.home_dir, &program.app_log_level)?;
-    warn_if_log_level_auto_healed(
-        program.app_log_level_was_missing,
-        &request.program_path,
-    );
+    warn_if_log_level_auto_healed(program.app_log_level_was_missing, &request.program_path);
     let markets = load_markets_config_with_overlay(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
@@ -270,12 +262,9 @@ async fn resolve_build_and_post_context(
         request.splash_base_url.as_deref(),
     )?;
     let signer_config = load_signer_config(&request.program_path)?;
-    let (resolved_base_asset_id, resolved_quote_asset_id) = resolve_offer_assets_for_action(
-        &signer_config,
-        &market.base_asset,
-        &market.quote_asset,
-    )
-    .await?;
+    let (resolved_base_asset_id, resolved_quote_asset_id) =
+        resolve_offer_assets_for_action(&signer_config, &market.base_asset, &market.quote_asset)
+            .await?;
     let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
     let action_side = resolve_action_side(request.action_side.as_deref(), &market.pricing);
     let (offer_fee_mojos, offer_fee_source) = resolve_maker_offer_fee(&request.network).await;
@@ -430,7 +419,12 @@ async fn run_post_iteration(
     let result_payload = finalize_publish_payload(
         publish,
         &created.execution_mode,
-        timing_payload(started, Some(create_phase_ms), Some(create_phase_ms), Some(publish_ms)),
+        timing_payload(
+            started,
+            Some(create_phase_ms),
+            Some(create_phase_ms),
+            Some(publish_ms),
+        ),
         if ctx.publish_venue == "dexie" {
             Some(ctx.dexie_base_url.as_str())
         } else {
@@ -601,7 +595,10 @@ async fn resolve_maker_offer_fee(network: &str) -> (u64, String) {
 }
 
 fn resolve_action_side(action_side_override: Option<&str>, pricing: &Value) -> String {
-    if let Some(side) = action_side_override.map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(side) = action_side_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
         return normalize_offer_side(side).to_string();
     }
     action_side_from_pricing(pricing)
@@ -724,8 +721,8 @@ mod tests {
             offer_id: Some("offer-1".to_string()),
             body: json!({"success": true, "id": "offer-1"}),
         };
-        let record = offer_post_persist_record(&success, "sell", "direct", &ctx, 10)
-            .expect("record");
+        let record =
+            offer_post_persist_record(&success, "sell", "direct", &ctx, 10).expect("record");
         assert_eq!(record.offer_id, "offer-1");
         assert_eq!(record.market_id, "m1");
     }
@@ -740,7 +737,8 @@ mod tests {
         };
         assert!(!success.success);
         assert_eq!(
-            success.to_venue_result()
+            success
+                .to_venue_result()
                 .get("result")
                 .and_then(|value| value.get("error"))
                 .and_then(Value::as_str),

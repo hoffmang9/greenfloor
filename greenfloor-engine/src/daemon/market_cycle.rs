@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::adapters::DexieClient;
-use crate::config::{MarketConfig, ManagerProgramConfig};
+use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::{market_cycle_phases, MarketCyclePhase};
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;

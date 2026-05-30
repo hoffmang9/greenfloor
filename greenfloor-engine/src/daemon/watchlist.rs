@@ -29,7 +29,8 @@ pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult
     let mut offer_ids = HashSet::new();
     for row in store.list_offer_state_details(market_id, 500)? {
         let state = row.state.trim().to_ascii_lowercase();
-        if tracked_states.contains(state.as_str()) || state == OfferLifecycleState::MempoolObserved.as_str()
+        if tracked_states.contains(state.as_str())
+            || state == OfferLifecycleState::MempoolObserved.as_str()
         {
             offer_ids.insert(row.offer_id);
         }
@@ -116,7 +117,8 @@ fn recent_offer_metadata_by_offer_id(
             if size <= 0 {
                 continue;
             }
-            let side = parse_offer_side_metadata(item_obj.get("side").and_then(|value| value.as_str()));
+            let side =
+                parse_offer_side_metadata(item_obj.get("side").and_then(|value| value.as_str()));
             if metadata_by_offer_id.contains_key(&offer_id) {
                 continue;
             }
@@ -164,7 +166,11 @@ fn active_offer_state_summary(
     market_id: &str,
     clock: DateTime<Utc>,
     limit: usize,
-) -> SignerResult<(Vec<String>, HashMap<String, i64>, HashMap<String, OfferExecutionMetadata>)> {
+) -> SignerResult<(
+    Vec<String>,
+    HashMap<String, i64>,
+    HashMap<String, OfferExecutionMetadata>,
+)> {
     let offer_states = store.list_offer_state_details(market_id, limit)?;
     let mut state_counts: HashMap<String, i64> = HashMap::new();
     for row in &offer_states {
@@ -208,13 +214,32 @@ pub fn active_offer_counts_by_size(
     dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
 ) -> SignerResult<(BTreeMap<i64, i64>, u64)> {
-    active_offer_counts_by_size_at(
+    let (counts, _, unmapped) = active_offer_counts_by_size_detail(
         store,
         market_id,
         dexie_size_by_offer_id,
         tracked_sizes,
         Utc::now(),
-    )
+    )?;
+    Ok((counts, unmapped))
+}
+
+pub fn active_offer_counts_by_size_detail(
+    store: &SqliteStore,
+    market_id: &str,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
+    tracked_sizes: &[i64],
+    clock: DateTime<Utc>,
+) -> SignerResult<(BTreeMap<i64, i64>, HashMap<String, i64>, u64)> {
+    let (counts, unmapped) = active_offer_counts_by_size_at(
+        store,
+        market_id,
+        dexie_size_by_offer_id,
+        tracked_sizes,
+        clock,
+    )?;
+    let (_, state_counts, _) = active_offer_state_summary(store, market_id, clock, 500)?;
+    Ok((counts, state_counts, unmapped))
 }
 
 fn active_offer_counts_by_size_at(
@@ -268,13 +293,37 @@ pub fn active_offer_counts_by_size_and_side(
     dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
 ) -> SignerResult<(BTreeMap<i64, i64>, BTreeMap<i64, i64>, u64)> {
-    active_offer_counts_by_size_and_side_at(
+    let (buy, sell, _, unmapped) = active_offer_counts_by_size_and_side_detail(
         store,
         market_id,
         dexie_size_by_offer_id,
         tracked_sizes,
         Utc::now(),
-    )
+    )?;
+    Ok((buy, sell, unmapped))
+}
+
+pub fn active_offer_counts_by_size_and_side_detail(
+    store: &SqliteStore,
+    market_id: &str,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
+    tracked_sizes: &[i64],
+    clock: DateTime<Utc>,
+) -> SignerResult<(
+    BTreeMap<i64, i64>,
+    BTreeMap<i64, i64>,
+    HashMap<String, i64>,
+    u64,
+)> {
+    let (buy, sell, unmapped) = active_offer_counts_by_size_and_side_at(
+        store,
+        market_id,
+        dexie_size_by_offer_id,
+        tracked_sizes,
+        clock,
+    )?;
+    let (_, state_counts, _) = active_offer_state_summary(store, market_id, clock, 500)?;
+    Ok((buy, sell, state_counts, unmapped))
 }
 
 fn active_offer_counts_by_size_and_side_at(
@@ -313,7 +362,16 @@ fn active_offer_counts_by_size_and_side_at(
             continue;
         };
         let normalized_side = normalize_offer_side(side);
-        let size = metadata.size;
+        let mut size = metadata.size;
+        if size <= 0 {
+            size = dexie_size_by_offer_id
+                .and_then(|map| map.get(&offer_id).copied())
+                .unwrap_or(0);
+        }
+        if size <= 0 {
+            active_unmapped += 1;
+            continue;
+        }
         let target = if normalized_side == "buy" {
             buy_counts.get_mut(&size)
         } else {
@@ -391,7 +449,8 @@ mod tests {
     fn is_recent_mempool_observed_offer_state_respects_age_window() {
         let clock = Utc::now();
         let recent = (clock - chrono::Duration::seconds(30)).to_rfc3339();
-        let stale = (clock - chrono::Duration::seconds(RESEED_MEMPOOL_MAX_AGE_SECONDS + 1)).to_rfc3339();
+        let stale =
+            (clock - chrono::Duration::seconds(RESEED_MEMPOOL_MAX_AGE_SECONDS + 1)).to_rfc3339();
         assert!(is_recent_mempool_observed_offer_state(&recent, clock));
         assert!(!is_recent_mempool_observed_offer_state(&stale, clock));
     }
@@ -408,13 +467,7 @@ mod tests {
             .upsert_offer_state_at("ten-1", "m1", "refresh_due", Some(0), &clock_iso)
             .expect("upsert");
         store
-            .upsert_offer_state_at(
-                "hundred-1",
-                "m1",
-                "mempool_observed",
-                Some(0),
-                &clock_iso,
-            )
+            .upsert_offer_state_at("hundred-1", "m1", "mempool_observed", Some(0), &clock_iso)
             .expect("upsert");
         store
             .upsert_offer_state_at("unknown-1", "m1", "open", Some(0), &clock_iso)
@@ -430,14 +483,8 @@ mod tests {
             &clock_iso,
         );
 
-        let (counts, unmapped) = active_offer_counts_by_size_at(
-            &store,
-            "m1",
-            None,
-            &[],
-            clock,
-        )
-        .expect("counts");
+        let (counts, unmapped) =
+            active_offer_counts_by_size_at(&store, "m1", None, &[], clock).expect("counts");
 
         assert_eq!(counts.get(&1), Some(&1));
         assert_eq!(counts.get(&10), Some(&1));
@@ -489,14 +536,9 @@ mod tests {
             .upsert_offer_state_at("offer-unknown-side", "m1", "open", Some(0), &clock_iso)
             .expect("upsert");
 
-        let (buy_counts, sell_counts, unmapped) = active_offer_counts_by_size_and_side_at(
-            &store,
-            "m1",
-            None,
-            &[],
-            clock,
-        )
-        .expect("counts");
+        let (buy_counts, sell_counts, unmapped) =
+            active_offer_counts_by_size_and_side_at(&store, "m1", None, &[], clock)
+                .expect("counts");
 
         assert_eq!(buy_counts.get(&1), Some(&0));
         assert_eq!(sell_counts.get(&1), Some(&0));
@@ -533,14 +575,9 @@ mod tests {
             &clock_iso,
         );
 
-        let (_buy_counts, _sell_counts, unmapped) = active_offer_counts_by_size_and_side_at(
-            &store,
-            "m1",
-            None,
-            &[],
-            clock,
-        )
-        .expect("counts");
+        let (_buy_counts, _sell_counts, unmapped) =
+            active_offer_counts_by_size_and_side_at(&store, "m1", None, &[], clock)
+                .expect("counts");
 
         assert_eq!(unmapped, 2);
     }
@@ -607,14 +644,9 @@ mod tests {
             &clock_iso,
         );
 
-        let (counts, unmapped) = active_offer_counts_by_size_at(
-            &store,
-            "m1",
-            None,
-            &[1, 10, 50],
-            clock,
-        )
-        .expect("counts");
+        let (counts, unmapped) =
+            active_offer_counts_by_size_at(&store, "m1", None, &[1, 10, 50], clock)
+                .expect("counts");
 
         assert_eq!(counts.get(&50), Some(&1));
         assert_eq!(unmapped, 0);
@@ -640,14 +672,9 @@ mod tests {
             &stale_created_at,
         );
 
-        let (counts, unmapped) = active_offer_counts_by_size_at(
-            &store,
-            "m1",
-            Some(&HashMap::new()),
-            &[50],
-            clock,
-        )
-        .expect("counts");
+        let (counts, unmapped) =
+            active_offer_counts_by_size_at(&store, "m1", Some(&HashMap::new()), &[50], clock)
+                .expect("counts");
 
         assert_eq!(counts.get(&50), Some(&0));
         assert_eq!(unmapped, 1);
@@ -674,14 +701,9 @@ mod tests {
         );
 
         let dexie = HashMap::from([("pending-50".to_string(), 50)]);
-        let (counts, unmapped) = active_offer_counts_by_size_at(
-            &store,
-            "m1",
-            Some(&dexie),
-            &[50],
-            clock,
-        )
-        .expect("counts");
+        let (counts, unmapped) =
+            active_offer_counts_by_size_at(&store, "m1", Some(&dexie), &[50], clock)
+                .expect("counts");
 
         assert_eq!(counts.get(&50), Some(&1));
         assert_eq!(unmapped, 0);

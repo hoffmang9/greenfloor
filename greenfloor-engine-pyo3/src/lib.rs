@@ -4,6 +4,7 @@
 //! callers should import through `greenfloor.core.engine_bridge.import_engine`.
 
 mod daemon_py;
+mod watchlist_py;
 mod manager_py;
 mod coin_ops_py;
 mod cycle;
@@ -264,5 +265,6 @@ fn greenfloor_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     wallet_io_py::register(m)?;
     manager_py::register(m)?;
     daemon_py::register(m)?;
+    watchlist_py::register(m)?;
     Ok(())
 }

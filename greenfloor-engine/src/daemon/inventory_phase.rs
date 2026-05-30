@@ -6,7 +6,7 @@ use serde_json::json;
 use crate::coin_ops::compute_bucket_counts_from_coins;
 use crate::coinset::list_wallet_unspent_coins;
 use crate::config::{
-    load_signer_config, require_signer_offer_path, MarketConfig, ManagerProgramConfig,
+    load_signer_config, require_signer_offer_path, ManagerProgramConfig, MarketConfig,
 };
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
@@ -97,12 +97,9 @@ pub async fn run_inventory_phase(
     let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim()) as i64;
     let scan_result: SignerResult<(String, usize, BTreeMap<i64, i64>)> = async {
         let signer_config = load_signer_config(program_path)?;
-        let (resolved_base_asset_id, _) = resolve_offer_assets_for_action(
-            &signer_config,
-            market.base_asset.trim(),
-            "xch",
-        )
-        .await?;
+        let (resolved_base_asset_id, _) =
+            resolve_offer_assets_for_action(&signer_config, market.base_asset.trim(), "xch")
+                .await?;
         assert_inventory_asset_resolution_matches_config(market, &resolved_base_asset_id)?;
         let amounts = list_spendable_base_unit_amounts(
             network,
@@ -183,7 +180,9 @@ mod tests {
         let market = sample_market(&configured);
         let err = assert_inventory_asset_resolution_matches_config(&market, &resolved)
             .expect_err("mismatch");
-        assert!(err.to_string().contains("inventory_asset_resolution_mismatch"));
+        assert!(err
+            .to_string()
+            .contains("inventory_asset_resolution_mismatch"));
     }
 
     #[test]

@@ -5,12 +5,11 @@ use serde_json::{json, Value};
 
 use crate::coin_ops::{
     coin_op_target_amount_allowed, effective_sell_bucket_counts_for_coin_ops,
-    partition_plans_by_budget, plan_coin_ops, projected_coin_ops_fee_mojos, BucketSpec,
-    CoinOpPlan,
+    partition_plans_by_budget, plan_coin_ops, projected_coin_ops_fee_mojos, BucketSpec, CoinOpPlan,
 };
-use crate::hex::default_mojo_multiplier_for_asset;
-use crate::config::{MarketConfig, ManagerProgramConfig};
+use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::error::SignerResult;
+use crate::hex::default_mojo_multiplier_for_asset;
 use crate::storage::SqliteStore;
 
 use super::coin_ops_execution::{
@@ -50,8 +49,7 @@ pub async fn run_coin_ops_phase(
         Some(active_counts),
         Some(newly_executed_counts),
     );
-    let base_unit_multiplier =
-        default_mojo_multiplier_for_asset(market.base_asset.trim()) as i64;
+    let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim()) as i64;
     let mut valid_ladder = Vec::new();
     let mut invalid_buckets = Vec::new();
     for entry in &sell_ladder {
@@ -163,14 +161,16 @@ pub async fn run_coin_ops_phase(
             }),
             Some(&market.market_id),
         )?;
-        execution.items.extend(overflow_plans.iter().map(|plan| CoinOpExecItem {
-            op_type: plan.op_type.as_str().to_string(),
-            size_base_units: plan.size_base_units,
-            op_count: plan.op_count,
-            status: "skipped".to_string(),
-            reason: "fee_budget_guard".to_string(),
-            operation_id: None,
-        }));
+        execution
+            .items
+            .extend(overflow_plans.iter().map(|plan| CoinOpExecItem {
+                op_type: plan.op_type.as_str().to_string(),
+                size_base_units: plan.size_base_units,
+                op_count: plan.op_count,
+                status: "skipped".to_string(),
+                reason: "fee_budget_guard".to_string(),
+                operation_id: None,
+            }));
     }
     execution.planned_count = plans.len();
 

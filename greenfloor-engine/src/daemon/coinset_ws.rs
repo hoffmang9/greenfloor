@@ -58,8 +58,10 @@ pub async fn capture_coinset_websocket_once(
         None,
     )?;
     let _ = run_recovery_poll(store, program, coinset_base_url, "once_start").await;
-    let capture_window = Duration::from_secs(program.tx_block_fallback_poll_interval_seconds.max(1));
-    let reconnect = Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1));
+    let capture_window =
+        Duration::from_secs(program.tx_block_fallback_poll_interval_seconds.max(1));
+    let reconnect =
+        Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1));
     let deadline = tokio::time::Instant::now() + capture_window;
 
     while tokio::time::Instant::now() < deadline {

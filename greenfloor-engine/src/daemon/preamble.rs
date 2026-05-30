@@ -32,26 +32,16 @@ pub async fn run_cycle_preamble(
     match fetch_xch_price_usd().await {
         Ok(price) => {
             result.xch_price_usd = Some(price);
-            store.add_audit_event(
-                "xch_price_snapshot",
-                &json!({"price_usd": price}),
-                None,
-            )?;
+            store.add_audit_event("xch_price_snapshot", &json!({"price_usd": price}), None)?;
         }
         Err(err) => {
             result.cycle_error_count += 1;
-            store.add_audit_event(
-                "xch_price_error",
-                &json!({"error": err.to_string()}),
-                None,
-            )?;
+            store.add_audit_event("xch_price_error", &json!({"error": err.to_string()}), None)?;
         }
     }
 
     if use_websocket_capture {
-        if let Err(err) =
-            capture_coinset_websocket_once(&store, &program, coinset_base_url).await
-        {
+        if let Err(err) = capture_coinset_websocket_once(&store, &program, coinset_base_url).await {
             result.cycle_error_count += 1;
             store.add_audit_event(
                 "coinset_ws_once_error",
@@ -105,9 +95,9 @@ async fn fetch_xch_price_usd() -> SignerResult<f64> {
     if let Ok(raw) = std::env::var("GREENFLOOR_XCH_PRICE_USD") {
         let trimmed = raw.trim();
         if !trimmed.is_empty() {
-            let price: f64 = trimmed
-                .parse()
-                .map_err(|err| SignerError::Other(format!("invalid GREENFLOOR_XCH_PRICE_USD: {err}")))?;
+            let price: f64 = trimmed.parse().map_err(|err| {
+                SignerError::Other(format!("invalid GREENFLOOR_XCH_PRICE_USD: {err}"))
+            })?;
             if price > 0.0 {
                 return Ok(price);
             }
@@ -128,14 +118,20 @@ async fn fetch_xch_price_usd() -> SignerResult<f64> {
         .json()
         .await
         .map_err(|err| SignerError::Other(format!("xch_price_decode_error:{err}")))?;
-    if let Some(price) = payload.get("last_price_usd").and_then(serde_json::Value::as_f64) {
+    if let Some(price) = payload
+        .get("last_price_usd")
+        .and_then(serde_json::Value::as_f64)
+    {
         if price > 0.0 {
             return Ok(price);
         }
     }
     if let Some(items) = payload.as_array() {
         if let Some(first) = items.first() {
-            if let Some(price) = first.get("current_price").and_then(serde_json::Value::as_f64) {
+            if let Some(price) = first
+                .get("current_price")
+                .and_then(serde_json::Value::as_f64)
+            {
                 if price > 0.0 {
                     return Ok(price);
                 }

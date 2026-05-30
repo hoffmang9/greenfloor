@@ -1,7 +1,8 @@
 use crate::adapters::DexieClient;
 use crate::cycle::{
-    classify_dexie_stale_offer_status, collect_stale_sweep_candidates, is_dexie_offer_missing_error_text,
-    record_stale_sweep_check, OfferStateRow, StaleSweepHit, StaleSweepProgress,
+    classify_dexie_stale_offer_status, collect_stale_sweep_candidates,
+    is_dexie_offer_missing_error_text, record_stale_sweep_check, OfferStateRow, StaleSweepHit,
+    StaleSweepProgress,
 };
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;

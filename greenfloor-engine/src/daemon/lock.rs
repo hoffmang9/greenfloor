@@ -60,7 +60,9 @@ impl DaemonInstanceLock {
         })?;
         handle
             .write_all(payload.to_string().as_bytes())
-            .map_err(|err| SignerError::Other(format!("failed to write daemon lock metadata: {err}")))?;
+            .map_err(|err| {
+                SignerError::Other(format!("failed to write daemon lock metadata: {err}"))
+            })?;
         handle.flush().map_err(|err| {
             SignerError::Other(format!("failed to flush daemon lock metadata: {err}"))
         })?;

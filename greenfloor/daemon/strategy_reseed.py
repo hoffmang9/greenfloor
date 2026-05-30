@@ -9,13 +9,25 @@ from greenfloor.core.cycle import plan_reseed_actions_from_gap
 from greenfloor.core.cycle_reseed import ReseedGapPlan, ReseedSkipReason
 from greenfloor.core.strategy import PlannedAction, StrategyConfig
 from greenfloor.daemon.market_logging import _log_market_decision
-from greenfloor.daemon.watchlist import (
-    _ACTIVE_OFFER_STATES_FOR_RESEED,
-    _RESEED_MEMPOOL_MAX_AGE_SECONDS,
-    _active_offer_counts_by_size,
-    _strategy_target_counts_by_size,
-)
+from greenfloor.daemon.testing.watchlist import active_offer_counts_by_size
+from greenfloor.runtime.offer_watchlist import _RESEED_MEMPOOL_MAX_AGE_SECONDS
 from greenfloor.storage.sqlite import SqliteStore
+
+_ACTIVE_OFFER_STATES_FOR_RESEED = frozenset({"open", "refresh_due"})
+
+
+def _strategy_target_counts_by_size(strategy_config: StrategyConfig) -> dict[int, int]:
+    if strategy_config.target_counts_by_size:
+        return {
+            int(size): int(target)
+            for size, target in sorted(strategy_config.target_counts_by_size.items())
+            if int(size) > 0 and int(target) >= 0
+        }
+    return {
+        1: int(strategy_config.ones_target),
+        10: int(strategy_config.tens_target),
+        100: int(strategy_config.hundreds_target),
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,7 +109,7 @@ def _inject_reseed_action_if_no_active_offers(
     dexie_size_by_offer_id: dict[str, int] | None = None,
 ) -> list[PlannedAction]:
     target_by_size = _strategy_target_counts_by_size(strategy_config)
-    active_counts_by_size, state_counts, active_unmapped_offer_ids = _active_offer_counts_by_size(
+    active_counts_by_size, state_counts, active_unmapped_offer_ids = active_offer_counts_by_size(
         store=store,
         market_id=market.market_id,
         clock=clock,

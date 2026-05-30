@@ -7,11 +7,11 @@ use crate::cycle::enqueue_immediate_requeue;
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
+use super::market_cycle::run_post_reconcile_market_phases;
 use super::market_dispatch::{
     aggregate_market_dispatch_metrics, dexie_client, program_network, record_market_worker_error,
     selected_markets, IoPhaseMetrics, MarketDispatchContext, SingleMarketCycleOutput,
 };
-use super::market_cycle::run_post_reconcile_market_phases;
 use super::preamble::run_cycle_preamble;
 use super::reconcile_phase::run_market_reconcile_phase;
 use super::run_once::{
@@ -147,16 +147,7 @@ async fn dispatch_markets(
 
     let mut outputs = Vec::with_capacity(markets.len());
     for market in markets {
-        match process_one_market(
-            plan,
-            program,
-            dispatch_context,
-            &network,
-            &dexie,
-            &market,
-        )
-        .await
-        {
+        match process_one_market(plan, program, dispatch_context, &network, &dexie, &market).await {
             Ok(output) => outputs.push(output),
             Err(err) => {
                 record_market_worker_error(
@@ -206,15 +197,8 @@ pub async fn run_daemon_cycle_once(
     let markets = selected_markets(&dispatch_context)?;
     let dexie = dexie_client(&dispatch_context)?;
 
-    let (cycle_outputs, worker_errors) = dispatch_markets(
-        &plan,
-        &program,
-        &dispatch_context,
-        network,
-        dexie,
-        markets,
-    )
-    .await?;
+    let (cycle_outputs, worker_errors) =
+        dispatch_markets(&plan, &program, &dispatch_context, network, dexie, markets).await?;
 
     let mut metrics: MarketDispatchMetrics = aggregate_market_dispatch_metrics(&cycle_outputs);
     metrics.cycle_error_count += worker_errors;

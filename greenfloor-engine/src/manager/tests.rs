@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::adapters::{post_offer_phase_dexie, DexieClient};
 use crate::config::{
-    load_markets_config, load_program_config, resolve_market_for_build, require_signer_offer_path,
+    load_markets_config, load_program_config, require_signer_offer_path, resolve_market_for_build,
     resolve_offer_publish_settings, ManagerProgramConfig,
 };
 
@@ -200,6 +200,7 @@ markets:
     )
     .expect("write");
     let markets = load_markets_config(&markets_path).expect("markets");
-    let err = resolve_market_for_build(&markets, None, Some("a1:xch"), "mainnet").expect_err("ambiguous");
+    let err =
+        resolve_market_for_build(&markets, None, Some("a1:xch"), "mainnet").expect_err("ambiguous");
     assert!(err.to_string().contains("ambiguous"));
 }

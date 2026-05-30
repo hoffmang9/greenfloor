@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 
-use crate::config::{MarketConfig, resolve_quote_asset_for_offer};
+use crate::config::{resolve_quote_asset_for_offer, MarketConfig};
 use crate::cycle::{
     filter_planned_actions_with_positive_repeat, is_two_sided_market_mode,
     one_sided_offer_counts_by_side, plan_reseed_actions_from_gap, resolve_tracked_sizes,
@@ -91,10 +91,7 @@ pub fn evaluate_strategy_actions_for_market(
         &config,
     );
     actions = filter_planned_actions_with_positive_repeat(&actions);
-    let target_counts = config
-        .target_counts_by_size
-        .clone()
-        .unwrap_or_default();
+    let target_counts = config.target_counts_by_size.clone().unwrap_or_default();
     let reseed = plan_reseed_actions_from_gap(
         &actions,
         &active_offer_counts_by_size,
@@ -108,17 +105,17 @@ pub fn evaluate_strategy_actions_for_market(
     Ok((reseed.actions, active_offer_counts_by_size))
 }
 
-fn resolve_tracked_sizes_for_market(market: &MarketConfig, strategy_config: &StrategyConfig) -> Vec<i64> {
+fn resolve_tracked_sizes_for_market(
+    market: &MarketConfig,
+    strategy_config: &StrategyConfig,
+) -> Vec<i64> {
     let ladder_sizes: Vec<i64> = market
         .ladders
         .values()
         .flat_map(|entries| entries.iter().map(|entry| entry.size_base_units))
         .filter(|size| *size > 0)
         .collect();
-    resolve_tracked_sizes(
-        &ladder_sizes,
-        &target_sizes_from_config(strategy_config),
-    )
+    resolve_tracked_sizes(&ladder_sizes, &target_sizes_from_config(strategy_config))
 }
 
 fn strategy_config_for_side(market: &MarketConfig, network: &str, side: &str) -> StrategyConfig {

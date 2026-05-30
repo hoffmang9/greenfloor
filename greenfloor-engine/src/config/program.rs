@@ -390,7 +390,8 @@ mod tests {
 
     #[test]
     fn resolves_testnet_dexie_default() {
-        let url = resolve_dexie_base_url("testnet11", None, "https://api.dexie.space").expect("url");
+        let url =
+            resolve_dexie_base_url("testnet11", None, "https://api.dexie.space").expect("url");
         assert_eq!(url, "https://api-testnet.dexie.space");
     }
 
