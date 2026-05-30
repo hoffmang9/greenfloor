@@ -9,7 +9,7 @@ Canonical monkeypatch targets (module-qualified paths):
 - ``greenfloor.daemon.main`` — CLI entrypoint and instance lock
 - ``greenfloor.daemon.testing.inventory_scan`` — coinset adapter factory
 - ``greenfloor.daemon.testing.strategy_dispatch`` — routing (``execute_strategy_dispatch``)
-  and ``offer_dispatch`` module for managed/local offer IO monkeypatches
+  and ``offer_dispatch`` module for managed offer IO monkeypatches
 - ``greenfloor.daemon.testing.strategy_state`` — reseed policy
 - ``greenfloor.daemon.testing.cooldowns`` — post/cancel cooldown globals
 - ``greenfloor.daemon.testing.cancel_policy`` — cancel policy entry
@@ -52,9 +52,7 @@ from greenfloor.daemon.testing.reservations import (
     ReservationStorageError,
 )
 from greenfloor.daemon.testing.strategy_dispatch import (
-    build_offer_for_action,
     execute_managed_action_with_retry,
-    execute_single_local_action,
     execute_single_managed_action,
     execute_strategy_dispatch,
     expand_planned_actions,
@@ -90,7 +88,6 @@ __all__ = [
     "active_offer_counts_by_size",
     "active_offer_counts_by_size_and_side",
     "build_dexie_size_by_offer_id",
-    "build_offer_for_action",
     "cancel_retry_config",
     "coinset_spendable_base_unit_coin_amounts",
     "consume_reload_marker",
@@ -101,7 +98,6 @@ __all__ = [
     "enqueue_immediate_requeue_market",
     "execute_cancel_policy",
     "execute_managed_action_with_retry",
-    "execute_single_local_action",
     "execute_single_managed_action",
     "execute_strategy_dispatch",
     "managed_offer_post",

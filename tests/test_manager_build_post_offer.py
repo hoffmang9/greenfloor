@@ -8,7 +8,8 @@ import yaml
 from greenfloor.cli.offer_build_post import build_and_post_offer_cli
 from tests.helpers.fake_adapters import FakeDexie
 from tests.helpers.offer_runtime_fixtures import (
-    write_manager_program,
+    patch_signer_create_offer_phase,
+    write_manager_program_with_signer,
     write_markets,
     write_markets_with_duplicate_pair,
 )
@@ -17,7 +18,7 @@ from tests.helpers.offer_runtime_fixtures import (
 def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
     captured: dict = {}
 
@@ -32,13 +33,10 @@ def test_build_and_post_offer_defaults_to_mainnet(monkeypatch, tmp_path: Path, c
         def get_offer(self, offer_id: str) -> dict:
             return super().get_offer(offer_id)
 
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        lambda _payload: "offer1abc",
-    )
+    patch_signer_create_offer_phase(monkeypatch)
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.core.offer_policy.verify_offer_for_dexie",
+        "greenfloor.core.policy_bridge.verify_offer_for_dexie",
         lambda _offer: None,
     )
 
@@ -78,16 +76,13 @@ def test_build_and_post_offer_local_path_persists_sqlite_audit_record(
 
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        lambda _payload: "offer1abc",
-    )
+    patch_signer_create_offer_phase(monkeypatch)
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.core.offer_policy.verify_offer_for_dexie",
+        "greenfloor.core.policy_bridge.verify_offer_for_dexie",
         lambda _offer: None,
     )
 
@@ -130,7 +125,7 @@ def test_build_and_post_offer_uses_market_configured_expiry_override(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
     raw = yaml.safe_load(markets.read_text(encoding="utf-8"))
     pricing = dict(raw["markets"][0].get("pricing") or {})
@@ -138,18 +133,33 @@ def test_build_and_post_offer_uses_market_configured_expiry_override(
     raw["markets"][0]["pricing"] = pricing
     markets.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
-    captured_payload: dict[str, object] = {}
+    captured_kwargs: dict[str, object] = {}
 
     class _FakeDexie(FakeDexie):
         offer_id = "offer-expiry-1"
 
-    def _fake_build(payload: dict) -> str:
-        captured_payload.update(payload)
-        return "offer1expiryoverride"
+    patch_signer_create_offer_phase(monkeypatch)
 
-    monkeypatch.setattr("greenfloor.cli.offer_build_post.build_offer", _fake_build)
+    def _capture_create(**kwargs: object):
+        captured_kwargs.update(kwargs)
+        from greenfloor.core.offer_action import OfferCreatePhaseOutcome
+
+        return OfferCreatePhaseOutcome(
+            offer_text="offer1expiryoverride",
+            expires_at="2026-01-01T00:00:00+00:00",
+            side="sell",
+            offer_amount=1000,
+            request_amount=1000,
+            execution_mode="direct",
+            create_result={},
+        )
+
+    monkeypatch.setattr(
+        "greenfloor.runtime.offer_runtime.signer_create_offer_phase",
+        _capture_create,
+    )
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
-    monkeypatch.setattr("greenfloor.core.offer_policy.verify_offer_for_dexie", lambda _offer: None)
+    monkeypatch.setattr("greenfloor.core.policy_bridge.verify_offer_for_dexie", lambda _offer: None)
 
     code = build_and_post_offer_cli(
         program_path=program,
@@ -167,8 +177,11 @@ def test_build_and_post_offer_uses_market_configured_expiry_override(
         dry_run=False,
     )
     assert code == 0
-    assert captured_payload["expiry_unit"] == "minutes"
-    assert captured_payload["expiry_value"] == 12
+    market = captured_kwargs["market"]
+    from greenfloor.config.models import MarketConfig
+
+    assert isinstance(market, MarketConfig)
+    assert market.pricing.get("strategy_offer_expiry_minutes") == 12
     payload = json.loads(capsys.readouterr().out.strip())
     assert payload["publish_failures"] == 0
     assert payload["results"][0]["result"]["id"] == "offer-expiry-1"
@@ -179,17 +192,14 @@ def test_build_and_post_offer_dry_run_builds_but_does_not_post(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FailDexie:
         def __init__(self, _base_url: str) -> None:
             raise AssertionError("DexieAdapter should not be constructed in dry_run")
 
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        lambda _payload: "offer1dryrun",
-    )
+    patch_signer_create_offer_phase(monkeypatch)
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FailDexie)
 
     code = build_and_post_offer_cli(
@@ -214,62 +224,19 @@ def test_build_and_post_offer_dry_run_builds_but_does_not_post(
     assert payload["results"] == []
 
 
-def test_build_and_post_offer_dry_run_can_capture_full_offer_text(
-    monkeypatch, tmp_path: Path, capsys
-) -> None:
-    program = tmp_path / "program.yaml"
-    markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
-    write_markets(markets)
-    capture_dir = tmp_path / "offer-capture"
-
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        lambda _payload: "offer1captureme",
-    )
-    monkeypatch.setenv("GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", str(capture_dir))
-    try:
-        code = build_and_post_offer_cli(
-            program_path=program,
-            markets_path=markets,
-            network="mainnet",
-            market_id="m1",
-            pair=None,
-            size_base_units=1,
-            repeat=1,
-            publish_venue="dexie",
-            dexie_base_url="https://api.dexie.space",
-            splash_base_url="http://localhost:4000",
-            drop_only=True,
-            claim_rewards=False,
-            dry_run=True,
-        )
-    finally:
-        monkeypatch.delenv("GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", raising=False)
-
-    assert code == 0
-    payload = json.loads(capsys.readouterr().out.strip())
-    capture_path = Path(payload["built_offers_preview"][0]["offer_capture_path"])
-    assert capture_path.exists()
-    assert capture_path.read_text(encoding="utf-8") == "offer1captureme"
-
-
 def test_build_and_post_offer_resolves_market_by_pair(monkeypatch, tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeDexie(FakeDexie):
         offer_id = "offer-xyz"
 
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        lambda _payload: "offer1pair",
-    )
+    patch_signer_create_offer_phase(monkeypatch)
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.core.offer_policy.verify_offer_for_dexie",
+        "greenfloor.core.policy_bridge.verify_offer_for_dexie",
         lambda _offer: None,
     )
 
@@ -300,19 +267,16 @@ def test_build_and_post_offer_accepts_txch_pair_on_testnet11(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeDexie(FakeDexie):
         offer_id = "offer-txch"
 
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        lambda _payload: "offer1pair",
-    )
+    patch_signer_create_offer_phase(monkeypatch)
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.core.offer_policy.verify_offer_for_dexie",
+        "greenfloor.core.policy_bridge.verify_offer_for_dexie",
         lambda _offer: None,
     )
 
@@ -343,7 +307,7 @@ def test_build_and_post_offer_accepts_txch_pair_on_testnet11(
 def test_build_and_post_offer_rejects_txch_pair_on_mainnet(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     try:
@@ -372,7 +336,7 @@ def test_build_and_post_offer_pair_ambiguous_requires_market_id(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets_with_duplicate_pair(markets)
     try:
         build_and_post_offer_cli(
@@ -398,7 +362,7 @@ def test_build_and_post_offer_pair_ambiguous_requires_market_id(
 def test_build_and_post_offer_rejects_unknown_market(monkeypatch, tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
     try:
         build_and_post_offer_cli(
@@ -426,7 +390,7 @@ def test_build_and_post_offer_posts_to_splash_when_selected(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeSplash:
@@ -437,13 +401,10 @@ def test_build_and_post_offer_posts_to_splash_when_selected(
             _ = offer
             return {"success": True, "id": "splash-1"}
 
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        lambda _payload: "offer1pair",
-    )
+    patch_signer_create_offer_phase(monkeypatch)
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.SplashAdapter", _FakeSplash)
     monkeypatch.setattr(
-        "greenfloor.core.offer_policy.verify_offer_for_dexie",
+        "greenfloor.core.policy_bridge.verify_offer_for_dexie",
         lambda _offer: None,
     )
 
@@ -473,15 +434,12 @@ def test_build_and_post_offer_returns_nonzero_when_offer_verification_fails(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
+    patch_signer_create_offer_phase(monkeypatch)
     monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        lambda _payload: "offer1bad",
-    )
-    monkeypatch.setattr(
-        "greenfloor.core.offer_policy.verify_offer_for_dexie",
+        "greenfloor.core.policy_bridge.verify_offer_for_dexie",
         lambda _offer: "wallet_sdk_offer_verify_false",
     )
 
@@ -510,24 +468,18 @@ def test_build_and_post_offer_returns_nonzero_when_offer_verification_fails(
 def test_build_and_post_offer_surfaces_stale_engine_symbol_as_user_error(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
-    from tests.helpers.engine_mock import MinimalSignerEngine
+    from tests.helpers.engine_mock import MinimalSignerEngine, install_engine_stub
 
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _StaleEngine(MinimalSignerEngine):
         expected_publish_asset_fields = None
 
-    monkeypatch.setattr(
-        "greenfloor.core.engine_bridge.import_engine",
-        lambda: _StaleEngine,
-    )
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        lambda _payload: "offer1abc",
-    )
+    install_engine_stub(monkeypatch, _StaleEngine())
+    patch_signer_create_offer_phase(monkeypatch)
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", FakeDexie)
 
     code = build_and_post_offer_cli(
@@ -550,7 +502,7 @@ def test_build_and_post_offer_surfaces_stale_engine_symbol_as_user_error(
     assert payload["publish_attempts"] == 1
     assert payload["publish_failures"] == 1
     assert payload["results"][0]["result"]["success"] is False
-    assert payload["results"][0]["result"]["error"].startswith("offer_policy_error:")
+    assert payload["results"][0]["result"]["error"].startswith("policy_bridge_error:")
     assert (
         "Missing symbol: expected_publish_asset_fields" in payload["results"][0]["result"]["error"]
     )
@@ -561,7 +513,7 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
     called: dict[str, bool] = {"post_offer_called": False}
 
@@ -582,10 +534,7 @@ def test_build_and_post_offer_blocks_publish_when_offer_has_no_expiry(
             return "wallet_sdk_offer_missing_expiration"
 
     install_engine_stub(monkeypatch, _Signer)
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        lambda _payload: "offer1noexpiry",
-    )
+    patch_signer_create_offer_phase(monkeypatch)
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
 
     code = build_and_post_offer_cli(
@@ -618,7 +567,7 @@ def test_build_and_post_offer_returns_nonzero_when_publish_fails(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
     class _FakeDexie:
@@ -629,13 +578,10 @@ def test_build_and_post_offer_returns_nonzero_when_publish_fails(
             _ = offer, drop_only, claim_rewards
             return {"success": False, "error": "dexie_http_error:500"}
 
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        lambda _payload: "offer1abc",
-    )
+    patch_signer_create_offer_phase(monkeypatch)
     monkeypatch.setattr("greenfloor.runtime.offer_orchestration.DexieAdapter", _FakeDexie)
     monkeypatch.setattr(
-        "greenfloor.core.offer_policy.verify_offer_for_dexie",
+        "greenfloor.core.policy_bridge.verify_offer_for_dexie",
         lambda _offer: None,
     )
 
@@ -666,15 +612,12 @@ def test_build_and_post_offer_dry_run_returns_nonzero_when_build_fails(
 ) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
-    def _raise_build_error(_payload):
-        raise RuntimeError("signing_failed:no_agg_sig_targets_found")
-
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        _raise_build_error,
+    patch_signer_create_offer_phase(
+        monkeypatch,
+        error="signing_failed:no_agg_sig_targets_found",
     )
 
     code = build_and_post_offer_cli(
@@ -697,38 +640,4 @@ def test_build_and_post_offer_dry_run_returns_nonzero_when_build_fails(
     assert payload["publish_attempts"] == 1
     assert payload["publish_failures"] == 1
     assert payload["results"][0]["result"]["success"] is False
-    assert payload["results"][0]["result"]["error"].startswith("offer_builder_failed:")
-
-
-def test_local_offer_create_fn_delegates_to_offer_builder(monkeypatch) -> None:
-    from dataclasses import replace
-
-    from greenfloor.cli import offer_build_post
-    from greenfloor.runtime.local_offer import make_local_offer_create_fn
-    from tests.helpers.offer_runtime_fixtures import (
-        market_config_for_local_offer,
-        program_config_for_local_offer,
-    )
-
-    monkeypatch.setattr(
-        "greenfloor.cli.offer_build_post.build_offer",
-        lambda _payload: "offer1direct",
-    )
-    market = replace(
-        market_config_for_local_offer(),
-        pricing={"min_price_quote_per_base": 0.0031, "max_price_quote_per_base": 0.0038},
-    )
-    build_ctx = offer_build_post.prepare_offer_build_context(
-        program=program_config_for_local_offer(),
-        market=market,
-        program_path=Path("/tmp/program.yaml"),
-        network="mainnet",
-        keyring_yaml_path="/tmp/keyring.yaml",
-    )
-    create_fn = make_local_offer_create_fn(
-        build_ctx,
-        dry_run=False,
-        build_offer_fn=offer_build_post.build_offer,
-    )
-    outcome = create_fn(size_base_units=1, quote_price=0.5, action_side="sell")
-    assert outcome.offer_text == "offer1direct"
+    assert payload["results"][0]["result"]["error"].startswith("signing_failed:")

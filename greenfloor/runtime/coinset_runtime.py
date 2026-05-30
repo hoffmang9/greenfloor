@@ -7,7 +7,7 @@ import time
 
 from greenfloor.adapters.coinset import CoinsetAdapter
 from greenfloor.config.io import is_testnet
-from greenfloor.core.retry_policy import coinset_fee_lookup_retry_sleep
+from greenfloor.core.policy_bridge import coinset_fee_lookup_retry_sleep
 
 
 class CoinsetFeeLookupPreflightError(RuntimeError):

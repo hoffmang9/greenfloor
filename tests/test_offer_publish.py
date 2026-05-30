@@ -4,12 +4,14 @@ from typing import Any, cast
 
 import pytest
 
-from greenfloor.core.offer_policy import (
+from greenfloor.core.offer_request_bridge import (
+    resolve_offer_expiry_for_pricing,
+    resolve_quote_price_for_pricing,
+)
+from greenfloor.core.policy_bridge import (
     bootstrap_block_error,
     dexie_offer_asset_expectation_error,
     expected_publish_asset_fields,
-    resolve_offer_expiry_for_pricing,
-    resolve_quote_price_for_pricing,
     verify_offer_for_dexie,
 )
 from greenfloor.runtime.offer_publish import (
@@ -83,7 +85,7 @@ def test_verify_offer_for_dexie_reports_missing_engine(monkeypatch) -> None:
         lambda: (_ for _ in ()).throw(ImportError("greenfloor_engine_unavailable")),
     )
     assert verify_offer_for_dexie("offer1contract") == (
-        "wallet_sdk_import_error:greenfloor_engine_unavailable"
+        "greenfloor_engine_unavailable:verify_offer_for_dexie"
     )
 
 
@@ -278,7 +280,7 @@ def test_verify_dexie_offer_visible_by_id_uses_engine_asset_expectation(monkeypa
             }
 
     monkeypatch.setattr(
-        "greenfloor.core.offer_policy.dexie_offer_asset_expectation_error",
+        "greenfloor.core.policy_bridge.dexie_offer_asset_expectation_error",
         lambda **_kwargs: "dexie_offer_offered_asset_missing:expected_asset=abc:expected_symbol=A",
     )
 

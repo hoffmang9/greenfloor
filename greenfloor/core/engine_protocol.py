@@ -64,13 +64,6 @@ class CycleEngineProtocol(Protocol):
         xch_price_usd: float | None,
     ) -> Any: ...
 
-    def sequential_action_route(
-        self,
-        runtime_dry_run: bool,
-        program_present: bool,
-        managed_backend_available: bool,
-    ) -> str: ...
-
     def expand_planned_actions(self, actions: list[PlannedAction]) -> list[PlannedAction]: ...
 
     def filter_planned_actions_with_positive_repeat(

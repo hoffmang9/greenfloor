@@ -1,7 +1,7 @@
 """Shared PyO3 bridge for the Rust deterministic policy engine.
 
 The compiled extension is published as ``greenfloor_engine`` (ADR 0010). Python
-callers should use :func:`import_engine`; ``import_signer`` remains as a migration alias.
+callers should use :func:`import_engine`.
 
 ``policy_engine``, ``coin_ops_engine``, and ``bootstrap_engine`` are typed views of
 the same PyO3 module — use the name that matches the ``Protocol`` at the call site.
@@ -32,7 +32,6 @@ __all__ = [
     "bootstrap_engine",
     "coin_ops_engine",
     "import_engine",
-    "import_signer",
     "engine_method_getter",
     "engine_rebuild_hint",
     "policy_engine",
@@ -118,7 +117,3 @@ def coin_ops_engine() -> CoinOpsEngineProtocol:
 
 def bootstrap_engine() -> BootstrapEngineProtocol:
     return typed_engine_view(kind="bootstrap")
-
-
-# Migration alias — prefer import_engine for new code.
-import_signer = import_engine

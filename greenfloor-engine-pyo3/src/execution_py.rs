@@ -3,8 +3,7 @@ use pyo3::types::{PyDict, PyList};
 
 use engine_core::{
     expand_planned_actions, filter_planned_actions_with_positive_repeat,
-    plan_parallel_managed_dispatch, sequential_action_route, ParallelBatchPlan,
-    ParallelReservationContext, SequentialActionRoute,
+    plan_parallel_managed_dispatch, ParallelBatchPlan, ParallelReservationContext,
 };
 
 use crate::py_utils::{
@@ -65,22 +64,6 @@ fn parallel_reservation_context_from_py(
 }
 
 #[pyfunction]
-#[pyo3(name = "sequential_action_route")]
-fn sequential_action_route_py(
-    runtime_dry_run: bool,
-    program_present: bool,
-    managed_backend_available: bool,
-) -> &'static str {
-    match sequential_action_route(runtime_dry_run, program_present, managed_backend_available) {
-        SequentialActionRoute::DryRunPlanned => "dry_run_planned",
-        SequentialActionRoute::Managed => "managed",
-        SequentialActionRoute::Local => "local",
-        SequentialActionRoute::SkipNoProgram => "skip_no_program",
-        SequentialActionRoute::SkipNoManagedBackend => "skip_no_managed_backend",
-    }
-}
-
-#[pyfunction]
 #[pyo3(name = "expand_planned_actions")]
 fn expand_planned_actions_py(actions: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
     let list = actions.cast::<PyList>()?;
@@ -124,7 +107,6 @@ fn plan_parallel_managed_dispatch_py(
 }
 
 pub fn register_execution(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(sequential_action_route_py, m)?)?;
     m.add_function(wrap_pyfunction!(expand_planned_actions_py, m)?)?;
     m.add_function(wrap_pyfunction!(
         filter_planned_actions_with_positive_repeat_py,

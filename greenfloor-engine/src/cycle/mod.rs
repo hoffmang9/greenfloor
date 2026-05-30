@@ -26,8 +26,8 @@ pub use dispatch::{
 };
 pub use execution::{
     expand_planned_actions, filter_planned_actions_with_positive_repeat,
-    plan_parallel_managed_dispatch, sequential_action_route, ParallelBatchPlan, ParallelQueueItem,
-    ParallelReservationContext, ParallelSkipItem, SequentialActionRoute,
+    plan_parallel_managed_dispatch, ParallelBatchPlan, ParallelQueueItem,
+    ParallelReservationContext, ParallelSkipItem,
 };
 pub use lifecycle::{apply_offer_signal, OfferLifecycleState, OfferSignal, OfferTransition};
 pub use managed::{

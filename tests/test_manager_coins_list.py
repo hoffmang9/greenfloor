@@ -77,8 +77,10 @@ def test_coins_list_resolves_asset_filter_before_listing(
 def test_coins_list_requires_signer_backend(tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     write_manager_program(program, tmp_path=tmp_path)
-    with pytest.raises(ValueError, match="coin ops require signer"):
-        coins_list(program_path=program, asset=None, vault_id=None)
+    code = coins_list(program_path=program, asset=None, vault_id=None)
+    assert code == 2
+    payload = json.loads(capsys.readouterr().err.strip())
+    assert payload["error"] == "coin_list_requires_signer_backend"
 
 
 def test_coins_list_cat_id_uses_signer_resolution(monkeypatch, tmp_path: Path, capsys) -> None:

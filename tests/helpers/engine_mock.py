@@ -140,6 +140,10 @@ class MinimalSignerEngine:
     """
 
     @staticmethod
+    def extract_coin_id_hints_from_offer(_offer: str) -> list[str]:
+        return []
+
+    @staticmethod
     def validate_offer(_offer: str) -> None:
         return None
 

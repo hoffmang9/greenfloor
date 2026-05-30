@@ -11,7 +11,7 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
-from greenfloor.core import offer_policy
+from greenfloor.core import policy_bridge
 from greenfloor.core.offer_action import OfferCreatePhaseOutcome
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.offer_bootstrap import (
@@ -82,8 +82,8 @@ class OfferCreateFailure(Exception):
         self.extra = dict(extra or {})
 
 
-def _offer_policy_error(exc: Exception) -> str:
-    return f"offer_policy_error:{exc}"
+def _policy_bridge_error(exc: Exception) -> str:
+    return f"policy_bridge_error:{exc}"
 
 
 def bootstrap_blocks_offer(bootstrap_result: BootstrapPhaseResult) -> tuple[bool, str | None]:
@@ -92,7 +92,7 @@ def bootstrap_blocks_offer(bootstrap_result: BootstrapPhaseResult) -> tuple[bool
             "bootstrap_blocks_offer requires BootstrapPhaseResult; "
             "use BootstrapPhaseResult.to_manager_dict for manager dicts"
         )
-    error = offer_policy.bootstrap_block_error(
+    error = policy_bridge.bootstrap_block_error(
         bootstrap_status=bootstrap_result.status,
         bootstrap_reason=bootstrap_result.reason,
         bootstrap_ready=bootstrap_result.ready,
@@ -140,7 +140,7 @@ def default_offer_post_deps(
     return OfferPostDeps(
         resolve_maker_offer_fee_fn=resolve_maker_offer_fee,
         log_signed_offer_artifact_fn=log_signed_offer_artifact,
-        verify_offer_for_dexie_fn=offer_policy.verify_offer_for_dexie,
+        verify_offer_for_dexie_fn=policy_bridge.verify_offer_for_dexie,
         post_offer_phase_fn=post_offer_phase,
         dexie_offer_view_url_fn=dexie_offer_view_url,
         dexie_adapter_cls=DexieAdapter,
@@ -243,8 +243,6 @@ def execute_build_and_post_offer(
     resolved_quote_asset_id: str,
     bootstrap_phase_fn: collections.abc.Callable[..., BootstrapPhaseResult] | None,
     create_offer_fn: collections.abc.Callable[..., OfferCreateOutcome],
-    path_label: str,
-    path_extra_fields: dict[str, Any] | None = None,
     post_deps: OfferPostDeps | None = None,
 ) -> tuple[int, dict[str, Any], list[OfferPostPersistRecord]]:
     resolved_post_deps = post_deps or default_offer_post_deps()
@@ -344,7 +342,7 @@ def execute_build_and_post_offer(
                 post_results,
                 publish_venue=publish_venue,
                 started_ms=started_ms,
-                error=f"{path_label}_offer_text_unavailable",
+                error="signer_offer_text_unavailable",
                 create_phase_ms=created.create_phase_ms,
                 artifact_wait_ms=created.artifact_wait_ms,
                 create_total_ms=created.create_total_ms,
@@ -380,7 +378,7 @@ def execute_build_and_post_offer(
                 post_results,
                 publish_venue=publish_venue,
                 started_ms=started_ms,
-                error=_offer_policy_error(exc),
+                error=_policy_bridge_error(exc),
                 create_phase_ms=created.create_phase_ms,
                 artifact_wait_ms=created.artifact_wait_ms,
                 create_total_ms=created.create_total_ms,
@@ -401,7 +399,7 @@ def execute_build_and_post_offer(
 
         publish_started = time.monotonic()
         try:
-            asset_fields = offer_policy.expected_publish_asset_fields(
+            asset_fields = policy_bridge.expected_publish_asset_fields(
                 side=created.side,
                 base_symbol=str(market.base_symbol),
                 quote_asset=str(market.quote_asset),
@@ -414,7 +412,7 @@ def execute_build_and_post_offer(
                 post_results,
                 publish_venue=publish_venue,
                 started_ms=started_ms,
-                error=_offer_policy_error(exc),
+                error=_policy_bridge_error(exc),
                 create_phase_ms=created.create_phase_ms,
                 artifact_wait_ms=created.artifact_wait_ms,
                 create_total_ms=created.create_total_ms,
@@ -485,10 +483,9 @@ def execute_build_and_post_offer(
         "results": post_results,
         "offer_fee_mojos": offer_fee_mojos,
         "offer_fee_source": offer_fee_source,
-        "execution_backend": path_label,
+        "execution_backend": "signer",
+        "signer_path": True,
     }
-    if path_extra_fields:
-        payload.update(path_extra_fields)
     return (0 if publish_failures == 0 else 2), payload, persist_records
 
 
@@ -507,8 +504,6 @@ def build_and_post_offer(
     resolved_quote_asset_id: str,
     bootstrap_phase_fn: collections.abc.Callable[..., BootstrapPhaseResult] | None,
     create_offer_fn: collections.abc.Callable[..., OfferCreateOutcome],
-    path_label: str,
-    path_extra_fields: dict[str, Any] | None = None,
     post_deps: OfferPostDeps | None = None,
     emit_output: bool = True,
     persist_results: bool = True,
@@ -529,8 +524,6 @@ def build_and_post_offer(
         resolved_quote_asset_id=resolved_quote_asset_id,
         bootstrap_phase_fn=bootstrap_phase_fn,
         create_offer_fn=create_offer_fn,
-        path_label=path_label,
-        path_extra_fields=path_extra_fields,
         post_deps=resolved_post_deps,
     )
     if persist_results and persist_records:

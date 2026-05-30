@@ -60,7 +60,6 @@ def test_coin_op_scope_disallows_signer_split_combine_prereq() -> None:
     scope = CoinOpScope(
         market=_signer_market(),
         selected_venue=None,
-        execution_backend="signer",
         vault_id="signer",
     )
     assert scope.allows_daemon_split_combine_prereq is True
@@ -70,11 +69,7 @@ def test_coin_op_scope_disallows_signer_split_combine_prereq() -> None:
     )
 
 
-def test_execute_managed_coin_op_plans_missing_receive_address(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "greenfloor.runtime.coin_ops.daemon_execution.coin_ops_execution_backend",
-        lambda _program: "signer",
-    )
+def test_execute_managed_coin_op_plans_missing_receive_address() -> None:
     market = _signer_market(receive_address="")
     result = execute_managed_coin_op_plans(
         market=market,
@@ -236,11 +231,7 @@ def test_signer_daemon_combine_submits(monkeypatch) -> None:
     assert captured["output_amounts"] == [1000, 1000]
 
 
-def test_resolve_coin_op_base_asset_id_signer_xch(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "greenfloor.runtime.coin_ops.daemon_execution.coin_ops_execution_backend",
-        lambda _program: "signer",
-    )
+def test_resolve_coin_op_base_asset_id_signer_xch() -> None:
     market = _signer_market()
     market.base_asset = "xch"
     assert (

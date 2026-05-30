@@ -221,22 +221,17 @@ def test_execute_strategy_dispatch_preserves_planned_size_order(monkeypatch) -> 
     assert seen_sizes == [1, 10, 100]
 
 
-def test_execute_strategy_dispatch_signer_managed_failure_skips_without_builder(
+def test_execute_strategy_dispatch_signer_managed_failure_skips(
     monkeypatch,
 ) -> None:
     POST_COOLDOWN_UNTIL.clear()
-    calls = {"builder": 0}
+    calls = {"managed": 0}
 
-    def _unexpected_builder(**_kwargs):
-        calls["builder"] += 1
-        return {"status": "executed", "reason": "offer_builder_success", "offer": "offer1unused"}
+    def _managed_failure(**_kwargs):
+        calls["managed"] += 1
+        return managed_post_result(success=False, error="vault_signing_unavailable")
 
-    monkeypatch.setattr(offer_dispatch, "build_offer_for_action", _unexpected_builder)
-    monkeypatch.setattr(
-        offer_dispatch,
-        "managed_offer_post",
-        lambda **_kwargs: managed_post_result(success=False, error="vault_signing_unavailable"),
-    )
+    monkeypatch.setattr(offer_dispatch, "managed_offer_post", _managed_failure)
 
     def program_factory() -> ProgramConfig:
         return signer_program_config()
@@ -269,4 +264,4 @@ def test_execute_strategy_dispatch_signer_managed_failure_skips_without_builder(
     assert result.executed_count == 0
     assert result.action_items[0].status == "skipped"
     assert result.action_items[0].reason == "managed_offer_post_failed:vault_signing_unavailable"
-    assert calls["builder"] == 0
+    assert calls["managed"] == 1

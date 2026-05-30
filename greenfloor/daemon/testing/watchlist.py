@@ -8,17 +8,11 @@ from greenfloor.daemon.watchlist import (
 from greenfloor.daemon.watchlist import (
     _active_offer_counts_by_size_and_side as active_offer_counts_by_size_and_side,
 )
-from greenfloor.daemon.watchlist import (
-    _build_dexie_size_by_offer_id as build_dexie_size_by_offer_id,
-)
-from greenfloor.daemon.watchlist import (
-    _match_watched_coin_ids as match_watched_coin_ids,
-)
-from greenfloor.daemon.watchlist import (
-    _set_watched_coin_ids_for_market as set_watched_coin_ids_for_market,
-)
-from greenfloor.daemon.watchlist import (
-    _update_market_coin_watchlist_from_dexie as update_market_coin_watchlist_from_dexie,
+from greenfloor.runtime.offer_watchlist import (
+    build_dexie_size_by_offer_id,
+    match_watched_coin_ids,
+    set_watched_coin_ids_for_market,
+    update_market_coin_watchlist_from_dexie,
 )
 
 __all__ = [

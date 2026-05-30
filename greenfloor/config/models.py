@@ -3,13 +3,9 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from greenfloor.logging_setup import normalize_log_level_name
-
-OfferExecutionBackend = Literal["signer", "bls"]
-ManagedOfferExecutionBackend = Literal["signer"]
-CoinOpsExecutionBackend = Literal["signer"]
 
 _CANONICAL_CAT_UNIT_MOJOS = 1000
 _CANONICAL_XCH_UNIT_MOJOS = 1_000_000_000_000
@@ -126,11 +122,6 @@ def signer_runtime_config_path(program: ProgramConfig) -> str:
     return str(signer_config_path(program.home_dir))
 
 
-def ensure_signer_config_path(program: ProgramConfig) -> str:
-    """Deprecated alias: prefer ``prepare_signer_runtime`` at startup."""
-    return prepare_signer_runtime(program)
-
-
 def signer_offer_path_configured(program: ProgramConfig) -> bool:
     if not str(program.signer_kms_key_id).strip():
         return False
@@ -138,37 +129,15 @@ def signer_offer_path_configured(program: ProgramConfig) -> bool:
     return vault is not None and bool(str(vault.launcher_id).strip())
 
 
-def coin_ops_execution_backend(program: ProgramConfig) -> CoinOpsExecutionBackend:
-    if signer_offer_path_configured(program):
-        return "signer"
-    raise ValueError("coin ops require signer.kms_key_id and vault.launcher_id in program config")
+def require_signer_offer_path(program: ProgramConfig) -> None:
+    if not signer_offer_path_configured(program):
+        raise ValueError(
+            "offer execution requires signer.kms_key_id and vault.launcher_id in program config"
+        )
 
 
-def offer_execution_backend(
-    program: ProgramConfig,
-    *,
-    size_base_units: int = 0,
-    local_build_min_size_base_units: int | None = None,
-) -> OfferExecutionBackend:
-    if signer_offer_path_configured(program):
-        return "signer"
-    return "bls"
-
-
-def managed_offer_execution_backend(
-    program: ProgramConfig,
-    *,
-    size_base_units: int = 0,
-    local_build_min_size_base_units: int | None = None,
-) -> ManagedOfferExecutionBackend | None:
-    backend = offer_execution_backend(
-        program,
-        size_base_units=size_base_units,
-        local_build_min_size_base_units=local_build_min_size_base_units,
-    )
-    if backend == "signer":
-        return backend
-    return None
+def require_coin_ops_signer_path(program: ProgramConfig) -> None:
+    require_signer_offer_path(program)
 
 
 @dataclass(slots=True)

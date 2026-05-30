@@ -2,13 +2,11 @@
 
 ## Status
 
-Accepted (2026-05-28)
+Accepted (2026-05-28); updated 2026-05-29 (signer-only stack)
 
 ## Context
 
-Offer-request leg math moved into `greenfloor-engine` with PyO3 bindings. Python needs stable
-import paths for runtime, daemon dispatch, vault request construction, and BLS offer building
-without growing `policy_bridge.py` into a flat FFI catalog.
+Offer-request leg math moved into `greenfloor-engine` with PyO3 bindings. Python needs stable import paths for runtime, daemon dispatch, and vault request construction without growing `policy_bridge.py` into a flat FFI catalog.
 
 ## Decision
 
@@ -17,33 +15,26 @@ without growing `policy_bridge.py` into a flat FFI catalog.
 - `greenfloor-engine/src/offer/request.rs` — leg math, validation, `normalize_offer_side`,
   `normalize_offer_asset_id`, `signer_split_asset_id`, `compute_signer_offer_leg_amounts`.
 
-### Python modules (import from here, not `policy_bridge`)
+### Python modules (import from here, not duplicated facades)
 
-| Module                                   | Use for                                                                                                                 |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `greenfloor.core.offer_request_bridge`   | Direct engine access to offer-request symbols (internal bridge).                                                        |
-| `greenfloor.core.offer_bootstrap_bridge` | **Stable runtime imports** — bootstrap DTOs, planner, and phase engine wrappers.                                        |
-| `greenfloor.core.offer_bootstrap_policy` | Backward-compatible re-export of `offer_bootstrap_bridge` (no logic).                                                   |
-| `greenfloor.core.offer_policy`           | **Stable runtime/daemon/BLS imports** — re-exports leg math + Dexie/publish helpers.                                    |
-| `greenfloor.core.signer_offer_request`   | Low-level `SignerCreateOfferRequest` / `signer_create_offer_request_from_fields` (KMS plan-dict spends only).           |
-| `greenfloor.core.offer_action`           | **Canonical offer create** — typed action request/result, pure shaping, create-phase outcome mapping.                   |
-| `greenfloor.runtime.offer_action_build`  | Build action requests from `OfferBuildContext` plus local/signer runtime orchestration (asset resolution + BLS create). |
-| `greenfloor.adapters.offer_action`       | Engine IO only (`build_*_offer_for_action`).                                                                            |
+| Module                                   | Use for                                                                                        |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `greenfloor.core.offer_request_bridge`   | Direct engine access to offer-request symbols (leg math, side normalization).                  |
+| `greenfloor.core.policy_bridge`          | Pricing/publish/retry engine wrappers (`verify_offer_for_dexie`, retry sleeps, publish gates). |
+| `greenfloor.core.offer_bootstrap_bridge` | Bootstrap DTOs, planner, and phase engine wrappers.                                            |
+| `greenfloor.core.signer_offer_request`   | Low-level `SignerCreateOfferRequest` / `signer_create_offer_request_from_fields`.              |
+| `greenfloor.core.offer_action`           | Canonical offer create — typed action request/result, pure shaping, create-phase mapping.      |
+| `greenfloor.adapters.offer_action`       | Engine IO only (`build_signer_offer_for_action`).                                              |
 
-### Offer-action create path (2026-05)
+### Offer-action create path
 
-- **New market-action offer creation** must use `core/offer_action` + `adapters/offer_action`
-  (signer) or `runtime/offer_action_build` (local BLS). Do not add call sites to
-  `rust_signer.build_vault_cat_offer` for that flow.
-- Local BLS resolves ticker symbols via `resolve_action_assets_for_build_context` before engine
-  dispatch when ids are not already canonical.
+- **All market-action offer creation** uses `core/offer_action` + `adapters/offer_action` (signer vault KMS).
+- Do not add call sites to legacy BLS or Cloud Wallet offer builders.
 
 ### `policy_bridge.py` role
 
-- Owns **pricing/publish/retry** engine wrappers and re-exports offer-request symbols for
-  backward compatibility during migration.
-- **New code** should import offer-request helpers from `offer_policy` or
-  `signer_offer_request`, not add new `policy_bridge` call sites.
+- Owns **pricing/publish/retry** engine wrappers.
+- **New code** should import offer-request helpers from `offer_request_bridge` and publish/retry helpers from `policy_bridge`.
 
 ### Normalized offer side caching
 
@@ -60,15 +51,5 @@ without growing `policy_bridge.py` into a flat FFI catalog.
   `offer_build_py.rs` / `policy_bridge.py` bodies.
 - Bootstrap planner symbols use `offer_bootstrap_bridge.py` and `offer_bootstrap_py.rs` (not
   `offer_build_py.rs`). Bridges call `engine_bridge.bootstrap_engine()` (`BootstrapEngineProtocol`).
-  Engine API: `plan_bootstrap_mixed_outputs(ladder_entries=...)` returns `BootstrapPlanOutcome`
-  (`ready` / `needs_split` / `cannot_fund` / `invalid_ladder` / `invalid_coins`).
-- Rust layout: `greenfloor-engine/src/offer/bootstrap/planner.rs` (deficit planner),
-  `offer/bootstrap/phase.rs` (early/executed phase snapshots). PyO3 marshalling:
-  `greenfloor-engine-pyo3/src/py_utils/bootstrap_marshal.rs`.
-- Runtime orchestration lives in `greenfloor/runtime/offer_bootstrap.py`
-  (`BootstrapRuntimeDeps`, `BootstrapPreflight`, `BootstrapSplitExecution`). Phase DTOs live in
-  `greenfloor.offer_bootstrap`; early/executed phase mapping is Rust via `offer_bootstrap_bridge.py`.
-- **Fee eligibility** (non-zero split fee guard) is intentionally Python-only in
-  `run_bootstrap_preflight`; do not move fee I/O into the Rust phase table.
-- Planner input DTO: `PlannerLadderRow` (config uses `MarketLadderEntry`).
+- Removed: `core/offer_policy.py`, `core/retry_policy.py`, `core/offer_bootstrap_policy.py`, local BLS offer modules.
 - Removing `core/offer_side.py` was intentional; do not reintroduce a pass-through module.

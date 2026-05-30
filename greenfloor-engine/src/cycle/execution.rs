@@ -109,16 +109,6 @@ pub fn plan_parallel_managed_dispatch(
     plan
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SequentialActionRoute {
-    DryRunPlanned,
-    Managed,
-    Local,
-    SkipNoProgram,
-    SkipNoManagedBackend,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParallelSkipItem {
     pub submit_index: usize,
@@ -136,24 +126,6 @@ pub struct ParallelQueueItem {
 pub struct ParallelBatchPlan {
     pub skip_items: Vec<ParallelSkipItem>,
     pub queue: Vec<ParallelQueueItem>,
-}
-
-pub fn sequential_action_route(
-    runtime_dry_run: bool,
-    program_present: bool,
-    managed_backend_available: bool,
-) -> SequentialActionRoute {
-    if runtime_dry_run {
-        return SequentialActionRoute::DryRunPlanned;
-    }
-    if !program_present {
-        return SequentialActionRoute::SkipNoProgram;
-    }
-    if managed_backend_available {
-        SequentialActionRoute::Managed
-    } else {
-        SequentialActionRoute::Local
-    }
 }
 
 pub fn filter_planned_actions_with_positive_repeat(
@@ -201,30 +173,6 @@ pub fn expand_planned_actions(actions: &[PlannedAction]) -> Vec<PlannedAction> {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
-
-    #[test]
-    fn sequential_route_dry_run() {
-        assert_eq!(
-            sequential_action_route(true, true, true),
-            SequentialActionRoute::DryRunPlanned
-        );
-    }
-
-    #[test]
-    fn sequential_route_managed_when_backend_available() {
-        assert_eq!(
-            sequential_action_route(false, true, true),
-            SequentialActionRoute::Managed
-        );
-    }
-
-    #[test]
-    fn sequential_route_local_without_managed_backend() {
-        assert_eq!(
-            sequential_action_route(false, true, false),
-            SequentialActionRoute::Local
-        );
-    }
 
     fn sample_reservation_context() -> ParallelReservationContext {
         ParallelReservationContext {

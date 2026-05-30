@@ -41,8 +41,6 @@ class StrategyDispatchHooks:
     """Callable bundle for strategy offer execution."""
 
     resolve_signer_offer_asset_ids_for_reservation: Callable[..., tuple[str, str, str]]
-    build_offer_for_action: Callable[..., dict[str, Any]]
-    execute_single_local_action: Callable[..., StrategyActionItem]
     managed_offer_post: Callable[..., ManagedOfferPostResult]
     execute_single_managed_action: Callable[..., StrategyActionItem]
     execute_managed_action_with_retry: Callable[..., StrategyActionItem]
@@ -55,8 +53,6 @@ def hooks_from_module() -> StrategyDispatchHooks:
         resolve_signer_offer_asset_ids_for_reservation=(
             pkg.resolve_signer_offer_asset_ids_for_reservation
         ),
-        build_offer_for_action=pkg.build_offer_for_action,
-        execute_single_local_action=pkg.execute_single_local_action,
         managed_offer_post=pkg.managed_offer_post,
         execute_single_managed_action=pkg.execute_single_managed_action,
         execute_managed_action_with_retry=pkg.execute_managed_action_with_retry,

@@ -1,8 +1,25 @@
 # Progress Log
 
+## 2026-05-29 (Review follow-ups — routing collapse + bridge merge)
+
+- **Routing:** removed `offer_execution_backend()` / `managed_offer_execution_backend()` / `coin_ops_execution_backend()` and Rust `sequential_action_route`; daemon sequential dispatch uses explicit dry-run / program / signer checks.
+- **Cycle bridge:** merged `_bridge_managed.py` + `_bridge_orchestration.py` into `core/cycle/_bridge.py`; split offer-build helpers into `core/offer_build_bridge.py`; `policy_bridge` is Dexie publish + retry only.
+- **Reconciliation:** `reconcile_market_watched_offers()` in `runtime/offer_reconciliation.py`; daemon cycle is a thin logging wrapper.
+- **Tests:** restored `test_signer_create_offer_parity`, `test_retry_policy_parity`, `test_coin_ops_policy_parity` with updated bridge imports.
+- **Cleanup:** `offer_decode` propagates engine errors; removed unused crate-root puzzle-hash exports and Cloud Wallet PEM/GraphQL error variants; simplified `coinset_coins` pass-through.
+
+## 2026-05-29 (Stack simplification — BLS removal + engine wallet IO)
+
+- **Removed Python paths:** local BLS offer builder, Cloud Wallet runtime, `offer_policy` / `retry_policy` facades, `cycle/_bridge_common.py`.
+- **Rust:** deleted `greenfloor-engine/src/bls/` and BLS PyO3 bindings; added `coinset/wallet_io.rs` (`list_wallet_unspent_coins`, `spend_bundle_hash_hex`, `extract_coin_id_hints_from_offer`).
+- **Python wallet IO:** production code no longer imports `chia_wallet_sdk`; coin listing, offer decode hints, and spend-bundle hashing go through `greenfloor_engine`.
+- **Reconciliation:** `transition_from_dexie_offer_payload()` in `runtime/offer_reconciliation.py` shared by CLI batch reconcile and daemon cycle transitions.
+- **Imports:** runtime/daemon use `policy_bridge` + `offer_request_bridge` directly.
+- **Docs:** ADR 0003, 0008, 0011 updated for signer-only architecture.
+
 ## 2026-05-29 (Offer asset resolution — Rust action boundary)
 
-- **`greenfloor-engine/src/offer/action.rs`:** `try_normalize_resolved_assets` and `resolve_offer_assets_for_action` compose normalize + Coinset fallback; `resolve_offer_assets_via_coinset` is Coinset-only. Signer and BLS action builds both use the composed path when signer config is available.
+- **`greenfloor-engine/src/offer/action.rs`:** `try_normalize_resolved_assets` and `resolve_offer_assets_for_action` compose normalize + Coinset fallback; signer action builds use the composed path.
 - **PyO3:** `try_normalize_offer_asset_ids` exposes Rust normalization; `resolve_offer_assets_via_coinset` is the canonical Coinset-only binding (`resolve_offer_asset_ids` remains a deprecated alias).
 - **Python bridge:** `offer_assets_bridge.resolve_offer_assets` composes normalize then Coinset once; runtime callers delegate through it.
 - **Tests:** Real-engine bridge tests cover normalize, collision, composition, and Coinset fallback; successful MSP lookup is covered by Rust mockito tests.

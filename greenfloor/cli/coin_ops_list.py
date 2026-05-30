@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.config.io import load_markets_config, load_program_config
-from greenfloor.config.models import ProgramConfig, coin_ops_execution_backend
+from greenfloor.config.models import ProgramConfig, require_coin_ops_signer_path
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.coin_ops_backend import build_coin_op_backend, resolve_signer_asset_id
 from greenfloor.runtime.json_output import format_json_output
@@ -100,7 +100,9 @@ def coins_list(
 ) -> int:
     _ = vault_id
     program = load_program_config(program_path)
-    if coin_ops_execution_backend(program) != "signer":
+    try:
+        require_coin_ops_signer_path(program)
+    except ValueError:
         print(
             format_json_output(
                 {

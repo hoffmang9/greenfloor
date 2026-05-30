@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-05-26)
+Accepted (2026-05-26); updated 2026-05-29 (signer-only stack)
 
 ## Decision
 
@@ -22,8 +22,7 @@ Replace the monolithic `greenfloor/runtime/cloud_wallet_offer_runtime.py` with f
 
 - `greenfloor/runtime/offer_post_request.py` — `OfferPostRequest` (CLI + daemon routing), `parse_managed_offer_post_result()`.
 - `greenfloor/runtime/offer_runtime.py` — vault KMS / Rust signer backend (`build_and_post_offer_signer`).
-- `greenfloor/runtime/cloud_wallet/` — Cloud Wallet backend (`build_post.py`, `phases.py`, `bootstrap.py`, `polling/`, `assets.py`, `deps.py`).
-- `greenfloor/runtime/local_offer.py` — legacy local BLS offer-builder path for large manual CLI builds.
+- `greenfloor/runtime/offer_reconciliation.py` — shared Dexie/Coinset lifecycle reconciliation for CLI and daemon.
 
 ### CLI entry
 
@@ -31,12 +30,12 @@ Replace the monolithic `greenfloor/runtime/cloud_wallet_offer_runtime.py` with f
 
 ### Routing gates (`greenfloor/config/models.py`)
 
-- `offer_execution_backend()` → `"signer" | "cloud_wallet" | "bls"`.
-- `managed_offer_execution_backend()` → `"signer" | "cloud_wallet" | None` (daemon managed post excludes BLS).
+- `require_signer_offer_path()` / `require_coin_ops_signer_path()` — raise when KMS + vault are not configured.
+- `signer_offer_path_configured()` — boolean gate for daemon skip reasons.
 
 ### Backend contracts
 
-- Signer and Cloud Wallet entry points take `build_ctx: OfferBuildContext` only (program/market derived from context).
+- Signer entry points take `build_ctx: OfferBuildContext` only (program/market derived from context).
 - `build_and_post_offer()` takes `build_ctx` and derives quote price / action side internally.
 
 ## Rationale
@@ -47,8 +46,8 @@ Replace the monolithic `greenfloor/runtime/cloud_wallet_offer_runtime.py` with f
 
 ## Consequences
 
-- Deleted: `greenfloor/runtime/cloud_wallet_offer_runtime.py`.
+- Deleted: `greenfloor/runtime/cloud_wallet_offer_runtime.py`, Cloud Wallet backend modules, local BLS offer paths.
 - Removed: daemon `build_and_post_fn` injection; managed post uses `OfferPostRequest.run_managed()` directly.
-- Daemon must not import CLI for offer build/post; it uses `greenfloor/offer_builder.py` and runtime modules.
-- Tests split from `tests/test_manager_post_offer.py` into focused modules (`test_offer_cli_dispatch.py`, `test_offer_cloud_wallet_post_*.py`, `test_offer_post_request.py`, etc.).
+- Daemon must not import CLI for offer build/post; it uses runtime modules and `adapters/offer_action`.
+- Tests split from `tests/test_manager_post_offer.py` into focused modules (`test_offer_cli_dispatch.py`, `test_offer_post_request.py`, etc.).
 - New offer-runtime wiring should extend existing modules rather than reintroducing a monolith.

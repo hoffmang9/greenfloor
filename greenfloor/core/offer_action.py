@@ -14,10 +14,8 @@ __all__ = [
     "build_action_request",
     "expires_at_iso_from_build_context",
     "expires_at_iso_from_unix",
-    "legacy_action_request_from_payload",
     "parse_action_result",
     "to_create_phase_outcome",
-    "validate_legacy_offer_payload",
 ]
 
 
@@ -86,64 +84,6 @@ def build_action_request(
     )
 
 
-def validate_legacy_offer_payload(payload: dict[str, Any]) -> None:
-    """Validate legacy offer_builder stdin payloads before action request shaping."""
-    receive_address = str(payload.get("receive_address", "")).strip()
-    key_id = str(payload.get("key_id", "")).strip()
-    network = str(payload.get("network", "")).strip()
-    keyring_yaml_path = str(payload.get("keyring_yaml_path", "")).strip()
-    size_base_units = int(payload.get("size_base_units", 0))
-    quote_price_quote_per_base = float(payload.get("quote_price_quote_per_base", 0.0))
-    base_unit_mojo_multiplier = int(payload.get("base_unit_mojo_multiplier", 0))
-    quote_unit_mojo_multiplier = int(payload.get("quote_unit_mojo_multiplier", 0))
-    if not receive_address:
-        raise ValueError("missing_receive_address")
-    if size_base_units <= 0:
-        raise ValueError("invalid_size_base_units")
-    if not key_id:
-        raise ValueError("missing_key_id")
-    if not network:
-        raise ValueError("missing_network")
-    if not keyring_yaml_path:
-        raise ValueError("missing_keyring_yaml_path")
-    if quote_price_quote_per_base <= 0:
-        raise ValueError("invalid_quote_price_quote_per_base")
-    if base_unit_mojo_multiplier <= 0:
-        raise ValueError("invalid_base_unit_mojo_multiplier")
-    if quote_unit_mojo_multiplier <= 0:
-        raise ValueError("invalid_quote_unit_mojo_multiplier")
-
-    quote_asset = str(payload.get("quote_asset", "xch")).strip().lower() or "xch"
-    if quote_asset not in {"xch", "txch", "1"} and len(quote_asset) != 64:
-        raise ValueError("invalid_quote_asset_id")
-
-
-def legacy_action_request_from_payload(payload: dict[str, Any]) -> OfferActionRequest:
-    """Map a validated legacy offer_builder payload to an action request."""
-    validate_legacy_offer_payload(payload)
-    asset_id = str(payload.get("asset_id", "xch")).strip().lower() or "xch"
-    quote_asset = str(payload.get("quote_asset", "xch")).strip().lower() or "xch"
-    return build_action_request(
-        receive_address=str(payload.get("receive_address", "")).strip(),
-        base_asset=asset_id,
-        quote_asset=quote_asset,
-        pricing={
-            "base_unit_mojo_multiplier": int(payload.get("base_unit_mojo_multiplier", 0)),
-            "quote_unit_mojo_multiplier": int(payload.get("quote_unit_mojo_multiplier", 0)),
-        },
-        size_base_units=int(payload.get("size_base_units", 0)),
-        action_side=str(payload.get("side", "sell")),
-        quote_price=float(payload.get("quote_price_quote_per_base", 0.0)),
-        split_input_coins=bool(payload.get("split_input_coins", True)),
-        broadcast_split=bool(payload.get("broadcast_split", False)),
-        offer_coin_ids=[
-            str(value).strip().lower()
-            for value in (payload.get("offer_coin_ids") or [])
-            if str(value).strip()
-        ],
-    )
-
-
 def parse_action_result(payload: object) -> OfferActionResult:
     if not isinstance(payload, dict):
         raise TypeError("offer action engine returned non-dict result")
@@ -183,7 +123,7 @@ def to_create_phase_outcome(
     *,
     action_side: str,
 ) -> OfferCreatePhaseOutcome:
-    """Map engine action result to signer/local create-phase fields."""
+    """Map engine action result to signer create-phase fields."""
     return OfferCreatePhaseOutcome(
         offer_text=result["offer_text"],
         expires_at=expires_at_iso_from_unix(result["expires_at_unix"]),

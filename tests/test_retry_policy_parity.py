@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from greenfloor.core.retry_policy import (
+from greenfloor.core.policy_bridge import (
     coinset_fee_lookup_retry_sleep,
     dexie_invalid_offer_retry_sleep,
     dexie_invalid_offer_should_retry,

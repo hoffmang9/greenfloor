@@ -305,11 +305,7 @@ def execute_split_cli(
             allow_lock_all_spendable=allow_lock_all_spendable,
             force_split_when_ready=force_split_when_ready,
         )
-        readiness_asset_id = (
-            setup.resolved_asset_id
-            if setup.backend.scope.execution_backend == "signer"
-            else str(setup.market.base_asset)
-        )
+        readiness_asset_id = setup.resolved_asset_id
         return _CoinOpCliRun(
             denomination_target=denomination_target,
             readiness_asset_id=readiness_asset_id,
@@ -409,11 +405,7 @@ def execute_combine_cli(
             step_result = run_coin_combine_step(params=step_params, wallet_coins=wallet_coins)
             return CoinOpStepOutcome(step=step_result.step)
 
-        readiness_asset_id = (
-            setup.resolved_asset_id
-            if setup.backend.scope.execution_backend == "signer"
-            else str(setup.market.base_asset)
-        )
+        readiness_asset_id = setup.resolved_asset_id
         return _CoinOpCliRun(
             denomination_target=denomination_target,
             readiness_asset_id=readiness_asset_id,

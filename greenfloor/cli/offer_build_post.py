@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from greenfloor.config.io import (
@@ -12,11 +11,9 @@ from greenfloor.config.io import (
     load_program_config,
     resolve_market_for_build,
 )
-from greenfloor.config.models import offer_execution_backend
+from greenfloor.config.models import require_signer_offer_path
 from greenfloor.logging_setup import warn_if_log_level_auto_healed
-from greenfloor.runtime.json_output import format_json_output
 from greenfloor.runtime.offer_build_context import prepare_offer_build_context
-from greenfloor.runtime.offer_execution import default_offer_post_deps
 from greenfloor.runtime.offer_post_request import OfferPostRequest
 from greenfloor.runtime.offer_publish import initialize_manager_file_logging
 
@@ -65,13 +62,6 @@ def resolve_offer_publish_settings(
     return venue, dexie_base, splash_base
 
 
-def build_offer(payload: dict) -> str:
-    """Legacy test/CLI hook for local BLS offer build (delegates to offer_builder)."""
-    from greenfloor.offer_builder import build_offer as legacy_build_offer
-
-    return legacy_build_offer(payload)
-
-
 def build_and_post_offer_cli(
     *,
     program_path: Path,
@@ -95,6 +85,7 @@ def build_and_post_offer_cli(
         raise ValueError("repeat must be positive")
 
     program = load_program_config(program_path)
+    require_signer_offer_path(program)
     markets = load_markets_config_with_optional_overlay(
         path=markets_path,
         overlay_path=testnet_markets_path,
@@ -131,22 +122,4 @@ def build_and_post_offer_cli(
         dry_run=bool(dry_run),
     )
 
-    debug_dry_run_offer_capture_dir = os.getenv(
-        "GREENFLOOR_DEBUG_DRY_RUN_OFFER_CAPTURE_DIR", ""
-    ).strip()
-    capture_dir_path = (
-        Path(debug_dry_run_offer_capture_dir).expanduser()
-        if debug_dry_run_offer_capture_dir
-        else None
-    )
-    if dry_run and capture_dir_path is not None:
-        capture_dir_path.mkdir(parents=True, exist_ok=True)
-
-    backend = offer_execution_backend(program, size_base_units=size_base_units)
-    return request.run_cli(
-        backend,
-        capture_dir_path=capture_dir_path,
-        build_offer_fn=build_offer,
-        post_deps=default_offer_post_deps(format_output_fn=format_json_output),
-        path_extra_fields={"local_cli_path": True},
-    )
+    return request.run_cli()

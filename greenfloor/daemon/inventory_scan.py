@@ -118,29 +118,20 @@ def _coinset_cat_spendable_base_unit_coin_amounts(
     if not asset_hex or not is_hex_id(asset_hex):
         return []
     try:
-        import chia_wallet_sdk as sdk  # type: ignore[import-untyped]
-
-        address = sdk.Address.decode(str(receive_address))
-        inner_puzzle_hash = bytes(address.puzzle_hash)
-        asset_id_bytes = bytes.fromhex(asset_hex)
-        cat_puzzle_hash = sdk.cat_puzzle_hash(asset_id_bytes, inner_puzzle_hash)
-        coinset = CoinsetAdapter(network=str(network))
-        records = coinset.get_coin_records_by_puzzle_hash(
-            puzzle_hash_hex=f"0x{bytes(cat_puzzle_hash).hex()}",
-            include_spent_coins=False,
+        coins = list_unspent_coins_by_receive_address(
+            network=str(network),
+            receive_address=str(receive_address),
+            asset_id=asset_hex,
         )
     except Exception:
         return []
     multiplier = max(1, int(base_unit_mojo_multiplier))
     amounts: list[int] = []
-    for record in records:
-        if not isinstance(record, dict):
-            continue
-        coin_payload = record.get("coin")
-        if not isinstance(coin_payload, dict):
+    for coin in coins:
+        if not isinstance(coin, dict):
             continue
         try:
-            amount_mojos = int(coin_payload.get("amount", 0))
+            amount_mojos = int(coin.get("amount", 0))
         except (TypeError, ValueError):
             continue
         if amount_mojos <= 0:

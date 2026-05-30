@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from greenfloor.adapters.dexie import DexieAdapter
-from greenfloor.config.models import MarketConfig, ProgramConfig, managed_offer_execution_backend
+from greenfloor.config.models import MarketConfig, ProgramConfig, require_signer_offer_path
 from greenfloor.core.cycle import (
     classify_dexie_visibility_outcome,
     classify_managed_post_result,
@@ -43,12 +43,7 @@ def managed_offer_post(
     side: str = "sell",
     program_path: Path | None = None,
 ) -> ManagedOfferPostResult:
-    backend = managed_offer_execution_backend(program, size_base_units=size_base_units)
-    if backend is None:
-        return ManagedOfferPostResult(
-            success=False,
-            error="managed_offer_post_requires_signer_backend",
-        )
+    require_signer_offer_path(program)
 
     build_ctx = prepare_offer_build_context(
         program=program,
@@ -68,7 +63,7 @@ def managed_offer_post(
         claim_rewards=False,
         dry_run=runtime_dry_run,
     )
-    exit_code, payload = request.run_managed(backend)
+    exit_code, payload = request.run_managed()
     result = parse_managed_offer_post_result(exit_code, payload)
     if not result.success and result.error:
         raise_if_transient_managed_upstream_error(result.error)

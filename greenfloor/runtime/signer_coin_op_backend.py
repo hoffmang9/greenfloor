@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import importlib
 from dataclasses import dataclass
 from typing import Any
 
 from greenfloor.adapters import rust_signer
 from greenfloor.config.models import MarketConfig, ProgramConfig, prepare_signer_runtime
 from greenfloor.core.coin_ops import coin_op_min_amount_mojos
+from greenfloor.core.engine_bridge import import_engine
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin
 from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode
 from greenfloor.runtime.coin_ops_scope import CoinOpScope
@@ -22,12 +22,7 @@ def _operation_id_from_spend_bundle_hex(spend_bundle_hex: str) -> str | None:
     if not spend_bundle_hex:
         return None
     try:
-        sdk = importlib.import_module("chia_wallet_sdk")
-        raw_hex = (
-            spend_bundle_hex[2:] if spend_bundle_hex.lower().startswith("0x") else spend_bundle_hex
-        )
-        spend_bundle = sdk.SpendBundle.from_bytes(bytes.fromhex(raw_hex))
-        return str(sdk.to_hex(spend_bundle.hash()))
+        return str(import_engine().spend_bundle_hash_hex(spend_bundle_hex))
     except Exception:
         return None
 
@@ -48,7 +43,6 @@ class SignerCoinOpBackend:
         return CoinOpScope(
             market=self.market,
             selected_venue=self.selected_venue,
-            execution_backend="signer",
             vault_id="signer",
         )
 

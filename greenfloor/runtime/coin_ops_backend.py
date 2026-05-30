@@ -4,17 +4,11 @@ from __future__ import annotations
 
 from greenfloor.config.models import MarketConfig, ProgramConfig
 from greenfloor.core.offer_assets_bridge import resolve_offer_assets
-from greenfloor.runtime.coin_ops_scope import (
-    CoinOpBackend,
-    CoinOpExecutionBackend,
-    CoinOpScope,
-    scope_payload,
-)
+from greenfloor.runtime.coin_ops_scope import CoinOpBackend, CoinOpScope, scope_payload
 from greenfloor.runtime.signer_coin_op_backend import SignerCoinOpBackend
 
 __all__ = [
     "CoinOpBackend",
-    "CoinOpExecutionBackend",
     "CoinOpScope",
     "SignerCoinOpBackend",
     "build_coin_op_backend",

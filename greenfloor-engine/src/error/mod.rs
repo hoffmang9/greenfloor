@@ -1,22 +1,7 @@
-mod bls;
-
-pub use bls::{
-    bls_reason, broadcast_reason, mixed_split_reason, offer_reason, xch_coin_op_reason, BlsOp,
-};
-
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum SignerError {
-    #[error("cloud wallet private key PEM must live under a .greenfloor directory")]
-    PemPathNotUnderDotGreenfloor,
-
-    #[error("cloud wallet private key PEM not found: {0}")]
-    PemPathNotFound(String),
-
-    #[error("cloud wallet graphql error: {0}")]
-    Graphql(String),
-
     #[error("vault custody snapshot unavailable")]
     VaultSnapshotUnavailable,
 

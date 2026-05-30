@@ -149,7 +149,6 @@ def run_market_cycle_coin_ops_phase(run: MarketCycleRun) -> None:
         _plan_and_execute_coin_ops(
             market=run.market,
             program=run.program,
-            wallet=run.wallet,
             store=run.store,
             sell_ladder=run.sell_ladder,
             wallet_bucket_counts=run.bucket_counts or dict(run.market.inventory.bucket_counts),

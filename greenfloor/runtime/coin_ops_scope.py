@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 from greenfloor.config.models import MarketConfig
 from greenfloor.runtime.coin_ops.models import CoinOpSelectionMode
 
-CoinOpExecutionBackend = Literal["signer"]
+SIGNER_EXECUTION_BACKEND = "signer"
 
 
 @dataclass(frozen=True, slots=True)
 class CoinOpScope:
     market: MarketConfig
     selected_venue: str | None
-    execution_backend: CoinOpExecutionBackend
     vault_id: str = ""
 
     @property
@@ -44,7 +43,7 @@ def scope_payload(scope: CoinOpScope) -> dict[str, object]:
         "market_id": scope.market.market_id,
         "pair": f"{scope.market.base_symbol}:{scope.market.quote_asset}",
         "venue": scope.selected_venue,
-        "execution_backend": scope.execution_backend,
+        "execution_backend": SIGNER_EXECUTION_BACKEND,
         "vault_id": scope.vault_id,
     }
 

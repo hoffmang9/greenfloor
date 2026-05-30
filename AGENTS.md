@@ -20,7 +20,7 @@ Severity tags:
 - `[MUST]` Work at a senior-developer standard: explicit tradeoffs and maintainable design.
 - `[MUST]` If behavior or requirements are unclear, ask before coding.
 - `[MUST]` Use `chia-wallet-sdk` (repo submodule) for blockchain sync, signing, and offer validation contracts.
-- `[MUST]` Treat offers as `offer1...` Bech32m strings. Python `offer_builder` encodes spend bundles via `greenfloor_native` (same `chia-sdk-driver` `encode_offer` as the SDK bindings).
+- `[MUST]` Treat offers as `offer1...` Bech32m strings. Offer encode/decode uses `greenfloor_engine` via `greenfloor.offer_decode`.
 - `[MUST]` Fix the primary path; do not add fallback execution paths to hide correctness gaps.
 - `[SHOULD]` Temporary sdk symbol-rename shims are allowed only during explicit migrations and must be removed once the pinned baseline stabilizes.
 - `[MUST]` Network symbol discipline: mainnet uses `xch`, testnet11 uses `txch` in examples, defaults, runbooks, workflows, and operator commands.
@@ -36,7 +36,7 @@ Severity tags:
 - `[MUST]` `greenfloor/core/coin_ops/`: coin-op deterministic policy (plan, fee budget, inventory, min-amount guard) shared by CLI and daemon.
 - `[MUST]` `greenfloor/config`: parse/validate config, resolve paths, resolve quote assets.
 - `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet, notifications).
-- `[MUST]` Signing/execution path is adapter -> canonical Rust engine (`greenfloor-engine` crate / `greenfloor_engine` PyO3); legacy `greenfloor/signing.py` re-exports adapters only.
+- `[MUST]` Signing/execution path is adapter -> canonical Rust engine (`greenfloor-engine` crate / `greenfloor_engine` PyO3).
 - `[MUST]` `greenfloor-engine/`: canonical Rust engine crate; new vault spend/offer logic lands here first.
 - `[MUST]` `greenfloor/cli/manager.py`: operator CLI router (argparse + dispatch).
 - `[MUST]` `greenfloor/cli/coin_ops_list.py`, `coin_ops_split.py`, `coin_ops_combine.py`: coin list/split/combine CLI commands (`coin_ops.py` re-exports).
@@ -49,7 +49,7 @@ Severity tags:
 - `[MUST]` `greenfloor/runtime/coin_ops/steps.py`: split/combine iteration step bodies.
 - `[MUST]` `greenfloor/runtime/offers_cancel.py`: venue offer cancel selection and Dexie execution.
 - `[MUST]` `greenfloor/runtime/offer_reconciliation.py`: offer reconciliation against Dexie/Coinset signals.
-- `[MUST]` `greenfloor/offer_builder.py`: canonical local BLS offer text construction; `greenfloor/cli/offer_builder_sdk.py` is a stdin/stdout CLI wrapper only.
+- `[MUST]` Offer build/post uses `adapters/offer_action.build_signer_offer_for_action` and `runtime/offer_post_request.OfferPostRequest` (signer/KMS only).
 - `[MUST]` `greenfloor/runtime/offer_execution.py`: composition root for offer build/post runtime; import orchestration helpers here (see ADR 0005, ADR 0008).
 - `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`, `greenfloor/config/io.py`.
 - `[MUST]` Import direction: daemon never imports CLI; CLI never imports daemon. Shared logic belongs in shared modules.
