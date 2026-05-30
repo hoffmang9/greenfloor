@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from greenfloor.core.cycle._bridge_common import normalize_spendable_profiles
 from greenfloor.core.engine_bridge import policy_engine
 from greenfloor.core.managed_action_outcome import ManagedActionOutcome
 from greenfloor.core.managed_retry import ManagedRetryDecision
@@ -32,6 +31,19 @@ __all__ = [
     "should_apply_parallel_transient_cooldown",
     "single_input_preferred_skip_reason",
 ]
+
+
+def _normalize_spendable_profiles(
+    spendable_profiles: dict[str, dict[str, int | bool]],
+) -> dict[str, dict[str, int | bool]]:
+    return {
+        str(asset_id): {
+            "total": int(profile.get("total", 0)),
+            "max_single": int(profile.get("max_single", 0)),
+            "max_single_known": bool(profile.get("max_single_known", False)),
+        }
+        for asset_id, profile in spendable_profiles.items()
+    }
 
 
 def sequential_action_route(
@@ -73,7 +85,7 @@ def plan_parallel_managed_dispatch(
     result = signer.plan_parallel_managed_dispatch(
         actions,
         ctx,
-        normalize_spendable_profiles(spendable_profiles),
+        _normalize_spendable_profiles(spendable_profiles),
     )
     if not isinstance(result, ParallelBatchPlan):
         raise TypeError("plan_parallel_managed_dispatch returned non-ParallelBatchPlan result")
@@ -88,7 +100,7 @@ def single_input_preferred_skip_reason(
     signer = policy_engine()
     return signer.single_input_preferred_skip_reason(
         requested_amounts,
-        normalize_spendable_profiles(spendable_profiles),
+        _normalize_spendable_profiles(spendable_profiles),
     )
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from greenfloor.core.offer_policy import verify_offer_for_dexie
+from greenfloor.core.policy_bridge import verify_offer_for_dexie
 from tests.helpers.engine_mock import install_engine_stub
 
 

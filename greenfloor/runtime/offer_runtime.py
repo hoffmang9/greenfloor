@@ -18,7 +18,7 @@ from greenfloor.core.offer_bootstrap_bridge import (
     BootstrapPhaseResult,
     plan_bootstrap_mixed_outputs,
 )
-from greenfloor.core.offer_policy import normalize_offer_side
+from greenfloor.core.offer_request_bridge import normalize_offer_side
 from greenfloor.core.signer_offer_request import signer_split_asset_id
 from greenfloor.runtime.bootstrap_fees import resolve_bootstrap_split_fee
 from greenfloor.runtime.coin_ops.coins import is_spendable_coin

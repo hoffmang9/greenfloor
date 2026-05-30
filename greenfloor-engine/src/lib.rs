@@ -3,7 +3,6 @@
 //! The Rust crate and PyO3 module are named `greenfloor_engine` (ADR 0010).
 //! Policy is grouped by domain (`cycle/`, `coin_ops/`, `offer/`, `vault/`).
 
-pub mod bls;
 pub mod coin_ops;
 pub mod coinset;
 pub mod config;
@@ -38,11 +37,11 @@ pub async fn resolve_offer_asset_ids(
     resolve_offer_assets_via_coinset(config, base_asset, quote_asset).await
 }
 
-pub use bls::{
-    broadcast_bls_spend_bundle, build_bls_mixed_split_spend_bundle, build_bls_offer_spend_bundle,
-    build_bls_xch_coin_op_spend_bundle, list_cat_coin_summaries, list_cat_coin_summaries_by_ids,
-    list_xch_coin_summaries, load_bls_master_secret_key, BlsMixedSplitRequest, BlsMixedSplitResult,
-    BlsOfferRequest, BlsOfferResult, BlsXchCoinOpRequest, BlsXchCoinOpResult, CoinRecordSummary,
+pub use coinset::{
+    cat_outer_puzzle_hash_hex, extract_coin_id_hints_from_offer_text, get_conservative_fee_estimate,
+    get_fee_estimate, is_canonical_xch_asset, is_xch_like_asset, list_wallet_unspent_coins,
+    parse_coin_ids, puzzle_hash_hex_for_receive_address, push_tx_hex,
+    spend_bundle_hash_from_hex, WalletUnspentCoin,
 };
 pub use coin_ops::{
     amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_should_stop,
@@ -54,10 +53,6 @@ pub use coin_ops::{
     split_would_create_sub_cat_change, BucketSpec, CoinCombineGateResult, CoinOpKind, CoinOpPlan,
     CoinSplitGateResult, CombineInputSelectionMode, SpendableCoin, SplitAutoSelectPlan,
     SplitCoinPlan, SplitCombinePrereqPlan, SplitPlanningProfile, SplitSkipPlan,
-};
-pub use coinset::{
-    get_conservative_fee_estimate, get_fee_estimate, is_canonical_xch_asset, is_xch_like_asset,
-    parse_coin_ids, push_tx_hex,
 };
 pub use config::load_signer_config;
 pub use cycle::{
@@ -116,9 +111,9 @@ pub use offer::request::{
     quote_mojos_for_base_size, signer_split_asset_id, SignerOfferLegAmounts,
 };
 pub use offer::{
-    build_bls_offer_for_action, build_signer_offer_for_action, build_vault_cat_offer,
-    expires_at_unix_from_pricing, resolve_offer_assets_for_action, try_normalize_resolved_assets,
-    BuildOfferForActionRequest, BuildOfferForActionResult, CreateOfferRequest, CreateOfferResult,
+    build_signer_offer_for_action, build_vault_cat_offer, expires_at_unix_from_pricing,
+    resolve_offer_assets_for_action, try_normalize_resolved_assets, BuildOfferForActionRequest,
+    BuildOfferForActionResult, CreateOfferRequest, CreateOfferResult,
 };
 pub use vault::{
     build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,

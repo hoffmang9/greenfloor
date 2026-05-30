@@ -4,12 +4,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from greenfloor.config.io import load_program_config
+from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.core.strategy import PlannedAction
+from greenfloor.daemon.offer_dispatch.items import action_item
+from greenfloor.daemon.strategy_execution import StrategyActionResult
 from greenfloor.daemon.testing import (
     CANCEL_COOLDOWN_UNTIL,
     POST_COOLDOWN_UNTIL,
     main,
-    offer_dispatch,
     run_once,
 )
 from greenfloor.runtime.offer_reconciliation import reconcile_offers
@@ -64,6 +66,21 @@ def write_program(path: Path, home_dir: Path) -> None:
                 "      fingerprint: 123456789",
                 '      network: "mainnet"',
                 '      keyring_yaml_path: "~/.chia_keys/keyring.yaml"',
+                "signer:",
+                '  kms_key_id: "arn:aws:kms:us-west-2:123:key/demo"',
+                '  kms_region: "us-west-2"',
+                '  kms_public_key_hex: "02abc123"',
+                "vault:",
+                '  launcher_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+                "  custody_threshold: 1",
+                "  recovery_threshold: 1",
+                "  recovery_clawback_timelock: 3600",
+                "  custody_keys:",
+                '    - public_key_hex: "020202020202020202020202020202020202020202020202020202020202020202"',
+                "      curve: SECP256R1",
+                "  recovery_keys:",
+                '    - public_key_hex: "ab3cb61463a695fa094f7c30526c8097fb813a0c5fa67bab261a7cd354cb6363b2d726218135b25b814f94df4749fc58"',
+                "      curve: BLS12_381",
             ]
         ),
         encoding="utf-8",
@@ -191,14 +208,40 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
         "greenfloor.daemon.market_cycle.strategy_eval_phase.evaluate_market",
         _fake_evaluate_market,
     )
+
+    def _fake_strategy_dispatch(**kwargs):
+        actions = kwargs["strategy_actions"]
+        store = kwargs["store"]
+        market = kwargs["market"]
+        items = []
+        for action in actions:
+            _FakeDexieAdapter.offers["offer-1"] = {
+                "id": "offer-1",
+                "status": 0,
+                "tx_id": _FakeDexieAdapter.take_tx_id,
+            }
+            store.upsert_offer_state(
+                offer_id="offer-1",
+                market_id=str(market.market_id),
+                state=OfferLifecycleState.OPEN.value,
+                last_seen_status=0,
+            )
+            items.append(
+                action_item(
+                    action,
+                    status="executed",
+                    reason="dexie_post_success",
+                    offer_id="offer-1",
+                )
+            )
+        return StrategyActionResult.from_items(
+            planned_count=len(actions),
+            action_items=items,
+        )
+
     monkeypatch.setattr(
-        offer_dispatch,
-        "build_offer_for_action",
-        lambda **_kwargs: {
-            "status": "executed",
-            "reason": "offer_builder_success",
-            "offer": "offer1demo",
-        },
+        "greenfloor.daemon.market_cycle.strategy_exec_phase.execute_strategy_dispatch",
+        _fake_strategy_dispatch,
     )
     monkeypatch.setattr(
         main,
@@ -219,6 +262,17 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
     )
     interim_store = SqliteStore(db_path)
     try:
+        _FakeDexieAdapter.offers["offer-1"] = {
+            "id": "offer-1",
+            "status": 0,
+            "tx_id": _FakeDexieAdapter.take_tx_id,
+        }
+        interim_store.upsert_offer_state(
+            offer_id="offer-1",
+            market_id="m1",
+            state=OfferLifecycleState.OPEN.value,
+            last_seen_status=0,
+        )
         assert interim_store.observe_mempool_tx_ids([_FakeDexieAdapter.take_tx_id]) == 1
         assert interim_store.confirm_tx_ids([_FakeDexieAdapter.take_tx_id]) == 1
     finally:

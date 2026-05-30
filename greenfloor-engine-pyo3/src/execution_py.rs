@@ -74,7 +74,6 @@ fn sequential_action_route_py(
     match sequential_action_route(runtime_dry_run, program_present, managed_backend_available) {
         SequentialActionRoute::DryRunPlanned => "dry_run_planned",
         SequentialActionRoute::Managed => "managed",
-        SequentialActionRoute::Local => "local",
         SequentialActionRoute::SkipNoProgram => "skip_no_program",
         SequentialActionRoute::SkipNoManagedBackend => "skip_no_managed_backend",
     }

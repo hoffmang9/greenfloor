@@ -11,7 +11,7 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
-from greenfloor.core import offer_policy
+from greenfloor.core import policy_bridge
 from greenfloor.core.offer_action import OfferCreatePhaseOutcome
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.offer_bootstrap import (
@@ -92,7 +92,7 @@ def bootstrap_blocks_offer(bootstrap_result: BootstrapPhaseResult) -> tuple[bool
             "bootstrap_blocks_offer requires BootstrapPhaseResult; "
             "use BootstrapPhaseResult.to_manager_dict for manager dicts"
         )
-    error = offer_policy.bootstrap_block_error(
+    error = policy_bridge.bootstrap_block_error(
         bootstrap_status=bootstrap_result.status,
         bootstrap_reason=bootstrap_result.reason,
         bootstrap_ready=bootstrap_result.ready,
@@ -140,7 +140,7 @@ def default_offer_post_deps(
     return OfferPostDeps(
         resolve_maker_offer_fee_fn=resolve_maker_offer_fee,
         log_signed_offer_artifact_fn=log_signed_offer_artifact,
-        verify_offer_for_dexie_fn=offer_policy.verify_offer_for_dexie,
+        verify_offer_for_dexie_fn=policy_bridge.verify_offer_for_dexie,
         post_offer_phase_fn=post_offer_phase,
         dexie_offer_view_url_fn=dexie_offer_view_url,
         dexie_adapter_cls=DexieAdapter,
@@ -401,7 +401,7 @@ def execute_build_and_post_offer(
 
         publish_started = time.monotonic()
         try:
-            asset_fields = offer_policy.expected_publish_asset_fields(
+            asset_fields = policy_bridge.expected_publish_asset_fields(
                 side=created.side,
                 base_symbol=str(market.base_symbol),
                 quote_asset=str(market.quote_asset),

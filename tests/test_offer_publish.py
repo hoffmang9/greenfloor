@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 
-from greenfloor.core.offer_policy import (
+from greenfloor.core.policy_bridge import (
     bootstrap_block_error,
     dexie_offer_asset_expectation_error,
     expected_publish_asset_fields,
@@ -278,7 +278,7 @@ def test_verify_dexie_offer_visible_by_id_uses_engine_asset_expectation(monkeypa
             }
 
     monkeypatch.setattr(
-        "greenfloor.core.offer_policy.dexie_offer_asset_expectation_error",
+        "greenfloor.core.policy_bridge.dexie_offer_asset_expectation_error",
         lambda **_kwargs: "dexie_offer_offered_asset_missing:expected_asset=abc:expected_symbol=A",
     )
 

@@ -10,9 +10,9 @@ from typing import Any
 
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.adapters.splash import SplashAdapter
-from greenfloor.core import offer_policy
+from greenfloor.core import policy_bridge
 from greenfloor.core.cycle import is_transient_dexie_visibility_404_error
-from greenfloor.core.retry_policy import (
+from greenfloor.core.policy_bridge import (
     dexie_invalid_offer_retry_sleep,
     dexie_invalid_offer_should_retry,
 )
@@ -142,7 +142,7 @@ def verify_dexie_offer_visible_by_id(
             if isinstance(offer_payload, dict):
                 offered = offer_payload.get("offered")
                 requested = offer_payload.get("requested")
-                asset_error = offer_policy.dexie_offer_asset_expectation_error(
+                asset_error = policy_bridge.dexie_offer_asset_expectation_error(
                     offered=offered,
                     requested=requested,
                     expected_offered_asset_id=str(expected_offered_asset_id or ""),

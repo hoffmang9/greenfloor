@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from greenfloor.logging_setup import normalize_log_level_name
 
-OfferExecutionBackend = Literal["signer", "bls"]
+OfferExecutionBackend = Literal["signer"]
 ManagedOfferExecutionBackend = Literal["signer"]
 CoinOpsExecutionBackend = Literal["signer"]
 
@@ -126,11 +126,6 @@ def signer_runtime_config_path(program: ProgramConfig) -> str:
     return str(signer_config_path(program.home_dir))
 
 
-def ensure_signer_config_path(program: ProgramConfig) -> str:
-    """Deprecated alias: prefer ``prepare_signer_runtime`` at startup."""
-    return prepare_signer_runtime(program)
-
-
 def signer_offer_path_configured(program: ProgramConfig) -> bool:
     if not str(program.signer_kms_key_id).strip():
         return False
@@ -138,10 +133,16 @@ def signer_offer_path_configured(program: ProgramConfig) -> bool:
     return vault is not None and bool(str(vault.launcher_id).strip())
 
 
+def require_signer_offer_path(program: ProgramConfig) -> None:
+    if not signer_offer_path_configured(program):
+        raise ValueError(
+            "offer execution requires signer.kms_key_id and vault.launcher_id in program config"
+        )
+
+
 def coin_ops_execution_backend(program: ProgramConfig) -> CoinOpsExecutionBackend:
-    if signer_offer_path_configured(program):
-        return "signer"
-    raise ValueError("coin ops require signer.kms_key_id and vault.launcher_id in program config")
+    require_signer_offer_path(program)
+    return "signer"
 
 
 def offer_execution_backend(
@@ -150,9 +151,9 @@ def offer_execution_backend(
     size_base_units: int = 0,
     local_build_min_size_base_units: int | None = None,
 ) -> OfferExecutionBackend:
-    if signer_offer_path_configured(program):
-        return "signer"
-    return "bls"
+    del size_base_units, local_build_min_size_base_units
+    require_signer_offer_path(program)
+    return "signer"
 
 
 def managed_offer_execution_backend(
@@ -160,15 +161,10 @@ def managed_offer_execution_backend(
     *,
     size_base_units: int = 0,
     local_build_min_size_base_units: int | None = None,
-) -> ManagedOfferExecutionBackend | None:
-    backend = offer_execution_backend(
-        program,
-        size_base_units=size_base_units,
-        local_build_min_size_base_units=local_build_min_size_base_units,
-    )
-    if backend == "signer":
-        return backend
-    return None
+) -> ManagedOfferExecutionBackend:
+    del size_base_units, local_build_min_size_base_units
+    require_signer_offer_path(program)
+    return "signer"
 
 
 @dataclass(slots=True)

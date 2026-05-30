@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (2026-05-26)
+Accepted (2026-05-26); updated 2026-05-29 (signer-only coin ops)
+
+> **Note:** Cloud Wallet runtime modules listed below were removed in the 2026-05-29 stack simplification. Coin ops and offer reconciliation now live under `greenfloor/runtime/coin_ops/` and `greenfloor/runtime/offer_reconciliation.py` with signer/Coinset backends.
 
 ## Decision
 

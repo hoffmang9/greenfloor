@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Protocol
 
-from greenfloor.adapters.coinset import extract_coinset_tx_ids_from_offer_payload
 from greenfloor.adapters.dexie import DexieAdapter
 from greenfloor.config.io import resolve_trade_asset_for_dexie
 from greenfloor.core.offer_reconcile import (
@@ -22,7 +21,7 @@ from greenfloor.daemon.watchlist import (
 )
 from greenfloor.runtime.offer_reconciliation import (
     persist_offer_lifecycle_transition,
-    resolve_watched_offer_transition,
+    transition_from_dexie_offer_payload,
 )
 from greenfloor.storage.sqlite import SqliteStore
 
@@ -194,11 +193,9 @@ def reconcile_market_cycle_offers(
         raw_status = offer.get("status", -1)
         status = int(raw_status) if raw_status is not None else None
         current_state = state_by_offer_id.get(offer_id, "open")
-        coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer)
-        transition = resolve_watched_offer_transition(
+        transition = transition_from_dexie_offer_payload(
             current_state=current_state,
-            status=status,
-            coinset_tx_ids=coinset_tx_ids,
+            offer_payload=offer,
             get_tx_signal_state=store.get_tx_signal_state,
         )
         _apply_cycle_transition(

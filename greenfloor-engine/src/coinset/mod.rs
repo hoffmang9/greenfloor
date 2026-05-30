@@ -4,6 +4,7 @@ mod backend;
 mod coin_select;
 mod msp;
 mod presplit;
+mod wallet_io;
 mod xch;
 
 pub use api::{
@@ -23,6 +24,10 @@ pub use msp::{
     DEFAULT_MSP_BASE_URL,
 };
 pub use presplit::{fetch_presplit_cat_by_id, wait_for_unspent_cat};
+pub use wallet_io::{
+    cat_outer_puzzle_hash_hex, extract_coin_id_hints_from_offer_text, list_wallet_unspent_coins,
+    puzzle_hash_hex_for_receive_address, spend_bundle_hash_from_hex, WalletUnspentCoin,
+};
 
 use chia_protocol::{Bytes32, Coin, CoinSpend, SpendBundle};
 use chia_puzzle_types::cat::CatArgs;

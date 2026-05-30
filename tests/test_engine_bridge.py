@@ -12,10 +12,6 @@ import pytest
 from greenfloor.core import engine_bridge
 
 
-def test_import_signer_is_import_engine_alias() -> None:
-    assert engine_bridge.import_signer is engine_bridge.import_engine
-
-
 def test_engine_rebuild_hint_uses_module_argument() -> None:
     hint = engine_bridge.engine_rebuild_hint(
         module=engine_bridge.ENGINE_MODULE,

@@ -21,6 +21,7 @@ target/
 greenfloor-native/target/
 greenfloor-engine-pyo3/target/
 greenfloor-engine-pyo3/python/
+greenfloor-signer-pyo3/
 greenfloor-engine/target/
 .coverage
 .coverage.*

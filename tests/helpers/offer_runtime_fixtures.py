@@ -94,12 +94,66 @@ def write_manager_program_with_signer(
     path.write_text(text, encoding="utf-8")
 
 
-def program_config_for_local_offer(*, home_dir: str = "/tmp/gf") -> ProgramConfig:
+def program_config_for_signer_offer(*, home_dir: str = "/tmp/gf") -> ProgramConfig:
     return minimal_program_config(home_dir=home_dir)
 
 
-def market_config_for_local_offer() -> MarketConfig:
+def market_config_for_signer_offer() -> MarketConfig:
     return minimal_market_config()
+
+
+def patch_signer_create_offer_phase(
+    monkeypatch,
+    *,
+    offer_text: str = "offer1abc",
+    error: str | None = None,
+    resolved_base_asset_id: str = "a1",
+    resolved_quote_asset_id: str = "xch",
+    mock_resolve: bool = True,
+) -> None:
+    if mock_resolve:
+        monkeypatch.setattr(
+            "greenfloor.runtime.offer_runtime.resolve_offer_assets",
+            lambda _base, _quote, **kwargs: (resolved_base_asset_id, resolved_quote_asset_id),
+        )
+    from greenfloor.offer_bootstrap import BootstrapPhaseResult
+
+    monkeypatch.setattr(
+        "greenfloor.runtime.offer_runtime.signer_bootstrap_phase",
+        lambda **_kwargs: BootstrapPhaseResult(
+            status="executed",
+            reason="already_ready",
+            ready=True,
+        ),
+    )
+    from greenfloor.core.offer_action import OfferCreatePhaseOutcome
+
+    if error is not None:
+
+        def _raise(**_kwargs: object) -> OfferCreatePhaseOutcome:
+            raise RuntimeError(error)
+
+        monkeypatch.setattr(
+            "greenfloor.runtime.offer_runtime.signer_create_offer_phase",
+            _raise,
+        )
+        return
+
+    def _create(**_kwargs: object) -> OfferCreatePhaseOutcome:
+        return OfferCreatePhaseOutcome(
+            offer_text=offer_text,
+            expires_at="2026-01-01T00:00:00+00:00",
+            side="sell",
+            offer_amount=1000,
+            request_amount=1000,
+            execution_mode="direct",
+            create_result={},
+        )
+
+    monkeypatch.setattr(
+        "greenfloor.runtime.offer_runtime.signer_create_offer_phase",
+        _create,
+    )
 
 
 def offer_build_context_for_program_market(

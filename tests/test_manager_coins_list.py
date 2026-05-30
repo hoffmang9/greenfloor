@@ -77,7 +77,7 @@ def test_coins_list_resolves_asset_filter_before_listing(
 def test_coins_list_requires_signer_backend(tmp_path: Path, capsys) -> None:
     program = tmp_path / "program.yaml"
     write_manager_program(program, tmp_path=tmp_path)
-    with pytest.raises(ValueError, match="coin ops require signer"):
+    with pytest.raises(ValueError, match="offer execution requires signer"):
         coins_list(program_path=program, asset=None, vault_id=None)
 
 

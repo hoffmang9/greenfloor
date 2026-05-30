@@ -8,7 +8,7 @@ from greenfloor.runtime.offer_orchestration import bootstrap_blocks_offer
 
 def test_bootstrap_blocks_offer_uses_engine_policy_result(monkeypatch) -> None:
     monkeypatch.setattr(
-        "greenfloor.core.offer_policy.bootstrap_block_error",
+        "greenfloor.core.policy_bridge.bootstrap_block_error",
         lambda **_kwargs: "bootstrap_pending:split_submitted",
     )
     blocked, error = bootstrap_blocks_offer(
@@ -55,7 +55,7 @@ def test_bootstrap_blocks_offer_rejects_manager_dict_payload() -> None:
 
 def test_bootstrap_blocks_offer_allows_offer_when_policy_returns_none(monkeypatch) -> None:
     monkeypatch.setattr(
-        "greenfloor.core.offer_policy.bootstrap_block_error",
+        "greenfloor.core.policy_bridge.bootstrap_block_error",
         lambda **_kwargs: None,
     )
     blocked, error = bootstrap_blocks_offer(

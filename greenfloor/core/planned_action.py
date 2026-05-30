@@ -26,7 +26,7 @@ def planned_action_side(action: PlannedAction) -> str:
     side = str(action.side or "sell").strip().lower()
     if side in _PLANNED_OFFER_SIDES:
         return side
-    from greenfloor.core.offer_policy import normalize_offer_side
+    from greenfloor.core.offer_request_bridge import normalize_offer_side
 
     return normalize_offer_side(side)
 

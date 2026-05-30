@@ -1,12 +1,10 @@
-//! Unified offer build for market actions (signer vault KMS and local BLS paths).
+//! Unified offer build for market actions (signer vault KMS path).
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use chia_bls::SecretKey;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::bls::{build_bls_offer_spend_bundle, BlsOfferRequest};
 use crate::coinset::{
     self, is_xch_like_asset, normalize_asset_id, resolve_offer_asset_ids, MspCoinset,
 };
@@ -16,7 +14,6 @@ use crate::offer::build::build_vault_cat_offer;
 use crate::offer::build_context::{
     resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
 };
-use crate::offer::codec::encode_offer_from_spend_bundle_bytes;
 use crate::offer::request::{compute_signer_offer_leg_amounts, normalize_offer_side};
 use crate::offer::types::{CreateOfferRequest, CreateOfferResult};
 
@@ -177,52 +174,6 @@ pub async fn build_signer_offer_for_action(
         request_amount: leg.request_amount_mojos,
         execution_mode: create_result.execution_mode.to_string(),
         create_result: Some(create_result),
-    })
-}
-
-pub async fn build_bls_offer_for_action(
-    network: &str,
-    master_sk: &SecretKey,
-    config: Option<&SignerConfig>,
-    request: BuildOfferForActionRequest,
-) -> SignerResult<BuildOfferForActionResult> {
-    let (resolved_base, resolved_quote) = match config {
-        Some(cfg) => {
-            resolve_offer_assets_for_action(cfg, &request.base_asset, &request.quote_asset).await?
-        }
-        None => try_normalize_resolved_assets(&request.base_asset, &request.quote_asset)?,
-    };
-    let quote_price = resolve_quote_price(&request)?;
-    let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
-    let expires_at_unix = expires_at_unix_from_pricing(&request.pricing);
-    let side = normalize_offer_side(&request.action_side).to_string();
-
-    let bls_request = BlsOfferRequest {
-        receive_address: request.receive_address.clone(),
-        offer_asset_id: leg.offer_asset_id.clone(),
-        offer_amount: leg.offer_amount_mojos,
-        request_asset_id: leg.request_asset_id.clone(),
-        request_amount: leg.request_amount_mojos,
-        offer_coin_ids: request.offer_coin_ids.clone(),
-        expires_at: Some(expires_at_unix),
-    };
-    let built = build_bls_offer_spend_bundle(network, master_sk, bls_request).await?;
-    let raw_hex = built
-        .spend_bundle_hex
-        .strip_prefix("0x")
-        .unwrap_or(built.spend_bundle_hex.as_str());
-    let spend_bytes = hex::decode(raw_hex)
-        .map_err(|err| SignerError::Other(format!("invalid spend_bundle_hex: {err}")))?;
-    let offer_text = encode_offer_from_spend_bundle_bytes(&spend_bytes)?;
-
-    Ok(BuildOfferForActionResult {
-        offer_text,
-        side,
-        expires_at_unix,
-        offer_amount: leg.offer_amount_mojos,
-        request_amount: leg.request_amount_mojos,
-        execution_mode: "bls".to_string(),
-        create_result: None,
     })
 }
 

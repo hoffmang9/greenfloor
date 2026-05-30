@@ -114,7 +114,6 @@ pub fn plan_parallel_managed_dispatch(
 pub enum SequentialActionRoute {
     DryRunPlanned,
     Managed,
-    Local,
     SkipNoProgram,
     SkipNoManagedBackend,
 }
@@ -152,7 +151,7 @@ pub fn sequential_action_route(
     if managed_backend_available {
         SequentialActionRoute::Managed
     } else {
-        SequentialActionRoute::Local
+        SequentialActionRoute::SkipNoManagedBackend
     }
 }
 
@@ -219,10 +218,10 @@ mod tests {
     }
 
     #[test]
-    fn sequential_route_local_without_managed_backend() {
+    fn sequential_route_skip_without_managed_backend() {
         assert_eq!(
             sequential_action_route(false, true, false),
-            SequentialActionRoute::Local
+            SequentialActionRoute::SkipNoManagedBackend
         );
     }
 

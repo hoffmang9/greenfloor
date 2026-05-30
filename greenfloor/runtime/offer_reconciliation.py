@@ -33,6 +33,7 @@ __all__ = [
     "reconcile_offers",
     "reconcile_result_from_transition",
     "resolve_watched_offer_transition",
+    "transition_from_dexie_offer_payload",
 ]
 
 
@@ -78,6 +79,23 @@ def _coinset_signal_lists(
         if signal.get("mempool_observed_at"):
             mempool.append(tx_id)
     return confirmed, mempool
+
+
+def transition_from_dexie_offer_payload(
+    *,
+    current_state: str,
+    offer_payload: dict[str, Any],
+    get_tx_signal_state: Callable[[list[str]], dict[str, dict[str, Any]]],
+) -> CycleOfferTransition:
+    """Resolve lifecycle transition from a Dexie offer dict (bulk list or single fetch)."""
+    status = dexie_offer_status(offer_payload)
+    coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer_payload)
+    return resolve_watched_offer_transition(
+        current_state=current_state,
+        status=status,
+        coinset_tx_ids=coinset_tx_ids,
+        get_tx_signal_state=get_tx_signal_state,
+    )
 
 
 def resolve_watched_offer_transition(
@@ -233,11 +251,9 @@ def reconcile_offer_row(
     try:
         payload = dexie_adapter.get_offer(offer_id)
         status = dexie_offer_status(payload)
-        coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(payload)
-        transition = resolve_watched_offer_transition(
+        transition = transition_from_dexie_offer_payload(
             current_state=current_state,
-            status=status,
-            coinset_tx_ids=coinset_tx_ids,
+            offer_payload=payload,
             get_tx_signal_state=get_tx_signal_state,
         )
     except urllib.error.HTTPError as exc:

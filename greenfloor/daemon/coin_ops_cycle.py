@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from greenfloor.adapters.wallet import WalletAdapter
 from greenfloor.core.coin_ops import (
     BucketSpec,
     coin_op_min_amount_mojos,
@@ -27,7 +26,6 @@ def _plan_and_execute_coin_ops(
     *,
     market: Any,
     program: Any,
-    wallet: WalletAdapter,
     store: SqliteStore,
     sell_ladder: list[Any],
     wallet_bucket_counts: dict[int, int],

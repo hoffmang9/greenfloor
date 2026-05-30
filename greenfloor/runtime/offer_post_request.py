@@ -1,19 +1,11 @@
-"""Shared offer post request model and backend dispatch."""
+"""Shared offer post request model and signer backend dispatch."""
 
 from __future__ import annotations
 
-import collections.abc
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-from greenfloor.config.models import OfferExecutionBackend
-from greenfloor.runtime.local_offer import make_local_offer_create_fn
 from greenfloor.runtime.offer_build_context import OfferBuildContext
-from greenfloor.runtime.offer_orchestration import (
-    OfferPostDeps,
-    build_and_post_offer,
-)
 from greenfloor.runtime.offer_runtime import SignerOfferDeps, build_and_post_offer_signer
 
 
@@ -152,69 +144,15 @@ class OfferPostRequest:
             ),
         )
 
-    def run_local_bls(
-        self,
-        *,
-        capture_dir_path: Path | None,
-        build_offer_fn: collections.abc.Callable[[dict[str, Any]], str] | None = None,
-        post_deps: OfferPostDeps,
-        path_label: str = "local",
-        path_extra_fields: dict[str, Any] | None = None,
-        persist_results: bool = True,
-        emit_output: bool = True,
-    ) -> tuple[int, dict[str, Any]]:
-        return build_and_post_offer(
-            build_ctx=self.build_ctx,
-            size_base_units=self.size_base_units,
-            repeat=self.repeat,
-            publish_venue=self.publish_venue,
-            dexie_base_url=self.dexie_base_url,
-            splash_base_url=self.splash_base_url,
-            drop_only=self.drop_only,
-            claim_rewards=self.claim_rewards,
-            dry_run=self.dry_run,
-            resolved_base_asset_id=str(self.build_ctx.market.base_asset),
-            resolved_quote_asset_id=self.build_ctx.resolved_quote_asset,
-            bootstrap_phase_fn=None,
-            create_offer_fn=make_local_offer_create_fn(
-                self.build_ctx,
-                dry_run=self.dry_run,
-                capture_dir_path=capture_dir_path,
-                build_offer_fn=build_offer_fn,
-            ),
-            path_label=path_label,
-            path_extra_fields=path_extra_fields,
-            post_deps=post_deps,
-            emit_output=emit_output,
-            persist_results=persist_results,
-        )
-
     def run_cli(
         self,
-        backend: OfferExecutionBackend,
         *,
-        capture_dir_path: Path | None,
-        build_offer_fn: collections.abc.Callable[[dict[str, Any]], str] | None = None,
-        post_deps: OfferPostDeps,
-        path_extra_fields: dict[str, Any] | None = None,
+        deps: SignerOfferDeps | None = None,
     ) -> int:
-        if backend == "signer":
-            exit_code, _ = self.run_signer()
-        else:
-            exit_code, _ = self.run_local_bls(
-                capture_dir_path=capture_dir_path,
-                build_offer_fn=build_offer_fn,
-                post_deps=post_deps,
-                path_extra_fields=path_extra_fields,
-            )
+        exit_code, _ = self.run_signer(deps=deps)
         return exit_code
 
     def run_managed(
         self,
-        backend: OfferExecutionBackend,
     ) -> tuple[int, dict[str, Any]]:
-        if backend == "bls":
-            raise ValueError("managed offer post does not support bls backend")
-        if backend != "signer":
-            raise ValueError("managed offer post requires signer backend")
         return self.run_signer(emit_output=False, persist_results=False)
