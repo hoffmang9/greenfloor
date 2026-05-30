@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from greenfloor.daemon.cycle_runner import run_loop
+from greenfloor.daemon.testing.main import run_loop
 
 
 def test_run_loop_delegates_to_engine_and_returns_zero_on_interrupt(
@@ -11,26 +12,18 @@ def test_run_loop_delegates_to_engine_and_returns_zero_on_interrupt(
 ) -> None:
     calls: dict[str, int] = {"loop": 0}
 
-    class _FakeLoopRequest:
-        def __init__(self, *args, **kwargs) -> None:
-            self.args = args
-            self.kwargs = kwargs
-
-    def _fake_run_daemon_loop(_request) -> int:
+    def _fake_run_daemon_loop(_request: dict) -> int:
         calls["loop"] += 1
         raise KeyboardInterrupt
 
     fake_engine = MagicMock()
-    fake_engine.DaemonLoopRequest = _FakeLoopRequest
     fake_engine.run_daemon_loop = _fake_run_daemon_loop
-    monkeypatch.setattr("greenfloor.daemon.cycle_runner.import_engine", lambda: fake_engine)
+    testing_main = importlib.import_module("greenfloor.daemon.testing.main")
+    monkeypatch.setattr(testing_main, "import_engine", lambda: fake_engine)
     monkeypatch.setattr(
-        "greenfloor.daemon.cycle_runner.initialize_daemon_logging",
-        lambda **_kwargs: None,
-    )
-    monkeypatch.setattr(
-        "greenfloor.daemon.cycle_runner.load_program_config",
-        lambda _path: MagicMock(home_dir=str(tmp_path / "home")),
+        testing_main,
+        "require_engine_method",
+        lambda _engine, name, **kwargs: getattr(fake_engine, name),
     )
 
     code = run_loop(

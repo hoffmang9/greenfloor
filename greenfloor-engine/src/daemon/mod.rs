@@ -1,5 +1,7 @@
 //! Daemon cycle orchestration (native Rust). Reconcile, inventory/strategy/coin_ops planning, and cancel run in Rust.
 
+mod cli;
+mod cancel_executor;
 mod cancel_phase;
 mod coin_ops_execution;
 mod coin_ops_phase;
@@ -69,10 +71,15 @@ pub use reconcile_phase::{
     run_market_reconcile_phase, ReconcilePhaseMetrics, ReconcilePhaseResult,
 };
 pub use reload::consume_reload_marker;
+pub use cli::{
+    run_daemon_command, run_daemon_cycle_once_from_json, run_daemon_loop_from_json,
+    run_offers_cancel_command, run_offers_reconcile_command, run_offers_status_command,
+    DaemonCliArgs, OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
+};
 pub use run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
     elapsed_ms, CyclePlan, DaemonCycleSummary, DaemonCycleTestControls, DaemonDispatchState,
-    DaemonRunOnceRequest, MarketDispatchMetrics,
+    DaemonRunOnceRequest, DaemonRunOnceRequestBody, MarketDispatchMetrics,
 };
 pub use watchlist::{
     active_offer_counts_by_size, active_offer_counts_by_size_and_side,

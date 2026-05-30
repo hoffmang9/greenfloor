@@ -4,15 +4,11 @@ use serde_json::{json, Value};
 
 use crate::adapters::DexieClient;
 use crate::config::{resolve_quote_asset_for_offer, resolve_trade_asset_for_network, MarketConfig};
-use crate::cycle::{
-    resolve_watched_offer_transition_from_signals, CycleOfferTransition,
-};
+use crate::cycle::CycleOfferTransition;
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
-use super::coinset_tx::{
-    build_dexie_size_by_offer_id, dexie_offer_status, extract_coinset_tx_ids_from_offer_payload,
-};
+use super::coinset_tx::build_dexie_size_by_offer_id;
 use super::reconcile_offer::transition_from_list_offer_payload;
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
 use super::reconcile_persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
@@ -32,31 +28,6 @@ pub struct ReconcilePhaseResult {
     pub dexie_size_by_offer_id: HashMap<String, i64>,
     pub dexie_fetch_error: Option<String>,
     pub metrics: ReconcilePhaseMetrics,
-}
-
-fn coinset_signal_lists(
-    store: &SqliteStore,
-    coinset_tx_ids: &[String],
-) -> SignerResult<(Vec<String>, Vec<String>)> {
-    if coinset_tx_ids.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
-    }
-    let signal_by_tx_id = store.get_tx_signal_state(coinset_tx_ids)?;
-    let mut confirmed = Vec::new();
-    let mut mempool = Vec::new();
-    for tx_id in coinset_tx_ids {
-        let Some(signal) = signal_by_tx_id.get(tx_id) else {
-            continue;
-        };
-        if signal.tx_block_confirmed_at.is_some() {
-            confirmed.push(tx_id.clone());
-            continue;
-        }
-        if signal.mempool_observed_at.is_some() {
-            mempool.push(tx_id.clone());
-        }
-    }
-    Ok((confirmed, mempool))
 }
 
 pub(crate) fn apply_reconcile_transition(
@@ -91,25 +62,6 @@ pub(crate) fn apply_reconcile_transition(
         }
     }
     Ok(())
-}
-
-pub(crate) fn transition_from_dexie_offer_payload(
-    store: &SqliteStore,
-    current_state: &str,
-    offer_payload: &Value,
-) -> SignerResult<CycleOfferTransition> {
-    let status = dexie_offer_status(offer_payload);
-    let coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer_payload);
-    let (coinset_confirmed_tx_ids, coinset_mempool_tx_ids) =
-        coinset_signal_lists(store, &coinset_tx_ids)?;
-    resolve_watched_offer_transition_from_signals(
-        current_state,
-        status,
-        coinset_tx_ids,
-        coinset_confirmed_tx_ids,
-        coinset_mempool_tx_ids,
-    )
-    .map_err(|err| crate::error::SignerError::Other(err.to_string()))
 }
 
 pub async fn run_market_reconcile_phase(

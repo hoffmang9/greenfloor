@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::cycle::{
     dedupe_sorted_market_ids, enqueue_immediate_requeue, select_market_batch,
@@ -48,6 +48,59 @@ pub struct DaemonRunOnceRequest {
     pub test_controls: DaemonCycleTestControls,
     #[serde(skip)]
     pub coin_watchlist: Arc<CoinWatchlistCache>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DaemonRunOnceRequestBody {
+    pub program_path: PathBuf,
+    pub markets_path: PathBuf,
+    #[serde(default)]
+    pub testnet_markets_path: Option<PathBuf>,
+    #[serde(default)]
+    pub state_db_override: Option<String>,
+    pub coinset_base_url: String,
+    pub state_dir: PathBuf,
+    #[serde(default = "default_poll_coinset_mempool")]
+    pub poll_coinset_mempool: bool,
+    #[serde(default)]
+    pub use_websocket_capture: bool,
+    #[serde(default)]
+    pub allowed_key_ids: Vec<String>,
+    #[serde(default)]
+    pub dispatch_state: DaemonDispatchState,
+    #[serde(default)]
+    pub test_controls: DaemonCycleTestControls,
+}
+
+fn default_poll_coinset_mempool() -> bool {
+    true
+}
+
+impl DaemonRunOnceRequestBody {
+    pub fn into_engine(self, coin_watchlist: Arc<CoinWatchlistCache>) -> DaemonRunOnceRequest {
+        DaemonRunOnceRequest {
+            program_path: self.program_path,
+            markets_path: self.markets_path,
+            testnet_markets_path: self.testnet_markets_path,
+            state_db_override: self.state_db_override,
+            coinset_base_url: self.coinset_base_url,
+            state_dir: self.state_dir,
+            poll_coinset_mempool: self.poll_coinset_mempool,
+            use_websocket_capture: self.use_websocket_capture,
+            allowed_key_ids: self.allowed_key_ids,
+            dispatch_state: self.dispatch_state,
+            test_controls: self.test_controls,
+            coin_watchlist,
+        }
+    }
+}
+
+impl DaemonRunOnceRequest {
+    pub fn from_json_value(value: Value, coin_watchlist: Arc<CoinWatchlistCache>) -> SignerResult<Self> {
+        let body: DaemonRunOnceRequestBody =
+            serde_json::from_value(value).map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
+        Ok(body.into_engine(coin_watchlist))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

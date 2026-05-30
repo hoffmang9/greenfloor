@@ -7,11 +7,13 @@ from datetime import datetime
 
 from greenfloor.core.cycle import plan_reseed_actions_from_gap
 from greenfloor.core.cycle_reseed import ReseedGapPlan, ReseedSkipReason
+from greenfloor.core.engine_bridge import import_engine
 from greenfloor.core.strategy import PlannedAction, StrategyConfig
 from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.testing.watchlist import active_offer_counts_by_size
-from greenfloor.runtime.offer_watchlist import RESEED_MEMPOOL_MAX_AGE_SECONDS
 from greenfloor.storage.sqlite import SqliteStore
+
+RESEED_MEMPOOL_MAX_AGE_SECONDS = int(import_engine().RESEED_MEMPOOL_MAX_AGE_SECONDS)
 
 _ACTIVE_OFFER_STATES_FOR_RESEED = frozenset({"open", "refresh_due"})
 

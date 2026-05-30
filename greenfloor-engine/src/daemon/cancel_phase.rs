@@ -8,6 +8,7 @@ use crate::cycle::{
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
+use super::cancel_executor::{cancel_offers_on_dexie, CancelOfferTarget};
 use super::coinset_tx::dexie_offer_status;
 
 pub async fn run_market_cancel_phase(
@@ -68,37 +69,49 @@ pub async fn run_market_cancel_phase(
     }
 
     cancel_triggered = true;
-    for offer_id in target_offer_ids {
-        if runtime_dry_run {
+    if runtime_dry_run {
+        for offer_id in &target_offer_ids {
             items.push(json!({
                 "offer_id": offer_id,
                 "status": "planned",
                 "reason": "dry_run",
             }));
-            continue;
         }
-        let result = dexie.cancel_offer(&offer_id).await?;
-        let success = result.get("success").and_then(Value::as_bool) == Some(true);
-        if success {
-            cancel_executed += 1;
-            store.upsert_offer_state(&offer_id, market_id, "cancelled", Some(3))?;
-            items.push(json!({
-                "offer_id": offer_id,
-                "status": "executed",
-                "reason": "cancelled_on_strong_unstable_move",
-                "attempts": 1,
-            }));
-        } else {
-            let error = result
-                .get("error")
-                .and_then(Value::as_str)
-                .unwrap_or("cancel_failed");
-            items.push(json!({
-                "offer_id": offer_id,
-                "status": "skipped",
-                "reason": format!("cancel_failed:{error}"),
-                "attempts": 1,
-            }));
+    } else {
+        let targets: Vec<CancelOfferTarget> = target_offer_ids
+            .iter()
+            .map(|offer_id| CancelOfferTarget {
+                offer_id: offer_id.clone(),
+                market_id: market_id.to_string(),
+            })
+            .collect();
+        let outcomes = cancel_offers_on_dexie(store, dexie, &targets).await?;
+        for outcome in outcomes {
+            if outcome.success {
+                cancel_executed += 1;
+                items.push(json!({
+                    "offer_id": outcome.offer_id,
+                    "status": "executed",
+                    "reason": "cancelled_on_strong_unstable_move",
+                    "attempts": 1,
+                }));
+            } else {
+                let error = if outcome.error.is_empty() {
+                    outcome
+                        .venue_response
+                        .get("error")
+                        .and_then(Value::as_str)
+                        .unwrap_or("cancel_failed")
+                } else {
+                    outcome.error.as_str()
+                };
+                items.push(json!({
+                    "offer_id": outcome.offer_id,
+                    "status": "skipped",
+                    "reason": format!("cancel_failed:{error}"),
+                    "attempts": 1,
+                }));
+            }
         }
     }
 

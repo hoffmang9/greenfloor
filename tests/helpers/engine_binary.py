@@ -29,6 +29,8 @@ def engine_binary_path(*, build_if_missing: bool = True) -> Path:
                 "build",
                 "--manifest-path",
                 str(manifest),
+                "--bin",
+                "greenfloor-engine",
                 "--target-dir",
                 str(target_dir),
             ],

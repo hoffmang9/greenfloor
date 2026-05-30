@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from greenfloor.cli.offers_lifecycle import offers_reconcile, offers_status
 from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.dexie_http_mock import DexieHttpMock
 from tests.helpers.offer_runtime_fixtures import write_manager_program
+from tests.helpers.offers_engine_cli import offers_reconcile, offers_status
 
 _DEFAULT_DEXIE_BASE = "https://api.dexie.space"
 

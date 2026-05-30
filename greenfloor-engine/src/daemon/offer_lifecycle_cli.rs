@@ -4,6 +4,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::cancel_executor::{cancel_offers_on_dexie, CancelOfferTarget};
 use crate::adapters::DexieClient;
 use crate::error::{SignerError, SignerResult};
 use crate::storage::{AuditEventRow, OfferStateListRow, SqliteStore};
@@ -175,8 +176,13 @@ pub async fn offers_cancel_cli(
     offer_ids: &[String],
     cancel_open: bool,
 ) -> SignerResult<OffersCancelCliResult> {
-    let store = SqliteStore::open(db_path)?;
     let venue = target_venue.trim().to_ascii_lowercase();
+    if venue != "dexie" {
+        return Err(SignerError::Other(format!(
+            "offer cancel supports dexie venue only (got {venue})"
+        )));
+    }
+    let store = SqliteStore::open(db_path)?;
     let dexie = DexieClient::new(dexie_base_url);
     let requested_offer_ids: Vec<String> = offer_ids
         .iter()
@@ -185,47 +191,28 @@ pub async fn offers_cancel_cli(
         .collect();
     let rows = store.list_offer_states(None, 500)?;
     let selected = select_offers_for_cancel(&rows, &requested_offer_ids, cancel_open)?;
-    let mut items = Vec::with_capacity(selected.len());
+    let targets: Vec<CancelOfferTarget> = selected
+        .iter()
+        .map(|row| CancelOfferTarget {
+            offer_id: row.offer_id.clone(),
+            market_id: row.market_id.clone(),
+        })
+        .collect();
+    let outcomes = cancel_offers_on_dexie(&store, &dexie, &targets).await?;
+    let mut items = Vec::with_capacity(outcomes.len());
     let mut failures = 0u64;
-    for row in selected {
-        let result = match dexie.cancel_offer(&row.offer_id).await {
-            Ok(value) => value,
-            Err(err) => {
-                failures += 1;
-                items.push(OffersCancelCliItem {
-                    offer_id: row.offer_id.clone(),
-                    market_id: row.market_id.clone(),
-                    state: row.state.clone(),
-                    result: json!({"success": false, "error": err.to_string()}),
-                });
-                continue;
-            }
-        };
-        let success = result.get("success").and_then(Value::as_bool) == Some(true);
-        if success {
-            let market_id = if row.market_id.is_empty() {
-                "unknown"
-            } else {
-                row.market_id.as_str()
-            };
-            store.upsert_offer_state(&row.offer_id, market_id, "cancelled", Some(3))?;
-        } else {
+    for (outcome, row) in outcomes.into_iter().zip(selected.into_iter()) {
+        if !outcome.success {
             failures += 1;
         }
-        let error = result
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_string();
         items.push(OffersCancelCliItem {
             offer_id: row.offer_id,
             market_id: row.market_id,
             state: row.state,
             result: json!({
-                "success": success,
-                "venue_response": result,
-                "error": if success { String::new() } else { error },
+                "success": outcome.success,
+                "venue_response": outcome.venue_response,
+                "error": outcome.error,
             }),
         });
     }

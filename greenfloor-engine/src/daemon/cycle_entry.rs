@@ -24,7 +24,7 @@ use crate::storage::resolve_state_db_path;
 /// Daemon cycles always process markets sequentially on one SQLite store.
 pub const SEQUENTIAL_MARKET_WORKER_SOURCE: &str = "sequential_market_worker";
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DaemonCycleOnceResponse {
     pub exit_code: i32,
     pub dispatch_state: DaemonDispatchState,

@@ -6,112 +6,55 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-
-from greenfloor.core.engine_bridge import import_engine, require_engine_method
-from greenfloor.daemon.cycle_runner import (
-    new_coin_watchlist_cache,
-    run_daemon_cycle_once_via_engine,
-    run_once,
-)
+from tests.helpers.daemon_rust_cycle_env import run_once_for_tests
 
 
-def _coin_watchlist() -> Any:
-    cls = require_engine_method(
-        import_engine(),
-        "CoinWatchlistCache",
-        missing="coin watchlist cache",
-    )
-    return cls()
-
-
-def _dispatch_state(cursor: int = 0, immediate_requeue_ids: list[str] | None = None) -> Any:
-    cls = require_engine_method(
-        import_engine(),
-        "DaemonDispatchState",
-        missing="daemon dispatch state",
-    )
-    return cls(cursor, immediate_requeue_ids or [])
-
-
-def test_run_daemon_cycle_once_via_engine_delegates_to_pyo3(monkeypatch, tmp_path: Path) -> None:
+def test_run_daemon_cycle_once_delegates_via_json_request(monkeypatch, tmp_path: Path) -> None:
     captured: dict[str, Any] = {}
-    dispatch_state = _dispatch_state(cursor=2, immediate_requeue_ids=["m-old"])
 
-    class _FakeDispatch:
-        cursor = 3
-        immediate_requeue_ids = ["m-new"]
-
-    class _FakeResponse:
-        exit_code = 0
-        dispatch_state = _FakeDispatch()
-        cycle_summary = object()
-
-    def _fake_run(request: Any) -> _FakeResponse:
+    def _fake_run(request: dict[str, Any]) -> dict[str, Any]:
         captured["request"] = request
-        return _FakeResponse()
+        return {
+            "exit_code": 0,
+            "dispatch_state": {"cursor": 3, "immediate_requeue_ids": ["m-new"]},
+            "cycle_summary": {"markets_processed": 1},
+        }
 
-    exit_code, updated = run_daemon_cycle_once_via_engine(
+    monkeypatch.setattr(
+        "tests.helpers.daemon_rust_cycle_env.run_daemon_cycle_once",
+        _fake_run,
+    )
+
+    code = run_once_for_tests(
         program_path=tmp_path / "program.yaml",
         markets_path=tmp_path / "markets.yaml",
-        testnet_markets_path=None,
         allowed_keys={"key-a"},
         db_path_override=None,
         coinset_base_url="https://api.coinset.org",
         state_dir=tmp_path / "state",
         poll_coinset_mempool=False,
         use_websocket_capture=True,
-        dispatch_state=dispatch_state,
-        coin_watchlist=_coin_watchlist(),
-        run_fn=_fake_run,
     )
-    assert exit_code == 0
-    assert updated.cursor == 3
-    assert updated.immediate_requeue_ids == ["m-new"]
+    assert code == 0
     request = captured["request"]
-    assert request.poll_coinset_mempool is False
-    assert request.use_websocket_capture is True
-    assert request.dispatch_state.cursor == 2
-    assert request.allowed_key_ids == ["key-a"]
+    assert request["poll_coinset_mempool"] is False
+    assert request["use_websocket_capture"] is True
+    assert request["allowed_key_ids"] == ["key-a"]
 
 
-def test_run_once_is_thin_wrapper_over_engine_cycle(monkeypatch, tmp_path: Path) -> None:
-    mock = MagicMock(return_value=(0, _dispatch_state()))
-    monkeypatch.setattr("greenfloor.daemon.cycle_runner.run_daemon_cycle_once_via_engine", mock)
-    code = run_once(
-        tmp_path / "program.yaml",
-        tmp_path / "markets.yaml",
-        {"key-a"},
-        None,
-        "https://api.coinset.org",
-        tmp_path / "state",
-        poll_coinset_mempool=True,
-        use_websocket_capture=False,
-        coin_watchlist=new_coin_watchlist_cache(),
+def test_run_once_for_tests_is_thin_wrapper(monkeypatch, tmp_path: Path) -> None:
+    mock = MagicMock(return_value={"exit_code": 0})
+    monkeypatch.setattr(
+        "tests.helpers.daemon_rust_cycle_env.run_daemon_cycle_once",
+        mock,
+    )
+    code = run_once_for_tests(
+        program_path=tmp_path / "program.yaml",
+        markets_path=tmp_path / "markets.yaml",
+        allowed_keys={"key-a"},
+        db_path_override=None,
+        coinset_base_url="https://api.coinset.org",
+        state_dir=tmp_path / "state",
     )
     assert code == 0
     mock.assert_called_once()
-
-
-def test_run_daemon_cycle_once_requires_response_dispatch_state(tmp_path: Path) -> None:
-    class _BadResponse:
-        exit_code = 0
-
-    def _bad_run(_request: Any) -> _BadResponse:
-        return _BadResponse()
-
-    with pytest.raises(AttributeError):
-        run_daemon_cycle_once_via_engine(
-            program_path=tmp_path / "program.yaml",
-            markets_path=tmp_path / "markets.yaml",
-            testnet_markets_path=None,
-            allowed_keys=None,
-            db_path_override=None,
-            coinset_base_url="https://api.coinset.org",
-            state_dir=tmp_path / "state",
-            poll_coinset_mempool=False,
-            use_websocket_capture=False,
-            dispatch_state=_dispatch_state(),
-            coin_watchlist=_coin_watchlist(),
-            run_fn=_bad_run,
-        )

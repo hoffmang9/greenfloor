@@ -30,9 +30,11 @@ from greenfloor.daemon.testing.main import (
     MarketCycleResult,
     MarketDispatchState,
     consume_reload_marker,
-    main,
     run_loop,
     run_once,
+)
+from greenfloor.daemon.testing.main import (
+    cli_main as main,
 )
 from greenfloor.daemon.testing.market_helpers import resolve_quote_asset_for_offer
 from greenfloor.daemon.testing.strategy_state import (

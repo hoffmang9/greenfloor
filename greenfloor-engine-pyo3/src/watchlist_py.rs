@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use engine_core::daemon::{
@@ -8,7 +9,7 @@ use engine_core::daemon::{
         active_offer_counts_by_size_and_side_detail, active_offer_counts_by_size_detail,
         match_watched_coin_ids, set_watched_coin_ids_for_market,
         time::RESEED_MEMPOOL_MAX_AGE_SECONDS, update_market_coin_watchlist_from_offers,
-        watched_coin_ids_for_market, watchlist_offer_ids,
+        watched_coin_ids_for_market, watchlist_offer_ids, CoinWatchlistCache,
     },
 };
 use engine_core::storage::SqliteStore;
@@ -16,8 +17,23 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 use serde_json::Value;
 
-use crate::daemon_py::PyCoinWatchlistCache;
 use crate::py_utils::{py_any_to_json, to_py_err};
+
+#[pyclass(name = "CoinWatchlistCache")]
+#[derive(Clone)]
+pub(crate) struct PyCoinWatchlistCache {
+    pub(crate) inner: Arc<CoinWatchlistCache>,
+}
+
+#[pymethods]
+impl PyCoinWatchlistCache {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: CoinWatchlistCache::new(),
+        }
+    }
+}
 
 fn parse_clock(clock_iso: Option<&str>) -> PyResult<DateTime<Utc>> {
     let Some(raw) = clock_iso.map(str::trim).filter(|value| !value.is_empty()) else {
@@ -213,5 +229,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(watchlist_offer_ids_from_store_py, m)?)?;
     m.add_function(wrap_pyfunction!(update_market_coin_watchlist_from_offers_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_dexie_size_by_offer_id_py, m)?)?;
+    m.add_class::<PyCoinWatchlistCache>()?;
     Ok(())
 }

@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use serde::{Deserialize, Serialize};
+
 use crate::config::load_program_config;
 use crate::error::SignerResult;
 use crate::storage::{resolve_state_db_path, SqliteStore};
@@ -16,7 +18,7 @@ use super::run_once::{
 };
 use super::watchlist::cache::CoinWatchlistCache;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonLoopRequest {
     pub program_path: PathBuf,
     pub markets_path: PathBuf,

@@ -12,6 +12,7 @@ from greenfloor.cli.coin_ops import (
     coin_status,
     coins_list,
 )
+from greenfloor.cli.engine_subprocess import run_engine_cli
 from greenfloor.cli.keys_onboard import keys_onboard
 from greenfloor.cli.manager_setup import (
     bootstrap_home,
@@ -22,7 +23,6 @@ from greenfloor.cli.manager_setup import (
 from greenfloor.cli.offer_build_post import (
     build_and_post_offer_cli,
 )
-from greenfloor.cli.offers_lifecycle import offers_cancel, offers_reconcile, offers_status
 from greenfloor.config.io import (
     default_cats_config_path as _default_cats_config_path_shared,
 )
@@ -119,9 +119,7 @@ def main() -> None:
     p_offers_cancel = sub.add_parser("offers-cancel")
     p_offers_cancel.add_argument("--offer-id", action="append", default=[])
     p_offers_cancel.add_argument("--cancel-open", action="store_true")
-    p_offers_cancel.add_argument("--submit-onchain-after-offchain", action="store_true")
-    p_offers_cancel.add_argument("--onchain-market-id", default="")
-    p_offers_cancel.add_argument("--onchain-pair", default="")
+    p_offers_cancel.add_argument("--venue", choices=["dexie"], default=None)
 
     p_bootstrap = sub.add_parser("bootstrap-home")
     p_bootstrap.add_argument("--home-dir", default="~/.greenfloor")
@@ -257,32 +255,48 @@ def main() -> None:
             testnet_markets_path=testnet_markets_path,
         )
     elif args.command == "offers-status":
-        code = offers_status(
-            program_path=Path(args.program_config),
-            state_db=args.state_db or None,
-            market_id=args.market_id or None,
-            limit=int(args.limit),
-            events_limit=int(args.events_limit),
-        )
+        argv = [
+            "offers-status",
+            "--program-config",
+            str(Path(args.program_config)),
+            "--limit",
+            str(int(args.limit)),
+            "--events-limit",
+            str(int(args.events_limit)),
+        ]
+        if args.state_db:
+            argv.extend(["--state-db", str(args.state_db)])
+        if args.market_id:
+            argv.extend(["--market-id", str(args.market_id)])
+        code = run_engine_cli(argv)
     elif args.command == "offers-reconcile":
-        code = offers_reconcile(
-            program_path=Path(args.program_config),
-            state_db=args.state_db or None,
-            market_id=args.market_id or None,
-            limit=int(args.limit),
-            venue=args.venue,
-        )
+        argv = [
+            "offers-reconcile",
+            "--program-config",
+            str(Path(args.program_config)),
+            "--limit",
+            str(int(args.limit)),
+        ]
+        if args.state_db:
+            argv.extend(["--state-db", str(args.state_db)])
+        if args.market_id:
+            argv.extend(["--market-id", str(args.market_id)])
+        if args.venue:
+            argv.extend(["--venue", str(args.venue)])
+        code = run_engine_cli(argv)
     elif args.command == "offers-cancel":
-        code = offers_cancel(
-            program_path=Path(args.program_config),
-            offer_ids=[str(value) for value in args.offer_id],
-            cancel_open=bool(args.cancel_open),
-            markets_path=Path(args.markets_config),
-            testnet_markets_path=testnet_markets_path,
-            submit_onchain_after_offchain=bool(args.submit_onchain_after_offchain),
-            onchain_market_id=args.onchain_market_id or None,
-            onchain_pair=args.onchain_pair or None,
-        )
+        argv = [
+            "offers-cancel",
+            "--program-config",
+            str(Path(args.program_config)),
+        ]
+        if args.cancel_open:
+            argv.append("--cancel-open")
+        for offer_id in args.offer_id:
+            argv.extend(["--offer-id", str(offer_id)])
+        if args.venue:
+            argv.extend(["--venue", str(args.venue)])
+        code = run_engine_cli(argv)
     elif args.command == "bootstrap-home":
         code = bootstrap_home(
             home_dir=Path(args.home_dir),

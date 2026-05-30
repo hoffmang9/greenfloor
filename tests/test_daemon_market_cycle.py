@@ -9,7 +9,7 @@ from greenfloor.daemon.testing import (
     resolve_quote_asset_for_offer,
     set_watched_coin_ids_for_market,
 )
-from greenfloor.runtime.offer_watchlist import new_coin_watchlist_cache
+from greenfloor.daemon.testing.watchlist import new_coin_watchlist_cache
 
 
 @dataclass

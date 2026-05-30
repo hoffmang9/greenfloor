@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
-import pytest
-
-from greenfloor.cli.offers_lifecycle import offers_cancel
+from greenfloor.cli.engine_binary import resolve_greenfloor_engine_binary
 from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.dexie_http_mock import DexieHttpMock
 from tests.helpers.offer_runtime_fixtures import write_manager_program
+from tests.helpers.offers_engine_cli import offers_cancel
 
 _DEFAULT_DEXIE_BASE = "https://api.dexie.space"
 
@@ -141,17 +141,21 @@ def test_offers_cancel_reports_dexie_failure(tmp_path: Path, capsys) -> None:
     assert payload["items"][0]["result"]["error"] == "not_found"
 
 
-def test_offers_cancel_submit_onchain_after_offchain_removed(tmp_path: Path) -> None:
+def test_offers_cancel_rejects_removed_submit_onchain_flag(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     write_manager_program(program, tmp_path=tmp_path)
-
-    with pytest.raises(
-        ValueError,
-        match="submit_onchain_after_offchain is removed with Cloud Wallet",
-    ):
-        offers_cancel(
-            program_path=program,
-            offer_ids=["offer-1"],
-            cancel_open=False,
-            submit_onchain_after_offchain=True,
-        )
+    completed = subprocess.run(
+        [
+            str(resolve_greenfloor_engine_binary()),
+            "offers-cancel",
+            "--program-config",
+            str(program),
+            "--offer-id",
+            "offer-1",
+            "--submit-onchain-after-offchain",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode != 0

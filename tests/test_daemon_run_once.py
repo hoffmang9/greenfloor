@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Generator
 from pathlib import Path
 
@@ -14,7 +13,6 @@ from tests.helpers.daemon_websocket_fixtures import (
     write_program,
 )
 from tests.helpers.dexie_http_mock import DexieHttpMock
-from tests.logging_helpers import reset_concurrent_log_handlers
 
 
 @pytest.fixture
@@ -153,7 +151,7 @@ def test_run_once_sequential_slot_rotation_picks_up_new_market_next_cycle(
 
 def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:
     from greenfloor.core.engine_bridge import import_engine, require_engine_method
-    from greenfloor.daemon.main import _acquire_daemon_instance_lock
+    from greenfloor.daemon.testing.main import _acquire_daemon_instance_lock
 
     lock_conflict = require_engine_method(
         import_engine(),
@@ -168,17 +166,15 @@ def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:
 
 
 def test_main_once_exits_with_lock_conflict(
-    monkeypatch, tmp_path: Path, caplog, dexie_mock: DexieHttpMock
+    monkeypatch, tmp_path: Path, dexie_mock: DexieHttpMock
 ) -> None:
-    import greenfloor.daemon.main as daemon_main_module
-    from greenfloor.daemon.main import _acquire_daemon_instance_lock
     from greenfloor.daemon.main import main as daemon_cli_main
+    from greenfloor.daemon.testing.main import _acquire_daemon_instance_lock
 
     home = tmp_path / "home"
     home.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     write_program(program, home, dexie_api_base=dexie_mock.base_url)
-    reset_concurrent_log_handlers(module=daemon_main_module)
     state_dir = tmp_path / "state"
     with _acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
         monkeypatch.setattr(
@@ -192,11 +188,9 @@ def test_main_once_exits_with_lock_conflict(
                 str(state_dir),
             ],
         )
-        with caplog.at_level(logging.ERROR, logger="greenfloor.daemon"):
-            with pytest.raises(SystemExit) as exc:
-                daemon_cli_main()
+        with pytest.raises(SystemExit) as exc:
+            daemon_cli_main()
         assert exc.value.code == 3
-        assert "daemon_lock_conflict" in caplog.text
 
 
 def test_run_once_all_markets_fail_exits_non_zero(

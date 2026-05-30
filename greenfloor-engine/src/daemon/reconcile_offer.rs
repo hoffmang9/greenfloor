@@ -6,14 +6,60 @@ use serde_json::Value;
 use crate::adapters::DexieClient;
 use crate::cycle::{
     is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
-    unchanged_offer_transition, unsupported_venue_offer_transition, CycleOfferTransition,
+    resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
+    unsupported_venue_offer_transition, CycleOfferTransition,
 };
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
-use super::coinset_tx::dexie_offer_status;
+use super::coinset_tx::{
+    dexie_offer_status, extract_coinset_tx_ids_from_offer_payload,
+};
 use super::dexie_offer::DexieOfferPayload;
-use super::reconcile_phase::transition_from_dexie_offer_payload;
+
+fn coinset_signal_lists(
+    store: &SqliteStore,
+    coinset_tx_ids: &[String],
+) -> SignerResult<(Vec<String>, Vec<String>)> {
+    if coinset_tx_ids.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let signal_by_tx_id = store.get_tx_signal_state(coinset_tx_ids)?;
+    let mut confirmed = Vec::new();
+    let mut mempool = Vec::new();
+    for tx_id in coinset_tx_ids {
+        let Some(signal) = signal_by_tx_id.get(tx_id) else {
+            continue;
+        };
+        if signal.tx_block_confirmed_at.is_some() {
+            confirmed.push(tx_id.clone());
+            continue;
+        }
+        if signal.mempool_observed_at.is_some() {
+            mempool.push(tx_id.clone());
+        }
+    }
+    Ok((confirmed, mempool))
+}
+
+pub(crate) fn transition_from_dexie_offer_payload(
+    store: &SqliteStore,
+    current_state: &str,
+    offer_payload: &Value,
+) -> SignerResult<CycleOfferTransition> {
+    let status = dexie_offer_status(offer_payload);
+    let coinset_tx_ids = extract_coinset_tx_ids_from_offer_payload(offer_payload);
+    let (coinset_confirmed_tx_ids, coinset_mempool_tx_ids) =
+        coinset_signal_lists(store, &coinset_tx_ids)?;
+    resolve_watched_offer_transition_from_signals(
+        current_state,
+        status,
+        coinset_tx_ids,
+        coinset_confirmed_tx_ids,
+        coinset_mempool_tx_ids,
+    )
+    .map_err(|err| crate::error::SignerError::Other(err.to_string()))
+}
 
 pub(crate) fn missing_offer_error_from_payload(payload: &Value) -> Option<String> {
     if payload.get("success") != Some(&Value::Bool(false)) {

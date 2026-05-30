@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
+from tests.helpers.daemon_rust_cycle_env import run_once_for_tests
 
 
 def _engine():
@@ -23,25 +24,9 @@ def test_use_websocket_capture_for_trigger_mode_via_engine() -> None:
     assert use_ws("WebSocket") is True
 
 
-def test_run_daemon_cycle_once_accepts_typed_request(tmp_path: Path) -> None:
-    engine = _engine()
-    request_cls = require_engine_method(
-        engine,
-        "DaemonRunOnceRequest",
-        missing="daemon cycle request",
-    )
-    dispatch_cls = require_engine_method(
-        engine,
-        "DaemonDispatchState",
-        missing="daemon dispatch state",
-    )
-    controls_cls = require_engine_method(
-        engine,
-        "DaemonCycleTestControls",
-        missing="daemon cycle test controls",
-    )
+def test_run_daemon_cycle_once_accepts_json_request(tmp_path: Path) -> None:
     run_once = require_engine_method(
-        engine,
+        _engine(),
         "run_daemon_cycle_once",
         missing="daemon cycle",
     )
@@ -51,82 +36,57 @@ def test_run_daemon_cycle_once_accepts_typed_request(tmp_path: Path) -> None:
     markets_path.write_text("markets: []\n", encoding="utf-8")
     state_dir = tmp_path / "state"
     state_dir.mkdir()
-    watchlist = require_engine_method(
-        _engine(),
-        "CoinWatchlistCache",
-        missing="coin watchlist cache",
-    )()
-    request = request_cls(
-        program_path,
-        markets_path,
-        "https://api.coinset.org",
-        state_dir,
-        watchlist,
-        poll_coinset_mempool=False,
-        use_websocket_capture=False,
-        allowed_key_ids=[],
-        dispatch_state=dispatch_cls(0, []),
-        test_controls=controls_cls(),
-    )
+    request = {
+        "program_path": str(program_path),
+        "markets_path": str(markets_path),
+        "coinset_base_url": "https://api.coinset.org",
+        "state_dir": str(state_dir),
+        "poll_coinset_mempool": False,
+        "use_websocket_capture": False,
+        "allowed_key_ids": [],
+        "dispatch_state": {"cursor": 0, "immediate_requeue_ids": []},
+        "test_controls": {},
+    }
     try:
         response = run_once(request)
     except Exception as exc:
         assert "program_path is required" not in str(exc)
         return
-    assert hasattr(response, "exit_code")
-    assert hasattr(response, "dispatch_state")
-    assert hasattr(response, "cycle_summary")
+    assert "exit_code" in response
+    assert "dispatch_state" in response
+    assert "cycle_summary" in response
 
 
-def test_daemon_dispatch_state_round_trip_via_engine_cycle(tmp_path: Path) -> None:
-    from greenfloor.daemon.cycle_runner import run_daemon_cycle_once_via_engine
+def test_daemon_dispatch_state_round_trip_via_engine_cycle(tmp_path: Path, monkeypatch) -> None:
+    captured: list[dict[str, Any]] = []
 
-    captured: list[Any] = []
-    dispatch_cls = require_engine_method(
-        _engine(),
-        "DaemonDispatchState",
-        missing="daemon dispatch state",
+    def _fake_run(request: dict[str, Any]) -> dict[str, Any]:
+        captured.append(dict(request["dispatch_state"]))
+        return {
+            "exit_code": 0,
+            "dispatch_state": {"cursor": 1, "immediate_requeue_ids": ["m-new"]},
+            "cycle_summary": {},
+        }
+
+    monkeypatch.setattr(
+        "tests.helpers.daemon_rust_cycle_env.run_daemon_cycle_once",
+        _fake_run,
     )
 
-    def _fake_run(request: Any) -> object:
-        dispatch = request.dispatch_state
-        captured.append(
-            dispatch_cls(
-                int(dispatch.cursor),
-                list(dispatch.immediate_requeue_ids),
-            )
-        )
-
-        class _Response:
-            exit_code = 0
-            dispatch_state = dispatch_cls(1, ["m-new"])
-
-        return _Response()
-
-    dispatch = dispatch_cls(2, ["m-old"])
-    exit_code, updated = run_daemon_cycle_once_via_engine(
+    code = run_once_for_tests(
         program_path=tmp_path / "program.yaml",
         markets_path=tmp_path / "markets.yaml",
-        testnet_markets_path=None,
         allowed_keys={"key-a"},
         db_path_override=None,
         coinset_base_url="https://api.coinset.org",
         state_dir=tmp_path / "state",
         poll_coinset_mempool=False,
         use_websocket_capture=True,
-        dispatch_state=dispatch,
-        coin_watchlist=require_engine_method(
-            _engine(),
-            "CoinWatchlistCache",
-            missing="coin watchlist cache",
-        )(),
-        run_fn=_fake_run,
+        test_controls={"skip_strategy_execution": True},
     )
-    assert exit_code == 0
-    assert updated.cursor == 1
-    assert updated.immediate_requeue_ids == ["m-new"]
-    assert captured[0].cursor == 2
-    assert captured[0].immediate_requeue_ids == ["m-old"]
+    assert code == 0
+    assert captured[0]["cursor"] == 0
+    assert captured[0]["immediate_requeue_ids"] == []
 
 
 def test_acquire_daemon_instance_lock_context_manager(tmp_path: Path) -> None:

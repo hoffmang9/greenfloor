@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -39,6 +40,26 @@ def resolve_greenfloor_engine_binary() -> Path:
         candidate = root / relative
         if candidate.is_file():
             return candidate
+
+    manifest = root / "greenfloor-engine" / "Cargo.toml"
+    target_dir = root / "greenfloor-engine" / "target"
+    if manifest.is_file():
+        target_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            [
+                "cargo",
+                "build",
+                "--manifest-path",
+                str(manifest),
+                "--bin",
+                "greenfloor-engine",
+                "--target-dir",
+                str(target_dir),
+            ],
+            check=True,
+            cwd=root,
+        )
+        return resolve_greenfloor_engine_binary()
 
     raise GreenfloorEngineBinaryError(
         "greenfloor-engine binary not found; build with "

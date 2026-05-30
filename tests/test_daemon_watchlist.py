@@ -11,7 +11,7 @@ from greenfloor.daemon.testing import (
     match_watched_coin_ids,
     update_market_coin_watchlist_from_dexie,
 )
-from greenfloor.runtime.offer_watchlist import new_coin_watchlist_cache
+from greenfloor.daemon.testing.watchlist import new_coin_watchlist_cache
 from tests.helpers.daemon_test_fixtures import market_config
 from tests.helpers.watchlist_store import (
     open_watchlist_test_store,

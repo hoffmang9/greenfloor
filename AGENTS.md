@@ -41,7 +41,8 @@ Severity tags:
 - `[MUST]` `greenfloor/cli/manager.py`: operator CLI router (argparse + dispatch).
 - `[MUST]` `greenfloor/cli/coin_ops_list.py`, `coin_ops_split.py`, `coin_ops_combine.py`: coin list/split/combine CLI commands (`coin_ops.py` re-exports).
 - `[MUST]` `greenfloor/cli/cats.py`: local CAT catalog CLI commands.
-- `[MUST]` `greenfloor/cli/offers_lifecycle.py`: offer reconcile/status/cancel CLI wrappers (core logic in `greenfloor-engine/src/daemon/{reconcile_batch,offer_lifecycle_cli}.rs` via PyO3).
+- `[MUST]` `greenfloor/cli/engine_subprocess.py`: thin wrapper delegating offers lifecycle and daemon commands to native `greenfloor-engine` CLI.
+- `[MUST]` `greenfloor/daemon/main.py`: exec wrapper to `greenfloor-engine daemon`.
 - `[MUST]` `greenfloor/cli/manager_setup.py`: config validate, doctor, bootstrap-home, set-log-level.
 - `[MUST]` `greenfloor/cli/keys_onboard.py`: keys-onboard CLI command.
 - `[MUST]` `greenfloor/cli/offer_build_post.py`: manager `build-and-post-offer` command implementation.

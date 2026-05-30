@@ -104,6 +104,11 @@ pub use manager::{
     build_and_post_offer, format_build_and_post_output, BuildAndPostOfferRequest,
     BuildAndPostOfferResponse,
 };
+pub use daemon::{
+    run_daemon_command, run_daemon_cycle_once_from_json, run_daemon_loop_from_json,
+    run_offers_cancel_command, run_offers_reconcile_command, run_offers_status_command,
+    DaemonCliArgs, OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
+};
 pub use offer::bootstrap::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,
     BootstrapPhaseSnapshot, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
