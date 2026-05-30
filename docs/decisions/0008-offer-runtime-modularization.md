@@ -22,7 +22,7 @@ Replace the monolithic `greenfloor/runtime/cloud_wallet_offer_runtime.py` with f
 
 - `greenfloor/runtime/offer_post_request.py` — `OfferPostRequest` (CLI + daemon routing), `parse_managed_offer_post_result()`.
 - `greenfloor/runtime/offer_runtime.py` — vault KMS / Rust signer backend (`build_and_post_offer_signer`).
-- `greenfloor/runtime/offer_reconciliation.py` — shared Dexie/Coinset lifecycle reconciliation for CLI and daemon.
+- `greenfloor/runtime/offer_reconciliation.py` — thin CLI wrapper over Rust `reconcile_offers_batch` (canonical orchestration in `greenfloor-engine/src/daemon/reconcile_{phase,batch,persist}.rs`).
 
 ### CLI entry
 

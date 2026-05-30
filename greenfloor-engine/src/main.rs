@@ -1,11 +1,6 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use greenfloor_engine::daemon::{
-    default_testnet_markets_path, initialize_daemon_file_logging, load_daemon_program_runtime,
-    resolve_testnet_markets_path, run_daemon_cycle_once, warn_if_daemon_log_level_auto_healed,
-    CoinWatchlistCache, DaemonDispatchState, DaemonInstanceLock, DaemonRunOnceRequest,
-};
 use greenfloor_engine::vault::members::hex_to_bytes32;
 use greenfloor_engine::{
     build_and_optionally_broadcast_vault_cat_mixed_split, build_and_post_offer,
@@ -120,43 +115,6 @@ enum Commands {
         json: bool,
         #[arg(long)]
         no_persist_results: bool,
-    },
-    /// Daemon cycle orchestration (native Rust entry).
-    Daemon {
-        #[command(subcommand)]
-        command: DaemonCommands,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum DaemonCommands {
-    /// Run one daemon evaluation cycle and exit.
-    RunOnce {
-        #[arg(long, default_value = "config/program.yaml")]
-        program_config: PathBuf,
-        #[arg(long, default_value = "config/markets.yaml")]
-        markets_config: PathBuf,
-        #[arg(long)]
-        testnet_markets_config: Option<PathBuf>,
-        #[arg(long, default_value = "")]
-        key_ids: String,
-        #[arg(long, default_value = "")]
-        state_db: String,
-        #[arg(long, default_value = "https://api.coinset.org")]
-        coinset_base_url: String,
-        #[arg(long, default_value = "~/.greenfloor/state")]
-        state_dir: PathBuf,
-        /// Emit full cycle response JSON on stdout (exit code still reflects cycle outcome).
-        #[arg(long)]
-        json: bool,
-        #[arg(long, default_value = "0")]
-        dispatch_cursor: usize,
-        #[arg(long, default_value = "")]
-        dispatch_requeue_ids: String,
-        #[arg(long, default_value_t = false)]
-        poll_coinset_mempool: bool,
-        #[arg(long, default_value_t = false)]
-        use_websocket_capture: bool,
     },
 }
 
@@ -303,147 +261,8 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
                 std::process::exit(response.exit_code);
             }
         }
-        Commands::Daemon { command } => match command {
-            DaemonCommands::RunOnce {
-                program_config,
-                markets_config,
-                testnet_markets_config,
-                key_ids,
-                state_db,
-                coinset_base_url,
-                state_dir,
-                json,
-                dispatch_cursor,
-                dispatch_requeue_ids,
-                poll_coinset_mempool,
-                use_websocket_capture,
-            } => {
-                let exit_code = run_daemon_cli_once(
-                    program_config,
-                    markets_config,
-                    testnet_markets_config,
-                    key_ids,
-                    state_db,
-                    coinset_base_url,
-                    state_dir,
-                    json,
-                    dispatch_cursor,
-                    dispatch_requeue_ids,
-                    poll_coinset_mempool,
-                    use_websocket_capture,
-                )
-                .await?;
-                if exit_code != 0 {
-                    std::process::exit(exit_code);
-                }
-            }
-        },
     }
     Ok(())
-}
-
-async fn run_daemon_cli_once(
-    program_config: PathBuf,
-    markets_config: PathBuf,
-    testnet_markets_config: Option<PathBuf>,
-    key_ids: String,
-    state_db: String,
-    coinset_base_url: String,
-    state_dir: PathBuf,
-    json: bool,
-    dispatch_cursor: usize,
-    dispatch_requeue_ids: String,
-    poll_coinset_mempool: bool,
-    use_websocket_capture: bool,
-) -> Result<i32, greenfloor_engine::Error> {
-    let runtime = load_daemon_program_runtime(&program_config)?;
-    initialize_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
-    warn_if_daemon_log_level_auto_healed(runtime.app_log_level_was_missing, &program_config);
-
-    let expanded_state_dir = expand_user_path(&state_dir);
-    let _lock = match DaemonInstanceLock::acquire(&expanded_state_dir, "once") {
-        Ok(lock) => lock,
-        Err(err) => {
-            tracing::error!(event = "daemon_lock_conflict", error = %err);
-            return Ok(3);
-        }
-    };
-
-    tracing::info!(
-        mode = "once",
-        program_config = %program_config.display(),
-        markets_config = %markets_config.display(),
-        "daemon_starting"
-    );
-
-    let testnet_overlay = match testnet_markets_config {
-        None => default_testnet_markets_path(),
-        Some(path) if path.as_os_str().is_empty() => default_testnet_markets_path(),
-        Some(path) => resolve_testnet_markets_path(&path.to_string_lossy()),
-    };
-    let allowed_key_ids: Vec<String> = key_ids
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect();
-    let state_db_override = if state_db.trim().is_empty() {
-        None
-    } else {
-        Some(state_db.trim().to_string())
-    };
-
-    let immediate_requeue_ids: Vec<String> = dispatch_requeue_ids
-        .split(',')
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .collect();
-
-    let response = run_daemon_cycle_once(&DaemonRunOnceRequest {
-        program_path: program_config,
-        markets_path: markets_config,
-        testnet_markets_path: testnet_overlay,
-        state_db_override,
-        coinset_base_url,
-        state_dir: expanded_state_dir,
-        poll_coinset_mempool,
-        use_websocket_capture,
-        allowed_key_ids,
-        dispatch_state: DaemonDispatchState {
-            cursor: dispatch_cursor,
-            immediate_requeue_ids,
-        },
-        test_controls: Default::default(),
-        coin_watchlist: CoinWatchlistCache::new(),
-    })
-    .await?;
-
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string(&response).map_err(|err| {
-                greenfloor_engine::Error::Other(format!("json encode failed: {err}"))
-            })?
-        );
-    }
-
-    tracing::info!(
-        mode = "once",
-        exit_code = response.exit_code,
-        "daemon_stopped"
-    );
-    Ok(response.exit_code)
-}
-
-fn expand_user_path(path: &PathBuf) -> PathBuf {
-    let raw = path.to_string_lossy();
-    if let Some(stripped) = raw.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(stripped);
-        }
-    }
-    path.clone()
 }
 
 async fn run_mixed_split(

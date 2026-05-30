@@ -5,10 +5,10 @@ use crate::runtime;
 
 use engine_core::load_program_config;
 use engine_core::daemon::{
-    initialize_daemon_file_logging, resolve_coinset_ws_url, run_daemon_cycle_once,
-    start_coinset_websocket_loop, websocket_capture_enabled, CoinWatchlistCache,
-    DaemonCycleOnceResponse, DaemonCycleTestControls, DaemonDispatchState, DaemonInstanceLock,
-    DaemonRunOnceRequest,
+    initialize_daemon_file_logging, reconcile_offers_batch, resolve_coinset_ws_url,
+    run_daemon_cycle_once, start_coinset_websocket_loop, websocket_capture_enabled,
+    CoinWatchlistCache, DaemonCycleOnceResponse, DaemonCycleTestControls, DaemonDispatchState,
+    DaemonInstanceLock, DaemonRunOnceRequest,
 };
 use crate::py_utils::{dict_from_json_value, to_py_err};
 use engine_core::error::SignerError;
@@ -347,6 +347,38 @@ fn use_websocket_capture_for_trigger_mode_py(tx_block_trigger_mode: &str) -> boo
 }
 
 #[pyfunction]
+#[pyo3(
+    name = "reconcile_offers_batch",
+    signature = (db_path, dexie_base_url, target_venue, market_id=None, limit=500, /)
+)]
+fn reconcile_offers_batch_py(
+    py: Python<'_>,
+    db_path: PathBuf,
+    dexie_base_url: String,
+    target_venue: String,
+    market_id: Option<String>,
+    limit: usize,
+) -> PyResult<Py<PyAny>> {
+    let market_filter = market_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let market_ref = market_filter.as_deref();
+    let batch = py.detach(move || {
+        runtime()
+            .block_on(reconcile_offers_batch(
+                &db_path,
+                &dexie_base_url,
+                &target_venue,
+                market_ref,
+                limit,
+            ))
+            .map_err(to_py_err)
+    })?;
+    let value = serde_json::to_value(&batch).map_err(to_py_err)?;
+    dict_from_json_value(py, value)
+}
+
+#[pyfunction]
 #[pyo3(name = "run_daemon_cycle_once", signature = (request, /))]
 fn run_daemon_cycle_once_py(
     py: Python<'_>,
@@ -365,6 +397,7 @@ fn run_daemon_cycle_once_py(
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(reconcile_offers_batch_py, m)?)?;
     m.add_function(wrap_pyfunction!(run_daemon_cycle_once_py, m)?)?;
     m.add_function(wrap_pyfunction!(
         use_websocket_capture_for_trigger_mode_py,

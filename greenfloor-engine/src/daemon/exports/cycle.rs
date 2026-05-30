@@ -13,6 +13,7 @@ pub use crate::daemon::program_runtime::{
     default_testnet_markets_path, load_daemon_program_runtime, resolve_testnet_markets_path,
     use_websocket_capture_for_once, websocket_capture_enabled, DaemonProgramRuntime,
 };
+pub use crate::daemon::reconcile_batch::{reconcile_offers_batch, ReconcileBatchItem, ReconcileBatchResult};
 pub use crate::daemon::reconcile_phase::{
     run_market_reconcile_phase, ReconcilePhaseMetrics, ReconcilePhaseResult,
 };

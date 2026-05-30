@@ -25,7 +25,7 @@ fn offer_id_from_payload(offer: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn missing_offer_error_from_payload(payload: &Value) -> Option<String> {
+pub(crate) fn missing_offer_error_from_payload(payload: &Value) -> Option<String> {
     if payload.get("success") != Some(&Value::Bool(false)) {
         return None;
     }

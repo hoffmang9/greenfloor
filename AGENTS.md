@@ -48,7 +48,7 @@ Severity tags:
 - `[MUST]` `greenfloor/runtime/coin_ops/runtime.py`: shared coin-op orchestration for CLI and daemon.
 - `[MUST]` `greenfloor/runtime/coin_ops/steps.py`: split/combine iteration step bodies.
 - `[MUST]` `greenfloor/runtime/offers_cancel.py`: venue offer cancel selection and Dexie execution.
-- `[MUST]` `greenfloor/runtime/offer_reconciliation.py`: offer reconciliation against Dexie/Coinset signals.
+- `[MUST]` `greenfloor/runtime/offer_reconciliation.py`: thin CLI wrapper over Rust `reconcile_offers_batch` (canonical reconcile orchestration in `greenfloor-engine`).
 - `[MUST]` Offer build/post uses `adapters/offer_action.build_signer_offer_for_action` and `runtime/offer_post_request.OfferPostRequest` (signer/KMS only).
 - `[MUST]` `greenfloor/runtime/offer_execution.py`: composition root for offer build/post runtime; import orchestration helpers here (see ADR 0005, ADR 0008).
 - `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`, `greenfloor/config/io.py`.

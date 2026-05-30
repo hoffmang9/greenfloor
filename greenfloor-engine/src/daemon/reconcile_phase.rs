@@ -14,6 +14,7 @@ use super::coinset_tx::{
     build_dexie_size_by_offer_id, dexie_offer_status, extract_coinset_tx_ids_from_offer_payload,
 };
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
+use super::reconcile_persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 use super::watchlist::cache::CoinWatchlistCache;
 use super::watchlist::{update_market_coin_watchlist_from_offers, watchlist_offer_ids};
 
@@ -57,60 +58,6 @@ fn coinset_signal_lists(
     Ok((confirmed, mempool))
 }
 
-fn persist_offer_lifecycle_transition(
-    store: &SqliteStore,
-    market_id: &str,
-    offer_id: &str,
-    transition: &CycleOfferTransition,
-    last_seen_status: Option<i64>,
-    dexie_error: Option<&str>,
-) -> SignerResult<()> {
-    store.upsert_offer_state(offer_id, market_id, &transition.new_state, last_seen_status)?;
-    let mut payload = json!({
-        "offer_id": offer_id,
-        "market_id": market_id,
-        "old_state": transition.old_state,
-        "new_state": transition.new_state,
-        "changed": transition.changed,
-        "reason": transition.reason,
-        "signal": transition.signal,
-        "signal_source": transition.signal_source,
-        "last_seen_status": last_seen_status,
-        "dexie_status": last_seen_status,
-        "coinset_tx_ids": transition.coinset_tx_ids,
-        "coinset_confirmed_tx_ids": transition.coinset_confirmed_tx_ids,
-        "coinset_mempool_tx_ids": transition.coinset_mempool_tx_ids,
-        "taker_signal": transition.taker_signal,
-        "taker_diagnostic": transition.taker_diagnostic,
-        "action": "reconcile_coins_and_offers",
-    });
-    if let Some(error) = dexie_error {
-        if let Value::Object(obj) = &mut payload {
-            obj.insert("dexie_error".to_string(), Value::String(error.to_string()));
-        }
-    }
-    store.add_audit_event("offer_lifecycle_transition", &payload, Some(market_id))?;
-    if transition.taker_signal != "none" {
-        store.add_audit_event(
-            "taker_detection",
-            &json!({
-                "offer_id": offer_id,
-                "market_id": market_id,
-                "venue": "dexie",
-                "signal": transition.taker_signal,
-                "advisory_diagnostic": transition.taker_diagnostic,
-                "old_state": transition.old_state,
-                "new_state": transition.new_state,
-                "last_seen_status": last_seen_status,
-                "signal_source": transition.signal_source,
-                "coinset_confirmed_tx_ids": transition.coinset_confirmed_tx_ids,
-            }),
-            Some(market_id),
-        )?;
-    }
-    Ok(())
-}
-
 pub(crate) fn apply_reconcile_transition(
     store: &SqliteStore,
     market_id: &str,
@@ -127,7 +74,11 @@ pub(crate) fn apply_reconcile_transition(
         offer_id,
         transition,
         last_seen_status,
-        dexie_error,
+        ReconcilePersistOptions {
+            action: "reconcile_coins_and_offers",
+            venue: Some("dexie"),
+            dexie_error,
+        },
     )?;
     if transition.changed {
         state_by_offer_id.insert(offer_id.to_string(), transition.new_state.clone());
@@ -141,7 +92,7 @@ pub(crate) fn apply_reconcile_transition(
     Ok(())
 }
 
-fn transition_from_dexie_offer_payload(
+pub(crate) fn transition_from_dexie_offer_payload(
     store: &SqliteStore,
     current_state: &str,
     offer_payload: &Value,
