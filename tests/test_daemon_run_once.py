@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from greenfloor.daemon.testing import main, run_once
+from greenfloor.daemon.testing import run_once
 from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.daemon_websocket_fixtures import (
     write_markets,
@@ -13,6 +13,16 @@ from tests.helpers.daemon_websocket_fixtures import (
     write_program,
 )
 from tests.logging_helpers import reset_concurrent_log_handlers
+
+
+@pytest.fixture(autouse=True)
+def _daemon_cycle_engine_bridge_shim(monkeypatch) -> None:
+    from tests.helpers.daemon_engine_cycle_shim import run_daemon_cycle_once_via_bridge
+
+    monkeypatch.setattr(
+        "greenfloor.daemon.engine_cycle._engine_run_daemon_cycle_once",
+        lambda: run_daemon_cycle_once_via_bridge,
+    )
 
 
 def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path) -> None:
@@ -55,10 +65,10 @@ def test_run_once_parallel_markets_overlap_execution(monkeypatch, tmp_path: Path
         assert both_started.wait(timeout=1.0)
         return MarketCycleResult()
 
-    monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
         "greenfloor.daemon.cycle_market_dispatch.process_single_market_with_store",
         _fake_process_single_market,
@@ -110,10 +120,10 @@ def test_run_once_parallel_market_failure_isolated(monkeypatch, tmp_path: Path) 
             raise RuntimeError("boom")
         return MarketCycleResult(strategy_planned=2, strategy_executed=1)
 
-    monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
         "greenfloor.daemon.cycle_market_dispatch.process_single_market_with_store",
         _fake_process_single_market,
@@ -175,10 +185,10 @@ def test_run_once_sequential_market_failure_isolated(monkeypatch, tmp_path: Path
             raise RuntimeError("boom-sequential")
         return MarketCycleResult(strategy_planned=2, strategy_executed=1)
 
-    monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
         "greenfloor.daemon.cycle_market_dispatch.process_single_market", _fake_process_single_market
     )
@@ -246,10 +256,10 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(monkeypatch, tmp_path:
         parallel_seen.append(str(market.market_id))
         return MarketCycleResult()
 
-    monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr(main, "SplashAdapter", _FakeSplashAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.SplashAdapter", _FakeSplashAdapter)
     monkeypatch.setattr(
         "greenfloor.daemon.cycle_market_dispatch.process_single_market", _fake_process_single_market
     )
@@ -329,10 +339,12 @@ def test_run_once_uses_websocket_capture_when_enabled(monkeypatch, tmp_path: Pat
     def _fake_capture(**_kwargs) -> None:
         capture_calls["n"] += 1
 
-    monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
-    monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
-    monkeypatch.setattr(main, "_run_coinset_signal_capture_once", _fake_capture)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr(
+        "greenfloor.daemon.rust_cycle_bridge._run_coinset_signal_capture_once", _fake_capture
+    )
 
     code = run_once(
         program_path=program,

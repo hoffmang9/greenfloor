@@ -155,3 +155,68 @@ def run_build_and_post_offer_via_engine(
             f"unexpected subprocess return value from greenfloor-engine: {returncode!r}"
         )
     return returncode
+
+
+def daemon_run_once_argv(
+    *,
+    binary: Path,
+    program_path: Path,
+    markets_path: Path,
+    testnet_markets_path: Path | None,
+    key_ids: str | None,
+    state_db: str | None,
+    coinset_base_url: str,
+    state_dir: Path,
+) -> list[str]:
+    argv: list[str] = [
+        str(binary),
+        "daemon",
+        "run-once",
+        "--program-config",
+        str(program_path),
+        "--markets-config",
+        str(markets_path),
+        "--coinset-base-url",
+        coinset_base_url.strip(),
+        "--state-dir",
+        str(state_dir),
+    ]
+    if testnet_markets_path is not None:
+        argv.extend(["--testnet-markets-config", str(testnet_markets_path)])
+    if key_ids and key_ids.strip():
+        argv.extend(["--key-ids", key_ids.strip()])
+    if state_db and state_db.strip():
+        argv.extend(["--state-db", state_db.strip()])
+    return argv
+
+
+def run_daemon_once_via_engine(
+    *,
+    program_path: Path,
+    markets_path: Path,
+    testnet_markets_path: Path | None = None,
+    key_ids: str | None = None,
+    state_db: str | None = None,
+    coinset_base_url: str = "https://api.coinset.org",
+    state_dir: Path,
+    run_fn: Callable[..., object] | None = None,
+) -> int:
+    binary = resolve_greenfloor_engine_binary()
+    argv = daemon_run_once_argv(
+        binary=binary,
+        program_path=program_path,
+        markets_path=markets_path,
+        testnet_markets_path=testnet_markets_path,
+        key_ids=key_ids,
+        state_db=state_db,
+        coinset_base_url=coinset_base_url,
+        state_dir=state_dir,
+    )
+    runner = run_fn or subprocess.run
+    completed = runner(argv, check=False)
+    returncode = getattr(completed, "returncode", completed)
+    if not isinstance(returncode, int):
+        raise GreenfloorEngineBinaryError(
+            f"unexpected subprocess return value from greenfloor-engine: {returncode!r}"
+        )
+    return returncode

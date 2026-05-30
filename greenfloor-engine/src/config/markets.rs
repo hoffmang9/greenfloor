@@ -21,8 +21,10 @@ pub struct MarketConfig {
     pub base_asset: String,
     pub base_symbol: String,
     pub quote_asset: String,
+    pub quote_asset_type: String,
     pub receive_address: String,
     pub pricing: Value,
+    pub cancel_move_threshold_bps: Option<i64>,
     pub ladders: HashMap<String, Vec<LadderEntry>>,
 }
 
@@ -43,6 +45,7 @@ struct MarketYaml {
     base_asset: Option<String>,
     base_symbol: Option<String>,
     quote_asset: Option<String>,
+    quote_asset_type: Option<String>,
     receive_address: Option<String>,
     pricing: Option<Value>,
     ladders: Option<HashMap<String, Vec<LadderEntryYaml>>>,
@@ -138,16 +141,45 @@ pub fn parse_markets_config(raw: &Value) -> SignerResult<MarketsConfig> {
                 .unwrap_or_default()
                 .trim()
                 .to_string(),
+            quote_asset_type: row
+                .quote_asset_type
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase(),
             receive_address: row
                 .receive_address
                 .unwrap_or_default()
                 .trim()
                 .to_string(),
-            pricing: row.pricing.unwrap_or_else(|| json!({})),
+            pricing: row.pricing.clone().unwrap_or_else(|| json!({})),
+            cancel_move_threshold_bps: parse_cancel_move_threshold_bps(
+                row.pricing.as_ref(),
+            ),
             ladders,
         });
     }
     Ok(MarketsConfig { markets })
+}
+
+fn parse_cancel_move_threshold_bps(pricing: Option<&Value>) -> Option<i64> {
+    let Some(pricing) = pricing else {
+        return None;
+    };
+    let Some(raw) = pricing.get("cancel_move_threshold_bps") else {
+        return None;
+    };
+    let parsed = raw.as_i64().or_else(|| raw.as_u64().map(|value| value as i64))?;
+    if parsed <= 0 {
+        return None;
+    }
+    Some(parsed)
+}
+
+pub fn cancel_policy_stable_vs_unstable(pricing: &Value) -> bool {
+    pricing
+        .get("cancel_policy_stable_vs_unstable")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 pub fn resolve_market_for_build(

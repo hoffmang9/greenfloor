@@ -70,6 +70,47 @@ impl DexieClient {
         Self::parse_response(response).await
     }
 
+    pub async fn get_offers(&self, offered: &str, requested: &str) -> SignerResult<Vec<Value>> {
+        let query = format!(
+            "offered={}&requested={}",
+            urlencoding::encode(offered.trim()),
+            urlencoding::encode(requested.trim())
+        );
+        let url = format!("{}/v1/offers?{query}", self.base_url);
+        let response = self
+            .http
+            .get(url)
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|err| SignerError::Other(format!("dexie_get_offers_error:{err}")))?;
+        let payload = Self::parse_response(response).await?;
+        let offers = payload
+            .get("offers")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        Ok(offers)
+    }
+
+    pub async fn cancel_offer(&self, offer_id: &str) -> SignerResult<Value> {
+        let clean_offer_id = offer_id.trim();
+        if clean_offer_id.is_empty() {
+            return Err(SignerError::Other("offer_id is required".to_string()));
+        }
+        let encoded = urlencoding::encode(clean_offer_id);
+        let url = format!("{}/v1/offers/{encoded}/cancel", self.base_url);
+        let response = self
+            .http
+            .post(url)
+            .json(&json!({"id": clean_offer_id}))
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|err| SignerError::Other(format!("dexie_cancel_offer_error:{err}")))?;
+        Self::parse_response(response).await
+    }
+
     async fn parse_response(response: reqwest::Response) -> SignerResult<Value> {
         let status = response.status();
         let body = response

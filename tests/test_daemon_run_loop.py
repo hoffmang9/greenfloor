@@ -292,7 +292,10 @@ def test_run_loop_websocket_callbacks_use_callback_thread_store(
     def _fake_run_once(**_kwargs):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(main, "SqliteStore", _ThreadBoundStore)
+    monkeypatch.setattr(
+        "greenfloor.daemon.cycle_ws_handlers.SqliteStore",
+        _ThreadBoundStore,
+    )
     monkeypatch.setattr(main, "CoinsetWebsocketClient", _FakeWsClient)
     monkeypatch.setattr(main, "run_once", _fake_run_once)
 

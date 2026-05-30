@@ -21,13 +21,10 @@ from greenfloor.daemon.cooldowns import (
     raise_if_transient_managed_upstream_error,
 )
 from greenfloor.daemon.offer_dispatch.items import action_item_from_managed_outcome
-from greenfloor.runtime.offer_build_context import (
-    default_program_config_path,
-    prepare_offer_build_context,
-)
+from greenfloor.runtime.daemon_config_paths import resolve_daemon_config_paths
+from greenfloor.runtime.engine_build_and_post import run_build_and_post_offer_in_process
 from greenfloor.runtime.offer_post_request import (
     ManagedOfferPostResult,
-    OfferPostRequest,
     parse_managed_offer_post_result,
 )
 from greenfloor.runtime.offer_publish import verify_offer_visible_on_dexie
@@ -45,25 +42,21 @@ def managed_offer_post(
 ) -> ManagedOfferPostResult:
     require_signer_offer_path(program)
 
-    build_ctx = prepare_offer_build_context(
-        program=program,
-        market=market,
-        program_path=default_program_config_path(program, program_path),
+    paths = resolve_daemon_config_paths(program, program_path)
+    exit_code, payload = run_build_and_post_offer_in_process(
+        paths=paths,
         network=program.app_network,
-        action_side=side,
-    )
-    request = OfferPostRequest(
-        build_ctx=build_ctx,
+        market_id=str(market.market_id),
         size_base_units=size_base_units,
-        repeat=1,
         publish_venue=publish_venue,
         dexie_base_url=str(program.dexie_api_base),
         splash_base_url=str(program.splash_api_base),
         drop_only=True,
         claim_rewards=False,
         dry_run=runtime_dry_run,
+        action_side=side,
+        persist_results=False,
     )
-    exit_code, payload = request.run_managed()
     result = parse_managed_offer_post_result(exit_code, payload)
     if not result.success and result.error:
         raise_if_transient_managed_upstream_error(result.error)

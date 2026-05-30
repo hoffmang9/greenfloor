@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from greenfloor.runtime.daemon_config_paths import resolve_daemon_config_paths
+from greenfloor.runtime.engine_build_and_post import run_build_and_post_offer_in_process
 from greenfloor.runtime.offer_build_context import OfferBuildContext
-from greenfloor.runtime.offer_runtime import SignerOfferDeps, build_and_post_offer_signer
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,52 +108,41 @@ class OfferPostRequest:
     claim_rewards: bool
     dry_run: bool
 
-    def _managed_backend_kwargs(
-        self,
-        *,
-        deps: SignerOfferDeps | None = None,
-        emit_output: bool = True,
-        persist_results: bool = True,
-    ) -> dict[str, Any]:
-        return {
-            "build_ctx": self.build_ctx,
-            "size_base_units": self.size_base_units,
-            "repeat": self.repeat,
-            "publish_venue": self.publish_venue,
-            "dexie_base_url": self.dexie_base_url,
-            "splash_base_url": self.splash_base_url,
-            "drop_only": self.drop_only,
-            "claim_rewards": self.claim_rewards,
-            "dry_run": self.dry_run,
-            "deps": deps,
-            "emit_output": emit_output,
-            "persist_results": persist_results,
-        }
-
     def run_signer(
         self,
         *,
-        deps: SignerOfferDeps | None = None,
         emit_output: bool = True,
         persist_results: bool = True,
     ) -> tuple[int, dict[str, Any]]:
-        return build_and_post_offer_signer(
-            **self._managed_backend_kwargs(
-                deps=deps,
-                emit_output=emit_output,
-                persist_results=persist_results,
-            ),
+        del emit_output
+        paths = resolve_daemon_config_paths(
+            self.build_ctx.program,
+            self.build_ctx.program_path,
+        )
+        market = self.build_ctx.market
+        return run_build_and_post_offer_in_process(
+            paths=paths,
+            network=self.build_ctx.network,
+            market_id=str(market.market_id),
+            size_base_units=self.size_base_units,
+            repeat=self.repeat,
+            publish_venue=self.publish_venue,
+            dexie_base_url=self.dexie_base_url,
+            splash_base_url=self.splash_base_url,
+            drop_only=self.drop_only,
+            claim_rewards=self.claim_rewards,
+            dry_run=self.dry_run,
+            action_side=self.build_ctx.action_side,
+            persist_results=persist_results,
         )
 
     def run_cli(
         self,
-        *,
-        deps: SignerOfferDeps | None = None,
     ) -> int:
-        exit_code, _ = self.run_signer(deps=deps)
+        exit_code, _ = self.run_signer()
         return exit_code
 
     def run_managed(
         self,
     ) -> tuple[int, dict[str, Any]]:
-        return self.run_signer(emit_output=False, persist_results=False)
+        return self.run_signer(persist_results=False)

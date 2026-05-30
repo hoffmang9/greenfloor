@@ -92,6 +92,28 @@ pub fn state_db_path_for_home(home_dir: &Path) -> PathBuf {
     home_dir.join("db").join("greenfloor.sqlite")
 }
 
+#[derive(Debug, Clone)]
+pub struct OfferStateListRow {
+    pub offer_id: String,
+    pub market_id: String,
+    pub state: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct OfferStateDetailRow {
+    pub offer_id: String,
+    pub market_id: String,
+    pub state: String,
+    pub last_seen_status: Option<i64>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TxSignalStateRow {
+    pub mempool_observed_at: Option<String>,
+    pub tx_block_confirmed_at: Option<String>,
+}
+
 impl SqliteStore {
     pub fn open(db_path: &Path) -> SignerResult<Self> {
         if let Some(parent) = db_path.parent() {
@@ -147,6 +169,239 @@ impl SqliteStore {
             )
             .map_err(|err| SignerError::Other(format!("failed to upsert offer_state: {err}")))?;
         Ok(())
+    }
+
+    pub fn get_latest_xch_price_snapshot(&self) -> SignerResult<Option<f64>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
+                SELECT payload_json
+                FROM audit_event
+                WHERE event_type = 'xch_price_snapshot'
+                ORDER BY id DESC
+                LIMIT 1
+                "#,
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("failed to prepare xch price snapshot query: {err}"))
+            })?;
+        let mut rows = stmt
+            .query([])
+            .map_err(|err| SignerError::Other(format!("failed to query xch price snapshot: {err}")))?;
+        let Some(row) = rows
+            .next()
+            .map_err(|err| SignerError::Other(format!("failed to read xch price row: {err}")))?
+        else {
+            return Ok(None);
+        };
+        let payload_json: String = row
+            .get(0)
+            .map_err(|err| SignerError::Other(format!("failed to read payload_json: {err}")))?;
+        let payload: Value = serde_json::from_str(&payload_json).map_err(|err| {
+            SignerError::Other(format!("failed to decode xch price snapshot json: {err}"))
+        })?;
+        let Some(raw) = payload.get("price_usd") else {
+            return Ok(None);
+        };
+        let value = raw
+            .as_f64()
+            .or_else(|| raw.as_i64().map(|v| v as f64))
+            .ok_or_else(|| SignerError::Other("xch_price_snapshot price_usd is not numeric".to_string()))?;
+        if value <= 0.0 {
+            return Ok(None);
+        }
+        Ok(Some(value))
+    }
+
+    pub fn list_offer_states(
+        &self,
+        market_id: Option<&str>,
+        limit: usize,
+    ) -> SignerResult<Vec<OfferStateListRow>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit_i64 = i64::try_from(limit).map_err(|_| {
+            SignerError::Other("list_offer_states limit exceeds i64 max".to_string())
+        })?;
+        let mut out = Vec::new();
+        if let Some(market_id) = market_id.map(str::trim).filter(|value| !value.is_empty()) {
+            let mut stmt = self
+                .conn
+                .prepare(
+                    r#"
+                    SELECT offer_id, market_id, state
+                    FROM offer_state
+                    WHERE market_id = ?1
+                    ORDER BY updated_at DESC
+                    LIMIT ?2
+                    "#,
+                )
+                .map_err(|err| SignerError::Other(format!("failed to prepare offer_state query: {err}")))?;
+            let mut rows = stmt
+                .query(params![market_id, limit_i64])
+                .map_err(|err| SignerError::Other(format!("failed to query offer_state: {err}")))?;
+            while let Some(row) = rows
+                .next()
+                .map_err(|err| SignerError::Other(format!("failed to read offer_state row: {err}")))?
+            {
+                out.push(OfferStateListRow {
+                    offer_id: row.get(0).map_err(|err| {
+                        SignerError::Other(format!("failed to read offer_id: {err}"))
+                    })?,
+                    market_id: row.get(1).map_err(|err| {
+                        SignerError::Other(format!("failed to read market_id: {err}"))
+                    })?,
+                    state: row
+                        .get(2)
+                        .map_err(|err| SignerError::Other(format!("failed to read state: {err}")))?,
+                });
+            }
+        } else {
+            let mut stmt = self
+                .conn
+                .prepare(
+                    r#"
+                    SELECT offer_id, market_id, state
+                    FROM offer_state
+                    ORDER BY updated_at DESC
+                    LIMIT ?1
+                    "#,
+                )
+                .map_err(|err| SignerError::Other(format!("failed to prepare offer_state query: {err}")))?;
+            let mut rows = stmt
+                .query(params![limit_i64])
+                .map_err(|err| SignerError::Other(format!("failed to query offer_state: {err}")))?;
+            while let Some(row) = rows
+                .next()
+                .map_err(|err| SignerError::Other(format!("failed to read offer_state row: {err}")))?
+            {
+                out.push(OfferStateListRow {
+                    offer_id: row.get(0).map_err(|err| {
+                        SignerError::Other(format!("failed to read offer_id: {err}"))
+                    })?,
+                    market_id: row.get(1).map_err(|err| {
+                        SignerError::Other(format!("failed to read market_id: {err}"))
+                    })?,
+                    state: row
+                        .get(2)
+                        .map_err(|err| SignerError::Other(format!("failed to read state: {err}")))?,
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    pub fn list_offer_state_details(
+        &self,
+        market_id: &str,
+        limit: usize,
+    ) -> SignerResult<Vec<OfferStateDetailRow>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let limit_i64 = i64::try_from(limit).map_err(|_| {
+            SignerError::Other("list_offer_state_details limit exceeds i64 max".to_string())
+        })?;
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
+                SELECT offer_id, market_id, state, last_seen_status, updated_at
+                FROM offer_state
+                WHERE market_id = ?1
+                ORDER BY updated_at DESC
+                LIMIT ?2
+                "#,
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("failed to prepare offer_state detail query: {err}"))
+            })?;
+        let mut rows = stmt
+            .query(params![market_id, limit_i64])
+            .map_err(|err| SignerError::Other(format!("failed to query offer_state details: {err}")))?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().map_err(|err| {
+            SignerError::Other(format!("failed to read offer_state detail row: {err}"))
+        })? {
+            out.push(OfferStateDetailRow {
+                offer_id: row.get(0).map_err(|err| {
+                    SignerError::Other(format!("failed to read offer_id: {err}"))
+                })?,
+                market_id: row.get(1).map_err(|err| {
+                    SignerError::Other(format!("failed to read market_id: {err}"))
+                })?,
+                state: row
+                    .get(2)
+                    .map_err(|err| SignerError::Other(format!("failed to read state: {err}")))?,
+                last_seen_status: row.get(3).ok(),
+                updated_at: row.get(4).map_err(|err| {
+                    SignerError::Other(format!("failed to read updated_at: {err}"))
+                })?,
+            });
+        }
+        Ok(out)
+    }
+
+    pub fn get_tx_signal_state(
+        &self,
+        tx_ids: &[String],
+    ) -> SignerResult<std::collections::HashMap<String, TxSignalStateRow>> {
+        use std::collections::HashMap;
+        let mut unique: Vec<String> = Vec::new();
+        for tx_id in tx_ids {
+            let normalized = tx_id.trim();
+            if normalized.is_empty() {
+                continue;
+            }
+            if !unique.iter().any(|existing| existing == normalized) {
+                unique.push(normalized.to_string());
+            }
+        }
+        if unique.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = unique
+            .iter()
+            .enumerate()
+            .map(|(index, _)| format!("?{}", index + 1))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sql = format!(
+            r#"
+            SELECT tx_id, mempool_observed_at, tx_block_confirmed_at
+            FROM tx_signal_state
+            WHERE tx_id IN ({placeholders})
+            "#
+        );
+        let mut stmt = self
+            .conn
+            .prepare(&sql)
+            .map_err(|err| SignerError::Other(format!("failed to prepare tx_signal query: {err}")))?;
+        let params: Vec<&dyn rusqlite::ToSql> = unique
+            .iter()
+            .map(|value| value as &dyn rusqlite::ToSql)
+            .collect();
+        let mut rows = stmt
+            .query(params.as_slice())
+            .map_err(|err| SignerError::Other(format!("failed to query tx_signal_state: {err}")))?;
+        let mut out = HashMap::new();
+        while let Some(row) = rows.next().map_err(|err| {
+            SignerError::Other(format!("failed to read tx_signal row: {err}"))
+        })? {
+            let tx_id: String = row
+                .get(0)
+                .map_err(|err| SignerError::Other(format!("failed to read tx_id: {err}")))?;
+            out.insert(
+                tx_id,
+                TxSignalStateRow {
+                    mempool_observed_at: row.get(1).ok(),
+                    tx_block_confirmed_at: row.get(2).ok(),
+                },
+            );
+        }
+        Ok(out)
     }
 
     pub fn add_audit_event(

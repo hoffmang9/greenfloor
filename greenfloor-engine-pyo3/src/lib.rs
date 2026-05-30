@@ -3,6 +3,8 @@
 //! The extension module is exported as `greenfloor_engine` (ADR 0010). Python
 //! callers should import through `greenfloor.core.engine_bridge.import_engine`.
 
+mod daemon_py;
+mod manager_py;
 mod coin_ops_py;
 mod cycle;
 mod execution_py;
@@ -33,7 +35,7 @@ use pyo3::prelude::*;
 use py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
 use pyo3::types::{PyDict, PyModule, PyTuple};
 
-fn runtime() -> &'static tokio::runtime::Runtime {
+pub(crate) fn runtime() -> &'static tokio::runtime::Runtime {
     static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
     RUNTIME.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
@@ -260,5 +262,7 @@ fn greenfloor_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     offer_request_py::register(m)?;
     retry_py::register(m)?;
     wallet_io_py::register(m)?;
+    manager_py::register(m)?;
+    daemon_py::register(m)?;
     Ok(())
 }

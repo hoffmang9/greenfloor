@@ -7,6 +7,12 @@ use greenfloor_engine::{
     build_vault_cat_offer, load_signer_config, parse_coin_ids, resolve_vault_context,
     BuildAndPostOfferRequest, CreateOfferRequest, MixedSplitRequest,
 };
+use greenfloor_engine::daemon::{
+    default_bridge, default_testnet_markets_path, initialize_daemon_file_logging,
+    load_daemon_program_runtime, resolve_testnet_markets_path, run_daemon_cycle_once,
+    use_websocket_capture_for_once, warn_if_daemon_log_level_auto_healed, DaemonDispatchState,
+    DaemonInstanceLock, DaemonRunOnceRequest,
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -115,6 +121,32 @@ enum Commands {
         json: bool,
         #[arg(long)]
         no_persist_results: bool,
+    },
+    /// Daemon cycle orchestration (native Rust entry; IO phases use Python bridge subprocess).
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommands,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum DaemonCommands {
+    /// Run one daemon evaluation cycle and exit.
+    RunOnce {
+        #[arg(long, default_value = "config/program.yaml")]
+        program_config: PathBuf,
+        #[arg(long, default_value = "config/markets.yaml")]
+        markets_config: PathBuf,
+        #[arg(long, default_value = "")]
+        testnet_markets_config: PathBuf,
+        #[arg(long, default_value = "")]
+        key_ids: String,
+        #[arg(long, default_value = "")]
+        state_db: String,
+        #[arg(long, default_value = "https://api.coinset.org")]
+        coinset_base_url: String,
+        #[arg(long, default_value = "~/.greenfloor/state")]
+        state_dir: PathBuf,
     },
 }
 
@@ -253,6 +285,7 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
                 dry_run,
                 compact_json: json,
                 persist_results: !no_persist_results,
+                action_side: None,
             })
             .await?;
             println!("{}", response.output);
@@ -260,8 +293,114 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
                 std::process::exit(response.exit_code);
             }
         }
+        Commands::Daemon { command } => match command {
+            DaemonCommands::RunOnce {
+                program_config,
+                markets_config,
+                testnet_markets_config,
+                key_ids,
+                state_db,
+                coinset_base_url,
+                state_dir,
+            } => {
+                let exit_code = run_daemon_cli_once(
+                    program_config,
+                    markets_config,
+                    testnet_markets_config,
+                    key_ids,
+                    state_db,
+                    coinset_base_url,
+                    state_dir,
+                )
+                .await?;
+                if exit_code != 0 {
+                    std::process::exit(exit_code);
+                }
+            }
+        },
     }
     Ok(())
+}
+
+async fn run_daemon_cli_once(
+    program_config: PathBuf,
+    markets_config: PathBuf,
+    testnet_markets_config: PathBuf,
+    key_ids: String,
+    state_db: String,
+    coinset_base_url: String,
+    state_dir: PathBuf,
+) -> Result<i32, greenfloor_engine::Error> {
+    let runtime = load_daemon_program_runtime(&program_config)?;
+    initialize_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
+    warn_if_daemon_log_level_auto_healed(
+        runtime.app_log_level_was_missing,
+        &program_config,
+    );
+
+    let expanded_state_dir = expand_user_path(&state_dir);
+    let _lock = match DaemonInstanceLock::acquire(&expanded_state_dir, "once") {
+        Ok(lock) => lock,
+        Err(err) => {
+            tracing::error!(event = "daemon_lock_conflict", error = %err);
+            return Ok(3);
+        }
+    };
+
+    tracing::info!(
+        mode = "once",
+        program_config = %program_config.display(),
+        markets_config = %markets_config.display(),
+        "daemon_starting"
+    );
+
+    let testnet_overlay = if testnet_markets_config.as_os_str().is_empty() {
+        default_testnet_markets_path()
+    } else {
+        resolve_testnet_markets_path(&testnet_markets_config.to_string_lossy())
+    };
+    let allowed_key_ids: Vec<String> = key_ids
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect();
+    let state_db_override = if state_db.trim().is_empty() {
+        None
+    } else {
+        Some(state_db.trim().to_string())
+    };
+
+    let bridge = default_bridge()?;
+    let response = run_daemon_cycle_once(
+        &DaemonRunOnceRequest {
+            program_path: program_config,
+            markets_path: markets_config,
+            testnet_markets_path: testnet_overlay,
+            state_db_override,
+            coinset_base_url,
+            state_dir: expanded_state_dir,
+            poll_coinset_mempool: false,
+            use_websocket_capture: use_websocket_capture_for_once(&runtime),
+            allowed_key_ids,
+            dispatch_state: DaemonDispatchState::default(),
+        },
+        &bridge,
+    )
+    .await?;
+
+    tracing::info!(mode = "once", exit_code = response.exit_code, "daemon_stopped");
+    Ok(response.exit_code)
+}
+
+fn expand_user_path(path: &PathBuf) -> PathBuf {
+    let raw = path.to_string_lossy();
+    if let Some(stripped) = raw.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from(home).join(stripped);
+        }
+    }
+    path.clone()
 }
 
 async fn run_mixed_split(

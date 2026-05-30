@@ -1,5 +1,41 @@
 # Progress Log
 
+## 2026-05-29 (Phase 4 — native greenfloord `--once` via greenfloor-engine)
+
+- **`greenfloor-engine daemon run-once`:** native Rust CLI with instance lock, file logging, and full cycle orchestration (`daemon/cycle_entry.rs`).
+- **Python IO bridge:** subprocess JSON RPC via `greenfloor.daemon.bridge_subprocess` (shared by Rust binary and PyO3 `run_daemon_cycle_once`).
+- **Thin `greenfloord`:** `--once` delegates to `greenfloor-engine daemon run-once`; loop mode remains Python (websocket sidecar).
+- **PyO3:** `daemon_py.rs` refactored to call shared `run_daemon_cycle_once`.
+- **Tests:** `tests/test_daemon_native_engine.py` (bridge subprocess + lock conflict when binary available).
+- **Next:** native Rust `daemon run-loop` with websocket; manager CLI subcommand cutover.
+
+## 2026-05-29 (Phase 3 — Rust reconcile/cancel market phases)
+
+- **Rust native phases:** `daemon/reconcile_phase.rs` and `daemon/cancel_phase.rs` run Dexie + SQLite reconcile and cancel-on-price-move policy in-process.
+- **Market dispatch:** `daemon/market_dispatch.rs` orchestrates per-market cycle: Rust reconcile → Python IO (inventory/strategy) → Rust cancel → Python coin_ops.
+- **PyO3:** `run_daemon_cycle_once` no longer calls Python `execute_market_dispatch`; uses `run_market_cycle_io_phases` / `run_market_coin_ops_phase` bridge callbacks.
+- **SQLite/Dexie extensions:** `get_tx_signal_state`, `list_offer_state_details`, Dexie `get_offers`/`cancel_offer`.
+- **Tests:** multi-cycle integration fix (shim reads previous XCH price; drop invalid `XchPriceProvider` monkeypatch); 19 daemon cycle tests pass.
+- **Next:** parallel Rust market dispatch, port inventory/strategy to Rust, collapse Python `storage/sqlite.py`.
+
+## 2026-05-29 (Phase 2 — Rust daemon cycle orchestration)
+
+- **Rust `daemon/` module:** `run_once.rs` builds cycle plan (enabled markets, stale sweep, slot dispatch); `stale_sweep.rs` uses Rust Dexie + SQLite.
+- **SQLite extensions:** `list_offer_states`, `get_latest_xch_price_snapshot` on Rust `SqliteStore`.
+- **PyO3:** `run_daemon_cycle_once` orchestrates Rust plan + Python bridge callbacks.
+- **Python bridge:** `rust_cycle_bridge.py` (preamble IO + market dispatch); `engine_cycle.py` thin wrapper; `cycle_runner.run_once` delegates to engine.
+- **Tests:** `tests/test_daemon_engine_cycle.py`; integration tests use `daemon_engine_cycle_shim` when Rust plan is bypassed.
+- **Next (Phase 3):** port market cycle phases + collapse duplicate Python SQLite/adapters.
+
+## 2026-05-29 (Phase 1 — daemon offer post via Rust engine)
+
+- **PyO3:** `manager_py.rs` exposes in-process `build_and_post_offer` returning `{exit_code, payload}`.
+- **Rust:** `BuildAndPostOfferRequest.action_side` optional override for daemon buy/sell planned actions.
+- **Python:** `runtime/engine_build_and_post.py` + `runtime/daemon_config_paths.py`; `managed_offer_post` and `OfferPostRequest.run_managed` delegate to Rust (no Python orchestration on daemon post path).
+- **Cycle:** `cycle_runner` sets daemon config paths context so `--markets-config` overrides resolve correctly.
+- **Tests:** `tests/test_daemon_engine_build_and_post.py`; existing daemon strategy tests pass.
+- **Next (Phase 2):** native `greenfloord` cycle loop in Rust; delete `offer_orchestration.py` / `offer_runtime.py` once unused.
+
 ## 2026-05-29 (Manager CLI Rust cutover — logging, typed post results, ADR 0012)
 
 - **Logging:** `manager/logging.rs` restores `{home_dir}/logs/debug.log` for Rust manager path; `app.log_level` parsed in `config/program.rs`.

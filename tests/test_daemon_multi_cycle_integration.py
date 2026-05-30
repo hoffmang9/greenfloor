@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from greenfloor.config.io import load_program_config
 from greenfloor.core.offer_lifecycle import OfferLifecycleState
 from greenfloor.core.strategy import PlannedAction
@@ -11,11 +13,20 @@ from greenfloor.daemon.strategy_execution import StrategyActionResult
 from greenfloor.daemon.testing import (
     CANCEL_COOLDOWN_UNTIL,
     POST_COOLDOWN_UNTIL,
-    main,
     run_once,
 )
 from greenfloor.runtime.offer_reconciliation import reconcile_offers
 from greenfloor.storage.sqlite import SqliteStore
+
+
+@pytest.fixture(autouse=True)
+def _daemon_cycle_engine_bridge_shim(monkeypatch) -> None:
+    from tests.helpers.daemon_engine_cycle_shim import run_daemon_cycle_once_via_bridge
+
+    monkeypatch.setattr(
+        "greenfloor.daemon.engine_cycle._engine_run_daemon_cycle_once",
+        lambda: run_daemon_cycle_once_via_bridge,
+    )
 
 
 def write_program(path: Path, home_dir: Path) -> None:
@@ -199,10 +210,10 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
             ]
         return []
 
-    monkeypatch.setattr(main, "PriceAdapter", _FakePriceAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.PriceAdapter", _FakePriceAdapter)
     monkeypatch.setattr("greenfloor.daemon.inventory_scan.CoinsetAdapter", _FakeCoinsetAdapter)
-    monkeypatch.setattr(main, "WalletAdapter", _FakeWalletAdapter)
-    monkeypatch.setattr(main, "DexieAdapter", _FakeDexieAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.WalletAdapter", _FakeWalletAdapter)
+    monkeypatch.setattr("greenfloor.daemon.rust_cycle_bridge.DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr("greenfloor.runtime.offer_reconciliation.DexieAdapter", _FakeDexieAdapter)
     monkeypatch.setattr(
         "greenfloor.daemon.market_cycle.strategy_eval_phase.evaluate_market",
@@ -244,8 +255,7 @@ def test_daemon_multi_cycle_price_shift_plan_post_cancel_and_reconcile(
         _fake_strategy_dispatch,
     )
     monkeypatch.setattr(
-        main,
-        "utcnow",
+        "greenfloor.daemon.rust_cycle_bridge.utcnow",
         lambda: datetime(2026, 2, 20, 12, 0, tzinfo=UTC),
     )
 

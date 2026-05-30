@@ -12,6 +12,7 @@ pub mod error;
 pub mod hex;
 pub mod kms;
 pub mod manager;
+pub mod daemon;
 pub mod offer;
 pub mod storage;
 pub mod vault;

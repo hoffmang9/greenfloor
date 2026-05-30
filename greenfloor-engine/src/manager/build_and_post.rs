@@ -16,7 +16,8 @@ use crate::offer::build_context::resolve_quote_price_for_pricing;
 use crate::offer::codec::verify_offer_for_dexie;
 use crate::offer::publish::expected_publish_asset_fields;
 use crate::offer::{
-    build_signer_offer_for_action, resolve_offer_assets_for_action, BuildOfferForActionRequest,
+    build_signer_offer_for_action, normalize_offer_side, resolve_offer_assets_for_action,
+    BuildOfferForActionRequest,
 };
 use crate::storage::{
     persist_offer_post_records, state_db_path_for_home, OfferPostPersistRecord, SqliteStore,
@@ -43,6 +44,8 @@ pub struct BuildAndPostOfferRequest {
     pub dry_run: bool,
     pub compact_json: bool,
     pub persist_results: bool,
+    /// When set, overrides ``pricing.side`` for bootstrap and offer construction (daemon buy/sell actions).
+    pub action_side: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -274,7 +277,7 @@ async fn resolve_build_and_post_context(
     )
     .await?;
     let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
-    let action_side = action_side_from_pricing(&market.pricing);
+    let action_side = resolve_action_side(request.action_side.as_deref(), &market.pricing);
     let (offer_fee_mojos, offer_fee_source) = resolve_maker_offer_fee(&request.network).await;
 
     Ok(ResolvedBuildAndPostContext {
@@ -597,6 +600,13 @@ async fn resolve_maker_offer_fee(network: &str) -> (u64, String) {
     }
 }
 
+fn resolve_action_side(action_side_override: Option<&str>, pricing: &Value) -> String {
+    if let Some(side) = action_side_override.map(str::trim).filter(|value| !value.is_empty()) {
+        return normalize_offer_side(side).to_string();
+    }
+    action_side_from_pricing(pricing)
+}
+
 fn timing_payload(
     started: Instant,
     create_phase_ms: Option<u64>,
@@ -637,8 +647,10 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
             base_asset: "a1".to_string(),
             base_symbol: "A1".to_string(),
             quote_asset: "xch".to_string(),
+            quote_asset_type: "unstable".to_string(),
             receive_address: "xch1".to_string(),
             pricing: json!({}),
+            cancel_move_threshold_bps: None,
             ladders: HashMap::new(),
         },
         signer_config: SignerConfig {
@@ -774,5 +786,16 @@ mod tests {
         )
         .expect("skip");
         assert!(!state_db_path_for_home(dir.path()).exists());
+    }
+
+    #[test]
+    fn resolve_action_side_prefers_explicit_override() {
+        let pricing = json!({"side": "sell"});
+        assert_eq!(
+            resolve_action_side(Some("buy"), &pricing),
+            "buy".to_string()
+        );
+        assert_eq!(resolve_action_side(None, &pricing), "sell".to_string());
+        assert_eq!(resolve_action_side(Some(""), &pricing), "sell".to_string());
     }
 }

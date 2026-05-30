@@ -1,3 +1,5 @@
+"""Thin greenfloord entry: --once delegates to native greenfloor-engine."""
+
 from __future__ import annotations
 
 import argparse
@@ -9,14 +11,14 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+from greenfloor.cli.engine_binary import run_daemon_once_via_engine
 from greenfloor.config.io import default_state_dir_path, load_program_config
 from greenfloor.daemon.bootstrap import (
     initialize_daemon_file_logging,
     log_daemon_event,
     warn_if_daemon_log_level_auto_healed,
 )
-from greenfloor.daemon.cycle_runner import run_loop, run_once
-from greenfloor.daemon.market_logging import _daemon_logger
+from greenfloor.daemon.cycle_runner import run_loop
 
 _DAEMON_INSTANCE_LOCK_FILENAME = "daemon.lock"
 
@@ -94,7 +96,7 @@ def main() -> None:
     parser.add_argument(
         "--once",
         action="store_true",
-        help="Run one evaluation cycle and exit",
+        help="Run one evaluation cycle and exit (native Rust engine path)",
     )
     parser.add_argument("--state-db", default="", help="Optional explicit SQLite state DB path")
     parser.add_argument(
@@ -115,45 +117,31 @@ def main() -> None:
 
     allowed_keys = {k.strip() for k in args.key_ids.split(",") if k.strip()} or None
     try:
+        if args.once:
+            exit_code = run_daemon_once_via_engine(
+                program_path=Path(args.program_config),
+                markets_path=Path(args.markets_config),
+                testnet_markets_path=testnet_markets_path,
+                key_ids=args.key_ids or None,
+                state_db=args.state_db or None,
+                coinset_base_url=args.coinset_base_url,
+                state_dir=state_dir,
+            )
+            raise SystemExit(exit_code)
+
         with _acquire_daemon_instance_lock(
             state_dir=state_dir,
-            mode="once" if args.once else "loop",
+            mode="loop",
         ):
-            if args.once:
-                program = load_program_config(Path(args.program_config))
-                initialize_daemon_file_logging(
-                    program.home_dir, log_level=getattr(program, "app_log_level", "INFO")
-                )
-                warn_if_daemon_log_level_auto_healed(
-                    program=program, program_path=Path(args.program_config)
-                )
-                _daemon_logger.info(
-                    "daemon_starting mode=once program_config=%s markets_config=%s",
-                    args.program_config,
-                    args.markets_config,
-                )
-                exit_code = run_once(
-                    Path(args.program_config),
-                    Path(args.markets_config),
-                    allowed_keys,
-                    args.state_db or None,
-                    args.coinset_base_url,
-                    state_dir,
-                    poll_coinset_mempool=False,
-                    use_websocket_capture=program.tx_block_trigger_mode == "websocket",
-                    testnet_markets_path=testnet_markets_path,
-                )
-                _daemon_logger.info("daemon_stopped mode=once exit_code=%s", exit_code)
-            else:
-                exit_code = run_loop(
-                    program_path=Path(args.program_config),
-                    markets_path=Path(args.markets_config),
-                    testnet_markets_path=testnet_markets_path,
-                    allowed_keys=allowed_keys,
-                    db_path_override=args.state_db or None,
-                    coinset_base_url=args.coinset_base_url,
-                    state_dir=state_dir,
-                )
+            exit_code = run_loop(
+                program_path=Path(args.program_config),
+                markets_path=Path(args.markets_config),
+                testnet_markets_path=testnet_markets_path,
+                allowed_keys=allowed_keys,
+                db_path_override=args.state_db or None,
+                coinset_base_url=args.coinset_base_url,
+                state_dir=state_dir,
+            )
     except RuntimeError as exc:
         try:
             program = load_program_config(Path(args.program_config))
