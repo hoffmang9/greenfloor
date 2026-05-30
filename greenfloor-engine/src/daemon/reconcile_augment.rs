@@ -9,6 +9,9 @@ use crate::cycle::{
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
+use super::reconcile_offer::{
+    missing_offer_error_from_payload,
+};
 use super::reconcile_phase::{apply_reconcile_transition, ReconcilePhaseMetrics};
 
 pub struct AugmentedDexieOffers {
@@ -23,21 +26,6 @@ fn offer_id_from_payload(offer: &Value) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-}
-
-pub(crate) fn missing_offer_error_from_payload(payload: &Value) -> Option<String> {
-    if payload.get("success") != Some(&Value::Bool(false)) {
-        return None;
-    }
-    let error_text = payload
-        .get("error")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    if is_dexie_offer_missing_error_text(error_text) {
-        Some(error_text.to_string())
-    } else {
-        None
-    }
 }
 
 fn apply_missing_watched_offer(

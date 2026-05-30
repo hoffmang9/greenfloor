@@ -21,11 +21,17 @@ pub struct CoinsetWebsocketLoopHandle {
 }
 
 impl CoinsetWebsocketLoopHandle {
-    pub fn stop(mut self) {
+    pub fn stop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
         if let Some(join) = self.join.take() {
             let _ = join.join();
         }
+    }
+}
+
+impl Drop for CoinsetWebsocketLoopHandle {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 

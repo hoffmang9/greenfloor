@@ -5,15 +5,12 @@ use crate::runtime;
 
 use engine_core::load_program_config;
 use engine_core::daemon::{
-    initialize_daemon_file_logging, resolve_coinset_ws_url,
-    run_daemon_cycle_once, start_coinset_websocket_loop, websocket_capture_enabled,
+    consume_reload_marker, initialize_daemon_file_logging, reconcile_offers_cli, resolve_coinset_ws_url,
+    run_daemon_cycle_once, run_daemon_loop, websocket_capture_enabled,
     CoinWatchlistCache, DaemonCycleOnceResponse, DaemonCycleTestControls, DaemonDispatchState,
-    DaemonInstanceLock, DaemonRunOnceRequest,
+    DaemonInstanceLock, DaemonLoopRequest, DaemonRunOnceRequest,
 };
-use crate::engine_contracts_py::{
-    reconcile_offers_batch_typed, PyDaemonCycleSummary, PyReconcileBatchResult,
-};
-use crate::py_utils::to_py_err;
+use crate::py_utils::{dict_from_json_value, to_py_err};
 use engine_core::error::SignerError;
 use engine_core::storage::resolve_state_db_path;
 use pyo3::exceptions::PyException;
@@ -52,7 +49,7 @@ impl PyCoinWatchlistCache {
 
 #[pyclass(name = "DaemonDispatchState")]
 #[derive(Clone)]
-struct PyDaemonDispatchState {
+pub(crate) struct PyDaemonDispatchState {
     #[pyo3(get, set)]
     cursor: usize,
     #[pyo3(get, set)]
@@ -144,7 +141,7 @@ struct PyDaemonRunOnceRequest {
     dispatch_state: PyDaemonDispatchState,
     #[pyo3(get, set)]
     test_controls: PyDaemonCycleTestControls,
-    coin_watchlist: Option<PyCoinWatchlistCache>,
+    coin_watchlist: PyCoinWatchlistCache,
 }
 
 #[pymethods]
@@ -156,6 +153,7 @@ impl PyDaemonRunOnceRequest {
         markets_path,
         coinset_base_url,
         state_dir,
+        coin_watchlist,
         *,
         testnet_markets_path=None,
         state_db_override=None,
@@ -164,13 +162,13 @@ impl PyDaemonRunOnceRequest {
         allowed_key_ids=None,
         dispatch_state=None,
         test_controls=None,
-        coin_watchlist=None,
     ))]
     fn new(
         program_path: PathBuf,
         markets_path: PathBuf,
         coinset_base_url: String,
         state_dir: PathBuf,
+        coin_watchlist: PyRef<'_, PyCoinWatchlistCache>,
         testnet_markets_path: Option<PathBuf>,
         state_db_override: Option<String>,
         poll_coinset_mempool: bool,
@@ -178,7 +176,6 @@ impl PyDaemonRunOnceRequest {
         allowed_key_ids: Option<Vec<String>>,
         dispatch_state: Option<PyDaemonDispatchState>,
         test_controls: Option<PyDaemonCycleTestControls>,
-        coin_watchlist: Option<PyCoinWatchlistCache>,
     ) -> Self {
         Self {
             program_path,
@@ -192,13 +189,85 @@ impl PyDaemonRunOnceRequest {
             allowed_key_ids: allowed_key_ids.unwrap_or_default(),
             dispatch_state: dispatch_state.unwrap_or_else(|| PyDaemonDispatchState::new(0, None)),
             test_controls: test_controls.unwrap_or_default(),
-            coin_watchlist,
+            coin_watchlist: coin_watchlist.clone(),
         }
     }
 }
 
-impl From<PyDaemonRunOnceRequest> for DaemonRunOnceRequest {
-    fn from(value: PyDaemonRunOnceRequest) -> Self {
+impl PyDaemonRunOnceRequest {
+    fn into_engine(self) -> DaemonRunOnceRequest {
+        DaemonRunOnceRequest {
+            program_path: self.program_path,
+            markets_path: self.markets_path,
+            testnet_markets_path: self.testnet_markets_path,
+            state_db_override: self.state_db_override,
+            coinset_base_url: self.coinset_base_url,
+            state_dir: self.state_dir,
+            poll_coinset_mempool: self.poll_coinset_mempool,
+            use_websocket_capture: self.use_websocket_capture,
+            allowed_key_ids: self.allowed_key_ids,
+            dispatch_state: self.dispatch_state.into(),
+            test_controls: self.test_controls.into(),
+            coin_watchlist: self.coin_watchlist.inner,
+        }
+    }
+}
+
+#[pyclass(name = "DaemonLoopRequest")]
+#[derive(Clone)]
+struct PyDaemonLoopRequest {
+    #[pyo3(get, set)]
+    program_path: PathBuf,
+    #[pyo3(get, set)]
+    markets_path: PathBuf,
+    #[pyo3(get, set)]
+    testnet_markets_path: Option<PathBuf>,
+    #[pyo3(get, set)]
+    state_db_override: Option<String>,
+    #[pyo3(get, set)]
+    coinset_base_url: String,
+    #[pyo3(get, set)]
+    state_dir: PathBuf,
+    #[pyo3(get, set)]
+    allowed_key_ids: Vec<String>,
+}
+
+#[pymethods]
+impl PyDaemonLoopRequest {
+    #[new]
+    #[pyo3(signature = (
+        program_path,
+        markets_path,
+        coinset_base_url,
+        state_dir,
+        *,
+        testnet_markets_path=None,
+        state_db_override=None,
+        allowed_key_ids=None,
+    ))]
+    fn new(
+        program_path: PathBuf,
+        markets_path: PathBuf,
+        coinset_base_url: String,
+        state_dir: PathBuf,
+        testnet_markets_path: Option<PathBuf>,
+        state_db_override: Option<String>,
+        allowed_key_ids: Option<Vec<String>>,
+    ) -> Self {
+        Self {
+            program_path,
+            markets_path,
+            testnet_markets_path,
+            state_db_override,
+            coinset_base_url,
+            state_dir,
+            allowed_key_ids: allowed_key_ids.unwrap_or_default(),
+        }
+    }
+}
+
+impl From<PyDaemonLoopRequest> for DaemonLoopRequest {
+    fn from(value: PyDaemonLoopRequest) -> Self {
         Self {
             program_path: value.program_path,
             markets_path: value.markets_path,
@@ -206,15 +275,7 @@ impl From<PyDaemonRunOnceRequest> for DaemonRunOnceRequest {
             state_db_override: value.state_db_override,
             coinset_base_url: value.coinset_base_url,
             state_dir: value.state_dir,
-            poll_coinset_mempool: value.poll_coinset_mempool,
-            use_websocket_capture: value.use_websocket_capture,
             allowed_key_ids: value.allowed_key_ids,
-            dispatch_state: value.dispatch_state.into(),
-            test_controls: value.test_controls.into(),
-            coin_watchlist: value
-                .coin_watchlist
-                .map(|cache| cache.inner.clone())
-                .unwrap_or_else(CoinWatchlistCache::new),
         }
     }
 }
@@ -226,15 +287,16 @@ struct PyDaemonCycleOnceResponse {
     #[pyo3(get)]
     dispatch_state: PyDaemonDispatchState,
     #[pyo3(get)]
-    cycle_summary: Py<PyDaemonCycleSummary>,
+    cycle_summary: Py<PyAny>,
 }
 
 impl PyDaemonCycleOnceResponse {
     fn from_engine(py: Python<'_>, response: DaemonCycleOnceResponse) -> PyResult<Self> {
+        let summary = serde_json::to_value(&response.cycle_summary).map_err(to_py_err)?;
         Ok(Self {
             exit_code: response.exit_code,
             dispatch_state: response.dispatch_state.into(),
-            cycle_summary: Py::new(py, PyDaemonCycleSummary::from(response.cycle_summary))?,
+            cycle_summary: dict_from_json_value(py, summary)?,
         })
     }
 }
@@ -259,20 +321,6 @@ impl PyDaemonInstanceLock {
     ) -> PyResult<()> {
         slf.inner.take();
         Ok(())
-    }
-}
-
-#[pyclass(name = "CoinsetWebsocketLoop", unsendable)]
-struct PyCoinsetWebsocketLoop {
-    inner: Option<engine_core::daemon::CoinsetWebsocketLoopHandle>,
-}
-
-#[pymethods]
-impl PyCoinsetWebsocketLoop {
-    fn stop(&mut self) {
-        if let Some(handle) = self.inner.take() {
-            handle.stop();
-        }
     }
 }
 
@@ -313,33 +361,9 @@ fn resolve_coinset_ws_url_py(program_path: PathBuf, coinset_base_url: &str) -> P
 #[pyfunction]
 #[pyo3(name = "resolve_state_db_path", signature = (program_home_dir, explicit_db_path=None, /))]
 fn resolve_state_db_path_py(program_home_dir: PathBuf, explicit_db_path: Option<String>) -> String {
-    let path = resolve_state_db_path(
-        &program_home_dir,
-        explicit_db_path.as_deref(),
-    );
-    path.display().to_string()
-}
-
-#[pyfunction]
-#[pyo3(
-    name = "start_coinset_websocket_loop",
-    signature = (db_path, program_path, coinset_base_url, coin_watchlist=None, /)
-)]
-fn start_coinset_websocket_loop_py(
-    db_path: PathBuf,
-    program_path: PathBuf,
-    coinset_base_url: &str,
-    coin_watchlist: Option<PyRef<'_, PyCoinWatchlistCache>>,
-) -> PyResult<PyCoinsetWebsocketLoop> {
-    let program = load_program_config(&program_path).map_err(to_py_err)?;
-    let cache = coin_watchlist
-        .map(|cache| cache.inner.clone())
-        .unwrap_or_else(CoinWatchlistCache::new);
-    let handle =
-        start_coinset_websocket_loop(db_path, program, coinset_base_url.to_string(), cache);
-    Ok(PyCoinsetWebsocketLoop {
-        inner: Some(handle),
-    })
+    resolve_state_db_path(&program_home_dir, explicit_db_path.as_deref())
+        .display()
+        .to_string()
 }
 
 #[pyfunction]
@@ -349,19 +373,43 @@ fn use_websocket_capture_for_trigger_mode_py(tx_block_trigger_mode: &str) -> boo
 }
 
 #[pyfunction]
+#[pyo3(name = "consume_reload_marker", signature = (state_dir, /))]
+fn consume_reload_marker_py(state_dir: PathBuf) -> bool {
+    consume_reload_marker(&state_dir)
+}
+
+#[pyfunction]
 #[pyo3(
-    name = "reconcile_offers_batch",
+    name = "reconcile_offers_cli",
     signature = (db_path, dexie_base_url, target_venue, market_id=None, limit=500, /)
 )]
-fn reconcile_offers_batch_py(
+fn reconcile_offers_cli_py(
     py: Python<'_>,
     db_path: PathBuf,
     dexie_base_url: String,
     target_venue: String,
     market_id: Option<String>,
     limit: usize,
-) -> PyResult<Py<PyReconcileBatchResult>> {
-    reconcile_offers_batch_typed(py, db_path, dexie_base_url, target_venue, market_id, limit)
+) -> PyResult<Py<PyAny>> {
+    let market_filter = market_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let market_ref = market_filter.as_deref();
+    let payload = py.detach(move || {
+        runtime()
+            .block_on(reconcile_offers_cli(
+                &db_path,
+                &dexie_base_url,
+                &target_venue,
+                market_ref,
+                limit,
+            ))
+            .map_err(to_py_err)
+    })?;
+    dict_from_json_value(
+        py,
+        serde_json::to_value(payload).map_err(to_py_err)?,
+    )
 }
 
 #[pyfunction]
@@ -370,7 +418,7 @@ fn run_daemon_cycle_once_py(
     py: Python<'_>,
     request: PyRef<'_, PyDaemonRunOnceRequest>,
 ) -> PyResult<Py<PyDaemonCycleOnceResponse>> {
-    let engine_request: DaemonRunOnceRequest = request.clone().into();
+    let engine_request = request.clone().into_engine();
     let response = py.detach(move || {
         runtime()
             .block_on(run_daemon_cycle_once(&engine_request))
@@ -382,9 +430,22 @@ fn run_daemon_cycle_once_py(
     )
 }
 
+#[pyfunction]
+#[pyo3(name = "run_daemon_loop", signature = (request, /))]
+fn run_daemon_loop_py(py: Python<'_>, request: PyRef<'_, PyDaemonLoopRequest>) -> PyResult<i32> {
+    let engine_request: DaemonLoopRequest = request.clone().into();
+    py.detach(move || {
+        runtime()
+            .block_on(run_daemon_loop(engine_request))
+            .map_err(to_py_err)
+    })
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(reconcile_offers_batch_py, m)?)?;
+    m.add_function(wrap_pyfunction!(consume_reload_marker_py, m)?)?;
+    m.add_function(wrap_pyfunction!(reconcile_offers_cli_py, m)?)?;
     m.add_function(wrap_pyfunction!(run_daemon_cycle_once_py, m)?)?;
+    m.add_function(wrap_pyfunction!(run_daemon_loop_py, m)?)?;
     m.add_function(wrap_pyfunction!(
         use_websocket_capture_for_trigger_mode_py,
         m
@@ -397,13 +458,12 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?)?;
     m.add_function(wrap_pyfunction!(resolve_coinset_ws_url_py, m)?)?;
     m.add_function(wrap_pyfunction!(resolve_state_db_path_py, m)?)?;
-    m.add_function(wrap_pyfunction!(start_coinset_websocket_loop_py, m)?)?;
     m.add_class::<PyCoinWatchlistCache>()?;
     m.add_class::<PyDaemonInstanceLock>()?;
-    m.add_class::<PyCoinsetWebsocketLoop>()?;
     m.add_class::<PyDaemonDispatchState>()?;
     m.add_class::<PyDaemonCycleTestControls>()?;
     m.add_class::<PyDaemonRunOnceRequest>()?;
+    m.add_class::<PyDaemonLoopRequest>()?;
     m.add_class::<PyDaemonCycleOnceResponse>()?;
     m.add("DaemonLockConflict", m.py().get_type::<DaemonLockConflict>())?;
     Ok(())

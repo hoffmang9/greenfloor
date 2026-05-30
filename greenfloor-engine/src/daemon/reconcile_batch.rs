@@ -1,18 +1,12 @@
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 
 use crate::adapters::DexieClient;
-use crate::cycle::{
-    is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
-    unchanged_offer_transition, unsupported_venue_offer_transition, CycleOfferTransition,
-};
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
-use super::reconcile_augment::missing_offer_error_from_payload;
-use super::reconcile_phase::transition_from_dexie_offer_payload;
+use super::reconcile_offer::resolve_watched_offer_transition_for_venue;
 use super::reconcile_persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,7 +36,7 @@ pub struct ReconcileBatchResult {
 fn batch_item_from_transition(
     offer_id: &str,
     market_id: &str,
-    transition: &CycleOfferTransition,
+    transition: &crate::cycle::CycleOfferTransition,
     last_seen_status: Option<i64>,
 ) -> ReconcileBatchItem {
     ReconcileBatchItem {
@@ -59,51 +53,6 @@ fn batch_item_from_transition(
         coinset_tx_ids: transition.coinset_tx_ids.clone(),
         coinset_confirmed_tx_ids: transition.coinset_confirmed_tx_ids.clone(),
         coinset_mempool_tx_ids: transition.coinset_mempool_tx_ids.clone(),
-    }
-}
-
-async fn reconcile_offer_row(
-    store: &SqliteStore,
-    dexie: &DexieClient,
-    target_venue: &str,
-    offer_id: &str,
-    market_id: &str,
-    current_state: &str,
-) -> SignerResult<(CycleOfferTransition, Option<i64>)> {
-    if target_venue != "dexie" {
-        let transition =
-            unsupported_venue_offer_transition(current_state, target_venue).map_err(|err| {
-                crate::error::SignerError::Other(err.to_string())
-            })?;
-        return Ok((transition, None));
-    }
-
-    match dexie.get_offer(offer_id).await {
-        Ok(payload) => {
-            if missing_offer_error_from_payload(&payload).is_some() {
-                let transition = resolve_missing_watched_offer_transition(current_state)
-                    .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
-                return Ok((transition, None));
-            }
-            let offer_body = payload.get("offer").unwrap_or(&payload);
-            let status = super::coinset_tx::dexie_offer_status(offer_body);
-            let transition =
-                transition_from_dexie_offer_payload(store, current_state, offer_body)?;
-            Ok((transition, status))
-        }
-        Err(err) if is_dexie_offer_missing_error_text(&err.to_string()) => {
-            let transition = resolve_missing_watched_offer_transition(current_state)
-                .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
-            Ok((transition, None))
-        }
-        Err(err) => {
-            let transition = unchanged_offer_transition(
-                current_state,
-                &format!("dexie_lookup_error:{err}"),
-            )
-            .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;
-            Ok((transition, None))
-        }
     }
 }
 
@@ -127,23 +76,15 @@ pub async fn reconcile_offers_batch(
     let mut changed_count = 0u64;
 
     for row in rows {
-        let (transition, last_seen_status) = if let Some(dexie) = dexie.as_ref() {
-            reconcile_offer_row(
+        let (transition, last_seen_status, _dexie_error) =
+            resolve_watched_offer_transition_for_venue(
                 &store,
-                dexie,
+                dexie.as_ref(),
                 &venue,
                 &row.offer_id,
-                &row.market_id,
                 &row.state,
             )
-            .await?
-        } else {
-            let transition =
-                unsupported_venue_offer_transition(&row.state, &venue).map_err(|err| {
-                    crate::error::SignerError::Other(err.to_string())
-                })?;
-            (transition, None)
-        };
+            .await?;
 
         persist_offer_lifecycle_transition(
             &store,
@@ -173,6 +114,34 @@ pub async fn reconcile_offers_batch(
         reconciled_count: items.len() as u64,
         changed_count,
         items,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReconcileCliResult {
+    pub state_db: String,
+    pub venue: String,
+    pub market_id: Option<String>,
+    pub reconciled_count: u64,
+    pub changed_count: u64,
+    pub items: Vec<ReconcileBatchItem>,
+}
+
+pub async fn reconcile_offers_cli(
+    db_path: &Path,
+    dexie_base_url: &str,
+    target_venue: &str,
+    market_id: Option<&str>,
+    limit: usize,
+) -> SignerResult<ReconcileCliResult> {
+    let batch = reconcile_offers_batch(db_path, dexie_base_url, target_venue, market_id, limit).await?;
+    Ok(ReconcileCliResult {
+        state_db: db_path.display().to_string(),
+        venue: target_venue.trim().to_ascii_lowercase(),
+        market_id: market_id.map(str::to_string),
+        reconciled_count: batch.reconciled_count,
+        changed_count: batch.changed_count,
+        items: batch.items,
     })
 }
 

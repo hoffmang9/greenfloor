@@ -7,7 +7,6 @@ from typing import Any
 
 from greenfloor.runtime.engine_build_and_post import run_build_and_post_offer_in_process
 from greenfloor.runtime.offer_build_context import OfferBuildContext
-from greenfloor.runtime.resolved_daemon_paths import resolve_resolved_daemon_paths
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,15 +114,14 @@ class OfferPostRequest:
         persist_results: bool = True,
     ) -> tuple[int, dict[str, Any]]:
         del emit_output
-        paths = resolve_resolved_daemon_paths(
-            self.build_ctx.program,
-            self.build_ctx.program_path,
-        )
-        market = self.build_ctx.market
+        ctx = self.build_ctx
+        program_path = ctx.program_path.expanduser().resolve()
         return run_build_and_post_offer_in_process(
-            paths=paths,
+            program_path=program_path,
+            markets_path=program_path.parent / "markets.yaml",
+            testnet_markets_path=None,
             network=self.build_ctx.network,
-            market_id=str(market.market_id),
+            market_id=str(ctx.market.market_id),
             size_base_units=self.size_base_units,
             repeat=self.repeat,
             publish_venue=self.publish_venue,

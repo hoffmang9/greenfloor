@@ -93,14 +93,14 @@ def test_run_once_is_thin_wrapper_over_engine_cycle(monkeypatch, tmp_path: Path)
     mock.assert_called_once()
 
 
-def test_run_daemon_cycle_once_requires_dispatch_state(tmp_path: Path) -> None:
+def test_run_daemon_cycle_once_requires_response_dispatch_state(tmp_path: Path) -> None:
     class _BadResponse:
         exit_code = 0
 
     def _bad_run(_request: Any) -> _BadResponse:
         return _BadResponse()
 
-    with pytest.raises(TypeError, match="dispatch_state"):
+    with pytest.raises(AttributeError):
         run_daemon_cycle_once_via_engine(
             program_path=tmp_path / "program.yaml",
             markets_path=tmp_path / "markets.yaml",
@@ -111,7 +111,7 @@ def test_run_daemon_cycle_once_requires_dispatch_state(tmp_path: Path) -> None:
             state_dir=tmp_path / "state",
             poll_coinset_mempool=False,
             use_websocket_capture=False,
-            dispatch_state=None,
+            dispatch_state=_dispatch_state(),
             coin_watchlist=_coin_watchlist(),
             run_fn=_bad_run,
         )

@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::adapters::{dexie_offer_view_url, post_offer_phase_dexie, DexieClient, SplashClient};
@@ -26,7 +27,7 @@ use crate::storage::{
 use super::bootstrap::{bootstrap_blocks_offer, signer_bootstrap_phase, BootstrapPhaseResult};
 use super::logging::{initialize_manager_file_logging, warn_if_log_level_auto_healed};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct BuildAndPostOfferRequest {
     pub program_path: PathBuf,
     pub markets_path: PathBuf,

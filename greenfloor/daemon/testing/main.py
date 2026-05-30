@@ -6,13 +6,13 @@ from typing import Any
 
 import greenfloor.daemon.cycle_runner as cycle_runner
 from greenfloor.daemon.cycle_runner import (
-    consume_reload_marker,
     resolve_cycle_websocket_capture,
     run_loop,
     run_once,
 )
 from greenfloor.daemon.main import _acquire_daemon_instance_lock
 from greenfloor.daemon.main import main as cli_main
+from greenfloor.daemon.reload import consume_reload_marker
 from greenfloor.daemon.testing.market_cycle_result import MarketCycleResult
 
 # Tests monkeypatch adapter imports on this module object.

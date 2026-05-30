@@ -37,6 +37,6 @@ def test_build_and_post_offer_cli_delegates_to_engine_in_process(
         dry_run=False,
     )
     assert code == 0
-    assert captured["paths"].program_path == program
-    assert captured["paths"].markets_path == markets
+    assert captured["program_path"] == program.expanduser().resolve()
+    assert captured["markets_path"] == markets.expanduser().resolve()
     assert captured["market_id"] == "m1"

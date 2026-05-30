@@ -51,11 +51,17 @@ def test_run_daemon_cycle_once_accepts_typed_request(tmp_path: Path) -> None:
     markets_path.write_text("markets: []\n", encoding="utf-8")
     state_dir = tmp_path / "state"
     state_dir.mkdir()
+    watchlist = require_engine_method(
+        _engine(),
+        "CoinWatchlistCache",
+        missing="coin watchlist cache",
+    )()
     request = request_cls(
         program_path,
         markets_path,
         "https://api.coinset.org",
         state_dir,
+        watchlist,
         poll_coinset_mempool=False,
         use_websocket_capture=False,
         allowed_key_ids=[],

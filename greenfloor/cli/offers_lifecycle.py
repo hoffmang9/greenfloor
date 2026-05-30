@@ -2,16 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 
 from greenfloor.adapters.dexie import DexieAdapter
-from greenfloor.config.io import (
-    load_program_config,
-    resolve_state_db_path,
-)
+from greenfloor.config.io import load_program_config, resolve_state_db_path
+from greenfloor.core.engine_bridge import import_engine, require_engine_method
 from greenfloor.runtime.json_output import format_json_output
-from greenfloor.runtime.offer_reconciliation import reconcile_offers
 from greenfloor.runtime.offers_cancel import cancel_offers_on_venue, select_offers_for_cancel
 from greenfloor.storage.sqlite import SqliteStore
 
@@ -24,32 +20,22 @@ def offers_reconcile(
     limit: int,
     venue: str | None,
 ) -> int:
+    program = load_program_config(program_path)
     db_path = resolve_state_db_path(program_config_path=program_path, explicit_db_path=state_db)
-    store = SqliteStore(db_path)
-    try:
-        program = load_program_config(program_path)
-        target_venue = str(venue or program.offer_publish_venue).strip().lower()
-        batch = reconcile_offers(
-            store=store,
-            dexie_api_base=program.dexie_api_base,
-            target_venue=target_venue,
-            market_id=market_id,
-            limit=limit,
-        )
-        print(
-            format_json_output(
-                {
-                    "state_db": str(db_path),
-                    "venue": target_venue,
-                    "market_id": market_id,
-                    "reconciled_count": batch.reconciled_count,
-                    "changed_count": batch.changed_count,
-                    "items": [asdict(item) for item in batch.items],
-                }
-            )
-        )
-    finally:
-        store.close()
+    target_venue = str(venue or program.offer_publish_venue).strip().lower()
+    reconcile_fn = require_engine_method(
+        import_engine(),
+        "reconcile_offers_cli",
+        missing="offer reconcile cli",
+    )
+    payload = reconcile_fn(
+        str(db_path),
+        program.dexie_api_base,
+        target_venue,
+        market_id.strip() if market_id and market_id.strip() else None,
+        int(limit),
+    )
+    print(format_json_output(dict(payload)))
     return 0
 
 

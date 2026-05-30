@@ -6,7 +6,6 @@ from typing import Any
 
 from greenfloor.core.cycle import is_dexie_offer_missing_error_text
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
-from greenfloor.core.watchlist_constants import RESEED_MEMPOOL_MAX_AGE_SECONDS
 from greenfloor.storage.sqlite import SqliteStore
 
 __all__ = [
@@ -26,6 +25,16 @@ _WATCHLIST_MISSING = "watchlist"
 
 def _watchlist_method(name: str):
     return require_engine_method(import_engine(), name, missing=_WATCHLIST_MISSING)
+
+
+def _engine_constant(name: str) -> int:
+    value = getattr(import_engine(), name, None)
+    if value is None:
+        raise RuntimeError(f"engine missing watchlist constant: {name}")
+    return int(value)
+
+
+RESEED_MEMPOOL_MAX_AGE_SECONDS = _engine_constant("RESEED_MEMPOOL_MAX_AGE_SECONDS")
 
 
 def new_coin_watchlist_cache() -> Any:
