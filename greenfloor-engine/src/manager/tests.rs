@@ -133,7 +133,6 @@ fn resolve_offer_publish_settings_uses_program_defaults() {
         coin_ops_combine_fee_mojos: 0,
         runtime_offer_bootstrap_wait_timeout_seconds: 120,
         runtime_market_slot_count: 0,
-        runtime_parallel_markets: false,
         runtime_offer_parallelism_enabled: false,
         runtime_offer_parallelism_max_workers: 4,
         runtime_dry_run: false,

@@ -13,6 +13,7 @@ use crate::storage::SqliteStore;
 use super::coinset_tx::{
     build_dexie_size_by_offer_id, dexie_offer_status, extract_coinset_tx_ids_from_offer_payload,
 };
+use super::dexie_offer::DexieOfferPayload;
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
 use super::reconcile_persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
 use super::watchlist::cache::CoinWatchlistCache;
@@ -167,23 +168,21 @@ pub async fn run_market_reconcile_phase(
     let dexie_size_by_offer_id =
         build_dexie_size_by_offer_id(&augmented_offers, &market.base_asset);
 
-    for offer in &augmented_offers {
-        let offer_id = offer
-            .as_object()
-            .and_then(|obj| obj.get("id"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_string();
-        if offer_id.is_empty() || !our_offer_ids.contains(&offer_id) {
+    for raw in &augmented_offers {
+        let offer = DexieOfferPayload::new(raw.clone());
+        let Some(offer_id) = offer.id() else {
+            continue;
+        };
+        if !our_offer_ids.contains(&offer_id) {
             continue;
         }
-        let status = dexie_offer_status(offer);
+        let status = offer.status();
         let current_state = state_by_offer_id
             .get(&offer_id)
             .map(String::as_str)
             .unwrap_or("open");
-        let transition = transition_from_dexie_offer_payload(store, current_state, offer)?;
+        let transition =
+            transition_from_dexie_offer_payload(store, current_state, offer.body())?;
         apply_reconcile_transition(
             store,
             market_id,

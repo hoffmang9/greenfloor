@@ -27,7 +27,6 @@ pub struct ManagerProgramConfig {
     pub coin_ops_combine_fee_mojos: i64,
     pub runtime_offer_bootstrap_wait_timeout_seconds: u64,
     pub runtime_market_slot_count: u64,
-    pub runtime_parallel_markets: bool,
     pub runtime_offer_parallelism_enabled: bool,
     pub runtime_offer_parallelism_max_workers: usize,
     pub runtime_dry_run: bool,
@@ -60,7 +59,6 @@ struct AppYaml {
 struct RuntimeYaml {
     offer_bootstrap_wait_timeout_seconds: Option<u64>,
     market_slot_count: Option<u64>,
-    parallel_markets: Option<bool>,
     offer_parallelism_enabled: Option<bool>,
     offer_parallelism_max_workers: Option<u64>,
     dry_run: Option<bool>,
@@ -191,7 +189,6 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
     let runtime = parsed.runtime.unwrap_or(RuntimeYaml {
         offer_bootstrap_wait_timeout_seconds: None,
         market_slot_count: None,
-        parallel_markets: None,
         offer_parallelism_enabled: None,
         offer_parallelism_max_workers: None,
         dry_run: None,
@@ -202,7 +199,6 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
         .unwrap_or(120)
         .max(10);
     let runtime_market_slot_count = runtime.market_slot_count.unwrap_or(0);
-    let runtime_parallel_markets = runtime.parallel_markets.unwrap_or(false);
     let runtime_offer_parallelism_enabled = runtime.offer_parallelism_enabled.unwrap_or(false);
     let runtime_offer_parallelism_max_workers = runtime
         .offer_parallelism_max_workers
@@ -257,7 +253,6 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
         coin_ops_combine_fee_mojos,
         runtime_offer_bootstrap_wait_timeout_seconds,
         runtime_market_slot_count,
-        runtime_parallel_markets,
         runtime_offer_parallelism_enabled,
         runtime_offer_parallelism_max_workers,
         runtime_dry_run,

@@ -59,7 +59,6 @@ fn sample_program(parallelism_enabled: bool, dry_run: bool) -> ManagerProgramCon
         coin_ops_combine_fee_mojos: 0,
         runtime_offer_bootstrap_wait_timeout_seconds: 120,
         runtime_market_slot_count: 1,
-        runtime_parallel_markets: false,
         runtime_offer_parallelism_enabled: parallelism_enabled,
         runtime_offer_parallelism_max_workers: 2,
         runtime_dry_run: dry_run,

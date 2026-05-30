@@ -5,12 +5,15 @@ use crate::runtime;
 
 use engine_core::load_program_config;
 use engine_core::daemon::{
-    initialize_daemon_file_logging, reconcile_offers_batch, resolve_coinset_ws_url,
+    initialize_daemon_file_logging, resolve_coinset_ws_url,
     run_daemon_cycle_once, start_coinset_websocket_loop, websocket_capture_enabled,
     CoinWatchlistCache, DaemonCycleOnceResponse, DaemonCycleTestControls, DaemonDispatchState,
     DaemonInstanceLock, DaemonRunOnceRequest,
 };
-use crate::py_utils::{dict_from_json_value, to_py_err};
+use crate::engine_contracts_py::{
+    reconcile_offers_batch_typed, PyDaemonCycleSummary, PyReconcileBatchResult,
+};
+use crate::py_utils::to_py_err;
 use engine_core::error::SignerError;
 use engine_core::storage::resolve_state_db_path;
 use pyo3::exceptions::PyException;
@@ -223,16 +226,15 @@ struct PyDaemonCycleOnceResponse {
     #[pyo3(get)]
     dispatch_state: PyDaemonDispatchState,
     #[pyo3(get)]
-    cycle_summary: Py<PyAny>,
+    cycle_summary: Py<PyDaemonCycleSummary>,
 }
 
 impl PyDaemonCycleOnceResponse {
     fn from_engine(py: Python<'_>, response: DaemonCycleOnceResponse) -> PyResult<Self> {
-        let summary_value = serde_json::to_value(&response.cycle_summary).map_err(to_py_err)?;
         Ok(Self {
             exit_code: response.exit_code,
             dispatch_state: response.dispatch_state.into(),
-            cycle_summary: dict_from_json_value(py, summary_value)?,
+            cycle_summary: Py::new(py, PyDaemonCycleSummary::from(response.cycle_summary))?,
         })
     }
 }
@@ -358,24 +360,8 @@ fn reconcile_offers_batch_py(
     target_venue: String,
     market_id: Option<String>,
     limit: usize,
-) -> PyResult<Py<PyAny>> {
-    let market_filter = market_id
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    let market_ref = market_filter.as_deref();
-    let batch = py.detach(move || {
-        runtime()
-            .block_on(reconcile_offers_batch(
-                &db_path,
-                &dexie_base_url,
-                &target_venue,
-                market_ref,
-                limit,
-            ))
-            .map_err(to_py_err)
-    })?;
-    let value = serde_json::to_value(&batch).map_err(to_py_err)?;
-    dict_from_json_value(py, value)
+) -> PyResult<Py<PyReconcileBatchResult>> {
+    reconcile_offers_batch_typed(py, db_path, dexie_base_url, target_venue, market_id, limit)
 }
 
 #[pyfunction]

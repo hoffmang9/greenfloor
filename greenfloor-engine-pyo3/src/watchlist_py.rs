@@ -203,13 +203,8 @@ fn build_dexie_size_by_offer_id_py(
     })
 }
 
-#[pyfunction]
-#[pyo3(name = "reseed_mempool_max_age_seconds")]
-fn reseed_mempool_max_age_seconds_py() -> i64 {
-    RESEED_MEMPOOL_MAX_AGE_SECONDS
-}
-
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("RESEED_MEMPOOL_MAX_AGE_SECONDS", RESEED_MEMPOOL_MAX_AGE_SECONDS)?;
     m.add_function(wrap_pyfunction!(active_offer_counts_by_size, m)?)?;
     m.add_function(wrap_pyfunction!(active_offer_counts_by_size_and_side, m)?)?;
     m.add_function(wrap_pyfunction!(match_watched_coin_ids_py, m)?)?;
@@ -218,6 +213,5 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(watchlist_offer_ids_from_store_py, m)?)?;
     m.add_function(wrap_pyfunction!(update_market_coin_watchlist_from_offers_py, m)?)?;
     m.add_function(wrap_pyfunction!(build_dexie_size_by_offer_id_py, m)?)?;
-    m.add_function(wrap_pyfunction!(reseed_mempool_max_age_seconds_py, m)?)?;
     Ok(())
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 
 from greenfloor.adapters.dexie import DexieAdapter
@@ -43,7 +44,7 @@ def offers_reconcile(
                     "market_id": market_id,
                     "reconciled_count": batch.reconciled_count,
                     "changed_count": batch.changed_count,
-                    "items": batch.items,
+                    "items": [asdict(item) for item in batch.items],
                 }
             )
         )

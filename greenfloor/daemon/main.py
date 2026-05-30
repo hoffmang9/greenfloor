@@ -18,13 +18,9 @@ from greenfloor.daemon.cycle_runner import (
 from greenfloor.daemon.engine_logging import initialize_daemon_logging
 
 
-def _engine():
-    return import_engine()
-
-
 def _acquire_daemon_instance_lock(*, state_dir: Path, mode: str):
     acquire = require_engine_method(
-        _engine(),
+        import_engine(),
         "acquire_daemon_instance_lock",
         missing="daemon instance lock",
     )
@@ -33,7 +29,7 @@ def _acquire_daemon_instance_lock(*, state_dir: Path, mode: str):
 
 def _daemon_lock_conflict_type():
     return require_engine_method(
-        _engine(),
+        import_engine(),
         "DaemonLockConflict",
         missing="daemon lock conflict type",
     )
@@ -116,10 +112,7 @@ def main() -> None:
                 )
             raise SystemExit(exit_code)
 
-        with _acquire_daemon_instance_lock(
-            state_dir=state_dir,
-            mode="loop",
-        ):
+        with _acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
             exit_code = run_loop(
                 program_path=Path(args.program_config),
                 markets_path=Path(args.markets_config),

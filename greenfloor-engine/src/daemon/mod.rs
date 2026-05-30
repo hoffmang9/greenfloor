@@ -8,6 +8,7 @@ mod coinset_tx;
 mod coinset_ws;
 mod cycle_entry;
 mod cycle_paths;
+mod dexie_offer;
 mod disabled_markets;
 mod exports;
 mod inventory_phase;

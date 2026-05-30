@@ -26,17 +26,15 @@ __all__ = [
     "run_once",
 ]
 
-
-def _engine():
-    return import_engine()
+_DAEMON_ENGINE_MISSING = "daemon cycle"
 
 
-def _require(name: str, *, missing: str):
-    return require_engine_method(_engine(), name, missing=missing)
+def _daemon_method(name: str):
+    return require_engine_method(import_engine(), name, missing=_DAEMON_ENGINE_MISSING)
 
 
 def _new_dispatch_state() -> Any:
-    dispatch_cls = _require("DaemonDispatchState", missing="daemon dispatch state")
+    dispatch_cls = _daemon_method("DaemonDispatchState")
     return dispatch_cls(0, [])
 
 
@@ -44,10 +42,7 @@ def resolve_cycle_websocket_capture(*, program, loop_websocket_active: bool) -> 
     if loop_websocket_active:
         return False
     mode = str(getattr(program, "tx_block_trigger_mode", "websocket"))
-    use_websocket = _require(
-        "use_websocket_capture_for_trigger_mode",
-        missing="daemon websocket capture policy",
-    )
+    use_websocket = _daemon_method("use_websocket_capture_for_trigger_mode")
     return bool(use_websocket(mode))
 
 
@@ -60,7 +55,7 @@ def consume_reload_marker(state_dir: Path) -> bool:
 
 
 def resolve_cycle_state_db_path(*, program_home_dir: str, db_path_override: str | None) -> str:
-    resolve = _require("resolve_state_db_path", missing="state db path resolution")
+    resolve = _daemon_method("resolve_state_db_path")
     return str(resolve(Path(program_home_dir).expanduser(), db_path_override))
 
 
@@ -79,8 +74,8 @@ def _build_engine_request(
     coin_watchlist: Any,
     test_controls: Mapping[str, Any] | None = None,
 ) -> Any:
-    controls_cls = _require("DaemonCycleTestControls", missing="daemon cycle test controls")
-    request_cls = _require("DaemonRunOnceRequest", missing="daemon cycle request")
+    controls_cls = _daemon_method("DaemonCycleTestControls")
+    request_cls = _daemon_method("DaemonRunOnceRequest")
 
     forced = None
     skip_strategy = False
@@ -140,7 +135,7 @@ def run_daemon_cycle_once_via_engine(
         test_controls=test_controls,
     )
 
-    runner = run_fn or _require("run_daemon_cycle_once", missing="daemon cycle")
+    runner = run_fn or _daemon_method("run_daemon_cycle_once")
     response = runner(request)
     exit_code = int(getattr(response, "exit_code", 1))
     updated = getattr(response, "dispatch_state", None)
@@ -158,14 +153,12 @@ def run_once(
     state_dir: Path,
     poll_coinset_mempool: bool = True,
     use_websocket_capture: bool = False,
-    program=None,
     testnet_markets_path: Path | None = None,
     dispatch_state: Any | None = None,
     *,
     coin_watchlist: Any,
     test_controls: Mapping[str, Any] | None = None,
 ) -> int:
-    del program
     state = dispatch_state or _new_dispatch_state()
     exit_code, updated_state = run_daemon_cycle_once_via_engine(
         program_path=program_path,
@@ -210,10 +203,7 @@ def run_loop(
         program_home_dir=current_program.home_dir,
         db_path_override=db_path_override,
     )
-    start_ws_loop = _require(
-        "start_coinset_websocket_loop",
-        missing="daemon coinset websocket loop",
-    )
+    start_ws_loop = _daemon_method("start_coinset_websocket_loop")
     ws_client = start_ws_loop(db_path, program_path, coinset_base_url, coin_watchlist)
 
     try:
@@ -228,7 +218,6 @@ def run_loop(
                 state_dir=state_dir,
                 poll_coinset_mempool=False,
                 use_websocket_capture=False,
-                program=current_program,
                 testnet_markets_path=testnet_markets_path,
                 dispatch_state=dispatch_state,
                 coin_watchlist=coin_watchlist,

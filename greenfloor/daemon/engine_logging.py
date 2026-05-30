@@ -7,18 +7,15 @@ from pathlib import Path
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
 
 
-def _engine():
-    return import_engine()
-
-
 def initialize_daemon_logging(*, program, program_path: Path) -> None:
+    engine = import_engine()
     init_logging = require_engine_method(
-        _engine(),
+        engine,
         "initialize_daemon_file_logging",
         missing="daemon logging",
     )
     warn_healed = require_engine_method(
-        _engine(),
+        engine,
         "warn_if_daemon_log_level_auto_healed",
         missing="daemon logging heal warning",
     )

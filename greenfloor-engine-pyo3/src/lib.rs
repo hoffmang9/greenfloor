@@ -6,6 +6,7 @@
 mod coin_ops_py;
 mod cycle;
 mod daemon_py;
+mod engine_contracts_py;
 mod execution_py;
 mod hex_py;
 mod manager_py;
@@ -263,6 +264,7 @@ fn greenfloor_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     offer_request_py::register(m)?;
     retry_py::register(m)?;
     wallet_io_py::register(m)?;
+    engine_contracts_py::register(m)?;
     manager_py::register(m)?;
     daemon_py::register(m)?;
     watchlist_py::register(m)?;

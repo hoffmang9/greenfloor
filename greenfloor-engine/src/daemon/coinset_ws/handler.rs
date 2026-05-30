@@ -164,3 +164,82 @@ pub fn handle_ws_text(
 pub fn ws_error(err: tokio_tungstenite::tungstenite::Error) -> SignerError {
     SignerError::Other(format!("coinset_ws_once_error:{err}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::daemon::watchlist::cache::CoinWatchlistCache;
+    use serde_json::json;
+    use tempfile::tempdir;
+
+    fn open_store() -> (tempfile::TempDir, SqliteStore) {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("state.db");
+        let store = SqliteStore::open(&path).expect("open");
+        (dir, store)
+    }
+
+    #[test]
+    fn handle_ws_text_routes_mempool_and_confirmed_tx_ids() {
+        let (_dir, store) = open_store();
+        let watchlist = CoinWatchlistCache::new();
+        let tx_id = "c".repeat(64);
+        handle_ws_text(
+            &store,
+            &watchlist,
+            &json!({"event": "mempool_seen", "tx_id": tx_id}).to_string(),
+        )
+        .expect("mempool");
+        handle_ws_text(
+            &store,
+            &watchlist,
+            &json!({"event": "tx_confirmed", "tx_id": tx_id}).to_string(),
+        )
+        .expect("confirmed");
+
+        let events = store
+            .list_recent_audit_events(
+                Some(&[
+                    "coinset_ws_mempool_event",
+                    "coinset_ws_tx_block_event",
+                ]),
+                None,
+                10,
+            )
+            .expect("events");
+        let types: Vec<_> = events.iter().map(|row| row.event_type.as_str()).collect();
+        assert_eq!(types.len(), 2);
+        assert!(types.contains(&"coinset_ws_mempool_event"));
+        assert!(types.contains(&"coinset_ws_tx_block_event"));
+    }
+
+    #[test]
+    fn handle_ws_text_emits_coin_observed_audit() {
+        let (_dir, store) = open_store();
+        let watchlist = CoinWatchlistCache::new();
+        let coin_id = "d".repeat(64);
+        handle_ws_text(
+            &store,
+            &watchlist,
+            &json!({"involved_coins": [format!("0x{coin_id}")]}).to_string(),
+        )
+        .expect("coin");
+        let events = store
+            .list_recent_audit_events(Some(&["coinset_ws_coin_observed"]), None, 5)
+            .expect("events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "coinset_ws_coin_observed");
+    }
+
+    #[test]
+    fn handle_ws_text_emits_parse_error_for_invalid_json() {
+        let (_dir, store) = open_store();
+        let watchlist = CoinWatchlistCache::new();
+        handle_ws_text(&store, &watchlist, "{not-json").expect("parse error audit");
+        let events = store
+            .list_recent_audit_events(Some(&["coinset_ws_payload_parse_error"]), None, 5)
+            .expect("events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "coinset_ws_payload_parse_error");
+    }
+}

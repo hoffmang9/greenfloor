@@ -9,7 +9,6 @@ def write_program(
     path: Path,
     home_dir: Path,
     *,
-    parallel_markets: bool = False,
     dexie_api_base: str = "https://api.dexie.space",
 ) -> None:
     path.write_text(
@@ -22,7 +21,6 @@ def write_program(
                 "runtime:",
                 "  loop_interval_seconds: 30",
                 "  dry_run: false",
-                f"  parallel_markets: {'true' if parallel_markets else 'false'}",
                 "chain_signals:",
                 "  tx_block_trigger:",
                 '    mode: "websocket"',

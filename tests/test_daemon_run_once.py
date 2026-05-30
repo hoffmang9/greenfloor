@@ -42,7 +42,7 @@ def test_run_once_multi_market_sequential_execution(
     state_dir.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program(program, home, parallel_markets=True, dexie_api_base=dexie_mock.base_url)
+    write_program(program, home, dexie_api_base=dexie_mock.base_url)
     write_markets_two(markets)
     db_path = tmp_path / "state.sqlite"
 
@@ -59,15 +59,9 @@ def test_run_once_multi_market_sequential_execution(
 
     store = SqliteStore(db_path)
     try:
-        ignored = store.list_recent_audit_events(
-            event_types=["parallel_markets_ignored"],
-            limit=5,
-        )
         events = store.list_recent_audit_events(event_types=["daemon_cycle_summary"], limit=1)
     finally:
         store.close()
-    assert len(ignored) == 1
-    assert ignored[0]["payload"]["enabled_market_count"] == 2
     assert len(events) == 1
     payload = events[0]["payload"]
     assert payload["markets_attempted"] == 2
@@ -80,7 +74,7 @@ def test_run_once_multi_market_failure_isolated(tmp_path: Path, dexie_mock: Dexi
     state_dir.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program(program, home, parallel_markets=True, dexie_api_base=dexie_mock.base_url)
+    write_program(program, home, dexie_api_base=dexie_mock.base_url)
     write_markets_two(markets)
     db_path = tmp_path / "state.sqlite"
 
@@ -111,7 +105,7 @@ def test_run_once_multi_market_failure_isolated(tmp_path: Path, dexie_mock: Dexi
     assert payload["error_count"] >= 1
 
 
-def test_run_once_sequential_market_failure_isolated(
+def test_run_once_sequential_slot_rotation_picks_up_new_market_next_cycle(
     tmp_path: Path, dexie_mock: DexieHttpMock
 ) -> None:
     home = tmp_path / "home"
@@ -119,46 +113,7 @@ def test_run_once_sequential_market_failure_isolated(
     state_dir.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program(program, home, parallel_markets=False, dexie_api_base=dexie_mock.base_url)
-    write_markets_two(markets)
-    db_path = tmp_path / "state.sqlite"
-
-    code = run_once(
-        program_path=program,
-        markets_path=markets,
-        allowed_keys=None,
-        db_path_override=str(db_path),
-        coinset_base_url="https://coinset.org",
-        state_dir=state_dir,
-        poll_coinset_mempool=False,
-        test_controls={
-            "skip_strategy_execution": True,
-            "force_market_error_for": "m1",
-        },
-    )
-    assert code == 0
-
-    store = SqliteStore(db_path)
-    try:
-        events = store.list_recent_audit_events(event_types=["daemon_cycle_summary"], limit=1)
-    finally:
-        store.close()
-    assert len(events) == 1
-    payload = events[0]["payload"]
-    assert payload["markets_attempted"] == 2
-    assert payload["markets_processed"] == 1
-    assert payload["error_count"] >= 1
-
-
-def test_run_once_parallel_picks_up_new_market_next_cycle(
-    tmp_path: Path, dexie_mock: DexieHttpMock
-) -> None:
-    home = tmp_path / "home"
-    state_dir = home / "state"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    program = tmp_path / "program.yaml"
-    markets = tmp_path / "markets.yaml"
-    write_program(program, home, parallel_markets=True, dexie_api_base=dexie_mock.base_url)
+    write_program(program, home, dexie_api_base=dexie_mock.base_url)
     write_markets(markets)
     db_path = tmp_path / "state.sqlite"
 
@@ -252,7 +207,7 @@ def test_run_once_all_markets_fail_exits_non_zero(
     state_dir.mkdir(parents=True, exist_ok=True)
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_program(program, home, parallel_markets=False, dexie_api_base=dexie_mock.base_url)
+    write_program(program, home, dexie_api_base=dexie_mock.base_url)
     write_markets(markets)
     db_path = tmp_path / "state.sqlite"
 

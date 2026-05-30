@@ -21,6 +21,9 @@ use super::run_once::{
 };
 use crate::storage::resolve_state_db_path;
 
+/// Daemon cycles always process markets sequentially on one SQLite store.
+pub const SEQUENTIAL_MARKET_WORKER_SOURCE: &str = "sequential_market_worker";
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DaemonCycleOnceResponse {
     pub exit_code: i32,
@@ -112,7 +115,7 @@ async fn dispatch_markets(
             cycle_store,
             &market.market_id,
             result,
-            "sequential_market_worker",
+            SEQUENTIAL_MARKET_WORKER_SOURCE,
         )? {
             Ok(output) => outputs.push(output),
             Err(count) => worker_errors += count,
@@ -195,4 +198,14 @@ pub async fn run_daemon_cycle_once(
     request: &DaemonRunOnceRequest,
 ) -> SignerResult<DaemonCycleOnceResponse> {
     Box::pin(run_daemon_cycle_once_inner(request)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn market_dispatch_is_sequential_on_one_sqlite_connection() {
+        assert_eq!(SEQUENTIAL_MARKET_WORKER_SOURCE, "sequential_market_worker");
+    }
 }

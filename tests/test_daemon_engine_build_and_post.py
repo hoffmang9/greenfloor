@@ -36,22 +36,33 @@ def test_resolve_resolved_daemon_paths_uses_context_override(tmp_path: Path) -> 
     assert resolved.markets_path == markets_path.resolve()
 
 
+def _fake_build_response() -> MagicMock:
+    response = MagicMock()
+    response.exit_code = 0
+    response.payload = {
+        "publish_failures": 0,
+        "results": [{"result": {"success": True, "id": "offer-rust-1"}}],
+    }
+    return response
+
+
 def test_run_build_and_post_offer_in_process_delegates_to_engine(monkeypatch) -> None:
     captured: dict[str, Any] = {}
 
-    def _fake_engine(request: dict[str, Any]) -> dict[str, Any]:
+    def _fake_run(request: Any) -> MagicMock:
         captured["request"] = request
-        return {
-            "exit_code": 0,
-            "payload": {
-                "publish_failures": 0,
-                "results": [{"result": {"success": True, "id": "offer-rust-1"}}],
-            },
-        }
+        return _fake_build_response()
 
+    fake_engine = MagicMock()
+
+    def _capture_request(*_args: Any, **kwargs: Any) -> dict[str, Any]:
+        return kwargs
+
+    fake_engine.BuildAndPostOfferRequest = _capture_request
+    fake_engine.build_and_post_offer = _fake_run
     monkeypatch.setattr(
-        "greenfloor.runtime.engine_build_and_post._engine_build_and_post_offer",
-        lambda: _fake_engine,
+        "greenfloor.runtime.engine_build_and_post.import_engine",
+        lambda: fake_engine,
     )
     paths = ResolvedDaemonPaths(
         program_path=Path("/tmp/program.yaml"),
@@ -74,26 +85,43 @@ def test_run_build_and_post_offer_in_process_delegates_to_engine(monkeypatch) ->
 
 
 def test_run_managed_offer_post_uses_engine_build_and_post(monkeypatch) -> None:
-    engine = MagicMock(
-        return_value={
-            "exit_code": 0,
-            "payload": {
-                "publish_failures": 0,
-                "results": [
-                    {
-                        "result": {
-                            "success": True,
-                            "id": "offer-managed-1",
-                            "timing_ms": {"create_total_ms": 42},
-                        }
-                    }
-                ],
-            },
+    response = MagicMock()
+    response.exit_code = 0
+    response.payload = {
+        "publish_failures": 0,
+        "results": [
+            {
+                "result": {
+                    "success": True,
+                    "id": "offer-managed-1",
+                    "timing_ms": {"create_total_ms": 42},
+                }
+            }
+        ],
+    }
+
+    def _build_request(
+        program_path: Path,
+        markets_path: Path,
+        network: str,
+        size_base_units: int,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return {
+            "program_path": program_path,
+            "markets_path": markets_path,
+            "network": network,
+            "size_base_units": size_base_units,
+            **kwargs,
         }
-    )
+
+    engine = MagicMock(return_value=response)
+    fake_module = MagicMock()
+    fake_module.BuildAndPostOfferRequest = _build_request
+    fake_module.build_and_post_offer = engine
     monkeypatch.setattr(
-        "greenfloor.runtime.engine_build_and_post._engine_build_and_post_offer",
-        lambda: engine,
+        "greenfloor.runtime.engine_build_and_post.import_engine",
+        lambda: fake_module,
     )
     paths = ResolvedDaemonPaths(
         program_path=Path("/tmp/program.yaml"),

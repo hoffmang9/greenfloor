@@ -40,12 +40,13 @@ def _patch_engine(monkeypatch, *, ws_client_factory, init_logging=None, warn_hea
                 warn_healed(missing, path)
 
     fake_engine = _FakeEngine()
-    monkeypatch.setattr(main, "_engine", lambda: fake_engine)
     import greenfloor.daemon.cycle_runner as cycle_runner
     import greenfloor.daemon.engine_logging as engine_logging
+    import greenfloor.daemon.main as daemon_main
 
-    monkeypatch.setattr(cycle_runner, "_engine", lambda: fake_engine)
-    monkeypatch.setattr(engine_logging, "_engine", lambda: fake_engine)
+    monkeypatch.setattr(cycle_runner, "import_engine", lambda: fake_engine)
+    monkeypatch.setattr(engine_logging, "import_engine", lambda: fake_engine)
+    monkeypatch.setattr(daemon_main, "import_engine", lambda: fake_engine)
 
 
 def test_run_loop_starts_coinset_websocket_client(monkeypatch, tmp_path: Path, caplog) -> None:

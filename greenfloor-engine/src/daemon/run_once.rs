@@ -101,16 +101,6 @@ pub async fn build_cycle_plan(
 
     let runtime_market_slot_count = program.runtime_market_slot_count;
     let runtime_dry_run = program.runtime_dry_run;
-    if program.runtime_parallel_markets && enabled_market_ids.len() > 1 {
-        store.add_audit_event(
-            "parallel_markets_ignored",
-            &json!({
-                "enabled_market_count": enabled_market_ids.len(),
-                "reason": "daemon runs markets sequentially on one sqlite connection",
-            }),
-            None,
-        )?;
-    }
     let mut dispatch_state = request.dispatch_state.clone();
     for market_id in &stale_open_sweep.requeue_market_ids {
         dispatch_state.immediate_requeue_ids =

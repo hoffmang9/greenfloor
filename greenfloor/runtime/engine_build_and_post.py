@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
 from greenfloor.runtime.resolved_daemon_paths import ResolvedDaemonPaths
 
-
-def _engine_build_and_post_offer() -> Any:
-    return require_engine_method(
-        import_engine(),
-        "build_and_post_offer",
-        missing="build_and_post_offer",
-    )
+__all__ = ["run_build_and_post_offer_in_process"]
 
 
 def run_build_and_post_offer_in_process(
@@ -40,37 +34,42 @@ def run_build_and_post_offer_in_process(
     if market_id is None and pair is None:
         raise ValueError("provide exactly one of market_id or pair")
 
-    request: dict[str, Any] = {
-        "program_path": str(paths.program_path),
-        "markets_path": str(paths.markets_path),
-        "network": network.strip(),
-        "size_base_units": int(size_base_units),
-        "repeat": int(repeat),
-        "drop_only": bool(drop_only),
-        "claim_rewards": bool(claim_rewards),
-        "dry_run": bool(dry_run),
-        "persist_results": bool(persist_results),
-    }
-    if paths.testnet_markets_path is not None:
-        request["testnet_markets_path"] = str(paths.testnet_markets_path)
-    if market_id:
-        request["market_id"] = market_id.strip()
-    if pair:
-        request["pair"] = pair.strip()
-    if publish_venue and publish_venue.strip():
-        request["publish_venue"] = publish_venue.strip()
-    if dexie_base_url and dexie_base_url.strip():
-        request["dexie_base_url"] = dexie_base_url.strip()
-    if splash_base_url and splash_base_url.strip():
-        request["splash_base_url"] = splash_base_url.strip()
-    if action_side and action_side.strip():
-        request["action_side"] = action_side.strip()
+    engine = import_engine()
+    request_cls = require_engine_method(
+        engine,
+        "BuildAndPostOfferRequest",
+        missing="build_and_post_offer request",
+    )
+    run_fn = require_engine_method(
+        engine,
+        "build_and_post_offer",
+        missing="build_and_post_offer",
+    )
 
-    response = _engine_build_and_post_offer()(request)
-    if not isinstance(response, dict):
-        raise TypeError("engine build_and_post_offer returned non-dict response")
-    exit_code = int(response.get("exit_code", 1))
-    payload = response.get("payload", {})
+    request = request_cls(
+        paths.program_path,
+        paths.markets_path,
+        network.strip(),
+        int(size_base_units),
+        testnet_markets_path=paths.testnet_markets_path,
+        market_id=market_id.strip() if market_id else None,
+        pair=pair.strip() if pair else None,
+        repeat=int(repeat),
+        publish_venue=publish_venue.strip() if publish_venue and publish_venue.strip() else None,
+        dexie_base_url=dexie_base_url.strip()
+        if dexie_base_url and dexie_base_url.strip()
+        else None,
+        splash_base_url=splash_base_url.strip()
+        if splash_base_url and splash_base_url.strip()
+        else None,
+        drop_only=bool(drop_only),
+        claim_rewards=bool(claim_rewards),
+        dry_run=bool(dry_run),
+        persist_results=bool(persist_results),
+        action_side=action_side.strip() if action_side and action_side.strip() else None,
+    )
+    response = run_fn(request)
+    payload = response.payload
     if not isinstance(payload, dict):
         raise TypeError("engine build_and_post_offer payload is not a dict")
-    return exit_code, cast(dict[str, Any], payload)
+    return int(response.exit_code), dict(payload)

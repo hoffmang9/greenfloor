@@ -13,7 +13,7 @@
 
 - **Native cycle phases:** `daemon/preamble.rs`, `strategy_support.rs`, `market_phases.rs` — XCH price fetch, inventory scan, strategy evaluation/planning, coin-op planning all in Rust.
 - **Unified entrypoints:** `run_daemon_cycle_once` no longer takes a Python bridge; production `greenfloord` uses in-process PyO3 (native `daemon run-once` CLI removed 2026-05-30).
-- **Parallel markets:** `runtime.parallel_markets` is accepted but ignored when multiple markets are selected; cycle runs markets sequentially on one SQLite connection and logs `parallel_markets_ignored`.
+- **Market dispatch:** Daemon cycles always process selected markets sequentially on one SQLite connection (in-process PyO3; no cross-market parallelism).
 - **Exit codes:** non-zero when all selected markets fail (`compute_cycle_exit_code`).
 - **Removed:** `python_bridge.rs`, `daemon_inprocess_bridge.rs`, `rust_cycle_bridge.py`, `bridge_subprocess.py`, dead split-phase APIs in `runner.py`.
 - **Tests:** env-hook fixtures (`GREENFLOOR_XCH_PRICE_USD`, `GREENFLOOR_TEST_FORCE_MARKET_ERROR`, `GREENFLOOR_TEST_SKIP_STRATEGY_EXEC`); `tests/test_daemon_cycle_speed.py`.

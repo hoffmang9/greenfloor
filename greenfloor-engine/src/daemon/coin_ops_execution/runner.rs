@@ -13,6 +13,7 @@ use crate::offer::resolve_offer_assets_for_action;
 use crate::storage::SqliteStore;
 
 use super::super::coinset_tx::extract_coin_ids_from_offer_payload;
+use super::super::dexie_offer::DexieOfferPayload;
 use super::super::watchlist::watchlist_offer_ids;
 use super::combine::execute_daemon_combine_plan;
 use super::context::CoinOpExecContext;
@@ -35,11 +36,14 @@ pub fn watched_coin_ids_for_market(
     let watch_offer_ids = watchlist_offer_ids(store, market_id)?;
     let mut watched = HashSet::new();
     for offer in offers {
-        let offer_id = offer.get("id").and_then(Value::as_str).unwrap_or("").trim();
-        if offer_id.is_empty() || !watch_offer_ids.contains(offer_id) {
+        let payload = DexieOfferPayload::new(offer.clone());
+        let Some(offer_id) = payload.id() else {
+            continue;
+        };
+        if !watch_offer_ids.contains(&offer_id) {
             continue;
         }
-        for coin_id in extract_coin_ids_from_offer_payload(offer) {
+        for coin_id in extract_coin_ids_from_offer_payload(payload.body()) {
             watched.insert(coin_id);
         }
     }
