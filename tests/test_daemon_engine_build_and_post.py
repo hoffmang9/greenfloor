@@ -8,30 +8,30 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from greenfloor.runtime.daemon_config_paths import (
-    DaemonConfigPaths,
-    resolve_daemon_config_paths,
-    set_daemon_config_paths,
-)
 from greenfloor.runtime.engine_build_and_post import run_build_and_post_offer_in_process
 from greenfloor.runtime.offer_post_request import parse_managed_offer_post_result
+from greenfloor.runtime.resolved_daemon_paths import (
+    ResolvedDaemonPaths,
+    resolve_resolved_daemon_paths,
+    set_resolved_daemon_paths,
+)
 from tests.helpers.daemon_test_fixtures import market_config, signer_program_config
 
 
-def test_resolve_daemon_config_paths_uses_context_override(tmp_path: Path) -> None:
+def test_resolve_resolved_daemon_paths_uses_context_override(tmp_path: Path) -> None:
     program = signer_program_config()
     program_path = tmp_path / "config" / "program.yaml"
     markets_path = tmp_path / "config" / "markets.yaml"
     program_path.parent.mkdir(parents=True)
     program_path.write_text("app: {}\n", encoding="utf-8")
     markets_path.write_text("markets: []\n", encoding="utf-8")
-    set_daemon_config_paths(
-        DaemonConfigPaths(
+    set_resolved_daemon_paths(
+        ResolvedDaemonPaths(
             program_path=program_path,
             markets_path=markets_path,
         )
     )
-    resolved = resolve_daemon_config_paths(program)
+    resolved = resolve_resolved_daemon_paths(program)
     assert resolved.program_path == program_path.resolve()
     assert resolved.markets_path == markets_path.resolve()
 
@@ -53,7 +53,7 @@ def test_run_build_and_post_offer_in_process_delegates_to_engine(monkeypatch) ->
         "greenfloor.runtime.engine_build_and_post._engine_build_and_post_offer",
         lambda: _fake_engine,
     )
-    paths = DaemonConfigPaths(
+    paths = ResolvedDaemonPaths(
         program_path=Path("/tmp/program.yaml"),
         markets_path=Path("/tmp/markets.yaml"),
     )
@@ -95,7 +95,7 @@ def test_run_managed_offer_post_uses_engine_build_and_post(monkeypatch) -> None:
         "greenfloor.runtime.engine_build_and_post._engine_build_and_post_offer",
         lambda: engine,
     )
-    paths = DaemonConfigPaths(
+    paths = ResolvedDaemonPaths(
         program_path=Path("/tmp/program.yaml"),
         markets_path=Path("/tmp/markets.yaml"),
     )
@@ -119,7 +119,7 @@ def test_run_managed_offer_post_uses_engine_build_and_post(monkeypatch) -> None:
 
 
 def test_run_build_and_post_offer_in_process_requires_market_selector() -> None:
-    paths = DaemonConfigPaths(
+    paths = ResolvedDaemonPaths(
         program_path=Path("/tmp/program.yaml"),
         markets_path=Path("/tmp/markets.yaml"),
     )

@@ -10,9 +10,7 @@ from greenfloor.core.cycle_reseed import ReseedGapPlan, ReseedSkipReason
 from greenfloor.core.strategy import PlannedAction, StrategyConfig
 from greenfloor.daemon.market_logging import _log_market_decision
 from greenfloor.daemon.testing.watchlist import active_offer_counts_by_size
-from greenfloor.runtime.offer_watchlist import (
-    RESEED_MEMPOOL_MAX_AGE_SECONDS as _RESEED_MEMPOOL_MAX_AGE_SECONDS,
-)
+from greenfloor.runtime.offer_watchlist import reseed_mempool_max_age_seconds
 from greenfloor.storage.sqlite import SqliteStore
 
 _ACTIVE_OFFER_STATES_FOR_RESEED = frozenset({"open", "refresh_due"})
@@ -49,7 +47,7 @@ def _reseed_skip_log_extra(plan: ReseedGapPlan, ctx: _ReseedLogContext) -> dict:
         case ReseedSkipReason.ACTIVE_OFFER_TARGETS_SATISFIED:
             return {
                 "active_states": sorted(_ACTIVE_OFFER_STATES_FOR_RESEED),
-                "recent_mempool_window_seconds": _RESEED_MEMPOOL_MAX_AGE_SECONDS,
+                "recent_mempool_window_seconds": reseed_mempool_max_age_seconds(),
                 "state_counts": ctx.state_counts,
                 "active_counts_by_size": ctx.active_counts_by_size,
                 "target_counts_by_size": ctx.target_counts_by_size,

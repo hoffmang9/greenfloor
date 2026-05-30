@@ -7,9 +7,9 @@ use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
 use crate::offer::resolve_offer_assets_for_action;
 
-use crate::daemon::config_paths::DaemonConfigPaths;
+use crate::daemon::cycle_paths::DaemonCyclePaths;
 
-pub fn reservation_wallet_id(paths: &DaemonConfigPaths) -> SignerResult<String> {
+pub fn reservation_wallet_id(paths: &DaemonCyclePaths) -> SignerResult<String> {
     let config = load_signer_config(&paths.program_path)?;
     let encoded = hex::encode(config.vault.launcher_id);
     if encoded.is_empty() {
@@ -19,7 +19,7 @@ pub fn reservation_wallet_id(paths: &DaemonConfigPaths) -> SignerResult<String> 
 }
 
 pub async fn parallel_reservation_context(
-    paths: &DaemonConfigPaths,
+    paths: &DaemonCyclePaths,
     market: &MarketConfig,
     fee_amount_mojos: i64,
 ) -> SignerResult<ParallelReservationContext> {
@@ -105,7 +105,7 @@ vault:
         )
         .expect("write");
 
-        let paths = DaemonConfigPaths::new(
+        let paths = DaemonCyclePaths::new(
             program_path.clone(),
             dir.path().join("markets.yaml"),
             None,

@@ -36,6 +36,17 @@ pub fn state_db_path_for_home(home_dir: &Path) -> PathBuf {
     home_dir.join("db").join("greenfloor.sqlite")
 }
 
+/// Resolve SQLite state DB path (explicit override or default under program home).
+pub fn resolve_state_db_path(home_dir: &Path, explicit_db_path: Option<&str>) -> PathBuf {
+    if let Some(path) = explicit_db_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return PathBuf::from(path);
+    }
+    state_db_path_for_home(home_dir)
+}
+
 #[derive(Debug, Clone)]
 pub struct OfferStateListRow {
     pub offer_id: String,

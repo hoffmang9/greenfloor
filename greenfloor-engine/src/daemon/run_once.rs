@@ -1,4 +1,5 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,8 @@ use crate::cycle::{
     should_use_market_slot_dispatch, StaleSweepProgress,
 };
 use crate::error::SignerResult;
-use crate::storage::{state_db_path_for_home, SqliteStore};
+use crate::daemon::watchlist::cache::CoinWatchlistCache;
+use crate::storage::{resolve_state_db_path, SqliteStore};
 
 use super::market_context::DaemonCycleResources;
 use super::markets::enabled_market_ids;
@@ -44,6 +46,8 @@ pub struct DaemonRunOnceRequest {
     pub dispatch_state: DaemonDispatchState,
     #[serde(default)]
     pub test_controls: DaemonCycleTestControls,
+    #[serde(skip)]
+    pub coin_watchlist: Arc<CoinWatchlistCache>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,16 +77,6 @@ pub struct MarketDispatchMetrics {
     pub cancel_planned_total: u64,
     pub cancel_executed_total: u64,
     pub immediate_requeue_market_ids: Vec<String>,
-}
-
-pub fn resolve_state_db_path(home_dir: &Path, explicit_db_path: Option<&str>) -> PathBuf {
-    if let Some(path) = explicit_db_path
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        return PathBuf::from(path);
-    }
-    state_db_path_for_home(home_dir)
 }
 
 pub async fn build_cycle_plan(
@@ -259,6 +253,8 @@ mod tests {
 
     #[test]
     fn resolve_state_db_path_prefers_explicit_override() {
+        use crate::storage::state_db_path_for_home;
+
         let home = PathBuf::from("/tmp/gf");
         assert_eq!(
             resolve_state_db_path(&home, Some("/tmp/custom.sqlite")),

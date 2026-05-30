@@ -10,6 +10,7 @@ from greenfloor.core.engine_bridge import import_engine, require_engine_method
 from greenfloor.runtime.offer_watchlist import (
     build_dexie_size_by_offer_id,
     match_watched_coin_ids,
+    new_coin_watchlist_cache,
     set_watched_coin_ids_for_market,
     update_market_coin_watchlist_from_dexie,
 )
@@ -92,6 +93,7 @@ __all__ = [
     "active_offer_counts_by_size_and_side",
     "build_dexie_size_by_offer_id",
     "match_watched_coin_ids",
+    "new_coin_watchlist_cache",
     "set_watched_coin_ids_for_market",
     "update_market_coin_watchlist_from_dexie",
 ]

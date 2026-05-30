@@ -6,11 +6,10 @@ import logging
 import os
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from greenfloor.config.io import load_program_config, resolve_state_db_path
+from greenfloor.config.io import load_program_config
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
 from greenfloor.daemon.bootstrap import log_daemon_event
 from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
@@ -18,14 +17,26 @@ from greenfloor.daemon.engine_logging import initialize_daemon_logging
 from greenfloor.daemon.market_logging import _daemon_logger
 
 
-@dataclass
-class LoopDispatchState:
-    cursor: int = 0
-    immediate_requeue_ids: list[str] = field(default_factory=list)
-
-
 def _engine():
     return import_engine()
+
+
+def _new_dispatch_state() -> Any:
+    dispatch_cls = require_engine_method(
+        _engine(),
+        "DaemonDispatchState",
+        missing="daemon dispatch state",
+    )
+    return dispatch_cls(0, [])
+
+
+def new_coin_watchlist_cache() -> Any:
+    cache_cls = require_engine_method(
+        _engine(),
+        "CoinWatchlistCache",
+        missing="coin watchlist cache",
+    )
+    return cache_cls()
 
 
 def resolve_cycle_websocket_capture(*, program, loop_websocket_active: bool) -> bool:
@@ -48,6 +59,15 @@ def consume_reload_marker(state_dir: Path) -> bool:
     return True
 
 
+def resolve_cycle_state_db_path(*, program_home_dir: str, db_path_override: str | None) -> str:
+    resolve = require_engine_method(
+        _engine(),
+        "resolve_state_db_path",
+        missing="state db path resolution",
+    )
+    return str(resolve(Path(program_home_dir).expanduser(), db_path_override))
+
+
 def run_once(
     program_path: Path,
     markets_path: Path,
@@ -59,10 +79,13 @@ def run_once(
     use_websocket_capture: bool = False,
     program=None,
     testnet_markets_path: Path | None = None,
-    market_dispatch_state: Any | None = None,
+    dispatch_state: Any | None = None,
+    *,
+    coin_watchlist: Any,
     test_controls: Mapping[str, Any] | None = None,
 ) -> int:
     del program
+    state = dispatch_state or _new_dispatch_state()
     exit_code, updated_state = run_daemon_cycle_once_via_engine(
         program_path=program_path,
         markets_path=markets_path,
@@ -73,12 +96,13 @@ def run_once(
         state_dir=state_dir,
         poll_coinset_mempool=poll_coinset_mempool,
         use_websocket_capture=use_websocket_capture,
-        dispatch_state=market_dispatch_state,
+        dispatch_state=state,
+        coin_watchlist=coin_watchlist,
         test_controls=test_controls,
     )
-    if market_dispatch_state is not None:
-        market_dispatch_state.cursor = int(updated_state.cursor)
-        market_dispatch_state.immediate_requeue_ids = list(updated_state.immediate_requeue_ids)
+    if dispatch_state is not None:
+        dispatch_state.cursor = int(updated_state.cursor)
+        dispatch_state.immediate_requeue_ids = list(updated_state.immediate_requeue_ids)
     return exit_code
 
 
@@ -93,23 +117,24 @@ def run_loop(
     state_dir: Path,
 ) -> int:
     current_program = load_program_config(program_path)
-    market_dispatch_state = LoopDispatchState()
+    dispatch_state = _new_dispatch_state()
+    coin_watchlist = new_coin_watchlist_cache()
     initialize_daemon_logging(program=current_program, program_path=program_path)
     _daemon_logger.info(
         "daemon_starting mode=loop program_config=%s markets_config=%s",
         os.fspath(program_path),
         os.fspath(markets_path),
     )
-    db_path = resolve_state_db_path(
+    db_path = resolve_cycle_state_db_path(
         program_home_dir=current_program.home_dir,
-        explicit_db_path=db_path_override,
+        db_path_override=db_path_override,
     )
     start_ws_loop = require_engine_method(
         _engine(),
         "start_coinset_websocket_loop",
         missing="daemon coinset websocket loop",
     )
-    ws_client = start_ws_loop(db_path, program_path, coinset_base_url)
+    ws_client = start_ws_loop(db_path, program_path, coinset_base_url, coin_watchlist)
 
     try:
         while True:
@@ -125,7 +150,8 @@ def run_loop(
                 use_websocket_capture=False,
                 program=current_program,
                 testnet_markets_path=testnet_markets_path,
-                market_dispatch_state=market_dispatch_state,
+                dispatch_state=dispatch_state,
+                coin_watchlist=coin_watchlist,
             )
             if exit_code != 0:
                 _daemon_logger.warning("daemon_cycle_exit_code=%s", exit_code)

@@ -14,6 +14,7 @@ use super::coinset_tx::{
     build_dexie_size_by_offer_id, dexie_offer_status, extract_coinset_tx_ids_from_offer_payload,
 };
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
+use super::watchlist::cache::CoinWatchlistCache;
 use super::watchlist::{update_market_coin_watchlist_from_offers, watchlist_offer_ids};
 
 #[derive(Debug, Clone, Default)]
@@ -161,6 +162,7 @@ fn transition_from_dexie_offer_payload(
 
 pub async fn run_market_reconcile_phase(
     store: &SqliteStore,
+    coin_watchlist: &CoinWatchlistCache,
     dexie: &DexieClient,
     market: &MarketConfig,
     network: &str,
@@ -243,7 +245,12 @@ pub async fn run_market_reconcile_phase(
         )?;
     }
 
-    update_market_coin_watchlist_from_offers(store, market_id, &augmented_offers)?;
+    update_market_coin_watchlist_from_offers(
+        store,
+        coin_watchlist,
+        market_id,
+        &augmented_offers,
+    )?;
 
     Ok(ReconcilePhaseResult {
         offers: augmented_offers,

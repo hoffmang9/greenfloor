@@ -9,7 +9,12 @@ from pathlib import Path
 from greenfloor.config.io import default_state_dir_path, load_program_config
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
 from greenfloor.daemon.bootstrap import log_daemon_event
-from greenfloor.daemon.cycle_runner import resolve_cycle_websocket_capture, run_loop, run_once
+from greenfloor.daemon.cycle_runner import (
+    new_coin_watchlist_cache,
+    resolve_cycle_websocket_capture,
+    run_loop,
+    run_once,
+)
 from greenfloor.daemon.engine_logging import initialize_daemon_logging
 
 
@@ -99,6 +104,7 @@ def main() -> None:
                     state_dir=state_dir,
                     poll_coinset_mempool=not use_websocket_capture,
                     use_websocket_capture=use_websocket_capture,
+                    coin_watchlist=new_coin_watchlist_cache(),
                 )
             raise SystemExit(exit_code)
 

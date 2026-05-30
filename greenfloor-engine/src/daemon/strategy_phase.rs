@@ -22,7 +22,6 @@ pub async fn run_strategy_phase(
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
     state: &mut MarketCycleResultState,
-    _bucket_counts: &BTreeMap<i64, i64>,
 ) -> SignerResult<StrategyPhaseResult> {
     let (strategy_actions, sell_active_counts) = evaluate_strategy_actions_for_market(
         store,

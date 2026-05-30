@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+use crate::daemon::watchlist::cache::CoinWatchlistCache;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -31,6 +33,7 @@ pub fn start_coinset_websocket_loop(
     db_path: PathBuf,
     program: ManagerProgramConfig,
     coinset_base_url: String,
+    coin_watchlist: Arc<CoinWatchlistCache>,
 ) -> CoinsetWebsocketLoopHandle {
     ensure_rustls_crypto_provider();
     let stop = Arc::new(AtomicBool::new(false));
@@ -44,6 +47,7 @@ pub fn start_coinset_websocket_loop(
             db_path,
             program,
             coinset_base_url,
+            coin_watchlist,
             stop_flag,
         ));
     });
@@ -57,6 +61,7 @@ async fn run_coinset_websocket_loop(
     db_path: PathBuf,
     program: ManagerProgramConfig,
     coinset_base_url: String,
+    coin_watchlist: Arc<CoinWatchlistCache>,
     stop: Arc<AtomicBool>,
 ) {
     let Ok(store) = SqliteStore::open(&db_path) else {
@@ -83,7 +88,7 @@ async fn run_coinset_websocket_loop(
                 while !stop.load(Ordering::SeqCst) {
                     match tokio::time::timeout(Duration::from_secs(1), ws.next()).await {
                         Ok(Some(Ok(Message::Text(text)))) => {
-                            let _ = handle_ws_text(&store, &text);
+                            let _ = handle_ws_text(&store, &coin_watchlist, &text);
                         }
                         Ok(Some(Ok(Message::Ping(payload)))) => {
                             let _ = ws.send(Message::Pong(payload)).await;
@@ -171,7 +176,12 @@ mod tests {
             .create();
 
         let program = sample_program();
-        capture_coinset_websocket_once(&store, &program, &server.url())
+        capture_coinset_websocket_once(
+            &store,
+            &program,
+            &server.url(),
+            &CoinWatchlistCache::new(),
+        )
             .await
             .expect("capture");
 

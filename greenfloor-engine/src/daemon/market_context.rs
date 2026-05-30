@@ -1,10 +1,12 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::adapters::DexieClient;
 use crate::config::{load_program_config, load_markets_config_with_overlay, require_signer_offer_path, ManagerProgramConfig, MarketConfig, MarketsConfig};
 use crate::error::SignerResult;
 
-use super::config_paths::DaemonConfigPaths;
+use super::cycle_paths::DaemonCyclePaths;
+use super::watchlist::cache::CoinWatchlistCache;
 use super::reconcile_phase::ReconcilePhaseResult;
 use super::run_once::{CyclePlan, DaemonRunOnceRequest};
 
@@ -15,7 +17,8 @@ pub struct DaemonCycleResources {
     pub markets: MarketsConfig,
     pub network: String,
     pub dexie: DexieClient,
-    pub paths: DaemonConfigPaths,
+    pub paths: DaemonCyclePaths,
+    pub coin_watchlist: Arc<CoinWatchlistCache>,
     pub signer_offer_path_configured: bool,
 }
 
@@ -70,16 +73,18 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
     let network = program.network.clone();
     let dexie = DexieClient::new(program.dexie_api_base.clone());
     let signer_offer_path_configured = require_signer_offer_path(&request.program_path).is_ok();
+    let coin_watchlist = request.coin_watchlist.clone();
     Ok(DaemonCycleResources {
         program,
         markets,
         network,
         dexie,
-        paths: DaemonConfigPaths::new(
+        paths: DaemonCyclePaths::new(
             request.program_path.clone(),
             request.markets_path.clone(),
             request.testnet_markets_path.clone(),
         ),
+        coin_watchlist,
         signer_offer_path_configured,
     })
 }
@@ -137,11 +142,12 @@ mod tests {
             markets: MarketsConfig { markets },
             network: "mainnet".to_string(),
             dexie: DexieClient::new("https://api.dexie.space"),
-            paths: DaemonConfigPaths::new(
+            paths: DaemonCyclePaths::new(
                 PathBuf::from("/tmp/program.yaml"),
                 PathBuf::from("/tmp/markets.yaml"),
                 None,
             ),
+            coin_watchlist: CoinWatchlistCache::new(),
             signer_offer_path_configured: false,
         }
     }

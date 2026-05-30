@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
-from greenfloor.runtime.daemon_config_paths import DaemonConfigPaths
+from greenfloor.runtime.resolved_daemon_paths import ResolvedDaemonPaths
 
 
 def _engine_build_and_post_offer() -> Any:
@@ -18,7 +18,7 @@ def _engine_build_and_post_offer() -> Any:
 
 def run_build_and_post_offer_in_process(
     *,
-    paths: DaemonConfigPaths,
+    paths: ResolvedDaemonPaths,
     network: str,
     market_id: str | None = None,
     pair: str | None = None,

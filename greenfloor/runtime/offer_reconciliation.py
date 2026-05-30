@@ -457,7 +457,7 @@ def reconcile_market_watched_offers(
         )
         offers = []
 
-    our_offer_ids = watchlist_offer_ids_from_store(store=store, market_id=market_id, clock=now)
+    our_offer_ids = watchlist_offer_ids_from_store(store=store, market_id=market_id)
     state_by_offer_id = {
         str(row["offer_id"]): str(row["state"])
         for row in store.list_offer_states(market_id=market_id, limit=5000)
@@ -516,7 +516,6 @@ def reconcile_market_watched_offers(
             market=market,
             offers=augmented_offers,
             store=store,
-            clock=now,
         )
 
     for offer in augmented_offers:

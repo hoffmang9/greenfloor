@@ -1,18 +1,37 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::runtime;
 
 use engine_core::load_program_config;
 use engine_core::daemon::{
     initialize_daemon_file_logging, resolve_coinset_ws_url, run_daemon_cycle_once,
-    start_coinset_websocket_loop, websocket_capture_enabled, DaemonCycleOnceResponse,
-    DaemonCycleSummary, DaemonCycleTestControls, DaemonDispatchState, DaemonInstanceLock,
+    start_coinset_websocket_loop, websocket_capture_enabled, CoinWatchlistCache,
+    DaemonCycleOnceResponse, DaemonCycleTestControls, DaemonDispatchState, DaemonInstanceLock,
     DaemonRunOnceRequest,
 };
+use crate::py_utils::dict_from_json_value;
+use engine_core::storage::resolve_state_db_path;
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 
 use crate::py_utils::to_py_err;
+
+#[pyclass(name = "CoinWatchlistCache")]
+#[derive(Clone)]
+pub(crate) struct PyCoinWatchlistCache {
+    pub(crate) inner: Arc<CoinWatchlistCache>,
+}
+
+#[pymethods]
+impl PyCoinWatchlistCache {
+    #[new]
+    fn new() -> Self {
+        Self {
+            inner: CoinWatchlistCache::new(),
+        }
+    }
+}
 
 #[pyclass(name = "DaemonDispatchState")]
 #[derive(Clone)]
@@ -108,6 +127,7 @@ struct PyDaemonRunOnceRequest {
     dispatch_state: PyDaemonDispatchState,
     #[pyo3(get, set)]
     test_controls: PyDaemonCycleTestControls,
+    coin_watchlist: Option<PyCoinWatchlistCache>,
 }
 
 #[pymethods]
@@ -127,6 +147,7 @@ impl PyDaemonRunOnceRequest {
         allowed_key_ids=None,
         dispatch_state=None,
         test_controls=None,
+        coin_watchlist=None,
     ))]
     fn new(
         program_path: PathBuf,
@@ -140,6 +161,7 @@ impl PyDaemonRunOnceRequest {
         allowed_key_ids: Option<Vec<String>>,
         dispatch_state: Option<PyDaemonDispatchState>,
         test_controls: Option<PyDaemonCycleTestControls>,
+        coin_watchlist: Option<PyCoinWatchlistCache>,
     ) -> Self {
         Self {
             program_path,
@@ -153,6 +175,7 @@ impl PyDaemonRunOnceRequest {
             allowed_key_ids: allowed_key_ids.unwrap_or_default(),
             dispatch_state: dispatch_state.unwrap_or_else(|| PyDaemonDispatchState::new(0, None)),
             test_controls: test_controls.unwrap_or_default(),
+            coin_watchlist,
         }
     }
 }
@@ -171,72 +194,10 @@ impl From<PyDaemonRunOnceRequest> for DaemonRunOnceRequest {
             allowed_key_ids: value.allowed_key_ids,
             dispatch_state: value.dispatch_state.into(),
             test_controls: value.test_controls.into(),
-        }
-    }
-}
-
-#[pyclass(name = "DaemonCycleSummary")]
-#[derive(Clone)]
-struct PyDaemonCycleSummary {
-    #[pyo3(get)]
-    duration_ms: u64,
-    #[pyo3(get)]
-    enabled_markets: usize,
-    #[pyo3(get)]
-    markets_attempted: usize,
-    #[pyo3(get)]
-    markets_processed: u64,
-    #[pyo3(get)]
-    runtime_market_slot_count: u64,
-    #[pyo3(get)]
-    stale_open_sweep_checked_offer_count: u64,
-    #[pyo3(get)]
-    stale_open_sweep_requeue_market_ids: Vec<String>,
-    #[pyo3(get)]
-    stale_open_sweep_requeue_count: usize,
-    #[pyo3(get)]
-    stale_open_sweep_truncated: bool,
-    #[pyo3(get)]
-    immediate_requeue_market_ids: Vec<String>,
-    #[pyo3(get)]
-    immediate_requeue_count: usize,
-    #[pyo3(get)]
-    error_count: u64,
-    #[pyo3(get)]
-    strategy_planned_total: u64,
-    #[pyo3(get)]
-    strategy_executed_total: u64,
-    #[pyo3(get)]
-    cancel_triggered_count: u64,
-    #[pyo3(get)]
-    cancel_planned_total: u64,
-    #[pyo3(get)]
-    cancel_executed_total: u64,
-    #[pyo3(get)]
-    consumed_immediate_requeues: Vec<String>,
-}
-
-impl PyDaemonCycleSummary {
-    fn from_engine(summary: &DaemonCycleSummary) -> Self {
-        Self {
-            duration_ms: summary.duration_ms,
-            enabled_markets: summary.enabled_markets,
-            markets_attempted: summary.markets_attempted,
-            markets_processed: summary.markets_processed,
-            runtime_market_slot_count: summary.runtime_market_slot_count,
-            stale_open_sweep_checked_offer_count: summary.stale_open_sweep_checked_offer_count,
-            stale_open_sweep_requeue_market_ids: summary.stale_open_sweep_requeue_market_ids.clone(),
-            stale_open_sweep_requeue_count: summary.stale_open_sweep_requeue_count,
-            stale_open_sweep_truncated: summary.stale_open_sweep_truncated,
-            immediate_requeue_market_ids: summary.immediate_requeue_market_ids.clone(),
-            immediate_requeue_count: summary.immediate_requeue_count,
-            error_count: summary.error_count,
-            strategy_planned_total: summary.strategy_planned_total,
-            strategy_executed_total: summary.strategy_executed_total,
-            cancel_triggered_count: summary.cancel_triggered_count,
-            cancel_planned_total: summary.cancel_planned_total,
-            cancel_executed_total: summary.cancel_executed_total,
-            consumed_immediate_requeues: summary.consumed_immediate_requeues.clone(),
+            coin_watchlist: value
+                .coin_watchlist
+                .map(|cache| cache.inner.clone())
+                .unwrap_or_else(CoinWatchlistCache::new),
         }
     }
 }
@@ -248,15 +209,16 @@ struct PyDaemonCycleOnceResponse {
     #[pyo3(get)]
     dispatch_state: PyDaemonDispatchState,
     #[pyo3(get)]
-    cycle_summary: PyDaemonCycleSummary,
+    cycle_summary: Py<PyAny>,
 }
 
 impl PyDaemonCycleOnceResponse {
-    fn from_engine(_py: Python<'_>, response: DaemonCycleOnceResponse) -> PyResult<Self> {
+    fn from_engine(py: Python<'_>, response: DaemonCycleOnceResponse) -> PyResult<Self> {
+        let summary_value = serde_json::to_value(&response.cycle_summary).map_err(to_py_err)?;
         Ok(Self {
             exit_code: response.exit_code,
             dispatch_state: response.dispatch_state.into(),
-            cycle_summary: PyDaemonCycleSummary::from_engine(&response.cycle_summary),
+            cycle_summary: dict_from_json_value(py, summary_value)?,
         })
     }
 }
@@ -333,14 +295,32 @@ fn resolve_coinset_ws_url_py(program_path: PathBuf, coinset_base_url: &str) -> P
 }
 
 #[pyfunction]
-#[pyo3(name = "start_coinset_websocket_loop", signature = (db_path, program_path, coinset_base_url, /))]
+#[pyo3(name = "resolve_state_db_path", signature = (program_home_dir, explicit_db_path=None, /))]
+fn resolve_state_db_path_py(program_home_dir: PathBuf, explicit_db_path: Option<String>) -> String {
+    let path = resolve_state_db_path(
+        &program_home_dir,
+        explicit_db_path.as_deref(),
+    );
+    path.display().to_string()
+}
+
+#[pyfunction]
+#[pyo3(
+    name = "start_coinset_websocket_loop",
+    signature = (db_path, program_path, coinset_base_url, coin_watchlist=None, /)
+)]
 fn start_coinset_websocket_loop_py(
     db_path: PathBuf,
     program_path: PathBuf,
     coinset_base_url: &str,
+    coin_watchlist: Option<PyRef<'_, PyCoinWatchlistCache>>,
 ) -> PyResult<PyCoinsetWebsocketLoop> {
     let program = load_program_config(&program_path).map_err(to_py_err)?;
-    let handle = start_coinset_websocket_loop(db_path, program, coinset_base_url.to_string());
+    let cache = coin_watchlist
+        .map(|cache| cache.inner.clone())
+        .unwrap_or_else(CoinWatchlistCache::new);
+    let handle =
+        start_coinset_websocket_loop(db_path, program, coinset_base_url.to_string(), cache);
     Ok(PyCoinsetWebsocketLoop {
         inner: Some(handle),
     })
@@ -383,13 +363,14 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
         m
     )?)?;
     m.add_function(wrap_pyfunction!(resolve_coinset_ws_url_py, m)?)?;
+    m.add_function(wrap_pyfunction!(resolve_state_db_path_py, m)?)?;
     m.add_function(wrap_pyfunction!(start_coinset_websocket_loop_py, m)?)?;
+    m.add_class::<PyCoinWatchlistCache>()?;
     m.add_class::<PyDaemonInstanceLock>()?;
     m.add_class::<PyCoinsetWebsocketLoop>()?;
     m.add_class::<PyDaemonDispatchState>()?;
     m.add_class::<PyDaemonCycleTestControls>()?;
     m.add_class::<PyDaemonRunOnceRequest>()?;
-    m.add_class::<PyDaemonCycleSummary>()?;
     m.add_class::<PyDaemonCycleOnceResponse>()?;
     Ok(())
 }

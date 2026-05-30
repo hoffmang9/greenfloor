@@ -9,6 +9,7 @@ from greenfloor.daemon.testing import (
     resolve_quote_asset_for_offer,
     set_watched_coin_ids_for_market,
 )
+from greenfloor.runtime.offer_watchlist import new_coin_watchlist_cache
 
 
 @dataclass
@@ -52,8 +53,19 @@ def test_select_market_batch_prioritizes_immediate_requeue_then_round_robin() ->
 
 
 def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:
-    set_watched_coin_ids_for_market(market_id="m-empty", coin_ids={"c" * 64})
-    assert match_watched_coin_ids(observed_coin_ids=["d" * 64]) == {}
+    coin_watchlist = new_coin_watchlist_cache()
+    set_watched_coin_ids_for_market(
+        coin_watchlist=coin_watchlist,
+        market_id="m-empty",
+        coin_ids={"c" * 64},
+    )
+    assert (
+        match_watched_coin_ids(
+            coin_watchlist=coin_watchlist,
+            observed_coin_ids=["d" * 64],
+        )
+        == {}
+    )
 
 
 def test_resolve_quote_asset_for_offer_maps_symbol_from_cats(monkeypatch, tmp_path) -> None:

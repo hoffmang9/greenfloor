@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use greenfloor_engine::daemon::{
     default_testnet_markets_path, initialize_daemon_file_logging, load_daemon_program_runtime,
     resolve_testnet_markets_path, run_daemon_cycle_once, warn_if_daemon_log_level_auto_healed,
-    DaemonDispatchState, DaemonInstanceLock, DaemonRunOnceRequest,
+    CoinWatchlistCache, DaemonDispatchState, DaemonInstanceLock, DaemonRunOnceRequest,
 };
 use greenfloor_engine::vault::members::hex_to_bytes32;
 use greenfloor_engine::{
@@ -415,6 +415,7 @@ async fn run_daemon_cli_once(
             immediate_requeue_ids,
         },
         test_controls: Default::default(),
+        coin_watchlist: CoinWatchlistCache::new(),
     })
     .await?;
 

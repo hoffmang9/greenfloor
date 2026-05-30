@@ -4,6 +4,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::config::ManagerProgramConfig;
+use crate::daemon::watchlist::cache::CoinWatchlistCache;
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
@@ -14,6 +15,7 @@ pub async fn capture_coinset_websocket_once(
     store: &SqliteStore,
     program: &ManagerProgramConfig,
     coinset_base_url: &str,
+    coin_watchlist: &CoinWatchlistCache,
 ) -> SignerResult<()> {
     ensure_rustls_crypto_provider();
     let ws_url = resolve_coinset_ws_url(program, coinset_base_url);
@@ -42,7 +44,7 @@ pub async fn capture_coinset_websocket_once(
                     let wait_for = remaining.min(Duration::from_secs(1));
                     match tokio::time::timeout(wait_for, ws.next()).await {
                         Ok(Some(Ok(Message::Text(text)))) => {
-                            handle_ws_text(store, &text)?;
+                            handle_ws_text(store, coin_watchlist, &text)?;
                         }
                         Ok(Some(Ok(Message::Ping(payload)))) => {
                             ws.send(Message::Pong(payload)).await.map_err(ws_error)?;

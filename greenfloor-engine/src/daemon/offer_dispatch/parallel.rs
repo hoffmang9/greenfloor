@@ -13,7 +13,7 @@ use crate::error::{SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
 use crate::storage::SqliteStore;
 
-use crate::daemon::config_paths::DaemonConfigPaths;
+use crate::daemon::cycle_paths::DaemonCyclePaths;
 use super::coordinator::OfferReservationCoordinator;
 use super::managed_post::post_managed_planned_action;
 use super::reservation_ctx::{
@@ -33,7 +33,7 @@ pub async fn execute_actions_parallel(
     store: &SqliteStore,
     db_path: &Path,
     program: &ManagerProgramConfig,
-    paths: &DaemonConfigPaths,
+    paths: &DaemonCyclePaths,
     market: &MarketConfig,
     network: &str,
     expanded: &[PlannedAction],

@@ -1,14 +1,14 @@
 use std::path::{Path, PathBuf};
 
-/// Config file paths shared by daemon cycle phases and offer dispatch.
+/// Config file paths carried through a daemon cycle (from the run-once request).
 #[derive(Debug, Clone)]
-pub struct DaemonConfigPaths {
+pub struct DaemonCyclePaths {
     pub program_path: PathBuf,
     pub markets_path: PathBuf,
     pub testnet_markets_path: Option<PathBuf>,
 }
 
-impl DaemonConfigPaths {
+impl DaemonCyclePaths {
     pub fn new(
         program_path: PathBuf,
         markets_path: PathBuf,

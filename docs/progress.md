@@ -4,7 +4,7 @@
 
 - **Native cycle phases:** `daemon/preamble.rs`, `strategy_support.rs`, `market_phases.rs` — XCH price fetch, inventory scan, strategy evaluation/planning, coin-op planning all in Rust.
 - **Unified entrypoints:** `run_daemon_cycle_once` no longer takes a Python bridge; PyO3 and `greenfloor-engine daemon run-once` share the same Rust orchestrator.
-- **Parallel markets:** honest `parallel_markets` for loop and `--once`; parallel workers use `spawn_blocking` + per-market runtime (SQLite is not `Send` across await).
+- **Parallel markets:** `runtime.parallel_markets` is accepted but ignored when multiple markets are selected; cycle runs markets sequentially on one SQLite connection and logs `parallel_markets_ignored`.
 - **Exit codes:** non-zero when all selected markets fail (`compute_cycle_exit_code`).
 - **Removed:** `python_bridge.rs`, `daemon_inprocess_bridge.rs`, `rust_cycle_bridge.py`, `bridge_subprocess.py`, dead split-phase APIs in `runner.py`.
 - **Tests:** env-hook fixtures (`GREENFLOOR_XCH_PRICE_USD`, `GREENFLOOR_TEST_FORCE_MARKET_ERROR`, `GREENFLOOR_TEST_SKIP_STRATEGY_EXEC`); `tests/test_daemon_cycle_speed.py`.
@@ -41,7 +41,7 @@
 
 - **PyO3:** `manager_py.rs` exposes in-process `build_and_post_offer` returning `{exit_code, payload}`.
 - **Rust:** `BuildAndPostOfferRequest.action_side` optional override for daemon buy/sell planned actions.
-- **Python:** `runtime/engine_build_and_post.py` + `runtime/daemon_config_paths.py`; `managed_offer_post` and `OfferPostRequest.run_managed` delegate to Rust (no Python orchestration on daemon post path).
+- **Python:** `runtime/engine_build_and_post.py` + `runtime/resolved_daemon_paths.py`; `managed_offer_post` and `OfferPostRequest.run_managed` delegate to Rust (no Python orchestration on daemon post path).
 - **Cycle:** `cycle_runner` sets daemon config paths context so `--markets-config` overrides resolve correctly.
 - **Tests:** `tests/test_daemon_engine_build_and_post.py`; existing daemon strategy tests pass.
 - **Next (Phase 2):** native `greenfloord` cycle loop in Rust; delete `offer_orchestration.py` / `offer_runtime.py` once unused.
@@ -252,7 +252,7 @@ Steps 1–13 moved deterministic daemon/coin-op/shared policy into `greenfloor-e
 
 - **`greenfloor-engine/src/coin_ops/`:** deterministic coin-op policy bundle — `plan_coin_ops`, fee-budget partitioning, bucket counting, and CAT min-amount guard.
 - **PyO3 + core surface:** `coin_ops_py.rs` exposes typed `BucketSpec` / `CoinOpPlan` round-trip via `greenfloor.core.coin_ops` dataclasses; Python policy is consolidated in `greenfloor/core/coin_ops/_bridge.py` with `CoinOpsEngineProtocol` typing.
-- **Python IO glue:** `runtime/coin_ops/` and `daemon/coin_ops_cycle.py` unchanged — still own Coinset/wallet execution, fee lookup, and SQLite budget accounting.
+- **Python IO glue:** `runtime/coin_ops/` still owns Coinset/wallet execution, fee lookup, and SQLite budget accounting; per-market coin-op planning runs in Rust `daemon/coin_ops_phase.rs`.
 - **Tests:** Rust unit tests in `coin_ops/{plan,fee_budget,inventory,policy}.rs`; Python parity/FFI contract in `tests/test_coin_ops_policy_parity.py`; existing planner/fee/inventory tests remain parity gates.
 - **Follow-up:** consolidated Python surface into `greenfloor/core/coin_ops/` package + shared `engine_bridge`; deduplicated PyO3 class caching; `amount_meets_coin_op_min_mojos` is the single Rust threshold check (ADR 0010).
 - **Migration status:** step 10 complete for core coin-op policy.
@@ -411,7 +411,7 @@ Large Python daemon modules remain intentionally unsplit pending Rust migration 
 7. **`strategy_dispatch` reservation + retry engine (seventh)** ✅ — typed `ManagedActionOutcome`, `PlannedAction` parallel planning, `parallel_pool` extract.
 8. **Market-cycle reseed gap planning (eighth)** ✅ — `cycle/reseed.rs` + typed PyO3 `ReseedGapPlan`; Python keeps SQLite offer-count IO and structured reseed logging; `tests/test_cycle_reseed.py` enforces skip-reason label parity.
 9. **Offer reconciliation transition engine (ninth)** ✅ — `cycle/reconcile.rs` + typed PyO3 `CycleOfferTransition`; Python keeps Dexie fetch, SQLite tx-signal lookup, and audit persistence in `runtime/offer_reconciliation.py`.
-10. **Core coin-op policy bundle (tenth)** ✅ — `coin_ops/{plan,fee_budget,inventory,policy}.rs` + PyO3 `coin_ops_py.rs`; Python keeps `runtime/coin_ops/` execution IO and `daemon/coin_ops_cycle.py` glue.
+10. **Core coin-op policy bundle (tenth)** ✅ — `coin_ops/{plan,fee_budget,inventory,policy}.rs` + PyO3 `coin_ops_py.rs`; Python keeps `runtime/coin_ops/` execution IO; daemon planning in `coin_ops_phase.rs`.
 11. **Coin-op selection/planning helpers (eleventh)** ✅ — `coin_ops/selection.rs` + `split_planning.rs`; Python keeps CLI/daemon execution IO only (`runtime/coin_ops/planning.py` / `selection.py` re-exports).
 12. **Shared hex utilities + low-inventory alerts (twelfth)** ✅ — `hex.rs` + `cycle/notifications.rs` + PyO3 bindings; pure-Python `hex_utils.py`; typed `DeterministicPolicyEngineProtocol`.
 13. **Cancel-policy decision engine (thirteenth)** ✅ — `cycle/cancel.rs` + typed `OpenOfferRow`; Python keeps Dexie cancel IO and SQLite persistence.

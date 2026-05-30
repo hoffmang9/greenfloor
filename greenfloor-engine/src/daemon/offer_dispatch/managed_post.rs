@@ -6,11 +6,11 @@ use crate::error::SignerResult;
 use crate::manager::{build_and_post_offer, BuildAndPostOfferRequest};
 use crate::offer::request::normalize_offer_side;
 
-use crate::daemon::config_paths::DaemonConfigPaths;
+use crate::daemon::cycle_paths::DaemonCyclePaths;
 
 pub async fn post_managed_planned_action(
     program: &ManagerProgramConfig,
-    paths: &DaemonConfigPaths,
+    paths: &DaemonCyclePaths,
     market: &MarketConfig,
     action: &PlannedAction,
 ) -> SignerResult<bool> {

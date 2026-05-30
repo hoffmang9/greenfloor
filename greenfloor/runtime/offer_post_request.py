@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from greenfloor.runtime.daemon_config_paths import resolve_daemon_config_paths
 from greenfloor.runtime.engine_build_and_post import run_build_and_post_offer_in_process
 from greenfloor.runtime.offer_build_context import OfferBuildContext
+from greenfloor.runtime.resolved_daemon_paths import resolve_resolved_daemon_paths
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +115,7 @@ class OfferPostRequest:
         persist_results: bool = True,
     ) -> tuple[int, dict[str, Any]]:
         del emit_output
-        paths = resolve_daemon_config_paths(
+        paths = resolve_resolved_daemon_paths(
             self.build_ctx.program,
             self.build_ctx.program_path,
         )
@@ -135,12 +135,6 @@ class OfferPostRequest:
             action_side=self.build_ctx.action_side,
             persist_results=persist_results,
         )
-
-    def run_cli(
-        self,
-    ) -> int:
-        exit_code, _ = self.run_signer()
-        return exit_code
 
     def run_managed(
         self,

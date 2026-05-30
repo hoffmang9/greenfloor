@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use crate::config::MarketConfig;
 use crate::cycle::enqueue_immediate_requeue;
-use crate::error::{SignerError, SignerResult};
+use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
 use super::market_context::{
@@ -16,9 +16,10 @@ use super::reconcile_augment::merge_reconcile_immediate_requeue;
 use super::reconcile_phase::run_market_reconcile_phase;
 use super::run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
-    elapsed_ms, resolve_state_db_path, CyclePlan, DaemonCycleSummary, DaemonDispatchState,
-    DaemonRunOnceRequest, MarketDispatchMetrics,
+    elapsed_ms, CyclePlan, DaemonCycleSummary, DaemonDispatchState, DaemonRunOnceRequest,
+    MarketDispatchMetrics,
 };
+use crate::storage::resolve_state_db_path;
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DaemonCycleOnceResponse {
@@ -50,8 +51,14 @@ async fn process_one_market(
     plan: &CyclePlan,
     market: &MarketConfig,
 ) -> SignerResult<SingleMarketCycleOutput> {
-    let reconcile =
-        run_market_reconcile_phase(store, &resources.dexie, market, &resources.network).await?;
+    let reconcile = run_market_reconcile_phase(
+        store,
+        &resources.coin_watchlist,
+        &resources.dexie,
+        market,
+        &resources.network,
+    )
+    .await?;
     let phase_context = MarketCycleContext {
         resources,
         dispatch: dispatch_context,
@@ -90,47 +97,18 @@ async fn dispatch_markets(
     plan: &CyclePlan,
     markets: Vec<MarketConfig>,
 ) -> SignerResult<(Vec<SingleMarketCycleOutput>, u64)> {
-    let parallel = dispatch_context.parallel_markets_enabled && markets.len() > 1;
-    let mut worker_errors = 0u64;
-
-    if parallel {
-        let runtime = tokio::runtime::Handle::current();
-        let mut blocking_tasks = Vec::with_capacity(markets.len());
-        for market in markets {
-            let resources = resources.clone();
-            let dispatch_context = dispatch_context.clone();
-            let plan = plan.clone();
-            let db_path = plan.db_path.clone();
-            let market_id = market.market_id.clone();
-            let runtime = runtime.clone();
-            blocking_tasks.push(tokio::task::spawn_blocking(move || {
-                let result = runtime.block_on(async {
-                    let store = SqliteStore::open(&db_path)?;
-                    process_one_market(
-                        &store,
-                        &resources,
-                        &dispatch_context,
-                        &plan,
-                        &market,
-                    )
-                    .await
-                });
-                (market_id, result)
-            }));
-        }
-        let mut outputs = Vec::new();
-        for task in blocking_tasks {
-            let (market_id, result) = task
-                .await
-                .map_err(|err| SignerError::Other(format!("parallel market join failed: {err}")))?;
-            match record_market_result(cycle_store, &market_id, result, "parallel_market_worker")? {
-                Ok(output) => outputs.push(output),
-                Err(count) => worker_errors += count,
-            }
-        }
-        return Ok((outputs, worker_errors));
+    if dispatch_context.parallel_markets_enabled && markets.len() > 1 {
+        cycle_store.add_audit_event(
+            "parallel_markets_ignored",
+            &serde_json::json!({
+                "market_count": markets.len(),
+                "reason": "daemon runs markets sequentially on one sqlite connection",
+            }),
+            None,
+        )?;
     }
 
+    let mut worker_errors = 0u64;
     let mut outputs = Vec::with_capacity(markets.len());
     for market in markets {
         let result = process_one_market(
@@ -173,6 +151,7 @@ async fn run_daemon_cycle_once_inner(
         &resources.program,
         &cycle_store,
         &request.coinset_base_url,
+        &resources.coin_watchlist,
         request.poll_coinset_mempool,
         request.use_websocket_capture,
     )
@@ -213,7 +192,7 @@ async fn run_daemon_cycle_once_inner(
         elapsed_ms(started),
     );
     let summary_payload = serde_json::to_value(&summary).map_err(|err| {
-        SignerError::Other(format!("failed to encode daemon_cycle_summary: {err}"))
+        crate::error::SignerError::Other(format!("failed to encode daemon_cycle_summary: {err}"))
     })?;
     cycle_store.add_audit_event("daemon_cycle_summary", &summary_payload, None)?;
 

@@ -23,7 +23,7 @@ use crate::cycle::{
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
-use crate::daemon::config_paths::DaemonConfigPaths;
+use crate::daemon::cycle_paths::DaemonCyclePaths;
 
 pub use coordinator::OfferReservationCoordinator;
 
@@ -76,7 +76,7 @@ pub async fn execute_strategy_actions(
     store: &SqliteStore,
     db_path: &Path,
     program: &ManagerProgramConfig,
-    paths: &DaemonConfigPaths,
+    paths: &DaemonCyclePaths,
     market: &MarketConfig,
     network: &str,
     actions: &[PlannedAction],

@@ -7,6 +7,7 @@ use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
 use super::coinset_ws::capture_coinset_websocket_once;
+use super::watchlist::cache::CoinWatchlistCache;
 
 const DEFAULT_XCH_PRICE_URL: &str = "https://coincodex.com/api/coincodex/get_coin/xch";
 
@@ -20,6 +21,7 @@ pub async fn run_cycle_preamble(
     program: &ManagerProgramConfig,
     store: &SqliteStore,
     coinset_base_url: &str,
+    coin_watchlist: &CoinWatchlistCache,
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
 ) -> SignerResult<CyclePreambleResult> {
@@ -37,7 +39,9 @@ pub async fn run_cycle_preamble(
     }
 
     if use_websocket_capture {
-        if let Err(err) = capture_coinset_websocket_once(&store, &program, coinset_base_url).await {
+        if let Err(err) =
+            capture_coinset_websocket_once(&store, &program, coinset_base_url, coin_watchlist).await
+        {
             result.cycle_error_count += 1;
             store.add_audit_event(
                 "coinset_ws_once_error",

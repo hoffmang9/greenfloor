@@ -41,14 +41,7 @@ pub async fn run_post_reconcile_market_phases(
     )
     .await?;
 
-    let strategy = run_strategy_phase(
-        store,
-        ctx,
-        market,
-        &mut cycle_state,
-        &bucket_counts,
-    )
-    .await?;
+    let strategy = run_strategy_phase(store, ctx, market, &mut cycle_state).await?;
 
     let _cancel_payload = run_market_cancel_phase(
         store,

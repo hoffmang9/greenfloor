@@ -361,15 +361,17 @@ fn update_market_coin_watchlist_tracks_coins_for_owned_offers() {
         json!({"id": "offer-1", "involved_coins": [format!("0x{coin_a}")]}),
         json!({"id": "offer-2", "involved_coins": [format!("0x{}", "b".repeat(64))]}),
     ];
-    update_market_coin_watchlist_from_offers(&store, "m1", &offers).expect("update");
-    let hits = match_watched_coin_ids(&[coin_a.clone(), "b".repeat(64)]);
+    let cache = super::cache::CoinWatchlistCache::new();
+    super::update_market_coin_watchlist_from_offers(&store, &cache, "m1", &offers).expect("update");
+    let hits = super::match_watched_coin_ids(&cache, &[coin_a.clone(), "b".repeat(64)]);
     assert_eq!(hits.get("m1"), Some(&vec![coin_a]));
 }
 
 #[test]
 fn watched_coin_ids_for_market_reads_process_cache() {
     let coin_a = "c".repeat(64);
-    set_watched_coin_ids_for_market("m1", HashSet::from([coin_a.clone()]));
-    let cached = watched_coin_ids_for_market("m1");
+    let cache = super::cache::CoinWatchlistCache::new();
+    super::set_watched_coin_ids_for_market(&cache, "m1", HashSet::from([coin_a.clone()]));
+    let cached = super::watched_coin_ids_for_market(&cache, "m1");
     assert!(cached.contains(&coin_a));
 }

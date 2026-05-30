@@ -16,6 +16,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 use serde_json::Value;
 
+use crate::daemon_py::PyCoinWatchlistCache;
 use crate::py_utils::{py_any_to_json, to_py_err};
 
 fn parse_clock(clock_iso: Option<&str>) -> PyResult<DateTime<Utc>> {
@@ -111,9 +112,12 @@ fn active_offer_counts_by_size_and_side(
 }
 
 #[pyfunction]
-#[pyo3(name = "match_watched_coin_ids", signature = (observed_coin_ids, /))]
-fn match_watched_coin_ids_py(observed_coin_ids: Vec<String>) -> PyResult<Py<PyAny>> {
-    let matches = match_watched_coin_ids(&observed_coin_ids);
+#[pyo3(name = "match_watched_coin_ids", signature = (coin_watchlist, observed_coin_ids, /))]
+fn match_watched_coin_ids_py(
+    coin_watchlist: PyRef<'_, PyCoinWatchlistCache>,
+    observed_coin_ids: Vec<String>,
+) -> PyResult<Py<PyAny>> {
+    let matches = match_watched_coin_ids(&coin_watchlist.inner, &observed_coin_ids);
     Python::attach(|py| {
         let out = PyDict::new(py);
         for (market_id, coin_ids) in matches {
@@ -124,21 +128,31 @@ fn match_watched_coin_ids_py(observed_coin_ids: Vec<String>) -> PyResult<Py<PyAn
 }
 
 #[pyfunction]
-#[pyo3(name = "set_watched_coin_ids_for_market", signature = (market_id, coin_ids, /))]
-fn set_watched_coin_ids_for_market_py(market_id: String, coin_ids: Vec<String>) -> PyResult<()> {
+#[pyo3(name = "set_watched_coin_ids_for_market", signature = (coin_watchlist, market_id, coin_ids, /))]
+fn set_watched_coin_ids_for_market_py(
+    coin_watchlist: PyRef<'_, PyCoinWatchlistCache>,
+    market_id: String,
+    coin_ids: Vec<String>,
+) -> PyResult<()> {
+    let cache = &coin_watchlist.inner;
     let normalized: HashSet<String> = coin_ids
         .into_iter()
         .map(|coin_id| coin_id.trim().to_ascii_lowercase())
         .filter(|coin_id| !coin_id.is_empty())
         .collect();
-    set_watched_coin_ids_for_market(&market_id, normalized);
+    set_watched_coin_ids_for_market(&cache, &market_id, normalized);
     Ok(())
 }
 
 #[pyfunction]
-#[pyo3(name = "watched_coin_ids_for_market", signature = (market_id, /))]
-fn watched_coin_ids_for_market_py(market_id: String) -> PyResult<Vec<String>> {
-    let mut coin_ids: Vec<String> = watched_coin_ids_for_market(&market_id).into_iter().collect();
+#[pyo3(name = "watched_coin_ids_for_market", signature = (coin_watchlist, market_id, /))]
+fn watched_coin_ids_for_market_py(
+    coin_watchlist: PyRef<'_, PyCoinWatchlistCache>,
+    market_id: String,
+) -> PyResult<Vec<String>> {
+    let mut coin_ids: Vec<String> = watched_coin_ids_for_market(&coin_watchlist.inner, &market_id)
+        .into_iter()
+        .collect();
     coin_ids.sort();
     Ok(coin_ids)
 }
@@ -156,15 +170,20 @@ fn watchlist_offer_ids_from_store_py(db_path: PathBuf, market_id: String) -> PyR
 }
 
 #[pyfunction]
-#[pyo3(name = "update_market_coin_watchlist_from_offers", signature = (db_path, market_id, offers, /))]
+#[pyo3(
+    name = "update_market_coin_watchlist_from_offers",
+    signature = (db_path, coin_watchlist, market_id, offers, /)
+)]
 fn update_market_coin_watchlist_from_offers_py(
     db_path: PathBuf,
+    coin_watchlist: PyRef<'_, PyCoinWatchlistCache>,
     market_id: String,
     offers: &Bound<'_, PyList>,
 ) -> PyResult<()> {
     let store = SqliteStore::open(&db_path).map_err(to_py_err)?;
+    let cache = &coin_watchlist.inner;
     let offers = offers_from_py_list(offers)?;
-    update_market_coin_watchlist_from_offers(&store, &market_id, &offers).map_err(to_py_err)
+    update_market_coin_watchlist_from_offers(&store, &cache, &market_id, &offers).map_err(to_py_err)
 }
 
 #[pyfunction]

@@ -1,10 +1,10 @@
+pub mod cache;
+
 mod counting;
 mod metadata;
 pub mod time;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::{LazyLock, Mutex};
-
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
@@ -211,64 +211,33 @@ fn active_offer_counts_by_size_and_side_at(
     Ok((buckets.buy_counts, buckets.sell_counts, buckets.unmapped))
 }
 
-static WATCHED_COIN_IDS_BY_MARKET: LazyLock<Mutex<HashMap<String, HashSet<String>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+pub use cache::CoinWatchlistCache;
 
-pub fn watched_coin_ids_for_market(market_id: &str) -> HashSet<String> {
-    let key = market_id.trim();
-    if key.is_empty() {
-        return HashSet::new();
-    }
-    let Ok(cache) = WATCHED_COIN_IDS_BY_MARKET.lock() else {
-        return HashSet::new();
-    };
-    cache.get(key).cloned().unwrap_or_default()
+pub fn watched_coin_ids_for_market(
+    cache: &CoinWatchlistCache,
+    market_id: &str,
+) -> HashSet<String> {
+    cache.watched_coin_ids_for_market(market_id)
 }
 
-pub fn set_watched_coin_ids_for_market(market_id: &str, coin_ids: HashSet<String>) {
-    let key = market_id.trim();
-    if key.is_empty() {
-        return;
-    }
-    let normalized: HashSet<String> = coin_ids
-        .into_iter()
-        .map(|coin_id| coin_id.trim().to_ascii_lowercase())
-        .filter(|coin_id| !coin_id.is_empty())
-        .collect();
-    if let Ok(mut cache) = WATCHED_COIN_IDS_BY_MARKET.lock() {
-        cache.insert(key.to_string(), normalized);
-    }
+pub fn set_watched_coin_ids_for_market(
+    cache: &CoinWatchlistCache,
+    market_id: &str,
+    coin_ids: HashSet<String>,
+) {
+    cache.set_watched_coin_ids_for_market(market_id, coin_ids);
 }
 
-pub fn match_watched_coin_ids(observed_coin_ids: &[String]) -> HashMap<String, Vec<String>> {
-    let normalized: HashSet<String> = observed_coin_ids
-        .iter()
-        .map(|coin_id| coin_id.trim().to_ascii_lowercase())
-        .filter(|coin_id| !coin_id.is_empty())
-        .collect();
-    if normalized.is_empty() {
-        return HashMap::new();
-    }
-    let Ok(cache) = WATCHED_COIN_IDS_BY_MARKET.lock() else {
-        return HashMap::new();
-    };
-    let mut matches = HashMap::new();
-    for (market_id, watched) in cache.iter() {
-        let mut intersection: Vec<String> = normalized
-            .intersection(watched)
-            .cloned()
-            .collect();
-        if intersection.is_empty() {
-            continue;
-        }
-        intersection.sort();
-        matches.insert(market_id.clone(), intersection);
-    }
-    matches
+pub fn match_watched_coin_ids(
+    cache: &CoinWatchlistCache,
+    observed_coin_ids: &[String],
+) -> HashMap<String, Vec<String>> {
+    cache.match_watched_coin_ids(observed_coin_ids)
 }
 
 pub fn update_market_coin_watchlist_from_offers(
     store: &SqliteStore,
+    cache: &CoinWatchlistCache,
     market_id: &str,
     offers: &[Value],
 ) -> SignerResult<()> {
@@ -289,7 +258,7 @@ pub fn update_market_coin_watchlist_from_offers(
             watched_coin_ids.insert(coin_id);
         }
     }
-    set_watched_coin_ids_for_market(market_id, watched_coin_ids.clone());
+    set_watched_coin_ids_for_market(cache, market_id, watched_coin_ids.clone());
     let mut sample: Vec<String> = watched_coin_ids.iter().cloned().collect();
     sample.sort();
     sample.truncate(10);

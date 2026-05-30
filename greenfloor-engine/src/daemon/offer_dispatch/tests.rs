@@ -11,12 +11,32 @@ use super::{
 };
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::{parallel_managed_dispatch_enabled, PlannedAction};
-use crate::daemon::config_paths::DaemonConfigPaths;
+use crate::daemon::cycle_paths::DaemonCyclePaths;
 use crate::error::SignerError;
 use crate::storage::SqliteStore;
 
-fn sample_paths(dir: &tempfile::TempDir) -> DaemonConfigPaths {
-    DaemonConfigPaths::new(
+fn write_test_markets_file(path: &std::path::Path) {
+    std::fs::write(
+        path,
+        r#"
+markets:
+  - id: m1
+    enabled: true
+    base_asset: asset1
+    base_symbol: AS1
+    quote_asset: xch
+    quote_asset_type: unstable
+    receive_address: xch1test
+    signer_key_id: key-1
+    mode: sell_only
+    pricing: {}
+"#,
+    )
+    .expect("write markets");
+}
+
+fn sample_paths(dir: &tempfile::TempDir) -> DaemonCyclePaths {
+    DaemonCyclePaths::new(
         dir.path().join("program.yaml"),
         dir.path().join("markets.yaml"),
         None,
@@ -173,7 +193,7 @@ async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() 
     let program_path = dir.path().join("program.yaml");
     std::fs::write(&program_path, "app:\n  network: mainnet\n").expect("write program");
     let markets_path = dir.path().join("markets.yaml");
-    std::fs::write(&markets_path, "markets: []\n").expect("write markets");
+    write_test_markets_file(&markets_path);
     let program = sample_program(false, false);
     let market = MarketConfig {
         market_id: "m1".to_string(),
@@ -307,7 +327,7 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
     let program_path = dir.path().join("program.yaml");
     write_signer_program(&program_path);
     let markets_path = dir.path().join("markets.yaml");
-    std::fs::write(&markets_path, "markets: []\n").expect("write markets");
+    write_test_markets_file(&markets_path);
     let mut program = sample_program(true, false);
     program.runtime_offer_parallelism_enabled = true;
 
@@ -350,7 +370,7 @@ async fn execute_strategy_actions_parallel_fatal_propagates() {
     let program_path = dir.path().join("program.yaml");
     write_signer_program(&program_path);
     let markets_path = dir.path().join("markets.yaml");
-    std::fs::write(&markets_path, "markets: []\n").expect("write markets");
+    write_test_markets_file(&markets_path);
     let mut program = sample_program(true, false);
     program.runtime_offer_parallelism_enabled = true;
 
@@ -382,7 +402,7 @@ async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
     let program_path = dir.path().join("program.yaml");
     write_signer_program(&program_path);
     let markets_path = dir.path().join("markets.yaml");
-    std::fs::write(&markets_path, "markets: []\n").expect("write markets");
+    write_test_markets_file(&markets_path);
     let program = sample_program(false, false);
 
     set_managed_post_override(Some("success"));

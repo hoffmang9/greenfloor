@@ -17,6 +17,11 @@ def _require(name: str, *, missing: str):
     return require_engine_method(_engine_module(), name, missing=missing)
 
 
+def _default_dispatch_state() -> Any:
+    dispatch_cls = _require("DaemonDispatchState", missing="daemon dispatch state")
+    return dispatch_cls(0, [])
+
+
 def _build_engine_request(
     *,
     program_path: Path,
@@ -29,9 +34,9 @@ def _build_engine_request(
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
     dispatch_state: Any,
+    coin_watchlist: Any,
     test_controls: Mapping[str, Any] | None = None,
 ) -> Any:
-    dispatch_cls = _require("DaemonDispatchState", missing="daemon dispatch state")
     controls_cls = _require("DaemonCycleTestControls", missing="daemon cycle test controls")
     request_cls = _require("DaemonRunOnceRequest", missing="daemon cycle request")
 
@@ -41,14 +46,6 @@ def _build_engine_request(
         skip_strategy = bool(test_controls.get("skip_strategy_execution", False))
         raw_forced = test_controls.get("force_market_error_for")
         forced = str(raw_forced) if raw_forced is not None else None
-
-    if not hasattr(dispatch_state, "cursor"):
-        dispatch_state = dispatch_cls(0, [])
-    elif "greenfloor_engine" not in type(dispatch_state).__module__:
-        dispatch_state = dispatch_cls(
-            int(dispatch_state.cursor),
-            list(getattr(dispatch_state, "immediate_requeue_ids", [])),
-        )
 
     return request_cls(
         program_path,
@@ -65,6 +62,7 @@ def _build_engine_request(
             skip_strategy_execution=skip_strategy,
             force_market_error_for=forced,
         ),
+        coin_watchlist=coin_watchlist,
     )
 
 
@@ -80,12 +78,11 @@ def run_daemon_cycle_once_via_engine(
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
     dispatch_state: Any | None = None,
-    market_dispatch_state: Any | None = None,
+    coin_watchlist: Any,
     run_fn: Callable[[Any], Any] | None = None,
     test_controls: Mapping[str, Any] | None = None,
 ) -> tuple[int, Any]:
-    dispatch_cls = _require("DaemonDispatchState", missing="daemon dispatch state")
-    state = dispatch_state or market_dispatch_state or dispatch_cls(0, [])
+    state = dispatch_state or _default_dispatch_state()
     request = _build_engine_request(
         program_path=program_path,
         markets_path=markets_path,
@@ -97,6 +94,7 @@ def run_daemon_cycle_once_via_engine(
         poll_coinset_mempool=poll_coinset_mempool,
         use_websocket_capture=use_websocket_capture,
         dispatch_state=state,
+        coin_watchlist=coin_watchlist,
         test_controls=test_controls,
     )
 

@@ -13,7 +13,21 @@ from tests.logging_helpers import reset_concurrent_log_handlers
 
 
 def _patch_engine(monkeypatch, *, ws_client_factory, init_logging=None, warn_healed=None):
+    class _FakeDispatchState:
+        def __init__(self, cursor: int = 0, immediate_requeue_ids: list[str] | None = None) -> None:
+            self.cursor = int(cursor)
+            self.immediate_requeue_ids = list(immediate_requeue_ids or [])
+
     class _FakeEngine:
+        DaemonDispatchState = _FakeDispatchState
+        CoinWatchlistCache = object
+
+        def resolve_state_db_path(self, home_dir, explicit_db_path=None):
+            explicit = str(explicit_db_path or "").strip()
+            if explicit:
+                return explicit
+            return str(Path(home_dir) / "db" / "greenfloor.sqlite")
+
         def start_coinset_websocket_loop(self, *_args, **_kwargs):
             return ws_client_factory()
 
@@ -27,8 +41,10 @@ def _patch_engine(monkeypatch, *, ws_client_factory, init_logging=None, warn_hea
 
     fake_engine = _FakeEngine()
     monkeypatch.setattr(main, "_engine", lambda: fake_engine)
+    import greenfloor.daemon.cycle_runner as cycle_runner
     import greenfloor.daemon.engine_logging as engine_logging
 
+    monkeypatch.setattr(cycle_runner, "_engine", lambda: fake_engine)
     monkeypatch.setattr(engine_logging, "_engine", lambda: fake_engine)
 
 

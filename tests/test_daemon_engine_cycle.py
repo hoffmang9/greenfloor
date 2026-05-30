@@ -9,8 +9,17 @@ from unittest.mock import MagicMock
 import pytest
 
 from greenfloor.core.engine_bridge import import_engine, require_engine_method
-from greenfloor.daemon.cycle_runner import run_once
+from greenfloor.daemon.cycle_runner import new_coin_watchlist_cache, run_once
 from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
+
+
+def _coin_watchlist() -> Any:
+    cls = require_engine_method(
+        import_engine(),
+        "CoinWatchlistCache",
+        missing="coin watchlist cache",
+    )
+    return cls()
 
 
 def _dispatch_state(cursor: int = 0, immediate_requeue_ids: list[str] | None = None) -> Any:
@@ -50,6 +59,7 @@ def test_run_daemon_cycle_once_via_engine_delegates_to_pyo3(monkeypatch, tmp_pat
         poll_coinset_mempool=False,
         use_websocket_capture=True,
         dispatch_state=dispatch_state,
+        coin_watchlist=_coin_watchlist(),
         run_fn=_fake_run,
     )
     assert exit_code == 0
@@ -74,6 +84,7 @@ def test_run_once_is_thin_wrapper_over_engine_cycle(monkeypatch, tmp_path: Path)
         tmp_path / "state",
         poll_coinset_mempool=True,
         use_websocket_capture=False,
+        coin_watchlist=new_coin_watchlist_cache(),
     )
     assert code == 0
     mock.assert_called_once()
@@ -98,5 +109,6 @@ def test_run_daemon_cycle_once_requires_dispatch_state(tmp_path: Path) -> None:
             poll_coinset_mempool=False,
             use_websocket_capture=False,
             dispatch_state=None,
+            coin_watchlist=_coin_watchlist(),
             run_fn=_bad_run,
         )

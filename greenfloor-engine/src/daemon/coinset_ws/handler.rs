@@ -6,7 +6,7 @@ use crate::daemon::coinset_tx::{
     classify_ws_payload_tx_ids, extract_coin_ids_from_offer_payload,
     extract_coinset_tx_ids_from_offer_payload,
 };
-use crate::daemon::watchlist::match_watched_coin_ids;
+use crate::daemon::watchlist::cache::CoinWatchlistCache;
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
@@ -50,7 +50,11 @@ pub async fn run_recovery_poll(
     }
 }
 
-pub fn handle_ws_text(store: &SqliteStore, raw: &str) -> SignerResult<()> {
+pub fn handle_ws_text(
+    store: &SqliteStore,
+    coin_watchlist: &CoinWatchlistCache,
+    raw: &str,
+) -> SignerResult<()> {
     let payload: Value = match serde_json::from_str(raw) {
         Ok(value) => value,
         Err(_) => {
@@ -118,7 +122,7 @@ pub fn handle_ws_text(store: &SqliteStore, raw: &str) -> SignerResult<()> {
             &serde_json::json!({"coin_id_count": observed_coin_ids.len()}),
             None,
         )?;
-        let hits = match_watched_coin_ids(&observed_coin_ids);
+        let hits = coin_watchlist.match_watched_coin_ids(&observed_coin_ids);
         if !hits.is_empty() {
             let mut sample: Vec<String> = observed_coin_ids
                 .iter()

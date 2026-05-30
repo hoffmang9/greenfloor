@@ -11,6 +11,7 @@ from greenfloor.daemon.testing import (
     match_watched_coin_ids,
     update_market_coin_watchlist_from_dexie,
 )
+from greenfloor.runtime.offer_watchlist import new_coin_watchlist_cache
 from tests.helpers.daemon_test_fixtures import market_config
 from tests.helpers.watchlist_store import (
     open_watchlist_test_store,
@@ -158,14 +159,18 @@ def test_update_market_coin_watchlist_from_dexie_tracks_coins_for_owned_offers(t
         {"id": "offer-2", "involved_coins": ["0x" + ("b" * 64)]},
     ]
 
+    coin_watchlist = new_coin_watchlist_cache()
     update_market_coin_watchlist_from_dexie(
         market=market,
         offers=offers,
         store=store,
-        clock=now,
+        coin_watchlist=coin_watchlist,
     )
 
-    hits = match_watched_coin_ids(observed_coin_ids=["a" * 64, "b" * 64])
+    hits = match_watched_coin_ids(
+        coin_watchlist=coin_watchlist,
+        observed_coin_ids=["a" * 64, "b" * 64],
+    )
     assert hits["m1"] == ["a" * 64]
 
 

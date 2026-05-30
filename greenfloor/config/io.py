@@ -167,18 +167,30 @@ def resolve_state_db_path(
     program_config_path: Path | None = None,
     explicit_db_path: str | None = None,
 ) -> Path:
-    """Return the SQLite state DB path for daemon or CLI callers."""
+    """Return the SQLite state DB path for daemon or CLI callers (canonical Rust resolver)."""
+    from greenfloor.core.engine_bridge import import_engine, require_engine_method
+
     if explicit_db_path and str(explicit_db_path).strip():
         return Path(explicit_db_path).expanduser()
+
+    home_dir: Path | None = None
     if program_home_dir is not None:
-        return (Path(program_home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
-    if program_config_path is not None:
+        home_dir = Path(program_home_dir).expanduser()
+    elif program_config_path is not None:
         program = load_program_config(program_config_path)
-        return (Path(program.home_dir).expanduser() / "db" / "greenfloor.sqlite").resolve()
-    raise ValueError(
-        "resolve_state_db_path requires program_home_dir or program_config_path "
-        "when explicit_db_path is not set"
+        home_dir = Path(program.home_dir).expanduser()
+    else:
+        raise ValueError(
+            "resolve_state_db_path requires program_home_dir or program_config_path "
+            "when explicit_db_path is not set"
+        )
+
+    resolve = require_engine_method(
+        import_engine(),
+        "resolve_state_db_path",
+        missing="state db path resolution",
     )
+    return Path(resolve(home_dir, None)).expanduser()
 
 
 def resolve_market_for_build(

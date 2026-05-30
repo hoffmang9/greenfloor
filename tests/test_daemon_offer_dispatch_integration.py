@@ -108,7 +108,12 @@ def test_daemon_dispatch_state_round_trip_via_engine_cycle(tmp_path: Path) -> No
         state_dir=tmp_path / "state",
         poll_coinset_mempool=False,
         use_websocket_capture=True,
-        market_dispatch_state=dispatch,
+        dispatch_state=dispatch,
+        coin_watchlist=require_engine_method(
+            _engine(),
+            "CoinWatchlistCache",
+            missing="coin watchlist cache",
+        )(),
         run_fn=_fake_run,
     )
     assert exit_code == 0
