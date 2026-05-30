@@ -4,7 +4,7 @@ use reqwest::Client;
 use serde_json::json;
 
 use crate::coinset::get_all_mempool_tx_ids;
-use crate::config::{load_program_config, ManagerProgramConfig};
+use crate::config::ManagerProgramConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
@@ -19,13 +19,12 @@ pub struct CyclePreambleResult {
 }
 
 pub async fn run_cycle_preamble(
-    program_path: &Path,
+    program: &ManagerProgramConfig,
     db_path: &Path,
     coinset_base_url: &str,
     poll_coinset_mempool: bool,
     use_websocket_capture: bool,
 ) -> SignerResult<CyclePreambleResult> {
-    let program = load_program_config(program_path)?;
     let store = SqliteStore::open(db_path)?;
     let mut result = CyclePreambleResult::default();
 

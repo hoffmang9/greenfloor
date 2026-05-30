@@ -19,10 +19,7 @@ from greenfloor.daemon.bootstrap import (
 from greenfloor.daemon.coinset_ws import CoinsetWebsocketClient
 from greenfloor.daemon.cycle_market_batch import (
     MarketDispatchState,
-    enqueue_immediate_requeue_market,  # noqa: F401
-    select_market_batch,  # noqa: F401
 )
-from greenfloor.daemon.cycle_stale_sweep import detect_stale_open_offers_for_requeue  # noqa: F401
 from greenfloor.daemon.cycle_ws_handlers import build_coinset_websocket_handlers
 from greenfloor.daemon.engine_cycle import run_daemon_cycle_once_via_engine
 from greenfloor.daemon.inventory_scan import (
@@ -30,6 +27,13 @@ from greenfloor.daemon.inventory_scan import (
     _resolve_coinset_ws_url,
 )
 from greenfloor.daemon.market_logging import _daemon_logger
+
+
+def resolve_cycle_websocket_capture(*, program, loop_websocket_active: bool) -> bool:
+    if loop_websocket_active:
+        return False
+    mode = str(getattr(program, "tx_block_trigger_mode", "websocket")).strip().lower()
+    return mode == "websocket"
 
 
 def consume_reload_marker(state_dir: Path) -> bool:
@@ -131,6 +135,7 @@ def run_loop(
                 coinset_base_url=coinset_base_url,
                 state_dir=state_dir,
                 poll_coinset_mempool=False,
+                use_websocket_capture=False,
                 program=current_program,
                 testnet_markets_path=testnet_markets_path,
                 market_dispatch_state=market_dispatch_state,

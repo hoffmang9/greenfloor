@@ -1,20 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, cast
 
 from greenfloor.config import io as config_io
 from greenfloor.daemon.testing import (
     MarketDispatchState,
-    detect_stale_open_offers_for_requeue,
     enqueue_immediate_requeue_market,
     match_watched_coin_ids,
     resolve_quote_asset_for_offer,
     select_market_batch,
     set_watched_coin_ids_for_market,
 )
-from greenfloor.storage.sqlite import SqliteStore
 
 
 def test_select_market_batch_prioritizes_immediate_requeue_then_round_robin() -> None:
@@ -43,65 +39,6 @@ def test_select_market_batch_prioritizes_immediate_requeue_then_round_robin() ->
     )
     assert [m.market_id for m in selected_next] == ["m2", "m3"]
     assert consumed_next == []
-
-
-def test_detect_stale_open_offers_for_requeue_marks_expired_status(tmp_path: Path) -> None:
-    store = SqliteStore(tmp_path / "state.db")
-    try:
-        store.upsert_offer_state(
-            offer_id="offer-expired",
-            market_id="m1",
-            state="open",
-            last_seen_status=0,
-        )
-
-        class _FakeDexie:
-            @staticmethod
-            def get_offer(offer_id: str, *, timeout: int = 5) -> dict[str, Any]:
-                _ = timeout
-                assert offer_id == "offer-expired"
-                return {"offer": {"id": offer_id, "status": 6}}
-
-        payload = detect_stale_open_offers_for_requeue(
-            store=store,
-            dexie=cast(Any, _FakeDexie()),
-            enabled_market_ids={"m1"},
-        )
-    finally:
-        store.close()
-
-    assert payload.checked_offer_count == 1
-    assert payload.requeue_market_ids == ["m1"]
-    assert payload.hits[0].reason == "offer_expired"
-
-
-def test_detect_stale_open_offers_for_requeue_marks_missing_404(tmp_path: Path) -> None:
-    store = SqliteStore(tmp_path / "state.db")
-    try:
-        store.upsert_offer_state(
-            offer_id="offer-missing",
-            market_id="m2",
-            state="open",
-            last_seen_status=0,
-        )
-
-        class _FakeDexie:
-            @staticmethod
-            def get_offer(offer_id: str, *, timeout: int = 5) -> dict[str, Any]:
-                _ = offer_id, timeout
-                raise RuntimeError("HTTP Error 404: Not Found")
-
-        payload = detect_stale_open_offers_for_requeue(
-            store=store,
-            dexie=cast(Any, _FakeDexie()),
-            enabled_market_ids={"m2"},
-        )
-    finally:
-        store.close()
-
-    assert payload.checked_offer_count == 1
-    assert payload.requeue_market_ids == ["m2"]
-    assert payload.hits[0].reason == "offer_missing_404"
 
 
 def test_match_watched_coin_ids_returns_empty_without_overlap() -> None:

@@ -5,7 +5,6 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::config::{load_markets_config_with_overlay, load_program_config};
 use crate::cycle::{
     dedupe_sorted_market_ids, enqueue_immediate_requeue, select_market_batch,
     should_use_market_slot_dispatch, StaleSweepProgress,
@@ -13,8 +12,8 @@ use crate::cycle::{
 use crate::error::SignerResult;
 use crate::storage::{state_db_path_for_home, SqliteStore};
 
+use super::market_context::DaemonCycleResources;
 use super::stale_sweep::detect_stale_open_offers_for_requeue;
-use crate::adapters::DexieClient;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DaemonDispatchState {
@@ -85,19 +84,18 @@ pub fn resolve_state_db_path(home_dir: &Path, explicit_db_path: Option<&str>) ->
     state_db_path_for_home(home_dir)
 }
 
-pub async fn build_cycle_plan(request: &DaemonRunOnceRequest) -> SignerResult<CyclePlan> {
-    let program = load_program_config(&request.program_path)?;
-    let markets = load_markets_config_with_overlay(
-        &request.markets_path,
-        request.testnet_markets_path.as_deref(),
-    )?;
+pub async fn build_cycle_plan(
+    request: &DaemonRunOnceRequest,
+    resources: &DaemonCycleResources,
+) -> SignerResult<CyclePlan> {
+    let program = &resources.program;
     let db_path = resolve_state_db_path(&program.home_dir, request.state_db_override.as_deref());
     let store = SqliteStore::open(&db_path)?;
     let previous_xch_price_usd = store.get_latest_xch_price_snapshot()?;
 
     let mut enabled_market_ids: Vec<String> = Vec::new();
     let mut enabled_set: HashSet<String> = HashSet::new();
-    for market in &markets.markets {
+    for market in &resources.markets.markets {
         if !market.enabled {
             continue;
         }
@@ -109,7 +107,6 @@ pub async fn build_cycle_plan(request: &DaemonRunOnceRequest) -> SignerResult<Cy
         enabled_market_ids.push(market_id.to_string());
     }
 
-    let dexie = DexieClient::new(program.dexie_api_base.clone());
     let stale_open_sweep = if enabled_market_ids.is_empty() {
         StaleSweepProgress {
             checked_offer_count: 0,
@@ -118,7 +115,7 @@ pub async fn build_cycle_plan(request: &DaemonRunOnceRequest) -> SignerResult<Cy
             truncated: false,
         }
     } else {
-        detect_stale_open_offers_for_requeue(&store, &dexie, &enabled_market_ids).await?
+        detect_stale_open_offers_for_requeue(&store, &resources.dexie, &enabled_market_ids).await?
     };
 
     let runtime_market_slot_count = program.runtime_market_slot_count;
@@ -164,8 +161,8 @@ pub async fn build_cycle_plan(request: &DaemonRunOnceRequest) -> SignerResult<Cy
         runtime_dry_run,
         db_path,
         previous_xch_price_usd,
-        dexie_base_url: program.dexie_api_base,
-        splash_base_url: program.splash_api_base,
+        dexie_base_url: program.dexie_api_base.clone(),
+        splash_base_url: program.splash_api_base.clone(),
         test_controls: request.test_controls.clone(),
     })
 }

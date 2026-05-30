@@ -130,3 +130,66 @@ async fn record_parallel_fallback_audit_persists_event() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_type, "offer_parallel_fallback");
 }
+
+#[tokio::test]
+async fn execute_strategy_actions_skips_when_signer_path_missing() {
+    use super::execute_strategy_actions;
+    use crate::config::MarketConfig;
+    use crate::cycle::PlannedAction;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    let dir = tempdir().expect("tempdir");
+    let db_path = dir.path().join("greenfloor.sqlite");
+    let store = SqliteStore::open(&db_path).expect("open");
+    let program_path = dir.path().join("program.yaml");
+    std::fs::write(&program_path, "app:\n  network: mainnet\n").expect("write program");
+    let markets_path = dir.path().join("markets.yaml");
+    std::fs::write(&markets_path, "markets: []\n").expect("write markets");
+    let program = sample_program(false, false);
+    let market = MarketConfig {
+        market_id: "m1".to_string(),
+        enabled: true,
+        base_asset: "xch".to_string(),
+        base_symbol: "XCH".to_string(),
+        quote_asset: "xch".to_string(),
+        quote_asset_type: "stable".to_string(),
+        receive_address: "xch1test".to_string(),
+        signer_key_id: "key-1".to_string(),
+        mode: "sell_only".to_string(),
+        pricing: json!({}),
+        cancel_move_threshold_bps: None,
+        ladders: HashMap::new(),
+    };
+    let actions = vec![PlannedAction {
+        size: 1,
+        repeat: 1,
+        pair: "xch".to_string(),
+        expiry_unit: "minutes".to_string(),
+        expiry_value: 10,
+        cancel_after_create: false,
+        reason: "test".to_string(),
+        target_spread_bps: None,
+        side: "sell".to_string(),
+    }];
+
+    let output = execute_strategy_actions(
+        &store,
+        &db_path,
+        &program,
+        &market,
+        "mainnet",
+        &program_path,
+        &markets_path,
+        None,
+        &actions,
+    )
+    .await
+    .expect("dispatch");
+
+    assert_eq!(output.executed_count, 0);
+    let events = store
+        .list_recent_audit_events(Some(&["strategy_exec_skipped_no_signer"]), Some("m1"), 1)
+        .expect("events");
+    assert_eq!(events.len(), 1);
+}

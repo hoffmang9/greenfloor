@@ -1,5 +1,6 @@
 //! Daemon cycle orchestration (native Rust). Reconcile, inventory/strategy/coin_ops planning, and cancel run in Rust.
 
+mod disabled_markets;
 mod cancel_phase;
 mod coin_ops_execution;
 mod coin_ops_phase;
@@ -9,6 +10,7 @@ mod cycle_entry;
 mod inventory_phase;
 mod lock;
 mod logging;
+mod market_context;
 mod market_cycle;
 mod market_dispatch;
 mod market_gate;
@@ -35,9 +37,12 @@ pub use lock::DaemonInstanceLock;
 pub use logging::{
     default_log_level, initialize_daemon_file_logging, warn_if_daemon_log_level_auto_healed,
 };
+pub use market_context::{
+    load_cycle_resources, DaemonCycleResources, MarketCycleContext, MarketDispatchContext,
+};
 pub use market_dispatch::{
-    aggregate_market_dispatch_metrics, dexie_client, program_network, record_market_worker_error,
-    selected_markets, IoPhaseMetrics, MarketDispatchContext, SingleMarketCycleOutput,
+    aggregate_market_dispatch_metrics, record_market_worker_error, IoPhaseMetrics,
+    SingleMarketCycleOutput,
 };
 pub use program_runtime::{
     default_testnet_markets_path, load_daemon_program_runtime, resolve_testnet_markets_path,

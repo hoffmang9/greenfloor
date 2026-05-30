@@ -63,8 +63,21 @@ pub async fn detect_stale_open_offers_for_requeue(
         let offer_id = candidate.offer_id.trim().to_string();
         let hit = match dexie.get_offer(&offer_id).await {
             Ok(payload) => {
-                let offer = payload.get("offer");
-                if let Some(offer_obj) = offer {
+                if payload.get("success") == Some(&serde_json::Value::Bool(false)) {
+                    let error_text = payload
+                        .get("error")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    if is_dexie_offer_missing_error_text(error_text) {
+                        Some(StaleSweepHit {
+                            market_id: market_id.clone(),
+                            offer_id: offer_id.clone(),
+                            reason: "offer_missing_404".to_string(),
+                        })
+                    } else {
+                        None
+                    }
+                } else if let Some(offer_obj) = payload.get("offer") {
                     let status = offer_obj
                         .get("status")
                         .and_then(|value| value.as_i64())
@@ -91,4 +104,73 @@ pub async fn detect_stale_open_offers_for_requeue(
     }
 
     Ok(progress)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockito::Server;
+    use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn detect_stale_open_offers_marks_expired_status() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        store
+            .upsert_offer_state("offer-expired", "m1", "open", Some(0))
+            .expect("seed");
+
+        let mut server = Server::new_async().await;
+        let _mock = server
+            .mock("GET", "/v1/offers/offer-expired")
+            .with_status(200)
+            .with_body(
+                r#"{"success":true,"offer":{"id":"offer-expired","status":6}}"#,
+            )
+            .create();
+        let dexie = DexieClient::new(server.url());
+
+        let progress = detect_stale_open_offers_for_requeue(
+            &store,
+            &dexie,
+            &["m1".to_string()],
+        )
+        .await
+        .expect("sweep");
+
+        assert_eq!(progress.checked_offer_count, 1);
+        assert_eq!(progress.requeue_market_ids, vec!["m1".to_string()]);
+        assert_eq!(progress.hits[0].reason, "offer_expired");
+    }
+
+    #[tokio::test]
+    async fn detect_stale_open_offers_marks_missing_404() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+        store
+            .upsert_offer_state("offer-missing", "m2", "open", Some(0))
+            .expect("seed");
+
+        let mut server = Server::new_async().await;
+        let _mock = server
+            .mock("GET", "/v1/offers/offer-missing")
+            .with_status(404)
+            .with_body(r#"{"success":false,"error":"not found"}"#)
+            .create();
+        let dexie = DexieClient::new(server.url());
+
+        let progress = detect_stale_open_offers_for_requeue(
+            &store,
+            &dexie,
+            &["m2".to_string()],
+        )
+        .await
+        .expect("sweep");
+
+        assert_eq!(progress.checked_offer_count, 1);
+        assert_eq!(progress.requeue_market_ids, vec!["m2".to_string()]);
+        assert_eq!(progress.hits[0].reason, "offer_missing_404");
+    }
 }

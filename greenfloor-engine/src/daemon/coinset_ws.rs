@@ -200,3 +200,73 @@ fn handle_ws_text(store: &SqliteStore, raw: &str) -> SignerResult<()> {
 fn ws_error(err: tokio_tungstenite::tungstenite::Error) -> SignerError {
     SignerError::Other(format!("coinset_ws_once_error:{err}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mockito::Server;
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    fn sample_program() -> ManagerProgramConfig {
+        ManagerProgramConfig {
+            network: "mainnet".to_string(),
+            home_dir: PathBuf::from("/tmp/gf"),
+            app_log_level: "INFO".to_string(),
+            app_log_level_was_missing: false,
+            dexie_api_base: "https://api.dexie.space".to_string(),
+            splash_api_base: "http://localhost:4000".to_string(),
+            offer_publish_venue: "dexie".to_string(),
+            coin_ops_minimum_fee_mojos: 0,
+            coin_ops_max_operations_per_run: 0,
+            coin_ops_max_daily_fee_budget_mojos: 0,
+            coin_ops_split_fee_mojos: 0,
+            coin_ops_combine_fee_mojos: 0,
+            runtime_offer_bootstrap_wait_timeout_seconds: 120,
+            runtime_market_slot_count: 1,
+            runtime_parallel_markets: false,
+            runtime_offer_parallelism_enabled: false,
+            runtime_offer_parallelism_max_workers: 2,
+            runtime_dry_run: false,
+            runtime_loop_interval_seconds: 30,
+            tx_block_trigger_mode: "websocket".to_string(),
+            tx_block_websocket_url: "ws://127.0.0.1:9/ws".to_string(),
+            tx_block_websocket_reconnect_interval_seconds: 1,
+            tx_block_fallback_poll_interval_seconds: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn capture_once_runs_recovery_poll_and_records_started() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = SqliteStore::open(&db_path).expect("open");
+
+        let mut server = Server::new_async().await;
+        let tx_id = "a".repeat(64);
+        let _mock = server
+            .mock("POST", "/get_all_mempool_tx_ids")
+            .with_status(200)
+            .with_body(format!(r#"{{"success":true,"tx_ids":["{tx_id}"]}}"#))
+            .create();
+
+        let program = sample_program();
+        capture_coinset_websocket_once(&store, &program, &server.url())
+            .await
+            .expect("capture");
+
+        let events = store
+            .list_recent_audit_events(
+                Some(&["coinset_ws_once_started", "coinset_ws_recovery_poll"]),
+                None,
+                10,
+            )
+            .expect("events");
+        let event_types: std::collections::HashSet<String> = events
+            .iter()
+            .map(|event| event.event_type.clone())
+            .collect();
+        assert!(event_types.contains("coinset_ws_once_started"));
+        assert!(event_types.contains("coinset_ws_recovery_poll"));
+    }
+}

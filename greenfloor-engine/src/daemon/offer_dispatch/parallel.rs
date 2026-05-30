@@ -134,15 +134,14 @@ pub async fn execute_actions_parallel(
                         testnet_markets_path.as_deref(),
                         &job.action,
                     )
-                    .await
-                    .unwrap_or(false);
+                    .await?;
                     let release_status = reservation_release_status(post_result);
                     let _ = coordinator.release(&reservation_id, release_status);
                     post_result
                 }
-                _ => false,
+                Ok(_) | Err(_) => false,
             };
-            (job.action, counts_as_executed)
+            Ok::<(PlannedAction, bool), SignerError>((job.action, counts_as_executed))
         }));
     }
 
@@ -150,7 +149,8 @@ pub async fn execute_actions_parallel(
     for handle in handles {
         let (action, counts_as_executed) = handle
             .await
-            .map_err(|err| SignerError::Other(format!("parallel worker join failed: {err}")))?;
+            .map_err(|err| SignerError::Other(format!("parallel worker join failed: {err}")))?
+            .map_err(|err| SignerError::Other(format!("parallel worker failed: {err}")))?;
         if counts_as_executed {
             executed += 1;
         }

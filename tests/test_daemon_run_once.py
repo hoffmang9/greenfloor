@@ -205,42 +205,6 @@ def test_run_once_parallel_picks_up_new_market_next_cycle(
     assert processed == [1, 2]
 
 
-def test_run_once_uses_websocket_capture_when_enabled(
-    tmp_path: Path, dexie_mock: DexieHttpMock
-) -> None:
-    home = tmp_path / "home"
-    state_dir = home / "state"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    program = tmp_path / "program.yaml"
-    markets = tmp_path / "markets.yaml"
-    write_program(program, home, dexie_api_base=dexie_mock.base_url)
-    write_markets(markets)
-
-    code = run_once(
-        program_path=program,
-        markets_path=markets,
-        allowed_keys=None,
-        db_path_override=str(tmp_path / "state.sqlite"),
-        coinset_base_url="https://api.coinset.org",
-        state_dir=state_dir,
-        poll_coinset_mempool=False,
-        use_websocket_capture=True,
-    )
-    assert code == 0
-
-    store = SqliteStore(tmp_path / "state.sqlite")
-    try:
-        events = store.list_recent_audit_events(
-            event_types=["coinset_ws_once_started", "coinset_ws_recovery_poll"],
-            limit=5,
-        )
-    finally:
-        store.close()
-    event_types = {str(event["event_type"]) for event in events}
-    assert "coinset_ws_once_started" in event_types
-    assert "coinset_ws_recovery_poll" in event_types
-
-
 def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:
     from greenfloor.daemon.main import _acquire_daemon_instance_lock
 
