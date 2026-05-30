@@ -6,6 +6,7 @@ use serde_json::json;
 use crate::adapters::{post_offer_phase_dexie, DexieClient};
 use crate::config::{
     load_markets_config, load_program_config, resolve_market_for_build, require_signer_offer_path,
+    resolve_offer_publish_settings, ManagerProgramConfig,
 };
 
 #[tokio::test]
@@ -113,4 +114,78 @@ markets:
     let markets = load_markets_config(&markets_path).expect("markets");
     let market = resolve_market_for_build(&markets, Some("m1"), None, "mainnet").expect("market");
     assert_eq!(market.market_id, "m1");
+}
+
+#[test]
+fn resolve_offer_publish_settings_uses_program_defaults() {
+    let program = ManagerProgramConfig {
+        network: "mainnet".to_string(),
+        home_dir: std::path::PathBuf::from("/tmp/gf"),
+        dexie_api_base: "https://api.dexie.space".to_string(),
+        splash_api_base: "http://localhost:4000".to_string(),
+        offer_publish_venue: "splash".to_string(),
+        coin_ops_minimum_fee_mojos: 0,
+        runtime_offer_bootstrap_wait_timeout_seconds: 120,
+    };
+    let (venue, dexie_base, splash_base) =
+        resolve_offer_publish_settings(&program, "mainnet", None, None, None).expect("settings");
+    assert_eq!(venue, "splash");
+    assert_eq!(dexie_base, "https://api.dexie.space");
+    assert_eq!(splash_base, "http://localhost:4000");
+}
+
+#[test]
+fn resolve_market_rejects_unknown_market_id() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let markets_path = dir.path().join("markets.yaml");
+    std::fs::write(
+        &markets_path,
+        r#"
+markets:
+  - id: m1
+    enabled: true
+    base_asset: a1
+    base_symbol: A1
+    quote_asset: xch
+    receive_address: xch1test
+    pricing:
+      min_price_quote_per_base: 0.0031
+      max_price_quote_per_base: 0.0038
+"#,
+    )
+    .expect("write");
+    let markets = load_markets_config(&markets_path).expect("markets");
+    let err = resolve_market_for_build(&markets, Some("missing"), None, "mainnet")
+        .expect_err("missing market");
+    assert!(err.to_string().contains("market_id not found"));
+}
+
+#[test]
+fn resolve_market_rejects_ambiguous_pair() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let markets_path = dir.path().join("markets.yaml");
+    std::fs::write(
+        &markets_path,
+        r#"
+markets:
+  - id: m1
+    enabled: true
+    base_asset: a1
+    base_symbol: A1
+    quote_asset: xch
+    receive_address: xch1a
+    pricing: { "side": "sell" }
+  - id: m2
+    enabled: true
+    base_asset: a1
+    base_symbol: A1
+    quote_asset: xch
+    receive_address: xch1b
+    pricing: { "side": "sell" }
+"#,
+    )
+    .expect("write");
+    let markets = load_markets_config(&markets_path).expect("markets");
+    let err = resolve_market_for_build(&markets, None, Some("a1:xch"), "mainnet").expect_err("ambiguous");
+    assert!(err.to_string().contains("ambiguous"));
 }

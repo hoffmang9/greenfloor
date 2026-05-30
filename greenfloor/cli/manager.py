@@ -21,7 +21,6 @@ from greenfloor.cli.manager_setup import (
 )
 from greenfloor.cli.offer_build_post import (
     build_and_post_offer_cli,
-    resolve_offer_publish_settings,
 )
 from greenfloor.cli.offers_lifecycle import offers_cancel, offers_reconcile, offers_status
 from greenfloor.config.io import (
@@ -234,13 +233,6 @@ def main() -> None:
             else None,
         )
     elif args.command == "build-and-post-offer":
-        venue, dexie_base_url, splash_base_url = resolve_offer_publish_settings(
-            program_path=Path(args.program_config),
-            network=args.network,
-            venue_override=args.venue,
-            dexie_base_url=args.dexie_base_url or None,
-            splash_base_url=args.splash_base_url or None,
-        )
         code = build_and_post_offer_cli(
             program_path=Path(args.program_config),
             markets_path=Path(args.markets_config),
@@ -250,9 +242,9 @@ def main() -> None:
             pair=args.pair or None,
             size_base_units=args.size_base_units,
             repeat=args.repeat,
-            publish_venue=venue,
-            dexie_base_url=dexie_base_url,
-            splash_base_url=splash_base_url,
+            publish_venue=args.venue,
+            dexie_base_url=args.dexie_base_url or None,
+            splash_base_url=args.splash_base_url or None,
             drop_only=not bool(args.allow_take),
             claim_rewards=bool(args.claim_rewards),
             dry_run=bool(args.dry_run),

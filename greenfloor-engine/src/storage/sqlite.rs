@@ -170,7 +170,28 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn count_audit_events(&self, event_type: &str, market_id: &str) -> SignerResult<i64> {
+    pub(crate) fn offer_state_for_id(&self, offer_id: &str) -> SignerResult<Option<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT state FROM offer_state WHERE offer_id = ?1")
+            .map_err(|err| SignerError::Other(format!("failed to prepare offer_state query: {err}")))?;
+        let mut rows = stmt
+            .query(params![offer_id])
+            .map_err(|err| SignerError::Other(format!("failed to query offer_state: {err}")))?;
+        if let Some(row) = rows
+            .next()
+            .map_err(|err| SignerError::Other(format!("failed to read offer_state row: {err}")))?
+        {
+            let state: String = row
+                .get(0)
+                .map_err(|err| SignerError::Other(format!("failed to read offer state: {err}")))?;
+            return Ok(Some(state));
+        }
+        Ok(None)
+    }
+
+    #[cfg(test)]
+    fn count_audit_events(&self, event_type: &str, market_id: &str) -> SignerResult<i64> {
         self.conn
             .query_row(
                 "SELECT COUNT(*) FROM audit_event WHERE event_type = ?1 AND market_id = ?2",
@@ -180,7 +201,8 @@ impl SqliteStore {
             .map_err(|err| SignerError::Other(format!("failed to count audit events: {err}")))
     }
 
-    pub fn latest_audit_payload(
+    #[cfg(test)]
+    fn latest_audit_payload(
         &self,
         event_type: &str,
         market_id: &str,
@@ -211,26 +233,6 @@ impl SqliteStore {
                 SignerError::Other(format!("failed to decode audit payload json: {err}"))
             })?;
             return Ok(Some(payload));
-        }
-        Ok(None)
-    }
-
-    pub fn offer_state_for_id(&self, offer_id: &str) -> SignerResult<Option<String>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT state FROM offer_state WHERE offer_id = ?1")
-            .map_err(|err| SignerError::Other(format!("failed to prepare offer_state query: {err}")))?;
-        let mut rows = stmt
-            .query(params![offer_id])
-            .map_err(|err| SignerError::Other(format!("failed to query offer_state: {err}")))?;
-        if let Some(row) = rows
-            .next()
-            .map_err(|err| SignerError::Other(format!("failed to read offer_state row: {err}")))?
-        {
-            let state: String = row
-                .get(0)
-                .map_err(|err| SignerError::Other(format!("failed to read offer state: {err}")))?;
-            return Ok(Some(state));
         }
         Ok(None)
     }

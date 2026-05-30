@@ -5,9 +5,8 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 
 class GreenfloorEngineBinaryError(RuntimeError):
@@ -58,13 +57,14 @@ def build_and_post_offer_argv(
     pair: str | None,
     size_base_units: int,
     repeat: int,
-    publish_venue: str,
-    dexie_base_url: str,
-    splash_base_url: str,
+    publish_venue: str | None,
+    dexie_base_url: str | None,
+    splash_base_url: str | None,
     drop_only: bool,
     claim_rewards: bool,
     dry_run: bool,
     compact_json: bool,
+    persist_results: bool,
 ) -> list[str]:
     argv: list[str] = [
         str(binary),
@@ -79,12 +79,6 @@ def build_and_post_offer_argv(
         str(int(size_base_units)),
         "--repeat",
         str(int(repeat)),
-        "--venue",
-        publish_venue.strip(),
-        "--dexie-base-url",
-        dexie_base_url.strip(),
-        "--splash-base-url",
-        splash_base_url.strip(),
     ]
     if testnet_markets_path is not None:
         argv.extend(["--testnet-markets-config", str(testnet_markets_path)])
@@ -92,6 +86,12 @@ def build_and_post_offer_argv(
         argv.extend(["--market-id", market_id.strip()])
     if pair:
         argv.extend(["--pair", pair.strip()])
+    if publish_venue and publish_venue.strip():
+        argv.extend(["--venue", publish_venue.strip()])
+    if dexie_base_url and dexie_base_url.strip():
+        argv.extend(["--dexie-base-url", dexie_base_url.strip()])
+    if splash_base_url and splash_base_url.strip():
+        argv.extend(["--splash-base-url", splash_base_url.strip()])
     if not drop_only:
         argv.append("--allow-take")
     if claim_rewards:
@@ -100,6 +100,8 @@ def build_and_post_offer_argv(
         argv.append("--dry-run")
     if compact_json:
         argv.append("--json")
+    if not persist_results:
+        argv.append("--no-persist-results")
     return argv
 
 
@@ -113,14 +115,15 @@ def run_build_and_post_offer_via_engine(
     pair: str | None,
     size_base_units: int,
     repeat: int,
-    publish_venue: str,
-    dexie_base_url: str,
-    splash_base_url: str,
+    publish_venue: str | None,
+    dexie_base_url: str | None,
+    splash_base_url: str | None,
     drop_only: bool,
     claim_rewards: bool,
     dry_run: bool,
     compact_json: bool = False,
-    run_fn: Callable[..., Any] | None = None,
+    persist_results: bool = True,
+    run_fn: Callable[..., object] | None = None,
 ) -> int:
     binary = resolve_greenfloor_engine_binary()
     argv = build_and_post_offer_argv(
@@ -140,6 +143,7 @@ def run_build_and_post_offer_via_engine(
         claim_rewards=claim_rewards,
         dry_run=dry_run,
         compact_json=compact_json,
+        persist_results=persist_results,
     )
     runner = run_fn or subprocess.run
     completed = runner(argv, check=False)
@@ -149,7 +153,3 @@ def run_build_and_post_offer_via_engine(
             f"unexpected subprocess return value from greenfloor-engine: {returncode!r}"
         )
     return returncode
-
-
-def format_argv_for_display(argv: Sequence[str]) -> str:
-    return " ".join(argv)

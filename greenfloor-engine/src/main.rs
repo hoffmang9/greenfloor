@@ -113,6 +113,8 @@ enum Commands {
         dry_run: bool,
         #[arg(long)]
         json: bool,
+        #[arg(long)]
+        no_persist_results: bool,
     },
 }
 
@@ -222,6 +224,7 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
             claim_rewards,
             dry_run,
             json,
+            no_persist_results,
         } => {
             if market_id.is_none() == pair.is_none() {
                 return Err(greenfloor_engine::Error::Other(
@@ -249,7 +252,7 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
                 claim_rewards,
                 dry_run,
                 compact_json: json,
-                persist_results: true,
+                persist_results: !no_persist_results,
             })
             .await?;
             println!("{}", response.output);

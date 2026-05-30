@@ -8,25 +8,10 @@ import pytest
 import greenfloor.cli.manager as manager_mod
 from greenfloor.asset_label_catalog import _dexie_lookup_token_for_cat_id
 from greenfloor.cli.manager_setup import set_log_level
-from greenfloor.cli.offer_build_post import (
-    resolve_dexie_base_url,
-    resolve_offer_publish_settings,
-    resolve_splash_base_url,
-)
 from greenfloor.runtime.json_output import format_json_output, set_json_output_compact
 from tests.helpers.offer_runtime_fixtures import (
     write_manager_program,
 )
-
-
-def test_resolve_dexie_base_url_by_network() -> None:
-    assert resolve_dexie_base_url("mainnet", None) == "https://api.dexie.space"
-    assert resolve_dexie_base_url("testnet11", None) == "https://api-testnet.dexie.space"
-    assert resolve_dexie_base_url("testnet", None) == "https://api-testnet.dexie.space"
-
-
-def test_resolve_splash_base_url_defaults_when_not_explicit() -> None:
-    assert resolve_splash_base_url(None) == "http://john-deere.hoffmang.com:4000"
 
 
 def test_dexie_lookup_token_for_cat_id_falls_back_to_v3_tickers(monkeypatch) -> None:
@@ -79,21 +64,6 @@ def test_format_json_output_compact_mode_is_single_line() -> None:
     set_json_output_compact(True)
     output = format_json_output({"alpha": 1, "beta": {"gamma": 2}})
     assert output == '{"alpha":1,"beta":{"gamma":2}}'
-
-
-def test_resolve_offer_publish_settings_from_program(tmp_path: Path) -> None:
-    program = tmp_path / "program.yaml"
-    write_manager_program(program, tmp_path=tmp_path, provider="splash")
-    venue, dexie_base, splash_base = resolve_offer_publish_settings(
-        program_path=program,
-        network="mainnet",
-        venue_override=None,
-        dexie_base_url=None,
-        splash_base_url=None,
-    )
-    assert venue == "splash"
-    assert dexie_base == "https://api.dexie.space"
-    assert splash_base == "http://localhost:4000"
 
 
 def test_set_log_level_updates_program_yaml(tmp_path: Path, capsys) -> None:

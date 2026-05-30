@@ -286,4 +286,10 @@ mod tests {
         assert_eq!(resolve_quote_asset_for_offer("xch", "testnet11"), "txch");
         assert_eq!(resolve_quote_asset_for_offer("xch", "mainnet"), "xch");
     }
+
+    #[test]
+    fn resolve_splash_base_url_defaults_to_program_base() {
+        let splash = resolve_splash_base_url(None, "http://localhost:4000");
+        assert_eq!(splash, "http://localhost:4000");
+    }
 }
