@@ -56,6 +56,7 @@ async fn process_one_market(
 
     let phases = run_post_reconcile_market_phases(
         &store,
+        &plan.db_path,
         dexie,
         program,
         market,

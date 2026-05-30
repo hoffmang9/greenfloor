@@ -1,9 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use serde_json::json;
-
-use crate::config::{require_signer_offer_path, ManagerProgramConfig, MarketConfig};
+use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::{
     executed_sell_offer_counts_by_size, expand_planned_actions, PlannedAction,
     StrategyActionSellCountInput,
@@ -13,17 +11,9 @@ use crate::manager::{build_and_post_offer, BuildAndPostOfferRequest};
 use crate::offer::request::normalize_offer_side;
 use crate::storage::SqliteStore;
 
-/// Sequential managed-offer dispatch for the daemon strategy phase.
-///
-/// Each successful post persists offer state and a canonical ``strategy_offer_execution`` audit
-/// (with ``offer_id``) via ``persist_offer_post_records``. This module intentionally does not
-/// emit a second aggregate audit event.
-pub struct StrategyDispatchOutput {
-    pub executed_count: u64,
-    pub newly_executed_sell_counts: BTreeMap<i64, i64>,
-}
+use super::OfferDispatchOutput;
 
-pub async fn execute_strategy_actions_sequential(
+pub async fn execute_actions_sequential(
     store: &SqliteStore,
     program: &ManagerProgramConfig,
     market: &MarketConfig,
@@ -31,19 +21,7 @@ pub async fn execute_strategy_actions_sequential(
     markets_path: &Path,
     testnet_markets_path: Option<&Path>,
     actions: &[PlannedAction],
-) -> SignerResult<StrategyDispatchOutput> {
-    if require_signer_offer_path(program_path).is_err() {
-        store.add_audit_event(
-            "strategy_exec_skipped_no_signer",
-            &json!({"market_id": market.market_id, "planned_count": actions.len()}),
-            Some(&market.market_id),
-        )?;
-        return Ok(StrategyDispatchOutput {
-            executed_count: 0,
-            newly_executed_sell_counts: BTreeMap::new(),
-        });
-    }
-
+) -> SignerResult<OfferDispatchOutput> {
     let expanded = expand_planned_actions(actions);
     let mut executed = 0_u64;
     let mut action_items = Vec::new();
@@ -85,12 +63,9 @@ pub async fn execute_strategy_actions_sequential(
         });
     }
 
-    Ok(StrategyDispatchOutput {
+    let _ = store;
+    Ok(OfferDispatchOutput {
         executed_count: executed,
         newly_executed_sell_counts: executed_sell_offer_counts_by_size(&action_items),
     })
-}
-
-pub fn skip_strategy_execution() -> bool {
-    std::env::var_os("GREENFLOOR_TEST_SKIP_STRATEGY_EXEC").is_some()
 }

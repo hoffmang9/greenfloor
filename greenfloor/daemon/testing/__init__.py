@@ -8,8 +8,6 @@ Canonical monkeypatch targets (module-qualified paths):
 - ``greenfloor.daemon.testing.main`` — cycle orchestration (`run_once`, `run_loop`, adapters; aliases ``cycle_runner``)
 - ``greenfloor.daemon.main`` — CLI entrypoint and instance lock
 - ``greenfloor.daemon.testing.inventory_scan`` — coinset adapter factory
-- ``greenfloor.daemon.testing.strategy_dispatch`` — routing (``execute_strategy_dispatch``)
-  and ``offer_dispatch`` module for managed offer IO monkeypatches
 - ``greenfloor.daemon.testing.strategy_state`` — reseed policy
 - ``greenfloor.daemon.testing.cooldowns`` — post/cancel cooldown globals
 - ``greenfloor.daemon.testing.cancel_policy`` — cancel policy entry
@@ -17,6 +15,7 @@ Canonical monkeypatch targets (module-qualified paths):
 
 from __future__ import annotations
 
+from greenfloor.core.cycle import expand_planned_actions, single_input_preferred_skip_reason
 from greenfloor.daemon.testing.cancel_policy import execute_cancel_policy
 from greenfloor.daemon.testing.cooldowns import (
     CANCEL_COOLDOWN_UNTIL,
@@ -50,16 +49,6 @@ from greenfloor.daemon.testing.reservations import (
     AssetReservationCoordinator,
     ReservationContentionError,
     ReservationStorageError,
-)
-from greenfloor.daemon.testing.strategy_dispatch import (
-    execute_managed_action_with_retry,
-    execute_single_managed_action,
-    execute_strategy_dispatch,
-    expand_planned_actions,
-    managed_offer_post,
-    offer_dispatch,
-    resolve_signer_offer_asset_ids_for_reservation,
-    single_input_preferred_skip_reason,
 )
 from greenfloor.daemon.testing.strategy_state import (
     inject_reseed_action_if_no_active_offers,
@@ -97,11 +86,6 @@ __all__ = [
     "drop_zero_repeat_strategy_actions",
     "enqueue_immediate_requeue_market",
     "execute_cancel_policy",
-    "execute_managed_action_with_retry",
-    "execute_single_managed_action",
-    "execute_strategy_dispatch",
-    "managed_offer_post",
-    "resolve_signer_offer_asset_ids_for_reservation",
     "expand_planned_actions",
     "inject_reseed_action_if_no_active_offers",
     "inventory_scan",
@@ -117,7 +101,6 @@ __all__ = [
     "set_watched_coin_ids_for_market",
     "single_input_preferred_skip_reason",
     "strategy_config_from_market",
-    "offer_dispatch",
     "strategy_state",
     "update_market_coin_watchlist_from_dexie",
 ]

@@ -34,6 +34,16 @@ pub fn market_cycle_phases() -> &'static [MarketCyclePhase] {
     ]
 }
 
+/// Phases run in-process after reconcile completes (reconcile is handled separately).
+pub fn post_reconcile_market_cycle_phases() -> &'static [MarketCyclePhase] {
+    &[
+        MarketCyclePhase::Inventory,
+        MarketCyclePhase::Strategy,
+        MarketCyclePhase::Cancel,
+        MarketCyclePhase::CoinOps,
+    ]
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct MarketCycleResultState {
     pub cycle_errors: i64,

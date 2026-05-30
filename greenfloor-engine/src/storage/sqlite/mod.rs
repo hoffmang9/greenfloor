@@ -1,0 +1,102 @@
+//! SQLite store: connection lifecycle and shared row types.
+
+mod audit;
+mod coin_ops;
+mod offers;
+mod reservations;
+mod tx_signals;
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use chrono::Utc;
+use rusqlite::Connection;
+
+use crate::error::{SignerError, SignerResult};
+
+use super::schema::SCHEMA;
+
+#[derive(Debug, Clone)]
+pub struct OfferPostPersistRecord {
+    pub offer_id: String,
+    pub market_id: String,
+    pub side: String,
+    pub size_base_units: u64,
+    pub publish_venue: String,
+    pub resolved_base_asset_id: String,
+    pub resolved_quote_asset_id: String,
+    pub created_extra: serde_json::Value,
+}
+
+pub struct SqliteStore {
+    pub(crate) conn: Connection,
+}
+
+pub fn state_db_path_for_home(home_dir: &Path) -> PathBuf {
+    home_dir.join("db").join("greenfloor.sqlite")
+}
+
+#[derive(Debug, Clone)]
+pub struct OfferStateListRow {
+    pub offer_id: String,
+    pub market_id: String,
+    pub state: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct OfferStateDetailRow {
+    pub offer_id: String,
+    pub market_id: String,
+    pub state: String,
+    pub last_seen_status: Option<i64>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TxSignalStateRow {
+    pub mempool_observed_at: Option<String>,
+    pub tx_block_confirmed_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuditEventRow {
+    pub id: i64,
+    pub event_type: String,
+    pub market_id: Option<String>,
+    pub payload: serde_json::Value,
+    pub created_at: String,
+}
+
+impl SqliteStore {
+    pub fn open(db_path: &Path) -> SignerResult<Self> {
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| {
+                SignerError::Other(format!(
+                    "failed to create sqlite parent dir {}: {err}",
+                    parent.display()
+                ))
+            })?;
+        }
+        let conn = Connection::open(db_path).map_err(|err| {
+            SignerError::Other(format!(
+                "failed to open sqlite db {}: {err}",
+                db_path.display()
+            ))
+        })?;
+        conn.busy_timeout(Duration::from_secs(30)).map_err(|err| {
+            SignerError::Other(format!("failed to set sqlite busy_timeout: {err}"))
+        })?;
+        conn.execute_batch("PRAGMA busy_timeout = 30000;")
+            .map_err(|err| {
+                SignerError::Other(format!("failed to set busy_timeout pragma: {err}"))
+            })?;
+        conn.execute_batch(SCHEMA).map_err(|err| {
+            SignerError::Other(format!("failed to initialize sqlite schema: {err}"))
+        })?;
+        Ok(Self { conn })
+    }
+}
+
+pub(crate) fn utcnow_iso() -> String {
+    Utc::now().to_rfc3339()
+}

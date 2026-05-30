@@ -8,13 +8,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from greenfloor.daemon.offer_dispatch.managed import managed_offer_post
 from greenfloor.runtime.daemon_config_paths import (
     DaemonConfigPaths,
     resolve_daemon_config_paths,
     set_daemon_config_paths,
 )
 from greenfloor.runtime.engine_build_and_post import run_build_and_post_offer_in_process
+from greenfloor.runtime.offer_post_request import parse_managed_offer_post_result
 from tests.helpers.daemon_test_fixtures import market_config, signer_program_config
 
 
@@ -73,7 +73,7 @@ def test_run_build_and_post_offer_in_process_delegates_to_engine(monkeypatch) ->
     assert captured["request"]["persist_results"] is False
 
 
-def test_managed_offer_post_uses_engine_build_and_post(monkeypatch) -> None:
+def test_run_managed_offer_post_uses_engine_build_and_post(monkeypatch) -> None:
     engine = MagicMock(
         return_value={
             "exit_code": 0,
@@ -95,14 +95,20 @@ def test_managed_offer_post_uses_engine_build_and_post(monkeypatch) -> None:
         "greenfloor.runtime.engine_build_and_post._engine_build_and_post_offer",
         lambda: engine,
     )
-    result = managed_offer_post(
-        program=signer_program_config(),
-        market=market_config(),
+    paths = DaemonConfigPaths(
+        program_path=Path("/tmp/program.yaml"),
+        markets_path=Path("/tmp/markets.yaml"),
+    )
+    exit_code, payload = run_build_and_post_offer_in_process(
+        paths=paths,
+        network="mainnet",
+        market_id=market_config().market_id,
         size_base_units=50,
         publish_venue="dexie",
-        runtime_dry_run=False,
-        side="sell",
+        action_side="sell",
+        persist_results=False,
     )
+    result = parse_managed_offer_post_result(exit_code, payload)
     assert result.success is True
     assert result.offer_id == "offer-managed-1"
     assert result.offer_create_ms == 42

@@ -8,7 +8,15 @@ use serde::Deserialize;
 use crate::py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
 use crate::runtime;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
+struct DaemonDispatchStatePy {
+    #[serde(default)]
+    cursor: usize,
+    #[serde(default)]
+    immediate_requeue_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct DaemonRunOnceRequestPy {
     program_path: PathBuf,
     markets_path: PathBuf,
@@ -26,19 +34,21 @@ struct DaemonRunOnceRequestPy {
     #[serde(default)]
     allowed_key_ids: Vec<String>,
     #[serde(default)]
-    dispatch_state: DaemonDispatchState,
+    dispatch_state: DaemonDispatchStatePy,
 }
 
 fn default_true() -> bool {
     true
 }
 
-#[pyfunction]
-#[pyo3(name = "run_daemon_cycle_once")]
-fn run_daemon_cycle_once_py(py: Python<'_>, request: &Bound<'_, PyDict>) -> PyResult<Py<PyAny>> {
-    let payload = request_dict_to_json(request)?;
-    let parsed: DaemonRunOnceRequestPy = serde_json::from_value(payload).map_err(to_py_err)?;
-    let engine_request = DaemonRunOnceRequest {
+fn parse_request(request: &Bound<'_, PyAny>) -> PyResult<DaemonRunOnceRequestPy> {
+    let dict = request.downcast::<PyDict>()?;
+    let payload = request_dict_to_json(dict)?;
+    serde_json::from_value(payload).map_err(to_py_err)
+}
+
+fn engine_request_from_py(parsed: DaemonRunOnceRequestPy) -> DaemonRunOnceRequest {
+    DaemonRunOnceRequest {
         program_path: parsed.program_path,
         markets_path: parsed.markets_path,
         testnet_markets_path: parsed.testnet_markets_path,
@@ -48,8 +58,18 @@ fn run_daemon_cycle_once_py(py: Python<'_>, request: &Bound<'_, PyDict>) -> PyRe
         poll_coinset_mempool: parsed.poll_coinset_mempool,
         use_websocket_capture: parsed.use_websocket_capture,
         allowed_key_ids: parsed.allowed_key_ids,
-        dispatch_state: parsed.dispatch_state,
-    };
+        dispatch_state: DaemonDispatchState {
+            cursor: parsed.dispatch_state.cursor,
+            immediate_requeue_ids: parsed.dispatch_state.immediate_requeue_ids,
+        },
+    }
+}
+
+#[pyfunction]
+#[pyo3(name = "run_daemon_cycle_once", signature = (request, /))]
+fn run_daemon_cycle_once_py(py: Python<'_>, request: &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> {
+    let parsed = parse_request(request)?;
+    let engine_request = engine_request_from_py(parsed);
 
     let response = py.detach(move || {
         runtime()

@@ -18,7 +18,7 @@ mod program_runtime;
 mod reconcile_phase;
 mod run_once;
 mod stale_sweep;
-mod strategy_dispatch;
+mod offer_dispatch;
 mod strategy_phase;
 mod strategy_support;
 pub mod watchlist;

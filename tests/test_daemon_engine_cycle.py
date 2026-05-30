@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -18,7 +19,7 @@ def test_run_daemon_cycle_once_via_engine_delegates_to_pyo3(monkeypatch, tmp_pat
     captured: dict[str, Any] = {}
     dispatch_state = MarketDispatchState(cursor=2, immediate_requeue_ids=deque(["m-old"]))
 
-    def _fake_run(request: dict[str, Any]) -> dict[str, Any]:
+    def _fake_run(request: Mapping[str, Any]) -> dict[str, Any]:
         captured["request"] = request
         return {
             "exit_code": 0,

@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::adapters::DexieClient;
 use crate::config::{ManagerProgramConfig, MarketConfig};
-use crate::cycle::{market_cycle_phases, MarketCyclePhase};
+use crate::cycle::post_reconcile_market_cycle_phases;
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
@@ -22,6 +22,7 @@ pub struct PostReconcilePhaseOutput {
 
 pub async fn run_post_reconcile_market_phases(
     store: &SqliteStore,
+    db_path: &Path,
     dexie: &DexieClient,
     program: &ManagerProgramConfig,
     market: &MarketConfig,
@@ -49,10 +50,9 @@ pub async fn run_post_reconcile_market_phases(
     let mut newly_executed_sell_counts = BTreeMap::new();
     let mut cancel = CancelPhaseMetrics::default();
 
-    for phase in market_cycle_phases() {
+    for phase in post_reconcile_market_cycle_phases() {
         match phase {
-            MarketCyclePhase::Reconcile => {}
-            MarketCyclePhase::Inventory => {
+            crate::cycle::MarketCyclePhase::Inventory => {
                 bucket_counts = run_inventory_phase(
                     store,
                     program_path,
@@ -63,9 +63,10 @@ pub async fn run_post_reconcile_market_phases(
                 )
                 .await?;
             }
-            MarketCyclePhase::Strategy => {
+            crate::cycle::MarketCyclePhase::Strategy => {
                 let strategy = run_strategy_phase(
                     store,
+                    db_path,
                     program,
                     market,
                     network,
@@ -80,7 +81,7 @@ pub async fn run_post_reconcile_market_phases(
                 sell_active_counts = strategy.sell_active_counts;
                 newly_executed_sell_counts = strategy.newly_executed_sell_counts;
             }
-            MarketCyclePhase::Cancel => {
+            crate::cycle::MarketCyclePhase::Cancel => {
                 let (cancel_metrics, _payload) = run_market_cancel_phase(
                     store,
                     dexie,
@@ -93,7 +94,7 @@ pub async fn run_post_reconcile_market_phases(
                 .await?;
                 cancel = cancel_metrics;
             }
-            MarketCyclePhase::CoinOps => {
+            crate::cycle::MarketCyclePhase::CoinOps => {
                 run_coin_ops_phase(
                     store,
                     market,
@@ -106,6 +107,7 @@ pub async fn run_post_reconcile_market_phases(
                 )
                 .await?;
             }
+            _ => {}
         }
     }
 
@@ -121,18 +123,13 @@ fn test_forced_market_error(market_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cycle::MarketCyclePhase;
+    use crate::cycle::{post_reconcile_market_cycle_phases, MarketCyclePhase};
 
     #[test]
-    fn post_reconcile_phases_follow_canonical_order_after_reconcile() {
-        let phases: Vec<MarketCyclePhase> = market_cycle_phases()
-            .iter()
-            .copied()
-            .filter(|phase| *phase != MarketCyclePhase::Reconcile)
-            .collect();
+    fn post_reconcile_phases_follow_canonical_order() {
         assert_eq!(
-            phases,
-            vec![
+            post_reconcile_market_cycle_phases(),
+            &[
                 MarketCyclePhase::Inventory,
                 MarketCyclePhase::Strategy,
                 MarketCyclePhase::Cancel,

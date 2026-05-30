@@ -4,9 +4,12 @@
 //! remains for the daemon until that path migrates; new manager CLI persistence must use this
 //! module only.
 
+mod persist;
+mod schema;
 mod sqlite;
 
+pub use persist::persist_offer_post_records;
 pub use sqlite::{
-    persist_offer_post_records, state_db_path_for_home, OfferPostPersistRecord, OfferStateListRow,
-    SqliteStore,
+    state_db_path_for_home, AuditEventRow, OfferPostPersistRecord, OfferStateDetailRow,
+    OfferStateListRow, SqliteStore, TxSignalStateRow,
 };

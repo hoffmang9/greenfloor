@@ -134,6 +134,8 @@ fn resolve_offer_publish_settings_uses_program_defaults() {
         runtime_offer_bootstrap_wait_timeout_seconds: 120,
         runtime_market_slot_count: 0,
         runtime_parallel_markets: false,
+        runtime_offer_parallelism_enabled: false,
+        runtime_offer_parallelism_max_workers: 4,
         runtime_dry_run: false,
         runtime_loop_interval_seconds: 30,
         tx_block_trigger_mode: "websocket".to_string(),

@@ -28,6 +28,8 @@ pub struct ManagerProgramConfig {
     pub runtime_offer_bootstrap_wait_timeout_seconds: u64,
     pub runtime_market_slot_count: u64,
     pub runtime_parallel_markets: bool,
+    pub runtime_offer_parallelism_enabled: bool,
+    pub runtime_offer_parallelism_max_workers: usize,
     pub runtime_dry_run: bool,
     pub runtime_loop_interval_seconds: u64,
     pub tx_block_trigger_mode: String,
@@ -59,6 +61,8 @@ struct RuntimeYaml {
     offer_bootstrap_wait_timeout_seconds: Option<u64>,
     market_slot_count: Option<u64>,
     parallel_markets: Option<bool>,
+    offer_parallelism_enabled: Option<bool>,
+    offer_parallelism_max_workers: Option<u64>,
     dry_run: Option<bool>,
     loop_interval_seconds: Option<u64>,
 }
@@ -188,6 +192,8 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
         offer_bootstrap_wait_timeout_seconds: None,
         market_slot_count: None,
         parallel_markets: None,
+        offer_parallelism_enabled: None,
+        offer_parallelism_max_workers: None,
         dry_run: None,
         loop_interval_seconds: None,
     });
@@ -197,6 +203,12 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
         .max(10);
     let runtime_market_slot_count = runtime.market_slot_count.unwrap_or(0);
     let runtime_parallel_markets = runtime.parallel_markets.unwrap_or(false);
+    let runtime_offer_parallelism_enabled = runtime.offer_parallelism_enabled.unwrap_or(false);
+    let runtime_offer_parallelism_max_workers = runtime
+        .offer_parallelism_max_workers
+        .map(|value| value as usize)
+        .unwrap_or(4)
+        .max(1);
     let runtime_dry_run = runtime.dry_run.unwrap_or(false);
     let runtime_loop_interval_seconds = runtime.loop_interval_seconds.unwrap_or(30).max(1);
     let tx_block_trigger = parsed
@@ -246,6 +258,8 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
         runtime_offer_bootstrap_wait_timeout_seconds,
         runtime_market_slot_count,
         runtime_parallel_markets,
+        runtime_offer_parallelism_enabled,
+        runtime_offer_parallelism_max_workers,
         runtime_dry_run,
         runtime_loop_interval_seconds,
         tx_block_trigger_mode,

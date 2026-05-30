@@ -13,12 +13,6 @@ from greenfloor.config.models import (
     VaultConfig,
     VaultWalletKeyConfig,
 )
-from greenfloor.core.strategy import PlannedAction
-from greenfloor.daemon.offer_dispatch.sequential import execute_actions_sequential
-from greenfloor.daemon.strategy_execution import StrategyActionResult, hooks_from_module
-from greenfloor.daemon.testing import (
-    expand_planned_actions,
-)
 from greenfloor.runtime.offer_post_request import ManagedOfferPostResult
 from tests.helpers.config_fixtures import minimal_program_config
 
@@ -34,36 +28,6 @@ def managed_post_result(
         success=success,
         offer_id=clean_offer_id,
         error=error.strip(),
-    )
-
-
-def execute_local_strategy_actions(
-    *,
-    market: MarketConfig,
-    strategy_actions: list[PlannedAction],
-    program: ProgramConfig,
-    xch_price_usd: float | None,
-    dexie: Any,
-    store: Any,
-    splash: Any | None = None,
-    publish_venue: str = "dexie",
-    keyring_yaml_path: str = "",
-    runtime_dry_run: bool = False,
-    **_: Any,
-) -> StrategyActionResult:
-    expanded = expand_planned_actions(strategy_actions)
-    return execute_actions_sequential(
-        program=program,
-        market=market,
-        expanded_actions=expanded,
-        runtime_dry_run=runtime_dry_run,
-        xch_price_usd=xch_price_usd,
-        dexie=dexie,
-        splash=splash,
-        publish_venue=publish_venue,
-        store=store,
-        keyring_yaml_path=keyring_yaml_path,
-        hooks=hooks_from_module(),
     )
 
 

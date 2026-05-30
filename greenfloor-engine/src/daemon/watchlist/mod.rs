@@ -1,22 +1,18 @@
+mod counting;
+mod metadata;
+mod time;
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
-use crate::offer::request::normalize_offer_side;
 use crate::storage::SqliteStore;
 
-const RESEED_MEMPOOL_MAX_AGE_SECONDS: i64 = 3 * 60;
-const PENDING_VISIBILITY_RECHECK_MAX_AGE_SECONDS: i64 = 2 * 60;
-
-#[derive(Debug, Clone)]
-struct OfferExecutionMetadata {
-    size: i64,
-    side: Option<String>,
-    status: String,
-    created_at: String,
-}
+use counting::{bucket_active_offers_by_side, bucket_active_offers_by_size};
+use metadata::{recent_offer_metadata_by_offer_id, OfferExecutionMetadata};
+use time::is_recent_mempool_observed_offer_state;
 
 pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult<HashSet<String>> {
     let tracked_states: HashSet<&str> = [
@@ -36,129 +32,6 @@ pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult
         }
     }
     Ok(offer_ids)
-}
-
-fn parse_event_created_at(value: &str) -> Option<DateTime<Utc>> {
-    let raw = value.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    let normalized = raw.replace('Z', "+00:00");
-    DateTime::parse_from_rfc3339(&normalized)
-        .ok()
-        .map(|dt| dt.with_timezone(&Utc))
-        .or_else(|| {
-            chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S")
-                .ok()
-                .map(|naive| naive.and_utc())
-        })
-}
-
-fn parse_offer_side_metadata(value: Option<&str>) -> Option<String> {
-    let side = value?.trim().to_ascii_lowercase();
-    if side == "buy" || side == "sell" {
-        Some(side)
-    } else {
-        None
-    }
-}
-
-fn is_recent_mempool_observed_offer_state(updated_at: &str, clock: DateTime<Utc>) -> bool {
-    let Some(parsed) = parse_event_created_at(updated_at) else {
-        return false;
-    };
-    let age_seconds = (clock - parsed).num_seconds();
-    (0..=RESEED_MEMPOOL_MAX_AGE_SECONDS).contains(&age_seconds)
-}
-
-fn recent_offer_metadata_by_offer_id(
-    store: &SqliteStore,
-    market_id: &str,
-) -> SignerResult<HashMap<String, OfferExecutionMetadata>> {
-    let events = store.list_recent_audit_events(
-        Some(&["strategy_offer_execution"]),
-        Some(market_id),
-        1500,
-    )?;
-    let mut metadata_by_offer_id = HashMap::new();
-    for event in events {
-        let Some(payload) = event.payload.as_object() else {
-            continue;
-        };
-        let Some(items) = payload.get("items").and_then(|value| value.as_array()) else {
-            continue;
-        };
-        for item in items {
-            let Some(item_obj) = item.as_object() else {
-                continue;
-            };
-            let status = item_obj
-                .get("status")
-                .and_then(|value| value.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_ascii_lowercase();
-            if status != "executed" && status != "pending_visibility" {
-                continue;
-            }
-            let offer_id = item_obj
-                .get("offer_id")
-                .and_then(|value| value.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            if offer_id.is_empty() {
-                continue;
-            }
-            let size = item_obj
-                .get("size")
-                .and_then(|value| value.as_i64())
-                .unwrap_or(0);
-            if size <= 0 {
-                continue;
-            }
-            let side =
-                parse_offer_side_metadata(item_obj.get("side").and_then(|value| value.as_str()));
-            if metadata_by_offer_id.contains_key(&offer_id) {
-                continue;
-            }
-            metadata_by_offer_id.insert(
-                offer_id,
-                OfferExecutionMetadata {
-                    size,
-                    side,
-                    status,
-                    created_at: event.created_at.clone(),
-                },
-            );
-        }
-    }
-    Ok(metadata_by_offer_id)
-}
-
-fn is_pending_visibility_metadata(metadata: &OfferExecutionMetadata) -> bool {
-    metadata.status == "pending_visibility"
-}
-
-fn is_stale_pending_visibility_offer(
-    offer_id: &str,
-    metadata: &OfferExecutionMetadata,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
-    clock: DateTime<Utc>,
-) -> bool {
-    if !is_pending_visibility_metadata(metadata) {
-        return false;
-    }
-    let Some(dexie_sizes) = dexie_size_by_offer_id else {
-        return false;
-    };
-    if dexie_sizes.contains_key(offer_id) {
-        return false;
-    }
-    let Some(created_at) = parse_event_created_at(&metadata.created_at) else {
-        return true;
-    };
-    (clock - created_at).num_seconds() > PENDING_VISIBILITY_RECHECK_MAX_AGE_SECONDS
 }
 
 fn active_offer_state_summary(
@@ -249,42 +122,16 @@ fn active_offer_counts_by_size_at(
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
 ) -> SignerResult<(BTreeMap<i64, i64>, u64)> {
-    let normalized_sizes: Vec<i64> = tracked_sizes
-        .iter()
-        .copied()
-        .filter(|size| *size > 0)
-        .collect();
-    let sizes = if normalized_sizes.is_empty() {
-        vec![1, 10, 100]
-    } else {
-        normalized_sizes
-    };
-    let mut active_counts: BTreeMap<i64, i64> = sizes.iter().map(|size| (*size, 0)).collect();
     let (active_offer_ids, _state_counts, metadata_by_offer_id) =
         active_offer_state_summary(store, market_id, clock, 500)?;
-    let mut active_unmapped = 0_u64;
-    for offer_id in active_offer_ids {
-        let metadata = metadata_by_offer_id.get(&offer_id);
-        if let Some(meta) = metadata {
-            if is_stale_pending_visibility_offer(&offer_id, meta, dexie_size_by_offer_id, clock) {
-                active_unmapped += 1;
-                continue;
-            }
-        }
-        let size = metadata
-            .map(|meta| meta.size)
-            .or_else(|| dexie_size_by_offer_id.and_then(|map| map.get(&offer_id).copied()));
-        let Some(size) = size else {
-            active_unmapped += 1;
-            continue;
-        };
-        if let Some(count) = active_counts.get_mut(&size) {
-            *count += 1;
-        } else {
-            active_unmapped += 1;
-        }
-    }
-    Ok((active_counts, active_unmapped))
+    let buckets = bucket_active_offers_by_size(
+        &active_offer_ids,
+        &metadata_by_offer_id,
+        tracked_sizes,
+        dexie_size_by_offer_id,
+        clock,
+    );
+    Ok((buckets.counts, buckets.unmapped))
 }
 
 pub fn active_offer_counts_by_size_and_side(
@@ -333,57 +180,16 @@ fn active_offer_counts_by_size_and_side_at(
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
 ) -> SignerResult<(BTreeMap<i64, i64>, BTreeMap<i64, i64>, u64)> {
-    let normalized_sizes: Vec<i64> = tracked_sizes
-        .iter()
-        .copied()
-        .filter(|size| *size > 0)
-        .collect();
-    let sizes = if normalized_sizes.is_empty() {
-        vec![1, 10, 100]
-    } else {
-        normalized_sizes
-    };
-    let mut buy_counts: BTreeMap<i64, i64> = sizes.iter().map(|size| (*size, 0)).collect();
-    let mut sell_counts: BTreeMap<i64, i64> = sizes.iter().map(|size| (*size, 0)).collect();
     let (active_offer_ids, _state_counts, metadata_by_offer_id) =
         active_offer_state_summary(store, market_id, clock, 500)?;
-    let mut active_unmapped = 0_u64;
-    for offer_id in active_offer_ids {
-        let Some(metadata) = metadata_by_offer_id.get(&offer_id) else {
-            active_unmapped += 1;
-            continue;
-        };
-        if is_stale_pending_visibility_offer(&offer_id, metadata, dexie_size_by_offer_id, clock) {
-            active_unmapped += 1;
-            continue;
-        }
-        let Some(side) = metadata.side.as_deref() else {
-            active_unmapped += 1;
-            continue;
-        };
-        let normalized_side = normalize_offer_side(side);
-        let mut size = metadata.size;
-        if size <= 0 {
-            size = dexie_size_by_offer_id
-                .and_then(|map| map.get(&offer_id).copied())
-                .unwrap_or(0);
-        }
-        if size <= 0 {
-            active_unmapped += 1;
-            continue;
-        }
-        let target = if normalized_side == "buy" {
-            buy_counts.get_mut(&size)
-        } else {
-            sell_counts.get_mut(&size)
-        };
-        if let Some(count) = target {
-            *count += 1;
-        } else {
-            active_unmapped += 1;
-        }
-    }
-    Ok((buy_counts, sell_counts, active_unmapped))
+    let buckets = bucket_active_offers_by_side(
+        &active_offer_ids,
+        &metadata_by_offer_id,
+        tracked_sizes,
+        dexie_size_by_offer_id,
+        clock,
+    );
+    Ok((buckets.buy_counts, buckets.sell_counts, buckets.unmapped))
 }
 
 #[cfg(test)]
@@ -440,9 +246,9 @@ mod tests {
     #[test]
     fn parse_event_created_at_accepts_rfc3339_and_sqlite_format() {
         let clock = Utc::now();
-        assert!(parse_event_created_at(&clock.to_rfc3339()).is_some());
+        assert!(time::parse_event_created_at(&clock.to_rfc3339()).is_some());
         let sql = clock.format("%Y-%m-%d %H:%M:%S").to_string();
-        assert!(parse_event_created_at(&sql).is_some());
+        assert!(time::parse_event_created_at(&sql).is_some());
     }
 
     #[test]
@@ -450,7 +256,7 @@ mod tests {
         let clock = Utc::now();
         let recent = (clock - chrono::Duration::seconds(30)).to_rfc3339();
         let stale =
-            (clock - chrono::Duration::seconds(RESEED_MEMPOOL_MAX_AGE_SECONDS + 1)).to_rfc3339();
+            (clock - chrono::Duration::seconds(time::RESEED_MEMPOOL_MAX_AGE_SECONDS + 1)).to_rfc3339();
         assert!(is_recent_mempool_observed_offer_state(&recent, clock));
         assert!(!is_recent_mempool_observed_offer_state(&stale, clock));
     }
