@@ -105,6 +105,7 @@ def test_resolve_offer_assets_via_coinset_config_path_is_coinset_only(tmp_path: 
         resolve_offer_assets_via_coinset_config_path(str(program_path), "HOA", "xch")
 
 
+@pytest.mark.engine
 def test_rust_coinset_resolution_for_ticker_symbols() -> None:
     """Successful MSP lookup runs in-engine (reqwest + in-process http.server deadlock in PyO3)."""
     result = subprocess.run(

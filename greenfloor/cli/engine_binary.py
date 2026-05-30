@@ -33,6 +33,8 @@ def resolve_greenfloor_engine_binary() -> Path:
 
     root = repo_root()
     for relative in (
+        Path("target/release/greenfloor-engine"),
+        Path("target/debug/greenfloor-engine"),
         Path("greenfloor-engine/target/release/greenfloor-engine"),
         Path("greenfloor-engine/target/debug/greenfloor-engine"),
     ):

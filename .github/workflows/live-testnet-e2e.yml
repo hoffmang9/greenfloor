@@ -46,8 +46,8 @@ jobs:
 
       - name: Build greenfloor-engine CLI binary
         run: |
-          cargo build --release --manifest-path greenfloor-engine/Cargo.toml
-          echo "$GITHUB_WORKSPACE/greenfloor-engine/target/release" >> "$GITHUB_PATH"
+          cargo build --release --manifest-path greenfloor-engine/Cargo.toml --bin greenfloor-engine
+          echo "$GITHUB_WORKSPACE/target/release" >> "$GITHUB_PATH"
           greenfloor-engine --help >/dev/null
 
       - uses: ./.github/actions/wheel-cache
