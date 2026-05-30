@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from greenfloor.cli.offer_build_post import build_and_post_offer_cli
+from tests.helpers.engine_binary_fixtures import patch_engine_build_and_post
 from tests.helpers.offer_runtime_fixtures import (
     write_manager_program,
     write_manager_program_with_signer,
@@ -39,23 +40,14 @@ def test_build_and_post_offer_cli_requires_signer_config(tmp_path: Path) -> None
         )
 
 
-def test_build_and_post_offer_cli_uses_signer_path(monkeypatch, tmp_path: Path) -> None:
+def test_build_and_post_offer_cli_delegates_to_engine_binary(monkeypatch, tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
     write_manager_program_with_signer(program, tmp_path=tmp_path)
     write_markets(markets)
 
-    signer_dispatched = [False]
-
-    def _fake_signer(**kwargs):
-        _ = kwargs
-        signer_dispatched[0] = True
-        return 0, {}
-
-    monkeypatch.setattr(
-        "greenfloor.runtime.offer_post_request.build_and_post_offer_signer",
-        _fake_signer,
-    )
+    captured: dict = {}
+    patch_engine_build_and_post(monkeypatch, capture=captured)
 
     code = build_and_post_offer_cli(
         program_path=program,
@@ -73,4 +65,5 @@ def test_build_and_post_offer_cli_uses_signer_path(monkeypatch, tmp_path: Path) 
         dry_run=False,
     )
     assert code == 0
-    assert signer_dispatched[0] is True
+    assert captured["market_id"] == "m1"
+    assert captured["publish_venue"] == "dexie"

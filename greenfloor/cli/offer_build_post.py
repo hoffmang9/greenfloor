@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from greenfloor.cli.engine_binary import run_build_and_post_offer_via_engine
 from greenfloor.config.io import (
     is_testnet,
     load_markets_config_with_optional_overlay,
@@ -13,8 +14,7 @@ from greenfloor.config.io import (
 )
 from greenfloor.config.models import require_signer_offer_path
 from greenfloor.logging_setup import warn_if_log_level_auto_healed
-from greenfloor.runtime.offer_build_context import prepare_offer_build_context
-from greenfloor.runtime.offer_post_request import OfferPostRequest
+from greenfloor.runtime.json_output import json_output_compact
 from greenfloor.runtime.offer_publish import initialize_manager_file_logging
 
 _manager_logger = logging.getLogger("greenfloor.manager")
@@ -90,16 +90,10 @@ def build_and_post_offer_cli(
         path=markets_path,
         overlay_path=testnet_markets_path,
     )
-    market = resolve_market_for_build(
+    _ = resolve_market_for_build(
         markets,
         market_id=market_id,
         pair=pair,
-        network=network,
-    )
-    build_ctx = prepare_offer_build_context(
-        program=program,
-        market=market,
-        program_path=program_path,
         network=network,
     )
 
@@ -110,8 +104,13 @@ def build_and_post_offer_cli(
         logger=_manager_logger,
     )
 
-    request = OfferPostRequest(
-        build_ctx=build_ctx,
+    return run_build_and_post_offer_via_engine(
+        program_path=program_path,
+        markets_path=markets_path,
+        testnet_markets_path=testnet_markets_path,
+        network=network,
+        market_id=market_id,
+        pair=pair,
         size_base_units=size_base_units,
         repeat=repeat,
         publish_venue=publish_venue,
@@ -119,7 +118,6 @@ def build_and_post_offer_cli(
         splash_base_url=splash_base_url,
         drop_only=drop_only,
         claim_rewards=claim_rewards,
-        dry_run=bool(dry_run),
+        dry_run=dry_run,
+        compact_json=json_output_compact(),
     )
-
-    return request.run_cli()

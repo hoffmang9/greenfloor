@@ -19,6 +19,7 @@ aws-config = "1"
 aws-sdk-kms = "1"
 base64 = "0.22"
 bip39 = "2.2.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chia-bls = "0.36.1"
 chia-consensus = "0.36.1"
 chia-protocol = "0.36.1"
@@ -39,12 +40,14 @@ hex = "0.4"
 indexmap = "2"
 rand = "0.9"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+urlencoding = "2"
 
 [dev-dependencies]
 anyhow = "1.0"
