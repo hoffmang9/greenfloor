@@ -7,9 +7,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-import yaml
-
-from greenfloor.config.io import ensure_program_config_valid
+from greenfloor.config.io import (
+    all_market_rows,
+    ensure_program_config_valid,
+    load_cats_fields,
+    load_markets_fields,
+)
 from greenfloor.config.launcher import launcher_id_from_program_config
 from greenfloor.hex_utils import is_hex_id, normalize_hex_id
 from scripts.vault_coinset_scan_checkpoint import (
@@ -55,14 +58,6 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _load_yaml_mapping(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as handle:
-        parsed = yaml.safe_load(handle) or {}
-    if not isinstance(parsed, dict):
-        return {}
-    return parsed
-
-
 def _load_cat_metadata_indexes() -> tuple[dict[str, set[str]], dict[str, list[str]]]:
     ticker_to_asset_ids: dict[str, set[str]] = {}
     asset_id_to_symbols: dict[str, set[str]] = {}
@@ -78,10 +73,10 @@ def _load_cat_metadata_indexes() -> tuple[dict[str, set[str]], dict[str, list[st
     cats_path = _repo_root() / "config" / "cats.yaml"
     if cats_path.exists():
         try:
-            cats_payload = _load_yaml_mapping(cats_path)
+            cats_fields = load_cats_fields(cats_config=cats_path)
         except Exception:
-            cats_payload = {}
-        cats = cats_payload.get("cats") if isinstance(cats_payload, dict) else None
+            cats_fields = {}
+        cats = cats_fields.get("cats") if isinstance(cats_fields, dict) else None
         if isinstance(cats, list):
             for item in cats:
                 if not isinstance(item, dict):
@@ -97,18 +92,15 @@ def _load_cat_metadata_indexes() -> tuple[dict[str, set[str]], dict[str, list[st
     markets_path = _repo_root() / "config" / "markets.yaml"
     if markets_path.exists():
         try:
-            markets_payload = _load_yaml_mapping(markets_path)
+            markets_fields = load_markets_fields(markets_config=markets_path)
         except Exception:
-            markets_payload = {}
-        markets = markets_payload.get("markets") if isinstance(markets_payload, dict) else None
-        if isinstance(markets, list):
-            for market in markets:
-                if not isinstance(market, dict):
-                    continue
-                add_mapping(ticker=market.get("base_symbol"), asset_id=market.get("base_asset"))
-                quote_asset = str(market.get("quote_asset", "")).strip()
-                if is_hex_id(quote_asset):
-                    add_mapping(ticker=quote_asset, asset_id=quote_asset)
+            markets_fields = {}
+        markets = all_market_rows(markets_fields)
+        for market in markets:
+            add_mapping(ticker=market.get("base_symbol"), asset_id=market.get("base_asset"))
+            quote_asset = str(market.get("quote_asset", "")).strip()
+            if is_hex_id(quote_asset):
+                add_mapping(ticker=quote_asset, asset_id=quote_asset)
 
     frozen_asset_to_symbols = {k: sorted(v) for k, v in asset_id_to_symbols.items()}
     return ticker_to_asset_ids, frozen_asset_to_symbols

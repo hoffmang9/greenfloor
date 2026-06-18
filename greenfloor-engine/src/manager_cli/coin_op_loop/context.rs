@@ -8,7 +8,8 @@ use crate::coin_ops::execution::{
 };
 use crate::coin_ops::SpendableCoin;
 use crate::config::{
-    load_markets_config_with_overlay, load_program_bundle, resolve_market_for_build, MarketConfig,
+    load_markets_config_with_overlay, load_program_bundle_gated, resolve_market_for_build,
+    MarketConfig,
 };
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
@@ -27,7 +28,7 @@ pub(super) async fn build_coin_op_exec_context(
     pair: Option<&str>,
     asset_id_override: Option<&str>,
 ) -> SignerResult<CoinOpExecContext> {
-    let bundle = load_program_bundle(program_path)?;
+    let bundle = load_program_bundle_gated(program_path)?;
     let program = bundle.program;
     let markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
     let market = resolve_market_for_build(&markets, market_id, pair, network)?;

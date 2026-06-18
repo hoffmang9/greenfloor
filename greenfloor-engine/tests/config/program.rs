@@ -1,4 +1,8 @@
-use greenfloor_engine::config::parse_program_config;
+use greenfloor_engine::config::{
+    is_signer_execution_soft_skip, parse_program_config, signer_execution_skip_reason,
+    SIGNER_SKIP_NO_SIGNER_PATH,
+};
+use greenfloor_engine::error::SignerError;
 use serde_json::{json, Value};
 
 use super::shared::base_program_raw;
@@ -323,4 +327,27 @@ fn parse_program_config_registry_none_treated_as_empty() {
     raw["keys"]["registry"] = json!(null);
     let cfg = parse_program_config(&raw).expect("config");
     assert!(cfg.signer_key_registry.is_empty());
+}
+
+#[test]
+fn signer_execution_skip_reason_maps_missing_signer_path() {
+    let cfg = parse_program_config(&base_program_raw()).expect("config");
+    let err = cfg
+        .require_signer_offer_path()
+        .expect_err("missing signer path");
+    assert_eq!(
+        signer_execution_skip_reason(&err),
+        SIGNER_SKIP_NO_SIGNER_PATH
+    );
+    assert!(is_signer_execution_soft_skip(&err));
+}
+
+#[test]
+fn signer_execution_skip_reason_maps_missing_signer_section() {
+    let err = SignerError::MissingConfigField("signer");
+    assert_eq!(
+        signer_execution_skip_reason(&err),
+        "skipped_missing_signer_config"
+    );
+    assert!(is_signer_execution_soft_skip(&err));
 }

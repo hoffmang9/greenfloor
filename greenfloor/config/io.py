@@ -10,10 +10,6 @@ from greenfloor.engine_binary import resolve_greenfloor_manager_binary
 from greenfloor.hex_utils import normalize_hex_id
 from tests.helpers.manager_cli import parse_json_output, run_manager
 
-_MINIMAL_PROGRAM_TEMPLATE = (
-    Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "data" / "minimal_program.yaml"
-)
-
 
 def load_yaml(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
@@ -38,15 +34,37 @@ def materialize_minimal_program_template(
     *,
     home_dir: Path,
     dexie_api_base: str = "https://api.dexie.space",
+    log_level: str = "INFO",
+    dry_run: bool = False,
+    low_inventory_alerts_enabled: bool = False,
+    pushover_enabled: bool = False,
+    with_signer: bool = False,
 ) -> None:
-    text = _MINIMAL_PROGRAM_TEMPLATE.read_text(encoding="utf-8")
-    text = text.replace("__HOME_DIR__", str(home_dir))
-    text = text.replace("__DEXIE_API_BASE__", dexie_api_base)
-    text = text.replace("__LOG_LEVEL__", "INFO")
-    text = text.replace("__DRY_RUN__", "false")
-    text = text.replace("__ALERTS_ENABLED__", "false")
-    text = text.replace("__PUSHOVER_ENABLED__", "false")
-    path.write_text(text, encoding="utf-8")
+    """Materialize the shared minimal program template via native Rust policy."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    argv = [
+        str(resolve_greenfloor_manager_binary()),
+        "materialize-minimal-program",
+        "--output",
+        str(path),
+        "--home-dir",
+        str(home_dir),
+        "--dexie-api-base",
+        dexie_api_base,
+        "--log-level",
+        log_level,
+    ]
+    if dry_run:
+        argv.append("--dry-run")
+    if low_inventory_alerts_enabled:
+        argv.append("--low-inventory-alerts-enabled")
+    if pushover_enabled:
+        argv.append("--pushover-enabled")
+    if with_signer:
+        argv.append("--with-signer")
+    completed = subprocess.run(argv, check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(f"materialize-minimal-program failed with exit {completed.returncode}")
 
 
 def run_config_validate(
@@ -160,6 +178,13 @@ def symbol_to_asset_id_map(fields: dict[str, Any]) -> dict[str, str]:
 
 def enabled_market_rows(fields: dict[str, Any]) -> list[dict[str, Any]]:
     markets = fields.get("enabled_markets")
+    if not isinstance(markets, list):
+        return []
+    return [row for row in markets if isinstance(row, dict)]
+
+
+def all_market_rows(fields: dict[str, Any]) -> list[dict[str, Any]]:
+    markets = fields.get("markets")
     if not isinstance(markets, list):
         return []
     return [row for row in markets if isinstance(row, dict)]

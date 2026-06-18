@@ -6,7 +6,7 @@ use crate::coin_ops::{
     coin_op_target_amount_allowed, effective_sell_bucket_counts_for_coin_ops,
     partition_plans_by_budget, plan_coin_ops, projected_coin_ops_fee_mojos, BucketSpec, CoinOpPlan,
 };
-use crate::config::MarketConfig;
+use crate::config::{signer_execution_skip_reason, MarketConfig};
 use crate::error::SignerResult;
 use crate::hex::default_mojo_multiplier_for_asset;
 use crate::storage::SqliteStore;
@@ -136,8 +136,6 @@ pub async fn run_coin_ops_phase(
                 "network": program.network,
             }),
         }
-    } else if !program.signer_offer_path_configured() {
-        skipped_coin_ops_result(program, market, &executable_plans, "skipped_no_signer")
     } else {
         match resources.signer_for_execution() {
             Ok(signer) => {
@@ -150,9 +148,12 @@ pub async fn run_coin_ops_phase(
                 )
                 .await
             }
-            Err(err) => {
-                skipped_coin_ops_result(program, market, &executable_plans, &err.to_string())
-            }
+            Err(err) => skipped_coin_ops_result(
+                program,
+                market,
+                &executable_plans,
+                &signer_execution_skip_reason(&err),
+            ),
         }
     };
 

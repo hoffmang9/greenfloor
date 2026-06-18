@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde_json::json;
 
 use crate::coin_ops::compute_bucket_counts_from_coins;
-use crate::config::MarketConfig;
+use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason, MarketConfig};
 use crate::cycle::MarketCycleResultState;
 use crate::error::SignerResult;
 use crate::hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
@@ -56,19 +56,6 @@ pub async fn run_inventory_phase(
         return Ok(BTreeMap::new());
     }
 
-    if !resources.program.signer_offer_path_configured() {
-        store.add_audit_event(
-            "inventory_bucket_scan",
-            &json!({
-                "market_id": market.market_id,
-                "source": "skipped_no_signer",
-                "bucket_counts": {},
-            }),
-            Some(&market.market_id),
-        )?;
-        return Ok(BTreeMap::new());
-    }
-
     let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
     let scan_result: SignerResult<(String, usize, BTreeMap<i64, i64>)> = async {
         let signer_config = resources.signer_for_execution()?;
@@ -101,6 +88,18 @@ pub async fn run_inventory_phase(
                 Some(&market.market_id),
             )?;
             Ok(bucket_counts)
+        }
+        Err(err) if is_signer_execution_soft_skip(&err) => {
+            store.add_audit_event(
+                "inventory_bucket_scan",
+                &json!({
+                    "market_id": market.market_id,
+                    "source": signer_execution_skip_reason(&err),
+                    "bucket_counts": {},
+                }),
+                Some(&market.market_id),
+            )?;
+            Ok(BTreeMap::new())
         }
         Err(err) => {
             state.record_phase_error();

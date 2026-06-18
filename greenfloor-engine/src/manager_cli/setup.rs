@@ -8,6 +8,9 @@ use serde_yaml::Value;
 use crate::config::{load_markets_config_with_overlay, load_program_config};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{is_hex_id, normalize_hex_id};
+use crate::minimal_program_template::{
+    write_minimal_program, write_minimal_program_with_signer, MinimalProgramParams,
+};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
 use super::cats_catalog::load_cats_catalog;
@@ -78,28 +81,62 @@ pub fn run_program_fields(ctx: &ManagerContext) -> SignerResult<i32> {
 pub fn run_markets_fields(ctx: &ManagerContext) -> SignerResult<i32> {
     let markets =
         load_markets_config_with_overlay(&ctx.markets_config, ctx.testnet_markets_path())?;
+    let all: Vec<_> = markets.markets.iter().map(market_fields_row).collect();
     let enabled: Vec<_> = markets
         .markets
         .iter()
         .filter(|market| market.enabled)
-        .map(|market| {
-            json!({
-                "id": market.market_id,
-                "enabled": market.enabled,
-                "base_asset": market.base_asset,
-                "base_symbol": market.base_symbol,
-                "quote_asset": market.quote_asset,
-                "quote_asset_type": market.quote_asset_type,
-                "receive_address": market.receive_address,
-                "signer_key_id": market.signer_key_id,
-                "mode": market.mode,
-            })
-        })
+        .map(market_fields_row)
         .collect();
     ctx.emit_json(&json!({
         "markets_config": ctx.markets_config.display().to_string(),
+        "markets": all,
         "enabled_markets": enabled,
     }))?;
+    Ok(0)
+}
+
+fn market_fields_row(market: &crate::config::MarketConfig) -> serde_json::Value {
+    json!({
+        "id": market.market_id,
+        "enabled": market.enabled,
+        "base_asset": market.base_asset,
+        "base_symbol": market.base_symbol,
+        "quote_asset": market.quote_asset,
+        "quote_asset_type": market.quote_asset_type,
+        "receive_address": market.receive_address,
+        "signer_key_id": market.signer_key_id,
+        "mode": market.mode,
+    })
+}
+
+pub struct MaterializeMinimalProgramRequest<'a> {
+    pub output: &'a Path,
+    pub home_dir: &'a Path,
+    pub dexie_api_base: &'a str,
+    pub log_level: &'a str,
+    pub dry_run: bool,
+    pub low_inventory_alerts_enabled: bool,
+    pub pushover_enabled: bool,
+    pub with_signer: bool,
+}
+
+pub fn run_materialize_minimal_program(
+    request: MaterializeMinimalProgramRequest<'_>,
+) -> SignerResult<i32> {
+    let params = MinimalProgramParams {
+        home_dir: request.home_dir,
+        dexie_api_base: request.dexie_api_base,
+        log_level: Some(request.log_level),
+        dry_run: request.dry_run,
+        low_inventory_alerts_enabled: request.low_inventory_alerts_enabled,
+        pushover_enabled: request.pushover_enabled,
+    };
+    if request.with_signer {
+        write_minimal_program_with_signer(request.output, params);
+    } else {
+        write_minimal_program(request.output, params);
+    }
     Ok(0)
 }
 

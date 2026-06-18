@@ -37,6 +37,24 @@ pub enum ManagerCommands {
     ProgramFields,
     MarketsFields,
     CatsFields,
+    MaterializeMinimalProgram {
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long)]
+        home_dir: PathBuf,
+        #[arg(long, default_value = "https://api.dexie.space")]
+        dexie_api_base: String,
+        #[arg(long, default_value = "INFO")]
+        log_level: String,
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+        #[arg(long, default_value_t = false)]
+        low_inventory_alerts_enabled: bool,
+        #[arg(long, default_value_t = false)]
+        pushover_enabled: bool,
+        #[arg(long, default_value_t = false)]
+        with_signer: bool,
+    },
     KeysOnboard {
         #[arg(long, default_value = "")]
         chia_keys_dir: String,

@@ -4,8 +4,8 @@ use serde_json::{json, Value};
 
 use crate::coin_ops::is_spendable_coin_state;
 use crate::config::{
-    load_markets_config_with_overlay, parse_program_config, parse_signer_config, read_program_yaml,
-    ProgramConfigBundle,
+    load_markets_config_with_overlay, parse_program_config, program_bundle_from_parsed,
+    read_program_yaml, ProgramConfigBundle,
 };
 use crate::error::{SignerError, SignerResult};
 
@@ -124,10 +124,7 @@ async fn run_coin_list_command(
         }))?;
         return Ok(2);
     }
-    let bundle = ProgramConfigBundle {
-        program,
-        signer: parse_signer_config(&raw)?,
-    };
+    let bundle = program_bundle_from_parsed(program, &raw)?;
     let snapshot = load_coin_list_snapshot(&bundle, &mgr.markets_config, asset, cat_id).await?;
     if op == "coin-status" {
         mgr.emit_json(&json!({

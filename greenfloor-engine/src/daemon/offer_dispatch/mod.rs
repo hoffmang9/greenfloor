@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 
-use crate::config::MarketConfig;
+use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason, MarketConfig};
 use crate::cycle::{expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction};
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
@@ -72,16 +72,23 @@ pub async fn execute_strategy_actions(
     market: &MarketConfig,
     actions: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
-    if !ctx.resources.program.signer_offer_path_configured() {
-        store.add_audit_event(
-            "strategy_exec_skipped_no_signer",
-            &json!({"market_id": market.market_id, "planned_count": actions.len()}),
-            Some(&market.market_id),
-        )?;
-        return Ok(OfferDispatchOutput {
-            executed_count: 0,
-            newly_executed_sell_counts: BTreeMap::new(),
-        });
+    if let Err(err) = ctx.resources.signer_for_execution() {
+        if is_signer_execution_soft_skip(&err) {
+            store.add_audit_event(
+                "strategy_exec_skipped_no_signer",
+                &json!({
+                    "market_id": market.market_id,
+                    "planned_count": actions.len(),
+                    "reason": signer_execution_skip_reason(&err),
+                }),
+                Some(&market.market_id),
+            )?;
+            return Ok(OfferDispatchOutput {
+                executed_count: 0,
+                newly_executed_sell_counts: BTreeMap::new(),
+            });
+        }
+        return Err(err);
     }
 
     let expanded = expand_planned_actions(actions);

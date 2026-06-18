@@ -1,6 +1,6 @@
 use crate::coinset::get_conservative_fee_estimate;
 use crate::config::{
-    action_side_from_pricing, load_markets_config_with_overlay, load_program_bundle,
+    action_side_from_pricing, load_markets_config_with_overlay, load_program_bundle_gated,
     resolve_market_for_build, resolve_offer_publish_settings, ManagerProgramConfig, MarketConfig,
     SignerConfig,
 };
@@ -34,9 +34,8 @@ pub(crate) struct ResolvedBuildAndPostContext {
 pub(super) async fn resolve_build_and_post_context(
     request: &BuildAndPostOfferRequest,
 ) -> SignerResult<ResolvedBuildAndPostContext> {
-    let bundle = load_program_bundle(&request.program_path)?;
+    let bundle = load_program_bundle_gated(&request.program_path)?;
     let program = bundle.program;
-    program.require_signer_offer_path()?;
     initialize_manager_file_logging(&program.home_dir, &program.app_log_level)?;
     warn_if_log_level_auto_healed(program.app_log_level_was_missing, &request.program_path);
     let markets = load_markets_config_with_overlay(

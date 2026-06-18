@@ -1,7 +1,11 @@
+//! Shared minimal ``program.yaml`` template materialization for tests and script adapters.
+
 use std::path::Path;
 
 const MINIMAL_PROGRAM_TEMPLATE: &str =
-    include_str!("../../../tests/fixtures/data/minimal_program.yaml");
+    include_str!("../../tests/fixtures/data/minimal_program.yaml");
+const MINIMAL_PROGRAM_SIGNER_APPEND: &str =
+    include_str!("../../tests/fixtures/data/minimal_program_signer_append.yaml");
 
 pub struct MinimalProgramParams<'a> {
     pub home_dir: &'a Path,
@@ -25,13 +29,13 @@ impl<'a> Default for MinimalProgramParams<'a> {
     }
 }
 
-pub fn write_minimal_program(path: &Path, params: MinimalProgramParams<'_>) {
+pub fn materialize_minimal_program_text(params: MinimalProgramParams<'_>) -> String {
     let log_level = params
         .log_level
         .unwrap_or("INFO")
         .trim()
         .to_ascii_uppercase();
-    let yaml = MINIMAL_PROGRAM_TEMPLATE
+    MINIMAL_PROGRAM_TEMPLATE
         .replace("__HOME_DIR__", &params.home_dir.display().to_string())
         .replace("__DEXIE_API_BASE__", params.dexie_api_base)
         .replace("__LOG_LEVEL__", &log_level)
@@ -51,6 +55,19 @@ pub fn write_minimal_program(path: &Path, params: MinimalProgramParams<'_>) {
             } else {
                 "false"
             },
-        );
-    std::fs::write(path, yaml).expect("write minimal program yaml");
+        )
+}
+
+pub fn write_minimal_program(path: &Path, params: MinimalProgramParams<'_>) {
+    std::fs::write(path, materialize_minimal_program_text(params))
+        .unwrap_or_else(|err| panic!("write minimal program yaml {}: {err}", path.display()));
+}
+
+pub fn write_minimal_program_with_signer(path: &Path, params: MinimalProgramParams<'_>) {
+    let launcher_id = "aa".repeat(32);
+    let mut contents = materialize_minimal_program_text(params);
+    contents.push('\n');
+    contents.push_str(&MINIMAL_PROGRAM_SIGNER_APPEND.replace("__LAUNCHER_ID__", &launcher_id));
+    std::fs::write(path, contents)
+        .unwrap_or_else(|err| panic!("write signer program {}: {err}", path.display()));
 }

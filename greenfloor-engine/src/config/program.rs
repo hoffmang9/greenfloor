@@ -66,6 +66,28 @@ impl ManagerProgramConfig {
     }
 }
 
+pub const SIGNER_SKIP_NO_SIGNER_PATH: &str = "skipped_no_signer";
+pub const SIGNER_SKIP_MISSING_SIGNER_CONFIG: &str = "skipped_missing_signer_config";
+
+pub fn signer_execution_skip_reason(err: &SignerError) -> String {
+    match err {
+        SignerError::MissingConfigField("signer") => SIGNER_SKIP_MISSING_SIGNER_CONFIG.to_string(),
+        SignerError::Other(msg)
+            if msg.contains("offer execution requires signer.kms_key_id and vault.launcher_id") =>
+        {
+            SIGNER_SKIP_NO_SIGNER_PATH.to_string()
+        }
+        other => other.to_string(),
+    }
+}
+
+pub fn is_signer_execution_soft_skip(err: &SignerError) -> bool {
+    matches!(
+        signer_execution_skip_reason(err).as_str(),
+        SIGNER_SKIP_NO_SIGNER_PATH | SIGNER_SKIP_MISSING_SIGNER_CONFIG
+    )
+}
+
 impl Default for ManagerProgramConfig {
     fn default() -> Self {
         Self {
@@ -385,12 +407,27 @@ pub struct ProgramConfigBundle {
     pub signer: SignerConfig,
 }
 
+pub fn program_bundle_from_parsed(
+    program: ManagerProgramConfig,
+    raw: &Value,
+) -> SignerResult<ProgramConfigBundle> {
+    Ok(ProgramConfigBundle {
+        program,
+        signer: super::signer::parse_signer_config(raw)?,
+    })
+}
+
 pub fn load_program_bundle(path: &Path) -> SignerResult<ProgramConfigBundle> {
     let raw = read_program_yaml(path)?;
-    Ok(ProgramConfigBundle {
-        program: parse_program_config(&raw)?,
-        signer: super::signer::parse_signer_config(&raw)?,
-    })
+    let program = parse_program_config(&raw)?;
+    program_bundle_from_parsed(program, &raw)
+}
+
+pub fn load_program_bundle_gated(path: &Path) -> SignerResult<ProgramConfigBundle> {
+    let raw = read_program_yaml(path)?;
+    let program = parse_program_config(&raw)?;
+    program.require_signer_offer_path()?;
+    program_bundle_from_parsed(program, &raw)
 }
 
 pub fn is_testnet_network(network: &str) -> bool {

@@ -20,6 +20,7 @@ pub mod error;
 pub mod hex;
 pub mod kms;
 pub mod manager_cli;
+pub mod minimal_program_template;
 pub mod offer;
 pub mod paths;
 pub mod storage;
