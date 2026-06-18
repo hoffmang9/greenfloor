@@ -34,6 +34,7 @@ pub enum ManagerCommands {
         #[arg(long, help = "Validate program.yaml only; skip markets overlay.")]
         program_only: bool,
     },
+    ProgramFields,
     KeysOnboard {
         #[arg(long, default_value = "")]
         chia_keys_dir: String,

@@ -112,7 +112,8 @@ pub async fn run_coins_list(
     cat_id: Option<&str>,
 ) -> SignerResult<i32> {
     let _ = vault_id;
-    if let Err(err) = require_signer_offer_path(&mgr.program_config) {
+    let program = load_program_config(&mgr.program_config)?;
+    if let Err(err) = require_signer_offer_path(&program) {
         mgr.emit_json(&json!({
             "ok": false,
             "error": "coin_list_requires_signer_backend",
@@ -143,7 +144,8 @@ pub async fn run_coin_status(
     cat_id: Option<&str>,
 ) -> SignerResult<i32> {
     let _ = vault_id;
-    if let Err(err) = require_signer_offer_path(&mgr.program_config) {
+    let program = load_program_config(&mgr.program_config)?;
+    if let Err(err) = require_signer_offer_path(&program) {
         mgr.emit_json(&json!({
             "ok": false,
             "error": "coin_list_requires_signer_backend",

@@ -6,6 +6,11 @@ use serde_json::{json, Value};
 
 use super::json_util::parse_json_output;
 
+#[path = "program.rs"]
+mod program_fixture;
+
+pub use program_fixture::{write_minimal_program, MinimalProgramParams};
+
 pub struct DaemonOnceResult {
     pub exit_code: i32,
     pub response: Option<Value>,
@@ -80,58 +85,14 @@ pub fn daemon_request(params: DaemonRequestParams<'_>) -> Value {
 }
 
 pub fn write_daemon_program(path: &Path, home_dir: &Path, dexie_api_base: &str) {
-    let home = home_dir.display();
-    let yaml = format!(
-        r#"app:
-  network: "mainnet"
-  home_dir: "{home}"
-  log_level: INFO
-runtime:
-  loop_interval_seconds: 30
-  dry_run: false
-chain_signals:
-  tx_block_trigger:
-    mode: "websocket"
-    websocket_url: "wss://coinset.org/ws"
-    websocket_reconnect_interval_seconds: 1
-    fallback_poll_interval_seconds: 1
-dev:
-  python:
-    min_version: "3.11"
-notifications:
-  low_inventory_alerts:
-    enabled: false
-    threshold_mode: "absolute_base_units"
-    default_threshold_base_units: 0
-    dedup_cooldown_seconds: 60
-    clear_hysteresis_percent: 10
-  providers:
-    - type: pushover
-      enabled: false
-      user_key_env: "PUSHOVER_USER_KEY"
-      app_token_env: "PUSHOVER_APP_TOKEN"
-      recipient_key_env: "PUSHOVER_RECIPIENT_KEY"
-venues:
-  dexie:
-    api_base: "{dexie_api_base}"
-  splash:
-    api_base: "http://localhost:4000"
-  offer_publish:
-    provider: "dexie"
-coin_ops:
-  max_operations_per_run: 0
-  max_daily_fee_budget_mojos: 0
-  split_fee_mojos: 0
-  combine_fee_mojos: 0
-keys:
-  registry:
-    - key_id: "key-main-1"
-      fingerprint: 123456789
-      network: "mainnet"
-      keyring_yaml_path: "~/.chia_keys/keyring.yaml"
-"#
+    write_minimal_program(
+        path,
+        MinimalProgramParams {
+            home_dir,
+            dexie_api_base,
+            ..Default::default()
+        },
     );
-    std::fs::write(path, yaml).expect("write program yaml");
 }
 
 pub fn write_markets_one(path: &Path, cancel_policy: bool) {

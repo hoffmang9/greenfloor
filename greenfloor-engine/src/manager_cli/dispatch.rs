@@ -21,6 +21,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
         ManagerCommands::ConfigValidate { program_only } => {
             setup::run_config_validate(&ctx, program_only)
         }
+        ManagerCommands::ProgramFields => setup::run_program_fields(&ctx),
         ManagerCommands::KeysOnboard {
             chia_keys_dir,
             key_id,

@@ -2,6 +2,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+#[path = "program.rs"]
+mod program_fixture;
+
+pub use program_fixture::{write_minimal_program, MinimalProgramParams};
+
 pub fn run_manager(args: &[&str], env: Option<&[(&str, &str)]>, stdin: Option<&str>) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_greenfloor-manager"));
     command
@@ -47,44 +52,15 @@ pub fn copy_example_program_and_markets(tmp: &Path) -> (PathBuf, PathBuf) {
 }
 
 pub fn write_manager_program(path: &Path, home_dir: &Path) {
-    let home = home_dir.display();
-    let yaml = format!(
-        r#"app:
-  network: "mainnet"
-  home_dir: "{home}"
-runtime:
-  loop_interval_seconds: 30
-chain_signals:
-  tx_block_trigger:
-    mode: "websocket"
-    webhook_enabled: true
-    webhook_listen_addr: "127.0.0.1:8787"
-dev:
-  python:
-    min_version: "3.11"
-notifications:
-  low_inventory_alerts:
-    enabled: true
-    threshold_mode: "absolute_base_units"
-    default_threshold_base_units: 0
-    dedup_cooldown_seconds: 60
-    clear_hysteresis_percent: 10
-  providers:
-    - type: pushover
-      enabled: true
-      user_key_env: "PUSHOVER_USER_KEY"
-      app_token_env: "PUSHOVER_APP_TOKEN"
-      recipient_key_env: "PUSHOVER_RECIPIENT_KEY"
-venues:
-  dexie:
-    api_base: "https://api.dexie.space"
-  splash:
-    api_base: "http://localhost:4000"
-  offer_publish:
-    provider: "dexie"
-"#
+    write_minimal_program(
+        path,
+        MinimalProgramParams {
+            home_dir,
+            low_inventory_alerts_enabled: true,
+            pushover_enabled: true,
+            ..Default::default()
+        },
     );
-    std::fs::write(path, yaml).expect("write manager program");
 }
 
 pub fn write_manager_program_with_signer(path: &Path, home_dir: &Path) {

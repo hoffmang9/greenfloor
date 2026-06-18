@@ -20,10 +20,10 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.config.io import (
-    ScriptProgramFields,
     default_cats_config_path,
     enabled_market_rows,
     load_markets_yaml_with_optional_overlay,
+    load_program_fields,
     load_yaml,
     run_config_validate,
 )
@@ -194,7 +194,7 @@ def _combine_argv_for_batch(
     *,
     args: argparse.Namespace,
     program_config_path: Path,
-    program_fields: ScriptProgramFields,
+    program_fields: dict[str, Any],
     key_id: str,
     keyring_yaml_path: str,
     receive_address: str,
@@ -220,9 +220,9 @@ def _combine_argv_for_batch(
             "--program-config",
             str(program_config_path),
             "--signer-kms-key-id",
-            program_fields.signer_kms_key_id,
+            program_fields["signer_kms_key_id"],
             "--signer-kms-region",
-            program_fields.signer_kms_region,
+            program_fields["signer_kms_region"],
         ]
     )
     argv.extend(
@@ -318,9 +318,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     program_path = Path(args.program_config).expanduser()
-    program_raw = load_yaml(program_path)
-    program_fields = ScriptProgramFields.from_raw(program_raw)
-    network = str(args.network).strip() or program_fields.network
+    program_fields = load_program_fields(program_config=program_path)
+    network = str(args.network).strip() or str(program_fields["network"])
     if network.lower() in {"testnet"}:
         network = "testnet11"
     args.network = network
@@ -402,7 +401,7 @@ def main(argv: list[str] | None = None) -> int:
     exit_code = 0
     combine_mode = not bool(args.dry_run) and not bool(args.list_only)
 
-    key_registry = program_fields.signer_key_registry
+    key_registry = program_fields.get("keys_registry", {})
     for job in jobs:
         signer = key_registry.get(job.signer_key_id)
         keyring = str(signer.get("keyring_yaml_path", "")).strip() if signer else ""

@@ -82,7 +82,7 @@ pub async fn execute_managed_coin_op_plans(
     plans: &[CoinOpPlan],
     watched_coin_ids: &HashSet<String>,
 ) -> CoinOpExecutionResult {
-    if let Err(err) = require_signer_offer_path(program_path) {
+    if let Err(err) = require_signer_offer_path(program) {
         return skip_all_plans(program, market, plans, &err.to_string(), "skipped");
     }
     if market.receive_address.trim().is_empty() {

@@ -5,20 +5,36 @@ from __future__ import annotations
 from pathlib import Path
 
 from greenfloor.config.io import (
-    ScriptProgramFields,
     enabled_market_rows,
     load_markets_yaml_with_optional_overlay,
+    load_program_fields,
     load_yaml,
+    materialize_minimal_program_template,
     run_config_validate,
 )
 from tests.helpers.manager_cli import parse_json_output, run_manager
 
 
-def test_script_program_fields_from_example_program() -> None:
-    raw = load_yaml(Path("config/program.yaml"))
-    fields = ScriptProgramFields.from_raw(raw)
-    assert fields.network == "mainnet"
-    assert "key-main-1" in fields.signer_key_registry
+def test_load_program_fields_reads_example_program(tmp_path: Path) -> None:
+    program = tmp_path / "program.yaml"
+    program.write_text(Path("config/program.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    fields = load_program_fields(program_config=program)
+    assert fields.get("network") == "mainnet"
+    registry = fields.get("keys_registry")
+    assert isinstance(registry, dict)
+    assert "key-main-1" in registry
+
+
+def test_materialize_minimal_program_template(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    program = tmp_path / "program.yaml"
+    materialize_minimal_program_template(
+        program, home_dir=home, dexie_api_base="https://dexie.test"
+    )
+    raw = load_yaml(program)
+    assert raw["app"]["home_dir"] == str(home)
+    assert raw["venues"]["dexie"]["api_base"] == "https://dexie.test"
+    assert raw["dev"]["python"]["min_version"] == "3.11"
 
 
 def test_load_markets_yaml_with_optional_overlay_merges_enabled_rows(tmp_path: Path) -> None:

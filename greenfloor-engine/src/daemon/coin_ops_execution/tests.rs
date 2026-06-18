@@ -12,6 +12,9 @@ fn sample_program() -> ManagerProgramConfig {
         coin_ops_max_operations_per_run: 0,
         tx_block_websocket_reconnect_interval_seconds: 1,
         tx_block_fallback_poll_interval_seconds: 1,
+        signer_kms_key_id: "arn:aws:kms:us-west-2:123:key/demo".to_string(),
+        vault_launcher_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            .to_string(),
         ..Default::default()
     }
 }

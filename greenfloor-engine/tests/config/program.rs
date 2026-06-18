@@ -1,51 +1,7 @@
 use greenfloor_engine::config::parse_program_config;
 use serde_json::{json, Value};
 
-fn base_program_raw() -> Value {
-    json!({
-        "app": {"network": "mainnet", "home_dir": "/tmp/greenfloor-test-home", "log_level": "INFO"},
-        "keys": {
-            "registry": [{
-                "key_id": "key-main-1",
-                "fingerprint": 123456789,
-                "network": "mainnet",
-                "keyring_yaml_path": "~/.chia_keys/keyring.yaml"
-            }]
-        },
-        "runtime": {"loop_interval_seconds": 30, "dry_run": false},
-        "chain_signals": {
-            "tx_block_trigger": {
-                "mode": "websocket",
-                "websocket_url": "",
-                "websocket_reconnect_interval_seconds": 30,
-                "fallback_poll_interval_seconds": 60
-            }
-        },
-        "venues": {
-            "dexie": {"api_base": "https://api.dexie.space"},
-            "splash": {"api_base": "http://localhost:4000"},
-            "offer_publish": {"provider": "dexie"}
-        },
-        "coin_ops": {"minimum_fee_mojos": 0},
-        "dev": {"python": {"min_version": "3.11"}},
-        "notifications": {
-            "low_inventory_alerts": {
-                "enabled": true,
-                "threshold_mode": "absolute_base_units",
-                "default_threshold_base_units": 0,
-                "dedup_cooldown_seconds": 21600,
-                "clear_hysteresis_percent": 10
-            },
-            "providers": [{
-                "type": "pushover",
-                "enabled": true,
-                "user_key_env": "PUSHOVER_USER_KEY",
-                "app_token_env": "PUSHOVER_APP_TOKEN",
-                "recipient_key_env": "PUSHOVER_RECIPIENT_KEY"
-            }]
-        }
-    })
-}
+use super::shared::base_program_raw;
 
 fn parse_err(raw: &Value) -> String {
     parse_program_config(raw).unwrap_err().to_string()
@@ -77,6 +33,44 @@ fn parse_program_config_minimal_valid() {
         .expect("registry entry");
     assert_eq!(reg.fingerprint, 123456789);
     assert_eq!(reg.network.as_deref(), Some("mainnet"));
+    assert_eq!(cfg.dev_python_min_version, "3.11");
+    assert!(!cfg.signer_offer_path_configured());
+}
+
+#[test]
+fn parse_program_config_reads_signer_and_vault_fields() {
+    let mut raw = base_program_raw();
+    raw["signer"] = json!({
+        "kms_key_id": "arn:aws:kms:us-west-2:123:key/demo",
+        "kms_region": "us-east-1",
+    });
+    raw["vault"] = json!({
+        "launcher_id": "aa".repeat(32),
+    });
+    let cfg = parse_program_config(&raw).expect("config");
+    assert_eq!(cfg.signer_kms_key_id, "arn:aws:kms:us-west-2:123:key/demo");
+    assert_eq!(cfg.signer_kms_region, "us-east-1");
+    assert_eq!(cfg.vault_launcher_id, "aa".repeat(32));
+    assert!(cfg.signer_offer_path_configured());
+}
+
+#[test]
+fn parse_program_config_missing_dev_python_min_version() {
+    let mut raw = base_program_raw();
+    raw["dev"]["python"]
+        .as_object_mut()
+        .unwrap()
+        .remove("min_version");
+    let err = parse_err(&raw);
+    assert!(err.contains("Missing required field: min_version"));
+}
+
+#[test]
+fn parse_program_config_empty_dev_python_min_version() {
+    let mut raw = base_program_raw();
+    raw["dev"]["python"]["min_version"] = json!("");
+    let err = parse_err(&raw);
+    assert!(err.contains("dev.python.min_version must be non-empty"));
 }
 
 #[test]

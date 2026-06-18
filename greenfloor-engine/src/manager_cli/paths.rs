@@ -2,20 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-pub fn expand_home(path: &Path) -> PathBuf {
-    let raw = path.to_string_lossy();
-    if raw == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home);
-        }
-    }
-    if let Some(stripped) = raw.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(stripped);
-        }
-    }
-    path.to_path_buf()
-}
+pub use crate::paths::expand_home;
 
 pub fn default_program_config_path() -> PathBuf {
     let home_default = expand_home(Path::new("~/.greenfloor/config/program.yaml"));

@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::adapters::DexieClient;
 use crate::config::{
-    load_markets_config_with_overlay, load_program_config, require_signer_offer_path,
-    ManagerProgramConfig, MarketConfig, MarketsConfig,
+    load_markets_config_with_overlay, load_program_config, ManagerProgramConfig, MarketConfig,
+    MarketsConfig,
 };
 use crate::error::SignerResult;
 
@@ -74,7 +74,7 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
     super::disabled_markets::log_disabled_markets_startup_once(&markets);
     let network = program.network.clone();
     let dexie = DexieClient::new(program.dexie_api_base.clone());
-    let signer_offer_path_configured = require_signer_offer_path(&request.program_path).is_ok();
+    let signer_offer_path_configured = program.signer_offer_path_configured();
     let coin_watchlist = request.coin_watchlist.clone();
     Ok(DaemonCycleResources {
         program,
@@ -91,7 +91,6 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
     })
 }
 
-/// Owned bundle for unit/integration tests that need a [`MarketCycleContext`].
 #[cfg(test)]
 pub struct TestCycleContextBundle {
     pub resources: DaemonCycleResources,
@@ -121,8 +120,8 @@ pub fn test_cycle_context(
 ) -> TestCycleContextBundle {
     use std::collections::HashMap;
 
+    use super::run_once::{DaemonCycleTestControls, DaemonDispatchState};
     use crate::cycle::StaleSweepProgress;
-    use crate::daemon::run_once::{DaemonCycleTestControls, DaemonDispatchState};
 
     TestCycleContextBundle {
         resources: DaemonCycleResources {

@@ -11,6 +11,7 @@ use super::yaml_fields::{
 use crate::coinset::is_xch_like_asset;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::is_hex_id;
+use crate::paths::expand_home;
 
 const DEFAULT_DEXIE_API_BASE: &str = "https://api.dexie.space";
 const DEFAULT_SPLASH_API_BASE: &str = "http://john-deere.hoffmang.com:4000";
@@ -41,14 +42,24 @@ pub struct ManagerProgramConfig {
     pub tx_block_websocket_url: String,
     pub tx_block_websocket_reconnect_interval_seconds: u64,
     pub tx_block_fallback_poll_interval_seconds: u64,
+    pub signer_kms_key_id: String,
+    pub signer_kms_region: String,
+    pub vault_launcher_id: String,
+    pub dev_python_min_version: String,
     pub signer_key_registry: HashMap<String, SignerKeyEntry>,
+}
+
+impl ManagerProgramConfig {
+    pub fn signer_offer_path_configured(&self) -> bool {
+        !self.signer_kms_key_id.is_empty() && !self.vault_launcher_id.is_empty()
+    }
 }
 
 impl Default for ManagerProgramConfig {
     fn default() -> Self {
         Self {
             network: "mainnet".to_string(),
-            home_dir: expand_home_dir(DEFAULT_HOME_DIR),
+            home_dir: expand_home(DEFAULT_HOME_DIR),
             app_log_level: "INFO".to_string(),
             app_log_level_was_missing: true,
             dexie_api_base: DEFAULT_DEXIE_API_BASE.to_string(),
@@ -70,6 +81,10 @@ impl Default for ManagerProgramConfig {
             tx_block_websocket_url: "wss://api.coinset.org/ws".to_string(),
             tx_block_websocket_reconnect_interval_seconds: 30,
             tx_block_fallback_poll_interval_seconds: 60,
+            signer_kms_key_id: String::new(),
+            signer_kms_region: "us-west-2".to_string(),
+            vault_launcher_id: String::new(),
+            dev_python_min_version: String::new(),
             signer_key_registry: HashMap::new(),
         }
     }
@@ -81,7 +96,12 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
     let app = req_mapping(raw, "app")?;
     let runtime = req_mapping(raw, "runtime")?;
     let chain_signals = req_mapping(raw, "chain_signals")?;
-    let _dev = req_mapping(raw, "dev")?;
+    let dev = req_mapping(raw, "dev")?;
+    let python = req_mapping_from_map(dev, "python")?;
+    let dev_python_min_version = req_str(python, "min_version")?.trim().to_string();
+    if dev_python_min_version.is_empty() {
+        return Err(config_err("dev.python.min_version must be non-empty"));
+    }
     require_pushover_provider(raw)?;
 
     let tx_trigger = req_mapping_from_map(chain_signals, "tx_block_trigger")?;
@@ -105,7 +125,7 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
             .unwrap_or("INFO"),
     );
     let network = req_str(app, "network")?;
-    let home_dir = expand_home_dir(req_str(app, "home_dir")?.trim());
+    let home_dir = expand_home(req_str(app, "home_dir")?.trim());
 
     let dexie_api_base = dexie
         .and_then(|section| section.get("api_base"))
@@ -251,6 +271,27 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
     )?;
 
     let signer_key_registry = parse_signer_key_registry(raw)?;
+    let signer = raw.get("signer").and_then(Value::as_object);
+    let signer_kms_key_id = signer
+        .and_then(|section| section.get("kms_key_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    let signer_kms_region = signer
+        .and_then(|section| section.get("kms_region"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("us-west-2")
+        .to_string();
+    let vault = raw.get("vault").and_then(Value::as_object);
+    let vault_launcher_id = vault
+        .and_then(|section| section.get("launcher_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
 
     Ok(ManagerProgramConfig {
         network,
@@ -276,6 +317,10 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
         tx_block_websocket_url,
         tx_block_websocket_reconnect_interval_seconds,
         tx_block_fallback_poll_interval_seconds,
+        signer_kms_key_id,
+        signer_kms_region,
+        vault_launcher_id,
+        dev_python_min_version,
         signer_key_registry,
     })
 }
@@ -320,32 +365,14 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
     parse_program_config(&parsed)
 }
 
-pub fn require_signer_offer_path(path: &Path) -> SignerResult<()> {
-    let raw = std::fs::read_to_string(path).map_err(|err| {
-        SignerError::Other(format!("failed to read config {}: {err}", path.display()))
-    })?;
-    let parsed: Value = serde_yaml::from_str(&raw).map_err(|err| {
-        SignerError::Other(format!("failed to parse config {}: {err}", path.display()))
-    })?;
-    let signer = parsed.get("signer").and_then(Value::as_object);
-    let kms_key_id = signer
-        .and_then(|section| section.get("kms_key_id"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or_default();
-    let vault = parsed.get("vault").and_then(Value::as_object);
-    let launcher_id = vault
-        .and_then(|section| section.get("launcher_id"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or_default();
-    if kms_key_id.is_empty() || launcher_id.is_empty() {
-        return Err(SignerError::Other(
-            "offer execution requires signer.kms_key_id and vault.launcher_id in program config"
-                .to_string(),
-        ));
+pub fn require_signer_offer_path(config: &ManagerProgramConfig) -> SignerResult<()> {
+    if config.signer_offer_path_configured() {
+        return Ok(());
     }
-    Ok(())
+    Err(SignerError::Other(
+        "offer execution requires signer.kms_key_id and vault.launcher_id in program config"
+            .to_string(),
+    ))
 }
 
 pub fn is_testnet_network(network: &str) -> bool {
@@ -441,20 +468,6 @@ fn normalize_manager_log_level(log_level: &str) -> String {
         }
         _ => "INFO".to_string(),
     }
-}
-
-fn expand_home_dir(path: &str) -> PathBuf {
-    if let Some(stripped) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(stripped);
-        }
-    }
-    if path == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home);
-        }
-    }
-    PathBuf::from(path)
 }
 
 pub fn action_side_from_pricing(pricing: &Value) -> String {

@@ -5,9 +5,7 @@ use std::path::Path;
 use serde_json::json;
 use serde_yaml::Value;
 
-use crate::config::{
-    load_markets_config_with_overlay, load_program_config, require_signer_offer_path,
-};
+use crate::config::{load_markets_config_with_overlay, load_program_config};
 use crate::error::{SignerError, SignerResult};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
@@ -44,6 +42,33 @@ pub fn run_config_validate(ctx: &ManagerContext, program_only: bool) -> SignerRe
         "ok": true,
         "program_config": program_path.display().to_string(),
         "markets_config": markets_path.display().to_string(),
+    }))?;
+    Ok(0)
+}
+
+pub fn run_program_fields(ctx: &ManagerContext) -> SignerResult<i32> {
+    let program = load_program_config(&ctx.program_config)?;
+    let mut keys_registry = serde_json::Map::new();
+    for (key_id, entry) in &program.signer_key_registry {
+        keys_registry.insert(
+            key_id.clone(),
+            json!({
+                "key_id": key_id,
+                "fingerprint": entry.fingerprint,
+                "network": entry.network,
+                "keyring_yaml_path": entry.keyring_yaml_path,
+            }),
+        );
+    }
+    ctx.emit_json(&json!({
+        "network": program.network,
+        "home_dir": program.home_dir.display().to_string(),
+        "signer_kms_key_id": program.signer_kms_key_id,
+        "signer_kms_region": program.signer_kms_region,
+        "vault_launcher_id": program.vault_launcher_id,
+        "signer_offer_path_configured": program.signer_offer_path_configured(),
+        "dev_python_min_version": program.dev_python_min_version,
+        "keys_registry": keys_registry,
     }))?;
     Ok(0)
 }
@@ -219,7 +244,7 @@ pub fn run_doctor(ctx: &ManagerContext) -> SignerResult<i32> {
         }
         Err(err) => problems.push(format!("db_error:{err}")),
     }
-    if require_signer_offer_path(program_path).is_err() {
+    if !program.signer_offer_path_configured() {
         warnings.push("signer_not_configured:kms_key_id_or_vault_launcher_id".to_string());
     }
     collect_env_warnings(&mut warnings);

@@ -128,8 +128,8 @@ markets:
     )
     .expect("write markets");
 
-    require_signer_offer_path(&program_path).expect("signer path");
     let program = load_program_config(&program_path).expect("program");
+    require_signer_offer_path(&program).expect("signer path");
     assert_eq!(program.offer_publish_venue, "dexie");
     let markets = load_markets_config(&markets_path).expect("markets");
     let market = resolve_market_for_build(&markets, Some("m1"), None, "mainnet").expect("market");

@@ -5,22 +5,7 @@ use greenfloor_engine::config::{
 use greenfloor_engine::error::SignerResult;
 use serde_json::{json, Value};
 
-fn base_market_row() -> Value {
-    json!({
-        "id": "m1",
-        "enabled": true,
-        "base_asset": "asset1",
-        "base_symbol": "AS1",
-        "quote_asset": "xch",
-        "quote_asset_type": "unstable",
-        "receive_address": "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h",
-        "mode": "sell_only",
-        "signer_key_id": "key-main-1",
-        "inventory": {"low_watermark_base_units": 1},
-        "ladders": {"sell": [{"size_base_units": 1, "target_count": 1}]},
-        "pricing": {},
-    })
-}
+use super::shared::base_market_row;
 
 fn parse_single_market(row: Value) -> SignerResult<MarketConfig> {
     parse_markets_config(&json!({"markets": [row]})).map(|cfg| {

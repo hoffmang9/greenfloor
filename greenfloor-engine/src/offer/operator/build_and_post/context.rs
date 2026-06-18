@@ -34,8 +34,8 @@ pub(crate) struct ResolvedBuildAndPostContext {
 pub(super) async fn resolve_build_and_post_context(
     request: &BuildAndPostOfferRequest,
 ) -> SignerResult<ResolvedBuildAndPostContext> {
-    require_signer_offer_path(&request.program_path)?;
     let program = load_program_config(&request.program_path)?;
+    require_signer_offer_path(&program)?;
     initialize_manager_file_logging(&program.home_dir, &program.app_log_level)?;
     warn_if_log_level_auto_healed(program.app_log_level_was_missing, &request.program_path);
     let markets = load_markets_config_with_overlay(
