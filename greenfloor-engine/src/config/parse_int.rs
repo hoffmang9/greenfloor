@@ -6,7 +6,7 @@
 use crate::config::yaml_fields::config_err;
 use crate::error::SignerResult;
 
-pub fn non_negative_i64_to_u64(value: i64, field: &str) -> SignerResult<u64> {
+pub fn parse_non_negative_u64(value: i64, field: &str) -> SignerResult<u64> {
     if value < 0 {
         return Err(config_err(format!("{field} must be >= 0")));
     }

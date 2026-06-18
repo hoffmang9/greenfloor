@@ -10,6 +10,7 @@ pub use context::{
     compute_vault_context, compute_vault_context_from_hashes, compute_vault_hashes,
     VaultComputedHashes, VaultContext, VaultCustodySnapshot,
 };
+pub use members::validate_vault_threshold;
 pub use mixed_split::{
     build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest, MixedSplitResult,
 };

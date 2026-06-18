@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 
-use crate::coin_ops::non_negative_i64_to_u64;
+use crate::coin_ops::coin_op_non_negative_u64;
 use crate::config::SignerConfig;
 use crate::error::SignerResult;
 use crate::offer::bootstrap::BootstrapPlan;
@@ -21,7 +21,7 @@ pub(super) async fn submit_bootstrap_mixed_split(
                 .output_amounts_base_units
                 .iter()
                 .map(|amount| {
-                    non_negative_i64_to_u64(*amount, "bootstrap.output_amount_base_units")
+                    coin_op_non_negative_u64(*amount, "bootstrap.output_amount_base_units")
                 })
                 .collect::<SignerResult<Vec<_>>>()?,
             coin_ids: crate::coinset::parse_coin_ids(std::slice::from_ref(

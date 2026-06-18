@@ -1,5 +1,3 @@
-#![allow(clippy::implicit_hasher)]
-
 use std::collections::HashSet;
 
 use serde_json::{json, Value};

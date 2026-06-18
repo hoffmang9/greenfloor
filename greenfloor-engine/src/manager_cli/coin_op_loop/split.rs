@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use crate::coin_ops::evaluate_coin_split_gate;
-use crate::coin_ops::{i64_to_usize, non_negative_i64_to_u64};
+use crate::coin_ops::{coin_op_non_negative_u64, i64_to_usize};
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::ladder::{
@@ -77,9 +77,10 @@ pub async fn run_coin_split(request: CoinSplitRequest<'_>) -> SignerResult<i32> 
     let explicit_coin_ids = !coin_ids.is_empty();
     let resolved_asset_id = exec_ctx.resolved_base_asset_id.clone();
     let output_count = i64_to_usize(number_of_coins, "split.number_of_coins")?;
-    let amount_u64 = non_negative_i64_to_u64(amount_per_coin_mojos, "split.amount_per_coin_mojos")?;
+    let amount_u64 =
+        coin_op_non_negative_u64(amount_per_coin_mojos, "split.amount_per_coin_mojos")?;
     let output_amounts: Vec<u64> = vec![amount_u64; output_count];
-    let split_fee = non_negative_i64_to_u64(
+    let split_fee = coin_op_non_negative_u64(
         exec_ctx.program.coin_ops_split_fee_mojos,
         "program.coin_ops_split_fee_mojos",
     )?;

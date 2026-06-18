@@ -112,7 +112,8 @@ async fn split_presplit_cat_on_sim(
         &mut harness.vault_ctx.clone(),
         std::slice::from_ref(&source_cat),
         PresplitSplitParams {
-            change_puzzle_hash: vault_change_puzzle_hash(harness.chain.launcher_id),
+            change_puzzle_hash: vault_change_puzzle_hash(harness.chain.launcher_id)
+                .expect("change"),
             p2_puzzle_hash: binding.p2_puzzle_hash,
             offer_amount,
             change_amount,

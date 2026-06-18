@@ -1,7 +1,5 @@
 //! Auto split/combine input planning (CLI vs daemon profiles).
 
-#![allow(clippy::implicit_hasher)]
-
 use std::collections::{HashMap, HashSet};
 
 use super::policy::coin_op_min_amount_mojos;

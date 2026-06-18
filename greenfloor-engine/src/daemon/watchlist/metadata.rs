@@ -1,5 +1,3 @@
-#![allow(clippy::implicit_hasher)]
-
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};

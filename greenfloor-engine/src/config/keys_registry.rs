@@ -60,7 +60,7 @@ pub fn parse_signer_key_registry(raw: &Value) -> SignerResult<HashMap<String, Si
             key_id.clone(),
             SignerKeyEntry {
                 key_id,
-                fingerprint: crate::config::non_negative_i64_to_u64(
+                fingerprint: crate::config::parse_non_negative_u64(
                     fingerprint,
                     &fingerprint_field,
                 )?,

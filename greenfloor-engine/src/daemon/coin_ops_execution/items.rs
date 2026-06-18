@@ -22,6 +22,8 @@ pub struct CoinOpExecutionResult {
     pub signer_selection: Value,
 }
 
+pub(crate) type CoinOpSkipResult<T> = Result<T, (Vec<CoinOpExecItem>, u64)>;
+
 pub(crate) fn skip_item(
     op_type: &str,
     size_base_units: i64,
@@ -60,7 +62,7 @@ pub(crate) fn skip_on_signer_err<T>(
     size_base_units: i64,
     op_count: i64,
     result: SignerResult<T>,
-) -> Result<T, (Vec<CoinOpExecItem>, u64)> {
+) -> CoinOpSkipResult<T> {
     result.map_err(|err| {
         (
             vec![skip_item(

@@ -55,7 +55,7 @@ pub fn expires_at_unix_from_pricing(pricing: &Value) -> u64 {
     let (_unit, minutes) = resolve_offer_expiry_for_pricing(pricing);
     let secs = minutes.saturating_mul(60);
     let secs_u64 =
-        crate::config::non_negative_i64_to_u64(secs, "pricing.strategy_offer_expiry_seconds")
+        crate::config::parse_non_negative_u64(secs, "pricing.strategy_offer_expiry_seconds")
             .expect("expiry minutes from validated pricing must fit in u64");
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

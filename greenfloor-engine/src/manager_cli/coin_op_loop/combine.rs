@@ -1,7 +1,7 @@
 use serde_json::json;
 
+use crate::coin_ops::coin_op_non_negative_u64;
 use crate::coin_ops::evaluate_coin_combine_gate;
-use crate::coin_ops::non_negative_i64_to_u64;
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::ladder::{resolve_combine_count, sell_ladder_entry_for_size};
@@ -69,7 +69,7 @@ pub async fn run_coin_combine(request: CoinCombineRequest<'_>) -> SignerResult<i
         .cloned();
     let explicit_coin_ids = !coin_ids.is_empty();
     let resolved_asset_id = exec_ctx.resolved_base_asset_id.clone();
-    let combine_fee = non_negative_i64_to_u64(
+    let combine_fee = coin_op_non_negative_u64(
         exec_ctx.program.coin_ops_combine_fee_mojos,
         "program.coin_ops_combine_fee_mojos",
     )?;

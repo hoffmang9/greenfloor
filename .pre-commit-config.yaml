@@ -19,7 +19,8 @@ repos:
         files: ^greenfloor-engine/
 
       - id: cargo-clippy
-        name: cargo clippy cast hygiene (greenfloor-engine)
+        # Runs full `clippy::all = deny` from greenfloor-engine/Cargo.toml (not pedantic blanket).
+        name: cargo clippy (greenfloor-engine, clippy::all)
         entry: cargo clippy --manifest-path greenfloor-engine/Cargo.toml --all-targets --no-deps
         language: system
         pass_filenames: false

@@ -7,7 +7,7 @@ use crate::error::{SignerError, SignerResult};
 use crate::vault::members::{
     bytes32_to_hex, force_1_of_2_restriction, hex_to_bytes32, m_of_n_hash, member_hash_for_key,
     prevent_vault_side_effects_restriction, singleton_member_hash, timelock_restriction,
-    tree_hash_nil, tree_hash_to_hex, MemberConfig, WalletKey,
+    tree_hash_nil, tree_hash_to_hex, validate_vault_threshold, MemberConfig, WalletKey,
 };
 
 #[derive(Debug, Clone)]
@@ -44,16 +44,8 @@ impl VaultCustodySnapshot {
         if custody_keys.is_empty() || recovery_keys.is_empty() {
             return Err(SignerError::UnsupportedVaultSignerCardinality);
         }
-        let custody_threshold_usize = usize::try_from(custody_threshold)
-            .map_err(|_| SignerError::UnsupportedVaultThreshold)?;
-        if custody_threshold == 0 || custody_threshold_usize > custody_keys.len() {
-            return Err(SignerError::UnsupportedVaultThreshold);
-        }
-        let recovery_threshold_usize = usize::try_from(recovery_threshold)
-            .map_err(|_| SignerError::UnsupportedVaultThreshold)?;
-        if recovery_threshold == 0 || recovery_threshold_usize > recovery_keys.len() {
-            return Err(SignerError::UnsupportedVaultThreshold);
-        }
+        validate_vault_threshold(custody_threshold, custody_keys.len())?;
+        validate_vault_threshold(recovery_threshold, recovery_keys.len())?;
         if recovery_clawback_timelock == 0 {
             return Err(SignerError::InvalidVaultRecoveryTimelock);
         }
@@ -153,7 +145,7 @@ pub fn compute_vault_hashes(snapshot: &VaultCustodySnapshot) -> SignerResult<Vau
         &MemberConfig::default().with_top_level(true),
         snapshot.launcher_id,
         false,
-    );
+    )?;
 
     Ok(VaultComputedHashes {
         inner_puzzle_hash,

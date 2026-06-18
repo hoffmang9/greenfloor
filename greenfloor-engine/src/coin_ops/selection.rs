@@ -1,7 +1,5 @@
 //! Low-level coin selection helpers for split/combine planning.
 
-#![allow(clippy::implicit_hasher)]
-
 use std::collections::HashSet;
 
 use super::policy::coin_op_min_amount_mojos;

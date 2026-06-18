@@ -6,7 +6,7 @@ use super::program::read_program_yaml;
 use super::yaml_fields::{config_err, optional_trimmed_string, req_mapping, req_str, req_value};
 use crate::error::{SignerError, SignerResult};
 use crate::vault::context::VaultCustodySnapshot;
-use crate::vault::members::{hex_to_bytes32, WalletKey};
+use crate::vault::members::{hex_to_bytes32, validate_vault_threshold, WalletKey};
 
 pub use crate::coinset::DEFAULT_MSP_BASE_URL;
 
@@ -91,16 +91,8 @@ fn parse_vault_section(
     if custody_keys.is_empty() || recovery_keys.is_empty() {
         return Err(SignerError::UnsupportedVaultSignerCardinality);
     }
-    let custody_threshold_usize =
-        usize::try_from(custody_threshold).map_err(|_| SignerError::UnsupportedVaultThreshold)?;
-    if custody_threshold == 0 || custody_threshold_usize > custody_keys.len() {
-        return Err(SignerError::UnsupportedVaultThreshold);
-    }
-    let recovery_threshold_usize =
-        usize::try_from(recovery_threshold).map_err(|_| SignerError::UnsupportedVaultThreshold)?;
-    if recovery_threshold == 0 || recovery_threshold_usize > recovery_keys.len() {
-        return Err(SignerError::UnsupportedVaultThreshold);
-    }
+    validate_vault_threshold(custody_threshold, custody_keys.len())?;
+    validate_vault_threshold(recovery_threshold, recovery_keys.len())?;
     if recovery_clawback_timelock == 0 {
         return Err(SignerError::InvalidVaultRecoveryTimelock);
     }
@@ -157,7 +149,7 @@ fn parse_u64_field(raw: &Value, context: &str) -> SignerResult<u64> {
     if value < 0 {
         return Err(config_err(format!("{context} must be >= 0")));
     }
-    crate::config::non_negative_i64_to_u64(value, context)
+    crate::config::parse_non_negative_u64(value, context)
 }
 
 #[cfg(test)]

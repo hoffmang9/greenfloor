@@ -1,15 +1,45 @@
 use std::collections::HashSet;
 
 use crate::coin_ops::{
-    coin_op_target_amount_allowed, i64_to_usize, non_negative_i64_to_u64,
+    coin_op_non_negative_u64, coin_op_target_amount_allowed, i64_to_usize,
     plan_auto_split_selection, CoinOpPlan, SpendableCoin, SplitAutoSelectPlan,
     SplitCombinePrereqPlan, SplitPlanningProfile,
 };
 use crate::config::usize_to_i64;
 
-use super::items::{executed_item, skip_item, skip_on_signer_err, CoinOpExecItem};
+use super::items::{
+    executed_item, skip_item, skip_on_signer_err, CoinOpExecItem, CoinOpSkipResult,
+};
 use super::COIN_OP_ERROR_PREFIX;
 use crate::coin_ops::execution::{submit_combine_prereq, CoinOpExecContext};
+
+fn split_execution_scalars(
+    op_type: &str,
+    size_base_units: i64,
+    op_count: i64,
+    amount_per_coin_mojos: i64,
+    split_fee_mojos_config: i64,
+) -> CoinOpSkipResult<(u64, usize, u64)> {
+    let amount_u64 = skip_on_signer_err(
+        op_type,
+        size_base_units,
+        op_count,
+        coin_op_non_negative_u64(amount_per_coin_mojos, "split.amount_per_coin_mojos"),
+    )?;
+    let output_count = skip_on_signer_err(
+        op_type,
+        size_base_units,
+        op_count,
+        i64_to_usize(op_count, "split.op_count"),
+    )?;
+    let fee_mojos = skip_on_signer_err(
+        op_type,
+        size_base_units,
+        op_count,
+        coin_op_non_negative_u64(split_fee_mojos_config, "program.coin_ops_split_fee_mojos"),
+    )?;
+    Ok((amount_u64, output_count, fee_mojos))
+}
 
 pub(crate) async fn submit_combine_prereq_for_split(
     ctx: &CoinOpExecContext,
@@ -181,34 +211,14 @@ pub(crate) async fn execute_daemon_split_plan(
             }
             SplitAutoSelectPlan::Coin(selected) => {
                 attempted_coin_ids.insert(selected.coin_id.clone());
-                let amount_u64 = match skip_on_signer_err(
+                let (amount_u64, output_count, fee_mojos) = match split_execution_scalars(
                     op_type,
                     size_base_units,
                     op_count,
-                    non_negative_i64_to_u64(amount_per_coin_mojos, "split.amount_per_coin_mojos"),
+                    amount_per_coin_mojos,
+                    ctx.program.coin_ops_split_fee_mojos,
                 ) {
-                    Ok(value) => value,
-                    Err(skip) => return skip,
-                };
-                let output_count = match skip_on_signer_err(
-                    op_type,
-                    size_base_units,
-                    op_count,
-                    i64_to_usize(op_count, "split.op_count"),
-                ) {
-                    Ok(value) => value,
-                    Err(skip) => return skip,
-                };
-                let fee_mojos = match skip_on_signer_err(
-                    op_type,
-                    size_base_units,
-                    op_count,
-                    non_negative_i64_to_u64(
-                        ctx.program.coin_ops_split_fee_mojos,
-                        "program.coin_ops_split_fee_mojos",
-                    ),
-                ) {
-                    Ok(value) => value,
+                    Ok(values) => values,
                     Err(skip) => return skip,
                 };
                 let output_amounts = vec![amount_u64; output_count];

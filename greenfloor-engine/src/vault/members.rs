@@ -19,6 +19,14 @@ pub(crate) fn u32_to_usize(value: u32) -> SignerResult<usize> {
     usize::try_from(value).map_err(|_| SignerError::UnsupportedVaultThreshold)
 }
 
+pub fn validate_vault_threshold(threshold: u32, key_count: usize) -> SignerResult<usize> {
+    let threshold_usize = u32_to_usize(threshold)?;
+    if threshold == 0 || threshold_usize > key_count {
+        return Err(SignerError::UnsupportedVaultThreshold);
+    }
+    Ok(threshold_usize)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MemberConfig {
     pub top_level: bool,
@@ -55,13 +63,10 @@ pub fn m_of_n_hash(
     items: Vec<TreeHash>,
 ) -> SignerResult<TreeHash> {
     let required_usize = u32_to_usize(required)?;
-    Ok(member_hash(
-        config,
-        MofN::new(required_usize, items).inner_puzzle_hash(),
-    ))
+    member_hash(config, MofN::new(required_usize, items).inner_puzzle_hash())
 }
 
-pub fn custom_member_hash(config: &MemberConfig, inner_hash: TreeHash) -> TreeHash {
+pub fn custom_member_hash(config: &MemberConfig, inner_hash: TreeHash) -> SignerResult<TreeHash> {
     member_hash(config, inner_hash)
 }
 
@@ -77,8 +82,8 @@ pub fn p2_conditions_or_singleton_puzzle_hash(
     launcher_id: Bytes32,
 ) -> SignerResult<P2ConditionsOrSingletonHashes> {
     let member_config = MemberConfig::default();
-    let fixed_conditions_hash = custom_member_hash(&member_config, fixed_delegated_puzzle_hash);
-    let p2_singleton_hash = singleton_member_hash(&member_config, launcher_id, false);
+    let fixed_conditions_hash = custom_member_hash(&member_config, fixed_delegated_puzzle_hash)?;
+    let p2_singleton_hash = singleton_member_hash(&member_config, launcher_id, false)?;
     let puzzle_hash = m_of_n_hash(
         &member_config.with_top_level(true),
         1,
@@ -95,7 +100,7 @@ pub fn r1_member_hash(
     config: &MemberConfig,
     public_key: R1PublicKey,
     fast_forward: bool,
-) -> TreeHash {
+) -> SignerResult<TreeHash> {
     member_hash(
         config,
         if fast_forward {
@@ -110,7 +115,7 @@ pub fn k1_member_hash(
     config: &MemberConfig,
     public_key: K1PublicKey,
     fast_forward: bool,
-) -> TreeHash {
+) -> SignerResult<TreeHash> {
     member_hash(
         config,
         if fast_forward {
@@ -125,7 +130,7 @@ pub fn bls_member_hash(
     config: &MemberConfig,
     public_key: PublicKey,
     fast_forward: bool,
-) -> TreeHash {
+) -> SignerResult<TreeHash> {
     member_hash(
         config,
         if fast_forward {
@@ -140,7 +145,7 @@ pub fn passkey_member_hash(
     config: &MemberConfig,
     public_key: R1PublicKey,
     fast_forward: bool,
-) -> TreeHash {
+) -> SignerResult<TreeHash> {
     member_hash(
         config,
         if fast_forward {
@@ -155,7 +160,7 @@ pub fn singleton_member_hash(
     config: &MemberConfig,
     launcher_id: Bytes32,
     fast_forward: bool,
-) -> TreeHash {
+) -> SignerResult<TreeHash> {
     member_hash(
         config,
         if fast_forward {
@@ -243,14 +248,13 @@ fn bytes48_from_vec(bytes: &[u8]) -> SignerResult<[u8; 48]> {
     Ok(out)
 }
 
-fn member_hash(config: &MemberConfig, inner_hash: TreeHash) -> TreeHash {
-    let nonce = u32_to_usize(config.nonce).expect("member config nonce fits in usize");
-    mips_puzzle_hash(
-        nonce,
+fn member_hash(config: &MemberConfig, inner_hash: TreeHash) -> SignerResult<TreeHash> {
+    Ok(mips_puzzle_hash(
+        u32_to_usize(config.nonce)?,
         config.restrictions.clone(),
         inner_hash,
         config.top_level,
-    )
+    ))
 }
 
 #[derive(Debug, Clone)]
@@ -268,28 +272,28 @@ pub fn member_hash_for_key(config: &MemberConfig, key: &WalletKey) -> SignerResu
             let pk = R1PublicKey::from_bytes(&key_array).map_err(|err| {
                 SignerError::UnsupportedVaultCurve(format!("SECP256R1 decode: {err}"))
             })?;
-            Ok(r1_member_hash(config, pk, true))
+            Ok(r1_member_hash(config, pk, true)?)
         }
         "SECP256K1" => {
             let key_array = bytes33_from_vec(&key_bytes)?;
             let pk = K1PublicKey::from_bytes(&key_array).map_err(|err| {
                 SignerError::UnsupportedVaultCurve(format!("SECP256K1 decode: {err}"))
             })?;
-            Ok(k1_member_hash(config, pk, true))
+            Ok(k1_member_hash(config, pk, true)?)
         }
         "WEBAUTHN" => {
             let key_array = bytes33_from_vec(&key_bytes)?;
             let pk = R1PublicKey::from_bytes(&key_array).map_err(|err| {
                 SignerError::UnsupportedVaultCurve(format!("WEBAUTHN decode: {err}"))
             })?;
-            Ok(passkey_member_hash(config, pk, true))
+            Ok(passkey_member_hash(config, pk, true)?)
         }
         "BLS12_381" => {
             let key_array = bytes48_from_vec(&key_bytes)?;
             let pk = PublicKey::from_bytes(&key_array).map_err(|err| {
                 SignerError::UnsupportedVaultCurve(format!("BLS12_381 decode: {err}"))
             })?;
-            Ok(bls_member_hash(config, pk, false))
+            Ok(bls_member_hash(config, pk, false)?)
         }
         other => Err(SignerError::UnsupportedVaultCurve(other.to_string())),
     }

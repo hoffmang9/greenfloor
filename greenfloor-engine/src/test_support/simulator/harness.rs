@@ -80,6 +80,7 @@ impl SimulatorVaultHarness {
             launcher_id,
             false,
         )
+        .expect("p2 message hash")
         .into();
         self.vault_ctx.launcher_id = launcher_id;
         self.vault_ctx

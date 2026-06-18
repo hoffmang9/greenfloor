@@ -7,6 +7,8 @@
 //! (`manager_cli`, `daemon::cli`, `coinset_cli`).
 
 #![recursion_limit = "1024"]
+// Watchlist and coin-op selection use implicit `S: Hasher` on HashMap helpers; not worth generic churn.
+#![allow(clippy::implicit_hasher)]
 
 pub mod adapters;
 pub mod cli_util;

@@ -1,5 +1,3 @@
-#![allow(clippy::implicit_hasher)]
-
 pub mod cache;
 
 mod counting;
