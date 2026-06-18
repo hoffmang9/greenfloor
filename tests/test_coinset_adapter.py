@@ -4,19 +4,14 @@ from typing import Any
 
 import pytest
 
-from greenfloor.adapters.coinset import (
-    CoinsetAdapter,
-    build_webhook_callback_url,
-    extract_coin_ids_from_offer_payload,
-    extract_coinset_tx_ids_from_offer_payload,
-)
+from greenfloor.adapters.coinset import CoinsetAdapter, build_webhook_callback_url
 from tests.helpers.coinset_cli_mock import make_coinset_cli_handler
 
 
 @pytest.fixture(autouse=True)
 def _mock_rust_coinset_io(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_engine.run_engine_json",
+        "greenfloor.adapters.coinset.cli.run_engine_json",
         make_coinset_cli_handler(),
     )
 
@@ -51,7 +46,7 @@ def test_coinset_adapter_get_all_mempool_tx_ids_uses_post_cli(monkeypatch) -> No
         return {"success": True, "mempool_tx_ids": ["0xabc", "0xdef"]}
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_engine.run_engine_json",
+        "greenfloor.adapters.coinset.cli.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter("https://coinset.org")
@@ -69,7 +64,7 @@ def test_coinset_adapter_get_coin_records_by_puzzle_hash_filters_non_dicts(
         return {"success": True, "coin_records": [{"coin": {"amount": 1}}, "bad"]}
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_engine.run_engine_json",
+        "greenfloor.adapters.coinset.cli.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter()
@@ -92,7 +87,7 @@ def test_coinset_adapter_get_coin_record_by_name_success_and_failure(
         return responses.pop(0)
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_engine.run_engine_json",
+        "greenfloor.adapters.coinset.cli.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter()
@@ -114,7 +109,7 @@ def test_coinset_adapter_get_puzzle_and_solution_adds_height_when_provided(
         }
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_engine.run_engine_json",
+        "greenfloor.adapters.coinset.cli.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter()
@@ -137,7 +132,7 @@ def test_coinset_adapter_get_puzzle_and_solution_omits_non_positive_height(
         }
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_engine.run_engine_json",
+        "greenfloor.adapters.coinset.cli.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter()
@@ -152,73 +147,13 @@ def test_push_tx_returns_payload_dict() -> None:
     assert result["status"] == "submitted"
 
 
-def test_extract_tx_ids_from_flat_payload() -> None:
-    payload = {"tx_id": "a" * 64, "other": "ignored"}
-    assert extract_coinset_tx_ids_from_offer_payload(payload) == ["a" * 64]
-
-
-def test_extract_tx_ids_from_nested_payload() -> None:
-    payload = {"offer": {"data": {"takeTxId": "b" * 64}}}
-    assert extract_coinset_tx_ids_from_offer_payload(payload) == ["b" * 64]
-
-
-def test_extract_tx_ids_deduplicates() -> None:
-    tx = "c" * 64
-    payload = {"tx_id": tx, "nested": {"tx_id": tx}}
-    assert extract_coinset_tx_ids_from_offer_payload(payload) == [tx]
-
-
-def test_extract_tx_ids_handles_list_values() -> None:
-    tx1, tx2 = "d" * 64, "e" * 64
-    payload = {"mempool_tx_ids": [tx1, tx2]}
-    result = extract_coinset_tx_ids_from_offer_payload(payload)
-    assert result == [tx1, tx2]
-
-
-def test_extract_tx_ids_ignores_non_hex() -> None:
-    payload = {"tx_id": "not-a-valid-tx-id"}
-    assert extract_coinset_tx_ids_from_offer_payload(payload) == []
-
-
-def test_extract_tx_ids_ignores_wrong_length() -> None:
-    payload = {"tx_id": "abcd"}
-    assert extract_coinset_tx_ids_from_offer_payload(payload) == []
-
-
-def test_extract_tx_ids_empty_payload() -> None:
-    assert extract_coinset_tx_ids_from_offer_payload({}) == []
-
-
-def test_extract_coin_ids_from_involved_coins_and_nested_inputs() -> None:
-    coin_a = "a" * 64
-    coin_b = "b" * 64
-    payload = {
-        "involved_coins": [f"0x{coin_a}", coin_b],
-        "input_coins": {
-            "xch": [
-                {"id": f"0x{coin_a}"},
-                {"name": coin_b},
-            ]
-        },
-    }
-    assert extract_coin_ids_from_offer_payload(payload) == [coin_a, coin_b]
-
-
-def test_extract_coin_ids_ignores_non_hash_values() -> None:
-    payload = {
-        "involved_coins": ["not-a-coin", "0x1234"],
-        "input_coins": {"xch": [{"id": "short"}]},
-    }
-    assert extract_coin_ids_from_offer_payload(payload) == []
-
-
 def test_get_blockchain_state_success(monkeypatch) -> None:
     def _post_handler(endpoint: str, _body: dict[str, Any]) -> Any:
         assert endpoint == "get_blockchain_state"
         return {"success": True, "blockchain_state": {"peak_height": 1234}}
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_engine.run_engine_json",
+        "greenfloor.adapters.coinset.cli.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter()
@@ -232,7 +167,7 @@ def test_get_blockchain_state_returns_none_on_failure(monkeypatch) -> None:
         return {"success": False}
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_engine.run_engine_json",
+        "greenfloor.adapters.coinset.cli.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter()
