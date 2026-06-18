@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from greenfloor.runtime.coinset_runtime import (
     CoinsetFeeLookupPreflightError,
 )
@@ -139,36 +137,6 @@ def test_resolve_maker_offer_fee_is_zero() -> None:
     assert source == "maker_default_zero"
 
 
-@pytest.mark.skip(
-    reason="coin op fee integration requires signer wallet mocking unavailable via native subprocess"
-)
-def test_coin_split_no_wait_uses_advised_fee() -> None:
-    pass
-
-
-@pytest.mark.skip(
-    reason="coin op fee integration requires signer wallet mocking unavailable via native subprocess"
-)
-def test_coin_combine_no_wait_uses_advised_fee() -> None:
-    pass
-
-
-@pytest.mark.skip(
-    reason="coin op fee integration requires signer wallet mocking unavailable via native subprocess"
-)
-def test_coin_split_returns_structured_error_when_fee_resolution_fails() -> None:
-    pass
-
-
-@pytest.mark.skip(
-    reason="coin op fee integration requires signer wallet mocking unavailable via native subprocess"
-)
-def test_coin_combine_returns_structured_error_when_fee_resolution_fails() -> None:
-    pass
-
-
-@pytest.mark.skip(
-    reason="coin op fee integration requires signer wallet mocking unavailable via native subprocess"
-)
-def test_coin_combine_distinguishes_temporary_fee_advice_unavailability() -> None:
-    pass
+# Native greenfloor-manager coin-op fees come from program.yaml coin_ops.{split,combine}_fee_mojos.
+# Coinset taker-fee preflight + signer_vault_no_fee were removed with the Python CLI cutover.
+# See greenfloor-engine coin_op_loop.rs and daemon/coin_ops_execution/*.

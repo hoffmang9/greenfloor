@@ -67,3 +67,7 @@ def test_keys_onboard_import_words_rejects_non_12_or_24_word_secret(tmp_path: Pa
 
     assert code == 1
     assert "mnemonic must contain 12 or 24 words" in stderr
+
+
+# Chia-keys discovery branch is covered by Rust unit tests in manager_cli/keys.rs
+# (discover_chia_keys, prefers_existing_chia_keys, save_key_onboarding_selection).

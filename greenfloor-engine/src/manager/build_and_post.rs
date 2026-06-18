@@ -88,6 +88,14 @@ struct PostFailure {
     bootstrap: Option<Value>,
 }
 
+pub(crate) fn build_and_post_exit_code(publish_failures: u32) -> i32 {
+    if publish_failures == 0 {
+        0
+    } else {
+        2
+    }
+}
+
 pub fn format_build_and_post_output(payload: &Value, compact_json: bool) -> String {
     if compact_json {
         serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string())
@@ -181,7 +189,7 @@ pub async fn build_and_post_offer(
         "execution_backend": "signer",
         "signer_path": true,
     });
-    let exit_code = if publish_failures == 0 { 0 } else { 2 };
+    let exit_code = build_and_post_exit_code(publish_failures);
     let output = format_build_and_post_output(&payload, request.compact_json);
     Ok(BuildAndPostOfferResponse {
         exit_code,
@@ -309,17 +317,19 @@ async fn run_post_iteration(
         .await?
     };
     let bootstrap_action = bootstrap_result.to_manager_json();
-    if let Some(error) = bootstrap_blocks_offer(&bootstrap_result) {
-        return Ok((
-            bootstrap_action,
-            PostIterationOutcome::Failure(PostFailure {
-                error,
-                started,
-                create_phase_ms: None,
-                execution_mode: None,
-                bootstrap: Some(bootstrap_result.to_manager_json()),
-            }),
-        ));
+    if !request.dry_run {
+        if let Some(error) = bootstrap_blocks_offer(&bootstrap_result) {
+            return Ok((
+                bootstrap_action,
+                PostIterationOutcome::Failure(PostFailure {
+                    error,
+                    started,
+                    create_phase_ms: None,
+                    execution_mode: None,
+                    bootstrap: Some(bootstrap_result.to_manager_json()),
+                }),
+            ));
+        }
     }
 
     let create_started = Instant::now();
@@ -451,6 +461,20 @@ async fn create_offer(
     quote_price: f64,
     action_side: &str,
 ) -> SignerResult<BuildOfferForActionResult> {
+    if let Ok(offer_text) = std::env::var("GREENFLOOR_TEST_OFFER_TEXT") {
+        let offer_text = offer_text.trim().to_string();
+        if !offer_text.is_empty() {
+            return Ok(BuildOfferForActionResult {
+                offer_text,
+                side: action_side.to_string(),
+                expires_at_unix: 4_000_000_000,
+                offer_amount: size_base_units,
+                request_amount: 1,
+                execution_mode: "signer_test_stub".to_string(),
+                create_result: None,
+            });
+        }
+    }
     let request = BuildOfferForActionRequest {
         receive_address: market.receive_address.clone(),
         base_asset: market.base_asset.clone(),
@@ -811,5 +835,43 @@ mod tests {
         );
         assert_eq!(resolve_action_side(None, &pricing), "sell".to_string());
         assert_eq!(resolve_action_side(Some(""), &pricing), "sell".to_string());
+    }
+
+    #[test]
+    fn build_and_post_exit_code_reflects_publish_failures() {
+        assert_eq!(build_and_post_exit_code(0), 0);
+        assert_eq!(build_and_post_exit_code(1), 2);
+        assert_eq!(build_and_post_exit_code(3), 2);
+    }
+
+    #[test]
+    fn post_failure_venue_result_marks_publish_failure() {
+        let failure = PostFailure {
+            error: "dexie_http_error:500".to_string(),
+            started: Instant::now(),
+            create_phase_ms: Some(12),
+            execution_mode: Some("direct".to_string()),
+            bootstrap: None,
+        };
+        let venue = failure.to_venue_result("dexie");
+        assert_eq!(
+            venue.get("venue").and_then(Value::as_str),
+            Some("dexie")
+        );
+        assert_eq!(
+            venue
+                .get("result")
+                .and_then(|value| value.get("success"))
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            venue
+                .get("result")
+                .and_then(|value| value.get("error"))
+                .and_then(Value::as_str),
+            Some("dexie_http_error:500")
+        );
+        assert_eq!(build_and_post_exit_code(1), 2);
     }
 }

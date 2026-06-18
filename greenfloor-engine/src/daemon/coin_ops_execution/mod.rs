@@ -4,6 +4,10 @@ pub mod helpers;
 mod items;
 mod runner;
 mod split;
+mod test_fixtures;
+
+#[cfg(test)]
+mod tests;
 
 pub use context::CoinOpExecContext;
 pub use items::{CoinOpExecItem, CoinOpExecutionResult};

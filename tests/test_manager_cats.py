@@ -61,8 +61,53 @@ def test_cats_add_manual_without_dexie_lookup(tmp_path: Path) -> None:
 
 
 @pytest.mark.skip(reason="requires Dexie HTTP mocking unavailable via native subprocess")
-def test_cats_add_uses_dexie_lookup_when_available() -> None:
-    pass
+def test_cats_add_uses_dexie_lookup_when_available(tmp_path: Path) -> None:
+    from tests.helpers.dexie_http_mock import DexieHttpMock
+
+    cats_path = tmp_path / "cats.yaml"
+    cat_id = "4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7"
+    dexie = DexieHttpMock()
+    dexie.set_swap_tokens(
+        [
+            {
+                "assetId": cat_id,
+                "code": "wUSDC.b",
+                "name": "Wrapped USDC",
+            }
+        ]
+    )
+    dexie.set_price_tickers(
+        [
+            {
+                "ticker_id": f"{cat_id}_xch",
+                "base_currency": cat_id,
+                "target_currency": "xch",
+            }
+        ]
+    )
+    dexie.start()
+    try:
+        code, stdout, _stderr = run_manager(
+            [
+                "--cats-config",
+                str(cats_path),
+                "--dexie-base-url",
+                dexie.base_url,
+                "cats-add",
+                "--network",
+                "mainnet",
+                "--cat-id",
+                cat_id,
+            ]
+        )
+        assert code == 0
+        payload = parse_json_output(stdout)
+        assert payload["added"] is True
+        assert payload["asset_id"] == cat_id
+        row = _cats_list(cats_path)["cats"][0]
+        assert row["base_symbol"] == "wUSDC.b"
+    finally:
+        dexie.stop()
 
 
 def test_cats_add_replace_required_for_existing_asset(tmp_path: Path) -> None:
@@ -159,16 +204,80 @@ def test_cats_delete_by_cat_id(tmp_path: Path) -> None:
     assert _cats_list(cats_path)["cats"] == []
 
 
-@pytest.mark.skip(
-    reason="native manager cats-delete resolves ticker via Dexie only, not local catalog"
-)
-def test_cats_delete_by_ticker_uses_local_catalog_match() -> None:
-    pass
+def test_cats_delete_by_ticker_uses_local_catalog_match(tmp_path: Path) -> None:
+    cats_path = tmp_path / "cats.yaml"
+    cat_id = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    added_code, _, _ = run_manager(
+        [
+            "--cats-config",
+            str(cats_path),
+            "cats-add",
+            "--network",
+            "mainnet",
+            "--cat-id",
+            cat_id,
+            "--name",
+            "Catalog Cat",
+            "--base-symbol",
+            "CATX",
+            "--no-dexie-lookup",
+        ]
+    )
+    assert added_code == 0
+    deleted_code, stdout, _stderr = run_manager(
+        [
+            "--cats-config",
+            str(cats_path),
+            "cats-delete",
+            "--network",
+            "mainnet",
+            "--ticker",
+            "CATX",
+            "--no-dexie-lookup",
+            "--yes",
+        ]
+    )
+    assert deleted_code == 0
+    payload = parse_json_output(stdout)
+    assert payload["deleted"] is True
+    assert _cats_list(cats_path)["cats"] == []
 
 
-@pytest.mark.skip(reason="requires interactive prompt mocking unavailable via native subprocess")
-def test_cats_delete_requires_confirmation_when_not_yes() -> None:
-    pass
+def test_cats_delete_requires_confirmation_when_not_yes(tmp_path: Path) -> None:
+    cats_path = tmp_path / "cats.yaml"
+    cat_id = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    added_code, _, _ = run_manager(
+        [
+            "--cats-config",
+            str(cats_path),
+            "cats-add",
+            "--network",
+            "mainnet",
+            "--cat-id",
+            cat_id,
+            "--name",
+            "Needs Confirm",
+            "--base-symbol",
+            "CNF",
+            "--no-dexie-lookup",
+        ]
+    )
+    assert added_code == 0
+    deleted_code, stdout, _stderr = run_manager(
+        [
+            "--cats-config",
+            str(cats_path),
+            "cats-delete",
+            "--network",
+            "mainnet",
+            "--cat-id",
+            cat_id,
+        ]
+    )
+    assert deleted_code == 2
+    payload = parse_json_output(stdout)
+    assert payload["error"] == "confirmation_required"
+    assert _cats_list(cats_path)["cats"]
 
 
 def test_cats_delete_preflight_only_does_not_delete(tmp_path: Path) -> None:

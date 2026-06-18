@@ -126,4 +126,22 @@ mod tests {
         let count = resolve_combine_count(&market, 0, Some(100)).expect("ladder row");
         assert_eq!(count, 3);
     }
+
+    #[test]
+    fn combine_threshold_count_uses_ceil() {
+        let entry = LadderEntry {
+            size_base_units: 10,
+            target_count: 3,
+            split_buffer_count: 1,
+            combine_when_excess_factor: 1.5,
+        };
+        assert_eq!(combine_threshold_count(&entry), 5);
+        let mut market = sample_market();
+        market.ladders.insert(
+            "sell".to_string(),
+            vec![entry.clone()],
+        );
+        let count = resolve_combine_count(&market, 0, Some(10)).expect("ladder row");
+        assert_eq!(count, 5);
+    }
 }

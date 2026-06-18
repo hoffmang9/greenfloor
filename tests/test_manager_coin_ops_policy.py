@@ -54,3 +54,25 @@ def test_combine_until_ready_not_ready_when_above_cap() -> None:
     )
     assert stop is True
     assert reason == "max_iterations_reached"
+
+
+def test_split_until_ready_explicit_coin_ids_stop_when_not_ready() -> None:
+    coins = [
+        {"amount": 100, "state": "CONFIRMED"},
+    ]
+    readiness = evaluate_coin_split_gate(
+        asset_scoped_coins=coins,
+        resolved_asset_id="asset",
+        size_base_units=100,
+        required_count=2,
+    )
+    assert readiness.ready is False
+    stop, reason = coin_op_should_stop(
+        until_ready=True,
+        readiness_ready=readiness.ready,
+        coin_ids=["coin-a"],
+        iteration=1,
+        max_iterations=3,
+    )
+    assert stop is True
+    assert reason == "requires_new_coin_selection"

@@ -31,6 +31,7 @@ pub async fn run_cats_add(
     target_usd_per_unit: Option<&str>,
     use_dexie_lookup: bool,
     replace: bool,
+    dexie_base_url: Option<&str>,
 ) -> SignerResult<i32> {
     let ref_cat_id = cat_id.map(normalize_hex_id).unwrap_or_default();
     let ref_ticker = ticker.unwrap_or("").trim();
@@ -39,7 +40,7 @@ pub async fn run_cats_add(
             .map_err(SignerError::Other)?;
         return Ok(2);
     }
-    let dexie_base = resolve_dexie_base_url(network, None, "https://api.dexie.space")?;
+    let dexie_base = resolve_dexie_base_url(network, dexie_base_url, "https://api.dexie.space")?;
     let dexie = DexieClient::new(dexie_base);
     let mut dexie_row = None;
     if use_dexie_lookup {
@@ -149,6 +150,7 @@ pub async fn run_cats_delete(
     use_dexie_lookup: bool,
     confirm_delete: bool,
     preflight_only: bool,
+    dexie_base_url: Option<&str>,
 ) -> SignerResult<i32> {
     let ref_cat_id = cat_id.map(normalize_hex_id).unwrap_or_default();
     let ref_ticker = ticker.unwrap_or("").trim();
@@ -157,9 +159,14 @@ pub async fn run_cats_delete(
             .map_err(SignerError::Other)?;
         return Ok(2);
     }
+    let catalog = load_cats_catalog(cats_path)?;
     let mut resolved_asset_id = ref_cat_id.clone();
+    if resolved_asset_id.is_empty() && !ref_ticker.is_empty() {
+        resolved_asset_id = resolve_asset_id_from_catalog(&catalog, ref_ticker)
+            .unwrap_or_default();
+    }
     if resolved_asset_id.is_empty() && use_dexie_lookup && !ref_ticker.is_empty() {
-        let dexie_base = resolve_dexie_base_url(network, None, "https://api.dexie.space")?;
+        let dexie_base = resolve_dexie_base_url(network, dexie_base_url, "https://api.dexie.space")?;
         let dexie = DexieClient::new(dexie_base);
         if let Some(row) = dexie.lookup_token_by_symbol(ref_ticker).await? {
             let meta = derive_cat_metadata_from_dexie_row(Some(&row));
@@ -175,7 +182,6 @@ pub async fn run_cats_delete(
             .map_err(SignerError::Other)?;
         return Ok(2);
     }
-    let catalog = load_cats_catalog(cats_path)?;
     let exists = catalog.iter().any(|row| {
         row.get("asset_id")
             .and_then(JsonValue::as_str)
@@ -249,6 +255,34 @@ fn write_cats_catalog(path: &Path, catalog: &[JsonValue]) -> SignerResult<()> {
         .map_err(|err| SignerError::Other(format!("failed to write {}: {err}", path.display())))
 }
 
+fn resolve_asset_id_from_catalog(catalog: &[JsonValue], ticker: &str) -> Option<String> {
+    let target = ticker.trim();
+    if target.is_empty() {
+        return None;
+    }
+    catalog.iter().find_map(|row| {
+        let asset_id = row
+            .get("asset_id")
+            .and_then(JsonValue::as_str)
+            .map(normalize_hex_id)
+            .filter(|value| is_hex_id(value))?;
+        let base_symbol = row
+            .get("base_symbol")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("");
+        let ticker_id = row
+            .get("dexie")
+            .and_then(|value| value.get("ticker_id"))
+            .and_then(JsonValue::as_str)
+            .unwrap_or("");
+        if base_symbol.eq_ignore_ascii_case(target) || ticker_id.eq_ignore_ascii_case(target) {
+            Some(asset_id)
+        } else {
+            None
+        }
+    })
+}
+
 fn derive_cat_metadata_from_dexie_row(row: Option<&JsonValue>) -> JsonValue {
     let Some(row) = row else {
         return json!({});
@@ -289,4 +323,26 @@ fn parse_optional_float(raw: Option<&str>) -> Option<JsonValue> {
     text.parse::<f64>()
         .ok()
         .map(|value| json!(value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_asset_id_from_catalog_matches_base_symbol() {
+        let catalog = vec![json!({
+            "name": "My Cat",
+            "base_symbol": "MCAT",
+            "asset_id": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "dexie": {"ticker_id": "mcat_xch"},
+        })];
+        let asset_id = resolve_asset_id_from_catalog(&catalog, "MCAT").expect("match");
+        assert_eq!(
+            asset_id,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+        );
+        let by_ticker = resolve_asset_id_from_catalog(&catalog, "mcat_xch").expect("ticker");
+        assert_eq!(by_ticker, asset_id);
+    }
 }

@@ -35,8 +35,8 @@ pub fn run_keys_onboard(
             "Found existing Chia keys at '{}'. Use these keys? [Y/n]: ",
             discovery.chia_keys_dir.display()
         );
-        let answer = prompt_line(&prompt)?.to_ascii_lowercase();
-        use_existing_keys = answer.is_empty() || answer == "y" || answer == "yes";
+        let answer = prompt_line(&prompt)?;
+        use_existing_keys = prefers_existing_chia_keys(&answer);
     }
     if discovery.has_existing_keys && use_existing_keys {
         let selection_path = save_key_onboarding_selection(
@@ -146,13 +146,73 @@ fn save_key_onboarding_selection(path: &Path, payload: &serde_json::Value) -> Si
 }
 
 fn prompt_line(prompt: &str) -> SignerResult<String> {
-    print!("{prompt}");
-    io::stdout()
+    eprint!("{prompt}");
+    io::stderr()
         .flush()
-        .map_err(|err| SignerError::Other(format!("stdout flush failed: {err}")))?;
+        .map_err(|err| SignerError::Other(format!("stderr flush failed: {err}")))?;
     let mut line = String::new();
     io::stdin()
         .read_line(&mut line)
         .map_err(|err| SignerError::Other(format!("stdin read failed: {err}")))?;
-    Ok(line)
+    Ok(line.trim().to_string())
+}
+
+fn prefers_existing_chia_keys(answer: &str) -> bool {
+    let answer = answer.trim().to_ascii_lowercase();
+    answer.is_empty() || answer == "y" || answer == "yes"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn prefers_existing_chia_keys_defaults_and_yes_variants() {
+        assert!(prefers_existing_chia_keys(""));
+        assert!(prefers_existing_chia_keys("Y"));
+        assert!(prefers_existing_chia_keys("yes"));
+        assert!(!prefers_existing_chia_keys("n"));
+        assert!(!prefers_existing_chia_keys("no"));
+    }
+
+    #[test]
+    fn discover_chia_keys_detects_keyring_yaml() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let keyring = dir.path().join("keyring.yaml");
+        fs::write(&keyring, "keys: []\n").expect("write keyring");
+        let discovery = discover_chia_keys(Some(dir.path()));
+        assert!(discovery.has_existing_keys);
+        assert_eq!(discovery.keyring_yaml_path, keyring);
+    }
+
+    #[test]
+    fn discover_chia_keys_handles_missing_keyring_yaml() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let discovery = discover_chia_keys(Some(dir.path()));
+        assert!(!discovery.has_existing_keys);
+    }
+
+    #[test]
+    fn save_key_onboarding_selection_writes_json_round_trip() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("key_onboarding.json");
+        let payload = json!({
+            "selected_source": "chia_keys",
+            "key_id": "key-main-1",
+            "network": "mainnet",
+        });
+        let written = save_key_onboarding_selection(&path, &payload).expect("save");
+        assert_eq!(written, path);
+        let text = fs::read_to_string(&path).expect("read");
+        let loaded: Value = serde_json::from_str(&text).expect("json");
+        assert_eq!(
+            loaded.get("selected_source").and_then(Value::as_str),
+            Some("chia_keys")
+        );
+        assert_eq!(
+            loaded.get("key_id").and_then(Value::as_str),
+            Some("key-main-1")
+        );
+    }
 }

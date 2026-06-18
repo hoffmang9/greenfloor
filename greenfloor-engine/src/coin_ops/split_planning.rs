@@ -372,6 +372,57 @@ mod tests {
     }
 
     #[test]
+    fn daemon_retry_second_attempt_disables_combine_prereq() {
+        let spendable = coins(&[("Coin_a", 4000), ("Coin_b", 6000)]);
+        let first = plan_auto_split_selection(
+            &spendable,
+            10_000,
+            "xch",
+            SplitPlanningProfile::DaemonAuto,
+            10,
+            Some(true),
+        );
+        match first {
+            SplitAutoSelectPlan::CombinePrereq(_) => {}
+            other => panic!("expected combine prereq on first attempt: {other:?}"),
+        }
+        let second = plan_auto_split_selection(
+            &spendable,
+            10_000,
+            "xch",
+            SplitPlanningProfile::DaemonAuto,
+            10,
+            Some(false),
+        );
+        match second {
+            SplitAutoSelectPlan::Skip(skip) => {
+                assert_eq!(skip.reason, "no_spendable_split_coin_meets_required_amount");
+            }
+            other => panic!("expected skip when combine prereq disabled: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn combine_exact_amount_skips_non_matching_denominations() {
+        let spendable = coins(&[
+            ("dust", 500),
+            ("coin_a", 1000),
+            ("coin_b", 1000),
+            ("coin_c", 1000),
+        ]);
+        let ids = plan_auto_combine_inputs(
+            &spendable,
+            3,
+            CombineInputSelectionMode::ExactAmount,
+            Some(1000),
+            None,
+            Some(3),
+        )
+        .expect("combine inputs");
+        assert_eq!(ids, vec!["coin_a", "coin_b", "coin_c"]);
+    }
+
+    #[test]
     fn daemon_auto_rejects_sub_cat_change_dust() {
         let cat_id = "0000000000000000000000000000000000000000000000000000000000000001";
         let plan = plan_auto_split_selection(

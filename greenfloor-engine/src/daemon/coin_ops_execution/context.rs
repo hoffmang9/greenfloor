@@ -25,6 +25,9 @@ pub struct CoinOpExecContext {
 
 impl CoinOpExecContext {
     pub async fn list_spendable_coins(&self) -> SignerResult<Vec<SpendableCoin>> {
+        if let Some(coins) = super::test_fixtures::test_wallet_coins_from_env() {
+            return Ok(coins);
+        }
         let coins = list_wallet_unspent_coins(
             &self.program.network,
             &self.market.receive_address,
@@ -43,6 +46,10 @@ impl CoinOpExecContext {
         coin_ids: &[String],
         fee_mojos: u64,
     ) -> SignerResult<String> {
+        if let Some(operation_id) = super::test_fixtures::test_mixed_split_operation_id_from_env() {
+            let _ = (output_amounts, coin_ids, fee_mojos);
+            return Ok(operation_id);
+        }
         let asset_id = hex_to_bytes32(&self.resolved_base_asset_id)?;
         let parsed_coin_ids: Vec<Bytes32> = coin_ids
             .iter()

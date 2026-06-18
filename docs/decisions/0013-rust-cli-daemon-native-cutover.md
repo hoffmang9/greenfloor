@@ -39,13 +39,13 @@ build/post, policy, SQLite, and most adapters.
 
 ## Command ownership
 
-| Operator command | Owner |
-| ---------------- | ----- |
-| `greenfloord` / `daemon` | `greenfloor-engine` |
-| `config-validate`, `doctor`, `bootstrap-home`, `set-log-level` | `greenfloor-manager` (Rust) |
-| `build-and-post-offer`, `offers-*` | `greenfloor-manager` → Rust engine |
-| `coins-list`, `coin-status`, `coin-split`, `coin-combine` | `greenfloor-manager` (Rust) |
-| `keys-onboard`, `cats-*` | `greenfloor-manager` (Rust) |
+| Operator command                                               | Owner                              |
+| -------------------------------------------------------------- | ---------------------------------- |
+| `greenfloord` / `daemon`                                       | `greenfloor-engine`                |
+| `config-validate`, `doctor`, `bootstrap-home`, `set-log-level` | `greenfloor-manager` (Rust)        |
+| `build-and-post-offer`, `offers-*`                             | `greenfloor-manager` → Rust engine |
+| `coins-list`, `coin-status`, `coin-split`, `coin-combine`      | `greenfloor-manager` (Rust)        |
+| `keys-onboard`, `cats-*`                                       | `greenfloor-manager` (Rust)        |
 
 ## Consequences
 

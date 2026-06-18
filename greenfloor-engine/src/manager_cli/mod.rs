@@ -41,6 +41,8 @@ pub struct ManagerCli {
     pub state_db: String,
     #[arg(long, help = "Emit compact single-line JSON output.")]
     pub json: bool,
+    #[arg(long, help = "Override Dexie API base URL for cats and offer commands.")]
+    pub dexie_base_url: Option<String>,
     #[command(subcommand)]
     pub command: ManagerCommands,
 }
@@ -276,7 +278,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
                 size_base_units,
                 repeat,
                 publish_venue: venue,
-                dexie_base_url,
+                dexie_base_url: dexie_base_url.or(cli.dexie_base_url),
                 splash_base_url,
                 drop_only: !allow_take,
                 claim_rewards,
@@ -378,6 +380,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
                 target_usd_per_unit.as_deref(),
                 !no_dexie_lookup,
                 replace,
+                cli.dexie_base_url.as_deref(),
             )
             .await
         }
@@ -398,6 +401,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
                 !no_dexie_lookup,
                 yes,
                 preflight_only,
+                cli.dexie_base_url.as_deref(),
             )
             .await
         }

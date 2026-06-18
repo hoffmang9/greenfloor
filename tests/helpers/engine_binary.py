@@ -38,6 +38,8 @@ def _build_engine_binaries() -> None:
         raise GreenfloorEngineBinaryError(
             "greenfloor-engine Cargo.toml not found; cannot build binaries"
         )
+    env = os.environ.copy()
+    env.setdefault("CARGO_TARGET_DIR", str(root / "target"))
     cmd = [
         "cargo",
         "build",
@@ -46,7 +48,7 @@ def _build_engine_binaries() -> None:
     ]
     for binary_name in _ALL_BINS:
         cmd.extend(["--bin", binary_name])
-    subprocess.run(cmd, check=True, cwd=root)
+    subprocess.run(cmd, check=True, cwd=root, env=env)
 
 
 def resolve_greenfloor_engine_binary(*, build_if_missing: bool = True) -> Path:

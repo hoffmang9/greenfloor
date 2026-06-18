@@ -15,3 +15,30 @@ pub(crate) fn wallet_coins_to_spendable(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wallet_coins_to_spendable_filters_cat_dust() {
+        let cat_id = "0000000000000000000000000000000000000000000000000000000000000001";
+        let coins = vec![
+            WalletUnspentCoin {
+                id: "dust".to_string(),
+                name: "dust".to_string(),
+                amount: 500,
+                state: "SETTLED".to_string(),
+            },
+            WalletUnspentCoin {
+                id: "coin_a".to_string(),
+                name: "coin_a".to_string(),
+                amount: 1000,
+                state: "SETTLED".to_string(),
+            },
+        ];
+        let spendable = wallet_coins_to_spendable(&coins, cat_id);
+        assert_eq!(spendable.len(), 1);
+        assert_eq!(spendable[0].id, "coin_a");
+    }
+}

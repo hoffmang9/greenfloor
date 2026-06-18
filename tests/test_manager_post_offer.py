@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from greenfloor.asset_label_catalog import _dexie_lookup_token_for_cat_id
 from tests.helpers.manager_cli import parse_json_output, run_manager
 from tests.helpers.manager_program_fixtures import write_manager_program
@@ -78,17 +76,3 @@ def test_set_log_level_updates_program_yaml(tmp_path: Path) -> None:
     assert payload["previous_log_level"] == "INFO"
     assert payload["log_level"] == "WARNING"
     assert "log_level: WARNING" in program.read_text(encoding="utf-8")
-
-
-@pytest.mark.skip(
-    reason="Python manager dispatch wiring removed in favor of native greenfloor-manager subprocess"
-)
-def test_main_dispatches_set_log_level_command() -> None:
-    pass
-
-
-@pytest.mark.skip(
-    reason="Python manager dispatch wiring removed in favor of native greenfloor-manager subprocess"
-)
-def test_main_dispatches_coin_status_command() -> None:
-    pass

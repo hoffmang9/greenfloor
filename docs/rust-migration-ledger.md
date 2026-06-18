@@ -5,9 +5,11 @@ Single-operator deployment catch-up checklist. No backwards-compatibility shims.
 ## Install
 
 1. Build and install native binaries:
+
    ```bash
    cargo install --path greenfloor-engine --bins
    ```
+
    Installs `greenfloor-engine`, `greenfloor-manager`, and `greenfloord`.
 
 2. Stop using `pip install -e .` for operator commands. Python venv remains for
@@ -15,11 +17,11 @@ Single-operator deployment catch-up checklist. No backwards-compatibility shims.
 
 ## Command invocation
 
-| Before | After |
-| ------ | ----- |
-| `pip` console script `greenfloor-manager …` | `greenfloor-manager …` (native binary) |
-| `pip` console script `greenfloord …` | `greenfloord …` (native binary) |
-| `build-and-post-offer` via PyO3 in-process | `greenfloor-manager build-and-post-offer` (Rust) |
+| Before                                      | After                                            |
+| ------------------------------------------- | ------------------------------------------------ |
+| `pip` console script `greenfloor-manager …` | `greenfloor-manager …` (native binary)           |
+| `pip` console script `greenfloord …`        | `greenfloord …` (native binary)                  |
+| `build-and-post-offer` via PyO3 in-process  | `greenfloor-manager build-and-post-offer` (Rust) |
 
 Global flags on `greenfloor-manager`:
 
@@ -47,13 +49,13 @@ Global flags on `greenfloor-manager`:
 
 ## Breaking changes log
 
-| Date | Change | Action |
-| ---- | ------ | ------ |
-| 2026-06-17 | Python `greenfloor-manager` / `greenfloord` entrypoints removed | Install Cargo binaries |
-| 2026-06-17 | Manager `build-and-post-offer` is Rust-only (no PyO3) | Use `greenfloor-manager build-and-post-offer` |
-| 2026-06-17 | Daemon tests use subprocess `greenfloord` / `greenfloor-engine daemon` | Drop PyO3 daemon test harness imports |
-| 2026-06-17 | `greenfloor-engine` no longer exposes `build-and-post-offer` or `offers-*` | Use `greenfloor-manager` for operator lifecycle commands |
-| 2026-06-17 | `doctor` validates `signer_key_id` on enabled markets (not Python keys registry) | Ensure each enabled market has `signer_key_id` set |
-| 2026-06-17 | `coin-split` / `coin-combine` use Rust gate policy (`coin_ops/gate.rs`) | Until-ready requires `--size-base-units`; combine prereq auto-runs combine first |
+| Date       | Change                                                                           | Action                                                                           |
+| ---------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| 2026-06-17 | Python `greenfloor-manager` / `greenfloord` entrypoints removed                  | Install Cargo binaries                                                           |
+| 2026-06-17 | Manager `build-and-post-offer` is Rust-only (no PyO3)                            | Use `greenfloor-manager build-and-post-offer`                                    |
+| 2026-06-17 | Daemon tests use subprocess `greenfloord` / `greenfloor-engine daemon`           | Drop PyO3 daemon test harness imports                                            |
+| 2026-06-17 | `greenfloor-engine` no longer exposes `build-and-post-offer` or `offers-*`       | Use `greenfloor-manager` for operator lifecycle commands                         |
+| 2026-06-17 | `doctor` validates `signer_key_id` on enabled markets (not Python keys registry) | Ensure each enabled market has `signer_key_id` set                               |
+| 2026-06-17 | `coin-split` / `coin-combine` use Rust gate policy (`coin_ops/gate.rs`)          | Until-ready requires `--size-base-units`; combine prereq auto-runs combine first |
 
 Add a row here for every intentional operator-facing break during the migration.

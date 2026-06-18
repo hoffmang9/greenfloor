@@ -133,6 +133,13 @@ mod tests {
     }
 
     #[test]
+    fn coin_op_should_stop_explicit_coin_ids_when_not_ready() {
+        let (stop, reason) = coin_op_should_stop(true, Some(false), true, 1, 3);
+        assert!(stop);
+        assert_eq!(reason, "requires_new_coin_selection");
+    }
+
+    #[test]
     fn combine_gate_ready_when_at_or_below_cap() {
         let coins = vec![
             json!({"amount": 100, "state": "CONFIRMED"}),
