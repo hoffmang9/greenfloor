@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::metrics::collection_len_to_i64;
+
 use super::wallet_coin::is_spendable_wallet_coin;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -33,13 +35,9 @@ pub fn evaluate_coin_split_gate(
         .copied()
         .filter(|amount| *amount == size)
         .collect();
-    let larger_reserve_count = spendable
-        .iter()
-        .filter(|amount| **amount > size)
-        .count()
-        .try_into()
-        .unwrap_or(0i64);
-    let current_count = denom_coins.len().try_into().unwrap_or(0i64);
+    let larger_reserve_count =
+        collection_len_to_i64(spendable.iter().filter(|amount| **amount > size).count());
+    let current_count = collection_len_to_i64(denom_coins.len());
     let extra_denom_count = (current_count - required).max(0);
     let reserve_ready = larger_reserve_count >= 1 || extra_denom_count >= 1;
     let ready = current_count >= required && reserve_ready;
@@ -96,14 +94,14 @@ pub fn evaluate_coin_combine_gate(
     size_base_units: i64,
     max_allowed_count: i64,
 ) -> CoinCombineGateResult {
-    let current_count = asset_scoped_coins
-        .iter()
-        .filter(|coin| is_spendable_wallet_coin(coin))
-        .filter_map(|coin| coin.get("amount").and_then(serde_json::Value::as_i64))
-        .filter(|amount| *amount == size_base_units)
-        .count()
-        .try_into()
-        .unwrap_or(0i64);
+    let current_count = collection_len_to_i64(
+        asset_scoped_coins
+            .iter()
+            .filter(|coin| is_spendable_wallet_coin(coin))
+            .filter_map(|coin| coin.get("amount").and_then(serde_json::Value::as_i64))
+            .filter(|amount| *amount == size_base_units)
+            .count(),
+    );
     let ready = current_count <= max_allowed_count;
     CoinCombineGateResult {
         asset_id: asset_id.to_string(),

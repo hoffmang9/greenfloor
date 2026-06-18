@@ -1,7 +1,8 @@
 //! Low-level coin selection helpers for split/combine planning.
 
+#![allow(clippy::implicit_hasher)]
+
 use std::collections::HashSet;
-use std::hash::BuildHasher;
 
 use super::policy::coin_op_min_amount_mojos;
 
@@ -11,10 +12,10 @@ pub struct SpendableCoin {
     pub amount: i64,
 }
 
-pub fn select_largest_spendable_coin<'a, S: BuildHasher>(
+pub fn select_largest_spendable_coin<'a>(
     coins: &'a [SpendableCoin],
     min_amount_mojos: i64,
-    exclude_coin_ids: &HashSet<String, S>,
+    exclude_coin_ids: &HashSet<String>,
 ) -> Option<&'a SpendableCoin> {
     coins
         .iter()
@@ -26,10 +27,10 @@ pub fn select_largest_spendable_coin<'a, S: BuildHasher>(
         .max_by_key(|coin| coin.amount)
 }
 
-pub fn select_exact_amount_coin_ids<S: BuildHasher>(
+pub fn select_exact_amount_coin_ids(
     coins: &[SpendableCoin],
     amount_mojos: i64,
-    exclude_coin_ids: &HashSet<String, S>,
+    exclude_coin_ids: &HashSet<String>,
     max_count: Option<usize>,
 ) -> Vec<String> {
     let mut selected = Vec::new();

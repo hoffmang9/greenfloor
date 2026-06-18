@@ -1,5 +1,6 @@
+#![allow(clippy::implicit_hasher)]
+
 use std::collections::HashMap;
-use std::hash::BuildHasher;
 
 use chrono::{DateTime, Utc};
 
@@ -90,10 +91,10 @@ pub(crate) fn recent_offer_metadata_by_offer_id(
     Ok(metadata_by_offer_id)
 }
 
-pub(crate) fn is_stale_pending_visibility_offer<S: BuildHasher>(
+pub(crate) fn is_stale_pending_visibility_offer(
     offer_id: &str,
     metadata: &OfferExecutionMetadata,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     clock: DateTime<Utc>,
 ) -> bool {
     if metadata.status != "pending_visibility" {

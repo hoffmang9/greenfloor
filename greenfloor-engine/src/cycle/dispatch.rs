@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::SignerResult;
+use crate::offer::pricing::quote_mojos_for_base_size;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlannedActionInput {
     pub size: i64,
@@ -74,7 +77,7 @@ pub struct ManagedOfferReservationRequest<'a> {
 
 pub fn reservation_request_for_managed_offer(
     request: ManagedOfferReservationRequest<'_>,
-) -> BTreeMap<String, i64> {
+) -> SignerResult<BTreeMap<String, i64>> {
     let ManagedOfferReservationRequest {
         side,
         size_base_units,
@@ -89,24 +92,20 @@ pub fn reservation_request_for_managed_offer(
     let base_asset_id = base_asset_id.trim();
     let quote_asset_id = quote_asset_id.trim();
     if base_asset_id.is_empty() || quote_asset_id.is_empty() {
-        return BTreeMap::default();
+        return Ok(BTreeMap::default());
     }
 
     let side = side.trim().to_ascii_lowercase();
     let base_amount = size_base_units * base_unit_mojo_multiplier;
-    let quote_amount = crate::num_conv::quote_mojos_for_base_size(
-        size_base_units,
-        quote_price,
-        quote_unit_mojo_multiplier,
-    )
-    .unwrap_or(0);
+    let quote_amount =
+        quote_mojos_for_base_size(size_base_units, quote_price, quote_unit_mojo_multiplier)?;
     let (offer_asset_id, offer_amount) = if side == "buy" {
         (quote_asset_id, quote_amount)
     } else {
         (base_asset_id, base_amount)
     };
     if offer_amount <= 0 {
-        return BTreeMap::default();
+        return Ok(BTreeMap::default());
     }
 
     let mut request = BTreeMap::from([(offer_asset_id.to_string(), offer_amount)]);
@@ -114,7 +113,7 @@ pub fn reservation_request_for_managed_offer(
     if !fee_asset.is_empty() && fee_amount_mojos > 0 {
         *request.entry(fee_asset.to_string()).or_insert(0) += fee_amount_mojos;
     }
-    request
+    Ok(request)
 }
 
 pub fn single_input_preferred_skip_reason(
@@ -204,7 +203,8 @@ mod tests {
             quote_price: 1.5,
             fee_asset_id: "xch_asset",
             fee_amount_mojos: 0,
-        });
+        })
+        .expect("reservation request");
         assert_eq!(request.get("base_asset"), Some(&10_000));
     }
 

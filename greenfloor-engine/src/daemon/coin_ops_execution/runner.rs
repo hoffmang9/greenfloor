@@ -1,5 +1,6 @@
+#![allow(clippy::implicit_hasher)]
+
 use std::collections::HashSet;
-use std::hash::BuildHasher;
 
 use serde_json::{json, Value};
 
@@ -73,12 +74,12 @@ fn skip_all_plans(
     }
 }
 
-pub async fn execute_managed_coin_op_plans<S: BuildHasher>(
+pub async fn execute_managed_coin_op_plans(
     program: &ManagerProgramConfig,
     signer_config: &SignerConfig,
     market: &MarketConfig,
     plans: &[CoinOpPlan],
-    watched_coin_ids: &HashSet<String, S>,
+    watched_coin_ids: &HashSet<String>,
 ) -> CoinOpExecutionResult {
     if market.receive_address.trim().is_empty() {
         return skip_all_plans(

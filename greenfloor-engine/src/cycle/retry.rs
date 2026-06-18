@@ -11,7 +11,10 @@ pub fn parse_rate_limit_retry_seconds(error_text: &str) -> Option<f64> {
     if digits.is_empty() {
         return None;
     }
-    digits.parse::<i64>().ok().map(crate::num_conv::i64_to_f64)
+    digits
+        .parse::<i64>()
+        .ok()
+        .map(crate::offer::pricing::i64_to_f64)
 }
 
 /// Sleep duration before the next moderate-retry attempt after a failure.

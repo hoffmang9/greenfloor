@@ -14,7 +14,10 @@ pub(super) async fn wait_for_coinset_confirmation(
     timeout_seconds: u64,
 ) -> SignerResult<Vec<Value>> {
     let start = std::time::Instant::now();
-    let timeout = crate::num_conv::u64_to_i64(timeout_seconds.max(10))?;
+    let timeout = crate::config::u64_to_i64(
+        timeout_seconds.max(10),
+        "runtime.offer_bootstrap_wait_timeout_seconds",
+    )?;
     let initial_sleep = 2.0f64;
     let max_sleep = 20.0f64;
     let mut sleep_seconds = 0.0f64;

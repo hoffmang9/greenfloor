@@ -4,9 +4,9 @@ use crate::coin_ops::is_spendable_wallet_coin;
 use crate::coinset::{get_conservative_fee_estimate, WalletUnspentCoin};
 use crate::config::LadderEntry;
 use crate::error::SignerResult;
-use crate::num_conv::quote_mojos_for_base_size;
 use crate::offer::bootstrap::PlannerLadderRow;
 use crate::offer::build_context::mojo_multiplier_for_leg;
+use crate::offer::pricing::quote_mojos_for_base_size;
 use crate::offer::request::normalize_offer_side;
 
 pub(super) fn bootstrap_ladder_entries_for_side(

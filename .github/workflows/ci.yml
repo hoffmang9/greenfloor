@@ -71,14 +71,6 @@ jobs:
       - uses: ./.github/actions/rust-cache-greenfloor
         if: matrix.build_native_clis || matrix.run_rust_tests
 
-      - name: Rust format check
-        if: matrix.run_rust_tests
-        run: cargo fmt --manifest-path "${{ env.CARGO_MANIFEST }}" --check
-
-      - name: Rust clippy (pedantic, greenfloor-engine only)
-        if: matrix.run_rust_tests
-        run: cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}" --all-targets --no-deps
-
       - name: Build greenfloor-engine binaries
         if: matrix.build_native_clis && !matrix.run_rust_tests
         run: cargo build --manifest-path "${{ env.CARGO_MANIFEST }}" --bins

@@ -59,7 +59,7 @@ pub fn resolve_combine_count(
 ) -> SignerResult<i64> {
     if let Some(size) = size_base_units.filter(|value| *value > 0) {
         let entry = sell_ladder_entry_for_size(market, size)?;
-        let threshold = crate::num_conv::combine_threshold_count(
+        let threshold = crate::offer::pricing::combine_threshold_count(
             entry.target_count,
             entry.combine_when_excess_factor,
         )?;
@@ -78,7 +78,10 @@ pub fn split_required_count(entry: &LadderEntry) -> i64 {
 }
 
 pub fn combine_threshold_count(entry: &LadderEntry) -> SignerResult<i64> {
-    crate::num_conv::combine_threshold_count(entry.target_count, entry.combine_when_excess_factor)
+    crate::offer::pricing::combine_threshold_count(
+        entry.target_count,
+        entry.combine_when_excess_factor,
+    )
 }
 
 #[cfg(test)]

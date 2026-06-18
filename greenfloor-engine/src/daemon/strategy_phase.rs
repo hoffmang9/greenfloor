@@ -30,7 +30,10 @@ pub async fn run_strategy_phase(
         &ctx.reconcile.dexie_size_by_offer_id,
         ctx.dispatch.xch_price_usd,
     )?;
-    state.merge_strategy_execution(strategy_actions.len().try_into().unwrap_or(0i64), 0);
+    state.merge_strategy_execution(
+        crate::config::usize_to_i64(strategy_actions.len(), "strategy.action_count")?,
+        0,
+    );
 
     store.add_audit_event(
         "strategy_actions_planned",
@@ -48,7 +51,7 @@ pub async fn run_strategy_phase(
             Ok(output) => {
                 state.merge_strategy_execution(
                     0,
-                    crate::num_conv::u64_to_i64(output.executed_count).unwrap_or(0),
+                    crate::config::u64_to_i64(output.executed_count, "strategy.executed_count")?,
                 );
                 newly_executed_sell_counts = output.newly_executed_sell_counts;
             }

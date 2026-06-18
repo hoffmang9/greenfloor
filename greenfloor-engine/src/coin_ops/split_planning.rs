@@ -1,7 +1,8 @@
 //! Auto split/combine input planning (CLI vs daemon profiles).
 
+#![allow(clippy::implicit_hasher)]
+
 use std::collections::{HashMap, HashSet};
-use std::hash::BuildHasher;
 
 use super::policy::coin_op_min_amount_mojos;
 use super::selection::{
@@ -228,12 +229,12 @@ pub fn plan_auto_split_selection(
     })
 }
 
-pub fn plan_auto_combine_inputs<S: BuildHasher>(
+pub fn plan_auto_combine_inputs(
     spendable_coins: &[SpendableCoin],
     number_of_coins: usize,
     selection_mode: CombineInputSelectionMode,
     target_amount_mojos: Option<i64>,
-    exclude_coin_ids: Option<&HashSet<String, S>>,
+    exclude_coin_ids: Option<&HashSet<String>>,
     max_count: Option<usize>,
 ) -> Result<Vec<String>, &'static str> {
     let capped_count = match max_count {

@@ -73,7 +73,7 @@ pub fn evaluate_cancel_policy_decision(
     let Some(move_bps) = move_bps else {
         unreachable!("move_bps checked above");
     };
-    if move_bps < crate::num_conv::i64_to_f64(threshold_bps) {
+    if move_bps < crate::offer::pricing::i64_to_f64(threshold_bps) {
         return CancelPolicyDecision {
             eligible: true,
             triggered: false,

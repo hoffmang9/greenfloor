@@ -1,3 +1,5 @@
+#![allow(clippy::implicit_hasher)]
+
 pub mod cache;
 
 mod counting;
@@ -7,7 +9,6 @@ pub mod time;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::hash::BuildHasher;
 
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
@@ -114,10 +115,10 @@ fn active_offer_state_summary(
     Ok((active_offer_ids, state_counts, metadata))
 }
 
-pub fn active_offer_counts_by_size<S: BuildHasher>(
+pub fn active_offer_counts_by_size(
     store: &SqliteStore,
     market_id: &str,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
 ) -> SignerResult<(BTreeMap<i64, i64>, u64)> {
     let (counts, _, unmapped) = active_offer_counts_by_size_detail(
@@ -130,10 +131,10 @@ pub fn active_offer_counts_by_size<S: BuildHasher>(
     Ok((counts, unmapped))
 }
 
-pub fn active_offer_counts_by_size_detail<S: BuildHasher>(
+pub fn active_offer_counts_by_size_detail(
     store: &SqliteStore,
     market_id: &str,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
 ) -> SignerResult<SizeCountDetail> {
@@ -148,10 +149,10 @@ pub fn active_offer_counts_by_size_detail<S: BuildHasher>(
     Ok((counts, state_counts, unmapped))
 }
 
-fn active_offer_counts_by_size_at<S: BuildHasher>(
+fn active_offer_counts_by_size_at(
     store: &SqliteStore,
     market_id: &str,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
 ) -> SignerResult<(BTreeMap<i64, i64>, u64)> {
@@ -167,10 +168,10 @@ fn active_offer_counts_by_size_at<S: BuildHasher>(
     Ok((buckets.counts, buckets.unmapped))
 }
 
-pub fn active_offer_counts_by_size_and_side<S: BuildHasher>(
+pub fn active_offer_counts_by_size_and_side(
     store: &SqliteStore,
     market_id: &str,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
 ) -> SignerResult<SideCounts> {
     let (buy, sell, _, unmapped) = active_offer_counts_by_size_and_side_detail(
@@ -183,10 +184,10 @@ pub fn active_offer_counts_by_size_and_side<S: BuildHasher>(
     Ok((buy, sell, unmapped))
 }
 
-pub fn active_offer_counts_by_size_and_side_detail<S: BuildHasher>(
+pub fn active_offer_counts_by_size_and_side_detail(
     store: &SqliteStore,
     market_id: &str,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
 ) -> SignerResult<SideCountDetail> {
@@ -201,10 +202,10 @@ pub fn active_offer_counts_by_size_and_side_detail<S: BuildHasher>(
     Ok((buy, sell, state_counts, unmapped))
 }
 
-fn active_offer_counts_by_size_and_side_at<S: BuildHasher>(
+fn active_offer_counts_by_size_and_side_at(
     store: &SqliteStore,
     market_id: &str,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
 ) -> SignerResult<SideCounts> {
@@ -226,12 +227,11 @@ pub fn watched_coin_ids_for_market(cache: &CoinWatchlistCache, market_id: &str) 
     cache.watched_coin_ids_for_market(market_id)
 }
 
-pub fn set_watched_coin_ids_for_market<S: BuildHasher>(
+pub fn set_watched_coin_ids_for_market(
     cache: &CoinWatchlistCache,
     market_id: &str,
-    coin_ids: HashSet<String, S>,
+    coin_ids: HashSet<String>,
 ) {
-    let coin_ids: HashSet<String> = coin_ids.into_iter().collect();
     cache.set_watched_coin_ids_for_market(market_id, coin_ids);
 }
 

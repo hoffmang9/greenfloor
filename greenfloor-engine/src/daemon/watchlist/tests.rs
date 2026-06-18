@@ -96,8 +96,7 @@ fn active_offer_counts_by_size_uses_offer_state_and_size_mapping() {
     );
 
     let (counts, unmapped) =
-        active_offer_counts_by_size_at(&store, "m1", None::<&HashMap<String, i64>>, &[], clock)
-            .expect("counts");
+        active_offer_counts_by_size_at(&store, "m1", None, &[], clock).expect("counts");
 
     assert_eq!(counts.get(&1), Some(&1));
     assert_eq!(counts.get(&10), Some(&1));
@@ -134,8 +133,7 @@ fn active_offer_counts_by_size_counts_cli_posted_offer() {
         .expect("audit");
 
     let (counts, unmapped) =
-        active_offer_counts_by_size_at(&store, "m1", None::<&HashMap<String, i64>>, &[], clock)
-            .expect("counts");
+        active_offer_counts_by_size_at(&store, "m1", None, &[], clock).expect("counts");
 
     assert_eq!(counts.get(&100), Some(&1));
     assert_eq!(unmapped, 0);
@@ -150,14 +148,8 @@ fn active_offer_counts_by_size_and_side_unknown_metadata_stays_unmapped() {
         .upsert_offer_state_at("offer-unknown-side", "m1", "open", Some(0), &clock_iso)
         .expect("upsert");
 
-    let (buy_counts, sell_counts, unmapped) = active_offer_counts_by_size_and_side_at(
-        &store,
-        "m1",
-        None::<&HashMap<String, i64>>,
-        &[],
-        clock,
-    )
-    .expect("counts");
+    let (buy_counts, sell_counts, unmapped) =
+        active_offer_counts_by_size_and_side_at(&store, "m1", None, &[], clock).expect("counts");
 
     assert_eq!(buy_counts.get(&1), Some(&0));
     assert_eq!(sell_counts.get(&1), Some(&0));
@@ -194,14 +186,8 @@ fn active_offer_counts_by_size_and_side_malformed_side_stays_unmapped() {
         &clock_iso,
     );
 
-    let (_buy_counts, _sell_counts, unmapped) = active_offer_counts_by_size_and_side_at(
-        &store,
-        "m1",
-        None::<&HashMap<String, i64>>,
-        &[],
-        clock,
-    )
-    .expect("counts");
+    let (_buy_counts, _sell_counts, unmapped) =
+        active_offer_counts_by_size_and_side_at(&store, "m1", None, &[], clock).expect("counts");
 
     assert_eq!(unmapped, 2);
 }
@@ -252,8 +238,7 @@ fn active_offer_counts_by_size_foreign_offer_stays_unmapped() {
     );
 
     let (counts, unmapped) =
-        active_offer_counts_by_size_at(&store, "m1", None::<&HashMap<String, i64>>, &[], clock)
-            .expect("counts");
+        active_offer_counts_by_size_at(&store, "m1", None, &[], clock).expect("counts");
 
     assert_eq!(counts.get(&100), Some(&1));
     assert_eq!(unmapped, 1);
@@ -274,14 +259,8 @@ fn active_offer_counts_by_size_tracks_non_legacy_size() {
         &clock_iso,
     );
 
-    let (counts, unmapped) = active_offer_counts_by_size_at(
-        &store,
-        "m1",
-        None::<&HashMap<String, i64>>,
-        &[1, 10, 50],
-        clock,
-    )
-    .expect("counts");
+    let (counts, unmapped) =
+        active_offer_counts_by_size_at(&store, "m1", None, &[1, 10, 50], clock).expect("counts");
 
     assert_eq!(counts.get(&50), Some(&1));
     assert_eq!(unmapped, 0);
@@ -369,8 +348,7 @@ fn active_offer_counts_keeps_pending_when_no_dexie_snapshot() {
     );
 
     let (counts, unmapped) =
-        active_offer_counts_by_size_at(&store, "m1", None::<&HashMap<String, i64>>, &[50], clock)
-            .expect("counts");
+        active_offer_counts_by_size_at(&store, "m1", None, &[50], clock).expect("counts");
 
     assert_eq!(counts.get(&50), Some(&1));
     assert_eq!(unmapped, 0);

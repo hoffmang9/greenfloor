@@ -8,6 +8,7 @@ use crate::coin_ops::{
 use super::items::{executed_item, skip_item, CoinOpExecItem};
 use super::COIN_OP_ERROR_PREFIX;
 use crate::coin_ops::execution::{submit_combine_prereq, CoinOpExecContext};
+use crate::config::{non_negative_i64_to_u64, usize_to_i64};
 
 pub(crate) async fn submit_combine_prereq_for_split(
     ctx: &CoinOpExecContext,
@@ -17,7 +18,21 @@ pub(crate) async fn submit_combine_prereq_for_split(
     _required_amount: i64,
     prereq: &SplitCombinePrereqPlan,
 ) -> (Vec<CoinOpExecItem>, u64) {
-    let combine_count = crate::num_conv::usize_to_i64(prereq.input_coin_ids.len()).unwrap_or(0);
+    let combine_count = match usize_to_i64(prereq.input_coin_ids.len(), "split_prereq.input_count")
+    {
+        Ok(count) => count,
+        Err(err) => {
+            return (
+                vec![skip_item(
+                    op_type,
+                    size_base_units,
+                    op_count,
+                    format!("{COIN_OP_ERROR_PREFIX}:{err}:split_prereq_input_count"),
+                )],
+                0,
+            );
+        }
+    };
     match submit_combine_prereq(ctx, &prereq.input_coin_ids).await {
         Ok(operation_id) => {
             let reason = if prereq.exact_match {
@@ -165,17 +180,57 @@ pub(crate) async fn execute_daemon_split_plan(
             }
             SplitAutoSelectPlan::Coin(selected) => {
                 attempted_coin_ids.insert(selected.coin_id.clone());
-                let output_amounts = vec![
-                    crate::num_conv::i64_to_u64(amount_per_coin_mojos.max(0))
-                        .unwrap_or(0);
-                    op_count.try_into().unwrap_or(0usize)
-                ];
+                let amount_u64 = match non_negative_i64_to_u64(
+                    amount_per_coin_mojos,
+                    "split.amount_per_coin_mojos",
+                ) {
+                    Ok(amount) => amount,
+                    Err(err) => {
+                        return (
+                            vec![skip_item(
+                                op_type,
+                                size_base_units,
+                                op_count,
+                                format!("{COIN_OP_ERROR_PREFIX}:{err}"),
+                            )],
+                            0,
+                        );
+                    }
+                };
+                let Ok(output_count) = usize::try_from(op_count) else {
+                    return (
+                        vec![skip_item(
+                            op_type,
+                            size_base_units,
+                            op_count,
+                            format!("{COIN_OP_ERROR_PREFIX}:split op_count must fit in usize"),
+                        )],
+                        0,
+                    );
+                };
+                let fee_mojos = match non_negative_i64_to_u64(
+                    ctx.program.coin_ops_split_fee_mojos,
+                    "program.coin_ops_split_fee_mojos",
+                ) {
+                    Ok(fee) => fee,
+                    Err(err) => {
+                        return (
+                            vec![skip_item(
+                                op_type,
+                                size_base_units,
+                                op_count,
+                                format!("{COIN_OP_ERROR_PREFIX}:{err}"),
+                            )],
+                            0,
+                        );
+                    }
+                };
+                let output_amounts = vec![amount_u64; output_count];
                 match ctx
                     .execute_mixed_split(
                         output_amounts,
                         std::slice::from_ref(&selected.coin_id),
-                        crate::num_conv::i64_to_u64(ctx.program.coin_ops_split_fee_mojos.max(0))
-                            .unwrap_or(0),
+                        fee_mojos,
                     )
                     .await
                 {

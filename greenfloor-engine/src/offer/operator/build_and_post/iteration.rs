@@ -14,6 +14,7 @@ use super::publish::{
 };
 use super::types::{timing_payload, PostAttemptSuccess, PostFailure, PostIterationOutcome};
 use super::BuildAndPostOfferRequest;
+use crate::metrics::millis_to_u64;
 use crate::offer::operator::signer_denomination::{
     bootstrap_blocks_offer, run_signer_denomination_phase, BootstrapPhaseResult,
 };
@@ -72,24 +73,14 @@ pub(super) async fn run_post_iteration(
                 PostIterationOutcome::Failure(PostFailure {
                     error: err.to_string(),
                     started,
-                    create_phase_ms: Some(
-                        create_started
-                            .elapsed()
-                            .as_millis()
-                            .try_into()
-                            .unwrap_or(0u64),
-                    ),
+                    create_phase_ms: Some(millis_to_u64(create_started.elapsed().as_millis())),
                     execution_mode: None,
                     bootstrap: None,
                 }),
             ));
         }
     };
-    let create_phase_ms = create_started
-        .elapsed()
-        .as_millis()
-        .try_into()
-        .unwrap_or(0u64);
+    let create_phase_ms = millis_to_u64(create_started.elapsed().as_millis());
 
     if created.offer_text.trim().is_empty() {
         return Ok((
@@ -150,11 +141,7 @@ pub(super) async fn run_post_iteration(
         expected_requested_symbol: &asset_fields.expected_requested_symbol,
     })
     .await?;
-    let publish_ms = publish_started
-        .elapsed()
-        .as_millis()
-        .try_into()
-        .unwrap_or(0u64);
+    let publish_ms = millis_to_u64(publish_started.elapsed().as_millis());
 
     let persist_record = offer_post_persist_record(
         &publish,

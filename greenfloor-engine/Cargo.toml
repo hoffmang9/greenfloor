@@ -22,6 +22,7 @@ name = "greenfloord"
 path = "src/bin/greenfloord.rs"
 
 [lints.clippy]
+# Cast hygiene + selective pedantic (doc/must_use/struct-bool noise allowed below).
 all = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 cargo = { level = "warn", priority = -1 }

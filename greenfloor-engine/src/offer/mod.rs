@@ -14,11 +14,11 @@ pub mod lifecycle;
 pub mod operator;
 pub mod plan;
 pub mod presplit;
+pub mod pricing;
 pub mod publish;
 pub mod request;
 pub mod types;
 
-pub use crate::num_conv::quote_mojos_for_base_size;
 pub use action::{
     build_signer_offer_for_action, expires_at_unix_from_pricing, resolve_offer_assets_for_action,
     resolve_offer_assets_via_coinset, try_normalize_resolved_assets, BuildOfferForActionRequest,
@@ -37,6 +37,7 @@ pub use codec::{
     from_input_spend_bundle_xch_bytes, validate_offer_structure, validate_offer_text,
     verify_offer_for_dexie,
 };
+pub use pricing::quote_mojos_for_base_size;
 pub use publish::{
     bootstrap_block_error, bootstrap_offer_gate, dexie_offer_asset_expectation_error,
     expected_publish_asset_fields, BootstrapOfferGate, ExpectedPublishAssetFields,

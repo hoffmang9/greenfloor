@@ -205,9 +205,9 @@ fn runtime_parity_sell(
     quote_unit_mojo_multiplier: u64,
 ) -> SignerFixtureRuntimeParity {
     let size_base_units = offer_amount / base_unit_mojo_multiplier;
-    let quote_price = crate::num_conv::u64_to_f64(request_amount)
-        / (crate::num_conv::u64_to_f64(size_base_units)
-            * crate::num_conv::u64_to_f64(quote_unit_mojo_multiplier));
+    let quote_price = crate::offer::pricing::u64_to_f64(request_amount)
+        / (crate::offer::pricing::u64_to_f64(size_base_units)
+            * crate::offer::pricing::u64_to_f64(quote_unit_mojo_multiplier));
     SignerFixtureRuntimeParity {
         action_side: "sell".to_string(),
         resolved_base_asset_id: resolved_base_asset_id.to_string(),
@@ -228,9 +228,9 @@ fn runtime_parity_buy(
     quote_unit_mojo_multiplier: u64,
 ) -> SignerFixtureRuntimeParity {
     let size_base_units = request_amount / base_unit_mojo_multiplier;
-    let quote_price = crate::num_conv::u64_to_f64(offer_amount)
-        / (crate::num_conv::u64_to_f64(size_base_units)
-            * crate::num_conv::u64_to_f64(quote_unit_mojo_multiplier));
+    let quote_price = crate::offer::pricing::u64_to_f64(offer_amount)
+        / (crate::offer::pricing::u64_to_f64(size_base_units)
+            * crate::offer::pricing::u64_to_f64(quote_unit_mojo_multiplier));
     SignerFixtureRuntimeParity {
         action_side: "buy".to_string(),
         resolved_base_asset_id: resolved_base_asset_id.to_string(),

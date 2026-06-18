@@ -1,5 +1,6 @@
+#![allow(clippy::implicit_hasher)]
+
 use std::collections::{BTreeMap, HashMap};
-use std::hash::BuildHasher;
 
 use chrono::{DateTime, Utc};
 
@@ -31,11 +32,11 @@ pub(crate) struct SideBucketCounts {
     pub unmapped: u64,
 }
 
-pub(crate) fn bucket_active_offers_by_size<S: BuildHasher>(
+pub(crate) fn bucket_active_offers_by_size(
     active_offer_ids: &[String],
     metadata_by_offer_id: &HashMap<String, OfferExecutionMetadata>,
     tracked_sizes: &[i64],
-    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     clock: DateTime<Utc>,
 ) -> SizeBucketCounts {
     let sizes = normalize_tracked_sizes(tracked_sizes);
@@ -65,11 +66,11 @@ pub(crate) fn bucket_active_offers_by_size<S: BuildHasher>(
     SizeBucketCounts { counts, unmapped }
 }
 
-pub(crate) fn bucket_active_offers_by_side<S: BuildHasher>(
+pub(crate) fn bucket_active_offers_by_side(
     active_offer_ids: &[String],
     metadata_by_offer_id: &HashMap<String, OfferExecutionMetadata>,
     tracked_sizes: &[i64],
-    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     clock: DateTime<Utc>,
 ) -> SideBucketCounts {
     let sizes = normalize_tracked_sizes(tracked_sizes);

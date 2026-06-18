@@ -156,7 +156,7 @@ fn parse_u64_field(raw: &Value, context: &str) -> SignerResult<u64> {
     if value < 0 {
         return Err(config_err(format!("{context} must be >= 0")));
     }
-    crate::num_conv::i64_to_u64(value)
+    crate::config::non_negative_i64_to_u64(value, context)
 }
 
 #[cfg(test)]

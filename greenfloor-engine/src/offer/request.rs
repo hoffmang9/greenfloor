@@ -3,8 +3,8 @@
 use serde_json::Value;
 
 use crate::error::{SignerError, SignerResult};
-use crate::num_conv::quote_mojos_for_base_size;
 use crate::offer::build_context::mojo_multiplier_for_leg;
+use crate::offer::pricing::quote_mojos_for_base_size;
 
 /// Normalized offer action side: ``buy`` or ``sell``.
 pub fn normalize_offer_side(value: &str) -> &'static str {

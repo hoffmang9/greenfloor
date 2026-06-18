@@ -1,3 +1,5 @@
+use crate::offer::pricing::{combine_threshold_count, i64_to_f64};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoinOpKind {
     Split,
@@ -64,8 +66,7 @@ pub fn plan_coin_ops(
         let deficit = threshold - bucket.current_count;
         if deficit > 0 && bucket.target_count > 0 {
             deficits.push((
-                crate::num_conv::i64_to_f64(deficit)
-                    / crate::num_conv::i64_to_f64(bucket.target_count),
+                i64_to_f64(deficit) / i64_to_f64(bucket.target_count),
                 bucket,
                 deficit,
             ));
@@ -107,10 +108,11 @@ pub fn plan_coin_ops(
 
     let mut excess_candidates: Vec<(&BucketSpec, i64)> = Vec::new();
     for bucket in buckets {
-        let threshold = crate::num_conv::f64_to_i64_round(
-            crate::num_conv::i64_to_f64(bucket.target_count) * bucket.combine_when_excess_factor,
-        )
-        .unwrap_or(0);
+        let Ok(threshold) =
+            combine_threshold_count(bucket.target_count, bucket.combine_when_excess_factor)
+        else {
+            continue;
+        };
         let excess = bucket.current_count - threshold;
         if excess > 0 {
             excess_candidates.push((bucket, excess));
