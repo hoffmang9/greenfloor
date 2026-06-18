@@ -261,7 +261,7 @@ pub fn plan_auto_combine_inputs(
         .iter()
         .filter(|coin| !coin.id.is_empty() && !excluded.contains(&coin.id.to_ascii_lowercase()))
         .collect();
-    eligible.sort_by(|left, right| right.amount.cmp(&left.amount));
+    eligible.sort_by_key(|coin| std::cmp::Reverse(coin.amount));
     Ok(eligible
         .iter()
         .take(capped_count)

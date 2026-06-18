@@ -87,7 +87,7 @@ pub fn select_spendable_coins_for_target_amount(
     let cap = required + max_amount;
     if cap > 500_000 {
         let mut ordered = entries.clone();
-        ordered.sort_by(|left, right| right.1.cmp(&left.1));
+        ordered.sort_by_key(|(_, amount)| std::cmp::Reverse(*amount));
         let mut picked_ids = Vec::new();
         let mut running = 0i64;
         for (coin_id, amount) in ordered {

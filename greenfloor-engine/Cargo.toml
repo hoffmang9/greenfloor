@@ -22,11 +22,23 @@ name = "greenfloord"
 path = "src/bin/greenfloord.rs"
 
 [lints.clippy]
-# Cast hygiene via clippy::all. Pedantic is not blanket-enforced; enable individual lints as needed.
+# Cast hygiene + selective pedantic (doc/must_use/struct-bool noise allowed below).
 all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
 cargo = { level = "warn", priority = -1 }
 cargo_common_metadata = "allow"
+doc_markdown = "allow"
+fn_params_excessive_bools = "allow"
+large_futures = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+module_name_repetitions = "allow"
 multiple_crate_versions = "allow"
+must_use_candidate = "allow"
+return_self_not_must_use = "allow"
+struct_excessive_bools = "allow"
+too_many_lines = "allow"
+unreadable_literal = "allow"
 
 [dependencies]
 anyhow = "1.0"

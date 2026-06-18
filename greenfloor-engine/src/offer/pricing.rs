@@ -17,6 +17,7 @@ pub fn u64_to_f64(value: u64) -> f64 {
     value as f64
 }
 
+#[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn f64_to_i64_round_internal(value: f64) -> Result<i64, ()> {
     let rounded = value.round();
     if !rounded.is_finite() {
