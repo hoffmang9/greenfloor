@@ -74,7 +74,7 @@
 ## 2026-05-29 (Manager CLI Rust cutover — logging, typed post results, ADR 0012)
 
 - **Logging:** `offer/operator/logging.rs` restores `{home_dir}/logs/debug.log` for Rust manager path; `app.log_level` parsed in `config/program.rs`.
-- **Bootstrap:** `signer_bootstrap_phase` in `offer/operator/signer_denomination/` takes `&SignerConfig` from resolved context (no second YAML read).
+- **Bootstrap:** `run_signer_denomination_phase` in `offer/operator/signer_denomination/` takes `&SignerConfig` from resolved context (no second YAML read).
 - **Orchestration:** `PostAttemptSuccess` tracks publish outcome without re-parsing JSON for failure counts.
 - **Tests:** build/post fixtures extracted to `manager/fixtures/build_and_post.rs`.
 - **Decision:** ADR 0012 documents manager CLI = Rust, daemon orchestration = temporary Python until `greenfloord` migrates.

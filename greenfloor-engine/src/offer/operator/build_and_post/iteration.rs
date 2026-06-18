@@ -8,7 +8,7 @@ use crate::offer::codec::verify_offer_for_dexie;
 use crate::offer::publish::expected_publish_asset_fields;
 
 use crate::offer::operator::signer_denomination::{
-    bootstrap_blocks_offer, signer_bootstrap_phase, BootstrapPhaseResult,
+    bootstrap_blocks_offer, run_signer_denomination_phase, BootstrapPhaseResult,
 };
 use super::context::ResolvedBuildAndPostContext;
 use super::create::create_offer;
@@ -31,7 +31,7 @@ pub(super) async fn run_post_iteration(
     let bootstrap_result = if request.dry_run {
         BootstrapPhaseResult::skipped("dry_run")
     } else {
-        signer_bootstrap_phase(
+        run_signer_denomination_phase(
             &ctx.program,
             &ctx.market,
             &ctx.signer_config,
@@ -42,7 +42,7 @@ pub(super) async fn run_post_iteration(
         )
         .await?
     };
-    let bootstrap_action = bootstrap_result.to_manager_json();
+    let bootstrap_action = bootstrap_result.to_operator_json();
     if let Some(error) = bootstrap_blocks_offer(&bootstrap_result) {
         return Ok((
             bootstrap_action,
@@ -51,7 +51,7 @@ pub(super) async fn run_post_iteration(
                 started,
                 create_phase_ms: None,
                 execution_mode: None,
-                bootstrap: Some(bootstrap_result.to_manager_json()),
+                bootstrap: Some(bootstrap_result.to_operator_json()),
             }),
         ));
     }

@@ -2,6 +2,11 @@
 //!
 //! The Rust crate and PyO3 module are named `greenfloor_engine` (ADR 0010).
 //! Policy is grouped by domain (`cycle/`, `coin_ops/`, `offer/`, `vault/`).
+//!
+//! **Import convention:** operator binaries import CLI modules directly
+//! (`manager_cli`, `daemon::cli`). PyO3 bindings should prefer domain module paths
+//! (`engine_core::offer::`, `engine_core::daemon::`, `engine_core::cycle::`) over
+//! flattened crate-root re-exports when adding new bindings.
 
 #![recursion_limit = "1024"]
 
@@ -109,7 +114,7 @@ pub use offer::bootstrap::{
 };
 pub use offer::operator::{
     bootstrap_blocks_offer, build_and_post_offer, format_build_and_post_output,
-    signer_bootstrap_phase, BuildAndPostOfferRequest, BuildAndPostOfferResponse,
+    run_signer_denomination_phase, BuildAndPostOfferRequest, BuildAndPostOfferResponse,
     BootstrapPhaseResult,
 };
 pub use offer::build_context::{

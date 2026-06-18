@@ -10,8 +10,6 @@ mod wait;
 
 use std::collections::HashSet;
 
-use serde_json::json;
-
 use crate::coinset::list_wallet_unspent_coins;
 use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
@@ -27,9 +25,10 @@ use planning::{
     bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee, wallet_coin_spendable,
 };
 use split_submit::submit_bootstrap_mixed_split;
+use types::BootstrapPhaseFailure;
 use wait::wait_for_coinset_confirmation;
 
-pub async fn signer_bootstrap_phase(
+pub async fn run_signer_denomination_phase(
     program: &ManagerProgramConfig,
     market: &MarketConfig,
     signer_config: &SignerConfig,
@@ -108,18 +107,12 @@ pub async fn signer_bootstrap_phase(
     )
     .await;
     if fee_mojos > 0 {
-        return Ok(BootstrapPhaseResult {
-            status: "failed".to_string(),
-            reason: "signer_mixed_split_fee_not_supported".to_string(),
-            ready: false,
+        return Ok(BootstrapPhaseResult::failed(BootstrapPhaseFailure::new(
+            "signer_mixed_split_fee_not_supported",
             fee_mojos,
             fee_source,
             fee_lookup_error,
-            wait_error: None,
-            split_result: json!({}),
-            wait_events: Vec::new(),
-            plan: None,
-        });
+        )));
     }
 
     let existing_coin_ids: HashSet<String> = asset_scoped_coins
@@ -137,18 +130,15 @@ pub async fn signer_bootstrap_phase(
     {
         Ok(result) => result,
         Err(err) => {
-            return Ok(BootstrapPhaseResult {
-                status: "failed".to_string(),
-                reason: format!("signer_mixed_split_error:{err}"),
-                ready: false,
-                fee_mojos,
-                fee_source,
-                fee_lookup_error,
-                wait_error: None,
-                split_result: json!({}),
-                wait_events: Vec::new(),
-                plan: Some(bootstrap_plan),
-            });
+            return Ok(BootstrapPhaseResult::failed(
+                BootstrapPhaseFailure::new(
+                    format!("signer_mixed_split_error:{err}"),
+                    fee_mojos,
+                    fee_source,
+                    fee_lookup_error,
+                )
+                .with_plan(bootstrap_plan),
+            ));
         }
     };
 
@@ -163,18 +153,17 @@ pub async fn signer_bootstrap_phase(
     {
         Ok(events) => events,
         Err(err) => {
-            return Ok(BootstrapPhaseResult {
-                status: "failed".to_string(),
-                reason: "bootstrap_wait_failed".to_string(),
-                ready: false,
-                fee_mojos,
-                fee_source,
-                fee_lookup_error,
-                wait_error: Some(err.to_string()),
-                split_result,
-                wait_events: Vec::new(),
-                plan: Some(bootstrap_plan),
-            });
+            return Ok(BootstrapPhaseResult::failed(
+                BootstrapPhaseFailure::new(
+                    "bootstrap_wait_failed",
+                    fee_mojos,
+                    fee_source,
+                    fee_lookup_error,
+                )
+                .with_plan(bootstrap_plan)
+                .with_wait_error(err.to_string())
+                .with_split_result(split_result),
+            ));
         }
     };
 

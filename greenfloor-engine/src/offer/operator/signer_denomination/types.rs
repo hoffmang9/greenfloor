@@ -18,7 +18,7 @@ pub struct BootstrapPhaseResult {
 }
 
 impl BootstrapPhaseResult {
-    pub fn to_manager_json(&self) -> Value {
+    pub fn to_operator_json(&self) -> Value {
         let mut payload = json!({
             "status": self.status,
             "reason": self.reason,
@@ -81,6 +81,67 @@ impl BootstrapPhaseResult {
 
     pub fn offer_creation_gate(&self) -> BootstrapOfferGate {
         bootstrap_offer_gate(&self.status, &self.reason, self.ready)
+    }
+
+    pub(super) fn failed(failure: BootstrapPhaseFailure) -> Self {
+        Self {
+            status: "failed".to_string(),
+            reason: failure.reason,
+            ready: false,
+            fee_mojos: failure.fee_mojos,
+            fee_source: failure.fee_source,
+            fee_lookup_error: failure.fee_lookup_error,
+            wait_error: failure.wait_error,
+            split_result: failure.split_result,
+            wait_events: failure.wait_events,
+            plan: failure.plan,
+        }
+    }
+}
+
+pub(super) struct BootstrapPhaseFailure {
+    pub reason: String,
+    pub fee_mojos: u64,
+    pub fee_source: String,
+    pub fee_lookup_error: Option<String>,
+    pub wait_error: Option<String>,
+    pub split_result: Value,
+    pub wait_events: Vec<Value>,
+    pub plan: Option<BootstrapPlan>,
+}
+
+impl BootstrapPhaseFailure {
+    pub(super) fn new(
+        reason: impl Into<String>,
+        fee_mojos: u64,
+        fee_source: String,
+        fee_lookup_error: Option<String>,
+    ) -> Self {
+        Self {
+            reason: reason.into(),
+            fee_mojos,
+            fee_source,
+            fee_lookup_error,
+            wait_error: None,
+            split_result: json!({}),
+            wait_events: Vec::new(),
+            plan: None,
+        }
+    }
+
+    pub(super) fn with_plan(mut self, plan: BootstrapPlan) -> Self {
+        self.plan = Some(plan);
+        self
+    }
+
+    pub(super) fn with_wait_error(mut self, wait_error: impl Into<String>) -> Self {
+        self.wait_error = Some(wait_error.into());
+        self
+    }
+
+    pub(super) fn with_split_result(mut self, split_result: Value) -> Self {
+        self.split_result = split_result;
+        self
     }
 }
 

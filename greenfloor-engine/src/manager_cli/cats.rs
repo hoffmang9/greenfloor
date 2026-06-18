@@ -10,11 +10,11 @@ use crate::config::{is_testnet_network, resolve_dexie_base_url};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{is_hex_id, normalize_hex_id};
 
-use super::json::print_json_value;
+use super::json::emit_json;
 
 pub async fn run_cats_list(cats_path: &Path) -> SignerResult<i32> {
     let catalog = load_cats_catalog(cats_path)?;
-    print_json_value(&json!({"cats": catalog})).map_err(SignerError::Other)?;
+    emit_json(&json!({"cats": catalog}))?;
     Ok(0)
 }
 
@@ -36,8 +36,7 @@ pub async fn run_cats_add(
     let ref_cat_id = cat_id.map(normalize_hex_id).unwrap_or_default();
     let ref_ticker = ticker.unwrap_or("").trim();
     if ref_cat_id.is_empty() && ref_ticker.is_empty() {
-        print_json_value(&json!({"added": false, "error": "must_provide_cat_id_or_ticker"}))
-            .map_err(SignerError::Other)?;
+        emit_json(&json!({"added": false, "error": "must_provide_cat_id_or_ticker"}))?;
         return Ok(2);
     }
     let dexie_base = resolve_dexie_base_url(network, dexie_base_url, "https://api.dexie.space")?;
@@ -62,8 +61,7 @@ pub async fn run_cats_add(
             .unwrap_or_default()
     };
     if !is_hex_id(&resolved_asset_id) {
-        print_json_value(&json!({"added": false, "error": "cat_id_required_and_must_be_64_hex"}))
-            .map_err(SignerError::Other)?;
+        emit_json(&json!({"added": false, "error": "cat_id_required_and_must_be_64_hex"}))?;
         return Ok(2);
     }
     let resolved_symbol = base_symbol
@@ -78,8 +76,7 @@ pub async fn run_cats_add(
         })
         .unwrap_or_else(|| ref_ticker.to_string());
     if resolved_symbol.trim().is_empty() {
-        print_json_value(&json!({"added": false, "error": "base_symbol_required"}))
-            .map_err(SignerError::Other)?;
+        emit_json(&json!({"added": false, "error": "base_symbol_required"}))?;
         return Ok(2);
     }
     let resolved_name = name
@@ -100,12 +97,11 @@ pub async fn run_cats_add(
             .map(|value| normalize_hex_id(value) == resolved_asset_id)
             .unwrap_or(false)
     }) {
-        print_json_value(&json!({
+        emit_json(&json!({
             "added": false,
             "error": "cat_already_exists",
             "asset_id": resolved_asset_id,
-        }))
-        .map_err(SignerError::Other)?;
+        }))?;
         return Ok(2);
     }
     catalog.retain(|row| {
@@ -132,13 +128,12 @@ pub async fn run_cats_add(
     }
     catalog.push(entry);
     write_cats_catalog(cats_path, &catalog)?;
-    print_json_value(&json!({
+    emit_json(&json!({
         "added": true,
         "asset_id": resolved_asset_id,
         "base_symbol": resolved_symbol,
         "cats_config": cats_path.display().to_string(),
-    }))
-    .map_err(SignerError::Other)?;
+    }))?;
     Ok(0)
 }
 
@@ -155,8 +150,7 @@ pub async fn run_cats_delete(
     let ref_cat_id = cat_id.map(normalize_hex_id).unwrap_or_default();
     let ref_ticker = ticker.unwrap_or("").trim();
     if ref_cat_id.is_empty() && ref_ticker.is_empty() {
-        print_json_value(&json!({"deleted": false, "error": "must_provide_cat_id_or_ticker"}))
-            .map_err(SignerError::Other)?;
+        emit_json(&json!({"deleted": false, "error": "must_provide_cat_id_or_ticker"}))?;
         return Ok(2);
     }
     let catalog = load_cats_catalog(cats_path)?;
@@ -178,8 +172,7 @@ pub async fn run_cats_delete(
         }
     }
     if resolved_asset_id.is_empty() {
-        print_json_value(&json!({"deleted": false, "error": "cat_id_unresolved"}))
-            .map_err(SignerError::Other)?;
+        emit_json(&json!({"deleted": false, "error": "cat_id_unresolved"}))?;
         return Ok(2);
     }
     let exists = catalog.iter().any(|row| {
@@ -189,22 +182,19 @@ pub async fn run_cats_delete(
             .unwrap_or(false)
     });
     if preflight_only {
-        print_json_value(&json!({
+        emit_json(&json!({
             "preflight": true,
             "exists": exists,
             "asset_id": resolved_asset_id,
-        }))
-        .map_err(SignerError::Other)?;
+        }))?;
         return Ok(0);
     }
     if !exists {
-        print_json_value(&json!({"deleted": false, "error": "cat_not_found", "asset_id": resolved_asset_id}))
-            .map_err(SignerError::Other)?;
+        emit_json(&json!({"deleted": false, "error": "cat_not_found", "asset_id": resolved_asset_id}))?;
         return Ok(2);
     }
     if !confirm_delete {
-        print_json_value(&json!({"deleted": false, "error": "confirmation_required", "asset_id": resolved_asset_id}))
-            .map_err(SignerError::Other)?;
+        emit_json(&json!({"deleted": false, "error": "confirmation_required", "asset_id": resolved_asset_id}))?;
         return Ok(2);
     }
     let updated: Vec<JsonValue> = catalog
@@ -217,8 +207,7 @@ pub async fn run_cats_delete(
         })
         .collect();
     write_cats_catalog(cats_path, &updated)?;
-    print_json_value(&json!({"deleted": true, "asset_id": resolved_asset_id}))
-        .map_err(SignerError::Other)?;
+    emit_json(&json!({"deleted": true, "asset_id": resolved_asset_id}))?;
     Ok(0)
 }
 

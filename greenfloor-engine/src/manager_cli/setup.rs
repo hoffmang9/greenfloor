@@ -9,7 +9,7 @@ use crate::config::{load_markets_config_with_overlay, load_program_config, requi
 use crate::error::{SignerError, SignerResult};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
-use super::json::print_json_value;
+use super::json::emit_json;
 use super::paths::expand_home;
 
 const ALLOWED_LOG_LEVELS: &[&str] = &["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"];
@@ -46,13 +46,12 @@ pub fn run_set_log_level(program_path: &Path, log_level: &str) -> SignerResult<i
         .unwrap_or_else(|| "INFO".to_string());
     app_map.insert(Value::from("log_level"), Value::from(level.as_str()));
     write_yaml(program_path, &root)?;
-    print_json_value(&json!({
+    emit_json(&json!({
         "updated": true,
         "program_config": program_path.display().to_string(),
         "previous_log_level": prior_level,
         "log_level": level,
-    }))
-    .map_err(SignerError::Other)?;
+    }))?;
     Ok(0)
 }
 
@@ -138,7 +137,7 @@ pub fn run_bootstrap_home(
         None,
     )?;
 
-    print_json_value(&json!({
+    emit_json(&json!({
         "bootstrapped": true,
         "home_dir": home.display().to_string(),
         "program_config": seeded_program.display().to_string(),
@@ -156,8 +155,7 @@ pub fn run_bootstrap_home(
         "wrote_markets_config": wrote_markets,
         "wrote_cats_config": wrote_cats,
         "wrote_testnet_markets_config": wrote_testnet_markets,
-    }))
-    .map_err(SignerError::Other)?;
+    }))?;
     Ok(0)
 }
 
@@ -201,7 +199,7 @@ pub fn run_doctor(
     resolved_key_ids.sort();
     resolved_key_ids.dedup();
     let ok = problems.is_empty();
-    print_json_value(&json!({
+    emit_json(&json!({
         "ok": ok,
         "program_config": program_path.display().to_string(),
         "markets_config": markets_path.display().to_string(),
@@ -210,8 +208,7 @@ pub fn run_doctor(
         "resolved_key_ids": resolved_key_ids,
         "warnings": warnings,
         "problems": problems,
-    }))
-    .map_err(SignerError::Other)?;
+    }))?;
     Ok(if ok { 0 } else { 2 })
 }
 

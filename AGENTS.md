@@ -45,6 +45,7 @@ Severity tags:
 - `[MUST]` `greenfloor/cli/*` and `greenfloor/daemon/*` Python packages are removed; do not reintroduce Python orchestration entrypoints.
 - `[MUST]` `scripts/` may remain Python; they use `greenfloor.config`, `greenfloor.adapters`, and `greenfloor.hex_utils` only.
 - `[MUST]` PyO3 `greenfloor_engine` is dev/test-only unless a new ADR expands operator scope.
+- `[MUST]` New PyO3 bindings prefer domain module paths (`offer::`, `daemon::`, `cycle::`, …) over flattened crate-root re-exports in `greenfloor-engine/src/lib.rs`.
 - `[MUST]` Offer build/post uses `offer::operator::build_and_post_offer` (`greenfloor-manager build-and-post-offer` and daemon managed post).
 - `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`, `greenfloor/config/io.py`.
 - `[MUST]` `greenfloor-engine` crate root exports domain APIs (`offer`, `daemon`, `coin_ops`, `vault`); operator binaries import CLI modules directly (`manager_cli`, `daemon::cli`).

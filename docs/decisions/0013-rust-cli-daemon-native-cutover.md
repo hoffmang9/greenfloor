@@ -29,6 +29,10 @@ build/post, policy, SQLite, and most adapters.
 3. **PyO3 is dev/test-only.** `greenfloor-engine-pyo3` remains for CI parity and
    integration tests; operators install and run Rust binaries only.
 
+   **Import convention:** new PyO3 bindings should prefer domain module paths
+   (`offer::`, `daemon::`, `cycle::`, …) over flattened crate-root re-exports in
+   `lib.rs`. Operator binaries import `manager_cli` and `daemon::cli` directly.
+
 4. **Python scripts stay.** Standalone utilities under `scripts/` may keep using
    script-only Python libraries (`config`, `adapters`, `hex_utils`) until
    explicitly ported.

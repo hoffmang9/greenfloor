@@ -6,7 +6,7 @@ mod build_and_post;
 mod test_overrides;
 
 pub use signer_denomination::{
-    bootstrap_blocks_offer, signer_bootstrap_phase, BootstrapPhaseResult,
+    bootstrap_blocks_offer, run_signer_denomination_phase, BootstrapPhaseResult,
 };
 pub use build_and_post::{
     build_and_post_offer, format_build_and_post_output, BuildAndPostOfferRequest,
