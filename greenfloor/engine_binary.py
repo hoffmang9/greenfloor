@@ -59,13 +59,13 @@ def _resolve_binary(
             raise GreenfloorEngineBinaryError(f"{env_var} is not an executable file: {path}")
         return path
 
-    discovered = shutil.which(binary_name)
-    if discovered:
-        return Path(discovered)
-
     for candidate in _candidate_paths(binary_name):
         if candidate.is_file():
             return candidate
+
+    discovered = shutil.which(binary_name)
+    if discovered:
+        return Path(discovered)
 
     if build_if_missing:
         _build_engine_binaries()

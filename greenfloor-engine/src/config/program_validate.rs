@@ -1,94 +1,16 @@
-use std::collections::HashSet;
-
 use serde_json::Value;
 
-use crate::error::{SignerError, SignerResult};
-
-fn program_err(message: impl Into<String>) -> SignerError {
-    SignerError::Other(message.into())
-}
-
-fn req_mapping<'a>(
-    value: &'a Value,
-    key: &str,
-) -> SignerResult<&'a serde_json::Map<String, Value>> {
-    match value.get(key) {
-        Some(Value::Object(map)) => Ok(map),
-        Some(_) => Err(program_err(format!("{key} must be a mapping"))),
-        None => Err(program_err(format!("Missing required field: {key}"))),
-    }
-}
-
-fn req_value<'a>(map: &'a serde_json::Map<String, Value>, key: &str) -> SignerResult<&'a Value> {
-    map.get(key)
-        .ok_or_else(|| program_err(format!("Missing required field: {key}")))
-}
-
-fn parse_i64_field(raw: &Value, context: &str) -> SignerResult<i64> {
-    if let Some(value) = raw.as_i64() {
-        return Ok(value);
-    }
-    if let Some(value) = raw.as_u64() {
-        return Ok(value as i64);
-    }
-    if let Some(text) = raw.as_str() {
-        if let Ok(value) = text.parse::<i64>() {
-            return Ok(value);
-        }
-    }
-    Err(program_err(format!("invalid {context}")))
-}
-
-fn validate_keys_registry(raw: &Value) -> SignerResult<()> {
-    let keys_root = raw.get("keys").and_then(Value::as_object);
-    let registry_rows = keys_root
-        .and_then(|keys| keys.get("registry"))
-        .unwrap_or(&Value::Null);
-
-    if registry_rows.is_null() {
-        return Ok(());
-    }
-
-    let rows = registry_rows
-        .as_array()
-        .ok_or_else(|| program_err("keys.registry must be a list"))?;
-
-    let mut seen_key_ids = HashSet::new();
-    for row in rows {
-        let row_map = row
-            .as_object()
-            .ok_or_else(|| program_err("keys.registry entries must be mappings"))?;
-        let key_id = req_value(row_map, "key_id")?
-            .as_str()
-            .ok_or_else(|| program_err("keys.registry entry key_id must be non-empty"))?
-            .trim()
-            .to_string();
-        if key_id.is_empty() {
-            return Err(program_err("keys.registry entry key_id must be non-empty"));
-        }
-        let fingerprint_raw = req_value(row_map, "fingerprint")?;
-        let fingerprint =
-            parse_i64_field(fingerprint_raw, &format!("fingerprint for key_id={key_id}"))
-                .map_err(|_| program_err(format!("invalid fingerprint for key_id={key_id}")))?;
-        if fingerprint <= 0 {
-            return Err(program_err(format!(
-                "fingerprint for key_id={key_id} must be positive"
-            )));
-        }
-        if !seen_key_ids.insert(key_id.clone()) {
-            return Err(program_err(format!(
-                "duplicate key_id in keys.registry: {key_id}"
-            )));
-        }
-    }
-    Ok(())
-}
+use super::keys_registry::parse_signer_key_registry;
+use super::yaml_fields::{
+    config_err, parse_i64_field, req_mapping, req_mapping_from_map, req_value,
+};
+use crate::error::SignerResult;
 
 fn validate_cloud_wallet(raw: &Value) -> SignerResult<()> {
     match raw.get("cloud_wallet") {
         None | Some(Value::Null) => Ok(()),
         Some(Value::Object(map)) if map.is_empty() => Ok(()),
-        Some(_) => Err(program_err(
+        Some(_) => Err(config_err(
             "cloud_wallet config is removed; use signer: and vault: blocks instead \
              (see config/program.yaml)",
         )),
@@ -107,7 +29,7 @@ fn validate_offer_publish_provider(raw: &Value) -> SignerResult<()> {
         .trim()
         .to_ascii_lowercase();
     if provider != "dexie" && provider != "splash" {
-        return Err(program_err(
+        return Err(config_err(
             "venues.offer_publish.provider must be one of: dexie, splash",
         ));
     }
@@ -120,19 +42,17 @@ fn validate_coin_ops_minimum_fee(raw: &Value) -> SignerResult<()> {
         .and_then(|section| section.get("minimum_fee_mojos"))
         .map(|raw| parse_i64_field(raw, "coin_ops.minimum_fee_mojos"))
         .transpose()
-        .map_err(|_| program_err("coin_ops.minimum_fee_mojos must be an integer"))?
+        .map_err(|_| config_err("coin_ops.minimum_fee_mojos must be an integer"))?
         .unwrap_or(10_000_000);
     if minimum_fee_mojos < 0 {
-        return Err(program_err("coin_ops.minimum_fee_mojos must be >= 0"));
+        return Err(config_err("coin_ops.minimum_fee_mojos must be >= 0"));
     }
     Ok(())
 }
 
 fn validate_tx_block_trigger(raw: &Value) -> SignerResult<()> {
     let chain_signals = req_mapping(raw, "chain_signals")?;
-    let tx_trigger = req_value(chain_signals, "tx_block_trigger")?
-        .as_object()
-        .ok_or_else(|| program_err("chain_signals.tx_block_trigger must be a mapping"))?;
+    let tx_trigger = req_mapping_from_map(chain_signals, "tx_block_trigger")?;
 
     let mode = tx_trigger
         .get("mode")
@@ -141,7 +61,7 @@ fn validate_tx_block_trigger(raw: &Value) -> SignerResult<()> {
         .trim()
         .to_ascii_lowercase();
     if mode != "websocket" {
-        return Err(program_err(
+        return Err(config_err(
             "chain_signals.tx_block_trigger.mode must be websocket",
         ));
     }
@@ -156,13 +76,13 @@ fn validate_tx_block_trigger(raw: &Value) -> SignerResult<()> {
         })
         .transpose()
         .map_err(|_| {
-            program_err(
+            config_err(
                 "chain_signals.tx_block_trigger.websocket_reconnect_interval_seconds must be an integer",
             )
         })?
         .unwrap_or(30);
     if reconnect_interval < 1 {
-        return Err(program_err(
+        return Err(config_err(
             "chain_signals.tx_block_trigger.websocket_reconnect_interval_seconds must be >= 1",
         ));
     }
@@ -177,13 +97,13 @@ fn validate_tx_block_trigger(raw: &Value) -> SignerResult<()> {
         })
         .transpose()
         .map_err(|_| {
-            program_err(
+            config_err(
                 "chain_signals.tx_block_trigger.fallback_poll_interval_seconds must be an integer",
             )
         })?
         .unwrap_or(60);
     if fallback_poll < 0 {
-        return Err(program_err(
+        return Err(config_err(
             "chain_signals.tx_block_trigger.fallback_poll_interval_seconds must be >= 0",
         ));
     }
@@ -195,7 +115,7 @@ fn validate_notifications_pushover(raw: &Value) -> SignerResult<()> {
     req_value(notifications, "low_inventory_alerts")?;
     let providers = req_value(notifications, "providers")?
         .as_array()
-        .ok_or_else(|| program_err("notifications.providers must be a list"))?;
+        .ok_or_else(|| config_err("notifications.providers must be a list"))?;
 
     let pushover = providers.iter().find(|provider| {
         provider
@@ -204,7 +124,7 @@ fn validate_notifications_pushover(raw: &Value) -> SignerResult<()> {
             .is_some_and(|value| value.trim() == "pushover")
     });
     if pushover.is_none() {
-        return Err(program_err(
+        return Err(config_err(
             "Missing notifications.providers entry with type=pushover",
         ));
     }
@@ -218,7 +138,7 @@ pub fn validate_program_config(raw: &Value) -> SignerResult<()> {
     req_mapping(raw, "dev")?;
     validate_notifications_pushover(raw)?;
     validate_cloud_wallet(raw)?;
-    validate_keys_registry(raw)?;
+    parse_signer_key_registry(raw).map(|_| ())?;
     validate_offer_publish_provider(raw)?;
     validate_coin_ops_minimum_fee(raw)?;
     validate_tx_block_trigger(raw)?;

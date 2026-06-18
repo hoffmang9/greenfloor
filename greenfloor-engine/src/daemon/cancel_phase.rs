@@ -1,6 +1,5 @@
 use serde_json::{json, Value};
 
-use crate::adapters::DexieClient;
 use crate::config::{cancel_policy_stable_vs_unstable, MarketConfig};
 use crate::cycle::{
     collect_open_offer_ids_for_cancel, evaluate_cancel_policy_decision, MarketCycleResultState,
@@ -11,29 +10,19 @@ use crate::storage::SqliteStore;
 use crate::offer::dexie_payload::dexie_offer_status;
 use crate::offer::lifecycle::{cancel_offers_on_dexie, CancelOfferTarget};
 
-pub struct MarketCancelPhaseParams<'a> {
-    pub store: &'a SqliteStore,
-    pub dexie: &'a DexieClient,
-    pub market: &'a MarketConfig,
-    pub offers: &'a [Value],
-    pub runtime_dry_run: bool,
-    pub current_xch_price_usd: Option<f64>,
-    pub previous_xch_price_usd: Option<f64>,
-}
+use super::market_context::MarketCycleContext;
 
 pub async fn run_market_cancel_phase(
-    params: MarketCancelPhaseParams<'_>,
+    store: &SqliteStore,
+    ctx: &MarketCycleContext<'_>,
+    market: &MarketConfig,
+    offers: &[Value],
     state: &mut MarketCycleResultState,
 ) -> SignerResult<Value> {
-    let MarketCancelPhaseParams {
-        store,
-        dexie,
-        market,
-        offers,
-        runtime_dry_run,
-        current_xch_price_usd,
-        previous_xch_price_usd,
-    } = params;
+    let dexie = &ctx.resources.dexie;
+    let runtime_dry_run = ctx.dispatch.runtime_dry_run;
+    let current_xch_price_usd = ctx.dispatch.xch_price_usd;
+    let previous_xch_price_usd = ctx.plan.previous_xch_price_usd;
     let market_id = market.market_id.as_str();
     let env_threshold = std::env::var("GREENFLOOR_UNSTABLE_CANCEL_MOVE_BPS")
         .ok()

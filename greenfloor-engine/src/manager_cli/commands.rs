@@ -31,6 +31,7 @@ pub struct ManagerCli {
 #[derive(Debug, Subcommand)]
 pub enum ManagerCommands {
     ConfigValidate,
+    ProgramConfigValidate,
     KeysOnboard {
         #[arg(long, default_value = "")]
         chia_keys_dir: String,

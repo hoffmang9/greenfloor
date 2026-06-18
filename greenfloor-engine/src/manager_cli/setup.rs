@@ -27,6 +27,16 @@ pub struct BootstrapHomeParams<'a> {
     pub force: bool,
 }
 
+pub fn run_program_config_validate(ctx: &ManagerContext) -> SignerResult<i32> {
+    let program_path = &ctx.program_config;
+    let _program = load_program_config(program_path)?;
+    ctx.emit_json(&json!({
+        "ok": true,
+        "program_config": program_path.display().to_string(),
+    }))?;
+    Ok(0)
+}
+
 pub fn run_config_validate(ctx: &ManagerContext) -> SignerResult<i32> {
     let program_path = &ctx.program_config;
     let markets_path = &ctx.markets_config;

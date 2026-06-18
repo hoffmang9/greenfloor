@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from greenfloor.config.io import ensure_operator_config_valid
+from greenfloor.config.io import ensure_program_config_valid
 from greenfloor.config.launcher import launcher_id_from_program_config
 from greenfloor.hex_utils import is_hex_id, normalize_hex_id
 from scripts.vault_coinset_scan_checkpoint import (
@@ -263,9 +263,9 @@ def main() -> int:
 
     program_config = str(args.program_config).strip()
     if program_config:
-        ensure_operator_config_valid(program_config=Path(program_config).expanduser())
+        ensure_program_config_valid(program_config=Path(program_config).expanduser())
     else:
-        ensure_operator_config_valid()
+        ensure_program_config_valid()
 
     if bool(args.auto_increment):
         if bool(args.no_resume_checkpoint):

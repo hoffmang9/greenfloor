@@ -12,10 +12,7 @@ pub use api::{
     get_fee_estimate, post_coinset_rpc, push_tx_hex,
 };
 
-pub(crate) use coin_select::{
-    finalize_selected_cats, list_and_select_cats, select_xch_for_amount, CatListSelectRequest,
-    CoinSelectionMode, XchSelectRequest,
-};
+pub(crate) use coin_select::finalize_selected_cats;
 
 pub use asset::is_canonical_xch_asset;
 pub use asset::is_xch_like_asset;
@@ -81,24 +78,12 @@ pub(crate) async fn select_cats_for_spend(
     explicit_coin_ids: &[Bytes32],
     target_amount: u64,
 ) -> SignerResult<SelectedCats> {
-    let mode = CoinSelectionMode::from_explicit_ids(explicit_coin_ids);
-    let selected = list_and_select_cats(CatListSelectRequest {
-        client,
-        receive_address,
-        asset_id,
-        explicit_coin_ids,
-        target_amount,
-        mode,
-        empty_list_err: SignerError::NoUnspentCatCoins,
-        insufficient_err: SignerError::InsufficientCatCoins,
-    })
-    .await?;
-    let offered_total: u64 = selected.iter().map(|cat| cat.coin.amount).sum();
-    Ok(SelectedCats {
-        selected,
-        offered_total,
-        change_amount: offered_total.saturating_sub(target_amount),
-    })
+    let cats = if explicit_coin_ids.is_empty() {
+        list_unspent_cats(client, receive_address, asset_id).await?
+    } else {
+        list_unspent_cats_by_ids(client, explicit_coin_ids).await?
+    };
+    finalize_selected_cats(cats, explicit_coin_ids, target_amount)
 }
 
 pub async fn list_unspent_xch(

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -16,9 +15,7 @@ def rust_cycle_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
     install_rust_cycle_test_env(monkeypatch)
 
 
-def test_daemon_once_processes_multiple_markets(
-    rust_cycle_test_env: None, tmp_path: Path
-) -> None:
+def test_daemon_once_processes_multiple_markets(rust_cycle_test_env: None, tmp_path: Path) -> None:
     home = tmp_path / "home"
     state_dir = home / "state"
     state_dir.mkdir(parents=True, exist_ok=True)

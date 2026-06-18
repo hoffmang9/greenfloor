@@ -566,6 +566,31 @@ mod tests {
     }
 
     #[test]
+    fn rejects_testnet_receive_address_in_base_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("markets.yaml");
+        std::fs::write(
+            &path,
+            r#"markets:
+  - id: bad_base
+    enabled: true
+    base_asset: "a1"
+    base_symbol: "A1"
+    quote_asset: "xch"
+    quote_asset_type: "unstable"
+    signer_key_id: "key-main-1"
+    receive_address: "txch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"
+    mode: "sell_only"
+    inventory:
+      low_watermark_base_units: 100
+"#,
+        )
+        .expect("write markets");
+        let err = load_markets_config_with_overlay(&path, None).expect_err("txch in base");
+        assert!(err.to_string().contains("testnet receive_address"));
+    }
+
+    #[test]
     fn resolves_market_by_id() {
         let markets = sample_markets();
         let market =

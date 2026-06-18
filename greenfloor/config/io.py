@@ -106,31 +106,31 @@ class ScriptProgramFields:
         )
 
 
-def program_app_network(raw: dict[str, Any]) -> str:
-    return ScriptProgramFields.from_raw(raw).network
-
-
-def program_home_dir(raw: dict[str, Any]) -> str:
-    return ScriptProgramFields.from_raw(raw).home_dir
-
-
-def program_signer_kms_key_id(raw: dict[str, Any]) -> str:
-    return ScriptProgramFields.from_raw(raw).signer_kms_key_id
-
-
-def program_signer_kms_region(raw: dict[str, Any]) -> str:
-    return ScriptProgramFields.from_raw(raw).signer_kms_region
-
-
-def program_signer_key_registry(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    return ScriptProgramFields.from_raw(raw).signer_key_registry
-
-
 def enabled_market_rows(raw: dict[str, Any]) -> list[dict[str, Any]]:
     markets = raw.get("markets")
     if not isinstance(markets, list):
         return []
     return [row for row in markets if isinstance(row, dict) and bool(row.get("enabled"))]
+
+
+def run_program_config_validate(*, program_config: Path) -> int:
+    """Validate program.yaml only via native ``greenfloor-manager program-config-validate``."""
+    argv = [
+        str(resolve_greenfloor_manager_binary()),
+        "--program-config",
+        str(program_config),
+        "program-config-validate",
+    ]
+    completed = subprocess.run(argv, check=False)
+    return int(completed.returncode)
+
+
+def ensure_program_config_valid(*, program_config: Path | None = None) -> None:
+    """Run native program-only validation using the default path when omitted."""
+    program_path = (program_config or _DEFAULT_PROGRAM_CONFIG).expanduser()
+    code = run_program_config_validate(program_config=program_path)
+    if code != 0:
+        raise SystemExit(code)
 
 
 def run_config_validate(

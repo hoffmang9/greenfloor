@@ -9,7 +9,7 @@ use crate::storage::SqliteStore;
 use crate::cycle::MarketCycleResultState;
 
 use super::market_context::MarketCycleContext;
-use super::offer_dispatch::{execute_strategy_actions, ExecuteStrategyActionsParams};
+use super::offer_dispatch::execute_strategy_actions;
 use super::strategy_support::evaluate_strategy_actions_for_market;
 
 pub struct StrategyPhaseResult {
@@ -44,18 +44,7 @@ pub async fn run_strategy_phase(
 
     let mut newly_executed_sell_counts = BTreeMap::new();
     if !strategy_actions.is_empty() && !ctx.dispatch.test_controls.skip_strategy_execution {
-        match execute_strategy_actions(ExecuteStrategyActionsParams {
-            store,
-            db_path: &ctx.dispatch.db_path,
-            program: &ctx.resources.program,
-            paths: &ctx.resources.paths,
-            market,
-            network: &ctx.resources.network,
-            actions: &strategy_actions,
-            signer_offer_path_configured: ctx.resources.signer_offer_path_configured,
-        })
-        .await
-        {
+        match execute_strategy_actions(store, ctx, market, &strategy_actions).await {
             Ok(output) => {
                 state.merge_strategy_execution(0, output.executed_count as i64);
                 newly_executed_sell_counts = output.newly_executed_sell_counts;

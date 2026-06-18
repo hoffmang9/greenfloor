@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde_json::{json, Value};
 
@@ -7,7 +6,7 @@ use crate::coin_ops::{
     coin_op_target_amount_allowed, effective_sell_bucket_counts_for_coin_ops,
     partition_plans_by_budget, plan_coin_ops, projected_coin_ops_fee_mojos, BucketSpec, CoinOpPlan,
 };
-use crate::config::{ManagerProgramConfig, MarketConfig};
+use crate::config::MarketConfig;
 use crate::error::SignerResult;
 use crate::hex::default_mojo_multiplier_for_asset;
 use crate::storage::SqliteStore;
@@ -16,29 +15,19 @@ use super::coin_ops_execution::{
     execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
     CoinOpExecItem, CoinOpExecutionResult,
 };
+use super::market_context::MarketCycleContext;
 
-pub struct CoinOpsPhaseParams<'a> {
-    pub store: &'a SqliteStore,
-    pub market: &'a MarketConfig,
-    pub program: &'a ManagerProgramConfig,
-    pub program_path: &'a Path,
-    pub offers: &'a [Value],
-    pub wallet_bucket_counts: &'a BTreeMap<i64, i64>,
-    pub active_counts: &'a BTreeMap<i64, i64>,
-    pub newly_executed_counts: &'a BTreeMap<i64, i64>,
-}
-
-pub async fn run_coin_ops_phase(params: CoinOpsPhaseParams<'_>) -> SignerResult<()> {
-    let CoinOpsPhaseParams {
-        store,
-        market,
-        program,
-        program_path,
-        offers,
-        wallet_bucket_counts,
-        active_counts,
-        newly_executed_counts,
-    } = params;
+pub async fn run_coin_ops_phase(
+    store: &SqliteStore,
+    ctx: &MarketCycleContext<'_>,
+    market: &MarketConfig,
+    offers: &[Value],
+    wallet_bucket_counts: &BTreeMap<i64, i64>,
+    active_counts: &BTreeMap<i64, i64>,
+    newly_executed_counts: &BTreeMap<i64, i64>,
+) -> SignerResult<()> {
+    let program = &ctx.resources.program;
+    let program_path = ctx.resources.program_path();
     let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
     if sell_ladder.is_empty() {
         store.add_audit_event(

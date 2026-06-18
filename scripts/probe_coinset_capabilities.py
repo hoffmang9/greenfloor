@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from greenfloor.adapters.coinset import CoinsetAdapter
-from greenfloor.config.io import ensure_operator_config_valid
+from greenfloor.config.io import ensure_program_config_valid
 from greenfloor.config.launcher import launcher_id_from_program_config
 from greenfloor.hex_utils import normalize_hex_id
 
@@ -96,9 +96,9 @@ def main() -> int:
 
     program_config = str(args.program_config).strip()
     if program_config:
-        ensure_operator_config_valid(program_config=Path(program_config).expanduser())
+        ensure_program_config_valid(program_config=Path(program_config).expanduser())
     else:
-        ensure_operator_config_valid()
+        ensure_program_config_valid()
 
     launcher_id = normalize_hex_id(args.launcher_id)
     launcher_source = "arg"

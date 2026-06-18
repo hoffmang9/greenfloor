@@ -12,16 +12,15 @@ mod test_hooks;
 mod tests;
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde_json::json;
 
-use crate::config::{ManagerProgramConfig, MarketConfig};
+use crate::config::MarketConfig;
 use crate::cycle::{expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction};
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
-use crate::daemon::cycle_paths::DaemonCyclePaths;
+use super::market_context::MarketCycleContext;
 
 #[derive(Debug, Clone)]
 pub struct OfferDispatchOutput {
@@ -68,31 +67,13 @@ pub(crate) async fn record_parallel_fallback_audit(
     )
 }
 
-pub struct ExecuteStrategyActionsParams<'a> {
-    pub store: &'a SqliteStore,
-    pub db_path: &'a Path,
-    pub program: &'a ManagerProgramConfig,
-    pub paths: &'a DaemonCyclePaths,
-    pub market: &'a MarketConfig,
-    pub network: &'a str,
-    pub actions: &'a [PlannedAction],
-    pub signer_offer_path_configured: bool,
-}
-
 pub async fn execute_strategy_actions(
-    params: ExecuteStrategyActionsParams<'_>,
+    store: &SqliteStore,
+    ctx: &MarketCycleContext<'_>,
+    market: &MarketConfig,
+    actions: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
-    let ExecuteStrategyActionsParams {
-        store,
-        db_path,
-        program,
-        paths,
-        market,
-        network,
-        actions,
-        signer_offer_path_configured,
-    } = params;
-    if !signer_offer_path_configured {
+    if !ctx.resources.signer_offer_path_configured {
         store.add_audit_event(
             "strategy_exec_skipped_no_signer",
             &json!({"market_id": market.market_id, "planned_count": actions.len()}),
@@ -112,10 +93,17 @@ pub async fn execute_strategy_actions(
         });
     }
 
+    let program = &ctx.resources.program;
     if parallel_managed_dispatch_enabled(program) {
         match classify_parallel_dispatch(
             parallel::execute_actions_parallel(
-                store, db_path, program, paths, market, network, &expanded,
+                store,
+                &ctx.dispatch.db_path,
+                program,
+                &ctx.resources.paths,
+                market,
+                &ctx.resources.network,
+                &expanded,
             )
             .await,
         ) {
@@ -127,5 +115,5 @@ pub async fn execute_strategy_actions(
         }
     }
 
-    sequential::execute_actions_sequential(program, paths, market, &expanded).await
+    sequential::execute_actions_sequential(program, &ctx.resources.paths, market, &expanded).await
 }
