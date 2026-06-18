@@ -1,8 +1,8 @@
 use crate::coinset::get_conservative_fee_estimate;
 use crate::config::{
-    action_side_from_pricing, load_markets_config_with_overlay, load_program_config,
-    load_signer_config, require_signer_offer_path, resolve_market_for_build,
-    resolve_offer_publish_settings, ManagerProgramConfig, MarketConfig, SignerConfig,
+    action_side_from_pricing, load_markets_config_with_overlay, load_program_bundle,
+    require_signer_offer_path, resolve_market_for_build, resolve_offer_publish_settings,
+    ManagerProgramConfig, MarketConfig, SignerConfig,
 };
 use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
@@ -34,7 +34,8 @@ pub(crate) struct ResolvedBuildAndPostContext {
 pub(super) async fn resolve_build_and_post_context(
     request: &BuildAndPostOfferRequest,
 ) -> SignerResult<ResolvedBuildAndPostContext> {
-    let program = load_program_config(&request.program_path)?;
+    let bundle = load_program_bundle(&request.program_path)?;
+    let program = bundle.program;
     require_signer_offer_path(&program)?;
     initialize_manager_file_logging(&program.home_dir, &program.app_log_level)?;
     warn_if_log_level_auto_healed(program.app_log_level_was_missing, &request.program_path);
@@ -55,7 +56,7 @@ pub(super) async fn resolve_build_and_post_context(
         request.dexie_base_url.as_deref(),
         request.splash_base_url.as_deref(),
     )?;
-    let signer_config = load_signer_config(&request.program_path)?;
+    let signer_config = bundle.signer;
     let (resolved_base_asset_id, resolved_quote_asset_id) =
         resolve_offer_assets_for_action(&signer_config, &market.base_asset, &market.quote_asset)
             .await?;

@@ -32,37 +32,6 @@ def is_testnet(network: str) -> bool:
     return network.strip().lower() in frozenset({"testnet", "testnet11"})
 
 
-def load_markets_yaml(path: Path) -> dict[str, Any]:
-    return load_markets_yaml_with_optional_overlay(path=path, overlay_path=None)
-
-
-def load_markets_yaml_with_optional_overlay(
-    *, path: Path, overlay_path: Path | None
-) -> dict[str, Any]:
-    raw = load_yaml(path)
-    if overlay_path is not None:
-        resolved_overlay = overlay_path.expanduser()
-        if resolved_overlay.exists():
-            overlay_raw = load_yaml(resolved_overlay)
-            base_markets = raw.get("markets")
-            overlay_markets = overlay_raw.get("markets")
-            if not isinstance(base_markets, list):
-                raise ValueError(f"markets must be a list in base config: {path}")
-            if not isinstance(overlay_markets, list):
-                raise ValueError(f"markets must be a list in overlay config: {resolved_overlay}")
-            merged = dict(raw)
-            merged["markets"] = [*base_markets, *overlay_markets]
-            raw = merged
-    return raw
-
-
-def enabled_market_rows(raw: dict[str, Any]) -> list[dict[str, Any]]:
-    markets = raw.get("markets")
-    if not isinstance(markets, list):
-        return []
-    return [row for row in markets if isinstance(row, dict) and bool(row.get("enabled"))]
-
-
 def materialize_minimal_program_template(
     path: Path,
     *,
@@ -72,6 +41,10 @@ def materialize_minimal_program_template(
     text = _MINIMAL_PROGRAM_TEMPLATE.read_text(encoding="utf-8")
     text = text.replace("__HOME_DIR__", str(home_dir))
     text = text.replace("__DEXIE_API_BASE__", dexie_api_base)
+    text = text.replace("__LOG_LEVEL__", "INFO")
+    text = text.replace("__DRY_RUN__", "false")
+    text = text.replace("__ALERTS_ENABLED__", "false")
+    text = text.replace("__PUSHOVER_ENABLED__", "false")
     path.write_text(text, encoding="utf-8")
 
 
@@ -128,6 +101,36 @@ def load_program_fields(*, program_config: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise RuntimeError("program-fields returned non-object JSON")
     return payload
+
+
+def load_markets_fields(
+    *,
+    markets_config: Path,
+    testnet_markets_config: Path | None = None,
+) -> dict[str, Any]:
+    """Load script-facing enabled markets via native ``greenfloor-manager markets-fields``."""
+    argv = [
+        "--markets-config",
+        str(markets_config),
+    ]
+    if testnet_markets_config is not None:
+        argv.extend(["--testnet-markets-config", str(testnet_markets_config)])
+    argv.extend(["--json", "markets-fields"])
+    code, stdout, stderr = run_manager(argv)
+    if code != 0:
+        detail = stderr.strip() or stdout.strip() or f"exit {code}"
+        raise RuntimeError(f"markets-fields failed: {detail}")
+    payload = parse_json_output(stdout)
+    if not isinstance(payload, dict):
+        raise RuntimeError("markets-fields returned non-object JSON")
+    return payload
+
+
+def enabled_market_rows(fields: dict[str, Any]) -> list[dict[str, Any]]:
+    markets = fields.get("enabled_markets")
+    if not isinstance(markets, list):
+        return []
+    return [row for row in markets if isinstance(row, dict)]
 
 
 def ensure_program_config_valid(*, program_config: Path | None = None) -> None:

@@ -7,9 +7,9 @@ use super::{
     is_parallel_dispatch_transient_signer_error, record_parallel_fallback_audit,
     OfferDispatchOutput, ParallelDispatchDecision,
 };
-use crate::config::{ManagerProgramConfig, MarketConfig};
+use crate::config::{load_program_bundle, ManagerProgramConfig, MarketConfig};
 use crate::cycle::{parallel_managed_dispatch_enabled, PlannedAction};
-use crate::daemon::market_context::test_cycle_context;
+use crate::daemon::test_support::test_cycle_context;
 use crate::error::SignerError;
 use crate::storage::SqliteStore;
 use crate::test_support::minimal_program::{
@@ -36,6 +36,24 @@ markets:
 "#,
     )
     .expect("write markets");
+}
+
+fn test_context_from_program_file(
+    dir: &tempfile::TempDir,
+    db_path: &std::path::Path,
+    program_path: &std::path::Path,
+    mut program: ManagerProgramConfig,
+    with_signer: bool,
+) -> crate::daemon::test_support::TestCycleContextBundle {
+    let signer = if with_signer {
+        let bundle = load_program_bundle(program_path).expect("program bundle");
+        program.signer_kms_key_id = bundle.program.signer_kms_key_id;
+        program.vault_launcher_id = bundle.program.vault_launcher_id;
+        Some(bundle.signer)
+    } else {
+        None
+    };
+    test_cycle_context(dir, db_path, program, signer)
 }
 
 fn sample_program(parallelism_enabled: bool, dry_run: bool) -> ManagerProgramConfig {
@@ -190,8 +208,13 @@ async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() 
     );
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
-    let program = sample_program(false, false);
-    let test_ctx = test_cycle_context(&dir, &db_path, program, false);
+    let test_ctx = test_context_from_program_file(
+        &dir,
+        &db_path,
+        &program_path,
+        sample_program(false, false),
+        false,
+    );
     let market = MarketConfig {
         market_id: "m1".to_string(),
         enabled: true,
@@ -281,9 +304,13 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
     );
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
-    let mut program = sample_program(true, false);
-    program.runtime_offer_parallelism_enabled = true;
-    let test_ctx = test_cycle_context(&dir, &db_path, program, true);
+    let test_ctx = test_context_from_program_file(
+        &dir,
+        &db_path,
+        &program_path,
+        sample_program(true, false),
+        true,
+    );
 
     set_parallel_dispatch_override(Some("transient"));
     set_managed_post_override(Some("success"));
@@ -317,9 +344,13 @@ async fn execute_strategy_actions_parallel_fatal_propagates() {
     );
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
-    let mut program = sample_program(true, false);
-    program.runtime_offer_parallelism_enabled = true;
-    let test_ctx = test_cycle_context(&dir, &db_path, program, true);
+    let test_ctx = test_context_from_program_file(
+        &dir,
+        &db_path,
+        &program_path,
+        sample_program(true, false),
+        true,
+    );
 
     set_parallel_dispatch_override(Some("fatal"));
     let err = execute_strategy_actions(
@@ -352,8 +383,13 @@ async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
     );
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
-    let program = sample_program(false, false);
-    let test_ctx = test_cycle_context(&dir, &db_path, program, true);
+    let test_ctx = test_context_from_program_file(
+        &dir,
+        &db_path,
+        &program_path,
+        sample_program(false, false),
+        true,
+    );
 
     set_managed_post_override(Some("success"));
     let output = execute_strategy_actions(

@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::adapters::DexieClient;
 use crate::config::{
-    load_markets_config_with_overlay, load_program_config, ManagerProgramConfig, MarketConfig,
-    MarketsConfig,
+    load_markets_config_with_overlay, parse_program_config, parse_signer_config, read_program_yaml,
+    ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
 };
 use crate::error::SignerResult;
 
@@ -17,17 +17,21 @@ use super::watchlist::cache::CoinWatchlistCache;
 #[derive(Debug, Clone)]
 pub struct DaemonCycleResources {
     pub program: ManagerProgramConfig,
+    pub signer: Option<SignerConfig>,
     pub markets: MarketsConfig,
     pub network: String,
     pub dexie: DexieClient,
     pub paths: DaemonCyclePaths,
     pub coin_watchlist: Arc<CoinWatchlistCache>,
-    pub signer_offer_path_configured: bool,
 }
 
 impl DaemonCycleResources {
     pub fn program_path(&self) -> &std::path::Path {
         &self.paths.program_path
+    }
+
+    pub fn signer_offer_path_configured(&self) -> bool {
+        self.program.signer_offer_path_configured()
     }
 
     pub fn selected_markets(&self, selected_market_ids: &[String]) -> Vec<MarketConfig> {
@@ -66,7 +70,13 @@ pub struct MarketCycleContext<'a> {
 }
 
 pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<DaemonCycleResources> {
-    let program = load_program_config(&request.program_path)?;
+    let raw = read_program_yaml(&request.program_path)?;
+    let program = parse_program_config(&raw)?;
+    let signer = if program.signer_offer_path_configured() {
+        Some(parse_signer_config(&raw)?)
+    } else {
+        None
+    };
     let markets = load_markets_config_with_overlay(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
@@ -74,10 +84,10 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
     super::disabled_markets::log_disabled_markets_startup_once(&markets);
     let network = program.network.clone();
     let dexie = DexieClient::new(program.dexie_api_base.clone());
-    let signer_offer_path_configured = program.signer_offer_path_configured();
     let coin_watchlist = request.coin_watchlist.clone();
     Ok(DaemonCycleResources {
         program,
+        signer,
         markets,
         network,
         dexie,
@@ -87,90 +97,7 @@ pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<Daem
             request.testnet_markets_path.clone(),
         ),
         coin_watchlist,
-        signer_offer_path_configured,
     })
-}
-
-#[cfg(test)]
-pub struct TestCycleContextBundle {
-    pub resources: DaemonCycleResources,
-    pub dispatch: MarketDispatchContext,
-    pub plan: CyclePlan,
-    pub reconcile: ReconcileMarketCycleResult,
-}
-
-#[cfg(test)]
-impl TestCycleContextBundle {
-    pub fn cycle_context(&self) -> MarketCycleContext<'_> {
-        MarketCycleContext {
-            resources: &self.resources,
-            dispatch: &self.dispatch,
-            plan: &self.plan,
-            reconcile: &self.reconcile,
-        }
-    }
-}
-
-#[cfg(test)]
-pub fn test_cycle_context(
-    dir: &tempfile::TempDir,
-    db_path: &std::path::Path,
-    program: ManagerProgramConfig,
-    signer_offer_path_configured: bool,
-) -> TestCycleContextBundle {
-    use std::collections::HashMap;
-
-    use super::run_once::{DaemonCycleTestControls, DaemonDispatchState};
-    use crate::cycle::StaleSweepProgress;
-
-    TestCycleContextBundle {
-        resources: DaemonCycleResources {
-            program,
-            markets: MarketsConfig { markets: vec![] },
-            network: "mainnet".to_string(),
-            dexie: DexieClient::new("https://api.dexie.space"),
-            paths: DaemonCyclePaths::new(
-                dir.path().join("program.yaml"),
-                dir.path().join("markets.yaml"),
-                None,
-            ),
-            coin_watchlist: CoinWatchlistCache::new(),
-            signer_offer_path_configured,
-        },
-        dispatch: MarketDispatchContext {
-            db_path: db_path.to_path_buf(),
-            allowed_key_ids: Vec::new(),
-            xch_price_usd: None,
-            previous_xch_price_usd: None,
-            runtime_dry_run: false,
-            test_controls: DaemonCycleTestControls::default(),
-        },
-        plan: CyclePlan {
-            enabled_market_ids: vec!["m1".to_string()],
-            selected_market_ids: vec!["m1".to_string()],
-            consumed_immediate_requeues: Vec::new(),
-            dispatch_state: DaemonDispatchState::default(),
-            stale_open_sweep: StaleSweepProgress {
-                checked_offer_count: 0,
-                requeue_market_ids: Vec::new(),
-                hits: Vec::new(),
-                truncated: false,
-            },
-            configured_market_slot_count: 1,
-            runtime_dry_run: false,
-            db_path: db_path.to_path_buf(),
-            previous_xch_price_usd: None,
-            dexie_base_url: "https://api.dexie.space".to_string(),
-            splash_base_url: "http://example.test".to_string(),
-            test_controls: DaemonCycleTestControls::default(),
-        },
-        reconcile: ReconcileMarketCycleResult {
-            offers: Vec::new(),
-            dexie_size_by_offer_id: HashMap::new(),
-            dexie_fetch_error: None,
-            metrics: Default::default(),
-        },
-    }
 }
 
 #[cfg(test)]
@@ -205,6 +132,7 @@ mod tests {
                 tx_block_fallback_poll_interval_seconds: 1,
                 ..Default::default()
             },
+            signer: None,
             markets: MarketsConfig { markets },
             network: "mainnet".to_string(),
             dexie: DexieClient::new("https://api.dexie.space"),
@@ -214,7 +142,6 @@ mod tests {
                 None,
             ),
             coin_watchlist: CoinWatchlistCache::new(),
-            signer_offer_path_configured: false,
         }
     }
 

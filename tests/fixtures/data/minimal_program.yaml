@@ -1,10 +1,10 @@
 app:
   network: "mainnet"
   home_dir: "__HOME_DIR__"
-  log_level: INFO
+  log_level: __LOG_LEVEL__
 runtime:
   loop_interval_seconds: 30
-  dry_run: false
+  dry_run: __DRY_RUN__
 chain_signals:
   tx_block_trigger:
     mode: "websocket"
@@ -16,14 +16,14 @@ dev:
     min_version: "3.11"
 notifications:
   low_inventory_alerts:
-    enabled: false
+    enabled: __ALERTS_ENABLED__
     threshold_mode: "absolute_base_units"
     default_threshold_base_units: 0
     dedup_cooldown_seconds: 60
     clear_hysteresis_percent: 10
   providers:
     - type: pushover
-      enabled: false
+      enabled: __PUSHOVER_ENABLED__
       user_key_env: "PUSHOVER_USER_KEY"
       app_token_env: "PUSHOVER_APP_TOKEN"
       recipient_key_env: "PUSHOVER_RECIPIENT_KEY"

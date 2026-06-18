@@ -22,7 +22,7 @@ from typing import Any
 from greenfloor.config.io import (
     default_cats_config_path,
     enabled_market_rows,
-    load_markets_yaml_with_optional_overlay,
+    load_markets_fields,
     load_program_fields,
     load_yaml,
     run_config_validate,
@@ -73,15 +73,15 @@ def _build_enabled_cat_jobs(
     cats_path: Path,
     only_cat_asset_id: str | None,
 ) -> list[CatDustJob]:
-    raw = load_markets_yaml_with_optional_overlay(
-        path=markets_config_path.expanduser(),
-        overlay_path=testnet_markets_path.expanduser() if testnet_markets_path else None,
+    fields = load_markets_fields(
+        markets_config=markets_config_path.expanduser(),
+        testnet_markets_config=testnet_markets_path.expanduser() if testnet_markets_path else None,
     )
     symbol_map = _load_symbol_to_cat_asset_id(cats_path.expanduser())
     filter_id = normalize_hex_id(only_cat_asset_id) if only_cat_asset_id else None
 
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
-    for m in enabled_market_rows(raw):
+    for m in enabled_market_rows(fields):
         aid = _resolve_market_base_cat_asset_id(
             base_asset=str(m.get("base_asset", "")),
             symbol_map=symbol_map,

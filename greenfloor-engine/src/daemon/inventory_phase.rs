@@ -3,7 +3,6 @@ use std::collections::BTreeMap;
 use serde_json::json;
 
 use crate::coin_ops::compute_bucket_counts_from_coins;
-use crate::config::load_signer_config;
 use crate::config::MarketConfig;
 use crate::cycle::MarketCycleResultState;
 use crate::error::SignerResult;
@@ -57,7 +56,7 @@ pub async fn run_inventory_phase(
         return Ok(BTreeMap::new());
     }
 
-    if !resources.signer_offer_path_configured {
+    if !resources.signer_offer_path_configured() {
         store.add_audit_event(
             "inventory_bucket_scan",
             &json!({
@@ -72,10 +71,12 @@ pub async fn run_inventory_phase(
 
     let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
     let scan_result: SignerResult<(String, usize, BTreeMap<i64, i64>)> = async {
-        let signer_config = load_signer_config(resources.program_path())?;
+        let signer_config = resources
+            .signer
+            .as_ref()
+            .ok_or(crate::error::SignerError::MissingConfigField("signer"))?;
         let (resolved_base_asset_id, _) =
-            resolve_offer_assets_for_action(&signer_config, market.base_asset.trim(), "xch")
-                .await?;
+            resolve_offer_assets_for_action(signer_config, market.base_asset.trim(), "xch").await?;
         assert_inventory_asset_resolution_matches_config(market, &resolved_base_asset_id)?;
         let amounts = list_spendable_base_unit_amounts(
             &resources.network,

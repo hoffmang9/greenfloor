@@ -6,7 +6,7 @@ from pathlib import Path
 
 from greenfloor.config.io import (
     enabled_market_rows,
-    load_markets_yaml_with_optional_overlay,
+    load_markets_fields,
     load_program_fields,
     load_yaml,
     materialize_minimal_program_template,
@@ -25,6 +25,16 @@ def test_load_program_fields_reads_example_program(tmp_path: Path) -> None:
     assert "key-main-1" in registry
 
 
+def test_load_markets_fields_reads_example_markets() -> None:
+    fields = load_markets_fields(
+        markets_config=Path("config/markets.yaml"),
+        testnet_markets_config=Path("config/testnet-markets.yaml"),
+    )
+    enabled = enabled_market_rows(fields)
+    assert enabled
+    assert all(bool(row.get("enabled")) for row in enabled)
+
+
 def test_materialize_minimal_program_template(tmp_path: Path) -> None:
     home = tmp_path / "home"
     program = tmp_path / "program.yaml"
@@ -35,53 +45,6 @@ def test_materialize_minimal_program_template(tmp_path: Path) -> None:
     assert raw["app"]["home_dir"] == str(home)
     assert raw["venues"]["dexie"]["api_base"] == "https://dexie.test"
     assert raw["dev"]["python"]["min_version"] == "3.11"
-
-
-def test_load_markets_yaml_with_optional_overlay_merges_enabled_rows(tmp_path: Path) -> None:
-    base_path = tmp_path / "markets.yaml"
-    overlay_path = tmp_path / "testnet-markets.yaml"
-    base_path.write_text(
-        "\n".join(
-            [
-                "markets:",
-                "  - id: base_m1",
-                "    enabled: true",
-                '    base_asset: "a1"',
-                '    base_symbol: "A1"',
-                '    quote_asset: "xch"',
-                '    quote_asset_type: "unstable"',
-                '    signer_key_id: "key-main-1"',
-                '    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"',
-                '    mode: "sell_only"',
-                "    inventory:",
-                "      low_watermark_base_units: 100",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    overlay_path.write_text(
-        "\n".join(
-            [
-                "markets:",
-                "  - id: testnet_m1",
-                "    enabled: true",
-                '    base_asset: "ta1"',
-                '    base_symbol: "TA1"',
-                '    quote_asset: "txch"',
-                '    quote_asset_type: "unstable"',
-                '    signer_key_id: "key-main-1"',
-                '    receive_address: "txch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"',
-                '    mode: "sell_only"',
-                "    inventory:",
-                "      low_watermark_base_units: 100",
-            ]
-        ),
-        encoding="utf-8",
-    )
-    raw = load_markets_yaml_with_optional_overlay(path=base_path, overlay_path=overlay_path)
-    enabled = enabled_market_rows(raw)
-    assert len(enabled) == 2
-    assert {str(m.get("id")) for m in enabled} == {"base_m1", "testnet_m1"}
 
 
 def test_run_config_validate_subprocess_accepts_example_configs(tmp_path: Path) -> None:
@@ -117,3 +80,20 @@ def test_manager_config_validate_cli_emits_ok_json(tmp_path: Path) -> None:
     payload = parse_json_output(stdout)
     assert code == 0
     assert payload.get("ok") is True
+
+
+def test_manager_markets_fields_cli_emits_enabled_rows(tmp_path: Path) -> None:
+    markets = tmp_path / "markets.yaml"
+    markets.write_text(Path("config/markets.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    code, stdout, _stderr = run_manager(
+        [
+            "--markets-config",
+            str(markets),
+            "--json",
+            "markets-fields",
+        ]
+    )
+    payload = parse_json_output(stdout)
+    assert code == 0
+    enabled = enabled_market_rows(payload)
+    assert enabled

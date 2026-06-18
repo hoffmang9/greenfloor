@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::config::{ManagerProgramConfig, MarketConfig};
+use crate::config::MarketConfig;
 use crate::cycle::{
     parallel_max_workers, plan_parallel_managed_dispatch, reservation_release_status,
     PlannedAction, StrategyActionSellCountInput,
 };
+use crate::daemon::market_context::DaemonCycleResources;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
 use crate::storage::SqliteStore;
@@ -19,7 +20,6 @@ use super::reservation_ctx::{
     parallel_reservation_asset_ids, parallel_reservation_context, reservation_wallet_id,
 };
 use super::OfferDispatchOutput;
-use crate::daemon::cycle_paths::DaemonCyclePaths;
 
 use crate::daemon::coinset_spendable::coinset_spendable_profiles_by_asset;
 
@@ -32,25 +32,33 @@ struct ParallelPostJob {
 pub async fn execute_actions_parallel(
     store: &SqliteStore,
     db_path: &Path,
-    program: &ManagerProgramConfig,
-    paths: &DaemonCyclePaths,
+    resources: &DaemonCycleResources,
     market: &MarketConfig,
-    network: &str,
     expanded: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
     #[cfg(test)]
     if let Some(result) = super::test_hooks::parallel_dispatch_test_override() {
         return result;
     }
-    let reservation_ctx = parallel_reservation_context(paths, market, 0).await?;
+    let program = &resources.program;
+    let signer_config = resources
+        .signer
+        .as_ref()
+        .ok_or(SignerError::MissingConfigField("signer"))?;
+    let reservation_ctx =
+        parallel_reservation_context(signer_config, &program.network, market, 0).await?;
     let asset_ids = parallel_reservation_asset_ids(&reservation_ctx);
-    let spendable_profiles =
-        coinset_spendable_profiles_by_asset(network, &market.receive_address, &asset_ids).await?;
+    let spendable_profiles = coinset_spendable_profiles_by_asset(
+        &resources.network,
+        &market.receive_address,
+        &asset_ids,
+    )
+    .await?;
     let batch_plan =
         plan_parallel_managed_dispatch(expanded, &reservation_ctx, &spendable_profiles);
     let coordinator = Arc::new(OfferReservationCoordinator::new(db_path, Some(300))?);
     let _ = coordinator.expire_stale();
-    let wallet_id = reservation_wallet_id(paths)?;
+    let wallet_id = reservation_wallet_id(signer_config);
 
     store.add_audit_event(
         "parallel_offer_dispatch",
@@ -107,9 +115,9 @@ pub async fn execute_actions_parallel(
             .await
             .map_err(|err| SignerError::Other(format!("parallel semaphore failed: {err}")))?;
         let coordinator = coordinator.clone();
-        let program = program.clone();
+        let program = resources.program.clone();
         let market = market.clone();
-        let paths = paths.clone();
+        let paths = resources.paths.clone();
         let market_id = market.market_id.clone();
         let wallet_id = wallet_id.clone();
 

@@ -73,6 +73,34 @@ pub fn run_program_fields(ctx: &ManagerContext) -> SignerResult<i32> {
     Ok(0)
 }
 
+pub fn run_markets_fields(ctx: &ManagerContext) -> SignerResult<i32> {
+    let markets =
+        load_markets_config_with_overlay(&ctx.markets_config, ctx.testnet_markets_path())?;
+    let enabled: Vec<_> = markets
+        .markets
+        .iter()
+        .filter(|market| market.enabled)
+        .map(|market| {
+            json!({
+                "id": market.market_id,
+                "enabled": market.enabled,
+                "base_asset": market.base_asset,
+                "base_symbol": market.base_symbol,
+                "quote_asset": market.quote_asset,
+                "quote_asset_type": market.quote_asset_type,
+                "receive_address": market.receive_address,
+                "signer_key_id": market.signer_key_id,
+                "mode": market.mode,
+            })
+        })
+        .collect();
+    ctx.emit_json(&json!({
+        "markets_config": ctx.markets_config.display().to_string(),
+        "enabled_markets": enabled,
+    }))?;
+    Ok(0)
+}
+
 pub fn run_set_log_level(ctx: &ManagerContext, log_level: &str) -> SignerResult<i32> {
     let program_path = &ctx.program_config;
     let level = normalize_log_level(log_level)?;

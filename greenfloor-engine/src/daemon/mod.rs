@@ -29,6 +29,8 @@ mod run_once;
 mod stale_sweep;
 mod strategy_phase;
 mod strategy_support;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod watchlist;
 
 pub use crate::coin_ops::execution::CoinOpExecContext;

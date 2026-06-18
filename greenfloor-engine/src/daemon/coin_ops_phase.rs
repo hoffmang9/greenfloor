@@ -27,7 +27,7 @@ pub async fn run_coin_ops_phase(
     newly_executed_counts: &BTreeMap<i64, i64>,
 ) -> SignerResult<()> {
     let program = &ctx.resources.program;
-    let program_path = ctx.resources.program_path();
+    let resources = &ctx.resources;
     let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
     if sell_ladder.is_empty() {
         store.add_audit_event(
@@ -138,9 +138,9 @@ pub async fn run_coin_ops_phase(
         }
     } else {
         execute_managed_coin_op_plans(
-            program_path,
-            market,
             program,
+            resources.signer.as_ref(),
+            market,
             &executable_plans,
             &watched_coin_ids,
         )

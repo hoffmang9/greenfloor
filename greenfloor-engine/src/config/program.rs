@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::keys_registry::{parse_signer_key_registry, SignerKeyEntry};
+use super::signer::SignerConfig;
 use super::yaml_fields::{
     config_err, optional_bool, parse_i64_field, parse_u64_field, req_mapping, req_mapping_from_map,
     req_str, req_value,
@@ -355,14 +356,31 @@ fn require_pushover_provider(raw: &Value) -> SignerResult<()> {
     ))
 }
 
-pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
+pub fn read_program_yaml(path: &Path) -> SignerResult<Value> {
     let raw = std::fs::read_to_string(path).map_err(|err| {
         SignerError::Other(format!("failed to read config {}: {err}", path.display()))
     })?;
-    let parsed: Value = serde_yaml::from_str(&raw).map_err(|err| {
+    serde_yaml::from_str(&raw).map_err(|err| {
         SignerError::Other(format!("failed to parse config {}: {err}", path.display()))
-    })?;
-    parse_program_config(&parsed)
+    })
+}
+
+pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
+    parse_program_config(&read_program_yaml(path)?)
+}
+
+#[derive(Debug, Clone)]
+pub struct ProgramConfigBundle {
+    pub program: ManagerProgramConfig,
+    pub signer: SignerConfig,
+}
+
+pub fn load_program_bundle(path: &Path) -> SignerResult<ProgramConfigBundle> {
+    let raw = read_program_yaml(path)?;
+    Ok(ProgramConfigBundle {
+        program: parse_program_config(&raw)?,
+        signer: super::signer::parse_signer_config(&raw)?,
+    })
 }
 
 pub fn require_signer_offer_path(config: &ManagerProgramConfig) -> SignerResult<()> {

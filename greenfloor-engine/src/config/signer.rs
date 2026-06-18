@@ -1,7 +1,9 @@
 use std::path::Path;
 
-use serde::Deserialize;
+use serde_json::Value;
 
+use super::program::read_program_yaml;
+use super::yaml_fields::{config_err, optional_trimmed_string, req_mapping, req_str, req_value};
 use crate::error::{SignerError, SignerResult};
 use crate::vault::context::VaultCustodySnapshot;
 use crate::vault::members::{hex_to_bytes32, WalletKey};
@@ -18,82 +20,40 @@ pub struct SignerConfig {
     pub vault: VaultCustodySnapshot,
 }
 
-#[derive(Debug, Deserialize)]
-struct ProgramYaml {
-    app: Option<AppSection>,
-    signer: Option<SignerSection>,
-    vault: Option<VaultSection>,
-}
+pub fn parse_signer_config(raw: &Value) -> SignerResult<SignerConfig> {
+    let network = raw
+        .get("app")
+        .and_then(Value::as_object)
+        .and_then(|app| app.get("network"))
+        .and_then(Value::as_str)
+        .unwrap_or("mainnet")
+        .trim()
+        .to_string();
 
-#[derive(Debug, Deserialize)]
-struct AppSection {
-    network: Option<String>,
-}
+    let signer = req_mapping(raw, "signer")?;
+    let vault = req_mapping(raw, "vault")?;
 
-#[derive(Debug, Deserialize)]
-struct SignerSection {
-    coinset_msp_base_url: Option<String>,
-    kms_key_id: Option<String>,
-    kms_region: Option<String>,
-    kms_public_key_hex: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct VaultSection {
-    launcher_id: Option<String>,
-    custody_threshold: Option<u32>,
-    recovery_threshold: Option<u32>,
-    recovery_clawback_timelock: Option<u64>,
-    custody_keys: Option<Vec<WalletKeyYaml>>,
-    recovery_keys: Option<Vec<WalletKeyYaml>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WalletKeyYaml {
-    public_key_hex: String,
-    curve: String,
-}
-
-pub fn load_signer_config(path: &Path) -> SignerResult<SignerConfig> {
-    let raw = std::fs::read_to_string(path).map_err(|err| {
-        SignerError::Other(format!("failed to read config {}: {err}", path.display()))
-    })?;
-    let parsed: ProgramYaml = serde_yaml::from_str(&raw).map_err(|err| {
-        SignerError::Other(format!("failed to parse config {}: {err}", path.display()))
-    })?;
-
-    let network = parsed
-        .app
-        .and_then(|app| app.network)
-        .unwrap_or_else(|| "mainnet".to_string());
-
-    let signer = parsed
-        .signer
-        .ok_or(SignerError::MissingConfigField("signer"))?;
-    let vault = parsed
-        .vault
-        .ok_or(SignerError::MissingConfigField("vault"))?;
-
-    let kms_key_id = require_field(signer.kms_key_id, "signer.kms_key_id")?;
+    let kms_key_id = require_nonempty_str(signer, "kms_key_id")?;
     let kms_region = signer
-        .kms_region
-        .map(|value| value.trim().to_string())
+        .get("kms_region")
+        .and_then(Value::as_str)
+        .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "us-west-2".to_string());
-    let kms_public_key_hex = signer
-        .kms_public_key_hex
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
+        .unwrap_or("us-west-2")
+        .to_string();
+    let kms_public_key_hex = optional_trimmed_string(signer.get("kms_public_key_hex"));
     let coinset_msp_base_url = signer
-        .coinset_msp_base_url
-        .map(|value| value.trim().to_string())
+        .get("coinset_msp_base_url")
+        .and_then(Value::as_str)
+        .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_MSP_BASE_URL.to_string());
+        .unwrap_or(DEFAULT_MSP_BASE_URL)
+        .to_string();
 
-    let vault_snapshot = vault_section_to_snapshot(vault)?;
+    let vault_snapshot = parse_vault_section(vault)?;
 
     Ok(SignerConfig {
-        network: network.trim().to_string(),
+        network,
         coinset_msp_base_url,
         kms_key_id,
         kms_region,
@@ -102,29 +62,31 @@ pub fn load_signer_config(path: &Path) -> SignerResult<SignerConfig> {
     })
 }
 
-fn vault_section_to_snapshot(vault: VaultSection) -> SignerResult<VaultCustodySnapshot> {
-    let launcher_id = hex_to_bytes32(&require_field(vault.launcher_id, "vault.launcher_id")?)
-        .map_err(|_| SignerError::VaultLauncherIdInvalid)?;
-    let custody_threshold = vault
-        .custody_threshold
-        .ok_or(SignerError::VaultThresholdOrTimelockInvalid)?;
-    let recovery_threshold = vault
-        .recovery_threshold
-        .ok_or(SignerError::VaultThresholdOrTimelockInvalid)?;
-    let recovery_clawback_timelock = vault
-        .recovery_clawback_timelock
-        .ok_or(SignerError::VaultThresholdOrTimelockInvalid)?;
+pub fn load_signer_config(path: &Path) -> SignerResult<SignerConfig> {
+    parse_signer_config(&read_program_yaml(path)?)
+}
 
-    let custody_keys = wallet_keys_from_yaml(
-        vault
-            .custody_keys
-            .ok_or(SignerError::UnsupportedVaultSignerCardinality)?,
+fn parse_vault_section(
+    vault: &serde_json::Map<String, Value>,
+) -> SignerResult<VaultCustodySnapshot> {
+    let launcher_id = hex_to_bytes32(&require_nonempty_str(vault, "launcher_id")?)
+        .map_err(|_| SignerError::VaultLauncherIdInvalid)?;
+    let custody_threshold = parse_u32_field(
+        req_value(vault, "custody_threshold")?,
+        "vault.custody_threshold",
     )?;
-    let recovery_keys = wallet_keys_from_yaml(
-        vault
-            .recovery_keys
-            .ok_or(SignerError::UnsupportedVaultSignerCardinality)?,
+    let recovery_threshold = parse_u32_field(
+        req_value(vault, "recovery_threshold")?,
+        "vault.recovery_threshold",
     )?;
+    let recovery_clawback_timelock = parse_u64_field(
+        req_value(vault, "recovery_clawback_timelock")?,
+        "vault.recovery_clawback_timelock",
+    )?;
+
+    let custody_keys = parse_wallet_keys(req_value(vault, "custody_keys")?, "vault.custody_keys")?;
+    let recovery_keys =
+        parse_wallet_keys(req_value(vault, "recovery_keys")?, "vault.recovery_keys")?;
 
     if custody_keys.is_empty() || recovery_keys.is_empty() {
         return Err(SignerError::UnsupportedVaultSignerCardinality);
@@ -149,24 +111,49 @@ fn vault_section_to_snapshot(vault: VaultSection) -> SignerResult<VaultCustodySn
     })
 }
 
-fn wallet_keys_from_yaml(entries: Vec<WalletKeyYaml>) -> SignerResult<Vec<WalletKey>> {
+fn parse_wallet_keys(raw: &Value, field: &str) -> SignerResult<Vec<WalletKey>> {
+    let entries = raw
+        .as_array()
+        .ok_or_else(|| config_err(format!("{field} must be a list")))?;
     entries
-        .into_iter()
+        .iter()
         .map(|entry| {
+            let map = entry
+                .as_object()
+                .ok_or_else(|| config_err(format!("{field} entries must be mappings")))?;
             Ok(WalletKey {
-                public_key_hex: entry.public_key_hex.trim().to_string(),
-                curve: entry.curve.trim().to_string(),
+                public_key_hex: req_str(map, "public_key_hex")?.trim().to_string(),
+                curve: req_str(map, "curve")?.trim().to_string(),
             })
         })
         .collect()
 }
 
-fn require_field(value: Option<String>, name: &'static str) -> SignerResult<String> {
-    let trimmed = value
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .ok_or(SignerError::MissingConfigField(name))?;
+fn require_nonempty_str(
+    map: &serde_json::Map<String, Value>,
+    key: &'static str,
+) -> SignerResult<String> {
+    let trimmed = req_str(map, key)?.trim().to_string();
+    if trimmed.is_empty() {
+        return Err(SignerError::MissingConfigField(key));
+    }
     Ok(trimmed)
+}
+
+fn parse_u32_field(raw: &Value, context: &str) -> SignerResult<u32> {
+    let value = super::yaml_fields::parse_i64_field(raw, context)?;
+    if value < 0 {
+        return Err(config_err(format!("{context} must be >= 0")));
+    }
+    u32::try_from(value).map_err(|_| config_err(format!("{context} must fit in u32")))
+}
+
+fn parse_u64_field(raw: &Value, context: &str) -> SignerResult<u64> {
+    let value = super::yaml_fields::parse_i64_field(raw, context)?;
+    if value < 0 {
+        return Err(config_err(format!("{context} must be >= 0")));
+    }
+    Ok(value as u64)
 }
 
 #[cfg(test)]

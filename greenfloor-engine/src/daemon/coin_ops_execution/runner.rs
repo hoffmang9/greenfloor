@@ -1,12 +1,9 @@
 use std::collections::HashSet;
-use std::path::Path;
 
 use serde_json::{json, Value};
 
 use crate::coin_ops::CoinOpPlan;
-use crate::config::{
-    load_signer_config, require_signer_offer_path, ManagerProgramConfig, MarketConfig,
-};
+use crate::config::{require_signer_offer_path, ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::hex::default_mojo_multiplier_for_asset;
 use crate::offer::resolve_offer_assets_for_action;
@@ -76,9 +73,9 @@ fn skip_all_plans(
 }
 
 pub async fn execute_managed_coin_op_plans(
-    program_path: &Path,
-    market: &MarketConfig,
     program: &ManagerProgramConfig,
+    signer_config: Option<&SignerConfig>,
+    market: &MarketConfig,
     plans: &[CoinOpPlan],
     watched_coin_ids: &HashSet<String>,
 ) -> CoinOpExecutionResult {
@@ -95,10 +92,16 @@ pub async fn execute_managed_coin_op_plans(
         );
     }
 
-    let signer_config = match load_signer_config(program_path) {
-        Ok(config) => config,
-        Err(err) => {
-            return skip_all_plans(program, market, plans, &err.to_string(), "skipped");
+    let signer_config = match signer_config {
+        Some(config) => config.clone(),
+        None => {
+            return skip_all_plans(
+                program,
+                market,
+                plans,
+                "offer execution requires signer.kms_key_id and vault.launcher_id in program config",
+                "skipped",
+            );
         }
     };
     let (resolved_base_asset_id, _) = match resolve_offer_assets_for_action(
