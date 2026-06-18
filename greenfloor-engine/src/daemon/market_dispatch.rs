@@ -1,6 +1,8 @@
 use crate::cycle::MarketCycleResultState;
 use crate::error::SignerResult;
 
+use crate::metrics::{metric_collection_len_to_u64, metric_non_negative_u64};
+
 use super::reconcile_market_cycle::ReconcileMarketCycleResult;
 use super::run_once::MarketDispatchMetrics;
 
@@ -15,19 +17,19 @@ pub fn aggregate_market_dispatch_metrics(
     outputs: &[SingleMarketCycleOutput],
 ) -> MarketDispatchMetrics {
     let mut metrics = MarketDispatchMetrics {
-        markets_processed: outputs.len() as u64,
+        markets_processed: metric_collection_len_to_u64(outputs.len()),
         ..Default::default()
     };
     for output in outputs {
         metrics.cycle_error_count += output.reconcile.metrics.cycle_errors;
-        metrics.cycle_error_count += output.state.cycle_errors.max(0) as u64;
-        metrics.strategy_planned_total += output.state.strategy_planned.max(0) as u64;
-        metrics.strategy_executed_total += output.state.strategy_executed.max(0) as u64;
+        metrics.cycle_error_count += metric_non_negative_u64(output.state.cycle_errors);
+        metrics.strategy_planned_total += metric_non_negative_u64(output.state.strategy_planned);
+        metrics.strategy_executed_total += metric_non_negative_u64(output.state.strategy_executed);
         if output.state.cancel_triggered {
             metrics.cancel_triggered_count += 1;
         }
-        metrics.cancel_planned_total += output.state.cancel_planned.max(0) as u64;
-        metrics.cancel_executed_total += output.state.cancel_executed.max(0) as u64;
+        metrics.cancel_planned_total += metric_non_negative_u64(output.state.cancel_planned);
+        metrics.cancel_executed_total += metric_non_negative_u64(output.state.cancel_executed);
         if output.state.immediate_requeue_requested {
             metrics
                 .immediate_requeue_market_ids
@@ -68,7 +70,7 @@ mod tests {
             market_id: "m1".to_string(),
             reconcile: ReconcileMarketCycleResult {
                 offers: Vec::new(),
-                dexie_size_by_offer_id: Default::default(),
+                dexie_size_by_offer_id: std::collections::HashMap::default(),
                 dexie_fetch_error: None,
                 metrics: ReconcileMarketCycleMetrics::default(),
             },

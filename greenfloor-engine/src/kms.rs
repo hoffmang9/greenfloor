@@ -138,7 +138,7 @@ fn read_der_integer(data: &[u8], offset: usize) -> SignerResult<(Vec<u8>, usize)
 
 pub fn normalize_hex(value: &str) -> String {
     let raw = value.trim().trim_start_matches("0x").to_ascii_lowercase();
-    raw.chars().filter(|ch| ch.is_ascii_hexdigit()).collect()
+    raw.chars().filter(char::is_ascii_hexdigit).collect()
 }
 
 #[cfg(test)]

@@ -61,13 +61,13 @@ pub fn build_presplit_conditions_inner_spend(
 ) -> SignerResult<Spend> {
     let member_config = MemberConfig::default();
     let fixed_conditions_hash =
-        custom_member_hash(&member_config, ctx.tree_hash(fixed_spend.puzzle));
-    let p2_singleton_hash = singleton_member_hash(&member_config, launcher_id, false);
+        custom_member_hash(&member_config, ctx.tree_hash(fixed_spend.puzzle))?;
+    let p2_singleton_hash = singleton_member_hash(&member_config, launcher_id, false)?;
     let full_puzzle_hash = m_of_n_hash(
         &member_config.with_top_level(true),
         1,
         vec![fixed_conditions_hash, p2_singleton_hash],
-    );
+    )?;
 
     let nil_spend = Spend::new(NodePtr::NIL, NodePtr::NIL);
     let mut mips_spend = MipsSpend::new(nil_spend);
@@ -93,13 +93,13 @@ pub fn predict_presplit_cat(source_cat: &Cat, p2_puzzle_hash: Bytes32, offer_amo
     source_cat.child(p2_puzzle_hash, offer_amount)
 }
 
-pub fn vault_change_puzzle_hash(launcher_id: Bytes32) -> Bytes32 {
-    singleton_member_hash(
+pub fn vault_change_puzzle_hash(launcher_id: Bytes32) -> SignerResult<Bytes32> {
+    Ok(singleton_member_hash(
         &MemberConfig::default().with_top_level(true),
         launcher_id,
         false,
-    )
-    .into()
+    )?
+    .into())
 }
 
 #[derive(Debug, Clone)]
@@ -130,7 +130,7 @@ impl PresplitOfferBinding {
         )?;
         let fixed_conditions_tree_hash = ctx.tree_hash(fixed_spend.puzzle);
         let p2_hashes =
-            p2_conditions_or_singleton_puzzle_hash(fixed_conditions_tree_hash, launcher_id);
+            p2_conditions_or_singleton_puzzle_hash(fixed_conditions_tree_hash, launcher_id)?;
         Ok(Self {
             requested_payments,
             requested_asset_info,
@@ -319,7 +319,8 @@ mod tests {
             ))
             .expect("fixed spend");
         let puzzle_hash = ctx.tree_hash(fixed_spend.puzzle);
-        let hashes = p2_conditions_or_singleton_puzzle_hash(puzzle_hash, launcher_id);
+        let hashes =
+            p2_conditions_or_singleton_puzzle_hash(puzzle_hash, launcher_id).expect("p2 hashes");
         assert_ne!(hashes.puzzle_hash.to_bytes(), [0u8; 32]);
         assert_ne!(hashes.fixed_conditions_hash.to_bytes(), [0u8; 32]);
     }

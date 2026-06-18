@@ -10,13 +10,13 @@ impl SqliteStore {
         let mut stmt = self
             .conn
             .prepare(
-                r#"
+                r"
             SELECT payload_json
             FROM audit_event
             WHERE event_type = 'xch_price_snapshot'
             ORDER BY id DESC
             LIMIT 1
-            "#,
+            ",
             )
             .map_err(|err| {
                 SignerError::Other(format!("failed to prepare xch price snapshot query: {err}"))
@@ -41,7 +41,7 @@ impl SqliteStore {
         };
         let value = raw
             .as_f64()
-            .or_else(|| raw.as_i64().map(|v| v as f64))
+            .or_else(|| raw.as_i64().map(crate::offer::pricing::i64_to_f64))
             .ok_or_else(|| {
                 SignerError::Other("xch_price_snapshot price_usd is not numeric".to_string())
             })?;
@@ -82,17 +82,17 @@ impl SqliteStore {
             format!("WHERE {}", where_clauses.join(" AND "))
         };
         let sql = format!(
-            r#"
+            r"
             SELECT id, event_type, market_id, payload_json, created_at
             FROM audit_event
             {where_sql}
             ORDER BY id DESC
             LIMIT ?
-            "#
+            "
         );
         params.push(Box::new(limit_i64));
         let param_refs: Vec<&dyn rusqlite::ToSql> =
-            params.iter().map(|value| value.as_ref()).collect();
+            params.iter().map(std::convert::AsRef::as_ref).collect();
         let mut stmt = self.conn.prepare(&sql).map_err(|err| {
             SignerError::Other(format!("failed to prepare audit_event query: {err}"))
         })?;
@@ -147,10 +147,10 @@ impl SqliteStore {
         })?;
         self.conn
             .execute(
-                r#"
+                r"
                 INSERT INTO audit_event (event_type, market_id, payload_json, created_at)
                 VALUES (?1, ?2, ?3, ?4)
-                "#,
+                ",
                 params![event_type, market_id, payload_json, created_at],
             )
             .map_err(|err| SignerError::Other(format!("failed to insert audit_event: {err}")))?;

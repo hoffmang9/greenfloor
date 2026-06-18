@@ -8,7 +8,7 @@ pub fn effective_sell_bucket_counts_for_coin_ops(
     active_sell_offer_counts_by_size: Option<&BTreeMap<i64, i64>>,
     newly_executed_sell_offer_counts_by_size: Option<&BTreeMap<i64, i64>>,
 ) -> BTreeMap<i64, i64> {
-    let empty = BTreeMap::new();
+    let empty = BTreeMap::default();
     let active_sell_counts = active_sell_offer_counts_by_size.unwrap_or(&empty);
     let newly_executed_sell_counts = newly_executed_sell_offer_counts_by_size.unwrap_or(&empty);
     let mut effective_counts = wallet_bucket_counts.clone();

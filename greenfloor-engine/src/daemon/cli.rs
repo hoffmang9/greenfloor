@@ -11,7 +11,7 @@ use super::daemon_loop::{run_daemon_loop, DaemonLoopRequest};
 use super::lock::DaemonInstanceLock;
 use super::logging::{initialize_daemon_file_logging, warn_if_daemon_log_level_auto_healed};
 use super::program_runtime::{load_daemon_program_runtime, use_websocket_capture_for_once};
-use super::run_once::{DaemonDispatchState, DaemonRunOnceRequestBody};
+use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequestBody};
 use super::watchlist::cache::CoinWatchlistCache;
 
 fn parse_key_ids(raw: &str) -> Option<Vec<String>> {
@@ -83,7 +83,7 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
             use_websocket_capture,
             allowed_key_ids,
             dispatch_state: DaemonDispatchState::default(),
-            test_controls: Default::default(),
+            test_controls: DaemonCycleTestControls::default(),
         };
         let request = body.into_engine(CoinWatchlistCache::new());
         let response = run_daemon_cycle_once(&request).await?;

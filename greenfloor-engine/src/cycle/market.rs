@@ -152,8 +152,8 @@ pub fn one_sided_offer_counts_by_side(
     sell_counts: &BTreeMap<i64, i64>,
     tracked_sizes: &[i64],
 ) -> (BTreeMap<i64, i64>, BTreeMap<i64, i64>) {
-    let mut buy = BTreeMap::new();
-    let mut sell = BTreeMap::new();
+    let mut buy = BTreeMap::default();
+    let mut sell = BTreeMap::default();
     for size in tracked_sizes {
         buy.insert(*size, 0);
         sell.insert(*size, sell_counts.get(size).copied().unwrap_or(0));

@@ -99,9 +99,7 @@ async fn run_coinset_websocket_loop(
                         Ok(Some(Ok(Message::Ping(payload)))) => {
                             let _ = ws.send(Message::Pong(payload)).await;
                         }
-                        Ok(Some(Ok(Message::Close(_)))) => break,
-                        Ok(Some(Err(_))) | Ok(None) => break,
-                        Err(_) => continue,
+                        Ok(None | Some(Ok(Message::Close(_)) | Err(_))) => break,
                         _ => {}
                     }
                 }

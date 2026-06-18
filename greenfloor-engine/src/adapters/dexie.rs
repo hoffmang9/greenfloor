@@ -108,7 +108,10 @@ impl DexieClient {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_else(|| payload.as_array().cloned().unwrap_or_default());
-        Ok(tokens.into_iter().filter(|row| row.is_object()).collect())
+        Ok(tokens
+            .into_iter()
+            .filter(serde_json::Value::is_object)
+            .collect())
     }
 
     pub async fn get_price_tickers(&self) -> SignerResult<Vec<Value>> {
@@ -130,7 +133,7 @@ impl DexieClient {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .filter(|row| row.is_object())
+            .filter(serde_json::Value::is_object)
             .collect())
     }
 

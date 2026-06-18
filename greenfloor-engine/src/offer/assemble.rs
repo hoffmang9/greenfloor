@@ -73,7 +73,7 @@ pub(crate) async fn execute_presplit_new_offer<C: OfferCoinsetBackend>(
         offer_nonce,
         vault_ctx.launcher_id,
     )?;
-    let change_puzzle_hash = vault_change_puzzle_hash(vault_ctx.launcher_id);
+    let change_puzzle_hash = vault_change_puzzle_hash(vault_ctx.launcher_id)?;
 
     let (split_spend_bundle, predicted_presplit_cat) = build_presplit_split_spend_bundle(
         vault_ctx,

@@ -71,13 +71,18 @@ jobs:
       - uses: ./.github/actions/rust-cache-greenfloor
         if: matrix.build_native_clis || matrix.run_rust_tests
 
-      - name: Rust format check
-        if: matrix.run_rust_tests
-        run: cargo fmt --manifest-path "${{ env.CARGO_MANIFEST }}" --check
+      - name: Cache pre-commit environment
+        uses: actions/cache@v4
+        with:
+          path: ./.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-
 
-      - name: Rust clippy
-        if: matrix.run_rust_tests
-        run: cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}" --all-targets
+      - name: "Lint + Type-check (pre-commit)"
+        env:
+          PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
+        run: pre-commit run --all-files
 
       - name: Build greenfloor-engine binaries
         if: matrix.build_native_clis && !matrix.run_rust_tests
@@ -95,19 +100,6 @@ jobs:
           for bin in greenfloor-engine greenfloor-manager greenfloord; do
             install -m 755 "target/debug/${bin}" "$GITHUB_WORKSPACE/.venv/bin/${bin}"
           done
-
-      - name: Cache pre-commit environment
-        uses: actions/cache@v4
-        with:
-          path: ./.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('.pre-commit-config.yaml') }}
-          restore-keys: |
-            pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-
-
-      - name: "Lint + Type-check (pre-commit)"
-        env:
-          PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
-        run: pre-commit run --all-files
 
       - name: "Test suite (pytest)"
         run: pytest -v --tb=short

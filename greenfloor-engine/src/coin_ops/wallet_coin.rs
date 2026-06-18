@@ -2,10 +2,6 @@ use serde_json::Value;
 
 /// Whether a wallet coin state string is spendable for coin-op selection.
 pub fn is_spendable_coin_state(state: &str) -> bool {
-    let state = state.trim().to_ascii_uppercase();
-    if state.is_empty() {
-        return false;
-    }
     const NON_SPENDABLE: &[&str] = &[
         "PENDING",
         "MEMPOOL",
@@ -15,10 +11,14 @@ pub fn is_spendable_coin_state(state: &str) -> bool {
         "RESERVED",
         "UNCONFIRMED",
     ];
+    const SPENDABLE: &[&str] = &["CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE", "SETTLED"];
+    let state = state.trim().to_ascii_uppercase();
+    if state.is_empty() {
+        return false;
+    }
     if NON_SPENDABLE.contains(&state.as_str()) {
         return false;
     }
-    const SPENDABLE: &[&str] = &["CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE", "SETTLED"];
     SPENDABLE.contains(&state.as_str())
 }
 

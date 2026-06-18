@@ -19,10 +19,10 @@ impl SqliteStore {
         })?;
         self.conn
             .execute(
-                r#"
+                r"
                 INSERT INTO price_policy_history (market_id, source, payload_json, created_at)
                 VALUES (?1, ?2, ?3, ?4)
-                "#,
+                ",
                 params![market_id, source, payload_json, utcnow_iso()],
             )
             .map_err(|err| {

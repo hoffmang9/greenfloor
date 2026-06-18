@@ -31,7 +31,7 @@ pub fn resolve_quote_price_for_pricing(pricing: &Value) -> SignerResult<f64> {
         .get("max_price_quote_per_base")
         .and_then(value_as_f64);
     let quote_price: Option<f64> = match (min_q, max_q) {
-        (Some(min), Some(max)) => Some((min + max) / 2.0),
+        (Some(min), Some(max)) => Some(f64::midpoint(min, max)),
         (Some(min), None) => Some(min),
         (None, Some(max)) => Some(max),
         (None, None) => None,

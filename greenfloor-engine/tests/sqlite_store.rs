@@ -66,7 +66,7 @@ fn sqlite_daily_fee_spent() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("greenfloor.sqlite"));
     store
-        .add_coin_op_ledger_entry(coin_op_entry(
+        .add_coin_op_ledger_entry(&coin_op_entry(
             "m1",
             "split",
             1,
@@ -77,7 +77,7 @@ fn sqlite_daily_fee_spent() {
         ))
         .expect("executed entry");
     store
-        .add_coin_op_ledger_entry(coin_op_entry(
+        .add_coin_op_ledger_entry(&coin_op_entry(
             "m1",
             "combine",
             1,
@@ -98,7 +98,7 @@ fn coin_op_budget_report() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("greenfloor.sqlite"));
     store
-        .add_coin_op_ledger_entry(coin_op_entry(
+        .add_coin_op_ledger_entry(&coin_op_entry(
             "m1",
             "split",
             2,
@@ -109,7 +109,7 @@ fn coin_op_budget_report() {
         ))
         .expect("executed");
     store
-        .add_coin_op_ledger_entry(coin_op_entry(
+        .add_coin_op_ledger_entry(&coin_op_entry(
             "m1",
             "split",
             3,
@@ -120,7 +120,7 @@ fn coin_op_budget_report() {
         ))
         .expect("planned");
     store
-        .add_coin_op_ledger_entry(coin_op_entry(
+        .add_coin_op_ledger_entry(&coin_op_entry(
             "m1",
             "combine",
             4,
@@ -407,7 +407,7 @@ fn add_coin_op_ledger_entry_persists_all_fields() {
     let db_path = dir.path().join("gf.sqlite");
     let store = open_store(&db_path);
     store
-        .add_coin_op_ledger_entry(coin_op_entry(
+        .add_coin_op_ledger_entry(&coin_op_entry(
             "m1",
             "split",
             3,
@@ -449,7 +449,7 @@ fn add_coin_op_ledger_entry_null_operation_id() {
     let db_path = dir.path().join("gf.sqlite");
     let store = open_store(&db_path);
     store
-        .add_coin_op_ledger_entry(coin_op_entry(
+        .add_coin_op_ledger_entry(&coin_op_entry(
             "m1", "combine", 1, 0, "skipped", "dry_run", None,
         ))
         .expect("insert");
@@ -467,7 +467,7 @@ fn add_coin_op_ledger_entry_null_operation_id() {
 fn offer_reservation_lease_roundtrip() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("gf.sqlite"));
-    let mut amounts = BTreeMap::new();
+    let mut amounts = BTreeMap::default();
     amounts.insert("xch".to_string(), 1000);
     amounts.insert("cat-1".to_string(), 2500);
     store
@@ -494,7 +494,7 @@ fn offer_reservation_lease_roundtrip() {
 fn offer_reservation_release_clears_reserved_amount() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("gf.sqlite"));
-    let mut amounts = BTreeMap::new();
+    let mut amounts = BTreeMap::default();
     amounts.insert("xch".to_string(), 700);
     store
         .add_offer_reservation_lease("res-2", "m1", "vault-1", &amounts, 120)
@@ -520,7 +520,7 @@ fn offer_reservation_release_clears_reserved_amount() {
 fn offer_reservation_expiry_marks_active_rows_expired() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("gf.sqlite"));
-    let mut amounts = BTreeMap::new();
+    let mut amounts = BTreeMap::default();
     amounts.insert("xch".to_string(), 120);
     store
         .add_offer_reservation_lease("res-3", "m1", "vault-1", &amounts, 1)
@@ -542,12 +542,12 @@ fn offer_reservation_expiry_marks_active_rows_expired() {
 fn try_acquire_offer_reservation_lease_rejects_insufficient_capacity() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("gf.sqlite"));
-    let mut requested = BTreeMap::new();
+    let mut requested = BTreeMap::default();
     requested.insert("asset".to_string(), 100);
-    let mut available = BTreeMap::new();
+    let mut available = BTreeMap::default();
     available.insert("asset".to_string(), 50);
     let err = store
-        .try_acquire_offer_reservation_lease(OfferReservationLeaseRequest {
+        .try_acquire_offer_reservation_lease(&OfferReservationLeaseRequest {
             reservation_id: "res-4",
             market_id: "m1",
             wallet_id: "vault-1",
@@ -569,14 +569,14 @@ fn try_acquire_offer_reservation_lease_rejects_insufficient_capacity() {
 fn try_acquire_offer_reservation_lease_persists_rows_on_success() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("gf.sqlite"));
-    let mut requested = BTreeMap::new();
+    let mut requested = BTreeMap::default();
     requested.insert("asset".to_string(), 100);
     requested.insert("xch".to_string(), 20);
-    let mut available = BTreeMap::new();
+    let mut available = BTreeMap::default();
     available.insert("asset".to_string(), 150);
     available.insert("xch".to_string(), 40);
     assert!(store
-        .try_acquire_offer_reservation_lease(OfferReservationLeaseRequest {
+        .try_acquire_offer_reservation_lease(&OfferReservationLeaseRequest {
             reservation_id: "res-5",
             market_id: "m1",
             wallet_id: "vault-1",
@@ -605,7 +605,7 @@ fn try_acquire_offer_reservation_lease_persists_rows_on_success() {
 fn prune_offer_reservation_leases_removes_old_inactive_rows() {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = open_store(&dir.path().join("gf.sqlite"));
-    let mut amounts = BTreeMap::new();
+    let mut amounts = BTreeMap::default();
     amounts.insert("asset".to_string(), 10);
     store
         .add_offer_reservation_lease("res-6", "m1", "vault-1", &amounts, 120)

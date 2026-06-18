@@ -87,7 +87,7 @@ pub fn select_spendable_coins_for_target_amount(
     let cap = required + max_amount;
     if cap > 500_000 {
         let mut ordered = entries.clone();
-        ordered.sort_by(|left, right| right.1.cmp(&left.1));
+        ordered.sort_by_key(|(_, amount)| std::cmp::Reverse(*amount));
         let mut picked_ids = Vec::new();
         let mut running = 0i64;
         for (coin_id, amount) in ordered {
@@ -100,7 +100,8 @@ pub fn select_spendable_coins_for_target_amount(
         return (Vec::new(), 0, false);
     }
 
-    let mut best: std::collections::BTreeMap<i64, Vec<usize>> = std::collections::BTreeMap::new();
+    let mut best: std::collections::BTreeMap<i64, Vec<usize>> =
+        std::collections::BTreeMap::default();
     best.insert(0, Vec::new());
     for (idx, (_, amount)) in entries.iter().enumerate() {
         let snapshot: Vec<(i64, Vec<usize>)> = best.iter().map(|(s, v)| (*s, v.clone())).collect();
@@ -112,7 +113,7 @@ pub fn select_spendable_coins_for_target_amount(
             let mut candidate = subset;
             candidate.push(idx);
             let existing = best.get(&next_sum);
-            if existing.is_none() || existing.is_some_and(|e| candidate.len() < e.len()) {
+            if existing.is_none_or(|e| candidate.len() < e.len()) {
                 best.insert(next_sum, candidate);
             }
         }
@@ -133,7 +134,7 @@ pub fn select_spendable_coins_for_target_amount(
     let best_over = overs
         .into_iter()
         .min_by_key(|sum| {
-            let subset = best.get(sum).map(Vec::len).unwrap_or(0);
+            let subset = best.get(sum).map_or(0, Vec::len);
             (sum - required, subset, *sum)
         })
         .unwrap_or(0);
@@ -162,7 +163,7 @@ mod tests {
     #[test]
     fn select_largest_respects_min_and_exclude() {
         let list = coins(&[("small", 100), ("big", 1500), ("excluded", 2000)]);
-        let mut excluded = HashSet::new();
+        let mut excluded: HashSet<String> = HashSet::default();
         excluded.insert("excluded".to_string());
         let picked = select_largest_spendable_coin(&list, 1000, &excluded);
         assert_eq!(picked.map(|c| c.id.as_str()), Some("big"));
@@ -171,7 +172,7 @@ mod tests {
     #[test]
     fn select_exact_amount_case_insensitive_exclude() {
         let list = coins(&[("CoinA", 1000), ("coinb", 1000), ("CoinC", 2000)]);
-        let mut excluded = HashSet::new();
+        let mut excluded: HashSet<String> = HashSet::default();
         excluded.insert("coina".to_string());
         let ids = select_exact_amount_coin_ids(&list, 1000, &excluded, Some(5));
         assert_eq!(ids, vec!["coinb"]);

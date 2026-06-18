@@ -36,8 +36,7 @@ fn apply_missing_watched_offer(
 ) -> SignerResult<()> {
     let current_state = state_by_offer_id
         .get(watched_offer_id)
-        .map(String::as_str)
-        .unwrap_or("open");
+        .map_or("open", String::as_str);
     let transition = resolve_missing_watched_offer_transition(current_state)
         .map_err(|parse_err| SignerError::Other(parse_err.to_string()))?;
     apply_reconcile_transition(ReconcileTransitionParams {
@@ -66,7 +65,7 @@ pub async fn augment_dexie_offers_for_watchlist(
         .filter_map(offer_id_from_payload)
         .collect();
 
-    let mut augmented_by_id: HashMap<String, Value> = HashMap::new();
+    let mut augmented_by_id: HashMap<String, Value> = HashMap::default();
     for offer in list_offers {
         if let Some(offer_id) = offer_id_from_payload(offer) {
             augmented_by_id.insert(offer_id, offer.clone());
@@ -77,9 +76,9 @@ pub async fn augment_dexie_offers_for_watchlist(
         .difference(&dexie_offer_ids_in_list)
         .cloned()
         .collect();
-    let mut missing_watched_offer_ids = HashSet::new();
+    let mut missing_watched_offer_ids = HashSet::default();
 
-    for watched_offer_id in our_offer_ids.iter() {
+    for watched_offer_id in our_offer_ids {
         if augmented_by_id.contains_key(watched_offer_id) {
             continue;
         }

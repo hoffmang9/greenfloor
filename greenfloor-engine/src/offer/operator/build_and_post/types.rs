@@ -2,6 +2,8 @@ use std::time::Instant;
 
 use serde_json::{json, Value};
 
+use crate::metrics::metric_millis_to_u64;
+
 pub(crate) fn build_and_post_exit_code(publish_failures: u32) -> i32 {
     if publish_failures == 0 {
         0
@@ -100,7 +102,7 @@ pub(super) fn timing_payload(
     json!({
         "create_phase_ms": create_phase_ms,
         "publish_ms": publish_ms,
-        "total_ms": started.elapsed().as_millis() as u64,
+        "total_ms": metric_millis_to_u64(started.elapsed().as_millis()),
         "create_total_ms": create_total_ms.or(create_phase_ms),
     })
 }

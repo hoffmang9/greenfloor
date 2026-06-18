@@ -102,7 +102,9 @@ pub fn conservative_fee_from_payload(payload: &Value) -> Option<u64> {
             if let Some(parsed) = value.as_u64() {
                 valid.push(parsed);
             } else if let Some(parsed) = value.as_i64().filter(|v| *v >= 0) {
-                valid.push(parsed as u64);
+                if let Ok(parsed_u64) = u64::try_from(parsed) {
+                    valid.push(parsed_u64);
+                }
             }
         }
         if !valid.is_empty() {
@@ -112,7 +114,7 @@ pub fn conservative_fee_from_payload(payload: &Value) -> Option<u64> {
     payload.get("fee_estimate").and_then(|value| {
         value
             .as_u64()
-            .or_else(|| value.as_i64().filter(|v| *v >= 0).map(|v| v as u64))
+            .or_else(|| value.as_i64().and_then(|v| u64::try_from(v).ok()))
     })
 }
 

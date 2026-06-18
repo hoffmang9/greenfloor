@@ -180,7 +180,8 @@ pub fn cycle_summary(response: &Value) -> &Value {
 pub fn audit_events_by_type(
     events: &[greenfloor_engine::storage::AuditEventRow],
 ) -> HashMap<String, Vec<&greenfloor_engine::storage::AuditEventRow>> {
-    let mut out: HashMap<String, Vec<&greenfloor_engine::storage::AuditEventRow>> = HashMap::new();
+    let mut out: HashMap<String, Vec<&greenfloor_engine::storage::AuditEventRow>> =
+        HashMap::default();
     for event in events {
         out.entry(event.event_type.clone()).or_default().push(event);
     }

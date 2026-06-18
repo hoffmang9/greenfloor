@@ -7,6 +7,7 @@ use super::selection::{
     select_exact_amount_coin_ids, select_spendable_coins_for_target_amount,
     split_would_create_sub_cat_change, SpendableCoin,
 };
+use crate::metrics::metric_non_negative_usize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitPlanningProfile {
@@ -114,7 +115,7 @@ pub fn build_combine_prereq_plan(
         .iter()
         .map(|coin| (coin.id.clone(), coin.amount))
         .collect();
-    let cap = combine_input_cap.max(0) as usize;
+    let cap = metric_non_negative_usize(combine_input_cap);
     let combine_input_coin_ids: Vec<String> = combine_coin_ids.iter().take(cap).cloned().collect();
     let combine_cap_applied = combine_input_coin_ids.len() < combine_coin_ids.len();
     let combine_selected_total: i64 = combine_input_coin_ids
@@ -242,7 +243,9 @@ pub fn plan_auto_combine_inputs(
     if selection_mode == CombineInputSelectionMode::ExactAmount {
         let amount = target_amount_mojos
             .ok_or("target_amount_mojos is required for exact-amount combine selection")?;
-        let excluded = exclude_coin_ids.cloned().unwrap_or_default();
+        let excluded: HashSet<String> = exclude_coin_ids
+            .map(|set| set.iter().cloned().collect())
+            .unwrap_or_default();
         return Ok(select_exact_amount_coin_ids(
             spendable_coins,
             amount,
@@ -258,7 +261,7 @@ pub fn plan_auto_combine_inputs(
         .iter()
         .filter(|coin| !coin.id.is_empty() && !excluded.contains(&coin.id.to_ascii_lowercase()))
         .collect();
-    eligible.sort_by(|left, right| right.amount.cmp(&left.amount));
+    eligible.sort_by_key(|coin| std::cmp::Reverse(coin.amount));
     Ok(eligible
         .iter()
         .take(capped_count)
@@ -415,7 +418,7 @@ mod tests {
             3,
             CombineInputSelectionMode::ExactAmount,
             Some(1000),
-            None,
+            None::<&HashSet<String>>,
             Some(3),
         )
         .expect("combine inputs");

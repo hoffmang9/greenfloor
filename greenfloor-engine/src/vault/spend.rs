@@ -85,13 +85,15 @@ impl VaultSpendContext {
             return Some(*cached);
         }
         for nonce in 0..=self.max_nonce_probe {
-            let candidate = singleton_member_hash(
+            let Ok(candidate) = singleton_member_hash(
                 &MemberConfig::default()
                     .with_top_level(true)
                     .with_nonce(nonce),
                 self.launcher_id,
                 false,
-            );
+            ) else {
+                continue;
+            };
             if Bytes32::from(candidate) == p2_puzzle_hash {
                 self.nonce_by_p2_hash.insert(p2_puzzle_hash, nonce);
                 return Some(nonce);
@@ -128,7 +130,7 @@ impl VaultSpendContext {
             secp256r1_public_key,
             max_nonce_probe: 2048,
             network: "mainnet".to_string(),
-            nonce_by_p2_hash: HashMap::new(),
+            nonce_by_p2_hash: HashMap::default(),
             #[cfg(test)]
             local_fast_forward_signer: None,
         }
@@ -215,7 +217,7 @@ mod tests {
             secp256r1_public_key: r1.pk,
             max_nonce_probe: 20,
             network: "mainnet".to_string(),
-            nonce_by_p2_hash: HashMap::new(),
+            nonce_by_p2_hash: HashMap::default(),
             #[cfg(test)]
             local_fast_forward_signer: None,
         };
@@ -223,7 +225,8 @@ mod tests {
             &MemberConfig::default().with_top_level(true).with_nonce(7),
             launcher_id,
             false,
-        );
+        )
+        .expect("singleton hash");
         let inferred = vault_ctx
             .infer_nonce_for_p2_hash(target.into())
             .expect("nonce");

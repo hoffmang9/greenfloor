@@ -129,7 +129,7 @@ mod tests {
                 assert_eq!(args.body_json, "{}");
                 assert!(args.json);
             }
-            other => panic!("unexpected subcommand: {other:?}"),
+            other @ CoinsetCommands::PushTx(_) => panic!("unexpected subcommand: {other:?}"),
         }
     }
 
@@ -148,7 +148,7 @@ mod tests {
                 assert_eq!(args.spend_bundle_hex, "deadbeef");
                 assert!(args.json);
             }
-            other => panic!("unexpected subcommand: {other:?}"),
+            other @ CoinsetCommands::Post(_) => panic!("unexpected subcommand: {other:?}"),
         }
     }
 }

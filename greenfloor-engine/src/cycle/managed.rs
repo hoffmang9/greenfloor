@@ -54,7 +54,6 @@ pub enum ParallelSubmissionDecision {
 }
 
 pub fn is_transient_managed_upstream_error_text(error_text: &str) -> bool {
-    let normalized = error_text.trim().to_ascii_lowercase();
     const MARKERS: &[&str] = &[
         "timed out",
         "timeout",
@@ -73,6 +72,7 @@ pub fn is_transient_managed_upstream_error_text(error_text: &str) -> bool {
         "signer_http_error:503",
         "signer_http_error:504",
     ];
+    let normalized = error_text.trim().to_ascii_lowercase();
     MARKERS.iter().any(|marker| normalized.contains(marker))
 }
 
@@ -81,10 +81,8 @@ pub fn classify_managed_transient_error(
     _error_text: &str,
 ) -> Option<String> {
     match exception_class.trim() {
-        "ReservationStorageError" => None,
         "ReservationContentionError" => Some("reservation_contention".to_string()),
-        "ManagedUpstreamTransientError" => Some("upstream".to_string()),
-        "TimeoutError" => Some("upstream".to_string()),
+        "ManagedUpstreamTransientError" | "TimeoutError" => Some("upstream".to_string()),
         _ => None,
     }
 }
@@ -100,7 +98,7 @@ pub fn is_managed_worker_transient_error(exception_class: &str, error_text: &str
 pub fn is_parallel_dispatch_transient_error(exception_class: &str, error_text: &str) -> bool {
     matches!(
         classify_managed_transient_error(exception_class, error_text).as_deref(),
-        Some("upstream") | Some("reservation_contention")
+        Some("upstream" | "reservation_contention")
     )
 }
 
@@ -110,13 +108,19 @@ pub fn is_transient_dexie_visibility_404_error(error: &str) -> bool {
         || normalized.contains("dexie_http_error:404")
 }
 
-pub fn can_parallelize_managed_offers(
-    signer_path_configured: bool,
-    parallelism_enabled: bool,
-    runtime_dry_run: bool,
-    has_coordinator: bool,
-) -> bool {
-    signer_path_configured && parallelism_enabled && !runtime_dry_run && has_coordinator
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ManagedParallelismGate {
+    pub signer_path_configured: bool,
+    pub parallelism_enabled: bool,
+    pub runtime_dry_run: bool,
+    pub has_coordinator: bool,
+}
+
+pub fn can_parallelize_managed_offers(gate: ManagedParallelismGate) -> bool {
+    gate.signer_path_configured
+        && gate.parallelism_enabled
+        && !gate.runtime_dry_run
+        && gate.has_coordinator
 }
 
 /// Parallel managed dispatch after signer path is confirmed (daemon strategy phase).
@@ -216,8 +220,7 @@ pub fn prepare_parallel_managed_submission_decision(
         .map(|asset_id| {
             let total = spendable_profiles
                 .get(asset_id)
-                .map(|profile| profile.total)
-                .unwrap_or(0);
+                .map_or(0, |profile| profile.total);
             (asset_id.clone(), total)
         })
         .collect();
@@ -393,8 +396,10 @@ mod tests {
 
     #[test]
     fn prepare_parallel_submission_skips_invalid_request() {
-        let decision =
-            prepare_parallel_managed_submission_decision(&BTreeMap::new(), &BTreeMap::new());
+        let decision = prepare_parallel_managed_submission_decision(
+            &BTreeMap::default(),
+            &BTreeMap::default(),
+        );
         assert_eq!(
             decision,
             ParallelSubmissionDecision::Skip {

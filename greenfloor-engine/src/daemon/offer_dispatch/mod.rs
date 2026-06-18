@@ -50,7 +50,7 @@ pub(crate) fn classify_parallel_dispatch(
     }
 }
 
-pub(crate) async fn record_parallel_fallback_audit(
+pub(crate) fn record_parallel_fallback_audit(
     store: &SqliteStore,
     market_id: &str,
     err: &SignerError,
@@ -85,7 +85,7 @@ pub async fn execute_strategy_actions(
             )?;
             return Ok(OfferDispatchOutput {
                 executed_count: 0,
-                newly_executed_sell_counts: BTreeMap::new(),
+                newly_executed_sell_counts: BTreeMap::default(),
             });
         }
         Err(err) => return Err(err),
@@ -96,7 +96,7 @@ pub async fn execute_strategy_actions(
     if expanded.is_empty() {
         return Ok(OfferDispatchOutput {
             executed_count: 0,
-            newly_executed_sell_counts: BTreeMap::new(),
+            newly_executed_sell_counts: BTreeMap::default(),
         });
     }
 
@@ -115,7 +115,7 @@ pub async fn execute_strategy_actions(
         ) {
             ParallelDispatchDecision::Success(output) => return Ok(output),
             ParallelDispatchDecision::FallbackTransient(err) => {
-                record_parallel_fallback_audit(store, &market.market_id, &err).await?;
+                record_parallel_fallback_audit(store, &market.market_id, &err)?;
             }
             ParallelDispatchDecision::Fatal(err) => return Err(err),
         }

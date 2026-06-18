@@ -25,7 +25,7 @@ pub fn watched_coin_ids_from_open_offers(
     offers: &[Value],
 ) -> SignerResult<HashSet<String>> {
     let watch_offer_ids = watchlist_offer_ids(store, market_id)?;
-    let mut watched = HashSet::new();
+    let mut watched = HashSet::default();
     for offer in offers {
         let payload = DexieOfferPayload::new(offer.clone());
         let Some(offer_id) = payload.id() else {
@@ -105,7 +105,7 @@ pub async fn execute_managed_coin_op_plans(
         resolved_base_asset_id,
         base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(market.base_asset.trim()),
         combine_input_cap: resolve_combine_input_cap(),
-        watched_coin_ids: watched_coin_ids.clone(),
+        watched_coin_ids: watched_coin_ids.iter().cloned().collect(),
         test_overrides: CoinOpTestOverrides::default(),
     };
 
@@ -184,7 +184,7 @@ pub fn persist_coin_op_execution(
             }),
             Some(&market.market_id),
         )?;
-        store.add_coin_op_ledger_entry(crate::storage::CoinOpLedgerEntry {
+        store.add_coin_op_ledger_entry(&crate::storage::CoinOpLedgerEntry {
             market_id: &market.market_id,
             op_type: &item.op_type,
             op_count: item.op_count,

@@ -15,6 +15,10 @@ use clvm_utils::{tree_hash_atom, TreeHash};
 
 use crate::error::{SignerError, SignerResult};
 
+pub(crate) fn u32_to_usize(value: u32) -> SignerResult<usize> {
+    usize::try_from(value).map_err(|_| SignerError::UnsupportedVaultThreshold)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MemberConfig {
     pub top_level: bool,
@@ -45,14 +49,16 @@ impl MemberConfig {
     }
 }
 
-pub fn m_of_n_hash(config: &MemberConfig, required: u32, items: Vec<TreeHash>) -> TreeHash {
-    member_hash(
-        config,
-        MofN::new(required as usize, items).inner_puzzle_hash(),
-    )
+pub fn m_of_n_hash(
+    config: &MemberConfig,
+    required: u32,
+    items: Vec<TreeHash>,
+) -> SignerResult<TreeHash> {
+    let required_usize = u32_to_usize(required)?;
+    member_hash(config, MofN::new(required_usize, items).inner_puzzle_hash())
 }
 
-pub fn custom_member_hash(config: &MemberConfig, inner_hash: TreeHash) -> TreeHash {
+pub fn custom_member_hash(config: &MemberConfig, inner_hash: TreeHash) -> SignerResult<TreeHash> {
     member_hash(config, inner_hash)
 }
 
@@ -66,27 +72,27 @@ pub struct P2ConditionsOrSingletonHashes {
 pub fn p2_conditions_or_singleton_puzzle_hash(
     fixed_delegated_puzzle_hash: TreeHash,
     launcher_id: Bytes32,
-) -> P2ConditionsOrSingletonHashes {
+) -> SignerResult<P2ConditionsOrSingletonHashes> {
     let member_config = MemberConfig::default();
-    let fixed_conditions_hash = custom_member_hash(&member_config, fixed_delegated_puzzle_hash);
-    let p2_singleton_hash = singleton_member_hash(&member_config, launcher_id, false);
+    let fixed_conditions_hash = custom_member_hash(&member_config, fixed_delegated_puzzle_hash)?;
+    let p2_singleton_hash = singleton_member_hash(&member_config, launcher_id, false)?;
     let puzzle_hash = m_of_n_hash(
         &member_config.with_top_level(true),
         1,
         vec![fixed_conditions_hash, p2_singleton_hash],
-    );
-    P2ConditionsOrSingletonHashes {
+    )?;
+    Ok(P2ConditionsOrSingletonHashes {
         puzzle_hash,
         fixed_conditions_hash,
         p2_singleton_hash,
-    }
+    })
 }
 
 pub fn r1_member_hash(
     config: &MemberConfig,
     public_key: R1PublicKey,
     fast_forward: bool,
-) -> TreeHash {
+) -> SignerResult<TreeHash> {
     member_hash(
         config,
         if fast_forward {
@@ -101,7 +107,7 @@ pub fn k1_member_hash(
     config: &MemberConfig,
     public_key: K1PublicKey,
     fast_forward: bool,
-) -> TreeHash {
+) -> SignerResult<TreeHash> {
     member_hash(
         config,
         if fast_forward {
@@ -116,7 +122,7 @@ pub fn bls_member_hash(
     config: &MemberConfig,
     public_key: PublicKey,
     fast_forward: bool,
-) -> TreeHash {
+) -> SignerResult<TreeHash> {
     member_hash(
         config,
         if fast_forward {
@@ -131,7 +137,7 @@ pub fn passkey_member_hash(
     config: &MemberConfig,
     public_key: R1PublicKey,
     fast_forward: bool,
-) -> TreeHash {
+) -> SignerResult<TreeHash> {
     member_hash(
         config,
         if fast_forward {
@@ -146,7 +152,7 @@ pub fn singleton_member_hash(
     config: &MemberConfig,
     launcher_id: Bytes32,
     fast_forward: bool,
-) -> TreeHash {
+) -> SignerResult<TreeHash> {
     member_hash(
         config,
         if fast_forward {
@@ -169,17 +175,17 @@ pub fn force_1_of_2_restriction(
     nonce: u32,
     member_validator_list_hash: Bytes32,
     delegated_puzzle_validator_list_hash: Bytes32,
-) -> Restriction {
-    Restriction {
+) -> SignerResult<Restriction> {
+    Ok(Restriction {
         kind: RestrictionKind::DelegatedPuzzleWrapper,
         puzzle_hash: Force1of2RestrictedVariable::new(
             left_side_subtree_hash,
-            nonce as usize,
+            u32_to_usize(nonce)?,
             member_validator_list_hash,
             delegated_puzzle_validator_list_hash,
         )
         .curry_tree_hash(),
-    }
+    })
 }
 
 pub fn prevent_vault_side_effects_restriction() -> Vec<Restriction> {
@@ -234,13 +240,13 @@ fn bytes48_from_vec(bytes: &[u8]) -> SignerResult<[u8; 48]> {
     Ok(out)
 }
 
-fn member_hash(config: &MemberConfig, inner_hash: TreeHash) -> TreeHash {
-    mips_puzzle_hash(
-        config.nonce as usize,
+fn member_hash(config: &MemberConfig, inner_hash: TreeHash) -> SignerResult<TreeHash> {
+    Ok(mips_puzzle_hash(
+        u32_to_usize(config.nonce)?,
         config.restrictions.clone(),
         inner_hash,
         config.top_level,
-    )
+    ))
 }
 
 #[derive(Debug, Clone)]
@@ -258,28 +264,28 @@ pub fn member_hash_for_key(config: &MemberConfig, key: &WalletKey) -> SignerResu
             let pk = R1PublicKey::from_bytes(&key_array).map_err(|err| {
                 SignerError::UnsupportedVaultCurve(format!("SECP256R1 decode: {err}"))
             })?;
-            Ok(r1_member_hash(config, pk, true))
+            Ok(r1_member_hash(config, pk, true)?)
         }
         "SECP256K1" => {
             let key_array = bytes33_from_vec(&key_bytes)?;
             let pk = K1PublicKey::from_bytes(&key_array).map_err(|err| {
                 SignerError::UnsupportedVaultCurve(format!("SECP256K1 decode: {err}"))
             })?;
-            Ok(k1_member_hash(config, pk, true))
+            Ok(k1_member_hash(config, pk, true)?)
         }
         "WEBAUTHN" => {
             let key_array = bytes33_from_vec(&key_bytes)?;
             let pk = R1PublicKey::from_bytes(&key_array).map_err(|err| {
                 SignerError::UnsupportedVaultCurve(format!("WEBAUTHN decode: {err}"))
             })?;
-            Ok(passkey_member_hash(config, pk, true))
+            Ok(passkey_member_hash(config, pk, true)?)
         }
         "BLS12_381" => {
             let key_array = bytes48_from_vec(&key_bytes)?;
             let pk = PublicKey::from_bytes(&key_array).map_err(|err| {
                 SignerError::UnsupportedVaultCurve(format!("BLS12_381 decode: {err}"))
             })?;
-            Ok(bls_member_hash(config, pk, false))
+            Ok(bls_member_hash(config, pk, false)?)
         }
         other => Err(SignerError::UnsupportedVaultCurve(other.to_string())),
     }

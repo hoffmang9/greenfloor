@@ -36,12 +36,11 @@ impl OfferReservationCoordinator {
             "res-{:x}-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or(0),
+                .map_or(0, |duration| duration.as_nanos()),
             std::process::id()
         );
         match store.try_acquire_offer_reservation_lease(
-            crate::storage::OfferReservationLeaseRequest {
+            &crate::storage::OfferReservationLeaseRequest {
                 reservation_id: &reservation_id,
                 market_id,
                 wallet_id,

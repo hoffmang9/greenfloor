@@ -71,8 +71,7 @@ impl MspCoinset {
             .await;
         match response {
             Ok(body) if body.success => Ok(body.asset),
-            Ok(_) => Ok(None),
-            Err(_) => Ok(None),
+            _ => Ok(None),
         }
     }
 }

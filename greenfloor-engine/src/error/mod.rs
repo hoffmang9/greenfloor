@@ -149,6 +149,9 @@ pub enum SignerError {
     #[error("request_amount must be positive")]
     InvalidOfferRequestAmount,
 
+    #[error("invalid ladder math")]
+    InvalidLadderMath,
+
     #[error("invalid_offer_amount")]
     InvalidOfferAmount,
 
@@ -196,13 +199,13 @@ impl SignerError {
 
 pub type SignerResult<T> = Result<T, SignerError>;
 
-pub fn driver_error(err: chia_sdk_driver::DriverError) -> SignerError {
+pub fn driver_error(err: &chia_sdk_driver::DriverError) -> SignerError {
     SignerError::Driver(err.to_string())
 }
 
 impl From<chia_sdk_driver::DriverError> for SignerError {
     fn from(err: chia_sdk_driver::DriverError) -> Self {
-        driver_error(err)
+        driver_error(&err)
     }
 }
 

@@ -69,7 +69,7 @@ pub async fn run_offers_reconcile_command(
 
 pub fn run_offers_status_command(
     ctx: &ManagerContext,
-    args: OffersStatusCliArgs,
+    args: &OffersStatusCliArgs,
 ) -> SignerResult<i32> {
     let program = load_program_config(&ctx.program_config)?;
     let db_path = resolve_state_db_path(&program.home_dir, ctx.state_db_override());

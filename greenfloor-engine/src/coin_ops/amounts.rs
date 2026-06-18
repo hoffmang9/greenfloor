@@ -2,17 +2,21 @@
 
 use std::collections::HashMap;
 
+use crate::error::SignerResult;
+
+use super::scalars::{coin_op_non_negative_u64_saturating, usize_to_i64};
 use super::selection::SpendableCoin;
 
-pub fn combine_output_amounts(total: i64, output_count: usize) -> Vec<u64> {
+pub fn combine_output_amounts(total: i64, output_count: usize) -> SignerResult<Vec<u64>> {
     let output_count = output_count.max(1);
-    let base = total.div_euclid(output_count as i64);
-    let remainder = total.rem_euclid(output_count as i64);
-    let mut output_amounts = vec![base.max(0) as u64; output_count];
+    let output_count_i64 = usize_to_i64(output_count, "combine.output_count")?;
+    let base = total.div_euclid(output_count_i64);
+    let remainder = total.rem_euclid(output_count_i64);
+    let mut output_amounts = vec![coin_op_non_negative_u64_saturating(base); output_count];
     if let Some(last) = output_amounts.last_mut() {
-        *last = last.saturating_add(remainder.max(0) as u64);
+        *last = last.saturating_add(coin_op_non_negative_u64_saturating(remainder));
     }
-    output_amounts
+    Ok(output_amounts)
 }
 
 pub fn total_for_coin_ids(spendable: &[SpendableCoin], coin_ids: &[String]) -> i64 {
@@ -37,7 +41,10 @@ mod tests {
 
     #[test]
     fn combine_output_distributes_remainder_to_last() {
-        assert_eq!(combine_output_amounts(10, 3), vec![3, 3, 4]);
+        assert_eq!(
+            combine_output_amounts(10, 3).expect("output amounts"),
+            vec![3, 3, 4]
+        );
     }
 
     #[test]

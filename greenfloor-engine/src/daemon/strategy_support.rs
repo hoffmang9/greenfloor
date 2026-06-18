@@ -90,7 +90,7 @@ fn strategy_config_for_ladder(
     include_pricing_bounds: bool,
 ) -> StrategyConfig {
     let ladder = market.ladders.get(side).cloned().unwrap_or_default();
-    let mut targets_by_size: BTreeMap<i64, i64> = BTreeMap::new();
+    let mut targets_by_size: BTreeMap<i64, i64> = BTreeMap::default();
     for entry in &ladder {
         if entry.size_base_units > 0 {
             targets_by_size.insert(entry.size_base_units, entry.target_count.max(0));
@@ -171,12 +171,12 @@ fn pricing_int(pricing: &serde_json::Value, key: &str) -> Option<i64> {
     pricing.get(key).and_then(|value| {
         value
             .as_i64()
-            .or_else(|| value.as_u64().map(|raw| raw as i64))
+            .or_else(|| value.as_u64().and_then(|raw| i64::try_from(raw).ok()))
     })
 }
 
 fn pricing_float(pricing: &serde_json::Value, key: &str) -> Option<f64> {
-    pricing.get(key).and_then(|value| value.as_f64())
+    pricing.get(key).and_then(serde_json::Value::as_f64)
 }
 
 #[cfg(test)]
@@ -187,7 +187,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn sample_market() -> MarketConfig {
-        let mut ladders = HashMap::new();
+        let mut ladders = HashMap::default();
         ladders.insert(
             "sell".to_string(),
             vec![LadderEntry {

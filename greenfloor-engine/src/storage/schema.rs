@@ -1,4 +1,4 @@
-pub const SCHEMA: &str = r#"
+pub const SCHEMA: &str = r"
 CREATE TABLE IF NOT EXISTS alert_state (
   market_id TEXT PRIMARY KEY,
   is_low INTEGER NOT NULL,
@@ -60,4 +60,4 @@ CREATE TABLE IF NOT EXISTS offer_reservation_lease (
   expires_at TEXT NOT NULL,
   released_at TEXT NULL
 );
-"#;
+";

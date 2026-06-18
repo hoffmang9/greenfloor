@@ -33,7 +33,7 @@ pub fn parse_signer_key_registry(raw: &Value) -> SignerResult<HashMap<String, Si
             .collect()
     };
 
-    let mut key_registry = HashMap::new();
+    let mut key_registry = HashMap::default();
     for row in rows {
         let row_map = row
             .as_object()
@@ -43,9 +43,9 @@ pub fn parse_signer_key_registry(raw: &Value) -> SignerResult<HashMap<String, Si
             return Err(config_err("keys.registry entry key_id must be non-empty"));
         }
         let fingerprint_raw = req_value(row_map, "fingerprint")?;
-        let fingerprint =
-            parse_i64_field(fingerprint_raw, &format!("fingerprint for key_id={key_id}"))
-                .map_err(|_| config_err(format!("invalid fingerprint for key_id={key_id}")))?;
+        let fingerprint_field = format!("fingerprint for key_id={key_id}");
+        let fingerprint = parse_i64_field(fingerprint_raw, &fingerprint_field)
+            .map_err(|_| config_err(format!("invalid fingerprint for key_id={key_id}")))?;
         if fingerprint <= 0 {
             return Err(config_err(format!(
                 "fingerprint for key_id={key_id} must be positive"
@@ -60,7 +60,10 @@ pub fn parse_signer_key_registry(raw: &Value) -> SignerResult<HashMap<String, Si
             key_id.clone(),
             SignerKeyEntry {
                 key_id,
-                fingerprint: fingerprint as u64,
+                fingerprint: crate::config::parse_non_negative_u64(
+                    fingerprint,
+                    &fingerprint_field,
+                )?,
                 network: optional_trimmed_string(row_map.get("network")),
                 keyring_yaml_path: optional_trimmed_string(row_map.get("keyring_yaml_path")),
             },

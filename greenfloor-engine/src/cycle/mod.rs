@@ -40,7 +40,8 @@ pub use managed::{
     managed_retry_decision, parallel_managed_dispatch_enabled, parallel_max_workers,
     prepare_parallel_managed_submission_decision, reservation_release_status,
     should_apply_parallel_transient_cooldown, ManagedActionOutcome, ManagedActionStatus,
-    ManagedRetryDecision, ManagedRetryDecisionKind, ParallelSubmissionDecision,
+    ManagedParallelismGate, ManagedRetryDecision, ManagedRetryDecisionKind,
+    ParallelSubmissionDecision,
 };
 pub use market::{
     aggregate_two_sided_offer_counts, is_two_sided_market_mode, market_cycle_phases,

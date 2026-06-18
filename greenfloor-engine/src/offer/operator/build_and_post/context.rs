@@ -96,8 +96,7 @@ pub(super) fn resolve_action_side(
 async fn resolve_maker_offer_fee(network: &str) -> (u64, String) {
     match get_conservative_fee_estimate(network, None, 1_000_000, Some(1)).await {
         Ok(Some(fee)) => (fee, "coinset_conservative_fee".to_string()),
-        Ok(None) => (0, "coinset_fee_unavailable".to_string()),
-        Err(_) => (0, "coinset_fee_unavailable".to_string()),
+        Ok(None) | Err(_) => (0, "coinset_fee_unavailable".to_string()),
     }
 }
 
@@ -128,7 +127,7 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
             mode: "sell_only".to_string(),
             pricing: json!({}),
             cancel_move_threshold_bps: None,
-            ladders: HashMap::new(),
+            ladders: HashMap::default(),
         },
         signer_config: SignerConfig {
             network: "mainnet".to_string(),

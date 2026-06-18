@@ -15,10 +15,10 @@ impl CoinWatchlistCache {
     pub fn watched_coin_ids_for_market(&self, market_id: &str) -> HashSet<String> {
         let key = market_id.trim();
         if key.is_empty() {
-            return HashSet::new();
+            return HashSet::default();
         }
         let Ok(cache) = self.inner.lock() else {
-            return HashSet::new();
+            return HashSet::default();
         };
         cache.get(key).cloned().unwrap_or_default()
     }
@@ -48,12 +48,12 @@ impl CoinWatchlistCache {
             .filter(|coin_id| !coin_id.is_empty())
             .collect();
         if normalized.is_empty() {
-            return HashMap::new();
+            return HashMap::default();
         }
         let Ok(cache) = self.inner.lock() else {
-            return HashMap::new();
+            return HashMap::default();
         };
-        let mut matches = HashMap::new();
+        let mut matches = HashMap::default();
         for (market_id, watched) in cache.iter() {
             let mut intersection: Vec<String> = normalized.intersection(watched).cloned().collect();
             if intersection.is_empty() {

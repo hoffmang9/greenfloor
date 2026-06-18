@@ -1,6 +1,7 @@
 mod keys_registry;
 mod markets;
 mod markets_validate;
+mod parse_int;
 mod program;
 mod signer;
 mod yaml_fields;
@@ -10,6 +11,7 @@ pub use markets::{
     cancel_policy_stable_vs_unstable, load_markets_config, load_markets_config_with_overlay,
     parse_markets_config, resolve_market_for_build, LadderEntry, MarketConfig, MarketsConfig,
 };
+pub use parse_int::{parse_non_negative_u64, u64_to_i64, usize_to_i64};
 pub use program::{
     action_side_from_pricing, is_signer_execution_soft_skip, is_testnet_network,
     load_program_bundle, load_program_bundle_for_coin_list, load_program_bundle_gated,

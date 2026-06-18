@@ -82,14 +82,14 @@ pub fn offers_status_cli(
         .into_iter()
         .map(audit_event_row)
         .collect::<Vec<_>>();
-    let mut by_state = HashMap::new();
+    let mut by_state = HashMap::default();
     for row in &offers {
         *by_state.entry(row.state.clone()).or_insert(0) += 1;
     }
     Ok(OffersStatusCliResult {
         state_db: db_path.display().to_string(),
         market_id: market_filter.map(str::to_string),
-        offer_count: offers.len() as u64,
+        offer_count: crate::metrics::metric_collection_len_to_u64(offers.len()),
         by_state,
         offers,
         recent_events: events,

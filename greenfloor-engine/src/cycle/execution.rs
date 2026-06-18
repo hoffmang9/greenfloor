@@ -8,6 +8,7 @@ use super::dispatch::{
 };
 use super::managed::{prepare_parallel_managed_submission_decision, ParallelSubmissionDecision};
 use super::strategy::PlannedAction;
+use crate::error::SignerResult;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParallelActionReservationInput {
@@ -42,7 +43,7 @@ struct ParallelReservationPrep {
 fn build_parallel_reservation_prep(
     actions: &[ParallelActionReservationInput],
     ctx: &ParallelReservationContext,
-) -> ParallelReservationPrep {
+) -> SignerResult<ParallelReservationPrep> {
     let mut entries = Vec::with_capacity(actions.len());
     let mut asset_ids = BTreeSet::new();
     for action in actions {
@@ -57,7 +58,7 @@ fn build_parallel_reservation_prep(
                 quote_price: ctx.quote_price,
                 fee_asset_id: &ctx.fee_asset_id,
                 fee_amount_mojos: ctx.fee_amount_mojos,
-            });
+            })?;
         for asset_id in requested_amounts.keys() {
             asset_ids.insert(asset_id.clone());
         }
@@ -66,17 +67,17 @@ fn build_parallel_reservation_prep(
             requested_amounts,
         });
     }
-    ParallelReservationPrep {
+    Ok(ParallelReservationPrep {
         entries,
         asset_ids: asset_ids.into_iter().collect(),
-    }
+    })
 }
 
 pub fn plan_parallel_managed_dispatch(
     actions: &[PlannedAction],
     ctx: &ParallelReservationContext,
     spendable_profiles: &BTreeMap<String, SpendableAssetProfile>,
-) -> ParallelBatchPlan {
+) -> SignerResult<ParallelBatchPlan> {
     let reservation_inputs: Vec<ParallelActionReservationInput> = actions
         .iter()
         .enumerate()
@@ -86,7 +87,7 @@ pub fn plan_parallel_managed_dispatch(
             size_base_units: action.size,
         })
         .collect();
-    let prep = build_parallel_reservation_prep(&reservation_inputs, ctx);
+    let prep = build_parallel_reservation_prep(&reservation_inputs, ctx)?;
     let mut plan = ParallelBatchPlan::default();
     for entry in &prep.entries {
         let decision = prepare_parallel_managed_submission_decision(
@@ -109,7 +110,7 @@ pub fn plan_parallel_managed_dispatch(
             }
         }
     }
-    plan
+    Ok(plan)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -224,7 +225,8 @@ mod tests {
                 max_single_known: true,
             },
         )]);
-        let plan = plan_parallel_managed_dispatch(&actions, &ctx, &spendable_profiles);
+        let plan =
+            plan_parallel_managed_dispatch(&actions, &ctx, &spendable_profiles).expect("plan");
         assert_eq!(plan.skip_items.len(), 1);
         assert_eq!(plan.skip_items[0].submit_index, 0);
         assert_eq!(plan.queue.len(), 1);

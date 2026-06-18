@@ -109,7 +109,7 @@ pub async fn offers_cancel_cli(
     let outcomes = cancel_offers_on_dexie(&store, &dexie, &targets).await?;
     let mut items = Vec::with_capacity(outcomes.len());
     let mut failures = 0u64;
-    for (outcome, row) in outcomes.into_iter().zip(selected.into_iter()) {
+    for (outcome, row) in outcomes.into_iter().zip(selected) {
         if !outcome.success {
             failures += 1;
         }
@@ -124,7 +124,7 @@ pub async fn offers_cancel_cli(
             }),
         });
     }
-    let selected_count = items.len() as u64;
+    let selected_count = crate::metrics::metric_collection_len_to_u64(items.len());
     Ok(OffersCancelCliResult {
         venue,
         cancel_open,

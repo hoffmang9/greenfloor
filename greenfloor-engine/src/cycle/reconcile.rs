@@ -57,8 +57,7 @@ impl ReconcileState {
     fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Lifecycle(OfferLifecycleState::TxBlockConfirmed)
-                | Self::Lifecycle(OfferLifecycleState::Expired)
+            Self::Lifecycle(OfferLifecycleState::TxBlockConfirmed | OfferLifecycleState::Expired)
                 | Self::Cancelled
         )
     }
@@ -145,7 +144,7 @@ fn build_transition_from_decision(
 ) -> CycleOfferTransition {
     let immediate_requeue = matches!(
         decision.signal,
-        Some(OfferSignal::TxConfirmed) | Some(OfferSignal::Expired)
+        Some(OfferSignal::TxConfirmed | OfferSignal::Expired)
     );
     build_transition(TransitionBuildArgs {
         current_state,
@@ -174,7 +173,6 @@ fn reconciled_state_from_dexie_status(
             apply_offer_signal(OfferLifecycleState::Open, OfferSignal::Expired).new_state,
         ),
         3 => ReconcileState::Cancelled,
-        0 | 1 | 2 | 5 => current_state.clone(),
         _ => current_state.clone(),
     }
 }
@@ -246,7 +244,7 @@ fn resolve_watched_offer_decision(
     }
 
     let dexie_state = reconciled_state_from_dexie_status(status.unwrap_or_default(), current_state);
-    let taker_diagnostic = if matches!(status, Some(4) | Some(5)) {
+    let taker_diagnostic = if matches!(status, Some(4 | 5)) {
         "dexie_status_pattern_fallback"
     } else {
         TAKER_NONE

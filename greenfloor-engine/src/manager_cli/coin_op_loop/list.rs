@@ -66,8 +66,9 @@ async fn load_coin_list_snapshot(
         .iter()
         .map(|coin| {
             let state = coin.state.trim().to_ascii_uppercase();
+            let amount_i64 = i64::try_from(coin.amount).ok();
             let spendable = is_spendable_coin_state(&state)
-                && i64::try_from(coin.amount).unwrap_or(0) >= min_amount;
+                && amount_i64.is_some_and(|amount| amount >= min_amount);
             json!({
                 "coin_id": coin.name,
                 "amount": coin.amount,

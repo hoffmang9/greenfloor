@@ -29,7 +29,7 @@ pub async fn post_managed_planned_action(
         network: program.network.clone(),
         market_id: Some(market.market_id.clone()),
         pair: None,
-        size_base_units: action.size as u64,
+        size_base_units: crate::config::parse_non_negative_u64(action.size, "action.size")?,
         repeat: 1,
         publish_venue: Some(program.offer_publish_venue.clone()),
         dexie_base_url: Some(program.dexie_api_base.clone()),

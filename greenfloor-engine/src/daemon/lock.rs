@@ -10,7 +10,7 @@ use crate::error::{SignerError, SignerResult};
 const LOCK_FILENAME: &str = "daemon.lock";
 
 pub struct DaemonInstanceLock {
-    _file: File,
+    lock_file: File,
     path: PathBuf,
 }
 
@@ -67,7 +67,10 @@ impl DaemonInstanceLock {
         handle.flush().map_err(|err| {
             SignerError::Other(format!("failed to flush daemon lock metadata: {err}"))
         })?;
-        Ok(Self { _file: file, path })
+        Ok(Self {
+            lock_file: file,
+            path,
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -77,7 +80,7 @@ impl DaemonInstanceLock {
 
 impl Drop for DaemonInstanceLock {
     fn drop(&mut self) {
-        unlock(&self._file);
+        unlock(&self.lock_file);
     }
 }
 

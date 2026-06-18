@@ -33,7 +33,7 @@ pub(crate) fn recent_offer_metadata_by_offer_id(
         Some(market_id),
         1500,
     )?;
-    let mut metadata_by_offer_id = HashMap::new();
+    let mut metadata_by_offer_id = HashMap::default();
     for event in events {
         let Some(payload) = event.payload.as_object() else {
             continue;
@@ -47,7 +47,7 @@ pub(crate) fn recent_offer_metadata_by_offer_id(
             };
             let status = item_obj
                 .get("status")
-                .and_then(|value| value.as_str())
+                .and_then(serde_json::Value::as_str)
                 .unwrap_or("")
                 .trim()
                 .to_ascii_lowercase();
@@ -56,30 +56,30 @@ pub(crate) fn recent_offer_metadata_by_offer_id(
             }
             let offer_id = item_obj
                 .get("offer_id")
-                .and_then(|value| value.as_str())
+                .and_then(serde_json::Value::as_str)
                 .unwrap_or("")
                 .trim()
                 .to_string();
             if offer_id.is_empty() {
                 continue;
             }
-            let size = item_obj
+            let offer_size = item_obj
                 .get("size")
-                .and_then(|value| value.as_i64())
+                .and_then(serde_json::Value::as_i64)
                 .unwrap_or(0);
-            if size <= 0 {
+            if offer_size <= 0 {
                 continue;
             }
-            let side =
-                parse_offer_side_metadata(item_obj.get("side").and_then(|value| value.as_str()));
+            let parsed_side =
+                parse_offer_side_metadata(item_obj.get("side").and_then(serde_json::Value::as_str));
             if metadata_by_offer_id.contains_key(&offer_id) {
                 continue;
             }
             metadata_by_offer_id.insert(
                 offer_id,
                 OfferExecutionMetadata {
-                    size,
-                    side,
+                    size: offer_size,
+                    side: parsed_side,
                     status,
                     created_at: event.created_at.clone(),
                 },

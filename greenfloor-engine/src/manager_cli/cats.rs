@@ -28,7 +28,7 @@ pub struct CatsAddRequest<'a> {
     pub replace: bool,
 }
 
-pub async fn run_cats_list(ctx: &ManagerContext) -> SignerResult<i32> {
+pub fn run_cats_list(ctx: &ManagerContext) -> SignerResult<i32> {
     let catalog = load_cats_catalog(&ctx.cats_config)?;
     ctx.emit_json(&json!({"cats": catalog}))?;
     Ok(0)
@@ -71,14 +71,14 @@ pub async fn run_cats_add(request: CatsAddRequest<'_>) -> SignerResult<i32> {
         }
     }
     let dexie_meta = derive_cat_metadata_from_dexie_row(dexie_row.as_ref());
-    let resolved_asset_id = if !ref_cat_id.is_empty() {
-        ref_cat_id.clone()
-    } else {
+    let resolved_asset_id = if ref_cat_id.is_empty() {
         dexie_meta
             .get("asset_id")
             .and_then(JsonValue::as_str)
             .map(normalize_hex_id)
             .unwrap_or_default()
+    } else {
+        ref_cat_id.clone()
     };
     if !is_hex_id(&resolved_asset_id) {
         ctx.emit_json(&json!({"added": false, "error": "cat_id_required_and_must_be_64_hex"}))?;
@@ -115,8 +115,7 @@ pub async fn run_cats_add(request: CatsAddRequest<'_>) -> SignerResult<i32> {
         && catalog.iter().any(|row| {
             row.get("asset_id")
                 .and_then(JsonValue::as_str)
-                .map(|value| normalize_hex_id(value) == resolved_asset_id)
-                .unwrap_or(false)
+                .is_some_and(|value| normalize_hex_id(value) == resolved_asset_id)
         })
     {
         ctx.emit_json(&json!({
@@ -129,8 +128,7 @@ pub async fn run_cats_add(request: CatsAddRequest<'_>) -> SignerResult<i32> {
     catalog.retain(|row| {
         row.get("asset_id")
             .and_then(JsonValue::as_str)
-            .map(|value| normalize_hex_id(value) != resolved_asset_id)
-            .unwrap_or(true)
+            .is_none_or(|value| normalize_hex_id(value) != resolved_asset_id)
     });
     let mut entry = json!({
         "name": resolved_name,
@@ -205,8 +203,7 @@ pub async fn run_cats_delete(
     let exists = catalog.iter().any(|row| {
         row.get("asset_id")
             .and_then(JsonValue::as_str)
-            .map(|value| normalize_hex_id(value) == resolved_asset_id)
-            .unwrap_or(false)
+            .is_some_and(|value| normalize_hex_id(value) == resolved_asset_id)
     });
     if preflight_only {
         ctx.emit_json(&json!({
@@ -231,8 +228,7 @@ pub async fn run_cats_delete(
         .filter(|row| {
             row.get("asset_id")
                 .and_then(JsonValue::as_str)
-                .map(|value| normalize_hex_id(value) != resolved_asset_id)
-                .unwrap_or(true)
+                .is_none_or(|value| normalize_hex_id(value) != resolved_asset_id)
         })
         .collect();
     write_cats_catalog(&ctx.cats_config, &updated)?;

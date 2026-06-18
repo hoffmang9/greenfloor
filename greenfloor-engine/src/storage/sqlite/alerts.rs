@@ -49,14 +49,14 @@ impl SqliteStore {
     pub fn upsert_alert_state(&self, state: &StoredAlertState) -> SignerResult<()> {
         self.conn
             .execute(
-                r#"
+                r"
                 INSERT INTO alert_state (market_id, is_low, last_alert_at, updated_at)
                 VALUES (?1, ?2, ?3, ?4)
                 ON CONFLICT(market_id) DO UPDATE SET
                   is_low = excluded.is_low,
                   last_alert_at = excluded.last_alert_at,
                   updated_at = excluded.updated_at
-                "#,
+                ",
                 params![
                     state.market_id,
                     i64::from(state.is_low),

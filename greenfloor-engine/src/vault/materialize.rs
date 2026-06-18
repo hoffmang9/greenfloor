@@ -16,6 +16,7 @@ use clvm_utils::TreeHash;
 
 use crate::coinset::OfferCoinsetBackend;
 use crate::error::{SignerError, SignerResult};
+use crate::vault::members::u32_to_usize;
 use crate::vault::messages::extract_mode23_receive_messages;
 use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
 
@@ -97,11 +98,12 @@ pub(crate) fn build_vault_cat_inner_spend(
     nonce: u32,
     p2_puzzle_hash: TreeHash,
 ) -> SignerResult<Spend> {
+    let nonce_usize = u32_to_usize(nonce)?;
     let mut mips_spend = MipsSpend::new(delegated);
     let restrictions = Vec::new();
     let member = SingletonMember::new(vault_ctx.launcher_id);
     let member_hash = mips_puzzle_hash(
-        nonce as usize,
+        nonce_usize,
         restrictions.clone(),
         member.curry_tree_hash(),
         true,
@@ -116,7 +118,7 @@ pub(crate) fn build_vault_cat_inner_spend(
     mips_spend.members.insert(
         member_hash,
         InnerPuzzleSpend::new(
-            nonce as usize,
+            nonce_usize,
             restrictions,
             Spend::new(member_puzzle, member_solution),
         ),

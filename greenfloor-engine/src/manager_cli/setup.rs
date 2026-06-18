@@ -110,6 +110,7 @@ fn market_fields_row(market: &crate::config::MarketConfig) -> serde_json::Value 
     })
 }
 
+#[derive(Clone, Copy)]
 pub struct MaterializeMinimalProgramRequest<'a> {
     pub output: &'a Path,
     pub home_dir: &'a Path,
@@ -121,9 +122,7 @@ pub struct MaterializeMinimalProgramRequest<'a> {
     pub with_signer: bool,
 }
 
-pub fn run_materialize_minimal_program(
-    request: MaterializeMinimalProgramRequest<'_>,
-) -> SignerResult<i32> {
+pub fn run_materialize_minimal_program(request: MaterializeMinimalProgramRequest<'_>) -> i32 {
     let params = MinimalProgramParams {
         home_dir: request.home_dir,
         dexie_api_base: request.dexie_api_base,
@@ -137,7 +136,7 @@ pub fn run_materialize_minimal_program(
     } else {
         write_minimal_program(request.output, params);
     }
-    Ok(0)
+    0
 }
 
 pub fn run_cats_fields(ctx: &ManagerContext) -> SignerResult<i32> {
@@ -146,7 +145,7 @@ pub fn run_cats_fields(ctx: &ManagerContext) -> SignerResult<i32> {
     for row in &catalog {
         let Some(symbol) = row
             .get("base_symbol")
-            .and_then(|value| value.as_str())
+            .and_then(serde_json::Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
         else {
@@ -154,7 +153,7 @@ pub fn run_cats_fields(ctx: &ManagerContext) -> SignerResult<i32> {
         };
         let Some(asset_id) = row
             .get("asset_id")
-            .and_then(|value| value.as_str())
+            .and_then(serde_json::Value::as_str)
             .map(normalize_hex_id)
             .filter(|value| is_hex_id(value))
         else {
@@ -180,7 +179,7 @@ pub fn run_set_log_level(ctx: &ManagerContext, log_level: &str) -> SignerResult<
         .ok_or_else(|| SignerError::Other("program config root must be a mapping".to_string()))?;
     let app_entry = app
         .entry(Value::from("app"))
-        .or_insert_with(|| Value::Mapping(Default::default()));
+        .or_insert_with(|| Value::Mapping(serde_yaml::Mapping::default()));
     let app_map = app_entry.as_mapping_mut().ok_or_else(|| {
         SignerError::Other("program config field 'app' must be a mapping".to_string())
     })?;
@@ -201,7 +200,7 @@ pub fn run_set_log_level(ctx: &ManagerContext, log_level: &str) -> SignerResult<
     Ok(0)
 }
 
-pub fn run_bootstrap_home(params: BootstrapHomeParams<'_>) -> SignerResult<i32> {
+pub fn run_bootstrap_home(params: &BootstrapHomeParams<'_>) -> SignerResult<i32> {
     let BootstrapHomeParams {
         ctx,
         home_dir,
@@ -211,7 +210,7 @@ pub fn run_bootstrap_home(params: BootstrapHomeParams<'_>) -> SignerResult<i32> 
         testnet_markets_template,
         seed_testnet_markets,
         force,
-    } = params;
+    } = *params;
     let home = expand_home(home_dir);
     let config_dir = home.join("config");
     let db_dir = home.join("db");

@@ -4,6 +4,8 @@ mod backend;
 mod coin_select;
 mod msp;
 mod presplit;
+#[cfg(test)]
+pub(crate) mod test_support;
 mod wallet_io;
 mod xch;
 
@@ -323,16 +325,7 @@ mod tests {
 
     #[test]
     fn select_cats_smallest_first_accumulates_until_target() {
-        use chia_protocol::{Bytes32, Coin};
-        use chia_sdk_driver::{Cat, CatInfo};
-
-        fn cat_with_amount(amount: u64) -> Cat {
-            Cat::new(
-                Coin::new(Bytes32::new([amount as u8; 32]), Bytes32::default(), amount),
-                None,
-                CatInfo::new(Bytes32::new([0x01; 32]), None, Bytes32::default()),
-            )
-        }
+        use crate::coinset::test_support::cat_with_amount;
 
         let cats = vec![
             cat_with_amount(5000),

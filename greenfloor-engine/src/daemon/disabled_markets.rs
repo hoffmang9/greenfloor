@@ -25,8 +25,9 @@ pub fn disabled_market_log_interval_seconds() -> u64 {
     std::env::var("GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS")
         .ok()
         .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .map(|value| value.max(MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS))
-        .unwrap_or(DEFAULT_DISABLED_MARKET_LOG_INTERVAL_SECONDS)
+        .map_or(DEFAULT_DISABLED_MARKET_LOG_INTERVAL_SECONDS, |value| {
+            value.max(MIN_DISABLED_MARKET_LOG_INTERVAL_SECONDS)
+        })
 }
 
 pub fn log_disabled_markets_startup_once(markets: &MarketsConfig) {
@@ -104,7 +105,7 @@ mod tests {
             mode: "sell_only".to_string(),
             pricing: json!({}),
             cancel_move_threshold_bps: None,
-            ladders: HashMap::new(),
+            ladders: HashMap::default(),
         }
     }
 

@@ -41,7 +41,7 @@ pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult
     ]
     .into_iter()
     .collect();
-    let mut offer_ids = HashSet::new();
+    let mut offer_ids = HashSet::default();
     for row in store.list_offer_state_details(market_id, 500)? {
         let state = row.state.trim().to_ascii_lowercase();
         if tracked_states.contains(state.as_str())
@@ -77,7 +77,7 @@ fn active_offer_state_summary(
     limit: usize,
 ) -> SignerResult<ActiveOfferStateSummary> {
     let offer_states = store.list_offer_state_details(market_id, limit)?;
-    let mut state_counts: HashMap<String, i64> = HashMap::new();
+    let mut state_counts: HashMap<String, i64> = HashMap::default();
     for row in &offer_states {
         let state = row.state.trim().to_ascii_lowercase();
         if state.is_empty() {
@@ -247,7 +247,7 @@ pub fn update_market_coin_watchlist_from_offers(
     offers: &[Value],
 ) -> SignerResult<()> {
     let watch_offer_ids = watchlist_offer_ids_for_coin_tracking(store, market_id)?;
-    let mut watched_coin_ids = HashSet::new();
+    let mut watched_coin_ids: HashSet<String> = HashSet::default();
     let mut matched_offer_count = 0_u64;
     for offer in offers {
         let offer_id = offer.get("id").and_then(Value::as_str).unwrap_or("").trim();

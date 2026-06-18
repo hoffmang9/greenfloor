@@ -51,12 +51,13 @@ pub async fn coinset_spendable_profiles_by_asset(
     }
     for asset_id in asset_ids {
         let profile = profiles.get_mut(asset_id).expect("profile");
-        let coins = match list_wallet_unspent_coins(network, receive_address, asset_id).await {
-            Ok(coins) => coins,
-            Err(_) => continue,
+        let Ok(coins) = list_wallet_unspent_coins(network, receive_address, asset_id).await else {
+            continue;
         };
         for coin in coins {
-            let amount = i64::try_from(coin.amount).unwrap_or(0);
+            let Some(amount) = i64::try_from(coin.amount).ok() else {
+                continue;
+            };
             if amount <= 0 {
                 continue;
             }

@@ -20,7 +20,7 @@ fn sample_market(receive_address: &str) -> MarketConfig {
         mode: "sell_only".to_string(),
         pricing: serde_json::json!({}),
         cancel_move_threshold_bps: None,
-        ladders: std::collections::HashMap::new(),
+        ladders: std::collections::HashMap::default(),
     }
 }
 
@@ -63,7 +63,7 @@ async fn execute_managed_coin_op_plans_skips_when_receive_address_missing() {
         &bundle.signer,
         &market,
         &plans,
-        &HashSet::new(),
+        &HashSet::<String>::default(),
     )
     .await;
 
@@ -93,7 +93,7 @@ async fn execute_managed_coin_op_plans_dry_run_plans_without_execution() {
         &bundle.signer,
         &market,
         &plans,
-        &HashSet::new(),
+        &HashSet::<String>::default(),
     )
     .await;
 

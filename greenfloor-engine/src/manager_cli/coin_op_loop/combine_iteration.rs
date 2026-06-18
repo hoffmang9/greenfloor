@@ -1,6 +1,8 @@
 use serde_json::{json, Value};
+use std::collections::HashSet;
 
 use crate::coin_ops::execution::CoinOpExecContext;
+use crate::coin_ops::i64_to_usize;
 use crate::coin_ops::{
     combine_output_amounts, plan_auto_combine_inputs, total_for_coin_ids,
     CombineInputSelectionMode, SpendableCoin,
@@ -35,18 +37,20 @@ pub(super) async fn run_combine_iteration(
         combine_fee,
         no_wait,
     } = params;
+    let requested_count = i64_to_usize(number_of_coins, "combine.number_of_coins")?;
+    let capped_count = i64_to_usize(ctx.combine_input_cap, "combine.input_cap")?;
     let input_coin_ids = if coin_ids.is_empty() {
         plan_auto_combine_inputs(
             &spendable,
-            number_of_coins as usize,
+            requested_count,
             CombineInputSelectionMode::ExactAmount,
             if target_coin_amount_mojos > 0 {
                 Some(target_coin_amount_mojos)
             } else {
                 None
             },
-            None,
-            Some(ctx.combine_input_cap as usize),
+            None::<&HashSet<String>>,
+            Some(capped_count),
         )
         .map_err(|reason| SignerError::Other(reason.to_string()))?
     } else {
@@ -60,7 +64,7 @@ pub(super) async fn run_combine_iteration(
     }
 
     let total = total_for_coin_ids(&spendable, &input_coin_ids);
-    let output_amounts = combine_output_amounts(total, 1);
+    let output_amounts = combine_output_amounts(total, 1)?;
     let operation_id = ctx
         .execute_mixed_split(output_amounts, &input_coin_ids, combine_fee)
         .await?;

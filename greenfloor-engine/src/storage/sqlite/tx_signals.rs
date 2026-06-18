@@ -22,7 +22,7 @@ impl SqliteStore {
             }
         }
         if unique.is_empty() {
-            return Ok(HashMap::new());
+            return Ok(HashMap::default());
         }
         let placeholders = unique
             .iter()
@@ -31,11 +31,11 @@ impl SqliteStore {
             .collect::<Vec<_>>()
             .join(", ");
         let sql = format!(
-            r#"
+            r"
             SELECT tx_id, mempool_observed_at, tx_block_confirmed_at
             FROM tx_signal_state
             WHERE tx_id IN ({placeholders})
-            "#
+            "
         );
         let mut stmt = self.conn.prepare(&sql).map_err(|err| {
             SignerError::Other(format!("failed to prepare tx_signal query: {err}"))
@@ -47,7 +47,7 @@ impl SqliteStore {
         let mut rows = stmt
             .query(params.as_slice())
             .map_err(|err| SignerError::Other(format!("failed to query tx_signal_state: {err}")))?;
-        let mut out = HashMap::new();
+        let mut out = HashMap::default();
         while let Some(row) = rows
             .next()
             .map_err(|err| SignerError::Other(format!("failed to read tx_signal row: {err}")))?
@@ -80,16 +80,16 @@ impl SqliteStore {
             let changed = self
                 .conn
                 .execute(
-                    r#"
+                    r"
                     INSERT OR IGNORE INTO tx_signal_state (tx_id, mempool_observed_at, tx_block_confirmed_at)
                     VALUES (?1, ?2, NULL)
-                    "#,
+                    ",
                     params![normalized, now],
                 )
                 .map_err(|err| {
                     SignerError::Other(format!("failed to observe mempool tx id: {err}"))
                 })?;
-            inserted += u64::try_from(changed).unwrap_or(0);
+            inserted += super::sqlite_rows_changed(changed)?;
         }
         Ok(inserted)
     }
@@ -108,15 +108,15 @@ impl SqliteStore {
             let changed = self
                 .conn
                 .execute(
-                    r#"
+                    r"
                     UPDATE tx_signal_state
                     SET tx_block_confirmed_at = COALESCE(tx_block_confirmed_at, ?1)
                     WHERE tx_id = ?2
-                    "#,
+                    ",
                     params![now, normalized],
                 )
                 .map_err(|err| SignerError::Other(format!("failed to confirm tx id: {err}")))?;
-            updated += u64::try_from(changed).unwrap_or(0);
+            updated += super::sqlite_rows_changed(changed)?;
         }
         Ok(updated)
     }

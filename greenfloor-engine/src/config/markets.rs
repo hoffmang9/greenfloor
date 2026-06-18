@@ -132,11 +132,11 @@ pub fn parse_markets_config(raw: &Value) -> SignerResult<MarketsConfig> {
     let root = raw
         .as_object()
         .ok_or_else(|| config_err("markets config root must be a mapping"))?;
+    let empty: &[Value] = &[];
     let rows = root
         .get("markets")
         .and_then(Value::as_array)
-        .map(|rows| rows.as_slice())
-        .unwrap_or(&[]);
+        .map_or(empty, |rows| rows.as_slice());
     let mut markets = Vec::with_capacity(rows.len());
     for row in rows {
         let row = row
@@ -151,7 +151,7 @@ fn parse_market_row(row: &serde_json::Map<String, Value>) -> SignerResult<Market
     let market_id = optional_trimmed_string(row.get("id"))
         .ok_or_else(|| SignerError::Other("market id is required".to_string()))?;
 
-    let mut ladders: HashMap<String, Vec<LadderEntry>> = HashMap::new();
+    let mut ladders: HashMap<String, Vec<LadderEntry>> = HashMap::default();
     if let Some(ladder_map) = row.get("ladders").and_then(Value::as_object) {
         for (side, entries) in ladder_map {
             let Some(entries) = entries.as_array() else {

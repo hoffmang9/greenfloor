@@ -10,7 +10,7 @@ use crate::cycle::StaleSweepProgress;
 
 use super::cycle_paths::DaemonCyclePaths;
 use super::market_context::{DaemonCycleResources, MarketCycleContext, MarketDispatchContext};
-use super::reconcile_market_cycle::ReconcileMarketCycleResult;
+use super::reconcile_market_cycle::{ReconcileMarketCycleMetrics, ReconcileMarketCycleResult};
 use super::run_once::{CyclePlan, DaemonCycleTestControls, DaemonDispatchState};
 
 pub struct TestCycleContextBundle {
@@ -83,9 +83,9 @@ pub fn test_cycle_context(
         },
         reconcile: ReconcileMarketCycleResult {
             offers: Vec::new(),
-            dexie_size_by_offer_id: HashMap::new(),
+            dexie_size_by_offer_id: HashMap::default(),
             dexie_fetch_error: None,
-            metrics: Default::default(),
+            metrics: ReconcileMarketCycleMetrics::default(),
         },
     }
 }

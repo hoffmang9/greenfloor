@@ -186,7 +186,7 @@ fn daemon_once_isolates_forced_market_error() {
     assert!(
         summary
             .get("error_count")
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(0)
             >= 1
     );
@@ -225,7 +225,7 @@ fn daemon_once_sequential_slot_rotation_picks_up_new_market_next_cycle() {
             event
                 .payload
                 .get("markets_attempted")
-                .and_then(|v| v.as_i64())
+                .and_then(serde_json::Value::as_i64)
                 .expect("markets_attempted")
         })
         .collect::<Vec<_>>();
@@ -235,7 +235,7 @@ fn daemon_once_sequential_slot_rotation_picks_up_new_market_next_cycle() {
             event
                 .payload
                 .get("markets_processed")
-                .and_then(|v| v.as_i64())
+                .and_then(serde_json::Value::as_i64)
                 .expect("markets_processed")
         })
         .collect::<Vec<_>>();

@@ -11,6 +11,7 @@ use crate::cycle::{
 };
 use crate::daemon::watchlist::cache::CoinWatchlistCache;
 use crate::error::SignerResult;
+use crate::metrics::{metric_millis_to_u64, metric_u64_to_usize};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
 use super::market_context::DaemonCycleResources;
@@ -35,13 +36,12 @@ pub struct DaemonCycleTestControls {
 pub fn daemon_test_controls_enabled() -> bool {
     std::env::var("GREENFLOOR_DAEMON_TEST_CONTROLS")
         .ok()
-        .map(|value| {
+        .is_some_and(|value| {
             matches!(
                 value.trim().to_ascii_lowercase().as_str(),
                 "1" | "true" | "yes"
             )
         })
-        .unwrap_or(false)
 }
 
 impl DaemonCycleTestControls {
@@ -194,11 +194,11 @@ pub async fn build_cycle_plan(
 
     let (selected_market_ids, consumed_immediate_requeues) = if should_use_market_slot_dispatch(
         enabled_market_ids.len(),
-        runtime_market_slot_count as usize,
+        metric_u64_to_usize(runtime_market_slot_count),
     ) {
         let selection = select_market_batch(
             &enabled_market_ids,
-            runtime_market_slot_count as usize,
+            metric_u64_to_usize(runtime_market_slot_count),
             dispatch_state.cursor,
             &dispatch_state.immediate_requeue_ids,
         );
@@ -288,7 +288,7 @@ pub fn cycle_started_instant() -> Instant {
 }
 
 pub fn elapsed_ms(started: Instant) -> u64 {
-    started.elapsed().as_millis() as u64
+    metric_millis_to_u64(started.elapsed().as_millis())
 }
 
 pub fn compute_cycle_exit_code(plan: &CyclePlan, metrics: &MarketDispatchMetrics) -> i32 {

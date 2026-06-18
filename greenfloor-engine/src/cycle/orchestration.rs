@@ -64,7 +64,7 @@ pub fn select_market_batch(
     immediate_requeue_ids: &[String],
 ) -> MarketBatchSelection {
     let mut enabled_ids: Vec<String> = Vec::new();
-    let mut enabled_set: HashSet<String> = HashSet::new();
+    let mut enabled_set: HashSet<String> = HashSet::default();
     for market_id in enabled_market_ids {
         let clean = market_id.trim();
         if clean.is_empty() || enabled_set.contains(clean) {
@@ -171,7 +171,7 @@ pub fn should_log_disabled_market(now_monotonic: f64, next_log_deadline: f64) ->
 }
 
 pub fn next_disabled_market_log_deadline(now_monotonic: f64, interval_seconds: u64) -> f64 {
-    now_monotonic + interval_seconds as f64
+    now_monotonic + crate::offer::pricing::u64_to_f64(interval_seconds)
 }
 
 pub fn should_try_cat_inventory_fallback(coinset_scan_empty: bool, base_asset: &str) -> bool {
@@ -196,7 +196,7 @@ pub fn collect_stale_sweep_candidates(
         return Vec::new();
     }
     let per_market_limit = per_market_limit.max(1);
-    let mut offer_ids_by_market: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut offer_ids_by_market: BTreeMap<String, Vec<String>> = BTreeMap::default();
     for row in rows {
         let market_id = row.market_id.trim();
         if market_id.is_empty() || !enabled.contains(market_id) {

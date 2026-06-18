@@ -89,20 +89,20 @@ pub(crate) fn bucket_active_offers_by_side(
             continue;
         };
         let normalized_side = normalize_offer_side(side);
-        let mut size = metadata.size;
-        if size <= 0 {
-            size = dexie_size_by_offer_id
+        let mut offer_size = metadata.size;
+        if offer_size <= 0 {
+            offer_size = dexie_size_by_offer_id
                 .and_then(|map| map.get(offer_id).copied())
                 .unwrap_or(0);
         }
-        if size <= 0 {
+        if offer_size <= 0 {
             unmapped += 1;
             continue;
         }
         let target = if normalized_side == "buy" {
-            buy_counts.get_mut(&size)
+            buy_counts.get_mut(&offer_size)
         } else {
-            sell_counts.get_mut(&size)
+            sell_counts.get_mut(&offer_size)
         };
         if let Some(count) = target {
             *count += 1;

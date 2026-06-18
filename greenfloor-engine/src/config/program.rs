@@ -242,7 +242,8 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
         if raw_fee < 0 {
             return Err(config_err("coin_ops.minimum_fee_mojos must be >= 0"));
         }
-        raw_fee as u64
+        u64::try_from(raw_fee)
+            .map_err(|_| config_err("coin_ops.minimum_fee_mojos must fit in u64"))?
     };
     let coin_ops_max_operations_per_run = parse_i64_field(
         coin_ops
@@ -288,7 +289,9 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
             .unwrap_or(&Value::Number(4.into())),
         "runtime.offer_parallelism_max_workers",
     )?
-    .max(1) as usize;
+    .max(1)
+    .try_into()
+    .map_err(|_| config_err("runtime.offer_parallelism_max_workers must fit in usize"))?;
     let runtime_reservation_ttl_seconds = parse_u64_field(
         runtime
             .get("reservation_ttl_seconds")
@@ -523,8 +526,10 @@ pub fn resolve_splash_base_url(explicit: Option<&str>, program_base: &str) -> St
     explicit
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|value| value.trim_end_matches('/').to_string())
-        .unwrap_or_else(|| program_base.trim().trim_end_matches('/').to_string())
+        .map_or_else(
+            || program_base.trim().trim_end_matches('/').to_string(),
+            |value| value.trim_end_matches('/').to_string(),
+        )
 }
 
 pub fn resolve_offer_publish_settings(
@@ -534,11 +539,13 @@ pub fn resolve_offer_publish_settings(
     dexie_base_url: Option<&str>,
     splash_base_url: Option<&str>,
 ) -> SignerResult<(String, String, String)> {
-    let venue = venue_override
+    let venue = match venue_override
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(|value| value.to_ascii_lowercase())
-        .unwrap_or_else(|| program.offer_publish_venue.clone());
+    {
+        Some(value) => value.to_ascii_lowercase(),
+        None => program.offer_publish_venue.clone(),
+    };
     if venue != "dexie" && venue != "splash" {
         return Err(SignerError::Other(
             "offer publish venue must be dexie or splash".to_string(),

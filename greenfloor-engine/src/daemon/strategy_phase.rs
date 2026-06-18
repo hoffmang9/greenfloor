@@ -30,7 +30,10 @@ pub async fn run_strategy_phase(
         &ctx.reconcile.dexie_size_by_offer_id,
         ctx.dispatch.xch_price_usd,
     )?;
-    state.merge_strategy_execution(strategy_actions.len() as i64, 0);
+    state.merge_strategy_execution(
+        crate::config::usize_to_i64(strategy_actions.len(), "strategy.action_count")?,
+        0,
+    );
 
     store.add_audit_event(
         "strategy_actions_planned",
@@ -42,11 +45,14 @@ pub async fn run_strategy_phase(
         Some(&market.market_id),
     )?;
 
-    let mut newly_executed_sell_counts = BTreeMap::new();
+    let mut newly_executed_sell_counts = BTreeMap::default();
     if !strategy_actions.is_empty() && !ctx.dispatch.test_controls.skip_strategy_execution {
         match execute_strategy_actions(store, ctx, market, &strategy_actions).await {
             Ok(output) => {
-                state.merge_strategy_execution(0, output.executed_count as i64);
+                state.merge_strategy_execution(
+                    0,
+                    crate::config::u64_to_i64(output.executed_count, "strategy.executed_count")?,
+                );
                 newly_executed_sell_counts = output.newly_executed_sell_counts;
             }
             Err(err) => {

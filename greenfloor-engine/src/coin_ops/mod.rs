@@ -10,6 +10,7 @@ mod gate;
 mod inventory;
 mod plan;
 mod policy;
+mod scalars;
 mod selection;
 mod split_planning;
 mod wallet_coin;
@@ -25,9 +26,14 @@ pub use gate::{
     CoinCombineGateResult, CoinSplitGateResult,
 };
 pub use inventory::compute_bucket_counts_from_coins;
-pub use plan::{plan_coin_ops, BucketSpec, CoinOpKind, CoinOpPlan, LadderTargetRow};
+pub use plan::{
+    plan_coin_ops, BucketSpec, CoinOpKind, CoinOpPlan, CoinOpPlanningResult, LadderTargetRow,
+};
 pub use policy::{
     amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_target_amount_allowed,
+};
+pub use scalars::{
+    coin_op_non_negative_u64, coin_op_non_negative_u64_saturating, i64_to_usize, usize_to_i64,
 };
 pub use selection::{
     select_exact_amount_coin_ids, select_largest_spendable_coin,
