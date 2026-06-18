@@ -6,14 +6,15 @@ backed by the canonical `greenfloor-engine` crate.
 - `greenfloor-manager` and `greenfloord` are Cargo binaries (no Python entrypoints).
 - Rust owns vault signing, offer construction, coin-op execution, daemon cycles,
   config validation for operator commands, and SQLite persistence.
-- Python remains for `scripts/` utilities and a slim `greenfloor` package (config parsing,
-  hex helpers, Coinset adapter) used only by those scripts.
+- Python remains for `scripts/` utilities and a slim `greenfloor` package (config CLI
+  adapters via `greenfloor-manager` field commands, hex helpers, Coinset adapter) used
+  only by those scripts and tests.
 - **No PyO3 extension.** Script Coinset mutations call `greenfloor-engine coinset …` CLI
   subcommands via `greenfloor.adapters.coinset`.
 
 ## Components
 
-- `greenfloor-manager`: native manager CLI for config validation, key onboarding, coin inventory/reshaping, offer building/posting, and operational checks.
+- `greenfloor-manager`: native manager CLI for config validation, key onboarding, coin inventory/reshaping, offer building/posting, and operational checks. Script adapters: `program-fields`, `markets-fields`, `cats-fields`, `materialize-minimal-program`.
 - `greenfloord`: native daemon process that evaluates configured markets, executes offers, and runs the market cycle.
 - `greenfloor-engine/`: Rust crate for canonical signing, offer, coin-op, and cycle policy.
 

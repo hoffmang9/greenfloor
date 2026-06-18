@@ -41,9 +41,11 @@ build/post, policy, SQLite, and most adapters.
    **Import convention:** operator binaries import `manager_cli`, `daemon::cli`, and
    `coinset_cli` directly.
 
-4. **Python scripts stay.** Standalone utilities under `scripts/` may keep using
-   script-only Python libraries (`config`, `adapters`, `hex_utils`) until
-   explicitly ported.
+4. **Python scripts stay.** Standalone utilities under `scripts/` use script-only Python
+   libraries (`greenfloor.config.io` CLI adapters, `adapters.coinset`, `hex_utils`,
+   `engine_binary`) and must not reimplement operator YAML policy walks. Config field
+   reads go through `greenfloor-manager program-fields`, `markets-fields`, and
+   `cats-fields` (see `greenfloor/config/io.py`).
 
 5. **Quality bar.** Implementation work is held to the `thermonuclear-code-review`
    skill standard. A manager agent splits work into subagent-sized packets and
@@ -57,13 +59,15 @@ greenfloor-engine/Cargo.toml` in CI (`ubuntu-latest` matrix job). Python pytest
 
 ## Command ownership
 
-| Operator command                                               | Owner                              |
-| -------------------------------------------------------------- | ---------------------------------- |
-| `greenfloord` / `daemon`                                       | `greenfloor-engine`                |
-| `config-validate`, `doctor`, `bootstrap-home`, `set-log-level` | `greenfloor-manager` (Rust)        |
-| `build-and-post-offer`, `offers-*`                             | `greenfloor-manager` → Rust engine |
-| `coins-list`, `coin-status`, `coin-split`, `coin-combine`      | `greenfloor-manager` (Rust)        |
-| `keys-onboard`, `cats-*`                                       | `greenfloor-manager` (Rust)        |
+| Operator command                                               | Owner                               |
+| -------------------------------------------------------------- | ----------------------------------- |
+| `greenfloord` / `daemon`                                       | `greenfloor-engine`                 |
+| `config-validate`, `doctor`, `bootstrap-home`, `set-log-level` | `greenfloor-manager` (Rust)         |
+| `program-fields`, `markets-fields`, `cats-fields`              | `greenfloor-manager` (Rust JSON)    |
+| `materialize-minimal-program`                                  | `greenfloor-manager` (test/fixture) |
+| `build-and-post-offer`, `offers-*`                             | `greenfloor-manager` → Rust engine  |
+| `coins-list`, `coin-status`, `coin-split`, `coin-combine`      | `greenfloor-manager` (Rust)         |
+| `keys-onboard`, `cats-*`                                       | `greenfloor-manager` (Rust)         |
 
 ## Consequences
 

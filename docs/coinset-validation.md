@@ -6,8 +6,11 @@ GreenFloor operator coin ops use the native manager (`greenfloor-manager coins-l
 
 ## Scope
 
-- Scripts under `scripts/` use `greenfloor.adapters.coinset` and read vault identity
-  from `program.yaml` (`signer:` + `vault:` — legacy `cloud_wallet:` is rejected).
+- Scripts under `scripts/` use `greenfloor.adapters.coinset` for Coinset mutation IO.
+- Vault identity and script config fields come from Rust policy via `greenfloor/config/io.py`
+  adapters (`program-fields` for `vault_launcher_id`; `cats-fields` / `markets-fields` for
+  ticker→asset metadata in vault scans). Legacy `cloud_wallet:` blocks are rejected at
+  Rust config load.
 - Use Coinset CLI for spot verification against script output when debugging.
 
 ## 1) Probe endpoint capabilities
@@ -21,7 +24,7 @@ cd ~/greenfloor
 ```
 
 Optional: pass `--launcher-id-file ~/.greenfloor/cache/vault_launcher_id.txt` instead
-of reading `vault.launcher_id` from program config.
+of resolving `vault_launcher_id` via `program-fields` from `--program-config`.
 
 Expected: batched height-range endpoints report `range_supported: true` when the
 host can run incremental vault scans.
@@ -38,7 +41,8 @@ host can run incremental vault scans.
 ```
 
 See `scripts/vault_coinset_scan_coinset.py` and `scripts/vault_coinset_scan_checkpoint.py`
-for checkpointed scan workflows.
+for checkpointed scan workflows. `vault_coinset_scan_lib.py` builds ticker→asset indexes
+from `cats-fields` and `markets-fields` (not direct YAML walks).
 
 ## 3) Manager inventory (preferred for operators)
 

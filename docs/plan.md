@@ -4,8 +4,8 @@
 
 - Long-lived daemon (`greenfloord`) plus manager CLI (`greenfloor-manager`) for
   deterministic CAT/XCH market-making.
-- Policy and execution in Rust (`greenfloor-engine`); slim Python package for config,
-  adapters, and `scripts/` utilities.
+- Policy and execution in Rust (`greenfloor-engine`); slim Python package for config CLI
+  adapters (`greenfloor/config/io.py`), hex/Coinset helpers, and `scripts/` utilities.
 - V1 notifications: low-inventory alerts only (ticker, remaining amount, receive address).
 
 ## Architecture
@@ -18,11 +18,13 @@ greenfloord         ──►  daemon/      → cycle/, offer/operator, coin_ops
 
 Dev / tests              greenfloor (Python)
 ─────────                ─────────────────
-parity tests, scripts ──► greenfloor-engine CLI (`coinset …`, `daemon-once`) / native binaries
+parity tests, scripts ──► greenfloor-manager field CLIs + `greenfloor-engine` (`coinset …`, `daemon-once`)
 ```
 
 - **Canonical signing and offer build:** `greenfloor-engine` (vault KMS + Coinset MSP).
-- **Config validation for operators:** Rust (`config/program.rs`, `config/markets.rs`).
+- **Config policy for operators:** Rust (`config/program.rs`, `config/markets.rs`, `config/signer.rs`).
+- **Script-facing config reads:** `greenfloor-manager program-fields`, `markets-fields`,
+  `cats-fields` (via `greenfloor/config/io.py`); not direct YAML policy walks.
 - **State DB:** Rust (`storage/`); SQLite at `~/.greenfloor/db/greenfloor.sqlite`.
 - **No PyO3** in the repository (ADR 0013).
 
@@ -48,6 +50,13 @@ Adjunct operator commands:
 - `cats-add`, `cats-list`, `cats-delete` — CAT catalog in `cats.yaml`
 - `set-log-level` — update `app.log_level` in program config
 
+Script and test adapter commands (JSON with `--json` unless noted):
+
+- `program-fields` — script-facing program/signer/vault summary fields
+- `markets-fields` — all `markets` rows plus `enabled_markets`
+- `cats-fields` — CAT catalog rows and `symbol_to_asset_id` map
+- `materialize-minimal-program` — write shared test minimal `program.yaml` template
+
 Global flags: `--program-config`, `--markets-config`, `--testnet-markets-config`,
 `--cats-config`, `--state-db`, `--json` (compact JSON), `--dexie-base-url`.
 
@@ -70,8 +79,9 @@ Coin-op notes:
 ## Delivery constraints
 
 - Python 3.11+ for dev tooling and tests.
-- Required checks: `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`.
-- Rust: `cargo test` in `greenfloor-engine/`.
+- Required checks: `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`
+  (script adapters and subprocess harnesses; ~52 tests).
+- Rust: `cargo test` in `greenfloor-engine/` (operator config and policy parity safety net).
 - Local gate: `pre-commit run --all-files`.
 - CI runs pytest as a separate step; pre-commit skips pytest via `SKIP=pytest`.
 
@@ -83,6 +93,7 @@ Coin-op notes:
 - [x] Coin-op Coinset fee preflight diagnostics (H1)
 - [x] Testnet11 G1–G3 proof path (CI `live-testnet-e2e.yml`)
 - [x] Mainnet manager lifecycle evidence for `eco1812022_sell_wusdbc`
+- [x] Rust-owned operator config policy; Python config field CLI adapters
 
 ## Open items
 

@@ -4,6 +4,23 @@ Python utilities for Coinset vault scans, one-time vault setup, and test fixture
 Operator coin ops and offer lifecycle use native Rust binaries (`greenfloor-manager`,
 `greenfloord`); see `docs/runbook.md`.
 
+## Config access (scripts)
+
+Scripts must not walk operator YAML for policy fields. Use `greenfloor/config/io.py`:
+
+| Need                         | Adapter                                           | Rust command                                     |
+| ---------------------------- | ------------------------------------------------- | ------------------------------------------------ |
+| Program/signer/vault fields  | `load_program_fields()`                           | `greenfloor-manager program-fields --json`       |
+| Enabled markets              | `load_markets_fields()` + `enabled_market_rows()` | `greenfloor-manager markets-fields --json`       |
+| All markets (incl. disabled) | `all_market_rows()`                               | same (`markets` array in JSON)                   |
+| CAT catalog / symbol map     | `load_cats_fields()` + `symbol_to_asset_id_map()` | `greenfloor-manager cats-fields --json`          |
+| Vault launcher id            | `launcher_id_from_program_config()`               | via `program-fields`                             |
+| Validate before scan         | `ensure_program_config_valid()`                   | `greenfloor-manager config-validate`             |
+| Test minimal program.yaml    | `materialize_minimal_program_template()`          | `greenfloor-manager materialize-minimal-program` |
+
+`load_yaml()` in `io.py` is for reading YAML files back in tests after materialization;
+it is not operator config validation.
+
 ## Coinset vault inventory and coin ops
 
 - `list_vault_coins_coinset.py` — scan vault singleton member puzzle hashes via Coinset.
@@ -13,8 +30,9 @@ Operator coin ops and offer lifecycle use native Rust binaries (`greenfloor-mana
 - `combine_market_cat_dust_coinset.py` — batch dust combine for enabled market CAT assets.
 - `probe_coinset_capabilities.py` — probe Coinset height-window API support for vault scans.
 
-These scripts read `vault.launcher_id` and signer settings from `program.yaml`
-(`--program-config`). Legacy `cloud_wallet:` blocks are rejected at config load.
+These scripts resolve vault identity and market/CAT metadata through the config adapters
+above (`--program-config`, `--markets-config`, optional `--cats-config`). Legacy
+`cloud_wallet:` blocks are rejected at Rust config load.
 
 See also `docs/coinset-validation.md`.
 

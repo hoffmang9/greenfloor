@@ -34,7 +34,9 @@ Severity tags:
 
 - `[MUST]` `greenfloor/core`: deterministic policy only (no IO).
 - `[MUST]` `greenfloor/core/coin_ops/`: coin-op deterministic policy (plan, fee budget, inventory, min-amount guard) shared by CLI and daemon.
-- `[MUST]` `greenfloor/config`: parse/validate config, resolve paths, resolve quote assets.
+- `[MUST]` `greenfloor/config`: script config CLI adapters only (`io.py` → `greenfloor-manager`
+  `program-fields`, `markets-fields`, `cats-fields`, `materialize-minimal-program`,
+  `config-validate`); operator YAML policy lives in `greenfloor-engine/src/config/`.
 - `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet). Operator signing/execution is in-process Rust (`greenfloor-engine`). Script Coinset reads and mutations shell out to `greenfloor-engine coinset {post,push-tx}` via `greenfloor.adapters.coinset` (`cli` + `client` package).
 - `[MUST]` `greenfloor-engine/`: canonical Rust engine crate; new vault spend/offer logic lands here first.
 - `[MUST]` Operator CLI and daemon are native Rust binaries: `greenfloor-manager`, `greenfloord`, `greenfloor-engine` (`greenfloor-engine/src/manager_cli/`, `greenfloor-engine/src/daemon/`). They do not import PyO3.
@@ -43,18 +45,26 @@ Severity tags:
 - `[MUST]` Manager operator commands live in `greenfloor-engine/src/manager_cli/` (`greenfloor-manager` binary).
 - `[MUST]` `greenfloor/cli/*` and `greenfloor/daemon/*` Python packages are removed; do not reintroduce Python orchestration entrypoints.
 - `[MUST]` `greenfloor/core/*` policy bridges are removed; do not reintroduce Python policy orchestration.
-- `[MUST]` `scripts/` may remain Python; they use `greenfloor.config`, `greenfloor.adapters.coinset`, `greenfloor.hex_utils`, and `greenfloor.engine_binary` for native CLI resolution.
+- `[MUST]` `scripts/` may remain Python; they use `greenfloor.config.io` (field CLI adapters),
+  `greenfloor.adapters.coinset`, `greenfloor.hex_utils`, and `greenfloor.engine_binary`
+  for native CLI resolution. Do not add YAML policy walks for operator config in scripts.
 - `[CONTEXT]` No PyO3 extension in the repo (ADR 0013, 2026-06-17). Operator policy, offer orchestration, and Coinset fee parsing live in `greenfloor-engine`; CI runs `cargo test --manifest-path greenfloor-engine/Cargo.toml` on `ubuntu-latest` as the explicit policy-parity safety net. Python pytest covers script adapters and integration harnesses only.
 - `[MUST]` Do not reintroduce PyO3 or Python policy bridges.
 - `[MUST]` Offer build/post uses `offer::operator::build_and_post_offer` (`greenfloor-manager build-and-post-offer` and daemon managed post).
-- `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`, `greenfloor/config/io.py`.
+- `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`,
+  `greenfloor/config/io.py` (subprocess adapters to Rust field commands — not Python policy).
 - `[MUST]` `greenfloor-engine` crate root exports domain APIs (`offer`, `daemon`, `coin_ops`, `vault`); operator binaries import CLI modules directly (`manager_cli`, `daemon::cli`).
 - `[MUST]` Import direction: daemon never imports CLI; CLI never imports daemon. Shared logic belongs in shared modules.
 
 ## Design Constraints
 
 - `[MUST]` Prefer direct function calls within the package; do not spawn subprocesses for same-env Python calls unless isolation/security is documented in `docs/decisions/`.
-- `[MUST]` Python script paths that need Coinset IO use `greenfloor.adapters.coinset` → `greenfloor-engine coinset …`. Operator paths call Rust in-process (no Python FFI). Offer-payload ID extraction and conservative-fee parsing are Rust-only (`offer::dexie_payload`, `coinset::get_conservative_fee_estimate`).
+- `[MUST]` Python script paths that need Coinset IO use `greenfloor.adapters.coinset` →
+  `greenfloor-engine coinset …`. Script paths that need operator config fields use
+  `greenfloor.config.io` → `greenfloor-manager program-fields` / `markets-fields` /
+  `cats-fields`. Operator paths call Rust in-process (no Python FFI). Offer-payload ID
+  extraction and conservative-fee parsing are Rust-only (`offer::dexie_payload`,
+  `coinset::get_conservative_fee_estimate`).
 - `[MUST]` Avoid unnecessary indirection layers (`executor`, `worker`, `engine`, etc.).
 - `[MUST]` Keep one distinct responsibility per file; merge pass-through modules into functions.
 - `[MUST]` Eliminate duplicated logic blocks (>10 lines) by extracting shared helpers.

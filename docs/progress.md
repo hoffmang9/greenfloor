@@ -15,6 +15,7 @@ history and superseded ADRs (`0006`–`0012`).
 
 Implementation lives in `greenfloor-engine/src/`:
 
+- `config/` — program, markets, and signer parse/validation (operator policy)
 - `manager_cli/` — manager command dispatch and JSON output
 - `daemon/` — cycle loop, market phases, websocket tx signals
 - `offer/operator/` — shared build/post + signer denomination (manager + daemon)
@@ -23,8 +24,11 @@ Implementation lives in `greenfloor-engine/src/`:
 - `cycle/` — deterministic strategy, cancel policy, parallel dispatch
 - `storage/` — SQLite schema and persistence
 
-- Python (`greenfloor/` + `scripts/`): thin YAML helpers (`config/io.py`), hex helpers, and Coinset adapter
-  for standalone scripts. Operator validation is Rust-only (`greenfloor-manager config-validate`).
+- Python (`greenfloor/` + `scripts/`): config CLI adapters (`greenfloor/config/io.py` →
+  `greenfloor-manager program-fields`, `markets-fields`, `cats-fields`,
+  `materialize-minimal-program`, `config-validate`), hex helpers, and Coinset adapter
+  for standalone scripts. Operator config policy and validation are Rust-only
+  (`greenfloor-engine/src/config/`).
 
 **Deleted:** `greenfloor-engine-pyo3/`, `greenfloor/core/`, policy bridges, PyO3 FFI.
 
@@ -33,12 +37,27 @@ runtime modules.
 
 ## Recent milestones
 
+### 2026-06-17 — Rust config policy; script CLI field adapters
+
+- Deleted `greenfloor/config/models.py` and Python config policy pytest mirrors; Rust owns
+  program/markets/signer parse and validation (`greenfloor-engine/src/config/`).
+- Added script-facing manager commands: `program-fields`, `markets-fields`, `cats-fields`,
+  `materialize-minimal-program` (JSON with `--json` where applicable).
+- Python `greenfloor/config/io.py` shells out to those commands; scripts must not walk
+  operator YAML for policy fields (`launcher.py`, `combine_market_cat_dust_coinset.py`,
+  `vault_coinset_scan_lib.py`).
+- Unified program YAML load: `read_program_yaml` → `parse_program_config` /
+  `parse_signer_config`; execution paths use `load_program_bundle_gated` and
+  `signer_for_execution()` with stable skip reasons.
+- Test safety net: `greenfloor-engine/tests/config/`, `tests/manager_integration/`; shared
+  minimal program template in `minimal_program_template.rs`.
+- Pytest: script adapters and subprocess harnesses (~52 tests); policy parity is
+  `cargo test` in `greenfloor-engine/`.
+
 ### 2026-06-17 — Rust-centric CI/pre-commit; Python scope trimmed
 
 - Added `cargo fmt --check` and `cargo clippy` to pre-commit and CI (ubuntu + arm).
 - `cargo test` runs on `ubuntu-24.04-arm` as well as `ubuntu-latest`.
-- Deleted `greenfloor/config/models.py`; scripts use thin `load_yaml` + `greenfloor-manager config-validate`.
-- Collapsed pytest to 23 tests (coinset adapter, `engine_binary`, manager/daemon subprocess smoke).
 - Removed Python `SqliteStore` test helpers; daemon assertions use `daemon-once` JSON responses.
 - `live-testnet-e2e` no longer installs `chia-wallet-sdk` PyO3 wheel.
 
