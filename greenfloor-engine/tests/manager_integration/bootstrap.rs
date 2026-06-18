@@ -1,11 +1,6 @@
-#[path = "fixtures/json_util.rs"]
-mod json_util;
-#[path = "fixtures/manager.rs"]
-mod manager_fixtures;
-
 use std::path::{Path, PathBuf};
 
-use manager_fixtures::run_manager;
+use super::fixtures::run_manager;
 
 fn write_bootstrap_templates(root: &Path) -> (PathBuf, PathBuf, PathBuf, PathBuf) {
     let program_template = root.join("program.template.yaml");

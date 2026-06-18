@@ -2,7 +2,6 @@ mod keys_registry;
 mod markets;
 mod markets_validate;
 mod program;
-mod program_validate;
 mod signer;
 mod yaml_fields;
 

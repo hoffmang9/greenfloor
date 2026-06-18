@@ -8,17 +8,9 @@ use super::{
     is_parallel_dispatch_transient_signer_error, record_parallel_fallback_audit,
     OfferDispatchOutput, ParallelDispatchDecision,
 };
-use crate::adapters::DexieClient;
-use crate::config::{ManagerProgramConfig, MarketConfig, MarketsConfig};
-use crate::cycle::StaleSweepProgress;
+use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::{parallel_managed_dispatch_enabled, PlannedAction};
-use crate::daemon::cycle_paths::DaemonCyclePaths;
-use crate::daemon::market_context::{
-    DaemonCycleResources, MarketCycleContext, MarketDispatchContext,
-};
-use crate::daemon::reconcile_market_cycle::ReconcileMarketCycleResult;
-use crate::daemon::run_once::{CyclePlan, DaemonCycleTestControls, DaemonDispatchState};
-use crate::daemon::watchlist::cache::CoinWatchlistCache;
+use crate::daemon::market_context::test_cycle_context;
 use crate::error::SignerError;
 use crate::storage::SqliteStore;
 
@@ -42,14 +34,6 @@ markets:
     .expect("write markets");
 }
 
-fn sample_paths(dir: &tempfile::TempDir) -> DaemonCyclePaths {
-    DaemonCyclePaths::new(
-        dir.path().join("program.yaml"),
-        dir.path().join("markets.yaml"),
-        None,
-    )
-}
-
 fn sample_program(parallelism_enabled: bool, dry_run: bool) -> ManagerProgramConfig {
     ManagerProgramConfig {
         runtime_market_slot_count: 1,
@@ -59,76 +43,6 @@ fn sample_program(parallelism_enabled: bool, dry_run: bool) -> ManagerProgramCon
         tx_block_websocket_reconnect_interval_seconds: 1,
         tx_block_fallback_poll_interval_seconds: 1,
         ..Default::default()
-    }
-}
-
-struct OfferDispatchTestContext {
-    resources: DaemonCycleResources,
-    dispatch: MarketDispatchContext,
-    plan: CyclePlan,
-    reconcile: ReconcileMarketCycleResult,
-}
-
-impl OfferDispatchTestContext {
-    fn cycle_context(&self) -> MarketCycleContext<'_> {
-        MarketCycleContext {
-            resources: &self.resources,
-            dispatch: &self.dispatch,
-            plan: &self.plan,
-            reconcile: &self.reconcile,
-        }
-    }
-}
-
-fn offer_dispatch_test_context(
-    dir: &tempfile::TempDir,
-    db_path: &std::path::Path,
-    program: ManagerProgramConfig,
-    signer_offer_path_configured: bool,
-) -> OfferDispatchTestContext {
-    OfferDispatchTestContext {
-        resources: DaemonCycleResources {
-            program,
-            markets: MarketsConfig { markets: vec![] },
-            network: "mainnet".to_string(),
-            dexie: DexieClient::new("https://api.dexie.space"),
-            paths: sample_paths(dir),
-            coin_watchlist: CoinWatchlistCache::new(),
-            signer_offer_path_configured,
-        },
-        dispatch: MarketDispatchContext {
-            db_path: db_path.to_path_buf(),
-            allowed_key_ids: Vec::new(),
-            xch_price_usd: None,
-            previous_xch_price_usd: None,
-            runtime_dry_run: false,
-            test_controls: DaemonCycleTestControls::default(),
-        },
-        plan: CyclePlan {
-            enabled_market_ids: vec!["m1".to_string()],
-            selected_market_ids: vec!["m1".to_string()],
-            consumed_immediate_requeues: Vec::new(),
-            dispatch_state: DaemonDispatchState::default(),
-            stale_open_sweep: StaleSweepProgress {
-                checked_offer_count: 0,
-                requeue_market_ids: Vec::new(),
-                hits: Vec::new(),
-                truncated: false,
-            },
-            configured_market_slot_count: 1,
-            runtime_dry_run: false,
-            db_path: db_path.to_path_buf(),
-            previous_xch_price_usd: None,
-            dexie_base_url: "https://api.dexie.space".to_string(),
-            splash_base_url: "http://example.test".to_string(),
-            test_controls: DaemonCycleTestControls::default(),
-        },
-        reconcile: ReconcileMarketCycleResult {
-            offers: Vec::new(),
-            dexie_size_by_offer_id: HashMap::new(),
-            dexie_fetch_error: None,
-            metrics: Default::default(),
-        },
     }
 }
 
@@ -255,7 +169,7 @@ async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() 
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
     let program = sample_program(false, false);
-    let test_ctx = offer_dispatch_test_context(&dir, &db_path, program, false);
+    let test_ctx = test_cycle_context(&dir, &db_path, program, false);
     let market = MarketConfig {
         market_id: "m1".to_string(),
         enabled: true,
@@ -387,7 +301,7 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
     let mut program = sample_program(true, false);
     program.runtime_offer_parallelism_enabled = true;
 
-    let test_ctx = offer_dispatch_test_context(&dir, &db_path, program, true);
+    let test_ctx = test_cycle_context(&dir, &db_path, program, true);
 
     set_parallel_dispatch_override(Some("transient"));
     set_managed_post_override(Some("success"));
@@ -424,7 +338,7 @@ async fn execute_strategy_actions_parallel_fatal_propagates() {
     let mut program = sample_program(true, false);
     program.runtime_offer_parallelism_enabled = true;
 
-    let test_ctx = offer_dispatch_test_context(&dir, &db_path, program, true);
+    let test_ctx = test_cycle_context(&dir, &db_path, program, true);
 
     set_parallel_dispatch_override(Some("fatal"));
     let err = execute_strategy_actions(
@@ -453,7 +367,7 @@ async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
     let program = sample_program(false, false);
-    let test_ctx = offer_dispatch_test_context(&dir, &db_path, program, true);
+    let test_ctx = test_cycle_context(&dir, &db_path, program, true);
 
     set_managed_post_override(Some("success"));
     let output = execute_strategy_actions(

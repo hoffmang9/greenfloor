@@ -1,9 +1,4 @@
-#[path = "fixtures/json_util.rs"]
-mod json_util;
-#[path = "fixtures/manager.rs"]
-mod manager_fixtures;
-
-use manager_fixtures::{run_manager, write_manager_program_with_signer, write_markets_with_ladder};
+use super::fixtures::{run_manager, write_manager_program_with_signer, write_markets_with_ladder};
 
 #[test]
 fn coin_split_until_ready_requires_size_base_units() {

@@ -30,8 +30,10 @@ pub struct ManagerCli {
 
 #[derive(Debug, Subcommand)]
 pub enum ManagerCommands {
-    ConfigValidate,
-    ProgramConfigValidate,
+    ConfigValidate {
+        #[arg(long, help = "Validate program.yaml only; skip markets overlay.")]
+        program_only: bool,
+    },
     KeysOnboard {
         #[arg(long, default_value = "")]
         chia_keys_dir: String,

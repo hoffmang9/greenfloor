@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::keys_registry::{parse_signer_key_registry, SignerKeyEntry};
-use super::program_validate::validate_program_config;
 use super::yaml_fields::{
-    config_err, optional_bool, parse_i64_field, parse_u64_field, req_mapping, req_str, req_value,
+    config_err, optional_bool, parse_i64_field, parse_u64_field, req_mapping, req_mapping_from_map,
+    req_str, req_value,
 };
 use crate::coinset::is_xch_like_asset;
 use crate::error::{SignerError, SignerResult};
@@ -76,14 +76,15 @@ impl Default for ManagerProgramConfig {
 }
 
 pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
-    validate_program_config(raw)?;
+    reject_cloud_wallet(raw)?;
 
     let app = req_mapping(raw, "app")?;
     let runtime = req_mapping(raw, "runtime")?;
     let chain_signals = req_mapping(raw, "chain_signals")?;
-    let tx_trigger = req_value(chain_signals, "tx_block_trigger")?
-        .as_object()
-        .ok_or_else(|| config_err("chain_signals.tx_block_trigger must be a mapping"))?;
+    let _dev = req_mapping(raw, "dev")?;
+    require_pushover_provider(raw)?;
+
+    let tx_trigger = req_mapping_from_map(chain_signals, "tx_block_trigger")?;
 
     let venues = raw.get("venues").and_then(Value::as_object);
     let dexie = venues
@@ -129,13 +130,24 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
         .filter(|value| !value.is_empty())
         .unwrap_or("dexie")
         .to_ascii_lowercase();
+    if offer_publish_venue != "dexie" && offer_publish_venue != "splash" {
+        return Err(config_err(
+            "venues.offer_publish.provider must be one of: dexie, splash",
+        ));
+    }
 
-    let coin_ops_minimum_fee_mojos = parse_i64_field(
-        coin_ops
-            .and_then(|section| section.get("minimum_fee_mojos"))
-            .unwrap_or(&Value::Number(10_000_000.into())),
-        "coin_ops.minimum_fee_mojos",
-    )? as u64;
+    let coin_ops_minimum_fee_mojos = {
+        let raw_fee = parse_i64_field(
+            coin_ops
+                .and_then(|section| section.get("minimum_fee_mojos"))
+                .unwrap_or(&Value::Number(10_000_000.into())),
+            "coin_ops.minimum_fee_mojos",
+        )?;
+        if raw_fee < 0 {
+            return Err(config_err("coin_ops.minimum_fee_mojos must be >= 0"));
+        }
+        raw_fee as u64
+    };
     let coin_ops_max_operations_per_run = parse_i64_field(
         coin_ops
             .and_then(|section| section.get("max_operations_per_run"))
@@ -202,6 +214,11 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
         .unwrap_or("websocket")
         .trim()
         .to_ascii_lowercase();
+    if tx_block_trigger_mode != "websocket" {
+        return Err(config_err(
+            "chain_signals.tx_block_trigger.mode must be websocket",
+        ));
+    }
     let mut tx_block_websocket_url = tx_trigger
         .get("websocket_url")
         .and_then(Value::as_str)
@@ -221,6 +238,11 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
             .unwrap_or(&Value::Number(30.into())),
         "chain_signals.tx_block_trigger.websocket_reconnect_interval_seconds",
     )?;
+    if tx_block_websocket_reconnect_interval_seconds < 1 {
+        return Err(config_err(
+            "chain_signals.tx_block_trigger.websocket_reconnect_interval_seconds must be >= 1",
+        ));
+    }
     let tx_block_fallback_poll_interval_seconds = parse_u64_field(
         tx_trigger
             .get("fallback_poll_interval_seconds")
@@ -256,6 +278,36 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
         tx_block_fallback_poll_interval_seconds,
         signer_key_registry,
     })
+}
+
+fn reject_cloud_wallet(raw: &Value) -> SignerResult<()> {
+    match raw.get("cloud_wallet") {
+        None | Some(Value::Null) => Ok(()),
+        Some(Value::Object(map)) if map.is_empty() => Ok(()),
+        Some(_) => Err(config_err(
+            "cloud_wallet config is removed; use signer: and vault: blocks instead \
+             (see config/program.yaml)",
+        )),
+    }
+}
+
+fn require_pushover_provider(raw: &Value) -> SignerResult<()> {
+    let notifications = req_mapping(raw, "notifications")?;
+    req_value(notifications, "low_inventory_alerts")?;
+    let providers = req_value(notifications, "providers")?
+        .as_array()
+        .ok_or_else(|| config_err("notifications.providers must be a list"))?;
+    if providers.iter().any(|provider| {
+        provider
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.trim() == "pushover")
+    }) {
+        return Ok(());
+    }
+    Err(config_err(
+        "Missing notifications.providers entry with type=pushover",
+    ))
 }
 
 pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {

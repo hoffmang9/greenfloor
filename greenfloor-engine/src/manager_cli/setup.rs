@@ -27,21 +27,18 @@ pub struct BootstrapHomeParams<'a> {
     pub force: bool,
 }
 
-pub fn run_program_config_validate(ctx: &ManagerContext) -> SignerResult<i32> {
+pub fn run_config_validate(ctx: &ManagerContext, program_only: bool) -> SignerResult<i32> {
     let program_path = &ctx.program_config;
     let _program = load_program_config(program_path)?;
-    ctx.emit_json(&json!({
-        "ok": true,
-        "program_config": program_path.display().to_string(),
-    }))?;
-    Ok(0)
-}
-
-pub fn run_config_validate(ctx: &ManagerContext) -> SignerResult<i32> {
-    let program_path = &ctx.program_config;
+    if program_only {
+        ctx.emit_json(&json!({
+            "ok": true,
+            "program_config": program_path.display().to_string(),
+        }))?;
+        return Ok(0);
+    }
     let markets_path = &ctx.markets_config;
     let testnet_markets_path = ctx.testnet_markets_path();
-    let _program = load_program_config(program_path)?;
     let _markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
     ctx.emit_json(&json!({
         "ok": true,
@@ -344,7 +341,7 @@ notifications:
         .expect("write program");
         std::fs::write(&markets_path, "markets: []\n").expect("write markets");
         let output = super::super::context::ManagerContext::for_test(program_path, markets_path);
-        let code = run_config_validate(&output).expect("validate");
+        let code = run_config_validate(&output, false).expect("validate");
         assert_eq!(code, 0);
     }
 }

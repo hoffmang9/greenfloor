@@ -90,6 +90,37 @@ pub fn parse_f64_field(raw: &Value, context: &str) -> SignerResult<f64> {
     Err(config_err(format!("{context} must be numeric")))
 }
 
+pub fn optional_str(map: &serde_json::Map<String, Value>, key: &str, default: &str) -> String {
+    map.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| default.to_string())
+}
+
+pub fn optional_i64(map: &serde_json::Map<String, Value>, key: &str, default: i64) -> i64 {
+    map.get(key)
+        .map(|raw| parse_i64_field(raw, key))
+        .transpose()
+        .ok()
+        .flatten()
+        .unwrap_or(default)
+}
+
+pub fn optional_f64(map: &serde_json::Map<String, Value>, key: &str, default: f64) -> f64 {
+    map.get(key)
+        .map(|raw| parse_f64_field(raw, key))
+        .transpose()
+        .ok()
+        .flatten()
+        .unwrap_or(default)
+}
+
+pub fn optional_bool_value(raw: Option<&Value>, default: bool) -> bool {
+    raw.and_then(Value::as_bool).unwrap_or(default)
+}
+
 pub fn optional_trimmed_string(raw: Option<&Value>) -> Option<String> {
     raw.and_then(Value::as_str)
         .map(str::trim)

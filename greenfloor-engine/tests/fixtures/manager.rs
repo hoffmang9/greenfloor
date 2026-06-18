@@ -2,8 +2,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-pub use super::json_util::parse_json_output;
-
 pub fn run_manager(args: &[&str], env: Option<&[(&str, &str)]>, stdin: Option<&str>) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_greenfloor-manager"));
     command

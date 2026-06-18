@@ -18,8 +18,9 @@ use crate::cli_util::optional_str;
 pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
     let (ctx, command) = ManagerContext::from_cli(cli);
     match command {
-        ManagerCommands::ConfigValidate => setup::run_config_validate(&ctx),
-        ManagerCommands::ProgramConfigValidate => setup::run_program_config_validate(&ctx),
+        ManagerCommands::ConfigValidate { program_only } => {
+            setup::run_config_validate(&ctx, program_only)
+        }
         ManagerCommands::KeysOnboard {
             chia_keys_dir,
             key_id,

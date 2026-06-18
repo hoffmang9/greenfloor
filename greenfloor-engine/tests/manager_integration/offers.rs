@@ -1,15 +1,10 @@
-#[path = "fixtures/json_util.rs"]
-mod json_util;
-#[path = "fixtures/manager.rs"]
-mod manager_fixtures;
-
 use std::path::Path;
 
-use greenfloor_engine::storage::SqliteStore;
-use manager_fixtures::{
+use super::fixtures::{
     parse_json_output, patch_program_dexie_base, restore_program_dexie_base, run_manager,
     write_manager_program,
 };
+use greenfloor_engine::storage::SqliteStore;
 use serde_json::json;
 
 fn seed_offer_states(db_path: &Path, rows: &[(&str, &str, &str)]) {

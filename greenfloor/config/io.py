@@ -113,14 +113,38 @@ def enabled_market_rows(raw: dict[str, Any]) -> list[dict[str, Any]]:
     return [row for row in markets if isinstance(row, dict) and bool(row.get("enabled"))]
 
 
-def run_program_config_validate(*, program_config: Path) -> int:
-    """Validate program.yaml only via native ``greenfloor-manager program-config-validate``."""
+def run_config_validate(
+    *,
+    program_config: Path,
+    markets_config: Path | None = None,
+    testnet_markets_config: Path | None = None,
+    program_only: bool = False,
+) -> int:
+    """Validate operator config via native ``greenfloor-manager config-validate``."""
     argv = [
         str(resolve_greenfloor_manager_binary()),
         "--program-config",
         str(program_config),
-        "program-config-validate",
     ]
+    if program_only:
+        argv.extend(["config-validate", "--program-only"])
+    else:
+        if markets_config is None:
+            raise ValueError("markets_config is required unless program_only=True")
+        argv.extend(
+            [
+                "--markets-config",
+                str(markets_config),
+            ]
+        )
+        if testnet_markets_config is not None:
+            argv.extend(
+                [
+                    "--testnet-markets-config",
+                    str(testnet_markets_config),
+                ]
+            )
+        argv.append("config-validate")
     completed = subprocess.run(argv, check=False)
     return int(completed.returncode)
 
@@ -128,53 +152,7 @@ def run_program_config_validate(*, program_config: Path) -> int:
 def ensure_program_config_valid(*, program_config: Path | None = None) -> None:
     """Run native program-only validation using the default path when omitted."""
     program_path = (program_config or _DEFAULT_PROGRAM_CONFIG).expanduser()
-    code = run_program_config_validate(program_config=program_path)
-    if code != 0:
-        raise SystemExit(code)
-
-
-def run_config_validate(
-    *,
-    program_config: Path,
-    markets_config: Path,
-    testnet_markets_config: Path | None = None,
-) -> int:
-    """Validate operator config via native ``greenfloor-manager config-validate``."""
-    argv = [
-        str(resolve_greenfloor_manager_binary()),
-        "--program-config",
-        str(program_config),
-        "--markets-config",
-        str(markets_config),
-        "config-validate",
-    ]
-    if testnet_markets_config is not None:
-        argv[5:5] = [
-            "--testnet-markets-config",
-            str(testnet_markets_config),
-        ]
-    completed = subprocess.run(argv, check=False)
-    return int(completed.returncode)
-
-
-def ensure_operator_config_valid(
-    *,
-    program_config: Path | None = None,
-    markets_config: Path | None = None,
-    testnet_markets_config: Path | None = None,
-) -> None:
-    """Run native config validation using default operator paths when omitted."""
-    program_path = (program_config or _DEFAULT_PROGRAM_CONFIG).expanduser()
-    markets_path = (markets_config or _DEFAULT_MARKETS_CONFIG).expanduser()
-    overlay = testnet_markets_config
-    if overlay is None:
-        default_overlay = _DEFAULT_TESTNET_MARKETS_CONFIG.expanduser()
-        overlay = default_overlay if default_overlay.exists() else None
-    code = run_config_validate(
-        program_config=program_path,
-        markets_config=markets_path,
-        testnet_markets_config=overlay,
-    )
+    code = run_config_validate(program_config=program_path, program_only=True)
     if code != 0:
         raise SystemExit(code)
 

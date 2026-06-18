@@ -1,9 +1,4 @@
-#[path = "fixtures/json_util.rs"]
-mod json_util;
-#[path = "fixtures/manager.rs"]
-mod manager_fixtures;
-
-use manager_fixtures::{parse_json_output, run_manager, write_manager_program, write_markets_one};
+use super::fixtures::{parse_json_output, run_manager, write_manager_program, write_markets_one};
 use serde_json::json;
 
 #[test]

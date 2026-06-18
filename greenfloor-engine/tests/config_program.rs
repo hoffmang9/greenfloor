@@ -1,26 +1,9 @@
-use greenfloor_engine::config::{
-    parse_program_config, resolve_dexie_base_url, resolve_quote_asset_for_offer,
-    resolve_splash_base_url,
-};
+use greenfloor_engine::config::parse_program_config;
 use serde_json::{json, Value};
-
-fn expand_home_dir(path: &str) -> std::path::PathBuf {
-    if let Some(stripped) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return std::path::PathBuf::from(home).join(stripped);
-        }
-    }
-    if path == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            return std::path::PathBuf::from(home);
-        }
-    }
-    std::path::PathBuf::from(path)
-}
 
 fn base_program_raw() -> Value {
     json!({
-        "app": {"network": "mainnet", "home_dir": "~/.greenfloor", "log_level": "INFO"},
+        "app": {"network": "mainnet", "home_dir": "/tmp/greenfloor-test-home", "log_level": "INFO"},
         "keys": {
             "registry": [{
                 "key_id": "key-main-1",
@@ -72,7 +55,10 @@ fn parse_err(raw: &Value) -> String {
 fn parse_program_config_minimal_valid() {
     let cfg = parse_program_config(&base_program_raw()).expect("config");
     assert_eq!(cfg.network, "mainnet");
-    assert_eq!(cfg.home_dir, expand_home_dir("~/.greenfloor"));
+    assert_eq!(
+        cfg.home_dir,
+        std::path::PathBuf::from("/tmp/greenfloor-test-home")
+    );
     assert_eq!(cfg.runtime_loop_interval_seconds, 30);
     assert!(!cfg.runtime_dry_run);
     assert_eq!(cfg.tx_block_trigger_mode, "websocket");
