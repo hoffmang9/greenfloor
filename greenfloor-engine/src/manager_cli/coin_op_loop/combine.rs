@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use crate::coin_ops::evaluate_coin_combine_gate;
+use crate::coin_ops::non_negative_i64_to_u64;
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::ladder::{
@@ -69,12 +70,14 @@ pub async fn run_coin_combine(request: CoinCombineRequest<'_>) -> SignerResult<i
         .cloned();
     let explicit_coin_ids = !coin_ids.is_empty();
     let resolved_asset_id = exec_ctx.resolved_base_asset_id.clone();
-    let combine_fee = exec_ctx
-        .program
-        .coin_ops_combine_fee_mojos
-        .max(0)
-        .try_into()
-        .unwrap_or(0u64);
+    let combine_fee = non_negative_i64_to_u64(
+        exec_ctx.program.coin_ops_combine_fee_mojos,
+        "program.coin_ops_combine_fee_mojos",
+    )?;
+    let combine_threshold = match &combine_target {
+        Some(entry) => Some(combine_threshold_count(entry)?),
+        None => None,
+    };
 
     let (operations, completion) = run_until_ready_loop(
         &exec_ctx,
@@ -86,12 +89,12 @@ pub async fn run_coin_combine(request: CoinCombineRequest<'_>) -> SignerResult<i
             stop_when_gate_ready: true,
         },
         |gate_coins| {
-            combine_target.as_ref().map(|entry| {
+            combine_threshold.map(|threshold| {
                 evaluate_coin_combine_gate(
                     gate_coins,
                     &resolved_asset_id,
                     target_coin_amount_mojos,
-                    combine_threshold_count(entry).expect("ladder combine threshold"),
+                    threshold,
                 )
             })
         },

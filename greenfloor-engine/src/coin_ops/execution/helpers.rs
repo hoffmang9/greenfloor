@@ -8,10 +8,12 @@ pub(crate) fn wallet_coins_to_spendable(
     let min_amount = coin_op_min_amount_mojos(canonical_asset_id);
     coins
         .iter()
-        .filter(|coin| i64::try_from(coin.amount).unwrap_or(0) >= min_amount)
-        .map(|coin| SpendableCoin {
-            id: coin.id.clone(),
-            amount: i64::try_from(coin.amount).unwrap_or(i64::MAX),
+        .filter_map(|coin| {
+            let amount = i64::try_from(coin.amount).ok()?;
+            (amount >= min_amount).then_some(SpendableCoin {
+                id: coin.id.clone(),
+                amount,
+            })
         })
         .collect()
 }

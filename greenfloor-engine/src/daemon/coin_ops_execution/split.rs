@@ -1,14 +1,15 @@
 use std::collections::HashSet;
 
 use crate::coin_ops::{
-    coin_op_target_amount_allowed, plan_auto_split_selection, CoinOpPlan, SpendableCoin,
-    SplitAutoSelectPlan, SplitCombinePrereqPlan, SplitPlanningProfile,
+    coin_op_target_amount_allowed, i64_to_usize, non_negative_i64_to_u64,
+    plan_auto_split_selection, CoinOpPlan, SpendableCoin, SplitAutoSelectPlan,
+    SplitCombinePrereqPlan, SplitPlanningProfile,
 };
+use crate::config::usize_to_i64;
 
-use super::items::{executed_item, skip_item, CoinOpExecItem};
+use super::items::{executed_item, skip_item, skip_on_signer_err, CoinOpExecItem};
 use super::COIN_OP_ERROR_PREFIX;
 use crate::coin_ops::execution::{submit_combine_prereq, CoinOpExecContext};
-use crate::config::{non_negative_i64_to_u64, usize_to_i64};
 
 pub(crate) async fn submit_combine_prereq_for_split(
     ctx: &CoinOpExecContext,
@@ -180,50 +181,35 @@ pub(crate) async fn execute_daemon_split_plan(
             }
             SplitAutoSelectPlan::Coin(selected) => {
                 attempted_coin_ids.insert(selected.coin_id.clone());
-                let amount_u64 = match non_negative_i64_to_u64(
-                    amount_per_coin_mojos,
-                    "split.amount_per_coin_mojos",
+                let amount_u64 = match skip_on_signer_err(
+                    op_type,
+                    size_base_units,
+                    op_count,
+                    non_negative_i64_to_u64(amount_per_coin_mojos, "split.amount_per_coin_mojos"),
                 ) {
-                    Ok(amount) => amount,
-                    Err(err) => {
-                        return (
-                            vec![skip_item(
-                                op_type,
-                                size_base_units,
-                                op_count,
-                                format!("{COIN_OP_ERROR_PREFIX}:{err}"),
-                            )],
-                            0,
-                        );
-                    }
+                    Ok(value) => value,
+                    Err(skip) => return skip,
                 };
-                let Ok(output_count) = usize::try_from(op_count) else {
-                    return (
-                        vec![skip_item(
-                            op_type,
-                            size_base_units,
-                            op_count,
-                            format!("{COIN_OP_ERROR_PREFIX}:split op_count must fit in usize"),
-                        )],
-                        0,
-                    );
-                };
-                let fee_mojos = match non_negative_i64_to_u64(
-                    ctx.program.coin_ops_split_fee_mojos,
-                    "program.coin_ops_split_fee_mojos",
+                let output_count = match skip_on_signer_err(
+                    op_type,
+                    size_base_units,
+                    op_count,
+                    i64_to_usize(op_count, "split.op_count"),
                 ) {
-                    Ok(fee) => fee,
-                    Err(err) => {
-                        return (
-                            vec![skip_item(
-                                op_type,
-                                size_base_units,
-                                op_count,
-                                format!("{COIN_OP_ERROR_PREFIX}:{err}"),
-                            )],
-                            0,
-                        );
-                    }
+                    Ok(value) => value,
+                    Err(skip) => return skip,
+                };
+                let fee_mojos = match skip_on_signer_err(
+                    op_type,
+                    size_base_units,
+                    op_count,
+                    non_negative_i64_to_u64(
+                        ctx.program.coin_ops_split_fee_mojos,
+                        "program.coin_ops_split_fee_mojos",
+                    ),
+                ) {
+                    Ok(value) => value,
+                    Err(skip) => return skip,
                 };
                 let output_amounts = vec![amount_u64; output_count];
                 match ctx

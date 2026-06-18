@@ -128,7 +128,7 @@ export PRE_COMMIT_HOME="$(pwd)/.cache/pre-commit"  # reuse hook envs; CI caches 
 pre-commit run --all-files                         # lint + type-check (~5–10s warm)
 ```
 
-Full gate before push (Rust fmt/clippy run via pre-commit; CI runs the same pre-commit step):
+Full gate before push (Rust fmt/clippy via pre-commit — cast hygiene via clippy::all, not blanket pedantic):
 
 ```bash
 cargo test --manifest-path greenfloor-engine/Cargo.toml

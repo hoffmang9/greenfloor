@@ -1,8 +1,9 @@
 use crate::coin_ops::{
-    coin_op_target_amount_allowed, plan_auto_combine_inputs, CoinOpPlan, CombineInputSelectionMode,
+    coin_op_target_amount_allowed, i64_to_usize, non_negative_i64_to_u64, plan_auto_combine_inputs,
+    CoinOpPlan, CombineInputSelectionMode,
 };
 
-use super::items::{executed_item, skip_item, CoinOpExecItem};
+use super::items::{executed_item, skip_item, skip_on_signer_err, CoinOpExecItem};
 use super::COIN_OP_ERROR_PREFIX;
 use crate::coin_ops::execution::CoinOpExecContext;
 use crate::coin_ops::{combine_output_amounts, total_for_coin_ids};
@@ -46,13 +47,32 @@ pub(crate) async fn execute_daemon_combine_plan(
         }
     };
 
+    let requested_count = match skip_on_signer_err(
+        op_type,
+        size_base_units,
+        op_count,
+        i64_to_usize(requested_number_of_coins, "combine.op_count"),
+    ) {
+        Ok(value) => value,
+        Err(skip) => return skip,
+    };
+    let capped_count = match skip_on_signer_err(
+        op_type,
+        size_base_units,
+        op_count,
+        i64_to_usize(capped_number_of_coins, "combine.capped_op_count"),
+    ) {
+        Ok(value) => value,
+        Err(skip) => return skip,
+    };
+
     let combine_input_coin_ids = match plan_auto_combine_inputs(
         &spendable,
-        requested_number_of_coins.try_into().unwrap_or(0usize),
+        requested_count,
         CombineInputSelectionMode::ExactAmount,
         Some(target_coin_amount_mojos),
         Some(&ctx.watched_coin_ids),
-        Some(capped_number_of_coins.try_into().unwrap_or(0usize)),
+        Some(capped_count),
     ) {
         Ok(ids) => ids,
         Err(reason) => {
@@ -76,17 +96,21 @@ pub(crate) async fn execute_daemon_combine_plan(
 
     let total = total_for_coin_ids(&spendable, &combine_input_coin_ids);
     let output_amounts = combine_output_amounts(total, combine_input_coin_ids.len());
+    let fee_mojos = match skip_on_signer_err(
+        op_type,
+        size_base_units,
+        op_count,
+        non_negative_i64_to_u64(
+            ctx.program.coin_ops_combine_fee_mojos,
+            "program.coin_ops_combine_fee_mojos",
+        ),
+    ) {
+        Ok(value) => value,
+        Err(skip) => return skip,
+    };
 
     match ctx
-        .execute_mixed_split(
-            output_amounts,
-            &combine_input_coin_ids,
-            ctx.program
-                .coin_ops_combine_fee_mojos
-                .max(0)
-                .try_into()
-                .unwrap_or(0u64),
-        )
+        .execute_mixed_split(output_amounts, &combine_input_coin_ids, fee_mojos)
         .await
     {
         Ok(operation_id) => (

@@ -1,4 +1,6 @@
-//! Config and runtime scalar integer conversions (propagate errors; no silent fallback).
+//! Config and runtime scalar integer conversions.
+//!
+//! Policy: config and runtime scalar reads propagate errors via `config_err` (no silent fallback).
 
 use crate::config::yaml_fields::config_err;
 use crate::error::SignerResult;

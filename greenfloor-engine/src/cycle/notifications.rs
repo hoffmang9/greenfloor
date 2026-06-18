@@ -67,7 +67,8 @@ pub fn evaluate_low_inventory_alert(input: &LowInventoryInput) -> LowInventoryEv
         input.program_default_threshold,
         input.low_watermark,
     );
-    let hysteresis_target = crate::offer::pricing::f64_to_i64_round(
+    // Intentional fallback: invalid hysteresis math must not spuriously clear low-inventory state.
+    let hysteresis_target = crate::offer::pricing::f64_to_i64_round_ladder(
         crate::offer::pricing::i64_to_f64(threshold)
             * (1.0 + input.clear_hysteresis_percent / 100.0),
     )

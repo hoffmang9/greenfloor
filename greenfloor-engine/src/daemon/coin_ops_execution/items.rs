@@ -1,5 +1,7 @@
 use serde_json::Value;
 
+use crate::error::SignerResult;
+
 #[derive(Debug, Clone)]
 pub struct CoinOpExecItem {
     pub op_type: String,
@@ -51,4 +53,23 @@ pub(crate) fn executed_item(
         reason: reason.into(),
         operation_id: Some(operation_id),
     }
+}
+
+pub(crate) fn skip_on_signer_err<T>(
+    op_type: &str,
+    size_base_units: i64,
+    op_count: i64,
+    result: SignerResult<T>,
+) -> Result<T, (Vec<CoinOpExecItem>, u64)> {
+    result.map_err(|err| {
+        (
+            vec![skip_item(
+                op_type,
+                size_base_units,
+                op_count,
+                format!("{}:{err}", super::COIN_OP_ERROR_PREFIX),
+            )],
+            0,
+        )
+    })
 }

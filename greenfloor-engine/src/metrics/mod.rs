@@ -1,7 +1,10 @@
 //! Saturating numeric conversions for daemon/cycle aggregation metrics.
 //!
-//! Policy: metric rollups are best-effort totals. Negative per-market counters clamp to zero;
-//! lengths and counters above `u64::MAX` clamp to `u64::MAX` (documented saturation, not errors).
+//! Policy: metric rollups are best-effort totals — not operator correctness paths.
+//! Negative per-market counters clamp to zero; lengths and counters above the target type
+//! clamp to the type maximum (documented saturation, not errors).
+//! For config reads use `config::parse_int`; for offer/ladder math use `offer::pricing`;
+//! for coin-op execution amounts use `coin_ops::scalars`.
 
 /// Convert a collection length for metric counters.
 #[must_use]
@@ -25,4 +28,16 @@ pub fn millis_to_u64(ms: u128) -> u64 {
 #[must_use]
 pub fn non_negative_i64_to_u64(value: i64) -> u64 {
     u64::try_from(value.max(0)).unwrap_or(u64::MAX)
+}
+
+/// Convert a non-negative runtime scalar for daemon dispatch (overflow → `usize::MAX`).
+#[must_use]
+pub fn non_negative_i64_to_usize(value: i64) -> usize {
+    usize::try_from(value.max(0)).unwrap_or(usize::MAX)
+}
+
+/// Convert a non-negative runtime `u64` scalar for daemon dispatch (overflow → `usize::MAX`).
+#[must_use]
+pub fn non_negative_u64_to_usize(value: u64) -> usize {
+    usize::try_from(value).unwrap_or(usize::MAX)
 }

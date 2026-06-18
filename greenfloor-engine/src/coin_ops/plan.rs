@@ -172,4 +172,24 @@ mod tests {
         assert!(!plans.is_empty());
         assert_eq!(plans[0].op_type, CoinOpKind::Combine);
     }
+
+    #[test]
+    fn skips_combine_when_threshold_math_invalid() {
+        let invalid = BucketSpec {
+            size_base_units: 1,
+            target_count: 5,
+            split_buffer_count: 1,
+            combine_when_excess_factor: f64::NAN,
+            current_count: 100,
+        };
+        let valid = bucket(10, 2, 10);
+        let plans = plan_coin_ops(&[invalid, valid], 10, 100, 1, 1);
+        assert!(
+            plans.iter().all(|plan| plan.size_base_units != 1),
+            "invalid ladder math must not plan combine for that bucket"
+        );
+        assert!(plans
+            .iter()
+            .any(|plan| plan.op_type == CoinOpKind::Combine && plan.size_base_units == 10));
+    }
 }

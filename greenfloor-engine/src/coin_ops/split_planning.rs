@@ -9,6 +9,7 @@ use super::selection::{
     select_exact_amount_coin_ids, select_spendable_coins_for_target_amount,
     split_would_create_sub_cat_change, SpendableCoin,
 };
+use crate::metrics::non_negative_i64_to_usize;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SplitPlanningProfile {
@@ -116,7 +117,7 @@ pub fn build_combine_prereq_plan(
         .iter()
         .map(|coin| (coin.id.clone(), coin.amount))
         .collect();
-    let cap = combine_input_cap.max(0).try_into().unwrap_or(0usize);
+    let cap = non_negative_i64_to_usize(combine_input_cap);
     let combine_input_coin_ids: Vec<String> = combine_coin_ids.iter().take(cap).cloned().collect();
     let combine_cap_applied = combine_input_coin_ids.len() < combine_coin_ids.len();
     let combine_selected_total: i64 = combine_input_coin_ids

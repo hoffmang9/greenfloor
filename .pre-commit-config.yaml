@@ -19,7 +19,7 @@ repos:
         files: ^greenfloor-engine/
 
       - id: cargo-clippy
-        name: cargo clippy cast hygiene + selective pedantic (greenfloor-engine)
+        name: cargo clippy cast hygiene (greenfloor-engine)
         entry: cargo clippy --manifest-path greenfloor-engine/Cargo.toml --all-targets --no-deps
         language: system
         pass_filenames: false

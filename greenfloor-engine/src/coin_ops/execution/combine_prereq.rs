@@ -1,4 +1,4 @@
-use crate::coin_ops::{combine_output_amounts, total_for_coin_ids};
+use crate::coin_ops::{combine_output_amounts, non_negative_i64_to_u64, total_for_coin_ids};
 use crate::error::SignerResult;
 
 use super::context::CoinOpExecContext;
@@ -13,11 +13,10 @@ pub async fn submit_combine_prereq(
     ctx.execute_mixed_split(
         output_amounts,
         input_coin_ids,
-        ctx.program
-            .coin_ops_combine_fee_mojos
-            .max(0)
-            .try_into()
-            .unwrap_or(0u64),
+        non_negative_i64_to_u64(
+            ctx.program.coin_ops_combine_fee_mojos,
+            "program.coin_ops_combine_fee_mojos",
+        )?,
     )
     .await
 }

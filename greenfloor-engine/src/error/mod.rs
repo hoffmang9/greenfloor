@@ -149,6 +149,9 @@ pub enum SignerError {
     #[error("request_amount must be positive")]
     InvalidOfferRequestAmount,
 
+    #[error("invalid ladder math")]
+    InvalidLadderMath,
+
     #[error("invalid_offer_amount")]
     InvalidOfferAmount,
 

@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use super::scalars::non_negative_i64_to_u64_saturating;
 use super::selection::SpendableCoin;
 
 pub fn combine_output_amounts(total: i64, output_count: usize) -> Vec<u64> {
@@ -9,9 +10,9 @@ pub fn combine_output_amounts(total: i64, output_count: usize) -> Vec<u64> {
     let output_count_i64 = i64::try_from(output_count).unwrap_or(i64::MAX);
     let base = total.div_euclid(output_count_i64);
     let remainder = total.rem_euclid(output_count_i64);
-    let mut output_amounts = vec![u64::try_from(base.max(0)).unwrap_or(0); output_count];
+    let mut output_amounts = vec![non_negative_i64_to_u64_saturating(base); output_count];
     if let Some(last) = output_amounts.last_mut() {
-        *last = last.saturating_add(u64::try_from(remainder.max(0)).unwrap_or(0));
+        *last = last.saturating_add(non_negative_i64_to_u64_saturating(remainder));
     }
     output_amounts
 }
