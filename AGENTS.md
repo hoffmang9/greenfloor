@@ -52,7 +52,7 @@ Severity tags:
 - `[MUST]` Do not reintroduce PyO3 or Python policy bridges.
 - `[MUST]` Offer build/post uses `offer::operator::build_and_post_offer` (`greenfloor-manager build-and-post-offer` and daemon managed post).
 - `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`,
-  `greenfloor/config/io.py` (subprocess adapters to Rust field commands — not Python policy).
+  `greenfloor/config/io.py`, `greenfloor/manager_subprocess.py` (subprocess adapters to Rust field commands).
 - `[MUST]` `greenfloor-engine` crate root exports domain APIs (`offer`, `daemon`, `coin_ops`, `vault`); operator binaries import CLI modules directly (`manager_cli`, `daemon::cli`).
 - `[MUST]` Import direction: daemon never imports CLI; CLI never imports daemon. Shared logic belongs in shared modules.
 

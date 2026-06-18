@@ -72,8 +72,8 @@ pub async fn execute_strategy_actions(
     market: &MarketConfig,
     actions: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
-    if let Err(err) = ctx.resources.signer_for_execution() {
-        if is_signer_execution_soft_skip(&err) {
+    let signer_config = match ctx.resources.signer_for_execution() {
+        Err(err) if is_signer_execution_soft_skip(&err) => {
             store.add_audit_event(
                 "strategy_exec_skipped_no_signer",
                 &json!({
@@ -88,8 +88,9 @@ pub async fn execute_strategy_actions(
                 newly_executed_sell_counts: BTreeMap::new(),
             });
         }
-        return Err(err);
-    }
+        Err(err) => return Err(err),
+        Ok(signer) => signer,
+    };
 
     let expanded = expand_planned_actions(actions);
     if expanded.is_empty() {
@@ -99,13 +100,14 @@ pub async fn execute_strategy_actions(
         });
     }
 
-    let program = &ctx.resources.program;
+    let program = ctx.resources.program();
     if parallel_managed_dispatch_enabled(program) {
         match classify_parallel_dispatch(
             parallel::execute_actions_parallel(
                 store,
                 &ctx.dispatch.db_path,
                 ctx.resources,
+                signer_config,
                 market,
                 &expanded,
             )

@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use crate::adapters::DexieClient;
 use crate::config::{
-    load_markets_config_with_overlay, parse_program_config, parse_signer_config, read_program_yaml,
+    load_markets_config_with_overlay, parse_program_config, read_program_yaml, CycleProgramConfig,
     ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
 };
-use crate::error::{SignerError, SignerResult};
+use crate::error::SignerResult;
 
 use super::cycle_paths::DaemonCyclePaths;
 use super::reconcile_market_cycle::ReconcileMarketCycleResult;
@@ -16,8 +16,7 @@ use super::watchlist::cache::CoinWatchlistCache;
 /// Config and clients loaded once per daemon cycle.
 #[derive(Debug, Clone)]
 pub struct DaemonCycleResources {
-    pub program: ManagerProgramConfig,
-    pub signer: Option<SignerConfig>,
+    program_config: CycleProgramConfig,
     pub markets: MarketsConfig,
     pub network: String,
     pub dexie: DexieClient,
@@ -30,11 +29,30 @@ impl DaemonCycleResources {
         &self.paths.program_path
     }
 
+    pub fn program(&self) -> &ManagerProgramConfig {
+        self.program_config.program()
+    }
+
     pub fn signer_for_execution(&self) -> SignerResult<&SignerConfig> {
-        self.program.require_signer_offer_path()?;
-        self.signer
-            .as_ref()
-            .ok_or(SignerError::MissingConfigField("signer"))
+        self.program_config.signer_for_execution()
+    }
+
+    pub(crate) fn with_program_config(
+        program_config: CycleProgramConfig,
+        markets: MarketsConfig,
+        network: String,
+        dexie: DexieClient,
+        paths: DaemonCyclePaths,
+        coin_watchlist: Arc<CoinWatchlistCache>,
+    ) -> Self {
+        Self {
+            program_config,
+            markets,
+            network,
+            dexie,
+            paths,
+            coin_watchlist,
+        }
     }
 
     pub fn selected_markets(&self, selected_market_ids: &[String]) -> Vec<MarketConfig> {
@@ -75,32 +93,28 @@ pub struct MarketCycleContext<'a> {
 pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<DaemonCycleResources> {
     let raw = read_program_yaml(&request.program_path)?;
     let program = parse_program_config(&raw)?;
-    let signer = if program.signer_offer_path_configured() {
-        Some(parse_signer_config(&raw)?)
-    } else {
-        None
-    };
+    let program_config = CycleProgramConfig::from_parsed(program, &raw)?;
+    let network = program_config.program().network.clone();
+    let dexie_api_base = program_config.program().dexie_api_base.clone();
     let markets = load_markets_config_with_overlay(
         &request.markets_path,
         request.testnet_markets_path.as_deref(),
     )?;
     super::disabled_markets::log_disabled_markets_startup_once(&markets);
-    let network = program.network.clone();
-    let dexie = DexieClient::new(program.dexie_api_base.clone());
+    let dexie = DexieClient::new(dexie_api_base);
     let coin_watchlist = request.coin_watchlist.clone();
-    Ok(DaemonCycleResources {
-        program,
-        signer,
+    Ok(DaemonCycleResources::with_program_config(
+        program_config,
         markets,
         network,
         dexie,
-        paths: DaemonCyclePaths::new(
+        DaemonCyclePaths::new(
             request.program_path.clone(),
             request.markets_path.clone(),
             request.testnet_markets_path.clone(),
         ),
         coin_watchlist,
-    })
+    ))
 }
 
 #[cfg(test)]
@@ -127,25 +141,24 @@ mod tests {
     }
 
     fn sample_resources(markets: Vec<MarketConfig>) -> DaemonCycleResources {
-        DaemonCycleResources {
-            program: ManagerProgramConfig {
+        DaemonCycleResources::with_program_config(
+            CycleProgramConfig::WithoutSigner(Box::new(ManagerProgramConfig {
                 runtime_market_slot_count: 1,
                 runtime_offer_parallelism_max_workers: 2,
                 tx_block_websocket_reconnect_interval_seconds: 1,
                 tx_block_fallback_poll_interval_seconds: 1,
                 ..Default::default()
-            },
-            signer: None,
-            markets: MarketsConfig { markets },
-            network: "mainnet".to_string(),
-            dexie: DexieClient::new("https://api.dexie.space"),
-            paths: DaemonCyclePaths::new(
+            })),
+            MarketsConfig { markets },
+            "mainnet".to_string(),
+            DexieClient::new("https://api.dexie.space"),
+            DaemonCyclePaths::new(
                 PathBuf::from("/tmp/program.yaml"),
                 PathBuf::from("/tmp/markets.yaml"),
                 None,
             ),
-            coin_watchlist: CoinWatchlistCache::new(),
-        }
+            CoinWatchlistCache::new(),
+        )
     }
 
     #[test]

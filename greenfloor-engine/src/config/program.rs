@@ -59,10 +59,42 @@ impl ManagerProgramConfig {
         if self.signer_offer_path_configured() {
             return Ok(());
         }
-        Err(SignerError::Other(
-            "offer execution requires signer.kms_key_id and vault.launcher_id in program config"
-                .to_string(),
-        ))
+        Err(SignerError::SignerPathNotConfigured)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum CycleProgramConfig {
+    WithoutSigner(Box<ManagerProgramConfig>),
+    WithSigner(Box<ProgramConfigBundle>),
+}
+
+impl CycleProgramConfig {
+    pub fn from_parsed(program: ManagerProgramConfig, raw: &Value) -> SignerResult<Self> {
+        if program.signer_offer_path_configured() {
+            Ok(Self::WithSigner(Box::new(program_bundle_from_parsed(
+                program, raw,
+            )?)))
+        } else {
+            Ok(Self::WithoutSigner(Box::new(program)))
+        }
+    }
+
+    pub fn program(&self) -> &ManagerProgramConfig {
+        match self {
+            Self::WithoutSigner(program) => program,
+            Self::WithSigner(bundle) => &bundle.program,
+        }
+    }
+
+    pub fn signer_for_execution(&self) -> SignerResult<&SignerConfig> {
+        match self {
+            Self::WithoutSigner(program) => {
+                program.require_signer_offer_path()?;
+                Err(SignerError::MissingConfigField("signer"))
+            }
+            Self::WithSigner(bundle) => Ok(&bundle.signer),
+        }
     }
 }
 
@@ -71,12 +103,8 @@ pub const SIGNER_SKIP_MISSING_SIGNER_CONFIG: &str = "skipped_missing_signer_conf
 
 pub fn signer_execution_skip_reason(err: &SignerError) -> String {
     match err {
+        SignerError::SignerPathNotConfigured => SIGNER_SKIP_NO_SIGNER_PATH.to_string(),
         SignerError::MissingConfigField("signer") => SIGNER_SKIP_MISSING_SIGNER_CONFIG.to_string(),
-        SignerError::Other(msg)
-            if msg.contains("offer execution requires signer.kms_key_id and vault.launcher_id") =>
-        {
-            SIGNER_SKIP_NO_SIGNER_PATH.to_string()
-        }
         other => other.to_string(),
     }
 }
@@ -428,6 +456,12 @@ pub fn load_program_bundle_gated(path: &Path) -> SignerResult<ProgramConfigBundl
     let program = parse_program_config(&raw)?;
     program.require_signer_offer_path()?;
     program_bundle_from_parsed(program, &raw)
+}
+
+/// Load execution bundle for coin-list; maps missing signer path to
+/// [`SignerError::SignerPathNotConfigured`] for stable CLI exit handling.
+pub fn load_program_bundle_for_coin_list(path: &Path) -> SignerResult<ProgramConfigBundle> {
+    load_program_bundle_gated(path)
 }
 
 pub fn is_testnet_network(network: &str) -> bool {

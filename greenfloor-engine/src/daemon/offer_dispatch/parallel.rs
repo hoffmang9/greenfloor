@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::config::MarketConfig;
+use crate::config::{MarketConfig, SignerConfig};
 use crate::cycle::{
     parallel_max_workers, plan_parallel_managed_dispatch, reservation_release_status,
     PlannedAction, StrategyActionSellCountInput,
@@ -33,6 +33,7 @@ pub async fn execute_actions_parallel(
     store: &SqliteStore,
     db_path: &Path,
     resources: &DaemonCycleResources,
+    signer_config: &SignerConfig,
     market: &MarketConfig,
     expanded: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
@@ -40,8 +41,7 @@ pub async fn execute_actions_parallel(
     if let Some(result) = super::test_hooks::parallel_dispatch_test_override() {
         return result;
     }
-    let program = &resources.program;
-    let signer_config = resources.signer_for_execution()?;
+    let program = resources.program();
     let reservation_ctx =
         parallel_reservation_context(signer_config, &program.network, market, 0).await?;
     let asset_ids = parallel_reservation_asset_ids(&reservation_ctx);
@@ -112,7 +112,7 @@ pub async fn execute_actions_parallel(
             .await
             .map_err(|err| SignerError::Other(format!("parallel semaphore failed: {err}")))?;
         let coordinator = coordinator.clone();
-        let program = resources.program.clone();
+        let program = resources.program().clone();
         let market = market.clone();
         let paths = resources.paths.clone();
         let market_id = market.market_id.clone();

@@ -164,6 +164,9 @@ pub enum SignerError {
     #[error("database is locked")]
     DatabaseLocked,
 
+    #[error("offer execution requires signer.kms_key_id and vault.launcher_id in program config")]
+    SignerPathNotConfigured,
+
     #[error("daemon_already_running:{path}{detail}")]
     DaemonAlreadyRunning { path: String, detail: String },
 

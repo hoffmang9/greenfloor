@@ -8,7 +8,7 @@ import yaml
 
 from greenfloor.engine_binary import resolve_greenfloor_manager_binary
 from greenfloor.hex_utils import normalize_hex_id
-from tests.helpers.manager_cli import parse_json_output, run_manager
+from greenfloor.manager_subprocess import parse_json_output, run_manager
 
 
 def load_yaml(path: Path) -> dict[str, Any]:

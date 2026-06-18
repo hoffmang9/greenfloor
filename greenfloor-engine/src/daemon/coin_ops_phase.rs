@@ -26,7 +26,7 @@ pub async fn run_coin_ops_phase(
     active_counts: &BTreeMap<i64, i64>,
     newly_executed_counts: &BTreeMap<i64, i64>,
 ) -> SignerResult<()> {
-    let program = &ctx.resources.program;
+    let program = ctx.resources.program();
     let resources = &ctx.resources;
     let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
     if sell_ladder.is_empty() {

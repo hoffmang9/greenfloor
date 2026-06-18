@@ -5,7 +5,9 @@ use std::path::Path;
 use tempfile::TempDir;
 
 use crate::adapters::DexieClient;
-use crate::config::{ManagerProgramConfig, MarketsConfig, SignerConfig};
+use crate::config::{
+    CycleProgramConfig, ManagerProgramConfig, MarketsConfig, ProgramConfigBundle, SignerConfig,
+};
 use crate::cycle::StaleSweepProgress;
 
 use super::cycle_paths::DaemonCyclePaths;
@@ -39,20 +41,26 @@ pub fn test_cycle_context(
 ) -> TestCycleContextBundle {
     use std::collections::HashMap;
 
+    let program_config = match signer {
+        Some(signer) => {
+            CycleProgramConfig::WithSigner(Box::new(ProgramConfigBundle { program, signer }))
+        }
+        None => CycleProgramConfig::WithoutSigner(Box::new(program)),
+    };
+
     TestCycleContextBundle {
-        resources: DaemonCycleResources {
-            program,
-            signer,
-            markets: MarketsConfig { markets: vec![] },
-            network: "mainnet".to_string(),
-            dexie: DexieClient::new("https://api.dexie.space"),
-            paths: DaemonCyclePaths::new(
+        resources: DaemonCycleResources::with_program_config(
+            program_config,
+            MarketsConfig { markets: vec![] },
+            "mainnet".to_string(),
+            DexieClient::new("https://api.dexie.space"),
+            DaemonCyclePaths::new(
                 dir.path().join("program.yaml"),
                 dir.path().join("markets.yaml"),
                 None,
             ),
-            coin_watchlist: super::watchlist::CoinWatchlistCache::new(),
-        },
+            super::watchlist::CoinWatchlistCache::new(),
+        ),
         dispatch: MarketDispatchContext {
             db_path: db_path.to_path_buf(),
             allowed_key_ids: Vec::new(),

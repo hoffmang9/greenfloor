@@ -4,8 +4,7 @@ use serde_json::{json, Value};
 
 use crate::coin_ops::is_spendable_coin_state;
 use crate::config::{
-    load_markets_config_with_overlay, parse_program_config, program_bundle_from_parsed,
-    read_program_yaml, ProgramConfigBundle,
+    load_markets_config_with_overlay, load_program_bundle_for_coin_list, ProgramConfigBundle,
 };
 use crate::error::{SignerError, SignerResult};
 
@@ -114,17 +113,18 @@ async fn run_coin_list_command(
     op: &str,
 ) -> SignerResult<i32> {
     let _ = vault_id;
-    let raw = read_program_yaml(&mgr.program_config)?;
-    let program = parse_program_config(&raw)?;
-    if let Err(err) = program.require_signer_offer_path() {
-        mgr.emit_json(&json!({
-            "ok": false,
-            "error": "coin_list_requires_signer_backend",
-            "detail": err.to_string(),
-        }))?;
-        return Ok(2);
-    }
-    let bundle = program_bundle_from_parsed(program, &raw)?;
+    let bundle = match load_program_bundle_for_coin_list(&mgr.program_config) {
+        Err(SignerError::SignerPathNotConfigured) => {
+            mgr.emit_json(&json!({
+                "ok": false,
+                "error": "coin_list_requires_signer_backend",
+                "detail": SignerError::SignerPathNotConfigured.to_string(),
+            }))?;
+            return Ok(2);
+        }
+        Err(err) => return Err(err),
+        Ok(bundle) => bundle,
+    };
     let snapshot = load_coin_list_snapshot(&bundle, &mgr.markets_config, asset, cat_id).await?;
     if op == "coin-status" {
         mgr.emit_json(&json!({

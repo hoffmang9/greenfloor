@@ -127,7 +127,7 @@ async fn run_daemon_cycle_once_inner(
     super::disabled_markets::log_disabled_markets_periodic(&resources.markets);
 
     let db_path = resolve_state_db_path(
-        &resources.program.home_dir,
+        &resources.program().home_dir,
         request.state_db_override.as_deref(),
     );
     let cycle_store = SqliteStore::open(&db_path)?;
@@ -135,7 +135,7 @@ async fn run_daemon_cycle_once_inner(
     write_stale_sweep_audit(&cycle_store, &plan)?;
 
     let preamble = run_cycle_preamble(
-        &resources.program,
+        resources.program(),
         &cycle_store,
         &request.coinset_base_url,
         &resources.coin_watchlist,

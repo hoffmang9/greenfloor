@@ -168,7 +168,7 @@ pub async fn build_cycle_plan(
     resources: &DaemonCycleResources,
     store: &SqliteStore,
 ) -> SignerResult<CyclePlan> {
-    let program = &resources.program;
+    let program = resources.program();
     let db_path = resolve_state_db_path(&program.home_dir, request.state_db_override.as_deref());
     let previous_xch_price_usd = store.get_latest_xch_price_snapshot()?;
     let enabled_market_ids = enabled_market_ids(&resources.markets);

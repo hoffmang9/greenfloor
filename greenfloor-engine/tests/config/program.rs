@@ -335,6 +335,7 @@ fn signer_execution_skip_reason_maps_missing_signer_path() {
     let err = cfg
         .require_signer_offer_path()
         .expect_err("missing signer path");
+    assert!(matches!(err, SignerError::SignerPathNotConfigured));
     assert_eq!(
         signer_execution_skip_reason(&err),
         SIGNER_SKIP_NO_SIGNER_PATH

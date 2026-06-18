@@ -12,10 +12,11 @@ pub use markets::{
 };
 pub use program::{
     action_side_from_pricing, is_signer_execution_soft_skip, is_testnet_network,
-    load_program_bundle, load_program_bundle_gated, load_program_config, parse_program_config,
-    program_bundle_from_parsed, read_program_yaml, resolve_dexie_base_url,
-    resolve_offer_publish_settings, resolve_quote_asset_for_offer, resolve_splash_base_url,
-    resolve_trade_asset_for_network, signer_execution_skip_reason, ManagerProgramConfig,
-    ProgramConfigBundle, SIGNER_SKIP_MISSING_SIGNER_CONFIG, SIGNER_SKIP_NO_SIGNER_PATH,
+    load_program_bundle, load_program_bundle_for_coin_list, load_program_bundle_gated,
+    load_program_config, parse_program_config, program_bundle_from_parsed, read_program_yaml,
+    resolve_dexie_base_url, resolve_offer_publish_settings, resolve_quote_asset_for_offer,
+    resolve_splash_base_url, resolve_trade_asset_for_network, signer_execution_skip_reason,
+    CycleProgramConfig, ManagerProgramConfig, ProgramConfigBundle,
+    SIGNER_SKIP_MISSING_SIGNER_CONFIG, SIGNER_SKIP_NO_SIGNER_PATH,
 };
 pub use signer::{load_signer_config, parse_signer_config, SignerConfig, DEFAULT_MSP_BASE_URL};
