@@ -1,6 +1,6 @@
 //! PyO3 manager entrypoints using serde JSON request/response boundaries.
 
-use engine_core::manager::{build_and_post_offer, BuildAndPostOfferRequest};
+use engine_core::offer::operator::{build_and_post_offer, BuildAndPostOfferRequest};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
 

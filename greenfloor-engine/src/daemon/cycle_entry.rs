@@ -13,7 +13,7 @@ use super::market_dispatch::{aggregate_market_dispatch_metrics, record_market_wo
     SingleMarketCycleOutput};
 use super::preamble::run_cycle_preamble;
 use super::reconcile_augment::merge_reconcile_immediate_requeue;
-use super::reconcile_phase::run_market_reconcile_phase;
+use super::reconcile_market_cycle::run_reconcile_market_cycle;
 use super::run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
     elapsed_ms, CyclePlan, DaemonCycleSummary, DaemonDispatchState, DaemonRunOnceRequest,
@@ -54,7 +54,7 @@ async fn process_one_market(
     plan: &CyclePlan,
     market: &MarketConfig,
 ) -> SignerResult<SingleMarketCycleOutput> {
-    let reconcile = run_market_reconcile_phase(
+    let reconcile = run_reconcile_market_cycle(
         store,
         &resources.coin_watchlist,
         &resources.dexie,

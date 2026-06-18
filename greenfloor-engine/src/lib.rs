@@ -6,6 +6,7 @@
 #![recursion_limit = "1024"]
 
 pub mod adapters;
+pub mod cli_util;
 pub mod coin_ops;
 pub mod coinset;
 pub mod config;
@@ -14,7 +15,6 @@ pub mod daemon;
 pub mod error;
 pub mod hex;
 pub mod kms;
-pub mod manager;
 pub mod manager_cli;
 pub mod offer;
 pub mod storage;
@@ -102,11 +102,12 @@ pub use cycle::{
 };
 pub use error::SignerError as Error;
 pub use hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
-pub use manager::{
-    run_offers_cancel_command, run_offers_reconcile_command, run_offers_status_command,
-    OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
+pub use manager_cli::{
+    run_manager_cli, run_offers_cancel_command, run_offers_reconcile_command,
+    run_offers_status_command, ManagerCli, ManagerCommands, OffersCancelCliArgs,
+    OffersReconcileCliArgs, OffersStatusCliArgs,
 };
-pub use manager_cli::{run_manager_cli, ManagerCli, ManagerCommands};
+pub use offer::lifecycle::{OffersCancelCliResult, OffersStatusCliResult};
 pub use coin_ops::execution::{combine_input_coin_cap, CoinOpExecContext};
 pub use daemon::{
     run_daemon_command, run_daemon_cycle_once_from_json, run_daemon_loop_from_json, DaemonCliArgs,

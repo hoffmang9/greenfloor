@@ -4,31 +4,13 @@ use std::path::PathBuf;
 
 use clap::Args;
 
+use crate::cli_util::{optional_trimmed, print_json_pretty};
 use crate::config::load_program_config;
 use crate::error::SignerResult;
 use crate::offer::lifecycle::{
     offers_cancel_cli, offers_status_cli, reconcile_offers_cli, OffersCancelCliResult,
 };
 use crate::storage::resolve_state_db_path;
-
-fn print_json(value: &impl serde::Serialize) -> SignerResult<()> {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(value).map_err(|err| {
-            crate::error::SignerError::Other(format!("failed to encode json output: {err}"))
-        })?
-    );
-    Ok(())
-}
-
-fn optional_trimmed(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
 
 #[derive(Debug, Args)]
 pub struct OffersReconcileCliArgs {
@@ -91,7 +73,7 @@ pub async fn run_offers_reconcile_command(args: OffersReconcileCliArgs) -> Signe
         args.limit,
     )
     .await?;
-    print_json(&payload)?;
+    print_json_pretty(&payload)?;
     Ok(0)
 }
 
@@ -107,7 +89,7 @@ pub fn run_offers_status_command(args: OffersStatusCliArgs) -> SignerResult<i32>
         args.limit,
         args.events_limit,
     )?;
-    print_json(&payload)?;
+    print_json_pretty(&payload)?;
     Ok(0)
 }
 
@@ -130,6 +112,6 @@ pub async fn run_offers_cancel_command(args: OffersCancelCliArgs) -> SignerResul
     )
     .await?;
     let exit_code = if payload.failed_count == 0 { 0 } else { 2 };
-    print_json(&payload)?;
+    print_json_pretty(&payload)?;
     Ok(exit_code)
 }

@@ -76,7 +76,7 @@ pub(super) async fn resolve_build_and_post_context(
         action_side,
         offer_fee_mojos,
         offer_fee_source,
-        test_overrides: OfferOperatorTestOverrides::from_env(),
+        test_overrides: request.test_overrides.clone(),
     })
 }
 

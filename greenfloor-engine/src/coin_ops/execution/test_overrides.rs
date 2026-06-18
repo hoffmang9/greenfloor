@@ -1,4 +1,4 @@
-//! Debug-build integration-test overrides (populated at CLI context construction only).
+//! Debug-build integration-test overrides (set on `CoinOpExecContext` at CLI construction).
 
 use crate::coin_ops::SpendableCoin;
 

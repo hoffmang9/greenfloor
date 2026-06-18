@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clap::Args;
 use serde_json::Value;
 
+use crate::cli_util::optional_trimmed;
 use crate::error::{SignerError, SignerResult};
 
 use super::cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
@@ -12,15 +13,6 @@ use super::logging::{initialize_daemon_file_logging, warn_if_daemon_log_level_au
 use super::program_runtime::{load_daemon_program_runtime, use_websocket_capture_for_once};
 use super::run_once::{DaemonDispatchState, DaemonRunOnceRequestBody};
 use super::watchlist::cache::CoinWatchlistCache;
-
-fn optional_trimmed(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
 
 fn parse_key_ids(raw: &str) -> Option<Vec<String>> {
     let ids: Vec<String> = raw

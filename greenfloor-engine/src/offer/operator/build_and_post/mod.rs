@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 
 use crate::adapters::{DexieClient, SplashClient};
 use crate::error::{SignerError, SignerResult};
+use crate::offer::operator::OfferOperatorTestOverrides;
 use crate::storage::OfferPostPersistRecord;
 
 use context::resolve_build_and_post_context;
@@ -41,6 +42,8 @@ pub struct BuildAndPostOfferRequest {
     pub persist_results: bool,
     /// When set, overrides ``pricing.side`` for bootstrap and offer construction (daemon buy/sell actions).
     pub action_side: Option<String>,
+    #[serde(default)]
+    pub test_overrides: OfferOperatorTestOverrides,
 }
 
 #[derive(Debug, Clone)]

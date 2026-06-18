@@ -7,7 +7,7 @@ use crate::error::SignerResult;
 use crate::offer::codec::verify_offer_for_dexie;
 use crate::offer::publish::expected_publish_asset_fields;
 
-use crate::offer::operator::bootstrap::{
+use crate::offer::operator::signer_denomination::{
     bootstrap_blocks_offer, signer_bootstrap_phase, BootstrapPhaseResult,
 };
 use super::context::ResolvedBuildAndPostContext;

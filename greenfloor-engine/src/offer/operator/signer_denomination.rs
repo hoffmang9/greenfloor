@@ -1,3 +1,8 @@
+//! Runtime signer denomination bootstrap (vault mixed-split) for offer build/post.
+//!
+//! Deterministic ladder planning lives in `offer::bootstrap`; this module executes
+//! the signer-side denomination phase before offer construction.
+
 use std::collections::HashSet;
 
 use serde_json::{json, Value};

@@ -1,7 +1,10 @@
-//! Debug-build integration-test overrides (populated at operator context construction only).
+//! Debug-build integration-test overrides (set on `BuildAndPostOfferRequest` by the CLI).
 
-#[derive(Debug, Clone, Default)]
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct OfferOperatorTestOverrides {
+    #[serde(default)]
     pub offer_text: Option<String>,
 }
 

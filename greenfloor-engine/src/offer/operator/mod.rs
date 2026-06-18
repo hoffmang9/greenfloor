@@ -1,11 +1,11 @@
 //! Shared operator orchestration for manager CLI and daemon offer dispatch.
 
-mod bootstrap;
+mod signer_denomination;
 mod logging;
 mod build_and_post;
 mod test_overrides;
 
-pub use bootstrap::{
+pub use signer_denomination::{
     bootstrap_blocks_offer, signer_bootstrap_phase, BootstrapPhaseResult,
 };
 pub use build_and_post::{

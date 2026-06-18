@@ -1,3 +1,8 @@
+//! In-crate unit-test hooks for offer-dispatch orchestration only.
+//!
+//! Subprocess and integration tests must use request-carried overrides instead
+//! (`BuildAndPostOfferRequest::test_overrides`, `CoinOpTestOverrides`).
+
 #[cfg(test)]
 use std::sync::{Mutex, MutexGuard};
 

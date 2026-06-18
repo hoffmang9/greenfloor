@@ -3,7 +3,7 @@
 mod cancel;
 mod cancel_cli;
 mod persist;
-mod reconcile;
+mod reconcile_watched_offers;
 mod status_cli;
 mod transition;
 
@@ -12,7 +12,7 @@ pub use cancel_cli::{
     offers_cancel_cli, OffersCancelCliItem, OffersCancelCliResult,
 };
 pub use persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
-pub use reconcile::{
+pub use reconcile_watched_offers::{
     reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,
     ReconcileCliResult,
 };

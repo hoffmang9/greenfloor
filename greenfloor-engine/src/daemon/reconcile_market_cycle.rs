@@ -1,3 +1,5 @@
+//! Per-market daemon-cycle reconcile: Dexie list fetch, watchlist updates, lifecycle transitions.
+
 use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value};
@@ -17,18 +19,18 @@ use super::watchlist::cache::CoinWatchlistCache;
 use super::watchlist::{update_market_coin_watchlist_from_offers, watchlist_offer_ids};
 
 #[derive(Debug, Clone, Default)]
-pub struct ReconcilePhaseMetrics {
+pub struct ReconcileMarketCycleMetrics {
     pub cycle_errors: u64,
     pub immediate_requeue_requested: bool,
     pub immediate_requeue_signals: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ReconcilePhaseResult {
+pub struct ReconcileMarketCycleResult {
     pub offers: Vec<Value>,
     pub dexie_size_by_offer_id: HashMap<String, i64>,
     pub dexie_fetch_error: Option<String>,
-    pub metrics: ReconcilePhaseMetrics,
+    pub metrics: ReconcileMarketCycleMetrics,
 }
 
 pub(crate) fn apply_reconcile_transition(
@@ -36,7 +38,7 @@ pub(crate) fn apply_reconcile_transition(
     market_id: &str,
     offer_id: &str,
     transition: &CycleOfferTransition,
-    metrics: &mut ReconcilePhaseMetrics,
+    metrics: &mut ReconcileMarketCycleMetrics,
     state_by_offer_id: &mut HashMap<String, String>,
     last_seen_status: Option<i64>,
     dexie_error: Option<&str>,
@@ -65,15 +67,15 @@ pub(crate) fn apply_reconcile_transition(
     Ok(())
 }
 
-pub async fn run_market_reconcile_phase(
+pub async fn run_reconcile_market_cycle(
     store: &SqliteStore,
     coin_watchlist: &CoinWatchlistCache,
     dexie: &DexieClient,
     market: &MarketConfig,
     network: &str,
-) -> SignerResult<ReconcilePhaseResult> {
+) -> SignerResult<ReconcileMarketCycleResult> {
     let market_id = market.market_id.as_str();
-    let mut metrics = ReconcilePhaseMetrics::default();
+    let mut metrics = ReconcileMarketCycleMetrics::default();
     let dexie_offered_asset = resolve_trade_asset_for_network(&market.base_asset, network);
     let dexie_requested_asset = resolve_quote_asset_for_offer(&market.quote_asset, network);
 
@@ -89,7 +91,7 @@ pub async fn run_market_reconcile_phase(
                 &json!({"market_id": market_id, "error": err.to_string()}),
                 Some(market_id),
             )?;
-            return Ok(ReconcilePhaseResult {
+            return Ok(ReconcileMarketCycleResult {
                 offers: Vec::new(),
                 dexie_size_by_offer_id: HashMap::new(),
                 dexie_fetch_error: Some(err.to_string()),
@@ -160,7 +162,7 @@ pub async fn run_market_reconcile_phase(
         &augmented_offers,
     )?;
 
-    Ok(ReconcilePhaseResult {
+    Ok(ReconcileMarketCycleResult {
         offers: augmented_offers,
         dexie_size_by_offer_id,
         dexie_fetch_error: None,
@@ -222,7 +224,7 @@ mod tests {
         let dexie = DexieClient::new(server.url());
         let watchlist = CoinWatchlistCache::new();
 
-        let result = run_market_reconcile_phase(
+        let result = run_reconcile_market_cycle(
             &store,
             &watchlist,
             &dexie,
@@ -279,7 +281,7 @@ mod tests {
         let dexie = DexieClient::new(server.url());
         let watchlist = CoinWatchlistCache::new();
 
-        let result = run_market_reconcile_phase(
+        let result = run_reconcile_market_cycle(
             &store,
             &watchlist,
             &dexie,
@@ -325,7 +327,7 @@ mod tests {
         let dexie = DexieClient::new(server.url());
         let watchlist = CoinWatchlistCache::new();
 
-        run_market_reconcile_phase(
+        run_reconcile_market_cycle(
             &store,
             &watchlist,
             &dexie,
@@ -354,7 +356,7 @@ mod tests {
         let dexie = DexieClient::new(server.url());
         let watchlist = CoinWatchlistCache::new();
 
-        run_market_reconcile_phase(
+        run_reconcile_market_cycle(
             &store,
             &watchlist,
             &dexie,

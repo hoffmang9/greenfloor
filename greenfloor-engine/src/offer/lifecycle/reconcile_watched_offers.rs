@@ -1,3 +1,5 @@
+//! Batch reconcile of watched offer rows from SQLite against venue APIs (CLI + operator tooling).
+
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
