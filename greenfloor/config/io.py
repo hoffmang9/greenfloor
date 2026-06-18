@@ -7,6 +7,7 @@ from typing import Any
 import yaml
 
 from greenfloor.engine_binary import resolve_greenfloor_manager_binary
+from greenfloor.hex_utils import normalize_hex_id
 from tests.helpers.manager_cli import parse_json_output, run_manager
 
 _MINIMAL_PROGRAM_TEMPLATE = (
@@ -124,6 +125,37 @@ def load_markets_fields(
     if not isinstance(payload, dict):
         raise RuntimeError("markets-fields returned non-object JSON")
     return payload
+
+
+def load_cats_fields(*, cats_config: Path) -> dict[str, Any]:
+    """Load script-facing CAT catalog fields via native ``greenfloor-manager cats-fields``."""
+    code, stdout, stderr = run_manager(
+        [
+            "--cats-config",
+            str(cats_config),
+            "--json",
+            "cats-fields",
+        ]
+    )
+    if code != 0:
+        detail = stderr.strip() or stdout.strip() or f"exit {code}"
+        raise RuntimeError(f"cats-fields failed: {detail}")
+    payload = parse_json_output(stdout)
+    if not isinstance(payload, dict):
+        raise RuntimeError("cats-fields returned non-object JSON")
+    return payload
+
+
+def symbol_to_asset_id_map(fields: dict[str, Any]) -> dict[str, str]:
+    raw = fields.get("symbol_to_asset_id")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for symbol, asset_id in raw.items():
+        normalized = normalize_hex_id(str(asset_id))
+        if normalized:
+            out[str(symbol).strip().lower()] = normalized
+    return out
 
 
 def enabled_market_rows(fields: dict[str, Any]) -> list[dict[str, Any]]:

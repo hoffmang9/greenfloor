@@ -6,7 +6,7 @@ use crate::config::{
     load_markets_config_with_overlay, parse_program_config, parse_signer_config, read_program_yaml,
     ManagerProgramConfig, MarketConfig, MarketsConfig, SignerConfig,
 };
-use crate::error::SignerResult;
+use crate::error::{SignerError, SignerResult};
 
 use super::cycle_paths::DaemonCyclePaths;
 use super::reconcile_market_cycle::ReconcileMarketCycleResult;
@@ -30,8 +30,11 @@ impl DaemonCycleResources {
         &self.paths.program_path
     }
 
-    pub fn signer_offer_path_configured(&self) -> bool {
-        self.program.signer_offer_path_configured()
+    pub fn signer_for_execution(&self) -> SignerResult<&SignerConfig> {
+        self.program.require_signer_offer_path()?;
+        self.signer
+            .as_ref()
+            .ok_or(SignerError::MissingConfigField("signer"))
     }
 
     pub fn selected_markets(&self, selected_market_ids: &[String]) -> Vec<MarketConfig> {

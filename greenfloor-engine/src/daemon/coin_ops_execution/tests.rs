@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::coin_ops::{CoinOpKind, CoinOpPlan};
-use crate::config::{load_program_bundle, ManagerProgramConfig, MarketConfig};
+use crate::config::{load_program_bundle, MarketConfig};
 use crate::daemon::coin_ops_execution::{execute_managed_coin_op_plans, CoinOpExecutionResult};
 use crate::test_support::minimal_program::{
     write_minimal_program_with_signer, MinimalProgramParams,
@@ -60,7 +60,7 @@ async fn execute_managed_coin_op_plans_skips_when_receive_address_missing() {
 
     let result = execute_managed_coin_op_plans(
         &bundle.program,
-        Some(&bundle.signer),
+        &bundle.signer,
         &market,
         &plans,
         &HashSet::new(),
@@ -90,7 +90,7 @@ async fn execute_managed_coin_op_plans_dry_run_plans_without_execution() {
 
     let result = execute_managed_coin_op_plans(
         &bundle.program,
-        Some(&bundle.signer),
+        &bundle.signer,
         &market,
         &plans,
         &HashSet::new(),
@@ -101,20 +101,4 @@ async fn execute_managed_coin_op_plans_dry_run_plans_without_execution() {
     assert_eq!(result.items.len(), 1);
     assert_eq!(result.items[0].status, "planned");
     assert_eq!(result.items[0].reason, "dry_run:signer");
-}
-
-#[tokio::test]
-async fn execute_managed_coin_op_plans_skips_when_signer_missing_from_resources() {
-    let program = ManagerProgramConfig {
-        signer_kms_key_id: "arn:aws:kms:us-west-2:123:key/demo".to_string(),
-        vault_launcher_id: "aa".repeat(32),
-        ..Default::default()
-    };
-    let market = sample_market("xch1test");
-    let plans = vec![sample_plan(CoinOpKind::Split)];
-
-    let result =
-        execute_managed_coin_op_plans(&program, None, &market, &plans, &HashSet::new()).await;
-
-    assert_skipped_all(&result, "signer.kms_key_id");
 }

@@ -136,15 +136,24 @@ pub async fn run_coin_ops_phase(
                 "network": program.network,
             }),
         }
+    } else if !program.signer_offer_path_configured() {
+        skipped_coin_ops_result(program, market, &executable_plans, "skipped_no_signer")
     } else {
-        execute_managed_coin_op_plans(
-            program,
-            resources.signer.as_ref(),
-            market,
-            &executable_plans,
-            &watched_coin_ids,
-        )
-        .await
+        match resources.signer_for_execution() {
+            Ok(signer) => {
+                execute_managed_coin_op_plans(
+                    program,
+                    signer,
+                    market,
+                    &executable_plans,
+                    &watched_coin_ids,
+                )
+                .await
+            }
+            Err(err) => {
+                skipped_coin_ops_result(program, market, &executable_plans, &err.to_string())
+            }
+        }
     };
 
     if !overflow_plans.is_empty() {
@@ -212,6 +221,36 @@ pub async fn run_coin_ops_phase(
 
     persist_coin_op_execution(store, market, program, &execution)?;
     Ok(())
+}
+
+fn skipped_coin_ops_result(
+    program: &crate::config::ManagerProgramConfig,
+    market: &MarketConfig,
+    plans: &[CoinOpPlan],
+    reason: &str,
+) -> CoinOpExecutionResult {
+    CoinOpExecutionResult {
+        dry_run: program.runtime_dry_run,
+        planned_count: plans.len(),
+        executed_count: 0,
+        status: "skipped".to_string(),
+        items: plans
+            .iter()
+            .map(|plan| CoinOpExecItem {
+                op_type: plan.op_type.as_str().to_string(),
+                size_base_units: plan.size_base_units,
+                op_count: plan.op_count,
+                status: "skipped".to_string(),
+                reason: reason.to_string(),
+                operation_id: None,
+            })
+            .collect(),
+        signer_selection: json!({
+            "selected_source": "signer_registry",
+            "key_id": market.signer_key_id,
+            "network": program.network,
+        }),
+    }
 }
 
 fn plan_summary(plan: &CoinOpPlan) -> serde_json::Value {

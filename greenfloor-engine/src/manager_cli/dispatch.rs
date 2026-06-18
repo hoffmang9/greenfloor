@@ -23,6 +23,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
         }
         ManagerCommands::ProgramFields => setup::run_program_fields(&ctx),
         ManagerCommands::MarketsFields => setup::run_markets_fields(&ctx),
+        ManagerCommands::CatsFields => setup::run_cats_fields(&ctx),
         ManagerCommands::KeysOnboard {
             chia_keys_dir,
             key_id,

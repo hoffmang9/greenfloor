@@ -72,7 +72,7 @@ pub async fn execute_strategy_actions(
     market: &MarketConfig,
     actions: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
-    if !ctx.resources.signer_offer_path_configured() {
+    if !ctx.resources.program.signer_offer_path_configured() {
         store.add_audit_event(
             "strategy_exec_skipped_no_signer",
             &json!({"market_id": market.market_id, "planned_count": actions.len()}),

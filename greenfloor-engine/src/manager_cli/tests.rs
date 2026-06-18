@@ -5,7 +5,7 @@ use serde_json::json;
 
 use crate::adapters::{post_offer_phase_dexie, DexieClient, PostOfferPhaseDexieParams};
 use crate::config::{
-    load_markets_config, load_program_config, require_signer_offer_path, resolve_market_for_build,
+    load_markets_config, load_program_config, resolve_market_for_build,
     resolve_offer_publish_settings, ManagerProgramConfig,
 };
 
@@ -129,7 +129,7 @@ markets:
     .expect("write markets");
 
     let program = load_program_config(&program_path).expect("program");
-    require_signer_offer_path(&program).expect("signer path");
+    program.require_signer_offer_path().expect("signer path");
     assert_eq!(program.offer_publish_venue, "dexie");
     let markets = load_markets_config(&markets_path).expect("markets");
     let market = resolve_market_for_build(&markets, Some("m1"), None, "mainnet").expect("market");

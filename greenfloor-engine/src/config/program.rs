@@ -54,6 +54,16 @@ impl ManagerProgramConfig {
     pub fn signer_offer_path_configured(&self) -> bool {
         !self.signer_kms_key_id.is_empty() && !self.vault_launcher_id.is_empty()
     }
+
+    pub fn require_signer_offer_path(&self) -> SignerResult<()> {
+        if self.signer_offer_path_configured() {
+            return Ok(());
+        }
+        Err(SignerError::Other(
+            "offer execution requires signer.kms_key_id and vault.launcher_id in program config"
+                .to_string(),
+        ))
+    }
 }
 
 impl Default for ManagerProgramConfig {
@@ -381,16 +391,6 @@ pub fn load_program_bundle(path: &Path) -> SignerResult<ProgramConfigBundle> {
         program: parse_program_config(&raw)?,
         signer: super::signer::parse_signer_config(&raw)?,
     })
-}
-
-pub fn require_signer_offer_path(config: &ManagerProgramConfig) -> SignerResult<()> {
-    if config.signer_offer_path_configured() {
-        return Ok(());
-    }
-    Err(SignerError::Other(
-        "offer execution requires signer.kms_key_id and vault.launcher_id in program config"
-            .to_string(),
-    ))
 }
 
 pub fn is_testnet_network(network: &str) -> bool {

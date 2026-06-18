@@ -89,16 +89,13 @@ pub(super) fn spendable_coins_for_gate(spendable: &[SpendableCoin]) -> Vec<Value
 }
 
 pub(super) async fn resolve_asset_filter(
-    program_path: &Path,
-    network: &str,
+    signer_config: &crate::config::SignerConfig,
     filter: &str,
 ) -> SignerResult<String> {
     if is_hex_id(filter) {
         return Ok(normalize_hex_id(filter));
     }
-    let bundle = load_program_bundle(program_path)?;
-    let (resolved, _) = resolve_offer_assets_for_action(&bundle.signer, filter, "xch").await?;
-    let _ = network;
+    let (resolved, _) = resolve_offer_assets_for_action(signer_config, filter, "xch").await?;
     Ok(resolved)
 }
 

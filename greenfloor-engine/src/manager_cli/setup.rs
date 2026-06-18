@@ -7,8 +7,10 @@ use serde_yaml::Value;
 
 use crate::config::{load_markets_config_with_overlay, load_program_config};
 use crate::error::{SignerError, SignerResult};
+use crate::hex::{is_hex_id, normalize_hex_id};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
+use super::cats_catalog::load_cats_catalog;
 use super::context::ManagerContext;
 use super::paths::expand_home;
 
@@ -97,6 +99,36 @@ pub fn run_markets_fields(ctx: &ManagerContext) -> SignerResult<i32> {
     ctx.emit_json(&json!({
         "markets_config": ctx.markets_config.display().to_string(),
         "enabled_markets": enabled,
+    }))?;
+    Ok(0)
+}
+
+pub fn run_cats_fields(ctx: &ManagerContext) -> SignerResult<i32> {
+    let catalog = load_cats_catalog(&ctx.cats_config)?;
+    let mut symbol_to_asset_id = serde_json::Map::new();
+    for row in &catalog {
+        let Some(symbol) = row
+            .get("base_symbol")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let Some(asset_id) = row
+            .get("asset_id")
+            .and_then(|value| value.as_str())
+            .map(normalize_hex_id)
+            .filter(|value| is_hex_id(value))
+        else {
+            continue;
+        };
+        symbol_to_asset_id.insert(symbol.to_ascii_lowercase(), json!(asset_id));
+    }
+    ctx.emit_json(&json!({
+        "cats_config": ctx.cats_config.display().to_string(),
+        "symbol_to_asset_id": symbol_to_asset_id,
+        "cats": catalog,
     }))?;
     Ok(0)
 }

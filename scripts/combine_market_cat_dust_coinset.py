@@ -22,10 +22,11 @@ from typing import Any
 from greenfloor.config.io import (
     default_cats_config_path,
     enabled_market_rows,
+    load_cats_fields,
     load_markets_fields,
     load_program_fields,
-    load_yaml,
     run_config_validate,
+    symbol_to_asset_id_map,
 )
 from greenfloor.hex_utils import normalize_hex_id
 
@@ -40,22 +41,6 @@ class CatDustJob:
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
-
-
-def _load_symbol_to_cat_asset_id(cats_path: Path) -> dict[str, str]:
-    raw = load_yaml(cats_path)
-    cats = raw.get("cats")
-    if not isinstance(cats, list):
-        return {}
-    out: dict[str, str] = {}
-    for row in cats:
-        if not isinstance(row, dict):
-            continue
-        sym = str(row.get("base_symbol", "")).strip().lower()
-        aid = normalize_hex_id(str(row.get("asset_id", "")))
-        if sym and aid:
-            out[sym] = aid
-    return out
 
 
 def _resolve_market_base_cat_asset_id(*, base_asset: str, symbol_map: dict[str, str]) -> str | None:
@@ -77,7 +62,7 @@ def _build_enabled_cat_jobs(
         markets_config=markets_config_path.expanduser(),
         testnet_markets_config=testnet_markets_path.expanduser() if testnet_markets_path else None,
     )
-    symbol_map = _load_symbol_to_cat_asset_id(cats_path.expanduser())
+    symbol_map = symbol_to_asset_id_map(load_cats_fields(cats_config=cats_path.expanduser()))
     filter_id = normalize_hex_id(only_cat_asset_id) if only_cat_asset_id else None
 
     grouped: dict[tuple[str, str], dict[str, Any]] = {}

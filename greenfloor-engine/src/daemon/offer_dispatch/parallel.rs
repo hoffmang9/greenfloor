@@ -41,10 +41,7 @@ pub async fn execute_actions_parallel(
         return result;
     }
     let program = &resources.program;
-    let signer_config = resources
-        .signer
-        .as_ref()
-        .ok_or(SignerError::MissingConfigField("signer"))?;
+    let signer_config = resources.signer_for_execution()?;
     let reservation_ctx =
         parallel_reservation_context(signer_config, &program.network, market, 0).await?;
     let asset_ids = parallel_reservation_asset_ids(&reservation_ctx);

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use serde_json::{json, Value};
 
 use crate::coin_ops::CoinOpPlan;
-use crate::config::{require_signer_offer_path, ManagerProgramConfig, MarketConfig, SignerConfig};
+use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::hex::default_mojo_multiplier_for_asset;
 use crate::offer::resolve_offer_assets_for_action;
@@ -74,14 +74,11 @@ fn skip_all_plans(
 
 pub async fn execute_managed_coin_op_plans(
     program: &ManagerProgramConfig,
-    signer_config: Option<&SignerConfig>,
+    signer_config: &SignerConfig,
     market: &MarketConfig,
     plans: &[CoinOpPlan],
     watched_coin_ids: &HashSet<String>,
 ) -> CoinOpExecutionResult {
-    if let Err(err) = require_signer_offer_path(program) {
-        return skip_all_plans(program, market, plans, &err.to_string(), "skipped");
-    }
     if market.receive_address.trim().is_empty() {
         return skip_all_plans(
             program,
@@ -92,33 +89,17 @@ pub async fn execute_managed_coin_op_plans(
         );
     }
 
-    let signer_config = match signer_config {
-        Some(config) => config.clone(),
-        None => {
-            return skip_all_plans(
-                program,
-                market,
-                plans,
-                "offer execution requires signer.kms_key_id and vault.launcher_id in program config",
-                "skipped",
-            );
-        }
-    };
-    let (resolved_base_asset_id, _) = match resolve_offer_assets_for_action(
-        &signer_config,
-        market.base_asset.trim(),
-        "xch",
-    )
-    .await
-    {
-        Ok(resolved) => resolved,
-        Err(err) => {
-            return skip_all_plans(program, market, plans, &err.to_string(), "skipped");
-        }
-    };
+    let (resolved_base_asset_id, _) =
+        match resolve_offer_assets_for_action(signer_config, market.base_asset.trim(), "xch").await
+        {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                return skip_all_plans(program, market, plans, &err.to_string(), "skipped");
+            }
+        };
 
     let ctx = CoinOpExecContext {
-        signer_config,
+        signer_config: signer_config.clone(),
         market: market.clone(),
         program: program.clone(),
         resolved_base_asset_id,

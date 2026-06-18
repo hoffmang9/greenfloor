@@ -6,11 +6,13 @@ from pathlib import Path
 
 from greenfloor.config.io import (
     enabled_market_rows,
+    load_cats_fields,
     load_markets_fields,
     load_program_fields,
     load_yaml,
     materialize_minimal_program_template,
     run_config_validate,
+    symbol_to_asset_id_map,
 )
 from tests.helpers.manager_cli import parse_json_output, run_manager
 
@@ -33,6 +35,12 @@ def test_load_markets_fields_reads_example_markets() -> None:
     enabled = enabled_market_rows(fields)
     assert enabled
     assert all(bool(row.get("enabled")) for row in enabled)
+
+
+def test_load_cats_fields_reads_example_cats() -> None:
+    fields = load_cats_fields(cats_config=Path("config/cats.yaml"))
+    symbol_map = symbol_to_asset_id_map(fields)
+    assert symbol_map
 
 
 def test_materialize_minimal_program_template(tmp_path: Path) -> None:
@@ -80,6 +88,22 @@ def test_manager_config_validate_cli_emits_ok_json(tmp_path: Path) -> None:
     payload = parse_json_output(stdout)
     assert code == 0
     assert payload.get("ok") is True
+
+
+def test_manager_cats_fields_cli_emits_symbol_map(tmp_path: Path) -> None:
+    cats = tmp_path / "cats.yaml"
+    cats.write_text(Path("config/cats.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    code, stdout, _stderr = run_manager(
+        [
+            "--cats-config",
+            str(cats),
+            "--json",
+            "cats-fields",
+        ]
+    )
+    payload = parse_json_output(stdout)
+    assert code == 0
+    assert symbol_to_asset_id_map(payload)
 
 
 def test_manager_markets_fields_cli_emits_enabled_rows(tmp_path: Path) -> None:

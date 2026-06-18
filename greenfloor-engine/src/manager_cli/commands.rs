@@ -36,6 +36,7 @@ pub enum ManagerCommands {
     },
     ProgramFields,
     MarketsFields,
+    CatsFields,
     KeysOnboard {
         #[arg(long, default_value = "")]
         chia_keys_dir: String,
