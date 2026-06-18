@@ -1,3 +1,5 @@
+"""Subprocess bridge to ``greenfloor-manager`` config commands for Python scripts."""
+
 from __future__ import annotations
 
 import subprocess
@@ -6,9 +8,9 @@ from typing import Any
 
 import yaml
 
-from greenfloor.engine_binary import resolve_greenfloor_manager_binary
-from greenfloor.hex_utils import normalize_hex_id
-from greenfloor.manager_subprocess import parse_json_output, run_manager
+from lib.binaries import resolve_greenfloor_manager_binary
+from lib.hex_utils import normalize_hex_id
+from lib.manager_subprocess import parse_json_output, run_manager
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -40,7 +42,6 @@ def materialize_minimal_program_template(
     pushover_enabled: bool = False,
     with_signer: bool = False,
 ) -> None:
-    """Materialize the shared minimal program template via native Rust policy."""
     path.parent.mkdir(parents=True, exist_ok=True)
     argv = [
         str(resolve_greenfloor_manager_binary()),
@@ -74,7 +75,6 @@ def run_config_validate(
     testnet_markets_config: Path | None = None,
     program_only: bool = False,
 ) -> int:
-    """Validate operator config via native ``greenfloor-manager config-validate``."""
     argv = [
         str(resolve_greenfloor_manager_binary()),
         "--program-config",
@@ -85,33 +85,17 @@ def run_config_validate(
     else:
         if markets_config is None:
             raise ValueError("markets_config is required unless program_only=True")
-        argv.extend(
-            [
-                "--markets-config",
-                str(markets_config),
-            ]
-        )
+        argv.extend(["--markets-config", str(markets_config)])
         if testnet_markets_config is not None:
-            argv.extend(
-                [
-                    "--testnet-markets-config",
-                    str(testnet_markets_config),
-                ]
-            )
+            argv.extend(["--testnet-markets-config", str(testnet_markets_config)])
         argv.append("config-validate")
     completed = subprocess.run(argv, check=False)
     return int(completed.returncode)
 
 
 def load_program_fields(*, program_config: Path) -> dict[str, Any]:
-    """Load script-facing program fields via native ``greenfloor-manager program-fields``."""
     code, stdout, stderr = run_manager(
-        [
-            "--program-config",
-            str(program_config),
-            "--json",
-            "program-fields",
-        ]
+        ["--program-config", str(program_config), "--json", "program-fields"]
     )
     if code != 0:
         detail = stderr.strip() or stdout.strip() or f"exit {code}"
@@ -127,11 +111,7 @@ def load_markets_fields(
     markets_config: Path,
     testnet_markets_config: Path | None = None,
 ) -> dict[str, Any]:
-    """Load script-facing enabled markets via native ``greenfloor-manager markets-fields``."""
-    argv = [
-        "--markets-config",
-        str(markets_config),
-    ]
+    argv = ["--markets-config", str(markets_config)]
     if testnet_markets_config is not None:
         argv.extend(["--testnet-markets-config", str(testnet_markets_config)])
     argv.extend(["--json", "markets-fields"])
@@ -146,15 +126,7 @@ def load_markets_fields(
 
 
 def load_cats_fields(*, cats_config: Path) -> dict[str, Any]:
-    """Load script-facing CAT catalog fields via native ``greenfloor-manager cats-fields``."""
-    code, stdout, stderr = run_manager(
-        [
-            "--cats-config",
-            str(cats_config),
-            "--json",
-            "cats-fields",
-        ]
-    )
+    code, stdout, stderr = run_manager(["--cats-config", str(cats_config), "--json", "cats-fields"])
     if code != 0:
         detail = stderr.strip() or stdout.strip() or f"exit {code}"
         raise RuntimeError(f"cats-fields failed: {detail}")
@@ -191,7 +163,6 @@ def all_market_rows(fields: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def ensure_program_config_valid(*, program_config: Path | None = None) -> None:
-    """Run native program-only validation using the default path when omitted."""
     program_path = (program_config or Path("~/.greenfloor/config/program.yaml")).expanduser()
     code = run_config_validate(program_config=program_path, program_only=True)
     if code != 0:
@@ -210,3 +181,11 @@ def default_cats_config_path() -> Path | None:
 
 def default_state_dir_path() -> Path:
     return Path("~/.greenfloor/state").expanduser()
+
+
+def launcher_id_from_program_config(program_config_path: str | Path) -> str:
+    fields = load_program_fields(program_config=Path(program_config_path).expanduser())
+    launcher = normalize_hex_id(str(fields.get("vault_launcher_id", "")))
+    if not launcher:
+        raise RuntimeError("vault_launcher_id_missing_from_program_config")
+    return launcher

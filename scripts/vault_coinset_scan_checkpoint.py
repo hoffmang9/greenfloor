@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from greenfloor.hex_utils import normalize_hex_id
+from lib.hex_utils import normalize_hex_id
+
 from scripts.vault_coinset_scan_coinset import _safe_int
 
 
@@ -69,6 +70,12 @@ def _coin_row_from_dict(payload: dict[str, Any]) -> CoinRow | None:
         return None
     nonces_raw = payload.get("discovered_nonces")
     nonces = [int(value) for value in nonces_raw] if isinstance(nonces_raw, list) else []
+    cat_symbols_raw = payload.get("cat_symbols")
+    cat_symbols = [
+        str(symbol).strip()
+        for symbol in (cat_symbols_raw if isinstance(cat_symbols_raw, list) else [])
+        if str(symbol).strip()
+    ]
     return CoinRow(
         coin_id=coin_id,
         puzzle_hash=normalize_hex_id(payload.get("puzzle_hash")) or "",
@@ -81,13 +88,7 @@ def _coin_row_from_dict(payload: dict[str, Any]) -> CoinRow | None:
         discovered_by_hint=bool(payload.get("discovered_by_hint", False)),
         coin_type=str(payload.get("coin_type", "UNKNOWN")).strip().upper() or "UNKNOWN",
         cat_asset_id=normalize_hex_id(payload.get("cat_asset_id")) or None,
-        cat_symbols=[
-            str(symbol).strip()
-            for symbol in (
-                payload.get("cat_symbols") if isinstance(payload.get("cat_symbols"), list) else []
-            )
-            if str(symbol).strip()
-        ],
+        cat_symbols=cat_symbols,
     )
 
 
@@ -187,6 +188,13 @@ def _load_scan_checkpoint(
     )
 
 
+def _child_asset_id_items(lineage: dict[str, Any]) -> list[tuple[str, Any]]:
+    child_asset_ids = lineage.get("child_asset_ids")
+    if isinstance(child_asset_ids, dict):
+        return list(child_asset_ids.items())
+    return []
+
+
 def _save_scan_checkpoint(
     *,
     checkpoint_file: str,
@@ -230,11 +238,7 @@ def _save_scan_checkpoint(
                     for child_id, asset_id in sorted(
                         (
                             (normalize_hex_id(raw_child_id) or "", raw_asset_id)
-                            for raw_child_id, raw_asset_id in (
-                                lineage.get("child_asset_ids").items()
-                                if isinstance(lineage.get("child_asset_ids"), dict)
-                                else []
-                            )
+                            for raw_child_id, raw_asset_id in _child_asset_id_items(lineage)
                         ),
                         key=lambda item: item[0],
                     )

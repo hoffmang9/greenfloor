@@ -7,8 +7,12 @@ import random
 import time
 from typing import Any
 
-from greenfloor.adapters.coinset import CoinsetAdapter
-from greenfloor.hex_utils import normalize_hex_id
+from lib.coinset_subprocess import (
+    MAINNET_BASE_URL,
+    TESTNET11_BASE_URL,
+    CoinsetScriptClient,
+)
+from lib.hex_utils import normalize_hex_id
 
 
 def _import_sdk() -> Any:
@@ -110,11 +114,9 @@ def _normalize_coinset_base_url(*, base_url: str | None, network: str) -> str | 
     }
     is_testnet11 = network.strip().lower() in {"testnet", "testnet11"}
     if lower in mainnet_aliases:
-        return (
-            CoinsetAdapter.TESTNET11_BASE_URL if is_testnet11 else CoinsetAdapter.MAINNET_BASE_URL
-        )
+        return TESTNET11_BASE_URL if is_testnet11 else MAINNET_BASE_URL
     if lower in testnet_aliases:
-        return CoinsetAdapter.TESTNET11_BASE_URL
+        return TESTNET11_BASE_URL
     return normalized
 
 
@@ -174,7 +176,7 @@ def _coinset_with_retries(
 class CoinsetScanner:
     def __init__(self, *, network: str, base_url: str | None = None) -> None:
         resolved_base_url = _normalize_coinset_base_url(base_url=base_url, network=network)
-        self.adapter = CoinsetAdapter(base_url=resolved_base_url, network=network)
+        self.adapter = CoinsetScriptClient(base_url=resolved_base_url, network=network)
 
     def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
         return _coinset_with_retries(lambda: self.adapter.post_json(endpoint, body))
@@ -304,14 +306,14 @@ def _detect_cat_asset_id(
         return None
     parent_lineage = parent_lineage_cache.get(parent_coin_id_hex)
     if isinstance(parent_lineage, dict):
-        child_assets = parent_lineage.get("child_asset_ids")
-        if isinstance(child_assets, dict):
-            cached_asset = normalize_hex_id(child_assets.get(coin_id))
+        cached_child_assets = parent_lineage.get("child_asset_ids")
+        if isinstance(cached_child_assets, dict):
+            cached_asset = normalize_hex_id(cached_child_assets.get(coin_id))
             if cached_asset:
                 cat_asset_cache[coin_id] = cached_asset
                 return cached_asset
             # Cached lineage says this child is not a CAT child.
-            if coin_id in child_assets:
+            if coin_id in cached_child_assets:
                 cat_asset_cache[coin_id] = ""
                 return None
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from greenfloor.config.io import materialize_minimal_program_template
+from lib.config_subprocess import materialize_minimal_program_template
 
 
 def write_program(

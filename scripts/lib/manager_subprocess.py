@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 
-from greenfloor.engine_binary import resolve_greenfloor_manager_binary
+from lib.binaries import resolve_greenfloor_manager_binary
 
 
 def run_manager(

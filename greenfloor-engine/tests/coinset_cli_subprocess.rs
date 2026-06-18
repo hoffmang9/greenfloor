@@ -84,6 +84,42 @@ async fn subprocess_coinset_post_returns_rpc_payload() {
 }
 
 #[tokio::test]
+async fn subprocess_coinset_adapter_get_mempool_tx_ids() {
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/get_all_mempool_tx_ids")
+        .with_status(200)
+        .with_body(r#"{"success":true,"mempool_tx_ids":["0xabc","0xdef"]}"#)
+        .create_async()
+        .await;
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_greenfloor-engine"))
+        .args([
+            "coinset",
+            "adapter",
+            "get-mempool-tx-ids",
+            "--network",
+            "mainnet",
+            "--base-url",
+            &server.url(),
+            "--json",
+        ])
+        .output()
+        .expect("spawn greenfloor-engine coinset adapter get-mempool-tx-ids");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("parse adapter json stdout");
+    let tx_ids = value
+        .get("tx_ids")
+        .and_then(Value::as_array)
+        .expect("tx_ids array");
+    assert_eq!(tx_ids.len(), 2);
+}
+
+#[tokio::test]
 async fn subprocess_coinset_push_tx_emits_success_payload() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server

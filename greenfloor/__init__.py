@@ -1,1 +1,0 @@
-"""GreenFloor package."""

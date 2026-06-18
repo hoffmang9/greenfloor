@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from greenfloor.config.io import (
+from lib.config_subprocess import (
     default_cats_config_path,
     enabled_market_rows,
     load_cats_fields,
@@ -28,7 +28,7 @@ from greenfloor.config.io import (
     run_config_validate,
     symbol_to_asset_id_map,
 )
-from greenfloor.hex_utils import normalize_hex_id
+from lib.hex_utils import normalize_hex_id
 
 
 @dataclass(frozen=True, slots=True)

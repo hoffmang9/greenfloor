@@ -1,13 +1,11 @@
 [project]
 name = "greenfloor"
 version = "0.1.0"
-description = "GreenFloor CAT market making engine and config library"
+description = "GreenFloor script adapters and pytest harness dependencies"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "aiohttp",
-  "boto3",
-  "concurrent-log-handler",
   "PyYAML>=6.0",
 ]
 
@@ -25,10 +23,11 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-include-package-data = true
+package-dir = {"" = "scripts"}
 
 [tool.setuptools.packages.find]
-include = ["greenfloor*"]
+where = ["scripts"]
+include = ["lib*"]
 
 [tool.ruff]
 line-length = 100

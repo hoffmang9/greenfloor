@@ -2,6 +2,7 @@ use clap::{Args, Subcommand};
 use serde_json::Value;
 
 use crate::cli_util::{optional_trimmed, print_json_value};
+use crate::coinset::adapter_cli::CoinsetAdapterCommands;
 use crate::coinset::{post_coinset_rpc, push_tx_hex};
 use crate::error::SignerResult;
 
@@ -37,6 +38,8 @@ pub enum CoinsetCommands {
     Post(CoinsetPostArgs),
     #[command(name = "push-tx")]
     PushTx(CoinsetPushTxArgs),
+    #[command(subcommand)]
+    Adapter(CoinsetAdapterCommands),
 }
 
 #[derive(Debug, Args)]
@@ -49,6 +52,9 @@ pub async fn run_coinset_command(args: CoinsetCliArgs) -> SignerResult<()> {
     match args.command {
         CoinsetCommands::Post(args) => run_coinset_post(args).await,
         CoinsetCommands::PushTx(args) => run_coinset_push_tx(args).await,
+        CoinsetCommands::Adapter(command) => {
+            crate::coinset::adapter_cli::run_coinset_adapter_command(command).await
+        }
     }
 }
 
@@ -129,7 +135,9 @@ mod tests {
                 assert_eq!(args.body_json, "{}");
                 assert!(args.json);
             }
-            other @ CoinsetCommands::PushTx(_) => panic!("unexpected subcommand: {other:?}"),
+            CoinsetCommands::PushTx(_) | CoinsetCommands::Adapter(_) => {
+                panic!("unexpected subcommand")
+            }
         }
     }
 
@@ -148,7 +156,9 @@ mod tests {
                 assert_eq!(args.spend_bundle_hex, "deadbeef");
                 assert!(args.json);
             }
-            other @ CoinsetCommands::Post(_) => panic!("unexpected subcommand: {other:?}"),
+            CoinsetCommands::Post(_) | CoinsetCommands::Adapter(_) => {
+                panic!("unexpected subcommand")
+            }
         }
     }
 }

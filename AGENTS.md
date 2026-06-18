@@ -52,16 +52,18 @@ Severity tags:
 
 **Python (scripts and test harnesses only)**
 
-- `[MUST]` `scripts/` and the slim `greenfloor/` package are adapters only — no operator policy or
+- `[MUST]` `scripts/` and `scripts/lib/` are adapters only — no operator policy or
   orchestration. Do not reintroduce PyO3, Python policy bridges, or `greenfloor/cli/` /
   `greenfloor/daemon/` runtime modules.
-- `[MUST]` Config field reads: `greenfloor/config/io.py` → `greenfloor-manager program-fields`,
+- `[MUST]` Config field reads: `scripts/lib/config_subprocess.py` → `greenfloor-manager program-fields`,
   `markets-fields`, `cats-fields`, `materialize-minimal-program`, `config-validate`. Operator YAML
   policy lives in `greenfloor-engine/src/config/`; scripts must not walk operator YAML for policy
   fields.
-- `[MUST]` Script Coinset IO: `greenfloor.adapters.coinset` → `greenfloor-engine coinset post`
-  and `greenfloor-engine coinset push-tx`. Reuse `hex_utils`, `logging_setup`,
-  `manager_subprocess`, `engine_binary`.
+- `[MUST]` Script adapters live under `scripts/lib/` (subprocess bridges to native binaries).
+  Coinset IO uses `greenfloor-engine coinset post`, `coinset push-tx`, and `coinset adapter`
+  subcommands. Config field reads use `greenfloor-manager program-fields`, `markets-fields`,
+  and `cats-fields`. KMS public-key fetch uses `greenfloor-engine kms-public-key-compressed-hex`.
+  Hex normalization for hot script paths mirrors `greenfloor-engine/src/hex.rs`.
 - `[CONTEXT]` Pytest covers script adapters and subprocess harnesses; operator policy parity is
   `cargo test --manifest-path greenfloor-engine/Cargo.toml` in CI (ADR 0013).
 

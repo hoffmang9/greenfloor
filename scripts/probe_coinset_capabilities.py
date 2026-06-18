@@ -7,10 +7,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from greenfloor.adapters.coinset import CoinsetAdapter
-from greenfloor.config.io import ensure_program_config_valid
-from greenfloor.config.launcher import launcher_id_from_program_config
-from greenfloor.hex_utils import normalize_hex_id
+from lib.coinset_subprocess import CoinsetScriptClient
+from lib.config_subprocess import ensure_program_config_valid, launcher_id_from_program_config
+from lib.hex_utils import normalize_hex_id
 
 
 def _import_sdk() -> Any:
@@ -113,7 +112,7 @@ def main() -> int:
         launcher_id = launcher_id_from_program_config(program_config)
         launcher_source = "program_config"
 
-    adapter = CoinsetAdapter(
+    adapter = CoinsetScriptClient(
         base_url=(str(args.coinset_base_url).strip() or None),
         network=args.network,
     )

@@ -11,6 +11,7 @@
 #![allow(clippy::implicit_hasher)]
 
 pub mod adapters;
+pub mod binaries;
 pub mod cli_util;
 pub mod coin_ops;
 pub mod coinset;
@@ -21,6 +22,7 @@ pub mod daemon;
 pub mod error;
 pub mod hex;
 pub mod kms;
+pub mod kms_cli;
 pub mod manager_cli;
 pub mod metrics;
 pub mod minimal_program_template;
