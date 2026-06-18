@@ -45,14 +45,22 @@ pub struct CoinOpPlan {
     pub reason: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct CoinOpPlanningResult {
+    pub plans: Vec<CoinOpPlan>,
+    /// Bucket sizes omitted from combine planning because ladder threshold math was invalid.
+    pub invalid_ladder_math_sizes: Vec<i64>,
+}
+
 pub fn plan_coin_ops(
     buckets: &[BucketSpec],
     max_operations_per_run: i64,
     max_fee_budget_mojos: i64,
     split_fee_mojos: i64,
     combine_fee_mojos: i64,
-) -> Vec<CoinOpPlan> {
+) -> CoinOpPlanningResult {
     let mut plans = Vec::new();
+    let mut invalid_ladder_math_sizes = Vec::new();
     let mut remaining_ops = max_operations_per_run;
     let mut remaining_fee = if max_fee_budget_mojos > 0 {
         max_fee_budget_mojos
@@ -103,7 +111,10 @@ pub fn plan_coin_ops(
     }
 
     if had_deficits {
-        return plans;
+        return CoinOpPlanningResult {
+            plans,
+            invalid_ladder_math_sizes,
+        };
     }
 
     let mut excess_candidates: Vec<(&BucketSpec, i64)> = Vec::new();
@@ -111,6 +122,7 @@ pub fn plan_coin_ops(
         let Ok(threshold) =
             combine_threshold_count(bucket.target_count, bucket.combine_when_excess_factor)
         else {
+            invalid_ladder_math_sizes.push(bucket.size_base_units);
             continue;
         };
         let excess = bucket.current_count - threshold;
@@ -141,7 +153,10 @@ pub fn plan_coin_ops(
         remaining_fee -= combine_fee_mojos;
     }
 
-    plans
+    CoinOpPlanningResult {
+        plans,
+        invalid_ladder_math_sizes,
+    }
 }
 
 #[cfg(test)]
@@ -160,17 +175,18 @@ mod tests {
 
     #[test]
     fn plans_split_when_deficit_exists() {
-        let plans = plan_coin_ops(&[bucket(1, 5, 2), bucket(10, 2, 3)], 10, 100, 1, 1);
-        assert!(!plans.is_empty());
-        assert_eq!(plans[0].op_type, CoinOpKind::Split);
-        assert_eq!(plans[0].size_base_units, 1);
+        let result = plan_coin_ops(&[bucket(1, 5, 2), bucket(10, 2, 3)], 10, 100, 1, 1);
+        assert!(!result.plans.is_empty());
+        assert_eq!(result.plans[0].op_type, CoinOpKind::Split);
+        assert_eq!(result.plans[0].size_base_units, 1);
+        assert!(result.invalid_ladder_math_sizes.is_empty());
     }
 
     #[test]
     fn plans_combine_only_when_no_deficits() {
-        let plans = plan_coin_ops(&[bucket(1, 5, 12)], 4, 10, 1, 1);
-        assert!(!plans.is_empty());
-        assert_eq!(plans[0].op_type, CoinOpKind::Combine);
+        let result = plan_coin_ops(&[bucket(1, 5, 12)], 4, 10, 1, 1);
+        assert!(!result.plans.is_empty());
+        assert_eq!(result.plans[0].op_type, CoinOpKind::Combine);
     }
 
     #[test]
@@ -183,12 +199,14 @@ mod tests {
             current_count: 100,
         };
         let valid = bucket(10, 2, 10);
-        let plans = plan_coin_ops(&[invalid, valid], 10, 100, 1, 1);
+        let result = plan_coin_ops(&[invalid, valid], 10, 100, 1, 1);
+        assert_eq!(result.invalid_ladder_math_sizes, vec![1]);
         assert!(
-            plans.iter().all(|plan| plan.size_base_units != 1),
+            result.plans.iter().all(|plan| plan.size_base_units != 1),
             "invalid ladder math must not plan combine for that bucket"
         );
-        assert!(plans
+        assert!(result
+            .plans
             .iter()
             .any(|plan| plan.op_type == CoinOpKind::Combine && plan.size_base_units == 10));
     }

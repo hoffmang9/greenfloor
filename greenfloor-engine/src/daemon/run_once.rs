@@ -11,7 +11,7 @@ use crate::cycle::{
 };
 use crate::daemon::watchlist::cache::CoinWatchlistCache;
 use crate::error::SignerResult;
-use crate::metrics::{metric_u64_to_usize, millis_to_u64};
+use crate::metrics::{metric_millis_to_u64, metric_u64_to_usize};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
 use super::market_context::DaemonCycleResources;
@@ -288,7 +288,7 @@ pub fn cycle_started_instant() -> Instant {
 }
 
 pub fn elapsed_ms(started: Instant) -> u64 {
-    millis_to_u64(started.elapsed().as_millis())
+    metric_millis_to_u64(started.elapsed().as_millis())
 }
 
 pub fn compute_cycle_exit_code(plan: &CyclePlan, metrics: &MarketDispatchMetrics) -> i32 {

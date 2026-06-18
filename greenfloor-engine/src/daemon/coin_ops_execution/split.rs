@@ -41,29 +41,19 @@ fn split_execution_scalars(
     Ok((amount_u64, output_count, fee_mojos))
 }
 
-pub(crate) async fn submit_combine_prereq_for_split(
+async fn submit_combine_prereq_for_split_inner(
     ctx: &CoinOpExecContext,
     op_type: &str,
     size_base_units: i64,
     op_count: i64,
-    _required_amount: i64,
     prereq: &SplitCombinePrereqPlan,
-) -> (Vec<CoinOpExecItem>, u64) {
-    let combine_count = match usize_to_i64(prereq.input_coin_ids.len(), "split_prereq.input_count")
-    {
-        Ok(count) => count,
-        Err(err) => {
-            return (
-                vec![skip_item(
-                    op_type,
-                    size_base_units,
-                    op_count,
-                    format!("{COIN_OP_ERROR_PREFIX}:{err}:split_prereq_input_count"),
-                )],
-                0,
-            );
-        }
-    };
+) -> CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)> {
+    let combine_count = skip_on_signer_err(
+        op_type,
+        size_base_units,
+        op_count,
+        usize_to_i64(prereq.input_coin_ids.len(), "split_prereq.input_count"),
+    )?;
     match submit_combine_prereq(ctx, &prereq.input_coin_ids).await {
         Ok(operation_id) => {
             let reason = if prereq.exact_match {
@@ -71,7 +61,7 @@ pub(crate) async fn submit_combine_prereq_for_split(
             } else {
                 "signer_combine_submitted_for_split_prereq_with_change"
             };
-            (
+            Ok((
                 vec![executed_item(
                     "combine",
                     size_base_units,
@@ -80,9 +70,9 @@ pub(crate) async fn submit_combine_prereq_for_split(
                     operation_id,
                 )],
                 1,
-            )
+            ))
         }
-        Err(err) => (
+        Err(err) => Ok((
             vec![skip_item(
                 op_type,
                 size_base_units,
@@ -90,7 +80,7 @@ pub(crate) async fn submit_combine_prereq_for_split(
                 format!("{COIN_OP_ERROR_PREFIX}:{err}:combine_for_split_prereq"),
             )],
             0,
-        ),
+        )),
     }
 }
 
@@ -200,15 +190,14 @@ async fn execute_daemon_split_plan_inner(
 
         match selection {
             SplitAutoSelectPlan::CombinePrereq(prereq) => {
-                return Ok(submit_combine_prereq_for_split(
+                return submit_combine_prereq_for_split_inner(
                     ctx,
                     op_type,
                     size_base_units,
                     op_count,
-                    required_amount,
                     &prereq,
                 )
-                .await);
+                .await;
             }
             SplitAutoSelectPlan::Skip(skip) => {
                 if skip.reason == "no_spendable_split_coin_meets_required_amount" {

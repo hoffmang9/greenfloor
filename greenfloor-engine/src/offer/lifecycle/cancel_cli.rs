@@ -124,7 +124,7 @@ pub async fn offers_cancel_cli(
             }),
         });
     }
-    let selected_count = crate::metrics::collection_len_to_u64(items.len());
+    let selected_count = crate::metrics::metric_collection_len_to_u64(items.len());
     Ok(OffersCancelCliResult {
         venue,
         cancel_open,

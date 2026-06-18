@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::metrics::collection_len_to_i64;
+use crate::metrics::metric_collection_len_to_i64;
 
 use super::wallet_coin::is_spendable_wallet_coin;
 
@@ -36,8 +36,8 @@ pub fn evaluate_coin_split_gate(
         .filter(|amount| *amount == size)
         .collect();
     let larger_reserve_count =
-        collection_len_to_i64(spendable.iter().filter(|amount| **amount > size).count());
-    let current_count = collection_len_to_i64(denom_coins.len());
+        metric_collection_len_to_i64(spendable.iter().filter(|amount| **amount > size).count());
+    let current_count = metric_collection_len_to_i64(denom_coins.len());
     let extra_denom_count = (current_count - required).max(0);
     let reserve_ready = larger_reserve_count >= 1 || extra_denom_count >= 1;
     let ready = current_count >= required && reserve_ready;
@@ -94,7 +94,7 @@ pub fn evaluate_coin_combine_gate(
     size_base_units: i64,
     max_allowed_count: i64,
 ) -> CoinCombineGateResult {
-    let current_count = collection_len_to_i64(
+    let current_count = metric_collection_len_to_i64(
         asset_scoped_coins
             .iter()
             .filter(|coin| is_spendable_wallet_coin(coin))

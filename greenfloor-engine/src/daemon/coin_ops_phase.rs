@@ -92,13 +92,24 @@ pub async fn run_coin_ops_phase(
             current_count: *bucket_counts.get(&entry.size_base_units).unwrap_or(&0),
         })
         .collect();
-    let plans = plan_coin_ops(
+    let planning = plan_coin_ops(
         &buckets,
         program.coin_ops_max_operations_per_run,
         program.coin_ops_max_daily_fee_budget_mojos,
         program.coin_ops_split_fee_mojos,
         program.coin_ops_combine_fee_mojos,
     );
+    if !planning.invalid_ladder_math_sizes.is_empty() {
+        store.add_audit_event(
+            "coin_ops_invalid_ladder_math",
+            &json!({
+                "market_id": market.market_id,
+                "invalid_ladder_math_sizes": planning.invalid_ladder_math_sizes,
+            }),
+            Some(&market.market_id),
+        )?;
+    }
+    let plans = planning.plans;
     if plans.is_empty() {
         store.add_audit_event(
             "coin_ops_no_plans",

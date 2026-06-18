@@ -1,7 +1,7 @@
 use crate::cycle::MarketCycleResultState;
 use crate::error::SignerResult;
 
-use crate::metrics::{collection_len_to_u64, metric_non_negative_u64};
+use crate::metrics::{metric_collection_len_to_u64, metric_non_negative_u64};
 
 use super::reconcile_market_cycle::ReconcileMarketCycleResult;
 use super::run_once::MarketDispatchMetrics;
@@ -17,7 +17,7 @@ pub fn aggregate_market_dispatch_metrics(
     outputs: &[SingleMarketCycleOutput],
 ) -> MarketDispatchMetrics {
     let mut metrics = MarketDispatchMetrics {
-        markets_processed: collection_len_to_u64(outputs.len()),
+        markets_processed: metric_collection_len_to_u64(outputs.len()),
         ..Default::default()
     };
     for output in outputs {

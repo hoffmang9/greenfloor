@@ -113,7 +113,7 @@ pub async fn reconcile_offers_batch(
     }
 
     Ok(ReconcileBatchResult {
-        reconciled_count: crate::metrics::collection_len_to_u64(items.len()),
+        reconciled_count: crate::metrics::metric_collection_len_to_u64(items.len()),
         changed_count,
         items,
     })

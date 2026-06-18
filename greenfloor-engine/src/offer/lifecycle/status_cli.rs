@@ -89,7 +89,7 @@ pub fn offers_status_cli(
     Ok(OffersStatusCliResult {
         state_db: db_path.display().to_string(),
         market_id: market_filter.map(str::to_string),
-        offer_count: crate::metrics::collection_len_to_u64(offers.len()),
+        offer_count: crate::metrics::metric_collection_len_to_u64(offers.len()),
         by_state,
         offers,
         recent_events: events,

@@ -51,16 +51,15 @@ pub struct BuildOfferForActionResult {
     pub create_result: Option<CreateOfferResult>,
 }
 
-pub fn expires_at_unix_from_pricing(pricing: &Value) -> u64 {
+pub fn expires_at_unix_from_pricing(pricing: &Value) -> SignerResult<u64> {
     let (_unit, minutes) = resolve_offer_expiry_for_pricing(pricing);
     let secs = minutes.saturating_mul(60);
     let secs_u64 =
-        crate::config::parse_non_negative_u64(secs, "pricing.strategy_offer_expiry_seconds")
-            .expect("expiry minutes from validated pricing must fit in u64");
+        crate::config::parse_non_negative_u64(secs, "pricing.strategy_offer_expiry_seconds")?;
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs().saturating_add(secs_u64))
-        .unwrap_or(secs_u64)
+        .map_err(|_| SignerError::Other("system clock before unix epoch".to_string()))
 }
 
 fn resolve_quote_price(request: &BuildOfferForActionRequest) -> SignerResult<f64> {
@@ -164,7 +163,7 @@ pub async fn build_signer_offer_for_action(
         resolve_offer_assets_for_action(&config, &request.base_asset, &request.quote_asset).await?;
     let quote_price = resolve_quote_price(&request)?;
     let leg = leg_amounts_for_request(&request, &resolved_base, &resolved_quote, quote_price)?;
-    let expires_at_unix = expires_at_unix_from_pricing(&request.pricing);
+    let expires_at_unix = expires_at_unix_from_pricing(&request.pricing)?;
     let side = normalize_offer_side(&request.action_side).to_string();
     let create_request = create_offer_request_from_leg(&request, &leg, expires_at_unix)?;
     let create_result = build_vault_cat_offer(config, create_request).await?;
@@ -191,7 +190,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock")
             .as_secs();
-        let expires = expires_at_unix_from_pricing(&json!({"strategy_offer_expiry_minutes": 5}));
+        let expires = expires_at_unix_from_pricing(&json!({"strategy_offer_expiry_minutes": 5}))
+            .expect("expiry");
         assert!(expires >= before + 300);
         assert!(expires <= before + 301);
     }
