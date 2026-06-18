@@ -1,7 +1,7 @@
 #![recursion_limit = "2048"]
 
 use clap::Parser;
-use greenfloor_engine::{run_daemon_command, DaemonCliArgs};
+use greenfloor_engine::daemon::{run_daemon_command, DaemonCliArgs};
 
 #[derive(Debug, Parser)]
 #[command(name = "greenfloord", about = "GreenFloor native daemon")]

@@ -18,7 +18,7 @@ use super::super::watchlist::watchlist_offer_ids;
 use super::combine::execute_daemon_combine_plan;
 use super::items::{skip_item, CoinOpExecItem, CoinOpExecutionResult};
 use super::split::execute_daemon_split_plan;
-use crate::coin_ops::execution::{combine_input_coin_cap, CoinOpExecContext, CoinOpTestOverrides};
+use crate::coin_ops::execution::{resolve_combine_input_cap, CoinOpExecContext, CoinOpTestOverrides};
 
 pub fn watched_coin_ids_from_open_offers(
     store: &SqliteStore,
@@ -119,7 +119,7 @@ pub async fn execute_managed_coin_op_plans(
         resolved_base_asset_id,
         base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(market.base_asset.trim())
             as i64,
-        combine_input_cap: combine_input_coin_cap(),
+        combine_input_cap: resolve_combine_input_cap(),
         watched_coin_ids: watched_coin_ids.clone(),
         test_overrides: CoinOpTestOverrides::default(),
     };

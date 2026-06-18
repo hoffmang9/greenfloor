@@ -43,7 +43,7 @@ Split the former monolithic `greenfloor/cli/manager.py` into focused CLI modules
 - `greenfloor/runtime/cloud_wallet/coins.py` — spendable/scoped coin selection (`filter_spendable_scoped_coins`, etc.; CLI + daemon).
 - `greenfloor/runtime/cloud_wallet/offers.py` — offer list/cancel selection helpers.
 - `greenfloor/runtime/cloud_wallet/assets.py` — canonical wallet asset GraphQL helpers (`RESOLVE_WALLET_ASSETS_QUERY`, asset amounts).
-- `greenfloor/runtime/offer_reconciliation.py` — CLI delegate to Rust `reconcile_offers_batch` (daemon uses `run_market_reconcile_phase` in-engine).
+- `greenfloor/runtime/offer_reconciliation.py` — historical CLI delegate; native `greenfloor-manager offers-reconcile` calls `offer/lifecycle/reconcile_watched_offers.rs` in-engine. Daemon uses `run_reconcile_market_cycle` in `daemon/reconcile_market_cycle.rs`.
 - `greenfloor/core/coin_ops/` — deterministic coin-op policy (plan, fee budget, inventory, min-amount guard; Rust-backed, CLI + daemon).
 
 ### Config helpers (`greenfloor/config/io.py`)

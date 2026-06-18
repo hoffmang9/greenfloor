@@ -14,7 +14,8 @@ use super::paths::{
     default_cats_config_path, default_markets_config_path, default_program_config_path,
     default_testnet_markets_config_path, optional_path, resolve_cli_config_path,
 };
-use super::util::{optional_str, require_market_selector};
+use super::util::require_market_selector;
+use crate::cli_util::optional_str;
 use super::{cats, coin_op_loop, json, keys, setup};
 
 pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {

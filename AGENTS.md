@@ -39,14 +39,15 @@ Severity tags:
 - `[MUST]` Signing/execution path is adapter -> canonical Rust engine (`greenfloor-engine` crate / `greenfloor_engine` PyO3).
 - `[MUST]` `greenfloor-engine/`: canonical Rust engine crate; new vault spend/offer logic lands here first.
 - `[MUST]` Operator CLI and daemon are native Rust binaries: `greenfloor-manager`, `greenfloord`, `greenfloor-engine` (`greenfloor-engine/src/manager_cli/`, `greenfloor-engine/src/daemon/`).
+- `[MUST]` Shared offer orchestration lives in `greenfloor-engine/src/offer/operator/` and `greenfloor-engine/src/offer/lifecycle/` (used by both manager CLI and daemon).
 - `[MUST]` Coin-op CLI and daemon execution share Rust policy in `greenfloor-engine/src/coin_ops/` and `daemon/coin_ops_execution/`.
 - `[MUST]` Manager operator commands live in `greenfloor-engine/src/manager_cli/` (`greenfloor-manager` binary).
 - `[MUST]` `greenfloor/cli/*` and `greenfloor/daemon/*` Python packages are removed; do not reintroduce Python orchestration entrypoints.
 - `[MUST]` `scripts/` may remain Python; they use `greenfloor.config`, `greenfloor.adapters`, and `greenfloor.hex_utils` only.
 - `[MUST]` PyO3 `greenfloor_engine` is dev/test-only unless a new ADR expands operator scope.
-- `[MUST]` Offer build/post uses the Rust manager path (`greenfloor-manager build-and-post-offer` → `greenfloor-engine/src/manager/`).
+- `[MUST]` Offer build/post uses `offer::operator::build_and_post_offer` (`greenfloor-manager build-and-post-offer` and daemon managed post).
 - `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`, `greenfloor/config/io.py`.
-- `[MUST]` `greenfloor-engine` exposes vault/daemon low-level commands only; operator lifecycle commands use `greenfloor-manager`.
+- `[MUST]` `greenfloor-engine` crate root exports domain APIs (`offer`, `daemon`, `coin_ops`, `vault`); operator binaries import CLI modules directly (`manager_cli`, `daemon::cli`).
 - `[MUST]` Import direction: daemon never imports CLI; CLI never imports daemon. Shared logic belongs in shared modules.
 
 ## Design Constraints

@@ -1,9 +1,10 @@
-//! JSON output helpers for the native manager CLI.
+//! JSON output mode for the native manager CLI (`--json`).
 
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::error::{SignerError, SignerResult};
+use crate::cli_util;
+use crate::error::SignerResult;
 
 static COMPACT_JSON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -16,25 +17,15 @@ pub fn json_output_compact() -> bool {
 }
 
 pub fn print_json(value: &impl Serialize) -> Result<(), String> {
-    let text = if json_output_compact() {
-        serde_json::to_string(value).map_err(|err| format!("json encode failed: {err}"))?
-    } else {
-        serde_json::to_string_pretty(value).map_err(|err| format!("json encode failed: {err}"))?
-    };
-    println!("{text}");
-    Ok(())
+    cli_util::format_json(value, json_output_compact())
+        .map(|text| println!("{text}"))
 }
 
 pub fn print_json_value(value: &Value) -> Result<(), String> {
-    let text = if json_output_compact() {
-        serde_json::to_string(value).map_err(|err| format!("json encode failed: {err}"))?
-    } else {
-        serde_json::to_string_pretty(value).map_err(|err| format!("json encode failed: {err}"))?
-    };
-    println!("{text}");
-    Ok(())
+    cli_util::format_json_value(value, json_output_compact())
+        .map(|text| println!("{text}"))
 }
 
 pub fn emit_json(value: &Value) -> SignerResult<()> {
-    print_json_value(value).map_err(SignerError::Other)
+    cli_util::print_json_value(value, json_output_compact())
 }

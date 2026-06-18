@@ -12,6 +12,7 @@ pub(super) async fn create_offer(
     action_side: &str,
     test_overrides: &OfferOperatorTestOverrides,
 ) -> SignerResult<BuildOfferForActionResult> {
+    #[cfg(debug_assertions)]
     if let Some(offer_text) = test_overrides
         .offer_text
         .as_deref()

@@ -34,7 +34,7 @@ pub mod watchlist;
 pub use coin_ops_execution::{
     execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
 };
-pub use crate::coin_ops::execution::{combine_input_coin_cap, CoinOpExecContext};
+pub use crate::coin_ops::execution::CoinOpExecContext;
 pub use crate::offer::lifecycle::{
     cancel_offers_on_dexie, reconcile_offers_batch, reconcile_offers_cli, CancelOfferTarget,
     ReconcileBatchItem, ReconcileBatchResult, ReconcileCliResult,

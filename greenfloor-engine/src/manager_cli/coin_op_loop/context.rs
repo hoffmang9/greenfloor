@@ -4,7 +4,7 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use crate::coin_ops::{CoinCombineGateResult, CoinSplitGateResult, SpendableCoin};
-use crate::coin_ops::execution::{combine_input_coin_cap, CoinOpTestOverrides, CoinOpExecContext};
+use crate::coin_ops::execution::{resolve_combine_input_cap, CoinOpExecContext, CoinOpTestOverrides};
 use crate::config::{
     load_markets_config_with_overlay, load_program_config, load_signer_config,
     resolve_market_for_build, MarketConfig,
@@ -44,7 +44,7 @@ pub(super) async fn build_coin_op_exec_context(
         resolved_base_asset_id,
         base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(market.base_asset.trim())
             as i64,
-        combine_input_cap: combine_input_coin_cap(),
+        combine_input_cap: resolve_combine_input_cap(),
         watched_coin_ids: HashSet::new(),
         test_overrides: CoinOpTestOverrides::from_env(),
     })

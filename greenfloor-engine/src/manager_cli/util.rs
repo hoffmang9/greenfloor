@@ -15,12 +15,3 @@ pub fn require_market_selector(
     }
     Ok(())
 }
-
-pub fn optional_str(raw: &str) -> Option<&str> {
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed)
-    }
-}

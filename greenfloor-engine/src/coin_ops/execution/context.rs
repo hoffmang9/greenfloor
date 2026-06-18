@@ -27,6 +27,7 @@ pub struct CoinOpExecContext {
 
 impl CoinOpExecContext {
     pub async fn list_spendable_coins(&self) -> SignerResult<Vec<SpendableCoin>> {
+        #[cfg(debug_assertions)]
         if let Some(coins) = &self.test_overrides.wallet_coins {
             return Ok(coins.clone());
         }
@@ -48,6 +49,7 @@ impl CoinOpExecContext {
         coin_ids: &[String],
         fee_mojos: u64,
     ) -> SignerResult<String> {
+        #[cfg(debug_assertions)]
         if let Some(operation_id) = &self.test_overrides.mixed_split_operation_id {
             let _ = (output_amounts, coin_ids, fee_mojos);
             return Ok(operation_id.clone());

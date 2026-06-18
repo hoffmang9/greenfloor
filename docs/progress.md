@@ -1,5 +1,15 @@
 # Progress Log
 
+## 2026-06-17 (Post-cutover module boundary cleanup)
+
+- **Removed `manager/` shim:** offers CLI wiring lives in `manager_cli/offers.rs`; shared orchestration in `offer::operator` and `offer::lifecycle`.
+- **Test overrides:** honored only under `debug_assertions` in execution paths; daemon passes empty overrides on `BuildAndPostOfferRequest`.
+- **Coin-op cap:** `GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP` resolved once at `CoinOpExecContext` construction (`resolve_combine_input_cap`).
+- **CLI helpers:** canonical trim/JSON output in `cli_util.rs`; manager `--json` compact mode stays in `manager_cli/json.rs`.
+- **Signer denomination:** decomposed into `offer/operator/signer_denomination/{types,planning,wait,split_submit}.rs`.
+- **Reconcile naming:** daemon per-market path `daemon/reconcile_market_cycle.rs` (`run_reconcile_market_cycle`); batch CLI path `offer/lifecycle/reconcile_watched_offers.rs`.
+- **Crate exports:** `lib.rs` no longer re-exports manager CLI command runners; binaries import `manager_cli` / `daemon` modules directly.
+
 ## 2026-06-17 (Rust-native CLI and daemon cutover)
 
 - **Operator binaries:** `greenfloor-manager`, `greenfloord`, and `greenfloor-engine` are Cargo `[[bin]]` targets; Python `[project.scripts]` entrypoints removed.
@@ -11,7 +21,7 @@
 
 ## 2026-05-30 (Reconcile/watchlist consolidation — single Rust orchestration surface)
 
-- **Offer reconcile (canonical Rust):** `daemon/reconcile_batch.rs` implements CLI `offers-reconcile` (`reconcile_offers_batch`); daemon per-market path remains `run_market_reconcile_phase` in `reconcile_phase.rs`. Shared audit/state writes live in `reconcile_persist.rs` (`offers_reconcile` vs `reconcile_coins_and_offers` action).
+- **Offer reconcile (canonical Rust, superseded layout):** CLI `offers-reconcile` uses `offer/lifecycle/reconcile_watched_offers.rs` (`reconcile_offers_batch`); daemon per-market path uses `daemon/reconcile_market_cycle.rs` (`run_reconcile_market_cycle`). Shared persist/transition logic lives in `offer/lifecycle/`.
 - **PyO3:** `reconcile_offers_batch` exposed from `daemon_py.rs`; `runtime/offer_reconciliation.py` is a thin delegate (~65 lines). Removed Python `reconcile_market_watched_offers` and duplicate Dexie/transition orchestration.
 - **Watchlist:** deleted unused `greenfloor/daemon/watchlist.py` re-export shim; callers use `runtime/offer_watchlist.py` → engine watchlist bindings only.
 - **Daemon entry:** production path is `greenfloord` in-process PyO3 `run_daemon_cycle_once` only; removed `greenfloor-engine daemon run-once` subcommand and `tests/test_daemon_native_engine.py`.
@@ -36,7 +46,7 @@
 
 ## 2026-05-29 (Phase 3 — Rust reconcile/cancel market phases)
 
-- **Rust native phases:** `daemon/reconcile_phase.rs` and `daemon/cancel_phase.rs` run Dexie + SQLite reconcile and cancel-on-price-move policy in-process.
+- **Rust native phases:** `daemon/reconcile_market_cycle.rs` and `daemon/cancel_phase.rs` run Dexie + SQLite reconcile and cancel-on-price-move policy in-process.
 - **Market dispatch:** `daemon/market_dispatch.rs` orchestrates per-market cycle: Rust reconcile → Python IO (inventory/strategy) → Rust cancel → Python coin_ops.
 - **PyO3:** `run_daemon_cycle_once` no longer calls Python `execute_market_dispatch`; uses `run_market_cycle_io_phases` / `run_market_coin_ops_phase` bridge callbacks.
 - **SQLite/Dexie extensions:** `get_tx_signal_state`, `list_offer_state_details`, Dexie `get_offers`/`cancel_offer`.
@@ -63,8 +73,8 @@
 
 ## 2026-05-29 (Manager CLI Rust cutover — logging, typed post results, ADR 0012)
 
-- **Logging:** `manager/logging.rs` restores `{home_dir}/logs/debug.log` for Rust manager path; `app.log_level` parsed in `config/program.rs`.
-- **Bootstrap:** `signer_bootstrap_phase` takes `&SignerConfig` from resolved context (no second YAML read).
+- **Logging:** `offer/operator/logging.rs` restores `{home_dir}/logs/debug.log` for Rust manager path; `app.log_level` parsed in `config/program.rs`.
+- **Bootstrap:** `signer_bootstrap_phase` in `offer/operator/signer_denomination/` takes `&SignerConfig` from resolved context (no second YAML read).
 - **Orchestration:** `PostAttemptSuccess` tracks publish outcome without re-parsing JSON for failure counts.
 - **Tests:** build/post fixtures extracted to `manager/fixtures/build_and_post.rs`.
 - **Decision:** ADR 0012 documents manager CLI = Rust, daemon orchestration = temporary Python until `greenfloord` migrates.
@@ -80,7 +90,7 @@
 - **`greenfloor-engine build-and-post-offer`:** native manager path for bootstrap → sign → verify → Dexie/Splash publish without PyO3.
 - **Config:** `config/program.rs` + `config/markets.rs` load manager program + markets YAML (market id/pair resolution, venue URLs).
 - **Adapters:** `adapters/dexie.rs` + `adapters/splash.rs` (post, invalid-offer retry, visibility polling).
-- **Orchestration:** `manager/build_and_post.rs` + `manager/bootstrap.rs` call in-process engine (`build_signer_offer_for_action`, bootstrap mixed-split).
+- **Orchestration:** `offer/operator/build_and_post/` + `offer/operator/signer_denomination/` call in-process engine (`build_signer_offer_for_action`, bootstrap mixed-split).
 - **Persistence:** sqlite audit records on successful post (`storage/sqlite.rs`).
 - **Tests:** Rust unit tests for config/market resolution and mockito Dexie publish phase; 210+ engine tests.
 - **Next:** port `greenfloord` daemon offer post to Rust; delete Python `offer_orchestration.py` manager path (see ADR 0012).
@@ -105,7 +115,7 @@
 - **Removed Python paths:** local BLS offer builder, Cloud Wallet runtime, `offer_policy` / `retry_policy` facades, `cycle/_bridge_common.py`.
 - **Rust:** deleted `greenfloor-engine/src/bls/` and BLS PyO3 bindings; added `coinset/wallet_io.rs` (`list_wallet_unspent_coins`, `spend_bundle_hash_hex`, `extract_coin_id_hints_from_offer`).
 - **Python wallet IO:** production code no longer imports `chia_wallet_sdk`; coin listing, offer decode hints, and spend-bundle hashing go through `greenfloor_engine`.
-- **Reconciliation (historical):** transition rules in `cycle/reconcile.rs`; orchestration now Rust-only (`reconcile_phase` + `reconcile_batch`).
+- **Reconciliation (historical):** transition rules in `cycle/reconcile.rs`; orchestration now Rust-only (`reconcile_market_cycle` + `reconcile_watched_offers`).
 - **Imports:** runtime/daemon use `policy_bridge` + `offer_request_bridge` directly.
 - **Docs:** ADR 0003, 0008, 0011 updated for signer-only architecture.
 
