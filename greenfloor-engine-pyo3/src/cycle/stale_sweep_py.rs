@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
-use engine_core::{
+use engine_core::cycle::{
     classify_dexie_stale_offer_status, collect_stale_sweep_candidates,
     is_dexie_offer_missing_error_text, record_stale_sweep_check,
 };

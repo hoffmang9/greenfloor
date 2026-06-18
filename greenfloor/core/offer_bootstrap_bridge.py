@@ -4,9 +4,10 @@ Engine-backed symbols live here. Call via this module (not ``engine_bridge.boots
 Coinset coin dicts are coerced to ``BootstrapCoin`` at the planner boundary; PyO3 requires
 ``BootstrapCoin`` instances.
 
-**Policy ownership:** deterministic planner + early/executed phase mapping are Rust
-(``greenfloor-engine/src/offer/bootstrap/``). **Fee eligibility** and mixed-split I/O are
-Python-only (``greenfloor/runtime/offer_bootstrap.py``).
+**Policy ownership:** deterministic planner, early/executed phase mapping, and signer
+mixed-split execution are Rust (``greenfloor-engine/src/offer/bootstrap/`` and
+``offer/operator/signer_denomination/``). Python DTOs in ``greenfloor.offer_bootstrap``
+exist only for PyO3 bridge typing.
 """
 
 from __future__ import annotations

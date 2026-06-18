@@ -53,6 +53,39 @@ impl UntilReadyCompletion {
     }
 }
 
+fn gate_ready_for_stop<G>(
+    config: &UntilReadyLoopConfig,
+    gate: &G,
+    gate_ready: &impl Fn(&G) -> bool,
+) -> bool {
+    let ready = gate_ready(gate);
+    if ready && !config.stop_when_gate_ready {
+        false
+    } else {
+        ready
+    }
+}
+
+fn until_ready_stop_reason(
+    config: &UntilReadyLoopConfig,
+    gate_ready_value: Option<bool>,
+    iteration: i32,
+    max_iterations: i32,
+) -> Option<&'static str> {
+    let (should_stop, reason) = coin_op_should_stop(
+        config.until_ready,
+        gate_ready_value,
+        config.explicit_coin_ids,
+        i64::from(iteration),
+        i64::from(max_iterations),
+    );
+    if should_stop && config.until_ready {
+        Some(reason)
+    } else {
+        None
+    }
+}
+
 pub async fn run_until_ready_loop<G, GateReady, RunIteration, Fut>(
     ctx: &CoinOpExecContext,
     config: UntilReadyLoopConfig,
@@ -77,20 +110,18 @@ where
         let gate_json = gate
             .as_ref()
             .and_then(|gate| serde_json::to_value(gate).ok());
+        let gate_ready_value = gate
+            .as_ref()
+            .map(|gate| gate_ready_for_stop(&config, gate, &gate_ready));
 
-        if let Some(ref gate) = gate {
-            if config.until_ready && config.stop_when_gate_ready && gate_ready(gate) {
+        if config.until_ready {
+            if config.stop_when_gate_ready && gate_ready_value == Some(true) {
                 stop_reason = "ready".to_string();
                 break;
             }
-            let (should_stop, reason) = coin_op_should_stop(
-                config.until_ready,
-                Some(gate_ready(gate)),
-                config.explicit_coin_ids,
-                i64::from(iteration),
-                i64::from(max_iterations),
-            );
-            if should_stop && config.until_ready {
+            if let Some(reason) =
+                until_ready_stop_reason(&config, gate_ready_value, iteration, max_iterations)
+            {
                 stop_reason = reason.to_string();
                 break;
             }
@@ -117,7 +148,7 @@ where
 
         let (should_stop, reason) = coin_op_should_stop(
             config.until_ready,
-            gate.as_ref().map(|gate| gate_ready(gate)),
+            gate_ready_value,
             config.explicit_coin_ids,
             i64::from(iteration),
             i64::from(max_iterations),
@@ -144,11 +175,4 @@ pub fn until_ready_exit_code(until_ready: bool, stop_reason: &str) -> i32 {
     } else {
         0
     }
-}
-
-pub(super) fn emit_coin_op_exit(payload: Option<Value>) -> SignerResult<()> {
-    if let Some(payload) = payload {
-        crate::manager_cli::json::emit_json(&payload)?;
-    }
-    Ok(())
 }

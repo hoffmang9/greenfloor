@@ -5,6 +5,7 @@ use crate::coin_ops::{coin_op_should_stop, evaluate_coin_split_gate, SpendableCo
 use super::combine::run_coin_combine;
 use super::context::{enforce_split_lockup_guardrail, spendable_coins_for_gate};
 use super::split::run_coin_split;
+use crate::manager_cli::json::ManagerOutput;
 
 #[test]
 fn lockup_guardrail_blocks_when_all_spendable_selected() {
@@ -25,7 +26,7 @@ fn lockup_guardrail_blocks_when_all_spendable_selected() {
         "asset-1",
     )
     .expect("guardrail payload")
-    .map(|exit| exit.code);
+    .map(|(code, _payload)| code);
     assert_eq!(code, Some(2));
 }
 
@@ -103,7 +104,9 @@ fn split_gate_ready_skips_execution_path() {
 
 #[tokio::test]
 async fn until_ready_requires_size_base_units() {
+    let output = ManagerOutput::new(false);
     let err = run_coin_split(
+        &output,
         Path::new("/tmp/unused-program.yaml"),
         Path::new("/tmp/unused-markets.yaml"),
         None,
@@ -127,7 +130,9 @@ async fn until_ready_requires_size_base_units() {
 
 #[tokio::test]
 async fn until_ready_disallows_no_wait() {
+    let output = ManagerOutput::new(false);
     let err = run_coin_split(
+        &output,
         Path::new("/tmp/unused-program.yaml"),
         Path::new("/tmp/unused-markets.yaml"),
         None,
@@ -153,7 +158,9 @@ async fn until_ready_disallows_no_wait() {
 
 #[tokio::test]
 async fn combine_until_ready_disallows_no_wait() {
+    let output = ManagerOutput::new(false);
     let err = run_coin_combine(
+        &output,
         Path::new("/tmp/unused-program.yaml"),
         Path::new("/tmp/unused-markets.yaml"),
         None,

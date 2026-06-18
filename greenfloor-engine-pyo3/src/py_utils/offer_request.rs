@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use engine_core::SignerOfferLegAmounts;
+use engine_core::offer::request::SignerOfferLegAmounts;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 

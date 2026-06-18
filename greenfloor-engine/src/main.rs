@@ -1,13 +1,16 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use greenfloor_engine::vault::members::hex_to_bytes32;
+use greenfloor_engine::coinset::parse_coin_ids;
+use greenfloor_engine::config::load_signer_config;
 use greenfloor_engine::daemon::{run_daemon_command, DaemonCliArgs};
-use greenfloor_engine::{
-    build_and_optionally_broadcast_vault_cat_mixed_split, build_vault_cat_offer,
-    load_signer_config, parse_coin_ids, resolve_vault_context, CreateOfferRequest,
+use greenfloor_engine::error::SignerError;
+use greenfloor_engine::offer::{build_vault_cat_offer, CreateOfferRequest};
+use greenfloor_engine::vault::{
+    build_and_optionally_broadcast_vault_cat_mixed_split, members::hex_to_bytes32,
     MixedSplitRequest,
 };
+use greenfloor_engine::{resolve_vault_context, Error};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -94,7 +97,7 @@ async fn main() {
     }
 }
 
-async fn run() -> Result<(), greenfloor_engine::Error> {
+async fn run() -> Result<(), Error> {
     let cli = Cli::parse();
     match cli.command {
         Commands::VaultInfo { config, json } => {
@@ -104,7 +107,7 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&context).map_err(|err| {
-                        greenfloor_engine::Error::Other(format!("json encode failed: {err}"))
+                        SignerError::Other(format!("json encode failed: {err}"))
                     })?
                 );
             } else {
@@ -194,7 +197,7 @@ async fn run_mixed_split(
     coin_ids: Vec<String>,
     allow_sub_cat_output: bool,
     broadcast: bool,
-) -> Result<greenfloor_engine::MixedSplitResult, greenfloor_engine::Error> {
+) -> Result<greenfloor_engine::vault::MixedSplitResult, Error> {
     let config = load_signer_config(config_path)?;
     let parsed_coin_ids = if coin_ids.is_empty() {
         Vec::new()
@@ -241,14 +244,14 @@ fn print_vault_info(context: &greenfloor_engine::vault::VaultContext) {
 }
 
 fn print_mixed_split_result(
-    result: &greenfloor_engine::MixedSplitResult,
+    result: &greenfloor_engine::vault::MixedSplitResult,
     json: bool,
-) -> Result<(), greenfloor_engine::Error> {
+) -> Result<(), Error> {
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(result).map_err(|err| {
-                greenfloor_engine::Error::Other(format!("json encode failed: {err}"))
+                SignerError::Other(format!("json encode failed: {err}"))
             })?
         );
         return Ok(());
@@ -268,14 +271,14 @@ fn print_mixed_split_result(
 }
 
 fn print_create_offer_result(
-    result: &greenfloor_engine::CreateOfferResult,
+    result: &greenfloor_engine::offer::CreateOfferResult,
     json: bool,
-) -> Result<(), greenfloor_engine::Error> {
+) -> Result<(), Error> {
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(result).map_err(|err| {
-                greenfloor_engine::Error::Other(format!("json encode failed: {err}"))
+                SignerError::Other(format!("json encode failed: {err}"))
             })?
         );
         return Ok(());

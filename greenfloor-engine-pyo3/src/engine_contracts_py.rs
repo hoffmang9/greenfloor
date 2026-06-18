@@ -12,10 +12,13 @@ pub(crate) fn build_and_post_offer_typed(
     py: Python<'_>,
     request: &Bound<'_, PyDict>,
 ) -> PyResult<Py<PyAny>> {
+    let compact_json = request
+        .get_item("compact_json")?
+        .and_then(|value| value.extract::<bool>().ok())
+        .unwrap_or(false);
     let payload = request_dict_to_json(request)?;
     let engine_request: BuildAndPostOfferRequest =
         serde_json::from_value(payload).map_err(to_py_err)?;
-    let compact_json = engine_request.compact_json;
     let response = py.detach(move || {
         runtime()
             .block_on(build_and_post_offer(engine_request))

@@ -7,7 +7,7 @@ use crate::config::{load_markets_config_with_overlay, load_program_config, requi
 use crate::error::{SignerError, SignerResult};
 
 use super::context::{resolve_asset_filter, select_list_market};
-use crate::manager_cli::json::emit_json;
+use crate::manager_cli::json::ManagerOutput;
 
 struct CoinListSnapshot {
     network: String,
@@ -98,6 +98,7 @@ async fn load_coin_list_snapshot(
 }
 
 pub async fn run_coins_list(
+    output: &ManagerOutput,
     program_path: &Path,
     markets_path: &Path,
     asset: Option<&str>,
@@ -106,7 +107,7 @@ pub async fn run_coins_list(
 ) -> SignerResult<i32> {
     let _ = vault_id;
     if let Err(err) = require_signer_offer_path(program_path) {
-        emit_json(&json!({
+        output.emit_json(&json!({
             "ok": false,
             "error": "coin_list_requires_signer_backend",
             "detail": err.to_string(),
@@ -114,8 +115,7 @@ pub async fn run_coins_list(
         return Ok(2);
     }
     let snapshot = load_coin_list_snapshot(program_path, markets_path, asset, cat_id).await?;
-    emit_json(&json!({
-        "execution_backend": "signer",
+    output.emit_json(&json!({
         "network": snapshot.network,
         "market_id": snapshot.market_id,
         "receive_address": snapshot.receive_address,
@@ -130,6 +130,7 @@ pub async fn run_coins_list(
 }
 
 pub async fn run_coin_status(
+    output: &ManagerOutput,
     program_path: &Path,
     markets_path: &Path,
     asset: Option<&str>,
@@ -138,7 +139,7 @@ pub async fn run_coin_status(
 ) -> SignerResult<i32> {
     let _ = vault_id;
     if let Err(err) = require_signer_offer_path(program_path) {
-        emit_json(&json!({
+        output.emit_json(&json!({
             "ok": false,
             "error": "coin_list_requires_signer_backend",
             "detail": err.to_string(),
@@ -146,9 +147,8 @@ pub async fn run_coin_status(
         return Ok(2);
     }
     let snapshot = load_coin_list_snapshot(program_path, markets_path, asset, cat_id).await?;
-    emit_json(&json!({
+    output.emit_json(&json!({
         "op": "coin-status",
-        "execution_backend": "signer",
         "network": snapshot.network,
         "market_id": snapshot.market_id,
         "receive_address": snapshot.receive_address,

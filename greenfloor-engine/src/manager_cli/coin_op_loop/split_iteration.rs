@@ -65,15 +65,15 @@ pub(super) async fn run_split_iteration(
         }
     };
 
-    if let Some(exit) = enforce_split_lockup_guardrail(
+    if let Some((code, payload)) = enforce_split_lockup_guardrail(
         &spendable,
         &selected_coin_ids,
         allow_lock_all_spendable,
         &ctx.resolved_base_asset_id,
     )? {
         return Ok(LoopIterationOutcome::Exit {
-            code: exit.code,
-            payload: Some(exit.payload),
+            code,
+            payload: Some(payload),
         });
     }
 

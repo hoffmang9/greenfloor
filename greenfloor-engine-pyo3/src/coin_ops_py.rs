@@ -2,7 +2,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 
-use engine_core::{
+use engine_core::coin_ops::{
     amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_should_stop,
     coin_op_target_amount_allowed, compute_bucket_counts_from_coins,
     effective_sell_bucket_counts_for_coin_ops, evaluate_coin_combine_gate,

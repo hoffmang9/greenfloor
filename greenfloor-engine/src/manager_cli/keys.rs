@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use crate::config::load_program_config;
 use crate::error::{SignerError, SignerResult};
 
-use super::json::emit_json;
+use super::json::ManagerOutput;
 use super::paths::expand_home;
 
 #[derive(Debug, Clone)]
@@ -19,6 +19,7 @@ struct ChiaKeysDiscovery {
 }
 
 pub fn run_keys_onboard(
+    output: &ManagerOutput,
     program_path: &Path,
     key_id: &str,
     state_dir: &Path,
@@ -50,7 +51,7 @@ pub fn run_keys_onboard(
                 "mnemonic_word_count": Value::Null,
             }),
         )?;
-        emit_json(&json!({
+        output.emit_json(&json!({
             "selected_source": "chia_keys",
             "key_id": key_id.trim(),
             "network": program.network,
@@ -90,7 +91,7 @@ pub fn run_keys_onboard(
                 "mnemonic_word_count": words.len(),
             }),
         )?;
-        emit_json(&json!({
+        output.emit_json(&json!({
             "selected_source": "mnemonic_import",
             "key_id": key_id.trim(),
             "network": program.network,
@@ -109,7 +110,7 @@ pub fn run_keys_onboard(
             "mnemonic_word_count": Value::Null,
         }),
     )?;
-    emit_json(&json!({
+    output.emit_json(&json!({
         "selected_source": "generate_new_key",
         "key_id": key_id.trim(),
         "network": program.network,

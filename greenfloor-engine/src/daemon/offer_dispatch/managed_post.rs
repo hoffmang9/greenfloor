@@ -37,7 +37,6 @@ pub async fn post_managed_planned_action(
         drop_only: true,
         claim_rewards: false,
         dry_run: program.runtime_dry_run,
-        compact_json: false,
         persist_results: true,
         action_side: Some(side),
         test_overrides: OfferOperatorTestOverrides::default(),

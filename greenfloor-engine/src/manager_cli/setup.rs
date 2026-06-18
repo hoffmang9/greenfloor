@@ -9,23 +9,32 @@ use crate::config::{load_markets_config_with_overlay, load_program_config, requi
 use crate::error::{SignerError, SignerResult};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
-use super::json::emit_json;
+use super::json::ManagerOutput;
 use super::paths::expand_home;
 
 const ALLOWED_LOG_LEVELS: &[&str] = &["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"];
 
 pub fn run_config_validate(
+    output: &ManagerOutput,
     program_path: &Path,
     markets_path: &Path,
     testnet_markets_path: Option<&Path>,
 ) -> SignerResult<i32> {
     let _program = load_program_config(program_path)?;
     let _markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
-    println!("config validation ok");
+    output.emit_json(&json!({
+        "ok": true,
+        "program_config": program_path.display().to_string(),
+        "markets_config": markets_path.display().to_string(),
+    }))?;
     Ok(0)
 }
 
-pub fn run_set_log_level(program_path: &Path, log_level: &str) -> SignerResult<i32> {
+pub fn run_set_log_level(
+    output: &ManagerOutput,
+    program_path: &Path,
+    log_level: &str,
+) -> SignerResult<i32> {
     let level = normalize_log_level(log_level)?;
     let raw = read_yaml_mapping(program_path)?;
     let mut root = raw;
@@ -46,7 +55,7 @@ pub fn run_set_log_level(program_path: &Path, log_level: &str) -> SignerResult<i
         .unwrap_or_else(|| "INFO".to_string());
     app_map.insert(Value::from("log_level"), Value::from(level.as_str()));
     write_yaml(program_path, &root)?;
-    emit_json(&json!({
+    output.emit_json(&json!({
         "updated": true,
         "program_config": program_path.display().to_string(),
         "previous_log_level": prior_level,
@@ -56,6 +65,7 @@ pub fn run_set_log_level(program_path: &Path, log_level: &str) -> SignerResult<i
 }
 
 pub fn run_bootstrap_home(
+    output: &ManagerOutput,
     home_dir: &Path,
     program_template: &Path,
     markets_template: &Path,
@@ -137,7 +147,7 @@ pub fn run_bootstrap_home(
         None,
     )?;
 
-    emit_json(&json!({
+    output.emit_json(&json!({
         "bootstrapped": true,
         "home_dir": home.display().to_string(),
         "program_config": seeded_program.display().to_string(),
@@ -160,6 +170,7 @@ pub fn run_bootstrap_home(
 }
 
 pub fn run_doctor(
+    output: &ManagerOutput,
     program_path: &Path,
     markets_path: &Path,
     state_db: Option<&str>,
@@ -199,7 +210,7 @@ pub fn run_doctor(
     resolved_key_ids.sort();
     resolved_key_ids.dedup();
     let ok = problems.is_empty();
-    emit_json(&json!({
+    output.emit_json(&json!({
         "ok": ok,
         "program_config": program_path.display().to_string(),
         "markets_config": markets_path.display().to_string(),
@@ -277,5 +288,22 @@ mod tests {
     #[test]
     fn normalize_log_level_rejects_garbage() {
         assert!(normalize_log_level("verbose").is_err());
+    }
+
+    #[test]
+    fn config_validate_emits_json() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program_path = dir.path().join("program.yaml");
+        let markets_path = dir.path().join("markets.yaml");
+        std::fs::write(
+            &program_path,
+            "app:\n  network: mainnet\n  home_dir: /tmp/gf\n",
+        )
+        .expect("write program");
+        std::fs::write(&markets_path, "markets: []\n").expect("write markets");
+        let output = super::super::json::ManagerOutput::new(false);
+        let code = run_config_validate(&output, &program_path, &markets_path, None)
+            .expect("validate");
+        assert_eq!(code, 0);
     }
 }

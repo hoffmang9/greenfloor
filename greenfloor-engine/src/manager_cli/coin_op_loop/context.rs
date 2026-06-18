@@ -13,8 +13,6 @@ use crate::error::{SignerError, SignerResult};
 use crate::hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
 use crate::offer::resolve_offer_assets_for_action;
 
-use super::cli_exit::CoinOpCliExit;
-
 pub(super) const COIN_SPLIT_LOCKUP_ERROR: &str = "coin_split_lockup_guardrail_would_lock_all_spendable_coins";
 pub(super) const COIN_SPLIT_NO_SPENDABLE_ERROR: &str = "no_spendable_split_coin_available";
 
@@ -55,7 +53,7 @@ pub(super) fn enforce_split_lockup_guardrail(
     selected_coin_ids: &[String],
     allow_lock_all_spendable: bool,
     resolved_asset_id: &str,
-) -> SignerResult<Option<CoinOpCliExit>> {
+) -> SignerResult<Option<(i32, Value)>> {
     if allow_lock_all_spendable {
         return Ok(None);
     }
@@ -64,15 +62,15 @@ pub(super) fn enforce_split_lockup_guardrail(
     if spendable_ids.is_empty() || selected_set != spendable_ids {
         return Ok(None);
     }
-    Ok(Some(CoinOpCliExit {
-        code: 2,
-        payload: json!({
+    Ok(Some((
+        2,
+        json!({
             "error": COIN_SPLIT_LOCKUP_ERROR,
             "resolved_asset_id": resolved_asset_id,
             "spendable_asset_coin_count": spendable_ids.len(),
             "selected_spendable_coin_count": selected_set.len(),
         }),
-    }))
+    )))
 }
 
 pub(super) fn spendable_coins_for_gate(spendable: &[SpendableCoin]) -> Vec<Value> {

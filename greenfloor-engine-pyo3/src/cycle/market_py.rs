@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 
-use engine_core::{
+use engine_core::cycle::{
     dedupe_sorted_market_ids, enqueue_immediate_requeue, market_cycle_phases,
     next_disabled_market_log_deadline, select_market_batch, should_log_disabled_market,
     should_try_cat_inventory_fallback, should_use_market_slot_dispatch,

@@ -38,7 +38,6 @@ pub struct BuildAndPostOfferRequest {
     pub drop_only: bool,
     pub claim_rewards: bool,
     pub dry_run: bool,
-    pub compact_json: bool,
     pub persist_results: bool,
     /// When set, overrides ``pricing.side`` for bootstrap and offer construction (daemon buy/sell actions).
     pub action_side: Option<String>,
@@ -134,8 +133,6 @@ pub async fn build_and_post_offer(
         "results": post_results,
         "offer_fee_mojos": ctx.offer_fee_mojos,
         "offer_fee_source": ctx.offer_fee_source,
-        "execution_backend": "signer",
-        "signer_path": true,
     });
     let exit_code = build_and_post_exit_code(publish_failures);
     Ok(BuildAndPostOfferResponse {

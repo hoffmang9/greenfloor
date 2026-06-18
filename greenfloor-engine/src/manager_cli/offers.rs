@@ -12,7 +12,7 @@ use crate::offer::lifecycle::{
 };
 use crate::storage::resolve_state_db_path;
 
-use super::json::emit_serialized;
+use super::json::ManagerOutput;
 
 #[derive(Debug, Args)]
 pub struct OffersReconcileCliArgs {
@@ -54,7 +54,10 @@ pub struct OffersCancelCliArgs {
     pub venue: Option<String>,
 }
 
-pub async fn run_offers_reconcile_command(args: OffersReconcileCliArgs) -> SignerResult<i32> {
+pub async fn run_offers_reconcile_command(
+    output: &ManagerOutput,
+    args: OffersReconcileCliArgs,
+) -> SignerResult<i32> {
     let program = load_program_config(&args.program_config)?;
     let db_path = resolve_state_db_path(
         &program.home_dir,
@@ -75,11 +78,14 @@ pub async fn run_offers_reconcile_command(args: OffersReconcileCliArgs) -> Signe
         args.limit,
     )
     .await?;
-    emit_serialized(&payload)?;
+    output.emit_serialized(&payload)?;
     Ok(0)
 }
 
-pub fn run_offers_status_command(args: OffersStatusCliArgs) -> SignerResult<i32> {
+pub fn run_offers_status_command(
+    output: &ManagerOutput,
+    args: OffersStatusCliArgs,
+) -> SignerResult<i32> {
     let program = load_program_config(&args.program_config)?;
     let db_path = resolve_state_db_path(
         &program.home_dir,
@@ -91,11 +97,14 @@ pub fn run_offers_status_command(args: OffersStatusCliArgs) -> SignerResult<i32>
         args.limit,
         args.events_limit,
     )?;
-    emit_serialized(&payload)?;
+    output.emit_serialized(&payload)?;
     Ok(0)
 }
 
-pub async fn run_offers_cancel_command(args: OffersCancelCliArgs) -> SignerResult<i32> {
+pub async fn run_offers_cancel_command(
+    output: &ManagerOutput,
+    args: OffersCancelCliArgs,
+) -> SignerResult<i32> {
     let program = load_program_config(&args.program_config)?;
     let db_path = resolve_state_db_path(&program.home_dir, None);
     let venue = args
@@ -114,6 +123,6 @@ pub async fn run_offers_cancel_command(args: OffersCancelCliArgs) -> SignerResul
     )
     .await?;
     let exit_code = if payload.failed_count == 0 { 0 } else { 2 };
-    emit_serialized(&payload)?;
+    output.emit_serialized(&payload)?;
     Ok(exit_code)
 }

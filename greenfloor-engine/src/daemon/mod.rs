@@ -62,6 +62,7 @@ pub use program_runtime::{
     default_testnet_markets_path, load_daemon_program_runtime, resolve_testnet_markets_path,
     use_websocket_capture_for_once, websocket_capture_enabled, DaemonProgramRuntime,
 };
+pub use reload::consume_reload_marker;
 pub use cli::{
     run_daemon_command, run_daemon_cycle_once_from_json, run_daemon_loop_from_json,
     DaemonCliArgs,

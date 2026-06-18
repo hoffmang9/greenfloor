@@ -6,6 +6,7 @@ use crate::error::SignerResult;
 use crate::offer::operator::{build_and_post_offer, BuildAndPostOfferRequest, OfferOperatorTestOverrides};
 
 use super::commands::{ManagerCli, ManagerCommands};
+use super::json::ManagerOutput;
 use super::offers::{
     run_offers_cancel_command, run_offers_reconcile_command, run_offers_status_command,
     OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
@@ -16,14 +17,15 @@ use super::paths::{
 };
 use super::util::require_market_selector;
 use crate::cli_util::optional_str;
-use super::{cats, coin_op_loop, json, keys, setup};
+use super::{cats, coin_op_loop, keys, setup};
 
 pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
     let cli = resolve_manager_cli_paths(cli);
-    json::set_json_output_compact(cli.json);
+    let output = ManagerOutput::new(cli.json);
     let testnet_markets_path = resolve_testnet_markets_path(&cli);
     match cli.command {
         ManagerCommands::ConfigValidate => setup::run_config_validate(
+            &output,
             &cli.program_config,
             &cli.markets_config,
             testnet_markets_path.as_deref(),
@@ -33,6 +35,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             key_id,
             state_dir,
         } => keys::run_keys_onboard(
+            &output,
             &cli.program_config,
             &key_id,
             &state_dir,
@@ -67,16 +70,16 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
                 drop_only: !allow_take,
                 claim_rewards,
                 dry_run,
-                compact_json: cli.json,
                 persist_results: true,
                 action_side: None,
                 test_overrides: OfferOperatorTestOverrides::from_env(),
             })
             .await?;
-            json::emit_json(&response.payload)?;
+            output.emit_json(&response.payload)?;
             Ok(response.exit_code)
         }
         ManagerCommands::Doctor => setup::run_doctor(
+            &output,
             &cli.program_config,
             &cli.markets_config,
             optional_path(&cli.state_db)
@@ -88,25 +91,31 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             market_id,
             limit,
             events_limit,
-        } => run_offers_status_command(OffersStatusCliArgs {
-            program_config: cli.program_config,
-            state_db: cli.state_db,
-            market_id,
-            limit,
-            events_limit,
-        }),
+        } => run_offers_status_command(
+            &output,
+            OffersStatusCliArgs {
+                program_config: cli.program_config,
+                state_db: cli.state_db,
+                market_id,
+                limit,
+                events_limit,
+            },
+        ),
         ManagerCommands::OffersReconcile {
             market_id,
             limit,
             venue,
         } => {
-            run_offers_reconcile_command(OffersReconcileCliArgs {
-                program_config: cli.program_config,
-                state_db: cli.state_db,
-                market_id,
-                limit,
-                venue,
-            })
+            run_offers_reconcile_command(
+                &output,
+                OffersReconcileCliArgs {
+                    program_config: cli.program_config,
+                    state_db: cli.state_db,
+                    market_id,
+                    limit,
+                    venue,
+                },
+            )
             .await
         }
         ManagerCommands::OffersCancel {
@@ -114,12 +123,15 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             cancel_open,
             venue,
         } => {
-            run_offers_cancel_command(OffersCancelCliArgs {
-                program_config: cli.program_config,
-                offer_id,
-                cancel_open,
-                venue,
-            })
+            run_offers_cancel_command(
+                &output,
+                OffersCancelCliArgs {
+                    program_config: cli.program_config,
+                    offer_id,
+                    cancel_open,
+                    venue,
+                },
+            )
             .await
         }
         ManagerCommands::BootstrapHome {
@@ -131,6 +143,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             seed_testnet_markets,
             force,
         } => setup::run_bootstrap_home(
+            &output,
             &home_dir,
             &program_template,
             &markets_template,
@@ -153,6 +166,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             replace,
         } => {
             cats::run_cats_add(
+                &output,
                 &cli.cats_config,
                 &network,
                 cat_id.as_deref(),
@@ -169,7 +183,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             )
             .await
         }
-        ManagerCommands::CatsList => cats::run_cats_list(&cli.cats_config).await,
+        ManagerCommands::CatsList => cats::run_cats_list(&output, &cli.cats_config).await,
         ManagerCommands::CatsDelete {
             network,
             cat_id,
@@ -179,6 +193,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             preflight_only,
         } => {
             cats::run_cats_delete(
+                &output,
                 &cli.cats_config,
                 &network,
                 cat_id.as_deref(),
@@ -191,7 +206,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             .await
         }
         ManagerCommands::SetLogLevel { log_level } => {
-            setup::run_set_log_level(&cli.program_config, &log_level)
+            setup::run_set_log_level(&output, &cli.program_config, &log_level)
         }
         ManagerCommands::CoinsList {
             asset,
@@ -199,6 +214,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             cat_id,
         } => {
             coin_op_loop::run_coins_list(
+                &output,
                 &cli.program_config,
                 &cli.markets_config,
                 optional_str(&asset),
@@ -213,6 +229,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             cat_id,
         } => {
             coin_op_loop::run_coin_status(
+                &output,
                 &cli.program_config,
                 &cli.markets_config,
                 optional_str(&asset),
@@ -237,6 +254,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
         } => {
             require_market_selector(market_id.as_deref(), pair.as_deref())?;
             coin_op_loop::run_coin_split(
+                &output,
                 &cli.program_config,
                 &cli.markets_config,
                 testnet_markets_path.as_deref(),
@@ -273,6 +291,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
         } => {
             require_market_selector(market_id.as_deref(), pair.as_deref())?;
             coin_op_loop::run_coin_combine(
+                &output,
                 &cli.program_config,
                 &cli.markets_config,
                 testnet_markets_path.as_deref(),

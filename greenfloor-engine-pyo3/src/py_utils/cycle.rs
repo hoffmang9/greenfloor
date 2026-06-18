@@ -6,6 +6,10 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use super::common::{cached_class, i64_i64_map_to_py_dict, require_i64_attr};
+use engine_core::cycle::{
+    ManagedActionOutcome, ReseedGapPlan, ReseedSkipReason, SpendableAssetProfile,
+    StrategyActionSellCountInput,
+};
 
 const ORCHESTRATION_MODULE: &str = "greenfloor.core.cycle_orchestration";
 const CYCLE_RESEED_MODULE: &str = "greenfloor.core.cycle_reseed";
@@ -72,7 +76,7 @@ pub fn reseed_gap_plan_class<'py>(py: Python<'py>) -> PyResult<Bound<'py, PyAny>
 
 pub fn reseed_skip_reason_to_py<'py>(
     py: Python<'py>,
-    reason: engine_core::ReseedSkipReason,
+    reason: ReseedSkipReason,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = cached_class(
         py,
@@ -85,7 +89,7 @@ pub fn reseed_skip_reason_to_py<'py>(
 
 pub fn reseed_gap_plan_to_py<'py>(
     py: Python<'py>,
-    plan: &engine_core::ReseedGapPlan,
+    plan: &ReseedGapPlan,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = reseed_gap_plan_class(py)?;
     let kwargs = PyDict::new(py);
@@ -124,7 +128,7 @@ pub fn managed_action_outcome_class<'py>(py: Python<'py>) -> PyResult<Bound<'py,
 
 pub fn managed_action_outcome_to_py<'py>(
     py: Python<'py>,
-    outcome: &engine_core::ManagedActionOutcome,
+    outcome: &ManagedActionOutcome,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = managed_action_outcome_class(py)?;
     let kwargs = PyDict::new(py);
@@ -183,7 +187,7 @@ pub fn cycle_offer_transition_class<'py>(py: Python<'py>) -> PyResult<Bound<'py,
 
 pub fn extract_spendable_profiles(
     profiles: &Bound<'_, PyDict>,
-) -> PyResult<BTreeMap<String, engine_core::SpendableAssetProfile>> {
+) -> PyResult<BTreeMap<String, SpendableAssetProfile>> {
     let mut map = BTreeMap::new();
     for (asset_id, value) in profiles.iter() {
         let profile = value
@@ -197,7 +201,7 @@ pub fn extract_spendable_profiles(
             .extract::<bool>()?;
         map.insert(
             asset_id.extract::<String>()?,
-            engine_core::SpendableAssetProfile {
+            SpendableAssetProfile {
                 total: profile
                     .get_item("total")?
                     .and_then(|item| item.extract::<i64>().ok())
@@ -215,7 +219,7 @@ pub fn extract_spendable_profiles(
 
 pub fn strategy_action_sell_counts_from_py_list(
     list: &Bound<'_, PyList>,
-) -> PyResult<Vec<engine_core::cycle::StrategyActionSellCountInput>> {
+) -> PyResult<Vec<StrategyActionSellCountInput>> {
     list.iter()
         .enumerate()
         .map(|(index, item)| {
@@ -234,7 +238,7 @@ pub fn strategy_action_sell_counts_from_py_list(
                 .map_err(|_| {
                     PyValueError::new_err(format!("{label}.counts_as_executed must be a bool"))
                 })?;
-            Ok(engine_core::cycle::StrategyActionSellCountInput {
+            Ok(StrategyActionSellCountInput {
                 size: require_i64_attr(&item, &label, "size")?,
                 side,
                 counts_as_executed,

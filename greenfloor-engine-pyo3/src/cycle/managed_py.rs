@@ -6,7 +6,7 @@ use crate::py_utils::{
     managed_action_outcome_to_py, managed_retry_decision_class, request_dict_to_json, to_py_err,
 };
 
-use engine_core::{
+use engine_core::cycle::{
     can_parallelize_managed_offers, classify_dexie_visibility_outcome,
     classify_managed_post_result, classify_managed_transient_error,
     count_parallel_transient_failures, is_managed_upstream_transient_error,
@@ -156,7 +156,7 @@ fn managed_retry_decision_py(
             "should_retry",
             matches!(
                 decision.decision,
-                engine_core::ManagedRetryDecisionKind::Retry
+                engine_core::cycle::ManagedRetryDecisionKind::Retry
             ),
         )?;
         kwargs.set_item("sleep_ms", decision.sleep_ms)?;

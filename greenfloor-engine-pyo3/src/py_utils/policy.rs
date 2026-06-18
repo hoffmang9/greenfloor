@@ -4,6 +4,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
 use super::common::cached_class;
+use engine_core::cycle::{
+    AlertEvent, AlertState, CancelPolicyDecision, LowInventoryEvaluation, LowInventoryInput,
+};
 
 const CANCEL_POLICY_MODULE: &str = "greenfloor.core.cancel_policy";
 const NOTIFICATIONS_MODULE: &str = "greenfloor.core.notifications";
@@ -41,7 +44,7 @@ pub fn low_inventory_evaluation_class<'py>(py: Python<'py>) -> PyResult<Bound<'p
 
 pub fn cancel_policy_decision_to_py<'py>(
     py: Python<'py>,
-    decision: &engine_core::CancelPolicyDecision,
+    decision: &CancelPolicyDecision,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = cancel_policy_decision_class(py)?;
     let kwargs = PyDict::new(py);
@@ -55,7 +58,7 @@ pub fn cancel_policy_decision_to_py<'py>(
 
 pub fn alert_event_to_py<'py>(
     py: Python<'py>,
-    event: &engine_core::AlertEvent,
+    event: &AlertEvent,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = alert_event_class(py)?;
     let kwargs = PyDict::new(py);
@@ -69,7 +72,7 @@ pub fn alert_event_to_py<'py>(
 
 pub fn alert_state_to_py<'py>(
     py: Python<'py>,
-    state: &engine_core::AlertState,
+    state: &AlertState,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = alert_state_class(py)?;
     let kwargs = PyDict::new(py);
@@ -80,7 +83,7 @@ pub fn alert_state_to_py<'py>(
 
 pub fn low_inventory_evaluation_to_py<'py>(
     py: Python<'py>,
-    evaluation: &engine_core::LowInventoryEvaluation,
+    evaluation: &LowInventoryEvaluation,
 ) -> PyResult<Bound<'py, PyAny>> {
     let cls = low_inventory_evaluation_class(py)?;
     let kwargs = PyDict::new(py);
@@ -95,8 +98,8 @@ pub fn low_inventory_evaluation_to_py<'py>(
 
 pub fn low_inventory_input_from_py(
     input: &Bound<'_, PyAny>,
-) -> PyResult<engine_core::LowInventoryInput> {
-    Ok(engine_core::LowInventoryInput {
+) -> PyResult<LowInventoryInput> {
+    Ok(LowInventoryInput {
         now_unix: input.getattr("now_unix")?.extract()?,
         low_inventory_enabled: input.getattr("low_inventory_enabled")?.extract()?,
         program_default_threshold: input.getattr("program_default_threshold")?.extract()?,
