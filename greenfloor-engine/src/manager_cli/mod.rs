@@ -4,6 +4,7 @@ mod cats;
 mod cats_catalog;
 mod coin_op_loop;
 mod commands;
+mod context;
 mod dispatch;
 mod json;
 mod keys;

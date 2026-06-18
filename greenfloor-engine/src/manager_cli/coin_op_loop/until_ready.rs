@@ -44,15 +44,6 @@ pub enum UntilReadyCompletion {
     },
 }
 
-impl UntilReadyCompletion {
-    pub fn stop_reason(&self) -> Option<&str> {
-        match self {
-            Self::Completed { stop_reason } => Some(stop_reason.as_str()),
-            Self::Exit { .. } => None,
-        }
-    }
-}
-
 fn gate_ready_for_stop<G>(
     config: &UntilReadyLoopConfig,
     gate: &G,
@@ -66,12 +57,18 @@ fn gate_ready_for_stop<G>(
     }
 }
 
-fn until_ready_stop_reason(
+fn iteration_stop_reason(
     config: &UntilReadyLoopConfig,
     gate_ready_value: Option<bool>,
     iteration: i32,
     max_iterations: i32,
+    after_iteration_body: bool,
 ) -> Option<&'static str> {
+    if !after_iteration_body && config.until_ready {
+        if config.stop_when_gate_ready && gate_ready_value == Some(true) {
+            return Some("ready");
+        }
+    }
     let (should_stop, reason) = coin_op_should_stop(
         config.until_ready,
         gate_ready_value,
@@ -79,7 +76,10 @@ fn until_ready_stop_reason(
         i64::from(iteration),
         i64::from(max_iterations),
     );
-    if should_stop && config.until_ready {
+    if !should_stop {
+        return None;
+    }
+    if after_iteration_body || config.until_ready {
         Some(reason)
     } else {
         None
@@ -114,17 +114,15 @@ where
             .as_ref()
             .map(|gate| gate_ready_for_stop(&config, gate, &gate_ready));
 
-        if config.until_ready {
-            if config.stop_when_gate_ready && gate_ready_value == Some(true) {
-                stop_reason = "ready".to_string();
-                break;
-            }
-            if let Some(reason) =
-                until_ready_stop_reason(&config, gate_ready_value, iteration, max_iterations)
-            {
-                stop_reason = reason.to_string();
-                break;
-            }
+        if let Some(reason) = iteration_stop_reason(
+            &config,
+            gate_ready_value,
+            iteration,
+            max_iterations,
+            false,
+        ) {
+            stop_reason = reason.to_string();
+            break;
         }
 
         match run_iteration(iteration, spendable, gate_json).await? {
@@ -146,14 +144,13 @@ where
             }
         }
 
-        let (should_stop, reason) = coin_op_should_stop(
-            config.until_ready,
+        if let Some(reason) = iteration_stop_reason(
+            &config,
             gate_ready_value,
-            config.explicit_coin_ids,
-            i64::from(iteration),
-            i64::from(max_iterations),
-        );
-        if should_stop {
+            iteration,
+            max_iterations,
+            true,
+        ) {
             stop_reason = reason.to_string();
             break;
         }

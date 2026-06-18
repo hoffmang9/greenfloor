@@ -1,7 +1,5 @@
 //! Manager CLI entrypoints for offers status, reconcile, and cancel.
 
-use std::path::PathBuf;
-
 use clap::Args;
 
 use crate::cli_util::optional_trimmed;
@@ -12,14 +10,10 @@ use crate::offer::lifecycle::{
 };
 use crate::storage::resolve_state_db_path;
 
-use super::json::ManagerOutput;
+use super::context::ManagerContext;
 
 #[derive(Debug, Args)]
 pub struct OffersReconcileCliArgs {
-    #[arg(long, default_value = "config/program.yaml")]
-    pub program_config: PathBuf,
-    #[arg(long, default_value = "")]
-    pub state_db: String,
     #[arg(long, default_value = "")]
     pub market_id: String,
     #[arg(long, default_value_t = 200)]
@@ -30,10 +24,6 @@ pub struct OffersReconcileCliArgs {
 
 #[derive(Debug, Args)]
 pub struct OffersStatusCliArgs {
-    #[arg(long, default_value = "config/program.yaml")]
-    pub program_config: PathBuf,
-    #[arg(long, default_value = "")]
-    pub state_db: String,
     #[arg(long, default_value = "")]
     pub market_id: String,
     #[arg(long, default_value_t = 50)]
@@ -44,8 +34,6 @@ pub struct OffersStatusCliArgs {
 
 #[derive(Debug, Args)]
 pub struct OffersCancelCliArgs {
-    #[arg(long, default_value = "config/program.yaml")]
-    pub program_config: PathBuf,
     #[arg(long, action = clap::ArgAction::Append)]
     pub offer_id: Vec<String>,
     #[arg(long)]
@@ -55,14 +43,11 @@ pub struct OffersCancelCliArgs {
 }
 
 pub async fn run_offers_reconcile_command(
-    output: &ManagerOutput,
+    ctx: &ManagerContext,
     args: OffersReconcileCliArgs,
 ) -> SignerResult<i32> {
-    let program = load_program_config(&args.program_config)?;
-    let db_path = resolve_state_db_path(
-        &program.home_dir,
-        optional_trimmed(&args.state_db).as_deref(),
-    );
+    let program = load_program_config(&ctx.program_config)?;
+    let db_path = resolve_state_db_path(&program.home_dir, ctx.state_db_override());
     let venue = args
         .venue
         .as_deref()
@@ -78,34 +63,31 @@ pub async fn run_offers_reconcile_command(
         args.limit,
     )
     .await?;
-    output.emit_serialized(&payload)?;
+    ctx.emit_serialized(&payload)?;
     Ok(0)
 }
 
 pub fn run_offers_status_command(
-    output: &ManagerOutput,
+    ctx: &ManagerContext,
     args: OffersStatusCliArgs,
 ) -> SignerResult<i32> {
-    let program = load_program_config(&args.program_config)?;
-    let db_path = resolve_state_db_path(
-        &program.home_dir,
-        optional_trimmed(&args.state_db).as_deref(),
-    );
+    let program = load_program_config(&ctx.program_config)?;
+    let db_path = resolve_state_db_path(&program.home_dir, ctx.state_db_override());
     let payload = offers_status_cli(
         &db_path,
         optional_trimmed(&args.market_id).as_deref(),
         args.limit,
         args.events_limit,
     )?;
-    output.emit_serialized(&payload)?;
+    ctx.emit_serialized(&payload)?;
     Ok(0)
 }
 
 pub async fn run_offers_cancel_command(
-    output: &ManagerOutput,
+    ctx: &ManagerContext,
     args: OffersCancelCliArgs,
 ) -> SignerResult<i32> {
-    let program = load_program_config(&args.program_config)?;
+    let program = load_program_config(&ctx.program_config)?;
     let db_path = resolve_state_db_path(&program.home_dir, None);
     let venue = args
         .venue
@@ -123,6 +105,6 @@ pub async fn run_offers_cancel_command(
     )
     .await?;
     let exit_code = if payload.failed_count == 0 { 0 } else { 2 };
-    output.emit_serialized(&payload)?;
+    ctx.emit_serialized(&payload)?;
     Ok(exit_code)
 }

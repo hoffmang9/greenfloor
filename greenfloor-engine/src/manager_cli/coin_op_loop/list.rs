@@ -6,8 +6,9 @@ use crate::coin_ops::is_spendable_coin_state;
 use crate::config::{load_markets_config_with_overlay, load_program_config, require_signer_offer_path};
 use crate::error::{SignerError, SignerResult};
 
+use crate::manager_cli::context::ManagerContext;
+
 use super::context::{resolve_asset_filter, select_list_market};
-use crate::manager_cli::json::ManagerOutput;
 
 struct CoinListSnapshot {
     network: String,
@@ -98,24 +99,22 @@ async fn load_coin_list_snapshot(
 }
 
 pub async fn run_coins_list(
-    output: &ManagerOutput,
-    program_path: &Path,
-    markets_path: &Path,
+    mgr: &ManagerContext,
     asset: Option<&str>,
     vault_id: Option<&str>,
     cat_id: Option<&str>,
 ) -> SignerResult<i32> {
     let _ = vault_id;
-    if let Err(err) = require_signer_offer_path(program_path) {
-        output.emit_json(&json!({
+    if let Err(err) = require_signer_offer_path(&mgr.program_config) {
+        mgr.emit_json(&json!({
             "ok": false,
             "error": "coin_list_requires_signer_backend",
             "detail": err.to_string(),
         }))?;
         return Ok(2);
     }
-    let snapshot = load_coin_list_snapshot(program_path, markets_path, asset, cat_id).await?;
-    output.emit_json(&json!({
+    let snapshot = load_coin_list_snapshot(&mgr.program_config, &mgr.markets_config, asset, cat_id).await?;
+    mgr.emit_json(&json!({
         "network": snapshot.network,
         "market_id": snapshot.market_id,
         "receive_address": snapshot.receive_address,
@@ -130,24 +129,22 @@ pub async fn run_coins_list(
 }
 
 pub async fn run_coin_status(
-    output: &ManagerOutput,
-    program_path: &Path,
-    markets_path: &Path,
+    mgr: &ManagerContext,
     asset: Option<&str>,
     vault_id: Option<&str>,
     cat_id: Option<&str>,
 ) -> SignerResult<i32> {
     let _ = vault_id;
-    if let Err(err) = require_signer_offer_path(program_path) {
-        output.emit_json(&json!({
+    if let Err(err) = require_signer_offer_path(&mgr.program_config) {
+        mgr.emit_json(&json!({
             "ok": false,
             "error": "coin_list_requires_signer_backend",
             "detail": err.to_string(),
         }))?;
         return Ok(2);
     }
-    let snapshot = load_coin_list_snapshot(program_path, markets_path, asset, cat_id).await?;
-    output.emit_json(&json!({
+    let snapshot = load_coin_list_snapshot(&mgr.program_config, &mgr.markets_config, asset, cat_id).await?;
+    mgr.emit_json(&json!({
         "op": "coin-status",
         "network": snapshot.network,
         "market_id": snapshot.market_id,

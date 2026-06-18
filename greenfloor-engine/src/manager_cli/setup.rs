@@ -1,6 +1,6 @@
 //! Setup, validation, and health commands for the manager CLI.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::json;
 use serde_yaml::Value;
@@ -9,20 +9,18 @@ use crate::config::{load_markets_config_with_overlay, load_program_config, requi
 use crate::error::{SignerError, SignerResult};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
-use super::json::ManagerOutput;
+use super::context::ManagerContext;
 use super::paths::expand_home;
 
 const ALLOWED_LOG_LEVELS: &[&str] = &["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"];
 
-pub fn run_config_validate(
-    output: &ManagerOutput,
-    program_path: &Path,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
-) -> SignerResult<i32> {
+pub fn run_config_validate(ctx: &ManagerContext) -> SignerResult<i32> {
+    let program_path = &ctx.program_config;
+    let markets_path = &ctx.markets_config;
+    let testnet_markets_path = ctx.testnet_markets_path();
     let _program = load_program_config(program_path)?;
     let _markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
-    output.emit_json(&json!({
+    ctx.emit_json(&json!({
         "ok": true,
         "program_config": program_path.display().to_string(),
         "markets_config": markets_path.display().to_string(),
@@ -30,11 +28,8 @@ pub fn run_config_validate(
     Ok(0)
 }
 
-pub fn run_set_log_level(
-    output: &ManagerOutput,
-    program_path: &Path,
-    log_level: &str,
-) -> SignerResult<i32> {
+pub fn run_set_log_level(ctx: &ManagerContext, log_level: &str) -> SignerResult<i32> {
+    let program_path = &ctx.program_config;
     let level = normalize_log_level(log_level)?;
     let raw = read_yaml_mapping(program_path)?;
     let mut root = raw;
@@ -55,7 +50,7 @@ pub fn run_set_log_level(
         .unwrap_or_else(|| "INFO".to_string());
     app_map.insert(Value::from("log_level"), Value::from(level.as_str()));
     write_yaml(program_path, &root)?;
-    output.emit_json(&json!({
+    ctx.emit_json(&json!({
         "updated": true,
         "program_config": program_path.display().to_string(),
         "previous_log_level": prior_level,
@@ -65,7 +60,7 @@ pub fn run_set_log_level(
 }
 
 pub fn run_bootstrap_home(
-    output: &ManagerOutput,
+    ctx: &ManagerContext,
     home_dir: &Path,
     program_template: &Path,
     markets_template: &Path,
@@ -147,7 +142,7 @@ pub fn run_bootstrap_home(
         None,
     )?;
 
-    output.emit_json(&json!({
+    ctx.emit_json(&json!({
         "bootstrapped": true,
         "home_dir": home.display().to_string(),
         "program_config": seeded_program.display().to_string(),
@@ -169,13 +164,11 @@ pub fn run_bootstrap_home(
     Ok(0)
 }
 
-pub fn run_doctor(
-    output: &ManagerOutput,
-    program_path: &Path,
-    markets_path: &Path,
-    state_db: Option<&str>,
-    testnet_markets_path: Option<&Path>,
-) -> SignerResult<i32> {
+pub fn run_doctor(ctx: &ManagerContext) -> SignerResult<i32> {
+    let program_path = &ctx.program_config;
+    let markets_path = &ctx.markets_config;
+    let state_db = ctx.state_db_override();
+    let testnet_markets_path = ctx.testnet_markets_path();
     let program = load_program_config(program_path)?;
     let markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
     let mut problems = Vec::new();
@@ -210,7 +203,7 @@ pub fn run_doctor(
     resolved_key_ids.sort();
     resolved_key_ids.dedup();
     let ok = problems.is_empty();
-    output.emit_json(&json!({
+    ctx.emit_json(&json!({
         "ok": ok,
         "program_config": program_path.display().to_string(),
         "markets_config": markets_path.display().to_string(),
@@ -301,9 +294,8 @@ mod tests {
         )
         .expect("write program");
         std::fs::write(&markets_path, "markets: []\n").expect("write markets");
-        let output = super::super::json::ManagerOutput::new(false);
-        let code = run_config_validate(&output, &program_path, &markets_path, None)
-            .expect("validate");
+        let output = super::super::context::ManagerContext::for_test(program_path, markets_path);
+        let code = run_config_validate(&output).expect("validate");
         assert_eq!(code, 0);
     }
 }

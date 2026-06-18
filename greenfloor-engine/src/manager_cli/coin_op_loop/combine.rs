@@ -1,24 +1,19 @@
-use std::path::Path;
-
 use serde_json::json;
 
 use crate::coin_ops::evaluate_coin_combine_gate;
 use crate::error::{SignerError, SignerResult};
+use crate::manager_cli::context::ManagerContext;
+use crate::manager_cli::ladder::{
+    combine_threshold_count, resolve_combine_count, sell_ladder_entry_for_size,
+};
 
 use super::context::build_coin_op_exec_context;
 use super::combine_iteration::run_combine_iteration;
 use super::loop_common::{finish_coin_op_command, validate_until_ready_mode};
 use super::until_ready::{run_until_ready_loop, UntilReadyLoopConfig};
-use crate::manager_cli::json::ManagerOutput;
-use crate::manager_cli::ladder::{
-    combine_threshold_count, resolve_combine_count, sell_ladder_entry_for_size,
-};
 
 pub async fn run_coin_combine(
-    output: &ManagerOutput,
-    program_path: &Path,
-    markets_path: &Path,
-    testnet_markets_path: Option<&Path>,
+    mgr: &ManagerContext,
     network: &str,
     market_id: Option<&str>,
     pair: Option<&str>,
@@ -31,35 +26,35 @@ pub async fn run_coin_combine(
     max_iterations: i32,
 ) -> SignerResult<i32> {
     validate_until_ready_mode(until_ready, no_wait, size_base_units)?;
-    let ctx = build_coin_op_exec_context(
-        program_path,
-        markets_path,
-        testnet_markets_path,
+    let exec_ctx = build_coin_op_exec_context(
+        &mgr.program_config,
+        &mgr.markets_config,
+        mgr.testnet_markets_path(),
         network,
         market_id,
         pair,
         asset_id,
     )
     .await?;
-    let number_of_coins = resolve_combine_count(&ctx.market, number_of_coins, size_base_units)?;
+    let number_of_coins = resolve_combine_count(&exec_ctx.market, number_of_coins, size_base_units)?;
     if number_of_coins <= 1 {
         return Err(SignerError::Other("number_of_coins must be > 1".to_string()));
     }
     let target_coin_amount_mojos = size_base_units
         .unwrap_or(0)
         .max(0)
-        .saturating_mul(ctx.base_unit_mojo_multiplier);
+        .saturating_mul(exec_ctx.base_unit_mojo_multiplier);
     let combine_target = size_base_units
         .filter(|value| *value > 0)
-        .map(|size| sell_ladder_entry_for_size(&ctx.market, size))
+        .map(|size| sell_ladder_entry_for_size(&exec_ctx.market, size))
         .transpose()?
         .cloned();
     let explicit_coin_ids = !coin_ids.is_empty();
-    let resolved_asset_id = ctx.resolved_base_asset_id.clone();
-    let combine_fee = ctx.program.coin_ops_combine_fee_mojos.max(0) as u64;
+    let resolved_asset_id = exec_ctx.resolved_base_asset_id.clone();
+    let combine_fee = exec_ctx.program.coin_ops_combine_fee_mojos.max(0) as u64;
 
     let (operations, completion) = run_until_ready_loop(
-        &ctx,
+        &exec_ctx,
         UntilReadyLoopConfig {
             until_ready,
             no_wait,
@@ -80,7 +75,7 @@ pub async fn run_coin_combine(
         |gate| gate.ready,
         |iteration, spendable, gate_json| {
             run_combine_iteration(
-                &ctx,
+                &exec_ctx,
                 iteration,
                 spendable,
                 gate_json,
@@ -95,14 +90,14 @@ pub async fn run_coin_combine(
     .await?;
 
     finish_coin_op_command(
-        output,
+        mgr,
         until_ready,
         completion,
         json!({
             "op": "coin-combine",
             "coin_selection_mode": if explicit_coin_ids { "explicit" } else { "adapter_auto_select" },
             "number_of_coins": number_of_coins,
-            "resolved_asset_id": ctx.resolved_base_asset_id,
+            "resolved_asset_id": exec_ctx.resolved_base_asset_id,
             "until_ready": until_ready,
             "max_iterations": max_iterations.max(1),
             "operations": operations,

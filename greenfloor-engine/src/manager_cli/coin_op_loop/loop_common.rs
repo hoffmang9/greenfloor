@@ -2,8 +2,9 @@ use serde_json::{json, Value};
 
 use crate::error::{SignerError, SignerResult};
 
+use crate::manager_cli::context::ManagerContext;
+
 use super::until_ready::{until_ready_exit_code, UntilReadyCompletion};
-use crate::manager_cli::json::ManagerOutput;
 
 pub(super) fn validate_until_ready_mode(
     until_ready: bool,
@@ -24,7 +25,7 @@ pub(super) fn validate_until_ready_mode(
 }
 
 pub(super) fn finish_coin_op_command(
-    output: &ManagerOutput,
+    mgr: &ManagerContext,
     until_ready: bool,
     completion: UntilReadyCompletion,
     success_payload: Value,
@@ -32,7 +33,7 @@ pub(super) fn finish_coin_op_command(
     match completion {
         UntilReadyCompletion::Exit { code, payload } => {
             if let Some(payload) = payload {
-                output.emit_json(&payload)?;
+                mgr.emit_json(&payload)?;
             }
             Ok(code)
         }
@@ -41,7 +42,7 @@ pub(super) fn finish_coin_op_command(
             if let Some(obj) = payload.as_object_mut() {
                 obj.insert("stop_reason".to_string(), json!(stop_reason));
             }
-            output.emit_json(&payload)?;
+            mgr.emit_json(&payload)?;
             Ok(until_ready_exit_code(until_ready, &stop_reason))
         }
     }

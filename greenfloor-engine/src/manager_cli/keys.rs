@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use crate::config::load_program_config;
 use crate::error::{SignerError, SignerResult};
 
-use super::json::ManagerOutput;
+use super::context::ManagerContext;
 use super::paths::expand_home;
 
 #[derive(Debug, Clone)]
@@ -19,8 +19,7 @@ struct ChiaKeysDiscovery {
 }
 
 pub fn run_keys_onboard(
-    output: &ManagerOutput,
-    program_path: &Path,
+    ctx: &ManagerContext,
     key_id: &str,
     state_dir: &Path,
     chia_keys_dir: Option<&Path>,
@@ -28,7 +27,7 @@ pub fn run_keys_onboard(
     if key_id.trim().is_empty() {
         return Err(SignerError::Other("key_id must be provided".to_string()));
     }
-    let program = load_program_config(program_path)?;
+    let program = load_program_config(&ctx.program_config)?;
     let discovery = discover_chia_keys(chia_keys_dir);
     let mut use_existing_keys = false;
     if discovery.has_existing_keys {
@@ -51,7 +50,7 @@ pub fn run_keys_onboard(
                 "mnemonic_word_count": Value::Null,
             }),
         )?;
-        output.emit_json(&json!({
+        ctx.emit_json(&json!({
             "selected_source": "chia_keys",
             "key_id": key_id.trim(),
             "network": program.network,
@@ -91,7 +90,7 @@ pub fn run_keys_onboard(
                 "mnemonic_word_count": words.len(),
             }),
         )?;
-        output.emit_json(&json!({
+        ctx.emit_json(&json!({
             "selected_source": "mnemonic_import",
             "key_id": key_id.trim(),
             "network": program.network,
@@ -110,7 +109,7 @@ pub fn run_keys_onboard(
             "mnemonic_word_count": Value::Null,
         }),
     )?;
-    output.emit_json(&json!({
+    ctx.emit_json(&json!({
         "selected_source": "generate_new_key",
         "key_id": key_id.trim(),
         "network": program.network,
