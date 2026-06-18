@@ -64,16 +64,28 @@ async fn load_asset_scoped_coins(
         })
 }
 
-fn executed_after_split(
+struct ExecutedAfterSplitParams<'a> {
     fee_mojos: u64,
     fee_source: String,
     fee_lookup_error: Option<String>,
     split_result: serde_json::Value,
     wait_events: Vec<serde_json::Value>,
     bootstrap_plan: BootstrapPlan,
-    ladder_entries: &[PlannerLadderRow],
-    refreshed_spendable: &[BootstrapCoin],
-) -> BootstrapPhaseResult {
+    ladder_entries: &'a [PlannerLadderRow],
+    refreshed_spendable: &'a [BootstrapCoin],
+}
+
+fn executed_after_split(params: ExecutedAfterSplitParams<'_>) -> BootstrapPhaseResult {
+    let ExecutedAfterSplitParams {
+        fee_mojos,
+        fee_source,
+        fee_lookup_error,
+        split_result,
+        wait_events,
+        bootstrap_plan,
+        ladder_entries,
+        refreshed_spendable,
+    } = params;
     let remaining = plan_bootstrap_mixed_outputs(ladder_entries, refreshed_spendable);
     let executed = bootstrap_executed_phase(&remaining);
     BootstrapPhaseResult {
@@ -127,11 +139,11 @@ pub async fn run_signer_denomination_phase(
         return bootstrap_skipped("missing_receive_address_for_bootstrap");
     }
 
-    let asset_scoped_coins = match load_asset_scoped_coins(program, receive_address, &split_asset_id).await
-    {
-        Ok(coins) => coins,
-        Err(result) => return Ok(result),
-    };
+    let asset_scoped_coins =
+        match load_asset_scoped_coins(program, receive_address, &split_asset_id).await {
+            Ok(coins) => coins,
+            Err(result) => return Ok(result),
+        };
 
     let spendable_coins = spendable_bootstrap_coins(&asset_scoped_coins);
     let outcome = plan_bootstrap_mixed_outputs(&ladder_entries, &spendable_coins);
@@ -213,14 +225,14 @@ pub async fn run_signer_denomination_phase(
     let refreshed_asset_coins =
         list_wallet_unspent_coins(&program.network, receive_address, &split_asset_id).await?;
     let refreshed_spendable = spendable_bootstrap_coins(&refreshed_asset_coins);
-    Ok(executed_after_split(
-        fee_context.0,
-        fee_context.1,
-        fee_context.2,
+    Ok(executed_after_split(ExecutedAfterSplitParams {
+        fee_mojos: fee_context.0,
+        fee_source: fee_context.1,
+        fee_lookup_error: fee_context.2,
         split_result,
         wait_events,
         bootstrap_plan,
-        &ladder_entries,
-        &refreshed_spendable,
-    ))
+        ladder_entries: &ladder_entries,
+        refreshed_spendable: &refreshed_spendable,
+    }))
 }

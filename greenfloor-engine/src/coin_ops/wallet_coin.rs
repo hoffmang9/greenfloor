@@ -27,11 +27,7 @@ pub fn is_spendable_wallet_coin(coin: &Value) -> bool {
     if coin.get("isLocked").and_then(Value::as_bool) == Some(true) {
         return false;
     }
-    is_spendable_coin_state(
-        coin.get("state")
-            .and_then(Value::as_str)
-            .unwrap_or(""),
-    )
+    is_spendable_coin_state(coin.get("state").and_then(Value::as_str).unwrap_or(""))
 }
 
 #[cfg(test)]

@@ -178,7 +178,10 @@ impl SqliteStore {
             .map_err(|err| SignerError::Other(format!("failed to upsert offer_state: {err}")))?;
         Ok(())
     }
+}
 
+#[cfg(test)]
+impl SqliteStore {
     pub(crate) fn offer_state_for_id(&self, offer_id: &str) -> SignerResult<Option<String>> {
         let mut stmt = self
             .conn

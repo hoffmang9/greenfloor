@@ -16,6 +16,7 @@ mod wallet_coin;
 
 pub use amounts::{combine_output_amounts, total_for_coin_ids};
 pub use effective_counts::effective_sell_bucket_counts_for_coin_ops;
+pub use execution::CoinOpExecContext;
 pub use fee_budget::{
     fee_budget_allows_execution, partition_plans_by_budget, projected_coin_ops_fee_mojos,
 };
@@ -37,5 +38,4 @@ pub use split_planning::{
     CombineInputSelectionMode, SplitAutoSelectPlan, SplitCoinPlan, SplitCombinePrereqPlan,
     SplitPlanningProfile, SplitSkipPlan, SubCatChangeSkipData,
 };
-pub use execution::CoinOpExecContext;
 pub use wallet_coin::{is_spendable_coin_state, is_spendable_wallet_coin};

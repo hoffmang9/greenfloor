@@ -20,7 +20,7 @@ use crate::storage::OfferPostPersistRecord;
 use context::resolve_build_and_post_context;
 use iteration::run_post_iteration;
 use publish::persist_post_records_if_enabled;
-use types::{PostIterationOutcome, build_and_post_exit_code};
+use types::{build_and_post_exit_code, PostIterationOutcome};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BuildAndPostOfferRequest {
@@ -135,8 +135,5 @@ pub async fn build_and_post_offer(
         "offer_fee_source": ctx.offer_fee_source,
     });
     let exit_code = build_and_post_exit_code(publish_failures);
-    Ok(BuildAndPostOfferResponse {
-        exit_code,
-        payload,
-    })
+    Ok(BuildAndPostOfferResponse { exit_code, payload })
 }

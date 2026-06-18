@@ -7,24 +7,39 @@ use crate::manager_cli::ladder::{
     combine_threshold_count, resolve_combine_count, sell_ladder_entry_for_size,
 };
 
+use super::combine_iteration::{run_combine_iteration, CombineIterationParams};
 use super::context::build_coin_op_exec_context;
-use super::combine_iteration::run_combine_iteration;
 use super::loop_common::{finish_coin_op_command, validate_until_ready_mode};
 use super::until_ready::{run_until_ready_loop, UntilReadyLoopConfig};
 
-pub async fn run_coin_combine(
-    mgr: &ManagerContext,
-    network: &str,
-    market_id: Option<&str>,
-    pair: Option<&str>,
-    coin_ids: &[String],
-    number_of_coins: i64,
-    asset_id: Option<&str>,
-    no_wait: bool,
-    size_base_units: Option<i64>,
-    until_ready: bool,
-    max_iterations: i32,
-) -> SignerResult<i32> {
+pub struct CoinCombineRequest<'a> {
+    pub mgr: &'a ManagerContext,
+    pub network: &'a str,
+    pub market_id: Option<&'a str>,
+    pub pair: Option<&'a str>,
+    pub coin_ids: &'a [String],
+    pub number_of_coins: i64,
+    pub asset_id: Option<&'a str>,
+    pub no_wait: bool,
+    pub size_base_units: Option<i64>,
+    pub until_ready: bool,
+    pub max_iterations: i32,
+}
+
+pub async fn run_coin_combine(request: CoinCombineRequest<'_>) -> SignerResult<i32> {
+    let CoinCombineRequest {
+        mgr,
+        network,
+        market_id,
+        pair,
+        coin_ids,
+        number_of_coins,
+        asset_id,
+        no_wait,
+        size_base_units,
+        until_ready,
+        max_iterations,
+    } = request;
     validate_until_ready_mode(until_ready, no_wait, size_base_units)?;
     let exec_ctx = build_coin_op_exec_context(
         &mgr.program_config,
@@ -36,9 +51,12 @@ pub async fn run_coin_combine(
         asset_id,
     )
     .await?;
-    let number_of_coins = resolve_combine_count(&exec_ctx.market, number_of_coins, size_base_units)?;
+    let number_of_coins =
+        resolve_combine_count(&exec_ctx.market, number_of_coins, size_base_units)?;
     if number_of_coins <= 1 {
-        return Err(SignerError::Other("number_of_coins must be > 1".to_string()));
+        return Err(SignerError::Other(
+            "number_of_coins must be > 1".to_string(),
+        ));
     }
     let target_coin_amount_mojos = size_base_units
         .unwrap_or(0)
@@ -74,8 +92,8 @@ pub async fn run_coin_combine(
         },
         |gate| gate.ready,
         |iteration, spendable, gate_json| {
-            run_combine_iteration(
-                &exec_ctx,
+            run_combine_iteration(CombineIterationParams {
+                ctx: &exec_ctx,
                 iteration,
                 spendable,
                 gate_json,
@@ -84,7 +102,7 @@ pub async fn run_coin_combine(
                 coin_ids,
                 combine_fee,
                 no_wait,
-            )
+            })
         },
     )
     .await?;

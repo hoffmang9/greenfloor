@@ -25,6 +25,7 @@ impl DaemonInstanceLock {
         let path = state_dir.join(LOCK_FILENAME);
         let file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(&path)

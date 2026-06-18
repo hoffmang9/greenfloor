@@ -25,6 +25,8 @@ accepted decision** when onboarding; older ADRs may be superseded.
 ## Related docs
 
 - Operator procedures: [runbook.md](runbook.md)
+- Coinset script validation: [coinset-validation.md](coinset-validation.md)
+- Script config adapters: [../scripts/README.md](../scripts/README.md)
 - V1 scope: [plan.md](plan.md)
 - Migration catch-up: [rust-migration-ledger.md](rust-migration-ledger.md)
 - Recent milestones: [progress.md](progress.md)

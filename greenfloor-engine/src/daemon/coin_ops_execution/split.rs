@@ -5,9 +5,9 @@ use crate::coin_ops::{
     SplitAutoSelectPlan, SplitCombinePrereqPlan, SplitPlanningProfile,
 };
 
-use crate::coin_ops::execution::{submit_combine_prereq, CoinOpExecContext};
 use super::items::{executed_item, skip_item, CoinOpExecItem};
 use super::COIN_OP_ERROR_PREFIX;
+use crate::coin_ops::execution::{submit_combine_prereq, CoinOpExecContext};
 
 pub(crate) async fn submit_combine_prereq_for_split(
     ctx: &CoinOpExecContext,

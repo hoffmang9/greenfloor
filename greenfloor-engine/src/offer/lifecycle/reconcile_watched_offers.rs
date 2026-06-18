@@ -169,13 +169,13 @@ mod tests {
             .expect("seed");
         assert_eq!(
             store
-                .observe_mempool_tx_ids(&[confirmed_tx_id.clone()])
+                .observe_mempool_tx_ids(std::slice::from_ref(&confirmed_tx_id))
                 .expect("mempool"),
             1
         );
         assert_eq!(
             store
-                .confirm_tx_ids(&[confirmed_tx_id.clone()])
+                .confirm_tx_ids(std::slice::from_ref(&confirmed_tx_id))
                 .expect("confirm"),
             1
         );
@@ -184,9 +184,7 @@ mod tests {
         let _ok = server
             .mock("GET", "/v1/offers/offer-ok")
             .with_status(200)
-            .with_body(
-                json!({"id":"offer-ok","status":4,"tx_id":confirmed_tx_id}).to_string(),
-            )
+            .with_body(json!({"id":"offer-ok","status":4,"tx_id":confirmed_tx_id}).to_string())
             .create();
         let _missing = server
             .mock("GET", "/v1/offers/offer-missing")
@@ -194,21 +192,13 @@ mod tests {
             .with_body(r#"{"success":false,"error":"not_found"}"#)
             .create();
 
-        let batch = reconcile_offers_batch(
-            &db_path,
-            &server.url(),
-            "dexie",
-            None,
-            20,
-        )
-        .await
-        .expect("batch");
+        let batch = reconcile_offers_batch(&db_path, &server.url(), "dexie", None, 20)
+            .await
+            .expect("batch");
 
         assert_eq!(batch.reconciled_count, 2);
         assert_eq!(batch.changed_count, 2);
-        let rows = store
-            .list_offer_state_details("m1", 20)
-            .expect("rows");
+        let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let by_id: std::collections::HashMap<_, _> = rows
             .into_iter()
             .map(|row| (row.offer_id, row.state))

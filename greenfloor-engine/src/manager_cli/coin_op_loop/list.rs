@@ -3,7 +3,9 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use crate::coin_ops::is_spendable_coin_state;
-use crate::config::{load_markets_config_with_overlay, load_program_config, require_signer_offer_path};
+use crate::config::{
+    load_markets_config_with_overlay, load_program_bundle_for_coin_list, ProgramConfigBundle,
+};
 use crate::error::{SignerError, SignerResult};
 
 use crate::manager_cli::context::ManagerContext;
@@ -23,12 +25,12 @@ struct CoinListSnapshot {
 }
 
 async fn load_coin_list_snapshot(
-    program_path: &Path,
+    bundle: &ProgramConfigBundle,
     markets_path: &Path,
     asset: Option<&str>,
     cat_id: Option<&str>,
 ) -> SignerResult<CoinListSnapshot> {
-    let program = load_program_config(program_path)?;
+    let program = &bundle.program;
     let markets = load_markets_config_with_overlay(markets_path, None)?;
     let market = select_list_market(&markets)?;
     let receive_address = market.receive_address.trim();
@@ -41,10 +43,15 @@ async fn load_coin_list_snapshot(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .or_else(|| asset.map(str::trim).filter(|value| !value.is_empty()).map(str::to_string));
+        .or_else(|| {
+            asset
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        });
     let filter_label = filter.clone();
     let list_asset_id = if let Some(filter_value) = filter {
-        resolve_asset_filter(program_path, &program.network, &filter_value).await?
+        resolve_asset_filter(&bundle.signer, &filter_value).await?
     } else {
         market.base_asset.clone()
     };
@@ -86,7 +93,7 @@ async fn load_coin_list_snapshot(
         .filter(|row| row.get("pending").and_then(Value::as_bool) == Some(true))
         .count();
     Ok(CoinListSnapshot {
-        network: program.network,
+        network: program.network.clone(),
         market_id: market.market_id.clone(),
         receive_address: receive_address.to_string(),
         list_asset_id,
@@ -98,34 +105,63 @@ async fn load_coin_list_snapshot(
     })
 }
 
+async fn run_coin_list_command(
+    mgr: &ManagerContext,
+    asset: Option<&str>,
+    vault_id: Option<&str>,
+    cat_id: Option<&str>,
+    op: &str,
+) -> SignerResult<i32> {
+    let _ = vault_id;
+    let bundle = match load_program_bundle_for_coin_list(&mgr.program_config) {
+        Err(SignerError::SignerPathNotConfigured) => {
+            mgr.emit_json(&json!({
+                "ok": false,
+                "error": "coin_list_requires_signer_backend",
+                "detail": SignerError::SignerPathNotConfigured.to_string(),
+            }))?;
+            return Ok(2);
+        }
+        Err(err) => return Err(err),
+        Ok(bundle) => bundle,
+    };
+    let snapshot = load_coin_list_snapshot(&bundle, &mgr.markets_config, asset, cat_id).await?;
+    if op == "coin-status" {
+        mgr.emit_json(&json!({
+            "op": "coin-status",
+            "network": snapshot.network,
+            "market_id": snapshot.market_id,
+            "receive_address": snapshot.receive_address,
+            "resolved_asset_id": snapshot.filter_label,
+            "asset": snapshot.list_asset_id,
+            "total_coin_count": snapshot.items.len(),
+            "spendable_coin_count": snapshot.spendable_coin_count,
+            "spendable_amount": snapshot.spendable_amount,
+            "pending_coin_count": snapshot.pending_coin_count,
+        }))?;
+    } else {
+        mgr.emit_json(&json!({
+            "network": snapshot.network,
+            "market_id": snapshot.market_id,
+            "receive_address": snapshot.receive_address,
+            "resolved_asset_id": snapshot.filter_label,
+            "asset": snapshot.list_asset_id,
+            "coin_count": snapshot.items.len(),
+            "spendable_coin_count": snapshot.spendable_coin_count,
+            "spendable_amount": snapshot.spendable_amount,
+            "coins": snapshot.items,
+        }))?;
+    }
+    Ok(0)
+}
+
 pub async fn run_coins_list(
     mgr: &ManagerContext,
     asset: Option<&str>,
     vault_id: Option<&str>,
     cat_id: Option<&str>,
 ) -> SignerResult<i32> {
-    let _ = vault_id;
-    if let Err(err) = require_signer_offer_path(&mgr.program_config) {
-        mgr.emit_json(&json!({
-            "ok": false,
-            "error": "coin_list_requires_signer_backend",
-            "detail": err.to_string(),
-        }))?;
-        return Ok(2);
-    }
-    let snapshot = load_coin_list_snapshot(&mgr.program_config, &mgr.markets_config, asset, cat_id).await?;
-    mgr.emit_json(&json!({
-        "network": snapshot.network,
-        "market_id": snapshot.market_id,
-        "receive_address": snapshot.receive_address,
-        "resolved_asset_id": snapshot.filter_label,
-        "asset": snapshot.list_asset_id,
-        "coin_count": snapshot.items.len(),
-        "spendable_coin_count": snapshot.spendable_coin_count,
-        "spendable_amount": snapshot.spendable_amount,
-        "coins": snapshot.items,
-    }))?;
-    Ok(0)
+    run_coin_list_command(mgr, asset, vault_id, cat_id, "coins-list").await
 }
 
 pub async fn run_coin_status(
@@ -134,27 +170,5 @@ pub async fn run_coin_status(
     vault_id: Option<&str>,
     cat_id: Option<&str>,
 ) -> SignerResult<i32> {
-    let _ = vault_id;
-    if let Err(err) = require_signer_offer_path(&mgr.program_config) {
-        mgr.emit_json(&json!({
-            "ok": false,
-            "error": "coin_list_requires_signer_backend",
-            "detail": err.to_string(),
-        }))?;
-        return Ok(2);
-    }
-    let snapshot = load_coin_list_snapshot(&mgr.program_config, &mgr.markets_config, asset, cat_id).await?;
-    mgr.emit_json(&json!({
-        "op": "coin-status",
-        "network": snapshot.network,
-        "market_id": snapshot.market_id,
-        "receive_address": snapshot.receive_address,
-        "resolved_asset_id": snapshot.filter_label,
-        "asset": snapshot.list_asset_id,
-        "total_coin_count": snapshot.items.len(),
-        "spendable_coin_count": snapshot.spendable_coin_count,
-        "spendable_amount": snapshot.spendable_amount,
-        "pending_coin_count": snapshot.pending_coin_count,
-    }))?;
-    Ok(0)
+    run_coin_list_command(mgr, asset, vault_id, cat_id, "coin-status").await
 }

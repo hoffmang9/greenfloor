@@ -21,9 +21,12 @@ from typing import Any
 
 from greenfloor.config.io import (
     default_cats_config_path,
-    load_markets_config_with_optional_overlay,
-    load_program_config,
-    load_yaml,
+    enabled_market_rows,
+    load_cats_fields,
+    load_markets_fields,
+    load_program_fields,
+    run_config_validate,
+    symbol_to_asset_id_map,
 )
 from greenfloor.hex_utils import normalize_hex_id
 
@@ -38,22 +41,6 @@ class CatDustJob:
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
-
-
-def _load_symbol_to_cat_asset_id(cats_path: Path) -> dict[str, str]:
-    raw = load_yaml(cats_path)
-    cats = raw.get("cats")
-    if not isinstance(cats, list):
-        return {}
-    out: dict[str, str] = {}
-    for row in cats:
-        if not isinstance(row, dict):
-            continue
-        sym = str(row.get("base_symbol", "")).strip().lower()
-        aid = normalize_hex_id(str(row.get("asset_id", "")))
-        if sym and aid:
-            out[sym] = aid
-    return out
 
 
 def _resolve_market_base_cat_asset_id(*, base_asset: str, symbol_map: dict[str, str]) -> str | None:
@@ -71,34 +58,37 @@ def _build_enabled_cat_jobs(
     cats_path: Path,
     only_cat_asset_id: str | None,
 ) -> list[CatDustJob]:
-    cfg = load_markets_config_with_optional_overlay(
-        path=markets_config_path.expanduser(),
-        overlay_path=testnet_markets_path.expanduser() if testnet_markets_path else None,
+    fields = load_markets_fields(
+        markets_config=markets_config_path.expanduser(),
+        testnet_markets_config=testnet_markets_path.expanduser() if testnet_markets_path else None,
     )
-    symbol_map = _load_symbol_to_cat_asset_id(cats_path.expanduser())
+    symbol_map = symbol_to_asset_id_map(load_cats_fields(cats_config=cats_path.expanduser()))
     filter_id = normalize_hex_id(only_cat_asset_id) if only_cat_asset_id else None
 
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
-    for m in cfg.markets:
-        if not m.enabled:
-            continue
-        aid = _resolve_market_base_cat_asset_id(base_asset=m.base_asset, symbol_map=symbol_map)
+    for m in enabled_market_rows(fields):
+        aid = _resolve_market_base_cat_asset_id(
+            base_asset=str(m.get("base_asset", "")),
+            symbol_map=symbol_map,
+        )
         if not aid:
             continue
         if filter_id and aid != filter_id:
             continue
-        sk = str(m.signer_key_id).strip()
+        sk = str(m.get("signer_key_id", "")).strip()
+        market_id = str(m.get("id", "")).strip()
+        receive_address = str(m.get("receive_address", "")).strip()
         key = (sk, aid)
         if key not in grouped:
-            grouped[key] = {"receive": m.receive_address, "markets": [m.market_id]}
+            grouped[key] = {"receive": receive_address, "markets": [market_id]}
             continue
-        if grouped[key]["receive"] != m.receive_address:
+        if grouped[key]["receive"] != receive_address:
             raise ValueError(
                 f"Conflicting receive_address for signer={sk!r} cat={aid}: "
-                f"{grouped[key]['receive']!r} vs {m.receive_address!r} "
-                f"(markets {grouped[key]['markets']!r} vs {m.market_id!r})"
+                f"{grouped[key]['receive']!r} vs {receive_address!r} "
+                f"(markets {grouped[key]['markets']!r} vs {market_id!r})"
             )
-        grouped[key]["markets"].append(m.market_id)
+        grouped[key]["markets"].append(market_id)
 
     jobs: list[CatDustJob] = []
     for (signer_key_id, cat_asset_id), payload in sorted(grouped.items()):
@@ -189,7 +179,7 @@ def _combine_argv_for_batch(
     *,
     args: argparse.Namespace,
     program_config_path: Path,
-    program: Any,
+    program_fields: dict[str, Any],
     key_id: str,
     keyring_yaml_path: str,
     receive_address: str,
@@ -215,9 +205,9 @@ def _combine_argv_for_batch(
             "--program-config",
             str(program_config_path),
             "--signer-kms-key-id",
-            str(program.signer_kms_key_id).strip(),
+            program_fields["signer_kms_key_id"],
             "--signer-kms-region",
-            str(program.signer_kms_region or "us-west-2").strip(),
+            program_fields["signer_kms_region"],
         ]
     )
     argv.extend(
@@ -313,8 +303,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     program_path = Path(args.program_config).expanduser()
-    program = load_program_config(program_path)
-    network = str(args.network).strip() or program.app_network
+    program_fields = load_program_fields(program_config=program_path)
+    network = str(args.network).strip() or str(program_fields["network"])
     if network.lower() in {"testnet"}:
         network = "testnet11"
     args.network = network
@@ -340,9 +330,29 @@ def main(argv: list[str] | None = None) -> int:
     if str(args.testnet_markets_config).strip():
         overlay = Path(args.testnet_markets_config).expanduser()
 
+    markets_path = Path(args.markets_config).expanduser()
+    validate_code = run_config_validate(
+        program_config=program_path,
+        markets_config=markets_path,
+        testnet_markets_config=overlay,
+    )
+    if validate_code != 0:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "reason": "config_validate_failed",
+                    "exit_code": validate_code,
+                },
+                indent=2,
+            ),
+            file=sys.stderr,
+        )
+        return validate_code
+
     try:
         jobs = _build_enabled_cat_jobs(
-            markets_config_path=Path(args.markets_config),
+            markets_config_path=markets_path,
             testnet_markets_path=overlay,
             cats_path=cats_path,
             only_cat_asset_id=str(args.cat_asset_id).strip() or None,
@@ -376,9 +386,10 @@ def main(argv: list[str] | None = None) -> int:
     exit_code = 0
     combine_mode = not bool(args.dry_run) and not bool(args.list_only)
 
+    key_registry = program_fields.get("keys_registry", {})
     for job in jobs:
-        signer = program.signer_key_registry.get(job.signer_key_id)
-        keyring = str(signer.keyring_yaml_path or "").strip() if signer else ""
+        signer = key_registry.get(job.signer_key_id)
+        keyring = str(signer.get("keyring_yaml_path", "")).strip() if signer else ""
         if combine_mode:
             if signer is None:
                 exit_code = 1
@@ -464,7 +475,7 @@ def main(argv: list[str] | None = None) -> int:
             c_argv = _combine_argv_for_batch(
                 args=args,
                 program_config_path=program_path,
-                program=program,
+                program_fields=program_fields,
                 key_id=job.signer_key_id,
                 keyring_yaml_path=keyring,
                 receive_address=job.receive_address,

@@ -12,11 +12,11 @@ use crate::storage::SqliteStore;
 
 use super::coinset_tx::build_dexie_size_by_offer_id;
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
+use super::watchlist::cache::CoinWatchlistCache;
+use super::watchlist::{update_market_coin_watchlist_from_offers, watchlist_offer_ids};
 use crate::offer::lifecycle::{
     persist_offer_lifecycle_transition, transition_from_list_offer_payload, ReconcilePersistOptions,
 };
-use super::watchlist::cache::CoinWatchlistCache;
-use super::watchlist::{update_market_coin_watchlist_from_offers, watchlist_offer_ids};
 
 #[derive(Debug, Clone, Default)]
 pub struct ReconcileMarketCycleMetrics {
@@ -33,16 +33,30 @@ pub struct ReconcileMarketCycleResult {
     pub metrics: ReconcileMarketCycleMetrics,
 }
 
+pub(crate) struct ReconcileTransitionParams<'a> {
+    pub store: &'a SqliteStore,
+    pub market_id: &'a str,
+    pub offer_id: &'a str,
+    pub transition: &'a CycleOfferTransition,
+    pub metrics: &'a mut ReconcileMarketCycleMetrics,
+    pub state_by_offer_id: &'a mut HashMap<String, String>,
+    pub last_seen_status: Option<i64>,
+    pub dexie_error: Option<&'a str>,
+}
+
 pub(crate) fn apply_reconcile_transition(
-    store: &SqliteStore,
-    market_id: &str,
-    offer_id: &str,
-    transition: &CycleOfferTransition,
-    metrics: &mut ReconcileMarketCycleMetrics,
-    state_by_offer_id: &mut HashMap<String, String>,
-    last_seen_status: Option<i64>,
-    dexie_error: Option<&str>,
+    params: ReconcileTransitionParams<'_>,
 ) -> SignerResult<()> {
+    let ReconcileTransitionParams {
+        store,
+        market_id,
+        offer_id,
+        transition,
+        metrics,
+        state_by_offer_id,
+        last_seen_status,
+        dexie_error,
+    } = params;
     persist_offer_lifecycle_transition(
         store,
         market_id,
@@ -100,9 +114,8 @@ pub async fn run_reconcile_market_cycle(
         }
     };
 
-    let our_offer_ids: HashSet<String> = watchlist_offer_ids(store, market_id)?
-        .into_iter()
-        .collect();
+    let our_offer_ids: HashSet<String> =
+        watchlist_offer_ids(store, market_id)?.into_iter().collect();
     let mut state_by_offer_id: HashMap<String, String> = store
         .list_offer_state_details(market_id, 5000)?
         .into_iter()
@@ -141,26 +154,20 @@ pub async fn run_reconcile_market_cycle(
             .get(&offer_id)
             .map(String::as_str)
             .unwrap_or("open");
-        let (transition, status) =
-            transition_from_list_offer_payload(store, current_state, raw)?;
-        apply_reconcile_transition(
+        let (transition, status) = transition_from_list_offer_payload(store, current_state, raw)?;
+        apply_reconcile_transition(ReconcileTransitionParams {
             store,
             market_id,
-            &offer_id,
-            &transition,
-            &mut metrics,
-            &mut state_by_offer_id,
-            status,
-            None,
-        )?;
+            offer_id: &offer_id,
+            transition: &transition,
+            metrics: &mut metrics,
+            state_by_offer_id: &mut state_by_offer_id,
+            last_seen_status: status,
+            dexie_error: None,
+        })?;
     }
 
-    update_market_coin_watchlist_from_offers(
-        store,
-        coin_watchlist,
-        market_id,
-        &augmented_offers,
-    )?;
+    update_market_coin_watchlist_from_offers(store, coin_watchlist, market_id, &augmented_offers)?;
 
     Ok(ReconcileMarketCycleResult {
         offers: augmented_offers,
@@ -234,25 +241,22 @@ mod tests {
         .await
         .expect("reconcile");
 
-        let rows = store
-            .list_offer_state_details("m1", 20)
-            .expect("rows");
+        let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let row = rows
             .into_iter()
             .find(|entry| entry.offer_id == "offer-50")
             .expect("offer row");
         let transitions = store
-            .list_recent_audit_events(
-                Some(&["offer_lifecycle_transition"]),
-                Some("m1"),
-                20,
-            )
+            .list_recent_audit_events(Some(&["offer_lifecycle_transition"]), Some("m1"), 20)
             .expect("audit");
 
         assert_eq!(row.state, "expired");
         assert!(row.last_seen_status.is_none());
         assert_eq!(transitions[0].payload["offer_id"], "offer-50");
-        assert_eq!(transitions[0].payload["signal_source"], "dexie_get_offer_404");
+        assert_eq!(
+            transitions[0].payload["signal_source"],
+            "dexie_get_offer_404"
+        );
         assert!(result.metrics.immediate_requeue_requested);
         assert!(result
             .metrics
@@ -291,9 +295,7 @@ mod tests {
         .await
         .expect("reconcile");
 
-        let rows = store
-            .list_offer_state_details("m1", 20)
-            .expect("rows");
+        let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let row = rows
             .into_iter()
             .find(|entry| entry.offer_id == "offer-confirmed")
@@ -366,9 +368,7 @@ mod tests {
         .await
         .expect("reconcile");
 
-        let rows = store
-            .list_offer_state_details("m1", 20)
-            .expect("rows");
+        let rows = store.list_offer_state_details("m1", 20).expect("rows");
         let row = rows
             .into_iter()
             .find(|entry| entry.offer_id == "offer-open")

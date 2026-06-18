@@ -39,22 +39,6 @@ jobs:
 
       - uses: ./.github/actions/rust-cache-greenfloor
 
-      - name: Build greenfloor-engine CLI binary
-        run: |
-          cargo build --release --manifest-path greenfloor-engine/Cargo.toml --bin greenfloor-engine
-          echo "$GITHUB_WORKSPACE/target/release" >> "$GITHUB_PATH"
-          greenfloor-engine --help >/dev/null
-
-      - uses: ./.github/actions/wheel-cache
-        with:
-          operation: ensure-and-install
-          builder: pip
-          tree-path: chia-wallet-sdk
-          source-path: ./chia-wallet-sdk/pyo3
-          cache-key-prefix: sdk-wheelhouse
-          wheelhouse-subdir: chia-wallet-sdk
-          rust-already-configured: true
-
       - name: Build native operator binaries
         run: |
           cargo build --manifest-path greenfloor-engine/Cargo.toml --bins

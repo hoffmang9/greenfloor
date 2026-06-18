@@ -264,9 +264,8 @@ fn print_mixed_split_result(
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(result).map_err(|err| {
-                SignerError::Other(format!("json encode failed: {err}"))
-            })?
+            serde_json::to_string_pretty(result)
+                .map_err(|err| { SignerError::Other(format!("json encode failed: {err}")) })?
         );
         return Ok(());
     }
@@ -291,9 +290,8 @@ fn print_create_offer_result(
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(result).map_err(|err| {
-                SignerError::Other(format!("json encode failed: {err}"))
-            })?
+            serde_json::to_string_pretty(result)
+                .map_err(|err| { SignerError::Other(format!("json encode failed: {err}")) })?
         );
         return Ok(());
     }

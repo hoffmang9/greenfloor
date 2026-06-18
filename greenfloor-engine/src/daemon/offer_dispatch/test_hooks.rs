@@ -86,7 +86,10 @@ pub fn parallel_dispatch_test_override(
 
 #[cfg(test)]
 pub fn managed_post_test_override() -> Option<crate::error::SignerResult<bool>> {
-    match *MANAGED_POST_OVERRIDE.lock().expect("managed post override lock") {
+    match *MANAGED_POST_OVERRIDE
+        .lock()
+        .expect("managed post override lock")
+    {
         None => None,
         Some("success") => Some(Ok(true)),
         Some("failure") => Some(Ok(false)),

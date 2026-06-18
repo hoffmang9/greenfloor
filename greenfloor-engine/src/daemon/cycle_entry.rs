@@ -9,8 +9,9 @@ use super::market_context::{
     load_cycle_resources, DaemonCycleResources, MarketCycleContext, MarketDispatchContext,
 };
 use super::market_cycle::run_post_reconcile_market_phases;
-use super::market_dispatch::{aggregate_market_dispatch_metrics, record_market_worker_error,
-    SingleMarketCycleOutput};
+use super::market_dispatch::{
+    aggregate_market_dispatch_metrics, record_market_worker_error, SingleMarketCycleOutput,
+};
 use super::preamble::run_cycle_preamble;
 use super::reconcile_augment::merge_reconcile_immediate_requeue;
 use super::reconcile_market_cycle::run_reconcile_market_cycle;
@@ -103,14 +104,8 @@ async fn dispatch_markets(
     let mut worker_errors = 0u64;
     let mut outputs = Vec::with_capacity(markets.len());
     for market in markets {
-        let result = process_one_market(
-            cycle_store,
-            resources,
-            dispatch_context,
-            plan,
-            &market,
-        )
-        .await;
+        let result =
+            process_one_market(cycle_store, resources, dispatch_context, plan, &market).await;
         match record_market_result(
             cycle_store,
             &market.market_id,
@@ -132,7 +127,7 @@ async fn run_daemon_cycle_once_inner(
     super::disabled_markets::log_disabled_markets_periodic(&resources.markets);
 
     let db_path = resolve_state_db_path(
-        &resources.program.home_dir,
+        &resources.program().home_dir,
         request.state_db_override.as_deref(),
     );
     let cycle_store = SqliteStore::open(&db_path)?;
@@ -140,7 +135,7 @@ async fn run_daemon_cycle_once_inner(
     write_stale_sweep_audit(&cycle_store, &plan)?;
 
     let preamble = run_cycle_preamble(
-        &resources.program,
+        resources.program(),
         &cycle_store,
         &request.coinset_base_url,
         &resources.coin_watchlist,
@@ -159,14 +154,8 @@ async fn run_daemon_cycle_once_inner(
     };
     let markets = resources.selected_markets(&plan.selected_market_ids);
 
-    let (cycle_outputs, worker_errors) = dispatch_markets(
-        &cycle_store,
-        &resources,
-        &dispatch_context,
-        &plan,
-        markets,
-    )
-    .await?;
+    let (cycle_outputs, worker_errors) =
+        dispatch_markets(&cycle_store, &resources, &dispatch_context, &plan, markets).await?;
 
     let mut metrics: MarketDispatchMetrics = aggregate_market_dispatch_metrics(&cycle_outputs);
     metrics.cycle_error_count += worker_errors;

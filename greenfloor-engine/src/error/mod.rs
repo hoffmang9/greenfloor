@@ -164,6 +164,9 @@ pub enum SignerError {
     #[error("database is locked")]
     DatabaseLocked,
 
+    #[error("offer execution requires signer.kms_key_id and vault.launcher_id in program config")]
+    SignerPathNotConfigured,
+
     #[error("daemon_already_running:{path}{detail}")]
     DaemonAlreadyRunning { path: String, detail: String },
 
@@ -174,9 +177,9 @@ pub enum SignerError {
 impl SignerError {
     pub fn is_parallel_dispatch_transient(&self) -> bool {
         match self {
-            Self::ReservationContention(_) | Self::ManagedUpstreamTransient(_) | Self::DatabaseLocked => {
-                true
-            }
+            Self::ReservationContention(_)
+            | Self::ManagedUpstreamTransient(_)
+            | Self::DatabaseLocked => true,
             Self::Other(message) => {
                 let message = message.as_str();
                 if message.contains("database is locked") {

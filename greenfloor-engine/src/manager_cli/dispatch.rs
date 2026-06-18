@@ -1,7 +1,9 @@
 //! Command dispatch for the native manager CLI.
 
 use crate::error::SignerResult;
-use crate::offer::operator::{build_and_post_offer, BuildAndPostOfferRequest, OfferOperatorTestOverrides};
+use crate::offer::operator::{
+    build_and_post_offer, BuildAndPostOfferRequest, OfferOperatorTestOverrides,
+};
 
 use super::commands::{ManagerCli, ManagerCommands};
 use super::context::ManagerContext;
@@ -10,13 +12,37 @@ use super::offers::{
     OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
 };
 use super::util::require_market_selector;
-use crate::cli_util::optional_str;
 use super::{cats, coin_op_loop, keys, setup};
+use crate::cli_util::optional_str;
 
 pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
     let (ctx, command) = ManagerContext::from_cli(cli);
     match command {
-        ManagerCommands::ConfigValidate => setup::run_config_validate(&ctx),
+        ManagerCommands::ConfigValidate { program_only } => {
+            setup::run_config_validate(&ctx, program_only)
+        }
+        ManagerCommands::ProgramFields => setup::run_program_fields(&ctx),
+        ManagerCommands::MarketsFields => setup::run_markets_fields(&ctx),
+        ManagerCommands::CatsFields => setup::run_cats_fields(&ctx),
+        ManagerCommands::MaterializeMinimalProgram {
+            output,
+            home_dir,
+            dexie_api_base,
+            log_level,
+            dry_run,
+            low_inventory_alerts_enabled,
+            pushover_enabled,
+            with_signer,
+        } => setup::run_materialize_minimal_program(setup::MaterializeMinimalProgramRequest {
+            output: &output,
+            home_dir: &home_dir,
+            dexie_api_base: &dexie_api_base,
+            log_level: &log_level,
+            dry_run,
+            low_inventory_alerts_enabled,
+            pushover_enabled,
+            with_signer,
+        }),
         ManagerCommands::KeysOnboard {
             chia_keys_dir,
             key_id,
@@ -115,16 +141,17 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             testnet_markets_template,
             seed_testnet_markets,
             force,
-        } => setup::run_bootstrap_home(
-            &ctx,
-            &home_dir,
-            &program_template,
-            &markets_template,
-            super::paths::optional_path(&cats_template).as_deref(),
-            super::paths::optional_path(&testnet_markets_template).as_deref(),
+        } => setup::run_bootstrap_home(setup::BootstrapHomeParams {
+            ctx: &ctx,
+            home_dir: &home_dir,
+            program_template: &program_template,
+            markets_template: &markets_template,
+            cats_template: super::paths::optional_path(&cats_template).as_deref(),
+            testnet_markets_template: super::paths::optional_path(&testnet_markets_template)
+                .as_deref(),
             seed_testnet_markets,
             force,
-        ),
+        }),
         ManagerCommands::CatsAdd {
             network,
             cat_id,
@@ -138,20 +165,20 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             no_dexie_lookup,
             replace,
         } => {
-            cats::run_cats_add(
-                &ctx,
-                &network,
-                cat_id.as_deref(),
-                ticker.as_deref(),
-                name.as_deref(),
-                base_symbol.as_deref(),
-                ticker_id.as_deref(),
-                pool_id.as_deref(),
-                last_price_xch.as_deref(),
-                target_usd_per_unit.as_deref(),
-                !no_dexie_lookup,
+            cats::run_cats_add(cats::CatsAddRequest {
+                ctx: &ctx,
+                network: &network,
+                cat_id: cat_id.as_deref(),
+                ticker: ticker.as_deref(),
+                name: name.as_deref(),
+                base_symbol: base_symbol.as_deref(),
+                ticker_id: ticker_id.as_deref(),
+                pool_id: pool_id.as_deref(),
+                last_price_xch: last_price_xch.as_deref(),
+                target_usd_per_unit: target_usd_per_unit.as_deref(),
+                use_dexie_lookup: !no_dexie_lookup,
                 replace,
-            )
+            })
             .await
         }
         ManagerCommands::CatsList => cats::run_cats_list(&ctx).await,
@@ -216,16 +243,16 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             force_split_when_ready,
         } => {
             require_market_selector(market_id.as_deref(), pair.as_deref())?;
-            coin_op_loop::run_coin_split(
-                &ctx,
-                &network,
-                market_id.as_deref(),
-                pair.as_deref(),
-                &coin_id,
+            coin_op_loop::run_coin_split(coin_op_loop::CoinSplitRequest {
+                mgr: &ctx,
+                network: &network,
+                market_id: market_id.as_deref(),
+                pair: pair.as_deref(),
+                coin_ids: &coin_id,
                 amount_per_coin,
                 number_of_coins,
                 no_wait,
-                if size_base_units > 0 {
+                size_base_units: if size_base_units > 0 {
                     Some(size_base_units)
                 } else {
                     None
@@ -234,7 +261,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
                 max_iterations,
                 allow_lock_all_spendable,
                 force_split_when_ready,
-            )
+            })
             .await
         }
         ManagerCommands::CoinCombine {
@@ -250,23 +277,23 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             no_wait,
         } => {
             require_market_selector(market_id.as_deref(), pair.as_deref())?;
-            coin_op_loop::run_coin_combine(
-                &ctx,
-                &network,
-                market_id.as_deref(),
-                pair.as_deref(),
-                &coin_id,
-                input_coin_count,
-                optional_str(&asset_id),
+            coin_op_loop::run_coin_combine(coin_op_loop::CoinCombineRequest {
+                mgr: &ctx,
+                network: &network,
+                market_id: market_id.as_deref(),
+                pair: pair.as_deref(),
+                coin_ids: &coin_id,
+                number_of_coins: input_coin_count,
+                asset_id: optional_str(&asset_id),
                 no_wait,
-                if size_base_units > 0 {
+                size_base_units: if size_base_units > 0 {
                     Some(size_base_units)
                 } else {
                     None
                 },
                 until_ready,
                 max_iterations,
-            )
+            })
             .await
         }
     }

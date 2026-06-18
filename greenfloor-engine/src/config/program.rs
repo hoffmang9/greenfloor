@@ -1,11 +1,18 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
 use serde_json::Value;
 
+use super::keys_registry::{parse_signer_key_registry, SignerKeyEntry};
+use super::signer::{parse_signer_config, SignerConfig};
+use super::yaml_fields::{
+    config_err, optional_bool, parse_i64_field, parse_u64_field, req_mapping, req_mapping_from_map,
+    req_str, req_value,
+};
 use crate::coinset::is_xch_like_asset;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::is_hex_id;
+use crate::paths::expand_home;
 
 const DEFAULT_DEXIE_API_BASE: &str = "https://api.dexie.space";
 const DEFAULT_SPLASH_API_BASE: &str = "http://john-deere.hoffmang.com:4000";
@@ -29,198 +36,291 @@ pub struct ManagerProgramConfig {
     pub runtime_market_slot_count: u64,
     pub runtime_offer_parallelism_enabled: bool,
     pub runtime_offer_parallelism_max_workers: usize,
+    pub runtime_reservation_ttl_seconds: u64,
     pub runtime_dry_run: bool,
     pub runtime_loop_interval_seconds: u64,
     pub tx_block_trigger_mode: String,
     pub tx_block_websocket_url: String,
     pub tx_block_websocket_reconnect_interval_seconds: u64,
     pub tx_block_fallback_poll_interval_seconds: u64,
+    pub signer_kms_key_id: String,
+    pub signer_kms_region: String,
+    pub vault_launcher_id: String,
+    pub dev_python_min_version: String,
+    pub signer_key_registry: HashMap<String, SignerKeyEntry>,
 }
 
-#[derive(Debug, Deserialize)]
-struct ProgramYaml {
-    app: Option<AppYaml>,
-    runtime: Option<RuntimeYaml>,
-    chain_signals: Option<ChainSignalsYaml>,
-    venues: Option<VenuesYaml>,
-    coin_ops: Option<CoinOpsYaml>,
-    signer: Option<SignerPresence>,
-    vault: Option<VaultPresence>,
+impl ManagerProgramConfig {
+    pub fn signer_offer_path_configured(&self) -> bool {
+        !self.signer_kms_key_id.is_empty() && !self.vault_launcher_id.is_empty()
+    }
+
+    pub fn require_signer_offer_path(&self) -> SignerResult<()> {
+        if self.signer_offer_path_configured() {
+            return Ok(());
+        }
+        Err(SignerError::SignerPathNotConfigured)
+    }
 }
 
-#[derive(Debug, Deserialize)]
-struct AppYaml {
-    network: Option<String>,
-    home_dir: Option<String>,
-    log_level: Option<String>,
+#[derive(Debug, Clone)]
+pub struct CycleProgramConfig {
+    program: Box<ManagerProgramConfig>,
+    signer: Option<SignerConfig>,
 }
 
-#[derive(Debug, Deserialize)]
-struct RuntimeYaml {
-    offer_bootstrap_wait_timeout_seconds: Option<u64>,
-    market_slot_count: Option<u64>,
-    offer_parallelism_enabled: Option<bool>,
-    offer_parallelism_max_workers: Option<u64>,
-    dry_run: Option<bool>,
-    loop_interval_seconds: Option<u64>,
+impl CycleProgramConfig {
+    /// Daemon cycle load: never fail the whole cycle on signer YAML errors.
+    pub fn from_parsed(program: ManagerProgramConfig, raw: &Value) -> Self {
+        let signer = if program.signer_offer_path_configured() {
+            parse_signer_config(raw).ok()
+        } else {
+            None
+        };
+        Self {
+            program: Box::new(program),
+            signer,
+        }
+    }
+
+    pub fn from_parts(program: ManagerProgramConfig, signer: Option<SignerConfig>) -> Self {
+        Self {
+            program: Box::new(program),
+            signer,
+        }
+    }
+
+    pub fn program(&self) -> &ManagerProgramConfig {
+        &self.program
+    }
+
+    pub fn signer_for_execution(&self) -> SignerResult<&SignerConfig> {
+        self.program.require_signer_offer_path()?;
+        self.signer
+            .as_ref()
+            .ok_or(SignerError::MissingConfigField("signer"))
+    }
 }
 
-#[derive(Debug, Deserialize)]
-struct ChainSignalsYaml {
-    tx_block_trigger: Option<TxBlockTriggerYaml>,
+pub const SIGNER_SKIP_NO_SIGNER_PATH: &str = "skipped_no_signer";
+pub const SIGNER_SKIP_MISSING_SIGNER_CONFIG: &str = "skipped_missing_signer_config";
+
+pub fn signer_execution_skip_reason(err: &SignerError) -> String {
+    match err {
+        SignerError::SignerPathNotConfigured => SIGNER_SKIP_NO_SIGNER_PATH.to_string(),
+        SignerError::MissingConfigField("signer") => SIGNER_SKIP_MISSING_SIGNER_CONFIG.to_string(),
+        other => other.to_string(),
+    }
 }
 
-#[derive(Debug, Deserialize)]
-struct TxBlockTriggerYaml {
-    mode: Option<String>,
-    websocket_url: Option<String>,
-    websocket_reconnect_interval_seconds: Option<u64>,
-    fallback_poll_interval_seconds: Option<u64>,
+pub fn is_signer_execution_soft_skip(err: &SignerError) -> bool {
+    matches!(
+        signer_execution_skip_reason(err).as_str(),
+        SIGNER_SKIP_NO_SIGNER_PATH | SIGNER_SKIP_MISSING_SIGNER_CONFIG
+    )
 }
 
-#[derive(Debug, Deserialize)]
-struct VenuesYaml {
-    dexie: Option<VenueBaseYaml>,
-    splash: Option<VenueBaseYaml>,
-    offer_publish: Option<OfferPublishYaml>,
+impl Default for ManagerProgramConfig {
+    fn default() -> Self {
+        Self {
+            network: "mainnet".to_string(),
+            home_dir: expand_home(DEFAULT_HOME_DIR),
+            app_log_level: "INFO".to_string(),
+            app_log_level_was_missing: true,
+            dexie_api_base: DEFAULT_DEXIE_API_BASE.to_string(),
+            splash_api_base: DEFAULT_SPLASH_API_BASE.to_string(),
+            offer_publish_venue: "dexie".to_string(),
+            coin_ops_minimum_fee_mojos: 10_000_000,
+            coin_ops_max_operations_per_run: 20,
+            coin_ops_max_daily_fee_budget_mojos: 0,
+            coin_ops_split_fee_mojos: 0,
+            coin_ops_combine_fee_mojos: 0,
+            runtime_offer_bootstrap_wait_timeout_seconds: 120,
+            runtime_market_slot_count: 0,
+            runtime_offer_parallelism_enabled: false,
+            runtime_offer_parallelism_max_workers: 4,
+            runtime_reservation_ttl_seconds: 300,
+            runtime_dry_run: false,
+            runtime_loop_interval_seconds: 30,
+            tx_block_trigger_mode: "websocket".to_string(),
+            tx_block_websocket_url: "wss://api.coinset.org/ws".to_string(),
+            tx_block_websocket_reconnect_interval_seconds: 30,
+            tx_block_fallback_poll_interval_seconds: 60,
+            signer_kms_key_id: String::new(),
+            signer_kms_region: "us-west-2".to_string(),
+            vault_launcher_id: String::new(),
+            dev_python_min_version: String::new(),
+            signer_key_registry: HashMap::new(),
+        }
+    }
 }
 
-#[derive(Debug, Deserialize)]
-struct VenueBaseYaml {
-    api_base: Option<String>,
-}
+pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
+    reject_cloud_wallet(raw)?;
 
-#[derive(Debug, Deserialize)]
-struct OfferPublishYaml {
-    provider: Option<String>,
-}
+    let app = req_mapping(raw, "app")?;
+    let runtime = req_mapping(raw, "runtime")?;
+    let chain_signals = req_mapping(raw, "chain_signals")?;
+    let dev = req_mapping(raw, "dev")?;
+    let python = req_mapping_from_map(dev, "python")?;
+    let dev_python_min_version = match python.get("min_version") {
+        None => "3.11".to_string(),
+        Some(value) => {
+            let text = value
+                .as_str()
+                .ok_or_else(|| config_err("dev.python.min_version must be a string"))?;
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return Err(config_err(
+                    "dev.python.min_version must be non-empty when set",
+                ));
+            }
+            trimmed.to_string()
+        }
+    };
+    require_pushover_provider(raw)?;
 
-#[derive(Debug, Deserialize)]
-struct CoinOpsYaml {
-    minimum_fee_mojos: Option<u64>,
-    max_operations_per_run: Option<i64>,
-    max_daily_fee_budget_mojos: Option<i64>,
-    split_fee_mojos: Option<i64>,
-    combine_fee_mojos: Option<i64>,
-}
+    let tx_trigger = req_mapping_from_map(chain_signals, "tx_block_trigger")?;
 
-#[derive(Debug, Deserialize)]
-struct SignerPresence {
-    kms_key_id: Option<String>,
-}
+    let venues = raw.get("venues").and_then(Value::as_object);
+    let dexie = venues
+        .and_then(|section| section.get("dexie"))
+        .and_then(Value::as_object);
+    let splash = venues
+        .and_then(|section| section.get("splash"))
+        .and_then(Value::as_object);
+    let offer_publish = venues
+        .and_then(|section| section.get("offer_publish"))
+        .and_then(Value::as_object);
+    let coin_ops = raw.get("coin_ops").and_then(Value::as_object);
 
-#[derive(Debug, Deserialize)]
-struct VaultPresence {
-    launcher_id: Option<String>,
-}
-
-pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
-    let raw = std::fs::read_to_string(path).map_err(|err| {
-        SignerError::Other(format!("failed to read config {}: {err}", path.display()))
-    })?;
-    let parsed: ProgramYaml = serde_yaml::from_str(&raw).map_err(|err| {
-        SignerError::Other(format!("failed to parse config {}: {err}", path.display()))
-    })?;
-
-    let app = parsed.app.unwrap_or(AppYaml {
-        network: None,
-        home_dir: None,
-        log_level: None,
-    });
-    let app_log_level_was_missing = app.log_level.is_none();
-    let app_log_level = app
-        .log_level
-        .as_deref()
-        .map(|value| normalize_manager_log_level(value))
-        .unwrap_or_else(|| "INFO".to_string());
-    let network = app
-        .network
-        .unwrap_or_else(|| "mainnet".to_string())
-        .trim()
-        .to_string();
-    let home_dir = expand_home_dir(
-        app.home_dir
-            .unwrap_or_else(|| DEFAULT_HOME_DIR.to_string())
-            .trim(),
+    let app_log_level_was_missing = !app.contains_key("log_level");
+    let app_log_level = normalize_manager_log_level(
+        app.get("log_level")
+            .and_then(Value::as_str)
+            .unwrap_or("INFO"),
     );
+    let network = req_str(app, "network")?;
+    let home_dir = expand_home(req_str(app, "home_dir")?.trim());
 
-    let venues = parsed.venues.unwrap_or(VenuesYaml {
-        dexie: None,
-        splash: None,
-        offer_publish: None,
-    });
-    let dexie_api_base = venues
-        .dexie
-        .and_then(|section| section.api_base)
-        .map(|value| value.trim().trim_end_matches('/').to_string())
+    let dexie_api_base = dexie
+        .and_then(|section| section.get("api_base"))
+        .and_then(Value::as_str)
+        .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_DEXIE_API_BASE.to_string());
-    let splash_api_base = venues
-        .splash
-        .and_then(|section| section.api_base)
-        .map(|value| value.trim().trim_end_matches('/').to_string())
+        .unwrap_or(DEFAULT_DEXIE_API_BASE)
+        .trim_end_matches('/')
+        .to_string();
+    let splash_api_base = splash
+        .and_then(|section| section.get("api_base"))
+        .and_then(Value::as_str)
+        .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_SPLASH_API_BASE.to_string());
-    let offer_publish_venue = venues
-        .offer_publish
-        .and_then(|section| section.provider)
-        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or(DEFAULT_SPLASH_API_BASE)
+        .trim_end_matches('/')
+        .to_string();
+    let offer_publish_venue = offer_publish
+        .and_then(|section| section.get("provider"))
+        .and_then(Value::as_str)
+        .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "dexie".to_string());
+        .unwrap_or("dexie")
+        .to_ascii_lowercase();
     if offer_publish_venue != "dexie" && offer_publish_venue != "splash" {
-        return Err(SignerError::Other(
-            "venues.offer_publish.provider must be dexie or splash".to_string(),
+        return Err(config_err(
+            "venues.offer_publish.provider must be one of: dexie, splash",
         ));
     }
 
-    let coin_ops = parsed.coin_ops.unwrap_or(CoinOpsYaml {
-        minimum_fee_mojos: None,
-        max_operations_per_run: None,
-        max_daily_fee_budget_mojos: None,
-        split_fee_mojos: None,
-        combine_fee_mojos: None,
-    });
-    let coin_ops_minimum_fee_mojos = coin_ops.minimum_fee_mojos.unwrap_or(10_000_000);
-    let coin_ops_max_operations_per_run = coin_ops.max_operations_per_run.unwrap_or(20);
-    let coin_ops_max_daily_fee_budget_mojos = coin_ops.max_daily_fee_budget_mojos.unwrap_or(0);
-    let coin_ops_split_fee_mojos = coin_ops.split_fee_mojos.unwrap_or(0);
-    let coin_ops_combine_fee_mojos = coin_ops.combine_fee_mojos.unwrap_or(0);
+    let coin_ops_minimum_fee_mojos = {
+        let raw_fee = parse_i64_field(
+            coin_ops
+                .and_then(|section| section.get("minimum_fee_mojos"))
+                .unwrap_or(&Value::Number(10_000_000.into())),
+            "coin_ops.minimum_fee_mojos",
+        )?;
+        if raw_fee < 0 {
+            return Err(config_err("coin_ops.minimum_fee_mojos must be >= 0"));
+        }
+        raw_fee as u64
+    };
+    let coin_ops_max_operations_per_run = parse_i64_field(
+        coin_ops
+            .and_then(|section| section.get("max_operations_per_run"))
+            .unwrap_or(&Value::Number(20.into())),
+        "coin_ops.max_operations_per_run",
+    )?;
+    let coin_ops_max_daily_fee_budget_mojos = parse_i64_field(
+        coin_ops
+            .and_then(|section| section.get("max_daily_fee_budget_mojos"))
+            .unwrap_or(&Value::Number(0.into())),
+        "coin_ops.max_daily_fee_budget_mojos",
+    )?;
+    let coin_ops_split_fee_mojos = parse_i64_field(
+        coin_ops
+            .and_then(|section| section.get("split_fee_mojos"))
+            .unwrap_or(&Value::Number(0.into())),
+        "coin_ops.split_fee_mojos",
+    )?;
+    let coin_ops_combine_fee_mojos = parse_i64_field(
+        coin_ops
+            .and_then(|section| section.get("combine_fee_mojos"))
+            .unwrap_or(&Value::Number(0.into())),
+        "coin_ops.combine_fee_mojos",
+    )?;
 
-    let runtime = parsed.runtime.unwrap_or(RuntimeYaml {
-        offer_bootstrap_wait_timeout_seconds: None,
-        market_slot_count: None,
-        offer_parallelism_enabled: None,
-        offer_parallelism_max_workers: None,
-        dry_run: None,
-        loop_interval_seconds: None,
-    });
-    let runtime_offer_bootstrap_wait_timeout_seconds = runtime
-        .offer_bootstrap_wait_timeout_seconds
-        .unwrap_or(120)
-        .max(10);
-    let runtime_market_slot_count = runtime.market_slot_count.unwrap_or(0);
-    let runtime_offer_parallelism_enabled = runtime.offer_parallelism_enabled.unwrap_or(false);
-    let runtime_offer_parallelism_max_workers = runtime
-        .offer_parallelism_max_workers
-        .map(|value| value as usize)
-        .unwrap_or(4)
-        .max(1);
-    let runtime_dry_run = runtime.dry_run.unwrap_or(false);
-    let runtime_loop_interval_seconds = runtime.loop_interval_seconds.unwrap_or(30).max(1);
-    let tx_block_trigger = parsed
-        .chain_signals
-        .and_then(|section| section.tx_block_trigger);
-    let tx_block_trigger_mode = tx_block_trigger
-        .as_ref()
-        .and_then(|trigger| trigger.mode.clone())
-        .map(|value| value.trim().to_ascii_lowercase())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "websocket".to_string());
-    let mut tx_block_websocket_url = tx_block_trigger
-        .as_ref()
-        .and_then(|trigger| trigger.websocket_url.clone())
-        .map(|value| value.trim().to_string())
-        .unwrap_or_default();
+    let runtime_loop_interval_seconds = parse_u64_field(
+        req_value(runtime, "loop_interval_seconds")?,
+        "runtime.loop_interval_seconds",
+    )?;
+    let runtime_dry_run = optional_bool(runtime, "dry_run", false);
+    let runtime_market_slot_count = parse_u64_field(
+        runtime
+            .get("market_slot_count")
+            .unwrap_or(&Value::Number(0.into())),
+        "runtime.market_slot_count",
+    )?;
+    let runtime_offer_parallelism_enabled =
+        optional_bool(runtime, "offer_parallelism_enabled", false);
+    let runtime_offer_parallelism_max_workers = parse_u64_field(
+        runtime
+            .get("offer_parallelism_max_workers")
+            .unwrap_or(&Value::Number(4.into())),
+        "runtime.offer_parallelism_max_workers",
+    )?
+    .max(1) as usize;
+    let runtime_reservation_ttl_seconds = parse_u64_field(
+        runtime
+            .get("reservation_ttl_seconds")
+            .unwrap_or(&Value::Number(300.into())),
+        "runtime.reservation_ttl_seconds",
+    )?
+    .max(30);
+    let runtime_offer_bootstrap_wait_timeout_seconds = runtime_timeout_seconds(
+        runtime,
+        "offer_bootstrap_wait_timeout_seconds",
+        "cloud_wallet_bootstrap_wait_timeout_seconds",
+        120,
+        10,
+    )?;
+
+    let tx_block_trigger_mode = tx_trigger
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("websocket")
+        .trim()
+        .to_ascii_lowercase();
+    if tx_block_trigger_mode != "websocket" {
+        return Err(config_err(
+            "chain_signals.tx_block_trigger.mode must be websocket",
+        ));
+    }
+    let mut tx_block_websocket_url = tx_trigger
+        .get("websocket_url")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if tx_block_websocket_url.is_empty() {
         tx_block_websocket_url = if is_testnet_network(&network) {
             "wss://testnet11.api.coinset.org/ws".to_string()
@@ -228,15 +328,46 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
             "wss://api.coinset.org/ws".to_string()
         };
     }
-    let tx_block_websocket_reconnect_interval_seconds = tx_block_trigger
-        .as_ref()
-        .and_then(|trigger| trigger.websocket_reconnect_interval_seconds)
-        .unwrap_or(30)
-        .max(1);
-    let tx_block_fallback_poll_interval_seconds = tx_block_trigger
-        .as_ref()
-        .and_then(|trigger| trigger.fallback_poll_interval_seconds)
-        .unwrap_or(60);
+    let tx_block_websocket_reconnect_interval_seconds = parse_u64_field(
+        tx_trigger
+            .get("websocket_reconnect_interval_seconds")
+            .unwrap_or(&Value::Number(30.into())),
+        "chain_signals.tx_block_trigger.websocket_reconnect_interval_seconds",
+    )?;
+    if tx_block_websocket_reconnect_interval_seconds < 1 {
+        return Err(config_err(
+            "chain_signals.tx_block_trigger.websocket_reconnect_interval_seconds must be >= 1",
+        ));
+    }
+    let tx_block_fallback_poll_interval_seconds = parse_u64_field(
+        tx_trigger
+            .get("fallback_poll_interval_seconds")
+            .unwrap_or(&Value::Number(60.into())),
+        "chain_signals.tx_block_trigger.fallback_poll_interval_seconds",
+    )?;
+
+    let signer_key_registry = parse_signer_key_registry(raw)?;
+    let signer = raw.get("signer").and_then(Value::as_object);
+    let signer_kms_key_id = signer
+        .and_then(|section| section.get("kms_key_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
+    let signer_kms_region = signer
+        .and_then(|section| section.get("kms_region"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("us-west-2")
+        .to_string();
+    let vault = raw.get("vault").and_then(Value::as_object);
+    let vault_launcher_id = vault
+        .and_then(|section| section.get("launcher_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or_default()
+        .to_string();
 
     Ok(ManagerProgramConfig {
         network,
@@ -255,39 +386,97 @@ pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
         runtime_market_slot_count,
         runtime_offer_parallelism_enabled,
         runtime_offer_parallelism_max_workers,
+        runtime_reservation_ttl_seconds,
         runtime_dry_run,
         runtime_loop_interval_seconds,
         tx_block_trigger_mode,
         tx_block_websocket_url,
         tx_block_websocket_reconnect_interval_seconds,
         tx_block_fallback_poll_interval_seconds,
+        signer_kms_key_id,
+        signer_kms_region,
+        vault_launcher_id,
+        dev_python_min_version,
+        signer_key_registry,
     })
 }
 
-pub fn require_signer_offer_path(path: &Path) -> SignerResult<()> {
+fn reject_cloud_wallet(raw: &Value) -> SignerResult<()> {
+    match raw.get("cloud_wallet") {
+        None | Some(Value::Null) => Ok(()),
+        Some(Value::Object(map)) if map.is_empty() => Ok(()),
+        Some(_) => Err(config_err(
+            "cloud_wallet config is removed; use signer: and vault: blocks instead \
+             (see config/program.yaml)",
+        )),
+    }
+}
+
+fn require_pushover_provider(raw: &Value) -> SignerResult<()> {
+    let notifications = req_mapping(raw, "notifications")?;
+    req_value(notifications, "low_inventory_alerts")?;
+    let providers = req_value(notifications, "providers")?
+        .as_array()
+        .ok_or_else(|| config_err("notifications.providers must be a list"))?;
+    if providers.iter().any(|provider| {
+        provider
+            .get("type")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.trim() == "pushover")
+    }) {
+        return Ok(());
+    }
+    Err(config_err(
+        "Missing notifications.providers entry with type=pushover",
+    ))
+}
+
+pub fn read_program_yaml(path: &Path) -> SignerResult<Value> {
     let raw = std::fs::read_to_string(path).map_err(|err| {
         SignerError::Other(format!("failed to read config {}: {err}", path.display()))
     })?;
-    let parsed: ProgramYaml = serde_yaml::from_str(&raw).map_err(|err| {
+    serde_yaml::from_str(&raw).map_err(|err| {
         SignerError::Other(format!("failed to parse config {}: {err}", path.display()))
-    })?;
-    let kms_key_id = parsed
-        .signer
-        .and_then(|signer| signer.kms_key_id)
-        .map(|value| value.trim().to_string())
-        .unwrap_or_default();
-    let launcher_id = parsed
-        .vault
-        .and_then(|vault| vault.launcher_id)
-        .map(|value| value.trim().to_string())
-        .unwrap_or_default();
-    if kms_key_id.is_empty() || launcher_id.is_empty() {
-        return Err(SignerError::Other(
-            "offer execution requires signer.kms_key_id and vault.launcher_id in program config"
-                .to_string(),
-        ));
-    }
-    Ok(())
+    })
+}
+
+pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
+    parse_program_config(&read_program_yaml(path)?)
+}
+
+#[derive(Debug, Clone)]
+pub struct ProgramConfigBundle {
+    pub program: ManagerProgramConfig,
+    pub signer: SignerConfig,
+}
+
+pub fn program_bundle_from_parsed(
+    program: ManagerProgramConfig,
+    raw: &Value,
+) -> SignerResult<ProgramConfigBundle> {
+    Ok(ProgramConfigBundle {
+        program,
+        signer: super::signer::parse_signer_config(raw)?,
+    })
+}
+
+pub fn load_program_bundle(path: &Path) -> SignerResult<ProgramConfigBundle> {
+    let raw = read_program_yaml(path)?;
+    let program = parse_program_config(&raw)?;
+    program_bundle_from_parsed(program, &raw)
+}
+
+pub fn load_program_bundle_gated(path: &Path) -> SignerResult<ProgramConfigBundle> {
+    let raw = read_program_yaml(path)?;
+    let program = parse_program_config(&raw)?;
+    program.require_signer_offer_path()?;
+    program_bundle_from_parsed(program, &raw)
+}
+
+/// Load execution bundle for coin-list; maps missing signer path to
+/// [`SignerError::SignerPathNotConfigured`] for stable CLI exit handling.
+pub fn load_program_bundle_for_coin_list(path: &Path) -> SignerResult<ProgramConfigBundle> {
+    load_program_bundle_gated(path)
 }
 
 pub fn is_testnet_network(network: &str) -> bool {
@@ -360,14 +549,20 @@ pub fn resolve_offer_publish_settings(
     Ok((venue, dexie_base, splash_base))
 }
 
-pub fn action_side_from_pricing(pricing: &Value) -> String {
-    pricing
-        .get("side")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("sell")
-        .to_string()
+fn runtime_timeout_seconds(
+    runtime: &serde_json::Map<String, Value>,
+    neutral_key: &str,
+    legacy_key: &str,
+    default: u64,
+    minimum: u64,
+) -> SignerResult<u64> {
+    for key in [neutral_key, legacy_key] {
+        if let Some(raw) = runtime.get(key) {
+            let parsed = parse_u64_field(raw, key)?;
+            return Ok(parsed.max(minimum));
+        }
+    }
+    Ok(default.max(minimum))
 }
 
 fn normalize_manager_log_level(log_level: &str) -> String {
@@ -379,40 +574,12 @@ fn normalize_manager_log_level(log_level: &str) -> String {
     }
 }
 
-fn expand_home_dir(path: &str) -> PathBuf {
-    if let Some(stripped) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(stripped);
-        }
-    }
-    if path == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home);
-        }
-    }
-    PathBuf::from(path)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn resolves_testnet_dexie_default() {
-        let url =
-            resolve_dexie_base_url("testnet11", None, "https://api.dexie.space").expect("url");
-        assert_eq!(url, "https://api-testnet.dexie.space");
-    }
-
-    #[test]
-    fn maps_xch_to_txch_on_testnet() {
-        assert_eq!(resolve_quote_asset_for_offer("xch", "testnet11"), "txch");
-        assert_eq!(resolve_quote_asset_for_offer("xch", "mainnet"), "xch");
-    }
-
-    #[test]
-    fn resolve_splash_base_url_defaults_to_program_base() {
-        let splash = resolve_splash_base_url(None, "http://localhost:4000");
-        assert_eq!(splash, "http://localhost:4000");
-    }
+pub fn action_side_from_pricing(pricing: &Value) -> String {
+    pricing
+        .get("side")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("sell")
+        .to_string()
 }

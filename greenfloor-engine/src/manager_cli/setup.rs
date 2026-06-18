@@ -5,25 +5,167 @@ use std::path::Path;
 use serde_json::json;
 use serde_yaml::Value;
 
-use crate::config::{load_markets_config_with_overlay, load_program_config, require_signer_offer_path};
+use crate::config::{load_markets_config_with_overlay, load_program_config};
 use crate::error::{SignerError, SignerResult};
+use crate::hex::{is_hex_id, normalize_hex_id};
+use crate::minimal_program_template::{
+    write_minimal_program, write_minimal_program_with_signer, MinimalProgramParams,
+};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
+use super::cats_catalog::load_cats_catalog;
 use super::context::ManagerContext;
 use super::paths::expand_home;
 
 const ALLOWED_LOG_LEVELS: &[&str] = &["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"];
 
-pub fn run_config_validate(ctx: &ManagerContext) -> SignerResult<i32> {
+pub struct BootstrapHomeParams<'a> {
+    pub ctx: &'a ManagerContext,
+    pub home_dir: &'a Path,
+    pub program_template: &'a Path,
+    pub markets_template: &'a Path,
+    pub cats_template: Option<&'a Path>,
+    pub testnet_markets_template: Option<&'a Path>,
+    pub seed_testnet_markets: bool,
+    pub force: bool,
+}
+
+pub fn run_config_validate(ctx: &ManagerContext, program_only: bool) -> SignerResult<i32> {
     let program_path = &ctx.program_config;
+    let _program = load_program_config(program_path)?;
+    if program_only {
+        ctx.emit_json(&json!({
+            "ok": true,
+            "program_config": program_path.display().to_string(),
+        }))?;
+        return Ok(0);
+    }
     let markets_path = &ctx.markets_config;
     let testnet_markets_path = ctx.testnet_markets_path();
-    let _program = load_program_config(program_path)?;
     let _markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
     ctx.emit_json(&json!({
         "ok": true,
         "program_config": program_path.display().to_string(),
         "markets_config": markets_path.display().to_string(),
+    }))?;
+    Ok(0)
+}
+
+pub fn run_program_fields(ctx: &ManagerContext) -> SignerResult<i32> {
+    let program = load_program_config(&ctx.program_config)?;
+    let mut keys_registry = serde_json::Map::new();
+    for (key_id, entry) in &program.signer_key_registry {
+        keys_registry.insert(
+            key_id.clone(),
+            json!({
+                "key_id": key_id,
+                "fingerprint": entry.fingerprint,
+                "network": entry.network,
+                "keyring_yaml_path": entry.keyring_yaml_path,
+            }),
+        );
+    }
+    ctx.emit_json(&json!({
+        "network": program.network,
+        "home_dir": program.home_dir.display().to_string(),
+        "signer_kms_key_id": program.signer_kms_key_id,
+        "signer_kms_region": program.signer_kms_region,
+        "vault_launcher_id": program.vault_launcher_id,
+        "signer_offer_path_configured": program.signer_offer_path_configured(),
+        "dev_python_min_version": program.dev_python_min_version,
+        "keys_registry": keys_registry,
+    }))?;
+    Ok(0)
+}
+
+pub fn run_markets_fields(ctx: &ManagerContext) -> SignerResult<i32> {
+    let markets =
+        load_markets_config_with_overlay(&ctx.markets_config, ctx.testnet_markets_path())?;
+    let all: Vec<_> = markets.markets.iter().map(market_fields_row).collect();
+    let enabled: Vec<_> = markets
+        .markets
+        .iter()
+        .filter(|market| market.enabled)
+        .map(market_fields_row)
+        .collect();
+    ctx.emit_json(&json!({
+        "markets_config": ctx.markets_config.display().to_string(),
+        "markets": all,
+        "enabled_markets": enabled,
+    }))?;
+    Ok(0)
+}
+
+fn market_fields_row(market: &crate::config::MarketConfig) -> serde_json::Value {
+    json!({
+        "id": market.market_id,
+        "enabled": market.enabled,
+        "base_asset": market.base_asset,
+        "base_symbol": market.base_symbol,
+        "quote_asset": market.quote_asset,
+        "quote_asset_type": market.quote_asset_type,
+        "receive_address": market.receive_address,
+        "signer_key_id": market.signer_key_id,
+        "mode": market.mode,
+    })
+}
+
+pub struct MaterializeMinimalProgramRequest<'a> {
+    pub output: &'a Path,
+    pub home_dir: &'a Path,
+    pub dexie_api_base: &'a str,
+    pub log_level: &'a str,
+    pub dry_run: bool,
+    pub low_inventory_alerts_enabled: bool,
+    pub pushover_enabled: bool,
+    pub with_signer: bool,
+}
+
+pub fn run_materialize_minimal_program(
+    request: MaterializeMinimalProgramRequest<'_>,
+) -> SignerResult<i32> {
+    let params = MinimalProgramParams {
+        home_dir: request.home_dir,
+        dexie_api_base: request.dexie_api_base,
+        log_level: Some(request.log_level),
+        dry_run: request.dry_run,
+        low_inventory_alerts_enabled: request.low_inventory_alerts_enabled,
+        pushover_enabled: request.pushover_enabled,
+    };
+    if request.with_signer {
+        write_minimal_program_with_signer(request.output, params);
+    } else {
+        write_minimal_program(request.output, params);
+    }
+    Ok(0)
+}
+
+pub fn run_cats_fields(ctx: &ManagerContext) -> SignerResult<i32> {
+    let catalog = load_cats_catalog(&ctx.cats_config)?;
+    let mut symbol_to_asset_id = serde_json::Map::new();
+    for row in &catalog {
+        let Some(symbol) = row
+            .get("base_symbol")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let Some(asset_id) = row
+            .get("asset_id")
+            .and_then(|value| value.as_str())
+            .map(normalize_hex_id)
+            .filter(|value| is_hex_id(value))
+        else {
+            continue;
+        };
+        symbol_to_asset_id.insert(symbol.to_ascii_lowercase(), json!(asset_id));
+    }
+    ctx.emit_json(&json!({
+        "cats_config": ctx.cats_config.display().to_string(),
+        "symbol_to_asset_id": symbol_to_asset_id,
+        "cats": catalog,
     }))?;
     Ok(0)
 }
@@ -39,9 +181,9 @@ pub fn run_set_log_level(ctx: &ManagerContext, log_level: &str) -> SignerResult<
     let app_entry = app
         .entry(Value::from("app"))
         .or_insert_with(|| Value::Mapping(Default::default()));
-    let app_map = app_entry
-        .as_mapping_mut()
-        .ok_or_else(|| SignerError::Other("program config field 'app' must be a mapping".to_string()))?;
+    let app_map = app_entry.as_mapping_mut().ok_or_else(|| {
+        SignerError::Other("program config field 'app' must be a mapping".to_string())
+    })?;
     let prior_level = app_map
         .get(Value::from("log_level"))
         .and_then(Value::as_str)
@@ -59,16 +201,17 @@ pub fn run_set_log_level(ctx: &ManagerContext, log_level: &str) -> SignerResult<
     Ok(0)
 }
 
-pub fn run_bootstrap_home(
-    ctx: &ManagerContext,
-    home_dir: &Path,
-    program_template: &Path,
-    markets_template: &Path,
-    cats_template: Option<&Path>,
-    testnet_markets_template: Option<&Path>,
-    seed_testnet_markets: bool,
-    force: bool,
-) -> SignerResult<i32> {
+pub fn run_bootstrap_home(params: BootstrapHomeParams<'_>) -> SignerResult<i32> {
+    let BootstrapHomeParams {
+        ctx,
+        home_dir,
+        program_template,
+        markets_template,
+        cats_template,
+        testnet_markets_template,
+        seed_testnet_markets,
+        force,
+    } = params;
     let home = expand_home(home_dir);
     let config_dir = home.join("config");
     let db_dir = home.join("db");
@@ -181,7 +324,10 @@ pub fn run_doctor(ctx: &ManagerContext) -> SignerResult<i32> {
     for market in &enabled_markets {
         let key_id = market.signer_key_id.trim();
         if key_id.is_empty() {
-            problems.push(format!("market_key_error:{}:missing signer_key_id", market.market_id));
+            problems.push(format!(
+                "market_key_error:{}:missing signer_key_id",
+                market.market_id
+            ));
         } else {
             key_ids.push(key_id.to_string());
         }
@@ -195,7 +341,7 @@ pub fn run_doctor(ctx: &ManagerContext) -> SignerResult<i32> {
         }
         Err(err) => problems.push(format!("db_error:{err}")),
     }
-    if require_signer_offer_path(program_path).is_err() {
+    if !program.signer_offer_path_configured() {
         warnings.push("signer_not_configured:kms_key_id_or_vault_launcher_id".to_string());
     }
     collect_env_warnings(&mut warnings);
@@ -254,9 +400,8 @@ fn normalize_log_level(log_level: &str) -> SignerResult<String> {
 }
 
 fn read_yaml_mapping(path: &Path) -> SignerResult<Value> {
-    let raw = std::fs::read_to_string(path).map_err(|err| {
-        SignerError::Other(format!("failed to read {}: {err}", path.display()))
-    })?;
+    let raw = std::fs::read_to_string(path)
+        .map_err(|err| SignerError::Other(format!("failed to read {}: {err}", path.display())))?;
     serde_yaml::from_str(&raw)
         .map_err(|err| SignerError::Other(format!("failed to parse {}: {err}", path.display())))
 }
@@ -264,9 +409,8 @@ fn read_yaml_mapping(path: &Path) -> SignerResult<Value> {
 fn write_yaml(path: &Path, value: &Value) -> SignerResult<()> {
     let text = serde_yaml::to_string(value)
         .map_err(|err| SignerError::Other(format!("failed to encode yaml: {err}")))?;
-    std::fs::write(path, text).map_err(|err| {
-        SignerError::Other(format!("failed to write {}: {err}", path.display()))
-    })
+    std::fs::write(path, text)
+        .map_err(|err| SignerError::Other(format!("failed to write {}: {err}", path.display())))
 }
 
 #[cfg(test)]
@@ -290,12 +434,36 @@ mod tests {
         let markets_path = dir.path().join("markets.yaml");
         std::fs::write(
             &program_path,
-            "app:\n  network: mainnet\n  home_dir: /tmp/gf\n",
+            r#"app:
+  network: mainnet
+  home_dir: /tmp/gf
+runtime:
+  loop_interval_seconds: 30
+chain_signals:
+  tx_block_trigger:
+    mode: websocket
+dev:
+  python:
+    min_version: "3.11"
+notifications:
+  low_inventory_alerts:
+    enabled: true
+    threshold_mode: absolute_base_units
+    default_threshold_base_units: 0
+    dedup_cooldown_seconds: 21600
+    clear_hysteresis_percent: 10
+  providers:
+    - type: pushover
+      enabled: true
+      user_key_env: PUSHOVER_USER_KEY
+      app_token_env: PUSHOVER_APP_TOKEN
+      recipient_key_env: PUSHOVER_RECIPIENT_KEY
+"#,
         )
         .expect("write program");
         std::fs::write(&markets_path, "markets: []\n").expect("write markets");
         let output = super::super::context::ManagerContext::for_test(program_path, markets_path);
-        let code = run_config_validate(&output).expect("validate");
+        let code = run_config_validate(&output, false).expect("validate");
         assert_eq!(code, 0);
     }
 }

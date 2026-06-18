@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use crate::coin_ops::{coin_op_should_stop, evaluate_coin_split_gate, SpendableCoin};
 
-use super::combine::run_coin_combine;
+use super::combine::{run_coin_combine, CoinCombineRequest};
 use super::context::{enforce_split_lockup_guardrail, spendable_coins_for_gate};
-use super::split::run_coin_split;
+use super::split::{run_coin_split, CoinSplitRequest};
 use crate::manager_cli::context::ManagerContext;
 
 #[test]
@@ -42,13 +42,9 @@ fn lockup_guardrail_allows_partial_selection() {
             amount: 200,
         },
     ];
-    let exit = enforce_split_lockup_guardrail(
-        &spendable,
-        &["coin-a".to_string()],
-        false,
-        "asset-1",
-    )
-    .expect("guardrail");
+    let exit =
+        enforce_split_lockup_guardrail(&spendable, &["coin-a".to_string()], false, "asset-1")
+            .expect("guardrail");
     assert!(exit.is_none());
 }
 
@@ -90,12 +86,7 @@ fn split_gate_ready_skips_execution_path() {
             amount: 200,
         },
     ];
-    let gate = evaluate_coin_split_gate(
-        &spendable_coins_for_gate(&spendable),
-        "asset",
-        100,
-        2,
-    );
+    let gate = evaluate_coin_split_gate(&spendable_coins_for_gate(&spendable), "asset", 100, 2);
     assert!(gate.ready);
     let (stop, reason) = coin_op_should_stop(true, Some(gate.ready), false, 1, 3);
     assert!(stop);
@@ -108,24 +99,26 @@ async fn until_ready_requires_size_base_units() {
         PathBuf::from("/tmp/unused-program.yaml"),
         PathBuf::from("/tmp/unused-markets.yaml"),
     );
-    let err = run_coin_split(
-        &mgr,
-        "mainnet",
-        None,
-        None,
-        &[],
-        10,
-        2,
-        false,
-        None,
-        true,
-        3,
-        false,
-        false,
-    )
+    let err = run_coin_split(CoinSplitRequest {
+        mgr: &mgr,
+        network: "mainnet",
+        market_id: None,
+        pair: None,
+        coin_ids: &[],
+        amount_per_coin: 10,
+        number_of_coins: 2,
+        no_wait: false,
+        size_base_units: None,
+        until_ready: true,
+        max_iterations: 3,
+        allow_lock_all_spendable: false,
+        force_split_when_ready: false,
+    })
     .await
     .expect_err("missing size");
-    assert!(err.to_string().contains("until-ready mode requires --size-base-units"));
+    assert!(err
+        .to_string()
+        .contains("until-ready mode requires --size-base-units"));
 }
 
 #[tokio::test]
@@ -134,21 +127,21 @@ async fn until_ready_disallows_no_wait() {
         PathBuf::from("/tmp/unused-program.yaml"),
         PathBuf::from("/tmp/unused-markets.yaml"),
     );
-    let err = run_coin_split(
-        &mgr,
-        "mainnet",
-        None,
-        None,
-        &[],
-        10,
-        2,
-        true,
-        Some(10),
-        true,
-        3,
-        false,
-        false,
-    )
+    let err = run_coin_split(CoinSplitRequest {
+        mgr: &mgr,
+        network: "mainnet",
+        market_id: None,
+        pair: None,
+        coin_ids: &[],
+        amount_per_coin: 10,
+        number_of_coins: 2,
+        no_wait: true,
+        size_base_units: Some(10),
+        until_ready: true,
+        max_iterations: 3,
+        allow_lock_all_spendable: false,
+        force_split_when_ready: false,
+    })
     .await
     .expect_err("no-wait conflict");
     assert!(err
@@ -162,19 +155,19 @@ async fn combine_until_ready_disallows_no_wait() {
         PathBuf::from("/tmp/unused-program.yaml"),
         PathBuf::from("/tmp/unused-markets.yaml"),
     );
-    let err = run_coin_combine(
-        &mgr,
-        "mainnet",
-        None,
-        None,
-        &[],
-        2,
-        None,
-        true,
-        Some(10),
-        true,
-        3,
-    )
+    let err = run_coin_combine(CoinCombineRequest {
+        mgr: &mgr,
+        network: "mainnet",
+        market_id: None,
+        pair: None,
+        coin_ids: &[],
+        number_of_coins: 2,
+        asset_id: None,
+        no_wait: true,
+        size_base_units: Some(10),
+        until_ready: true,
+        max_iterations: 3,
+    })
     .await
     .expect_err("no-wait conflict");
     assert!(err

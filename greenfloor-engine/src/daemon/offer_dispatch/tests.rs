@@ -1,19 +1,22 @@
-use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::collections::BTreeMap;
 
-use serde_json::json;
 use tempfile::tempdir;
 
 use super::{
-    classify_parallel_dispatch, is_parallel_dispatch_transient_signer_error,
-    record_parallel_fallback_audit, OfferDispatchOutput, OfferReservationCoordinator,
-    ParallelDispatchDecision,
+    classify_parallel_dispatch, coordinator::OfferReservationCoordinator,
+    is_parallel_dispatch_transient_signer_error, record_parallel_fallback_audit,
+    OfferDispatchOutput, ParallelDispatchDecision,
 };
-use crate::config::{ManagerProgramConfig, MarketConfig};
+use crate::config::{load_program_bundle, ManagerProgramConfig, MarketConfig};
 use crate::cycle::{parallel_managed_dispatch_enabled, PlannedAction};
-use crate::daemon::cycle_paths::DaemonCyclePaths;
+use crate::daemon::test_support::test_cycle_context;
 use crate::error::SignerError;
 use crate::storage::SqliteStore;
+use crate::test_support::minimal_program::{
+    write_minimal_program_with_signer, MinimalProgramParams,
+};
+use serde_json::json;
+use std::collections::HashMap;
 
 fn write_test_markets_file(path: &std::path::Path) {
     std::fs::write(
@@ -35,38 +38,33 @@ markets:
     .expect("write markets");
 }
 
-fn sample_paths(dir: &tempfile::TempDir) -> DaemonCyclePaths {
-    DaemonCyclePaths::new(
-        dir.path().join("program.yaml"),
-        dir.path().join("markets.yaml"),
-        None,
-    )
+fn test_context_from_program_file(
+    dir: &tempfile::TempDir,
+    db_path: &std::path::Path,
+    program_path: &std::path::Path,
+    mut program: ManagerProgramConfig,
+    with_signer: bool,
+) -> crate::daemon::test_support::TestCycleContextBundle {
+    let signer = if with_signer {
+        let bundle = load_program_bundle(program_path).expect("program bundle");
+        program.signer_kms_key_id = bundle.program.signer_kms_key_id;
+        program.vault_launcher_id = bundle.program.vault_launcher_id;
+        Some(bundle.signer)
+    } else {
+        None
+    };
+    test_cycle_context(dir, db_path, program, signer)
 }
 
 fn sample_program(parallelism_enabled: bool, dry_run: bool) -> ManagerProgramConfig {
     ManagerProgramConfig {
-        network: "mainnet".to_string(),
-        home_dir: PathBuf::from("/tmp/gf"),
-        app_log_level: "INFO".to_string(),
-        app_log_level_was_missing: false,
-        dexie_api_base: "https://api.dexie.space".to_string(),
-        splash_api_base: "http://localhost:4000".to_string(),
-        offer_publish_venue: "dexie".to_string(),
-        coin_ops_minimum_fee_mojos: 0,
-        coin_ops_max_operations_per_run: 0,
-        coin_ops_max_daily_fee_budget_mojos: 0,
-        coin_ops_split_fee_mojos: 0,
-        coin_ops_combine_fee_mojos: 0,
-        runtime_offer_bootstrap_wait_timeout_seconds: 120,
         runtime_market_slot_count: 1,
         runtime_offer_parallelism_enabled: parallelism_enabled,
         runtime_offer_parallelism_max_workers: 2,
         runtime_dry_run: dry_run,
-        runtime_loop_interval_seconds: 30,
-        tx_block_trigger_mode: "websocket".to_string(),
-        tx_block_websocket_url: String::new(),
         tx_block_websocket_reconnect_interval_seconds: 1,
         tx_block_fallback_poll_interval_seconds: 1,
+        ..Default::default()
     }
 }
 
@@ -136,8 +134,8 @@ fn coordinator_concurrent_acquires_only_one_succeeds_for_full_capacity() {
     let coordinator = OfferReservationCoordinator::new(&db_path, Some(300)).expect("coordinator");
     let market_id = "m1";
     let wallet_id = "wallet-1";
-    let mut requested = BTreeMap::from([("asset-a".to_string(), 100_i64)]);
-    let mut available = BTreeMap::from([("asset-a".to_string(), 100_i64)]);
+    let requested = BTreeMap::from([("asset-a".to_string(), 100_i64)]);
+    let available = BTreeMap::from([("asset-a".to_string(), 100_i64)]);
 
     let first = coordinator
         .try_acquire(market_id, wallet_id, &requested, &available)
@@ -178,22 +176,45 @@ fn coordinator_release_frees_capacity_for_next_acquire() {
 }
 
 #[tokio::test]
+async fn record_parallel_fallback_audit_persists_event() {
+    let dir = tempdir().expect("tempdir");
+    let db_path = dir.path().join("greenfloor.sqlite");
+    let store = SqliteStore::open(&db_path).expect("open");
+    let err = SignerError::Other("ReservationContentionError: simulated".to_string());
+    record_parallel_fallback_audit(&store, "m1", &err)
+        .await
+        .expect("audit");
+    let events = store
+        .list_recent_audit_events(Some(&["offer_parallel_fallback"]), Some("m1"), 5)
+        .expect("events");
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_type, "offer_parallel_fallback");
+}
+
+#[tokio::test]
 async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() {
-    use super::test_hooks::{set_managed_post_override, set_parallel_dispatch_override};
     use super::execute_strategy_actions;
-    use crate::config::MarketConfig;
-    use crate::cycle::PlannedAction;
-    use serde_json::json;
-    use std::collections::HashMap;
 
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
     let store = SqliteStore::open(&db_path).expect("open");
     let program_path = dir.path().join("program.yaml");
-    std::fs::write(&program_path, "app:\n  network: mainnet\n").expect("write program");
+    write_minimal_program_with_signer(
+        &program_path,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
-    let program = sample_program(false, false);
+    let test_ctx = test_context_from_program_file(
+        &dir,
+        &db_path,
+        &program_path,
+        sample_program(false, false),
+        false,
+    );
     let market = MarketConfig {
         market_id: "m1".to_string(),
         enabled: true,
@@ -220,68 +241,15 @@ async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() 
         side: "sell".to_string(),
     }];
 
-    let output = execute_strategy_actions(
-        &store,
-        &db_path,
-        &program,
-        &sample_paths(&dir),
-        &market,
-        "mainnet",
-        &actions,
-        false,
-    )
-    .await
-    .expect("dispatch");
+    let output = execute_strategy_actions(&store, &test_ctx.cycle_context(), &market, &actions)
+        .await
+        .expect("dispatch");
 
     assert_eq!(output.executed_count, 0);
     let events = store
         .list_recent_audit_events(Some(&["strategy_exec_skipped_no_signer"]), Some("m1"), 1)
         .expect("events");
     assert_eq!(events.len(), 1);
-}
-
-#[tokio::test]
-async fn record_parallel_fallback_audit_persists_event() {
-    let dir = tempdir().expect("tempdir");
-    let db_path = dir.path().join("greenfloor.sqlite");
-    let store = SqliteStore::open(&db_path).expect("open");
-    let err = SignerError::Other("ReservationContentionError: simulated".to_string());
-    record_parallel_fallback_audit(&store, "m1", &err)
-        .await
-        .expect("audit");
-    let events = store
-        .list_recent_audit_events(Some(&["offer_parallel_fallback"]), Some("m1"), 5)
-        .expect("events");
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].event_type, "offer_parallel_fallback");
-}
-
-fn write_signer_program(path: &std::path::Path) {
-    let launcher_id = "aa".repeat(32);
-    std::fs::write(
-        path,
-        format!(
-            r#"
-app:
-  network: mainnet
-signer:
-  kms_key_id: arn:aws:kms:us-west-2:123:key/abc
-  kms_region: us-west-2
-vault:
-  launcher_id: {launcher_id}
-  custody_threshold: 1
-  recovery_threshold: 1
-  recovery_clawback_timelock: 3600
-  custody_keys:
-    - public_key_hex: "020202020202020202020202020202020202020202020202020202020202020202"
-      curve: SECP256R1
-  recovery_keys:
-    - public_key_hex: "ab3cb61463a695fa094f7c30526c8097fb813a0c5fa67bab261a7cd354cb9901baa6b7a99d"
-      curve: SECP256R1
-"#
-        ),
-    )
-    .expect("write program");
 }
 
 fn sample_market() -> MarketConfig {
@@ -317,76 +285,79 @@ fn sample_action() -> PlannedAction {
 
 #[tokio::test]
 async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() {
+    use super::execute_strategy_actions;
     use super::test_hooks::{
         set_managed_post_override, set_parallel_dispatch_override, TestHooksScope,
     };
-    use super::execute_strategy_actions;
 
     let _hooks = TestHooksScope::begin();
-
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
     let store = SqliteStore::open(&db_path).expect("open");
     let program_path = dir.path().join("program.yaml");
-    write_signer_program(&program_path);
+    write_minimal_program_with_signer(
+        &program_path,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
-    let mut program = sample_program(true, false);
-    program.runtime_offer_parallelism_enabled = true;
+    let test_ctx = test_context_from_program_file(
+        &dir,
+        &db_path,
+        &program_path,
+        sample_program(true, false),
+        true,
+    );
 
     set_parallel_dispatch_override(Some("transient"));
     set_managed_post_override(Some("success"));
     let output = execute_strategy_actions(
         &store,
-        &db_path,
-        &program,
-        &sample_paths(&dir),
+        &test_ctx.cycle_context(),
         &sample_market(),
-        "mainnet",
         &[sample_action()],
-        true,
     )
     .await
     .expect("dispatch");
-
     assert_eq!(output.executed_count, 1);
-    let events = store
-        .list_recent_audit_events(
-            Some(&["offer_parallel_fallback"]),
-            Some("m1"),
-            5,
-        )
-        .expect("events");
-    assert_eq!(events.len(), 1);
 }
 
 #[tokio::test]
 async fn execute_strategy_actions_parallel_fatal_propagates() {
-    use super::test_hooks::{set_parallel_dispatch_override, TestHooksScope};
     use super::execute_strategy_actions;
+    use super::test_hooks::{set_parallel_dispatch_override, TestHooksScope};
 
     let _hooks = TestHooksScope::begin();
-
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
     let store = SqliteStore::open(&db_path).expect("open");
     let program_path = dir.path().join("program.yaml");
-    write_signer_program(&program_path);
+    write_minimal_program_with_signer(
+        &program_path,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
-    let mut program = sample_program(true, false);
-    program.runtime_offer_parallelism_enabled = true;
+    let test_ctx = test_context_from_program_file(
+        &dir,
+        &db_path,
+        &program_path,
+        sample_program(true, false),
+        true,
+    );
 
     set_parallel_dispatch_override(Some("fatal"));
     let err = execute_strategy_actions(
         &store,
-        &db_path,
-        &program,
-        &sample_paths(&dir),
+        &test_ctx.cycle_context(),
         &sample_market(),
-        "mainnet",
         &[sample_action()],
-        true,
     )
     .await
     .expect_err("fatal parallel error");
@@ -395,34 +366,40 @@ async fn execute_strategy_actions_parallel_fatal_propagates() {
 
 #[tokio::test]
 async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
-    use super::test_hooks::{set_managed_post_override, TestHooksScope};
     use super::execute_strategy_actions;
+    use super::test_hooks::{set_managed_post_override, TestHooksScope};
 
     let _hooks = TestHooksScope::begin();
-
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
     let store = SqliteStore::open(&db_path).expect("open");
     let program_path = dir.path().join("program.yaml");
-    write_signer_program(&program_path);
+    write_minimal_program_with_signer(
+        &program_path,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
-    let program = sample_program(false, false);
+    let test_ctx = test_context_from_program_file(
+        &dir,
+        &db_path,
+        &program_path,
+        sample_program(false, false),
+        true,
+    );
 
     set_managed_post_override(Some("success"));
     let output = execute_strategy_actions(
         &store,
-        &db_path,
-        &program,
-        &sample_paths(&dir),
+        &test_ctx.cycle_context(),
         &sample_market(),
-        "mainnet",
         &[sample_action()],
-        true,
     )
     .await
     .expect("dispatch");
-
     assert_eq!(output.executed_count, 1);
 }
 
@@ -509,7 +486,9 @@ fn parallel_dispatch_override_success_returns_output() {
 
 #[test]
 fn managed_post_override_success_returns_true() {
-    use super::test_hooks::{managed_post_test_override, set_managed_post_override, TestHooksScope};
+    use super::test_hooks::{
+        managed_post_test_override, set_managed_post_override, TestHooksScope,
+    };
 
     let _hooks = TestHooksScope::begin();
     set_managed_post_override(Some("success"));

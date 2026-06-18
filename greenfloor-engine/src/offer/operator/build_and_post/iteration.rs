@@ -7,18 +7,16 @@ use crate::error::SignerResult;
 use crate::offer::codec::verify_offer_for_dexie;
 use crate::offer::publish::expected_publish_asset_fields;
 
-use crate::offer::operator::signer_denomination::{
-    bootstrap_blocks_offer, run_signer_denomination_phase, BootstrapPhaseResult,
-};
 use super::context::ResolvedBuildAndPostContext;
 use super::create::create_offer;
 use super::publish::{
-    finalize_publish_payload, offer_post_persist_record, publish_offer,
+    finalize_publish_payload, offer_post_persist_record, publish_offer, PublishOfferParams,
 };
-use super::types::{
-    PostAttemptSuccess, PostFailure, PostIterationOutcome, timing_payload,
-};
+use super::types::{timing_payload, PostAttemptSuccess, PostFailure, PostIterationOutcome};
 use super::BuildAndPostOfferRequest;
+use crate::offer::operator::signer_denomination::{
+    bootstrap_blocks_offer, run_signer_denomination_phase, BootstrapPhaseResult,
+};
 
 pub(super) async fn run_post_iteration(
     request: &BuildAndPostOfferRequest,
@@ -129,18 +127,18 @@ pub(super) async fn run_post_iteration(
         &ctx.resolved_quote_asset_id,
     );
     let publish_started = Instant::now();
-    let publish = publish_offer(
-        &ctx.publish_venue,
+    let publish = publish_offer(PublishOfferParams {
+        publish_venue: &ctx.publish_venue,
         dexie,
         splash,
-        created.offer_text.trim(),
-        request.drop_only,
-        request.claim_rewards,
-        &asset_fields.expected_offered_asset_id,
-        &asset_fields.expected_offered_symbol,
-        &asset_fields.expected_requested_asset_id,
-        &asset_fields.expected_requested_symbol,
-    )
+        offer_text: created.offer_text.trim(),
+        drop_only: request.drop_only,
+        claim_rewards: request.claim_rewards,
+        expected_offered_asset_id: &asset_fields.expected_offered_asset_id,
+        expected_offered_symbol: &asset_fields.expected_offered_symbol,
+        expected_requested_asset_id: &asset_fields.expected_requested_asset_id,
+        expected_requested_symbol: &asset_fields.expected_requested_symbol,
+    })
     .await?;
     let publish_ms = publish_started.elapsed().as_millis() as u64;
 

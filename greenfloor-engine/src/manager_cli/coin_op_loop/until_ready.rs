@@ -5,8 +5,8 @@ use std::future::Future;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::coin_ops::{coin_op_should_stop, SpendableCoin};
 use crate::coin_ops::execution::CoinOpExecContext;
+use crate::coin_ops::{coin_op_should_stop, SpendableCoin};
 use crate::error::SignerResult;
 
 use super::context::spendable_coins_for_gate;
@@ -24,7 +24,9 @@ pub struct UntilReadyLoopConfig {
 }
 
 pub enum LoopIterationOutcome {
-    Continue { operation: Value },
+    Continue {
+        operation: Value,
+    },
     Break {
         operation: Option<Value>,
         reason: String,
@@ -38,10 +40,7 @@ pub enum LoopIterationOutcome {
 #[derive(Debug, Clone)]
 pub enum UntilReadyCompletion {
     Completed { stop_reason: String },
-    Exit {
-        code: i32,
-        payload: Option<Value>,
-    },
+    Exit { code: i32, payload: Option<Value> },
 }
 
 fn gate_ready_for_stop<G>(
@@ -64,10 +63,12 @@ fn iteration_stop_reason(
     max_iterations: i32,
     after_iteration_body: bool,
 ) -> Option<&'static str> {
-    if !after_iteration_body && config.until_ready {
-        if config.stop_when_gate_ready && gate_ready_value == Some(true) {
-            return Some("ready");
-        }
+    if !after_iteration_body
+        && config.until_ready
+        && config.stop_when_gate_ready
+        && gate_ready_value == Some(true)
+    {
+        return Some("ready");
     }
     let (should_stop, reason) = coin_op_should_stop(
         config.until_ready,
@@ -114,13 +115,9 @@ where
             .as_ref()
             .map(|gate| gate_ready_for_stop(&config, gate, &gate_ready));
 
-        if let Some(reason) = iteration_stop_reason(
-            &config,
-            gate_ready_value,
-            iteration,
-            max_iterations,
-            false,
-        ) {
+        if let Some(reason) =
+            iteration_stop_reason(&config, gate_ready_value, iteration, max_iterations, false)
+        {
             stop_reason = reason.to_string();
             break;
         }
@@ -137,20 +134,13 @@ where
                 break;
             }
             LoopIterationOutcome::Exit { code, payload } => {
-                return Ok((
-                    operations,
-                    UntilReadyCompletion::Exit { code, payload },
-                ));
+                return Ok((operations, UntilReadyCompletion::Exit { code, payload }));
             }
         }
 
-        if let Some(reason) = iteration_stop_reason(
-            &config,
-            gate_ready_value,
-            iteration,
-            max_iterations,
-            true,
-        ) {
+        if let Some(reason) =
+            iteration_stop_reason(&config, gate_ready_value, iteration, max_iterations, true)
+        {
             stop_reason = reason.to_string();
             break;
         }
@@ -160,10 +150,7 @@ where
         tokio::time::sleep(std::time::Duration::from_secs(ITERATION_SLEEP_SECS)).await;
     }
 
-    Ok((
-        operations,
-        UntilReadyCompletion::Completed { stop_reason },
-    ))
+    Ok((operations, UntilReadyCompletion::Completed { stop_reason }))
 }
 
 pub fn until_ready_exit_code(until_ready: bool, stop_reason: &str) -> i32 {

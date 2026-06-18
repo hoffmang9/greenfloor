@@ -1,8 +1,10 @@
 //! SQLite store: connection lifecycle and shared row types.
 
+mod alerts;
 mod audit;
 mod coin_ops;
 mod offers;
+mod pricing;
 mod reservations;
 mod tx_signals;
 
@@ -27,6 +29,9 @@ pub struct OfferPostPersistRecord {
     pub resolved_quote_asset_id: String,
     pub created_extra: serde_json::Value,
 }
+
+pub use coin_ops::{CoinOpBudgetReport, CoinOpLedgerEntry};
+pub use reservations::{OfferReservationLeaseRequest, OfferReservationLeaseRow};
 
 pub struct SqliteStore {
     pub(crate) conn: Connection,
@@ -71,7 +76,8 @@ pub struct TxSignalStateRow {
     pub tx_block_confirmed_at: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+pub use alerts::StoredAlertState;
+
 pub struct AuditEventRow {
     pub id: i64,
     pub event_type: String,

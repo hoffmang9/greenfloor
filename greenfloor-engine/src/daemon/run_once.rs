@@ -3,14 +3,14 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::cycle::{
     dedupe_sorted_market_ids, enqueue_immediate_requeue, select_market_batch,
     should_use_market_slot_dispatch, StaleSweepProgress,
 };
-use crate::error::SignerResult;
 use crate::daemon::watchlist::cache::CoinWatchlistCache;
+use crate::error::SignerResult;
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
 use super::market_context::DaemonCycleResources;
@@ -125,9 +125,12 @@ impl DaemonRunOnceRequestBody {
 }
 
 impl DaemonRunOnceRequest {
-    pub fn from_json_value(value: Value, coin_watchlist: Arc<CoinWatchlistCache>) -> SignerResult<Self> {
-        let body: DaemonRunOnceRequestBody =
-            serde_json::from_value(value).map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
+    pub fn from_json_value(
+        value: Value,
+        coin_watchlist: Arc<CoinWatchlistCache>,
+    ) -> SignerResult<Self> {
+        let body: DaemonRunOnceRequestBody = serde_json::from_value(value)
+            .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
         Ok(body.into_engine(coin_watchlist))
     }
 }
@@ -165,7 +168,7 @@ pub async fn build_cycle_plan(
     resources: &DaemonCycleResources,
     store: &SqliteStore,
 ) -> SignerResult<CyclePlan> {
-    let program = &resources.program;
+    let program = resources.program();
     let db_path = resolve_state_db_path(&program.home_dir, request.state_db_override.as_deref());
     let previous_xch_price_usd = store.get_latest_xch_price_snapshot()?;
     let enabled_market_ids = enabled_market_ids(&resources.markets);
@@ -178,7 +181,7 @@ pub async fn build_cycle_plan(
             truncated: false,
         }
     } else {
-        detect_stale_open_offers_for_requeue(&store, &resources.dexie, &enabled_market_ids).await?
+        detect_stale_open_offers_for_requeue(store, &resources.dexie, &enabled_market_ids).await?
     };
 
     let runtime_market_slot_count = program.runtime_market_slot_count;

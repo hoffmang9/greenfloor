@@ -1,18 +1,18 @@
-use std::path::{Path, PathBuf};
-
 use crate::coinset::get_conservative_fee_estimate;
 use crate::config::{
-    action_side_from_pricing, load_markets_config_with_overlay, load_program_config,
-    load_signer_config, require_signer_offer_path, resolve_market_for_build,
-    resolve_offer_publish_settings, ManagerProgramConfig, MarketConfig, SignerConfig,
+    action_side_from_pricing, load_markets_config_with_overlay, load_program_bundle_gated,
+    resolve_market_for_build, resolve_offer_publish_settings, ManagerProgramConfig, MarketConfig,
+    SignerConfig,
 };
 use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
 use crate::offer::{normalize_offer_side, resolve_offer_assets_for_action};
 
-use crate::offer::operator::test_overrides::OfferOperatorTestOverrides;
-use crate::offer::operator::logging::{initialize_manager_file_logging, warn_if_log_level_auto_healed};
 use super::BuildAndPostOfferRequest;
+use crate::offer::operator::logging::{
+    initialize_manager_file_logging, warn_if_log_level_auto_healed,
+};
+use crate::offer::operator::test_overrides::OfferOperatorTestOverrides;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedBuildAndPostContext {
@@ -34,8 +34,8 @@ pub(crate) struct ResolvedBuildAndPostContext {
 pub(super) async fn resolve_build_and_post_context(
     request: &BuildAndPostOfferRequest,
 ) -> SignerResult<ResolvedBuildAndPostContext> {
-    require_signer_offer_path(&request.program_path)?;
-    let program = load_program_config(&request.program_path)?;
+    let bundle = load_program_bundle_gated(&request.program_path)?;
+    let program = bundle.program;
     initialize_manager_file_logging(&program.home_dir, &program.app_log_level)?;
     warn_if_log_level_auto_healed(program.app_log_level_was_missing, &request.program_path);
     let markets = load_markets_config_with_overlay(
@@ -55,7 +55,7 @@ pub(super) async fn resolve_build_and_post_context(
         request.dexie_base_url.as_deref(),
         request.splash_base_url.as_deref(),
     )?;
-    let signer_config = load_signer_config(&request.program_path)?;
+    let signer_config = bundle.signer;
     let (resolved_base_asset_id, resolved_quote_asset_id) =
         resolve_offer_assets_for_action(&signer_config, &market.base_asset, &market.quote_asset)
             .await?;
@@ -80,7 +80,10 @@ pub(super) async fn resolve_build_and_post_context(
     })
 }
 
-pub(super) fn resolve_action_side(action_side_override: Option<&str>, pricing: &serde_json::Value) -> String {
+pub(super) fn resolve_action_side(
+    action_side_override: Option<&str>,
+    pricing: &serde_json::Value,
+) -> String {
     if let Some(side) = action_side_override
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -109,28 +112,9 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
 
     ResolvedBuildAndPostContext {
         program: ManagerProgramConfig {
-            network: "mainnet".to_string(),
-            home_dir: PathBuf::from("/tmp/gf"),
-            app_log_level: "INFO".to_string(),
-            app_log_level_was_missing: false,
-            dexie_api_base: "https://api.dexie.space".to_string(),
-            splash_api_base: "http://localhost:4000".to_string(),
-            offer_publish_venue: "dexie".to_string(),
-            coin_ops_minimum_fee_mojos: 0,
-            coin_ops_max_operations_per_run: 0,
-            coin_ops_max_daily_fee_budget_mojos: 0,
-            coin_ops_split_fee_mojos: 0,
-            coin_ops_combine_fee_mojos: 0,
-            runtime_offer_bootstrap_wait_timeout_seconds: 120,
-            runtime_market_slot_count: 0,
-            runtime_offer_parallelism_enabled: false,
-            runtime_offer_parallelism_max_workers: 4,
-            runtime_dry_run: false,
-            runtime_loop_interval_seconds: 30,
-            tx_block_trigger_mode: "websocket".to_string(),
-            tx_block_websocket_url: String::new(),
             tx_block_websocket_reconnect_interval_seconds: 1,
             tx_block_fallback_poll_interval_seconds: 1,
+            ..Default::default()
         },
         market: MarketConfig {
             market_id: "m1".to_string(),

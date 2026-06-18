@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde_json::{json, Value};
 
@@ -7,7 +6,7 @@ use crate::coin_ops::{
     coin_op_target_amount_allowed, effective_sell_bucket_counts_for_coin_ops,
     partition_plans_by_budget, plan_coin_ops, projected_coin_ops_fee_mojos, BucketSpec, CoinOpPlan,
 };
-use crate::config::{ManagerProgramConfig, MarketConfig};
+use crate::config::{signer_execution_skip_reason, MarketConfig};
 use crate::error::SignerResult;
 use crate::hex::default_mojo_multiplier_for_asset;
 use crate::storage::SqliteStore;
@@ -16,17 +15,19 @@ use super::coin_ops_execution::{
     execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
     CoinOpExecItem, CoinOpExecutionResult,
 };
+use super::market_context::MarketCycleContext;
 
 pub async fn run_coin_ops_phase(
     store: &SqliteStore,
+    ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
-    program: &ManagerProgramConfig,
-    program_path: &Path,
     offers: &[Value],
     wallet_bucket_counts: &BTreeMap<i64, i64>,
     active_counts: &BTreeMap<i64, i64>,
     newly_executed_counts: &BTreeMap<i64, i64>,
 ) -> SignerResult<()> {
+    let program = ctx.resources.program();
+    let resources = &ctx.resources;
     let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
     if sell_ladder.is_empty() {
         store.add_audit_event(
@@ -49,7 +50,7 @@ pub async fn run_coin_ops_phase(
         Some(active_counts),
         Some(newly_executed_counts),
     );
-    let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim()) as i64;
+    let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
     let mut valid_ladder = Vec::new();
     let mut invalid_buckets = Vec::new();
     for entry in &sell_ladder {
@@ -136,14 +137,24 @@ pub async fn run_coin_ops_phase(
             }),
         }
     } else {
-        execute_managed_coin_op_plans(
-            program_path,
-            market,
-            program,
-            &executable_plans,
-            &watched_coin_ids,
-        )
-        .await
+        match resources.signer_for_execution() {
+            Ok(signer) => {
+                execute_managed_coin_op_plans(
+                    program,
+                    signer,
+                    market,
+                    &executable_plans,
+                    &watched_coin_ids,
+                )
+                .await
+            }
+            Err(err) => skipped_coin_ops_result(
+                program,
+                market,
+                &executable_plans,
+                &signer_execution_skip_reason(&err),
+            ),
+        }
     };
 
     if !overflow_plans.is_empty() {
@@ -211,6 +222,36 @@ pub async fn run_coin_ops_phase(
 
     persist_coin_op_execution(store, market, program, &execution)?;
     Ok(())
+}
+
+fn skipped_coin_ops_result(
+    program: &crate::config::ManagerProgramConfig,
+    market: &MarketConfig,
+    plans: &[CoinOpPlan],
+    reason: &str,
+) -> CoinOpExecutionResult {
+    CoinOpExecutionResult {
+        dry_run: program.runtime_dry_run,
+        planned_count: plans.len(),
+        executed_count: 0,
+        status: "skipped".to_string(),
+        items: plans
+            .iter()
+            .map(|plan| CoinOpExecItem {
+                op_type: plan.op_type.as_str().to_string(),
+                size_base_units: plan.size_base_units,
+                op_count: plan.op_count,
+                status: "skipped".to_string(),
+                reason: reason.to_string(),
+                operation_id: None,
+            })
+            .collect(),
+        signer_selection: json!({
+            "selected_source": "signer_registry",
+            "key_id": market.signer_key_id,
+            "network": program.network,
+        }),
+    }
 }
 
 fn plan_summary(plan: &CoinOpPlan) -> serde_json::Value {

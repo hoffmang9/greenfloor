@@ -64,10 +64,7 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
 
     let runtime = load_daemon_program_runtime(&args.program_config)?;
     initialize_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
-    warn_if_daemon_log_level_auto_healed(
-        runtime.app_log_level_was_missing,
-        &args.program_config,
-    );
+    warn_if_daemon_log_level_auto_healed(runtime.app_log_level_was_missing, &args.program_config);
 
     let testnet_markets_path = resolve_testnet_markets_path(&args.testnet_markets_config);
     let allowed_key_ids = parse_key_ids(&args.key_ids).unwrap_or_default();
@@ -105,8 +102,11 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
     run_daemon_loop(request).await
 }
 
-pub async fn run_daemon_cycle_once_from_json(value: Value) -> SignerResult<DaemonCycleOnceResponse> {
-    let request = super::run_once::DaemonRunOnceRequest::from_json_value(value, CoinWatchlistCache::new())?;
+pub async fn run_daemon_cycle_once_from_json(
+    value: Value,
+) -> SignerResult<DaemonCycleOnceResponse> {
+    let request =
+        super::run_once::DaemonRunOnceRequest::from_json_value(value, CoinWatchlistCache::new())?;
     run_daemon_cycle_once(&request).await
 }
 
@@ -134,8 +134,8 @@ pub async fn run_daemon_once_from_request_json(args: DaemonOnceJsonArgs) -> Sign
     body.test_controls.ensure_allowed()?;
     let response = run_daemon_cycle_once_from_json(value).await?;
     if args.json {
-        let encoded = serde_json::to_value(&response)
-            .map_err(|err| SignerError::Other(err.to_string()))?;
+        let encoded =
+            serde_json::to_value(&response).map_err(|err| SignerError::Other(err.to_string()))?;
         crate::cli_util::print_json_value(&encoded, true)?;
     }
     Ok(response.exit_code)

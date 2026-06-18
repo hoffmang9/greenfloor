@@ -5,27 +5,21 @@ mod managed_post;
 mod parallel;
 mod reservation_ctx;
 mod sequential;
-#[cfg(test)]
 mod test_hooks;
 
 #[cfg(test)]
 mod tests;
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use serde_json::json;
 
-use crate::config::{ManagerProgramConfig, MarketConfig};
-use crate::cycle::{
-    expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction,
-};
+use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason, MarketConfig};
+use crate::cycle::{expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction};
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
-use crate::daemon::cycle_paths::DaemonCyclePaths;
-
-pub use coordinator::OfferReservationCoordinator;
+use super::market_context::MarketCycleContext;
 
 #[derive(Debug, Clone)]
 pub struct OfferDispatchOutput {
@@ -74,25 +68,29 @@ pub(crate) async fn record_parallel_fallback_audit(
 
 pub async fn execute_strategy_actions(
     store: &SqliteStore,
-    db_path: &Path,
-    program: &ManagerProgramConfig,
-    paths: &DaemonCyclePaths,
+    ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
-    network: &str,
     actions: &[PlannedAction],
-    signer_offer_path_configured: bool,
 ) -> SignerResult<OfferDispatchOutput> {
-    if !signer_offer_path_configured {
-        store.add_audit_event(
-            "strategy_exec_skipped_no_signer",
-            &json!({"market_id": market.market_id, "planned_count": actions.len()}),
-            Some(&market.market_id),
-        )?;
-        return Ok(OfferDispatchOutput {
-            executed_count: 0,
-            newly_executed_sell_counts: BTreeMap::new(),
-        });
-    }
+    let signer_config = match ctx.resources.signer_for_execution() {
+        Err(err) if is_signer_execution_soft_skip(&err) => {
+            store.add_audit_event(
+                "strategy_exec_skipped_no_signer",
+                &json!({
+                    "market_id": market.market_id,
+                    "planned_count": actions.len(),
+                    "reason": signer_execution_skip_reason(&err),
+                }),
+                Some(&market.market_id),
+            )?;
+            return Ok(OfferDispatchOutput {
+                executed_count: 0,
+                newly_executed_sell_counts: BTreeMap::new(),
+            });
+        }
+        Err(err) => return Err(err),
+        Ok(signer) => signer,
+    };
 
     let expanded = expand_planned_actions(actions);
     if expanded.is_empty() {
@@ -102,15 +100,15 @@ pub async fn execute_strategy_actions(
         });
     }
 
+    let program = ctx.resources.program();
     if parallel_managed_dispatch_enabled(program) {
         match classify_parallel_dispatch(
             parallel::execute_actions_parallel(
                 store,
-                db_path,
-                program,
-                paths,
+                &ctx.dispatch.db_path,
+                ctx.resources,
+                signer_config,
                 market,
-                network,
                 &expanded,
             )
             .await,
@@ -123,5 +121,5 @@ pub async fn execute_strategy_actions(
         }
     }
 
-    sequential::execute_actions_sequential(program, paths, market, &expanded).await
+    sequential::execute_actions_sequential(program, &ctx.resources.paths, market, &expanded).await
 }

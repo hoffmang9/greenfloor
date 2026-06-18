@@ -138,7 +138,7 @@ pub(crate) fn serialize_coin_ids<S>(values: &[Bytes32], serializer: S) -> Result
 where
     S: Serializer,
 {
-    let encoded: Vec<String> = values.iter().map(|value| hex::encode(value)).collect();
+    let encoded: Vec<String> = values.iter().map(hex::encode).collect();
     encoded.serialize(serializer)
 }
 

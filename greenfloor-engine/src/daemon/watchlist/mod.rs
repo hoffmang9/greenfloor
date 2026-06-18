@@ -4,9 +4,9 @@ mod counting;
 mod metadata;
 pub mod time;
 
-use std::collections::{BTreeMap, HashMap, HashSet};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
@@ -16,6 +16,20 @@ use crate::offer::dexie_payload::extract_coin_ids_from_offer_payload;
 use counting::{bucket_active_offers_by_side, bucket_active_offers_by_size};
 use metadata::{recent_offer_metadata_by_offer_id, OfferExecutionMetadata};
 use time::is_recent_mempool_observed_offer_state;
+
+type ActiveOfferStateSummary = (
+    Vec<String>,
+    HashMap<String, i64>,
+    HashMap<String, OfferExecutionMetadata>,
+);
+type SizeCountDetail = (BTreeMap<i64, i64>, HashMap<String, i64>, u64);
+type SideCountDetail = (
+    BTreeMap<i64, i64>,
+    BTreeMap<i64, i64>,
+    HashMap<String, i64>,
+    u64,
+);
+type SideCounts = (BTreeMap<i64, i64>, BTreeMap<i64, i64>, u64);
 
 pub use time::RESEED_MEMPOOL_MAX_AGE_SECONDS;
 
@@ -39,7 +53,10 @@ pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult
     Ok(offer_ids)
 }
 
-pub fn recent_executed_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult<HashSet<String>> {
+pub fn recent_executed_offer_ids(
+    store: &SqliteStore,
+    market_id: &str,
+) -> SignerResult<HashSet<String>> {
     let metadata = recent_offer_metadata_by_offer_id(store, market_id)?;
     Ok(metadata.into_keys().collect())
 }
@@ -58,11 +75,7 @@ fn active_offer_state_summary(
     market_id: &str,
     clock: DateTime<Utc>,
     limit: usize,
-) -> SignerResult<(
-    Vec<String>,
-    HashMap<String, i64>,
-    HashMap<String, OfferExecutionMetadata>,
-)> {
+) -> SignerResult<ActiveOfferStateSummary> {
     let offer_states = store.list_offer_state_details(market_id, limit)?;
     let mut state_counts: HashMap<String, i64> = HashMap::new();
     for row in &offer_states {
@@ -122,7 +135,7 @@ pub fn active_offer_counts_by_size_detail(
     dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
-) -> SignerResult<(BTreeMap<i64, i64>, HashMap<String, i64>, u64)> {
+) -> SignerResult<SizeCountDetail> {
     let (counts, unmapped) = active_offer_counts_by_size_at(
         store,
         market_id,
@@ -158,7 +171,7 @@ pub fn active_offer_counts_by_size_and_side(
     market_id: &str,
     dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
-) -> SignerResult<(BTreeMap<i64, i64>, BTreeMap<i64, i64>, u64)> {
+) -> SignerResult<SideCounts> {
     let (buy, sell, _, unmapped) = active_offer_counts_by_size_and_side_detail(
         store,
         market_id,
@@ -175,12 +188,7 @@ pub fn active_offer_counts_by_size_and_side_detail(
     dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
-) -> SignerResult<(
-    BTreeMap<i64, i64>,
-    BTreeMap<i64, i64>,
-    HashMap<String, i64>,
-    u64,
-)> {
+) -> SignerResult<SideCountDetail> {
     let (buy, sell, unmapped) = active_offer_counts_by_size_and_side_at(
         store,
         market_id,
@@ -198,7 +206,7 @@ fn active_offer_counts_by_size_and_side_at(
     dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
-) -> SignerResult<(BTreeMap<i64, i64>, BTreeMap<i64, i64>, u64)> {
+) -> SignerResult<SideCounts> {
     let (active_offer_ids, _state_counts, metadata_by_offer_id) =
         active_offer_state_summary(store, market_id, clock, 500)?;
     let buckets = bucket_active_offers_by_side(
@@ -213,10 +221,7 @@ fn active_offer_counts_by_size_and_side_at(
 
 pub use cache::CoinWatchlistCache;
 
-pub fn watched_coin_ids_for_market(
-    cache: &CoinWatchlistCache,
-    market_id: &str,
-) -> HashSet<String> {
+pub fn watched_coin_ids_for_market(cache: &CoinWatchlistCache, market_id: &str) -> HashSet<String> {
     cache.watched_coin_ids_for_market(market_id)
 }
 
@@ -245,11 +250,7 @@ pub fn update_market_coin_watchlist_from_offers(
     let mut watched_coin_ids = HashSet::new();
     let mut matched_offer_count = 0_u64;
     for offer in offers {
-        let offer_id = offer
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim();
+        let offer_id = offer.get("id").and_then(Value::as_str).unwrap_or("").trim();
         if offer_id.is_empty() || !watch_offer_ids.contains(offer_id) {
             continue;
         }

@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::config::MarketConfig;
 use crate::cycle::MarketCycleResultState;
 use crate::error::{SignerError, SignerResult};
@@ -10,7 +8,7 @@ use super::coin_ops_phase::run_coin_ops_phase;
 use super::inventory_phase::run_inventory_phase;
 use super::market_context::MarketCycleContext;
 use super::market_gate::enforce_market_key_allowlist;
-use super::strategy_phase::{run_strategy_phase, StrategyPhaseResult};
+use super::strategy_phase::run_strategy_phase;
 
 pub async fn run_post_reconcile_market_phases(
     store: &SqliteStore,
@@ -33,33 +31,18 @@ pub async fn run_post_reconcile_market_phases(
 
     let mut cycle_state = MarketCycleResultState::default();
 
-    let bucket_counts = run_inventory_phase(
-        store,
-        ctx.resources,
-        market,
-        &mut cycle_state,
-    )
-    .await?;
+    let bucket_counts = run_inventory_phase(store, ctx.resources, market, &mut cycle_state).await?;
 
     let strategy = run_strategy_phase(store, ctx, market, &mut cycle_state).await?;
 
-    let _cancel_payload = run_market_cancel_phase(
-        store,
-        &ctx.resources.dexie,
-        market,
-        &ctx.reconcile.offers,
-        ctx.dispatch.runtime_dry_run,
-        ctx.dispatch.xch_price_usd,
-        ctx.plan.previous_xch_price_usd,
-        &mut cycle_state,
-    )
-    .await?;
+    let _cancel_payload =
+        run_market_cancel_phase(store, ctx, market, &ctx.reconcile.offers, &mut cycle_state)
+            .await?;
 
     run_coin_ops_phase(
         store,
+        ctx,
         market,
-        &ctx.resources.program,
-        ctx.resources.program_path(),
         &ctx.reconcile.offers,
         &bucket_counts,
         &strategy.sell_active_counts,

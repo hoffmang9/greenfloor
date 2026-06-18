@@ -3,14 +3,14 @@ use std::collections::{HashMap, HashSet};
 use serde_json::Value;
 
 use crate::adapters::DexieClient;
-use crate::cycle::{
-    is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition,
-};
+use crate::cycle::{is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition};
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
+use super::reconcile_market_cycle::{
+    apply_reconcile_transition, ReconcileMarketCycleMetrics, ReconcileTransitionParams,
+};
 use crate::offer::lifecycle::missing_offer_error_from_payload;
-use super::reconcile_market_cycle::{apply_reconcile_transition, ReconcileMarketCycleMetrics};
 
 pub struct AugmentedDexieOffers {
     pub offers: Vec<Value>,
@@ -40,16 +40,16 @@ fn apply_missing_watched_offer(
         .unwrap_or("open");
     let transition = resolve_missing_watched_offer_transition(current_state)
         .map_err(|parse_err| SignerError::Other(parse_err.to_string()))?;
-    apply_reconcile_transition(
+    apply_reconcile_transition(ReconcileTransitionParams {
         store,
         market_id,
-        watched_offer_id,
-        &transition,
+        offer_id: watched_offer_id,
+        transition: &transition,
         metrics,
         state_by_offer_id,
-        None,
-        Some(error_text),
-    )
+        last_seen_status: None,
+        dexie_error: Some(error_text),
+    })
 }
 
 pub async fn augment_dexie_offers_for_watchlist(
@@ -185,7 +185,10 @@ mod tests {
         };
         merge_reconcile_immediate_requeue(&mut state, &metrics);
         assert!(state.immediate_requeue_requested);
-        assert_eq!(state.immediate_requeue_signals, vec!["taker_fill".to_string()]);
+        assert_eq!(
+            state.immediate_requeue_signals,
+            vec!["taker_fill".to_string()]
+        );
     }
 
     #[test]

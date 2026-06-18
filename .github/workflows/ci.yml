@@ -9,6 +9,7 @@ name: CI
 
 env:
   PYTHON_VERSION: "3.11"
+  CARGO_MANIFEST: greenfloor-engine/Cargo.toml
 
 jobs:
   lint-type-test:
@@ -22,11 +23,11 @@ jobs:
             run_rust_tests: true
             build_native_clis: true
           - os: ubuntu-24.04-arm
-            run_rust_tests: false
+            run_rust_tests: true
             build_native_clis: true
           - os: macos-14
-            run_rust_tests: false
-            build_native_clis: false
+            run_rust_tests: true
+            build_native_clis: true
 
     steps:
       - uses: actions/checkout@v4
@@ -68,17 +69,25 @@ jobs:
           key: venv-v2-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
 
       - uses: ./.github/actions/rust-cache-greenfloor
-        if: matrix.build_native_clis
+        if: matrix.build_native_clis || matrix.run_rust_tests
+
+      - name: Rust format check
+        if: matrix.run_rust_tests
+        run: cargo fmt --manifest-path "${{ env.CARGO_MANIFEST }}" --check
+
+      - name: Rust clippy
+        if: matrix.run_rust_tests
+        run: cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}" --all-targets
 
       - name: Build greenfloor-engine binaries
         if: matrix.build_native_clis && !matrix.run_rust_tests
-        run: cargo build --manifest-path greenfloor-engine/Cargo.toml --bins
+        run: cargo build --manifest-path "${{ env.CARGO_MANIFEST }}" --bins
 
       - name: Build and test greenfloor-engine
         if: matrix.run_rust_tests
         run: |
-          cargo build --manifest-path greenfloor-engine/Cargo.toml --bins
-          cargo test --manifest-path greenfloor-engine/Cargo.toml
+          cargo build --manifest-path "${{ env.CARGO_MANIFEST }}" --bins
+          cargo test --manifest-path "${{ env.CARGO_MANIFEST }}"
 
       - name: Install greenfloor native CLIs on PATH
         if: matrix.build_native_clis
@@ -98,7 +107,7 @@ jobs:
       - name: "Lint + Type-check (pre-commit)"
         env:
           PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
-          SKIP: pytest
+          SKIP: pytest,cargo-fmt,cargo-clippy
         run: pre-commit run --all-files
 
       - name: "Test suite (pytest)"

@@ -44,18 +44,7 @@ pub async fn run_strategy_phase(
 
     let mut newly_executed_sell_counts = BTreeMap::new();
     if !strategy_actions.is_empty() && !ctx.dispatch.test_controls.skip_strategy_execution {
-        match execute_strategy_actions(
-            store,
-            &ctx.dispatch.db_path,
-            &ctx.resources.program,
-            &ctx.resources.paths,
-            market,
-            &ctx.resources.network,
-            &strategy_actions,
-            ctx.resources.signer_offer_path_configured,
-        )
-        .await
-        {
+        match execute_strategy_actions(store, ctx, market, &strategy_actions).await {
             Ok(output) => {
                 state.merge_strategy_execution(0, output.executed_count as i64);
                 newly_executed_sell_counts = output.newly_executed_sell_counts;

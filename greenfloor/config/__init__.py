@@ -1,1 +1,1 @@
-"""Configuration loading and models."""
+"""Thin YAML helpers for scripts; operator validation is Rust-only."""

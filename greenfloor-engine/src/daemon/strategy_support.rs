@@ -104,9 +104,15 @@ fn strategy_config_for_ladder(
         ones_target: *normalized.get(&1).unwrap_or(&0),
         tens_target: *normalized.get(&10).unwrap_or(&0),
         hundreds_target: *normalized.get(&100).unwrap_or(&0),
-        target_spread_bps: include_pricing_bounds.then(|| pricing_int(pricing, "strategy_target_spread_bps")).flatten(),
-        min_xch_price_usd: include_pricing_bounds.then(|| pricing_float(pricing, "strategy_min_xch_price_usd")).flatten(),
-        max_xch_price_usd: include_pricing_bounds.then(|| pricing_float(pricing, "strategy_max_xch_price_usd")).flatten(),
+        target_spread_bps: include_pricing_bounds
+            .then(|| pricing_int(pricing, "strategy_target_spread_bps"))
+            .flatten(),
+        min_xch_price_usd: include_pricing_bounds
+            .then(|| pricing_float(pricing, "strategy_min_xch_price_usd"))
+            .flatten(),
+        max_xch_price_usd: include_pricing_bounds
+            .then(|| pricing_float(pricing, "strategy_max_xch_price_usd"))
+            .flatten(),
         offer_expiry_minutes: pricing_int(pricing, "strategy_offer_expiry_minutes"),
         target_counts_by_size: Some(normalized),
     }
@@ -133,7 +139,7 @@ fn normalize_target_counts(
     raw: &BTreeMap<i64, i64>,
     defaults: Option<&BTreeMap<i64, i64>>,
 ) -> BTreeMap<i64, i64> {
-    let mut out: BTreeMap<i64, i64> = raw
+    let out: BTreeMap<i64, i64> = raw
         .iter()
         .filter(|(size, _)| **size > 0)
         .map(|(size, target)| (*size, (*target).max(0)))

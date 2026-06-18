@@ -119,8 +119,7 @@ async fn subprocess_coinset_push_tx_emits_success_payload() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let value: Value =
-        serde_json::from_slice(&output.stdout).expect("parse push-tx json stdout");
+    let value: Value = serde_json::from_slice(&output.stdout).expect("parse push-tx json stdout");
     assert_eq!(value.get("success").and_then(Value::as_bool), Some(true));
     assert_eq!(value.get("status").and_then(Value::as_str), Some("SUCCESS"));
 }

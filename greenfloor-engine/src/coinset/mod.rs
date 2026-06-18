@@ -12,9 +12,7 @@ pub use api::{
     get_fee_estimate, post_coinset_rpc, push_tx_hex,
 };
 
-pub(crate) use coin_select::{
-    finalize_selected_cats, list_and_select_cats, select_xch_for_amount, CoinSelectionMode,
-};
+pub(crate) use coin_select::finalize_selected_cats;
 
 pub use asset::is_canonical_xch_asset;
 pub use asset::is_xch_like_asset;

@@ -1,117 +1,123 @@
+"""Adapter tests for Python config IO helpers (policy validation is Rust-only)."""
+
+from __future__ import annotations
+
 from pathlib import Path
 
-import pytest
-
 from greenfloor.config.io import (
-    load_markets_config,
-    load_markets_config_with_optional_overlay,
-    load_program_config,
+    enabled_market_rows,
+    load_cats_fields,
+    load_markets_fields,
+    load_program_fields,
+    load_yaml,
+    materialize_minimal_program_template,
+    run_config_validate,
+    symbol_to_asset_id_map,
 )
+from tests.helpers.manager_cli import parse_json_output, run_manager
 
 
-def test_load_program_config() -> None:
-    cfg = load_program_config(Path("config/program.yaml"))
-    assert cfg.python_min_version == "3.11"
-    assert cfg.low_inventory_enabled is True
-    assert cfg.app_log_level == "INFO"
-    assert cfg.tx_block_trigger_mode == "websocket"
-    assert cfg.tx_block_websocket_url.startswith("wss://")
-    assert "key-main-1" in cfg.signer_key_registry
-    assert cfg.signer_key_registry["key-main-1"].fingerprint == 123456789
+def test_load_program_fields_reads_example_program(tmp_path: Path) -> None:
+    program = tmp_path / "program.yaml"
+    program.write_text(Path("config/program.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    fields = load_program_fields(program_config=program)
+    assert fields.get("network") == "mainnet"
+    registry = fields.get("keys_registry")
+    assert isinstance(registry, dict)
+    assert "key-main-1" in registry
 
 
-def test_load_markets_config() -> None:
-    cfg = load_markets_config(Path("config/markets.yaml"))
-    assert len(cfg.markets) >= 2
-    assert all(m.signer_key_id for m in cfg.markets if m.enabled)
-
-
-def test_load_markets_config_with_optional_overlay(tmp_path: Path) -> None:
-    base_path = tmp_path / "markets.yaml"
-    overlay_path = tmp_path / "testnet-markets.yaml"
-    base_path.write_text(
-        "\n".join(
-            [
-                "markets:",
-                "  - id: base_m1",
-                "    enabled: true",
-                '    base_asset: "a1"',
-                '    base_symbol: "A1"',
-                '    quote_asset: "xch"',
-                '    quote_asset_type: "unstable"',
-                '    signer_key_id: "key-main-1"',
-                '    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"',
-                '    mode: "sell_only"',
-                "    inventory:",
-                "      low_watermark_base_units: 100",
-            ]
-        ),
-        encoding="utf-8",
+def test_load_markets_fields_reads_example_markets() -> None:
+    fields = load_markets_fields(
+        markets_config=Path("config/markets.yaml"),
+        testnet_markets_config=Path("config/testnet-markets.yaml"),
     )
-    overlay_path.write_text(
-        "\n".join(
-            [
-                "markets:",
-                "  - id: testnet_m1",
-                "    enabled: true",
-                '    base_asset: "ta1"',
-                '    base_symbol: "TA1"',
-                '    quote_asset: "txch"',
-                '    quote_asset_type: "unstable"',
-                '    signer_key_id: "key-main-1"',
-                '    receive_address: "txch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"',
-                '    mode: "sell_only"',
-                "    inventory:",
-                "      low_watermark_base_units: 100",
-            ]
-        ),
-        encoding="utf-8",
+    enabled = enabled_market_rows(fields)
+    assert enabled
+    assert all(bool(row.get("enabled")) for row in enabled)
+
+
+def test_load_cats_fields_reads_example_cats() -> None:
+    fields = load_cats_fields(cats_config=Path("config/cats.yaml"))
+    symbol_map = symbol_to_asset_id_map(fields)
+    assert symbol_map
+
+
+def test_materialize_minimal_program_template(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    program = tmp_path / "program.yaml"
+    materialize_minimal_program_template(
+        program, home_dir=home, dexie_api_base="https://dexie.test"
     )
-    cfg = load_markets_config_with_optional_overlay(path=base_path, overlay_path=overlay_path)
-    assert len(cfg.markets) == 2
-    assert {m.market_id for m in cfg.markets} == {"base_m1", "testnet_m1"}
+    raw = load_yaml(program)
+    assert raw["app"]["home_dir"] == str(home)
+    assert raw["venues"]["dexie"]["api_base"] == "https://dexie.test"
+    assert raw["dev"]["python"]["min_version"] == "3.11"
 
 
-def test_load_markets_config_rejects_testnet_address_in_base_file(tmp_path: Path) -> None:
-    base_path = tmp_path / "markets.yaml"
-    base_path.write_text(
-        "\n".join(
-            [
-                "markets:",
-                "  - id: bad_base",
-                "    enabled: true",
-                '    base_asset: "a1"',
-                '    base_symbol: "A1"',
-                '    quote_asset: "xch"',
-                '    quote_asset_type: "unstable"',
-                '    signer_key_id: "key-main-1"',
-                '    receive_address: "txch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"',
-                '    mode: "sell_only"',
-                "    inventory:",
-                "      low_watermark_base_units: 100",
-            ]
-        ),
-        encoding="utf-8",
+def test_run_config_validate_subprocess_accepts_example_configs(tmp_path: Path) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    program.write_text(Path("config/program.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    markets.write_text(Path("config/markets.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    code = run_config_validate(program_config=program, markets_config=markets)
+    assert code == 0
+
+
+def test_run_config_validate_program_only_subprocess(tmp_path: Path) -> None:
+    program = tmp_path / "program.yaml"
+    program.write_text(Path("config/program.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    code = run_config_validate(program_config=program, program_only=True)
+    assert code == 0
+
+
+def test_manager_config_validate_cli_emits_ok_json(tmp_path: Path) -> None:
+    program = tmp_path / "program.yaml"
+    markets = tmp_path / "markets.yaml"
+    program.write_text(Path("config/program.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    markets.write_text(Path("config/markets.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    code, stdout, _stderr = run_manager(
+        [
+            "--program-config",
+            str(program),
+            "--markets-config",
+            str(markets),
+            "config-validate",
+        ]
     )
-    with pytest.raises(ValueError, match="testnet receive_address entries found"):
-        load_markets_config_with_optional_overlay(path=base_path, overlay_path=None)
+    payload = parse_json_output(stdout)
+    assert code == 0
+    assert payload.get("ok") is True
 
 
-def test_load_program_config_defaults_log_level_to_info_when_missing(tmp_path: Path) -> None:
-    source = Path("config/program.yaml").read_text(encoding="utf-8")
-    candidate = source.replace("  log_level: INFO\n", "")
-    config_path = tmp_path / "program-missing-log-level.yaml"
-    config_path.write_text(candidate, encoding="utf-8")
-    cfg = load_program_config(config_path)
-    assert cfg.app_log_level == "INFO"
-    rewritten = config_path.read_text(encoding="utf-8")
-    assert "log_level: INFO" in rewritten
+def test_manager_cats_fields_cli_emits_symbol_map(tmp_path: Path) -> None:
+    cats = tmp_path / "cats.yaml"
+    cats.write_text(Path("config/cats.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    code, stdout, _stderr = run_manager(
+        [
+            "--cats-config",
+            str(cats),
+            "--json",
+            "cats-fields",
+        ]
+    )
+    payload = parse_json_output(stdout)
+    assert code == 0
+    assert symbol_to_asset_id_map(payload)
 
 
-def test_load_program_config_defaults_log_level_to_info_when_invalid(tmp_path: Path) -> None:
-    source = Path("config/program.yaml").read_text(encoding="utf-8")
-    candidate = source.replace("  log_level: INFO", "  log_level: totally-not-a-level")
-    config_path = tmp_path / "program-invalid-log-level.yaml"
-    config_path.write_text(candidate, encoding="utf-8")
-    cfg = load_program_config(config_path)
-    assert cfg.app_log_level == "INFO"
+def test_manager_markets_fields_cli_emits_enabled_rows(tmp_path: Path) -> None:
+    markets = tmp_path / "markets.yaml"
+    markets.write_text(Path("config/markets.yaml").read_text(encoding="utf-8"), encoding="utf-8")
+    code, stdout, _stderr = run_manager(
+        [
+            "--markets-config",
+            str(markets),
+            "--json",
+            "markets-fields",
+        ]
+    )
+    payload = parse_json_output(stdout)
+    assert code == 0
+    enabled = enabled_market_rows(payload)
+    assert enabled

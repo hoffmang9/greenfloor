@@ -13,9 +13,7 @@ use super::cycle_entry::run_daemon_cycle_once;
 use super::logging::{initialize_daemon_file_logging, warn_if_daemon_log_level_auto_healed};
 use super::program_runtime::load_daemon_program_runtime;
 use super::reload::{consume_reload_marker, record_config_reloaded};
-use super::run_once::{
-    DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest,
-};
+use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest};
 use super::watchlist::cache::CoinWatchlistCache;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,10 +54,7 @@ async fn run_one_loop_cycle(
 pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
     let runtime = load_daemon_program_runtime(&request.program_path)?;
     initialize_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
-    warn_if_daemon_log_level_auto_healed(
-        runtime.app_log_level_was_missing,
-        &request.program_path,
-    );
+    warn_if_daemon_log_level_auto_healed(runtime.app_log_level_was_missing, &request.program_path);
 
     let program = load_program_config(&request.program_path)?;
     let db_path = resolve_state_db_path(&program.home_dir, request.state_db_override.as_deref());
@@ -92,6 +87,9 @@ pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
             }
         }
 
-        tokio::time::sleep(Duration::from_secs(runtime.runtime_loop_interval_seconds.max(1))).await;
+        tokio::time::sleep(Duration::from_secs(
+            runtime.runtime_loop_interval_seconds.max(1),
+        ))
+        .await;
     }
 }

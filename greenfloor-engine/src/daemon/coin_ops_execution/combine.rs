@@ -2,10 +2,10 @@ use crate::coin_ops::{
     coin_op_target_amount_allowed, plan_auto_combine_inputs, CoinOpPlan, CombineInputSelectionMode,
 };
 
-use crate::coin_ops::execution::CoinOpExecContext;
-use crate::coin_ops::{combine_output_amounts, total_for_coin_ids};
 use super::items::{executed_item, skip_item, CoinOpExecItem};
 use super::COIN_OP_ERROR_PREFIX;
+use crate::coin_ops::execution::CoinOpExecContext;
+use crate::coin_ops::{combine_output_amounts, total_for_coin_ids};
 
 pub(crate) async fn execute_daemon_combine_plan(
     ctx: &CoinOpExecContext,

@@ -63,10 +63,7 @@ pub fn missing_offer_error_from_payload(payload: &Value) -> Option<String> {
     if payload.get("success") != Some(&Value::Bool(false)) {
         return None;
     }
-    let error_text = payload
-        .get("error")
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let error_text = payload.get("error").and_then(Value::as_str).unwrap_or("");
     if is_dexie_offer_missing_error_text(error_text) {
         Some(error_text.to_string())
     } else {
@@ -122,11 +119,9 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
             Ok((transition, None, Some(err.to_string())))
         }
         Err(err) => {
-            let transition = unchanged_offer_transition(
-                current_state,
-                &format!("dexie_lookup_error:{err}"),
-            )
-            .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;
+            let transition =
+                unchanged_offer_transition(current_state, format!("dexie_lookup_error:{err}"))
+                    .map_err(|parse_err| crate::error::SignerError::Other(parse_err.to_string()))?;
             Ok((transition, None, None))
         }
     }
@@ -140,10 +135,8 @@ pub async fn resolve_watched_offer_transition_for_venue(
     current_state: &str,
 ) -> SignerResult<(CycleOfferTransition, Option<i64>, Option<String>)> {
     if target_venue != "dexie" {
-        let transition =
-            unsupported_venue_offer_transition(current_state, target_venue).map_err(|err| {
-                crate::error::SignerError::Other(err.to_string())
-            })?;
+        let transition = unsupported_venue_offer_transition(current_state, target_venue)
+            .map_err(|err| crate::error::SignerError::Other(err.to_string()))?;
         return Ok((transition, None, None));
     }
     let Some(dexie) = dexie else {
@@ -156,7 +149,6 @@ pub async fn resolve_watched_offer_transition_for_venue(
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
     use tempfile::tempdir;
 
     use super::*;
