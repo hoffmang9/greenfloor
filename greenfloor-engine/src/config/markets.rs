@@ -168,14 +168,14 @@ fn parse_market_row(row: &serde_json::Map<String, Value>) -> SignerResult<Market
                         ))
                     })?;
                     Ok(LadderEntry {
-                        size_base_units: optional_i64(entry, "size_base_units", 0),
-                        target_count: optional_i64(entry, "target_count", 0),
-                        split_buffer_count: optional_i64(entry, "split_buffer_count", 0),
+                        size_base_units: optional_i64(entry, "size_base_units", 0)?,
+                        target_count: optional_i64(entry, "target_count", 0)?,
+                        split_buffer_count: optional_i64(entry, "split_buffer_count", 0)?,
                         combine_when_excess_factor: optional_f64(
                             entry,
                             "combine_when_excess_factor",
                             2.0,
-                        ),
+                        )?,
                     })
                 })
                 .collect::<SignerResult<Vec<_>>>()?;
@@ -210,7 +210,7 @@ fn parse_market_row(row: &serde_json::Map<String, Value>) -> SignerResult<Market
         );
     }
     validate_strategy_pricing(&pricing, &market_id, &quote_asset_type)?;
-    let cancel_move_threshold_bps = pop_cancel_move_threshold_bps(&mut pricing);
+    let cancel_move_threshold_bps = pop_cancel_move_threshold_bps(&mut pricing)?;
 
     Ok(MarketConfig {
         market_id,

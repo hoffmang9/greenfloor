@@ -127,6 +127,24 @@ fn parse_markets_config_rejects_legacy_reference_fields() {
 }
 
 #[test]
+fn parse_markets_config_accepts_cancel_move_threshold_bps_as_string() {
+    let mut row = base_market_row();
+    row["pricing"] = json!({"cancel_move_threshold_bps": "250"});
+    let market = parse_single_market(row).expect("market");
+    assert_eq!(market.cancel_move_threshold_bps, Some(250));
+}
+
+#[test]
+fn parse_markets_config_rejects_invalid_ladder_size_base_units() {
+    let mut row = base_market_row();
+    row["ladders"] = json!({
+        "sell": [{"size_base_units": "not-a-number"}]
+    });
+    let err = parse_single_market(row).unwrap_err().to_string();
+    assert!(err.contains("size_base_units"));
+}
+
+#[test]
 fn parse_markets_config_rejects_invalid_cancel_move_threshold_bps() {
     let mut row = base_market_row();
     row["pricing"] = json!({"cancel_move_threshold_bps": 0});

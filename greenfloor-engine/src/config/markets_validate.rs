@@ -160,9 +160,12 @@ pub fn validate_strategy_pricing(
     Ok(())
 }
 
-pub fn pop_cancel_move_threshold_bps(pricing: &mut Value) -> Option<i64> {
-    let pricing_obj = pricing.as_object_mut()?;
-    let raw = pricing_obj.remove("cancel_move_threshold_bps")?;
-    raw.as_i64()
-        .or_else(|| raw.as_u64().map(|value| value as i64))
+pub fn pop_cancel_move_threshold_bps(pricing: &mut Value) -> SignerResult<Option<i64>> {
+    let Some(pricing_obj) = pricing.as_object_mut() else {
+        return Ok(None);
+    };
+    let Some(raw) = pricing_obj.remove("cancel_move_threshold_bps") else {
+        return Ok(None);
+    };
+    Ok(Some(parse_i64_field(&raw, "cancel_move_threshold_bps")?))
 }

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-from pathlib import Path
 
 from greenfloor.engine_binary import resolve_greenfloor_manager_binary
 

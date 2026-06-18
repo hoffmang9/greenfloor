@@ -93,7 +93,7 @@ pub struct MarketCycleContext<'a> {
 pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<DaemonCycleResources> {
     let raw = read_program_yaml(&request.program_path)?;
     let program = parse_program_config(&raw)?;
-    let program_config = CycleProgramConfig::from_parsed(program, &raw)?;
+    let program_config = CycleProgramConfig::from_parsed(program, &raw);
     let network = program_config.program().network.clone();
     let dexie_api_base = program_config.program().dexie_api_base.clone();
     let markets = load_markets_config_with_overlay(
@@ -142,13 +142,16 @@ mod tests {
 
     fn sample_resources(markets: Vec<MarketConfig>) -> DaemonCycleResources {
         DaemonCycleResources::with_program_config(
-            CycleProgramConfig::WithoutSigner(Box::new(ManagerProgramConfig {
-                runtime_market_slot_count: 1,
-                runtime_offer_parallelism_max_workers: 2,
-                tx_block_websocket_reconnect_interval_seconds: 1,
-                tx_block_fallback_poll_interval_seconds: 1,
-                ..Default::default()
-            })),
+            CycleProgramConfig::from_parts(
+                ManagerProgramConfig {
+                    runtime_market_slot_count: 1,
+                    runtime_offer_parallelism_max_workers: 2,
+                    tx_block_websocket_reconnect_interval_seconds: 1,
+                    tx_block_fallback_poll_interval_seconds: 1,
+                    ..Default::default()
+                },
+                None,
+            ),
             MarketsConfig { markets },
             "mainnet".to_string(),
             DexieClient::new("https://api.dexie.space"),

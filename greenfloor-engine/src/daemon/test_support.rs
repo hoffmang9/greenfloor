@@ -5,9 +5,7 @@ use std::path::Path;
 use tempfile::TempDir;
 
 use crate::adapters::DexieClient;
-use crate::config::{
-    CycleProgramConfig, ManagerProgramConfig, MarketsConfig, ProgramConfigBundle, SignerConfig,
-};
+use crate::config::{CycleProgramConfig, ManagerProgramConfig, MarketsConfig, SignerConfig};
 use crate::cycle::StaleSweepProgress;
 
 use super::cycle_paths::DaemonCyclePaths;
@@ -41,12 +39,7 @@ pub fn test_cycle_context(
 ) -> TestCycleContextBundle {
     use std::collections::HashMap;
 
-    let program_config = match signer {
-        Some(signer) => {
-            CycleProgramConfig::WithSigner(Box::new(ProgramConfigBundle { program, signer }))
-        }
-        None => CycleProgramConfig::WithoutSigner(Box::new(program)),
-    };
+    let program_config = CycleProgramConfig::from_parts(program, signer);
 
     TestCycleContextBundle {
         resources: DaemonCycleResources::with_program_config(

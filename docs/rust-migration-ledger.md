@@ -39,7 +39,7 @@ Global flags on `greenfloor-manager`:
   `config-validate`. Scripts must not reimplement YAML policy walks for those fields.
 - `load_yaml()` in `io.py` remains for test fixtures that read written YAML files back;
   it is not an operator validation path.
-- Remove `dev.python.min_version` from `program.yaml` if present; it is ignored.
+- `dev.python.min_version` is optional in `program.yaml`; when omitted, Rust defaults to `3.11`.
 - State DB schema is owned by `greenfloor-engine/src/storage/`; run `doctor` after
   upgrade to confirm SQLite opens.
 

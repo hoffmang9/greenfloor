@@ -99,22 +99,26 @@ pub fn optional_str(map: &serde_json::Map<String, Value>, key: &str, default: &s
         .unwrap_or_else(|| default.to_string())
 }
 
-pub fn optional_i64(map: &serde_json::Map<String, Value>, key: &str, default: i64) -> i64 {
-    map.get(key)
-        .map(|raw| parse_i64_field(raw, key))
-        .transpose()
-        .ok()
-        .flatten()
-        .unwrap_or(default)
+pub fn optional_i64(
+    map: &serde_json::Map<String, Value>,
+    key: &str,
+    default: i64,
+) -> SignerResult<i64> {
+    match map.get(key) {
+        None => Ok(default),
+        Some(raw) => parse_i64_field(raw, key),
+    }
 }
 
-pub fn optional_f64(map: &serde_json::Map<String, Value>, key: &str, default: f64) -> f64 {
-    map.get(key)
-        .map(|raw| parse_f64_field(raw, key))
-        .transpose()
-        .ok()
-        .flatten()
-        .unwrap_or(default)
+pub fn optional_f64(
+    map: &serde_json::Map<String, Value>,
+    key: &str,
+    default: f64,
+) -> SignerResult<f64> {
+    match map.get(key) {
+        None => Ok(default),
+        Some(raw) => parse_f64_field(raw, key),
+    }
 }
 
 pub fn optional_bool_value(raw: Option<&Value>, default: bool) -> bool {

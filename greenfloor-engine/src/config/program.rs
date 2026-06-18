@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use super::keys_registry::{parse_signer_key_registry, SignerKeyEntry};
-use super::signer::SignerConfig;
+use super::signer::{parse_signer_config, SignerConfig};
 use super::yaml_fields::{
     config_err, optional_bool, parse_i64_field, parse_u64_field, req_mapping, req_mapping_from_map,
     req_str, req_value,
@@ -64,37 +64,41 @@ impl ManagerProgramConfig {
 }
 
 #[derive(Debug, Clone)]
-pub enum CycleProgramConfig {
-    WithoutSigner(Box<ManagerProgramConfig>),
-    WithSigner(Box<ProgramConfigBundle>),
+pub struct CycleProgramConfig {
+    program: Box<ManagerProgramConfig>,
+    signer: Option<SignerConfig>,
 }
 
 impl CycleProgramConfig {
-    pub fn from_parsed(program: ManagerProgramConfig, raw: &Value) -> SignerResult<Self> {
-        if program.signer_offer_path_configured() {
-            Ok(Self::WithSigner(Box::new(program_bundle_from_parsed(
-                program, raw,
-            )?)))
+    /// Daemon cycle load: never fail the whole cycle on signer YAML errors.
+    pub fn from_parsed(program: ManagerProgramConfig, raw: &Value) -> Self {
+        let signer = if program.signer_offer_path_configured() {
+            parse_signer_config(raw).ok()
         } else {
-            Ok(Self::WithoutSigner(Box::new(program)))
+            None
+        };
+        Self {
+            program: Box::new(program),
+            signer,
+        }
+    }
+
+    pub fn from_parts(program: ManagerProgramConfig, signer: Option<SignerConfig>) -> Self {
+        Self {
+            program: Box::new(program),
+            signer,
         }
     }
 
     pub fn program(&self) -> &ManagerProgramConfig {
-        match self {
-            Self::WithoutSigner(program) => program,
-            Self::WithSigner(bundle) => &bundle.program,
-        }
+        &self.program
     }
 
     pub fn signer_for_execution(&self) -> SignerResult<&SignerConfig> {
-        match self {
-            Self::WithoutSigner(program) => {
-                program.require_signer_offer_path()?;
-                Err(SignerError::MissingConfigField("signer"))
-            }
-            Self::WithSigner(bundle) => Ok(&bundle.signer),
-        }
+        self.program.require_signer_offer_path()?;
+        self.signer
+            .as_ref()
+            .ok_or(SignerError::MissingConfigField("signer"))
     }
 }
 
@@ -159,10 +163,21 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
     let chain_signals = req_mapping(raw, "chain_signals")?;
     let dev = req_mapping(raw, "dev")?;
     let python = req_mapping_from_map(dev, "python")?;
-    let dev_python_min_version = req_str(python, "min_version")?.trim().to_string();
-    if dev_python_min_version.is_empty() {
-        return Err(config_err("dev.python.min_version must be non-empty"));
-    }
+    let dev_python_min_version = match python.get("min_version") {
+        None => "3.11".to_string(),
+        Some(value) => {
+            let text = value
+                .as_str()
+                .ok_or_else(|| config_err("dev.python.min_version must be a string"))?;
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                return Err(config_err(
+                    "dev.python.min_version must be non-empty when set",
+                ));
+            }
+            trimmed.to_string()
+        }
+    };
     require_pushover_provider(raw)?;
 
     let tx_trigger = req_mapping_from_map(chain_signals, "tx_block_trigger")?;

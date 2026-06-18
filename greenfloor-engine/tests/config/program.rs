@@ -1,6 +1,6 @@
 use greenfloor_engine::config::{
     is_signer_execution_soft_skip, parse_program_config, signer_execution_skip_reason,
-    SIGNER_SKIP_NO_SIGNER_PATH,
+    CycleProgramConfig, SIGNER_SKIP_NO_SIGNER_PATH,
 };
 use greenfloor_engine::error::SignerError;
 use serde_json::{json, Value};
@@ -59,14 +59,14 @@ fn parse_program_config_reads_signer_and_vault_fields() {
 }
 
 #[test]
-fn parse_program_config_missing_dev_python_min_version() {
+fn parse_program_config_missing_dev_python_min_version_defaults() {
     let mut raw = base_program_raw();
     raw["dev"]["python"]
         .as_object_mut()
         .unwrap()
         .remove("min_version");
-    let err = parse_err(&raw);
-    assert!(err.contains("Missing required field: min_version"));
+    let cfg = parse_program_config(&raw).expect("config");
+    assert_eq!(cfg.dev_python_min_version, "3.11");
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn parse_program_config_empty_dev_python_min_version() {
     let mut raw = base_program_raw();
     raw["dev"]["python"]["min_version"] = json!("");
     let err = parse_err(&raw);
-    assert!(err.contains("dev.python.min_version must be non-empty"));
+    assert!(err.contains("dev.python.min_version must be non-empty when set"));
 }
 
 #[test]
@@ -327,6 +327,21 @@ fn parse_program_config_registry_none_treated_as_empty() {
     raw["keys"]["registry"] = json!(null);
     let cfg = parse_program_config(&raw).expect("config");
     assert!(cfg.signer_key_registry.is_empty());
+}
+
+#[test]
+fn cycle_program_config_soft_skips_when_signer_yaml_invalid() {
+    let mut raw = base_program_raw();
+    raw["signer"] = json!({
+        "kms_key_id": "",
+    });
+    raw["vault"] = json!({
+        "launcher_id": "aa".repeat(32),
+    });
+    let program = parse_program_config(&raw).expect("program");
+    let cycle = CycleProgramConfig::from_parsed(program, &raw);
+    let err = cycle.signer_for_execution().expect_err("invalid signer");
+    assert!(is_signer_execution_soft_skip(&err));
 }
 
 #[test]
