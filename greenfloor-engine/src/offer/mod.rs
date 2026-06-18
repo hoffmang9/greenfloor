@@ -8,7 +8,10 @@ pub mod bootstrap;
 pub mod build;
 pub mod build_context;
 pub mod codec;
+pub mod dexie_payload;
 pub mod invariants;
+pub mod lifecycle;
+pub mod operator;
 pub mod plan;
 pub mod presplit;
 pub mod publish;
@@ -34,8 +37,8 @@ pub use codec::{
     verify_offer_for_dexie,
 };
 pub use publish::{
-    bootstrap_block_error, dexie_offer_asset_expectation_error, expected_publish_asset_fields,
-    ExpectedPublishAssetFields,
+    bootstrap_block_error, bootstrap_offer_gate, dexie_offer_asset_expectation_error,
+    expected_publish_asset_fields, BootstrapOfferGate, ExpectedPublishAssetFields,
 };
 pub use request::{
     compute_signer_offer_leg_amounts, normalize_offer_asset_id, normalize_offer_side,

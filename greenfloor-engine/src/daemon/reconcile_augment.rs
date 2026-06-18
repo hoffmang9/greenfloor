@@ -9,9 +9,7 @@ use crate::cycle::{
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
-use super::reconcile_offer::{
-    missing_offer_error_from_payload,
-};
+use crate::offer::lifecycle::missing_offer_error_from_payload;
 use super::reconcile_phase::{apply_reconcile_transition, ReconcilePhaseMetrics};
 
 pub struct AugmentedDexieOffers {

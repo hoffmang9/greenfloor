@@ -103,9 +103,8 @@ pub use cycle::{
 pub use error::SignerError as Error;
 pub use hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
 pub use manager::{
-    build_and_post_offer, format_build_and_post_output, run_offers_cancel_command,
-    run_offers_reconcile_command, run_offers_status_command, BuildAndPostOfferRequest,
-    BuildAndPostOfferResponse, OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
+    run_offers_cancel_command, run_offers_reconcile_command, run_offers_status_command,
+    OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
 };
 pub use manager_cli::{run_manager_cli, ManagerCli, ManagerCommands};
 pub use coin_ops::execution::{combine_input_coin_cap, CoinOpExecContext};
@@ -115,6 +114,11 @@ pub use daemon::{
 pub use offer::bootstrap::{
     bootstrap_early_phase, bootstrap_executed_phase, plan_bootstrap_mixed_outputs, BootstrapCoin,
     BootstrapPhaseSnapshot, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
+};
+pub use offer::operator::{
+    bootstrap_blocks_offer, build_and_post_offer, format_build_and_post_output,
+    signer_bootstrap_phase, BuildAndPostOfferRequest, BuildAndPostOfferResponse,
+    BootstrapPhaseResult,
 };
 pub use offer::build_context::{
     mojo_multiplier_for_leg, resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,

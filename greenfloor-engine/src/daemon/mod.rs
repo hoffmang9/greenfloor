@@ -1,7 +1,6 @@
 //! Daemon cycle orchestration (native Rust). Reconcile, inventory/strategy/coin_ops planning, and cancel run in Rust.
 
 mod cli;
-mod cancel_executor;
 mod cancel_phase;
 mod coin_ops_execution;
 mod coin_ops_phase;
@@ -11,7 +10,6 @@ mod coinset_ws;
 mod cycle_entry;
 mod cycle_paths;
 mod daemon_loop;
-mod dexie_offer;
 mod disabled_markets;
 mod inventory_phase;
 mod lock;
@@ -25,9 +23,6 @@ mod offer_dispatch;
 mod preamble;
 mod program_runtime;
 mod reconcile_augment;
-mod reconcile_batch;
-mod reconcile_offer;
-mod reconcile_persist;
 mod reconcile_phase;
 mod reload;
 mod run_once;
@@ -40,10 +35,9 @@ pub use coin_ops_execution::{
     execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
 };
 pub use crate::coin_ops::execution::{combine_input_coin_cap, CoinOpExecContext};
-pub use cancel_executor::{cancel_offers_on_dexie, CancelOfferTarget};
-pub use reconcile_batch::{
-    reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,
-    ReconcileCliResult,
+pub use crate::offer::lifecycle::{
+    cancel_offers_on_dexie, reconcile_offers_batch, reconcile_offers_cli, CancelOfferTarget,
+    ReconcileBatchItem, ReconcileBatchResult, ReconcileCliResult,
 };
 pub use cancel_phase::run_market_cancel_phase;
 pub use coinset_tx::build_dexie_size_by_offer_id;

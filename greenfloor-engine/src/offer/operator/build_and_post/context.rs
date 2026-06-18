@@ -10,7 +10,8 @@ use crate::error::SignerResult;
 use crate::offer::build_context::resolve_quote_price_for_pricing;
 use crate::offer::{normalize_offer_side, resolve_offer_assets_for_action};
 
-use crate::manager::logging::{initialize_manager_file_logging, warn_if_log_level_auto_healed};
+use crate::offer::operator::test_overrides::OfferOperatorTestOverrides;
+use crate::offer::operator::logging::{initialize_manager_file_logging, warn_if_log_level_auto_healed};
 use super::BuildAndPostOfferRequest;
 
 #[derive(Debug, Clone)]
@@ -27,6 +28,7 @@ pub(crate) struct ResolvedBuildAndPostContext {
     pub action_side: String,
     pub offer_fee_mojos: u64,
     pub offer_fee_source: String,
+    pub test_overrides: OfferOperatorTestOverrides,
 }
 
 pub(super) async fn resolve_build_and_post_context(
@@ -74,6 +76,7 @@ pub(super) async fn resolve_build_and_post_context(
         action_side,
         offer_fee_mojos,
         offer_fee_source,
+        test_overrides: OfferOperatorTestOverrides::from_env(),
     })
 }
 
@@ -167,5 +170,6 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
         action_side: "sell".to_string(),
         offer_fee_mojos: 0,
         offer_fee_source: "coinset_fee_unavailable".to_string(),
+        test_overrides: OfferOperatorTestOverrides::default(),
     }
 }

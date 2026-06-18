@@ -8,8 +8,8 @@ use crate::cycle::{
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
-use super::cancel_executor::{cancel_offers_on_dexie, CancelOfferTarget};
-use super::coinset_tx::dexie_offer_status;
+use crate::offer::dexie_payload::dexie_offer_status;
+use crate::offer::lifecycle::{cancel_offers_on_dexie, CancelOfferTarget};
 
 pub async fn run_market_cancel_phase(
     store: &SqliteStore,

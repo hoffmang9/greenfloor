@@ -1,17 +1,15 @@
 use std::path::Path;
 
-use serde_json::{json, Value};
+use serde_json::json;
 
-use crate::coin_ops::{
-    coin_op_should_stop, evaluate_coin_split_gate, plan_auto_split_selection,
-    SplitAutoSelectPlan, SplitPlanningProfile,
-};
+use crate::coin_ops::evaluate_coin_split_gate;
 use crate::error::{SignerError, SignerResult};
 
+use super::context::{build_coin_op_exec_context, gate_to_json};
 use super::loop_common::validate_until_ready_mode;
-use super::context::{
-    build_coin_op_exec_context, enforce_split_lockup_guardrail, gate_to_json,
-    spendable_coins_for_gate, submit_split_combine_prereq, COIN_SPLIT_NO_SPENDABLE_ERROR,
+use super::split_iteration::run_split_iteration;
+use super::until_ready::{
+    run_until_ready_loop, until_ready_exit_code, UntilReadyLoopConfig,
 };
 use crate::manager_cli::json::emit_json;
 use crate::manager_cli::ladder::{
@@ -59,122 +57,55 @@ pub async fn run_coin_split(
     let split_target = size_base_units
         .filter(|value| *value > 0)
         .map(|size| sell_ladder_entry_for_size(&ctx.market, size))
-        .transpose()?;
-    let max_iterations = max_iterations.max(1);
-    let mut operations = Vec::new();
-    let mut stop_reason = "single_pass".to_string();
+        .transpose()?
+        .cloned();
     let explicit_coin_ids = !coin_ids.is_empty();
+    let resolved_asset_id = ctx.resolved_base_asset_id.clone();
+    let output_amounts: Vec<u64> =
+        vec![amount_per_coin_mojos.max(0) as u64; number_of_coins as usize];
+    let split_fee = ctx.program.coin_ops_split_fee_mojos.max(0) as u64;
 
-    for iteration in 1..=max_iterations {
-        let spendable = ctx.list_spendable_coins().await?;
-        let gate_coins = spendable_coins_for_gate(&spendable);
-        let split_gate = split_target
-            .as_ref()
-            .map(|entry| {
+    let (operations, completion) = run_until_ready_loop(
+        &ctx,
+        UntilReadyLoopConfig {
+            until_ready,
+            no_wait,
+            max_iterations,
+            explicit_coin_ids,
+            stop_when_gate_ready: !force_split_when_ready,
+        },
+        |gate_coins| {
+            split_target.as_ref().map(|entry| {
                 evaluate_coin_split_gate(
-                    &gate_coins,
-                    &ctx.resolved_base_asset_id,
+                    gate_coins,
+                    &resolved_asset_id,
                     amount_per_coin_mojos,
                     split_required_count(entry),
                 )
-            });
-
-        if let Some(ref gate) = split_gate {
-            if until_ready && gate.ready && !force_split_when_ready {
-                stop_reason = "ready".to_string();
-                break;
-            }
-            let (should_stop, reason) = coin_op_should_stop(
-                until_ready,
-                Some(gate.ready),
+            })
+        },
+        |gate| gate.ready,
+        gate_to_json,
+        |iteration, spendable, gate_json| {
+            run_split_iteration(
+                &ctx,
+                iteration,
+                spendable,
+                gate_json,
                 explicit_coin_ids,
-                i64::from(iteration),
-                i64::from(max_iterations),
-            );
-            if should_stop && until_ready {
-                stop_reason = reason.to_string();
-                break;
-            }
-        }
-
-        let selected_coin_ids = if explicit_coin_ids {
-            coin_ids.to_vec()
-        } else {
-            if spendable.is_empty() {
-                emit_json(&json!({"error": COIN_SPLIT_NO_SPENDABLE_ERROR}))?;
-                return Ok(2);
-            }
-            match plan_auto_split_selection(
-                &spendable,
+                coin_ids,
                 required_amount,
-                ctx.market.base_asset.trim(),
-                SplitPlanningProfile::CliAuto,
-                ctx.combine_input_cap,
-                Some(iteration == 1),
-            ) {
-                SplitAutoSelectPlan::CombinePrereq(prereq) => {
-                    let operation_id = submit_split_combine_prereq(&ctx, &prereq).await?;
-                    operations.push(json!({
-                        "iteration": iteration,
-                        "op": "combine-prereq",
-                        "signature_request_id": operation_id,
-                        "input_coin_ids": prereq.input_coin_ids,
-                        "waited": !no_wait,
-                    }));
-                    if no_wait {
-                        stop_reason = "combine_prereq_submitted".to_string();
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    continue;
-                }
-                SplitAutoSelectPlan::Skip(skip) => {
-                    emit_json(&json!({"error": skip.reason}))?;
-                    return Ok(2);
-                }
-                SplitAutoSelectPlan::Coin(plan) => vec![plan.coin_id],
-            }
-        };
-
-        if let Some(code) = enforce_split_lockup_guardrail(
-            &spendable,
-            &selected_coin_ids,
-            allow_lock_all_spendable,
-            &ctx.resolved_base_asset_id,
-        )? {
-            return Ok(code);
-        }
-
-        let operation_id = ctx
-            .execute_mixed_split(
-                vec![amount_per_coin_mojos.max(0) as u64; number_of_coins as usize],
-                &selected_coin_ids,
-                ctx.program.coin_ops_split_fee_mojos.max(0) as u64,
+                &output_amounts,
+                split_fee,
+                no_wait,
+                allow_lock_all_spendable,
             )
-            .await?;
-        operations.push(json!({
-            "iteration": iteration,
-            "signature_request_id": operation_id,
-            "selected_coin_ids": selected_coin_ids,
-            "waited": !no_wait,
-            "denomination_readiness": split_gate.as_ref().map(gate_to_json),
-        }));
+        },
+    )
+    .await?;
 
-        let (should_stop, reason) = coin_op_should_stop(
-            until_ready,
-            split_gate.as_ref().map(|gate| gate.ready),
-            explicit_coin_ids,
-            i64::from(iteration),
-            i64::from(max_iterations),
-        );
-        if should_stop {
-            stop_reason = reason.to_string();
-            break;
-        }
-        if no_wait {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    if let Some(code) = completion.exit_code() {
+        return Ok(code);
     }
 
     emit_json(&json!({
@@ -184,9 +115,12 @@ pub async fn run_coin_split(
         "number_of_coins": number_of_coins,
         "resolved_asset_id": ctx.resolved_base_asset_id,
         "until_ready": until_ready,
-        "max_iterations": max_iterations,
-        "stop_reason": stop_reason,
+        "max_iterations": max_iterations.max(1),
+        "stop_reason": completion.stop_reason().unwrap_or("single_pass"),
         "operations": operations,
     }))?;
-    Ok(if until_ready && stop_reason != "ready" { 2 } else { 0 })
+    Ok(until_ready_exit_code(
+        until_ready,
+        completion.stop_reason().unwrap_or("single_pass"),
+    ))
 }

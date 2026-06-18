@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::PlannedAction;
 use crate::error::SignerResult;
-use crate::manager::{build_and_post_offer, BuildAndPostOfferRequest};
+use crate::offer::operator::{build_and_post_offer, BuildAndPostOfferRequest};
 use crate::offer::request::normalize_offer_side;
 
 use crate::daemon::cycle_paths::DaemonCyclePaths;

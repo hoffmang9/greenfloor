@@ -6,8 +6,8 @@ use crate::adapters::DexieClient;
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
-use super::reconcile_offer::resolve_watched_offer_transition_for_venue;
-use super::reconcile_persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
+use super::persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
+use super::transition::resolve_watched_offer_transition_for_venue;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReconcileBatchItem {
@@ -134,7 +134,8 @@ pub async fn reconcile_offers_cli(
     market_id: Option<&str>,
     limit: usize,
 ) -> SignerResult<ReconcileCliResult> {
-    let batch = reconcile_offers_batch(db_path, dexie_base_url, target_venue, market_id, limit).await?;
+    let batch =
+        reconcile_offers_batch(db_path, dexie_base_url, target_venue, market_id, limit).await?;
     Ok(ReconcileCliResult {
         state_db: db_path.display().to_string(),
         venue: target_venue.trim().to_ascii_lowercase(),
@@ -151,7 +152,6 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::adapters::DexieClient;
 
     #[tokio::test]
     async fn batch_reconcile_updates_states_from_dexie() {
@@ -165,9 +165,16 @@ mod tests {
         store
             .upsert_offer_state("offer-missing", "m1", "open", Some(0))
             .expect("seed");
-        assert_eq!(store.observe_mempool_tx_ids(&[confirmed_tx_id.clone()]).expect("mempool"), 1);
         assert_eq!(
-            store.confirm_tx_ids(&[confirmed_tx_id.clone()]).expect("confirm"),
+            store
+                .observe_mempool_tx_ids(&[confirmed_tx_id.clone()])
+                .expect("mempool"),
+            1
+        );
+        assert_eq!(
+            store
+                .confirm_tx_ids(&[confirmed_tx_id.clone()])
+                .expect("confirm"),
             1
         );
 
@@ -204,7 +211,13 @@ mod tests {
             .into_iter()
             .map(|row| (row.offer_id, row.state))
             .collect();
-        assert_eq!(by_id.get("offer-ok").map(String::as_str), Some("tx_block_confirmed"));
-        assert_eq!(by_id.get("offer-missing").map(String::as_str), Some("expired"));
+        assert_eq!(
+            by_id.get("offer-ok").map(String::as_str),
+            Some("tx_block_confirmed")
+        );
+        assert_eq!(
+            by_id.get("offer-missing").map(String::as_str),
+            Some("expired")
+        );
     }
 }

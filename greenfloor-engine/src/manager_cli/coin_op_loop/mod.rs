@@ -1,10 +1,11 @@
-//! Coin split/combine CLI iteration loops using canonical gate policy.
-
 mod combine;
+mod combine_iteration;
 mod context;
 mod list;
 mod loop_common;
 mod split;
+mod split_iteration;
+mod until_ready;
 
 #[cfg(test)]
 mod tests;

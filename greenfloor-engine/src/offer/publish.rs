@@ -9,11 +9,54 @@ pub struct ExpectedPublishAssetFields {
     pub expected_requested_symbol: String,
 }
 
-fn bootstrap_skip_blocks_offer(reason: &str) -> bool {
-    !matches!(
-        reason.trim(),
-        "already_ready" | "dry_run"
-    )
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootstrapOfferGate {
+    Continue,
+    BlockFailed,
+    BlockPending,
+    BlockSkipped,
+}
+
+const BOOTSTRAP_SKIP_CONTINUE_REASONS: &[&str] = &["already_ready", "dry_run"];
+
+fn normalized_bootstrap_reason(bootstrap_reason: &str) -> String {
+    if bootstrap_reason.trim().is_empty() {
+        "bootstrap_precheck_failed".to_string()
+    } else {
+        bootstrap_reason.trim().to_string()
+    }
+}
+
+/// Typed bootstrap outcome for offer creation gating.
+pub fn bootstrap_offer_gate(
+    bootstrap_status: &str,
+    bootstrap_reason: &str,
+    bootstrap_ready: bool,
+) -> BootstrapOfferGate {
+    let status = bootstrap_status.trim().to_ascii_lowercase();
+    let reason = normalized_bootstrap_reason(bootstrap_reason);
+    if status == "failed" {
+        return BootstrapOfferGate::BlockFailed;
+    }
+    if status == "executed" && !bootstrap_ready {
+        return BootstrapOfferGate::BlockPending;
+    }
+    if status == "skipped" && !BOOTSTRAP_SKIP_CONTINUE_REASONS.contains(&reason.as_str()) {
+        return BootstrapOfferGate::BlockSkipped;
+    }
+    BootstrapOfferGate::Continue
+}
+
+impl BootstrapOfferGate {
+    pub fn block_error(self, bootstrap_reason: &str) -> Option<String> {
+        let reason = normalized_bootstrap_reason(bootstrap_reason);
+        match self {
+            BootstrapOfferGate::Continue => None,
+            BootstrapOfferGate::BlockFailed => Some(format!("bootstrap_failed:{reason}")),
+            BootstrapOfferGate::BlockPending => Some(format!("bootstrap_pending:{reason}")),
+            BootstrapOfferGate::BlockSkipped => Some(format!("bootstrap_precheck_skipped:{reason}")),
+        }
+    }
 }
 
 /// Return manager bootstrap block reason text, or ``None`` when offer creation should continue.
@@ -22,22 +65,8 @@ pub fn bootstrap_block_error(
     bootstrap_reason: &str,
     bootstrap_ready: bool,
 ) -> Option<String> {
-    let status = bootstrap_status.trim().to_ascii_lowercase();
-    let reason = if bootstrap_reason.trim().is_empty() {
-        "bootstrap_precheck_failed"
-    } else {
-        bootstrap_reason.trim()
-    };
-    if status == "failed" {
-        return Some(format!("bootstrap_failed:{reason}"));
-    }
-    if status == "executed" && !bootstrap_ready {
-        return Some(format!("bootstrap_pending:{reason}"));
-    }
-    if status == "skipped" && bootstrap_skip_blocks_offer(reason) {
-        return Some(format!("bootstrap_precheck_skipped:{reason}"));
-    }
-    None
+    bootstrap_offer_gate(bootstrap_status, bootstrap_reason, bootstrap_ready)
+        .block_error(bootstrap_reason)
 }
 
 /// Resolve expected offered/requested assets for Dexie visibility checks.
@@ -163,10 +192,34 @@ pub fn dexie_offer_asset_expectation_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        bootstrap_block_error, dexie_offer_asset_expectation_error, expected_publish_asset_fields,
-        ExpectedPublishAssetFields,
+        bootstrap_block_error, bootstrap_offer_gate, dexie_offer_asset_expectation_error,
+        expected_publish_asset_fields, BootstrapOfferGate, ExpectedPublishAssetFields,
     };
     use serde_json::json;
+
+    #[test]
+    fn bootstrap_offer_gate_typed_outcomes() {
+        assert_eq!(
+            bootstrap_offer_gate("failed", "split_error", false),
+            BootstrapOfferGate::BlockFailed
+        );
+        assert_eq!(
+            bootstrap_offer_gate("executed", "split_submitted", false),
+            BootstrapOfferGate::BlockPending
+        );
+        assert_eq!(
+            bootstrap_offer_gate("skipped", "already_ready", false),
+            BootstrapOfferGate::Continue
+        );
+        assert_eq!(
+            bootstrap_offer_gate("skipped", "dry_run", false),
+            BootstrapOfferGate::Continue
+        );
+        assert_eq!(
+            bootstrap_offer_gate("skipped", "seed_missing", false),
+            BootstrapOfferGate::BlockSkipped
+        );
+    }
 
     #[test]
     fn bootstrap_failed_returns_block_error() {

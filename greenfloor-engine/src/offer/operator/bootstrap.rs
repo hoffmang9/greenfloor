@@ -12,7 +12,7 @@ use crate::offer::bootstrap::{
     BootstrapPhaseSnapshot, BootstrapPlan, BootstrapPlanOutcome, PlannerLadderRow,
 };
 use crate::offer::build_context::mojo_multiplier_for_leg;
-use crate::offer::publish::bootstrap_block_error;
+use crate::offer::publish::{bootstrap_offer_gate, BootstrapOfferGate};
 use crate::offer::request::{
     normalize_offer_side, quote_mojos_for_base_size, signer_split_asset_id,
 };
@@ -93,10 +93,14 @@ impl BootstrapPhaseResult {
             plan: None,
         }
     }
+
+    pub fn offer_creation_gate(&self) -> BootstrapOfferGate {
+        bootstrap_offer_gate(&self.status, &self.reason, self.ready)
+    }
 }
 
 pub fn bootstrap_blocks_offer(result: &BootstrapPhaseResult) -> Option<String> {
-    bootstrap_block_error(&result.status, &result.reason, result.ready)
+    result.offer_creation_gate().block_error(&result.reason)
 }
 
 fn bootstrap_ladder_entries_for_side(

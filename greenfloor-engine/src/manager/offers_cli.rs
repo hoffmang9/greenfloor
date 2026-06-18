@@ -5,13 +5,11 @@ use std::path::PathBuf;
 use clap::Args;
 
 use crate::config::load_program_config;
-use crate::daemon::reconcile_offers_cli;
 use crate::error::SignerResult;
-use crate::storage::resolve_state_db_path;
-
-use super::offer_lifecycle::{
-    offers_cancel_cli, offers_status_cli, OffersCancelCliResult,
+use crate::offer::lifecycle::{
+    offers_cancel_cli, offers_status_cli, reconcile_offers_cli, OffersCancelCliResult,
 };
+use crate::storage::resolve_state_db_path;
 
 fn print_json(value: &impl serde::Serialize) -> SignerResult<()> {
     println!(

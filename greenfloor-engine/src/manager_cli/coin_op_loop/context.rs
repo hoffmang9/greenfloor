@@ -3,8 +3,8 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use crate::coin_ops::{CoinCombineGateResult, CoinSplitGateResult, SpendableCoin, SplitCombinePrereqPlan};
-use crate::coin_ops::execution::{combine_input_coin_cap, submit_combine_prereq, CoinOpExecContext};
+use crate::coin_ops::{CoinCombineGateResult, CoinSplitGateResult, SpendableCoin};
+use crate::coin_ops::execution::{combine_input_coin_cap, CoinOpTestOverrides, CoinOpExecContext};
 use crate::config::{
     load_markets_config_with_overlay, load_program_config, load_signer_config,
     resolve_market_for_build, MarketConfig,
@@ -46,14 +46,8 @@ pub(super) async fn build_coin_op_exec_context(
             as i64,
         combine_input_cap: combine_input_coin_cap(),
         watched_coin_ids: HashSet::new(),
+        test_overrides: CoinOpTestOverrides::from_env(),
     })
-}
-
-pub(super) async fn submit_split_combine_prereq(
-    ctx: &CoinOpExecContext,
-    prereq: &SplitCombinePrereqPlan,
-) -> SignerResult<String> {
-    submit_combine_prereq(ctx, &prereq.input_coin_ids).await
 }
 
 pub(super) fn enforce_split_lockup_guardrail(

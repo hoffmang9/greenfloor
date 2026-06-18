@@ -7,7 +7,9 @@ use crate::error::SignerResult;
 use crate::offer::codec::verify_offer_for_dexie;
 use crate::offer::publish::expected_publish_asset_fields;
 
-use crate::manager::bootstrap::{bootstrap_blocks_offer, signer_bootstrap_phase, BootstrapPhaseResult};
+use crate::offer::operator::bootstrap::{
+    bootstrap_blocks_offer, signer_bootstrap_phase, BootstrapPhaseResult,
+};
 use super::context::ResolvedBuildAndPostContext;
 use super::create::create_offer;
 use super::publish::{
@@ -61,6 +63,7 @@ pub(super) async fn run_post_iteration(
         request.size_base_units,
         ctx.quote_price,
         &ctx.action_side,
+        &ctx.test_overrides,
     )
     .await
     {

@@ -10,12 +10,10 @@ use crate::cycle::{
     unsupported_venue_offer_transition, CycleOfferTransition,
 };
 use crate::error::SignerResult;
-use crate::storage::SqliteStore;
-
-use super::coinset_tx::{
-    dexie_offer_status, extract_coinset_tx_ids_from_offer_payload,
+use crate::offer::dexie_payload::{
+    dexie_offer_status, extract_coinset_tx_ids_from_offer_payload, DexieOfferPayload,
 };
-use super::dexie_offer::DexieOfferPayload;
+use crate::storage::SqliteStore;
 
 fn coinset_signal_lists(
     store: &SqliteStore,
@@ -42,7 +40,7 @@ fn coinset_signal_lists(
     Ok((confirmed, mempool))
 }
 
-pub(crate) fn transition_from_dexie_offer_payload(
+pub fn transition_from_dexie_offer_payload(
     store: &SqliteStore,
     current_state: &str,
     offer_payload: &Value,
@@ -61,7 +59,7 @@ pub(crate) fn transition_from_dexie_offer_payload(
     .map_err(|err| crate::error::SignerError::Other(err.to_string()))
 }
 
-pub(crate) fn missing_offer_error_from_payload(payload: &Value) -> Option<String> {
+pub fn missing_offer_error_from_payload(payload: &Value) -> Option<String> {
     if payload.get("success") != Some(&Value::Bool(false)) {
         return None;
     }
@@ -92,7 +90,7 @@ fn transition_from_offer_body(
 }
 
 /// Resolve a lifecycle transition from an already-fetched Dexie offer payload.
-pub(crate) fn transition_from_list_offer_payload(
+pub fn transition_from_list_offer_payload(
     store: &SqliteStore,
     current_state: &str,
     offer_payload: &Value,

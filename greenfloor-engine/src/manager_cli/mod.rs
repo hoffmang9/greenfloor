@@ -18,7 +18,7 @@ use crate::manager::{
     OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
 };
 use crate::error::SignerResult;
-use crate::manager::{build_and_post_offer, BuildAndPostOfferRequest};
+use crate::offer::operator::{build_and_post_offer, BuildAndPostOfferRequest};
 
 use paths::{
     default_cats_config_path, default_markets_config_path, default_program_config_path,

@@ -9,9 +9,10 @@ use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
 use super::coinset_tx::build_dexie_size_by_offer_id;
-use super::reconcile_offer::transition_from_list_offer_payload;
 use super::reconcile_augment::augment_dexie_offers_for_watchlist;
-use super::reconcile_persist::{persist_offer_lifecycle_transition, ReconcilePersistOptions};
+use crate::offer::lifecycle::{
+    persist_offer_lifecycle_transition, transition_from_list_offer_payload, ReconcilePersistOptions,
+};
 use super::watchlist::cache::CoinWatchlistCache;
 use super::watchlist::{update_market_coin_watchlist_from_offers, watchlist_offer_ids};
 

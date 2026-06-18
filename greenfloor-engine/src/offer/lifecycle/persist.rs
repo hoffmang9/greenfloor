@@ -4,13 +4,13 @@ use crate::cycle::CycleOfferTransition;
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
-pub(crate) struct ReconcilePersistOptions<'a> {
+pub struct ReconcilePersistOptions<'a> {
     pub action: &'a str,
     pub venue: Option<&'a str>,
     pub dexie_error: Option<&'a str>,
 }
 
-pub(crate) fn persist_offer_lifecycle_transition(
+pub fn persist_offer_lifecycle_transition(
     store: &SqliteStore,
     market_id: &str,
     offer_id: &str,

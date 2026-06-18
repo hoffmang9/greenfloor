@@ -2,9 +2,9 @@ use serde_json::Value;
 
 use crate::coinset::get_all_mempool_tx_ids;
 use crate::config::ManagerProgramConfig;
-use crate::daemon::coinset_tx::{
-    classify_ws_payload_tx_ids, extract_coin_ids_from_offer_payload,
-    extract_coinset_tx_ids_from_offer_payload,
+use crate::daemon::coinset_tx::classify_ws_payload_tx_ids;
+use crate::offer::dexie_payload::{
+    extract_coin_ids_from_offer_payload, extract_coinset_tx_ids_from_offer_payload,
 };
 use crate::daemon::watchlist::cache::CoinWatchlistCache;
 use crate::error::{SignerError, SignerResult};

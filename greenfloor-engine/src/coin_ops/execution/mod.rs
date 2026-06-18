@@ -4,10 +4,9 @@ mod cap;
 mod combine_prereq;
 pub mod context;
 mod helpers;
-
-#[cfg(debug_assertions)]
-mod test_fixtures;
+mod test_overrides;
 
 pub use cap::combine_input_coin_cap;
 pub use combine_prereq::submit_combine_prereq;
 pub use context::CoinOpExecContext;
+pub use test_overrides::CoinOpTestOverrides;
