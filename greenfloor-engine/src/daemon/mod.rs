@@ -21,7 +21,6 @@ mod market_cycle;
 mod market_dispatch;
 mod market_gate;
 mod markets;
-mod offer_lifecycle_cli;
 mod offer_dispatch;
 mod preamble;
 mod program_runtime;
@@ -37,7 +36,15 @@ mod strategy_phase;
 mod strategy_support;
 pub mod watchlist;
 
-pub use coin_ops_execution::{combine_input_coin_cap, CoinOpExecContext};
+pub use coin_ops_execution::{
+    execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
+};
+pub use crate::coin_ops::execution::{combine_input_coin_cap, CoinOpExecContext};
+pub use cancel_executor::{cancel_offers_on_dexie, CancelOfferTarget};
+pub use reconcile_batch::{
+    reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,
+    ReconcileCliResult,
+};
 pub use cancel_phase::run_market_cancel_phase;
 pub use coinset_tx::build_dexie_size_by_offer_id;
 pub use coinset_ws::{
@@ -61,21 +68,9 @@ pub use program_runtime::{
     default_testnet_markets_path, load_daemon_program_runtime, resolve_testnet_markets_path,
     use_websocket_capture_for_once, websocket_capture_enabled, DaemonProgramRuntime,
 };
-pub use offer_lifecycle_cli::{
-    offers_cancel_cli, offers_status_cli, OffersCancelCliResult, OffersStatusCliResult,
-};
-pub use reconcile_batch::{
-    reconcile_offers_batch, reconcile_offers_cli, ReconcileBatchItem, ReconcileBatchResult,
-    ReconcileCliResult,
-};
-pub use reconcile_phase::{
-    run_market_reconcile_phase, ReconcilePhaseMetrics, ReconcilePhaseResult,
-};
-pub use reload::consume_reload_marker;
 pub use cli::{
     run_daemon_command, run_daemon_cycle_once_from_json, run_daemon_loop_from_json,
-    run_offers_cancel_command, run_offers_reconcile_command, run_offers_status_command,
-    DaemonCliArgs, OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
+    DaemonCliArgs,
 };
 pub use run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,

@@ -4,7 +4,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::cancel_executor::{cancel_offers_on_dexie, CancelOfferTarget};
+use crate::daemon::{cancel_offers_on_dexie, CancelOfferTarget};
 use crate::adapters::DexieClient;
 use crate::error::{SignerError, SignerResult};
 use crate::storage::{AuditEventRow, OfferStateListRow, SqliteStore};

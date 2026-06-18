@@ -1,4 +1,4 @@
-//! Explicit test fixtures for operator CLI integration tests (env opt-in only).
+//! Debug-build-only env fixtures for operator CLI integration tests.
 
 use serde::Deserialize;
 

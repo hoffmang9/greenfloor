@@ -25,6 +25,7 @@ pub struct CoinOpExecContext {
 
 impl CoinOpExecContext {
     pub async fn list_spendable_coins(&self) -> SignerResult<Vec<SpendableCoin>> {
+        #[cfg(debug_assertions)]
         if let Some(coins) = super::test_fixtures::test_wallet_coins_from_env() {
             return Ok(coins);
         }
@@ -46,6 +47,7 @@ impl CoinOpExecContext {
         coin_ids: &[String],
         fee_mojos: u64,
     ) -> SignerResult<String> {
+        #[cfg(debug_assertions)]
         if let Some(operation_id) = super::test_fixtures::test_mixed_split_operation_id_from_env() {
             let _ = (output_amounts, coin_ids, fee_mojos);
             return Ok(operation_id);

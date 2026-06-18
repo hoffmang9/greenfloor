@@ -16,19 +16,11 @@ use super::super::coinset_tx::extract_coin_ids_from_offer_payload;
 use super::super::dexie_offer::DexieOfferPayload;
 use super::super::watchlist::watchlist_offer_ids;
 use super::combine::execute_daemon_combine_plan;
-use super::context::CoinOpExecContext;
 use super::items::{skip_item, CoinOpExecItem, CoinOpExecutionResult};
 use super::split::execute_daemon_split_plan;
+use crate::coin_ops::execution::{combine_input_coin_cap, CoinOpExecContext};
 
-pub fn combine_input_coin_cap() -> i64 {
-    std::env::var("GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<i64>().ok())
-        .map(|value| value.max(2))
-        .unwrap_or(5)
-}
-
-pub fn watched_coin_ids_for_market(
+pub fn watched_coin_ids_from_open_offers(
     store: &SqliteStore,
     market_id: &str,
     offers: &[Value],

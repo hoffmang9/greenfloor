@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
 
-use crate::daemon::{
+use crate::manager::{
     run_offers_cancel_command, run_offers_reconcile_command, run_offers_status_command,
     OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
 };

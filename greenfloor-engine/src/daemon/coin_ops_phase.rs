@@ -13,7 +13,7 @@ use crate::hex::default_mojo_multiplier_for_asset;
 use crate::storage::SqliteStore;
 
 use super::coin_ops_execution::{
-    execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_for_market,
+    execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
     CoinOpExecItem, CoinOpExecutionResult,
 };
 
@@ -121,7 +121,7 @@ pub async fn run_coin_ops_phase(
         program.coin_ops_max_daily_fee_budget_mojos,
     );
 
-    let watched_coin_ids = watched_coin_ids_for_market(store, &market.market_id, offers)?;
+    let watched_coin_ids = watched_coin_ids_from_open_offers(store, &market.market_id, offers)?;
     let mut execution = if executable_plans.is_empty() {
         CoinOpExecutionResult {
             dry_run: program.runtime_dry_run,

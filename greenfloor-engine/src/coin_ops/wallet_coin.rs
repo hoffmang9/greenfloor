@@ -1,16 +1,8 @@
 use serde_json::Value;
 
-/// Whether a Cloud Wallet / signer coin row is spendable for coin-op selection.
-pub fn is_spendable_wallet_coin(coin: &Value) -> bool {
-    if coin.get("isLocked").and_then(Value::as_bool) == Some(true) {
-        return false;
-    }
-    let state = coin
-        .get("state")
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_ascii_uppercase();
+/// Whether a wallet coin state string is spendable for coin-op selection.
+pub fn is_spendable_coin_state(state: &str) -> bool {
+    let state = state.trim().to_ascii_uppercase();
     if state.is_empty() {
         return false;
     }
@@ -28,6 +20,18 @@ pub fn is_spendable_wallet_coin(coin: &Value) -> bool {
     }
     const SPENDABLE: &[&str] = &["CONFIRMED", "UNSPENT", "SPENDABLE", "AVAILABLE", "SETTLED"];
     SPENDABLE.contains(&state.as_str())
+}
+
+/// Whether a Cloud Wallet / signer coin row is spendable for coin-op selection.
+pub fn is_spendable_wallet_coin(coin: &Value) -> bool {
+    if coin.get("isLocked").and_then(Value::as_bool) == Some(true) {
+        return false;
+    }
+    is_spendable_coin_state(
+        coin.get("state")
+            .and_then(Value::as_str)
+            .unwrap_or(""),
+    )
 }
 
 #[cfg(test)]

@@ -9,6 +9,13 @@ pub struct ExpectedPublishAssetFields {
     pub expected_requested_symbol: String,
 }
 
+fn bootstrap_skip_blocks_offer(reason: &str) -> bool {
+    !matches!(
+        reason.trim(),
+        "already_ready" | "dry_run"
+    )
+}
+
 /// Return manager bootstrap block reason text, or ``None`` when offer creation should continue.
 pub fn bootstrap_block_error(
     bootstrap_status: &str,
@@ -27,7 +34,7 @@ pub fn bootstrap_block_error(
     if status == "executed" && !bootstrap_ready {
         return Some(format!("bootstrap_pending:{reason}"));
     }
-    if status == "skipped" && reason != "already_ready" {
+    if status == "skipped" && bootstrap_skip_blocks_offer(reason) {
         return Some(format!("bootstrap_precheck_skipped:{reason}"));
     }
     None
@@ -191,6 +198,11 @@ mod tests {
             bootstrap_block_error("skipped", "already_ready", false),
             None
         );
+    }
+
+    #[test]
+    fn bootstrap_allows_dry_run_skip() {
+        assert_eq!(bootstrap_block_error("skipped", "dry_run", false), None);
     }
 
     #[test]

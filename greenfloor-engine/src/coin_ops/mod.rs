@@ -4,6 +4,7 @@
 
 mod amounts;
 mod effective_counts;
+pub mod execution;
 mod fee_budget;
 mod gate;
 mod inventory;
@@ -36,4 +37,5 @@ pub use split_planning::{
     CombineInputSelectionMode, SplitAutoSelectPlan, SplitCoinPlan, SplitCombinePrereqPlan,
     SplitPlanningProfile, SplitSkipPlan, SubCatChangeSkipData,
 };
-pub use wallet_coin::is_spendable_wallet_coin;
+pub use execution::{combine_input_coin_cap, CoinOpExecContext};
+pub use wallet_coin::{is_spendable_coin_state, is_spendable_wallet_coin};
