@@ -1,5 +1,6 @@
 //! PyO3 manager entrypoints using serde JSON request/response boundaries.
 
+use engine_core::cli_util::format_json_value;
 use engine_core::offer::operator::{build_and_post_offer, BuildAndPostOfferRequest};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
@@ -14,15 +15,17 @@ pub(crate) fn build_and_post_offer_typed(
     let payload = request_dict_to_json(request)?;
     let engine_request: BuildAndPostOfferRequest =
         serde_json::from_value(payload).map_err(to_py_err)?;
+    let compact_json = engine_request.compact_json;
     let response = py.detach(move || {
         runtime()
             .block_on(build_and_post_offer(engine_request))
             .map_err(to_py_err)
     })?;
+    let output = format_json_value(&response.payload, compact_json).map_err(to_py_err)?;
     Python::attach(|py| {
         let out = PyDict::new(py);
         out.set_item("exit_code", response.exit_code)?;
-        out.set_item("output", response.output)?;
+        out.set_item("output", output)?;
         out.set_item("payload", dict_from_json_value(py, response.payload)?)?;
         Ok(out.into())
     })

@@ -7,6 +7,9 @@
 //! (`manager_cli`, `daemon::cli`). PyO3 bindings should prefer domain module paths
 //! (`engine_core::offer::`, `engine_core::daemon::`, `engine_core::cycle::`) over
 //! flattened crate-root re-exports when adding new bindings.
+//!
+//! **Crate-root re-exports** are limited to symbols still required by PyO3 integration
+//! tests and legacy bindings. New exports belong on domain modules, not here.
 
 #![recursion_limit = "1024"]
 
@@ -113,9 +116,8 @@ pub use offer::bootstrap::{
     BootstrapPhaseSnapshot, BootstrapPlan, BootstrapPlanOutcome, LadderDeficit, PlannerLadderRow,
 };
 pub use offer::operator::{
-    bootstrap_blocks_offer, build_and_post_offer, format_build_and_post_output,
-    run_signer_denomination_phase, BuildAndPostOfferRequest, BuildAndPostOfferResponse,
-    BootstrapPhaseResult,
+    bootstrap_blocks_offer, build_and_post_offer, BuildAndPostOfferRequest,
+    BuildAndPostOfferResponse, BootstrapPhaseResult,
 };
 pub use offer::build_context::{
     mojo_multiplier_for_leg, resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,

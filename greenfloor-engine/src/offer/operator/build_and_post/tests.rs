@@ -6,17 +6,14 @@ use serde_json::{json, Value};
 use super::context::{resolve_action_side, sample_resolved_build_and_post_context};
 use super::publish::{offer_post_persist_record, persist_post_records_if_enabled};
 use super::types::{PostAttemptSuccess, PostFailure, PublishResult, build_and_post_exit_code};
-use super::format_build_and_post_output;
+use crate::cli_util::{format_json, format_json_value};
 use crate::storage::{state_db_path_for_home, SqliteStore};
 
 #[test]
-fn formats_pretty_and_compact_json() {
+fn cli_json_formatting_respects_compact_flag() {
     let payload = json!({"ok": true});
-    assert!(format_build_and_post_output(&payload, false).contains('\n'));
-    assert_eq!(
-        format_build_and_post_output(&payload, true),
-        r#"{"ok":true}"#
-    );
+    assert!(format_json(&payload, false).unwrap().contains('\n'));
+    assert_eq!(format_json_value(&payload, true).unwrap(), r#"{"ok":true}"#);
 }
 
 #[test]

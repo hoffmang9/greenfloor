@@ -26,12 +26,29 @@ build/post, policy, SQLite, and most adapters.
    break is recorded in [docs/rust-migration-ledger.md](../rust-migration-ledger.md)
    with deployment catch-up steps.
 
-3. **PyO3 is dev/test-only.** `greenfloor-engine-pyo3` remains for CI parity and
-   integration tests; operators install and run Rust binaries only.
+3. **PyO3 is not on the operator install path.** Operators run native Rust
+   binaries only; they do not install or import `greenfloor_engine`.
+
+   **`greenfloor-engine-pyo3` remains in the repo** as the Python↔Rust FFI for:
+   - `greenfloor/core/*_bridge.py` (deterministic policy: cycle, coin-ops, cancel,
+     bootstrap, offer request)
+   - `greenfloor/adapters/` paths that call the engine in-process (`coinset`,
+     `rust_signer`, `offer_action`)
+   - library helpers (`greenfloor/offer_decode.py`, notifications, partial config)
+   - `scripts/` that use adapters (e.g. coinset probes)
+   - CI parity and integration tests (`tests/test_*_parity.py`,
+     `tests/test_greenfloor_engine_integration.py`)
+
+   “Dev/test-only” means **not required for production operator deployment** — not
+   that the extension is unused in the repository.
 
    **Import convention:** new PyO3 bindings should prefer domain module paths
    (`offer::`, `daemon::`, `cycle::`, …) over flattened crate-root re-exports in
-   `lib.rs`. Operator binaries import `manager_cli` and `daemon::cli` directly.
+   `lib.rs`. Those re-exports are legacy PyO3 surface; operator binaries import
+   `manager_cli` and `daemon::cli` directly.
+
+   **Deferred:** a follow-on cutover may remove PyO3 entirely once Python bridges,
+   scripts, and parity tests migrate to Rust unit tests or native binary JSON APIs.
 
 4. **Python scripts stay.** Standalone utilities under `scripts/` may keep using
    script-only Python libraries (`config`, `adapters`, `hex_utils`) until

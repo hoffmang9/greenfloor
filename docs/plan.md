@@ -2,177 +2,102 @@
 
 ## Scope
 
-- Run a long-lived daemon (`greenfloord`) plus manager CLI (`greenfloor-manager`) for deterministic CAT/XCH market-making operations.
-- Keep policy logic deterministic in `greenfloor/core`; keep side effects in adapters and CLI/daemon orchestration layers.
-- Ship only low-inventory alert notifications for v1.
+- Long-lived daemon (`greenfloord`) plus manager CLI (`greenfloor-manager`) for
+  deterministic CAT/XCH market-making.
+- Policy and execution in Rust (`greenfloor-engine`); Python package for config,
+  adapters, PyO3 parity bridges, and scripts.
+- V1 notifications: low-inventory alerts only (ticker, remaining amount, receive address).
 
-## Rollout Steps
+## Architecture
 
-1. Install project and validate baseline config in-repo (`config/program.yaml`, `config/markets.yaml`).
-2. Bootstrap runtime home dir (`~/.greenfloor`) with `greenfloor-manager bootstrap-home` (required before first real deployment run).
-3. Onboard signing key selection (`greenfloor-manager keys-onboard`) and verify key routing/registry mappings.
-4. Start daemon (`greenfloord`) and monitor audit/state DB events for market, offer-lifecycle, and coin-op behavior.
+```
+Operators                greenfloor-engine (Rust)
+─────────                ─────────────────────────
+greenfloor-manager  ──►  manager_cli/ → offer/operator, offer/lifecycle, coin_ops/…
+greenfloord         ──►  daemon/      → cycle/, offer/operator, coin_ops/execution/…
 
-## Manager CLI Commands (V1 Core)
+Dev / tests              greenfloor (Python)
+─────────                ─────────────────
+parity tests, scripts ──► core/*_bridge.py → greenfloor_engine (PyO3) → greenfloor-engine
+```
 
-Ten core commands are in scope. Do not add commands without explicit need tied to mainnet proof.
+- **Canonical signing and offer build:** `greenfloor-engine` (vault KMS + Coinset MSP).
+- **Config validation for operators:** Rust (`config/program.rs`, `config/markets.rs`).
+- **State DB:** Rust (`storage/`); SQLite at `~/.greenfloor/db/greenfloor.sqlite`.
+- **PyO3:** not installed for operator-only deployments; in-repo FFI for Python bridges
+  and tests (ADR 0013).
 
-1. `bootstrap-home` — create `~/.greenfloor` runtime layout, seed config, initialize state DB.
-2. `config-validate` — validate program + markets config and key routing.
-3. `doctor` — readiness check (config, key routing, DB, env overrides).
-4. `keys-onboard` — interactive key selection and onboarding persistence.
-5. `build-and-post-offer` — build offer via vault KMS signer and post to venue (Dexie or Splash). Requires `signer.kms_key_id` and `vault.launcher_id` in program config.
-6. `offers-status` — compact view of current offer states and recent events.
-7. `offers-reconcile` — refresh offer states using venue payloads plus Coinset tx-signal state (websocket/mempool) and flag orphaned/unknown.
-8. `coins-list` — list vault coin inventory via Coinset (signer receive address scope).
-9. `coin-split` — split a Vault coin into target denominations; default waits through signature + mempool + 1-block confirmation.
-10. `coin-combine` — combine Vault coins into fewer coins; default waits through signature + mempool + 1-block confirmation.
+Legacy `cloud_wallet:` blocks in `program.yaml` are rejected; use `signer:` + `vault:`.
 
-Cloud Wallet adjunct:
+## Operator commands
 
-- `offers-cancel` is available for Cloud Wallet offer cancellation workflows, but is not part of the v1 core command-count policy used for simplification scope control.
-- Cancellation mode compatibility policy:
-  - GreenFloor supports both Cloud Wallet cancellation APIs:
-    - standard on-chain cancellation (`cancelOffChain: false`),
-    - off-chain cancellation (`cancelOffChain: true`, requires org feature flag `OFFER_CANCEL_OFF_CHAIN`).
-  - Production/default operating path remains standard on-chain cancellation until `OFFER_CANCEL_OFF_CHAIN` is enabled in production.
-  - Off-chain cancellation support remains implemented and gated for activation once production feature-flag support is available.
+Core trading/runtime (V1):
 
-Operator output/coin-op behavior notes:
+1. `bootstrap-home` — create `~/.greenfloor` layout and seed configs
+2. `config-validate` — validate program + markets YAML
+3. `doctor` — readiness check (config, keys, DB, env overrides)
+4. `keys-onboard` — key selection and onboarding state
+5. `build-and-post-offer` — vault KMS offer build + Dexie/Splash publish
+6. `offers-status` — offer states and recent audit events
+7. `offers-reconcile` — refresh states from venue + Coinset tx signals
+8. `offers-cancel` — cancel by offer id or `--cancel-open`
+9. `coins-list` / `coin-status` — vault coin inventory via Coinset
+10. `coin-split` / `coin-combine` — denomination shaping (default waits for confirmation)
 
-- Manager JSON responses are pretty-formatted by default; use global `--json` for compact single-line output.
-- `coin-split` and `coin-combine` accept `--no-wait` for asynchronous mode, `--until-ready` (bounded by `--max-iterations`) for denomination-readiness loops, and repeatable `--coin-id` for exact-coin targeting.
-- `coin-split`/`coin-combine` accept `--size-base-units` to derive denomination parameters from the market ladder configuration automatically.
-- `coins-list` output hex coin names are accepted by `coin-split`/`coin-combine` `--coin-id` and resolved to Cloud Wallet `Coin_*` GraphQL IDs internally.
+Adjunct operator commands:
 
-## Signing and Offer Build Architecture
+- `cats-add`, `cats-list`, `cats-delete` — CAT catalog in `cats.yaml`
+- `set-log-level` — update `app.log_level` in program config
 
-- Coin discovery, chain-history reads (CAT parent lineage), and `push_tx` broadcast use `greenfloor/adapters/coinset.py` (`CoinsetAdapter`) as the side-effect boundary.
-- `CoinsetAdapter` defaults to mainnet endpoints and routes to testnet11 endpoints when `network=testnet11`; optional override: `GREENFLOOR_COINSET_BASE_URL`.
-- `WalletAdapter` (daemon coin-op path) calls `signing.sign_and_broadcast()` directly.
-- Local BLS offer text construction lives in `greenfloor/offer_builder.py` (canonical); `greenfloor/cli/offer_builder_sdk.py` is a thin stdin/stdout wrapper for external tooling only.
-- Offer build/post orchestration (bootstrap → create → verify → publish) lives under `greenfloor/runtime/` with composition root `greenfloor/runtime/offer_execution.py` (see ADR 0005, ADR 0008).
-- Signer path gate: `require_signer_offer_path()` / `signer_offer_path_configured()` in `greenfloor/config/models.py` (requires `signer.kms_key_id` and `vault.launcher_id`).
-- Vault KMS installs use `greenfloor/runtime/offer_runtime.py` (Rust signer via PyO3). Legacy `cloud_wallet:` blocks in `program.yaml` are rejected at config load.
-- No intermediate subprocess layers for in-process Python paths. See `AGENTS.md` for design discipline rules.
+Global flags: `--program-config`, `--markets-config`, `--testnet-markets-config`,
+`--cats-config`, `--state-db`, `--json` (compact JSON), `--dexie-base-url`.
 
-## Offer File Contract
+Coin-op notes:
 
-- Offer files are text files containing a Bech32m offer string (prefix `offer1...`), not JSON.
-- Per `chia-wallet-sdk`, offer text is an encoded/compressed `SpendBundle` (`encode_offer` / `decode_offer`).
-- Before Dexie submission, GreenFloor validates offer text through `chia-wallet-sdk` parse semantics (`Offer::from_spend_bundle`) and blocks submission on verification failure.
-- Before Dexie submission, GreenFloor rejects offers that do not include at least one `ASSERT_BEFORE_*` expiration condition (time or block-height).
-- Adapter/test paths should treat offer files as opaque serialized artifacts: read file text, submit text to venue API, and persist IDs/status separately.
+- Default output is pretty JSON; `--json` emits compact single-line JSON.
+- `--until-ready` requires `--size-base-units`; bounded by `--max-iterations`.
+- `--no-wait` submits without waiting for confirmation.
+- Fee preflight runs before coin-op submission (see runbook incident triage).
 
-## Offer Lifecycle Strategy
+## Offer policy
 
-- All market-making offers must always include an expiry.
-- Stable-vs-unstable markets use shorter offer expiries than other pair types, so stale pricing is naturally rotated faster.
-- Offer cancellation is intentionally rare and should not be a routine refresh mechanism.
-- Cancellation applies only to stable-vs-unstable pairs, and only when there is strong price movement on the unstable side.
-- In normal conditions, expiry-based replacement is preferred over explicit cancellation.
-- When cancellation is required in Cloud Wallet contexts, use standard on-chain cancellation by default until production support for `OFFER_CANCEL_OFF_CHAIN` is available.
+- All posted offers include expiry; stable-vs-unstable pairs use shorter expiries.
+- Cancellation is exceptional: stable-vs-unstable only, on strong unstable-leg moves
+  (`pricing.cancel_policy_stable_vs_unstable`).
+- Normal rotation is expiry-driven, not cancel/repost churn.
+- Offer files are Bech32m `offer1...` strings; Rust validates structure before Dexie post.
+- Reconciliation prefers Coinset tx-signal evidence over venue-status heuristics.
 
-## Offer Reconciliation Signal Policy
+## Delivery constraints
 
-- Offer-taken and lifecycle reconciliation should prefer Coinset tx-signal evidence (`tx_signal_state`) over venue-status heuristics whenever tx ids are available.
-- `offers-reconcile` derives taker confirmation from Coinset websocket/mempool tx-signal state first, and uses venue status as fallback context when Coinset evidence is unavailable.
-- Daemon `offer_lifecycle_transition` follows the same Coinset-first policy for consistency between continuous operation and manager reconciliation.
-- Reconciliation payloads should continue to expose `signal_source` and Coinset evidence fields (`coinset_tx_ids`, `coinset_confirmed_tx_ids`, `coinset_mempool_tx_ids`) for operator/debug traceability.
+- Python 3.11+ for dev tooling and tests.
+- Required checks: `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`.
+- Rust: `cargo test` in `greenfloor-engine/`.
+- Local gate: `pre-commit run --all-files`.
+- CI runs pytest as a separate step; pre-commit skips pytest via `SKIP=pytest`.
 
-## Delivery Constraints
+## Completed milestones
 
-- Python 3.11+.
-- Deterministic test suite (`pytest`) should stay under 10 minutes wall clock (prefer under 5).
-- Required checks: `ruff check`, `ruff format --check`, `pyright`, `pytest`.
-- Local convenience gate: `pre-commit run --all-files` (configured to run `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, and `pytest`).
-- CI splits `pytest` into a dedicated step (with `-v --tb=short`) for clearer log navigation; `pre-commit` runs linting and type-checking only in CI via `SKIP: pytest`.
+- [x] Native Rust operator binaries (ADR 0013)
+- [x] Vault KMS signer path; Cloud Wallet GraphQL removed
+- [x] Coinset websocket-first taker/lifecycle signals (H2)
+- [x] Coin-op Coinset fee preflight diagnostics (H1)
+- [x] Testnet11 G1–G3 proof path (CI `live-testnet-e2e.yml`)
+- [x] Mainnet manager lifecycle evidence for `eco1812022_sell_wusdbc`
 
-## Plan TODOs (Current State)
+## Open items
 
-- [x] Baseline clarified: `chia-wallet-sdk` is the default stack for sync/sign/offer generation.
-- [x] Signing pipeline consolidated into single `greenfloor/signing.py` module with direct function calls. Legacy 13-file subprocess chain removed.
-- [x] Dexie adapter offer write paths implemented (`post_offer`, `cancel_offer`) with deterministic fixture tests using real `offer1...` payloads.
-- [x] Strategy port completed: legacy carbon XCH sizing logic moved into pure `greenfloor/core/strategy.py` with deterministic tests.
-- [x] Coincodex price service implemented with TTL cache and stale fallback, and daemon now records XCH price snapshots each cycle.
-- [x] XCH strategy is price-gated: no XCH offer planning when price snapshot is unavailable/invalid.
-- [x] Home-dir bootstrap implemented via `greenfloor-manager bootstrap-home`.
-- [x] P1: Wire `strategy_actions_planned` outputs into daemon offer execution path.
-- [x] P1-followup: In-process `chia-wallet-sdk` offer construction via `greenfloor/offer_builder.py`.
-- [x] P2: Policy-gated cancel execution for unstable-leg markets on strong price moves.
-- [x] P3: Runbook-level operator docs (`docs/runbook.md`).
-- [x] Manager CLI simplification pass completed (historical). Current v1 core CLI surface is 10 commands (`bootstrap-home`, `config-validate`, `doctor`, `keys-onboard`, `build-and-post-offer`, `offers-status`, `offers-reconcile`, `coins-list`, `coin-split`, `coin-combine`); non-essential commands (metrics, config history, ladder/bucket tuning, etc.) remain deferred until after live proof milestones.
-- [x] Offer builder subprocess boundary eliminated — manager calls `greenfloor.offer_builder.build_offer()` directly.
-- [x] Offer runtime modularization — monolithic `cloud_wallet_offer_runtime.py` replaced by `greenfloor/runtime/*` modules and `OfferPostRequest` dispatch (ADR 0008).
+- [ ] **H3:** Evaluate Cloud Wallet native offer split options vs local pre-offer split
+      orchestration — preserve denomination readiness guardrails before changing defaults.
 
-## Remaining Gaps Before First Production-Like User Test
+## Deferred (post live proof)
 
-These are the only priorities. Do not start new feature work until G1-G3 are complete.
+- Config editing commands (`set-ladder-entry`, `set-bucket-count`, …)
+- Config history, metrics export, coin-op budget reports
+- Additional CLI surface without live-target justification
 
-- [x] G1: Replace deterministic/synthetic manager offer build output with coin-backed `chia-wallet-sdk` offer construction that passes venue validation on `testnet11`.
-  - Status update (2026-02-22): in-process offer-plan signing path is implemented in `greenfloor/signing.py` (including CAT lineage reconstruction and mixed-asset action building), and manager offer-builder now emits offer-plan payloads.
-  - Current blocker: production-like proof depends on funded inventory for the exact signer/address context used by the execution environment. Local runs may fail if mnemonic/key material is CI-only.
-  - Mitigation in place: `.github/workflows/live-testnet-e2e.yml` now supports a CI-only manager proof path (`pair`, `size_base_units`, `dry_run`) using `TESTNET_WALLET_MNEMONIC` and uploads proof logs as artifacts.
-  - Latest status (2026-02-23): branch `feat/greenfloor-native-upstream-migration` completed repeated live workflow proofs on the current head (`run_id=22325031449`, `run_id=22325053517`), including successful `dry_run=false` Dexie posts with offer IDs and uploaded artifacts.
-  - Verification hardening in place: manager now validates offers via wallet-sdk before Dexie post to catch malformed offers on the primary path.
-  - Closure evidence: repeated `dry_run=false` runs now show venue-valid post outcomes on `testnet11` with offer IDs in workflow logs/artifacts.
-- [x] G2: Add operator helper workflow for `testnet11` asset discovery + inventory bootstrap (Dexie testnet liquidity discovery + market snippet generation).
-  - Implemented minimal manual workflow: `.github/workflows/testnet11-asset-bootstrap-helper.yml`.
-  - Workflow contract: discover Dexie testnet tokens, normalize/rank candidates, and upload bootstrap artifacts (`raw-tokens.json`, `normalized-tokens.json`, `selected-assets.json`, `markets-snippet.yaml`, `summary.md`).
-- [x] G3: Run and document an end-to-end `testnet11` proof (build -> post -> status -> reconcile) using a live test asset pair.
-  - CI path now executes this sequence when `dry_run=false` in `live-testnet-e2e`.
-  - Latest status (2026-02-23): current native-migration branch runs (`run_id=22325031449`, `run_id=22325053517`) executed the full manager proof sequence successfully with artifacts, including live Dexie post (`dry_run=false`) and reconcile output.
-  - Historical `testnet11` proof pair was `TDBX:txch` (TXCH<->TDBX); BYC04 was not the primary proof target.
+## References
 
-## Active Live Testing Target
-
-- Active live testing target is now mainnet `ECO.181.2022:wUSDC.b` (primary), with `ECO.181.2022:xch` as a completed supporting proof path.
-- `ECO.181.2022` CAT ID: `4a168910b533e6bb9ddf82a776f8d6248308abd3d56b6f4423a3e1de88f466e7`.
-- `wUSDC.b` CAT ID: `fa4a180ac326e67ea289b869e3448256f6af05721f7cf934cb9901baa6b7a99d`.
-- Strict-close objective status: completed manager lifecycle evidence for `eco1812022_sell_wusdbc` is logged in `docs/progress.md` (2026-02-26 remote split + `build-and-post-offer` + `offers-status` evidence on mainnet).
-- Current daemon canary status: repost recovery is active with reseed fallback on `eco1812022_sell_wusdbc`; latest hardening reduced stale `mempool_observed` reseed blocking to a short recency window (`3 minutes`) and improved steady-state repost cadence in John-Deere soak checks.
-- Prior `testnet11` proof artifacts remain valid as historical closure evidence for G1-G3.
-
-## Operational Hardening Follow-up
-
-- [x] H1: Add explicit Coinset fee-lookup diagnostics and endpoint validation for coin operations.
-  - Scope covered: `coin-split` / `coin-combine` fee lookups (including conservative fee-advice path), not only generic Coinset connectivity.
-  - Added deterministic preflight validation against the configured/default Coinset endpoint before coin-op submission.
-  - Failure contracts now distinguish endpoint routing/configuration failures from temporary fee-advice unavailability.
-  - Operator debug steps and JSON failure contracts documented in `docs/runbook.md`.
-- [x] H2: Move offer lifecycle/taker reconciliation to Coinset websocket-first signal routing.
-  - Daemon now runs a long-lived Coinset websocket client with reconnect/recovery and writes tx signals into `tx_signal_state`.
-  - `offers-reconcile` and daemon lifecycle transitions consume `tx_signal_state` first and treat venue status as fallback diagnostics.
-  - Taker detection continues to emit `coinset_tx_block_webhook` on Coinset-confirmed transitions and includes `signal_source` + Coinset tx-id evidence in reconciliation/audit payloads.
-- [ ] H3: Evaluate replacing local pre-offer split orchestration with Cloud Wallet native offer split options (`splitInputCoins`, `splitInputCoinsFee`) where behavior is equivalent or better.
-  - Rationale: Cloud Wallet can split offer input coins as part of `createOffer`, which may reduce lockup risk and simplify manager-side split/control logic.
-  - Constraint: preserve deterministic guardrails and operator visibility (especially denomination readiness and reserve safety) before switching defaults.
-
-## CI Notes
-
-- `tests/test_chia_wallet_sdk_simulator_harness.py` was deleted (2026-02-25): all six tests
-  ran `cargo test` on `chia-sdk-driver` Rust internals (CAT issuance, catalog, reward distributor)
-  and tested no GreenFloor code. SDK has its own CI. `tests/test_greenfloor_engine_integration.py`
-  covers the signer surface GreenFloor actually uses.
-- CI pytest runs as a standalone step (`"Test suite (pytest)"`) with `-v --tb=short`, giving each test its own line in logs and a dedicated collapsible section with pass/fail badge. The `pre-commit` step skips pytest via `SKIP: pytest` so lint/type-check and tests have independent status indicators. Locally, `pre-commit run --all-files` still runs pytest as part of the hook set.
-- Three tests are intentionally skipped in CI:
-  - `test_replay_captured_cat_parse_cases` — requires `GREENFLOOR_CAT_PARSE_REPLAY_CASES_DIR` (operator-provided fixture directory).
-  - `test_greenfloor_engine_validate_offer_rejects_garbage` and `test_greenfloor_engine_from_input_spend_bundle_xch_round_trip_offer` in `tests/test_greenfloor_engine_integration.py` — require `GREENFLOOR_RUN_ENGINE_INTEGRATION_TESTS=1` (compiled `greenfloor_engine` + `chia-wallet-sdk` bindings).
-
-## Deferred Backlog (Post-Testnet Proof)
-
-These items were implemented previously but removed during simplification. Re-add only after G1-G3 are proven.
-
-- [ ] Config editing commands: `set-price-policy`, `set-ladder-entry`, `set-bucket-count`, `set-low-watermark`.
-- [ ] Config history: `config-history-list`, `config-history-revert`.
-- [ ] Operational commands: `keys-list`, `reload-config`, `consolidate`, `register-coinset-webhook`, `list-supported-assets`.
-- [ ] Observability: `metrics-export`, `coin-op-budget-report`.
-
-## Upstreaming to GitHub (Repository Setup)
-
-- [x] U1: Create GitHub repository and set `origin` remote.
-- [x] U2: Push current branch to `origin` and verify branch tracking.
-- [x] U3: Enable branch protection on `main` (require PR, disallow force-push).
-- [x] U4: Configure required PR checks to match project gates.
-- [x] U5: Verify Actions permissions and secret hygiene.
-- [x] U6: Open first PR and verify all required checks pass before merge.
+- Deployment: `docs/runbook.md`
+- Migration from pre-Rust CLI: `docs/rust-migration-ledger.md`
+- Recent work: `docs/progress.md`

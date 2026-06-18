@@ -73,7 +73,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
                 test_overrides: OfferOperatorTestOverrides::from_env(),
             })
             .await?;
-            println!("{}", response.output);
+            json::emit_json(&response.payload)?;
             Ok(response.exit_code)
         }
         ManagerCommands::Doctor => setup::run_doctor(

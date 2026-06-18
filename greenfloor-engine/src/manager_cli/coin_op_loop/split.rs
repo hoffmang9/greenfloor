@@ -5,11 +5,12 @@ use serde_json::json;
 use crate::coin_ops::evaluate_coin_split_gate;
 use crate::error::{SignerError, SignerResult};
 
-use super::context::{build_coin_op_exec_context, gate_to_json};
+use super::context::build_coin_op_exec_context;
 use super::loop_common::validate_until_ready_mode;
 use super::split_iteration::run_split_iteration;
 use super::until_ready::{
-    run_until_ready_loop, until_ready_exit_code, UntilReadyLoopConfig,
+    emit_coin_op_exit, run_until_ready_loop, until_ready_exit_code, UntilReadyCompletion,
+    UntilReadyLoopConfig,
 };
 use crate::manager_cli::json::emit_json;
 use crate::manager_cli::ladder::{
@@ -85,7 +86,6 @@ pub async fn run_coin_split(
             })
         },
         |gate| gate.ready,
-        gate_to_json,
         |iteration, spendable, gate_json| {
             run_split_iteration(
                 &ctx,
@@ -104,23 +104,24 @@ pub async fn run_coin_split(
     )
     .await?;
 
-    if let Some(code) = completion.exit_code() {
-        return Ok(code);
+    match completion {
+        UntilReadyCompletion::Exit { code, payload } => {
+            emit_coin_op_exit(payload)?;
+            Ok(code)
+        }
+        UntilReadyCompletion::Completed { stop_reason } => {
+            emit_json(&json!({
+                "op": "coin-split",
+                "coin_selection_mode": if explicit_coin_ids { "explicit" } else { "adapter_auto_select" },
+                "amount_per_coin": amount_per_coin,
+                "number_of_coins": number_of_coins,
+                "resolved_asset_id": ctx.resolved_base_asset_id,
+                "until_ready": until_ready,
+                "max_iterations": max_iterations.max(1),
+                "stop_reason": stop_reason,
+                "operations": operations,
+            }))?;
+            Ok(until_ready_exit_code(until_ready, &stop_reason))
+        }
     }
-
-    emit_json(&json!({
-        "op": "coin-split",
-        "coin_selection_mode": if explicit_coin_ids { "explicit" } else { "adapter_auto_select" },
-        "amount_per_coin": amount_per_coin,
-        "number_of_coins": number_of_coins,
-        "resolved_asset_id": ctx.resolved_base_asset_id,
-        "until_ready": until_ready,
-        "max_iterations": max_iterations.max(1),
-        "stop_reason": completion.stop_reason().unwrap_or("single_pass"),
-        "operations": operations,
-    }))?;
-    Ok(until_ready_exit_code(
-        until_ready,
-        completion.stop_reason().unwrap_or("single_pass"),
-    ))
 }

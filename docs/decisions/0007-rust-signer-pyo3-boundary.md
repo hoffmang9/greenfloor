@@ -2,35 +2,33 @@
 
 ## Status
 
-Accepted
+Accepted; **operator scope updated** by [0013-rust-cli-daemon-native-cutover.md](0013-rust-cli-daemon-native-cutover.md) (2026-06-17)
 
-## Decision
+## Current state
 
-Vault KMS signing, offer creation, bootstrap mixed-splits, and asset ID resolution run
-through the in-process `greenfloor_engine` PyO3 extension backed by `greenfloor-engine`.
+- **Operators:** vault KMS signing, offer creation, bootstrap mixed-splits, and asset
+  resolution run in-process in `greenfloor-engine` (no PyO3 on the install path).
+- **Python library / tests:** the same Rust logic is reachable via `greenfloor_engine`
+  (PyO3) through `greenfloor.core.engine_bridge` and `*_bridge.py` modules.
+- **On-chain IO:** Coinset MSP via Rust (`greenfloor-engine/src/coinset/`).
+- Cloud Wallet GraphQL is removed from offer/bootstrap/asset paths.
 
-Configuration and vault member metadata come from `program.yaml` (`signer:` + `vault:`).
-On-chain IO uses `api-msp.coinset.org` via the Rust MSP coinset client.
+## Original decision (2026-05)
 
-Cloud Wallet GraphQL is removed from offer/bootstrap/asset paths. Python retains
-orchestration (manager, daemon, Dexie/Splash publish, ladder planning).
+Vault KMS signing and offer construction are implemented once in `greenfloor-engine`.
+PyO3 provided in-process access for Python orchestration and parity tests.
 
 ## Rationale
 
 - Single canonical Rust implementation reduces drift (presplit nonce, MIPS signing).
-- PyO3 avoids subprocess hops (ADR 0002 alignment).
 - Coinset MSP `get_singleton_info` replaces GraphQL custody snapshot reads.
-- Operator installs reset with updated yaml; no dual-path feature flags.
 
-## Deferred (documented)
+## Deferred
 
-- Rust simulator atomic-take roundtrip for CAT:CAT requested legs remains sell-CAT/request-XCH only;
-  buy-side and cat-cat fixtures validate offer build + `create_offer_request` shape.
-- Operator `greenfloor-engine create-offer` CLI parity with live Coinset is covered by PyO3 in
-  production paths; dedicated subprocess JSON parity tests are not required while PyO3 is canonical.
+- Rust simulator atomic-take roundtrip for CAT:CAT requested legs remains
+  sell-CAT/request-XCH only; buy-side and cat-cat fixtures validate offer build shape.
 
 ## Consequences
 
-- CI builds `greenfloor-engine-pyo3` wheel alongside `greenfloor-native`.
+- CI builds `greenfloor-engine-pyo3` for parity tests; operators install Rust binaries only.
 - Golden offer fixtures export from Rust simulator tests.
-- Python tests validate wiring and `validate_offer`; Rust tests validate spend semantics.

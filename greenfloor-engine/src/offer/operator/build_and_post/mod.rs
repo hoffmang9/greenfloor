@@ -50,15 +50,6 @@ pub struct BuildAndPostOfferRequest {
 pub struct BuildAndPostOfferResponse {
     pub exit_code: i32,
     pub payload: Value,
-    pub output: String,
-}
-
-pub fn format_build_and_post_output(payload: &Value, compact_json: bool) -> String {
-    if compact_json {
-        serde_json::to_string(payload).unwrap_or_else(|_| "{}".to_string())
-    } else {
-        serde_json::to_string_pretty(payload).unwrap_or_else(|_| "{}".to_string())
-    }
 }
 
 pub async fn build_and_post_offer(
@@ -147,10 +138,8 @@ pub async fn build_and_post_offer(
         "signer_path": true,
     });
     let exit_code = build_and_post_exit_code(publish_failures);
-    let output = format_build_and_post_output(&payload, request.compact_json);
     Ok(BuildAndPostOfferResponse {
         exit_code,
         payload,
-        output,
     })
 }

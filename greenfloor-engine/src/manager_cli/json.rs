@@ -1,5 +1,6 @@
 //! JSON output mode for the native manager CLI (`--json`).
 
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::cli_util;
@@ -17,4 +18,8 @@ pub fn json_output_compact() -> bool {
 
 pub fn emit_json(value: &Value) -> SignerResult<()> {
     cli_util::print_json_value(value, json_output_compact())
+}
+
+pub fn emit_serialized(value: &impl Serialize) -> SignerResult<()> {
+    cli_util::print_json(value, json_output_compact())
 }

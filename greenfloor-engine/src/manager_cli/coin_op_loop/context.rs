@@ -13,7 +13,7 @@ use crate::error::{SignerError, SignerResult};
 use crate::hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
 use crate::offer::resolve_offer_assets_for_action;
 
-use crate::manager_cli::json::emit_json;
+use super::cli_exit::CoinOpCliExit;
 
 pub(super) const COIN_SPLIT_LOCKUP_ERROR: &str = "coin_split_lockup_guardrail_would_lock_all_spendable_coins";
 pub(super) const COIN_SPLIT_NO_SPENDABLE_ERROR: &str = "no_spendable_split_coin_available";
@@ -55,7 +55,7 @@ pub(super) fn enforce_split_lockup_guardrail(
     selected_coin_ids: &[String],
     allow_lock_all_spendable: bool,
     resolved_asset_id: &str,
-) -> SignerResult<Option<i32>> {
+) -> SignerResult<Option<CoinOpCliExit>> {
     if allow_lock_all_spendable {
         return Ok(None);
     }
@@ -64,13 +64,15 @@ pub(super) fn enforce_split_lockup_guardrail(
     if spendable_ids.is_empty() || selected_set != spendable_ids {
         return Ok(None);
     }
-    emit_json(&json!({
-        "error": COIN_SPLIT_LOCKUP_ERROR,
-        "resolved_asset_id": resolved_asset_id,
-        "spendable_asset_coin_count": spendable_ids.len(),
-        "selected_spendable_coin_count": selected_set.len(),
-    }))?;
-    Ok(Some(2))
+    Ok(Some(CoinOpCliExit {
+        code: 2,
+        payload: json!({
+            "error": COIN_SPLIT_LOCKUP_ERROR,
+            "resolved_asset_id": resolved_asset_id,
+            "spendable_asset_coin_count": spendable_ids.len(),
+            "selected_spendable_coin_count": selected_set.len(),
+        }),
+    }))
 }
 
 pub(super) fn spendable_coins_for_gate(spendable: &[SpendableCoin]) -> Vec<Value> {
@@ -83,29 +85,6 @@ pub(super) fn spendable_coins_for_gate(spendable: &[SpendableCoin]) -> Vec<Value
             })
         })
         .collect()
-}
-
-pub(super) fn gate_to_json(gate: &CoinSplitGateResult) -> Value {
-    json!({
-        "asset_id": gate.asset_id,
-        "size_base_units": gate.size_base_units,
-        "required_min_count": gate.required_min_count,
-        "current_count": gate.current_count,
-        "larger_reserve_coin_count": gate.larger_reserve_coin_count,
-        "extra_denom_coin_count": gate.extra_denom_coin_count,
-        "reserve_ready": gate.reserve_ready,
-        "ready": gate.ready,
-    })
-}
-
-pub(super) fn combine_gate_to_json(gate: &CoinCombineGateResult) -> Value {
-    json!({
-        "asset_id": gate.asset_id,
-        "size_base_units": gate.size_base_units,
-        "max_allowed_count": gate.max_allowed_count,
-        "current_count": gate.current_count,
-        "ready": gate.ready,
-    })
 }
 
 pub(super) async fn resolve_asset_filter(

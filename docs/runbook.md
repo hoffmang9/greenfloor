@@ -9,7 +9,8 @@ Coinset-specific vault scan validation and capability probing are documented in
 
 1. Install native operator binaries and dev Python tooling:
    - `cargo install --path greenfloor-engine --bins`
-   - `python -m pip install -e ".[dev]"` (tests, pre-commit, PyO3 dev wheel)
+   - `python -m pip install -e ".[dev]"` (tests, pre-commit)
+   - Optional for Python parity tests: `maturin develop --manifest-path greenfloor-engine-pyo3/Cargo.toml`
 2. Bootstrap runtime home:
    - `greenfloor-manager bootstrap-home`
 3. Validate seeded configs:
@@ -79,7 +80,9 @@ Optional developer bootstrap for testnet markets:
     - `taker_diagnostic`: advisory diagnostics (`coinset_tx_block_confirmed`, `coinset_mempool_observed`, or Dexie fallback patterns).
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
-- Note: manager CLI v1 core surface remains focused on trading/runtime commands. `offers-cancel`, `cats-add`, `cats-list`, and `cats-delete` are adjunct operator commands tracked outside the core-count policy. Tuning/history/metrics helpers are deferred until after G1-G3 testnet proof.
+- Cancel offers when policy requires it:
+  - `greenfloor-manager offers-cancel --offer-id <id>`
+  - Cancel all open offers for configured markets: `greenfloor-manager offers-cancel --cancel-open`
 
 ### Mainnet continuous-posting cutover (`eco1812022_sell_wusdbc`)
 
@@ -145,7 +148,7 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 
 - **Price unavailable:** look for `xch_price_error`; XCH planning is price-gated and may produce no actions.
 - **Offer builder failures:** check `strategy_offer_execution.items[].reason` for `offer_builder_*`.
-- **Offer backend:** `build-and-post-offer` and daemon managed post require the vault KMS signer path (`signer.kms_key_id` + `vault.launcher_id` in program config). See ADR 0007 and ADR 0008.
+- **Offer backend:** `build-and-post-offer` and daemon managed post require vault KMS signer config (`signer.kms_key_id` + `vault.launcher_id` in program config). See ADR 0007 and ADR 0013.
 - **Dexie post/cancel issues:** look for `dexie_offers_error`, `strategy_offer_execution` skip reasons, and `offer_cancel_policy` skip reasons.
 - **Extended waits on coin operations:** inspect `wait_events` for `poll_retry`, `signature_wait_*`, `in_mempool`, `confirmed`, and `reorg_watch_*` events to determine whether delay is signer-side, mempool-side, Coinset API-side, or chain-depth-side.
 - **Coin-op fee preflight failures:** inspect JSON `error` and `coinset_fee_lookup`:

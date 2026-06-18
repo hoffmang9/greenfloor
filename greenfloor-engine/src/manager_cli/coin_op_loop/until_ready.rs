@@ -2,6 +2,7 @@
 
 use std::future::Future;
 
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::coin_ops::{coin_op_should_stop, SpendableCoin};
@@ -28,42 +29,40 @@ pub enum LoopIterationOutcome {
         operation: Option<Value>,
         reason: String,
     },
-    Exit(i32),
+    Exit {
+        code: i32,
+        payload: Option<Value>,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub enum UntilReadyCompletion {
     Completed { stop_reason: String },
-    Exit(i32),
+    Exit {
+        code: i32,
+        payload: Option<Value>,
+    },
 }
 
 impl UntilReadyCompletion {
     pub fn stop_reason(&self) -> Option<&str> {
         match self {
             Self::Completed { stop_reason } => Some(stop_reason.as_str()),
-            Self::Exit(_) => None,
-        }
-    }
-
-    pub fn exit_code(&self) -> Option<i32> {
-        match self {
-            Self::Completed { .. } => None,
-            Self::Exit(code) => Some(*code),
+            Self::Exit { .. } => None,
         }
     }
 }
 
-pub async fn run_until_ready_loop<G, GateReady, GateJson, RunIteration, Fut>(
+pub async fn run_until_ready_loop<G, GateReady, RunIteration, Fut>(
     ctx: &CoinOpExecContext,
     config: UntilReadyLoopConfig,
     mut evaluate_gate: impl FnMut(&[Value]) -> Option<G>,
     gate_ready: GateReady,
-    gate_to_json: GateJson,
     mut run_iteration: RunIteration,
 ) -> SignerResult<(Vec<Value>, UntilReadyCompletion)>
 where
+    G: Serialize,
     GateReady: Fn(&G) -> bool,
-    GateJson: Fn(&G) -> Value,
     RunIteration: FnMut(i32, Vec<SpendableCoin>, Option<Value>) -> Fut,
     Fut: Future<Output = SignerResult<LoopIterationOutcome>>,
 {
@@ -75,7 +74,9 @@ where
         let spendable = ctx.list_spendable_coins().await?;
         let gate_coins = spendable_coins_for_gate(&spendable);
         let gate = evaluate_gate(&gate_coins);
-        let gate_json = gate.as_ref().map(|gate| gate_to_json(gate));
+        let gate_json = gate
+            .as_ref()
+            .and_then(|gate| serde_json::to_value(gate).ok());
 
         if let Some(ref gate) = gate {
             if config.until_ready && config.stop_when_gate_ready && gate_ready(gate) {
@@ -106,8 +107,11 @@ where
                 stop_reason = reason;
                 break;
             }
-            LoopIterationOutcome::Exit(code) => {
-                return Ok((operations, UntilReadyCompletion::Exit(code)));
+            LoopIterationOutcome::Exit { code, payload } => {
+                return Ok((
+                    operations,
+                    UntilReadyCompletion::Exit { code, payload },
+                ));
             }
         }
 
@@ -140,4 +144,11 @@ pub fn until_ready_exit_code(until_ready: bool, stop_reason: &str) -> i32 {
     } else {
         0
     }
+}
+
+pub(super) fn emit_coin_op_exit(payload: Option<Value>) -> SignerResult<()> {
+    if let Some(payload) = payload {
+        crate::manager_cli::json::emit_json(&payload)?;
+    }
+    Ok(())
 }

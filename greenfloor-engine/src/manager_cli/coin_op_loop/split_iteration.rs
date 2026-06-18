@@ -8,7 +8,6 @@ use crate::error::SignerResult;
 
 use super::context::{enforce_split_lockup_guardrail, COIN_SPLIT_NO_SPENDABLE_ERROR};
 use super::until_ready::LoopIterationOutcome;
-use crate::manager_cli::json::emit_json;
 
 pub(super) async fn run_split_iteration(
     ctx: &CoinOpExecContext,
@@ -26,8 +25,10 @@ pub(super) async fn run_split_iteration(
     let selected_coin_ids = if explicit_coin_ids {
         coin_ids.to_vec()
     } else if spendable.is_empty() {
-        emit_json(&json!({"error": COIN_SPLIT_NO_SPENDABLE_ERROR}))?;
-        return Ok(LoopIterationOutcome::Exit(2));
+        return Ok(LoopIterationOutcome::Exit {
+            code: 2,
+            payload: Some(json!({"error": COIN_SPLIT_NO_SPENDABLE_ERROR})),
+        });
     } else {
         match plan_auto_split_selection(
             &spendable,
@@ -55,20 +56,25 @@ pub(super) async fn run_split_iteration(
                 return Ok(LoopIterationOutcome::Continue { operation });
             }
             SplitAutoSelectPlan::Skip(skip) => {
-                emit_json(&json!({"error": skip.reason}))?;
-                return Ok(LoopIterationOutcome::Exit(2));
+                return Ok(LoopIterationOutcome::Exit {
+                    code: 2,
+                    payload: Some(json!({"error": skip.reason})),
+                });
             }
             SplitAutoSelectPlan::Coin(plan) => vec![plan.coin_id],
         }
     };
 
-    if let Some(code) = enforce_split_lockup_guardrail(
+    if let Some(exit) = enforce_split_lockup_guardrail(
         &spendable,
         &selected_coin_ids,
         allow_lock_all_spendable,
         &ctx.resolved_base_asset_id,
     )? {
-        return Ok(LoopIterationOutcome::Exit(code));
+        return Ok(LoopIterationOutcome::Exit {
+            code: exit.code,
+            payload: Some(exit.payload),
+        });
     }
 
     let operation_id = ctx

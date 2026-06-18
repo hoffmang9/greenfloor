@@ -8,7 +8,6 @@ use crate::coin_ops::execution::CoinOpExecContext;
 use crate::error::{SignerError, SignerResult};
 
 use super::until_ready::LoopIterationOutcome;
-use crate::manager_cli::json::emit_json;
 
 pub(super) async fn run_combine_iteration(
     ctx: &CoinOpExecContext,
@@ -39,8 +38,10 @@ pub(super) async fn run_combine_iteration(
         coin_ids.to_vec()
     };
     if input_coin_ids.len() < 2 {
-        emit_json(&json!({"error": "insufficient_combine_inputs"}))?;
-        return Ok(LoopIterationOutcome::Exit(2));
+        return Ok(LoopIterationOutcome::Exit {
+            code: 2,
+            payload: Some(json!({"error": "insufficient_combine_inputs"})),
+        });
     }
 
     let total = total_for_coin_ids(&spendable, &input_coin_ids);

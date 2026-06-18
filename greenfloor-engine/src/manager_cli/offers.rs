@@ -4,13 +4,15 @@ use std::path::PathBuf;
 
 use clap::Args;
 
-use crate::cli_util::{optional_trimmed, print_json_pretty};
+use crate::cli_util::optional_trimmed;
 use crate::config::load_program_config;
 use crate::error::SignerResult;
 use crate::offer::lifecycle::{
     offers_cancel_cli, offers_status_cli, reconcile_offers_cli, OffersCancelCliResult,
 };
 use crate::storage::resolve_state_db_path;
+
+use super::json::emit_serialized;
 
 #[derive(Debug, Args)]
 pub struct OffersReconcileCliArgs {
@@ -73,7 +75,7 @@ pub async fn run_offers_reconcile_command(args: OffersReconcileCliArgs) -> Signe
         args.limit,
     )
     .await?;
-    print_json_pretty(&payload)?;
+    emit_serialized(&payload)?;
     Ok(0)
 }
 
@@ -89,7 +91,7 @@ pub fn run_offers_status_command(args: OffersStatusCliArgs) -> SignerResult<i32>
         args.limit,
         args.events_limit,
     )?;
-    print_json_pretty(&payload)?;
+    emit_serialized(&payload)?;
     Ok(0)
 }
 
@@ -112,6 +114,6 @@ pub async fn run_offers_cancel_command(args: OffersCancelCliArgs) -> SignerResul
     )
     .await?;
     let exit_code = if payload.failed_count == 0 { 0 } else { 2 };
-    print_json_pretty(&payload)?;
+    emit_serialized(&payload)?;
     Ok(exit_code)
 }

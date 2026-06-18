@@ -5,10 +5,13 @@ use serde_json::json;
 use crate::coin_ops::evaluate_coin_combine_gate;
 use crate::error::{SignerError, SignerResult};
 
+use super::context::build_coin_op_exec_context;
 use super::combine_iteration::run_combine_iteration;
-use super::context::{build_coin_op_exec_context, combine_gate_to_json};
 use super::loop_common::validate_until_ready_mode;
-use super::until_ready::{run_until_ready_loop, until_ready_exit_code, UntilReadyLoopConfig};
+use super::until_ready::{
+    emit_coin_op_exit, run_until_ready_loop, until_ready_exit_code, UntilReadyCompletion,
+    UntilReadyLoopConfig,
+};
 use crate::manager_cli::json::emit_json;
 use crate::manager_cli::ladder::{
     combine_threshold_count, resolve_combine_count, sell_ladder_entry_for_size,
@@ -77,7 +80,6 @@ pub async fn run_coin_combine(
             })
         },
         |gate| gate.ready,
-        combine_gate_to_json,
         |iteration, spendable, gate_json| {
             run_combine_iteration(
                 &ctx,
@@ -94,22 +96,23 @@ pub async fn run_coin_combine(
     )
     .await?;
 
-    if let Some(code) = completion.exit_code() {
-        return Ok(code);
+    match completion {
+        UntilReadyCompletion::Exit { code, payload } => {
+            emit_coin_op_exit(payload)?;
+            Ok(code)
+        }
+        UntilReadyCompletion::Completed { stop_reason } => {
+            emit_json(&json!({
+                "op": "coin-combine",
+                "coin_selection_mode": if explicit_coin_ids { "explicit" } else { "adapter_auto_select" },
+                "number_of_coins": number_of_coins,
+                "resolved_asset_id": ctx.resolved_base_asset_id,
+                "until_ready": until_ready,
+                "max_iterations": max_iterations.max(1),
+                "stop_reason": stop_reason,
+                "operations": operations,
+            }))?;
+            Ok(until_ready_exit_code(until_ready, &stop_reason))
+        }
     }
-
-    emit_json(&json!({
-        "op": "coin-combine",
-        "coin_selection_mode": if explicit_coin_ids { "explicit" } else { "adapter_auto_select" },
-        "number_of_coins": number_of_coins,
-        "resolved_asset_id": ctx.resolved_base_asset_id,
-        "until_ready": until_ready,
-        "max_iterations": max_iterations.max(1),
-        "stop_reason": completion.stop_reason().unwrap_or("single_pass"),
-        "operations": operations,
-    }))?;
-    Ok(until_ready_exit_code(
-        until_ready,
-        completion.stop_reason().unwrap_or("single_pass"),
-    ))
 }

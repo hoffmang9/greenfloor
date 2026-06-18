@@ -73,15 +73,23 @@ pub async fn run_signer_denomination_phase(
         ));
     }
 
-    let asset_scoped_coins =
-        match list_wallet_unspent_coins(&program.network, receive_address, &split_asset_id).await {
-            Ok(coins) => coins,
-            Err(err) => {
-                return Ok(BootstrapPhaseResult::skipped(format!(
-                    "bootstrap_coin_list_failed:{err}"
-                )));
-            }
-        };
+    let asset_scoped_coins = match list_wallet_unspent_coins(
+        &program.network,
+        receive_address,
+        &split_asset_id,
+    )
+    .await
+    {
+        Ok(coins) => coins,
+        Err(err) => {
+            return Ok(BootstrapPhaseResult::failed(BootstrapPhaseFailure::new(
+                format!("bootstrap_coin_list_failed:{err}"),
+                0,
+                String::new(),
+                None,
+            )));
+        }
+    };
 
     let spendable_coins: Vec<BootstrapCoin> = asset_scoped_coins
         .iter()

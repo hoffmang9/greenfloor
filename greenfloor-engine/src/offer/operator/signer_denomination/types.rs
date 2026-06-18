@@ -1,3 +1,5 @@
+use serde::ser::{SerializeStruct, Serializer};
+use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::offer::bootstrap::{BootstrapPhaseSnapshot, BootstrapPlan};
@@ -17,36 +19,72 @@ pub struct BootstrapPhaseResult {
     pub plan: Option<BootstrapPlan>,
 }
 
-impl BootstrapPhaseResult {
-    pub fn to_operator_json(&self) -> Value {
-        let mut payload = json!({
-            "status": self.status,
-            "reason": self.reason,
-            "ready": self.ready,
-            "fee_mojos": self.fee_mojos,
-            "fee_source": self.fee_source,
-            "fee_lookup_error": self.fee_lookup_error,
-        });
-        if let Some(wait_error) = &self.wait_error {
-            payload["wait_error"] = json!(wait_error);
+impl Serialize for BootstrapPhaseResult {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let field_count = 6
+            + usize::from(self.fee_lookup_error.is_some())
+            + usize::from(self.wait_error.is_some())
+            + usize::from(!is_empty_json_value(&self.split_result))
+            + usize::from(!self.wait_events.is_empty())
+            + usize::from(self.plan.is_some());
+        let mut state = serializer.serialize_struct("BootstrapPhaseResult", field_count)?;
+        state.serialize_field("status", &self.status)?;
+        state.serialize_field("reason", &self.reason)?;
+        state.serialize_field("ready", &self.ready)?;
+        state.serialize_field("fee_mojos", &self.fee_mojos)?;
+        state.serialize_field("fee_source", &self.fee_source)?;
+        if let Some(value) = &self.fee_lookup_error {
+            state.serialize_field("fee_lookup_error", value)?;
         }
-        if !self.split_result.is_null() && self.split_result != json!({}) {
-            payload["split_result"] = self.split_result.clone();
+        if let Some(value) = &self.wait_error {
+            state.serialize_field("wait_error", value)?;
+        }
+        if !is_empty_json_value(&self.split_result) {
+            state.serialize_field("split_result", &self.split_result)?;
         }
         if !self.wait_events.is_empty() {
-            payload["wait_events"] = Value::Array(self.wait_events.clone());
+            state.serialize_field("wait_events", &self.wait_events)?;
         }
         if let Some(plan) = &self.plan {
-            payload["plan"] = json!({
-                "source_coin_id": plan.source_coin_id,
-                "source_amount": plan.source_amount,
-                "output_amounts_base_units": plan.output_amounts_base_units,
-                "total_output_amount": plan.total_output_amount,
-                "change_amount": plan.change_amount,
-                "output_count": plan.output_amounts_base_units.len(),
-            });
+            state.serialize_field("plan", &BootstrapPlanOutput::from(plan))?;
         }
-        payload
+        state.end()
+    }
+}
+
+#[derive(Serialize)]
+struct BootstrapPlanOutput<'a> {
+    source_coin_id: &'a str,
+    source_amount: i64,
+    output_amounts_base_units: &'a [i64],
+    total_output_amount: i64,
+    change_amount: i64,
+    output_count: usize,
+}
+
+impl<'a> From<&'a BootstrapPlan> for BootstrapPlanOutput<'a> {
+    fn from(plan: &'a BootstrapPlan) -> Self {
+        Self {
+            source_coin_id: &plan.source_coin_id,
+            source_amount: plan.source_amount,
+            output_amounts_base_units: &plan.output_amounts_base_units,
+            total_output_amount: plan.total_output_amount,
+            change_amount: plan.change_amount,
+            output_count: plan.output_amounts_base_units.len(),
+        }
+    }
+}
+
+fn is_empty_json_value(value: &Value) -> bool {
+    value.is_null() || value == &json!({})
+}
+
+impl BootstrapPhaseResult {
+    pub fn to_operator_json(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|_| json!({}))
     }
 
     pub(super) fn from_snapshot(snapshot: BootstrapPhaseSnapshot) -> Self {
