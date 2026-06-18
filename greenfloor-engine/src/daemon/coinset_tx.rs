@@ -1,156 +1,6 @@
 use serde_json::Value;
 
-const COINSET_TX_ID_KEYS: &[&str] = &[
-    "tx_id",
-    "txId",
-    "transaction_id",
-    "transactionId",
-    "spend_bundle_name",
-    "spendBundleName",
-];
-
-fn normalize_hex_hash(value: &str) -> String {
-    value.trim().trim_start_matches("0x").to_ascii_lowercase()
-}
-
-fn looks_like_tx_id(value: &str) -> bool {
-    value.len() == 64 && value.chars().all(|ch| ch.is_ascii_hexdigit())
-}
-
-fn add_candidate(candidate: &Value, tx_ids: &mut Vec<String>) {
-    match candidate {
-        Value::String(raw) => {
-            let normalized = normalize_hex_hash(raw);
-            if looks_like_tx_id(&normalized)
-                && !tx_ids.iter().any(|existing| existing == &normalized)
-            {
-                tx_ids.push(normalized);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                add_candidate(item, tx_ids);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn walk_node(node: &Value, tx_ids: &mut Vec<String>) {
-    match node {
-        Value::Object(map) => {
-            for (key, value) in map {
-                if COINSET_TX_ID_KEYS.iter().any(|candidate| candidate == key) {
-                    add_candidate(value, tx_ids);
-                }
-                if matches!(value, Value::Object(_) | Value::Array(_)) {
-                    walk_node(value, tx_ids);
-                }
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                if matches!(item, Value::Object(_) | Value::Array(_)) {
-                    walk_node(item, tx_ids);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-const COINSET_COIN_ID_KEYS: &[&str] = &[
-    "id",
-    "coin_id",
-    "coinId",
-    "name",
-    "coin_name",
-    "coinName",
-    "involved_coins",
-    "involvedCoins",
-    "input_coins",
-    "inputCoins",
-    "output_coins",
-    "outputCoins",
-    "spent_coins",
-    "spentCoins",
-    "additions",
-    "removals",
-];
-
-fn add_coin_id_candidate(candidate: &Value, coin_ids: &mut Vec<String>) {
-    match candidate {
-        Value::String(raw) => {
-            let normalized = normalize_hex_hash(raw);
-            if looks_like_tx_id(&normalized)
-                && !coin_ids.iter().any(|existing| existing == &normalized)
-            {
-                coin_ids.push(normalized);
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                add_coin_id_candidate(item, coin_ids);
-            }
-        }
-        Value::Object(map) => {
-            for key in COINSET_COIN_ID_KEYS {
-                if let Some(value) = map.get(*key) {
-                    add_coin_id_candidate(value, coin_ids);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn walk_coin_id_node(node: &Value, coin_ids: &mut Vec<String>) {
-    match node {
-        Value::Object(map) => {
-            for (key, value) in map {
-                if COINSET_COIN_ID_KEYS
-                    .iter()
-                    .any(|candidate| candidate == key)
-                {
-                    add_coin_id_candidate(value, coin_ids);
-                }
-                if matches!(value, Value::Object(_) | Value::Array(_)) {
-                    walk_coin_id_node(value, coin_ids);
-                }
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                if matches!(item, Value::Object(_) | Value::Array(_)) {
-                    walk_coin_id_node(item, coin_ids);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-pub fn extract_coin_ids_from_offer_payload(payload: &Value) -> Vec<String> {
-    let mut coin_ids = Vec::new();
-    walk_coin_id_node(payload, &mut coin_ids);
-    coin_ids
-}
-
-pub fn extract_coinset_tx_ids_from_offer_payload(payload: &Value) -> Vec<String> {
-    let mut tx_ids = Vec::new();
-    walk_node(payload, &mut tx_ids);
-    tx_ids
-}
-
-pub fn dexie_offer_status(payload: &Value) -> Option<i64> {
-    if let Some(status) = payload.get("status").and_then(Value::as_i64) {
-        return Some(status);
-    }
-    payload
-        .get("offer")
-        .and_then(|offer| offer.get("status"))
-        .and_then(Value::as_i64)
-}
+use crate::offer::dexie_payload::extract_coinset_tx_ids_from_offer_payload;
 
 pub fn classify_ws_payload_tx_ids(payload: &Value) -> (Vec<String>, Vec<String>) {
     let event_hint = payload
@@ -228,6 +78,9 @@ pub fn build_dexie_size_by_offer_id(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::offer::dexie_payload::{
+        extract_coin_ids_from_offer_payload, extract_coinset_tx_ids_from_offer_payload,
+    };
     use serde_json::json;
 
     #[test]

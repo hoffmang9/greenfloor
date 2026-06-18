@@ -1,19 +1,21 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use greenfloor_engine::vault::members::hex_to_bytes32;
-use greenfloor_engine::{
-    build_and_optionally_broadcast_vault_cat_mixed_split, build_and_post_offer,
-    build_vault_cat_offer, load_signer_config, parse_coin_ids, resolve_vault_context,
-    run_daemon_command, run_offers_cancel_command, run_offers_reconcile_command,
-    run_offers_status_command, BuildAndPostOfferRequest, CreateOfferRequest, MixedSplitRequest,
-    DaemonCliArgs, OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
+use greenfloor_engine::coinset::parse_coin_ids;
+use greenfloor_engine::config::load_signer_config;
+use greenfloor_engine::daemon::{run_daemon_command, DaemonCliArgs};
+use greenfloor_engine::error::SignerError;
+use greenfloor_engine::offer::{build_vault_cat_offer, CreateOfferRequest};
+use greenfloor_engine::vault::{
+    build_and_optionally_broadcast_vault_cat_mixed_split, members::hex_to_bytes32,
+    MixedSplitRequest,
 };
+use greenfloor_engine::{resolve_vault_context, Error};
 
 #[derive(Debug, Parser)]
 #[command(
     name = "greenfloor-engine",
-    about = "GreenFloor Rust engine: vault KMS signing and manager CLI"
+    about = "GreenFloor Rust engine: vault KMS signing and low-level ops"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -85,47 +87,6 @@ enum Commands {
     },
     /// Run the GreenFloor daemon loop or a single cycle.
     Daemon(DaemonCliArgs),
-    /// Reconcile watched offer states against the venue.
-    OffersReconcile(OffersReconcileCliArgs),
-    /// Report offer lifecycle status from the state DB.
-    OffersStatus(OffersStatusCliArgs),
-    /// Cancel offers on the configured venue (Dexie only).
-    OffersCancel(OffersCancelCliArgs),
-    /// Build a vault-signed offer and post it to Dexie or Splash (manager CLI path).
-    BuildAndPostOffer {
-        #[arg(long, default_value = "config/program.yaml")]
-        program_config: PathBuf,
-        #[arg(long, default_value = "config/markets.yaml")]
-        markets_config: PathBuf,
-        #[arg(long, default_value = "")]
-        testnet_markets_config: PathBuf,
-        #[arg(long, default_value = "mainnet")]
-        network: String,
-        #[arg(long)]
-        market_id: Option<String>,
-        #[arg(long)]
-        pair: Option<String>,
-        #[arg(long)]
-        size_base_units: u64,
-        #[arg(long, default_value = "1")]
-        repeat: u32,
-        #[arg(long)]
-        venue: Option<String>,
-        #[arg(long)]
-        dexie_base_url: Option<String>,
-        #[arg(long)]
-        splash_base_url: Option<String>,
-        #[arg(long)]
-        allow_take: bool,
-        #[arg(long)]
-        claim_rewards: bool,
-        #[arg(long)]
-        dry_run: bool,
-        #[arg(long)]
-        json: bool,
-        #[arg(long)]
-        no_persist_results: bool,
-    },
 }
 
 #[tokio::main]
@@ -136,7 +97,7 @@ async fn main() {
     }
 }
 
-async fn run() -> Result<(), greenfloor_engine::Error> {
+async fn run() -> Result<(), Error> {
     let cli = Cli::parse();
     match cli.command {
         Commands::VaultInfo { config, json } => {
@@ -146,7 +107,7 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&context).map_err(|err| {
-                        greenfloor_engine::Error::Other(format!("json encode failed: {err}"))
+                        SignerError::Other(format!("json encode failed: {err}"))
                     })?
                 );
             } else {
@@ -224,77 +185,6 @@ async fn run() -> Result<(), greenfloor_engine::Error> {
                 std::process::exit(code);
             }
         }
-        Commands::OffersReconcile(args) => {
-            let code = run_offers_reconcile_command(args).await?;
-            if code != 0 {
-                std::process::exit(code);
-            }
-        }
-        Commands::OffersStatus(args) => {
-            let code = run_offers_status_command(args)?;
-            if code != 0 {
-                std::process::exit(code);
-            }
-        }
-        Commands::OffersCancel(args) => {
-            let code = run_offers_cancel_command(args).await?;
-            if code != 0 {
-                std::process::exit(code);
-            }
-        }
-        Commands::BuildAndPostOffer {
-            program_config,
-            markets_config,
-            testnet_markets_config,
-            network,
-            market_id,
-            pair,
-            size_base_units,
-            repeat,
-            venue,
-            dexie_base_url,
-            splash_base_url,
-            allow_take,
-            claim_rewards,
-            dry_run,
-            json,
-            no_persist_results,
-        } => {
-            if market_id.is_none() == pair.is_none() {
-                return Err(greenfloor_engine::Error::Other(
-                    "provide exactly one of --market-id or --pair".to_string(),
-                ));
-            }
-            let testnet_overlay = if testnet_markets_config.as_os_str().is_empty() {
-                None
-            } else {
-                Some(testnet_markets_config)
-            };
-            let response = build_and_post_offer(BuildAndPostOfferRequest {
-                program_path: program_config,
-                markets_path: markets_config,
-                testnet_markets_path: testnet_overlay,
-                network,
-                market_id,
-                pair,
-                size_base_units,
-                repeat,
-                publish_venue: venue,
-                dexie_base_url,
-                splash_base_url,
-                drop_only: !allow_take,
-                claim_rewards,
-                dry_run,
-                compact_json: json,
-                persist_results: !no_persist_results,
-                action_side: None,
-            })
-            .await?;
-            println!("{}", response.output);
-            if response.exit_code != 0 {
-                std::process::exit(response.exit_code);
-            }
-        }
     }
     Ok(())
 }
@@ -307,7 +197,7 @@ async fn run_mixed_split(
     coin_ids: Vec<String>,
     allow_sub_cat_output: bool,
     broadcast: bool,
-) -> Result<greenfloor_engine::MixedSplitResult, greenfloor_engine::Error> {
+) -> Result<greenfloor_engine::vault::MixedSplitResult, Error> {
     let config = load_signer_config(config_path)?;
     let parsed_coin_ids = if coin_ids.is_empty() {
         Vec::new()
@@ -354,14 +244,14 @@ fn print_vault_info(context: &greenfloor_engine::vault::VaultContext) {
 }
 
 fn print_mixed_split_result(
-    result: &greenfloor_engine::MixedSplitResult,
+    result: &greenfloor_engine::vault::MixedSplitResult,
     json: bool,
-) -> Result<(), greenfloor_engine::Error> {
+) -> Result<(), Error> {
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(result).map_err(|err| {
-                greenfloor_engine::Error::Other(format!("json encode failed: {err}"))
+                SignerError::Other(format!("json encode failed: {err}"))
             })?
         );
         return Ok(());
@@ -381,14 +271,14 @@ fn print_mixed_split_result(
 }
 
 fn print_create_offer_result(
-    result: &greenfloor_engine::CreateOfferResult,
+    result: &greenfloor_engine::offer::CreateOfferResult,
     json: bool,
-) -> Result<(), greenfloor_engine::Error> {
+) -> Result<(), Error> {
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(result).map_err(|err| {
-                greenfloor_engine::Error::Other(format!("json encode failed: {err}"))
+                SignerError::Other(format!("json encode failed: {err}"))
             })?
         );
         return Ok(());

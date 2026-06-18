@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use engine_core::{
+use engine_core::cycle::{
     ManagedActionStatus, MarketBatchSelection, OfferStateRow, StaleSweepCandidate, StaleSweepHit,
     StaleSweepProgress,
 };

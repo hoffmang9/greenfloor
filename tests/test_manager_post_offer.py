@@ -3,15 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
-import greenfloor.cli.manager as manager_mod
 from greenfloor.asset_label_catalog import _dexie_lookup_token_for_cat_id
-from greenfloor.cli.manager_setup import set_log_level
-from greenfloor.runtime.json_output import format_json_output, set_json_output_compact
-from tests.helpers.offer_runtime_fixtures import (
-    write_manager_program,
-)
+from tests.helpers.manager_cli import parse_json_output, run_manager
+from tests.helpers.manager_program_fixtures import write_manager_program
 
 
 def test_dexie_lookup_token_for_cat_id_falls_back_to_v3_tickers(monkeypatch) -> None:
@@ -53,83 +47,32 @@ def test_dexie_lookup_token_for_cat_id_falls_back_to_v3_tickers(monkeypatch) -> 
     assert any(url.endswith("/v3/prices/tickers") for url in calls)
 
 
-def test_format_json_output_pretty_mode_has_indentation() -> None:
-    set_json_output_compact(False)
-    output = format_json_output({"alpha": 1, "beta": {"gamma": 2}})
+def test_json_dumps_pretty_mode_has_indentation() -> None:
+    output = json.dumps({"alpha": 1, "beta": {"gamma": 2}}, indent=2)
     assert output.startswith("{\n")
     assert '\n  "alpha": 1' in output
 
 
-def test_format_json_output_compact_mode_is_single_line() -> None:
-    set_json_output_compact(True)
-    output = format_json_output({"alpha": 1, "beta": {"gamma": 2}})
+def test_json_dumps_compact_mode_is_single_line() -> None:
+    output = json.dumps({"alpha": 1, "beta": {"gamma": 2}}, separators=(",", ":"))
     assert output == '{"alpha":1,"beta":{"gamma":2}}'
 
 
-def test_set_log_level_updates_program_yaml(tmp_path: Path, capsys) -> None:
+def test_set_log_level_updates_program_yaml(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     write_manager_program(program, tmp_path=tmp_path)
-    code = set_log_level(program_path=program, log_level="warning")
-    assert code == 0
-    payload = json.loads(capsys.readouterr().out.strip())
-    assert payload["updated"] is True
-    assert payload["previous_log_level"] == "INFO"
-    assert payload["log_level"] == "WARNING"
-    assert "log_level: WARNING" in program.read_text(encoding="utf-8")
-
-
-def test_main_dispatches_set_log_level_command(monkeypatch, tmp_path: Path) -> None:
-    program = tmp_path / "program.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
-    captured: dict[str, object] = {}
-
-    def _fake_set_log_level(*, program_path: Path, log_level: str) -> int:
-        captured["program_path"] = program_path
-        captured["log_level"] = log_level
-        return 0
-
-    monkeypatch.setattr("greenfloor.cli.manager.set_log_level", _fake_set_log_level)
-    monkeypatch.setattr(
-        "sys.argv",
+    code, stdout, _stderr = run_manager(
         [
-            "greenfloor-manager",
             "--program-config",
             str(program),
             "set-log-level",
             "--log-level",
-            "ERROR",
-        ],
+            "warning",
+        ]
     )
-    with pytest.raises(SystemExit) as exc:
-        manager_mod.main()
-    assert exc.value.code == 0
-    assert captured["program_path"] == program
-    assert captured["log_level"] == "ERROR"
-
-
-def test_main_dispatches_coin_status_command(monkeypatch, tmp_path: Path) -> None:
-    program = tmp_path / "program.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
-    captured: dict[str, object] = {}
-
-    def _fake_coin_status(**kwargs) -> int:
-        captured.update(kwargs)
-        return 0
-
-    monkeypatch.setattr("greenfloor.cli.manager.coin_status", _fake_coin_status)
-    monkeypatch.setattr(
-        "sys.argv",
-        [
-            "greenfloor-manager",
-            "--program-config",
-            str(program),
-            "coin-status",
-            "--asset",
-            "xch",
-        ],
-    )
-    with pytest.raises(SystemExit) as exc:
-        manager_mod.main()
-    assert exc.value.code == 0
-    assert captured["program_path"] == program
-    assert captured["asset"] == "xch"
+    assert code == 0
+    payload = parse_json_output(stdout)
+    assert payload["updated"] is True
+    assert payload["previous_log_level"] == "INFO"
+    assert payload["log_level"] == "WARNING"
+    assert "log_level: WARNING" in program.read_text(encoding="utf-8")

@@ -60,6 +60,15 @@ jobs:
           wheelhouse-subdir: chia-wallet-sdk
           rust-already-configured: true
 
+      - name: Build native operator binaries
+        run: |
+          cargo build --manifest-path greenfloor-engine/Cargo.toml --bins
+          mkdir -p .venv/bin
+          for bin in greenfloor-engine greenfloor-manager greenfloord; do
+            install -m 755 "target/debug/${bin}" ".venv/bin/${bin}"
+          done
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+
       - name: Install package
         run: |
           python -m pip install --upgrade pip

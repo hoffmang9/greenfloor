@@ -2,8 +2,8 @@ use crate::coin_ops::{
     coin_op_target_amount_allowed, plan_auto_combine_inputs, CoinOpPlan, CombineInputSelectionMode,
 };
 
-use super::context::CoinOpExecContext;
-use super::helpers::{combine_output_amounts, total_for_coin_ids};
+use crate::coin_ops::execution::CoinOpExecContext;
+use crate::coin_ops::{combine_output_amounts, total_for_coin_ids};
 use super::items::{executed_item, skip_item, CoinOpExecItem};
 use super::COIN_OP_ERROR_PREFIX;
 

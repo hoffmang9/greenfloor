@@ -5,8 +5,7 @@ use crate::coin_ops::{
     SplitAutoSelectPlan, SplitCombinePrereqPlan, SplitPlanningProfile,
 };
 
-use super::context::CoinOpExecContext;
-use super::helpers::{combine_output_amounts, total_for_coin_ids};
+use crate::coin_ops::execution::{submit_combine_prereq, CoinOpExecContext};
 use super::items::{executed_item, skip_item, CoinOpExecItem};
 use super::COIN_OP_ERROR_PREFIX;
 
@@ -19,30 +18,7 @@ pub(crate) async fn submit_combine_prereq_for_split(
     prereq: &SplitCombinePrereqPlan,
 ) -> (Vec<CoinOpExecItem>, u64) {
     let combine_count = prereq.input_coin_ids.len() as i64;
-    let spendable = match ctx.list_spendable_coins().await {
-        Ok(coins) => coins,
-        Err(err) => {
-            return (
-                vec![skip_item(
-                    op_type,
-                    size_base_units,
-                    op_count,
-                    format!("{COIN_OP_ERROR_PREFIX}:{err}:combine_for_split_prereq"),
-                )],
-                0,
-            );
-        }
-    };
-    let total = total_for_coin_ids(&spendable, &prereq.input_coin_ids);
-    let output_amounts = combine_output_amounts(total, prereq.input_coin_ids.len());
-    match ctx
-        .execute_mixed_split(
-            output_amounts,
-            &prereq.input_coin_ids,
-            ctx.program.coin_ops_combine_fee_mojos.max(0) as u64,
-        )
-        .await
-    {
+    match submit_combine_prereq(ctx, &prereq.input_coin_ids).await {
         Ok(operation_id) => {
             let reason = if prereq.exact_match {
                 "signer_combine_submitted_for_split_prereq_exact"

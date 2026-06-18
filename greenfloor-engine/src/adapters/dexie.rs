@@ -93,6 +93,95 @@ impl DexieClient {
         Ok(offers)
     }
 
+    pub async fn get_swap_tokens(&self) -> SignerResult<Vec<Value>> {
+        let url = format!("{}/v1/swap/tokens", self.base_url);
+        let response = self
+            .http
+            .get(url)
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await
+            .map_err(|err| SignerError::Other(format!("dexie_get_tokens_error:{err}")))?;
+        let payload = Self::parse_response(response).await?;
+        let tokens = payload
+            .get("tokens")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_else(|| {
+                payload
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+            });
+        Ok(tokens
+            .into_iter()
+            .filter(|row| row.is_object())
+            .collect())
+    }
+
+    pub async fn get_price_tickers(&self) -> SignerResult<Vec<Value>> {
+        let url = format!("{}/v3/prices/tickers", self.base_url);
+        let response = self
+            .http
+            .get(url)
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await
+            .map_err(|err| SignerError::Other(format!("dexie_get_tickers_error:{err}")))?;
+        let payload = Self::parse_response(response).await?;
+        if let Some(rows) = payload.as_array() {
+            return Ok(rows
+                .iter()
+                .filter(|row| row.is_object())
+                .cloned()
+                .collect());
+        }
+        Ok(payload
+            .get("tickers")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|row| row.is_object())
+            .collect())
+    }
+
+    pub async fn lookup_token_by_cat_id(&self, cat_id_hex: &str) -> SignerResult<Option<Value>> {
+        let target = cat_id_hex.trim().to_ascii_lowercase();
+        if target.is_empty() {
+            return Ok(None);
+        }
+        for row in self.get_swap_tokens().await? {
+            if row_matches_cat_target(&row, &target, false) {
+                return Ok(Some(row));
+            }
+        }
+        for row in self.get_price_tickers().await? {
+            if row_matches_cat_target(&row, &target, true) {
+                return Ok(Some(row));
+            }
+        }
+        Ok(None)
+    }
+
+    pub async fn lookup_token_by_symbol(&self, symbol: &str) -> SignerResult<Option<Value>> {
+        let target = symbol.trim();
+        if target.is_empty() {
+            return Ok(None);
+        }
+        for row in self.get_swap_tokens().await? {
+            for key in ["code", "name", "id"] {
+                if case_insensitive_match(
+                    row.get(key).and_then(Value::as_str).unwrap_or(""),
+                    target,
+                ) {
+                    return Ok(Some(row));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     pub async fn cancel_offer(&self, offer_id: &str) -> SignerResult<Value> {
         let clean_offer_id = offer_id.trim();
         if clean_offer_id.is_empty() {
@@ -129,6 +218,39 @@ impl DexieClient {
         serde_json::from_str(&body)
             .map_err(|err| SignerError::Other(format!("dexie_json_error:{err}")))
     }
+}
+
+fn case_insensitive_match(left: &str, right: &str) -> bool {
+    let a = left.trim().to_ascii_lowercase();
+    let b = right.trim().to_ascii_lowercase();
+    !a.is_empty() && a == b
+}
+
+fn row_matches_cat_target(row: &Value, target: &str, include_ticker_split: bool) -> bool {
+    let mut candidates = std::collections::HashSet::new();
+    for key in [
+        "assetId", "asset_id", "id", "tokenId", "token_id", "base_currency", "target_currency",
+    ] {
+        if let Some(value) = row.get(key).and_then(Value::as_str) {
+            let trimmed = value.trim().to_ascii_lowercase();
+            if !trimmed.is_empty() {
+                candidates.insert(trimmed);
+            }
+        }
+    }
+    if let Some(ticker_id) = row.get("ticker_id").and_then(Value::as_str) {
+        let ticker_id = ticker_id.trim().to_ascii_lowercase();
+        if !ticker_id.is_empty() {
+            candidates.insert(ticker_id.clone());
+            if include_ticker_split {
+                if let Some((base, quote)) = ticker_id.split_once('_') {
+                    candidates.insert(base.to_string());
+                    candidates.insert(quote.to_string());
+                }
+            }
+        }
+    }
+    candidates.contains(target)
 }
 
 pub fn dexie_offer_view_url(dexie_base_url: &str, offer_id: &str) -> String {

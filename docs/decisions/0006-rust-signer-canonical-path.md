@@ -2,47 +2,28 @@
 
 ## Status
 
-Accepted
+Accepted; **migration complete** for operators ([0013-rust-cli-daemon-native-cutover.md](0013-rust-cli-daemon-native-cutover.md))
 
 ## Decision
 
 `greenfloor-engine` is the canonical signing implementation for vault KMS paths.
-Python signing in `greenfloor/signing.py` remains during migration but is **legacy**;
-new vault spend, mixed-split, and offer behavior lands in Rust first.
+New vault spend, mixed-split, and offer behavior lands in Rust first.
 
-Migration order:
-
-1. **Now:** `greenfloor-engine` CLI for operator/debug flows and CI parity tests.
-2. **Next:** Python daemon/CLI invoke `greenfloor-engine` (or a PyO3 wrapper) instead of
-   duplicating spend logic in `greenfloor/signing.py`.
-3. **End state:** Remove duplicated Python vault spend paths; Python keeps orchestration,
-   config, and adapters only.
-
-Cloud Wallet GraphQL offer posting (`greenfloor/adapters/cloud_wallet.py`) may remain
-until local Rust offer paths reach production parity for each market flow.
+Python `greenfloor/adapters/rust_signer.py` and related bridges call the engine via
+PyO3 for scripts and parity tests only. Operator binaries do not use Python signing.
 
 ## Rationale
 
 - Vault MIPS + KMS fast-forward signing is easier to test and keep correct in Rust with
-  `chia-wallet-sdk` path deps.
-- Python `signing.py` duplicated puzzle construction increases drift risk (presplit nonce,
-  member hashes, mode-23 relay).
-- ADR 0002 consolidated Python layers; this ADR supersedes its "no alternate stacks"
-  guidance for the **implementation** layer while preserving adapter boundaries.
+  `chia-wallet-sdk`.
+- Single implementation avoids presplit nonce and member-hash drift.
 
 ## Consequences
 
 - Feature work for vault CAT spends and offers targets `greenfloor-engine/` first.
-- Python parity tests validate cross-language hash/spend contracts during migration.
-- ADR 0002 canonical Python APIs become thin wrappers until removed.
-- Coinset IO in Rust (`greenfloor-engine/src/coinset/`) is allowed for signer paths;
-  Python adapters remain for daemon orchestration until cutover.
-- Vault CAT coin selection for offers and mixed splits goes through
-  `OfferCoinsetBackend` (live coinset adapter + simulator test backend).
-- `--split-input-coins` selects the presplit-new input mode, but when selected CAT
-  inputs already equal `--offer-amount` exactly the signer still uses the direct
-  offer execution path (`execution_mode: direct`); no vault split spend is emitted.
+- `--split-input-coins` presplit path: when selected CAT inputs already equal offer
+  amount exactly, signer uses direct execution (`execution_mode: direct`).
 
 ## Supersedes
 
-Partially supersedes ADR 0002 "no alternate signing stacks" — see migration plan above.
+Partially supersedes ADR 0002 for the implementation layer; adapter boundaries unchanged.

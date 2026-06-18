@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.dexie_http_mock import DexieHttpMock
-from tests.helpers.offer_runtime_fixtures import write_manager_program
-from tests.helpers.offers_engine_cli import offers_reconcile, offers_status
+from tests.helpers.manager_cli import parse_json_output, run_manager
+from tests.helpers.manager_program_fixtures import write_manager_program
 
 _DEFAULT_DEXIE_BASE = "https://api.dexie.space"
 
@@ -18,24 +17,57 @@ def _run_offers_reconcile_with_mock(
     dexie: DexieHttpMock,
     market_id: str | None = None,
     limit: int = 20,
-) -> int:
+) -> tuple[int, dict]:
     base_url = dexie.start()
     original = program.read_text(encoding="utf-8")
     program.write_text(original.replace(_DEFAULT_DEXIE_BASE, base_url), encoding="utf-8")
     try:
-        return offers_reconcile(
-            program_path=program,
-            state_db=str(db_path),
-            market_id=market_id,
-            limit=limit,
-            venue="dexie",
-        )
+        argv = [
+            "--program-config",
+            str(program),
+            "--state-db",
+            str(db_path),
+            "offers-reconcile",
+            "--limit",
+            str(int(limit)),
+            "--venue",
+            "dexie",
+        ]
+        if market_id:
+            argv.extend(["--market-id", market_id])
+        code, stdout, _stderr = run_manager(argv)
+        return code, parse_json_output(stdout)
     finally:
         dexie.stop()
         program.write_text(original, encoding="utf-8")
 
 
-def test_offers_reconcile_updates_states_from_dexie(tmp_path: Path, capsys) -> None:
+def _run_offers_status(
+    *,
+    program: Path,
+    db_path: Path,
+    market_id: str | None = None,
+    limit: int = 20,
+    events_limit: int = 10,
+) -> tuple[int, dict]:
+    argv = [
+        "--program-config",
+        str(program),
+        "--state-db",
+        str(db_path),
+        "offers-status",
+        "--limit",
+        str(int(limit)),
+        "--events-limit",
+        str(int(events_limit)),
+    ]
+    if market_id:
+        argv.extend(["--market-id", market_id])
+    code, stdout, _stderr = run_manager(argv)
+    return code, parse_json_output(stdout)
+
+
+def test_offers_reconcile_updates_states_from_dexie(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
     write_manager_program(program, tmp_path=tmp_path)
@@ -69,9 +101,8 @@ def test_offers_reconcile_updates_states_from_dexie(tmp_path: Path, capsys) -> N
             },
         }
     )
-    code = _run_offers_reconcile_with_mock(program=program, db_path=db_path, dexie=dexie)
+    code, payload = _run_offers_reconcile_with_mock(program=program, db_path=db_path, dexie=dexie)
     assert code == 0
-    payload = json.loads(capsys.readouterr().out.strip())
     assert payload["reconciled_count"] == 2
     assert payload["changed_count"] == 2
     taker_items = [row for row in payload["items"] if row["offer_id"] == "offer-ok"]
@@ -92,7 +123,7 @@ def test_offers_reconcile_updates_states_from_dexie(tmp_path: Path, capsys) -> N
     assert events[0]["payload"]["signal"] == "coinset_tx_block_webhook"
 
 
-def test_offers_status_reports_compact_summary(tmp_path: Path, capsys) -> None:
+def test_offers_status_reports_compact_summary(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
     write_manager_program(program, tmp_path=tmp_path)
@@ -118,22 +149,21 @@ def test_offers_status_reports_compact_summary(tmp_path: Path, capsys) -> None:
     finally:
         store.close()
 
-    code = offers_status(
-        program_path=program,
-        state_db=str(db_path),
+    code, payload = _run_offers_status(
+        program=program,
+        db_path=db_path,
         market_id="m1",
         limit=20,
         events_limit=10,
     )
     assert code == 0
-    payload = json.loads(capsys.readouterr().out.strip())
     assert payload["offer_count"] == 2
     assert payload["by_state"]["open"] == 1
     assert payload["by_state"]["tx_block_confirmed"] == 1
     assert len(payload["recent_events"]) == 1
 
 
-def test_offers_reconcile_coinset_signal_matrix(tmp_path: Path, capsys) -> None:
+def test_offers_reconcile_coinset_signal_matrix(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
     write_manager_program(program, tmp_path=tmp_path)
@@ -168,9 +198,8 @@ def test_offers_reconcile_coinset_signal_matrix(tmp_path: Path, capsys) -> None:
             "offer-missing-status": {"id": "offer-missing-status"},
         }
     )
-    code = _run_offers_reconcile_with_mock(program=program, db_path=db_path, dexie=dexie)
+    code, payload = _run_offers_reconcile_with_mock(program=program, db_path=db_path, dexie=dexie)
     assert code == 0
-    payload = json.loads(capsys.readouterr().out.strip())
     by_offer = {row["offer_id"]: row for row in payload["items"]}
 
     assert by_offer["offer-confirmed"]["new_state"] == "tx_block_confirmed"
@@ -192,7 +221,7 @@ def test_offers_reconcile_coinset_signal_matrix(tmp_path: Path, capsys) -> None:
     assert by_offer["offer-missing-status"]["signal_source"] == "none"
 
 
-def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(tmp_path: Path, capsys) -> None:
+def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
     write_manager_program(program, tmp_path=tmp_path)
@@ -220,9 +249,8 @@ def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(tmp_path: Pa
             "offer-status-cancelled": {"id": "offer-status-cancelled", "status": 3},
         }
     )
-    code = _run_offers_reconcile_with_mock(program=program, db_path=db_path, dexie=dexie)
+    code, payload = _run_offers_reconcile_with_mock(program=program, db_path=db_path, dexie=dexie)
     assert code == 0
-    payload = json.loads(capsys.readouterr().out.strip())
     by_offer = {row["offer_id"]: row for row in payload["items"]}
 
     assert by_offer["offer-status-confirmed"]["new_state"] == "tx_block_confirmed"
@@ -235,7 +263,7 @@ def test_offers_reconcile_dexie_fallback_when_coinset_tx_ids_absent(tmp_path: Pa
     assert by_offer["offer-status-cancelled"]["taker_signal"] == "none"
 
 
-def test_offers_reconcile_reads_nested_dexie_offer_payload_shape(tmp_path: Path, capsys) -> None:
+def test_offers_reconcile_reads_nested_dexie_offer_payload_shape(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     db_path = tmp_path / "state.sqlite"
     write_manager_program(program, tmp_path=tmp_path)
@@ -261,10 +289,9 @@ def test_offers_reconcile_reads_nested_dexie_offer_payload_shape(tmp_path: Path,
             },
         }
     )
-    code = _run_offers_reconcile_with_mock(program=program, db_path=db_path, dexie=dexie)
+    code, payload = _run_offers_reconcile_with_mock(program=program, db_path=db_path, dexie=dexie)
 
     assert code == 0
-    payload = json.loads(capsys.readouterr().out.strip())
     by_offer = {row["offer_id"]: row for row in payload["items"]}
     assert by_offer["offer-nested"]["new_state"] == "tx_block_confirmed"
     assert by_offer["offer-nested"]["last_seen_status"] == 4

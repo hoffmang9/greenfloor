@@ -1,72 +1,69 @@
 # Coinset Validation Runbook
 
-This runbook defines the operator-side validation loop for Coinset-backed vault scans.
+Operator-side validation for Coinset-backed vault scans and coin inventory checks.
+GreenFloor operator coin ops use the native manager (`greenfloor-manager coins-list`,
+`coin-split`, `coin-combine`); this doc covers **scripts** and external CLI parity.
 
 ## Scope
 
-- Keep GreenFloor runtime logic in Python adapters/scripts.
-- Use Coinset CLI as an external verification and triage tool.
-- Validate endpoint capability on each host before relying on incremental scan mode.
+- Scripts under `scripts/` use `greenfloor.adapters.coinset` and read vault identity
+  from `program.yaml` (`signer:` + `vault:` — legacy `cloud_wallet:` is rejected).
+- Use Coinset CLI for spot verification against script output when debugging.
 
-## 1) Probe endpoint capabilities on host
-
-Run this first on each runtime host (for example John-Deere):
+## 1) Probe endpoint capabilities
 
 ```bash
 cd ~/greenfloor
 .venv/bin/python scripts/probe_coinset_capabilities.py \
   --network mainnet \
   --coinset-base-url https://api.coinset.org \
-  --launcher-id-file ~/.greenfloor/cache/vault_launcher_id.txt \
-  --cloud-wallet-base-url "$(yq -r '.cloud_wallet.base_url' ~/.greenfloor/config/program.yaml)" \
-  --cloud-wallet-user-key-id "$(yq -r '.cloud_wallet.user_key_id' ~/.greenfloor/config/program.yaml)" \
-  --cloud-wallet-private-key-pem-path "$(yq -r '.cloud_wallet.private_key_pem_path' ~/.greenfloor/config/program.yaml)" \
-  --vault-id "$(yq -r '.cloud_wallet.vault_id' ~/.greenfloor/config/program.yaml)"
+  --program-config ~/.greenfloor/config/program.yaml
 ```
 
-Expected: `capabilities.*.range_supported` should be `true` for batched endpoints.
+Optional: pass `--launcher-id-file ~/.greenfloor/cache/vault_launcher_id.txt` instead
+of reading `vault.launcher_id` from program config.
 
-## 2) Run full scan with checkpoint
+Expected: batched height-range endpoints report `range_supported: true` when the
+host can run incremental vault scans.
+
+## 2) List vault coins (script)
 
 ```bash
-cd ~/greenfloor
 .venv/bin/python scripts/list_vault_coins_coinset.py \
   --network mainnet \
   --coinset-base-url https://api.coinset.org \
-  --launcher-id-file ~/.greenfloor/cache/vault_launcher_id.txt \
+  --program-config ~/.greenfloor/config/program.yaml \
   --asset-type cat \
-  --cat-ticker wUSDC.b \
-  --max-nonce 64 \
-  --nonce-batch-size 32 \
-  --parent-lookup-batch-size 64 \
-  --checkpoint-file ~/.greenfloor/cache/vault_coinset_checkpoint.json \
-  --checkpoint-save-interval 32 \
-  --combine-dust --combine-dry-run
+  --cat-ticker wUSDC.b
 ```
 
-## 3) Run incremental checkpoint scan
+See `scripts/vault_coinset_scan_coinset.py` and `scripts/vault_coinset_scan_checkpoint.py`
+for checkpointed scan workflows.
+
+## 3) Manager inventory (preferred for operators)
 
 ```bash
-cd ~/greenfloor
-.venv/bin/python scripts/list_vault_coins_coinset.py \
-  --network mainnet \
-  --coinset-base-url https://api.coinset.org \
-  --launcher-id-file ~/.greenfloor/cache/vault_launcher_id.txt \
-  --asset-type cat \
-  --cat-ticker wUSDC.b \
-  --max-nonce 64 \
-  --nonce-batch-size 32 \
-  --parent-lookup-batch-size 64 \
-  --checkpoint-file ~/.greenfloor/cache/vault_coinset_checkpoint.json \
-  --incremental-from-checkpoint \
-  --combine-dust --combine-dry-run
+greenfloor-manager coins-list
+greenfloor-manager coin-status
+greenfloor-manager coins-list --asset wUSDC.b
 ```
 
-Expected: output `checkpoint.resumed=true`, narrowed `scan_window`, and significantly lower runtime than first full scan.
+These use the Rust engine Coinset client against the market receive address scope.
 
-## 4) Optional Coinset CLI parity checks
+## 4) CAT dust combine (script)
 
-Use Coinset CLI for spot verification against script output:
+For sub-unit CAT dust on enabled markets:
+
+```bash
+.venv/bin/python scripts/combine_market_cat_dust_coinset.py \
+  --program-config ~/.greenfloor/config/program.yaml \
+  --markets-config ~/.greenfloor/config/markets.yaml \
+  --dry-run
+```
+
+See also runbook §2 steady-state operations.
+
+## 5) Coinset CLI parity checks
 
 ```bash
 coinset get_coin_records_by_puzzle_hashes <p2_hash_hex> --include-spent-coins
@@ -74,87 +71,10 @@ coinset get_coin_records_by_hints <p2_hash_hex> --include-spent-coins
 coinset get_coin_record_by_name <coin_id_hex>
 ```
 
-Reference CLI skill:
-[coinset CLI SKILL.md](https://raw.githubusercontent.com/coinset-org/cli/refs/heads/main/SKILL.md)
+Reference: [coinset CLI SKILL.md](https://raw.githubusercontent.com/coinset-org/cli/refs/heads/main/SKILL.md)
 
-## 5) Failure handling
+## 6) Failure handling
 
 - If batched range support is false, run full-window scans without incremental mode.
-- If Coinset returns transient TLS/edge errors, rerun with existing checkpoint to resume quickly.
-- If `scan_window_exhausted`, no new height range is available since last sync.
-
-## 6) Direct combine on John-Deere (new script)
-
-Run this flow only after `probe_coinset_capabilities.py` succeeds.
-
-### 6.1 Preflight only (no broadcast)
-
-```bash
-ssh john-deere '
-  set -euo pipefail
-  cd ~/greenfloor
-  .venv/bin/python scripts/combine_coinset_direct.py \
-    --network mainnet \
-    --coinset-base-url https://api.coinset.org \
-    --coin-name <coin_id_hex_1> \
-    --coin-name <coin_id_hex_2> \
-    --max-input-coins 10 \
-    --preflight-only \
-    --key-id "<signer_key_id>" \
-    --keyring-yaml-path "<keyring_yaml_path>" \
-    --receive-address "<market_receive_address>" \
-    --cloud-wallet-base-url "$(yq -r ".cloud_wallet.base_url" ~/.greenfloor/config/program.yaml)" \
-    --cloud-wallet-user-key-id "$(yq -r ".cloud_wallet.user_key_id" ~/.greenfloor/config/program.yaml)" \
-    --cloud-wallet-private-key-pem-path "$(yq -r ".cloud_wallet.private_key_pem_path" ~/.greenfloor/config/program.yaml)" \
-    --vault-id "$(yq -r ".cloud_wallet.vault_id" ~/.greenfloor/config/program.yaml)" \
-    --cloud-wallet-kms-key-id "$(yq -r ".cloud_wallet.kms_key_id" ~/.greenfloor/config/program.yaml)" \
-    --cloud-wallet-kms-region "$(yq -r ".cloud_wallet.kms_region // \"us-west-2\"" ~/.greenfloor/config/program.yaml)"
-'
-```
-
-Expected preflight JSON:
-
-- `status=preflight_ok`
-- `preflight.ready=true`
-- per-check `ok=true` for `coinset`, `cloud_wallet_snapshot`, `kms_resolution`, `payload_validation`
-
-Optional live KMS probe (off by default):
-
-```bash
---kms-live-probe --kms-live-probe-message-hex "$(printf "11%.0s" {1..64})"
-```
-
-### 6.2 Live direct combine (broadcast + verify spent)
-
-Start with a small combine set (2-3 inputs) and fee `0` behavior from script defaults.
-
-```bash
-ssh john-deere '
-  set -euo pipefail
-  cd ~/greenfloor
-  .venv/bin/python scripts/combine_coinset_direct.py \
-    --network mainnet \
-    --coinset-base-url https://api.coinset.org \
-    --coin-name <coin_id_hex_1> \
-    --coin-name <coin_id_hex_2> \
-    --max-input-coins 10 \
-    --key-id "<signer_key_id>" \
-    --keyring-yaml-path "<keyring_yaml_path>" \
-    --receive-address "<market_receive_address>" \
-    --cloud-wallet-base-url "$(yq -r ".cloud_wallet.base_url" ~/.greenfloor/config/program.yaml)" \
-    --cloud-wallet-user-key-id "$(yq -r ".cloud_wallet.user_key_id" ~/.greenfloor/config/program.yaml)" \
-    --cloud-wallet-private-key-pem-path "$(yq -r ".cloud_wallet.private_key_pem_path" ~/.greenfloor/config/program.yaml)" \
-    --vault-id "$(yq -r ".cloud_wallet.vault_id" ~/.greenfloor/config/program.yaml)" \
-    --cloud-wallet-kms-key-id "$(yq -r ".cloud_wallet.kms_key_id" ~/.greenfloor/config/program.yaml)" \
-    --cloud-wallet-kms-region "$(yq -r ".cloud_wallet.kms_region // \"us-west-2\"" ~/.greenfloor/config/program.yaml)" \
-    --verify-timeout-seconds 900 \
-    --verify-poll-seconds 8 \
-    --verify-warning-interval-seconds 300
-'
-```
-
-Expected live JSON:
-
-- `status=ok`
-- `broadcast.status=executed`
-- `verification.status=spent`
+- If Coinset returns transient TLS/edge errors, rerun with an existing checkpoint to resume.
+- Override endpoint with `GREENFLOOR_COINSET_BASE_URL` (see `docs/runbook.md` §6).

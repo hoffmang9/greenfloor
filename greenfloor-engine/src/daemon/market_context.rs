@@ -7,7 +7,7 @@ use crate::error::SignerResult;
 
 use super::cycle_paths::DaemonCyclePaths;
 use super::watchlist::cache::CoinWatchlistCache;
-use super::reconcile_phase::ReconcilePhaseResult;
+use super::reconcile_market_cycle::ReconcileMarketCycleResult;
 use super::run_once::{CyclePlan, DaemonRunOnceRequest};
 
 /// Config and clients loaded once per daemon cycle.
@@ -59,7 +59,7 @@ pub struct MarketCycleContext<'a> {
     pub resources: &'a DaemonCycleResources,
     pub dispatch: &'a MarketDispatchContext,
     pub plan: &'a CyclePlan,
-    pub reconcile: &'a ReconcilePhaseResult,
+    pub reconcile: &'a ReconcileMarketCycleResult,
 }
 
 pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<DaemonCycleResources> {

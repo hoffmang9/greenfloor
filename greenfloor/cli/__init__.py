@@ -1,1 +1,0 @@
-"""Manager CLI package."""

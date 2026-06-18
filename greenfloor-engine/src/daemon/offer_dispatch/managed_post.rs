@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::PlannedAction;
 use crate::error::SignerResult;
-use crate::manager::{build_and_post_offer, BuildAndPostOfferRequest};
+use crate::offer::operator::{build_and_post_offer, BuildAndPostOfferRequest, OfferOperatorTestOverrides};
 use crate::offer::request::normalize_offer_side;
 
 use crate::daemon::cycle_paths::DaemonCyclePaths;
@@ -37,9 +37,9 @@ pub async fn post_managed_planned_action(
         drop_only: true,
         claim_rewards: false,
         dry_run: program.runtime_dry_run,
-        compact_json: false,
         persist_results: true,
         action_side: Some(side),
+        test_overrides: OfferOperatorTestOverrides::default(),
     })
     .await?;
     Ok(response.exit_code == 0)

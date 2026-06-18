@@ -1,13 +1,13 @@
 use crate::error::SignerResult;
 use crate::cycle::MarketCycleResultState;
 
-use super::reconcile_phase::{ReconcilePhaseMetrics, ReconcilePhaseResult};
+use super::reconcile_market_cycle::{ReconcileMarketCycleMetrics, ReconcileMarketCycleResult};
 use super::run_once::MarketDispatchMetrics;
 
 #[derive(Debug, Clone)]
 pub struct SingleMarketCycleOutput {
     pub market_id: String,
-    pub reconcile: ReconcilePhaseResult,
+    pub reconcile: ReconcileMarketCycleResult,
     pub state: MarketCycleResultState,
 }
 
@@ -63,11 +63,11 @@ mod tests {
         }
         SingleMarketCycleOutput {
             market_id: "m1".to_string(),
-            reconcile: ReconcilePhaseResult {
+            reconcile: ReconcileMarketCycleResult {
                 offers: Vec::new(),
                 dexie_size_by_offer_id: Default::default(),
                 dexie_fetch_error: None,
-                metrics: ReconcilePhaseMetrics::default(),
+                metrics: ReconcileMarketCycleMetrics::default(),
             },
             state,
         }

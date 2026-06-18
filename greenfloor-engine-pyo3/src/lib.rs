@@ -24,14 +24,20 @@ mod watchlist_py;
 use std::path::Path;
 use std::sync::OnceLock;
 
-use engine_core::{
-    build_and_optionally_broadcast_vault_cat_mixed_split, build_vault_cat_offer,
-    encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
-    from_input_spend_bundle_xch_bytes, get_conservative_fee_estimate, get_fee_estimate,
-    load_signer_config, push_tx_hex, resolve_offer_assets_via_coinset, resolve_vault_context,
-    validate_offer_structure, validate_offer_text, verify_offer_for_dexie, CreateOfferRequest,
-    MixedSplitRequest,
+use engine_core::coinset::{
+    get_conservative_fee_estimate, get_fee_estimate, push_tx_hex,
 };
+use engine_core::config::load_signer_config;
+use engine_core::offer::codec::{
+    encode_offer_from_spend_bundle_bytes, from_input_spend_bundle_bytes,
+    from_input_spend_bundle_xch_bytes, validate_offer_structure, validate_offer_text,
+    verify_offer_for_dexie,
+};
+use engine_core::offer::{build_vault_cat_offer, CreateOfferRequest};
+use engine_core::vault::{
+    build_and_optionally_broadcast_vault_cat_mixed_split, MixedSplitRequest,
+};
+use engine_core::{resolve_offer_assets_via_coinset, resolve_vault_context};
 use pyo3::prelude::*;
 
 use py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};

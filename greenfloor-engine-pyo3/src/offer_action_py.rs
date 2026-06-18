@@ -3,7 +3,8 @@ use std::path::Path;
 use engine_core::offer::action::{
     build_signer_offer_for_action, try_normalize_resolved_assets, BuildOfferForActionRequest,
 };
-use engine_core::{load_signer_config, Error};
+use engine_core::config::load_signer_config;
+use engine_core::error::SignerError as Error;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule, PyTuple};
 

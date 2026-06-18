@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from greenfloor.cli.manager_setup import bootstrap_home
+from tests.helpers.manager_cli import run_manager
 
 
 def _write_templates(root: Path) -> tuple[Path, Path, Path, Path]:
@@ -101,13 +101,44 @@ def _write_templates(root: Path) -> tuple[Path, Path, Path, Path]:
     return program_template, markets_template, cats_template, testnet_markets_template
 
 
+def _bootstrap_home(
+    *,
+    home_dir: Path,
+    program_template: Path,
+    markets_template: Path,
+    cats_template: Path,
+    testnet_markets_template: Path,
+    seed_testnet_markets: bool,
+    force: bool,
+) -> int:
+    argv = [
+        "bootstrap-home",
+        "--home-dir",
+        str(home_dir),
+        "--program-template",
+        str(program_template),
+        "--markets-template",
+        str(markets_template),
+        "--cats-template",
+        str(cats_template),
+        "--testnet-markets-template",
+        str(testnet_markets_template),
+    ]
+    if seed_testnet_markets:
+        argv.append("--seed-testnet-markets")
+    if force:
+        argv.append("--force")
+    code, _, _ = run_manager(argv)
+    return code
+
+
 def test_bootstrap_home_creates_layout_and_seed_configs(tmp_path: Path) -> None:
     home_dir = tmp_path / ".greenfloor"
     program_template, markets_template, cats_template, testnet_markets_template = _write_templates(
         tmp_path
     )
 
-    code = bootstrap_home(
+    code = _bootstrap_home(
         home_dir=home_dir,
         program_template=program_template,
         markets_template=markets_template,
@@ -152,7 +183,7 @@ def test_bootstrap_home_without_force_keeps_existing_seeded_config(tmp_path: Pat
         encoding="utf-8",
     )
 
-    code = bootstrap_home(
+    code = _bootstrap_home(
         home_dir=home_dir,
         program_template=program_template,
         markets_template=markets_template,
@@ -176,7 +207,7 @@ def test_bootstrap_home_can_seed_optional_testnet_markets(tmp_path: Path) -> Non
         tmp_path
     )
 
-    code = bootstrap_home(
+    code = _bootstrap_home(
         home_dir=home_dir,
         program_template=program_template,
         markets_template=markets_template,

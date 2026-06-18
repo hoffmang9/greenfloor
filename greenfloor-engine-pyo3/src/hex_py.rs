@@ -1,5 +1,6 @@
-use engine_core::{
-    default_mojo_multiplier_for_asset, is_canonical_xch_asset, is_hex_id, normalize_hex_id,
+use engine_core::coinset::is_canonical_xch_asset;
+use engine_core::hex::{
+    default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id,
 };
 use pyo3::prelude::*;
 

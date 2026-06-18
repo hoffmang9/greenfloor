@@ -149,50 +149,6 @@ def test_run_once_sequential_slot_rotation_picks_up_new_market_next_cycle(
     assert processed == [1, 2]
 
 
-def test_daemon_instance_lock_rejects_second_holder(tmp_path: Path) -> None:
-    from greenfloor.core.engine_bridge import import_engine, require_engine_method
-    from greenfloor.daemon.testing.main import _acquire_daemon_instance_lock
-
-    lock_conflict = require_engine_method(
-        import_engine(),
-        "DaemonLockConflict",
-        missing="daemon lock conflict type",
-    )
-    state_dir = tmp_path / "state"
-    with _acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
-        with pytest.raises(lock_conflict):
-            with _acquire_daemon_instance_lock(state_dir=state_dir, mode="once"):
-                pass
-
-
-def test_main_once_exits_with_lock_conflict(
-    monkeypatch, tmp_path: Path, dexie_mock: DexieHttpMock
-) -> None:
-    from greenfloor.daemon.main import main as daemon_cli_main
-    from greenfloor.daemon.testing.main import _acquire_daemon_instance_lock
-
-    home = tmp_path / "home"
-    home.mkdir(parents=True, exist_ok=True)
-    program = tmp_path / "program.yaml"
-    write_program(program, home, dexie_api_base=dexie_mock.base_url)
-    state_dir = tmp_path / "state"
-    with _acquire_daemon_instance_lock(state_dir=state_dir, mode="loop"):
-        monkeypatch.setattr(
-            "sys.argv",
-            [
-                "greenfloord",
-                "--once",
-                "--program-config",
-                str(program),
-                "--state-dir",
-                str(state_dir),
-            ],
-        )
-        with pytest.raises(SystemExit) as exc:
-            daemon_cli_main()
-        assert exc.value.code == 3
-
-
 def test_run_once_all_markets_fail_exits_non_zero(
     tmp_path: Path, dexie_mock: DexieHttpMock
 ) -> None:

@@ -7,8 +7,10 @@ Coinset-specific vault scan validation and capability probing are documented in
 
 ## 1) First Deployment (Clean Machine)
 
-1. Install dependencies:
-   - `python -m pip install -e ".[dev]"`
+1. Install native operator binaries and dev Python tooling:
+   - `cargo install --path greenfloor-engine --bins`
+   - `python -m pip install -e ".[dev]"` (tests, pre-commit)
+   - Optional for Python parity tests: `maturin develop --manifest-path greenfloor-engine-pyo3/Cargo.toml`
 2. Bootstrap runtime home:
    - `greenfloor-manager bootstrap-home`
 3. Validate seeded configs:
@@ -78,7 +80,9 @@ Optional developer bootstrap for testnet markets:
     - `taker_diagnostic`: advisory diagnostics (`coinset_tx_block_confirmed`, `coinset_mempool_observed`, or Dexie fallback patterns).
 - View compact offer execution/reconciliation state:
   - `greenfloor-manager offers-status --limit 50 --events-limit 30`
-- Note: manager CLI v1 core surface remains focused on trading/runtime commands. `offers-cancel`, `cats-add`, `cats-list`, and `cats-delete` are adjunct operator commands tracked outside the core-count policy. Tuning/history/metrics helpers are deferred until after G1-G3 testnet proof.
+- Cancel offers when policy requires it:
+  - `greenfloor-manager offers-cancel --offer-id <id>`
+  - Cancel all open offers for configured markets: `greenfloor-manager offers-cancel --cancel-open`
 
 ### Mainnet continuous-posting cutover (`eco1812022_sell_wusdbc`)
 
@@ -144,7 +148,7 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 
 - **Price unavailable:** look for `xch_price_error`; XCH planning is price-gated and may produce no actions.
 - **Offer builder failures:** check `strategy_offer_execution.items[].reason` for `offer_builder_*`.
-- **Offer backend:** `build-and-post-offer` and daemon managed post require the vault KMS signer path (`signer.kms_key_id` + `vault.launcher_id` in program config). See ADR 0007 and ADR 0008.
+- **Offer backend:** `build-and-post-offer` and daemon managed post require vault KMS signer config (`signer.kms_key_id` + `vault.launcher_id` in program config). See ADR 0007 and ADR 0013.
 - **Dexie post/cancel issues:** look for `dexie_offers_error`, `strategy_offer_execution` skip reasons, and `offer_cancel_policy` skip reasons.
 - **Extended waits on coin operations:** inspect `wait_events` for `poll_retry`, `signature_wait_*`, `in_mempool`, `confirmed`, and `reorg_watch_*` events to determine whether delay is signer-side, mempool-side, Coinset API-side, or chain-depth-side.
 - **Coin-op fee preflight failures:** inspect JSON `error` and `coinset_fee_lookup`:
@@ -156,6 +160,11 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
 
 ## 6) Runtime Controls
 
+- XCH/USD price for daemon stable-vs-unstable quote conversion (checked before HTTP fetch):
+  - `GREENFLOOR_XCH_PRICE_USD` — fixed positive float; invalid or non-positive values are ignored
+  - `GREENFLOOR_XCH_PRICE_URL` — HTTP JSON endpoint (default: CoinGecko simple price API); response must include `last_price_usd`
+- Disabled-market log cadence (daemon skips markets with `enabled: false`):
+  - `GREENFLOOR_DISABLED_MARKET_LOG_INTERVAL_SECONDS` (default: `3600`, min `60`)
 - Cancel threshold for unstable-leg movement:
   - `GREENFLOOR_UNSTABLE_CANCEL_MOVE_BPS` (default: `500`)
 - Offer-post retry/cooldown controls:
@@ -174,6 +183,8 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - `GREENFLOOR_COINSET_BASE_URL`
   - Default behavior: mainnet endpoint when unset; testnet11 endpoint when market/network is `testnet11`.
   - For `testnet11`, do not route to mainnet Coinset endpoint unless you explicitly set `GREENFLOOR_ALLOW_MAINNET_COINSET_FOR_TESTNET11=1` for temporary debugging.
+- Coin combine input cap (manager/daemon coin-op execution):
+  - `GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP` (default: `5`, min `2`)
 - Daemon tx-signal ingestion controls (`~/.greenfloor/config/program.yaml` -> `chain_signals.tx_block_trigger`):
   - `mode`: must be `websocket`
   - `websocket_url`: Coinset websocket endpoint (defaults by network when blank)
@@ -186,6 +197,8 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - if lock is held, process exits with `daemon_lock_conflict` event and non-zero exit code.
 - Validate config + override sanity before deploy:
   - `greenfloor-manager doctor` (includes warnings for invalid runtime override env values)
+- Test-only overrides (debug builds / CI; not for production):
+  - `GREENFLOOR_TEST_OFFER_TEXT`, `GREENFLOOR_TEST_WALLET_COINS_JSON`, `GREENFLOOR_TEST_MIXED_SPLIT_OPERATION_ID`
 
 ## 7) Golden Path Smoke Test
 

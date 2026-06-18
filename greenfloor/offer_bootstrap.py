@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 __all__ = [
@@ -26,7 +26,7 @@ BootstrapPhaseStatus = Literal["skipped", "failed", "executed"]
 
 @dataclass(frozen=True, slots=True)
 class BootstrapPhaseResult:
-    """Typed bootstrap phase output for offer orchestration."""
+    """Typed bootstrap phase DTO for PyO3 bridge boundaries."""
 
     status: BootstrapPhaseStatus
     reason: str
@@ -38,37 +38,6 @@ class BootstrapPhaseResult:
     split_result: dict[str, Any] = field(default_factory=dict)
     wait_events: list[dict[str, str]] = field(default_factory=list)
     plan: BootstrapPlan | None = None
-
-    def to_manager_dict(self) -> dict[str, Any]:
-        """Serialize for manager/JSON consumers; not for ``bootstrap_blocks_offer``."""
-        payload: dict[str, Any] = {
-            "status": self.status,
-            "reason": self.reason,
-            "ready": self.ready,
-            "fee_mojos": self.fee_mojos,
-            "fee_source": self.fee_source,
-            "fee_lookup_error": self.fee_lookup_error,
-        }
-        if self.wait_error is not None:
-            payload["wait_error"] = self.wait_error
-        if self.split_result:
-            payload["split_result"] = dict(self.split_result)
-        if self.wait_events:
-            payload["wait_events"] = list(self.wait_events)
-        if self.plan is not None:
-            plan_payload = asdict(self.plan)
-            plan_payload["output_count"] = len(self.plan.output_amounts_base_units)
-            payload["plan"] = plan_payload
-        return payload
-
-
-def append_bootstrap_manager_action(
-    actions: list[dict[str, Any]],
-    phase: BootstrapPhaseResult,
-) -> BootstrapPhaseResult:
-    """Record manager payload and return the typed phase for policy gates."""
-    actions.append(phase.to_manager_dict())
-    return phase
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,11 +1,7 @@
 //! Deterministic bootstrap mixed-output planner for offer denomination preflight.
 //!
 //! `output_amounts_base_units` is the authoritative mixed-split output list for
-//! `signer_bootstrap_phase` (passed to vault mixed-split as `output_amounts`).
-//! Deterministic bootstrap mixed-output planner for offer denomination preflight.
-//!
-//! `output_amounts_base_units` is the authoritative mixed-split output list for
-//! `signer_bootstrap_phase` (passed to vault mixed-split as `output_amounts`).
+//! `run_signer_denomination_phase` (passed to vault mixed-split as `output_amounts`).
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlannerLadderRow {

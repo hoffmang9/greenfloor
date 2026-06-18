@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from greenfloor.cli.engine_binary import (
+from tests.helpers.engine_binary import (
     GreenfloorEngineBinaryError,
     resolve_greenfloor_engine_binary,
 )
-from greenfloor.cli.offer_build_post import build_and_post_offer_cli
-from tests.helpers.engine_binary_fixtures import (
-    default_build_post_success_payload,
-    patch_engine_build_and_post,
+from tests.helpers.manager_cli import parse_json_output, run_manager
+from tests.helpers.manager_program_fixtures import (
+    write_manager_program,
+    write_manager_program_with_signer,
 )
-from tests.helpers.offer_runtime_fixtures import write_manager_program
 
 
 def test_resolve_greenfloor_engine_binary_from_env(
@@ -32,145 +30,93 @@ def test_resolve_greenfloor_engine_binary_missing_env(
 ) -> None:
     monkeypatch.delenv("GREENFLOOR_ENGINE_BIN", raising=False)
     monkeypatch.setattr(
-        "greenfloor.cli.engine_binary.shutil.which",
+        "tests.helpers.engine_binary.shutil.which",
         lambda _name: None,
     )
     monkeypatch.setattr(
-        "greenfloor.cli.engine_binary.repo_root",
+        "tests.helpers.engine_binary.repo_root",
         lambda: Path("/nonexistent"),
     )
     with pytest.raises(GreenfloorEngineBinaryError, match="binary not found"):
-        resolve_greenfloor_engine_binary()
+        resolve_greenfloor_engine_binary(build_if_missing=False)
 
 
-def test_build_and_post_offer_delegates_to_engine(monkeypatch, tmp_path: Path, capsys) -> None:
+# build-and-post-offer delegation, dry-run payload, and publish-failure exit codes are covered
+# by greenfloor-engine/src/manager/build_and_post.rs unit tests.
+
+
+def test_build_and_post_offer_dry_run_returns_preview(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
-    markets.write_text("markets: []\n", encoding="utf-8")
-    captured: dict = {}
-    patch_engine_build_and_post(
-        monkeypatch,
-        capture=captured,
-        payload=default_build_post_success_payload(),
-    )
-
-    code = build_and_post_offer_cli(
-        program_path=program,
-        markets_path=markets,
-        network="mainnet",
-        market_id="m1",
-        pair=None,
-        size_base_units=10,
-        repeat=1,
-        publish_venue=None,
-        dexie_base_url=None,
-        splash_base_url=None,
-        drop_only=True,
-        claim_rewards=False,
-        dry_run=False,
-    )
-    assert code == 0
-    assert captured["market_id"] == "m1"
-    assert captured["publish_venue"] is not None
-    assert captured["dexie_base_url"] is not None
-
-    payload = json.loads(capsys.readouterr().out.strip())
-    assert payload["results"][0]["venue"] == "dexie"
-
-
-def test_build_and_post_offer_dry_run_delegates(monkeypatch, tmp_path: Path, capsys) -> None:
-    program = tmp_path / "program.yaml"
-    markets = tmp_path / "markets.yaml"
-    write_manager_program(program, tmp_path=tmp_path)
-    markets.write_text("markets: []\n", encoding="utf-8")
-    patch_engine_build_and_post(
-        monkeypatch,
-        payload=default_build_post_success_payload(
-            dry_run=True,
-            publish_attempts=0,
-            publish_failures=0,
-            results=[],
-            built_offers_preview=[
-                {"offer_prefix": "offer1abc", "offer_length": "120"},
-            ],
+    write_manager_program_with_signer(program, tmp_path=tmp_path)
+    markets.write_text(
+        "\n".join(
+            [
+                "markets:",
+                "  - id: m1",
+                "    enabled: true",
+                '    base_asset: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"',
+                '    base_symbol: "TCAT"',
+                '    quote_asset: "xch"',
+                '    quote_asset_type: "unstable"',
+                '    signer_key_id: "key-main-1"',
+                '    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"',
+                '    mode: "sell_only"',
+                "    pricing:",
+                "      min_price_quote_per_base: 0.0031",
+                "      max_price_quote_per_base: 0.0038",
+            ]
         ),
+        encoding="utf-8",
     )
 
-    code = build_and_post_offer_cli(
-        program_path=program,
-        markets_path=markets,
-        network="mainnet",
-        market_id="m1",
-        pair=None,
-        size_base_units=1,
-        repeat=1,
-        publish_venue=None,
-        dexie_base_url=None,
-        splash_base_url=None,
-        drop_only=True,
-        claim_rewards=False,
-        dry_run=True,
+    code, stdout, _stderr = run_manager(
+        [
+            "--program-config",
+            str(program),
+            "--markets-config",
+            str(markets),
+            "build-and-post-offer",
+            "--market-id",
+            "m1",
+            "--size-base-units",
+            "1",
+            "--dry-run",
+            "--network",
+            "mainnet",
+        ],
+        env={"GREENFLOOR_TEST_OFFER_TEXT": "offer1dryrunpreviewstub"},
     )
     assert code == 0
-    payload = json.loads(capsys.readouterr().out.strip())
+    payload = parse_json_output(stdout)
     assert payload["dry_run"] is True
+    assert payload["publish_attempts"] == 0
+    assert payload["built_offers_preview"]
     assert payload["results"] == []
 
 
-def test_build_and_post_offer_returns_nonzero_when_publish_fails(
-    monkeypatch, tmp_path: Path, capsys
-) -> None:
+def test_build_and_post_offer_rejects_invalid_repeat(tmp_path: Path) -> None:
     program = tmp_path / "program.yaml"
     markets = tmp_path / "markets.yaml"
     write_manager_program(program, tmp_path=tmp_path)
     markets.write_text("markets: []\n", encoding="utf-8")
-    patch_engine_build_and_post(
-        monkeypatch,
-        exit_code=2,
-        payload=default_build_post_success_payload(
-            publish_failures=1,
-            results=[
-                {
-                    "venue": "dexie",
-                    "result": {"success": False, "error": "dexie_http_error:500"},
-                }
-            ],
-        ),
+
+    code, _stdout, stderr = run_manager(
+        [
+            "--program-config",
+            str(program),
+            "--markets-config",
+            str(markets),
+            "build-and-post-offer",
+            "--market-id",
+            "m1",
+            "--size-base-units",
+            "1",
+            "--repeat",
+            "0",
+            "--network",
+            "mainnet",
+        ]
     )
-
-    code = build_and_post_offer_cli(
-        program_path=program,
-        markets_path=markets,
-        network="mainnet",
-        market_id="m1",
-        pair=None,
-        size_base_units=1,
-        repeat=1,
-        publish_venue="dexie",
-        dexie_base_url="https://api.dexie.space",
-        splash_base_url=None,
-        drop_only=True,
-        claim_rewards=False,
-        dry_run=False,
-    )
-    assert code == 2
-
-
-def test_build_and_post_offer_rejects_invalid_repeat(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="repeat must be positive"):
-        build_and_post_offer_cli(
-            program_path=tmp_path / "program.yaml",
-            markets_path=tmp_path / "markets.yaml",
-            network="mainnet",
-            market_id="m1",
-            pair=None,
-            size_base_units=1,
-            repeat=0,
-            publish_venue=None,
-            dexie_base_url=None,
-            splash_base_url=None,
-            drop_only=True,
-            claim_rewards=False,
-            dry_run=False,
-        )
+    assert code != 0
+    assert "repeat must be positive" in stderr

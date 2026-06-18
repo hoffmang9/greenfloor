@@ -12,23 +12,15 @@ use crate::hex::default_mojo_multiplier_for_asset;
 use crate::offer::resolve_offer_assets_for_action;
 use crate::storage::SqliteStore;
 
-use super::super::coinset_tx::extract_coin_ids_from_offer_payload;
-use super::super::dexie_offer::DexieOfferPayload;
+use crate::offer::dexie_payload::extract_coin_ids_from_offer_payload;
+use crate::offer::dexie_payload::DexieOfferPayload;
 use super::super::watchlist::watchlist_offer_ids;
 use super::combine::execute_daemon_combine_plan;
-use super::context::CoinOpExecContext;
 use super::items::{skip_item, CoinOpExecItem, CoinOpExecutionResult};
 use super::split::execute_daemon_split_plan;
+use crate::coin_ops::execution::{resolve_combine_input_cap, CoinOpExecContext, CoinOpTestOverrides};
 
-pub fn combine_input_coin_cap() -> i64 {
-    std::env::var("GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<i64>().ok())
-        .map(|value| value.max(2))
-        .unwrap_or(5)
-}
-
-pub fn watched_coin_ids_for_market(
+pub fn watched_coin_ids_from_open_offers(
     store: &SqliteStore,
     market_id: &str,
     offers: &[Value],
@@ -127,8 +119,9 @@ pub async fn execute_managed_coin_op_plans(
         resolved_base_asset_id,
         base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(market.base_asset.trim())
             as i64,
-        combine_input_cap: combine_input_coin_cap(),
+        combine_input_cap: resolve_combine_input_cap(),
         watched_coin_ids: watched_coin_ids.clone(),
+        test_overrides: CoinOpTestOverrides::default(),
     };
 
     let mut items = Vec::new();

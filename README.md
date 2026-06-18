@@ -1,30 +1,36 @@
 # GreenFloor
 
-GreenFloor is a Chia CAT market-making system with a Python operator surface backed by
-the canonical `greenfloor-engine` Rust engine (`greenfloor_engine` PyO3 module).
-Python owns CLI/daemon orchestration, config parsing, storage, and network adapters;
-Rust owns vault signing, offer construction/validation, coin-op policy, and deterministic
-market-cycle policy.
+GreenFloor is a Chia CAT market-making system with native Rust operator binaries
+backed by the canonical `greenfloor-engine` crate.
+
+- `greenfloor-manager` and `greenfloord` are Cargo binaries (no Python entrypoints).
+- Rust owns vault signing, offer construction, coin-op execution, daemon cycles,
+  config validation for operator commands, and SQLite persistence.
+- Python remains for the `greenfloor` library (config, adapters, policy bridges),
+  dev tooling, parity tests, and optional scripts under `scripts/`.
+- **`greenfloor_engine` (PyO3)** is not required for operator deployment. It remains
+  the in-repo FFI so Python bridges (`greenfloor/core/*_bridge.py`), select adapters,
+  and tests can call Rust policy in-process without subprocess hops.
 
 ## Components
 
-- `greenfloor-manager`: manager CLI for config validation, key onboarding, coin inventory/reshaping, offer building/posting, and operational checks.
-- `greenfloord`: daemon process that evaluates configured markets, executes offers, and emits low-inventory alerts.
+- `greenfloor-manager`: native manager CLI for config validation, key onboarding, coin inventory/reshaping, offer building/posting, and operational checks.
+- `greenfloord`: native daemon process that evaluates configured markets, executes offers, and runs the market cycle.
 - `greenfloor-engine/`: Rust crate for canonical signing, offer, coin-op, and cycle policy.
-- `greenfloor-engine-pyo3/`: PyO3 extension exported as `greenfloor_engine` for in-process Python calls.
+- `greenfloor-engine-pyo3/`: PyO3 extension (`greenfloor_engine`) — Python↔Rust FFI for library bridges, adapters, scripts, and CI parity tests; not installed for operator-only deployments.
 
 ## V1 Plan
 
-- The current implementation plan is tracked in `docs/plan.md`.
-- Operator deployment/recovery runbook is in `docs/runbook.md`.
-- Syncing, signing, and offer-generation baseline: GreenFloor uses `chia-wallet-sdk` (included as a repo submodule) through the Rust engine for signing and offer-file execution paths.
+- Scope and architecture: `docs/plan.md`
+- Operator deployment/recovery: `docs/runbook.md`
+- Architecture decisions index: `docs/README.md`
 
 ## Offer Files
 
 - Offer files are plaintext Bech32m payloads with prefix `offer1...`.
 - In `chia-wallet-sdk`, offer text is an encoded/compressed `SpendBundle` (`encode_offer` / `decode_offer`).
-- Manager offer publishing validates offer text with `chia-wallet-sdk` parse semantics (`Offer::from_spend_bundle`) before Dexie submission.
-- Venue submission (`DexieAdapter.post_offer`) sends that exact offer text string as the `offer` field to `POST /v1/offers`.
+- Manager offer publishing validates offer text in Rust before Dexie submission.
+- Venue submission sends that exact offer text string as the `offer` field to the venue API.
 
 ## Offer Management Policy
 
@@ -36,10 +42,15 @@ market-cycle policy.
 
 ## Quickstart
 
+Build and install native operator binaries:
+
+```bash
+cargo install --path greenfloor-engine --bins
+```
+
 Bootstrap home directory first (required for real deployment):
 
 ```bash
-python -m pip install -e ".[dev]"
 greenfloor-manager bootstrap-home
 ```
 

@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
 
-use engine_core::{
+use engine_core::cycle::{
     expand_planned_actions, filter_planned_actions_with_positive_repeat,
     plan_parallel_managed_dispatch, ParallelBatchPlan, ParallelReservationContext,
 };

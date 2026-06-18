@@ -14,9 +14,17 @@ class DexieHttpMock:
         self._offers: dict[str, dict[str, Any]] = {}
         self._list_offers: list[dict[str, Any]] = []
         self._cancel_failures: dict[str, str] = {}
+        self._swap_tokens: list[dict[str, Any]] = []
+        self._price_tickers: list[dict[str, Any]] = []
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self.base_url = "http://127.0.0.1:0"
+
+    def set_swap_tokens(self, tokens: list[dict[str, Any]]) -> None:
+        self._swap_tokens = [dict(token) for token in tokens]
+
+    def set_price_tickers(self, tickers: list[dict[str, Any]]) -> None:
+        self._price_tickers = [dict(ticker) for ticker in tickers]
 
     def set_cancel_failure(self, offer_id: str, error: str) -> None:
         self._cancel_failures[str(offer_id)] = str(error)
@@ -34,6 +42,14 @@ class DexieHttpMock:
 
             def do_GET(self) -> None:
                 parsed = urlparse(self.path)
+                if parsed.path == "/v1/swap/tokens":
+                    body = json.dumps({"success": True, "tokens": mock._swap_tokens}).encode()
+                    self._write(200, body)
+                    return
+                if parsed.path == "/v3/prices/tickers":
+                    body = json.dumps({"success": True, "tickers": mock._price_tickers}).encode()
+                    self._write(200, body)
+                    return
                 if parsed.path == "/v1/offers":
                     body = json.dumps({"success": True, "offers": mock._list_offers}).encode()
                     self._write(200, body)

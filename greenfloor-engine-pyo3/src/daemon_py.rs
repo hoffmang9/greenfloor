@@ -3,10 +3,11 @@ use std::path::PathBuf;
 use crate::runtime;
 
 use engine_core::daemon::{
-    consume_reload_marker, initialize_daemon_file_logging, offers_cancel_cli, offers_status_cli,
-    reconcile_offers_cli, resolve_coinset_ws_url, run_daemon_cycle_once_from_json,
-    run_daemon_loop_from_json, websocket_capture_enabled, DaemonInstanceLock,
+    consume_reload_marker, initialize_daemon_file_logging, reconcile_offers_cli,
+    resolve_coinset_ws_url, run_daemon_cycle_once_from_json, run_daemon_loop_from_json,
+    websocket_capture_enabled, DaemonInstanceLock,
 };
+use engine_core::offer::lifecycle::{offers_cancel_cli, offers_status_cli};
 use crate::py_utils::{dict_from_json_value, request_dict_to_json, to_py_err};
 use engine_core::error::SignerError;
 use engine_core::storage::resolve_state_db_path;
@@ -81,7 +82,7 @@ fn warn_if_daemon_log_level_auto_healed_py(
 #[pyfunction]
 #[pyo3(name = "resolve_coinset_ws_url", signature = (program_path, coinset_base_url, /))]
 fn resolve_coinset_ws_url_py(program_path: PathBuf, coinset_base_url: &str) -> PyResult<String> {
-    let program = engine_core::load_program_config(&program_path).map_err(to_py_err)?;
+    let program = engine_core::config::load_program_config(&program_path).map_err(to_py_err)?;
     Ok(resolve_coinset_ws_url(&program, coinset_base_url))
 }
 

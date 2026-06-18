@@ -9,10 +9,8 @@ use crate::cycle::{
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
-use super::reconcile_offer::{
-    missing_offer_error_from_payload,
-};
-use super::reconcile_phase::{apply_reconcile_transition, ReconcilePhaseMetrics};
+use crate::offer::lifecycle::missing_offer_error_from_payload;
+use super::reconcile_market_cycle::{apply_reconcile_transition, ReconcileMarketCycleMetrics};
 
 pub struct AugmentedDexieOffers {
     pub offers: Vec<Value>,
@@ -34,7 +32,7 @@ fn apply_missing_watched_offer(
     watched_offer_id: &str,
     error_text: &str,
     state_by_offer_id: &mut HashMap<String, String>,
-    metrics: &mut ReconcilePhaseMetrics,
+    metrics: &mut ReconcileMarketCycleMetrics,
 ) -> SignerResult<()> {
     let current_state = state_by_offer_id
         .get(watched_offer_id)
@@ -61,7 +59,7 @@ pub async fn augment_dexie_offers_for_watchlist(
     list_offers: &[Value],
     our_offer_ids: &HashSet<String>,
     state_by_offer_id: &mut HashMap<String, String>,
-    metrics: &mut ReconcilePhaseMetrics,
+    metrics: &mut ReconcileMarketCycleMetrics,
 ) -> SignerResult<AugmentedDexieOffers> {
     let dexie_offer_ids_in_list: HashSet<String> = list_offers
         .iter()
@@ -159,7 +157,7 @@ pub async fn augment_dexie_offers_for_watchlist(
 
 pub fn merge_reconcile_immediate_requeue(
     state: &mut crate::cycle::MarketCycleResultState,
-    metrics: &ReconcilePhaseMetrics,
+    metrics: &ReconcileMarketCycleMetrics,
 ) {
     if !metrics.immediate_requeue_requested {
         return;
@@ -180,10 +178,10 @@ mod tests {
     #[test]
     fn merge_reconcile_immediate_requeue_populates_cycle_state() {
         let mut state = MarketCycleResultState::default();
-        let metrics = ReconcilePhaseMetrics {
+        let metrics = ReconcileMarketCycleMetrics {
             immediate_requeue_requested: true,
             immediate_requeue_signals: vec!["taker_fill".to_string()],
-            ..ReconcilePhaseMetrics::default()
+            ..ReconcileMarketCycleMetrics::default()
         };
         merge_reconcile_immediate_requeue(&mut state, &metrics);
         assert!(state.immediate_requeue_requested);
@@ -193,9 +191,9 @@ mod tests {
     #[test]
     fn merge_reconcile_immediate_requeue_without_signal_still_flags() {
         let mut state = MarketCycleResultState::default();
-        let metrics = ReconcilePhaseMetrics {
+        let metrics = ReconcileMarketCycleMetrics {
             immediate_requeue_requested: true,
-            ..ReconcilePhaseMetrics::default()
+            ..ReconcileMarketCycleMetrics::default()
         };
         merge_reconcile_immediate_requeue(&mut state, &metrics);
         assert!(state.immediate_requeue_requested);

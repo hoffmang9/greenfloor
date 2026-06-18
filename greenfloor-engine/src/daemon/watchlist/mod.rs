@@ -12,7 +12,7 @@ use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
-use super::coinset_tx::extract_coin_ids_from_offer_payload;
+use crate::offer::dexie_payload::extract_coin_ids_from_offer_payload;
 use counting::{bucket_active_offers_by_side, bucket_active_offers_by_size};
 use metadata::{recent_offer_metadata_by_offer_id, OfferExecutionMetadata};
 use time::is_recent_mempool_observed_offer_state;

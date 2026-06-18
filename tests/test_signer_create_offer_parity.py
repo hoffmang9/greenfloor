@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -16,11 +15,6 @@ from greenfloor.core.planned_action import PlannedAction, planned_action_side
 from greenfloor.core.signer_offer_request import (
     compute_signer_offer_leg_amounts,
     signer_create_offer_request_from_fields,
-)
-from tests.helpers.offer_runtime_fixtures import (
-    market_config_for_signer_offer,
-    offer_build_context_for_program_market,
-    program_config_for_signer_offer,
 )
 from tests.helpers.signer_fixtures import (
     SIGNER_FIXTURE_DIR,
@@ -75,24 +69,6 @@ def test_planned_action_side_avoids_engine_for_canonical_labels() -> None:
         side="buy",
     )
     assert planned_action_side(action) == "buy"
-
-
-def test_prepare_offer_build_context_caches_normalized_side(tmp_path: Path) -> None:
-    _require_signer_engine()
-    program = program_config_for_signer_offer(home_dir=str(tmp_path))
-    market = replace(
-        market_config_for_signer_offer(),
-        pricing={"fixed_quote_per_base": 1.0},
-    )
-    program_path = tmp_path / "program.yaml"
-    program_path.write_text("app:\n  network: mainnet\n", encoding="utf-8")
-    build_ctx = offer_build_context_for_program_market(
-        program=program,
-        market=market,
-        program_path=program_path,
-        action_side="BUY",
-    )
-    assert build_ctx.action_side == "buy"
 
 
 @pytest.mark.parametrize("fixture_path", sorted(SIGNER_FIXTURE_DIR.glob("*.json")))

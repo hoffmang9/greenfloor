@@ -1,9 +1,11 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
 
-use engine_core::{
-    bootstrap_block_error, dexie_offer_asset_expectation_error, expected_publish_asset_fields,
+use engine_core::offer::build_context::{
     mojo_multiplier_for_leg, resolve_offer_expiry_for_pricing, resolve_quote_price_for_pricing,
+};
+use engine_core::offer::publish::{
+    bootstrap_block_error, dexie_offer_asset_expectation_error, expected_publish_asset_fields,
 };
 
 use crate::py_utils::{pricing_dict_from_py, py_any_to_json, to_py_err};

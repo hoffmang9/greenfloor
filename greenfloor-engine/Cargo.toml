@@ -13,6 +13,14 @@ path = "src/lib.rs"
 name = "greenfloor-engine"
 path = "src/main.rs"
 
+[[bin]]
+name = "greenfloor-manager"
+path = "src/bin/greenfloor-manager.rs"
+
+[[bin]]
+name = "greenfloord"
+path = "src/bin/greenfloord.rs"
+
 [dependencies]
 anyhow = "1.0"
 aws-config = "1"
