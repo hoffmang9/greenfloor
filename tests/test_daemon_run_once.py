@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.daemon_rust_cycle_env import run_once_for_tests as run_once
 from tests.helpers.daemon_websocket_fixtures import (
     write_markets,
@@ -13,6 +12,7 @@ from tests.helpers.daemon_websocket_fixtures import (
     write_program,
 )
 from tests.helpers.dexie_http_mock import DexieHttpMock
+from tests.helpers.sqlite_store import SqliteStore
 
 
 @pytest.fixture
@@ -44,7 +44,7 @@ def test_run_once_multi_market_sequential_execution(
     write_markets_two(markets)
     db_path = tmp_path / "state.sqlite"
 
-    code = run_once(
+    result = run_once(
         program_path=program,
         markets_path=markets,
         allowed_keys=None,
@@ -53,7 +53,11 @@ def test_run_once_multi_market_sequential_execution(
         state_dir=state_dir,
         poll_coinset_mempool=False,
     )
-    assert code == 0
+    assert result.exit_code == 0
+    assert result.response is not None
+    cycle_summary = result.response.get("cycle_summary")
+    assert isinstance(cycle_summary, dict)
+    assert cycle_summary.get("markets_processed") == 2
 
     store = SqliteStore(db_path)
     try:
@@ -76,7 +80,7 @@ def test_run_once_multi_market_failure_isolated(tmp_path: Path, dexie_mock: Dexi
     write_markets_two(markets)
     db_path = tmp_path / "state.sqlite"
 
-    code = run_once(
+    result = run_once(
         program_path=program,
         markets_path=markets,
         allowed_keys=None,
@@ -89,7 +93,7 @@ def test_run_once_multi_market_failure_isolated(tmp_path: Path, dexie_mock: Dexi
             "force_market_error_for": "m1",
         },
     )
-    assert code == 0
+    assert result.exit_code == 0
 
     store = SqliteStore(db_path)
     try:
@@ -115,7 +119,7 @@ def test_run_once_sequential_slot_rotation_picks_up_new_market_next_cycle(
     write_markets(markets)
     db_path = tmp_path / "state.sqlite"
 
-    code = run_once(
+    result = run_once(
         program_path=program,
         markets_path=markets,
         allowed_keys=None,
@@ -124,10 +128,10 @@ def test_run_once_sequential_slot_rotation_picks_up_new_market_next_cycle(
         state_dir=state_dir,
         poll_coinset_mempool=False,
     )
-    assert code == 0
+    assert result.exit_code == 0
 
     write_markets_two(markets)
-    code = run_once(
+    result = run_once(
         program_path=program,
         markets_path=markets,
         allowed_keys=None,
@@ -136,7 +140,7 @@ def test_run_once_sequential_slot_rotation_picks_up_new_market_next_cycle(
         state_dir=state_dir,
         poll_coinset_mempool=False,
     )
-    assert code == 0
+    assert result.exit_code == 0
 
     store = SqliteStore(db_path)
     try:
@@ -161,7 +165,7 @@ def test_run_once_all_markets_fail_exits_non_zero(
     write_markets(markets)
     db_path = tmp_path / "state.sqlite"
 
-    code = run_once(
+    result = run_once(
         program_path=program,
         markets_path=markets,
         allowed_keys=None,
@@ -174,4 +178,4 @@ def test_run_once_all_markets_fail_exits_non_zero(
             "force_market_error_for": "m1",
         },
     )
-    assert code == 1
+    assert result.exit_code == 1

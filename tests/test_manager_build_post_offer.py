@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.helpers.engine_binary import (
+from greenfloor.engine_binary import (
     GreenfloorEngineBinaryError,
     resolve_greenfloor_engine_binary,
 )
@@ -30,11 +30,11 @@ def test_resolve_greenfloor_engine_binary_missing_env(
 ) -> None:
     monkeypatch.delenv("GREENFLOOR_ENGINE_BIN", raising=False)
     monkeypatch.setattr(
-        "tests.helpers.engine_binary.shutil.which",
+        "greenfloor.engine_binary.shutil.which",
         lambda _name: None,
     )
     monkeypatch.setattr(
-        "tests.helpers.engine_binary.repo_root",
+        "greenfloor.engine_binary.repo_root",
         lambda: Path("/nonexistent"),
     )
     with pytest.raises(GreenfloorEngineBinaryError, match="binary not found"):

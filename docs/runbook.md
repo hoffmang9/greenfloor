@@ -10,7 +10,6 @@ Coinset-specific vault scan validation and capability probing are documented in
 1. Install native operator binaries and dev Python tooling:
    - `cargo install --path greenfloor-engine --bins`
    - `python -m pip install -e ".[dev]"` (tests, pre-commit)
-   - Optional for Python parity tests: `maturin develop --manifest-path greenfloor-engine-pyo3/Cargo.toml`
 2. Bootstrap runtime home:
    - `greenfloor-manager bootstrap-home`
 3. Validate seeded configs:

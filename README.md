@@ -6,18 +6,16 @@ backed by the canonical `greenfloor-engine` crate.
 - `greenfloor-manager` and `greenfloord` are Cargo binaries (no Python entrypoints).
 - Rust owns vault signing, offer construction, coin-op execution, daemon cycles,
   config validation for operator commands, and SQLite persistence.
-- Python remains for the `greenfloor` library (config, adapters, policy bridges),
-  dev tooling, parity tests, and optional scripts under `scripts/`.
-- **`greenfloor_engine` (PyO3)** is not required for operator deployment. It remains
-  the in-repo FFI so Python bridges (`greenfloor/core/*_bridge.py`), select adapters,
-  and tests can call Rust policy in-process without subprocess hops.
+- Python remains for `scripts/` utilities and a slim `greenfloor` package (config parsing,
+  hex helpers, Coinset adapter) used only by those scripts.
+- **No PyO3 extension.** Script Coinset mutations call `greenfloor-engine coinset …` CLI
+  subcommands via `greenfloor.adapters.coinset`.
 
 ## Components
 
 - `greenfloor-manager`: native manager CLI for config validation, key onboarding, coin inventory/reshaping, offer building/posting, and operational checks.
 - `greenfloord`: native daemon process that evaluates configured markets, executes offers, and runs the market cycle.
 - `greenfloor-engine/`: Rust crate for canonical signing, offer, coin-op, and cycle policy.
-- `greenfloor-engine-pyo3/`: PyO3 extension (`greenfloor_engine`) — Python↔Rust FFI for library bridges, adapters, scripts, and CI parity tests; not installed for operator-only deployments.
 
 ## V1 Plan
 
@@ -132,7 +130,6 @@ Rust engine checks:
 
 ```bash
 cargo test --manifest-path greenfloor-engine/Cargo.toml
-cargo test --manifest-path greenfloor-engine-pyo3/Cargo.toml --no-run
 ```
 
 ## Environment Variables

@@ -26,29 +26,20 @@ build/post, policy, SQLite, and most adapters.
    break is recorded in [docs/rust-migration-ledger.md](../rust-migration-ledger.md)
    with deployment catch-up steps.
 
-3. **PyO3 is not on the operator install path.** Operators run native Rust
-   binaries only; they do not install or import `greenfloor_engine`.
+3. **No PyO3 on any path.** Operators and scripts use native Rust binaries only.
 
-   **`greenfloor-engine-pyo3` remains in the repo** as the Python↔Rust FFI for:
-   - `greenfloor/core/*_bridge.py` (deterministic policy: cycle, coin-ops, cancel,
-     bootstrap, offer request)
-   - `greenfloor/adapters/` paths that call the engine in-process (`coinset`,
-     `rust_signer`, `offer_action`)
-   - library helpers (`greenfloor/offer_decode.py`, notifications, partial config)
-   - `scripts/` that use adapters (e.g. coinset probes)
-   - CI parity and integration tests (`tests/test_*_parity.py`,
-     `tests/test_greenfloor_engine_integration.py`)
+   **Coinset mutation IO for scripts:** nested `greenfloor-engine coinset` subcommands:
+   - `coinset post` (reads and fee RPCs)
+   - `coinset push-tx`
 
-   “Dev/test-only” means **not required for production operator deployment** — not
-   that the extension is unused in the repository.
+   **Integration tests:** `greenfloor-engine daemon-once --request-json <file> --json`
+   (includes `test_controls` in the request body; no hidden flags on `greenfloord`).
 
-   **Import convention:** new PyO3 bindings should prefer domain module paths
-   (`offer::`, `daemon::`, `cycle::`, …) over flattened crate-root re-exports in
-   `lib.rs`. Those re-exports are legacy PyO3 surface; operator binaries import
-   `manager_cli` and `daemon::cli` directly.
+   **Removed (2026-06-17):** `greenfloor-engine-pyo3/`, Python policy bridges, and all
+   in-process Python↔Rust FFI.
 
-   **Deferred:** a follow-on cutover may remove PyO3 entirely once Python bridges,
-   scripts, and parity tests migrate to Rust unit tests or native binary JSON APIs.
+   **Import convention:** operator binaries import `manager_cli`, `daemon::cli`, and
+   `coinset_cli` directly.
 
 4. **Python scripts stay.** Standalone utilities under `scripts/` may keep using
    script-only Python libraries (`config`, `adapters`, `hex_utils`) until
@@ -57,6 +48,12 @@ build/post, policy, SQLite, and most adapters.
 5. **Quality bar.** Implementation work is held to the `thermonuclear-code-review`
    skill standard. A manager agent splits work into subagent-sized packets and
    loops implement → test → review until only two or fewer nit findings remain.
+
+6. **Policy parity safety net.** With PyO3 and Python policy bridges removed,
+   operator correctness is enforced by `cargo test --manifest-path
+greenfloor-engine/Cargo.toml` in CI (`ubuntu-latest` matrix job). Python pytest
+   covers script adapters, SQLite test helpers, and subprocess integration harnesses;
+   it does not re-test Rust policy or conservative-fee parsing.
 
 ## Command ownership
 

@@ -1,11 +1,10 @@
 //! GreenFloor Rust engine: vault KMS signing and deterministic daemon policy.
 //!
-//! The Rust crate and PyO3 module are named `greenfloor_engine` (ADR 0010).
-//! Policy is grouped by domain (`cycle/`, `coin_ops/`, `offer/`, `vault/`).
+//! The Rust library crate is named `greenfloor_engine` (ADR 0010). Policy is grouped
+//! by domain (`cycle/`, `coin_ops/`, `offer/`, `vault/`).
 //!
 //! **Import convention:** operator binaries import CLI modules directly
-//! (`manager_cli`, `daemon::cli`). PyO3 bindings import domain module paths
-//! (`offer::`, `daemon::`, `cycle::`, …), not flattened crate-root re-exports.
+//! (`manager_cli`, `daemon::cli`, `coinset_cli`).
 
 #![recursion_limit = "1024"]
 
@@ -13,6 +12,7 @@ pub mod adapters;
 pub mod cli_util;
 pub mod coin_ops;
 pub mod coinset;
+pub mod coinset_cli;
 pub mod config;
 pub mod cycle;
 pub mod daemon;

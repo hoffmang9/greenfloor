@@ -2,8 +2,11 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use greenfloor_engine::coinset::parse_coin_ids;
+use greenfloor_engine::coinset_cli::{run_coinset_command, CoinsetCliArgs};
 use greenfloor_engine::config::load_signer_config;
-use greenfloor_engine::daemon::{run_daemon_command, DaemonCliArgs};
+use greenfloor_engine::daemon::{
+    run_daemon_command, run_daemon_once_from_request_json, DaemonCliArgs, DaemonOnceJsonArgs,
+};
 use greenfloor_engine::error::SignerError;
 use greenfloor_engine::offer::{build_vault_cat_offer, CreateOfferRequest};
 use greenfloor_engine::vault::{
@@ -87,6 +90,10 @@ enum Commands {
     },
     /// Run the GreenFloor daemon loop or a single cycle.
     Daemon(DaemonCliArgs),
+    /// Run one daemon cycle from a JSON request file (integration tests and tooling).
+    DaemonOnce(DaemonOnceJsonArgs),
+    /// Coinset script IO: generic post RPC and push-tx for spend-bundle hex.
+    Coinset(CoinsetCliArgs),
 }
 
 #[tokio::main]
@@ -185,6 +192,13 @@ async fn run() -> Result<(), Error> {
                 std::process::exit(code);
             }
         }
+        Commands::DaemonOnce(args) => {
+            let code = run_daemon_once_from_request_json(args).await?;
+            if code != 0 {
+                std::process::exit(code);
+            }
+        }
+        Commands::Coinset(args) => run_coinset_command(args).await?,
     }
     Ok(())
 }

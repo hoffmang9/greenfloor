@@ -13,5 +13,4 @@ runs:
       with:
         workspaces: |
           greenfloor-engine -> target
-          greenfloor-engine-pyo3 -> target
         cache-workspace-crates: true

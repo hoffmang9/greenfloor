@@ -2,40 +2,38 @@
 
 ## Status
 
-Accepted (2026-05-28); **operator orchestration superseded** by ADR 0013. Bridge import
-rules still apply to the remaining Python library and tests.
+**Superseded** by [0013-rust-cli-daemon-native-cutover.md](0013-rust-cli-daemon-native-cutover.md) (2026-06-17).
+Python policy bridges and PyO3 FFI were deleted; this ADR is historical.
 
-## Context
+## Context (2026-05)
 
-Offer-request leg math lives in `greenfloor-engine`. Python bridges need stable import
+Offer-request leg math lives in `greenfloor-engine`. Python bridges needed stable import
 paths without growing `policy_bridge.py` into a flat FFI catalog.
 
-## Decision
+## Original decision
 
 ### Canonical Rust surface
 
 - `greenfloor-engine/src/offer/request.rs` — leg math, side/asset normalization,
   `compute_signer_offer_leg_amounts`.
 
-### Python modules (import from here)
+### Deleted Python modules (2026-06-17)
 
-| Module                                   | Use for                                       |
-| ---------------------------------------- | --------------------------------------------- |
-| `greenfloor.core.offer_request_bridge`   | Offer-request leg math and side normalization |
-| `greenfloor.core.policy_bridge`          | Pricing/publish/retry engine wrappers         |
-| `greenfloor.core.offer_bootstrap_bridge` | Bootstrap planner and phase wrappers          |
-| `greenfloor.core.signer_offer_request`   | `SignerCreateOfferRequest` shaping            |
-| `greenfloor.core.offer_action`           | Typed action request/result (pure)            |
-| `greenfloor.adapters.offer_action`       | Engine IO (`build_signer_offer_for_action`)   |
+The following were removed with `greenfloor/core/` and `greenfloor-engine-pyo3/`:
 
-### Rules
+- `greenfloor.core.offer_request_bridge`
+- `greenfloor.core.policy_bridge`
+- `greenfloor.core.offer_bootstrap_bridge`
+- `greenfloor.core.signer_offer_request`
+- `greenfloor.core.offer_action`
+- `greenfloor.adapters.offer_action`
 
-- All offer creation uses signer vault KMS via `core/offer_action` +
-  `adapters/offer_action`. Do not reintroduce legacy BLS or Cloud Wallet builders.
-- New PyO3 symbols go in domain modules (`offer_request_py.rs`, etc.) and surface
-  through the matching `*_bridge.py`, not ad hoc `policy_bridge` growth.
+## Current rule
+
+Operator build/post and daemon offer execution are Rust-native (`offer/operator/`,
+`offer/lifecycle/`). Do not reintroduce Python policy bridges or PyO3 symbols.
 
 ## Consequences
 
-- Operator build/post is Rust-native (`offer/operator/`); these bridges serve tests,
-  scripts, and any remaining Python callers only.
+- Offer creation uses signer vault KMS via `greenfloor-engine` only.
+- Scripts that need Coinset mutations call `greenfloor-engine coinset …` subcommands.

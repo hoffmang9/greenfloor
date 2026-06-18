@@ -2,28 +2,18 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from greenfloor.core.engine_bridge import import_engine, require_engine_method
-
-
-def new_coin_watchlist_cache() -> Any:
-    cache_cls = require_engine_method(
-        import_engine(),
-        "CoinWatchlistCache",
-        missing="coin watchlist cache",
-    )
-    return cache_cls()
+from greenfloor.engine_binary import resolve_greenfloor_engine_binary
 
 
-def run_daemon_cycle_once(request: dict[str, Any]) -> dict[str, Any]:
-    run_fn = require_engine_method(
-        import_engine(),
-        "run_daemon_cycle_once",
-        missing="daemon cycle once",
-    )
-    return dict(run_fn(request))
+@dataclass(slots=True)
+class DaemonOnceTestResult:
+    exit_code: int
+    response: dict[str, object] | None
 
 
 def run_once_for_tests(
@@ -38,11 +28,11 @@ def run_once_for_tests(
     use_websocket_capture: bool = False,
     testnet_markets_path: Path | None = None,
     test_controls: dict[str, object] | None = None,
-) -> int:
+) -> DaemonOnceTestResult:
     controls = (
         dict(test_controls) if test_controls is not None else {"skip_strategy_execution": True}
     )
-    request = {
+    request: dict[str, object] = {
         "program_path": str(program_path),
         "markets_path": str(markets_path),
         "coinset_base_url": coinset_base_url,
@@ -57,12 +47,44 @@ def run_once_for_tests(
         request["testnet_markets_path"] = str(testnet_markets_path)
     if db_path_override:
         request["state_db_override"] = db_path_override
-    response = run_daemon_cycle_once(request)
-    return int(response["exit_code"])
+
+    state_dir.mkdir(parents=True, exist_ok=True)
+    request_path = state_dir / ".once_request.json"
+    request_path.write_text(json.dumps(request), encoding="utf-8")
+
+    cmd = [
+        str(resolve_greenfloor_engine_binary()),
+        "daemon-once",
+        "--request-json",
+        str(request_path),
+        "--json",
+    ]
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    if result.returncode not in {0, 1, 3} and result.stderr.strip():
+        raise RuntimeError(
+            f"greenfloor-engine daemon-once failed (exit {result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+
+    response: dict[str, object] | None = None
+    stdout = result.stdout.strip()
+    if stdout:
+        try:
+            parsed = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"greenfloor-engine daemon-once returned invalid json: {stdout[:200]}"
+            ) from exc
+        if isinstance(parsed, dict):
+            response = parsed
+
+    return DaemonOnceTestResult(exit_code=int(result.returncode), response=response)
 
 
 def install_rust_cycle_test_env(monkeypatch) -> None:
-    from tests.helpers.engine_binary import engine_binary_path
-
     monkeypatch.setenv("GREENFLOOR_XCH_PRICE_USD", "30")
-    monkeypatch.setenv("GREENFLOOR_ENGINE_BIN", str(engine_binary_path()))
+    monkeypatch.setenv("GREENFLOOR_DAEMON_TEST_CONTROLS", "1")
+    monkeypatch.setenv(
+        "GREENFLOOR_ENGINE_BIN",
+        str(resolve_greenfloor_engine_binary()),
+    )

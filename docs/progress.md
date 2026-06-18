@@ -23,14 +23,23 @@ Implementation lives in `greenfloor-engine/src/`:
 - `cycle/` — deterministic strategy, cancel policy, parallel dispatch
 - `storage/` — SQLite schema and persistence
 
-**Python package (`greenfloor/`):** config parsing, HTTP adapters, and PyO3 bridges
-(`greenfloor/core/*_bridge.py`) for parity tests and scripts. Not used by operator
-binaries. See ADR 0013 for PyO3 scope.
+**Python (`greenfloor/` + `scripts/`):** config parsing, hex helpers, and Coinset adapter
+for standalone scripts. Coinset push/fee uses `greenfloor-engine` CLI subcommands.
+
+**Deleted:** `greenfloor-engine-pyo3/`, `greenfloor/core/`, policy bridges, PyO3 FFI.
 
 **Deleted:** `greenfloor/cli/`, `greenfloor/daemon/`, Python offer/coin-op orchestration
 runtime modules.
 
 ## Recent milestones
+
+### 2026-06-17 — PyO3 removed; Coinset CLI for scripts
+
+- Deleted `greenfloor-engine-pyo3/`; scripts use nested `greenfloor-engine coinset …` subcommands.
+- `greenfloor/adapters/coinset.py` shells out to the native binary for push/fee IO.
+- Moved `storage/sqlite.py` to `tests/helpers/sqlite_store.py` (test-only).
+- Daemon integration tests use `greenfloor-engine daemon-once --request-json` with
+  `GREENFLOOR_DAEMON_TEST_CONTROLS=1` for non-default `test_controls`.
 
 ### 2026-06-17 — Rust-native CLI/daemon cutover (ADR 0013)
 

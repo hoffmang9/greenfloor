@@ -7,7 +7,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from tests.helpers.engine_binary import resolve_greenfloor_engine_binary
+from greenfloor.engine_binary import resolve_greenfloor_engine_binary
 
 
 def resolve_greenfloor_manager_binary() -> Path:

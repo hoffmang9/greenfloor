@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from greenfloor.storage.sqlite import SqliteStore, StoredAlertState
+from tests.helpers.sqlite_store import SqliteStore, StoredAlertState
 
 
 def test_sqlite_alert_state_roundtrip(tmp_path: Path) -> None:

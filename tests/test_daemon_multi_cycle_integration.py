@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.daemon_rust_cycle_env import run_once_for_tests as run_once
 from tests.helpers.dexie_http_mock import DexieHttpMock
+from tests.helpers.sqlite_store import SqliteStore
 
 
 @pytest.fixture
@@ -159,7 +159,7 @@ def test_daemon_multi_cycle_price_shift_cancel_and_reconcile(
             db_path_override=str(db_path),
             coinset_base_url="http://coinset.local",
             state_dir=state_dir,
-        )
+        ).exit_code
         == 0
     )
 
@@ -179,7 +179,7 @@ def test_daemon_multi_cycle_price_shift_cancel_and_reconcile(
             db_path_override=str(db_path),
             coinset_base_url="http://coinset.local",
             state_dir=state_dir,
-        )
+        ).exit_code
         == 0
     )
 

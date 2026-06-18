@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from greenfloor.storage.sqlite import SqliteStore
+from tests.helpers.sqlite_store import SqliteStore
 
 
 def test_tx_signal_observe_and_confirm(tmp_path: Path) -> None:

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.dexie_http_mock import DexieHttpMock
 from tests.helpers.manager_cli import parse_json_output, run_manager
 from tests.helpers.manager_program_fixtures import write_manager_program
+from tests.helpers.sqlite_store import SqliteStore
 
 _DEFAULT_DEXIE_BASE = "https://api.dexie.space"
 

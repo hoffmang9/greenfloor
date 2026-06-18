@@ -106,11 +106,9 @@ def main() -> int:
         launcher_id = launcher_id_from_program_config(program_config)
         launcher_source = "program_config"
 
-    require_testnet11 = str(args.network).strip().lower() in {"testnet", "testnet11"}
     adapter = CoinsetAdapter(
         base_url=(str(args.coinset_base_url).strip() or None),
         network=args.network,
-        require_testnet11=require_testnet11,
     )
 
     sdk = _import_sdk()
