@@ -82,8 +82,9 @@ Coin-op notes:
 - Required checks: `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`
   (script adapters and subprocess harnesses; ~52 tests).
 - Rust: `cargo test` in `greenfloor-engine/` (operator config and policy parity safety net).
-- Local gate: `pre-commit run --all-files`.
-- CI runs pytest as a separate step; pre-commit skips pytest via `SKIP=pytest`.
+- Local gate: `pre-commit run --all-files` (lint + pyright + formatters; ~5–10s warm with
+  `PRE_COMMIT_HOME=.cache/pre-commit`). Run `cargo fmt`, `cargo clippy`, `cargo test`, and
+  `pytest` separately before push — same split as CI.
 
 **Deterministic tests (Rust operator paths):**
 
