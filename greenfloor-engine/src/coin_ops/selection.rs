@@ -113,7 +113,7 @@ pub fn select_spendable_coins_for_target_amount(
             let mut candidate = subset;
             candidate.push(idx);
             let existing = best.get(&next_sum);
-            if existing.is_none() || existing.is_some_and(|e| candidate.len() < e.len()) {
+            if existing.is_none_or(|e| candidate.len() < e.len()) {
                 best.insert(next_sum, candidate);
             }
         }
