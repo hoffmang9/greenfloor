@@ -19,14 +19,6 @@ pub(crate) fn u32_to_usize(value: u32) -> SignerResult<usize> {
     usize::try_from(value).map_err(|_| SignerError::UnsupportedVaultThreshold)
 }
 
-pub fn validate_vault_threshold(threshold: u32, key_count: usize) -> SignerResult<usize> {
-    let threshold_usize = u32_to_usize(threshold)?;
-    if threshold == 0 || threshold_usize > key_count {
-        return Err(SignerError::UnsupportedVaultThreshold);
-    }
-    Ok(threshold_usize)
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct MemberConfig {
     pub top_level: bool,

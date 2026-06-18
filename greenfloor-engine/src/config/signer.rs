@@ -6,7 +6,8 @@ use super::program::read_program_yaml;
 use super::yaml_fields::{config_err, optional_trimmed_string, req_mapping, req_str, req_value};
 use crate::error::{SignerError, SignerResult};
 use crate::vault::context::VaultCustodySnapshot;
-use crate::vault::members::{hex_to_bytes32, validate_vault_threshold, WalletKey};
+use crate::vault::members::{hex_to_bytes32, WalletKey};
+use crate::vault::validate_vault_threshold;
 
 pub use crate::coinset::DEFAULT_MSP_BASE_URL;
 

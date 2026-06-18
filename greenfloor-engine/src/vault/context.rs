@@ -7,8 +7,9 @@ use crate::error::{SignerError, SignerResult};
 use crate::vault::members::{
     bytes32_to_hex, force_1_of_2_restriction, hex_to_bytes32, m_of_n_hash, member_hash_for_key,
     prevent_vault_side_effects_restriction, singleton_member_hash, timelock_restriction,
-    tree_hash_nil, tree_hash_to_hex, validate_vault_threshold, MemberConfig, WalletKey,
+    tree_hash_nil, tree_hash_to_hex, MemberConfig, WalletKey,
 };
+use crate::vault::validate_vault_threshold;
 
 #[derive(Debug, Clone)]
 pub struct VaultCustodySnapshot {

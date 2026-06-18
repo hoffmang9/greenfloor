@@ -11,7 +11,7 @@ use crate::cycle::{
 };
 use crate::daemon::watchlist::cache::CoinWatchlistCache;
 use crate::error::SignerResult;
-use crate::metrics::{millis_to_u64, non_negative_u64_to_usize};
+use crate::metrics::{metric_u64_to_usize, millis_to_u64};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
 use super::market_context::DaemonCycleResources;
@@ -194,11 +194,11 @@ pub async fn build_cycle_plan(
 
     let (selected_market_ids, consumed_immediate_requeues) = if should_use_market_slot_dispatch(
         enabled_market_ids.len(),
-        non_negative_u64_to_usize(runtime_market_slot_count),
+        metric_u64_to_usize(runtime_market_slot_count),
     ) {
         let selection = select_market_batch(
             &enabled_market_ids,
-            non_negative_u64_to_usize(runtime_market_slot_count),
+            metric_u64_to_usize(runtime_market_slot_count),
             dispatch_state.cursor,
             &dispatch_state.immediate_requeue_ids,
         );

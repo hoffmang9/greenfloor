@@ -5,6 +5,7 @@
 //! clamp to the type maximum (documented saturation, not errors).
 //! For config reads use `config::parse_int` (`parse_non_negative_u64`, etc.);
 //! for offer/ladder math use `offer::pricing`; for coin-op execution use `coin_ops::scalars`.
+//! Saturating usize helpers: `metric_non_negative_usize`, `metric_u64_to_usize`.
 
 /// Convert a collection length for metric counters.
 #[must_use]
@@ -32,12 +33,12 @@ pub fn metric_non_negative_u64(value: i64) -> u64 {
 
 /// Convert a non-negative runtime scalar for daemon dispatch (overflow → `usize::MAX`).
 #[must_use]
-pub fn non_negative_i64_to_usize(value: i64) -> usize {
+pub fn metric_non_negative_usize(value: i64) -> usize {
     usize::try_from(value.max(0)).unwrap_or(usize::MAX)
 }
 
-/// Convert a non-negative runtime `u64` scalar for daemon dispatch (overflow → `usize::MAX`).
+/// Convert a runtime `u64` scalar for daemon dispatch (overflow → `usize::MAX`).
 #[must_use]
-pub fn non_negative_u64_to_usize(value: u64) -> usize {
+pub fn metric_u64_to_usize(value: u64) -> usize {
     usize::try_from(value).unwrap_or(usize::MAX)
 }
