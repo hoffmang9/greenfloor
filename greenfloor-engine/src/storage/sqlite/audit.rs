@@ -41,7 +41,7 @@ impl SqliteStore {
         };
         let value = raw
             .as_f64()
-            .or_else(|| raw.as_i64().map(crate::config::i64_to_f64))
+            .or_else(|| raw.as_i64().map(crate::offer::pricing::i64_to_f64))
             .ok_or_else(|| {
                 SignerError::Other("xch_price_snapshot price_usd is not numeric".to_string())
             })?;

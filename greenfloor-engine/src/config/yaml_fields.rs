@@ -77,10 +77,10 @@ pub fn parse_f64_field(raw: &Value, context: &str) -> SignerResult<f64> {
         return Ok(value);
     }
     if let Some(value) = raw.as_i64() {
-        return Ok(crate::config::i64_to_f64(value));
+        return Ok(crate::offer::pricing::i64_to_f64(value));
     }
     if let Some(value) = raw.as_u64() {
-        return Ok(crate::config::u64_to_f64(value));
+        return Ok(crate::offer::pricing::u64_to_f64(value));
     }
     if let Some(text) = raw.as_str() {
         if let Ok(value) = text.parse::<f64>() {

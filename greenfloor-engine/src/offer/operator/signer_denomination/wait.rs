@@ -22,7 +22,9 @@ pub(super) async fn wait_for_coinset_confirmation(
     let max_sleep = 20.0f64;
     let mut sleep_seconds = 0.0f64;
     loop {
-        let elapsed_seconds = start.elapsed().as_secs().try_into().unwrap_or(0i64);
+        let elapsed_seconds = i64::try_from(start.elapsed().as_secs()).map_err(|_| {
+            SignerError::Other("confirmation wait elapsed seconds overflow".to_string())
+        })?;
         let Some(next_sleep) = poll_exponential_sleep_now(
             elapsed_seconds,
             timeout,

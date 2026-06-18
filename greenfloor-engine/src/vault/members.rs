@@ -15,6 +15,10 @@ use clvm_utils::{tree_hash_atom, TreeHash};
 
 use crate::error::{SignerError, SignerResult};
 
+pub(crate) fn u32_to_usize(value: u32) -> SignerResult<usize> {
+    usize::try_from(value).map_err(|_| SignerError::UnsupportedVaultThreshold)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MemberConfig {
     pub top_level: bool,
@@ -45,11 +49,16 @@ impl MemberConfig {
     }
 }
 
-pub fn m_of_n_hash(config: &MemberConfig, required: u32, items: Vec<TreeHash>) -> TreeHash {
-    member_hash(
+pub fn m_of_n_hash(
+    config: &MemberConfig,
+    required: u32,
+    items: Vec<TreeHash>,
+) -> SignerResult<TreeHash> {
+    let required_usize = u32_to_usize(required)?;
+    Ok(member_hash(
         config,
-        MofN::new(required.try_into().unwrap_or(0usize), items).inner_puzzle_hash(),
-    )
+        MofN::new(required_usize, items).inner_puzzle_hash(),
+    ))
 }
 
 pub fn custom_member_hash(config: &MemberConfig, inner_hash: TreeHash) -> TreeHash {
@@ -66,7 +75,7 @@ pub struct P2ConditionsOrSingletonHashes {
 pub fn p2_conditions_or_singleton_puzzle_hash(
     fixed_delegated_puzzle_hash: TreeHash,
     launcher_id: Bytes32,
-) -> P2ConditionsOrSingletonHashes {
+) -> SignerResult<P2ConditionsOrSingletonHashes> {
     let member_config = MemberConfig::default();
     let fixed_conditions_hash = custom_member_hash(&member_config, fixed_delegated_puzzle_hash);
     let p2_singleton_hash = singleton_member_hash(&member_config, launcher_id, false);
@@ -74,12 +83,12 @@ pub fn p2_conditions_or_singleton_puzzle_hash(
         &member_config.with_top_level(true),
         1,
         vec![fixed_conditions_hash, p2_singleton_hash],
-    );
-    P2ConditionsOrSingletonHashes {
+    )?;
+    Ok(P2ConditionsOrSingletonHashes {
         puzzle_hash,
         fixed_conditions_hash,
         p2_singleton_hash,
-    }
+    })
 }
 
 pub fn r1_member_hash(
@@ -169,17 +178,17 @@ pub fn force_1_of_2_restriction(
     nonce: u32,
     member_validator_list_hash: Bytes32,
     delegated_puzzle_validator_list_hash: Bytes32,
-) -> Restriction {
-    Restriction {
+) -> SignerResult<Restriction> {
+    Ok(Restriction {
         kind: RestrictionKind::DelegatedPuzzleWrapper,
         puzzle_hash: Force1of2RestrictedVariable::new(
             left_side_subtree_hash,
-            nonce.try_into().unwrap_or(0usize),
+            u32_to_usize(nonce)?,
             member_validator_list_hash,
             delegated_puzzle_validator_list_hash,
         )
         .curry_tree_hash(),
-    }
+    })
 }
 
 pub fn prevent_vault_side_effects_restriction() -> Vec<Restriction> {
@@ -235,8 +244,9 @@ fn bytes48_from_vec(bytes: &[u8]) -> SignerResult<[u8; 48]> {
 }
 
 fn member_hash(config: &MemberConfig, inner_hash: TreeHash) -> TreeHash {
+    let nonce = u32_to_usize(config.nonce).expect("member config nonce fits in usize");
     mips_puzzle_hash(
-        config.nonce.try_into().unwrap_or(0usize),
+        nonce,
         config.restrictions.clone(),
         inner_hash,
         config.top_level,

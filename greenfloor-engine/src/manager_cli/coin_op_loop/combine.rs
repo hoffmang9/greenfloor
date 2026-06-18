@@ -4,9 +4,8 @@ use crate::coin_ops::evaluate_coin_combine_gate;
 use crate::coin_ops::non_negative_i64_to_u64;
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
-use crate::manager_cli::ladder::{
-    combine_threshold_count, resolve_combine_count, sell_ladder_entry_for_size,
-};
+use crate::manager_cli::ladder::{resolve_combine_count, sell_ladder_entry_for_size};
+use crate::offer::pricing::combine_threshold_count;
 
 use super::combine_iteration::{run_combine_iteration, CombineIterationParams};
 use super::context::build_coin_op_exec_context;
@@ -75,7 +74,10 @@ pub async fn run_coin_combine(request: CoinCombineRequest<'_>) -> SignerResult<i
         "program.coin_ops_combine_fee_mojos",
     )?;
     let combine_threshold = match &combine_target {
-        Some(entry) => Some(combine_threshold_count(entry)?),
+        Some(entry) => Some(combine_threshold_count(
+            entry.target_count,
+            entry.combine_when_excess_factor,
+        )?),
         None => None,
     };
 

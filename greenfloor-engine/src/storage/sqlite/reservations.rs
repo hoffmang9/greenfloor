@@ -186,7 +186,7 @@ impl SqliteStore {
             .map_err(|err| {
                 SignerError::Other(format!("failed to release reservation lease: {err}"))
             })?;
-        Ok(u64::try_from(changed).unwrap_or(0))
+        super::sqlite_rows_changed(changed)
     }
 
     pub fn expire_offer_reservation_leases(&self, now: Option<DateTime<Utc>>) -> SignerResult<u64> {
@@ -206,7 +206,7 @@ impl SqliteStore {
             .map_err(|err| {
                 SignerError::Other(format!("failed to expire reservation leases: {err}"))
             })?;
-        Ok(u64::try_from(changed).unwrap_or(0))
+        super::sqlite_rows_changed(changed)
     }
 
     pub fn add_offer_reservation_lease(
@@ -374,6 +374,6 @@ impl SqliteStore {
             .map_err(|err| {
                 SignerError::Other(format!("failed to prune reservation leases: {err}"))
             })?;
-        Ok(u64::try_from(changed).unwrap_or(0))
+        super::sqlite_rows_changed(changed)
     }
 }

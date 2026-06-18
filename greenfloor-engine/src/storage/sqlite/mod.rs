@@ -33,6 +33,14 @@ pub struct OfferPostPersistRecord {
 pub use coin_ops::{CoinOpBudgetReport, CoinOpLedgerEntry};
 pub use reservations::{OfferReservationLeaseRequest, OfferReservationLeaseRow};
 
+pub(crate) fn sqlite_rows_changed(changed: usize) -> SignerResult<u64> {
+    u64::try_from(changed).map_err(|_| {
+        SignerError::Other(format!(
+            "sqlite rows_changed count {changed} exceeds platform u64::MAX"
+        ))
+    })
+}
+
 pub struct SqliteStore {
     pub(crate) conn: Connection,
 }

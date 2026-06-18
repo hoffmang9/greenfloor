@@ -89,7 +89,7 @@ impl SqliteStore {
                 .map_err(|err| {
                     SignerError::Other(format!("failed to observe mempool tx id: {err}"))
                 })?;
-            inserted += u64::try_from(changed).unwrap_or(0);
+            inserted += super::sqlite_rows_changed(changed)?;
         }
         Ok(inserted)
     }
@@ -116,7 +116,7 @@ impl SqliteStore {
                     params![now, normalized],
                 )
                 .map_err(|err| SignerError::Other(format!("failed to confirm tx id: {err}")))?;
-            updated += u64::try_from(changed).unwrap_or(0);
+            updated += super::sqlite_rows_changed(changed)?;
         }
         Ok(updated)
     }

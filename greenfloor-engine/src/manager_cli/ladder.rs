@@ -77,13 +77,6 @@ pub fn split_required_count(entry: &LadderEntry) -> i64 {
     entry.target_count + entry.split_buffer_count
 }
 
-pub fn combine_threshold_count(entry: &LadderEntry) -> SignerResult<i64> {
-    crate::offer::pricing::combine_threshold_count(
-        entry.target_count,
-        entry.combine_when_excess_factor,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,13 +124,19 @@ mod tests {
 
     #[test]
     fn combine_threshold_count_uses_ceil() {
+        use crate::offer::pricing::combine_threshold_count;
+
         let entry = LadderEntry {
             size_base_units: 10,
             target_count: 3,
             split_buffer_count: 1,
             combine_when_excess_factor: 1.5,
         };
-        assert_eq!(combine_threshold_count(&entry).expect("threshold"), 5);
+        assert_eq!(
+            combine_threshold_count(entry.target_count, entry.combine_when_excess_factor)
+                .expect("threshold"),
+            5
+        );
         let mut market = sample_market();
         market
             .ladders

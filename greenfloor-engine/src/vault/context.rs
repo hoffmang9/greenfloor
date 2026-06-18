@@ -44,14 +44,14 @@ impl VaultCustodySnapshot {
         if custody_keys.is_empty() || recovery_keys.is_empty() {
             return Err(SignerError::UnsupportedVaultSignerCardinality);
         }
-        if custody_threshold == 0
-            || custody_threshold.try_into().unwrap_or(0usize) > custody_keys.len()
-        {
+        let custody_threshold_usize = usize::try_from(custody_threshold)
+            .map_err(|_| SignerError::UnsupportedVaultThreshold)?;
+        if custody_threshold == 0 || custody_threshold_usize > custody_keys.len() {
             return Err(SignerError::UnsupportedVaultThreshold);
         }
-        if recovery_threshold == 0
-            || recovery_threshold.try_into().unwrap_or(0usize) > recovery_keys.len()
-        {
+        let recovery_threshold_usize = usize::try_from(recovery_threshold)
+            .map_err(|_| SignerError::UnsupportedVaultThreshold)?;
+        if recovery_threshold == 0 || recovery_threshold_usize > recovery_keys.len() {
             return Err(SignerError::UnsupportedVaultThreshold);
         }
         if recovery_clawback_timelock == 0 {
@@ -105,7 +105,7 @@ pub fn compute_vault_hashes(snapshot: &VaultCustodySnapshot) -> SignerResult<Vau
     let custody_hash = if custody_hashes.len() == 1 {
         custody_hashes[0]
     } else {
-        m_of_n_hash(&member_config, snapshot.custody_threshold, custody_hashes)
+        m_of_n_hash(&member_config, snapshot.custody_threshold, custody_hashes)?
     };
 
     let timelock = timelock_restriction(snapshot.recovery_clawback_timelock);
@@ -121,7 +121,7 @@ pub fn compute_vault_hashes(snapshot: &VaultCustodySnapshot) -> SignerResult<Vau
                 0,
                 member_validator_list_hash,
                 delegated_puzzle_validator_list_hash,
-            ),
+            )?,
         );
         restrictions
     };
@@ -141,14 +141,14 @@ pub fn compute_vault_hashes(snapshot: &VaultCustodySnapshot) -> SignerResult<Vau
             &recovery_config,
             snapshot.recovery_threshold,
             recovery_hashes,
-        )
+        )?
     };
 
     let inner_puzzle_hash = m_of_n_hash(
         &member_config.with_top_level(true),
         1,
         vec![custody_hash, recovery_hash],
-    );
+    )?;
     let p2_singleton_message_hash = singleton_member_hash(
         &MemberConfig::default().with_top_level(true),
         snapshot.launcher_id,

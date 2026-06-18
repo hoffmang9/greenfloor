@@ -171,7 +171,7 @@ fn pricing_int(pricing: &serde_json::Value, key: &str) -> Option<i64> {
     pricing.get(key).and_then(|value| {
         value
             .as_i64()
-            .or_else(|| value.as_u64().map(|raw| i64::try_from(raw).unwrap_or(0i64)))
+            .or_else(|| value.as_u64().and_then(|raw| i64::try_from(raw).ok()))
     })
 }
 

@@ -91,13 +91,14 @@ fn parse_vault_section(
     if custody_keys.is_empty() || recovery_keys.is_empty() {
         return Err(SignerError::UnsupportedVaultSignerCardinality);
     }
-    if custody_threshold == 0 || custody_threshold.try_into().unwrap_or(0usize) > custody_keys.len()
-    {
+    let custody_threshold_usize =
+        usize::try_from(custody_threshold).map_err(|_| SignerError::UnsupportedVaultThreshold)?;
+    if custody_threshold == 0 || custody_threshold_usize > custody_keys.len() {
         return Err(SignerError::UnsupportedVaultThreshold);
     }
-    if recovery_threshold == 0
-        || recovery_threshold.try_into().unwrap_or(0usize) > recovery_keys.len()
-    {
+    let recovery_threshold_usize =
+        usize::try_from(recovery_threshold).map_err(|_| SignerError::UnsupportedVaultThreshold)?;
+    if recovery_threshold == 0 || recovery_threshold_usize > recovery_keys.len() {
         return Err(SignerError::UnsupportedVaultThreshold);
     }
     if recovery_clawback_timelock == 0 {
