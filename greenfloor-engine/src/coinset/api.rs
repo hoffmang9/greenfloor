@@ -1,31 +1,10 @@
 use chia_protocol::SpendBundle;
 use chia_sdk_coinset::ChiaRpcClient;
 use chia_traits::Streamable;
-use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::coinset::{broadcast_spend_bundle, client_for_network, MspCoinset};
 use crate::error::{SignerError, SignerResult};
-
-#[derive(Debug, Deserialize)]
-struct FeeEstimateResponse {
-    success: bool,
-    #[serde(default)]
-    error: Option<String>,
-    #[serde(default)]
-    estimates: Option<Vec<Value>>,
-    #[serde(default)]
-    fee_estimate: Option<Value>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MempoolTxIdsResponse {
-    success: bool,
-    #[serde(default)]
-    tx_ids: Option<Vec<Value>>,
-    #[serde(default)]
-    mempool_tx_ids: Option<Vec<Value>>,
-}
 
 fn coinset_client(
     network: &str,
@@ -40,6 +19,15 @@ fn coinset_client(
     }
 }
 
+fn apply_testnet11_network(body: &mut Value, network: &str) {
+    if network.trim().eq_ignore_ascii_case("testnet11") {
+        if let Some(obj) = body.as_object_mut() {
+            obj.entry("network".to_string())
+                .or_insert(json!("testnet11"));
+        }
+    }
+}
+
 pub async fn post_coinset_rpc(
     network: &str,
     base_url: Option<&str>,
@@ -50,12 +38,7 @@ pub async fn post_coinset_rpc(
     if endpoint.is_empty() {
         return Err(SignerError::Other("coinset endpoint is required".to_string()));
     }
-    if network.trim().eq_ignore_ascii_case("testnet11") {
-        if let Some(obj) = body.as_object_mut() {
-            obj.entry("network".to_string())
-                .or_insert(json!("testnet11"));
-        }
-    }
+    apply_testnet11_network(&mut body, network);
     let msp = if let Some(url) = base_url.map(str::trim).filter(|value| !value.is_empty()) {
         MspCoinset::for_network(network, Some(url))?
     } else {
@@ -93,11 +76,6 @@ pub async fn get_fee_estimate(
     cost: u64,
     spend_count: Option<u64>,
 ) -> SignerResult<Value> {
-    let msp = if let Some(url) = base_url.map(str::trim).filter(|value| !value.is_empty()) {
-        MspCoinset::for_network(network, Some(url))?
-    } else {
-        MspCoinset::for_network(network, None)?
-    };
     let mut body = json!({
         "target_times": target_times,
         "cost": cost.max(1),
@@ -105,28 +83,7 @@ pub async fn get_fee_estimate(
     if let Some(count) = spend_count.filter(|value| *value > 0) {
         body["spend_count"] = json!(count);
     }
-    if network.trim().eq_ignore_ascii_case("testnet11") {
-        if let Some(obj) = body.as_object_mut() {
-            obj.entry("network".to_string())
-                .or_insert(json!("testnet11"));
-        }
-    }
-    let response: FeeEstimateResponse = msp
-        .client()
-        .make_post_request("get_fee_estimate", body)
-        .await
-        .map_err(SignerError::from)?;
-    if !response.success {
-        return Ok(json!({
-            "success": false,
-            "error": response.error.unwrap_or_else(|| "coinset_fee_estimate_unsuccessful".to_string()),
-        }));
-    }
-    Ok(json!({
-        "success": true,
-        "estimates": response.estimates,
-        "fee_estimate": response.fee_estimate,
-    }))
+    post_coinset_rpc(network, base_url, "get_fee_estimate", body).await
 }
 
 pub fn conservative_fee_from_payload(payload: &Value) -> Option<u64> {
@@ -161,22 +118,19 @@ pub async fn get_all_mempool_tx_ids(
     network: &str,
     base_url: Option<&str>,
 ) -> SignerResult<Vec<String>> {
-    let msp = if let Some(url) = base_url.map(str::trim).filter(|value| !value.is_empty()) {
-        MspCoinset::for_network(network, Some(url))?
-    } else {
-        MspCoinset::for_network(network, None)?
-    };
-    let response: MempoolTxIdsResponse = msp
-        .client()
-        .make_post_request("get_all_mempool_tx_ids", json!({}))
-        .await
-        .map_err(SignerError::from)?;
-    if !response.success {
+    let payload = post_coinset_rpc(network, base_url, "get_all_mempool_tx_ids", json!({})).await?;
+    if !payload
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         return Ok(Vec::new());
     }
-    let tx_ids = response
-        .tx_ids
-        .or(response.mempool_tx_ids)
+    let tx_ids = payload
+        .get("tx_ids")
+        .or_else(|| payload.get("mempool_tx_ids"))
+        .and_then(Value::as_array)
+        .cloned()
         .unwrap_or_default();
     Ok(tx_ids
         .into_iter()

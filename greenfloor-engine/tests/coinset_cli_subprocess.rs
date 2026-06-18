@@ -3,7 +3,7 @@ use chia_traits::Streamable;
 use serde_json::Value;
 
 #[tokio::test]
-async fn subprocess_coinset_conservative_fee_emits_json_envelope() {
+async fn subprocess_coinset_post_fee_estimate_returns_rpc_payload() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server
         .mock("POST", "/get_fee_estimate")
@@ -15,25 +15,32 @@ async fn subprocess_coinset_conservative_fee_emits_json_envelope() {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_greenfloor-engine"))
         .args([
             "coinset",
-            "conservative-fee-estimate",
+            "post",
             "--network",
             "mainnet",
             "--base-url",
             &server.url(),
-            "--cost",
-            "1000000",
+            "--endpoint",
+            "get_fee_estimate",
+            "--body-json",
+            r#"{"target_times":[300,600,1200],"cost":1000000}"#,
             "--json",
         ])
         .output()
-        .expect("spawn greenfloor-engine coinset subprocess");
+        .expect("spawn greenfloor-engine coinset post subprocess");
     assert!(
         output.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let value: Value =
-        serde_json::from_slice(&output.stdout).expect("parse conservative fee json stdout");
-    assert_eq!(value.get("fee_mojos").and_then(Value::as_u64), Some(500));
+        serde_json::from_slice(&output.stdout).expect("parse fee estimate json stdout");
+    assert_eq!(value.get("success").and_then(Value::as_bool), Some(true));
+    let estimates = value
+        .get("estimates")
+        .and_then(Value::as_array)
+        .expect("estimates array");
+    assert_eq!(estimates.len(), 3);
 }
 
 #[tokio::test]

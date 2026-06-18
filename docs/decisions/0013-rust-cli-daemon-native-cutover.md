@@ -29,9 +29,8 @@ build/post, policy, SQLite, and most adapters.
 3. **No PyO3 on any path.** Operators and scripts use native Rust binaries only.
 
    **Coinset mutation IO for scripts:** nested `greenfloor-engine coinset` subcommands:
+   - `coinset post` (reads and fee RPCs)
    - `coinset push-tx`
-   - `coinset fee-estimate`
-   - `coinset conservative-fee-estimate`
 
    **Integration tests:** `greenfloor-engine daemon-once --request-json <file> --json`
    (includes `test_controls` in the request body; no hidden flags on `greenfloord`).

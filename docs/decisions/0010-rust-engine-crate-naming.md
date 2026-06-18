@@ -27,8 +27,8 @@ and coin-op planning. The old "signer" name no longer describes the scope.
 - `greenfloor.core.engine_bridge` and all Python policy bridges
 - In-process Python↔Rust FFI for operator or script paths
 
-**Script Coinset IO:** `greenfloor-engine coinset {post,push-tx,fee-estimate,conservative-fee-estimate}`
-via `greenfloor.adapters.coinset` (subprocess, JSON stdout).
+**Script Coinset IO:** `greenfloor-engine coinset {post,push-tx}`
+via `greenfloor.adapters.coinset_engine` (subprocess, JSON stdout).
 
 **Integration tests:** `greenfloor-engine daemon-once --request-json <file> --json`
 (requires `GREENFLOOR_DAEMON_TEST_CONTROLS=1` when `test_controls` is non-default).

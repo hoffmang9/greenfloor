@@ -16,7 +16,7 @@ from tests.helpers.coinset_cli_mock import make_coinset_cli_handler
 @pytest.fixture(autouse=True)
 def _mock_rust_coinset_io(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_cli_mutate.run_engine_json",
+        "greenfloor.adapters.coinset_engine.run_engine_json",
         make_coinset_cli_handler(),
     )
 
@@ -50,7 +50,7 @@ def test_coinset_adapter_get_all_mempool_tx_ids_uses_post_cli(monkeypatch) -> No
         return {"success": True, "mempool_tx_ids": ["0xabc", "0xdef"]}
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_cli_mutate.run_engine_json",
+        "greenfloor.adapters.coinset_engine.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter("https://coinset.org")
@@ -68,7 +68,7 @@ def test_coinset_adapter_get_coin_records_by_puzzle_hash_filters_non_dicts(
         return {"success": True, "coin_records": [{"coin": {"amount": 1}}, "bad"]}
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_cli_mutate.run_engine_json",
+        "greenfloor.adapters.coinset_engine.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter()
@@ -91,7 +91,7 @@ def test_coinset_adapter_get_coin_record_by_name_success_and_failure(
         return responses.pop(0)
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_cli_mutate.run_engine_json",
+        "greenfloor.adapters.coinset_engine.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter()
@@ -113,7 +113,7 @@ def test_coinset_adapter_get_puzzle_and_solution_adds_height_when_provided(
         }
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_cli_mutate.run_engine_json",
+        "greenfloor.adapters.coinset_engine.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter()
@@ -136,7 +136,7 @@ def test_coinset_adapter_get_puzzle_and_solution_omits_non_positive_height(
         }
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_cli_mutate.run_engine_json",
+        "greenfloor.adapters.coinset_engine.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter()
@@ -218,8 +218,8 @@ def test_conservative_fee_estimate_uses_max_of_estimates() -> None:
 
 def test_conservative_fee_estimate_falls_back_to_fee_estimate_field(monkeypatch) -> None:
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_cli_mutate.run_engine_json",
-        lambda _args: {"fee_mojos": 42},
+        "greenfloor.adapters.coinset_engine.run_engine_json",
+        lambda _args: {"success": True, "fee_estimate": 42},
     )
     adapter = CoinsetAdapter()
     assert adapter.get_conservative_fee_estimate() == 42
@@ -227,8 +227,8 @@ def test_conservative_fee_estimate_falls_back_to_fee_estimate_field(monkeypatch)
 
 def test_conservative_fee_estimate_returns_none_on_failure(monkeypatch) -> None:
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_cli_mutate.run_engine_json",
-        lambda _args: {"fee_mojos": None},
+        "greenfloor.adapters.coinset_engine.run_engine_json",
+        lambda _args: {"success": False},
     )
     adapter = CoinsetAdapter()
     assert adapter.get_conservative_fee_estimate() is None
@@ -236,8 +236,8 @@ def test_conservative_fee_estimate_returns_none_on_failure(monkeypatch) -> None:
 
 def test_conservative_fee_estimate_skips_invalid_estimate_values(monkeypatch) -> None:
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_cli_mutate.run_engine_json",
-        lambda _args: {"fee_mojos": 300},
+        "greenfloor.adapters.coinset_engine.run_engine_json",
+        lambda _args: {"success": True, "estimates": ["bad", 300]},
     )
     adapter = CoinsetAdapter()
     assert adapter.get_conservative_fee_estimate() == 300
@@ -249,7 +249,7 @@ def test_get_blockchain_state_success(monkeypatch) -> None:
         return {"success": True, "blockchain_state": {"peak_height": 1234}}
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_cli_mutate.run_engine_json",
+        "greenfloor.adapters.coinset_engine.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter()
@@ -263,7 +263,7 @@ def test_get_blockchain_state_returns_none_on_failure(monkeypatch) -> None:
         return {"success": False}
 
     monkeypatch.setattr(
-        "greenfloor.adapters.coinset_cli_mutate.run_engine_json",
+        "greenfloor.adapters.coinset_engine.run_engine_json",
         make_coinset_cli_handler(post_handler=_post_handler),
     )
     adapter = CoinsetAdapter()
