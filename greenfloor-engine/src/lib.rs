@@ -15,6 +15,7 @@ pub mod error;
 pub mod hex;
 pub mod kms;
 pub mod manager;
+pub mod manager_cli;
 pub mod offer;
 pub mod storage;
 pub mod vault;
@@ -45,14 +46,15 @@ pub async fn resolve_offer_asset_ids(
 
 pub use coin_ops::{
     amount_meets_coin_op_min_mojos, coin_op_min_amount_mojos, coin_op_should_stop,
-    coin_op_target_amount_allowed, compute_bucket_counts_from_coins,
+    coin_op_target_amount_allowed, combine_output_amounts, compute_bucket_counts_from_coins,
     effective_sell_bucket_counts_for_coin_ops, evaluate_coin_combine_gate,
     evaluate_coin_split_gate, fee_budget_allows_execution, is_spendable_wallet_coin,
     partition_plans_by_budget, plan_auto_combine_inputs, plan_auto_split_selection, plan_coin_ops,
     projected_coin_ops_fee_mojos, select_spendable_coins_for_target_amount,
-    split_would_create_sub_cat_change, BucketSpec, CoinCombineGateResult, CoinOpKind, CoinOpPlan,
-    CoinSplitGateResult, CombineInputSelectionMode, SpendableCoin, SplitAutoSelectPlan,
-    SplitCoinPlan, SplitCombinePrereqPlan, SplitPlanningProfile, SplitSkipPlan,
+    split_would_create_sub_cat_change, total_for_coin_ids, BucketSpec, CoinCombineGateResult,
+    CoinOpKind, CoinOpPlan, CoinSplitGateResult, CombineInputSelectionMode, SpendableCoin,
+    SplitAutoSelectPlan, SplitCoinPlan, SplitCombinePrereqPlan, SplitPlanningProfile,
+    SplitSkipPlan,
 };
 pub use coinset::{
     extract_coin_id_hints_from_offer_text, get_conservative_fee_estimate, get_fee_estimate,
@@ -104,6 +106,7 @@ pub use manager::{
     build_and_post_offer, format_build_and_post_output, BuildAndPostOfferRequest,
     BuildAndPostOfferResponse,
 };
+pub use manager_cli::{run_manager_cli, ManagerCli, ManagerCommands};
 pub use daemon::{
     run_daemon_command, run_daemon_cycle_once_from_json, run_daemon_loop_from_json,
     run_offers_cancel_command, run_offers_reconcile_command, run_offers_status_command,

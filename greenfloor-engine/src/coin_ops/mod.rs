@@ -2,6 +2,7 @@
 //!
 //! Lives in the `greenfloor-engine` crate alongside vault signing and cycle policy.
 
+mod amounts;
 mod effective_counts;
 mod fee_budget;
 mod gate;
@@ -12,6 +13,7 @@ mod selection;
 mod split_planning;
 mod wallet_coin;
 
+pub use amounts::{combine_output_amounts, total_for_coin_ids};
 pub use effective_counts::effective_sell_bucket_counts_for_coin_ops;
 pub use fee_budget::{
     fee_budget_allows_execution, partition_plans_by_budget, projected_coin_ops_fee_mojos,

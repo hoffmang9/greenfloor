@@ -37,6 +37,7 @@ mod strategy_phase;
 mod strategy_support;
 pub mod watchlist;
 
+pub use coin_ops_execution::{combine_input_coin_cap, CoinOpExecContext};
 pub use cancel_phase::run_market_cancel_phase;
 pub use coinset_tx::build_dexie_size_by_offer_id;
 pub use coinset_ws::{

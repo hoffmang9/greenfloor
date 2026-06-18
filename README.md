@@ -1,17 +1,21 @@
 # GreenFloor
 
-GreenFloor is a Chia CAT market-making system with a Python operator surface backed by
-the canonical `greenfloor-engine` Rust engine (`greenfloor_engine` PyO3 module).
-Python owns CLI/daemon orchestration, config parsing, storage, and network adapters;
-Rust owns vault signing, offer construction/validation, coin-op policy, and deterministic
-market-cycle policy.
+GreenFloor is a Chia CAT market-making system with native Rust operator binaries
+backed by the canonical `greenfloor-engine` crate (`greenfloor_engine` PyO3 module
+for dev/tests only).
+
+- `greenfloor-manager` and `greenfloord` are Cargo binaries (no Python entrypoints).
+- Rust owns vault signing, offer construction, coin-op execution, daemon cycles,
+  config validation for operator commands, and SQLite persistence.
+- Python remains for dev tooling, PyO3 integration tests, and optional scripts
+  under `scripts/`.
 
 ## Components
 
-- `greenfloor-manager`: manager CLI for config validation, key onboarding, coin inventory/reshaping, offer building/posting, and operational checks.
-- `greenfloord`: daemon process that evaluates configured markets, executes offers, and emits low-inventory alerts.
+- `greenfloor-manager`: native manager CLI for config validation, key onboarding, coin inventory/reshaping, offer building/posting, and operational checks.
+- `greenfloord`: native daemon process that evaluates configured markets, executes offers, and runs the market cycle.
 - `greenfloor-engine/`: Rust crate for canonical signing, offer, coin-op, and cycle policy.
-- `greenfloor-engine-pyo3/`: PyO3 extension exported as `greenfloor_engine` for in-process Python calls.
+- `greenfloor-engine-pyo3/`: PyO3 extension exported as `greenfloor_engine` for dev/test in-process calls.
 
 ## V1 Plan
 
@@ -36,10 +40,15 @@ market-cycle policy.
 
 ## Quickstart
 
+Build and install native operator binaries:
+
+```bash
+cargo install --path greenfloor-engine --bins
+```
+
 Bootstrap home directory first (required for real deployment):
 
 ```bash
-python -m pip install -e ".[dev]"
 greenfloor-manager bootstrap-home
 ```
 

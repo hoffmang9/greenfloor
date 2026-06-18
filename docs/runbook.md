@@ -7,8 +7,9 @@ Coinset-specific vault scan validation and capability probing are documented in
 
 ## 1) First Deployment (Clean Machine)
 
-1. Install dependencies:
-   - `python -m pip install -e ".[dev]"`
+1. Install native operator binaries and dev Python tooling:
+   - `cargo install --path greenfloor-engine --bins`
+   - `python -m pip install -e ".[dev]"` (tests, pre-commit, PyO3 dev wheel)
 2. Bootstrap runtime home:
    - `greenfloor-manager bootstrap-home`
 3. Validate seeded configs:

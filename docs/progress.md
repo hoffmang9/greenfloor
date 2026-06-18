@@ -1,5 +1,14 @@
 # Progress Log
 
+## 2026-06-17 (Rust-native CLI and daemon cutover)
+
+- **Operator binaries:** `greenfloor-manager`, `greenfloord`, and `greenfloor-engine` are Cargo `[[bin]]` targets; Python `[project.scripts]` entrypoints removed.
+- **Manager CLI:** all V1 commands implemented in `greenfloor-engine/src/manager_cli/` (setup, cats, keys, coin ops, build/post, offers lifecycle).
+- **Daemon:** `greenfloord` is a native wrapper to `greenfloor-engine` daemon loop/`--once`.
+- **Deleted:** `greenfloor/cli/`, `greenfloor/daemon/`, legacy Python offer/coin-op runtime orchestration modules.
+- **PyO3:** dev/test only (`greenfloor_engine`); operator install does not require maturin.
+- **Docs:** ADR 0013, `docs/rust-migration-ledger.md` (breaking-change catch-up for single deployment).
+
 ## 2026-05-30 (Reconcile/watchlist consolidation — single Rust orchestration surface)
 
 - **Offer reconcile (canonical Rust):** `daemon/reconcile_batch.rs` implements CLI `offers-reconcile` (`reconcile_offers_batch`); daemon per-market path remains `run_market_reconcile_phase` in `reconcile_phase.rs`. Shared audit/state writes live in `reconcile_persist.rs` (`offers_reconcile` vs `reconcile_coins_and_offers` action).

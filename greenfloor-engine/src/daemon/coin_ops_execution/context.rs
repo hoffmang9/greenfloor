@@ -13,7 +13,7 @@ use crate::vault::{
 
 use super::helpers::wallet_coins_to_spendable;
 
-pub(crate) struct CoinOpExecContext {
+pub struct CoinOpExecContext {
     pub signer_config: SignerConfig,
     pub market: MarketConfig,
     pub program: ManagerProgramConfig,

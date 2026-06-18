@@ -38,19 +38,15 @@ Severity tags:
 - `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet, notifications).
 - `[MUST]` Signing/execution path is adapter -> canonical Rust engine (`greenfloor-engine` crate / `greenfloor_engine` PyO3).
 - `[MUST]` `greenfloor-engine/`: canonical Rust engine crate; new vault spend/offer logic lands here first.
-- `[MUST]` `greenfloor/cli/manager.py`: operator CLI router (argparse + dispatch).
-- `[MUST]` `greenfloor/cli/coin_ops_list.py`, `coin_ops_split.py`, `coin_ops_combine.py`: coin list/split/combine CLI commands (`coin_ops.py` re-exports).
-- `[MUST]` `greenfloor/cli/cats.py`: local CAT catalog CLI commands.
-- `[MUST]` `greenfloor/cli/engine_subprocess.py`: thin wrapper delegating offers lifecycle and daemon commands to native `greenfloor-engine` CLI.
-- `[MUST]` `greenfloor/daemon/main.py`: exec wrapper to `greenfloor-engine daemon`.
-- `[MUST]` `greenfloor/cli/manager_setup.py`: config validate, doctor, bootstrap-home, set-log-level.
-- `[MUST]` `greenfloor/cli/keys_onboard.py`: keys-onboard CLI command.
-- `[MUST]` `greenfloor/cli/offer_build_post.py`: manager `build-and-post-offer` command implementation.
-- `[MUST]` `greenfloor/runtime/coin_ops/runtime.py`: shared coin-op orchestration for CLI and daemon.
-- `[MUST]` `greenfloor/runtime/coin_ops/steps.py`: split/combine iteration step bodies.
-- `[MUST]` Offer build/post uses `adapters/offer_action.build_signer_offer_for_action` and `runtime/offer_post_request.OfferPostRequest` (signer/KMS only).
-- `[MUST]` `greenfloor/runtime/offer_execution.py`: composition root for offer build/post runtime; import orchestration helpers here (see ADR 0005, ADR 0008).
+- `[MUST]` Operator CLI and daemon are native Rust binaries: `greenfloor-manager`, `greenfloord`, `greenfloor-engine` (`greenfloor-engine/src/manager_cli/`, `greenfloor-engine/src/daemon/`).
+- `[MUST]` Coin-op CLI and daemon execution share Rust policy in `greenfloor-engine/src/coin_ops/` and `daemon/coin_ops_execution/`.
+- `[MUST]` Manager operator commands live in `greenfloor-engine/src/manager_cli/` (`greenfloor-manager` binary).
+- `[MUST]` `greenfloor/cli/*` and `greenfloor/daemon/*` Python packages are removed; do not reintroduce Python orchestration entrypoints.
+- `[MUST]` `scripts/` may remain Python; they use `greenfloor.config`, `greenfloor.adapters`, and `greenfloor.hex_utils` only.
+- `[MUST]` PyO3 `greenfloor_engine` is dev/test-only unless a new ADR expands operator scope.
+- `[MUST]` Offer build/post uses the Rust manager path (`greenfloor-manager build-and-post-offer` → `greenfloor-engine/src/manager/`).
 - `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`, `greenfloor/config/io.py`.
+- `[MUST]` `greenfloor-engine` exposes vault/daemon low-level commands only; operator lifecycle commands use `greenfloor-manager`.
 - `[MUST]` Import direction: daemon never imports CLI; CLI never imports daemon. Shared logic belongs in shared modules.
 
 ## Design Constraints
