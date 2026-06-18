@@ -21,6 +21,11 @@ pub fn i64_to_usize(value: i64, field: &str) -> SignerResult<usize> {
         .map_err(|_| SignerError::Other(format!("{field} must fit in usize for coin-op execution")))
 }
 
+pub fn usize_to_i64(value: usize, field: &str) -> SignerResult<i64> {
+    i64::try_from(value)
+        .map_err(|_| SignerError::Other(format!("{field} must fit in i64 for coin-op execution")))
+}
+
 /// Saturating clamp for combine/split output leg amounts (validated totals; overflow → max).
 #[must_use]
 pub fn coin_op_non_negative_u64_saturating(value: i64) -> u64 {

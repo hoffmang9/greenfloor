@@ -101,7 +101,12 @@ async fn execute_daemon_combine_plan_inner(
     }
 
     let total = total_for_coin_ids(&spendable, &combine_input_coin_ids);
-    let output_amounts = combine_output_amounts(total, combine_input_coin_ids.len());
+    let output_amounts = skip_on_signer_err(
+        op_type,
+        size_base_units,
+        op_count,
+        combine_output_amounts(total, combine_input_coin_ids.len()),
+    )?;
     let fee_mojos = skip_on_signer_err(
         op_type,
         size_base_units,

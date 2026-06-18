@@ -64,7 +64,7 @@ pub(super) async fn run_combine_iteration(
     }
 
     let total = total_for_coin_ids(&spendable, &input_coin_ids);
-    let output_amounts = combine_output_amounts(total, 1);
+    let output_amounts = combine_output_amounts(total, 1)?;
     let operation_id = ctx
         .execute_mixed_split(output_amounts, &input_coin_ids, combine_fee)
         .await?;

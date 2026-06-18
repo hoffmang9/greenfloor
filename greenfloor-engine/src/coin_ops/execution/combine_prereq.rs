@@ -9,7 +9,7 @@ pub async fn submit_combine_prereq(
 ) -> SignerResult<String> {
     let spendable = ctx.list_spendable_coins().await?;
     let total = total_for_coin_ids(&spendable, input_coin_ids);
-    let output_amounts = combine_output_amounts(total, input_coin_ids.len());
+    let output_amounts = combine_output_amounts(total, input_coin_ids.len())?;
     ctx.execute_mixed_split(
         output_amounts,
         input_coin_ids,

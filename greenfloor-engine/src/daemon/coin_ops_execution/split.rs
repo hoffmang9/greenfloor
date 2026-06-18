@@ -2,10 +2,9 @@ use std::collections::HashSet;
 
 use crate::coin_ops::{
     coin_op_non_negative_u64, coin_op_target_amount_allowed, i64_to_usize,
-    plan_auto_split_selection, CoinOpPlan, SpendableCoin, SplitAutoSelectPlan,
+    plan_auto_split_selection, usize_to_i64, CoinOpPlan, SpendableCoin, SplitAutoSelectPlan,
     SplitCombinePrereqPlan, SplitPlanningProfile,
 };
-use crate::config::usize_to_i64;
 
 use super::items::{
     executed_item, skip_item, skip_on_signer_err, CoinOpExecItem, CoinOpSkipResult,

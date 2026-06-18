@@ -52,6 +52,25 @@ pub struct CoinOpPlanningResult {
     pub invalid_ladder_math_sizes: Vec<i64>,
 }
 
+fn collect_combine_candidates(buckets: &[BucketSpec]) -> (Vec<i64>, Vec<(&BucketSpec, i64)>) {
+    let mut invalid_ladder_math_sizes = Vec::new();
+    let mut excess_candidates = Vec::new();
+    for bucket in buckets {
+        let Ok(threshold) =
+            combine_threshold_count(bucket.target_count, bucket.combine_when_excess_factor)
+        else {
+            invalid_ladder_math_sizes.push(bucket.size_base_units);
+            continue;
+        };
+        let excess = bucket.current_count - threshold;
+        if excess > 0 {
+            excess_candidates.push((bucket, excess));
+        }
+    }
+    excess_candidates.sort_by_key(|(bucket, _)| bucket.size_base_units);
+    (invalid_ladder_math_sizes, excess_candidates)
+}
+
 pub fn plan_coin_ops(
     buckets: &[BucketSpec],
     max_operations_per_run: i64,
@@ -59,8 +78,8 @@ pub fn plan_coin_ops(
     split_fee_mojos: i64,
     combine_fee_mojos: i64,
 ) -> CoinOpPlanningResult {
+    let (invalid_ladder_math_sizes, excess_candidates) = collect_combine_candidates(buckets);
     let mut plans = Vec::new();
-    let mut invalid_ladder_math_sizes = Vec::new();
     let mut remaining_ops = max_operations_per_run;
     let mut remaining_fee = if max_fee_budget_mojos > 0 {
         max_fee_budget_mojos
@@ -116,21 +135,6 @@ pub fn plan_coin_ops(
             invalid_ladder_math_sizes,
         };
     }
-
-    let mut excess_candidates: Vec<(&BucketSpec, i64)> = Vec::new();
-    for bucket in buckets {
-        let Ok(threshold) =
-            combine_threshold_count(bucket.target_count, bucket.combine_when_excess_factor)
-        else {
-            invalid_ladder_math_sizes.push(bucket.size_base_units);
-            continue;
-        };
-        let excess = bucket.current_count - threshold;
-        if excess > 0 {
-            excess_candidates.push((bucket, excess));
-        }
-    }
-    excess_candidates.sort_by_key(|(bucket, _)| bucket.size_base_units);
 
     for (bucket, excess) in excess_candidates {
         if remaining_ops <= 0 {
@@ -209,5 +213,22 @@ mod tests {
             .plans
             .iter()
             .any(|plan| plan.op_type == CoinOpKind::Combine && plan.size_base_units == 10));
+    }
+
+    #[test]
+    fn records_invalid_ladder_math_when_split_deficits_take_priority() {
+        let invalid = BucketSpec {
+            size_base_units: 99,
+            target_count: 2,
+            split_buffer_count: 1,
+            combine_when_excess_factor: f64::NAN,
+            current_count: 0,
+        };
+        let result = plan_coin_ops(&[bucket(1, 5, 2), invalid], 10, 100, 1, 1);
+        assert_eq!(result.invalid_ladder_math_sizes, vec![99]);
+        assert!(result
+            .plans
+            .iter()
+            .all(|plan| plan.op_type == CoinOpKind::Split));
     }
 }
