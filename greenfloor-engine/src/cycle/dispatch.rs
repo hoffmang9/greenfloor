@@ -59,7 +59,7 @@ pub fn expiry_seconds_for_action(expiry_unit: &str, expiry_value: i64) -> Option
     Some(expiry_value * unit_seconds)
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ManagedOfferReservationRequest<'a> {
     pub side: &'a str,
     pub size_base_units: i64,
@@ -89,20 +89,24 @@ pub fn reservation_request_for_managed_offer(
     let base_asset_id = base_asset_id.trim();
     let quote_asset_id = quote_asset_id.trim();
     if base_asset_id.is_empty() || quote_asset_id.is_empty() {
-        return BTreeMap::new();
+        return BTreeMap::default();
     }
 
     let side = side.trim().to_ascii_lowercase();
     let base_amount = size_base_units * base_unit_mojo_multiplier;
-    let quote_amount =
-        (size_base_units as f64 * quote_price * quote_unit_mojo_multiplier as f64).round() as i64;
+    let quote_amount = crate::num_conv::quote_mojos_for_base_size(
+        size_base_units,
+        quote_price,
+        quote_unit_mojo_multiplier,
+    )
+    .unwrap_or(0);
     let (offer_asset_id, offer_amount) = if side == "buy" {
         (quote_asset_id, quote_amount)
     } else {
         (base_asset_id, base_amount)
     };
     if offer_amount <= 0 {
-        return BTreeMap::new();
+        return BTreeMap::default();
     }
 
     let mut request = BTreeMap::from([(offer_asset_id.to_string(), offer_amount)]);

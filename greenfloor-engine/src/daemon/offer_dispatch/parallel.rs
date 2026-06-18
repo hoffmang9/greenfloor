@@ -53,7 +53,7 @@ pub async fn execute_actions_parallel(
     .await?;
     let batch_plan =
         plan_parallel_managed_dispatch(expanded, &reservation_ctx, &spendable_profiles);
-    let ttl = program.runtime_reservation_ttl_seconds as i64;
+    let ttl = crate::num_conv::u64_to_i64(program.runtime_reservation_ttl_seconds)?;
     let coordinator = Arc::new(OfferReservationCoordinator::new(db_path, Some(ttl))?);
     let _ = coordinator.expire_stale();
     let wallet_id = reservation_wallet_id(signer_config);

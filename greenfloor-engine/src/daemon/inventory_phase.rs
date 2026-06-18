@@ -53,7 +53,7 @@ pub async fn run_inventory_phase(
         .filter(|size| *size > 0)
         .collect();
     if ladder_sizes.is_empty() {
-        return Ok(BTreeMap::new());
+        return Ok(BTreeMap::default());
     }
 
     let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
@@ -99,7 +99,7 @@ pub async fn run_inventory_phase(
                 }),
                 Some(&market.market_id),
             )?;
-            Ok(BTreeMap::new())
+            Ok(BTreeMap::default())
         }
         Err(err) => {
             state.record_phase_error();
@@ -132,7 +132,7 @@ mod tests {
             mode: "sell_only".to_string(),
             pricing: json!({}),
             cancel_move_threshold_bps: None,
-            ladders: HashMap::new(),
+            ladders: HashMap::default(),
         }
     }
 

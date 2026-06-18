@@ -14,12 +14,12 @@ pub(super) async fn wait_for_coinset_confirmation(
     timeout_seconds: u64,
 ) -> SignerResult<Vec<Value>> {
     let start = std::time::Instant::now();
-    let timeout = timeout_seconds.max(10) as i64;
+    let timeout = crate::num_conv::u64_to_i64(timeout_seconds.max(10))?;
     let initial_sleep = 2.0f64;
     let max_sleep = 20.0f64;
     let mut sleep_seconds = 0.0f64;
     loop {
-        let elapsed_seconds = start.elapsed().as_secs() as i64;
+        let elapsed_seconds = start.elapsed().as_secs().try_into().unwrap_or(0i64);
         let Some(next_sleep) = poll_exponential_sleep_now(
             elapsed_seconds,
             timeout,

@@ -59,8 +59,10 @@ pub fn resolve_combine_count(
 ) -> SignerResult<i64> {
     if let Some(size) = size_base_units.filter(|value| *value > 0) {
         let entry = sell_ladder_entry_for_size(market, size)?;
-        let threshold =
-            ((entry.target_count as f64) * entry.combine_when_excess_factor).ceil() as i64;
+        let threshold = crate::num_conv::combine_threshold_count(
+            entry.target_count,
+            entry.combine_when_excess_factor,
+        )?;
         let count = if number_of_coins > 0 {
             number_of_coins
         } else {
@@ -75,10 +77,8 @@ pub fn split_required_count(entry: &LadderEntry) -> i64 {
     entry.target_count + entry.split_buffer_count
 }
 
-pub fn combine_threshold_count(entry: &LadderEntry) -> i64 {
-    ((entry.target_count as f64) * entry.combine_when_excess_factor)
-        .ceil()
-        .max(2.0) as i64
+pub fn combine_threshold_count(entry: &LadderEntry) -> SignerResult<i64> {
+    crate::num_conv::combine_threshold_count(entry.target_count, entry.combine_when_excess_factor)
 }
 
 #[cfg(test)]
@@ -134,7 +134,7 @@ mod tests {
             split_buffer_count: 1,
             combine_when_excess_factor: 1.5,
         };
-        assert_eq!(combine_threshold_count(&entry), 5);
+        assert_eq!(combine_threshold_count(&entry).expect("threshold"), 5);
         let mut market = sample_market();
         market
             .ladders

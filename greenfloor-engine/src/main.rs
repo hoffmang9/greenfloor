@@ -88,7 +88,7 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Run the GreenFloor daemon loop or a single cycle.
+    /// Run the `GreenFloor` daemon loop or a single cycle.
     Daemon(DaemonCliArgs),
     /// Run one daemon cycle from a JSON request file (integration tests and tooling).
     DaemonOnce(DaemonOnceJsonArgs),

@@ -94,7 +94,7 @@ pub async fn reconcile_offers_batch(
             &row.offer_id,
             &transition,
             last_seen_status,
-            ReconcilePersistOptions {
+            &ReconcilePersistOptions {
                 action: "offers_reconcile",
                 venue: Some(&venue),
                 dexie_error: None,
@@ -113,7 +113,7 @@ pub async fn reconcile_offers_batch(
     }
 
     Ok(ReconcileBatchResult {
-        reconciled_count: items.len() as u64,
+        reconciled_count: items.len().try_into().unwrap_or(0u64),
         changed_count,
         items,
     })

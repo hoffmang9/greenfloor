@@ -128,11 +128,9 @@ export PRE_COMMIT_HOME="$(pwd)/.cache/pre-commit"  # reuse hook envs; CI caches 
 pre-commit run --all-files                         # lint + type-check (~5–10s warm)
 ```
 
-Full gate before push (pre-commit no longer runs pytest or cargo; CI runs these as separate steps):
+Full gate before push (pre-commit runs fmt/clippy; CI also runs these as dedicated steps):
 
 ```bash
-cargo fmt --manifest-path greenfloor-engine/Cargo.toml --check
-cargo clippy --manifest-path greenfloor-engine/Cargo.toml --all-targets
 cargo test --manifest-path greenfloor-engine/Cargo.toml
 pytest
 ```

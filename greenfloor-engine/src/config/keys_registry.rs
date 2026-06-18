@@ -33,7 +33,7 @@ pub fn parse_signer_key_registry(raw: &Value) -> SignerResult<HashMap<String, Si
             .collect()
     };
 
-    let mut key_registry = HashMap::new();
+    let mut key_registry = HashMap::default();
     for row in rows {
         let row_map = row
             .as_object()
@@ -60,7 +60,7 @@ pub fn parse_signer_key_registry(raw: &Value) -> SignerResult<HashMap<String, Si
             key_id.clone(),
             SignerKeyEntry {
                 key_id,
-                fingerprint: fingerprint as u64,
+                fingerprint: u64::try_from(fingerprint).unwrap_or(0u64),
                 network: optional_trimmed_string(row_map.get("network")),
                 keyring_yaml_path: optional_trimmed_string(row_map.get("keyring_yaml_path")),
             },

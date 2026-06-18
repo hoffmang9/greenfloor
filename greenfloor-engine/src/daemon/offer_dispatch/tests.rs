@@ -21,7 +21,7 @@ use std::collections::HashMap;
 fn write_test_markets_file(path: &std::path::Path) {
     std::fs::write(
         path,
-        r#"
+        r"
 markets:
   - id: m1
     enabled: true
@@ -33,7 +33,7 @@ markets:
     signer_key_id: key-1
     mode: sell_only
     pricing: {}
-"#,
+",
     )
     .expect("write markets");
 }
@@ -181,9 +181,7 @@ async fn record_parallel_fallback_audit_persists_event() {
     let db_path = dir.path().join("greenfloor.sqlite");
     let store = SqliteStore::open(&db_path).expect("open");
     let err = SignerError::Other("ReservationContentionError: simulated".to_string());
-    record_parallel_fallback_audit(&store, "m1", &err)
-        .await
-        .expect("audit");
+    record_parallel_fallback_audit(&store, "m1", &err).expect("audit");
     let events = store
         .list_recent_audit_events(Some(&["offer_parallel_fallback"]), Some("m1"), 5)
         .expect("events");
@@ -227,7 +225,7 @@ async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() 
         mode: "sell_only".to_string(),
         pricing: json!({}),
         cancel_move_threshold_bps: None,
-        ladders: HashMap::new(),
+        ladders: HashMap::default(),
     };
     let actions = vec![PlannedAction {
         size: 1,
@@ -265,7 +263,7 @@ fn sample_market() -> MarketConfig {
         mode: "sell_only".to_string(),
         pricing: json!({}),
         cancel_move_threshold_bps: None,
-        ladders: HashMap::new(),
+        ladders: HashMap::default(),
     }
 }
 

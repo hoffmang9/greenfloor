@@ -20,7 +20,7 @@ impl<'a> SimulatorOfferCoinset<'a> {
     pub fn new(chain: &'a SimChain) -> Self {
         Self {
             chain,
-            known_cats: Mutex::new(HashMap::new()),
+            known_cats: Mutex::new(HashMap::default()),
         }
     }
 
@@ -83,7 +83,7 @@ impl OfferCoinsetBackend for SimulatorOfferCoinset<'_> {
             .lock()
             .expect("known cats lock")
             .get(&coin_id)
-            .cloned()
+            .copied()
         {
             return Ok(cat);
         }

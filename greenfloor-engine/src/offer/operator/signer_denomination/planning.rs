@@ -4,9 +4,10 @@ use crate::coin_ops::is_spendable_wallet_coin;
 use crate::coinset::{get_conservative_fee_estimate, WalletUnspentCoin};
 use crate::config::LadderEntry;
 use crate::error::SignerResult;
+use crate::num_conv::quote_mojos_for_base_size;
 use crate::offer::bootstrap::PlannerLadderRow;
 use crate::offer::build_context::mojo_multiplier_for_leg;
-use crate::offer::request::{normalize_offer_side, quote_mojos_for_base_size};
+use crate::offer::request::normalize_offer_side;
 
 pub(super) fn bootstrap_ladder_entries_for_side(
     side: &str,
@@ -28,7 +29,7 @@ pub(super) fn bootstrap_ladder_entries_for_side(
     for entry in side_ladder {
         let mut size_base_units = entry.size_base_units;
         if let Some(multiplier) = quote_unit_multiplier {
-            size_base_units = quote_mojos_for_base_size(size_base_units, quote_price, multiplier);
+            size_base_units = quote_mojos_for_base_size(size_base_units, quote_price, multiplier)?;
             if size_base_units <= 0 {
                 continue;
             }
@@ -43,7 +44,7 @@ pub(super) fn bootstrap_ladder_entries_for_side(
 }
 
 fn bootstrap_fee_cost_for_output_count(output_count: usize) -> u64 {
-    let count = output_count.max(1) as u64;
+    let count = u64::try_from(output_count.max(1)).unwrap_or(u64::MAX);
     1_000_000 + count.saturating_sub(1) * 250_000
 }
 
@@ -53,7 +54,7 @@ pub(super) async fn resolve_bootstrap_split_fee(
     output_count: usize,
 ) -> (u64, String, Option<String>) {
     let fee_cost = bootstrap_fee_cost_for_output_count(output_count);
-    let spend_count = output_count.max(1) as u64;
+    let spend_count = u64::try_from(output_count.max(1)).unwrap_or(u64::MAX);
     match get_conservative_fee_estimate(network, None, fee_cost, Some(spend_count)).await {
         Ok(Some(fee_mojos)) => (fee_mojos, "coinset_conservative_fee".to_string(), None),
         Ok(None) => (

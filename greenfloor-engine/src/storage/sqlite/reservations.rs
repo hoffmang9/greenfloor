@@ -34,7 +34,7 @@ pub struct OfferReservationLeaseRequest<'a> {
 impl SqliteStore {
     pub fn try_acquire_offer_reservation_lease(
         &self,
-        request: OfferReservationLeaseRequest<'_>,
+        request: &OfferReservationLeaseRequest<'_>,
     ) -> SignerResult<Option<String>> {
         let OfferReservationLeaseRequest {
             reservation_id,
@@ -44,7 +44,7 @@ impl SqliteStore {
             available_amounts,
             lease_seconds,
             now,
-        } = request;
+        } = *request;
         if reservation_id.trim().is_empty() {
             return Err(SignerError::Other("reservation_id is required".to_string()));
         }
@@ -78,13 +78,13 @@ impl SqliteStore {
         let result = (|| -> SignerResult<Option<String>> {
             self.conn
                 .execute(
-                    r#"
+                    r"
                 UPDATE offer_reservation_lease
                 SET status = 'expired',
                     released_at = COALESCE(released_at, ?1)
                 WHERE status = 'active'
                   AND expires_at <= ?2
-                "#,
+                ",
                     params![now_iso, now_iso],
                 )
                 .map_err(|err| {
@@ -93,14 +93,14 @@ impl SqliteStore {
             let mut stmt = self
                 .conn
                 .prepare(
-                    r#"
+                    r"
                 SELECT asset_id, COALESCE(SUM(amount), 0) AS reserved_amount
                 FROM offer_reservation_lease
                 WHERE wallet_id = ?1
                   AND status = 'active'
                   AND expires_at > ?2
                 GROUP BY asset_id
-                "#,
+                ",
                 )
                 .map_err(|err| {
                     SignerError::Other(format!("failed to prepare reserved amounts query: {err}"))
@@ -108,7 +108,7 @@ impl SqliteStore {
             let mut rows = stmt.query(params![wallet_id, now_iso]).map_err(|err| {
                 SignerError::Other(format!("failed to query reserved amounts: {err}"))
             })?;
-            let mut reserved_by_asset: BTreeMap<String, i64> = BTreeMap::new();
+            let mut reserved_by_asset: BTreeMap<String, i64> = BTreeMap::default();
             while let Some(row) = rows.next().map_err(|err| {
                 SignerError::Other(format!("failed to read reserved amount row: {err}"))
             })? {
@@ -131,11 +131,11 @@ impl SqliteStore {
             }
             for (asset_id, amount) in &normalized_requests {
                 self.conn.execute(
-                    r#"
+                    r"
                     INSERT INTO offer_reservation_lease
                       (reservation_id, market_id, wallet_id, asset_id, amount, status, created_at, expires_at, released_at)
                     VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, NULL)
-                    "#,
+                    ",
                     params![
                         reservation_id,
                         market_id,
@@ -175,12 +175,12 @@ impl SqliteStore {
         let changed = self
             .conn
             .execute(
-                r#"
+                r"
                 UPDATE offer_reservation_lease
                 SET status = ?1, released_at = ?2
                 WHERE reservation_id = ?3
                   AND status = 'active'
-                "#,
+                ",
                 params![release_status, released_at, reservation_id],
             )
             .map_err(|err| {
@@ -194,13 +194,13 @@ impl SqliteStore {
         let changed = self
             .conn
             .execute(
-                r#"
+                r"
                 UPDATE offer_reservation_lease
                 SET status = 'expired',
                     released_at = COALESCE(released_at, ?1)
                 WHERE status = 'active'
                   AND expires_at <= ?2
-                "#,
+                ",
                 params![now_iso, now_iso],
             )
             .map_err(|err| {
@@ -237,11 +237,11 @@ impl SqliteStore {
         for (asset_id, amount) in rows {
             self.conn
                 .execute(
-                    r#"
+                    r"
                     INSERT INTO offer_reservation_lease
                       (reservation_id, market_id, wallet_id, asset_id, amount, status, created_at, expires_at, released_at)
                     VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, NULL)
-                    "#,
+                    ",
                     params![
                         reservation_id,
                         market_id,
@@ -264,10 +264,10 @@ impl SqliteStore {
         reservation_id: Option<&str>,
     ) -> SignerResult<Vec<OfferReservationLeaseRow>> {
         let mut sql = String::from(
-            r#"
+            r"
             SELECT reservation_id, market_id, wallet_id, asset_id, amount, status, created_at, expires_at, released_at
             FROM offer_reservation_lease
-            "#,
+            ",
         );
         let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
         if let Some(reservation_id) = reservation_id
@@ -279,7 +279,7 @@ impl SqliteStore {
         }
         sql.push_str("ORDER BY id ASC");
         let param_refs: Vec<&dyn rusqlite::ToSql> =
-            params.iter().map(|value| value.as_ref()).collect();
+            params.iter().map(std::convert::AsRef::as_ref).collect();
         let mut stmt = self.conn.prepare(&sql).map_err(|err| {
             SignerError::Other(format!("failed to prepare reservation lease query: {err}"))
         })?;
@@ -329,14 +329,14 @@ impl SqliteStore {
         let mut stmt = self
             .conn
             .prepare(
-                r#"
+                r"
                 SELECT asset_id, COALESCE(SUM(amount), 0) AS reserved_amount
                 FROM offer_reservation_lease
                 WHERE wallet_id = ?1
                   AND status = 'active'
                   AND expires_at > ?2
                 GROUP BY asset_id
-                "#,
+                ",
             )
             .map_err(|err| {
                 SignerError::Other(format!("failed to prepare reserved amounts query: {err}"))
@@ -344,7 +344,7 @@ impl SqliteStore {
         let mut rows = stmt.query(params![wallet_id, now_iso]).map_err(|err| {
             SignerError::Other(format!("failed to query reserved amounts: {err}"))
         })?;
-        let mut out = BTreeMap::new();
+        let mut out = BTreeMap::default();
         while let Some(row) = rows.next().map_err(|err| {
             SignerError::Other(format!("failed to read reserved amount row: {err}"))
         })? {
@@ -364,11 +364,11 @@ impl SqliteStore {
         let changed = self
             .conn
             .execute(
-                r#"
+                r"
                 DELETE FROM offer_reservation_lease
                 WHERE status != 'active'
                   AND COALESCE(released_at, expires_at) < ?1
-                "#,
+                ",
                 params![cutoff_iso],
             )
             .map_err(|err| {

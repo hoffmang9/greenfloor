@@ -128,7 +128,7 @@ impl VaultSpendContext {
             secp256r1_public_key,
             max_nonce_probe: 2048,
             network: "mainnet".to_string(),
-            nonce_by_p2_hash: HashMap::new(),
+            nonce_by_p2_hash: HashMap::default(),
             #[cfg(test)]
             local_fast_forward_signer: None,
         }
@@ -215,7 +215,7 @@ mod tests {
             secp256r1_public_key: r1.pk,
             max_nonce_probe: 20,
             network: "mainnet".to_string(),
-            nonce_by_p2_hash: HashMap::new(),
+            nonce_by_p2_hash: HashMap::default(),
             #[cfg(test)]
             local_fast_forward_signer: None,
         };

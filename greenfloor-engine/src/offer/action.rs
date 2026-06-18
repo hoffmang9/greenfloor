@@ -54,10 +54,11 @@ pub struct BuildOfferForActionResult {
 pub fn expires_at_unix_from_pricing(pricing: &Value) -> u64 {
     let (_unit, minutes) = resolve_offer_expiry_for_pricing(pricing);
     let secs = minutes.saturating_mul(60);
+    let secs_u64 = crate::num_conv::i64_to_u64(secs).unwrap_or(0);
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs().saturating_add(secs as u64))
-        .unwrap_or(secs as u64)
+        .map(|duration| duration.as_secs().saturating_add(secs_u64))
+        .unwrap_or(secs_u64)
 }
 
 fn resolve_quote_price(request: &BuildOfferForActionRequest) -> SignerResult<f64> {

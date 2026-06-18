@@ -1,6 +1,7 @@
 //! Auto split/combine input planning (CLI vs daemon profiles).
 
 use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasher;
 
 use super::policy::coin_op_min_amount_mojos;
 use super::selection::{
@@ -114,7 +115,7 @@ pub fn build_combine_prereq_plan(
         .iter()
         .map(|coin| (coin.id.clone(), coin.amount))
         .collect();
-    let cap = combine_input_cap.max(0) as usize;
+    let cap = combine_input_cap.max(0).try_into().unwrap_or(0usize);
     let combine_input_coin_ids: Vec<String> = combine_coin_ids.iter().take(cap).cloned().collect();
     let combine_cap_applied = combine_input_coin_ids.len() < combine_coin_ids.len();
     let combine_selected_total: i64 = combine_input_coin_ids
@@ -227,12 +228,12 @@ pub fn plan_auto_split_selection(
     })
 }
 
-pub fn plan_auto_combine_inputs(
+pub fn plan_auto_combine_inputs<S: BuildHasher>(
     spendable_coins: &[SpendableCoin],
     number_of_coins: usize,
     selection_mode: CombineInputSelectionMode,
     target_amount_mojos: Option<i64>,
-    exclude_coin_ids: Option<&HashSet<String>>,
+    exclude_coin_ids: Option<&HashSet<String, S>>,
     max_count: Option<usize>,
 ) -> Result<Vec<String>, &'static str> {
     let capped_count = match max_count {
@@ -242,7 +243,9 @@ pub fn plan_auto_combine_inputs(
     if selection_mode == CombineInputSelectionMode::ExactAmount {
         let amount = target_amount_mojos
             .ok_or("target_amount_mojos is required for exact-amount combine selection")?;
-        let excluded = exclude_coin_ids.cloned().unwrap_or_default();
+        let excluded: HashSet<String> = exclude_coin_ids
+            .map(|set| set.iter().cloned().collect())
+            .unwrap_or_default();
         return Ok(select_exact_amount_coin_ids(
             spendable_coins,
             amount,
@@ -415,7 +418,7 @@ mod tests {
             3,
             CombineInputSelectionMode::ExactAmount,
             Some(1000),
-            None,
+            None::<&HashSet<String>>,
             Some(3),
         )
         .expect("combine inputs");

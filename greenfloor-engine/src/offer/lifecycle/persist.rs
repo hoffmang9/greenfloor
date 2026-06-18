@@ -16,7 +16,7 @@ pub fn persist_offer_lifecycle_transition(
     offer_id: &str,
     transition: &CycleOfferTransition,
     last_seen_status: Option<i64>,
-    options: ReconcilePersistOptions<'_>,
+    options: &ReconcilePersistOptions<'_>,
 ) -> SignerResult<()> {
     store.upsert_offer_state(offer_id, market_id, &transition.new_state, last_seen_status)?;
     let mut payload = json!({

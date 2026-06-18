@@ -36,12 +36,12 @@ pub async fn parallel_reservation_context(
     let base_unit_mojo_multiplier = market
         .pricing
         .get("base_unit_mojo_multiplier")
-        .and_then(|value| value.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .unwrap_or(1000);
     let quote_unit_mojo_multiplier = market
         .pricing
         .get("quote_unit_mojo_multiplier")
-        .and_then(|value| value.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .unwrap_or(1000);
     let quote_price = resolve_quote_price_for_pricing(&market.pricing)?;
     Ok(ParallelReservationContext {

@@ -69,7 +69,12 @@ pub async fn run_coin_combine(request: CoinCombineRequest<'_>) -> SignerResult<i
         .cloned();
     let explicit_coin_ids = !coin_ids.is_empty();
     let resolved_asset_id = exec_ctx.resolved_base_asset_id.clone();
-    let combine_fee = exec_ctx.program.coin_ops_combine_fee_mojos.max(0) as u64;
+    let combine_fee = exec_ctx
+        .program
+        .coin_ops_combine_fee_mojos
+        .max(0)
+        .try_into()
+        .unwrap_or(0u64);
 
     let (operations, completion) = run_until_ready_loop(
         &exec_ctx,
@@ -86,7 +91,7 @@ pub async fn run_coin_combine(request: CoinCombineRequest<'_>) -> SignerResult<i
                     gate_coins,
                     &resolved_asset_id,
                     target_coin_amount_mojos,
-                    combine_threshold_count(entry),
+                    combine_threshold_count(entry).expect("ladder combine threshold"),
                 )
             })
         },

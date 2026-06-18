@@ -19,14 +19,13 @@ fn lockup_guardrail_blocks_when_all_spendable_selected() {
             amount: 200,
         },
     ];
-    let code = enforce_split_lockup_guardrail(
+    let guardrail = enforce_split_lockup_guardrail(
         &spendable,
         &["coin-a".to_string(), "coin-b".to_string()],
         false,
         "asset-1",
-    )
-    .expect("guardrail payload")
-    .map(|(code, _payload)| code);
+    );
+    let code = guardrail.map(|(code, _payload)| code);
     assert_eq!(code, Some(2));
 }
 
@@ -43,8 +42,7 @@ fn lockup_guardrail_allows_partial_selection() {
         },
     ];
     let exit =
-        enforce_split_lockup_guardrail(&spendable, &["coin-a".to_string()], false, "asset-1")
-            .expect("guardrail");
+        enforce_split_lockup_guardrail(&spendable, &["coin-a".to_string()], false, "asset-1");
     assert!(exit.is_none());
 }
 
@@ -65,8 +63,7 @@ fn lockup_guardrail_allows_override_when_flag_set() {
         &["coin-a".to_string(), "coin-b".to_string()],
         true,
         "asset-1",
-    )
-    .expect("guardrail");
+    );
     assert!(exit.is_none());
 }
 

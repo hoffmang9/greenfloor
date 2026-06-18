@@ -13,7 +13,11 @@ pub async fn submit_combine_prereq(
     ctx.execute_mixed_split(
         output_amounts,
         input_coin_ids,
-        ctx.program.coin_ops_combine_fee_mojos.max(0) as u64,
+        ctx.program
+            .coin_ops_combine_fee_mojos
+            .max(0)
+            .try_into()
+            .unwrap_or(0u64),
     )
     .await
 }

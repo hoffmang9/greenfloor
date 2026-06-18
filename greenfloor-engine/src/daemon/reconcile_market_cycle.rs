@@ -63,7 +63,7 @@ pub(crate) fn apply_reconcile_transition(
         offer_id,
         transition,
         last_seen_status,
-        ReconcilePersistOptions {
+        &ReconcilePersistOptions {
             action: "reconcile_coins_and_offers",
             venue: Some("dexie"),
             dexie_error,
@@ -107,7 +107,7 @@ pub async fn run_reconcile_market_cycle(
             )?;
             return Ok(ReconcileMarketCycleResult {
                 offers: Vec::new(),
-                dexie_size_by_offer_id: HashMap::new(),
+                dexie_size_by_offer_id: HashMap::default(),
                 dexie_fetch_error: Some(err.to_string()),
                 metrics,
             });
@@ -140,7 +140,7 @@ pub async fn run_reconcile_market_cycle(
         let Some(offer_id) = raw
             .as_object()
             .and_then(|obj| obj.get("id"))
-            .and_then(|value| value.as_str())
+            .and_then(serde_json::Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string)
@@ -152,8 +152,7 @@ pub async fn run_reconcile_market_cycle(
         }
         let current_state = state_by_offer_id
             .get(&offer_id)
-            .map(String::as_str)
-            .unwrap_or("open");
+            .map_or("open", String::as_str);
         let (transition, status) = transition_from_list_offer_payload(store, current_state, raw)?;
         apply_reconcile_transition(ReconcileTransitionParams {
             store,
@@ -204,7 +203,7 @@ mod tests {
             mode: "sell_only".to_string(),
             pricing: json!({}),
             cancel_move_threshold_bps: None,
-            ladders: HashMap::new(),
+            ladders: HashMap::default(),
         }
     }
 

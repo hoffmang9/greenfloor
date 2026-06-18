@@ -102,7 +102,7 @@ pub fn plan_reseed_actions_from_gap(
     }
 
     let mut one_per_size: std::collections::BTreeMap<i64, &PlannedAction> =
-        std::collections::BTreeMap::new();
+        std::collections::BTreeMap::default();
     for candidate in &seed_candidates {
         one_per_size.entry(candidate.size).or_insert(candidate);
     }
@@ -194,7 +194,7 @@ mod tests {
         }];
         let plan = plan_reseed_actions_from_gap(
             &existing,
-            &BTreeMap::new(),
+            &BTreeMap::default(),
             &BTreeMap::from([(1, 5)]),
             &config,
             Some(30.0),
@@ -212,7 +212,7 @@ mod tests {
         let config = sample_config();
         let targets = BTreeMap::from([(1, 5), (10, 2), (100, 1)]);
         let plan =
-            plan_reseed_actions_from_gap(&[], &BTreeMap::new(), &targets, &config, Some(30.0));
+            plan_reseed_actions_from_gap(&[], &BTreeMap::default(), &targets, &config, Some(30.0));
         assert!(plan.skip_reason.is_none());
         assert_eq!(plan.actions.len(), 3);
         assert!(plan

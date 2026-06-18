@@ -1,6 +1,7 @@
 use super::*;
 
 use serde_json::json;
+use std::collections::HashMap;
 use tempfile::tempdir;
 
 fn open_test_store() -> (tempfile::TempDir, SqliteStore) {
@@ -13,7 +14,7 @@ fn open_test_store() -> (tempfile::TempDir, SqliteStore) {
 fn insert_strategy_execution(
     store: &SqliteStore,
     market_id: &str,
-    items: serde_json::Value,
+    items: &serde_json::Value,
     created_at: &str,
 ) {
     store
@@ -86,7 +87,7 @@ fn active_offer_counts_by_size_uses_offer_state_and_size_mapping() {
     insert_strategy_execution(
         &store,
         "m1",
-        json!([
+        &json!([
             {"offer_id": "one-1", "size": 1, "status": "executed"},
             {"offer_id": "ten-1", "size": 10, "status": "executed"},
             {"offer_id": "hundred-1", "size": 100, "status": "executed"},
@@ -95,7 +96,8 @@ fn active_offer_counts_by_size_uses_offer_state_and_size_mapping() {
     );
 
     let (counts, unmapped) =
-        active_offer_counts_by_size_at(&store, "m1", None, &[], clock).expect("counts");
+        active_offer_counts_by_size_at(&store, "m1", None::<&HashMap<String, i64>>, &[], clock)
+            .expect("counts");
 
     assert_eq!(counts.get(&1), Some(&1));
     assert_eq!(counts.get(&10), Some(&1));
@@ -132,7 +134,8 @@ fn active_offer_counts_by_size_counts_cli_posted_offer() {
         .expect("audit");
 
     let (counts, unmapped) =
-        active_offer_counts_by_size_at(&store, "m1", None, &[], clock).expect("counts");
+        active_offer_counts_by_size_at(&store, "m1", None::<&HashMap<String, i64>>, &[], clock)
+            .expect("counts");
 
     assert_eq!(counts.get(&100), Some(&1));
     assert_eq!(unmapped, 0);
@@ -147,8 +150,14 @@ fn active_offer_counts_by_size_and_side_unknown_metadata_stays_unmapped() {
         .upsert_offer_state_at("offer-unknown-side", "m1", "open", Some(0), &clock_iso)
         .expect("upsert");
 
-    let (buy_counts, sell_counts, unmapped) =
-        active_offer_counts_by_size_and_side_at(&store, "m1", None, &[], clock).expect("counts");
+    let (buy_counts, sell_counts, unmapped) = active_offer_counts_by_size_and_side_at(
+        &store,
+        "m1",
+        None::<&HashMap<String, i64>>,
+        &[],
+        clock,
+    )
+    .expect("counts");
 
     assert_eq!(buy_counts.get(&1), Some(&0));
     assert_eq!(sell_counts.get(&1), Some(&0));
@@ -169,7 +178,7 @@ fn active_offer_counts_by_size_and_side_malformed_side_stays_unmapped() {
     insert_strategy_execution(
         &store,
         "m1",
-        json!([
+        &json!([
             {
                 "offer_id": "offer-bad-side",
                 "size": 10,
@@ -185,8 +194,14 @@ fn active_offer_counts_by_size_and_side_malformed_side_stays_unmapped() {
         &clock_iso,
     );
 
-    let (_buy_counts, _sell_counts, unmapped) =
-        active_offer_counts_by_size_and_side_at(&store, "m1", None, &[], clock).expect("counts");
+    let (_buy_counts, _sell_counts, unmapped) = active_offer_counts_by_size_and_side_at(
+        &store,
+        "m1",
+        None::<&HashMap<String, i64>>,
+        &[],
+        clock,
+    )
+    .expect("counts");
 
     assert_eq!(unmapped, 2);
 }
@@ -200,9 +215,14 @@ fn active_offer_counts_by_size_uses_dexie_hint_for_beyond_cap_offer() {
         .upsert_offer_state_at("beyond-cap-hundred", "m1", "open", Some(0), &clock_iso)
         .expect("upsert");
 
-    let (counts_without, unmapped_without) =
-        active_offer_counts_by_size_at(&store, "m1", Some(&HashMap::new()), &[], clock)
-            .expect("counts");
+    let (counts_without, unmapped_without) = active_offer_counts_by_size_at(
+        &store,
+        "m1",
+        Some(&HashMap::<String, i64>::default()),
+        &[],
+        clock,
+    )
+    .expect("counts");
     assert_eq!(counts_without.get(&100), Some(&0));
     assert_eq!(unmapped_without, 1);
 
@@ -227,12 +247,13 @@ fn active_offer_counts_by_size_foreign_offer_stays_unmapped() {
     insert_strategy_execution(
         &store,
         "m1",
-        json!([{"offer_id": "ours-100", "size": 100, "status": "executed"}]),
+        &json!([{"offer_id": "ours-100", "size": 100, "status": "executed"}]),
         &clock_iso,
     );
 
     let (counts, unmapped) =
-        active_offer_counts_by_size_at(&store, "m1", None, &[], clock).expect("counts");
+        active_offer_counts_by_size_at(&store, "m1", None::<&HashMap<String, i64>>, &[], clock)
+            .expect("counts");
 
     assert_eq!(counts.get(&100), Some(&1));
     assert_eq!(unmapped, 1);
@@ -249,12 +270,18 @@ fn active_offer_counts_by_size_tracks_non_legacy_size() {
     insert_strategy_execution(
         &store,
         "m1",
-        json!([{"offer_id": "ours-50", "size": 50, "status": "executed"}]),
+        &json!([{"offer_id": "ours-50", "size": 50, "status": "executed"}]),
         &clock_iso,
     );
 
-    let (counts, unmapped) =
-        active_offer_counts_by_size_at(&store, "m1", None, &[1, 10, 50], clock).expect("counts");
+    let (counts, unmapped) = active_offer_counts_by_size_at(
+        &store,
+        "m1",
+        None::<&HashMap<String, i64>>,
+        &[1, 10, 50],
+        clock,
+    )
+    .expect("counts");
 
     assert_eq!(counts.get(&50), Some(&1));
     assert_eq!(unmapped, 0);
@@ -271,7 +298,7 @@ fn active_offer_counts_excludes_stale_pending_visibility_offer() {
     insert_strategy_execution(
         &store,
         "m1",
-        json!([{
+        &json!([{
             "offer_id": "pending-50",
             "size": 50,
             "status": "pending_visibility",
@@ -280,9 +307,14 @@ fn active_offer_counts_excludes_stale_pending_visibility_offer() {
         &stale_created_at,
     );
 
-    let (counts, unmapped) =
-        active_offer_counts_by_size_at(&store, "m1", Some(&HashMap::new()), &[50], clock)
-            .expect("counts");
+    let (counts, unmapped) = active_offer_counts_by_size_at(
+        &store,
+        "m1",
+        Some(&HashMap::<String, i64>::default()),
+        &[50],
+        clock,
+    )
+    .expect("counts");
 
     assert_eq!(counts.get(&50), Some(&0));
     assert_eq!(unmapped, 1);
@@ -299,7 +331,7 @@ fn active_offer_counts_keeps_pending_visibility_offer_when_seen_on_dexie() {
     insert_strategy_execution(
         &store,
         "m1",
-        json!([{
+        &json!([{
             "offer_id": "pending-50",
             "size": 50,
             "status": "pending_visibility",
@@ -327,7 +359,7 @@ fn active_offer_counts_keeps_pending_when_no_dexie_snapshot() {
     insert_strategy_execution(
         &store,
         "m1",
-        json!([{
+        &json!([{
             "offer_id": "pending-old",
             "size": 50,
             "status": "pending_visibility",
@@ -337,7 +369,8 @@ fn active_offer_counts_keeps_pending_when_no_dexie_snapshot() {
     );
 
     let (counts, unmapped) =
-        active_offer_counts_by_size_at(&store, "m1", None, &[50], clock).expect("counts");
+        active_offer_counts_by_size_at(&store, "m1", None::<&HashMap<String, i64>>, &[50], clock)
+            .expect("counts");
 
     assert_eq!(counts.get(&50), Some(&1));
     assert_eq!(unmapped, 0);

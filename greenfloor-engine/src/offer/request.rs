@@ -3,6 +3,7 @@
 use serde_json::Value;
 
 use crate::error::{SignerError, SignerResult};
+use crate::num_conv::quote_mojos_for_base_size;
 use crate::offer::build_context::mojo_multiplier_for_leg;
 
 /// Normalized offer action side: ``buy`` or ``sell``.
@@ -12,15 +13,6 @@ pub fn normalize_offer_side(value: &str) -> &'static str {
     } else {
         "sell"
     }
-}
-
-/// Quote-leg mojos for a base size at the given price and unit multiplier.
-pub fn quote_mojos_for_base_size(
-    size_base_units: i64,
-    quote_price: f64,
-    quote_unit_multiplier: i64,
-) -> i64 {
-    (size_base_units as f64 * quote_price * quote_unit_multiplier as f64).round() as i64
 }
 
 /// Asset id to split for bootstrap / presplit given action side.
@@ -65,7 +57,7 @@ fn base_and_quote_leg_mojos(
     if base_offer <= 0 {
         return Err(SignerError::InvalidOfferAmount);
     }
-    let request_amount = quote_mojos_for_base_size(size_base_units, quote_price, quote_mult);
+    let request_amount = quote_mojos_for_base_size(size_base_units, quote_price, quote_mult)?;
     if request_amount <= 0 {
         return Err(SignerError::InvalidOfferRequestAmount);
     }
@@ -146,10 +138,13 @@ mod tests {
     #[test]
     fn quote_mojos_matches_python_rounding() {
         assert_eq!(
-            quote_mojos_for_base_size(1, 1.0, 1_000_000_000_000),
+            quote_mojos_for_base_size(1, 1.0, 1_000_000_000_000).expect("quote mojos"),
             1_000_000_000_000
         );
-        assert_eq!(quote_mojos_for_base_size(1, 5.0, 1_000), 5_000);
+        assert_eq!(
+            quote_mojos_for_base_size(1, 5.0, 1_000).expect("quote mojos"),
+            5_000
+        );
     }
 
     #[test]

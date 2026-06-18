@@ -63,7 +63,12 @@ pub fn plan_coin_ops(
         let threshold = bucket.target_count + bucket.split_buffer_count;
         let deficit = threshold - bucket.current_count;
         if deficit > 0 && bucket.target_count > 0 {
-            deficits.push((deficit as f64 / bucket.target_count as f64, bucket, deficit));
+            deficits.push((
+                crate::num_conv::i64_to_f64(deficit)
+                    / crate::num_conv::i64_to_f64(bucket.target_count),
+                bucket,
+                deficit,
+            ));
         }
     }
     deficits.sort_by(|left, right| {
@@ -102,7 +107,10 @@ pub fn plan_coin_ops(
 
     let mut excess_candidates: Vec<(&BucketSpec, i64)> = Vec::new();
     for bucket in buckets {
-        let threshold = (bucket.target_count as f64 * bucket.combine_when_excess_factor) as i64;
+        let threshold = crate::num_conv::f64_to_i64_round(
+            crate::num_conv::i64_to_f64(bucket.target_count) * bucket.combine_when_excess_factor,
+        )
+        .unwrap_or(0);
         let excess = bucket.current_count - threshold;
         if excess > 0 {
             excess_candidates.push((bucket, excess));

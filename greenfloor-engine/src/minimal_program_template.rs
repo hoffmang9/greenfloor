@@ -7,6 +7,7 @@ const MINIMAL_PROGRAM_TEMPLATE: &str =
 const MINIMAL_PROGRAM_SIGNER_APPEND: &str =
     include_str!("../../tests/fixtures/data/minimal_program_signer_append.yaml");
 
+#[derive(Clone, Copy)]
 pub struct MinimalProgramParams<'a> {
     pub home_dir: &'a Path,
     pub dexie_api_base: &'a str,
@@ -16,7 +17,7 @@ pub struct MinimalProgramParams<'a> {
     pub pushover_enabled: bool,
 }
 
-impl<'a> Default for MinimalProgramParams<'a> {
+impl Default for MinimalProgramParams<'_> {
     fn default() -> Self {
         Self {
             home_dir: Path::new("/tmp/greenfloor-test-home"),

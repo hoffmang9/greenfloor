@@ -6,11 +6,12 @@ use super::selection::SpendableCoin;
 
 pub fn combine_output_amounts(total: i64, output_count: usize) -> Vec<u64> {
     let output_count = output_count.max(1);
-    let base = total.div_euclid(output_count as i64);
-    let remainder = total.rem_euclid(output_count as i64);
-    let mut output_amounts = vec![base.max(0) as u64; output_count];
+    let output_count_i64 = i64::try_from(output_count).unwrap_or(i64::MAX);
+    let base = total.div_euclid(output_count_i64);
+    let remainder = total.rem_euclid(output_count_i64);
+    let mut output_amounts = vec![u64::try_from(base.max(0)).unwrap_or(0); output_count];
     if let Some(last) = output_amounts.last_mut() {
-        *last = last.saturating_add(remainder.max(0) as u64);
+        *last = last.saturating_add(u64::try_from(remainder.max(0)).unwrap_or(0));
     }
     output_amounts
 }

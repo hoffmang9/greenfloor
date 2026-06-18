@@ -55,16 +55,15 @@ pub fn handle_ws_text(
     coin_watchlist: &CoinWatchlistCache,
     raw: &str,
 ) -> SignerResult<()> {
-    let payload: Value = match serde_json::from_str(raw) {
-        Ok(value) => value,
-        Err(_) => {
-            store.add_audit_event(
-                "coinset_ws_payload_parse_error",
-                &serde_json::json!({"raw": raw.chars().take(200).collect::<String>()}),
-                None,
-            )?;
-            return Ok(());
-        }
+    let payload: Value = if let Ok(value) = serde_json::from_str(raw) {
+        value
+    } else {
+        store.add_audit_event(
+            "coinset_ws_payload_parse_error",
+            &serde_json::json!({"raw": raw.chars().take(200).collect::<String>()}),
+            None,
+        )?;
+        return Ok(());
     };
     if !payload.is_object() {
         let kind = match &payload {
@@ -155,7 +154,7 @@ pub fn handle_ws_text(
     Ok(())
 }
 
-pub fn ws_error(err: tokio_tungstenite::tungstenite::Error) -> SignerError {
+pub fn ws_error(err: &tokio_tungstenite::tungstenite::Error) -> SignerError {
     SignerError::Other(format!("coinset_ws_once_error:{err}"))
 }
 

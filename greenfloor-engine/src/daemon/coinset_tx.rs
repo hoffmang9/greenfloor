@@ -35,7 +35,7 @@ pub fn build_dexie_size_by_offer_id(
     base_asset_id: &str,
 ) -> std::collections::HashMap<String, i64> {
     let clean_base = base_asset_id.trim().to_ascii_lowercase();
-    let mut result = std::collections::HashMap::new();
+    let mut result = std::collections::HashMap::default();
     for offer in offers {
         let Some(offer_obj) = offer.as_object() else {
             continue;

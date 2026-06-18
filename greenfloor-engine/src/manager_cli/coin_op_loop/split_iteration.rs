@@ -87,7 +87,7 @@ pub(super) async fn run_split_iteration(
         &selected_coin_ids,
         allow_lock_all_spendable,
         &ctx.resolved_base_asset_id,
-    )? {
+    ) {
         return Ok(LoopIterationOutcome::Exit {
             code,
             payload: Some(payload),

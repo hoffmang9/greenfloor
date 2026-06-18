@@ -47,7 +47,7 @@ pub(super) async fn build_coin_op_exec_context(
         base_unit_mojo_multiplier: default_mojo_multiplier_for_asset(market.base_asset.trim())
             as i64,
         combine_input_cap: resolve_combine_input_cap(),
-        watched_coin_ids: HashSet::new(),
+        watched_coin_ids: HashSet::default(),
         test_overrides: CoinOpTestOverrides::from_env(),
     })
 }
@@ -57,16 +57,16 @@ pub(super) fn enforce_split_lockup_guardrail(
     selected_coin_ids: &[String],
     allow_lock_all_spendable: bool,
     resolved_asset_id: &str,
-) -> SignerResult<Option<(i32, Value)>> {
+) -> Option<(i32, Value)> {
     if allow_lock_all_spendable {
-        return Ok(None);
+        return None;
     }
     let spendable_ids: HashSet<_> = spendable.iter().map(|coin| coin.id.clone()).collect();
     let selected_set: HashSet<String> = selected_coin_ids.iter().cloned().collect();
     if spendable_ids.is_empty() || selected_set != spendable_ids {
-        return Ok(None);
+        return None;
     }
-    Ok(Some((
+    Some((
         2,
         json!({
             "error": COIN_SPLIT_LOCKUP_ERROR,
@@ -74,7 +74,7 @@ pub(super) fn enforce_split_lockup_guardrail(
             "spendable_asset_coin_count": spendable_ids.len(),
             "selected_spendable_coin_count": selected_set.len(),
         }),
-    )))
+    ))
 }
 
 pub(super) fn spendable_coins_for_gate(spendable: &[SpendableCoin]) -> Vec<Value> {

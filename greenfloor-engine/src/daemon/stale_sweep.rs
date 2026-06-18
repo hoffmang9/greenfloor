@@ -80,7 +80,7 @@ pub async fn detect_stale_open_offers_for_requeue(
                 } else if let Some(offer_obj) = payload.get("offer") {
                     let status = offer_obj
                         .get("status")
-                        .and_then(|value| value.as_i64())
+                        .and_then(serde_json::Value::as_i64)
                         .unwrap_or(-1);
                     classify_dexie_stale_offer_status(status).map(|reason| StaleSweepHit {
                         market_id: market_id.clone(),

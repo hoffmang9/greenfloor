@@ -17,7 +17,7 @@ pub(crate) async fn submit_combine_prereq_for_split(
     _required_amount: i64,
     prereq: &SplitCombinePrereqPlan,
 ) -> (Vec<CoinOpExecItem>, u64) {
-    let combine_count = prereq.input_coin_ids.len() as i64;
+    let combine_count = crate::num_conv::usize_to_i64(prereq.input_coin_ids.len()).unwrap_or(0);
     match submit_combine_prereq(ctx, &prereq.input_coin_ids).await {
         Ok(operation_id) => {
             let reason = if prereq.exact_match {
@@ -165,12 +165,17 @@ pub(crate) async fn execute_daemon_split_plan(
             }
             SplitAutoSelectPlan::Coin(selected) => {
                 attempted_coin_ids.insert(selected.coin_id.clone());
-                let output_amounts = vec![amount_per_coin_mojos.max(0) as u64; op_count as usize];
+                let output_amounts = vec![
+                    crate::num_conv::i64_to_u64(amount_per_coin_mojos.max(0))
+                        .unwrap_or(0);
+                    op_count.try_into().unwrap_or(0usize)
+                ];
                 match ctx
                     .execute_mixed_split(
                         output_amounts,
                         std::slice::from_ref(&selected.coin_id),
-                        ctx.program.coin_ops_split_fee_mojos.max(0) as u64,
+                        crate::num_conv::i64_to_u64(ctx.program.coin_ops_split_fee_mojos.max(0))
+                            .unwrap_or(0),
                     )
                     .await
                 {

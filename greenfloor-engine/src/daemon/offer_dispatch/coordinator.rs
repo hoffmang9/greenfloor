@@ -41,7 +41,7 @@ impl OfferReservationCoordinator {
             std::process::id()
         );
         match store.try_acquire_offer_reservation_lease(
-            crate::storage::OfferReservationLeaseRequest {
+            &crate::storage::OfferReservationLeaseRequest {
                 reservation_id: &reservation_id,
                 market_id,
                 wallet_id,

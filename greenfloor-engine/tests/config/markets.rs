@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use super::shared::base_market_row;
 
-fn parse_single_market(row: Value) -> SignerResult<MarketConfig> {
+fn parse_single_market(row: &Value) -> SignerResult<MarketConfig> {
     parse_markets_config(&json!({"markets": [row]})).map(|cfg| {
         cfg.markets
             .into_iter()
@@ -35,7 +35,7 @@ fn sample_markets() -> MarketsConfig {
 fn parse_markets_config_rejects_invalid_strategy_spread() {
     let mut row = base_market_row();
     row["pricing"] = json!({"strategy_target_spread_bps": 0});
-    let err = parse_single_market(row).expect_err("invalid spread");
+    let err = parse_single_market(&row).expect_err("invalid spread");
     assert!(err.to_string().contains("strategy_target_spread_bps"));
 }
 
@@ -46,7 +46,7 @@ fn parse_markets_config_rejects_invalid_strategy_price_band() {
         "strategy_min_xch_price_usd": 50.0,
         "strategy_max_xch_price_usd": 40.0,
     });
-    let err = parse_single_market(row).expect_err("invalid price band");
+    let err = parse_single_market(&row).expect_err("invalid price band");
     assert!(err
         .to_string()
         .contains("strategy_min_xch_price_usd must be <= strategy_max_xch_price_usd"));
@@ -60,7 +60,7 @@ fn parse_markets_config_accepts_valid_strategy_controls() {
         "strategy_min_xch_price_usd": 20.0,
         "strategy_max_xch_price_usd": 60.0,
     });
-    let market = parse_single_market(row).expect("valid strategy controls");
+    let market = parse_single_market(&row).expect("valid strategy controls");
     assert_eq!(
         market.pricing["strategy_target_spread_bps"].as_i64(),
         Some(120)
@@ -74,7 +74,7 @@ fn parse_markets_config_rejects_legacy_strategy_expiry_fields() {
         "strategy_offer_expiry_unit": "hours",
         "strategy_offer_expiry_value": 2,
     });
-    let err = parse_single_market(row).expect_err("legacy expiry fields");
+    let err = parse_single_market(&row).expect_err("legacy expiry fields");
     assert!(err
         .to_string()
         .contains("strategy_offer_expiry_unit/value are no longer supported"));
@@ -84,7 +84,7 @@ fn parse_markets_config_rejects_legacy_strategy_expiry_fields() {
 fn parse_markets_config_rejects_invalid_strategy_expiry_minutes_type() {
     let mut row = base_market_row();
     row["pricing"] = json!({"strategy_offer_expiry_minutes": "abc"});
-    let err = parse_single_market(row).expect_err("invalid expiry minutes type");
+    let err = parse_single_market(&row).expect_err("invalid expiry minutes type");
     assert!(err
         .to_string()
         .contains("strategy_offer_expiry_minutes must be an integer"));
@@ -95,7 +95,7 @@ fn parse_markets_config_accepts_strategy_expiry_override() {
     let mut row = base_market_row();
     row["quote_asset_type"] = json!("stable");
     row["pricing"] = json!({"strategy_offer_expiry_minutes": 120});
-    let market = parse_single_market(row).expect("strategy expiry override");
+    let market = parse_single_market(&row).expect("strategy expiry override");
     assert_eq!(
         market.pricing["strategy_offer_expiry_minutes"].as_i64(),
         Some(120)
@@ -106,7 +106,7 @@ fn parse_markets_config_accepts_strategy_expiry_override() {
 fn parse_markets_config_accepts_unstable_expiry_above_15_minutes() {
     let mut row = base_market_row();
     row["pricing"] = json!({"strategy_offer_expiry_minutes": 30});
-    let market = parse_single_market(row).expect("unstable expiry above 15 minutes");
+    let market = parse_single_market(&row).expect("unstable expiry above 15 minutes");
     assert_eq!(
         market.pricing["strategy_offer_expiry_minutes"].as_i64(),
         Some(30)
@@ -120,7 +120,7 @@ fn parse_markets_config_rejects_legacy_reference_fields() {
         "reference_source": "coingecko",
         "reference_pair": "xch_usd",
     });
-    let err = parse_single_market(row).expect_err("legacy reference fields");
+    let err = parse_single_market(&row).expect_err("legacy reference fields");
     assert!(err
         .to_string()
         .contains("reference_source is no longer supported"));
@@ -130,7 +130,7 @@ fn parse_markets_config_rejects_legacy_reference_fields() {
 fn parse_markets_config_accepts_cancel_move_threshold_bps_as_string() {
     let mut row = base_market_row();
     row["pricing"] = json!({"cancel_move_threshold_bps": "250"});
-    let market = parse_single_market(row).expect("market");
+    let market = parse_single_market(&row).expect("market");
     assert_eq!(market.cancel_move_threshold_bps, Some(250));
 }
 
@@ -140,7 +140,7 @@ fn parse_markets_config_rejects_invalid_ladder_size_base_units() {
     row["ladders"] = json!({
         "sell": [{"size_base_units": "not-a-number"}]
     });
-    let err = parse_single_market(row).unwrap_err().to_string();
+    let err = parse_single_market(&row).unwrap_err().to_string();
     assert!(err.contains("size_base_units"));
 }
 
@@ -148,7 +148,7 @@ fn parse_markets_config_rejects_invalid_ladder_size_base_units() {
 fn parse_markets_config_rejects_invalid_cancel_move_threshold_bps() {
     let mut row = base_market_row();
     row["pricing"] = json!({"cancel_move_threshold_bps": 0});
-    let err = parse_single_market(row).expect_err("invalid cancel threshold");
+    let err = parse_single_market(&row).expect_err("invalid cancel threshold");
     assert!(err
         .to_string()
         .contains("cancel_move_threshold_bps must be positive"));
@@ -158,7 +158,7 @@ fn parse_markets_config_rejects_invalid_cancel_move_threshold_bps() {
 fn parse_markets_config_accepts_cancel_move_threshold_bps() {
     let mut row = base_market_row();
     row["pricing"] = json!({"cancel_move_threshold_bps": 250});
-    let market = parse_single_market(row).expect("cancel threshold");
+    let market = parse_single_market(&row).expect("cancel threshold");
     assert!(market.pricing.get("cancel_move_threshold_bps").is_none());
     assert_eq!(market.cancel_move_threshold_bps, Some(250));
 }
@@ -172,7 +172,7 @@ fn parse_markets_config_stable_quote_validates_present_strategy_fields() {
         "strategy_min_xch_price_usd": -1,
         "strategy_max_xch_price_usd": "invalid",
     });
-    let err = parse_single_market(row).expect_err("stable strategy validation");
+    let err = parse_single_market(&row).expect_err("stable strategy validation");
     assert!(err.to_string().contains("strategy_target_spread_bps"));
 }
 
@@ -181,7 +181,7 @@ fn parse_markets_config_defaults_cat_unit_multipliers_to_1000() {
     let mut row = base_market_row();
     row["base_asset"] = json!("BYC");
     row["quote_asset"] = json!("wUSDC.b");
-    let market = parse_single_market(row).expect("cat multipliers");
+    let market = parse_single_market(&row).expect("cat multipliers");
     assert_eq!(
         market.pricing["base_unit_mojo_multiplier"].as_i64(),
         Some(1000)
@@ -195,7 +195,7 @@ fn parse_markets_config_defaults_cat_unit_multipliers_to_1000() {
 #[test]
 fn parse_markets_config_defaults_xch_quote_multiplier_to_one_trillion() {
     let row = base_market_row();
-    let market = parse_single_market(row).expect("xch quote multiplier");
+    let market = parse_single_market(&row).expect("xch quote multiplier");
     assert_eq!(
         market.pricing["base_unit_mojo_multiplier"].as_i64(),
         Some(1000)
@@ -211,7 +211,7 @@ fn parse_markets_config_rejects_noncanonical_cat_base_multiplier() {
     let mut row = base_market_row();
     row["base_asset"] = json!("BYC");
     row["pricing"] = json!({"base_unit_mojo_multiplier": 10});
-    let err = parse_single_market(row).expect_err("noncanonical base multiplier");
+    let err = parse_single_market(&row).expect_err("noncanonical base multiplier");
     assert!(err
         .to_string()
         .contains("base_unit_mojo_multiplier must be 1000 for CAT assets"));
@@ -222,7 +222,7 @@ fn parse_markets_config_rejects_noncanonical_cat_quote_multiplier() {
     let mut row = base_market_row();
     row["quote_asset"] = json!("wUSDC.b");
     row["pricing"] = json!({"quote_unit_mojo_multiplier": 10});
-    let err = parse_single_market(row).expect_err("noncanonical quote multiplier");
+    let err = parse_single_market(&row).expect_err("noncanonical quote multiplier");
     assert!(err
         .to_string()
         .contains("quote_unit_mojo_multiplier must be 1000 for CAT assets"));
@@ -232,7 +232,7 @@ fn parse_markets_config_rejects_noncanonical_cat_quote_multiplier() {
 fn parse_markets_config_preserves_xch_multiplier_override() {
     let mut row = base_market_row();
     row["pricing"] = json!({"quote_unit_mojo_multiplier": 1_000_000_000_000_i64});
-    let market = parse_single_market(row).expect("xch multiplier override");
+    let market = parse_single_market(&row).expect("xch multiplier override");
     assert_eq!(
         market.pricing["quote_unit_mojo_multiplier"].as_i64(),
         Some(1_000_000_000_000)

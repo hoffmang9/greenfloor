@@ -54,7 +54,7 @@ pub fn parse_i64_field(raw: &Value, context: &str) -> SignerResult<i64> {
         return Ok(value);
     }
     if let Some(value) = raw.as_u64() {
-        return Ok(value as i64);
+        return i64::try_from(value).map_err(|_| config_err(format!("{context} must fit in i64")));
     }
     if let Some(text) = raw.as_str() {
         if let Ok(value) = text.parse::<i64>() {
@@ -69,7 +69,7 @@ pub fn parse_u64_field(raw: &Value, context: &str) -> SignerResult<u64> {
     if value < 0 {
         return Err(config_err(format!("{context} must be >= 0")));
     }
-    Ok(value as u64)
+    u64::try_from(value).map_err(|_| config_err(format!("{context} must fit in u64")))
 }
 
 pub fn parse_f64_field(raw: &Value, context: &str) -> SignerResult<f64> {
@@ -77,10 +77,10 @@ pub fn parse_f64_field(raw: &Value, context: &str) -> SignerResult<f64> {
         return Ok(value);
     }
     if let Some(value) = raw.as_i64() {
-        return Ok(value as f64);
+        return Ok(crate::num_conv::i64_to_f64(value));
     }
     if let Some(value) = raw.as_u64() {
-        return Ok(value as f64);
+        return Ok(crate::num_conv::u64_to_f64(value));
     }
     if let Some(text) = raw.as_str() {
         if let Ok(value) = text.parse::<f64>() {
@@ -95,8 +95,7 @@ pub fn optional_str(map: &serde_json::Map<String, Value>, key: &str, default: &s
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| default.to_string())
+        .map_or_else(|| default.to_string(), str::to_string)
 }
 
 pub fn optional_i64(

@@ -44,10 +44,14 @@ impl VaultCustodySnapshot {
         if custody_keys.is_empty() || recovery_keys.is_empty() {
             return Err(SignerError::UnsupportedVaultSignerCardinality);
         }
-        if custody_threshold == 0 || custody_threshold as usize > custody_keys.len() {
+        if custody_threshold == 0
+            || custody_threshold.try_into().unwrap_or(0usize) > custody_keys.len()
+        {
             return Err(SignerError::UnsupportedVaultThreshold);
         }
-        if recovery_threshold == 0 || recovery_threshold as usize > recovery_keys.len() {
+        if recovery_threshold == 0
+            || recovery_threshold.try_into().unwrap_or(0usize) > recovery_keys.len()
+        {
             return Err(SignerError::UnsupportedVaultThreshold);
         }
         if recovery_clawback_timelock == 0 {
@@ -96,7 +100,7 @@ pub fn compute_vault_hashes(snapshot: &VaultCustodySnapshot) -> SignerResult<Vau
         .iter()
         .map(|key| member_hash_for_key(&member_config, key))
         .collect::<SignerResult<Vec<_>>>()?;
-    custody_hashes.sort_by_key(|hash| hash.to_bytes());
+    custody_hashes.sort_by_key(clvm_utils::TreeHash::to_bytes);
 
     let custody_hash = if custody_hashes.len() == 1 {
         custody_hashes[0]
@@ -128,7 +132,7 @@ pub fn compute_vault_hashes(snapshot: &VaultCustodySnapshot) -> SignerResult<Vau
         .iter()
         .map(|key| member_hash_for_key(&member_config, key))
         .collect::<SignerResult<Vec<_>>>()?;
-    recovery_hashes.sort_by_key(|hash| hash.to_bytes());
+    recovery_hashes.sort_by_key(clvm_utils::TreeHash::to_bytes);
 
     let recovery_hash = if recovery_hashes.len() == 1 {
         member_hash_for_key(&recovery_config, &snapshot.recovery_keys[0])?
@@ -248,13 +252,10 @@ fn extract_wallet_keys(connection: Option<&Value>) -> Vec<WalletKey> {
 }
 
 fn parse_u32_field(value: &Value, field: &str) -> Option<u32> {
-    value.get(field).and_then(parse_json_u64).and_then(|v| {
-        if v <= u32::MAX as u64 {
-            Some(v as u32)
-        } else {
-            None
-        }
-    })
+    value
+        .get(field)
+        .and_then(parse_json_u64)
+        .and_then(|v| u32::try_from(v).ok())
 }
 
 fn parse_json_u64(value: &Value) -> Option<u64> {

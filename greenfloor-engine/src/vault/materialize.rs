@@ -101,7 +101,7 @@ pub(crate) fn build_vault_cat_inner_spend(
     let restrictions = Vec::new();
     let member = SingletonMember::new(vault_ctx.launcher_id);
     let member_hash = mips_puzzle_hash(
-        nonce as usize,
+        nonce.try_into().unwrap_or(0usize),
         restrictions.clone(),
         member.curry_tree_hash(),
         true,
@@ -116,7 +116,7 @@ pub(crate) fn build_vault_cat_inner_spend(
     mips_spend.members.insert(
         member_hash,
         InnerPuzzleSpend::new(
-            nonce as usize,
+            nonce.try_into().unwrap_or(0usize),
             restrictions,
             Spend::new(member_puzzle, member_solution),
         ),

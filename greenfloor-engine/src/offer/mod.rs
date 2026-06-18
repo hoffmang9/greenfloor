@@ -18,6 +18,7 @@ pub mod publish;
 pub mod request;
 pub mod types;
 
+pub use crate::num_conv::quote_mojos_for_base_size;
 pub use action::{
     build_signer_offer_for_action, expires_at_unix_from_pricing, resolve_offer_assets_for_action,
     resolve_offer_assets_via_coinset, try_normalize_resolved_assets, BuildOfferForActionRequest,
@@ -42,6 +43,6 @@ pub use publish::{
 };
 pub use request::{
     compute_signer_offer_leg_amounts, normalize_offer_asset_id, normalize_offer_side,
-    quote_mojos_for_base_size, signer_split_asset_id, SignerOfferLegAmounts,
+    signer_split_asset_id, SignerOfferLegAmounts,
 };
 pub use types::{CreateOfferRequest, CreateOfferResult, OfferExecutionMode};

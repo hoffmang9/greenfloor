@@ -67,8 +67,10 @@ pub fn evaluate_low_inventory_alert(input: &LowInventoryInput) -> LowInventoryEv
         input.program_default_threshold,
         input.low_watermark,
     );
-    let hysteresis_target =
-        ((threshold as f64) * (1.0 + input.clear_hysteresis_percent / 100.0)).floor() as i64;
+    let hysteresis_target = crate::num_conv::f64_to_i64_round(
+        crate::num_conv::i64_to_f64(threshold) * (1.0 + input.clear_hysteresis_percent / 100.0),
+    )
+    .unwrap_or(0);
 
     let mut next_state = AlertState {
         is_low: input.state_is_low,

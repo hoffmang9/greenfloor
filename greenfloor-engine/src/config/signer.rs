@@ -91,10 +91,13 @@ fn parse_vault_section(
     if custody_keys.is_empty() || recovery_keys.is_empty() {
         return Err(SignerError::UnsupportedVaultSignerCardinality);
     }
-    if custody_threshold == 0 || custody_threshold as usize > custody_keys.len() {
+    if custody_threshold == 0 || custody_threshold.try_into().unwrap_or(0usize) > custody_keys.len()
+    {
         return Err(SignerError::UnsupportedVaultThreshold);
     }
-    if recovery_threshold == 0 || recovery_threshold as usize > recovery_keys.len() {
+    if recovery_threshold == 0
+        || recovery_threshold.try_into().unwrap_or(0usize) > recovery_keys.len()
+    {
         return Err(SignerError::UnsupportedVaultThreshold);
     }
     if recovery_clawback_timelock == 0 {
@@ -153,7 +156,7 @@ fn parse_u64_field(raw: &Value, context: &str) -> SignerResult<u64> {
     if value < 0 {
         return Err(config_err(format!("{context} must be >= 0")));
     }
-    Ok(value as u64)
+    crate::num_conv::i64_to_u64(value)
 }
 
 #[cfg(test)]

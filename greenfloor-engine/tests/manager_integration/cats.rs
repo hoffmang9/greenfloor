@@ -162,7 +162,7 @@ fn cats_delete_by_cat_id() {
     assert!(cats_list(&cats_path)
         .get("cats")
         .and_then(|v| v.as_array())
-        .is_some_and(|rows| rows.is_empty()));
+        .is_some_and(std::vec::Vec::is_empty));
 }
 
 #[test]
@@ -262,7 +262,7 @@ fn cats_delete_preflight_only_does_not_delete() {
         cats_list(&cats_path)
             .get("cats")
             .and_then(|v| v.as_array())
-            .map_or(0, |rows| rows.len()),
+            .map_or(0, std::vec::Vec::len),
         1
     );
 }

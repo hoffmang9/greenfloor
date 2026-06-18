@@ -75,9 +75,9 @@ jobs:
         if: matrix.run_rust_tests
         run: cargo fmt --manifest-path "${{ env.CARGO_MANIFEST }}" --check
 
-      - name: Rust clippy
+      - name: Rust clippy (pedantic, greenfloor-engine only)
         if: matrix.run_rust_tests
-        run: cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}" --all-targets
+        run: cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}" --all-targets --no-deps
 
       - name: Build greenfloor-engine binaries
         if: matrix.build_native_clis && !matrix.run_rust_tests

@@ -120,9 +120,8 @@ pub fn run_keys_onboard(
 }
 
 fn discover_chia_keys(chia_keys_dir: Option<&Path>) -> ChiaKeysDiscovery {
-    let base_dir = chia_keys_dir
-        .map(expand_home)
-        .unwrap_or_else(|| expand_home(Path::new("~/.chia_keys")));
+    let base_dir =
+        chia_keys_dir.map_or_else(|| expand_home(Path::new("~/.chia_keys")), expand_home);
     let keyring_yaml_path = base_dir.join("keyring.yaml");
     ChiaKeysDiscovery {
         has_existing_keys: keyring_yaml_path.exists(),

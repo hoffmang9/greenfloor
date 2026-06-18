@@ -72,14 +72,24 @@ pub(super) async fn run_post_iteration(
                 PostIterationOutcome::Failure(PostFailure {
                     error: err.to_string(),
                     started,
-                    create_phase_ms: Some(create_started.elapsed().as_millis() as u64),
+                    create_phase_ms: Some(
+                        create_started
+                            .elapsed()
+                            .as_millis()
+                            .try_into()
+                            .unwrap_or(0u64),
+                    ),
                     execution_mode: None,
                     bootstrap: None,
                 }),
             ));
         }
     };
-    let create_phase_ms = create_started.elapsed().as_millis() as u64;
+    let create_phase_ms = create_started
+        .elapsed()
+        .as_millis()
+        .try_into()
+        .unwrap_or(0u64);
 
     if created.offer_text.trim().is_empty() {
         return Ok((
@@ -140,7 +150,11 @@ pub(super) async fn run_post_iteration(
         expected_requested_symbol: &asset_fields.expected_requested_symbol,
     })
     .await?;
-    let publish_ms = publish_started.elapsed().as_millis() as u64;
+    let publish_ms = publish_started
+        .elapsed()
+        .as_millis()
+        .try_into()
+        .unwrap_or(0u64);
 
     let persist_record = offer_post_persist_record(
         &publish,

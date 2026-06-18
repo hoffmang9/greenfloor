@@ -328,7 +328,11 @@ mod tests {
 
         fn cat_with_amount(amount: u64) -> Cat {
             Cat::new(
-                Coin::new(Bytes32::new([amount as u8; 32]), Bytes32::default(), amount),
+                Coin::new(
+                    Bytes32::new([u8::try_from(amount).unwrap_or(0u8); 32]),
+                    Bytes32::default(),
+                    amount,
+                ),
                 None,
                 CatInfo::new(Bytes32::new([0x01; 32]), None, Bytes32::default()),
             )

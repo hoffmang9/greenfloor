@@ -30,13 +30,13 @@ impl SqliteStore {
             let mut stmt = self
                 .conn
                 .prepare(
-                    r#"
+                    r"
                 SELECT offer_id, market_id, state, last_seen_status, updated_at
                 FROM offer_state
                 WHERE market_id = ?1
                 ORDER BY updated_at DESC
                 LIMIT ?2
-                "#,
+                ",
                 )
                 .map_err(|err| {
                     SignerError::Other(format!("failed to prepare offer_state query: {err}"))
@@ -67,12 +67,12 @@ impl SqliteStore {
             let mut stmt = self
                 .conn
                 .prepare(
-                    r#"
+                    r"
                 SELECT offer_id, market_id, state, last_seen_status, updated_at
                 FROM offer_state
                 ORDER BY updated_at DESC
                 LIMIT ?1
-                "#,
+                ",
                 )
                 .map_err(|err| {
                     SignerError::Other(format!("failed to prepare offer_state query: {err}"))
@@ -117,13 +117,13 @@ impl SqliteStore {
         let mut stmt = self
             .conn
             .prepare(
-                r#"
+                r"
             SELECT offer_id, market_id, state, last_seen_status, updated_at
             FROM offer_state
             WHERE market_id = ?1
             ORDER BY updated_at DESC
             LIMIT ?2
-            "#,
+            ",
             )
             .map_err(|err| {
                 SignerError::Other(format!("failed to prepare offer_state detail query: {err}"))
@@ -164,7 +164,7 @@ impl SqliteStore {
     ) -> SignerResult<()> {
         self.conn
             .execute(
-                r#"
+                r"
                 INSERT INTO offer_state (offer_id, market_id, state, last_seen_status, updated_at)
                 VALUES (?1, ?2, ?3, ?4, ?5)
                 ON CONFLICT(offer_id) DO UPDATE SET
@@ -172,7 +172,7 @@ impl SqliteStore {
                   state = excluded.state,
                   last_seen_status = excluded.last_seen_status,
                   updated_at = excluded.updated_at
-                "#,
+                ",
                 params![offer_id, market_id, state, last_seen_status, updated_at,],
             )
             .map_err(|err| SignerError::Other(format!("failed to upsert offer_state: {err}")))?;

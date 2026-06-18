@@ -48,7 +48,7 @@ impl MemberConfig {
 pub fn m_of_n_hash(config: &MemberConfig, required: u32, items: Vec<TreeHash>) -> TreeHash {
     member_hash(
         config,
-        MofN::new(required as usize, items).inner_puzzle_hash(),
+        MofN::new(required.try_into().unwrap_or(0usize), items).inner_puzzle_hash(),
     )
 }
 
@@ -174,7 +174,7 @@ pub fn force_1_of_2_restriction(
         kind: RestrictionKind::DelegatedPuzzleWrapper,
         puzzle_hash: Force1of2RestrictedVariable::new(
             left_side_subtree_hash,
-            nonce as usize,
+            nonce.try_into().unwrap_or(0usize),
             member_validator_list_hash,
             delegated_puzzle_validator_list_hash,
         )
@@ -236,7 +236,7 @@ fn bytes48_from_vec(bytes: &[u8]) -> SignerResult<[u8; 48]> {
 
 fn member_hash(config: &MemberConfig, inner_hash: TreeHash) -> TreeHash {
     mips_puzzle_hash(
-        config.nonce as usize,
+        config.nonce.try_into().unwrap_or(0usize),
         config.restrictions.clone(),
         inner_hash,
         config.top_level,

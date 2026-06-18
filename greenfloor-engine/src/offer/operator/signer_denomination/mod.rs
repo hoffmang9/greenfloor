@@ -28,12 +28,12 @@ use split_submit::submit_bootstrap_mixed_split;
 use types::BootstrapPhaseFailure;
 use wait::wait_for_coinset_confirmation;
 
-fn bootstrap_skipped(reason: impl Into<String>) -> SignerResult<BootstrapPhaseResult> {
-    Ok(BootstrapPhaseResult::skipped(reason))
+fn bootstrap_skipped(reason: impl Into<String>) -> BootstrapPhaseResult {
+    BootstrapPhaseResult::skipped(reason)
 }
 
-fn bootstrap_failed(failure: BootstrapPhaseFailure) -> SignerResult<BootstrapPhaseResult> {
-    Ok(BootstrapPhaseResult::failed(failure))
+fn bootstrap_failed(failure: BootstrapPhaseFailure) -> BootstrapPhaseResult {
+    BootstrapPhaseResult::failed(failure)
 }
 
 fn spendable_bootstrap_coins(coins: &[WalletUnspentCoin]) -> Vec<BootstrapCoin> {
@@ -114,7 +114,7 @@ pub async fn run_signer_denomination_phase(
     let side = normalize_offer_side(action_side);
     let side_ladder = market.ladders.get(side).cloned().unwrap_or_default();
     if side_ladder.is_empty() {
-        return bootstrap_skipped(format!("missing_{side}_ladder"));
+        return Ok(bootstrap_skipped(format!("missing_{side}_ladder")));
     }
 
     let ladder_entries = bootstrap_ladder_entries_for_side(
@@ -125,18 +125,22 @@ pub async fn run_signer_denomination_phase(
         resolved_quote_asset_id,
     )?;
     if ladder_entries.is_empty() {
-        return bootstrap_skipped(format!("empty_{side}_ladder_after_quote_conversion"));
+        return Ok(bootstrap_skipped(format!(
+            "empty_{side}_ladder_after_quote_conversion"
+        )));
     }
 
     let split_asset_id =
         signer_split_asset_id(side, resolved_base_asset_id, resolved_quote_asset_id);
     if split_asset_id.trim().is_empty() {
-        return bootstrap_skipped(format!("missing_{side}_asset_for_bootstrap"));
+        return Ok(bootstrap_skipped(format!(
+            "missing_{side}_asset_for_bootstrap"
+        )));
     }
 
     let receive_address = market.receive_address.trim();
     if receive_address.is_empty() {
-        return bootstrap_skipped("missing_receive_address_for_bootstrap");
+        return Ok(bootstrap_skipped("missing_receive_address_for_bootstrap"));
     }
 
     let asset_scoped_coins =
@@ -151,7 +155,7 @@ pub async fn run_signer_denomination_phase(
         return Ok(BootstrapPhaseResult::from_snapshot(early));
     }
     let BootstrapPlanOutcome::NeedsSplit(bootstrap_plan) = outcome else {
-        return bootstrap_skipped("bootstrap_precheck_failed");
+        return Ok(bootstrap_skipped("bootstrap_precheck_failed"));
     };
 
     let (fee_mojos, fee_source, fee_lookup_error) = resolve_bootstrap_split_fee(
@@ -161,12 +165,12 @@ pub async fn run_signer_denomination_phase(
     )
     .await;
     if fee_mojos > 0 {
-        return bootstrap_failed(BootstrapPhaseFailure::new(
+        return Ok(bootstrap_failed(BootstrapPhaseFailure::new(
             "signer_mixed_split_fee_not_supported",
             fee_mojos,
             fee_source,
             fee_lookup_error,
-        ));
+        )));
     }
 
     let fee_context = (fee_mojos, fee_source.clone(), fee_lookup_error.clone());
@@ -185,7 +189,7 @@ pub async fn run_signer_denomination_phase(
     {
         Ok(result) => result,
         Err(err) => {
-            return bootstrap_failed(
+            return Ok(bootstrap_failed(
                 BootstrapPhaseFailure::new(
                     format!("signer_mixed_split_error:{err}"),
                     fee_context.0,
@@ -193,7 +197,7 @@ pub async fn run_signer_denomination_phase(
                     fee_context.2,
                 )
                 .with_plan(bootstrap_plan),
-            );
+            ));
         }
     };
 
@@ -208,7 +212,7 @@ pub async fn run_signer_denomination_phase(
     {
         Ok(events) => events,
         Err(err) => {
-            return bootstrap_failed(
+            return Ok(bootstrap_failed(
                 BootstrapPhaseFailure::new(
                     "bootstrap_wait_failed",
                     fee_context.0,
@@ -218,7 +222,7 @@ pub async fn run_signer_denomination_phase(
                 .with_plan(bootstrap_plan)
                 .with_wait_error(err.to_string())
                 .with_split_result(split_result),
-            );
+            ));
         }
     };
 

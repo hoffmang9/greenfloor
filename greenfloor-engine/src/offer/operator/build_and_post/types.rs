@@ -100,7 +100,7 @@ pub(super) fn timing_payload(
     json!({
         "create_phase_ms": create_phase_ms,
         "publish_ms": publish_ms,
-        "total_ms": started.elapsed().as_millis() as u64,
+        "total_ms": started.elapsed().as_millis().try_into().unwrap_or(0u64),
         "create_total_ms": create_total_ms.or(create_phase_ms),
     })
 }

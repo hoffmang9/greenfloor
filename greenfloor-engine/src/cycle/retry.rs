@@ -7,11 +7,11 @@ pub fn parse_rate_limit_retry_seconds(error_text: &str) -> Option<f64> {
     let lower = error_text.to_ascii_lowercase();
     let idx = lower.find(RATE_LIMIT_PATTERN)?;
     let rest = &lower[idx + RATE_LIMIT_PATTERN.len()..];
-    let digits: String = rest.chars().take_while(|ch| ch.is_ascii_digit()).collect();
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
     if digits.is_empty() {
         return None;
     }
-    digits.parse::<i64>().ok().map(|seconds| seconds as f64)
+    digits.parse::<i64>().ok().map(crate::num_conv::i64_to_f64)
 }
 
 /// Sleep duration before the next moderate-retry attempt after a failure.
@@ -35,12 +35,12 @@ pub fn dexie_invalid_offer_should_retry(error: &str, attempt: u32, max_attempts:
 }
 
 pub fn dexie_invalid_offer_retry_sleep(attempt: u32, initial_sleep: f64) -> f64 {
-    let multiplier = 2f64.powi(attempt.min(31) as i32);
+    let multiplier = 2f64.powi(i32::try_from(attempt.min(31)).unwrap_or(31));
     (initial_sleep * multiplier).min(8.0)
 }
 
 pub fn coinset_fee_lookup_retry_sleep(attempt: u32) -> f64 {
-    (0.5 * 2f64.powi(attempt.min(31) as i32)).min(8.0)
+    (0.5 * 2f64.powi(i32::try_from(attempt.min(31)).unwrap_or(31))).min(8.0)
 }
 
 /// Sleep duration to use after a failed poll tick, or ``None`` when timed out.
@@ -100,6 +100,6 @@ mod tests {
     fn poll_exponential_sleep_and_advance() {
         assert!(poll_exponential_sleep_now(10, 10, 1.0, 0.5, 8.0).is_none());
         assert_eq!(poll_exponential_sleep_now(0, 10, 0.0, 0.5, 8.0), Some(0.5));
-        assert_eq!(poll_exponential_advance_sleep(0.5, 0.5, 8.0, 2.0), 1.0);
+        assert!((poll_exponential_advance_sleep(0.5, 0.5, 8.0, 2.0) - 1.0).abs() < f64::EPSILON);
     }
 }

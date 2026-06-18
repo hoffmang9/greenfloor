@@ -75,9 +75,16 @@ pub async fn run_coin_split(request: CoinSplitRequest<'_>) -> SignerResult<i32> 
         .cloned();
     let explicit_coin_ids = !coin_ids.is_empty();
     let resolved_asset_id = exec_ctx.resolved_base_asset_id.clone();
-    let output_amounts: Vec<u64> =
-        vec![amount_per_coin_mojos.max(0) as u64; number_of_coins as usize];
-    let split_fee = exec_ctx.program.coin_ops_split_fee_mojos.max(0) as u64;
+    let output_amounts: Vec<u64> = vec![
+        amount_per_coin_mojos.max(0).try_into().unwrap_or(0u64);
+        number_of_coins.try_into().unwrap_or(0usize)
+    ];
+    let split_fee = exec_ctx
+        .program
+        .coin_ops_split_fee_mojos
+        .max(0)
+        .try_into()
+        .unwrap_or(0u64);
 
     let (operations, completion) = run_until_ready_loop(
         &exec_ctx,

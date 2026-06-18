@@ -47,7 +47,9 @@ pub async fn capture_coinset_websocket_once(
                             handle_ws_text(store, coin_watchlist, &text)?;
                         }
                         Ok(Some(Ok(Message::Ping(payload)))) => {
-                            ws.send(Message::Pong(payload)).await.map_err(ws_error)?;
+                            ws.send(Message::Pong(payload))
+                                .await
+                                .map_err(|err| ws_error(&err))?;
                         }
                         Ok(Some(Ok(Message::Close(_)))) => {
                             return Err(crate::error::SignerError::Other(
@@ -55,10 +57,9 @@ pub async fn capture_coinset_websocket_once(
                             ));
                         }
                         Ok(Some(Err(err))) => {
-                            return Err(ws_error(err));
+                            return Err(ws_error(&err));
                         }
                         Ok(None) => break,
-                        Err(_) => continue,
                         _ => {}
                     }
                 }

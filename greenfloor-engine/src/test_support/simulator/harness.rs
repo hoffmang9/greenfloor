@@ -111,9 +111,10 @@ impl SimulatorVaultHarness {
     pub fn fund_vault_two_cats(&mut self, base_amount: u64, quote_amount: u64) -> (Cat, Cat) {
         let base_cat = self.fund_vault_cat(base_amount);
         let quote_cat = self.fund_vault_cat(quote_amount);
-        if base_cat.info.asset_id == quote_cat.info.asset_id {
-            panic!("expected distinct CAT asset ids from sequential issuance");
-        }
+        assert!(
+            base_cat.info.asset_id != quote_cat.info.asset_id,
+            "expected distinct CAT asset ids from sequential issuance"
+        );
         (base_cat, quote_cat)
     }
 
@@ -163,7 +164,7 @@ impl SimulatorVaultHarness {
                 cat.coin.amount == cat_amount
                     && cat.info.p2_puzzle_hash == self.chain.p2_message_hash
             })
-            .cloned()
+            .copied()
             .expect("funded cat coin");
         if label == 0 {
             self.chain.asset_id = cat.info.asset_id;

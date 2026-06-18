@@ -197,23 +197,23 @@ pub async fn run_coin_ops_phase(
         Some(&market.market_id),
     )?;
 
-    if !executable_plans.is_empty() {
+    if executable_plans.is_empty() {
         store.add_audit_event(
-            "coin_ops_executed",
+            "coin_ops_skipped_fee_budget",
             &json!({
                 "market_id": market.market_id,
                 "plan_count": plans.len(),
-                "executable_count": executable_plans.len(),
                 "overflow_count": overflow_plans.len(),
             }),
             Some(&market.market_id),
         )?;
     } else {
         store.add_audit_event(
-            "coin_ops_skipped_fee_budget",
+            "coin_ops_executed",
             &json!({
                 "market_id": market.market_id,
                 "plan_count": plans.len(),
+                "executable_count": executable_plans.len(),
                 "overflow_count": overflow_plans.len(),
             }),
             Some(&market.market_id),

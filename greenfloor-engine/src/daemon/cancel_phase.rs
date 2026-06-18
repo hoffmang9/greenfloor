@@ -49,7 +49,7 @@ pub async fn run_market_cancel_phase(
         .collect();
     let target_offer_ids = collect_open_offer_ids_for_cancel(&offer_rows);
     let mut items = Vec::new();
-    let cancel_planned = target_offer_ids.len() as i64;
+    let cancel_planned = target_offer_ids.len().try_into().unwrap_or(0i64);
     let mut cancel_executed = 0_i64;
 
     if !decision.triggered {

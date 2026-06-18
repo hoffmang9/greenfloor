@@ -17,11 +17,11 @@ impl ManagerOutput {
         Self { compact }
     }
 
-    pub fn emit_json(&self, value: &Value) -> SignerResult<()> {
+    pub fn emit_json(self, value: &Value) -> SignerResult<()> {
         cli_util::print_json_value(value, self.compact)
     }
 
-    pub fn emit_serialized<T: Serialize>(&self, value: &T) -> SignerResult<()> {
+    pub fn emit_serialized<T: Serialize>(self, value: &T) -> SignerResult<()> {
         cli_util::print_json(value, self.compact)
     }
 }

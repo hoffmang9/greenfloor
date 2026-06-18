@@ -48,7 +48,10 @@ async fn dexie_post_offer_phase_posts_and_verifies_visibility() {
     })
     .await
     .expect("post");
-    assert_eq!(result.get("success").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(
+        result.get("success").and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
     assert_eq!(result.get("id").and_then(|v| v.as_str()), Some(offer_id));
 }
 
@@ -113,7 +116,7 @@ vault:
     .expect("write");
     std::fs::write(
         &markets_path,
-        r#"
+        r"
 markets:
   - id: m1
     enabled: true
@@ -124,7 +127,7 @@ markets:
     pricing:
       min_price_quote_per_base: 0.0031
       max_price_quote_per_base: 0.0038
-"#,
+",
     )
     .expect("write markets");
 
@@ -160,7 +163,7 @@ fn resolve_market_rejects_unknown_market_id() {
     let markets_path = dir.path().join("markets.yaml");
     std::fs::write(
         &markets_path,
-        r#"
+        r"
 markets:
   - id: m1
     enabled: true
@@ -171,7 +174,7 @@ markets:
     pricing:
       min_price_quote_per_base: 0.0031
       max_price_quote_per_base: 0.0038
-"#,
+",
     )
     .expect("write");
     let markets = load_markets_config(&markets_path).expect("markets");

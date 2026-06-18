@@ -136,7 +136,7 @@ mod tests {
             mode: "sell_only".to_string(),
             pricing: json!({}),
             cancel_move_threshold_bps: None,
-            ladders: HashMap::new(),
+            ladders: HashMap::default(),
         }
     }
 

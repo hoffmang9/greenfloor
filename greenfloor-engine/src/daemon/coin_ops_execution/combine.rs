@@ -48,11 +48,11 @@ pub(crate) async fn execute_daemon_combine_plan(
 
     let combine_input_coin_ids = match plan_auto_combine_inputs(
         &spendable,
-        requested_number_of_coins as usize,
+        requested_number_of_coins.try_into().unwrap_or(0usize),
         CombineInputSelectionMode::ExactAmount,
         Some(target_coin_amount_mojos),
         Some(&ctx.watched_coin_ids),
-        Some(capped_number_of_coins as usize),
+        Some(capped_number_of_coins.try_into().unwrap_or(0usize)),
     ) {
         Ok(ids) => ids,
         Err(reason) => {
@@ -81,7 +81,11 @@ pub(crate) async fn execute_daemon_combine_plan(
         .execute_mixed_split(
             output_amounts,
             &combine_input_coin_ids,
-            ctx.program.coin_ops_combine_fee_mojos.max(0) as u64,
+            ctx.program
+                .coin_ops_combine_fee_mojos
+                .max(0)
+                .try_into()
+                .unwrap_or(0u64),
         )
         .await
     {

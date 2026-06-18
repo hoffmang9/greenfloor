@@ -7,6 +7,7 @@ pub mod time;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::BuildHasher;
 
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
@@ -41,7 +42,7 @@ pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult
     ]
     .into_iter()
     .collect();
-    let mut offer_ids = HashSet::new();
+    let mut offer_ids = HashSet::default();
     for row in store.list_offer_state_details(market_id, 500)? {
         let state = row.state.trim().to_ascii_lowercase();
         if tracked_states.contains(state.as_str())
@@ -77,7 +78,7 @@ fn active_offer_state_summary(
     limit: usize,
 ) -> SignerResult<ActiveOfferStateSummary> {
     let offer_states = store.list_offer_state_details(market_id, limit)?;
-    let mut state_counts: HashMap<String, i64> = HashMap::new();
+    let mut state_counts: HashMap<String, i64> = HashMap::default();
     for row in &offer_states {
         let state = row.state.trim().to_ascii_lowercase();
         if state.is_empty() {
@@ -113,10 +114,10 @@ fn active_offer_state_summary(
     Ok((active_offer_ids, state_counts, metadata))
 }
 
-pub fn active_offer_counts_by_size(
+pub fn active_offer_counts_by_size<S: BuildHasher>(
     store: &SqliteStore,
     market_id: &str,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
     tracked_sizes: &[i64],
 ) -> SignerResult<(BTreeMap<i64, i64>, u64)> {
     let (counts, _, unmapped) = active_offer_counts_by_size_detail(
@@ -129,10 +130,10 @@ pub fn active_offer_counts_by_size(
     Ok((counts, unmapped))
 }
 
-pub fn active_offer_counts_by_size_detail(
+pub fn active_offer_counts_by_size_detail<S: BuildHasher>(
     store: &SqliteStore,
     market_id: &str,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
 ) -> SignerResult<SizeCountDetail> {
@@ -147,10 +148,10 @@ pub fn active_offer_counts_by_size_detail(
     Ok((counts, state_counts, unmapped))
 }
 
-fn active_offer_counts_by_size_at(
+fn active_offer_counts_by_size_at<S: BuildHasher>(
     store: &SqliteStore,
     market_id: &str,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
 ) -> SignerResult<(BTreeMap<i64, i64>, u64)> {
@@ -166,10 +167,10 @@ fn active_offer_counts_by_size_at(
     Ok((buckets.counts, buckets.unmapped))
 }
 
-pub fn active_offer_counts_by_size_and_side(
+pub fn active_offer_counts_by_size_and_side<S: BuildHasher>(
     store: &SqliteStore,
     market_id: &str,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
     tracked_sizes: &[i64],
 ) -> SignerResult<SideCounts> {
     let (buy, sell, _, unmapped) = active_offer_counts_by_size_and_side_detail(
@@ -182,10 +183,10 @@ pub fn active_offer_counts_by_size_and_side(
     Ok((buy, sell, unmapped))
 }
 
-pub fn active_offer_counts_by_size_and_side_detail(
+pub fn active_offer_counts_by_size_and_side_detail<S: BuildHasher>(
     store: &SqliteStore,
     market_id: &str,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
 ) -> SignerResult<SideCountDetail> {
@@ -200,10 +201,10 @@ pub fn active_offer_counts_by_size_and_side_detail(
     Ok((buy, sell, state_counts, unmapped))
 }
 
-fn active_offer_counts_by_size_and_side_at(
+fn active_offer_counts_by_size_and_side_at<S: BuildHasher>(
     store: &SqliteStore,
     market_id: &str,
-    dexie_size_by_offer_id: Option<&HashMap<String, i64>>,
+    dexie_size_by_offer_id: Option<&HashMap<String, i64, S>>,
     tracked_sizes: &[i64],
     clock: DateTime<Utc>,
 ) -> SignerResult<SideCounts> {
@@ -225,11 +226,12 @@ pub fn watched_coin_ids_for_market(cache: &CoinWatchlistCache, market_id: &str) 
     cache.watched_coin_ids_for_market(market_id)
 }
 
-pub fn set_watched_coin_ids_for_market(
+pub fn set_watched_coin_ids_for_market<S: BuildHasher>(
     cache: &CoinWatchlistCache,
     market_id: &str,
-    coin_ids: HashSet<String>,
+    coin_ids: HashSet<String, S>,
 ) {
+    let coin_ids: HashSet<String> = coin_ids.into_iter().collect();
     cache.set_watched_coin_ids_for_market(market_id, coin_ids);
 }
 
@@ -247,7 +249,7 @@ pub fn update_market_coin_watchlist_from_offers(
     offers: &[Value],
 ) -> SignerResult<()> {
     let watch_offer_ids = watchlist_offer_ids_for_coin_tracking(store, market_id)?;
-    let mut watched_coin_ids = HashSet::new();
+    let mut watched_coin_ids: HashSet<String> = HashSet::default();
     let mut matched_offer_count = 0_u64;
     for offer in offers {
         let offer_id = offer.get("id").and_then(Value::as_str).unwrap_or("").trim();

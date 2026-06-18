@@ -33,16 +33,18 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             low_inventory_alerts_enabled,
             pushover_enabled,
             with_signer,
-        } => setup::run_materialize_minimal_program(setup::MaterializeMinimalProgramRequest {
-            output: &output,
-            home_dir: &home_dir,
-            dexie_api_base: &dexie_api_base,
-            log_level: &log_level,
-            dry_run,
-            low_inventory_alerts_enabled,
-            pushover_enabled,
-            with_signer,
-        }),
+        } => Ok(setup::run_materialize_minimal_program(
+            setup::MaterializeMinimalProgramRequest {
+                output: &output,
+                home_dir: &home_dir,
+                dexie_api_base: &dexie_api_base,
+                log_level: &log_level,
+                dry_run,
+                low_inventory_alerts_enabled,
+                pushover_enabled,
+                with_signer,
+            },
+        )),
         ManagerCommands::KeysOnboard {
             chia_keys_dir,
             key_id,
@@ -70,7 +72,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             let response = build_and_post_offer(BuildAndPostOfferRequest {
                 program_path: ctx.program_config.clone(),
                 markets_path: ctx.markets_config.clone(),
-                testnet_markets_path: ctx.testnet_markets_path().map(|path| path.to_path_buf()),
+                testnet_markets_path: ctx.testnet_markets_path().map(std::path::Path::to_path_buf),
                 network,
                 market_id,
                 pair,
@@ -97,7 +99,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             events_limit,
         } => run_offers_status_command(
             &ctx,
-            OffersStatusCliArgs {
+            &OffersStatusCliArgs {
                 market_id,
                 limit,
                 events_limit,
@@ -141,7 +143,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             testnet_markets_template,
             seed_testnet_markets,
             force,
-        } => setup::run_bootstrap_home(setup::BootstrapHomeParams {
+        } => setup::run_bootstrap_home(&setup::BootstrapHomeParams {
             ctx: &ctx,
             home_dir: &home_dir,
             program_template: &program_template,
@@ -181,7 +183,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             })
             .await
         }
-        ManagerCommands::CatsList => cats::run_cats_list(&ctx).await,
+        ManagerCommands::CatsList => cats::run_cats_list(&ctx),
         ManagerCommands::CatsDelete {
             network,
             cat_id,

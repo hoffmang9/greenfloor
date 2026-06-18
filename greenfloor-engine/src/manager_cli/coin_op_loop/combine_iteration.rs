@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use std::collections::HashSet;
 
 use crate::coin_ops::execution::CoinOpExecContext;
 use crate::coin_ops::{
@@ -38,15 +39,15 @@ pub(super) async fn run_combine_iteration(
     let input_coin_ids = if coin_ids.is_empty() {
         plan_auto_combine_inputs(
             &spendable,
-            number_of_coins as usize,
+            number_of_coins.try_into().unwrap_or(0usize),
             CombineInputSelectionMode::ExactAmount,
             if target_coin_amount_mojos > 0 {
                 Some(target_coin_amount_mojos)
             } else {
                 None
             },
-            None,
-            Some(ctx.combine_input_cap as usize),
+            None::<&HashSet<String>>,
+            Some(ctx.combine_input_cap.try_into().unwrap_or(0usize)),
         )
         .map_err(|reason| SignerError::Other(reason.to_string()))?
     } else {
