@@ -85,6 +85,16 @@ Coin-op notes:
 - Local gate: `pre-commit run --all-files`.
 - CI runs pytest as a separate step; pre-commit skips pytest via `SKIP=pytest`.
 
+**Deterministic tests (Rust operator paths):**
+
+- Every conditional dispatch gate in operator policy has branch coverage in
+  `greenfloor-engine/` tests.
+- Polling and wait loops (daemon cycle, coin-op confirmation, websocket recovery) need
+  deterministic timeout/warning tests — inject clocks or mock time; avoid wall-clock-only
+  assertions.
+- Extract repeated test setup into a named helper when it appears in more than two tests.
+- Deterministic test harness runtime stays under 10 minutes wall clock (target under 5).
+
 ## Completed milestones
 
 - [x] Native Rust operator binaries (ADR 0013)

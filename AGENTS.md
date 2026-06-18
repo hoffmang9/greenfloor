@@ -43,8 +43,8 @@ Severity tags:
   (`manager_cli/`, `daemon/`). No PyO3 or Python orchestration entrypoints.
 - `[MUST]` Shared offer orchestration: `offer/operator/` and `offer/lifecycle/` (manager + daemon).
 - `[MUST]` Coin-op policy and execution: `coin_ops/` and `daemon/coin_ops_execution/`.
-- `[MUST]` Offer build/post uses `offer::operator::build_and_post_offer` (`greenfloor-manager
-build-and-post-offer` and daemon managed post).
+- `[MUST]` Offer build/post uses `offer::operator::build_and_post_offer`
+  (`greenfloor-manager build-and-post-offer` and daemon managed post).
 - `[MUST]` Offer-payload ID extraction and conservative-fee parsing are Rust-only
   (`offer::dexie_payload`, `coinset::get_conservative_fee_estimate`).
 - `[MUST]` Import direction: daemon never imports CLI; CLI never imports daemon. Shared logic lives in
@@ -59,8 +59,9 @@ build-and-post-offer` and daemon managed post).
   `markets-fields`, `cats-fields`, `materialize-minimal-program`, `config-validate`. Operator YAML
   policy lives in `greenfloor-engine/src/config/`; scripts must not walk operator YAML for policy
   fields.
-- `[MUST]` Script Coinset IO: `greenfloor.adapters.coinset` → `greenfloor-engine coinset
-{post,push-tx}`. Reuse `hex_utils`, `logging_setup`, `manager_subprocess`, `engine_binary`.
+- `[MUST]` Script Coinset IO: `greenfloor.adapters.coinset` → `greenfloor-engine coinset post`
+  and `greenfloor-engine coinset push-tx`. Reuse `hex_utils`, `logging_setup`,
+  `manager_subprocess`, `engine_binary`.
 - `[CONTEXT]` Pytest covers script adapters and subprocess harnesses; operator policy parity is
   `cargo test --manifest-path greenfloor-engine/Cargo.toml` in CI (ADR 0013).
 
@@ -72,26 +73,24 @@ build-and-post-offer` and daemon managed post).
 - `[MUST]` Keep one distinct responsibility per file; merge pass-through modules into functions.
 - `[MUST]` Eliminate duplicated logic blocks (>10 lines) by extracting shared helpers.
 - `[MUST]` Use allowlists for state checks; never rely on negated blocklists.
-- `[MUST]` For similar polling loops, match existing interval/accumulator style; warning cadence must be additive (`next_warning += warning_interval`).
+- `[MUST]` For similar polling loops, match existing interval/accumulator style; warning cadence
+  must be additive (`next_warning += warning_interval`). See `docs/plan.md` → **Delivery
+  constraints** for deterministic test expectations on wait/timeout paths.
 - `[SHOULD]` Keep functions under ~150 logic lines (excluding docstrings/blank lines).
 - `[SHOULD]` Minimize module-level mutable state; pass mutable state through objects/dataclasses.
 
 ## Current Scope
 
-- `[CONTEXT]` Rust-native operator cutover complete (ADR 0013). Production path: `greenfloor-manager`
-  - `greenfloord`.
-- `[CONTEXT]` Active mainnet canary: `eco1812022_sell_wusdbc`; testnet11 proof pair via CI
-  `live-testnet-e2e.yml`.
-- `[CONTEXT]` Open H3: evaluate Cloud Wallet native offer split vs local pre-offer split (see
-  `docs/plan.md`).
-- `[CONTEXT]` Defer new CLI commands, metrics, and observability without live-target justification.
-- `[CONTEXT]` v1 notifications: low-inventory alerts only (ticker, remaining amount, receive address).
+- `[CONTEXT]` V1 scope, architecture, open items, and delivery constraints: `docs/plan.md`.
+- `[CONTEXT]` Recent milestones and live testing targets: `docs/progress.md`.
 
 ## Before You Commit
 
 - `[MUST]` Python version is 3.11+.
 - `[MUST]` Use venv binaries for Python tooling (for example `.venv/bin/python -m pytest`).
 - `[MUST]` Run `pre-commit run --all-files`.
+- `[MUST]` Operator/daemon test expectations: `docs/plan.md` → **Delivery constraints**
+  (deterministic branch coverage, injected clocks for wait loops, harness runtime).
 
 ## Commit scope
 

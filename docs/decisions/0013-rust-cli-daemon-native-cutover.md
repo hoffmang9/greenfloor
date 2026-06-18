@@ -6,13 +6,14 @@ Accepted (2026-06-17)
 
 ## Context
 
-GreenFloor has one operator deployment. The daemon already runs through
-`greenfloor-engine daemon`, but operator entrypoints, several manager commands,
-config validation, and large Python CLI/daemon packages remain.
+GreenFloor has one operator deployment. At cutover time the daemon already ran through
+`greenfloor-engine daemon`, but operator entrypoints, several manager commands, config
+validation, and large Python CLI/daemon packages remained.
 
-ADR 0012 assumed a long-lived Python manager wrapper and Python daemon
-orchestration. That is obsolete: the Rust engine owns daemon cycles, offer
-build/post, policy, SQLite, and most adapters.
+An intermediate cutover plan assumed a long-lived Python manager wrapper and Python daemon
+orchestration. That path is obsolete: the Rust engine owns daemon cycles, offer build/post,
+policy, SQLite, and most adapters. Superseded intermediate ADRs (`0005`–`0012`) were removed
+from the index; see git history for the full record.
 
 ## Decision
 
