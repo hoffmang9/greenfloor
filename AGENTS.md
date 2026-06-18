@@ -35,7 +35,7 @@ Severity tags:
 - `[MUST]` `greenfloor/core`: deterministic policy only (no IO).
 - `[MUST]` `greenfloor/core/coin_ops/`: coin-op deterministic policy (plan, fee budget, inventory, min-amount guard) shared by CLI and daemon.
 - `[MUST]` `greenfloor/config`: parse/validate config, resolve paths, resolve quote assets.
-- `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet). Operator signing/execution is in-process Rust (`greenfloor-engine`). Script Coinset mutations shell out to `greenfloor-engine coinset …` via `coinset_cli_mutate.py`; reads stay in `coinset_read.py`.
+- `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet). Operator signing/execution is in-process Rust (`greenfloor-engine`). Script Coinset reads and mutations shell out to `greenfloor-engine coinset {post,…}` via `coinset_read.py` / `coinset_cli_mutate.py`.
 - `[MUST]` `greenfloor-engine/`: canonical Rust engine crate; new vault spend/offer logic lands here first.
 - `[MUST]` Operator CLI and daemon are native Rust binaries: `greenfloor-manager`, `greenfloord`, `greenfloor-engine` (`greenfloor-engine/src/manager_cli/`, `greenfloor-engine/src/daemon/`). They do not import PyO3.
 - `[MUST]` Shared offer orchestration lives in `greenfloor-engine/src/offer/operator/` and `greenfloor-engine/src/offer/lifecycle/` (used by both manager CLI and daemon).

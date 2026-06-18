@@ -9,7 +9,7 @@ mod xch;
 
 pub use api::{
     conservative_fee_from_payload, get_all_mempool_tx_ids, get_conservative_fee_estimate,
-    get_fee_estimate, push_tx_hex,
+    get_fee_estimate, post_coinset_rpc, push_tx_hex,
 };
 
 pub(crate) use coin_select::{

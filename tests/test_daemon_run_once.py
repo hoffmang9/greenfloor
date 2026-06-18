@@ -54,6 +54,10 @@ def test_run_once_multi_market_sequential_execution(
         poll_coinset_mempool=False,
     )
     assert result.exit_code == 0
+    assert result.response is not None
+    cycle_summary = result.response.get("cycle_summary")
+    assert isinstance(cycle_summary, dict)
+    assert cycle_summary.get("markets_processed") == 2
 
     store = SqliteStore(db_path)
     try:

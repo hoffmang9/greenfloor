@@ -1,8 +1,6 @@
-"""Coinset adapter: HTTP reads in Python, mutations via greenfloor-engine CLI."""
+"""Coinset adapter: all IO via greenfloor-engine CLI (post for reads, subcommands for mutations)."""
 
 from __future__ import annotations
-
-from typing import Any
 
 from greenfloor.adapters.coinset_cli_mutate import (
     conservative_fee_estimate_cli,
@@ -24,20 +22,10 @@ __all__ = [
 
 
 class CoinsetAdapter(CoinsetReadClient):
-    def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
-        return self.post_json(endpoint, body)
-
-    def push_tx(self, *, spend_bundle_hex: str) -> dict[str, Any]:
+    def push_tx(self, *, spend_bundle_hex: str) -> dict[str, object]:
         payload = push_tx_cli(self.network, self.base_url, spend_bundle_hex)
         if not isinstance(payload, dict):
             raise RuntimeError("coinset_push_tx_invalid_response")
-        return payload
-
-    def push_tx_structured(self, *, spend_bundle: dict[str, Any]) -> dict[str, Any]:
-        """Test-only fallback when a Coinset endpoint rejects hex-encoded bundles."""
-        payload = self.post_json("push_tx", {"spend_bundle": spend_bundle})
-        if not isinstance(payload, dict):
-            return {"success": False, "error": "invalid_response_payload"}
         return payload
 
     def get_fee_estimate(
@@ -46,7 +34,7 @@ class CoinsetAdapter(CoinsetReadClient):
         target_times: list[int] | None = None,
         cost: int = 1_000_000,
         spend_count: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         resolved_target_times = target_times or [60, 300, 600]
         spend_count_opt = (
             int(spend_count) if spend_count is not None and int(spend_count) > 0 else None

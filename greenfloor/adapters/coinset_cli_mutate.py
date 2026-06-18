@@ -1,4 +1,4 @@
-"""Coinset mutation IO via native ``greenfloor-engine coinset`` CLI subcommands."""
+"""Coinset IO via native ``greenfloor-engine coinset`` CLI subcommands."""
 
 from __future__ import annotations
 
@@ -33,6 +33,23 @@ def run_coinset_cli(subcommand: str, flags: list[tuple[str, str]]) -> Any:
     for flag, value in flags:
         argv.extend([flag, value])
     return run_engine_json(argv)
+
+
+def post_json_cli(
+    network: str,
+    base_url: str,
+    endpoint: str,
+    body: dict[str, Any],
+) -> Any:
+    return run_coinset_cli(
+        "post",
+        [
+            ("--network", network),
+            ("--base-url", base_url),
+            ("--endpoint", endpoint),
+            ("--body-json", json.dumps(body, separators=(",", ":"))),
+        ],
+    )
 
 
 def push_tx_cli(network: str, base_url: str, spend_bundle_hex: str) -> Any:

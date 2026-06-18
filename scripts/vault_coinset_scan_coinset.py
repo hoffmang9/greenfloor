@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import importlib
-import json
 import random
 import time
-import urllib.error
-import urllib.request
 from typing import Any
 
 from greenfloor.adapters.coinset import CoinsetAdapter
@@ -183,30 +180,7 @@ class CoinsetScanner:
         )
 
     def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
-        def _request_once() -> dict[str, Any]:
-            payload = dict(body)
-            if self.adapter.network == "testnet11":
-                payload.setdefault("network", "testnet11")
-            req = urllib.request.Request(
-                f"{self.adapter.base_url}/{endpoint}",
-                data=json.dumps(payload).encode("utf-8"),
-                method="POST",
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "User-Agent": "greenfloor-vault-coinset-scanner/0.1",
-                },
-            )
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                response_payload = json.loads(resp.read().decode("utf-8"))
-            if not isinstance(response_payload, dict):
-                raise RuntimeError("coinset_invalid_response_payload")
-            return response_payload
-
-        parsed = _coinset_with_retries(_request_once)
-        if not isinstance(parsed, dict):
-            raise RuntimeError("coinset_invalid_response_payload")
-        return parsed
+        return _coinset_with_retries(lambda: self.adapter.post_json(endpoint, body))
 
     def by_puzzle_hash(
         self,
@@ -252,19 +226,14 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        payload = self._post_json(
-            "get_coin_records_by_hint",
-            {
-                "hint": hint,
-                "include_spent_coins": include_spent,
-                **({"start_height": int(start_height)} if start_height is not None else {}),
-                **({"end_height": int(end_height)} if end_height is not None else {}),
-            },
+        return _coinset_with_retries(
+            lambda: self.adapter.get_coin_records_by_hint(
+                hint_hex=hint,
+                include_spent_coins=include_spent,
+                start_height=start_height,
+                end_height=end_height,
+            )
         )
-        if not payload.get("success", False):
-            return []
-        rows = payload.get("coin_records") or []
-        return [row for row in rows if isinstance(row, dict)]
 
     def by_hints(
         self,

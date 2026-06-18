@@ -40,6 +40,33 @@ fn coinset_client(
     }
 }
 
+pub async fn post_coinset_rpc(
+    network: &str,
+    base_url: Option<&str>,
+    endpoint: &str,
+    mut body: Value,
+) -> SignerResult<Value> {
+    let endpoint = endpoint.trim().trim_start_matches('/');
+    if endpoint.is_empty() {
+        return Err(SignerError::Other("coinset endpoint is required".to_string()));
+    }
+    if network.trim().eq_ignore_ascii_case("testnet11") {
+        if let Some(obj) = body.as_object_mut() {
+            obj.entry("network".to_string())
+                .or_insert(json!("testnet11"));
+        }
+    }
+    let msp = if let Some(url) = base_url.map(str::trim).filter(|value| !value.is_empty()) {
+        MspCoinset::for_network(network, Some(url))?
+    } else {
+        MspCoinset::for_network(network, None)?
+    };
+    msp.client()
+        .make_post_request(endpoint, body)
+        .await
+        .map_err(SignerError::from)
+}
+
 pub async fn push_tx_hex(
     network: &str,
     base_url: Option<&str>,

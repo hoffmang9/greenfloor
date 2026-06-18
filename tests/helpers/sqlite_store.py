@@ -1,3 +1,10 @@
+"""SQLite persistence helpers for integration tests.
+
+Canonical schema owner: ``greenfloor-engine/src/storage/schema.rs`` and
+``greenfloor-engine/src/storage/sqlite/``. Keep this module aligned with Rust
+storage when adding columns or tables.
+"""
+
 from __future__ import annotations
 
 import json

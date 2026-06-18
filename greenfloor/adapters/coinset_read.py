@@ -1,12 +1,10 @@
-"""Read-only Coinset HTTP helpers for scripts."""
+"""Read-only Coinset queries via ``greenfloor-engine coinset post`` CLI."""
 
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
 from typing import Any
 
+from greenfloor.adapters.coinset_cli_mutate import post_json_cli
 from greenfloor.hex_utils import normalize_hex_id
 
 _COINSET_TX_ID_KEYS = (
@@ -143,36 +141,10 @@ class CoinsetReadClient:
         self.base_url = resolved_base_url.rstrip("/")
 
     def post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
-        request_body = dict(body)
-        if self.network == "testnet11":
-            request_body.setdefault("network", "testnet11")
-        url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
-        data = json.dumps(request_body).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=data,
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": "greenfloor/0.1 (+https://github.com/hoffmang/greenfloor)",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            raw = exc.read().decode("utf-8", errors="replace").strip()
-            snippet = raw[:160] if raw else ""
-            message = f"coinset_http_error:{exc.code}"
-            if snippet:
-                message = f"{message}:{snippet}"
-            raise RuntimeError(message) from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"coinset_network_error:{exc.reason}") from exc
-        if isinstance(payload, dict):
-            return payload
-        raise RuntimeError("coinset_invalid_response_payload")
+        payload = post_json_cli(self.network, self.base_url, endpoint, body)
+        if not isinstance(payload, dict):
+            raise RuntimeError("coinset_invalid_response_payload")
+        return payload
 
     def get_all_mempool_tx_ids(self) -> list[str]:
         payload = self.post_json("get_all_mempool_tx_ids", {})
@@ -285,6 +257,30 @@ class CoinsetReadClient:
         if end_height is not None:
             body["end_height"] = int(end_height)
         payload = self.post_json("get_coin_records_by_parent_ids", body)
+        if not payload.get("success", False):
+            return []
+        records = payload.get("coin_records") or []
+        if not isinstance(records, list):
+            return []
+        return [r for r in records if isinstance(r, dict)]
+
+    def get_coin_records_by_hint(
+        self,
+        *,
+        hint_hex: str,
+        include_spent_coins: bool = False,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        body: dict[str, Any] = {
+            "hint": hint_hex,
+            "include_spent_coins": bool(include_spent_coins),
+        }
+        if start_height is not None:
+            body["start_height"] = int(start_height)
+        if end_height is not None:
+            body["end_height"] = int(end_height)
+        payload = self.post_json("get_coin_records_by_hint", body)
         if not payload.get("success", False):
             return []
         records = payload.get("coin_records") or []
