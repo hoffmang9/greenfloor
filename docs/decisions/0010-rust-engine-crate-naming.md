@@ -45,4 +45,4 @@ via `greenfloor.adapters.coinset` (`cli.py` subprocess bridge, `client.py` adapt
 ## Consequences
 
 - Operator and script paths use native binaries only; no Python extension install.
-- ADR 0006/0007 boundaries unchanged; this ADR clarifies naming after PyO3 removal.
+- ADR 0007 boundaries unchanged; this ADR clarifies naming after PyO3 removal.
