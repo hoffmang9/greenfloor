@@ -1,0 +1,345 @@
+"""Read-only Coinset HTTP helpers for scripts."""
+
+from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
+from typing import Any
+
+from greenfloor.hex_utils import normalize_hex_id
+
+_COINSET_TX_ID_KEYS = (
+    "tx_id",
+    "txId",
+    "take_tx_id",
+    "takeTxId",
+    "settlement_tx_id",
+    "settlementTxId",
+    "coinset_tx_id",
+    "coinsetTxId",
+    "block_tx_id",
+    "blockTxId",
+    "mempool_tx_ids",
+    "mempoolTxIds",
+    "confirmed_tx_ids",
+    "confirmedTxIds",
+)
+_COINSET_COIN_ID_KEYS = (
+    "coin_id",
+    "coinId",
+    "coin_name",
+    "coinName",
+    "involved_coins",
+    "involvedCoins",
+    "input_coins",
+    "inputCoins",
+    "output_coins",
+    "outputCoins",
+    "spent_coins",
+    "spentCoins",
+    "additions",
+    "removals",
+)
+
+
+def _normalize_hex_hash(value: object) -> str:
+    return normalize_hex_id(value)
+
+
+def _looks_like_tx_id(value: object) -> bool:
+    return bool(_normalize_hex_hash(value))
+
+
+def _looks_like_coin_id(value: object) -> bool:
+    return bool(_normalize_hex_hash(value))
+
+
+def extract_coinset_tx_ids_from_offer_payload(payload: dict[str, Any]) -> list[str]:
+    tx_ids: list[str] = []
+
+    def _add_candidate(candidate: object) -> None:
+        if isinstance(candidate, str):
+            normalized = _normalize_hex_hash(candidate)
+            if _looks_like_tx_id(normalized) and normalized not in tx_ids:
+                tx_ids.append(normalized)
+        elif isinstance(candidate, list):
+            for item in candidate:
+                _add_candidate(item)
+
+    def _walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in _COINSET_TX_ID_KEYS:
+                    _add_candidate(value)
+                if isinstance(value, dict | list):
+                    _walk(value)
+            return
+        if isinstance(node, list):
+            for item in node:
+                if isinstance(item, dict | list):
+                    _walk(item)
+
+    _walk(payload)
+    return tx_ids
+
+
+def extract_coin_ids_from_offer_payload(payload: dict[str, Any]) -> list[str]:
+    coin_ids: list[str] = []
+
+    def _add_candidate(candidate: object) -> None:
+        if isinstance(candidate, str):
+            normalized = _normalize_hex_hash(candidate)
+            if _looks_like_coin_id(normalized) and normalized not in coin_ids:
+                coin_ids.append(normalized)
+            return
+        if isinstance(candidate, list):
+            for item in candidate:
+                _add_candidate(item)
+            return
+        if isinstance(candidate, dict):
+            for key in ("id", "coin_id", "coinId", "name", "coin_name", "coinName"):
+                if key in candidate:
+                    _add_candidate(candidate.get(key))
+
+    def _walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in _COINSET_COIN_ID_KEYS:
+                    _add_candidate(value)
+                if isinstance(value, dict | list):
+                    _walk(value)
+            return
+        if isinstance(node, list):
+            for item in node:
+                if isinstance(item, dict | list):
+                    _walk(item)
+
+    _walk(payload)
+    return coin_ids
+
+
+class CoinsetReadClient:
+    MAINNET_BASE_URL = "https://api.coinset.org"
+    TESTNET11_BASE_URL = "https://testnet11.api.coinset.org"
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        *,
+        network: str = "mainnet",
+        require_testnet11: bool = False,
+    ) -> None:
+        selected_network = "testnet11" if require_testnet11 else network.strip().lower()
+        if selected_network not in {"mainnet", "testnet11"}:
+            selected_network = "mainnet"
+        self.network = selected_network
+        resolved_base_url = base_url.strip() if isinstance(base_url, str) else ""
+        if not resolved_base_url:
+            if selected_network == "testnet11":
+                resolved_base_url = self.TESTNET11_BASE_URL
+            else:
+                resolved_base_url = self.MAINNET_BASE_URL
+        self.base_url = resolved_base_url.rstrip("/")
+
+    def post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
+        request_body = dict(body)
+        if self.network == "testnet11":
+            request_body.setdefault("network", "testnet11")
+        url = f"{self.base_url.rstrip('/')}/{endpoint.lstrip('/')}"
+        data = json.dumps(request_body).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": "greenfloor/0.1 (+https://github.com/hoffmang/greenfloor)",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace").strip()
+            snippet = raw[:160] if raw else ""
+            message = f"coinset_http_error:{exc.code}"
+            if snippet:
+                message = f"{message}:{snippet}"
+            raise RuntimeError(message) from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"coinset_network_error:{exc.reason}") from exc
+        if isinstance(payload, dict):
+            return payload
+        raise RuntimeError("coinset_invalid_response_payload")
+
+    def get_all_mempool_tx_ids(self) -> list[str]:
+        payload = self.post_json("get_all_mempool_tx_ids", {})
+        if not payload.get("success", False):
+            return []
+        tx_ids = payload.get("tx_ids") or payload.get("mempool_tx_ids") or []
+        return [str(x) for x in tx_ids]
+
+    def get_coin_records_by_puzzle_hash(
+        self,
+        *,
+        puzzle_hash_hex: str,
+        include_spent_coins: bool = False,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        body: dict[str, Any] = {
+            "puzzle_hash": puzzle_hash_hex,
+            "include_spent_coins": include_spent_coins,
+        }
+        if start_height is not None:
+            body["start_height"] = int(start_height)
+        if end_height is not None:
+            body["end_height"] = int(end_height)
+        payload = self.post_json("get_coin_records_by_puzzle_hash", body)
+        if not payload.get("success", False):
+            return []
+        records = payload.get("coin_records") or []
+        if not isinstance(records, list):
+            return []
+        return [r for r in records if isinstance(r, dict)]
+
+    def get_coin_records_by_puzzle_hashes(
+        self,
+        *,
+        puzzle_hashes_hex: list[str],
+        include_spent_coins: bool = False,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not puzzle_hashes_hex:
+            return []
+        body: dict[str, Any] = {
+            "puzzle_hashes": [str(value) for value in puzzle_hashes_hex],
+            "include_spent_coins": include_spent_coins,
+        }
+        if start_height is not None:
+            body["start_height"] = int(start_height)
+        if end_height is not None:
+            body["end_height"] = int(end_height)
+        payload = self.post_json("get_coin_records_by_puzzle_hashes", body)
+        if not payload.get("success", False):
+            return []
+        records = payload.get("coin_records") or []
+        if not isinstance(records, list):
+            return []
+        return [r for r in records if isinstance(r, dict)]
+
+    def get_coin_record_by_name(self, *, coin_name_hex: str) -> dict[str, Any] | None:
+        payload = self.post_json("get_coin_record_by_name", {"name": coin_name_hex})
+        if not payload.get("success", False):
+            return None
+        record = payload.get("coin_record")
+        if not isinstance(record, dict):
+            return None
+        return record
+
+    def get_coin_records_by_names(
+        self,
+        *,
+        coin_names_hex: list[str],
+        include_spent_coins: bool = True,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not coin_names_hex:
+            return []
+        body: dict[str, Any] = {
+            "names": [str(value) for value in coin_names_hex],
+            "include_spent_coins": bool(include_spent_coins),
+        }
+        if start_height is not None:
+            body["start_height"] = int(start_height)
+        if end_height is not None:
+            body["end_height"] = int(end_height)
+        payload = self.post_json("get_coin_records_by_names", body)
+        if not payload.get("success", False):
+            return []
+        records = payload.get("coin_records") or []
+        if not isinstance(records, list):
+            return []
+        return [r for r in records if isinstance(r, dict)]
+
+    def get_coin_records_by_parent_ids(
+        self,
+        *,
+        parent_ids_hex: list[str],
+        include_spent_coins: bool = True,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not parent_ids_hex:
+            return []
+        body: dict[str, Any] = {
+            "parent_ids": [str(value) for value in parent_ids_hex],
+            "include_spent_coins": bool(include_spent_coins),
+        }
+        if start_height is not None:
+            body["start_height"] = int(start_height)
+        if end_height is not None:
+            body["end_height"] = int(end_height)
+        payload = self.post_json("get_coin_records_by_parent_ids", body)
+        if not payload.get("success", False):
+            return []
+        records = payload.get("coin_records") or []
+        if not isinstance(records, list):
+            return []
+        return [r for r in records if isinstance(r, dict)]
+
+    def get_coin_records_by_hints(
+        self,
+        *,
+        hints_hex: list[str],
+        include_spent_coins: bool = False,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not hints_hex:
+            return []
+        body: dict[str, Any] = {
+            "hints": [str(value) for value in hints_hex],
+            "include_spent_coins": bool(include_spent_coins),
+        }
+        if start_height is not None:
+            body["start_height"] = int(start_height)
+        if end_height is not None:
+            body["end_height"] = int(end_height)
+        payload = self.post_json("get_coin_records_by_hints", body)
+        if not payload.get("success", False):
+            return []
+        records = payload.get("coin_records") or []
+        if not isinstance(records, list):
+            return []
+        return [r for r in records if isinstance(r, dict)]
+
+    def get_puzzle_and_solution(
+        self,
+        *,
+        coin_id_hex: str,
+        height: int | None = None,
+    ) -> dict[str, Any] | None:
+        body: dict[str, Any] = {"coin_id": coin_id_hex}
+        if height is not None and height > 0:
+            body["height"] = int(height)
+        payload = self.post_json("get_puzzle_and_solution", body)
+        if not payload.get("success", False):
+            return None
+        coin_solution = payload.get("coin_solution")
+        if not isinstance(coin_solution, dict):
+            return None
+        return coin_solution
+
+    def get_blockchain_state(self) -> dict[str, Any] | None:
+        payload = self.post_json("get_blockchain_state", {})
+        if not payload.get("success", False):
+            return None
+        blockchain_state = payload.get("blockchain_state")
+        if isinstance(blockchain_state, dict):
+            return blockchain_state
+        return payload

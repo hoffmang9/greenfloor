@@ -31,6 +31,35 @@ pub struct DaemonCycleTestControls {
     pub force_market_error_for: Option<String>,
 }
 
+/// Env gate for non-default `test_controls` on `greenfloor-engine daemon-once`.
+pub fn daemon_test_controls_enabled() -> bool {
+    std::env::var("GREENFLOOR_DAEMON_TEST_CONTROLS")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
+        .unwrap_or(false)
+}
+
+impl DaemonCycleTestControls {
+    pub fn is_non_default(&self) -> bool {
+        self.skip_strategy_execution || self.force_market_error_for.is_some()
+    }
+
+    pub fn ensure_allowed(&self) -> SignerResult<()> {
+        if self.is_non_default() && !daemon_test_controls_enabled() {
+            return Err(crate::error::SignerError::Other(
+                "non-default daemon test_controls require GREENFLOOR_DAEMON_TEST_CONTROLS=1"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonRunOnceRequest {
     pub program_path: PathBuf,
@@ -313,5 +342,36 @@ mod tests {
             resolve_state_db_path(&home, None),
             state_db_path_for_home(&home)
         );
+    }
+
+    #[test]
+    fn test_controls_default_allowed_without_env_gate() {
+        std::env::set_var("GREENFLOOR_DAEMON_TEST_CONTROLS", "0");
+        let controls = DaemonCycleTestControls::default();
+        assert!(controls.ensure_allowed().is_ok());
+    }
+
+    #[test]
+    fn test_controls_non_default_rejected_without_env_gate() {
+        std::env::set_var("GREENFLOOR_DAEMON_TEST_CONTROLS", "0");
+        let controls = DaemonCycleTestControls {
+            skip_strategy_execution: true,
+            force_market_error_for: None,
+        };
+        let err = controls.ensure_allowed().expect_err("gate");
+        assert!(err
+            .to_string()
+            .contains("GREENFLOOR_DAEMON_TEST_CONTROLS=1"));
+    }
+
+    #[test]
+    fn test_controls_non_default_allowed_when_env_gate_set() {
+        std::env::set_var("GREENFLOOR_DAEMON_TEST_CONTROLS", "1");
+        let controls = DaemonCycleTestControls {
+            skip_strategy_execution: true,
+            force_market_error_for: Some("m1".to_string()),
+        };
+        assert!(controls.ensure_allowed().is_ok());
+        std::env::remove_var("GREENFLOOR_DAEMON_TEST_CONTROLS");
     }
 }

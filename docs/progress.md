@@ -38,7 +38,8 @@ runtime modules.
 - Deleted `greenfloor-engine-pyo3/`; scripts use nested `greenfloor-engine coinset …` subcommands.
 - `greenfloor/adapters/coinset.py` shells out to the native binary for push/fee IO.
 - Moved `storage/sqlite.py` to `tests/helpers/sqlite_store.py` (test-only).
-- Daemon integration tests use `greenfloor-engine daemon-once --request-json` (no hidden `greenfloord` test flags).
+- Daemon integration tests use `greenfloor-engine daemon-once --request-json` with
+  `GREENFLOOR_DAEMON_TEST_CONTROLS=1` for non-default `test_controls`.
 
 ### 2026-06-17 — Rust-native CLI/daemon cutover (ADR 0013)
 

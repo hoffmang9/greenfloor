@@ -129,6 +129,9 @@ pub async fn run_daemon_once_from_request_json(args: DaemonOnceJsonArgs) -> Sign
         .map_err(|err| SignerError::Other(format!("read request json: {err}")))?;
     let value: Value = serde_json::from_str(&raw)
         .map_err(|err| SignerError::Other(format!("parse request json: {err}")))?;
+    let body: DaemonRunOnceRequestBody = serde_json::from_value(value.clone())
+        .map_err(|err| SignerError::Other(format!("parse daemon once request: {err}")))?;
+    body.test_controls.ensure_allowed()?;
     let response = run_daemon_cycle_once_from_json(value).await?;
     if args.json {
         let encoded = serde_json::to_value(&response)

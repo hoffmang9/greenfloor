@@ -16,6 +16,7 @@ accepted decision** when onboarding; older ADRs may be superseded.
 
 | ADR                                                              | Superseded by                          |
 | ---------------------------------------------------------------- | -------------------------------------- |
+| [0011](decisions/0011-offer-request-python-import-boundaries.md) | 0013 (Python offer bridges removed)    |
 | [0012](decisions/0012-manager-cli-rust-orchestration-cutover.md) | 0013                                   |
 | [0009](decisions/0009-manager-cli-modularization.md)             | 0013                                   |
 | [0008](decisions/0008-offer-runtime-modularization.md)           | 0013 (Python offer runtime removed)    |

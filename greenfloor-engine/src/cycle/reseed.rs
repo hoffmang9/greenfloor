@@ -22,7 +22,7 @@ impl ReseedSkipReason {
     }
 }
 
-/// Stable label list for Python `ReseedSkipReason` parity tests and PyO3 FFI.
+/// Stable label list for daemon audit and operator diagnostics.
 pub fn reseed_skip_reason_labels() -> Vec<&'static str> {
     vec![
         ReseedSkipReason::StrategyActionsPresent.label(),

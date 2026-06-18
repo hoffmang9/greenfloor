@@ -15,7 +15,7 @@ Accepted; **operator scope updated** by [0013-rust-cli-daemon-native-cutover.md]
 ## Original decision (2026-05)
 
 Vault KMS signing and offer construction are implemented once in `greenfloor-engine`.
-PyO3 provided in-process access for Python orchestration and parity tests.
+PyO3 provided in-process access for Python orchestration and parity tests. **Removed 2026-06-17** (ADR 0013).
 
 ## Rationale
 

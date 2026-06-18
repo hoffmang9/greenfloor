@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from greenfloor.engine_binary import resolve_greenfloor_engine_binary
+
+
+@dataclass(slots=True)
+class DaemonOnceTestResult:
+    exit_code: int
+    response: dict[str, object] | None
 
 
 def run_once_for_tests(
@@ -21,7 +28,7 @@ def run_once_for_tests(
     use_websocket_capture: bool = False,
     testnet_markets_path: Path | None = None,
     test_controls: dict[str, object] | None = None,
-) -> int:
+) -> DaemonOnceTestResult:
     controls = (
         dict(test_controls) if test_controls is not None else {"skip_strategy_execution": True}
     )
@@ -58,11 +65,25 @@ def run_once_for_tests(
             f"greenfloor-engine daemon-once failed (exit {result.returncode}): "
             f"{result.stderr.strip()}"
         )
-    return int(result.returncode)
+
+    response: dict[str, object] | None = None
+    stdout = result.stdout.strip()
+    if stdout:
+        try:
+            parsed = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"greenfloor-engine daemon-once returned invalid json: {stdout[:200]}"
+            ) from exc
+        if isinstance(parsed, dict):
+            response = parsed
+
+    return DaemonOnceTestResult(exit_code=int(result.returncode), response=response)
 
 
 def install_rust_cycle_test_env(monkeypatch) -> None:
     monkeypatch.setenv("GREENFLOOR_XCH_PRICE_USD", "30")
+    monkeypatch.setenv("GREENFLOOR_DAEMON_TEST_CONTROLS", "1")
     monkeypatch.setenv(
         "GREENFLOOR_ENGINE_BIN",
         str(resolve_greenfloor_engine_binary()),

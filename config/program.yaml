@@ -22,7 +22,7 @@ runtime:
   dry_run: false
 
 # Local Rust engine for vault KMS offer execution.
-# Written to ~/.greenfloor/config/signer.yaml at runtime for PyO3 load_signer_config.
+# Written to ~/.greenfloor/config/signer.yaml at runtime for Rust load_signer_config.
 signer:
   coinset_msp_base_url: "https://api-msp.coinset.org"
   kms_key_id: ""

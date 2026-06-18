@@ -51,7 +51,7 @@ def test_daemon_cycle_completes_under_one_second(tmp_path: Path, dexie_mock: Dex
     write_markets(markets)
 
     started = time.monotonic()
-    code = run_once(
+    result = run_once(
         program_path=program,
         markets_path=markets,
         allowed_keys=None,
@@ -61,5 +61,5 @@ def test_daemon_cycle_completes_under_one_second(tmp_path: Path, dexie_mock: Dex
         poll_coinset_mempool=False,
     )
     elapsed = time.monotonic() - started
-    assert code == 0
+    assert result.exit_code == 0
     assert elapsed < _max_cycle_seconds()

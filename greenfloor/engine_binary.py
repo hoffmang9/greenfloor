@@ -46,61 +46,50 @@ def _build_engine_binaries() -> None:
     subprocess.run(cmd, check=True, cwd=root, env=env)
 
 
-def resolve_greenfloor_engine_binary(*, build_if_missing: bool = True) -> Path:
-    override = os.environ.get("GREENFLOOR_ENGINE_BIN", "").strip()
+def _resolve_binary(
+    binary_name: str,
+    *,
+    env_var: str,
+    build_if_missing: bool,
+) -> Path:
+    override = os.environ.get(env_var, "").strip()
     if override:
         path = Path(override).expanduser()
         if not path.is_file():
-            raise GreenfloorEngineBinaryError(
-                f"GREENFLOOR_ENGINE_BIN is not an executable file: {path}"
-            )
+            raise GreenfloorEngineBinaryError(f"{env_var} is not an executable file: {path}")
         return path
 
-    discovered = shutil.which(_ENGINE_BIN)
+    discovered = shutil.which(binary_name)
     if discovered:
         return Path(discovered)
 
-    for candidate in _candidate_paths(_ENGINE_BIN):
+    for candidate in _candidate_paths(binary_name):
         if candidate.is_file():
             return candidate
 
     if build_if_missing:
         _build_engine_binaries()
-        return resolve_greenfloor_engine_binary(build_if_missing=False)
+        return _resolve_binary(binary_name, env_var=env_var, build_if_missing=False)
 
     raise GreenfloorEngineBinaryError(
-        "greenfloor-engine binary not found; build with "
+        f"{binary_name} binary not found; build with "
         "'cargo build --manifest-path greenfloor-engine/Cargo.toml "
         "--bin greenfloor-engine --bin greenfloor-manager --bin greenfloord' "
-        "or set GREENFLOOR_ENGINE_BIN"
+        f"or set {env_var}"
+    )
+
+
+def resolve_greenfloor_engine_binary(*, build_if_missing: bool = True) -> Path:
+    return _resolve_binary(
+        _ENGINE_BIN,
+        env_var="GREENFLOOR_ENGINE_BIN",
+        build_if_missing=build_if_missing,
     )
 
 
 def resolve_greenfloord_binary(*, build_if_missing: bool = True) -> Path:
-    override = os.environ.get("GREENFLOOR_DAEMON_BIN", "").strip()
-    if override:
-        path = Path(override).expanduser()
-        if not path.is_file():
-            raise GreenfloorEngineBinaryError(
-                f"GREENFLOOR_DAEMON_BIN is not an executable file: {path}"
-            )
-        return path
-
-    discovered = shutil.which(_DAEMON_BIN)
-    if discovered:
-        return Path(discovered)
-
-    for candidate in _candidate_paths(_DAEMON_BIN):
-        if candidate.is_file():
-            return candidate
-
-    if build_if_missing:
-        _build_engine_binaries()
-        return resolve_greenfloord_binary(build_if_missing=False)
-
-    raise GreenfloorEngineBinaryError(
-        "greenfloord binary not found; build with "
-        "'cargo build --manifest-path greenfloor-engine/Cargo.toml "
-        "--bin greenfloor-engine --bin greenfloor-manager --bin greenfloord' "
-        "or set GREENFLOOR_DAEMON_BIN"
+    return _resolve_binary(
+        _DAEMON_BIN,
+        env_var="GREENFLOOR_DAEMON_BIN",
+        build_if_missing=build_if_missing,
     )

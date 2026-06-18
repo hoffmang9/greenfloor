@@ -35,7 +35,7 @@ Severity tags:
 - `[MUST]` `greenfloor/core`: deterministic policy only (no IO).
 - `[MUST]` `greenfloor/core/coin_ops/`: coin-op deterministic policy (plan, fee budget, inventory, min-amount guard) shared by CLI and daemon.
 - `[MUST]` `greenfloor/config`: parse/validate config, resolve paths, resolve quote assets.
-- `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet). Operator signing/execution is in-process Rust (`greenfloor-engine`). Script Coinset mutations shell out to `greenfloor-engine coinset-*` CLI subcommands.
+- `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet). Operator signing/execution is in-process Rust (`greenfloor-engine`). Script Coinset mutations shell out to `greenfloor-engine coinset …` via `coinset_cli_mutate.py`; reads stay in `coinset_read.py`.
 - `[MUST]` `greenfloor-engine/`: canonical Rust engine crate; new vault spend/offer logic lands here first.
 - `[MUST]` Operator CLI and daemon are native Rust binaries: `greenfloor-manager`, `greenfloord`, `greenfloor-engine` (`greenfloor-engine/src/manager_cli/`, `greenfloor-engine/src/daemon/`). They do not import PyO3.
 - `[MUST]` Shared offer orchestration lives in `greenfloor-engine/src/offer/operator/` and `greenfloor-engine/src/offer/lifecycle/` (used by both manager CLI and daemon).
@@ -54,7 +54,7 @@ Severity tags:
 ## Design Constraints
 
 - `[MUST]` Prefer direct function calls within the package; do not spawn subprocesses for same-env Python calls unless isolation/security is documented in `docs/decisions/`.
-- `[MUST]` Python script paths that need Coinset mutations use `greenfloor.adapters.coinset` → `greenfloor-engine` CLI. Operator paths call `greenfloor-engine` in-process (no Python FFI).
+- `[MUST]` Python script paths that need Coinset mutations use `greenfloor.adapters.coinset` → `coinset_cli_mutate` → `greenfloor-engine coinset …`. Operator paths call Rust in-process (no Python FFI).
 - `[MUST]` Avoid unnecessary indirection layers (`executor`, `worker`, `engine`, etc.).
 - `[MUST]` Keep one distinct responsibility per file; merge pass-through modules into functions.
 - `[MUST]` Eliminate duplicated logic blocks (>10 lines) by extracting shared helpers.

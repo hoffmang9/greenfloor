@@ -9,8 +9,9 @@ Accepted; **migration complete** for operators ([0013-rust-cli-daemon-native-cut
 `greenfloor-engine` is the canonical signing implementation for vault KMS paths.
 New vault spend, mixed-split, and offer behavior lands in Rust first.
 
-Python `greenfloor/adapters/rust_signer.py` and related bridges call the engine via
-PyO3 for scripts and parity tests only. Operator binaries do not use Python signing.
+Operators and scripts use native Rust binaries only. Python `greenfloor/adapters/`
+remains for read-only Coinset HTTP in standalone scripts; mutations call
+`greenfloor-engine coinset …` CLI subcommands.
 
 ## Rationale
 

@@ -31,6 +31,7 @@ and coin-op planning. The old "signer" name no longer describes the scope.
 via `greenfloor.adapters.coinset` (subprocess, JSON stdout).
 
 **Integration tests:** `greenfloor-engine daemon-once --request-json <file> --json`
+(requires `GREENFLOOR_DAEMON_TEST_CONTROLS=1` when `test_controls` is non-default).
 
 ## Naming map
 
