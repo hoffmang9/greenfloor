@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from greenfloor.storage.sqlite import SqliteStore
+from tests.helpers.sqlite_store import SqliteStore
 
 
 def open_watchlist_test_store(tmp_path: Path) -> SqliteStore:

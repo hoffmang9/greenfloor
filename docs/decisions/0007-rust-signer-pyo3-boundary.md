@@ -7,9 +7,8 @@ Accepted; **operator scope updated** by [0013-rust-cli-daemon-native-cutover.md]
 ## Current state
 
 - **Operators:** vault KMS signing, offer creation, bootstrap mixed-splits, and asset
-  resolution run in-process in `greenfloor-engine` (no PyO3 on the install path).
-- **Python library / tests:** the same Rust logic is reachable via `greenfloor_engine`
-  (PyO3) through `greenfloor.core.engine_bridge` and `*_bridge.py` modules.
+  resolution run in-process in `greenfloor-engine`.
+- **Scripts:** Coinset push/fee via `greenfloor-engine coinset …` CLI subcommands.
 - **On-chain IO:** Coinset MSP via Rust (`greenfloor-engine/src/coinset/`).
 - Cloud Wallet GraphQL is removed from offer/bootstrap/asset paths.
 
@@ -30,5 +29,5 @@ PyO3 provided in-process access for Python orchestration and parity tests.
 
 ## Consequences
 
-- CI builds `greenfloor-engine-pyo3` for parity tests; operators install Rust binaries only.
+- CI builds `greenfloor-engine` binaries only; operators install Rust binaries.
 - Golden offer fixtures export from Rust simulator tests.

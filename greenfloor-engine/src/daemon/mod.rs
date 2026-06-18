@@ -65,7 +65,7 @@ pub use program_runtime::{
 pub use reload::consume_reload_marker;
 pub use cli::{
     run_daemon_command, run_daemon_cycle_once_from_json, run_daemon_loop_from_json,
-    DaemonCliArgs,
+    run_daemon_once_from_request_json, DaemonCliArgs, DaemonOnceJsonArgs,
 };
 pub use run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,

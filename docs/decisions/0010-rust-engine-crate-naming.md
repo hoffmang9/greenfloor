@@ -4,49 +4,44 @@
 
 Accepted
 
-Updated 2026-05-29: the Rust source directories, Cargo package, CLI binary,
-Rust library target, and PyO3 module now use engine naming.
+Updated 2026-06-17: PyO3 extension removed; scripts call `greenfloor-engine` CLI subcommands.
 
 ## Context
 
 The Rust implementation was introduced as a signer for vault KMS paths. The crate
-now also owns deterministic daemon policy: cycle orchestration, offer
-reconciliation, and coin-op planning. The old "signer" name no longer describes
-the scope.
+now owns deterministic daemon policy: cycle orchestration, offer reconciliation,
+and coin-op planning. The old "signer" name no longer describes the scope.
 
 ## Decision
 
-**Completed during this migration phase:**
+**Completed:**
 
-- Rename source paths to `greenfloor-engine/` and `greenfloor-engine-pyo3/`.
-- Rename the Cargo package and CLI binary to `greenfloor-engine`, and the Rust
-  library target and PyO3 module to `greenfloor_engine`.
-- `greenfloor.core.engine_bridge.import_engine()` remains the canonical Python
-  bridge API for in-process Rust policy; `import_signer` remains a migration alias.
-- `engine_bridge` imports `greenfloor_engine`; use `engine_rebuild_hint(module=...)`
-  and `require_engine_method()` for operator rebuild text and stale-symbol errors.
-- Group Rust policy by domain module (`cycle/`, `coin_ops/`, `offer/`, `vault/`) inside the crate.
+- Rust source directory: `greenfloor-engine/`
+- Cargo package and CLI binary: `greenfloor-engine`
+- Rust library target: `greenfloor_engine` (crate name used by operator binaries)
+- Policy grouped by domain module (`cycle/`, `coin_ops/`, `offer/`, `vault/`, `coinset_cli/`)
 
-**Remaining compatibility:**
+**Removed (2026-06-17):**
 
-- Retain `greenfloor.core.engine_bridge.import_signer` as a Python migration alias
-  until legacy call sites disappear.
+- `greenfloor-engine-pyo3/` and the `greenfloor_engine` Python extension module
+- `greenfloor.core.engine_bridge` and all Python policy bridges
+- In-process Python↔Rust FFI for operator or script paths
+
+**Script Coinset IO:** `greenfloor-engine coinset {push-tx,fee-estimate,conservative-fee-estimate}`
+via `greenfloor.adapters.coinset` (subprocess, JSON stdout).
+
+**Integration tests:** `greenfloor-engine daemon-once --request-json <file> --json`
 
 ## Naming map
 
-| Layer                | Current                         | Target                     |
-| -------------------- | ------------------------------- | -------------------------- |
-| Cargo crate          | `greenfloor-engine`             | done                       |
-| PyO3 module          | `greenfloor_engine`             | done                       |
-| Python bridge        | `engine_bridge.import_engine()` | unchanged                  |
-| Vault/sign path docs | "Rust signer"                   | "Rust engine (vault path)" |
+| Layer           | Name                 |
+| --------------- | -------------------- |
+| Cargo crate     | `greenfloor-engine`  |
+| Rust lib target | `greenfloor_engine`  |
+| Manager binary  | `greenfloor-manager` |
+| Daemon binary   | `greenfloord`        |
 
 ## Consequences
 
-- New Python policy surfaces use `engine_bridge`, not ad-hoc `importlib` copies.
-- Adapter IO paths (`rust_signer`, `coinset`, `native_offer`, etc.) import
-  the engine through `engine_bridge.import_engine()`.
-- Legacy module shims (`greenfloor.core.fee_budget`, `inventory`, `coin_ops_policy`) were
-  removed once call sites imported `greenfloor.core.coin_ops` only; coin-op policy now lives
-  in `_bridge.py` with `CoinOpsEngineProtocol` typing the PyO3 surface.
-- ADR 0006/0007 remain valid; this ADR clarifies naming without changing boundaries.
+- Operator and script paths use native binaries only; no Python extension install.
+- ADR 0006/0007 boundaries unchanged; this ADR clarifies naming after PyO3 removal.

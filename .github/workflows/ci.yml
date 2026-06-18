@@ -21,15 +21,12 @@ jobs:
           - os: ubuntu-latest
             run_rust_tests: true
             build_native_clis: true
-            run_sdk_integration: true
           - os: ubuntu-24.04-arm
             run_rust_tests: false
             build_native_clis: true
-            run_sdk_integration: false
           - os: macos-14
             run_rust_tests: false
             build_native_clis: false
-            run_sdk_integration: false
 
     steps:
       - uses: actions/checkout@v4
@@ -90,11 +87,6 @@ jobs:
             install -m 755 "target/debug/${bin}" "$GITHUB_WORKSPACE/.venv/bin/${bin}"
           done
 
-      - uses: ./.github/actions/greenfloor-maturin-wheels
-        with:
-          operation: ensure-and-install
-          rust-already-configured: ${{ matrix.build_native_clis }}
-
       - name: Cache pre-commit environment
         uses: actions/cache@v4
         with:
@@ -110,23 +102,4 @@ jobs:
         run: pre-commit run --all-files
 
       - name: "Test suite (pytest)"
-        run: pytest -v --tb=short -m "not engine"
-
-      - name: Pytest (engine marker)
-        if: matrix.run_rust_tests
-        run: pytest -v --tb=short -m engine
-
-      - uses: ./.github/actions/wheel-cache
-        if: matrix.run_sdk_integration
-        with:
-          operation: ensure-and-install
-          builder: pip
-          tree-path: chia-wallet-sdk
-          source-path: ./chia-wallet-sdk/pyo3
-          cache-key-prefix: sdk-wheelhouse
-          wheelhouse-subdir: chia-wallet-sdk
-          rust-already-configured: ${{ matrix.run_rust_tests }}
-
-      - name: Pytest (greenfloor_engine + chia-wallet-sdk offer round-trip on Ubuntu)
-        if: matrix.run_sdk_integration
-        run: GREENFLOOR_RUN_ENGINE_INTEGRATION_TESTS=1 pytest -vv -s tests/test_greenfloor_engine_integration.py
+        run: pytest -v --tb=short

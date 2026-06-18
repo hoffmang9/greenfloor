@@ -116,6 +116,28 @@ pub async fn run_daemon_loop_from_json(value: Value) -> SignerResult<i32> {
     run_daemon_loop(request).await
 }
 
+#[derive(Debug, Args)]
+pub struct DaemonOnceJsonArgs {
+    #[arg(long)]
+    pub request_json: PathBuf,
+    #[arg(long)]
+    pub json: bool,
+}
+
+pub async fn run_daemon_once_from_request_json(args: DaemonOnceJsonArgs) -> SignerResult<i32> {
+    let raw = std::fs::read_to_string(&args.request_json)
+        .map_err(|err| SignerError::Other(format!("read request json: {err}")))?;
+    let value: Value = serde_json::from_str(&raw)
+        .map_err(|err| SignerError::Other(format!("parse request json: {err}")))?;
+    let response = run_daemon_cycle_once_from_json(value).await?;
+    if args.json {
+        let encoded = serde_json::to_value(&response)
+            .map_err(|err| SignerError::Other(err.to_string()))?;
+        crate::cli_util::print_json_value(&encoded, true)?;
+    }
+    Ok(response.exit_code)
+}
+
 trait PathExt {
     fn expanduser(self) -> PathBuf;
 }

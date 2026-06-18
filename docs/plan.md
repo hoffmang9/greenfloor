@@ -4,8 +4,8 @@
 
 - Long-lived daemon (`greenfloord`) plus manager CLI (`greenfloor-manager`) for
   deterministic CAT/XCH market-making.
-- Policy and execution in Rust (`greenfloor-engine`); Python package for config,
-  adapters, PyO3 parity bridges, and scripts.
+- Policy and execution in Rust (`greenfloor-engine`); slim Python package for config,
+  adapters, and `scripts/` utilities.
 - V1 notifications: low-inventory alerts only (ticker, remaining amount, receive address).
 
 ## Architecture
@@ -18,14 +18,13 @@ greenfloord         ──►  daemon/      → cycle/, offer/operator, coin_ops
 
 Dev / tests              greenfloor (Python)
 ─────────                ─────────────────
-parity tests, scripts ──► core/*_bridge.py → greenfloor_engine (PyO3) → greenfloor-engine
+parity tests, scripts ──► greenfloor-engine CLI (`coinset …`, `daemon-once`) / native binaries
 ```
 
 - **Canonical signing and offer build:** `greenfloor-engine` (vault KMS + Coinset MSP).
 - **Config validation for operators:** Rust (`config/program.rs`, `config/markets.rs`).
 - **State DB:** Rust (`storage/`); SQLite at `~/.greenfloor/db/greenfloor.sqlite`.
-- **PyO3:** not installed for operator-only deployments; in-repo FFI for Python bridges
-  and tests (ADR 0013).
+- **No PyO3** in the repository (ADR 0013).
 
 Legacy `cloud_wallet:` blocks in `program.yaml` are rejected; use `signer:` + `vault:`.
 

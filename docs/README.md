@@ -9,7 +9,7 @@ accepted decision** when onboarding; older ADRs may be superseded.
 | -------------------------------------------------------- | ------------------------------------------------------------------ |
 | [0013](decisions/0013-rust-cli-daemon-native-cutover.md) | **Native Rust CLI/daemon** — production operator path              |
 | [0010](decisions/0010-rust-engine-crate-naming.md)       | Crate and module naming (`greenfloor-engine`, `greenfloor_engine`) |
-| [0007](decisions/0007-rust-signer-pyo3-boundary.md)      | Signer in Rust; PyO3 for Python library/tests                      |
+| [0007](decisions/0007-rust-signer-pyo3-boundary.md)      | Signer in Rust; scripts use CLI (PyO3 removed 2026-06-17)          |
 | [0001](decisions/0001-architecture-boundaries.md)        | Core vs adapters vs orchestration boundaries                       |
 
 ## Superseded (historical)

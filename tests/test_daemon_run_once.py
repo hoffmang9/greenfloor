@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from greenfloor.storage.sqlite import SqliteStore
 from tests.helpers.daemon_rust_cycle_env import run_once_for_tests as run_once
 from tests.helpers.daemon_websocket_fixtures import (
     write_markets,
@@ -13,6 +12,7 @@ from tests.helpers.daemon_websocket_fixtures import (
     write_program,
 )
 from tests.helpers.dexie_http_mock import DexieHttpMock
+from tests.helpers.sqlite_store import SqliteStore
 
 
 @pytest.fixture

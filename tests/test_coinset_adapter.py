@@ -15,20 +15,19 @@ from greenfloor.adapters.coinset import (
 
 @pytest.fixture(autouse=True)
 def _mock_rust_coinset_io(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _fake_require(name: str, *args: Any, **kwargs: Any) -> Any:
-        if name == "coinset_push_tx":
+    def _fake_run_engine_json(argv: list[str]) -> Any:
+        if len(argv) < 2 or argv[0] != "coinset":
+            raise AssertionError(f"unexpected_coinset_cli_argv:{argv}")
+        subcommand = argv[1]
+        if subcommand == "push-tx":
             return {"success": True, "status": "submitted"}
-        if name == "coinset_get_fee_estimate":
+        if subcommand == "fee-estimate":
             return {"success": True, "estimates": [100, 500, 200]}
-        if name == "coinset_get_conservative_fee_estimate":
-            network = args[0] if args else "mainnet"
-            base_url = args[1] if len(args) > 1 else ""
-            cost = args[2] if len(args) > 2 else 1_000_000
-            _ = network, base_url, cost, kwargs
-            return 500
-        raise AssertionError(f"unexpected_rust_coinset_call:{name}")
+        if subcommand == "conservative-fee-estimate":
+            return {"fee_mojos": 500}
+        raise AssertionError(f"unexpected_coinset_subcommand:{subcommand}")
 
-    monkeypatch.setattr("greenfloor.adapters.coinset._require_rust_coinset", _fake_require)
+    monkeypatch.setattr("greenfloor.adapters.coinset._run_engine_json", _fake_run_engine_json)
 
 
 class _FakeResponse:
@@ -232,31 +231,28 @@ def test_conservative_fee_estimate_uses_max_of_estimates() -> None:
 
 
 def test_conservative_fee_estimate_falls_back_to_fee_estimate_field(monkeypatch) -> None:
-    def _fake_require(name: str, *args: Any, **kwargs: Any) -> Any:
-        _ = name, args, kwargs
-        return 42
-
-    monkeypatch.setattr("greenfloor.adapters.coinset._require_rust_coinset", _fake_require)
+    monkeypatch.setattr(
+        "greenfloor.adapters.coinset._run_engine_json",
+        lambda _args: {"fee_mojos": 42},
+    )
     adapter = CoinsetAdapter()
     assert adapter.get_conservative_fee_estimate() == 42
 
 
 def test_conservative_fee_estimate_returns_none_on_failure(monkeypatch) -> None:
-    def _fake_require(name: str, *args: Any, **kwargs: Any) -> Any:
-        _ = name, args, kwargs
-        return None
-
-    monkeypatch.setattr("greenfloor.adapters.coinset._require_rust_coinset", _fake_require)
+    monkeypatch.setattr(
+        "greenfloor.adapters.coinset._run_engine_json",
+        lambda _args: {"fee_mojos": None},
+    )
     adapter = CoinsetAdapter()
     assert adapter.get_conservative_fee_estimate() is None
 
 
 def test_conservative_fee_estimate_skips_invalid_estimate_values(monkeypatch) -> None:
-    def _fake_require(name: str, *args: Any, **kwargs: Any) -> Any:
-        _ = name, args, kwargs
-        return 300
-
-    monkeypatch.setattr("greenfloor.adapters.coinset._require_rust_coinset", _fake_require)
+    monkeypatch.setattr(
+        "greenfloor.adapters.coinset._run_engine_json",
+        lambda _args: {"fee_mojos": 300},
+    )
     adapter = CoinsetAdapter()
     assert adapter.get_conservative_fee_estimate() == 300
 

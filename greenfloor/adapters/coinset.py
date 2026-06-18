@@ -1,20 +1,21 @@
-"""Coinset adapter: query helpers in Python, mutations via Rust engine bindings.
+"""Coinset adapter: query helpers in Python, mutations via greenfloor-engine CLI.
 
 Read-only Coinset HTTP calls (coin lookups, offer payload parsing) live here and
 use ``_post_json`` against the configured MSP base URL. Transaction push and fee
-estimation for signed spend bundles are delegated to the Rust engine PyO3 module
-(``engine_bridge.import_engine``) so mutation paths share the same Rust IO stack.
+estimation delegate to native ``greenfloor-engine`` subcommands so mutation paths
+share the same Rust IO stack.
 """
 
 from __future__ import annotations
 
 import json
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
 
-from greenfloor.core.engine_bridge import import_engine
+from greenfloor.engine_binary import resolve_greenfloor_engine_binary
 from greenfloor.hex_utils import normalize_hex_id
 
 _COINSET_TX_ID_KEYS = (
@@ -128,15 +129,77 @@ def extract_coin_ids_from_offer_payload(payload: dict[str, Any]) -> list[str]:
     return coin_ids
 
 
-def _require_rust_coinset(name: str, *args: Any, **kwargs: Any) -> Any:
+def _run_engine_json(argv: list[str]) -> Any:
     try:
-        engine = import_engine()
-    except ImportError as exc:
-        raise RuntimeError(f"greenfloor_engine_required_for_coinset_io: {exc}") from exc
-    fn = getattr(engine, name, None)
-    if not callable(fn):
-        raise RuntimeError(f"greenfloor_engine_missing_coinset_fn:{name}")
-    return fn(*args, **kwargs)
+        binary = resolve_greenfloor_engine_binary(build_if_missing=False)
+    except Exception as exc:
+        raise RuntimeError(f"coinset_cli_binary_unavailable: {exc}") from exc
+    cmd = [str(binary), *argv, "--json"]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"coinset_cli_failed:{detail}")
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("coinset_cli_invalid_json") from exc
+
+
+def _run_coinset_cli(subcommand: str, flags: list[tuple[str, str]]) -> Any:
+    argv = ["coinset", subcommand]
+    for flag, value in flags:
+        argv.extend([flag, value])
+    return _run_engine_json(argv)
+
+
+def _coinset_push_tx_cli(network: str, base_url: str, spend_bundle_hex: str) -> Any:
+    return _run_coinset_cli(
+        "push-tx",
+        [
+            ("--network", network),
+            ("--base-url", base_url),
+            ("--spend-bundle-hex", spend_bundle_hex),
+        ],
+    )
+
+
+def _coinset_fee_estimate_cli(
+    network: str,
+    base_url: str,
+    target_times: list[int],
+    cost: int,
+    spend_count: int | None,
+) -> Any:
+    flags: list[tuple[str, str]] = [
+        ("--network", network),
+        ("--base-url", base_url),
+        ("--target-times", ",".join(str(int(value)) for value in target_times)),
+        ("--cost", str(int(cost))),
+    ]
+    if spend_count is not None and int(spend_count) > 0:
+        flags.append(("--spend-count", str(int(spend_count))))
+    return _run_coinset_cli("fee-estimate", flags)
+
+
+def _coinset_conservative_fee_estimate_cli(
+    network: str,
+    base_url: str,
+    cost: int,
+    spend_count: int | None,
+) -> int | None:
+    flags: list[tuple[str, str]] = [
+        ("--network", network),
+        ("--base-url", base_url),
+        ("--cost", str(int(cost))),
+    ]
+    if spend_count is not None and int(spend_count) > 0:
+        flags.append(("--spend-count", str(int(spend_count))))
+    payload = _run_coinset_cli("conservative-fee-estimate", flags)
+    if isinstance(payload, dict):
+        fee = payload.get("fee_mojos")
+        if isinstance(fee, int) and fee >= 0:
+            return fee
+    return None
 
 
 class CoinsetAdapter:
@@ -361,12 +424,7 @@ class CoinsetAdapter:
         return coin_solution
 
     def push_tx(self, *, spend_bundle_hex: str) -> dict[str, Any]:
-        payload = _require_rust_coinset(
-            "coinset_push_tx",
-            self.network,
-            self.base_url,
-            spend_bundle_hex,
-        )
+        payload = _coinset_push_tx_cli(self.network, self.base_url, spend_bundle_hex)
         if not isinstance(payload, dict):
             raise RuntimeError("coinset_push_tx_invalid_response")
         return payload
@@ -389,8 +447,7 @@ class CoinsetAdapter:
         spend_count_opt = (
             int(spend_count) if spend_count is not None and int(spend_count) > 0 else None
         )
-        payload = _require_rust_coinset(
-            "coinset_get_fee_estimate",
+        payload = _coinset_fee_estimate_cli(
             self.network,
             self.base_url,
             [int(value) for value in resolved_target_times],
@@ -410,8 +467,7 @@ class CoinsetAdapter:
         spend_count_opt = (
             int(spend_count) if spend_count is not None and int(spend_count) > 0 else None
         )
-        fee = _require_rust_coinset(
-            "coinset_get_conservative_fee_estimate",
+        fee = _coinset_conservative_fee_estimate_cli(
             self.network,
             self.base_url,
             int(cost),
