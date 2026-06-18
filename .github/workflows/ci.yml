@@ -20,12 +20,15 @@ jobs:
         include:
           - os: ubuntu-latest
             run_rust_tests: true
+            build_native_clis: true
             run_sdk_integration: true
           - os: ubuntu-24.04-arm
             run_rust_tests: false
+            build_native_clis: true
             run_sdk_integration: false
           - os: macos-14
             run_rust_tests: false
+            build_native_clis: false
             run_sdk_integration: false
 
     steps:
@@ -68,7 +71,11 @@ jobs:
           key: venv-v2-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
 
       - uses: ./.github/actions/rust-cache-greenfloor
-        if: matrix.run_rust_tests
+        if: matrix.build_native_clis
+
+      - name: Build greenfloor-engine binaries
+        if: matrix.build_native_clis && !matrix.run_rust_tests
+        run: cargo build --manifest-path greenfloor-engine/Cargo.toml --bins
 
       - name: Build and test greenfloor-engine
         if: matrix.run_rust_tests
@@ -77,7 +84,7 @@ jobs:
           cargo test --manifest-path greenfloor-engine/Cargo.toml
 
       - name: Install greenfloor native CLIs on PATH
-        if: matrix.run_rust_tests
+        if: matrix.build_native_clis
         run: |
           for bin in greenfloor-engine greenfloor-manager greenfloord; do
             install -m 755 "target/debug/${bin}" "$GITHUB_WORKSPACE/.venv/bin/${bin}"
@@ -86,7 +93,7 @@ jobs:
       - uses: ./.github/actions/greenfloor-maturin-wheels
         with:
           operation: ensure-and-install
-          rust-already-configured: ${{ matrix.run_rust_tests }}
+          rust-already-configured: ${{ matrix.build_native_clis }}
 
       - name: Cache pre-commit environment
         uses: actions/cache@v4
