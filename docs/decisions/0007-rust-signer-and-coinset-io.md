@@ -1,8 +1,13 @@
-# 0007 - Rust Signer PyO3 Boundary
+# ADR 0007: Rust signer and Coinset IO
 
 ## Status
 
-Accepted; **operator scope updated** by [0013-rust-cli-daemon-native-cutover.md](0013-rust-cli-daemon-native-cutover.md) (2026-06-17)
+Accepted (2026-05); operator scope finalized by
+[0013-rust-cli-daemon-native-cutover.md](0013-rust-cli-daemon-native-cutover.md) (2026-06-17).
+
+> **Note:** This ADR was originally titled “Rust Signer PyO3 Boundary.” PyO3 and Python
+> policy bridges were removed in 2026-06-17; the filename was updated to match current
+> architecture.
 
 ## Current state
 
@@ -15,7 +20,8 @@ Accepted; **operator scope updated** by [0013-rust-cli-daemon-native-cutover.md]
 ## Original decision (2026-05)
 
 Vault KMS signing and offer construction are implemented once in `greenfloor-engine`.
-PyO3 provided in-process access for Python orchestration and parity tests. **Removed 2026-06-17** (ADR 0013).
+PyO3 briefly provided in-process access for Python orchestration and parity tests.
+**Removed 2026-06-17** (ADR 0013).
 
 ## Rationale
 

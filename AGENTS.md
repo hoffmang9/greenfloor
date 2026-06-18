@@ -19,10 +19,13 @@ Severity tags:
 
 - `[MUST]` Work at a senior-developer standard: explicit tradeoffs and maintainable design.
 - `[MUST]` If behavior or requirements are unclear, ask before coding.
-- `[MUST]` Use `chia-wallet-sdk` (repo submodule) for blockchain sync, signing, and offer validation contracts.
+- `[MUST]` Use `chia-wallet-sdk` (repo submodule) in `greenfloor-engine` for signing, puzzle/offer
+  construction, and offer validation. Do not run a full node or in-process wallet sync.
+- `[MUST]` Use Coinset.org HTTP and WebSocket APIs for blockchain access: coin lookup, mempool/tx
+  signals, fee estimates, and tx submission (`greenfloor-engine/src/coinset/` and daemon websocket
+  handlers). Scripts reach Coinset through `greenfloor-engine coinset …` subcommands.
 - `[MUST]` Treat offers as `offer1...` Bech32m strings. Operator paths validate/decode in Rust.
 - `[MUST]` Fix the primary path; do not add fallback execution paths to hide correctness gaps.
-- `[SHOULD]` Temporary sdk symbol-rename shims are allowed only during explicit migrations and must be removed once the pinned baseline stabilizes.
 - `[MUST]` Network symbol discipline: mainnet uses `xch`, testnet11 uses `txch` in examples, defaults, runbooks, workflows, and operator commands.
 - `[MUST]` CAT denomination discipline: 1000 mojos of a CAT is exactly 1 unit of that CAT in examples, operator output, runbooks, tests, and code comments.
 - `[SHOULD]` When debugging, prefer the existing log pipeline: set the host log level to `DEBUG` in `program.yaml` and use the service logs instead of adding ad hoc debug code or one-off debug files.
@@ -32,62 +35,62 @@ Severity tags:
 
 ## Architecture Boundaries
 
-- `[MUST]` `greenfloor/core`: deterministic policy only (no IO).
-- `[MUST]` `greenfloor/core/coin_ops/`: coin-op deterministic policy (plan, fee budget, inventory, min-amount guard) shared by CLI and daemon.
-- `[MUST]` `greenfloor/config`: script config CLI adapters only (`io.py` → `greenfloor-manager`
-  `program-fields`, `markets-fields`, `cats-fields`, `materialize-minimal-program`,
-  `config-validate`); operator YAML policy lives in `greenfloor-engine/src/config/`.
-- `[MUST]` `greenfloor/* adapters`: side effects only (network, filesystem, wallet). Operator signing/execution is in-process Rust (`greenfloor-engine`). Script Coinset reads and mutations shell out to `greenfloor-engine coinset {post,push-tx}` via `greenfloor.adapters.coinset` (`cli` + `client` package).
-- `[MUST]` `greenfloor-engine/`: canonical Rust engine crate; new vault spend/offer logic lands here first.
-- `[MUST]` Operator CLI and daemon are native Rust binaries: `greenfloor-manager`, `greenfloord`, `greenfloor-engine` (`greenfloor-engine/src/manager_cli/`, `greenfloor-engine/src/daemon/`). They do not import PyO3.
-- `[MUST]` Shared offer orchestration lives in `greenfloor-engine/src/offer/operator/` and `greenfloor-engine/src/offer/lifecycle/` (used by both manager CLI and daemon).
-- `[MUST]` Coin-op CLI and daemon execution share Rust policy in `greenfloor-engine/src/coin_ops/` and `daemon/coin_ops_execution/`.
-- `[MUST]` Manager operator commands live in `greenfloor-engine/src/manager_cli/` (`greenfloor-manager` binary).
-- `[MUST]` `greenfloor/cli/*` and `greenfloor/daemon/*` Python packages are removed; do not reintroduce Python orchestration entrypoints.
-- `[MUST]` `greenfloor/core/*` policy bridges are removed; do not reintroduce Python policy orchestration.
-- `[MUST]` `scripts/` may remain Python; they use `greenfloor.config.io` (field CLI adapters),
-  `greenfloor.adapters.coinset`, `greenfloor.hex_utils`, and `greenfloor.engine_binary`
-  for native CLI resolution. Do not add YAML policy walks for operator config in scripts.
-- `[CONTEXT]` No PyO3 extension in the repo (ADR 0013, 2026-06-17). Operator policy, offer orchestration, and Coinset fee parsing live in `greenfloor-engine`; CI runs `cargo test --manifest-path greenfloor-engine/Cargo.toml` on `ubuntu-latest` as the explicit policy-parity safety net. Python pytest covers script adapters and integration harnesses only.
-- `[MUST]` Do not reintroduce PyO3 or Python policy bridges.
-- `[MUST]` Offer build/post uses `offer::operator::build_and_post_offer` (`greenfloor-manager build-and-post-offer` and daemon managed post).
-- `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`,
-  `greenfloor/config/io.py`, `greenfloor/manager_subprocess.py` (subprocess adapters to Rust field commands).
-- `[MUST]` `greenfloor-engine` crate root exports domain APIs (`offer`, `daemon`, `coin_ops`, `vault`); operator binaries import CLI modules directly (`manager_cli`, `daemon::cli`).
-- `[MUST]` Import direction: daemon never imports CLI; CLI never imports daemon. Shared logic belongs in shared modules.
+**Rust operators (production)**
+
+- `[MUST]` `greenfloor-engine/` owns operator policy and execution: `config/`, `offer/`, `vault/`,
+  `coin_ops/`, `daemon/`, `storage/`, `coinset/`.
+- `[MUST]` Operator binaries are native Rust: `greenfloor-manager`, `greenfloord`, `greenfloor-engine`
+  (`manager_cli/`, `daemon/`). No PyO3 or Python orchestration entrypoints.
+- `[MUST]` Shared offer orchestration: `offer/operator/` and `offer/lifecycle/` (manager + daemon).
+- `[MUST]` Coin-op policy and execution: `coin_ops/` and `daemon/coin_ops_execution/`.
+- `[MUST]` Offer build/post uses `offer::operator::build_and_post_offer`
+  (`greenfloor-manager build-and-post-offer` and daemon managed post).
+- `[MUST]` Offer-payload ID extraction and conservative-fee parsing are Rust-only
+  (`offer::dexie_payload`, `coinset::get_conservative_fee_estimate`).
+- `[MUST]` Import direction: daemon never imports CLI; CLI never imports daemon. Shared logic lives in
+  shared modules. Operator binaries import CLI modules directly (`manager_cli`, `daemon::cli`).
+
+**Python (scripts and test harnesses only)**
+
+- `[MUST]` `scripts/` and the slim `greenfloor/` package are adapters only — no operator policy or
+  orchestration. Do not reintroduce PyO3, Python policy bridges, or `greenfloor/cli/` /
+  `greenfloor/daemon/` runtime modules.
+- `[MUST]` Config field reads: `greenfloor/config/io.py` → `greenfloor-manager program-fields`,
+  `markets-fields`, `cats-fields`, `materialize-minimal-program`, `config-validate`. Operator YAML
+  policy lives in `greenfloor-engine/src/config/`; scripts must not walk operator YAML for policy
+  fields.
+- `[MUST]` Script Coinset IO: `greenfloor.adapters.coinset` → `greenfloor-engine coinset post`
+  and `greenfloor-engine coinset push-tx`. Reuse `hex_utils`, `logging_setup`,
+  `manager_subprocess`, `engine_binary`.
+- `[CONTEXT]` Pytest covers script adapters and subprocess harnesses; operator policy parity is
+  `cargo test --manifest-path greenfloor-engine/Cargo.toml` in CI (ADR 0013).
 
 ## Design Constraints
 
-- `[MUST]` Prefer direct function calls within the package; do not spawn subprocesses for same-env Python calls unless isolation/security is documented in `docs/decisions/`.
-- `[MUST]` Python script paths that need Coinset IO use `greenfloor.adapters.coinset` →
-  `greenfloor-engine coinset …`. Script paths that need operator config fields use
-  `greenfloor.config.io` → `greenfloor-manager program-fields` / `markets-fields` /
-  `cats-fields`. Operator paths call Rust in-process (no Python FFI). Offer-payload ID
-  extraction and conservative-fee parsing are Rust-only (`offer::dexie_payload`,
-  `coinset::get_conservative_fee_estimate`).
+- `[MUST]` Prefer direct function calls within a package; do not spawn subprocesses for same-env
+  Python calls unless isolation/security is documented in `docs/decisions/`.
 - `[MUST]` Avoid unnecessary indirection layers (`executor`, `worker`, `engine`, etc.).
 - `[MUST]` Keep one distinct responsibility per file; merge pass-through modules into functions.
 - `[MUST]` Eliminate duplicated logic blocks (>10 lines) by extracting shared helpers.
 - `[MUST]` Use allowlists for state checks; never rely on negated blocklists.
-- `[MUST]` For similar polling loops, match existing interval/accumulator style; warning cadence must be additive (`next_warning += warning_interval`).
+- `[MUST]` For similar polling loops, match existing interval/accumulator style; warning cadence
+  must be additive (`next_warning += warning_interval`). See `docs/plan.md` → **Delivery
+  constraints** for deterministic test expectations on wait/timeout paths.
 - `[SHOULD]` Keep functions under ~150 logic lines (excluding docstrings/blank lines).
 - `[SHOULD]` Minimize module-level mutable state; pass mutable state through objects/dataclasses.
 
 ## Current Scope
 
-- `[CONTEXT]` Critical path: configure market -> build real offer -> post to venue -> verify on-chain.
-- `[CONTEXT]` Defer new CLI commands, metrics, and observability work until live-target proof exists for the active market.
-- `[CONTEXT]` v1 notifications cover only low-inventory alerts and must include ticker, remaining amount, and receive address.
+- `[CONTEXT]` V1 scope, architecture, open items, and delivery constraints: `docs/plan.md`.
+- `[CONTEXT]` Recent milestones and live testing targets: `docs/progress.md`.
 
 ## Before You Commit
 
 - `[MUST]` Python version is 3.11+.
 - `[MUST]` Use venv binaries for Python tooling (for example `.venv/bin/python -m pytest`).
 - `[MUST]` Run `pre-commit run --all-files`.
-- `[MUST]` Every conditional dispatch gate has deterministic tests for each branch.
-- `[MUST]` Every `while True` + `time.sleep` loop has deterministic timeout/warning tests (mock `time.sleep` and `time.monotonic`).
-- `[MUST]` Extract repeated test setup into a named helper when it appears in more than two tests.
-- `[SHOULD]` Deterministic test harness runtime stays under 10 minutes wall clock (target under 5).
+- `[MUST]` Operator/daemon test expectations: `docs/plan.md` → **Delivery constraints**
+  (deterministic branch coverage, injected clocks for wait loops, harness runtime).
 
 ## Commit scope
 
