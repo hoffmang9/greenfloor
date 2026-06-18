@@ -7,7 +7,6 @@ from tests.helpers.sqlite_store.schema import utcnow_iso
 
 
 class PricingStoreMixin(SqliteStoreMixin):
-
     def add_price_policy_snapshot(
         self, market_id: str, payload: dict, source: str = "startup"
     ) -> None:

@@ -5,7 +5,6 @@ from tests.helpers.sqlite_store.schema import utcnow_iso
 
 
 class TxSignalStoreMixin(SqliteStoreMixin):
-
     def observe_mempool_tx_ids(self, tx_ids: list[str]) -> int:
         if not tx_ids:
             return 0

@@ -5,7 +5,6 @@ from tests.helpers.sqlite_store.schema import utcnow_iso
 
 
 class OfferStoreMixin(SqliteStoreMixin):
-
     def upsert_offer_state(
         self,
         *,

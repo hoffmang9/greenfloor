@@ -7,7 +7,6 @@ from tests.helpers.sqlite_store.schema import utcnow_iso
 
 
 class AuditStoreMixin(SqliteStoreMixin):
-
     def add_audit_event(self, event_type: str, payload: dict, market_id: str | None = None) -> None:
         self.conn.execute(
             """

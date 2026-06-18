@@ -5,7 +5,6 @@ from tests.helpers.sqlite_store.schema import utcnow_iso
 
 
 class CoinOpStoreMixin(SqliteStoreMixin):
-
     def add_coin_op_ledger_entry(
         self,
         *,

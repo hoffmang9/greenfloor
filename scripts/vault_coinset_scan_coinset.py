@@ -173,11 +173,8 @@ def _coinset_with_retries(
 
 class CoinsetScanner:
     def __init__(self, *, network: str, base_url: str | None = None) -> None:
-        require_testnet11 = network.strip().lower() in {"testnet", "testnet11"}
         resolved_base_url = _normalize_coinset_base_url(base_url=base_url, network=network)
-        self.adapter = CoinsetAdapter(
-            base_url=resolved_base_url, network=network, require_testnet11=require_testnet11
-        )
+        self.adapter = CoinsetAdapter(base_url=resolved_base_url, network=network)
 
     def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
         return _coinset_with_retries(lambda: self.adapter.post_json(endpoint, body))

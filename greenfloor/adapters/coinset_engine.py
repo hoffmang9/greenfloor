@@ -97,27 +97,6 @@ def push_tx_cli(network: str, base_url: str, spend_bundle_hex: str) -> Any:
     )
 
 
-def _conservative_fee_from_payload(payload: dict[str, Any]) -> int | None:
-    if not payload.get("success"):
-        return None
-    estimates = payload.get("estimates")
-    if isinstance(estimates, list):
-        valid: list[int] = []
-        for value in estimates:
-            if isinstance(value, int) and value >= 0:
-                valid.append(value)
-            elif isinstance(value, float) and value >= 0:
-                valid.append(int(value))
-        if valid:
-            return max(valid)
-    fee = payload.get("fee_estimate")
-    if isinstance(fee, int) and fee >= 0:
-        return fee
-    if isinstance(fee, float) and fee >= 0:
-        return int(fee)
-    return None
-
-
 def fee_estimate_cli(
     network: str,
     base_url: str,
@@ -134,27 +113,11 @@ def fee_estimate_cli(
     return post_json_cli(network, base_url, "get_fee_estimate", body)
 
 
-def conservative_fee_estimate_cli(
-    network: str,
-    base_url: str,
-    cost: int,
-    spend_count: int | None,
-) -> int | None:
-    payload = fee_estimate_cli(network, base_url, [300, 600, 1200], cost, spend_count)
-    if isinstance(payload, dict):
-        return _conservative_fee_from_payload(payload)
-    return None
-
-
 def _normalize_hex_hash(value: object) -> str:
     return normalize_hex_id(value)
 
 
-def _looks_like_tx_id(value: object) -> bool:
-    return bool(_normalize_hex_hash(value))
-
-
-def _looks_like_coin_id(value: object) -> bool:
+def _looks_like_hex_id(value: object) -> bool:
     return bool(_normalize_hex_hash(value))
 
 
@@ -164,7 +127,7 @@ def extract_coinset_tx_ids_from_offer_payload(payload: dict[str, Any]) -> list[s
     def _add_candidate(candidate: object) -> None:
         if isinstance(candidate, str):
             normalized = _normalize_hex_hash(candidate)
-            if _looks_like_tx_id(normalized) and normalized not in tx_ids:
+            if _looks_like_hex_id(normalized) and normalized not in tx_ids:
                 tx_ids.append(normalized)
         elif isinstance(candidate, list):
             for item in candidate:
@@ -193,7 +156,7 @@ def extract_coin_ids_from_offer_payload(payload: dict[str, Any]) -> list[str]:
     def _add_candidate(candidate: object) -> None:
         if isinstance(candidate, str):
             normalized = _normalize_hex_hash(candidate)
-            if _looks_like_coin_id(normalized) and normalized not in coin_ids:
+            if _looks_like_hex_id(normalized) and normalized not in coin_ids:
                 coin_ids.append(normalized)
             return
         if isinstance(candidate, list):
@@ -222,6 +185,15 @@ def extract_coin_ids_from_offer_payload(payload: dict[str, Any]) -> list[str]:
     return coin_ids
 
 
+def _normalize_coinset_network(network: str) -> str:
+    normalized = network.strip().lower()
+    if normalized in {"testnet", "testnet11"}:
+        return "testnet11"
+    if normalized == "mainnet":
+        return "mainnet"
+    return "mainnet"
+
+
 def _apply_height_range(
     body: dict[str, Any],
     start_height: int | None,
@@ -233,6 +205,12 @@ def _apply_height_range(
         body["end_height"] = int(end_height)
 
 
+def _positive_spend_count(spend_count: int | None) -> int | None:
+    if spend_count is not None and int(spend_count) > 0:
+        return int(spend_count)
+    return None
+
+
 class CoinsetReadClient:
     MAINNET_BASE_URL = "https://api.coinset.org"
     TESTNET11_BASE_URL = "https://testnet11.api.coinset.org"
@@ -242,15 +220,11 @@ class CoinsetReadClient:
         base_url: str | None = None,
         *,
         network: str = "mainnet",
-        require_testnet11: bool = False,
     ) -> None:
-        selected_network = "testnet11" if require_testnet11 else network.strip().lower()
-        if selected_network not in {"mainnet", "testnet11"}:
-            selected_network = "mainnet"
-        self.network = selected_network
+        self.network = _normalize_coinset_network(network)
         resolved_base_url = base_url.strip() if isinstance(base_url, str) else ""
         if not resolved_base_url:
-            if selected_network == "testnet11":
+            if self.network == "testnet11":
                 resolved_base_url = self.TESTNET11_BASE_URL
             else:
                 resolved_base_url = self.MAINNET_BASE_URL
@@ -285,6 +259,40 @@ class CoinsetReadClient:
             return None
         return record
 
+    def _coin_records_query(
+        self,
+        endpoint: str,
+        body: dict[str, Any],
+        *,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        _apply_height_range(body, start_height, end_height)
+        return self._records_from_post(endpoint, body)
+
+    def _coin_records_list_query(
+        self,
+        endpoint: str,
+        *,
+        list_field: str,
+        values_hex: list[str],
+        include_spent_coins: bool,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not values_hex:
+            return []
+        body: dict[str, Any] = {
+            list_field: [str(value) for value in values_hex],
+            "include_spent_coins": bool(include_spent_coins),
+        }
+        return self._coin_records_query(
+            endpoint,
+            body,
+            start_height=start_height,
+            end_height=end_height,
+        )
+
     def get_all_mempool_tx_ids(self) -> list[str]:
         payload = self.post_json("get_all_mempool_tx_ids", {})
         if not payload.get("success", False):
@@ -300,12 +308,15 @@ class CoinsetReadClient:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        body: dict[str, Any] = {
-            "puzzle_hash": puzzle_hash_hex,
-            "include_spent_coins": include_spent_coins,
-        }
-        _apply_height_range(body, start_height, end_height)
-        return self._records_from_post("get_coin_records_by_puzzle_hash", body)
+        return self._coin_records_query(
+            "get_coin_records_by_puzzle_hash",
+            {
+                "puzzle_hash": puzzle_hash_hex,
+                "include_spent_coins": include_spent_coins,
+            },
+            start_height=start_height,
+            end_height=end_height,
+        )
 
     def get_coin_records_by_puzzle_hashes(
         self,
@@ -315,14 +326,14 @@ class CoinsetReadClient:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        if not puzzle_hashes_hex:
-            return []
-        body: dict[str, Any] = {
-            "puzzle_hashes": [str(value) for value in puzzle_hashes_hex],
-            "include_spent_coins": include_spent_coins,
-        }
-        _apply_height_range(body, start_height, end_height)
-        return self._records_from_post("get_coin_records_by_puzzle_hashes", body)
+        return self._coin_records_list_query(
+            "get_coin_records_by_puzzle_hashes",
+            list_field="puzzle_hashes",
+            values_hex=puzzle_hashes_hex,
+            include_spent_coins=include_spent_coins,
+            start_height=start_height,
+            end_height=end_height,
+        )
 
     def get_coin_record_by_name(self, *, coin_name_hex: str) -> dict[str, Any] | None:
         return self._record_from_post(
@@ -339,14 +350,14 @@ class CoinsetReadClient:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        if not coin_names_hex:
-            return []
-        body: dict[str, Any] = {
-            "names": [str(value) for value in coin_names_hex],
-            "include_spent_coins": bool(include_spent_coins),
-        }
-        _apply_height_range(body, start_height, end_height)
-        return self._records_from_post("get_coin_records_by_names", body)
+        return self._coin_records_list_query(
+            "get_coin_records_by_names",
+            list_field="names",
+            values_hex=coin_names_hex,
+            include_spent_coins=include_spent_coins,
+            start_height=start_height,
+            end_height=end_height,
+        )
 
     def get_coin_records_by_parent_ids(
         self,
@@ -356,14 +367,14 @@ class CoinsetReadClient:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        if not parent_ids_hex:
-            return []
-        body: dict[str, Any] = {
-            "parent_ids": [str(value) for value in parent_ids_hex],
-            "include_spent_coins": bool(include_spent_coins),
-        }
-        _apply_height_range(body, start_height, end_height)
-        return self._records_from_post("get_coin_records_by_parent_ids", body)
+        return self._coin_records_list_query(
+            "get_coin_records_by_parent_ids",
+            list_field="parent_ids",
+            values_hex=parent_ids_hex,
+            include_spent_coins=include_spent_coins,
+            start_height=start_height,
+            end_height=end_height,
+        )
 
     def get_coin_records_by_hint(
         self,
@@ -373,12 +384,15 @@ class CoinsetReadClient:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        body: dict[str, Any] = {
-            "hint": hint_hex,
-            "include_spent_coins": bool(include_spent_coins),
-        }
-        _apply_height_range(body, start_height, end_height)
-        return self._records_from_post("get_coin_records_by_hint", body)
+        return self._coin_records_query(
+            "get_coin_records_by_hint",
+            {
+                "hint": hint_hex,
+                "include_spent_coins": bool(include_spent_coins),
+            },
+            start_height=start_height,
+            end_height=end_height,
+        )
 
     def get_coin_records_by_hints(
         self,
@@ -388,14 +402,14 @@ class CoinsetReadClient:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        if not hints_hex:
-            return []
-        body: dict[str, Any] = {
-            "hints": [str(value) for value in hints_hex],
-            "include_spent_coins": bool(include_spent_coins),
-        }
-        _apply_height_range(body, start_height, end_height)
-        return self._records_from_post("get_coin_records_by_hints", body)
+        return self._coin_records_list_query(
+            "get_coin_records_by_hints",
+            list_field="hints",
+            values_hex=hints_hex,
+            include_spent_coins=include_spent_coins,
+            start_height=start_height,
+            end_height=end_height,
+        )
 
     def get_puzzle_and_solution(
         self,
@@ -416,3 +430,37 @@ class CoinsetReadClient:
         if isinstance(blockchain_state, dict):
             return blockchain_state
         return payload
+
+
+class CoinsetAdapter(CoinsetReadClient):
+    def push_tx(self, *, spend_bundle_hex: str) -> dict[str, object]:
+        payload = push_tx_cli(self.network, self.base_url, spend_bundle_hex)
+        if not isinstance(payload, dict):
+            raise RuntimeError("coinset_push_tx_invalid_response")
+        return payload
+
+    def get_fee_estimate(
+        self,
+        *,
+        target_times: list[int] | None = None,
+        cost: int = 1_000_000,
+        spend_count: int | None = None,
+    ) -> dict[str, object]:
+        resolved_target_times = target_times or [60, 300, 600]
+        payload = fee_estimate_cli(
+            self.network,
+            self.base_url,
+            [int(value) for value in resolved_target_times],
+            int(cost),
+            _positive_spend_count(spend_count),
+        )
+        if not isinstance(payload, dict):
+            raise RuntimeError("coinset_get_fee_estimate_invalid_response")
+        return payload
+
+
+def build_webhook_callback_url(listen_addr: str, path: str = "/coinset/tx-block") -> str:
+    host, _, port = listen_addr.partition(":")
+    if not port:
+        port = "8787"
+    return f"http://{host}:{port}{path}"

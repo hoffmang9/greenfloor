@@ -49,6 +49,12 @@ build/post, policy, SQLite, and most adapters.
    skill standard. A manager agent splits work into subagent-sized packets and
    loops implement → test → review until only two or fewer nit findings remain.
 
+6. **Policy parity safety net.** With PyO3 and Python policy bridges removed,
+   operator correctness is enforced by `cargo test --manifest-path
+greenfloor-engine/Cargo.toml` in CI (`ubuntu-latest` matrix job). Python pytest
+   covers script adapters, SQLite test helpers, and subprocess integration harnesses;
+   it does not re-test Rust policy or conservative-fee parsing.
+
 ## Command ownership
 
 | Operator command                                               | Owner                              |

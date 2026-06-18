@@ -92,7 +92,7 @@ enum Commands {
     Daemon(DaemonCliArgs),
     /// Run one daemon cycle from a JSON request file (integration tests and tooling).
     DaemonOnce(DaemonOnceJsonArgs),
-    /// Coinset mutation IO (push tx, fee estimates) for scripts and operators.
+    /// Coinset script IO: generic post RPC and push-tx for spend-bundle hex.
     Coinset(CoinsetCliArgs),
 }
 

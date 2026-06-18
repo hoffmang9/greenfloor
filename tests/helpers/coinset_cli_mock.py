@@ -31,8 +31,6 @@ def default_coinset_cli_handler(argv: list[str]) -> Any:
         endpoint = flags.get("endpoint", "")
         if endpoint == "get_all_mempool_tx_ids":
             return {"success": True, "mempool_tx_ids": ["0xabc", "0xdef"]}
-        if endpoint == "get_fee_estimate":
-            return {"success": True, "estimates": [100, 500, 200]}
         raise AssertionError(f"unexpected_coinset_post_endpoint:{endpoint}")
     raise AssertionError(f"unexpected_coinset_subcommand:{subcommand}")
 

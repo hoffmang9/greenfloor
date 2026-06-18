@@ -44,7 +44,7 @@ Severity tags:
 - `[MUST]` `greenfloor/cli/*` and `greenfloor/daemon/*` Python packages are removed; do not reintroduce Python orchestration entrypoints.
 - `[MUST]` `greenfloor/core/*` policy bridges are removed; do not reintroduce Python policy orchestration.
 - `[MUST]` `scripts/` may remain Python; they use `greenfloor.config`, `greenfloor.adapters.coinset`, `greenfloor.hex_utils`, and `greenfloor.engine_binary` for native CLI resolution.
-- `[CONTEXT]` No PyO3 extension in the repo (ADR 0013, 2026-06-17). Policy parity is covered by Rust tests and native binary integration tests.
+- `[CONTEXT]` No PyO3 extension in the repo (ADR 0013, 2026-06-17). Operator policy, offer orchestration, and Coinset fee parsing live in `greenfloor-engine`; CI runs `cargo test --manifest-path greenfloor-engine/Cargo.toml` on `ubuntu-latest` as the explicit policy-parity safety net. Python pytest covers script adapters and integration harnesses only.
 - `[MUST]` Do not reintroduce PyO3 or Python policy bridges.
 - `[MUST]` Offer build/post uses `offer::operator::build_and_post_offer` (`greenfloor-manager build-and-post-offer` and daemon managed post).
 - `[MUST]` Reuse canonical utilities: `greenfloor/hex_utils.py`, `greenfloor/logging_setup.py`, `greenfloor/config/io.py`.
@@ -54,7 +54,7 @@ Severity tags:
 ## Design Constraints
 
 - `[MUST]` Prefer direct function calls within the package; do not spawn subprocesses for same-env Python calls unless isolation/security is documented in `docs/decisions/`.
-- `[MUST]` Python script paths that need Coinset IO use `greenfloor.adapters.coinset` → `coinset_engine` → `greenfloor-engine coinset …`. Operator paths call Rust in-process (no Python FFI).
+- `[MUST]` Python script paths that need Coinset IO use `greenfloor.adapters.coinset` (re-exports `coinset_engine`) → `greenfloor-engine coinset …`. Operator paths call Rust in-process (no Python FFI). Conservative fee parsing is Rust-only (`coinset::get_conservative_fee_estimate`); scripts do not reimplement it in Python.
 - `[MUST]` Avoid unnecessary indirection layers (`executor`, `worker`, `engine`, etc.).
 - `[MUST]` Keep one distinct responsibility per file; merge pass-through modules into functions.
 - `[MUST]` Eliminate duplicated logic blocks (>10 lines) by extracting shared helpers.

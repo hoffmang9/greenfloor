@@ -31,8 +31,9 @@ def test_coinset_adapter_network_testnet11() -> None:
     assert adapter.base_url == CoinsetAdapter.TESTNET11_BASE_URL
 
 
-def test_coinset_adapter_require_testnet11_overrides_network() -> None:
-    adapter = CoinsetAdapter(network="mainnet", require_testnet11=True)
+def test_coinset_adapter_network_testnet_alias() -> None:
+    adapter = CoinsetAdapter(network="testnet")
+    assert adapter.network == "testnet11"
     assert adapter.base_url == CoinsetAdapter.TESTNET11_BASE_URL
 
 
@@ -209,38 +210,6 @@ def test_extract_coin_ids_ignores_non_hash_values() -> None:
         "input_coins": {"xch": [{"id": "short"}]},
     }
     assert extract_coin_ids_from_offer_payload(payload) == []
-
-
-def test_conservative_fee_estimate_uses_max_of_estimates() -> None:
-    adapter = CoinsetAdapter()
-    assert adapter.get_conservative_fee_estimate() == 500
-
-
-def test_conservative_fee_estimate_falls_back_to_fee_estimate_field(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "greenfloor.adapters.coinset_engine.run_engine_json",
-        lambda _args: {"success": True, "fee_estimate": 42},
-    )
-    adapter = CoinsetAdapter()
-    assert adapter.get_conservative_fee_estimate() == 42
-
-
-def test_conservative_fee_estimate_returns_none_on_failure(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "greenfloor.adapters.coinset_engine.run_engine_json",
-        lambda _args: {"success": False},
-    )
-    adapter = CoinsetAdapter()
-    assert adapter.get_conservative_fee_estimate() is None
-
-
-def test_conservative_fee_estimate_skips_invalid_estimate_values(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "greenfloor.adapters.coinset_engine.run_engine_json",
-        lambda _args: {"success": True, "estimates": ["bad", 300]},
-    )
-    adapter = CoinsetAdapter()
-    assert adapter.get_conservative_fee_estimate() == 300
 
 
 def test_get_blockchain_state_success(monkeypatch) -> None:

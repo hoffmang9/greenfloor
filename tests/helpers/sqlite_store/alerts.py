@@ -15,7 +15,6 @@ class StoredAlertState:
 
 
 class AlertStoreMixin(SqliteStoreMixin):
-
     def get_alert_state(self, market_id: str) -> StoredAlertState:
         row = self.conn.execute(
             "SELECT market_id, is_low, last_alert_at FROM alert_state WHERE market_id = ?",

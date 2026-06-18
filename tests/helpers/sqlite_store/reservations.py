@@ -7,7 +7,6 @@ from tests.helpers.sqlite_store.schema import utcnow_iso
 
 
 class ReservationStoreMixin(SqliteStoreMixin):
-
     def add_offer_reservation_lease(
         self,
         *,
