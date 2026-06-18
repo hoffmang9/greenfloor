@@ -1,7 +1,7 @@
 //! Daemon cycle orchestration (native Rust). Reconcile, inventory/strategy/coin_ops planning, and cancel run in Rust.
 
-mod cli;
 mod cancel_phase;
+mod cli;
 mod coin_ops_execution;
 mod coin_ops_phase;
 mod coinset_spendable;
@@ -31,15 +31,19 @@ mod strategy_phase;
 mod strategy_support;
 pub mod watchlist;
 
-pub use coin_ops_execution::{
-    execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
-};
 pub use crate::coin_ops::execution::CoinOpExecContext;
 pub use crate::offer::lifecycle::{
     cancel_offers_on_dexie, reconcile_offers_batch, reconcile_offers_cli, CancelOfferTarget,
     ReconcileBatchItem, ReconcileBatchResult, ReconcileCliResult,
 };
 pub use cancel_phase::run_market_cancel_phase;
+pub use cli::{
+    run_daemon_command, run_daemon_cycle_once_from_json, run_daemon_loop_from_json,
+    run_daemon_once_from_request_json, DaemonCliArgs, DaemonOnceJsonArgs,
+};
+pub use coin_ops_execution::{
+    execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
+};
 pub use coinset_tx::build_dexie_size_by_offer_id;
 pub use coinset_ws::{
     resolve_coinset_ws_url, start_coinset_websocket_loop, CoinsetWebsocketLoopHandle,
@@ -63,10 +67,6 @@ pub use program_runtime::{
     use_websocket_capture_for_once, websocket_capture_enabled, DaemonProgramRuntime,
 };
 pub use reload::consume_reload_marker;
-pub use cli::{
-    run_daemon_command, run_daemon_cycle_once_from_json, run_daemon_loop_from_json,
-    run_daemon_once_from_request_json, DaemonCliArgs, DaemonOnceJsonArgs,
-};
 pub use run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
     elapsed_ms, CyclePlan, DaemonCycleSummary, DaemonCycleTestControls, DaemonDispatchState,
@@ -75,7 +75,7 @@ pub use run_once::{
 pub use watchlist::{
     active_offer_counts_by_size, active_offer_counts_by_size_and_side,
     active_offer_counts_by_size_and_side_detail, active_offer_counts_by_size_detail,
-    match_watched_coin_ids, set_watched_coin_ids_for_market, update_market_coin_watchlist_from_offers,
-    watched_coin_ids_for_market, watchlist_offer_ids, CoinWatchlistCache,
-    RESEED_MEMPOOL_MAX_AGE_SECONDS,
+    match_watched_coin_ids, set_watched_coin_ids_for_market,
+    update_market_coin_watchlist_from_offers, watched_coin_ids_for_market, watchlist_offer_ids,
+    CoinWatchlistCache, RESEED_MEMPOOL_MAX_AGE_SECONDS,
 };

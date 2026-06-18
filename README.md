@@ -129,6 +129,8 @@ pre-commit run --all-files
 Rust engine checks:
 
 ```bash
+cargo fmt --manifest-path greenfloor-engine/Cargo.toml --check
+cargo clippy --manifest-path greenfloor-engine/Cargo.toml --all-targets
 cargo test --manifest-path greenfloor-engine/Cargo.toml
 ```
 

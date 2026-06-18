@@ -21,7 +21,9 @@ pub(super) async fn submit_bootstrap_mixed_split(
                 .iter()
                 .map(|amount| u64::try_from(*amount).unwrap_or(0))
                 .collect(),
-            coin_ids: crate::coinset::parse_coin_ids(&[bootstrap_plan.source_coin_id.clone()])?,
+            coin_ids: crate::coinset::parse_coin_ids(std::slice::from_ref(
+                &bootstrap_plan.source_coin_id,
+            ))?,
             allow_sub_cat_output: false,
             fee_mojos: 0,
         },

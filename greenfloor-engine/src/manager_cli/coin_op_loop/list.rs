@@ -3,7 +3,9 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 use crate::coin_ops::is_spendable_coin_state;
-use crate::config::{load_markets_config_with_overlay, load_program_config, require_signer_offer_path};
+use crate::config::{
+    load_markets_config_with_overlay, load_program_config, require_signer_offer_path,
+};
 use crate::error::{SignerError, SignerResult};
 
 use crate::manager_cli::context::ManagerContext;
@@ -41,7 +43,12 @@ async fn load_coin_list_snapshot(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
-        .or_else(|| asset.map(str::trim).filter(|value| !value.is_empty()).map(str::to_string));
+        .or_else(|| {
+            asset
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        });
     let filter_label = filter.clone();
     let list_asset_id = if let Some(filter_value) = filter {
         resolve_asset_filter(program_path, &program.network, &filter_value).await?
@@ -113,7 +120,8 @@ pub async fn run_coins_list(
         }))?;
         return Ok(2);
     }
-    let snapshot = load_coin_list_snapshot(&mgr.program_config, &mgr.markets_config, asset, cat_id).await?;
+    let snapshot =
+        load_coin_list_snapshot(&mgr.program_config, &mgr.markets_config, asset, cat_id).await?;
     mgr.emit_json(&json!({
         "network": snapshot.network,
         "market_id": snapshot.market_id,
@@ -143,7 +151,8 @@ pub async fn run_coin_status(
         }))?;
         return Ok(2);
     }
-    let snapshot = load_coin_list_snapshot(&mgr.program_config, &mgr.markets_config, asset, cat_id).await?;
+    let snapshot =
+        load_coin_list_snapshot(&mgr.program_config, &mgr.markets_config, asset, cat_id).await?;
     mgr.emit_json(&json!({
         "op": "coin-status",
         "network": snapshot.network,

@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use super::dispatch::{expand_inputs_by_repeat, PlannedActionInput};
-use super::dispatch::{reservation_request_for_managed_offer, SpendableAssetProfile};
+use super::dispatch::{
+    reservation_request_for_managed_offer, ManagedOfferReservationRequest, SpendableAssetProfile,
+};
 use super::managed::{prepare_parallel_managed_submission_decision, ParallelSubmissionDecision};
 use super::strategy::PlannedAction;
 
@@ -44,17 +46,18 @@ fn build_parallel_reservation_prep(
     let mut entries = Vec::with_capacity(actions.len());
     let mut asset_ids = BTreeSet::new();
     for action in actions {
-        let requested_amounts = reservation_request_for_managed_offer(
-            &action.side,
-            action.size_base_units,
-            &ctx.base_asset_id,
-            &ctx.quote_asset_id,
-            ctx.base_unit_mojo_multiplier,
-            ctx.quote_unit_mojo_multiplier,
-            ctx.quote_price,
-            &ctx.fee_asset_id,
-            ctx.fee_amount_mojos,
-        );
+        let requested_amounts =
+            reservation_request_for_managed_offer(ManagedOfferReservationRequest {
+                side: &action.side,
+                size_base_units: action.size_base_units,
+                base_asset_id: &ctx.base_asset_id,
+                quote_asset_id: &ctx.quote_asset_id,
+                base_unit_mojo_multiplier: ctx.base_unit_mojo_multiplier,
+                quote_unit_mojo_multiplier: ctx.quote_unit_mojo_multiplier,
+                quote_price: ctx.quote_price,
+                fee_asset_id: &ctx.fee_asset_id,
+                fee_amount_mojos: ctx.fee_amount_mojos,
+            });
         for asset_id in requested_amounts.keys() {
             asset_ids.insert(asset_id.clone());
         }

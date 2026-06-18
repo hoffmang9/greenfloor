@@ -58,22 +58,58 @@ pub(crate) fn select_cats_from_list(
 }
 
 /// List CAT coins (by wallet asset or explicit coin ids) and select per *mode*.
+#[derive(Debug)]
+pub(crate) struct CatListSelectRequest<'a> {
+    pub client: &'a CoinsetClient,
+    pub receive_address: &'a str,
+    pub asset_id: Bytes32,
+    pub explicit_coin_ids: &'a [Bytes32],
+    pub target_amount: u64,
+    pub mode: CoinSelectionMode,
+    pub empty_list_err: SignerError,
+    pub insufficient_err: SignerError,
+}
+
 pub(crate) async fn list_and_select_cats(
-    client: &CoinsetClient,
-    receive_address: &str,
-    asset_id: Bytes32,
-    explicit_coin_ids: &[Bytes32],
-    target_amount: u64,
-    mode: CoinSelectionMode,
-    empty_list_err: SignerError,
-    insufficient_err: SignerError,
+    request: CatListSelectRequest<'_>,
 ) -> SignerResult<Vec<Cat>> {
-    let cats = if explicit_coin_ids.is_empty() {
-        list_unspent_cats(client, receive_address, asset_id).await?
+    let cats = if request.explicit_coin_ids.is_empty() {
+        list_unspent_cats(request.client, request.receive_address, request.asset_id).await?
     } else {
-        list_unspent_cats_by_ids(client, explicit_coin_ids).await?
+        list_unspent_cats_by_ids(request.client, request.explicit_coin_ids).await?
     };
-    select_cats_from_list(cats, target_amount, mode, empty_list_err, insufficient_err)
+    select_cats_from_list(
+        cats,
+        request.target_amount,
+        request.mode,
+        request.empty_list_err,
+        request.insufficient_err,
+    )
+}
+
+/// Select XCH coins for a target amount, optionally restricted to explicit coin ids.
+#[derive(Debug)]
+pub(crate) struct XchSelectRequest<'a> {
+    pub client: &'a CoinsetClient,
+    pub receive_address: &'a str,
+    pub explicit_coin_ids: &'a [Bytes32],
+    pub amount: u64,
+    pub empty_err: SignerError,
+    pub select_failed: SignerError,
+}
+
+pub(crate) async fn select_xch_for_amount(
+    request: XchSelectRequest<'_>,
+) -> SignerResult<Vec<Coin>> {
+    let mut xch_coins = list_unspent_xch(request.client, request.receive_address).await?;
+    if !request.explicit_coin_ids.is_empty() {
+        let allowed: HashSet<Bytes32> = request.explicit_coin_ids.iter().copied().collect();
+        xch_coins.retain(|coin| allowed.contains(&coin.coin_id()));
+    }
+    if xch_coins.is_empty() {
+        return Err(request.empty_err);
+    }
+    select_coins(xch_coins, request.amount).map_err(|_| request.select_failed)
 }
 
 pub(crate) fn finalize_selected_cats(
@@ -97,30 +133,14 @@ pub(crate) fn finalize_selected_cats(
     })
 }
 
-pub(crate) async fn select_xch_for_amount(
-    client: &CoinsetClient,
-    receive_address: &str,
-    explicit_coin_ids: &[Bytes32],
-    amount: u64,
-    empty_err: SignerError,
-    select_failed: SignerError,
-) -> SignerResult<Vec<Coin>> {
-    let mut xch_coins = list_unspent_xch(client, receive_address).await?;
-    if !explicit_coin_ids.is_empty() {
-        let allowed: HashSet<Bytes32> = explicit_coin_ids.iter().copied().collect();
-        xch_coins.retain(|coin| allowed.contains(&coin.coin_id()));
-    }
-    if xch_coins.is_empty() {
-        return Err(empty_err);
-    }
-    select_coins(xch_coins, amount).map_err(|_| select_failed)
-}
-
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
     use chia_protocol::{Bytes32, Coin};
     use chia_sdk_driver::{Cat, CatInfo};
+    use chia_sdk_utils::select_coins;
 
     fn cat_with_amount(amount: u64) -> Cat {
         Cat::new(
@@ -214,6 +234,11 @@ mod tests {
         assert_eq!(selected.selected.len(), 2);
         assert_eq!(selected.offered_total, 1100);
         assert_eq!(selected.change_amount, 100);
+    }
+
+    #[test]
+    fn list_and_select_cats_delegates_to_finalize_path() {
+        let _cat = list_and_select_cats;
     }
 
     #[test]

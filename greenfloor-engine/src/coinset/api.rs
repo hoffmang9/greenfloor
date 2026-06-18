@@ -36,7 +36,9 @@ pub async fn post_coinset_rpc(
 ) -> SignerResult<Value> {
     let endpoint = endpoint.trim().trim_start_matches('/');
     if endpoint.is_empty() {
-        return Err(SignerError::Other("coinset endpoint is required".to_string()));
+        return Err(SignerError::Other(
+            "coinset endpoint is required".to_string(),
+        ));
     }
     apply_testnet11_network(&mut body, network);
     let msp = if let Some(url) = base_url.map(str::trim).filter(|value| !value.is_empty()) {

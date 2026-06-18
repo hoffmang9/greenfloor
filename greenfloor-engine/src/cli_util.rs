@@ -37,7 +37,10 @@ pub fn format_json_value(value: &Value, compact: bool) -> Result<String, String>
 }
 
 pub fn print_json(value: &impl Serialize, compact: bool) -> SignerResult<()> {
-    println!("{}", format_json(value, compact).map_err(SignerError::Other)?);
+    println!(
+        "{}",
+        format_json(value, compact).map_err(SignerError::Other)?
+    );
     Ok(())
 }
 

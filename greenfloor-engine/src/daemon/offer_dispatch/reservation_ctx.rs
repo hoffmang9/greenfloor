@@ -105,11 +105,8 @@ vault:
         )
         .expect("write");
 
-        let paths = DaemonCyclePaths::new(
-            program_path.clone(),
-            dir.path().join("markets.yaml"),
-            None,
-        );
+        let paths =
+            DaemonCyclePaths::new(program_path.clone(), dir.path().join("markets.yaml"), None);
         let wallet_id = reservation_wallet_id(&paths).expect("wallet id");
         assert_eq!(wallet_id, launcher_id);
     }

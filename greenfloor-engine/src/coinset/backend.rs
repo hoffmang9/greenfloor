@@ -1,9 +1,12 @@
-use chia_protocol::Bytes32;
 use chia_protocol::SpendBundle;
+use chia_protocol::{Bytes32, Coin};
 use clvm_utils::TreeHash;
 
-use super::{broadcast_spend_bundle, fetch_latest_vault, presplit, CoinsetClient, SelectedCats};
-use crate::error::SignerResult;
+use super::{
+    broadcast_spend_bundle, fetch_latest_vault, presplit, select_xch_for_amount, CoinsetClient,
+    SelectedCats, XchSelectRequest,
+};
+use crate::error::{SignerError, SignerResult};
 use chia_sdk_driver::{Cat, Vault};
 
 pub struct LiveCoinset<'a>(pub &'a CoinsetClient);
@@ -37,6 +40,26 @@ pub trait OfferCoinsetBackend {
         &self,
         spend_bundle: SpendBundle,
     ) -> impl std::future::Future<Output = SignerResult<String>> + Send;
+}
+
+impl<'a> LiveCoinset<'a> {
+    /// Select XCH inputs for a target amount (explicit coin ids or wallet listing).
+    pub(crate) async fn select_xch_for_spend(
+        &self,
+        receive_address: &str,
+        explicit_coin_ids: &[Bytes32],
+        amount: u64,
+    ) -> SignerResult<Vec<Coin>> {
+        select_xch_for_amount(XchSelectRequest {
+            client: self.0,
+            receive_address,
+            explicit_coin_ids,
+            amount,
+            empty_err: SignerError::NoUnspentXchCoins,
+            select_failed: SignerError::InsufficientXchFeeBalanceForMixedSplit,
+        })
+        .await
+    }
 }
 
 impl OfferCoinsetBackend for LiveCoinset<'_> {

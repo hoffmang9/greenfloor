@@ -174,9 +174,9 @@ pub enum SignerError {
 impl SignerError {
     pub fn is_parallel_dispatch_transient(&self) -> bool {
         match self {
-            Self::ReservationContention(_) | Self::ManagedUpstreamTransient(_) | Self::DatabaseLocked => {
-                true
-            }
+            Self::ReservationContention(_)
+            | Self::ManagedUpstreamTransient(_)
+            | Self::DatabaseLocked => true,
             Self::Other(message) => {
                 let message = message.as_str();
                 if message.contains("database is locked") {

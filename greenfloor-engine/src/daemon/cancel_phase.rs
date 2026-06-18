@@ -11,16 +11,29 @@ use crate::storage::SqliteStore;
 use crate::offer::dexie_payload::dexie_offer_status;
 use crate::offer::lifecycle::{cancel_offers_on_dexie, CancelOfferTarget};
 
+pub struct MarketCancelPhaseParams<'a> {
+    pub store: &'a SqliteStore,
+    pub dexie: &'a DexieClient,
+    pub market: &'a MarketConfig,
+    pub offers: &'a [Value],
+    pub runtime_dry_run: bool,
+    pub current_xch_price_usd: Option<f64>,
+    pub previous_xch_price_usd: Option<f64>,
+}
+
 pub async fn run_market_cancel_phase(
-    store: &SqliteStore,
-    dexie: &DexieClient,
-    market: &MarketConfig,
-    offers: &[Value],
-    runtime_dry_run: bool,
-    current_xch_price_usd: Option<f64>,
-    previous_xch_price_usd: Option<f64>,
+    params: MarketCancelPhaseParams<'_>,
     state: &mut MarketCycleResultState,
 ) -> SignerResult<Value> {
+    let MarketCancelPhaseParams {
+        store,
+        dexie,
+        market,
+        offers,
+        runtime_dry_run,
+        current_xch_price_usd,
+        previous_xch_price_usd,
+    } = params;
     let market_id = market.market_id.as_str();
     let env_threshold = std::env::var("GREENFLOOR_UNSTABLE_CANCEL_MOVE_BPS")
         .ok()
@@ -48,7 +61,6 @@ pub async fn run_market_cancel_phase(
     let target_offer_ids = collect_open_offer_ids_for_cancel(&offer_rows);
     let mut items = Vec::new();
     let cancel_planned = target_offer_ids.len() as i64;
-    let mut cancel_triggered = false;
     let mut cancel_executed = 0_i64;
 
     if !decision.triggered {
@@ -68,7 +80,7 @@ pub async fn run_market_cancel_phase(
         return Ok(payload);
     }
 
-    cancel_triggered = true;
+    let cancel_triggered = true;
     if runtime_dry_run {
         for offer_id in &target_offer_ids {
             items.push(json!({

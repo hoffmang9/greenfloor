@@ -174,6 +174,14 @@ mutation CreateWallet($input: CreateWalletInput!) {
 
 
 def main() -> None:
+    from pathlib import Path
+
+    from greenfloor.config.io import ensure_operator_config_valid
+
+    default_program = Path("~/.greenfloor/config/program.yaml").expanduser()
+    if default_program.is_file():
+        ensure_operator_config_valid()
+
     base_url = _require_env(
         "GREENFLOOR_ENT_WALLET_BASE_URL",
         legacy="GREENFLOOR_CLOUD_WALLET_BASE_URL",

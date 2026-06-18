@@ -87,6 +87,14 @@ def resolve_greenfloor_engine_binary(*, build_if_missing: bool = True) -> Path:
     )
 
 
+def resolve_greenfloor_manager_binary(*, build_if_missing: bool = True) -> Path:
+    return _resolve_binary(
+        _MANAGER_BIN,
+        env_var="GREENFLOOR_MANAGER_BIN",
+        build_if_missing=build_if_missing,
+    )
+
+
 def resolve_greenfloord_binary(*, build_if_missing: bool = True) -> Path:
     return _resolve_binary(
         _DAEMON_BIN,

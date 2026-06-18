@@ -107,16 +107,8 @@ impl DexieClient {
             .get("tokens")
             .and_then(Value::as_array)
             .cloned()
-            .unwrap_or_else(|| {
-                payload
-                    .as_array()
-                    .cloned()
-                    .unwrap_or_default()
-            });
-        Ok(tokens
-            .into_iter()
-            .filter(|row| row.is_object())
-            .collect())
+            .unwrap_or_else(|| payload.as_array().cloned().unwrap_or_default());
+        Ok(tokens.into_iter().filter(|row| row.is_object()).collect())
     }
 
     pub async fn get_price_tickers(&self) -> SignerResult<Vec<Value>> {
@@ -130,11 +122,7 @@ impl DexieClient {
             .map_err(|err| SignerError::Other(format!("dexie_get_tickers_error:{err}")))?;
         let payload = Self::parse_response(response).await?;
         if let Some(rows) = payload.as_array() {
-            return Ok(rows
-                .iter()
-                .filter(|row| row.is_object())
-                .cloned()
-                .collect());
+            return Ok(rows.iter().filter(|row| row.is_object()).cloned().collect());
         }
         Ok(payload
             .get("tickers")
@@ -229,7 +217,13 @@ fn case_insensitive_match(left: &str, right: &str) -> bool {
 fn row_matches_cat_target(row: &Value, target: &str, include_ticker_split: bool) -> bool {
     let mut candidates = std::collections::HashSet::new();
     for key in [
-        "assetId", "asset_id", "id", "tokenId", "token_id", "base_currency", "target_currency",
+        "assetId",
+        "asset_id",
+        "id",
+        "tokenId",
+        "token_id",
+        "base_currency",
+        "target_currency",
     ] {
         if let Some(value) = row.get(key).and_then(Value::as_str) {
             let trimmed = value.trim().to_ascii_lowercase();
@@ -359,16 +353,29 @@ pub async fn verify_dexie_offer_visible_by_id(
     Some(last_error)
 }
 
-pub async fn post_offer_phase_dexie(
-    dexie: &DexieClient,
-    offer_text: &str,
-    drop_only: bool,
-    claim_rewards: bool,
-    expected_offered_asset_id: &str,
-    expected_offered_symbol: &str,
-    expected_requested_asset_id: &str,
-    expected_requested_symbol: &str,
-) -> SignerResult<Value> {
+#[derive(Debug, Clone)]
+pub struct PostOfferPhaseDexieParams<'a> {
+    pub dexie: &'a DexieClient,
+    pub offer_text: &'a str,
+    pub drop_only: bool,
+    pub claim_rewards: bool,
+    pub expected_offered_asset_id: &'a str,
+    pub expected_offered_symbol: &'a str,
+    pub expected_requested_asset_id: &'a str,
+    pub expected_requested_symbol: &'a str,
+}
+
+pub async fn post_offer_phase_dexie(params: PostOfferPhaseDexieParams<'_>) -> SignerResult<Value> {
+    let PostOfferPhaseDexieParams {
+        dexie,
+        offer_text,
+        drop_only,
+        claim_rewards,
+        expected_offered_asset_id,
+        expected_offered_symbol,
+        expected_requested_asset_id,
+        expected_requested_symbol,
+    } = params;
     let mut last_result =
         json!({"success": false, "error": "dexie_offer_not_visible_after_publish"});
     let mut last_visibility_error = String::new();

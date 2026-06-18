@@ -5,7 +5,9 @@ use std::path::Path;
 use serde_json::json;
 use serde_yaml::Value;
 
-use crate::config::{load_markets_config_with_overlay, load_program_config, require_signer_offer_path};
+use crate::config::{
+    load_markets_config_with_overlay, load_program_config, require_signer_offer_path,
+};
 use crate::error::{SignerError, SignerResult};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
@@ -13,6 +15,17 @@ use super::context::ManagerContext;
 use super::paths::expand_home;
 
 const ALLOWED_LOG_LEVELS: &[&str] = &["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"];
+
+pub struct BootstrapHomeParams<'a> {
+    pub ctx: &'a ManagerContext,
+    pub home_dir: &'a Path,
+    pub program_template: &'a Path,
+    pub markets_template: &'a Path,
+    pub cats_template: Option<&'a Path>,
+    pub testnet_markets_template: Option<&'a Path>,
+    pub seed_testnet_markets: bool,
+    pub force: bool,
+}
 
 pub fn run_config_validate(ctx: &ManagerContext) -> SignerResult<i32> {
     let program_path = &ctx.program_config;
@@ -39,9 +52,9 @@ pub fn run_set_log_level(ctx: &ManagerContext, log_level: &str) -> SignerResult<
     let app_entry = app
         .entry(Value::from("app"))
         .or_insert_with(|| Value::Mapping(Default::default()));
-    let app_map = app_entry
-        .as_mapping_mut()
-        .ok_or_else(|| SignerError::Other("program config field 'app' must be a mapping".to_string()))?;
+    let app_map = app_entry.as_mapping_mut().ok_or_else(|| {
+        SignerError::Other("program config field 'app' must be a mapping".to_string())
+    })?;
     let prior_level = app_map
         .get(Value::from("log_level"))
         .and_then(Value::as_str)
@@ -59,16 +72,17 @@ pub fn run_set_log_level(ctx: &ManagerContext, log_level: &str) -> SignerResult<
     Ok(0)
 }
 
-pub fn run_bootstrap_home(
-    ctx: &ManagerContext,
-    home_dir: &Path,
-    program_template: &Path,
-    markets_template: &Path,
-    cats_template: Option<&Path>,
-    testnet_markets_template: Option<&Path>,
-    seed_testnet_markets: bool,
-    force: bool,
-) -> SignerResult<i32> {
+pub fn run_bootstrap_home(params: BootstrapHomeParams<'_>) -> SignerResult<i32> {
+    let BootstrapHomeParams {
+        ctx,
+        home_dir,
+        program_template,
+        markets_template,
+        cats_template,
+        testnet_markets_template,
+        seed_testnet_markets,
+        force,
+    } = params;
     let home = expand_home(home_dir);
     let config_dir = home.join("config");
     let db_dir = home.join("db");
@@ -181,7 +195,10 @@ pub fn run_doctor(ctx: &ManagerContext) -> SignerResult<i32> {
     for market in &enabled_markets {
         let key_id = market.signer_key_id.trim();
         if key_id.is_empty() {
-            problems.push(format!("market_key_error:{}:missing signer_key_id", market.market_id));
+            problems.push(format!(
+                "market_key_error:{}:missing signer_key_id",
+                market.market_id
+            ));
         } else {
             key_ids.push(key_id.to_string());
         }
@@ -254,9 +271,8 @@ fn normalize_log_level(log_level: &str) -> SignerResult<String> {
 }
 
 fn read_yaml_mapping(path: &Path) -> SignerResult<Value> {
-    let raw = std::fs::read_to_string(path).map_err(|err| {
-        SignerError::Other(format!("failed to read {}: {err}", path.display()))
-    })?;
+    let raw = std::fs::read_to_string(path)
+        .map_err(|err| SignerError::Other(format!("failed to read {}: {err}", path.display())))?;
     serde_yaml::from_str(&raw)
         .map_err(|err| SignerError::Other(format!("failed to parse {}: {err}", path.display())))
 }
@@ -264,9 +280,8 @@ fn read_yaml_mapping(path: &Path) -> SignerResult<Value> {
 fn write_yaml(path: &Path, value: &Value) -> SignerResult<()> {
     let text = serde_yaml::to_string(value)
         .map_err(|err| SignerError::Other(format!("failed to encode yaml: {err}")))?;
-    std::fs::write(path, text).map_err(|err| {
-        SignerError::Other(format!("failed to write {}: {err}", path.display()))
-    })
+    std::fs::write(path, text)
+        .map_err(|err| SignerError::Other(format!("failed to write {}: {err}", path.display())))
 }
 
 #[cfg(test)]
@@ -290,7 +305,31 @@ mod tests {
         let markets_path = dir.path().join("markets.yaml");
         std::fs::write(
             &program_path,
-            "app:\n  network: mainnet\n  home_dir: /tmp/gf\n",
+            r#"app:
+  network: mainnet
+  home_dir: /tmp/gf
+runtime:
+  loop_interval_seconds: 30
+chain_signals:
+  tx_block_trigger:
+    mode: websocket
+dev:
+  python:
+    min_version: "3.11"
+notifications:
+  low_inventory_alerts:
+    enabled: true
+    threshold_mode: absolute_base_units
+    default_threshold_base_units: 0
+    dedup_cooldown_seconds: 21600
+    clear_hysteresis_percent: 10
+  providers:
+    - type: pushover
+      enabled: true
+      user_key_env: PUSHOVER_USER_KEY
+      app_token_env: PUSHOVER_APP_TOKEN
+      recipient_key_env: PUSHOVER_RECIPIENT_KEY
+"#,
         )
         .expect("write program");
         std::fs::write(&markets_path, "markets: []\n").expect("write markets");

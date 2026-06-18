@@ -3,8 +3,10 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use crate::coin_ops::{CoinCombineGateResult, CoinSplitGateResult, SpendableCoin};
-use crate::coin_ops::execution::{resolve_combine_input_cap, CoinOpExecContext, CoinOpTestOverrides};
+use crate::coin_ops::execution::{
+    resolve_combine_input_cap, CoinOpExecContext, CoinOpTestOverrides,
+};
+use crate::coin_ops::SpendableCoin;
 use crate::config::{
     load_markets_config_with_overlay, load_program_config, load_signer_config,
     resolve_market_for_build, MarketConfig,
@@ -13,7 +15,8 @@ use crate::error::{SignerError, SignerResult};
 use crate::hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
 use crate::offer::resolve_offer_assets_for_action;
 
-pub(super) const COIN_SPLIT_LOCKUP_ERROR: &str = "coin_split_lockup_guardrail_would_lock_all_spendable_coins";
+pub(super) const COIN_SPLIT_LOCKUP_ERROR: &str =
+    "coin_split_lockup_guardrail_would_lock_all_spendable_coins";
 pub(super) const COIN_SPLIT_NO_SPENDABLE_ERROR: &str = "no_spendable_split_coin_available";
 
 pub(super) async fn build_coin_op_exec_context(
@@ -99,7 +102,9 @@ pub(super) async fn resolve_asset_filter(
     Ok(resolved)
 }
 
-pub(super) fn select_list_market(markets: &crate::config::MarketsConfig) -> SignerResult<&MarketConfig> {
+pub(super) fn select_list_market(
+    markets: &crate::config::MarketsConfig,
+) -> SignerResult<&MarketConfig> {
     let enabled: Vec<_> = markets.markets.iter().filter(|m| m.enabled).collect();
     let candidates = if enabled.is_empty() {
         markets.markets.iter().collect::<Vec<_>>()

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::error::SignerResult;
 use crate::storage::{AuditEventRow, OfferStateListRow, SqliteStore};
@@ -78,11 +78,7 @@ pub fn offers_status_cli(
         .map(offer_status_row)
         .collect::<Vec<_>>();
     let events = store
-        .list_recent_audit_events(
-            Some(STATUS_EVENT_TYPES),
-            market_filter,
-            events_limit,
-        )?
+        .list_recent_audit_events(Some(STATUS_EVENT_TYPES), market_filter, events_limit)?
         .into_iter()
         .map(audit_event_row)
         .collect::<Vec<_>>();
@@ -102,6 +98,7 @@ pub fn offers_status_cli(
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
     use tempfile::tempdir;
 
     use super::*;

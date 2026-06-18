@@ -22,7 +22,8 @@ pub use cancel::{
 };
 pub use dispatch::{
     expiry_seconds_for_action, reservation_request_for_managed_offer,
-    single_input_preferred_skip_reason, PlannedActionInput, SpendableAssetProfile,
+    single_input_preferred_skip_reason, ManagedOfferReservationRequest, PlannedActionInput,
+    SpendableAssetProfile,
 };
 pub use execution::{
     expand_planned_actions, filter_planned_actions_with_positive_repeat,

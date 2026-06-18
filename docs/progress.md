@@ -23,8 +23,8 @@ Implementation lives in `greenfloor-engine/src/`:
 - `cycle/` — deterministic strategy, cancel policy, parallel dispatch
 - `storage/` — SQLite schema and persistence
 
-**Python (`greenfloor/` + `scripts/`):** config parsing, hex helpers, and Coinset adapter
-for standalone scripts. Coinset push/fee uses `greenfloor-engine` CLI subcommands.
+- Python (`greenfloor/` + `scripts/`): thin YAML helpers (`config/io.py`), hex helpers, and Coinset adapter
+  for standalone scripts. Operator validation is Rust-only (`greenfloor-manager config-validate`).
 
 **Deleted:** `greenfloor-engine-pyo3/`, `greenfloor/core/`, policy bridges, PyO3 FFI.
 
@@ -32,6 +32,15 @@ for standalone scripts. Coinset push/fee uses `greenfloor-engine` CLI subcommand
 runtime modules.
 
 ## Recent milestones
+
+### 2026-06-17 — Rust-centric CI/pre-commit; Python scope trimmed
+
+- Added `cargo fmt --check` and `cargo clippy` to pre-commit and CI (ubuntu + arm).
+- `cargo test` runs on `ubuntu-24.04-arm` as well as `ubuntu-latest`.
+- Deleted `greenfloor/config/models.py`; scripts use thin `load_yaml` + `greenfloor-manager config-validate`.
+- Collapsed pytest to 23 tests (coinset adapter, `engine_binary`, manager/daemon subprocess smoke).
+- Removed Python `SqliteStore` test helpers; daemon assertions use `daemon-once` JSON responses.
+- `live-testnet-e2e` no longer installs `chia-wallet-sdk` PyO3 wheel.
 
 ### 2026-06-17 — PyO3 removed; Coinset CLI for scripts
 

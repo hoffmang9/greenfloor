@@ -59,6 +59,9 @@ async fn main() {
 
 
 def main() -> int:
+    from greenfloor.config.io import ensure_operator_config_valid
+
+    ensure_operator_config_valid()
     FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
     src_dir = REPO / "greenfloor-engine" / "tools"
     src_dir.mkdir(exist_ok=True)

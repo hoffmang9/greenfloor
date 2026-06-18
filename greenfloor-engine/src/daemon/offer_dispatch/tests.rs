@@ -1,13 +1,12 @@
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
 
 use serde_json::json;
 use tempfile::tempdir;
 
 use super::{
-    classify_parallel_dispatch, is_parallel_dispatch_transient_signer_error,
-    record_parallel_fallback_audit, OfferDispatchOutput, OfferReservationCoordinator,
-    ParallelDispatchDecision,
+    classify_parallel_dispatch, coordinator::OfferReservationCoordinator,
+    is_parallel_dispatch_transient_signer_error, record_parallel_fallback_audit,
+    OfferDispatchOutput, ParallelDispatchDecision,
 };
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::{parallel_managed_dispatch_enabled, PlannedAction};
@@ -45,28 +44,13 @@ fn sample_paths(dir: &tempfile::TempDir) -> DaemonCyclePaths {
 
 fn sample_program(parallelism_enabled: bool, dry_run: bool) -> ManagerProgramConfig {
     ManagerProgramConfig {
-        network: "mainnet".to_string(),
-        home_dir: PathBuf::from("/tmp/gf"),
-        app_log_level: "INFO".to_string(),
-        app_log_level_was_missing: false,
-        dexie_api_base: "https://api.dexie.space".to_string(),
-        splash_api_base: "http://localhost:4000".to_string(),
-        offer_publish_venue: "dexie".to_string(),
-        coin_ops_minimum_fee_mojos: 0,
-        coin_ops_max_operations_per_run: 0,
-        coin_ops_max_daily_fee_budget_mojos: 0,
-        coin_ops_split_fee_mojos: 0,
-        coin_ops_combine_fee_mojos: 0,
-        runtime_offer_bootstrap_wait_timeout_seconds: 120,
         runtime_market_slot_count: 1,
         runtime_offer_parallelism_enabled: parallelism_enabled,
         runtime_offer_parallelism_max_workers: 2,
         runtime_dry_run: dry_run,
-        runtime_loop_interval_seconds: 30,
-        tx_block_trigger_mode: "websocket".to_string(),
-        tx_block_websocket_url: String::new(),
         tx_block_websocket_reconnect_interval_seconds: 1,
         tx_block_fallback_poll_interval_seconds: 1,
+        ..Default::default()
     }
 }
 
@@ -136,8 +120,8 @@ fn coordinator_concurrent_acquires_only_one_succeeds_for_full_capacity() {
     let coordinator = OfferReservationCoordinator::new(&db_path, Some(300)).expect("coordinator");
     let market_id = "m1";
     let wallet_id = "wallet-1";
-    let mut requested = BTreeMap::from([("asset-a".to_string(), 100_i64)]);
-    let mut available = BTreeMap::from([("asset-a".to_string(), 100_i64)]);
+    let requested = BTreeMap::from([("asset-a".to_string(), 100_i64)]);
+    let available = BTreeMap::from([("asset-a".to_string(), 100_i64)]);
 
     let first = coordinator
         .try_acquire(market_id, wallet_id, &requested, &available)
@@ -179,8 +163,7 @@ fn coordinator_release_frees_capacity_for_next_acquire() {
 
 #[tokio::test]
 async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() {
-    use super::test_hooks::{set_managed_post_override, set_parallel_dispatch_override};
-    use super::execute_strategy_actions;
+    use super::{execute_strategy_actions, ExecuteStrategyActionsParams};
     use crate::config::MarketConfig;
     use crate::cycle::PlannedAction;
     use serde_json::json;
@@ -220,16 +203,16 @@ async fn execute_strategy_actions_parallel_disabled_uses_sequential_skip_path() 
         side: "sell".to_string(),
     }];
 
-    let output = execute_strategy_actions(
-        &store,
-        &db_path,
-        &program,
-        &sample_paths(&dir),
-        &market,
-        "mainnet",
-        &actions,
-        false,
-    )
+    let output = execute_strategy_actions(ExecuteStrategyActionsParams {
+        store: &store,
+        db_path: &db_path,
+        program: &program,
+        paths: &sample_paths(&dir),
+        market: &market,
+        network: "mainnet",
+        actions: &actions,
+        signer_offer_path_configured: false,
+    })
     .await
     .expect("dispatch");
 
@@ -320,7 +303,7 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
     use super::test_hooks::{
         set_managed_post_override, set_parallel_dispatch_override, TestHooksScope,
     };
-    use super::execute_strategy_actions;
+    use super::{execute_strategy_actions, ExecuteStrategyActionsParams};
 
     let _hooks = TestHooksScope::begin();
 
@@ -336,26 +319,22 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
 
     set_parallel_dispatch_override(Some("transient"));
     set_managed_post_override(Some("success"));
-    let output = execute_strategy_actions(
-        &store,
-        &db_path,
-        &program,
-        &sample_paths(&dir),
-        &sample_market(),
-        "mainnet",
-        &[sample_action()],
-        true,
-    )
+    let output = execute_strategy_actions(ExecuteStrategyActionsParams {
+        store: &store,
+        db_path: &db_path,
+        program: &program,
+        paths: &sample_paths(&dir),
+        market: &sample_market(),
+        network: "mainnet",
+        actions: &[sample_action()],
+        signer_offer_path_configured: true,
+    })
     .await
     .expect("dispatch");
 
     assert_eq!(output.executed_count, 1);
     let events = store
-        .list_recent_audit_events(
-            Some(&["offer_parallel_fallback"]),
-            Some("m1"),
-            5,
-        )
+        .list_recent_audit_events(Some(&["offer_parallel_fallback"]), Some("m1"), 5)
         .expect("events");
     assert_eq!(events.len(), 1);
 }
@@ -363,7 +342,7 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
 #[tokio::test]
 async fn execute_strategy_actions_parallel_fatal_propagates() {
     use super::test_hooks::{set_parallel_dispatch_override, TestHooksScope};
-    use super::execute_strategy_actions;
+    use super::{execute_strategy_actions, ExecuteStrategyActionsParams};
 
     let _hooks = TestHooksScope::begin();
 
@@ -378,16 +357,16 @@ async fn execute_strategy_actions_parallel_fatal_propagates() {
     program.runtime_offer_parallelism_enabled = true;
 
     set_parallel_dispatch_override(Some("fatal"));
-    let err = execute_strategy_actions(
-        &store,
-        &db_path,
-        &program,
-        &sample_paths(&dir),
-        &sample_market(),
-        "mainnet",
-        &[sample_action()],
-        true,
-    )
+    let err = execute_strategy_actions(ExecuteStrategyActionsParams {
+        store: &store,
+        db_path: &db_path,
+        program: &program,
+        paths: &sample_paths(&dir),
+        market: &sample_market(),
+        network: "mainnet",
+        actions: &[sample_action()],
+        signer_offer_path_configured: true,
+    })
     .await
     .expect_err("fatal parallel error");
     assert!(err.to_string().contains("permanent_offer_build_failure"));
@@ -396,7 +375,7 @@ async fn execute_strategy_actions_parallel_fatal_propagates() {
 #[tokio::test]
 async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
     use super::test_hooks::{set_managed_post_override, TestHooksScope};
-    use super::execute_strategy_actions;
+    use super::{execute_strategy_actions, ExecuteStrategyActionsParams};
 
     let _hooks = TestHooksScope::begin();
 
@@ -410,16 +389,16 @@ async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
     let program = sample_program(false, false);
 
     set_managed_post_override(Some("success"));
-    let output = execute_strategy_actions(
-        &store,
-        &db_path,
-        &program,
-        &sample_paths(&dir),
-        &sample_market(),
-        "mainnet",
-        &[sample_action()],
-        true,
-    )
+    let output = execute_strategy_actions(ExecuteStrategyActionsParams {
+        store: &store,
+        db_path: &db_path,
+        program: &program,
+        paths: &sample_paths(&dir),
+        market: &sample_market(),
+        network: "mainnet",
+        actions: &[sample_action()],
+        signer_offer_path_configured: true,
+    })
     .await
     .expect("dispatch");
 
@@ -509,7 +488,9 @@ fn parallel_dispatch_override_success_returns_output() {
 
 #[test]
 fn managed_post_override_success_returns_true() {
-    use super::test_hooks::{managed_post_test_override, set_managed_post_override, TestHooksScope};
+    use super::test_hooks::{
+        managed_post_test_override, set_managed_post_override, TestHooksScope,
+    };
 
     let _hooks = TestHooksScope::begin();
     set_managed_post_override(Some("success"));

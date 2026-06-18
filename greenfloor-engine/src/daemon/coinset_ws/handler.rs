@@ -3,11 +3,11 @@ use serde_json::Value;
 use crate::coinset::get_all_mempool_tx_ids;
 use crate::config::ManagerProgramConfig;
 use crate::daemon::coinset_tx::classify_ws_payload_tx_ids;
+use crate::daemon::watchlist::cache::CoinWatchlistCache;
+use crate::error::{SignerError, SignerResult};
 use crate::offer::dexie_payload::{
     extract_coin_ids_from_offer_payload, extract_coinset_tx_ids_from_offer_payload,
 };
-use crate::daemon::watchlist::cache::CoinWatchlistCache;
-use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
 pub async fn run_recovery_poll(
@@ -135,13 +135,7 @@ pub fn handle_ws_text(
                 .map(|(market_id, coin_ids)| {
                     (
                         market_id,
-                        Value::Array(
-                            coin_ids
-                                .into_iter()
-                                .take(10)
-                                .map(Value::String)
-                                .collect(),
-                        ),
+                        Value::Array(coin_ids.into_iter().take(10).map(Value::String).collect()),
                     )
                 })
                 .collect();
@@ -199,10 +193,7 @@ mod tests {
 
         let events = store
             .list_recent_audit_events(
-                Some(&[
-                    "coinset_ws_mempool_event",
-                    "coinset_ws_tx_block_event",
-                ]),
+                Some(&["coinset_ws_mempool_event", "coinset_ws_tx_block_event"]),
                 None,
                 10,
             )

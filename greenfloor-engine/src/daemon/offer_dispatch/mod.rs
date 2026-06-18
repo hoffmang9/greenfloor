@@ -17,15 +17,11 @@ use std::path::Path;
 use serde_json::json;
 
 use crate::config::{ManagerProgramConfig, MarketConfig};
-use crate::cycle::{
-    expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction,
-};
+use crate::cycle::{expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction};
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
 use crate::daemon::cycle_paths::DaemonCyclePaths;
-
-pub use coordinator::OfferReservationCoordinator;
 
 #[derive(Debug, Clone)]
 pub struct OfferDispatchOutput {
@@ -72,16 +68,30 @@ pub(crate) async fn record_parallel_fallback_audit(
     )
 }
 
+pub struct ExecuteStrategyActionsParams<'a> {
+    pub store: &'a SqliteStore,
+    pub db_path: &'a Path,
+    pub program: &'a ManagerProgramConfig,
+    pub paths: &'a DaemonCyclePaths,
+    pub market: &'a MarketConfig,
+    pub network: &'a str,
+    pub actions: &'a [PlannedAction],
+    pub signer_offer_path_configured: bool,
+}
+
 pub async fn execute_strategy_actions(
-    store: &SqliteStore,
-    db_path: &Path,
-    program: &ManagerProgramConfig,
-    paths: &DaemonCyclePaths,
-    market: &MarketConfig,
-    network: &str,
-    actions: &[PlannedAction],
-    signer_offer_path_configured: bool,
+    params: ExecuteStrategyActionsParams<'_>,
 ) -> SignerResult<OfferDispatchOutput> {
+    let ExecuteStrategyActionsParams {
+        store,
+        db_path,
+        program,
+        paths,
+        market,
+        network,
+        actions,
+        signer_offer_path_configured,
+    } = params;
     if !signer_offer_path_configured {
         store.add_audit_event(
             "strategy_exec_skipped_no_signer",
@@ -105,13 +115,7 @@ pub async fn execute_strategy_actions(
     if parallel_managed_dispatch_enabled(program) {
         match classify_parallel_dispatch(
             parallel::execute_actions_parallel(
-                store,
-                db_path,
-                program,
-                paths,
-                market,
-                network,
-                &expanded,
+                store, db_path, program, paths, market, network, &expanded,
             )
             .await,
         ) {

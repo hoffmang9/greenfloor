@@ -131,7 +131,10 @@ fn discover_chia_keys(chia_keys_dir: Option<&Path>) -> ChiaKeysDiscovery {
     }
 }
 
-fn save_key_onboarding_selection(path: &Path, payload: &serde_json::Value) -> SignerResult<PathBuf> {
+fn save_key_onboarding_selection(
+    path: &Path,
+    payload: &serde_json::Value,
+) -> SignerResult<PathBuf> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| {
             SignerError::Other(format!("failed to create {}: {err}", parent.display()))
@@ -139,9 +142,8 @@ fn save_key_onboarding_selection(path: &Path, payload: &serde_json::Value) -> Si
     }
     let text = serde_json::to_string(payload)
         .map_err(|err| SignerError::Other(format!("json encode failed: {err}")))?;
-    std::fs::write(path, text).map_err(|err| {
-        SignerError::Other(format!("failed to write {}: {err}", path.display()))
-    })?;
+    std::fs::write(path, text)
+        .map_err(|err| SignerError::Other(format!("failed to write {}: {err}", path.display())))?;
     Ok(path.to_path_buf())
 }
 

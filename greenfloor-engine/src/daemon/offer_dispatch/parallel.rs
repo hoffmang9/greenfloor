@@ -13,13 +13,13 @@ use crate::error::{SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
 use crate::storage::SqliteStore;
 
-use crate::daemon::cycle_paths::DaemonCyclePaths;
 use super::coordinator::OfferReservationCoordinator;
 use super::managed_post::post_managed_planned_action;
 use super::reservation_ctx::{
     parallel_reservation_asset_ids, parallel_reservation_context, reservation_wallet_id,
 };
 use super::OfferDispatchOutput;
+use crate::daemon::cycle_paths::DaemonCyclePaths;
 
 use crate::daemon::coinset_spendable::coinset_spendable_profiles_by_asset;
 
@@ -47,7 +47,7 @@ pub async fn execute_actions_parallel(
     let spendable_profiles =
         coinset_spendable_profiles_by_asset(network, &market.receive_address, &asset_ids).await?;
     let batch_plan =
-        plan_parallel_managed_dispatch(&expanded, &reservation_ctx, &spendable_profiles);
+        plan_parallel_managed_dispatch(expanded, &reservation_ctx, &spendable_profiles);
     let coordinator = Arc::new(OfferReservationCoordinator::new(db_path, Some(300))?);
     let _ = coordinator.expire_stale();
     let wallet_id = reservation_wallet_id(paths)?;
@@ -124,13 +124,8 @@ pub async fn execute_actions_parallel(
             let counts_as_executed = match acquired {
                 Ok(acquired) if acquired.ok => {
                     let reservation_id = acquired.reservation_id.expect("reservation id");
-                    let post_result = post_managed_planned_action(
-                        &program,
-                        &paths,
-                        &market,
-                        &job.action,
-                    )
-                    .await?;
+                    let post_result =
+                        post_managed_planned_action(&program, &paths, &market, &job.action).await?;
                     let release_status = reservation_release_status(post_result);
                     let _ = coordinator.release(&reservation_id, release_status);
                     post_result

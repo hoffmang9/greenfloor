@@ -8,6 +8,9 @@ use clvmr::{serde::node_from_bytes, Allocator, NodePtr};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 
+type RequestedXchPayments = Vec<(Vec<u8>, Vec<(Vec<u8>, u64)>)>;
+type RequestedCatPayments = Vec<(Vec<u8>, Vec<u8>, Vec<(Vec<u8>, u64)>)>;
+
 fn parse_bytes32(raw: &[u8], field: &str) -> SignerResult<Bytes32> {
     let bytes: [u8; 32] = raw
         .try_into()
@@ -122,8 +125,8 @@ pub fn encode_offer_from_spend_bundle_bytes(spend_bundle_bytes: &[u8]) -> Signer
 
 pub fn from_input_spend_bundle_bytes(
     spend_bundle_bytes: &[u8],
-    requested_payments_xch: Vec<(Vec<u8>, Vec<(Vec<u8>, u64)>)>,
-    requested_payments_cats: Vec<(Vec<u8>, Vec<u8>, Vec<(Vec<u8>, u64)>)>,
+    requested_payments_xch: RequestedXchPayments,
+    requested_payments_cats: RequestedCatPayments,
 ) -> SignerResult<Vec<u8>> {
     let spend_bundle = SpendBundle::from_bytes(spend_bundle_bytes)
         .map_err(|err| SignerError::Other(format!("invalid_spend_bundle_bytes:{err}")))?;
@@ -178,7 +181,7 @@ pub fn from_input_spend_bundle_bytes(
 
 pub fn from_input_spend_bundle_xch_bytes(
     spend_bundle_bytes: &[u8],
-    requested_payments_xch: Vec<(Vec<u8>, Vec<(Vec<u8>, u64)>)>,
+    requested_payments_xch: RequestedXchPayments,
 ) -> SignerResult<Vec<u8>> {
     from_input_spend_bundle_bytes(spend_bundle_bytes, requested_payments_xch, Vec::new())
 }

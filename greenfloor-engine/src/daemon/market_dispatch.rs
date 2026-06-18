@@ -1,7 +1,7 @@
-use crate::error::SignerResult;
 use crate::cycle::MarketCycleResultState;
+use crate::error::SignerResult;
 
-use super::reconcile_market_cycle::{ReconcileMarketCycleMetrics, ReconcileMarketCycleResult};
+use super::reconcile_market_cycle::ReconcileMarketCycleResult;
 use super::run_once::MarketDispatchMetrics;
 
 #[derive(Debug, Clone)]
@@ -14,8 +14,10 @@ pub struct SingleMarketCycleOutput {
 pub fn aggregate_market_dispatch_metrics(
     outputs: &[SingleMarketCycleOutput],
 ) -> MarketDispatchMetrics {
-    let mut metrics = MarketDispatchMetrics::default();
-    metrics.markets_processed = outputs.len() as u64;
+    let mut metrics = MarketDispatchMetrics {
+        markets_processed: outputs.len() as u64,
+        ..Default::default()
+    };
     for output in outputs {
         metrics.cycle_error_count += output.reconcile.metrics.cycle_errors;
         metrics.cycle_error_count += output.state.cycle_errors.max(0) as u64;
@@ -55,6 +57,7 @@ pub fn record_market_worker_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::daemon::reconcile_market_cycle::ReconcileMarketCycleMetrics;
 
     fn sample_output(immediate_requeue: bool) -> SingleMarketCycleOutput {
         let mut state = MarketCycleResultState::default();
@@ -75,10 +78,8 @@ mod tests {
 
     #[test]
     fn aggregate_metrics_uses_cycle_state_immediate_requeue() {
-        let metrics = aggregate_market_dispatch_metrics(&[
-            sample_output(false),
-            sample_output(true),
-        ]);
+        let metrics =
+            aggregate_market_dispatch_metrics(&[sample_output(false), sample_output(true)]);
         assert_eq!(metrics.immediate_requeue_market_ids, vec!["m1".to_string()]);
     }
 }

@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::{
     executed_sell_offer_counts_by_size, PlannedAction, StrategyActionSellCountInput,
@@ -7,9 +5,9 @@ use crate::cycle::{
 use crate::error::SignerResult;
 use crate::offer::request::normalize_offer_side;
 
-use crate::daemon::cycle_paths::DaemonCyclePaths;
 use super::managed_post::post_managed_planned_action;
 use super::OfferDispatchOutput;
+use crate::daemon::cycle_paths::DaemonCyclePaths;
 
 pub async fn execute_actions_sequential(
     program: &ManagerProgramConfig,

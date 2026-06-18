@@ -17,16 +17,28 @@ use super::coin_ops_execution::{
     CoinOpExecItem, CoinOpExecutionResult,
 };
 
-pub async fn run_coin_ops_phase(
-    store: &SqliteStore,
-    market: &MarketConfig,
-    program: &ManagerProgramConfig,
-    program_path: &Path,
-    offers: &[Value],
-    wallet_bucket_counts: &BTreeMap<i64, i64>,
-    active_counts: &BTreeMap<i64, i64>,
-    newly_executed_counts: &BTreeMap<i64, i64>,
-) -> SignerResult<()> {
+pub struct CoinOpsPhaseParams<'a> {
+    pub store: &'a SqliteStore,
+    pub market: &'a MarketConfig,
+    pub program: &'a ManagerProgramConfig,
+    pub program_path: &'a Path,
+    pub offers: &'a [Value],
+    pub wallet_bucket_counts: &'a BTreeMap<i64, i64>,
+    pub active_counts: &'a BTreeMap<i64, i64>,
+    pub newly_executed_counts: &'a BTreeMap<i64, i64>,
+}
+
+pub async fn run_coin_ops_phase(params: CoinOpsPhaseParams<'_>) -> SignerResult<()> {
+    let CoinOpsPhaseParams {
+        store,
+        market,
+        program,
+        program_path,
+        offers,
+        wallet_bucket_counts,
+        active_counts,
+        newly_executed_counts,
+    } = params;
     let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
     if sell_ladder.is_empty() {
         store.add_audit_event(
@@ -49,7 +61,7 @@ pub async fn run_coin_ops_phase(
         Some(active_counts),
         Some(newly_executed_counts),
     );
-    let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim()) as i64;
+    let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
     let mut valid_ladder = Vec::new();
     let mut invalid_buckets = Vec::new();
     for entry in &sell_ladder {

@@ -1,42 +1,20 @@
 from __future__ import annotations
 
-import logging
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from greenfloor.config.models import (
-    MarketConfig,
-    MarketsConfig,
-    ProgramConfig,
-    invalidate_signer_runtime_cache,
-    parse_markets_config,
-    parse_program_config,
-)
+from greenfloor.engine_binary import resolve_greenfloor_manager_binary
 from greenfloor.hex_utils import is_hex_id
 
-_config_logger = logging.getLogger("greenfloor.config")
+_TESTNET_NETWORKS: frozenset[str] = frozenset({"testnet", "testnet11"})
 
-
-def _validate_base_markets_addresses(*, path: Path, raw: dict[str, Any]) -> None:
-    rows = raw.get("markets")
-    if not isinstance(rows, list):
-        return
-    bad_ids: list[str] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        receive_address = str(row.get("receive_address", "")).strip().lower()
-        if receive_address.startswith("txch1"):
-            bad_ids.append(str(row.get("id", "")).strip() or "<unknown>")
-    if bad_ids:
-        message = (
-            f"testnet receive_address entries found in base markets config {path}; "
-            "move these markets to testnet-markets.yaml"
-        )
-        _config_logger.error("%s market_ids=%s", message, ",".join(bad_ids))
-        raise ValueError(message)
+_DEFAULT_PROGRAM_CONFIG = Path("~/.greenfloor/config/program.yaml")
+_DEFAULT_MARKETS_CONFIG = Path("~/.greenfloor/config/markets.yaml")
+_DEFAULT_TESTNET_MARKETS_CONFIG = Path("~/.greenfloor/config/testnet-markets.yaml")
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -53,27 +31,18 @@ def write_yaml(path: Path, data: dict[str, Any]) -> None:
         yaml.safe_dump(data, f, sort_keys=False)
 
 
-def load_program_config(path: Path) -> ProgramConfig:
-    raw = load_yaml(path)
-    config = parse_program_config(raw)
-    invalidate_signer_runtime_cache(home_dir=config.home_dir)
-    if config.app_log_level_was_missing:
-        app = raw.get("app")
-        if isinstance(app, dict):
-            app["log_level"] = config.app_log_level
-            write_yaml(path, raw)
-    return config
+def is_testnet(network: str) -> bool:
+    return network.strip().lower() in _TESTNET_NETWORKS
 
 
-def load_markets_config(path: Path) -> MarketsConfig:
-    return load_markets_config_with_optional_overlay(path=path, overlay_path=None)
+def load_markets_yaml(path: Path) -> dict[str, Any]:
+    return load_markets_yaml_with_optional_overlay(path=path, overlay_path=None)
 
 
-def load_markets_config_with_optional_overlay(
+def load_markets_yaml_with_optional_overlay(
     *, path: Path, overlay_path: Path | None
-) -> MarketsConfig:
+) -> dict[str, Any]:
     raw = load_yaml(path)
-    _validate_base_markets_addresses(path=path, raw=raw)
     if overlay_path is not None:
         resolved_overlay = overlay_path.expanduser()
         if resolved_overlay.exists():
@@ -87,22 +56,130 @@ def load_markets_config_with_optional_overlay(
             merged = dict(raw)
             merged["markets"] = [*base_markets, *overlay_markets]
             raw = merged
-    return parse_markets_config(raw)
+    return raw
 
 
-# ---------------------------------------------------------------------------
-# Shared config-path helpers (used by both daemon and CLI)
-# ---------------------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class ScriptProgramFields:
+    network: str
+    home_dir: str
+    signer_kms_key_id: str
+    signer_kms_region: str
+    signer_key_registry: dict[str, dict[str, Any]]
 
-_TESTNET_NETWORKS: frozenset[str] = frozenset({"testnet", "testnet11"})
+    @classmethod
+    def from_raw(cls, raw: dict[str, Any]) -> ScriptProgramFields:
+        app = raw.get("app")
+        network = "mainnet"
+        home_dir = "~/.greenfloor"
+        if isinstance(app, dict):
+            network = str(app.get("network", network)).strip() or network
+            home_dir = str(app.get("home_dir", home_dir)).strip() or home_dir
+
+        signer = raw.get("signer")
+        signer_kms_key_id = ""
+        signer_kms_region = "us-west-2"
+        if isinstance(signer, dict):
+            signer_kms_key_id = str(signer.get("kms_key_id", "")).strip()
+            region = str(signer.get("kms_region", "")).strip()
+            if region:
+                signer_kms_region = region
+
+        keys = raw.get("keys")
+        registry: dict[str, dict[str, Any]] = {}
+        if isinstance(keys, dict):
+            rows = keys.get("registry")
+            if isinstance(rows, list):
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    key_id = str(row.get("key_id", "")).strip()
+                    if key_id:
+                        registry[key_id] = row
+
+        return cls(
+            network=network,
+            home_dir=home_dir,
+            signer_kms_key_id=signer_kms_key_id,
+            signer_kms_region=signer_kms_region,
+            signer_key_registry=registry,
+        )
 
 
-def is_testnet(network: str) -> bool:
-    return network.strip().lower() in _TESTNET_NETWORKS
+def program_app_network(raw: dict[str, Any]) -> str:
+    return ScriptProgramFields.from_raw(raw).network
+
+
+def program_home_dir(raw: dict[str, Any]) -> str:
+    return ScriptProgramFields.from_raw(raw).home_dir
+
+
+def program_signer_kms_key_id(raw: dict[str, Any]) -> str:
+    return ScriptProgramFields.from_raw(raw).signer_kms_key_id
+
+
+def program_signer_kms_region(raw: dict[str, Any]) -> str:
+    return ScriptProgramFields.from_raw(raw).signer_kms_region
+
+
+def program_signer_key_registry(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return ScriptProgramFields.from_raw(raw).signer_key_registry
+
+
+def enabled_market_rows(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    markets = raw.get("markets")
+    if not isinstance(markets, list):
+        return []
+    return [row for row in markets if isinstance(row, dict) and bool(row.get("enabled"))]
+
+
+def run_config_validate(
+    *,
+    program_config: Path,
+    markets_config: Path,
+    testnet_markets_config: Path | None = None,
+) -> int:
+    """Validate operator config via native ``greenfloor-manager config-validate``."""
+    argv = [
+        str(resolve_greenfloor_manager_binary()),
+        "--program-config",
+        str(program_config),
+        "--markets-config",
+        str(markets_config),
+        "config-validate",
+    ]
+    if testnet_markets_config is not None:
+        argv[5:5] = [
+            "--testnet-markets-config",
+            str(testnet_markets_config),
+        ]
+    completed = subprocess.run(argv, check=False)
+    return int(completed.returncode)
+
+
+def ensure_operator_config_valid(
+    *,
+    program_config: Path | None = None,
+    markets_config: Path | None = None,
+    testnet_markets_config: Path | None = None,
+) -> None:
+    """Run native config validation using default operator paths when omitted."""
+    program_path = (program_config or _DEFAULT_PROGRAM_CONFIG).expanduser()
+    markets_path = (markets_config or _DEFAULT_MARKETS_CONFIG).expanduser()
+    overlay = testnet_markets_config
+    if overlay is None:
+        default_overlay = _DEFAULT_TESTNET_MARKETS_CONFIG.expanduser()
+        overlay = default_overlay if default_overlay.exists() else None
+    code = run_config_validate(
+        program_config=program_path,
+        markets_config=markets_path,
+        testnet_markets_config=overlay,
+    )
+    if code != 0:
+        raise SystemExit(code)
 
 
 def default_cats_config_path() -> Path | None:
-    """Return the cats.yaml path, preferring ~/.greenfloor over the repo."""
     home_candidate = Path("~/.greenfloor/config/cats.yaml").expanduser()
     if home_candidate.exists():
         return home_candidate
@@ -113,16 +190,10 @@ def default_cats_config_path() -> Path | None:
 
 
 def default_state_dir_path() -> Path:
-    """Return the canonical daemon state dir under ~/.greenfloor."""
     return Path("~/.greenfloor/state").expanduser()
 
 
 def resolve_trade_asset_for_dexie(*, asset: str, network: str) -> str:
-    """Resolve a base or quote asset id for Dexie list/fetch APIs.
-
-    Handles xch/txch network mapping and cats.yaml symbol lookup (same rules
-    as offer building for the quote side).
-    """
     normalized = asset.strip().lower()
     if normalized in {"xch", "txch", "1"}:
         return "txch" if is_testnet(network) else "xch"
@@ -154,82 +225,4 @@ def resolve_trade_asset_for_dexie(*, asset: str, network: str) -> str:
 
 
 def resolve_quote_asset_for_offer(*, quote_asset: str, network: str) -> str:
-    """Resolve a quote asset identifier to its canonical form for offer building.
-
-    Handles xch/txch network mapping and cats.yaml symbol lookup.
-    """
     return resolve_trade_asset_for_dexie(asset=quote_asset, network=network)
-
-
-def resolve_state_db_path(
-    *,
-    program_home_dir: str | None = None,
-    program_config_path: Path | None = None,
-    explicit_db_path: str | None = None,
-) -> Path:
-    """Return the SQLite state DB path (explicit override or ``<home>/db/greenfloor.sqlite``)."""
-    if explicit_db_path and str(explicit_db_path).strip():
-        return Path(explicit_db_path).expanduser()
-
-    home_dir: Path | None = None
-    if program_home_dir is not None:
-        home_dir = Path(program_home_dir).expanduser()
-    elif program_config_path is not None:
-        program = load_program_config(program_config_path)
-        home_dir = Path(program.home_dir).expanduser()
-    else:
-        raise ValueError(
-            "resolve_state_db_path requires program_home_dir or program_config_path "
-            "when explicit_db_path is not set"
-        )
-
-    return home_dir / "db" / "greenfloor.sqlite"
-
-
-def resolve_market_for_build(
-    markets: MarketsConfig,
-    *,
-    market_id: str | None,
-    pair: str | None,
-    network: str,
-) -> MarketConfig:
-    if bool(market_id) == bool(pair):
-        raise ValueError("provide exactly one of --market-id or --pair")
-    if market_id:
-        selected = next((m for m in markets.markets if m.market_id == market_id), None)
-        if selected is None:
-            raise ValueError(f"market_id not found: {market_id}")
-        return selected
-
-    assert pair is not None
-    raw = pair.strip()
-    sep = ":" if ":" in raw else "/" if "/" in raw else ""
-    if not sep:
-        raise ValueError("pair must be in base:quote or base/quote format")
-    base_raw, quote_raw = [p.strip().lower() for p in raw.split(sep, 1)]
-    if not base_raw or not quote_raw:
-        raise ValueError("pair base and quote must be non-empty")
-    network_l = network.strip().lower()
-    candidates: list[MarketConfig] = []
-    for market in markets.markets:
-        if not market.enabled:
-            continue
-        base_matches = {
-            str(market.base_asset).strip().lower(),
-            str(market.base_symbol).strip().lower(),
-        }
-        quote_match = str(market.quote_asset).strip().lower()
-        quote_matches = {quote_match}
-        if is_testnet(network_l):
-            if quote_match == "xch":
-                quote_matches.add("txch")
-            elif quote_match == "txch":
-                quote_matches.add("xch")
-        if base_raw in base_matches and quote_raw in quote_matches:
-            candidates.append(market)
-    if not candidates:
-        raise ValueError(f"no enabled market found for pair: {pair}")
-    if len(candidates) > 1:
-        ids = ", ".join(sorted(m.market_id for m in candidates))
-        raise ValueError(f"pair is ambiguous; use --market-id (candidates: {ids})")
-    return candidates[0]

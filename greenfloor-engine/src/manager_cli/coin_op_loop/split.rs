@@ -9,24 +9,41 @@ use crate::manager_cli::ladder::{
 
 use super::context::build_coin_op_exec_context;
 use super::loop_common::{finish_coin_op_command, validate_until_ready_mode};
-use super::split_iteration::run_split_iteration;
+use super::split_iteration::{run_split_iteration, SplitIterationParams};
 use super::until_ready::{run_until_ready_loop, UntilReadyLoopConfig};
 
-pub async fn run_coin_split(
-    mgr: &ManagerContext,
-    network: &str,
-    market_id: Option<&str>,
-    pair: Option<&str>,
-    coin_ids: &[String],
-    amount_per_coin: i64,
-    number_of_coins: i64,
-    no_wait: bool,
-    size_base_units: Option<i64>,
-    until_ready: bool,
-    max_iterations: i32,
-    allow_lock_all_spendable: bool,
-    force_split_when_ready: bool,
-) -> SignerResult<i32> {
+pub struct CoinSplitRequest<'a> {
+    pub mgr: &'a ManagerContext,
+    pub network: &'a str,
+    pub market_id: Option<&'a str>,
+    pub pair: Option<&'a str>,
+    pub coin_ids: &'a [String],
+    pub amount_per_coin: i64,
+    pub number_of_coins: i64,
+    pub no_wait: bool,
+    pub size_base_units: Option<i64>,
+    pub until_ready: bool,
+    pub max_iterations: i32,
+    pub allow_lock_all_spendable: bool,
+    pub force_split_when_ready: bool,
+}
+
+pub async fn run_coin_split(request: CoinSplitRequest<'_>) -> SignerResult<i32> {
+    let CoinSplitRequest {
+        mgr,
+        network,
+        market_id,
+        pair,
+        coin_ids,
+        amount_per_coin,
+        number_of_coins,
+        no_wait,
+        size_base_units,
+        until_ready,
+        max_iterations,
+        allow_lock_all_spendable,
+        force_split_when_ready,
+    } = request;
     validate_until_ready_mode(until_ready, no_wait, size_base_units)?;
     let exec_ctx = build_coin_op_exec_context(
         &mgr.program_config,
@@ -38,15 +55,18 @@ pub async fn run_coin_split(
         None,
     )
     .await?;
-    let (amount_per_coin, number_of_coins) =
-        resolve_split_targets(&exec_ctx.market, amount_per_coin, number_of_coins, size_base_units)?;
+    let (amount_per_coin, number_of_coins) = resolve_split_targets(
+        &exec_ctx.market,
+        amount_per_coin,
+        number_of_coins,
+        size_base_units,
+    )?;
     if amount_per_coin <= 0 || number_of_coins <= 0 {
         return Err(SignerError::Other(
             "amount_per_coin and number_of_coins must be positive".to_string(),
         ));
     }
-    let amount_per_coin_mojos =
-        amount_per_coin.saturating_mul(exec_ctx.base_unit_mojo_multiplier);
+    let amount_per_coin_mojos = amount_per_coin.saturating_mul(exec_ctx.base_unit_mojo_multiplier);
     let required_amount = amount_per_coin_mojos.saturating_mul(number_of_coins);
     let split_target = size_base_units
         .filter(|value| *value > 0)
@@ -80,19 +100,19 @@ pub async fn run_coin_split(
         },
         |gate| gate.ready,
         |iteration, spendable, gate_json| {
-            run_split_iteration(
-                &exec_ctx,
+            run_split_iteration(SplitIterationParams {
+                ctx: &exec_ctx,
                 iteration,
                 spendable,
                 gate_json,
                 explicit_coin_ids,
                 coin_ids,
                 required_amount,
-                &output_amounts,
+                output_amounts: &output_amounts,
                 split_fee,
                 no_wait,
                 allow_lock_all_spendable,
-            )
+            })
         },
     )
     .await?;

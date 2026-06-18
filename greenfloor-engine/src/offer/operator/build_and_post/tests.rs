@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 use super::context::{resolve_action_side, sample_resolved_build_and_post_context};
 use super::publish::{offer_post_persist_record, persist_post_records_if_enabled};
-use super::types::{PostAttemptSuccess, PostFailure, PublishResult, build_and_post_exit_code};
+use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
 use crate::cli_util::{format_json, format_json_value};
 use crate::storage::{state_db_path_for_home, SqliteStore};
 
@@ -137,10 +137,7 @@ fn post_failure_venue_result_marks_publish_failure() {
         bootstrap: None,
     };
     let venue = failure.to_venue_result("dexie");
-    assert_eq!(
-        venue.get("venue").and_then(Value::as_str),
-        Some("dexie")
-    );
+    assert_eq!(venue.get("venue").and_then(Value::as_str), Some("dexie"));
     assert_eq!(
         venue
             .get("result")

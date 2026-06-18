@@ -90,16 +90,14 @@ pub fn evaluate_low_inventory_alert(input: &LowInventoryInput) -> LowInventoryEv
         };
     }
 
-    let mut should_send = false;
+    let mut should_send = !input.state_is_low || input.state_last_alert_at_unix.is_none();
     let mut reason = "low_triggered".to_string();
-    if !input.state_is_low {
-        should_send = true;
-    } else if input.state_last_alert_at_unix.is_none() {
-        should_send = true;
-    } else if input
-        .now_unix
-        .saturating_sub(input.state_last_alert_at_unix.unwrap_or(input.now_unix))
-        >= input.dedup_cooldown_seconds
+    if input.state_is_low
+        && input.state_last_alert_at_unix.is_some()
+        && input
+            .now_unix
+            .saturating_sub(input.state_last_alert_at_unix.unwrap_or(input.now_unix))
+            >= input.dedup_cooldown_seconds
     {
         should_send = true;
         reason = "reminder_sent".to_string();

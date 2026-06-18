@@ -3,7 +3,7 @@ use std::io::Write;
 use mockito::Matcher;
 use serde_json::json;
 
-use crate::adapters::{post_offer_phase_dexie, DexieClient};
+use crate::adapters::{post_offer_phase_dexie, DexieClient, PostOfferPhaseDexieParams};
 use crate::config::{
     load_markets_config, load_program_config, require_signer_offer_path, resolve_market_for_build,
     resolve_offer_publish_settings, ManagerProgramConfig,
@@ -36,16 +36,16 @@ async fn dexie_post_offer_phase_posts_and_verifies_visibility() {
         .await;
 
     let dexie = DexieClient::new(server.url());
-    let result = post_offer_phase_dexie(
-        &dexie,
-        "offer1test",
-        true,
-        false,
-        "basecat",
-        "A1",
-        "xch",
-        "xch",
-    )
+    let result = post_offer_phase_dexie(PostOfferPhaseDexieParams {
+        dexie: &dexie,
+        offer_text: "offer1test",
+        drop_only: true,
+        claim_rewards: false,
+        expected_offered_asset_id: "basecat",
+        expected_offered_symbol: "A1",
+        expected_requested_asset_id: "xch",
+        expected_requested_symbol: "xch",
+    })
     .await
     .expect("post");
     assert_eq!(result.get("success").and_then(|v| v.as_bool()), Some(true));
@@ -65,7 +65,27 @@ app:
   network: mainnet
   home_dir: /tmp/gf
 runtime:
+  loop_interval_seconds: 30
   offer_bootstrap_wait_timeout_seconds: 120
+chain_signals:
+  tx_block_trigger:
+    mode: websocket
+dev:
+  python:
+    min_version: "3.11"
+notifications:
+  low_inventory_alerts:
+    enabled: true
+    threshold_mode: absolute_base_units
+    default_threshold_base_units: 0
+    dedup_cooldown_seconds: 21600
+    clear_hysteresis_percent: 10
+  providers:
+    - type: pushover
+      enabled: true
+      user_key_env: PUSHOVER_USER_KEY
+      app_token_env: PUSHOVER_APP_TOKEN
+      recipient_key_env: PUSHOVER_RECIPIENT_KEY
 venues:
   dexie:
     api_base: https://api.dexie.space
@@ -119,28 +139,13 @@ markets:
 #[test]
 fn resolve_offer_publish_settings_uses_program_defaults() {
     let program = ManagerProgramConfig {
-        network: "mainnet".to_string(),
-        home_dir: std::path::PathBuf::from("/tmp/gf"),
-        app_log_level: "INFO".to_string(),
-        app_log_level_was_missing: false,
-        dexie_api_base: "https://api.dexie.space".to_string(),
-        splash_api_base: "http://localhost:4000".to_string(),
         offer_publish_venue: "splash".to_string(),
+        splash_api_base: "http://localhost:4000".to_string(),
         coin_ops_minimum_fee_mojos: 0,
         coin_ops_max_operations_per_run: 0,
-        coin_ops_max_daily_fee_budget_mojos: 0,
-        coin_ops_split_fee_mojos: 0,
-        coin_ops_combine_fee_mojos: 0,
-        runtime_offer_bootstrap_wait_timeout_seconds: 120,
-        runtime_market_slot_count: 0,
-        runtime_offer_parallelism_enabled: false,
-        runtime_offer_parallelism_max_workers: 4,
-        runtime_dry_run: false,
-        runtime_loop_interval_seconds: 30,
-        tx_block_trigger_mode: "websocket".to_string(),
-        tx_block_websocket_url: String::new(),
         tx_block_websocket_reconnect_interval_seconds: 1,
         tx_block_fallback_poll_interval_seconds: 1,
+        ..Default::default()
     };
     let (venue, dexie_base, splash_base) =
         resolve_offer_publish_settings(&program, "mainnet", None, None, None).expect("settings");

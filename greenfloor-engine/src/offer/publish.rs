@@ -54,7 +54,9 @@ impl BootstrapOfferGate {
             BootstrapOfferGate::Continue => None,
             BootstrapOfferGate::BlockFailed => Some(format!("bootstrap_failed:{reason}")),
             BootstrapOfferGate::BlockPending => Some(format!("bootstrap_pending:{reason}")),
-            BootstrapOfferGate::BlockSkipped => Some(format!("bootstrap_precheck_skipped:{reason}")),
+            BootstrapOfferGate::BlockSkipped => {
+                Some(format!("bootstrap_precheck_skipped:{reason}"))
+            }
         }
     }
 }

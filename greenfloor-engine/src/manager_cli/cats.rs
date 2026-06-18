@@ -13,26 +13,42 @@ use super::cats_catalog::{
 };
 use super::context::ManagerContext;
 
+pub struct CatsAddRequest<'a> {
+    pub ctx: &'a ManagerContext,
+    pub network: &'a str,
+    pub cat_id: Option<&'a str>,
+    pub ticker: Option<&'a str>,
+    pub name: Option<&'a str>,
+    pub base_symbol: Option<&'a str>,
+    pub ticker_id: Option<&'a str>,
+    pub pool_id: Option<&'a str>,
+    pub last_price_xch: Option<&'a str>,
+    pub target_usd_per_unit: Option<&'a str>,
+    pub use_dexie_lookup: bool,
+    pub replace: bool,
+}
+
 pub async fn run_cats_list(ctx: &ManagerContext) -> SignerResult<i32> {
     let catalog = load_cats_catalog(&ctx.cats_config)?;
     ctx.emit_json(&json!({"cats": catalog}))?;
     Ok(0)
 }
 
-pub async fn run_cats_add(
-    ctx: &ManagerContext,
-    network: &str,
-    cat_id: Option<&str>,
-    ticker: Option<&str>,
-    name: Option<&str>,
-    base_symbol: Option<&str>,
-    ticker_id: Option<&str>,
-    pool_id: Option<&str>,
-    last_price_xch: Option<&str>,
-    target_usd_per_unit: Option<&str>,
-    use_dexie_lookup: bool,
-    replace: bool,
-) -> SignerResult<i32> {
+pub async fn run_cats_add(request: CatsAddRequest<'_>) -> SignerResult<i32> {
+    let CatsAddRequest {
+        ctx,
+        network,
+        cat_id,
+        ticker,
+        name,
+        base_symbol,
+        ticker_id,
+        pool_id,
+        last_price_xch,
+        target_usd_per_unit,
+        use_dexie_lookup,
+        replace,
+    } = request;
     let ref_cat_id = cat_id.map(normalize_hex_id).unwrap_or_default();
     let ref_ticker = ticker.unwrap_or("").trim();
     if ref_cat_id.is_empty() && ref_ticker.is_empty() {
@@ -95,12 +111,14 @@ pub async fn run_cats_add(
         })
         .unwrap_or_else(|| resolved_symbol.clone());
     let mut catalog = load_cats_catalog(&ctx.cats_config)?;
-    if !replace && catalog.iter().any(|row| {
-        row.get("asset_id")
-            .and_then(JsonValue::as_str)
-            .map(|value| normalize_hex_id(value) == resolved_asset_id)
-            .unwrap_or(false)
-    }) {
+    if !replace
+        && catalog.iter().any(|row| {
+            row.get("asset_id")
+                .and_then(JsonValue::as_str)
+                .map(|value| normalize_hex_id(value) == resolved_asset_id)
+                .unwrap_or(false)
+        })
+    {
         ctx.emit_json(&json!({
             "added": false,
             "error": "cat_already_exists",
@@ -127,7 +145,10 @@ pub async fn run_cats_add(
     });
     if is_testnet_network(network) {
         if let Some(obj) = entry.as_object_mut() {
-            obj.insert("network".to_string(), JsonValue::String(network.to_string()));
+            obj.insert(
+                "network".to_string(),
+                JsonValue::String(network.to_string()),
+            );
         }
     }
     catalog.push(entry);
@@ -196,7 +217,9 @@ pub async fn run_cats_delete(
         return Ok(0);
     }
     if !exists {
-        ctx.emit_json(&json!({"deleted": false, "error": "cat_not_found", "asset_id": resolved_asset_id}))?;
+        ctx.emit_json(
+            &json!({"deleted": false, "error": "cat_not_found", "asset_id": resolved_asset_id}),
+        )?;
         return Ok(2);
     }
     if !confirm_delete {

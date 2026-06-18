@@ -32,7 +32,7 @@ Global flags on `greenfloor-manager`:
 ## Config / state
 
 - Rust `config/program.rs` and `config/markets.rs` are the only validation path
-  for operator commands. Python `config/models.py` is not consulted.
+  for operator commands. Python `config/io.py` provides thin YAML loading for scripts only.
 - Remove `dev.python.min_version` from `program.yaml` if present; it is ignored.
 - State DB schema is owned by `greenfloor-engine/src/storage/`; run `doctor` after
   upgrade to confirm SQLite opens.

@@ -163,15 +163,9 @@ mod tests {
             .with_body(r#"{"success":true,"id":"offer-open","status":3}"#)
             .create();
 
-        let payload = offers_cancel_cli(
-            &db_path,
-            &server.url(),
-            "dexie",
-            &[],
-            true,
-        )
-        .await
-        .expect("cancel");
+        let payload = offers_cancel_cli(&db_path, &server.url(), "dexie", &[], true)
+            .await
+            .expect("cancel");
         assert_eq!(payload.selected_count, 1);
         assert_eq!(payload.cancelled_count, 1);
         assert_eq!(payload.failed_count, 0);
@@ -220,10 +214,7 @@ mod tests {
         assert_eq!(payload.cancelled_count, 0);
         assert_eq!(payload.failed_count, 1);
         assert_eq!(
-            payload.items[0]
-                .result
-                .get("error")
-                .and_then(Value::as_str),
+            payload.items[0].result.get("error").and_then(Value::as_str),
             Some("not_found")
         );
     }

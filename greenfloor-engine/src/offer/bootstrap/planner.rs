@@ -113,7 +113,7 @@ pub fn plan_bootstrap_mixed_outputs(
             current_count: current,
             deficit_count: deficit,
         });
-        output_amounts.extend(std::iter::repeat(size).take(deficit_count));
+        output_amounts.extend(std::iter::repeat_n(size, deficit_count));
     }
 
     if deficits.is_empty() {

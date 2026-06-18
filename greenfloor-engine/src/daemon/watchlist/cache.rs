@@ -38,7 +38,10 @@ impl CoinWatchlistCache {
         }
     }
 
-    pub fn match_watched_coin_ids(&self, observed_coin_ids: &[String]) -> HashMap<String, Vec<String>> {
+    pub fn match_watched_coin_ids(
+        &self,
+        observed_coin_ids: &[String],
+    ) -> HashMap<String, Vec<String>> {
         let normalized: HashSet<String> = observed_coin_ids
             .iter()
             .map(|coin_id| coin_id.trim().to_ascii_lowercase())

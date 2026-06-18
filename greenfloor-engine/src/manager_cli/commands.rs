@@ -19,7 +19,10 @@ pub struct ManagerCli {
     pub state_db: String,
     #[arg(long, help = "Emit compact single-line JSON output.")]
     pub json: bool,
-    #[arg(long, help = "Override Dexie API base URL for cats and offer commands.")]
+    #[arg(
+        long,
+        help = "Override Dexie API base URL for cats and offer commands."
+    )]
     pub dexie_base_url: Option<String>,
     #[command(subcommand)]
     pub command: ManagerCommands,

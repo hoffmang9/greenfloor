@@ -40,7 +40,7 @@ pub async fn run_cycle_preamble(
 
     if use_websocket_capture {
         if let Err(err) =
-            capture_coinset_websocket_once(&store, &program, coinset_base_url, coin_watchlist).await
+            capture_coinset_websocket_once(store, program, coinset_base_url, coin_watchlist).await
         {
             result.cycle_error_count += 1;
             store.add_audit_event(
@@ -50,7 +50,7 @@ pub async fn run_cycle_preamble(
             )?;
         }
     } else if poll_coinset_mempool {
-        if let Err(err) = poll_coinset_mempool_snapshot(&store, &program, coinset_base_url).await {
+        if let Err(err) = poll_coinset_mempool_snapshot(store, program, coinset_base_url).await {
             result.cycle_error_count += 1;
             store.add_audit_event(
                 "coinset_mempool_error",

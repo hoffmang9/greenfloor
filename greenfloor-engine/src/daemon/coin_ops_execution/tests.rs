@@ -4,34 +4,15 @@ use std::path::Path;
 
 use crate::coin_ops::{CoinOpKind, CoinOpPlan};
 use crate::config::{ManagerProgramConfig, MarketConfig};
-use crate::daemon::coin_ops_execution::{
-    execute_managed_coin_op_plans, CoinOpExecutionResult,
-};
+use crate::daemon::coin_ops_execution::{execute_managed_coin_op_plans, CoinOpExecutionResult};
 
 fn sample_program() -> ManagerProgramConfig {
     ManagerProgramConfig {
-        network: "mainnet".to_string(),
-        home_dir: std::path::PathBuf::from("/tmp/gf"),
-        app_log_level: "INFO".to_string(),
-        app_log_level_was_missing: false,
-        dexie_api_base: "https://api.dexie.space".to_string(),
-        splash_api_base: "http://localhost:4000".to_string(),
-        offer_publish_venue: "dexie".to_string(),
         coin_ops_minimum_fee_mojos: 0,
         coin_ops_max_operations_per_run: 0,
-        coin_ops_max_daily_fee_budget_mojos: 0,
-        coin_ops_split_fee_mojos: 0,
-        coin_ops_combine_fee_mojos: 0,
-        runtime_offer_bootstrap_wait_timeout_seconds: 120,
-        runtime_market_slot_count: 0,
-        runtime_offer_parallelism_enabled: false,
-        runtime_offer_parallelism_max_workers: 4,
-        runtime_dry_run: false,
-        runtime_loop_interval_seconds: 30,
-        tx_block_trigger_mode: "websocket".to_string(),
-        tx_block_websocket_url: String::new(),
         tx_block_websocket_reconnect_interval_seconds: 1,
         tx_block_fallback_poll_interval_seconds: 1,
+        ..Default::default()
     }
 }
 
@@ -100,10 +81,7 @@ fn assert_skipped_all(result: &CoinOpExecutionResult, reason: &str) {
     assert_eq!(result.executed_count, 0);
     assert_eq!(result.status, "skipped");
     assert!(result.items.iter().all(|item| item.status == "skipped"));
-    assert!(result
-        .items
-        .iter()
-        .all(|item| item.reason.contains(reason)));
+    assert!(result.items.iter().all(|item| item.reason.contains(reason)));
 }
 
 #[tokio::test]
@@ -113,16 +91,14 @@ async fn execute_managed_coin_op_plans_skips_when_receive_address_missing() {
     write_signer_program(&program_path);
     let market = sample_market("");
     let program = sample_program();
-    let plans = vec![sample_plan(CoinOpKind::Split), sample_plan(CoinOpKind::Combine)];
+    let plans = vec![
+        sample_plan(CoinOpKind::Split),
+        sample_plan(CoinOpKind::Combine),
+    ];
 
-    let result = execute_managed_coin_op_plans(
-        &program_path,
-        &market,
-        &program,
-        &plans,
-        &HashSet::new(),
-    )
-    .await;
+    let result =
+        execute_managed_coin_op_plans(&program_path, &market, &program, &plans, &HashSet::new())
+            .await;
 
     assert_skipped_all(&result, "signer_coin_ops_missing_receive_address");
     assert_eq!(result.planned_count, 2);
@@ -138,14 +114,9 @@ async fn execute_managed_coin_op_plans_dry_run_plans_without_execution() {
     program.runtime_dry_run = true;
     let plans = vec![sample_plan(CoinOpKind::Split)];
 
-    let result = execute_managed_coin_op_plans(
-        &program_path,
-        &market,
-        &program,
-        &plans,
-        &HashSet::new(),
-    )
-    .await;
+    let result =
+        execute_managed_coin_op_plans(&program_path, &market, &program, &plans, &HashSet::new())
+            .await;
 
     assert_eq!(result.executed_count, 0);
     assert_eq!(result.items.len(), 1);

@@ -1,9 +1,11 @@
 use std::path::Path;
-use std::time::Instant;
 
 use serde_json::{json, Value};
 
-use crate::adapters::{dexie_offer_view_url, post_offer_phase_dexie, DexieClient, SplashClient};
+use crate::adapters::{
+    dexie_offer_view_url, post_offer_phase_dexie, DexieClient, PostOfferPhaseDexieParams,
+    SplashClient,
+};
 use crate::error::{SignerError, SignerResult};
 use crate::storage::{
     persist_offer_post_records, state_db_path_for_home, OfferPostPersistRecord, SqliteStore,
@@ -12,24 +14,38 @@ use crate::storage::{
 use super::context::ResolvedBuildAndPostContext;
 use super::types::PublishResult;
 
-pub(super) async fn publish_offer(
-    publish_venue: &str,
-    dexie: Option<&DexieClient>,
-    splash: Option<&SplashClient>,
-    offer_text: &str,
-    drop_only: bool,
-    claim_rewards: bool,
-    expected_offered_asset_id: &str,
-    expected_offered_symbol: &str,
-    expected_requested_asset_id: &str,
-    expected_requested_symbol: &str,
-) -> SignerResult<PublishResult> {
+pub(super) struct PublishOfferParams<'a> {
+    pub publish_venue: &'a str,
+    pub dexie: Option<&'a DexieClient>,
+    pub splash: Option<&'a SplashClient>,
+    pub offer_text: &'a str,
+    pub drop_only: bool,
+    pub claim_rewards: bool,
+    pub expected_offered_asset_id: &'a str,
+    pub expected_offered_symbol: &'a str,
+    pub expected_requested_asset_id: &'a str,
+    pub expected_requested_symbol: &'a str,
+}
+
+pub(super) async fn publish_offer(params: PublishOfferParams<'_>) -> SignerResult<PublishResult> {
+    let PublishOfferParams {
+        publish_venue,
+        dexie,
+        splash,
+        offer_text,
+        drop_only,
+        claim_rewards,
+        expected_offered_asset_id,
+        expected_offered_symbol,
+        expected_requested_asset_id,
+        expected_requested_symbol,
+    } = params;
     let body = match publish_venue {
         "dexie" => {
             let dexie = dexie.ok_or_else(|| {
                 SignerError::Other("dexie adapter missing for dexie publish".to_string())
             })?;
-            post_offer_phase_dexie(
+            post_offer_phase_dexie(PostOfferPhaseDexieParams {
                 dexie,
                 offer_text,
                 drop_only,
@@ -38,7 +54,7 @@ pub(super) async fn publish_offer(
                 expected_offered_symbol,
                 expected_requested_asset_id,
                 expected_requested_symbol,
-            )
+            })
             .await?
         }
         "splash" => {

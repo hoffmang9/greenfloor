@@ -59,17 +59,33 @@ pub fn expiry_seconds_for_action(expiry_unit: &str, expiry_value: i64) -> Option
     Some(expiry_value * unit_seconds)
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct ManagedOfferReservationRequest<'a> {
+    pub side: &'a str,
+    pub size_base_units: i64,
+    pub base_asset_id: &'a str,
+    pub quote_asset_id: &'a str,
+    pub base_unit_mojo_multiplier: i64,
+    pub quote_unit_mojo_multiplier: i64,
+    pub quote_price: f64,
+    pub fee_asset_id: &'a str,
+    pub fee_amount_mojos: i64,
+}
+
 pub fn reservation_request_for_managed_offer(
-    side: &str,
-    size_base_units: i64,
-    base_asset_id: &str,
-    quote_asset_id: &str,
-    base_unit_mojo_multiplier: i64,
-    quote_unit_mojo_multiplier: i64,
-    quote_price: f64,
-    fee_asset_id: &str,
-    fee_amount_mojos: i64,
+    request: ManagedOfferReservationRequest<'_>,
 ) -> BTreeMap<String, i64> {
+    let ManagedOfferReservationRequest {
+        side,
+        size_base_units,
+        base_asset_id,
+        quote_asset_id,
+        base_unit_mojo_multiplier,
+        quote_unit_mojo_multiplier,
+        quote_price,
+        fee_asset_id,
+        fee_amount_mojos,
+    } = request;
     let base_asset_id = base_asset_id.trim();
     let quote_asset_id = quote_asset_id.trim();
     if base_asset_id.is_empty() || quote_asset_id.is_empty() {
@@ -174,17 +190,17 @@ mod tests {
 
     #[test]
     fn reservation_request_sell_side_uses_base_asset() {
-        let request = reservation_request_for_managed_offer(
-            "sell",
-            10,
-            "base_asset",
-            "quote_asset",
-            1000,
-            1000,
-            1.5,
-            "xch_asset",
-            0,
-        );
+        let request = reservation_request_for_managed_offer(ManagedOfferReservationRequest {
+            side: "sell",
+            size_base_units: 10,
+            base_asset_id: "base_asset",
+            quote_asset_id: "quote_asset",
+            base_unit_mojo_multiplier: 1000,
+            quote_unit_mojo_multiplier: 1000,
+            quote_price: 1.5,
+            fee_asset_id: "xch_asset",
+            fee_amount_mojos: 0,
+        });
         assert_eq!(request.get("base_asset"), Some(&10_000));
     }
 

@@ -1,16 +1,14 @@
-use std::collections::BTreeMap;
-
 use crate::config::MarketConfig;
 use crate::cycle::MarketCycleResultState;
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
-use super::cancel_phase::run_market_cancel_phase;
-use super::coin_ops_phase::run_coin_ops_phase;
+use super::cancel_phase::{run_market_cancel_phase, MarketCancelPhaseParams};
+use super::coin_ops_phase::{run_coin_ops_phase, CoinOpsPhaseParams};
 use super::inventory_phase::run_inventory_phase;
 use super::market_context::MarketCycleContext;
 use super::market_gate::enforce_market_key_allowlist;
-use super::strategy_phase::{run_strategy_phase, StrategyPhaseResult};
+use super::strategy_phase::run_strategy_phase;
 
 pub async fn run_post_reconcile_market_phases(
     store: &SqliteStore,
@@ -33,38 +31,34 @@ pub async fn run_post_reconcile_market_phases(
 
     let mut cycle_state = MarketCycleResultState::default();
 
-    let bucket_counts = run_inventory_phase(
-        store,
-        ctx.resources,
-        market,
-        &mut cycle_state,
-    )
-    .await?;
+    let bucket_counts = run_inventory_phase(store, ctx.resources, market, &mut cycle_state).await?;
 
     let strategy = run_strategy_phase(store, ctx, market, &mut cycle_state).await?;
 
     let _cancel_payload = run_market_cancel_phase(
-        store,
-        &ctx.resources.dexie,
-        market,
-        &ctx.reconcile.offers,
-        ctx.dispatch.runtime_dry_run,
-        ctx.dispatch.xch_price_usd,
-        ctx.plan.previous_xch_price_usd,
+        MarketCancelPhaseParams {
+            store,
+            dexie: &ctx.resources.dexie,
+            market,
+            offers: &ctx.reconcile.offers,
+            runtime_dry_run: ctx.dispatch.runtime_dry_run,
+            current_xch_price_usd: ctx.dispatch.xch_price_usd,
+            previous_xch_price_usd: ctx.plan.previous_xch_price_usd,
+        },
         &mut cycle_state,
     )
     .await?;
 
-    run_coin_ops_phase(
+    run_coin_ops_phase(CoinOpsPhaseParams {
         store,
         market,
-        &ctx.resources.program,
-        ctx.resources.program_path(),
-        &ctx.reconcile.offers,
-        &bucket_counts,
-        &strategy.sell_active_counts,
-        &strategy.newly_executed_sell_counts,
-    )
+        program: &ctx.resources.program,
+        program_path: ctx.resources.program_path(),
+        offers: &ctx.reconcile.offers,
+        wallet_bucket_counts: &bucket_counts,
+        active_counts: &strategy.sell_active_counts,
+        newly_executed_counts: &strategy.newly_executed_sell_counts,
+    })
     .await?;
 
     Ok(cycle_state)

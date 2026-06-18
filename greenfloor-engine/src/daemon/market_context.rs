@@ -2,13 +2,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::adapters::DexieClient;
-use crate::config::{load_program_config, load_markets_config_with_overlay, require_signer_offer_path, ManagerProgramConfig, MarketConfig, MarketsConfig};
+use crate::config::{
+    load_markets_config_with_overlay, load_program_config, require_signer_offer_path,
+    ManagerProgramConfig, MarketConfig, MarketsConfig,
+};
 use crate::error::SignerResult;
 
 use super::cycle_paths::DaemonCyclePaths;
-use super::watchlist::cache::CoinWatchlistCache;
 use super::reconcile_market_cycle::ReconcileMarketCycleResult;
 use super::run_once::{CyclePlan, DaemonRunOnceRequest};
+use super::watchlist::cache::CoinWatchlistCache;
 
 /// Config and clients loaded once per daemon cycle.
 #[derive(Debug, Clone)]
@@ -114,28 +117,11 @@ mod tests {
     fn sample_resources(markets: Vec<MarketConfig>) -> DaemonCycleResources {
         DaemonCycleResources {
             program: ManagerProgramConfig {
-                network: "mainnet".to_string(),
-                home_dir: PathBuf::from("/tmp/gf"),
-                app_log_level: "INFO".to_string(),
-                app_log_level_was_missing: false,
-                dexie_api_base: "https://api.dexie.space".to_string(),
-                splash_api_base: "http://localhost:4000".to_string(),
-                offer_publish_venue: "dexie".to_string(),
-                coin_ops_minimum_fee_mojos: 0,
-                coin_ops_max_operations_per_run: 0,
-                coin_ops_max_daily_fee_budget_mojos: 0,
-                coin_ops_split_fee_mojos: 0,
-                coin_ops_combine_fee_mojos: 0,
-                runtime_offer_bootstrap_wait_timeout_seconds: 120,
                 runtime_market_slot_count: 1,
-                runtime_offer_parallelism_enabled: false,
                 runtime_offer_parallelism_max_workers: 2,
-                runtime_dry_run: false,
-                runtime_loop_interval_seconds: 30,
-                tx_block_trigger_mode: "websocket".to_string(),
-                tx_block_websocket_url: String::new(),
                 tx_block_websocket_reconnect_interval_seconds: 1,
                 tx_block_fallback_poll_interval_seconds: 1,
+                ..Default::default()
             },
             markets: MarketsConfig { markets },
             network: "mainnet".to_string(),

@@ -70,7 +70,7 @@ pub async fn run_inventory_phase(
         return Ok(BTreeMap::new());
     }
 
-    let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim()) as i64;
+    let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
     let scan_result: SignerResult<(String, usize, BTreeMap<i64, i64>)> = async {
         let signer_config = load_signer_config(resources.program_path())?;
         let (resolved_base_asset_id, _) =

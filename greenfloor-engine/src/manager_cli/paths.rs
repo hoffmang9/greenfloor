@@ -49,10 +49,6 @@ pub fn default_cats_config_path() -> PathBuf {
     PathBuf::from("config/cats.yaml")
 }
 
-pub fn default_state_dir_path() -> PathBuf {
-    expand_home(Path::new("~/.greenfloor/state"))
-}
-
 pub fn resolve_cli_config_path(
     cli_value: &Path,
     repo_default: &Path,

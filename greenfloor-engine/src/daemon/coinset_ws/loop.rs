@@ -75,7 +75,7 @@ async fn run_coinset_websocket_loop(
     };
     let ws_url = resolve_coinset_ws_url(&program, &coinset_base_url);
     let reconnect =
-        Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1) as u64);
+        Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1));
 
     while !stop.load(Ordering::SeqCst) {
         let _ = run_recovery_poll(&store, &program, &coinset_base_url, "connected").await;
@@ -127,33 +127,16 @@ mod tests {
     use super::super::url::resolve_coinset_ws_url;
     use super::*;
     use mockito::Server;
-    use std::path::PathBuf;
     use tempfile::tempdir;
 
     fn sample_program() -> ManagerProgramConfig {
         ManagerProgramConfig {
-            network: "mainnet".to_string(),
-            home_dir: PathBuf::from("/tmp/gf"),
-            app_log_level: "INFO".to_string(),
-            app_log_level_was_missing: false,
-            dexie_api_base: "https://api.dexie.space".to_string(),
-            splash_api_base: "http://localhost:4000".to_string(),
-            offer_publish_venue: "dexie".to_string(),
-            coin_ops_minimum_fee_mojos: 0,
-            coin_ops_max_operations_per_run: 0,
-            coin_ops_max_daily_fee_budget_mojos: 0,
-            coin_ops_split_fee_mojos: 0,
-            coin_ops_combine_fee_mojos: 0,
-            runtime_offer_bootstrap_wait_timeout_seconds: 120,
             runtime_market_slot_count: 1,
-            runtime_offer_parallelism_enabled: false,
             runtime_offer_parallelism_max_workers: 2,
-            runtime_dry_run: false,
-            runtime_loop_interval_seconds: 30,
-            tx_block_trigger_mode: "websocket".to_string(),
             tx_block_websocket_url: "ws://127.0.0.1:9/ws".to_string(),
             tx_block_websocket_reconnect_interval_seconds: 1,
             tx_block_fallback_poll_interval_seconds: 1,
+            ..Default::default()
         }
     }
 
@@ -181,12 +164,7 @@ mod tests {
             .create();
 
         let program = sample_program();
-        capture_coinset_websocket_once(
-            &store,
-            &program,
-            &server.url(),
-            &CoinWatchlistCache::new(),
-        )
+        capture_coinset_websocket_once(&store, &program, &server.url(), &CoinWatchlistCache::new())
             .await
             .expect("capture");
 

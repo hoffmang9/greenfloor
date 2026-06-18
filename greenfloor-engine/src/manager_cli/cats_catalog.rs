@@ -106,9 +106,7 @@ pub fn parse_optional_float(raw: Option<&str>) -> Option<JsonValue> {
     if text.is_empty() {
         return None;
     }
-    text.parse::<f64>()
-        .ok()
-        .map(|value| json!(value))
+    text.parse::<f64>().ok().map(|value| json!(value))
 }
 
 #[cfg(test)]

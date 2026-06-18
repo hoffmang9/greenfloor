@@ -133,7 +133,7 @@ pub fn select_spendable_coins_for_target_amount(
     let best_over = overs
         .into_iter()
         .min_by_key(|sum| {
-            let subset = best.get(&sum).map(Vec::len).unwrap_or(0);
+            let subset = best.get(sum).map(Vec::len).unwrap_or(0);
             (sum - required, subset, *sum)
         })
         .unwrap_or(0);

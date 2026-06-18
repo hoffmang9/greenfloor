@@ -114,8 +114,7 @@ mod tests {
     #[test]
     fn resolve_split_targets_from_ladder_size() {
         let market = sample_market();
-        let (amount, count) =
-            resolve_split_targets(&market, 0, 0, Some(100)).expect("ladder row");
+        let (amount, count) = resolve_split_targets(&market, 0, 0, Some(100)).expect("ladder row");
         assert_eq!(amount, 100);
         assert_eq!(count, 3);
     }
@@ -137,10 +136,9 @@ mod tests {
         };
         assert_eq!(combine_threshold_count(&entry), 5);
         let mut market = sample_market();
-        market.ladders.insert(
-            "sell".to_string(),
-            vec![entry.clone()],
-        );
+        market
+            .ladders
+            .insert("sell".to_string(), vec![entry.clone()]);
         let count = resolve_combine_count(&market, 0, Some(10)).expect("ladder row");
         assert_eq!(count, 5);
     }
