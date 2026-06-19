@@ -208,7 +208,19 @@ async fn resolve_parent_children(
         return Ok(());
     };
 
-    let child_assets = child_cat_asset_ids_from_parent_spend(parent_coin, &parent_spend)?;
+    let child_assets = match child_cat_asset_ids_from_parent_spend(parent_coin, &parent_spend) {
+        Ok(child_assets) => child_assets,
+        Err(err) => {
+            tracing::warn!(
+                parent_coin_id = parent_id,
+                child_count = child_ids.len(),
+                error = %err,
+                "vault coinset scan: parent spend CAT parse failed; marking children as non-CAT"
+            );
+            fail_children(caches, rows, child_ids);
+            return Ok(());
+        }
+    };
     for (child_id, asset_id) in &child_assets {
         caches
             .cat_asset_cache
