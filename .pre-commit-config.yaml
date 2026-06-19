@@ -19,7 +19,7 @@ repos:
         files: ^greenfloor-engine/
 
       - id: cargo-clippy
-        # --lib --bins only: integration tests compile once in the test profile during `cargo test`, not again here via --all-targets.
+        # --lib --bins: integration tests compile once in `cargo test`, not again via --all-targets.
         name: cargo clippy (greenfloor-engine, clippy::all + pedantic)
         entry: cargo clippy --manifest-path greenfloor-engine/Cargo.toml --lib --bins --no-deps
         language: system
