@@ -9,9 +9,7 @@ use crate::error::{SignerError, SignerResult};
 use super::cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
 use super::daemon_loop::{run_daemon_loop, DaemonLoopRequest};
 use super::lock::DaemonInstanceLock;
-use super::logging::{
-    initialize_daemon_file_logging, sync_daemon_file_logging, warn_if_log_level_auto_healed,
-};
+use super::logging::{initialize_daemon_file_logging, warn_if_log_level_auto_healed};
 use super::program_runtime::{load_daemon_program_runtime, use_websocket_capture_for_once};
 use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequestBody};
 use super::watchlist::cache::CoinWatchlistCache;

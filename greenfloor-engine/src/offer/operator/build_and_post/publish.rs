@@ -1,12 +1,14 @@
 use std::path::Path;
 
 use serde_json::{json, Value};
+use tracing::Level;
 
 use crate::adapters::{
     dexie_offer_view_url, post_offer_phase_dexie, DexieClient, PostOfferPhaseDexieParams,
     SplashClient,
 };
 use crate::error::{SignerError, SignerResult};
+use crate::operator_log::{audit_and_trace, LogContext};
 use crate::storage::{
     persist_offer_post_records, state_db_path_for_home, OfferPostPersistRecord, SqliteStore,
 };
@@ -130,4 +132,41 @@ pub fn persist_post_records_if_enabled(
     let db_path = state_db_path_for_home(home_dir);
     let store = SqliteStore::open(&db_path)?;
     persist_offer_post_records(&store, records)
+}
+
+pub fn persist_post_failure_if_enabled(
+    home_dir: &Path,
+    persist_results: bool,
+    dry_run: bool,
+    market_id: &str,
+    publish_venue: &str,
+    error: &str,
+    offer_ref: Option<&str>,
+) -> SignerResult<()> {
+    if !persist_results || dry_run {
+        return Ok(());
+    }
+    let db_path = state_db_path_for_home(home_dir);
+    let store = SqliteStore::open(&db_path)?;
+    let mut payload = json!({
+        "market_id": market_id,
+        "venue": publish_venue,
+        "error": error,
+        "planned_count": 1,
+        "executed_count": 0,
+    });
+    if let Some(offer_ref) = offer_ref {
+        if let Value::Object(obj) = &mut payload {
+            obj.insert("offer_ref".to_string(), json!(offer_ref));
+        }
+    }
+    audit_and_trace(
+        &store,
+        Level::WARN,
+        LogContext::OFFER_POST,
+        "offer_post_failure",
+        &payload,
+        Some(market_id),
+        "offer post iteration failed",
+    )
 }

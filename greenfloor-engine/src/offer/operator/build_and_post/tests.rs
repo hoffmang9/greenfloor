@@ -4,10 +4,55 @@ use std::time::Instant;
 use serde_json::{json, Value};
 
 use super::context::{resolve_action_side, sample_resolved_build_and_post_context};
-use super::publish::{offer_post_persist_record, persist_post_records_if_enabled};
+use super::publish::{
+    offer_post_persist_record, persist_post_failure_if_enabled, persist_post_records_if_enabled,
+};
 use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
 use crate::cli_util::{format_json, format_json_value};
 use crate::storage::{state_db_path_for_home, SqliteStore};
+
+#[test]
+fn persist_post_failure_if_enabled_writes_audit_event() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path().join("home");
+    persist_post_failure_if_enabled(
+        &home,
+        true,
+        false,
+        "m1",
+        "dexie",
+        "dexie_http_error:500",
+        None,
+    )
+    .expect("persist failure");
+
+    let db_path = state_db_path_for_home(&home);
+    let store = SqliteStore::open(&db_path).expect("open");
+    let events = store
+        .list_recent_audit_events(Some(&["offer_post_failure"]), Some("m1"), 1)
+        .expect("events");
+    assert_eq!(events.len(), 1);
+    assert_eq!(
+        events[0].payload.get("error").and_then(Value::as_str),
+        Some("dexie_http_error:500")
+    );
+}
+
+#[test]
+fn persist_post_failure_if_enabled_skips_dry_run() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    persist_post_failure_if_enabled(
+        dir.path(),
+        true,
+        true,
+        "m1",
+        "dexie",
+        "dexie_http_error:500",
+        None,
+    )
+    .expect("skip");
+    assert!(!state_db_path_for_home(dir.path()).exists());
+}
 
 #[test]
 fn cli_json_formatting_respects_compact_flag() {

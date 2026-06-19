@@ -80,7 +80,14 @@ pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
         let exit_code =
             run_one_loop_cycle(&request, &mut dispatch_state, coin_watchlist.clone()).await?;
         if exit_code != 0 {
-            tracing::warn!("daemon_cycle_exit_code={exit_code}");
+            tracing::warn!(
+                service = crate::operator_log::LogContext::DAEMON_CYCLE.service,
+                event = crate::operator_log::DAEMON_CYCLE_COMPLETED,
+                phase = crate::operator_log::LogContext::DAEMON_CYCLE.phase,
+                exit_code,
+                outcome = "partial_failure",
+                "daemon loop cycle exited with errors"
+            );
         }
 
         if consume_reload_marker(&request.state_dir) {
@@ -88,7 +95,7 @@ pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
                 &runtime.home_dir,
                 request.state_db_override.as_deref(),
             )) {
-                let _ = record_config_reloaded(&store);
+                let _ = record_config_reloaded(&store, "reload_marker");
             }
         }
 

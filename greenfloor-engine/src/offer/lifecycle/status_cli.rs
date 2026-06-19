@@ -9,6 +9,8 @@ use crate::storage::{AuditEventRow, OfferStateListRow, SqliteStore};
 
 const STATUS_EVENT_TYPES: &[&str] = &[
     "strategy_offer_execution",
+    "strategy_offer_execution_error",
+    "offer_post_failure",
     "offer_cancel_policy",
     "offer_lifecycle_transition",
     "offer_reconciliation",

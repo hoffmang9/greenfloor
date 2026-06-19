@@ -30,6 +30,7 @@ pub mod manager_cli;
 pub mod metrics;
 pub mod minimal_program_template;
 pub mod offer;
+pub mod operator_log;
 pub mod paths;
 pub mod storage;
 pub mod vault;

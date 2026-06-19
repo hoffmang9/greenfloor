@@ -9,6 +9,7 @@ use crate::offer::publish::expected_publish_asset_fields;
 
 use super::context::ResolvedBuildAndPostContext;
 use super::create::create_offer;
+use super::operator_log::{log_post_iteration, log_post_iteration_outcome};
 use super::publish::{
     finalize_publish_payload, offer_post_persist_record, publish_offer, PublishOfferParams,
 };
@@ -178,6 +179,7 @@ pub(super) async fn run_post_iteration(
     let (bootstrap_action, bootstrap_result) = run_bootstrap_phase(request, ctx).await?;
     if let Some(bootstrap_result) = bootstrap_result {
         if let Some(error) = bootstrap_blocks_offer(&bootstrap_result) {
+            log_post_iteration(ctx, "failure", &ctx.publish_venue, Some(&error), None);
             return Ok((
                 bootstrap_action,
                 PostIterationOutcome::Failure(PostFailure {
@@ -193,7 +195,10 @@ pub(super) async fn run_post_iteration(
 
     let (created, create_phase_ms) = match create_offer_for_post(request, ctx, started).await? {
         Ok(values) => values,
-        Err(outcome) => return Ok((bootstrap_action, outcome)),
+        Err(outcome) => {
+            log_post_iteration_outcome(ctx, &outcome);
+            return Ok((bootstrap_action, outcome));
+        }
     };
 
     let outcome = publish_created_offer(
@@ -206,6 +211,8 @@ pub(super) async fn run_post_iteration(
         splash,
     )
     .await?;
+
+    log_post_iteration_outcome(ctx, &outcome);
 
     Ok((bootstrap_action, outcome))
 }

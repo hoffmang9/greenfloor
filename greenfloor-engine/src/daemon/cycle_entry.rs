@@ -3,6 +3,7 @@ use std::time::Instant;
 use crate::config::MarketConfig;
 use crate::cycle::enqueue_immediate_requeue;
 use crate::error::SignerResult;
+use crate::operator_log::{LogContext, DAEMON_CYCLE_COMPLETED, DAEMON_CYCLE_STARTED};
 use crate::storage::SqliteStore;
 
 use super::market_context::{
@@ -139,6 +140,16 @@ pub async fn run_daemon_cycle_once(
     let plan = build_cycle_plan(request, &resources, &cycle_store).await?;
     write_stale_sweep_audit(&cycle_store, &plan)?;
 
+    tracing::info!(
+        service = LogContext::DAEMON_CYCLE.service,
+        event = DAEMON_CYCLE_STARTED,
+        phase = LogContext::DAEMON_CYCLE.phase,
+        market_count = plan.selected_market_ids.len(),
+        dry_run = plan.runtime_dry_run,
+        selected_market_ids = ?plan.selected_market_ids,
+        "daemon cycle started"
+    );
+
     let preamble = run_cycle_preamble(
         resources.program(),
         &cycle_store,
@@ -181,8 +192,33 @@ pub async fn run_daemon_cycle_once(
     })?;
     cycle_store.add_audit_event("daemon_cycle_summary", &summary_payload, None)?;
 
+    let exit_code = compute_cycle_exit_code(&plan, &metrics);
+    if exit_code == 0 {
+        tracing::info!(
+            service = LogContext::DAEMON_CYCLE.service,
+            event = DAEMON_CYCLE_COMPLETED,
+            phase = LogContext::DAEMON_CYCLE.phase,
+            exit_code,
+            cycle_error_count = summary.error_count,
+            elapsed_ms = summary.duration_ms,
+            market_count = plan.selected_market_ids.len(),
+            "daemon cycle completed"
+        );
+    } else {
+        tracing::warn!(
+            service = LogContext::DAEMON_CYCLE.service,
+            event = DAEMON_CYCLE_COMPLETED,
+            phase = LogContext::DAEMON_CYCLE.phase,
+            exit_code,
+            cycle_error_count = summary.error_count,
+            elapsed_ms = summary.duration_ms,
+            market_count = plan.selected_market_ids.len(),
+            "daemon cycle completed"
+        );
+    }
+
     Ok(DaemonCycleOnceResponse {
-        exit_code: compute_cycle_exit_code(&plan, &metrics),
+        exit_code,
         dispatch_state,
         cycle_summary: summary,
     })
