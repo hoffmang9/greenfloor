@@ -8,8 +8,8 @@ use greenfloor_engine::vault::members::{
     hex_to_bytes32, singleton_member_hash, tree_hash_to_hex, MemberConfig,
 };
 use greenfloor_engine::vault_coinset_scan::request::ScanRequest;
-use greenfloor_engine::vault_coinset_scan::run_vault_coinset_scan;
 use greenfloor_engine::vault_coinset_scan::types::{AssetTypeFilter, CoinKind};
+use greenfloor_engine::vault_coinset_scan::ScanState;
 use mockito::Matcher;
 use serde_json::json;
 
@@ -104,9 +104,7 @@ async fn vault_coinset_scan_discovers_xch_coin_via_hint_lookup() {
         cache_clear: None,
     };
 
-    let result = run_vault_coinset_scan(request)
-        .await
-        .expect("scan should succeed");
+    let result = ScanState::run(request).await.expect("scan should succeed");
     assert_eq!(result.count, 1);
     assert_eq!(result.launcher_id, launcher);
     assert_eq!(result.coins.len(), 1);
@@ -197,9 +195,7 @@ async fn vault_coinset_scan_drops_unverified_coins() {
         cache_clear: None,
     };
 
-    let result = run_vault_coinset_scan(request)
-        .await
-        .expect("scan should succeed");
+    let result = ScanState::run(request).await.expect("scan should succeed");
     assert_eq!(result.count, 0);
     let verification = result.name_verification.expect("verification applied");
     assert!(verification.applied);

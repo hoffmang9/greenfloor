@@ -13,4 +13,4 @@ pub mod window;
 pub use cli::{run_vault_coinset_scan_command, VaultCoinsetScanCliArgs};
 pub use request::ScanRequest;
 pub use result::ScanResult;
-pub use state::run_vault_coinset_scan;
+pub use state::ScanState;

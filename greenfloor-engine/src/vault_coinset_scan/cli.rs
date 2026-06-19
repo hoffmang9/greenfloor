@@ -9,8 +9,8 @@ use crate::config::load_program_config;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::manager_cli::{
-    default_cats_config_path, default_markets_config_path, default_metadata_config_paths,
-    default_program_config_path, default_testnet_markets_config_path, optional_path,
+    default_program_config_path, default_testnet_markets_config_path,
+    default_vault_scan_metadata_config_paths, optional_path,
 };
 use crate::paths::expand_home;
 use crate::vault_coinset_scan::checkpoint::{
@@ -18,7 +18,7 @@ use crate::vault_coinset_scan::checkpoint::{
 };
 use crate::vault_coinset_scan::metadata::parse_csv_values;
 use crate::vault_coinset_scan::request::ScanRequest;
-use crate::vault_coinset_scan::state::run_vault_coinset_scan;
+use crate::vault_coinset_scan::state::ScanState;
 use crate::vault_coinset_scan::types::AssetTypeFilter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -167,21 +167,20 @@ impl VaultCoinsetScanCliArgs {
     }
 
     fn metadata_config_paths(&self) -> (PathBuf, PathBuf, Option<PathBuf>) {
-        if self.cats_config.trim().is_empty() && self.markets_config.trim().is_empty() {
-            return default_metadata_config_paths();
-        }
+        let (default_cats, default_markets, default_testnet) =
+            default_vault_scan_metadata_config_paths();
         (
             if self.cats_config.trim().is_empty() {
-                default_cats_config_path()
+                default_cats
             } else {
                 expand_home(std::path::Path::new(self.cats_config.trim()))
             },
             if self.markets_config.trim().is_empty() {
-                default_markets_config_path()
+                default_markets
             } else {
                 expand_home(std::path::Path::new(self.markets_config.trim()))
             },
-            default_testnet_markets_config_path(),
+            default_testnet.or_else(default_testnet_markets_config_path),
         )
     }
 
@@ -273,7 +272,7 @@ pub async fn run_vault_coinset_scan_command(args: VaultCoinsetScanCliArgs) -> Si
     }
 
     let request = args.into_scan_request(launcher_id, cache_clear);
-    let result = run_vault_coinset_scan(request).await?;
+    let result = ScanState::run(request).await?;
     let payload = serde_json::to_value(result)
         .map_err(|err| SignerError::Other(format!("encode scan result: {err}")))?;
     print_json_value(&payload, true)

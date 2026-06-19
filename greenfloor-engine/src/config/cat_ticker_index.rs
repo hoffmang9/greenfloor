@@ -33,17 +33,21 @@ pub fn build_cat_ticker_index(
     let mut asset_id_to_symbols: HashMap<String, BTreeSet<String>> = HashMap::new();
 
     if cats_config.exists() {
-        let catalog = load_cats_catalog(cats_config)?;
-        for row in &catalog {
-            add_cat_row_mappings(&mut ticker_to_asset_ids, &mut asset_id_to_symbols, row);
+        if let Ok(catalog) = load_cats_catalog(cats_config) {
+            for row in &catalog {
+                add_cat_row_mappings(&mut ticker_to_asset_ids, &mut asset_id_to_symbols, row);
+            }
         }
     }
 
     if markets_config.exists() {
-        let markets =
-            load_markets_config_with_overlay(markets_config, testnet_markets_config)?.markets;
-        for market in &markets {
-            add_market_row_mappings(&mut ticker_to_asset_ids, &mut asset_id_to_symbols, market);
+        if let Ok(markets) =
+            load_markets_config_with_overlay(markets_config, testnet_markets_config)
+                .map(|cfg| cfg.markets)
+        {
+            for market in &markets {
+                add_market_row_mappings(&mut ticker_to_asset_ids, &mut asset_id_to_symbols, market);
+            }
         }
     }
 
@@ -132,5 +136,18 @@ mod tests {
     #[test]
     fn normalize_label_strips_non_alnum() {
         assert_eq!(normalize_label(" wUSDC.b "), "wusdcb");
+    }
+
+    #[test]
+    fn build_cat_ticker_index_continues_when_catalog_unreadable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cats = dir.path().join("cats.yaml");
+        std::fs::write(&cats, "{not yaml").expect("write bad cats");
+        let markets = dir.path().join("markets.yaml");
+        std::fs::write(&markets, "{also bad").expect("write bad markets");
+        let (tickers, symbols) =
+            build_cat_ticker_index(&cats, &markets, None).expect("index should not abort scan");
+        assert!(tickers.is_empty());
+        assert!(symbols.is_empty());
     }
 }

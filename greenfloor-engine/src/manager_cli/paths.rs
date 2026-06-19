@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-pub use crate::paths::expand_home;
+pub use crate::paths::{expand_home, resolve_repo_root};
 
 pub fn default_program_config_path() -> PathBuf {
     let home_default = expand_home(Path::new("~/.greenfloor/config/program.yaml"));
@@ -44,6 +44,22 @@ pub fn default_metadata_config_paths() -> (PathBuf, PathBuf, Option<PathBuf>) {
     )
 }
 
+/// Vault Coinset scan metadata defaults anchored to the repository `config/` tree.
+///
+/// Matches the legacy Python scanner (`Path(__file__).parents[1] / "config"`), so scans
+/// invoked outside the repo cwd still resolve ticker indexes from the checkout.
+pub fn default_vault_scan_metadata_config_paths() -> (PathBuf, PathBuf, Option<PathBuf>) {
+    if let Some(repo_root) = resolve_repo_root() {
+        let testnet = repo_root.join("config/testnet-markets.yaml");
+        return (
+            repo_root.join("config/cats.yaml"),
+            repo_root.join("config/markets.yaml"),
+            testnet.exists().then_some(testnet),
+        );
+    }
+    default_metadata_config_paths()
+}
+
 pub fn resolve_cli_config_path(
     cli_value: &Path,
     repo_default: &Path,
@@ -70,6 +86,7 @@ pub fn optional_path(raw: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::paths::find_repo_root_from;
 
     #[test]
     fn resolve_cli_config_path_uses_home_when_repo_default() {
@@ -89,5 +106,18 @@ mod tests {
             || PathBuf::from("/tmp/home/program.yaml"),
         );
         assert_eq!(resolved, PathBuf::from("/custom/program.yaml"));
+    }
+
+    #[test]
+    fn vault_scan_metadata_paths_use_repo_config_when_discoverable() {
+        let engine_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = engine_dir.parent().expect("repo root");
+        assert_eq!(
+            find_repo_root_from(&engine_dir),
+            Some(repo_root.to_path_buf())
+        );
+        let (cats, markets, _) = default_vault_scan_metadata_config_paths();
+        assert_eq!(cats, repo_root.join("config/cats.yaml"));
+        assert_eq!(markets, repo_root.join("config/markets.yaml"));
     }
 }
