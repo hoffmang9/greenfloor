@@ -113,21 +113,46 @@ Run the daemon:
 greenfloord --program-config config/program.yaml --markets-config config/markets.yaml --once
 ```
 
+## Local dev tooling
+
+Post-Python-cutover local development uses three runtimes. None of them replace
+the others — each owns a distinct slice of the repo.
+
+| Runtime                     | Role                                                                                                                 | Install                                                                                             |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| **Rust** (stable + `cargo`) | Operator binaries (`greenfloor-engine`, `greenfloor-manager`, `greenfloord`), fmt/clippy, and the primary test suite | [rustup](https://rustup.rs/); optional `cargo install cargo-nextest` for faster tests               |
+| **Python 3.11+** (`.venv`)  | Script adapters under `scripts/`, ruff/pyright/yamllint pre-commit hooks                                             | `python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"`                     |
+| **Node.js LTS**             | Prettier pre-commit hook (YAML/JSON/Markdown)                                                                        | [fnm](https://github.com/Schniz/fnm), nvm, or `brew install node@24`; CI uses `node-version: lts/*` |
+
+**Operators are Rust-only.** Do not `pip install` expecting `greenfloor-manager` or
+`greenfloord` console scripts — build with `cargo install --path greenfloor-engine --bins`
+or `cargo build --manifest-path greenfloor-engine/Cargo.toml --bins`.
+
+**Python is not gone.** It remains for script subprocess bridges and dev lint/type-check
+only. See [AGENTS.md](AGENTS.md) → **Python (scripts and test harnesses only)**.
+
+**Node is easy to miss.** Pre-commit's Prettier hook needs `node` on your `PATH`. If
+`pre-commit run --all-files` fails on the prettier hook with “node not found”, install
+Node LTS and verify `node --version` before retrying.
+
 ## Developer Checks
 
-Install dev dependencies (includes `pre-commit`), then run local checks:
+One-time setup (install order: Rust and Node LTS from **Local dev tooling** above, then Python venv):
 
 ```bash
+# Rust (operators + tests): cargo install --path greenfloor-engine --bins
+# Node LTS: verify `node --version` before pre-commit
+
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
-**Node.js LTS** is required for the Prettier pre-commit hook (YAML/JSON/Markdown). CI uses `node-version: lts/*`. Install Node LTS locally (for example `brew install node@24 && brew link --overwrite node@24`, or [fnm](https://github.com/Schniz/fnm) / nvm) and verify `node --version` succeeds before running pre-commit.
+Run local checks:
 
 ```bash
 export PRE_COMMIT_HOME="$(pwd)/.cache/pre-commit"  # reuse hook envs; CI caches this path
-pre-commit run --all-files                         # lint + type-check (~5–10s warm)
+pre-commit run --all-files                         # ruff, pyright, prettier, yamllint, cargo fmt/clippy (~5–10s warm)
 ```
 
 Full gate before push (Rust fmt/clippy via pre-commit — `clippy::all` + `clippy::pedantic` with documented allows):

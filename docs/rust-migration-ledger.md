@@ -15,6 +15,14 @@ Single-operator deployment catch-up checklist. No backwards-compatibility shims.
 2. Stop using `pip install -e .` for operator commands. Python venv remains for
    `scripts/` and dev tooling only.
 
+## Local dev tooling
+
+Setup and gate commands: [README.md](../README.md) → **Local dev tooling** and
+**Developer Checks**.
+
+**Common mistake:** skipping Node LTS — `pre-commit run --all-files` needs `node` on your
+`PATH` for the Prettier hook.
+
 ## Command invocation
 
 | Before                                      | After                                            |

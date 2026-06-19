@@ -7,9 +7,12 @@ Coinset-specific vault scan validation and capability probing are documented in
 
 ## 1) First Deployment (Clean Machine)
 
-1. Install native operator binaries and dev Python tooling:
+1. Install native operator binaries and local dev tooling (Rust, Python venv, Node LTS —
+   see [README.md](../README.md) → **Local dev tooling**):
    - `cargo install --path greenfloor-engine --bins`
-   - `python -m pip install -e ".[dev]"` (tests, pre-commit)
+   - `python3 -m venv .venv && source .venv/bin/activate && python -m pip install -e ".[dev]"`
+     (script adapters, ruff/pyright/yamllint pre-commit hooks)
+   - Node.js LTS on your `PATH` for the Prettier pre-commit hook
 2. Bootstrap runtime home:
    - `greenfloor-manager bootstrap-home`
 3. Validate seeded configs:
