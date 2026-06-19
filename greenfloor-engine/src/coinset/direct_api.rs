@@ -91,7 +91,10 @@ mod tests {
     fn legacy_host_aliases_map_to_defaults() {
         assert!(is_legacy_coinset_host_alias("https://coinset.org"));
         assert!(is_legacy_coinset_host_alias("testnet11.coinset.org"));
-        assert_eq!(normalize_direct_base_url_input(Some("https://coinset.org/")), None);
+        assert_eq!(
+            normalize_direct_base_url_input(Some("https://coinset.org/")),
+            None
+        );
         assert_eq!(
             resolve_direct_coinset_base_url("mainnet", Some("https://coinset.org")),
             MAINNET_DIRECT_BASE_URL

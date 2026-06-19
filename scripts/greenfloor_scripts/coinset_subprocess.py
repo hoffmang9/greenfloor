@@ -16,9 +16,7 @@ def _client_flags(network: str, base_url: str | None) -> list[str]:
 
 
 def resolve_client_cli(network: str, base_url: str | None) -> tuple[str, str]:
-    payload = run_engine_json(
-        ["coinset", "resolve-client", *_client_flags(network, base_url)]
-    )
+    payload = run_engine_json(["coinset", "resolve-client", *_client_flags(network, base_url)])
     if not isinstance(payload, dict):
         raise RuntimeError("coinset_resolve_client_invalid_payload")
     resolved_network = str(payload.get("network") or "").strip()

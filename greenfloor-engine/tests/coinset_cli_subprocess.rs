@@ -6,7 +6,13 @@ use serde_json::Value;
 #[test]
 fn subprocess_coinset_resolve_client_testnet_defaults_without_base_url() {
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_greenfloor-engine"))
-        .args(["coinset", "resolve-client", "--network", "testnet", "--json"])
+        .args([
+            "coinset",
+            "resolve-client",
+            "--network",
+            "testnet",
+            "--json",
+        ])
         .output()
         .expect("spawn greenfloor-engine coinset resolve-client subprocess");
     assert!(
@@ -16,7 +22,10 @@ fn subprocess_coinset_resolve_client_testnet_defaults_without_base_url() {
     );
     let value: Value =
         serde_json::from_slice(&output.stdout).expect("parse resolve-client json stdout");
-    assert_eq!(value.get("network").and_then(Value::as_str), Some("testnet11"));
+    assert_eq!(
+        value.get("network").and_then(Value::as_str),
+        Some("testnet11")
+    );
     assert_eq!(
         value.get("base_url").and_then(Value::as_str),
         Some(TESTNET11_DIRECT_BASE_URL)

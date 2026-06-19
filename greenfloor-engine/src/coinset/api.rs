@@ -211,7 +211,7 @@ mod tests {
             payload
                 .get("mempool_tx_ids")
                 .and_then(|value| value.as_array())
-                .map(|values| values.len()),
+                .map(std::vec::Vec::len),
             Some(2)
         );
     }
@@ -327,10 +327,7 @@ mod tests {
         let result = push_tx_hex("mainnet", Some(&server.url()), &spend_bundle_hex)
             .await
             .expect("push tx");
-        assert_eq!(
-            result.get("success").and_then(|value| value.as_bool()),
-            Some(true)
-        );
+        assert_eq!(result.get("success").and_then(Value::as_bool), Some(true));
         assert_eq!(
             result.get("status").and_then(|value| value.as_str()),
             Some("SUCCESS")

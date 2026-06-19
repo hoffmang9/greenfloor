@@ -24,8 +24,10 @@ impl MspCoinset {
         let url = base_url
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .map(|value| value.trim_end_matches('/').to_string())
-            .unwrap_or_else(|| DEFAULT_MSP_BASE_URL.to_string());
+            .map_or_else(
+                || DEFAULT_MSP_BASE_URL.to_string(),
+                |value| value.trim_end_matches('/').to_string(),
+            );
         match network {
             "mainnet" | "testnet11" => Ok(Self::new(url)),
             other => Err(SignerError::Other(format!("unsupported network: {other}"))),

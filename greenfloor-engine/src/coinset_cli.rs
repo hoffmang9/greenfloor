@@ -113,7 +113,7 @@ fn apply_height_fields(body: &mut Value, start_height: Option<u64>, end_height: 
 
 pub async fn run_coinset_command(args: CoinsetCliArgs) -> SignerResult<()> {
     match args.command {
-        CoinsetCommands::ResolveClient(args) => run_coinset_resolve_client(args).await,
+        CoinsetCommands::ResolveClient(args) => run_coinset_resolve_client(&args),
         CoinsetCommands::CoinRecords(args) => run_coinset_coin_records(args).await,
         CoinsetCommands::Record(args) => run_coinset_record(args).await,
         CoinsetCommands::Post(args) => run_coinset_post(args).await,
@@ -121,7 +121,7 @@ pub async fn run_coinset_command(args: CoinsetCliArgs) -> SignerResult<()> {
     }
 }
 
-pub async fn run_coinset_resolve_client(args: CoinsetResolveClientArgs) -> SignerResult<()> {
+pub fn run_coinset_resolve_client(args: &CoinsetResolveClientArgs) -> SignerResult<()> {
     let resolved = resolve_direct_client(
         &args.client.network,
         client_base_url(&args.client.base_url).as_deref(),
