@@ -5,6 +5,7 @@ use crate::cycle::enqueue_immediate_requeue;
 use crate::error::SignerResult;
 use crate::operator_log::{LogContext, DAEMON_CYCLE_COMPLETED, DAEMON_CYCLE_STARTED};
 use crate::storage::SqliteStore;
+use tracing::Level;
 
 use super::market_context::{
     load_cycle_resources, DaemonCycleResources, MarketCycleContext, MarketDispatchContext,
@@ -195,33 +196,7 @@ pub async fn run_daemon_cycle_once(
     cycle_store.add_audit_event("daemon_cycle_summary", &summary_payload, None)?;
 
     let exit_code = compute_cycle_exit_code(&plan, &metrics);
-    if exit_code == 0 {
-        crate::trace_event!(
-            INFO,
-            LogContext::DAEMON_CYCLE,
-            DAEMON_CYCLE_COMPLETED,
-            {
-                exit_code,
-                cycle_error_count = summary.error_count,
-                elapsed_ms = summary.duration_ms,
-                market_count = plan.selected_market_ids.len(),
-            };
-            "daemon cycle completed"
-        );
-    } else {
-        crate::trace_event!(
-            WARN,
-            LogContext::DAEMON_CYCLE,
-            DAEMON_CYCLE_COMPLETED,
-            {
-                exit_code,
-                cycle_error_count = summary.error_count,
-                elapsed_ms = summary.duration_ms,
-                market_count = plan.selected_market_ids.len(),
-            };
-            "daemon cycle completed"
-        );
-    }
+    trace_daemon_cycle_completed(exit_code, &summary, plan.selected_market_ids.len());
 
     Ok(DaemonCycleOnceResponse {
         exit_code,
@@ -230,12 +205,60 @@ pub async fn run_daemon_cycle_once(
     })
 }
 
+fn trace_daemon_cycle_completed(exit_code: i32, summary: &DaemonCycleSummary, market_count: usize) {
+    let level = if exit_code == 0 {
+        Level::INFO
+    } else {
+        Level::WARN
+    };
+    crate::event_at_level!(
+        level,
+        service = LogContext::DAEMON_CYCLE.service,
+        event = DAEMON_CYCLE_COMPLETED,
+        phase = LogContext::DAEMON_CYCLE.phase,
+        exit_code = exit_code,
+        cycle_error_count = summary.error_count,
+        elapsed_ms = summary.duration_ms,
+        market_count = market_count,
+        "daemon cycle completed"
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operator_log::TraceCapture;
 
     #[test]
     fn market_dispatch_is_sequential_on_one_sqlite_connection() {
         assert_eq!(SEQUENTIAL_MARKET_WORKER_SOURCE, "sequential_market_worker");
+    }
+
+    #[test]
+    fn daemon_cycle_completed_emits_single_trace_event() {
+        let capture = TraceCapture::install();
+        let summary = DaemonCycleSummary {
+            duration_ms: 42,
+            enabled_markets: 1,
+            markets_attempted: 1,
+            markets_processed: 0,
+            runtime_market_slot_count: 1,
+            stale_open_sweep_checked_offer_count: 0,
+            stale_open_sweep_requeue_market_ids: Vec::new(),
+            stale_open_sweep_requeue_count: 0,
+            stale_open_sweep_truncated: false,
+            immediate_requeue_market_ids: Vec::new(),
+            immediate_requeue_count: 0,
+            error_count: 2,
+            strategy_planned_total: 0,
+            strategy_executed_total: 0,
+            cancel_triggered_count: 0,
+            cancel_planned_total: 0,
+            cancel_executed_total: 0,
+            consumed_immediate_requeues: Vec::new(),
+        };
+        trace_daemon_cycle_completed(2, &summary, 1);
+        assert_eq!(capture.count_substr(DAEMON_CYCLE_COMPLETED), 1);
+        assert!(capture.logs().contains("cycle_error_count"));
     }
 }

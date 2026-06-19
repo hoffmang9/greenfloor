@@ -22,6 +22,7 @@ use crate::operator_log::{offer_log_ref, LogContext, OFFER_POST_COMPLETED, OFFER
 use context::{resolve_build_and_post_context, ResolvedBuildAndPostContext};
 use iteration::run_post_iteration;
 use publish::{persist_post_failure_if_enabled, persist_post_records_if_enabled};
+use tracing::Level;
 use types::{build_and_post_exit_code, PostIterationOutcome};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -190,6 +191,35 @@ async fn run_post_iterations(
     Ok(batch)
 }
 
+fn offer_post_completed_level(outcome: &str) -> Level {
+    match outcome {
+        "success" => Level::INFO,
+        "failure" => Level::ERROR,
+        _ => Level::WARN,
+    }
+}
+
+fn trace_offer_post_completed(
+    outcome: &str,
+    market_id: &str,
+    publish_attempts: usize,
+    publish_failures: u32,
+    dry_run: bool,
+) {
+    crate::event_at_level!(
+        offer_post_completed_level(outcome),
+        service = LogContext::OFFER_POST.service,
+        event = OFFER_POST_COMPLETED,
+        phase = LogContext::OFFER_POST.phase,
+        market_id = market_id,
+        outcome = outcome,
+        publish_attempts = publish_attempts,
+        publish_failures = publish_failures,
+        dry_run = dry_run,
+        "build-and-post-offer completed"
+    );
+}
+
 fn build_and_post_payload(
     request: &BuildAndPostOfferRequest,
     ctx: &ResolvedBuildAndPostContext,
@@ -263,48 +293,12 @@ async fn build_and_post_offer_async(
     } else {
         "partial_failure"
     };
-    if exit_code == 0 {
-        crate::trace_event!(
-            INFO,
-            LogContext::OFFER_POST,
-            OFFER_POST_COMPLETED,
-            {
-                market_id = ctx.market.market_id.as_str(),
-                outcome,
-                publish_attempts = batch.post_results.len(),
-                publish_failures = batch.publish_failures,
-                dry_run = request.run.dry_run,
-            };
-            "build-and-post-offer completed"
-        );
-    } else if outcome == "failure" {
-        crate::trace_event!(
-            ERROR,
-            LogContext::OFFER_POST,
-            OFFER_POST_COMPLETED,
-            {
-                market_id = ctx.market.market_id.as_str(),
-                outcome,
-                publish_attempts = batch.post_results.len(),
-                publish_failures = batch.publish_failures,
-                dry_run = request.run.dry_run,
-            };
-            "build-and-post-offer completed"
-        );
-    } else {
-        crate::trace_event!(
-            WARN,
-            LogContext::OFFER_POST,
-            OFFER_POST_COMPLETED,
-            {
-                market_id = ctx.market.market_id.as_str(),
-                outcome,
-                publish_attempts = batch.post_results.len(),
-                publish_failures = batch.publish_failures,
-                dry_run = request.run.dry_run,
-            };
-            "build-and-post-offer completed"
-        );
-    }
+    trace_offer_post_completed(
+        outcome,
+        ctx.market.market_id.as_str(),
+        batch.post_results.len(),
+        batch.publish_failures,
+        request.run.dry_run,
+    );
     Ok(BuildAndPostOfferResponse { exit_code, payload })
 }

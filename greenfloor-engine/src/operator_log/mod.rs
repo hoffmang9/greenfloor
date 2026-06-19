@@ -9,7 +9,10 @@ mod emit;
 mod events;
 mod redact;
 
-pub use emit::{audit_and_trace, LogContext};
+pub use emit::{audit_and_trace, trace_audit_outcome, LogContext};
+
+#[cfg(test)]
+pub use emit::trace_capture::TraceCapture;
 pub use events::{
     CONFIG_RELOADED, DAEMON_CYCLE_COMPLETED, DAEMON_CYCLE_STARTED, MARKET_CYCLE_COMPLETED,
     MARKET_CYCLE_STARTED, MARKET_PHASE, MARKET_VALIDATION_WARNING, OFFER_POST_COMPLETED,

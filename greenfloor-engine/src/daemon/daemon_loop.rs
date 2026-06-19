@@ -77,28 +77,15 @@ pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
         let runtime = load_daemon_program_runtime(&request.program_path)?;
         sync_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
 
-        let exit_code =
+        let _exit_code =
             run_one_loop_cycle(&request, &mut dispatch_state, coin_watchlist.clone()).await?;
-        if exit_code != 0 {
-            crate::trace_event!(
-                WARN,
-                crate::operator_log::LogContext::DAEMON_CYCLE,
-                crate::operator_log::DAEMON_CYCLE_COMPLETED,
-                {
-                    exit_code,
-                    outcome = "partial_failure",
-                };
-                "daemon loop cycle exited with errors"
-            );
-        }
 
         if consume_reload_marker(&request.state_dir) {
-            if let Ok(store) = SqliteStore::open(&resolve_state_db_path(
+            let store = SqliteStore::open(&resolve_state_db_path(
                 &runtime.home_dir,
                 request.state_db_override.as_deref(),
-            )) {
-                let _ = record_config_reloaded(&store, "reload_marker");
-            }
+            ))?;
+            record_config_reloaded(&store, "reload_marker")?;
         }
 
         tokio::time::sleep(Duration::from_secs(

@@ -40,7 +40,8 @@ fn persist_post_failure_if_enabled_writes_audit_event() {
 }
 
 #[test]
-fn persist_post_failure_if_enabled_skips_dry_run() {
+fn persist_post_failure_if_enabled_skips_dry_run_audit() {
+    let capture = crate::operator_log::TraceCapture::install();
     let dir = tempfile::tempdir().expect("tempdir");
     persist_post_failure_if_enabled(
         dir.path(),
@@ -53,6 +54,7 @@ fn persist_post_failure_if_enabled_skips_dry_run() {
     )
     .expect("skip");
     assert!(!state_db_path_for_home(dir.path()).exists());
+    assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 1);
 }
 
 #[test]

@@ -36,91 +36,40 @@ impl LogContext {
     };
 }
 
-/// Emit a structured operator trace event (`service`, `event`, and `phase` are always set).
-///
-/// Additional fields use tracing syntax, including `?` for debug formatting.
-#[macro_export]
-macro_rules! trace_event {
-    (INFO, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
-        tracing::info!(
-            service = ($ctx).service,
-            event = $event,
-            phase = ($ctx).phase,
-            $($fields)*
-            $msg
-        );
-    };
-    (WARN, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
-        tracing::warn!(
-            service = ($ctx).service,
-            event = $event,
-            phase = ($ctx).phase,
-            $($fields)*
-            $msg
-        );
-    };
-    (ERROR, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
-        tracing::error!(
-            service = ($ctx).service,
-            event = $event,
-            phase = ($ctx).phase,
-            $($fields)*
-            $msg
-        );
-    };
-    (DEBUG, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
-        tracing::debug!(
-            service = ($ctx).service,
-            event = $event,
-            phase = ($ctx).phase,
-            $($fields)*
-            $msg
-        );
-    };
-}
-
-fn trace_audit_payload(
+/// Emit one structured operator trace line at `level`.
+pub fn trace_audit_outcome(
     level: Level,
     ctx: LogContext,
     audit_event_type: &str,
+    payload: &Value,
     market_id: Option<&str>,
-    payload_text: &str,
-    trace_message: &str,
+    trace_message: &'static str,
 ) {
-    match level {
-        Level::ERROR => tracing::error!(
-            service = ctx.service,
-            event = audit_event_type,
-            phase = ctx.phase,
-            market_id = market_id.unwrap_or(""),
-            payload = %payload_text,
-            "{trace_message}"
-        ),
-        Level::WARN => tracing::warn!(
-            service = ctx.service,
-            event = audit_event_type,
-            phase = ctx.phase,
-            market_id = market_id.unwrap_or(""),
-            payload = %payload_text,
-            "{trace_message}"
-        ),
-        Level::INFO => tracing::info!(
-            service = ctx.service,
-            event = audit_event_type,
-            phase = ctx.phase,
-            market_id = market_id.unwrap_or(""),
-            payload = %payload_text,
-            "{trace_message}"
-        ),
-        Level::DEBUG | Level::TRACE => tracing::debug!(
-            service = ctx.service,
-            event = audit_event_type,
-            phase = ctx.phase,
-            market_id = market_id.unwrap_or(""),
-            payload = %payload_text,
-            "{trace_message}"
-        ),
-    }
+    let payload_text = redact_json_for_log(payload).to_string();
+    crate::event_at_level!(
+        level,
+        service = ctx.service,
+        event = audit_event_type,
+        phase = ctx.phase,
+        market_id = market_id.unwrap_or(""),
+        payload = %payload_text,
+        trace_message
+    );
+}
+
+/// Dispatch `tracing::event!` when the level is chosen at runtime.
+#[macro_export]
+macro_rules! event_at_level {
+    ($level:expr, $($fields:tt)* ) => {
+        match $level {
+            ::tracing::Level::ERROR => ::tracing::event!(::tracing::Level::ERROR, $($fields)*),
+            ::tracing::Level::WARN => ::tracing::event!(::tracing::Level::WARN, $($fields)*),
+            ::tracing::Level::INFO => ::tracing::event!(::tracing::Level::INFO, $($fields)*),
+            ::tracing::Level::DEBUG | ::tracing::Level::TRACE => {
+                ::tracing::event!(::tracing::Level::DEBUG, $($fields)*)
+            }
+        }
+    };
 }
 
 /// Persist an audit row and emit one redacted trace line for the same outcome.
@@ -135,19 +84,82 @@ pub fn audit_and_trace(
     audit_event_type: &str,
     payload: &Value,
     market_id: Option<&str>,
-    trace_message: &str,
+    trace_message: &'static str,
 ) -> SignerResult<()> {
     store.add_audit_event(audit_event_type, payload, market_id)?;
-    let payload_text = redact_json_for_log(payload).to_string();
-    trace_audit_payload(
+    trace_audit_outcome(
         level,
         ctx,
         audit_event_type,
+        payload,
         market_id,
-        &payload_text,
         trace_message,
     );
     Ok(())
+}
+
+/// Emit a structured operator trace event (`service`, `event`, and `phase` are always set).
+///
+/// Additional fields use tracing syntax, including `?` for debug formatting.
+#[macro_export]
+macro_rules! trace_event {
+    ($level:ident, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
+        tracing::event!(
+            tracing::Level::$level,
+            service = ($ctx).service,
+            event = $event,
+            phase = ($ctx).phase,
+            $($fields)*
+            $msg
+        );
+    };
+}
+
+#[cfg(test)]
+pub mod trace_capture {
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    pub struct TraceCapture {
+        buf: Arc<Mutex<Vec<u8>>>,
+        _guard: tracing::subscriber::DefaultGuard,
+    }
+
+    struct Writer(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Writer {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().expect("lock").extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl TraceCapture {
+        pub fn install() -> Self {
+            let buf = Arc::new(Mutex::new(Vec::new()));
+            let writer_buf = buf.clone();
+            let subscriber = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_ansi(false)
+                .without_time()
+                .with_writer(move || Writer(writer_buf.clone()))
+                .finish();
+            let guard = tracing::subscriber::set_default(subscriber);
+            Self { buf, _guard: guard }
+        }
+
+        pub fn logs(&self) -> String {
+            String::from_utf8(self.buf.lock().expect("lock").clone()).expect("utf8")
+        }
+
+        pub fn count_substr(&self, needle: &str) -> usize {
+            self.logs().matches(needle).count()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -193,5 +205,25 @@ mod tests {
             .expect("redacted offer");
         assert!(!redacted_offer.contains(&secret_tail));
         assert!(redacted_offer.contains("len="));
+    }
+
+    #[test]
+    fn trace_audit_outcome_emits_redacted_payload_without_persisting() {
+        let capture = trace_capture::TraceCapture::install();
+        let payload = json!({
+            "market_id": "m1",
+            "error": "dexie_http_error:500",
+        });
+        trace_audit_outcome(
+            Level::WARN,
+            LogContext::OFFER_POST,
+            OFFER_POST_FAILURE,
+            &payload,
+            Some("m1"),
+            "offer post failed",
+        );
+        let logs = capture.logs();
+        assert!(logs.contains(OFFER_POST_FAILURE));
+        assert!(logs.contains("dexie_http_error:500"));
     }
 }

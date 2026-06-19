@@ -8,7 +8,7 @@ use crate::adapters::{
     SplashClient,
 };
 use crate::error::{SignerError, SignerResult};
-use crate::operator_log::{audit_and_trace, LogContext, OFFER_POST_FAILURE};
+use crate::operator_log::{audit_and_trace, trace_audit_outcome, LogContext, OFFER_POST_FAILURE};
 use crate::storage::{
     persist_offer_post_records, state_db_path_for_home, OfferPostPersistRecord, SqliteStore,
 };
@@ -134,20 +134,12 @@ pub fn persist_post_records_if_enabled(
     persist_offer_post_records(&store, records)
 }
 
-pub fn persist_post_failure_if_enabled(
-    home_dir: &Path,
-    persist_results: bool,
-    dry_run: bool,
+fn post_failure_payload(
     market_id: &str,
     publish_venue: &str,
     error: &str,
     offer_ref: Option<&str>,
-) -> SignerResult<()> {
-    if !persist_results || dry_run {
-        return Ok(());
-    }
-    let db_path = state_db_path_for_home(home_dir);
-    let store = SqliteStore::open(&db_path)?;
+) -> Value {
     let mut payload = json!({
         "market_id": market_id,
         "venue": publish_venue,
@@ -160,6 +152,32 @@ pub fn persist_post_failure_if_enabled(
             obj.insert("offer_ref".to_string(), json!(offer_ref));
         }
     }
+    payload
+}
+
+pub fn persist_post_failure_if_enabled(
+    home_dir: &Path,
+    persist_results: bool,
+    dry_run: bool,
+    market_id: &str,
+    publish_venue: &str,
+    error: &str,
+    offer_ref: Option<&str>,
+) -> SignerResult<()> {
+    let payload = post_failure_payload(market_id, publish_venue, error, offer_ref);
+    if !persist_results || dry_run {
+        trace_audit_outcome(
+            Level::WARN,
+            LogContext::OFFER_POST,
+            OFFER_POST_FAILURE,
+            &payload,
+            Some(market_id),
+            "offer post failed",
+        );
+        return Ok(());
+    }
+    let db_path = state_db_path_for_home(home_dir);
+    let store = SqliteStore::open(&db_path)?;
     audit_and_trace(
         &store,
         Level::WARN,

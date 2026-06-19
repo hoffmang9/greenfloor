@@ -1,9 +1,10 @@
 use std::path::Path;
 
 use serde_json::json;
+use tracing::Level;
 
 use crate::error::SignerResult;
-use crate::operator_log::{LogContext, CONFIG_RELOADED};
+use crate::operator_log::{audit_and_trace, LogContext, CONFIG_RELOADED};
 use crate::storage::SqliteStore;
 
 #[must_use]
@@ -17,15 +18,15 @@ pub fn consume_reload_marker(state_dir: &Path) -> bool {
 
 pub fn record_config_reloaded(store: &SqliteStore, source: &str) -> SignerResult<()> {
     let payload = json!({ "source": source });
-    store.add_audit_event("config_reloaded", &payload, None)?;
-    crate::trace_event!(
-        INFO,
+    audit_and_trace(
+        store,
+        Level::INFO,
         LogContext::CONFIG,
         CONFIG_RELOADED,
-        { source = source, };
-        "config reloaded"
-    );
-    Ok(())
+        &payload,
+        None,
+        "config reloaded",
+    )
 }
 
 #[cfg(test)]
@@ -38,7 +39,7 @@ mod tests {
         let store = SqliteStore::open(&dir.path().join("greenfloor.sqlite")).expect("open");
         record_config_reloaded(&store, "reload_marker").expect("reload");
         let events = store
-            .list_recent_audit_events(Some(&["config_reloaded"]), None, 1)
+            .list_recent_audit_events(Some(&[CONFIG_RELOADED]), None, 1)
             .expect("events");
         assert_eq!(events.len(), 1);
         assert_eq!(

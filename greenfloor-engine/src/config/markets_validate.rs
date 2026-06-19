@@ -182,12 +182,22 @@ pub fn pop_cancel_move_threshold_bps(pricing: &mut Value) -> SignerResult<Option
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::operator_log::{TraceCapture, MARKET_VALIDATION_WARNING};
     use serde_json::json;
 
     #[test]
     fn unstable_expiry_above_15_minutes_passes_validation() {
         let pricing = json!({"strategy_offer_expiry_minutes": 30});
         validate_strategy_pricing(&pricing, "m1", "unstable").expect("valid");
+    }
+
+    #[test]
+    fn unstable_expiry_above_15_minutes_emits_validation_warning() {
+        let capture = TraceCapture::install();
+        let pricing = json!({"strategy_offer_expiry_minutes": 30});
+        validate_strategy_pricing(&pricing, "m1", "unstable").expect("valid");
+        assert_eq!(capture.count_substr(MARKET_VALIDATION_WARNING), 1);
+        assert!(capture.logs().contains("strategy_offer_expiry_minutes"));
     }
 
     #[test]

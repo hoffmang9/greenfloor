@@ -3,7 +3,7 @@
 //! Audit-only paths (`SQLite` `audit_event` only; tracing would duplicate):
 //! - Coinset websocket — `coinset_ws_*`
 //! - Offer lifecycle reconcile — `offer_lifecycle_transition`
-//! - Daemon market phases — `strategy_*`, `coin_ops_*`, `inventory_*`
+//! - Per-phase audit rows — `strategy_*`, `coin_ops_*`, `inventory_*` (phase boundaries trace `market_phase`)
 //! - Cycle preamble — `xch_price_*`, `coinset_mempool_*`
 //!
 //! Not yet wired:
