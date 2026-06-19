@@ -121,5 +121,11 @@ pub async fn execute_strategy_actions(
         }
     }
 
-    sequential::execute_actions_sequential(program, &ctx.resources.paths, market, &expanded).await
+    Box::pin(sequential::execute_actions_sequential(
+        program,
+        &ctx.resources.paths,
+        market,
+        &expanded,
+    ))
+    .await
 }

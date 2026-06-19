@@ -1,4 +1,4 @@
-//! Batch reconcile of watched offer rows from SQLite against venue APIs (CLI + operator tooling).
+//! Batch reconcile of watched offer rows from `SQLite` against venue APIs (CLI + operator tooling).
 
 use std::path::Path;
 

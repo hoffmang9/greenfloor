@@ -86,7 +86,7 @@ pub(super) fn load_checkpoint_or_default(
     launcher_id: &str,
 ) -> SignerResult<LoadedCheckpoint> {
     let checkpoint_enabled = request.checkpoint_file.is_some();
-    if checkpoint_enabled && !request.no_resume_checkpoint {
+    if checkpoint_enabled && !request.checkpoint.no_resume_checkpoint {
         let checkpoint_file = request.checkpoint_file.as_ref().expect("checkpoint file");
         load_scan_checkpoint(checkpoint_file, network, launcher_id, request.include_spent)
     } else {
@@ -108,22 +108,23 @@ pub(super) async fn resolve_effective_window(
     checkpoint_enabled: bool,
     checkpoint_last_synced_height: Option<u64>,
 ) -> SignerResult<ScanWindowPlan> {
-    if request.incremental_from_checkpoint && !checkpoint_enabled {
+    if request.checkpoint.incremental_from_checkpoint && !checkpoint_enabled {
         return Err(SignerError::Other(
             "--incremental-from-checkpoint requires --checkpoint-file".to_string(),
         ));
     }
 
-    let chain_peak_height = if request.incremental_from_checkpoint || request.end_height.is_none() {
-        scanner.chain_peak_height().await?
-    } else {
-        None
-    };
+    let chain_peak_height =
+        if request.checkpoint.incremental_from_checkpoint || request.end_height.is_none() {
+            scanner.chain_peak_height().await?
+        } else {
+            None
+        };
 
     resolve_scan_window(
         request.start_height,
         request.end_height,
-        request.incremental_from_checkpoint,
+        request.checkpoint.incremental_from_checkpoint,
         checkpoint_last_synced_height,
         chain_peak_height,
     )

@@ -31,6 +31,170 @@ pub struct OfferReservationLeaseRequest<'a> {
     pub now: Option<DateTime<Utc>>,
 }
 
+struct NormalizedReservationLeaseRequest<'a> {
+    reservation_id: &'a str,
+    market_id: &'a str,
+    wallet_id: &'a str,
+    normalized_requests: BTreeMap<String, i64>,
+    normalized_available: BTreeMap<String, i64>,
+    now_iso: String,
+    expires_at_iso: String,
+}
+
+fn normalize_reservation_lease_request<'a>(
+    request: &'a OfferReservationLeaseRequest<'a>,
+) -> SignerResult<Result<NormalizedReservationLeaseRequest<'a>, Option<String>>> {
+    let OfferReservationLeaseRequest {
+        reservation_id,
+        market_id,
+        wallet_id,
+        requested_amounts,
+        available_amounts,
+        lease_seconds,
+        now,
+    } = *request;
+    if reservation_id.trim().is_empty() {
+        return Err(SignerError::Other("reservation_id is required".to_string()));
+    }
+    if lease_seconds <= 0 {
+        return Err(SignerError::Other("lease_seconds must be > 0".to_string()));
+    }
+    let normalized_requests: BTreeMap<String, i64> = requested_amounts
+        .iter()
+        .filter_map(|(asset_id, amount)| {
+            let amount = *amount;
+            (amount > 0).then_some((asset_id.trim().to_ascii_lowercase(), amount))
+        })
+        .collect();
+    if normalized_requests.is_empty() {
+        return Ok(Err(Some("reservation_empty_request".to_string())));
+    }
+    let normalized_available: BTreeMap<String, i64> = available_amounts
+        .iter()
+        .filter_map(|(asset_id, amount)| {
+            let amount = *amount;
+            (amount > 0).then_some((asset_id.trim().to_ascii_lowercase(), amount))
+        })
+        .collect();
+    let now_dt = now.unwrap_or_else(Utc::now);
+    let now_iso = now_dt.to_rfc3339();
+    let expires_at_iso = (now_dt + chrono::Duration::seconds(lease_seconds)).to_rfc3339();
+    Ok(Ok(NormalizedReservationLeaseRequest {
+        reservation_id,
+        market_id,
+        wallet_id,
+        normalized_requests,
+        normalized_available,
+        now_iso,
+        expires_at_iso,
+    }))
+}
+
+fn acquire_reservation_lease_in_txn(
+    store: &SqliteStore,
+    normalized: &NormalizedReservationLeaseRequest<'_>,
+) -> SignerResult<Option<String>> {
+    store.conn.execute("BEGIN IMMEDIATE", []).map_err(|err| {
+        SignerError::Other(format!("failed to begin reservation transaction: {err}"))
+    })?;
+    let result = (|| -> SignerResult<Option<String>> {
+        store
+            .conn
+            .execute(
+                r"
+                UPDATE offer_reservation_lease
+                SET status = 'expired',
+                    released_at = COALESCE(released_at, ?1)
+                WHERE status = 'active'
+                  AND expires_at <= ?2
+                ",
+                params![normalized.now_iso, normalized.now_iso],
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("failed to expire stale reservation leases: {err}"))
+            })?;
+        let mut stmt = store
+            .conn
+            .prepare(
+                r"
+                SELECT asset_id, COALESCE(SUM(amount), 0) AS reserved_amount
+                FROM offer_reservation_lease
+                WHERE wallet_id = ?1
+                  AND status = 'active'
+                  AND expires_at > ?2
+                GROUP BY asset_id
+                ",
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("failed to prepare reserved amounts query: {err}"))
+            })?;
+        let mut rows = stmt
+            .query(params![normalized.wallet_id, normalized.now_iso])
+            .map_err(|err| {
+                SignerError::Other(format!("failed to query reserved amounts: {err}"))
+            })?;
+        let mut reserved_by_asset: BTreeMap<String, i64> = BTreeMap::default();
+        while let Some(row) = rows.next().map_err(|err| {
+            SignerError::Other(format!("failed to read reserved amount row: {err}"))
+        })? {
+            let asset_id: String = row
+                .get(0)
+                .map_err(|err| SignerError::Other(format!("failed to read asset_id: {err}")))?;
+            let reserved: i64 = row.get(1).map_err(|err| {
+                SignerError::Other(format!("failed to read reserved_amount: {err}"))
+            })?;
+            reserved_by_asset.insert(asset_id.trim().to_ascii_lowercase(), reserved);
+        }
+        for (asset_id, amount) in &normalized.normalized_requests {
+            let available = normalized
+                .normalized_available
+                .get(asset_id)
+                .copied()
+                .unwrap_or(0);
+            let already_reserved = reserved_by_asset.get(asset_id).copied().unwrap_or(0);
+            if available - already_reserved < *amount {
+                return Ok(Some(format!(
+                    "reservation_insufficient_{asset_id}:available={available}:reserved={already_reserved}:needed={amount}"
+                )));
+            }
+        }
+        for (asset_id, amount) in &normalized.normalized_requests {
+            store.conn.execute(
+                r"
+                    INSERT INTO offer_reservation_lease
+                      (reservation_id, market_id, wallet_id, asset_id, amount, status, created_at, expires_at, released_at)
+                    VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, NULL)
+                    ",
+                params![
+                    normalized.reservation_id,
+                    normalized.market_id,
+                    normalized.wallet_id,
+                    asset_id,
+                    amount,
+                    normalized.now_iso,
+                    normalized.expires_at_iso,
+                ],
+            )
+            .map_err(|err| {
+                SignerError::Other(format!("failed to insert reservation lease: {err}"))
+            })?;
+        }
+        Ok(None)
+    })();
+    match result {
+        Ok(value) => {
+            store.conn.execute("COMMIT", []).map_err(|err| {
+                SignerError::Other(format!("failed to commit reservation transaction: {err}"))
+            })?;
+            Ok(value)
+        }
+        Err(err) => {
+            let _ = store.conn.execute("ROLLBACK", []);
+            Err(err)
+        }
+    }
+}
+
 impl SqliteStore {
     /// Try acquire offer reservation lease.
     ///
@@ -41,133 +205,9 @@ impl SqliteStore {
         &self,
         request: &OfferReservationLeaseRequest<'_>,
     ) -> SignerResult<Option<String>> {
-        let OfferReservationLeaseRequest {
-            reservation_id,
-            market_id,
-            wallet_id,
-            requested_amounts,
-            available_amounts,
-            lease_seconds,
-            now,
-        } = *request;
-        if reservation_id.trim().is_empty() {
-            return Err(SignerError::Other("reservation_id is required".to_string()));
-        }
-        if lease_seconds <= 0 {
-            return Err(SignerError::Other("lease_seconds must be > 0".to_string()));
-        }
-        let normalized_requests: BTreeMap<String, i64> = requested_amounts
-            .iter()
-            .filter_map(|(asset_id, amount)| {
-                let amount = *amount;
-                (amount > 0).then_some((asset_id.trim().to_ascii_lowercase(), amount))
-            })
-            .collect();
-        if normalized_requests.is_empty() {
-            return Ok(Some("reservation_empty_request".to_string()));
-        }
-        let normalized_available: BTreeMap<String, i64> = available_amounts
-            .iter()
-            .filter_map(|(asset_id, amount)| {
-                let amount = *amount;
-                (amount > 0).then_some((asset_id.trim().to_ascii_lowercase(), amount))
-            })
-            .collect();
-        let now_dt = now.unwrap_or_else(Utc::now);
-        let now_iso = now_dt.to_rfc3339();
-        let expires_at_iso = (now_dt + chrono::Duration::seconds(lease_seconds)).to_rfc3339();
-
-        self.conn.execute("BEGIN IMMEDIATE", []).map_err(|err| {
-            SignerError::Other(format!("failed to begin reservation transaction: {err}"))
-        })?;
-        let result = (|| -> SignerResult<Option<String>> {
-            self.conn
-                .execute(
-                    r"
-                UPDATE offer_reservation_lease
-                SET status = 'expired',
-                    released_at = COALESCE(released_at, ?1)
-                WHERE status = 'active'
-                  AND expires_at <= ?2
-                ",
-                    params![now_iso, now_iso],
-                )
-                .map_err(|err| {
-                    SignerError::Other(format!("failed to expire stale reservation leases: {err}"))
-                })?;
-            let mut stmt = self
-                .conn
-                .prepare(
-                    r"
-                SELECT asset_id, COALESCE(SUM(amount), 0) AS reserved_amount
-                FROM offer_reservation_lease
-                WHERE wallet_id = ?1
-                  AND status = 'active'
-                  AND expires_at > ?2
-                GROUP BY asset_id
-                ",
-                )
-                .map_err(|err| {
-                    SignerError::Other(format!("failed to prepare reserved amounts query: {err}"))
-                })?;
-            let mut rows = stmt.query(params![wallet_id, now_iso]).map_err(|err| {
-                SignerError::Other(format!("failed to query reserved amounts: {err}"))
-            })?;
-            let mut reserved_by_asset: BTreeMap<String, i64> = BTreeMap::default();
-            while let Some(row) = rows.next().map_err(|err| {
-                SignerError::Other(format!("failed to read reserved amount row: {err}"))
-            })? {
-                let asset_id: String = row
-                    .get(0)
-                    .map_err(|err| SignerError::Other(format!("failed to read asset_id: {err}")))?;
-                let reserved: i64 = row.get(1).map_err(|err| {
-                    SignerError::Other(format!("failed to read reserved_amount: {err}"))
-                })?;
-                reserved_by_asset.insert(asset_id.trim().to_ascii_lowercase(), reserved);
-            }
-            for (asset_id, amount) in &normalized_requests {
-                let available = normalized_available.get(asset_id).copied().unwrap_or(0);
-                let already_reserved = reserved_by_asset.get(asset_id).copied().unwrap_or(0);
-                if available - already_reserved < *amount {
-                    return Ok(Some(format!(
-                        "reservation_insufficient_{asset_id}:available={available}:reserved={already_reserved}:needed={amount}"
-                    )));
-                }
-            }
-            for (asset_id, amount) in &normalized_requests {
-                self.conn.execute(
-                    r"
-                    INSERT INTO offer_reservation_lease
-                      (reservation_id, market_id, wallet_id, asset_id, amount, status, created_at, expires_at, released_at)
-                    VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6, ?7, NULL)
-                    ",
-                    params![
-                        reservation_id,
-                        market_id,
-                        wallet_id,
-                        asset_id,
-                        amount,
-                        now_iso,
-                        expires_at_iso,
-                    ],
-                )
-                .map_err(|err| {
-                    SignerError::Other(format!("failed to insert reservation lease: {err}"))
-                })?;
-            }
-            Ok(None)
-        })();
-        match result {
-            Ok(value) => {
-                self.conn.execute("COMMIT", []).map_err(|err| {
-                    SignerError::Other(format!("failed to commit reservation transaction: {err}"))
-                })?;
-                Ok(value)
-            }
-            Err(err) => {
-                let _ = self.conn.execute("ROLLBACK", []);
-                Err(err)
-            }
+        match normalize_reservation_lease_request(request)? {
+            Ok(normalized) => acquire_reservation_lease_in_txn(self, &normalized),
+            Err(empty) => Ok(empty),
         }
     }
 

@@ -22,7 +22,7 @@ use super::run_once::{
 };
 use crate::storage::resolve_state_db_path;
 
-/// Daemon cycles always process markets sequentially on one SQLite store.
+/// Daemon cycles always process markets sequentially on one `SQLite` store.
 pub const SEQUENTIAL_MARKET_WORKER_SOURCE: &str = "sequential_market_worker";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

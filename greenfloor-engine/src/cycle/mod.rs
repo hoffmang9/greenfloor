@@ -47,7 +47,8 @@ pub use market::{
     aggregate_two_sided_offer_counts, is_two_sided_market_mode, market_cycle_phases,
     needs_inventory_fallback, one_sided_offer_counts_by_side, post_reconcile_market_cycle_phases,
     resolve_inventory_scan_source, resolve_tracked_sizes, wallet_fallback_source_label,
-    MarketCyclePhase, MarketCycleResultState,
+    CoinsetInventoryScanState, MarketCyclePhase, MarketCycleResultState,
+    SupplementalInventoryScanState,
 };
 pub use notifications::{
     evaluate_low_inventory_alert, AlertEvent, AlertState, LowInventoryEvaluation, LowInventoryInput,

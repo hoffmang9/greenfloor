@@ -4,6 +4,7 @@ mod markets;
 mod markets_validate;
 mod parse_int;
 mod program;
+mod program_parse;
 mod signer;
 mod yaml_fields;
 

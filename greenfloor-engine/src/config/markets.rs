@@ -278,7 +278,10 @@ pub fn resolve_market_for_build(
             .cloned()
             .ok_or_else(|| SignerError::Other(format!("market_id not found: {market_id}")));
     }
-    let pair = pair.expect("pair checked above").trim();
+    let pair = pair
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| SignerError::Other("pair required".to_string()))?;
     let sep = if pair.contains(':') {
         ':'
     } else if pair.contains('/') {

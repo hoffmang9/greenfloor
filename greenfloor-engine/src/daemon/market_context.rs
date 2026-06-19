@@ -89,7 +89,7 @@ pub struct MarketDispatchContext {
     pub test_controls: super::run_once::DaemonCycleTestControls,
 }
 
-/// Per-market inputs for inventory → strategy → cancel → coin_ops.
+/// Per-market inputs for inventory → strategy → cancel → `coin_ops`.
 #[derive(Debug, Clone)]
 pub struct MarketCycleContext<'a> {
     pub resources: &'a DaemonCycleResources,

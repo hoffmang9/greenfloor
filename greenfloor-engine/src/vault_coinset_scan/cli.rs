@@ -17,9 +17,19 @@ use crate::vault_coinset_scan::launcher::{
     cache_resolved_launcher_id, resolve_launcher_id, ResolveLauncherIdParams,
 };
 use crate::vault_coinset_scan::metadata::parse_csv_values;
-use crate::vault_coinset_scan::request::ScanRequest;
+use crate::vault_coinset_scan::request::{ScanCheckpointControl, ScanRequest};
 use crate::vault_coinset_scan::state::ScanState;
 use crate::vault_coinset_scan::types::AssetTypeFilter;
+
+#[derive(Debug, Parser)]
+pub struct VaultCoinsetScanCheckpointCli {
+    #[arg(long)]
+    pub no_resume_checkpoint: bool,
+    #[arg(long)]
+    pub incremental_from_checkpoint: bool,
+    #[arg(long)]
+    pub auto_increment: bool,
+}
 
 #[derive(Debug, Parser)]
 pub struct VaultCoinsetScanCliArgs {
@@ -51,8 +61,8 @@ pub struct VaultCoinsetScanCliArgs {
     pub checkpoint_file: String,
     #[arg(long, default_value_t = 1)]
     pub checkpoint_save_interval: u32,
-    #[arg(long)]
-    pub no_resume_checkpoint: bool,
+    #[command(flatten)]
+    pub checkpoint: VaultCoinsetScanCheckpointCli,
     #[arg(long, default_value_t = 32)]
     pub nonce_batch_size: u32,
     #[arg(long, default_value_t = 1)]
@@ -64,10 +74,6 @@ pub struct VaultCoinsetScanCliArgs {
     #[arg(long)]
     pub end_height: Option<u64>,
     #[arg(long)]
-    pub incremental_from_checkpoint: bool,
-    #[arg(long)]
-    pub auto_increment: bool,
-    #[arg(long)]
     pub clear_caches: bool,
     #[arg(long, default_value = "")]
     pub cats_config: String,
@@ -77,10 +83,10 @@ pub struct VaultCoinsetScanCliArgs {
 
 impl VaultCoinsetScanCliArgs {
     fn apply_auto_increment_defaults(&mut self) -> SignerResult<()> {
-        if !self.auto_increment {
+        if !self.checkpoint.auto_increment {
             return Ok(());
         }
-        if self.no_resume_checkpoint {
+        if self.checkpoint.no_resume_checkpoint {
             return Err(SignerError::Other(
                 "cannot use --auto-increment with --no-resume-checkpoint".to_string(),
             ));
@@ -88,7 +94,7 @@ impl VaultCoinsetScanCliArgs {
         if self.checkpoint_file.trim().is_empty() {
             self.checkpoint_file = "~/.greenfloor/cache/vault_coinset_checkpoint.json".to_string();
         }
-        self.incremental_from_checkpoint = true;
+        self.checkpoint.incremental_from_checkpoint = true;
         Ok(())
     }
 
@@ -192,14 +198,16 @@ fn scan_request_from_cli_args(
         requested_cat_tickers,
         checkpoint_file,
         checkpoint_save_interval: args.checkpoint_save_interval.max(1),
-        no_resume_checkpoint: args.no_resume_checkpoint,
+        checkpoint: ScanCheckpointControl {
+            no_resume_checkpoint: args.checkpoint.no_resume_checkpoint,
+            incremental_from_checkpoint: args.checkpoint.incremental_from_checkpoint,
+            auto_increment: args.checkpoint.auto_increment,
+        },
         nonce_batch_size: args.nonce_batch_size.max(1),
         empty_batch_stop_count: args.empty_batch_stop_count.max(1),
         parent_lookup_batch_size: args.parent_lookup_batch_size.max(1),
         start_height: args.start_height,
         end_height: args.end_height,
-        incremental_from_checkpoint: args.incremental_from_checkpoint,
-        auto_increment: args.auto_increment,
         cats_config,
         markets_config,
         testnet_markets_config,

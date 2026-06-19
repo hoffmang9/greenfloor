@@ -2,7 +2,8 @@ use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::PlannedAction;
 use crate::error::SignerResult;
 use crate::offer::operator::{
-    build_and_post_offer, BuildAndPostOfferRequest, OfferOperatorTestOverrides,
+    build_and_post_offer, BuildAndPostOfferRequest, BuildAndPostRunOptions,
+    BuildAndPostVenueOptions, OfferOperatorTestOverrides,
 };
 use crate::offer::request::normalize_offer_side;
 
@@ -34,10 +35,14 @@ pub async fn post_managed_planned_action(
         publish_venue: Some(program.offer_publish_venue.clone()),
         dexie_base_url: Some(program.dexie_api_base.clone()),
         splash_base_url: Some(program.splash_api_base.clone()),
-        drop_only: true,
-        claim_rewards: false,
-        dry_run: program.runtime_dry_run,
-        persist_results: true,
+        venue: BuildAndPostVenueOptions {
+            drop_only: true,
+            claim_rewards: false,
+        },
+        run: BuildAndPostRunOptions {
+            dry_run: program.runtime_dry_run,
+            persist_results: true,
+        },
         action_side: Some(side),
         test_overrides: OfferOperatorTestOverrides::default(),
     })

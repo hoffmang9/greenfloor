@@ -191,7 +191,7 @@ pub async fn build_signer_offer_for_action(
     let expires_at_unix = expires_at_unix_from_pricing(&request.pricing)?;
     let side = normalize_offer_side(&request.action_side).to_string();
     let create_request = create_offer_request_from_leg(&request, &leg, expires_at_unix)?;
-    let create_result = build_vault_cat_offer(config, create_request).await?;
+    let create_result = Box::pin(build_vault_cat_offer(config, create_request)).await?;
 
     Ok(BuildOfferForActionResult {
         offer_text: create_result.offer.clone(),

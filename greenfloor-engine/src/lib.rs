@@ -1,4 +1,4 @@
-//! GreenFloor Rust engine: vault KMS signing and deterministic daemon policy.
+//! `GreenFloor` Rust engine: vault KMS signing and deterministic daemon policy.
 //!
 //! The Rust library crate is named `greenfloor_engine` (ADR 0010). Policy is grouped
 //! by domain (`cycle/`, `coin_ops/`, `offer/`, `vault/`).

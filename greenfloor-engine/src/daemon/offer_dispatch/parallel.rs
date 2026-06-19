@@ -29,18 +29,22 @@ struct ParallelPostJob {
     available_amounts: BTreeMap<String, i64>,
 }
 
-pub async fn execute_actions_parallel(
+struct ParallelDispatchSetup {
+    coordinator: Arc<OfferReservationCoordinator>,
+    wallet_id: String,
+    jobs: Vec<ParallelPostJob>,
+    max_workers: usize,
+    skip_items: Vec<StrategyActionSellCountInput>,
+}
+
+async fn prepare_parallel_dispatch(
     store: &SqliteStore,
     db_path: &Path,
     resources: &DaemonCycleResources,
     signer_config: &SignerConfig,
     market: &MarketConfig,
     expanded: &[PlannedAction],
-) -> SignerResult<OfferDispatchOutput> {
-    #[cfg(test)]
-    if let Some(result) = super::test_hooks::parallel_dispatch_test_override() {
-        return result;
-    }
+) -> SignerResult<ParallelDispatchSetup> {
     let program = resources.program();
     let reservation_ctx =
         parallel_reservation_context(signer_config, &program.network, market, 0).await?;
@@ -75,22 +79,13 @@ pub async fn execute_actions_parallel(
         Some(&market.market_id),
     )?;
 
-    let mut action_items = Vec::new();
+    let mut skip_items = Vec::new();
     for skip in &batch_plan.skip_items {
         let action = &expanded[skip.submit_index];
-        action_items.push(StrategyActionSellCountInput {
+        skip_items.push(StrategyActionSellCountInput {
             size: action.size,
             side: normalize_offer_side(&action.side).to_string(),
             counts_as_executed: false,
-        });
-    }
-
-    if batch_plan.queue.is_empty() {
-        return Ok(OfferDispatchOutput {
-            executed_count: 0,
-            newly_executed_sell_counts: crate::cycle::executed_sell_offer_counts_by_size(
-                &action_items,
-            ),
         });
     }
 
@@ -103,9 +98,31 @@ pub async fn execute_actions_parallel(
             available_amounts: item.available_amounts,
         })
         .collect();
-
     let max_workers =
         parallel_max_workers(jobs.len(), program.runtime_offer_parallelism_max_workers);
+
+    Ok(ParallelDispatchSetup {
+        coordinator,
+        wallet_id,
+        jobs,
+        max_workers,
+        skip_items,
+    })
+}
+
+async fn run_parallel_post_jobs(
+    resources: &DaemonCycleResources,
+    market: &MarketConfig,
+    setup: ParallelDispatchSetup,
+) -> SignerResult<(u64, Vec<StrategyActionSellCountInput>)> {
+    let ParallelDispatchSetup {
+        coordinator,
+        wallet_id,
+        jobs,
+        max_workers,
+        mut skip_items,
+    } = setup;
+
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_workers));
     let mut handles = Vec::with_capacity(jobs.len());
 
@@ -133,8 +150,13 @@ pub async fn execute_actions_parallel(
             let counts_as_executed = match acquired {
                 Ok(acquired) if acquired.ok => {
                     let reservation_id = acquired.reservation_id.expect("reservation id");
-                    let post_result =
-                        post_managed_planned_action(&program, &paths, &market, &job.action).await?;
+                    let post_result = Box::pin(post_managed_planned_action(
+                        &program,
+                        &paths,
+                        &market,
+                        &job.action,
+                    ))
+                    .await?;
                     let release_status = reservation_release_status(post_result);
                     let _ = coordinator.release(&reservation_id, release_status);
                     post_result
@@ -160,12 +182,43 @@ pub async fn execute_actions_parallel(
         if counts_as_executed {
             executed += 1;
         }
-        action_items.push(StrategyActionSellCountInput {
+        skip_items.push(StrategyActionSellCountInput {
             size: action.size,
             side: normalize_offer_side(&action.side).to_string(),
             counts_as_executed,
         });
     }
+
+    Ok((executed, skip_items))
+}
+
+pub async fn execute_actions_parallel(
+    store: &SqliteStore,
+    db_path: &Path,
+    resources: &DaemonCycleResources,
+    signer_config: &SignerConfig,
+    market: &MarketConfig,
+    expanded: &[PlannedAction],
+) -> SignerResult<OfferDispatchOutput> {
+    #[cfg(test)]
+    if let Some(result) = super::test_hooks::parallel_dispatch_test_override() {
+        return result;
+    }
+
+    let setup =
+        prepare_parallel_dispatch(store, db_path, resources, signer_config, market, expanded)
+            .await?;
+
+    if setup.jobs.is_empty() {
+        return Ok(OfferDispatchOutput {
+            executed_count: 0,
+            newly_executed_sell_counts: crate::cycle::executed_sell_offer_counts_by_size(
+                &setup.skip_items,
+            ),
+        });
+    }
+
+    let (executed, action_items) = run_parallel_post_jobs(resources, market, setup).await?;
 
     Ok(OfferDispatchOutput {
         executed_count: executed,

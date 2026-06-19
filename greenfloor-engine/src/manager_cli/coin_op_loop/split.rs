@@ -1,7 +1,12 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use serde_json::json;
 
 use crate::coin_ops::evaluate_coin_split_gate;
+use crate::coin_ops::execution::CoinOpExecContext;
 use crate::coin_ops::{coin_op_non_negative_u64, i64_to_usize};
+use crate::config::LadderEntry;
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::ladder::{
@@ -11,7 +16,19 @@ use crate::manager_cli::ladder::{
 use super::context::build_coin_op_exec_context;
 use super::loop_common::{finish_coin_op_command, validate_until_ready_mode};
 use super::split_iteration::{run_split_iteration, SplitIterationParams};
-use super::until_ready::{run_until_ready_loop, UntilReadyLoopConfig};
+use super::until_ready::{run_until_ready_loop, UntilReadyLoopConfig, UntilReadyWaitMode};
+
+#[derive(Debug, Clone)]
+pub struct CoinSplitGating {
+    pub allow_lock_all_spendable: bool,
+    pub force_split_when_ready: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CoinSplitBehavior {
+    pub wait: UntilReadyWaitMode,
+    pub gating: CoinSplitGating,
+}
 
 pub struct CoinSplitRequest<'a> {
     pub mgr: &'a ManagerContext,
@@ -21,15 +38,28 @@ pub struct CoinSplitRequest<'a> {
     pub coin_ids: &'a [String],
     pub amount_per_coin: i64,
     pub number_of_coins: i64,
-    pub no_wait: bool,
+    pub behavior: CoinSplitBehavior,
     pub size_base_units: Option<i64>,
-    pub until_ready: bool,
     pub max_iterations: i32,
-    pub allow_lock_all_spendable: bool,
-    pub force_split_when_ready: bool,
 }
 
-pub async fn run_coin_split(request: CoinSplitRequest<'_>) -> SignerResult<i32> {
+struct SplitLoopContext<'a> {
+    exec_ctx: CoinOpExecContext,
+    amount_per_coin: i64,
+    number_of_coins: i64,
+    required_amount: i64,
+    split_target: Option<LadderEntry>,
+    explicit_coin_ids: bool,
+    resolved_asset_id: String,
+    output_amounts: Vec<u64>,
+    split_fee: u64,
+    coin_ids: &'a [String],
+    no_wait: bool,
+}
+
+async fn prepare_split_loop_context(
+    request: CoinSplitRequest<'_>,
+) -> SignerResult<SplitLoopContext<'_>> {
     let CoinSplitRequest {
         mgr,
         network,
@@ -38,13 +68,19 @@ pub async fn run_coin_split(request: CoinSplitRequest<'_>) -> SignerResult<i32> 
         coin_ids,
         amount_per_coin,
         number_of_coins,
-        no_wait,
+        behavior,
         size_base_units,
-        until_ready,
-        max_iterations,
-        allow_lock_all_spendable,
-        force_split_when_ready,
+        max_iterations: _,
     } = request;
+    let CoinSplitBehavior { wait, gating } = behavior;
+    let UntilReadyWaitMode {
+        until_ready,
+        no_wait,
+    } = wait;
+    let CoinSplitGating {
+        allow_lock_all_spendable: _,
+        force_split_when_ready: _,
+    } = gating;
     validate_until_ready_mode(until_ready, no_wait, size_base_units)?;
     let exec_ctx = build_coin_op_exec_context(
         &mgr.program_config,
@@ -84,12 +120,54 @@ pub async fn run_coin_split(request: CoinSplitRequest<'_>) -> SignerResult<i32> 
         exec_ctx.program.coin_ops_split_fee_mojos,
         "program.coin_ops_split_fee_mojos",
     )?;
+    Ok(SplitLoopContext {
+        exec_ctx,
+        amount_per_coin,
+        number_of_coins,
+        required_amount,
+        split_target,
+        explicit_coin_ids,
+        resolved_asset_id,
+        output_amounts,
+        split_fee,
+        coin_ids,
+        no_wait,
+    })
+}
+
+pub fn run_coin_split(
+    request: CoinSplitRequest<'_>,
+) -> Pin<Box<dyn Future<Output = SignerResult<i32>> + '_>> {
+    Box::pin(run_coin_split_async(request))
+}
+
+async fn run_coin_split_async(request: CoinSplitRequest<'_>) -> SignerResult<i32> {
+    let mgr = request.mgr;
+    let until_ready = request.behavior.wait.until_ready;
+    let max_iterations = request.max_iterations;
+    let force_split_when_ready = request.behavior.gating.force_split_when_ready;
+    let allow_lock_all_spendable = request.behavior.gating.allow_lock_all_spendable;
+    let SplitLoopContext {
+        exec_ctx,
+        amount_per_coin,
+        number_of_coins,
+        required_amount,
+        split_target,
+        explicit_coin_ids,
+        resolved_asset_id,
+        output_amounts,
+        split_fee,
+        coin_ids,
+        no_wait,
+    } = prepare_split_loop_context(request).await?;
 
     let (operations, completion) = run_until_ready_loop(
         &exec_ctx,
         UntilReadyLoopConfig {
-            until_ready,
-            no_wait,
+            wait: UntilReadyWaitMode {
+                until_ready,
+                no_wait,
+            },
             max_iterations,
             explicit_coin_ids,
             stop_when_gate_ready: !force_split_when_ready,
@@ -99,7 +177,7 @@ pub async fn run_coin_split(request: CoinSplitRequest<'_>) -> SignerResult<i32> 
                 evaluate_coin_split_gate(
                     gate_coins,
                     &resolved_asset_id,
-                    amount_per_coin_mojos,
+                    amount_per_coin.saturating_mul(exec_ctx.base_unit_mojo_multiplier),
                     split_required_count(entry),
                 )
             })

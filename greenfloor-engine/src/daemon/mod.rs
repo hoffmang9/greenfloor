@@ -1,4 +1,4 @@
-//! Daemon cycle orchestration (native Rust). Reconcile, inventory/strategy/coin_ops planning, and cancel run in Rust.
+//! Daemon cycle orchestration (native Rust). Reconcile, `inventory/strategy/coin_ops` planning, and cancel run in Rust.
 
 mod cancel_phase;
 mod cli;

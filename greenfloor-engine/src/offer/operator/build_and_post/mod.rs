@@ -7,7 +7,9 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -23,6 +25,27 @@ use publish::persist_post_records_if_enabled;
 use types::{build_and_post_exit_code, PostIterationOutcome};
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct BuildAndPostVenueOptions {
+    #[serde(default)]
+    pub drop_only: bool,
+    #[serde(default)]
+    pub claim_rewards: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct BuildAndPostRunOptions {
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default = "default_persist_results")]
+    pub persist_results: bool,
+}
+
+#[must_use]
+fn default_persist_results() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct BuildAndPostOfferRequest {
     pub program_path: PathBuf,
     pub markets_path: PathBuf,
@@ -35,10 +58,10 @@ pub struct BuildAndPostOfferRequest {
     pub publish_venue: Option<String>,
     pub dexie_base_url: Option<String>,
     pub splash_base_url: Option<String>,
-    pub drop_only: bool,
-    pub claim_rewards: bool,
-    pub dry_run: bool,
-    pub persist_results: bool,
+    #[serde(flatten)]
+    pub venue: BuildAndPostVenueOptions,
+    #[serde(flatten)]
+    pub run: BuildAndPostRunOptions,
     /// When set, overrides ``pricing.side`` for bootstrap and offer construction (daemon buy/sell actions).
     pub action_side: Option<String>,
     #[serde(default)]
@@ -56,7 +79,14 @@ pub struct BuildAndPostOfferResponse {
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn build_and_post_offer(
+#[must_use]
+pub fn build_and_post_offer(
+    request: BuildAndPostOfferRequest,
+) -> Pin<Box<dyn Future<Output = SignerResult<BuildAndPostOfferResponse>> + Send>> {
+    Box::pin(build_and_post_offer_async(request))
+}
+
+async fn build_and_post_offer_async(
     request: BuildAndPostOfferRequest,
 ) -> SignerResult<BuildAndPostOfferResponse> {
     if request.size_base_units == 0 {
@@ -76,12 +106,12 @@ pub async fn build_and_post_offer(
     let mut publish_failures = 0u32;
     let mut persist_records: Vec<OfferPostPersistRecord> = Vec::new();
 
-    let dexie = if !request.dry_run && ctx.publish_venue == "dexie" {
+    let dexie = if !request.run.dry_run && ctx.publish_venue == "dexie" {
         Some(DexieClient::new(ctx.dexie_base_url.clone()))
     } else {
         None
     };
-    let splash = if !request.dry_run && ctx.publish_venue == "splash" {
+    let splash = if !request.run.dry_run && ctx.publish_venue == "splash" {
         Some(SplashClient::new(ctx.splash_base_url.clone()))
     } else {
         None
@@ -112,8 +142,8 @@ pub async fn build_and_post_offer(
 
     persist_post_records_if_enabled(
         &ctx.program.home_dir,
-        request.persist_results,
-        request.dry_run,
+        request.run.persist_results,
+        request.run.dry_run,
         &persist_records,
     )?;
 
@@ -128,9 +158,9 @@ pub async fn build_and_post_offer(
         "publish_venue": ctx.publish_venue,
         "dexie_base_url": ctx.dexie_base_url,
         "splash_base_url": if ctx.publish_venue == "splash" { Value::String(ctx.splash_base_url.clone()) } else { Value::Null },
-        "drop_only": request.drop_only,
-        "claim_rewards": request.claim_rewards,
-        "dry_run": request.dry_run,
+        "drop_only": request.venue.drop_only,
+        "claim_rewards": request.venue.claim_rewards,
+        "dry_run": request.run.dry_run,
         "publish_attempts": post_results.len(),
         "publish_failures": publish_failures,
         "built_offers_preview": built_offers_preview,

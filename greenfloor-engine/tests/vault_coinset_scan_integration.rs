@@ -8,7 +8,7 @@ use greenfloor_engine::hex::normalize_hex_id;
 use greenfloor_engine::vault::members::{
     hex_to_bytes32, singleton_member_puzzle_hash_hex_from_launcher_id,
 };
-use greenfloor_engine::vault_coinset_scan::request::ScanRequest;
+use greenfloor_engine::vault_coinset_scan::request::{ScanCheckpointControl, ScanRequest};
 use greenfloor_engine::vault_coinset_scan::types::{AssetTypeFilter, CoinKind};
 use greenfloor_engine::vault_coinset_scan::ScanState;
 use mockito::Matcher;
@@ -38,14 +38,16 @@ fn scan_request(
         requested_cat_tickers: Vec::new(),
         checkpoint_file: None,
         checkpoint_save_interval: 1,
-        no_resume_checkpoint: false,
+        checkpoint: ScanCheckpointControl {
+            no_resume_checkpoint: false,
+            incremental_from_checkpoint: false,
+            auto_increment: false,
+        },
         nonce_batch_size: 32,
         empty_batch_stop_count: 1,
         parent_lookup_batch_size: 64,
         start_height: None,
         end_height: Some(end_height),
-        incremental_from_checkpoint: false,
-        auto_increment: false,
         cats_config: metadata_dir.join("missing-cats.yaml"),
         markets_config: metadata_dir.join("missing-markets.yaml"),
         testnet_markets_config: None,

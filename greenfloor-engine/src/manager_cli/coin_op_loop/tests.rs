@@ -4,7 +4,8 @@ use crate::coin_ops::{coin_op_should_stop, evaluate_coin_split_gate, SpendableCo
 
 use super::combine::{run_coin_combine, CoinCombineRequest};
 use super::context::{enforce_split_lockup_guardrail, spendable_coins_for_gate};
-use super::split::{run_coin_split, CoinSplitRequest};
+use super::split::{run_coin_split, CoinSplitBehavior, CoinSplitGating, CoinSplitRequest};
+use super::until_ready::UntilReadyWaitMode;
 use crate::manager_cli::context::ManagerContext;
 
 #[test]
@@ -104,12 +105,18 @@ async fn until_ready_requires_size_base_units() {
         coin_ids: &[],
         amount_per_coin: 10,
         number_of_coins: 2,
-        no_wait: false,
+        behavior: CoinSplitBehavior {
+            wait: UntilReadyWaitMode {
+                until_ready: true,
+                no_wait: false,
+            },
+            gating: CoinSplitGating {
+                allow_lock_all_spendable: false,
+                force_split_when_ready: false,
+            },
+        },
         size_base_units: None,
-        until_ready: true,
         max_iterations: 3,
-        allow_lock_all_spendable: false,
-        force_split_when_ready: false,
     })
     .await
     .expect_err("missing size");
@@ -132,12 +139,18 @@ async fn until_ready_disallows_no_wait() {
         coin_ids: &[],
         amount_per_coin: 10,
         number_of_coins: 2,
-        no_wait: true,
+        behavior: CoinSplitBehavior {
+            wait: UntilReadyWaitMode {
+                until_ready: true,
+                no_wait: true,
+            },
+            gating: CoinSplitGating {
+                allow_lock_all_spendable: false,
+                force_split_when_ready: false,
+            },
+        },
         size_base_units: Some(10),
-        until_ready: true,
         max_iterations: 3,
-        allow_lock_all_spendable: false,
-        force_split_when_ready: false,
     })
     .await
     .expect_err("no-wait conflict");
@@ -160,9 +173,11 @@ async fn combine_until_ready_disallows_no_wait() {
         coin_ids: &[],
         number_of_coins: 2,
         asset_id: None,
-        no_wait: true,
+        wait: UntilReadyWaitMode {
+            until_ready: true,
+            no_wait: true,
+        },
         size_base_units: Some(10),
-        until_ready: true,
         max_iterations: 3,
     })
     .await

@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Instant;
 
 use serde_json::{json, Value};
@@ -15,19 +17,19 @@ use super::publish::{
 use super::types::{timing_payload, PostAttemptSuccess, PostFailure, PostIterationOutcome};
 use super::BuildAndPostOfferRequest;
 use crate::metrics::metric_millis_to_u64;
+use crate::offer::action::BuildOfferForActionResult;
 use crate::offer::operator::signer_denomination::{
     bootstrap_blocks_offer, run_signer_denomination_phase, BootstrapPhaseResult,
 };
 
-pub(super) async fn run_post_iteration(
+type PostIterationFuture<'a> =
+    Pin<Box<dyn Future<Output = SignerResult<(Value, PostIterationOutcome)>> + Send + 'a>>;
+
+async fn run_bootstrap_phase(
     request: &BuildAndPostOfferRequest,
     ctx: &ResolvedBuildAndPostContext,
-    dexie: Option<&DexieClient>,
-    splash: Option<&SplashClient>,
-) -> SignerResult<(Value, PostIterationOutcome)> {
-    let started = Instant::now();
-
-    let bootstrap_result = if request.dry_run {
+) -> SignerResult<(Value, Option<BootstrapPhaseResult>)> {
+    let bootstrap_result = if request.run.dry_run {
         BootstrapPhaseResult::skipped("dry_run")
     } else {
         run_signer_denomination_phase(
@@ -42,19 +44,14 @@ pub(super) async fn run_post_iteration(
         .await?
     };
     let bootstrap_action = bootstrap_result.to_operator_json();
-    if let Some(error) = bootstrap_blocks_offer(&bootstrap_result) {
-        return Ok((
-            bootstrap_action,
-            PostIterationOutcome::Failure(PostFailure {
-                error,
-                started,
-                create_phase_ms: None,
-                execution_mode: None,
-                bootstrap: Some(bootstrap_result.to_operator_json()),
-            }),
-        ));
-    }
+    Ok((bootstrap_action, Some(bootstrap_result)))
+}
 
+async fn create_offer_for_post(
+    request: &BuildAndPostOfferRequest,
+    ctx: &ResolvedBuildAndPostContext,
+    started: Instant,
+) -> SignerResult<Result<(BuildOfferForActionResult, u64), PostIterationOutcome>> {
     let create_started = Instant::now();
     let created = match create_offer(
         &ctx.signer_config,
@@ -68,59 +65,57 @@ pub(super) async fn run_post_iteration(
     {
         Ok(result) => result,
         Err(err) => {
-            return Ok((
-                bootstrap_action,
-                PostIterationOutcome::Failure(PostFailure {
-                    error: err.to_string(),
-                    started,
-                    create_phase_ms: Some(metric_millis_to_u64(
-                        create_started.elapsed().as_millis(),
-                    )),
-                    execution_mode: None,
-                    bootstrap: None,
-                }),
-            ));
+            return Ok(Err(PostIterationOutcome::Failure(PostFailure {
+                error: err.to_string(),
+                started,
+                create_phase_ms: Some(metric_millis_to_u64(create_started.elapsed().as_millis())),
+                execution_mode: None,
+                bootstrap: None,
+            })));
         }
     };
     let create_phase_ms = metric_millis_to_u64(create_started.elapsed().as_millis());
 
     if created.offer_text.trim().is_empty() {
-        return Ok((
-            bootstrap_action,
-            PostIterationOutcome::Failure(PostFailure {
-                error: "signer_offer_text_unavailable".to_string(),
-                started,
-                create_phase_ms: Some(create_phase_ms),
-                execution_mode: Some(created.execution_mode.clone()),
-                bootstrap: None,
-            }),
-        ));
+        return Ok(Err(PostIterationOutcome::Failure(PostFailure {
+            error: "signer_offer_text_unavailable".to_string(),
+            started,
+            create_phase_ms: Some(create_phase_ms),
+            execution_mode: Some(created.execution_mode.clone()),
+            bootstrap: None,
+        })));
     }
 
-    if request.dry_run {
+    if request.run.dry_run {
         let offer_text = created.offer_text.trim();
-        return Ok((
-            bootstrap_action,
-            PostIterationOutcome::Preview(json!({
-                "offer_prefix": &offer_text[..offer_text.len().min(24)],
-                "offer_length": offer_text.len().to_string(),
-            })),
-        ));
+        return Ok(Err(PostIterationOutcome::Preview(json!({
+            "offer_prefix": &offer_text[..offer_text.len().min(24)],
+            "offer_length": offer_text.len().to_string(),
+        }))));
     }
 
     if let Some(verify_error) = verify_offer_for_dexie(&created.offer_text) {
-        return Ok((
-            bootstrap_action,
-            PostIterationOutcome::Failure(PostFailure {
-                error: verify_error,
-                started,
-                create_phase_ms: Some(create_phase_ms),
-                execution_mode: None,
-                bootstrap: None,
-            }),
-        ));
+        return Ok(Err(PostIterationOutcome::Failure(PostFailure {
+            error: verify_error,
+            started,
+            create_phase_ms: Some(create_phase_ms),
+            execution_mode: None,
+            bootstrap: None,
+        })));
     }
 
+    Ok(Ok((created, create_phase_ms)))
+}
+
+async fn publish_created_offer(
+    request: &BuildAndPostOfferRequest,
+    ctx: &ResolvedBuildAndPostContext,
+    created: BuildOfferForActionResult,
+    create_phase_ms: u64,
+    started: Instant,
+    dexie: Option<&DexieClient>,
+    splash: Option<&SplashClient>,
+) -> SignerResult<PostIterationOutcome> {
     let side = created.side.as_str();
     let asset_fields = expected_publish_asset_fields(
         side,
@@ -135,8 +130,8 @@ pub(super) async fn run_post_iteration(
         dexie,
         splash,
         offer_text: created.offer_text.trim(),
-        drop_only: request.drop_only,
-        claim_rewards: request.claim_rewards,
+        drop_only: request.venue.drop_only,
+        claim_rewards: request.venue.claim_rewards,
         expected_offered_asset_id: &asset_fields.expected_offered_asset_id,
         expected_offered_symbol: &asset_fields.expected_offered_symbol,
         expected_requested_asset_id: &asset_fields.expected_requested_asset_id,
@@ -169,13 +164,62 @@ pub(super) async fn run_post_iteration(
         },
     );
 
-    Ok((
-        bootstrap_action,
-        PostIterationOutcome::Success(PostAttemptSuccess {
-            publish_venue: ctx.publish_venue.clone(),
-            result: result_payload,
-            success: publish_success,
-            persist_record,
-        }),
-    ))
+    Ok(PostIterationOutcome::Success(PostAttemptSuccess {
+        publish_venue: ctx.publish_venue.clone(),
+        result: result_payload,
+        success: publish_success,
+        persist_record,
+    }))
+}
+
+pub(super) fn run_post_iteration<'a>(
+    request: &'a BuildAndPostOfferRequest,
+    ctx: &'a ResolvedBuildAndPostContext,
+    dexie: Option<&'a DexieClient>,
+    splash: Option<&'a SplashClient>,
+) -> PostIterationFuture<'a> {
+    Box::pin(run_post_iteration_async(request, ctx, dexie, splash))
+}
+
+async fn run_post_iteration_async(
+    request: &BuildAndPostOfferRequest,
+    ctx: &ResolvedBuildAndPostContext,
+    dexie: Option<&DexieClient>,
+    splash: Option<&SplashClient>,
+) -> SignerResult<(Value, PostIterationOutcome)> {
+    let started = Instant::now();
+
+    let (bootstrap_action, bootstrap_result) = run_bootstrap_phase(request, ctx).await?;
+    if let Some(bootstrap_result) = bootstrap_result {
+        if let Some(error) = bootstrap_blocks_offer(&bootstrap_result) {
+            return Ok((
+                bootstrap_action,
+                PostIterationOutcome::Failure(PostFailure {
+                    error,
+                    started,
+                    create_phase_ms: None,
+                    execution_mode: None,
+                    bootstrap: Some(bootstrap_result.to_operator_json()),
+                }),
+            ));
+        }
+    }
+
+    let (created, create_phase_ms) = match create_offer_for_post(request, ctx, started).await? {
+        Ok(values) => values,
+        Err(outcome) => return Ok((bootstrap_action, outcome)),
+    };
+
+    let outcome = publish_created_offer(
+        request,
+        ctx,
+        created,
+        create_phase_ms,
+        started,
+        dexie,
+        splash,
+    )
+    .await?;
+
+    Ok((bootstrap_action, outcome))
 }

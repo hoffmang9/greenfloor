@@ -6,7 +6,7 @@ use chia_sdk_driver::Cat;
 use super::{select_cats_smallest_first, SelectedCats};
 use crate::error::{SignerError, SignerResult};
 
-/// How to reduce a CAT list to the coins that cover *target_amount*.
+/// How to reduce a CAT list to the coins that cover *`target_amount`*.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoinSelectionMode {
     /// Smallest-first subset until the running total reaches the target.
