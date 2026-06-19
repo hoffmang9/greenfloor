@@ -17,6 +17,17 @@ from greenfloor_scripts.engine_subprocess import is_retryable_engine_cli_error
 
 T = TypeVar("T")
 
+_SINGLE_RECORD_ENDPOINTS: dict[str, tuple[str, str]] = {
+    "puzzle_hash": ("get_coin_records_by_puzzle_hash", "puzzle_hash"),
+    "hint": ("get_coin_records_by_hint", "hint"),
+}
+
+_BATCH_RECORD_ENDPOINTS: dict[str, tuple[str, str]] = {
+    "puzzle_hashes": ("get_coin_records_by_puzzle_hashes", "puzzle_hashes"),
+    "hints": ("get_coin_records_by_hints", "hints"),
+    "names": ("get_coin_records_by_names", "names"),
+}
+
 
 def chunk_values(values: list[str], chunk_size: int) -> list[list[str]]:
     if chunk_size <= 0:
@@ -105,10 +116,27 @@ class CoinsetScanner:
             end_height=end_height,
         )
 
+    def _records_single(
+        self,
+        endpoint_key: str,
+        value: str,
+        *,
+        include_spent: bool,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        endpoint, field_name = _SINGLE_RECORD_ENDPOINTS[endpoint_key]
+        return self._records_with_include_spent(
+            endpoint,
+            include_spent=include_spent,
+            start_height=start_height,
+            end_height=end_height,
+            **{field_name: value},
+        )
+
     def _records_batch(
         self,
-        endpoint: str,
-        field_name: str,
+        endpoint_key: str,
         values: list[str],
         *,
         include_spent: bool,
@@ -117,6 +145,7 @@ class CoinsetScanner:
     ) -> list[dict[str, Any]]:
         if not values:
             return []
+        endpoint, field_name = _BATCH_RECORD_ENDPOINTS[endpoint_key]
         return self._records_with_include_spent(
             endpoint,
             include_spent=include_spent,
@@ -136,12 +165,12 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        return self._records_with_include_spent(
-            "get_coin_records_by_puzzle_hash",
+        return self._records_single(
+            "puzzle_hash",
+            puzzle_hash,
             include_spent=include_spent,
             start_height=start_height,
             end_height=end_height,
-            puzzle_hash=puzzle_hash,
         )
 
     def by_puzzle_hashes(
@@ -153,7 +182,6 @@ class CoinsetScanner:
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
         return self._records_batch(
-            "get_coin_records_by_puzzle_hashes",
             "puzzle_hashes",
             puzzle_hashes,
             include_spent=include_spent,
@@ -169,12 +197,12 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        return self._records_with_include_spent(
-            "get_coin_records_by_hint",
+        return self._records_single(
+            "hint",
+            hint,
             include_spent=include_spent,
             start_height=start_height,
             end_height=end_height,
-            hint=hint,
         )
 
     def by_hints(
@@ -186,7 +214,6 @@ class CoinsetScanner:
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
         return self._records_batch(
-            "get_coin_records_by_hints",
             "hints",
             hints,
             include_spent=include_spent,
@@ -203,7 +230,6 @@ class CoinsetScanner:
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
         return self._records_batch(
-            "get_coin_records_by_names",
             "names",
             coin_names,
             include_spent=include_spent,

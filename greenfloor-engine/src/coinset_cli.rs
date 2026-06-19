@@ -1,10 +1,12 @@
+use std::io::{self, Read};
+
 use clap::{Args, Subcommand};
 use serde_json::{json, Value};
 
 use crate::cli_util::{optional_trimmed, print_json_value};
 use crate::coinset::{
-    post_coinset_coin_records, post_coinset_record, post_coinset_rpc, push_tx_hex,
-    resolve_direct_client,
+    coin_id_from_record, ensure_coinset_rpc_success, post_coinset_coin_records,
+    post_coinset_record, post_coinset_rpc, push_tx_hex, resolve_direct_client,
 };
 use crate::error::{SignerError, SignerResult};
 
@@ -63,6 +65,14 @@ pub struct CoinsetCoinRecordsArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct CoinsetCoinIdFromRecordArgs {
+    #[arg(long, default_value = "")]
+    pub record_json: String,
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
 pub struct CoinsetRecordArgs {
     #[command(flatten)]
     client: CoinsetClientArgs,
@@ -86,6 +96,8 @@ pub enum CoinsetCommands {
     Record(CoinsetRecordArgs),
     #[command(name = "post")]
     Post(CoinsetPostArgs),
+    #[command(name = "coin-id-from-record")]
+    CoinIdFromRecord(CoinsetCoinIdFromRecordArgs),
     #[command(name = "push-tx")]
     PushTx(CoinsetPushTxArgs),
 }
@@ -131,6 +143,7 @@ pub async fn run_coinset_command(args: CoinsetCliArgs) -> SignerResult<()> {
         CoinsetCommands::CoinRecords(args) => run_coinset_coin_records(args).await,
         CoinsetCommands::Record(args) => run_coinset_record(args).await,
         CoinsetCommands::Post(args) => run_coinset_post(args).await,
+        CoinsetCommands::CoinIdFromRecord(args) => run_coinset_coin_id_from_record(&args),
         CoinsetCommands::PushTx(args) => run_coinset_push_tx(args).await,
     }
 }
@@ -191,11 +204,27 @@ pub async fn run_coinset_post(args: CoinsetPostArgs) -> SignerResult<()> {
         body,
     )
     .await?;
-    let success = payload
-        .get("success")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    emit_json_or(&payload, args.json, || println!("success: {success}"))
+    ensure_coinset_rpc_success(&payload)?;
+    emit_json_or(&payload, args.json, || println!("success: true"))
+}
+
+fn read_record_json(record_json: &str) -> SignerResult<Value> {
+    let trimmed = record_json.trim();
+    if !trimmed.is_empty() {
+        return parse_body_json(trimmed);
+    }
+    let mut buffer = String::new();
+    io::stdin()
+        .read_to_string(&mut buffer)
+        .map_err(|err| SignerError::Other(format!("read record json from stdin: {err}")))?;
+    parse_body_json(&buffer)
+}
+
+pub fn run_coinset_coin_id_from_record(args: &CoinsetCoinIdFromRecordArgs) -> SignerResult<()> {
+    let record = read_record_json(&args.record_json)?;
+    let coin_id = coin_id_from_record(&record);
+    let payload = json!({ "coin_id": coin_id });
+    emit_json_or(&payload, args.json, || println!("{coin_id}"))
 }
 
 pub async fn run_coinset_push_tx(args: CoinsetPushTxArgs) -> SignerResult<()> {
@@ -264,6 +293,25 @@ mod tests {
         match cli.command {
             CoinsetCommands::PushTx(args) => {
                 assert_eq!(args.spend_bundle_hex, "deadbeef");
+                assert!(args.json);
+            }
+            _ => panic!("unexpected subcommand"),
+        }
+    }
+
+    #[test]
+    fn parses_coinset_coin_id_from_record() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "coin-id-from-record",
+            "--record-json",
+            r#"{"coin":{"amount":1}}"#,
+            "--json",
+        ])
+        .expect("parse coinset coin-id-from-record");
+        match cli.command {
+            CoinsetCommands::CoinIdFromRecord(args) => {
+                assert_eq!(args.record_json, r#"{"coin":{"amount":1}}"#);
                 assert!(args.json);
             }
             _ => panic!("unexpected subcommand"),

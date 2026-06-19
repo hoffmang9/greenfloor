@@ -1,6 +1,9 @@
+use chia_protocol::Coin;
 use serde_json::Value;
 
 use crate::error::{SignerError, SignerResult};
+use crate::hex::normalize_hex_id;
+use crate::vault::members::hex_to_bytes32;
 
 fn coinset_rpc_failure_detail(payload: &Value) -> String {
     for key in ["error", "error_message", "message"] {
@@ -45,6 +48,47 @@ pub fn record_from_payload<'a>(payload: &'a Value, key: &str) -> SignerResult<Op
     Ok(payload.get(key).filter(|value| value.is_object()))
 }
 
+fn normalized_hex_field(value: Option<&Value>) -> String {
+    value
+        .and_then(Value::as_str)
+        .map(normalize_hex_id)
+        .unwrap_or_default()
+}
+
+pub fn coin_id_from_record(record: &Value) -> String {
+    let Some(coin) = record.get("coin").and_then(Value::as_object) else {
+        return String::new();
+    };
+    for key in ["name", "coin_id", "coin_name"] {
+        let normalized = normalized_hex_field(coin.get(key));
+        if !normalized.is_empty() {
+            return normalized;
+        }
+    }
+    let normalized = normalized_hex_field(record.get("name"));
+    if !normalized.is_empty() {
+        return normalized;
+    }
+
+    let parent_hex = normalized_hex_field(coin.get("parent_coin_info"));
+    let puzzle_hex = normalized_hex_field(coin.get("puzzle_hash"));
+    let amount = coin.get("amount").and_then(Value::as_u64);
+    if parent_hex.is_empty() || puzzle_hex.is_empty() {
+        return String::new();
+    }
+    let Some(amount) = amount else {
+        return String::new();
+    };
+
+    let Ok(parent) = hex_to_bytes32(&parent_hex) else {
+        return String::new();
+    };
+    let Ok(puzzle_hash) = hex_to_bytes32(&puzzle_hex) else {
+        return String::new();
+    };
+    hex::encode(Coin::new(parent, puzzle_hash, amount).coin_id())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +125,42 @@ mod tests {
         assert!(record_from_payload(&payload, "coin_record")
             .expect("success payload")
             .is_none());
+    }
+
+    #[test]
+    fn coin_id_from_record_prefers_explicit_name_field() {
+        let name = "a".repeat(64);
+        let record = json!({
+            "coin": {
+                "parent_coin_info": format!("0x{}", "b".repeat(64)),
+                "puzzle_hash": format!("0x{}", "c".repeat(64)),
+                "amount": 1,
+                "name": format!("0x{name}"),
+            }
+        });
+        assert_eq!(coin_id_from_record(&record), name);
+    }
+
+    #[test]
+    fn coin_id_from_record_computes_from_parent_puzzle_and_amount() {
+        use chia_protocol::{Bytes32, Coin};
+
+        let parent = Bytes32::new([0x11; 32]);
+        let puzzle_hash = Bytes32::new([0x22; 32]);
+        let amount = 42_u64;
+        let expected = hex::encode(Coin::new(parent, puzzle_hash, amount).coin_id());
+        let record = json!({
+            "coin": {
+                "parent_coin_info": format!("0x{}", hex::encode(parent)),
+                "puzzle_hash": format!("0x{}", hex::encode(puzzle_hash)),
+                "amount": amount,
+            }
+        });
+        assert_eq!(coin_id_from_record(&record), expected);
+    }
+
+    #[test]
+    fn coin_id_from_record_returns_empty_when_coin_missing() {
+        assert!(coin_id_from_record(&json!({})).is_empty());
     }
 }

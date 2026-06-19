@@ -333,6 +333,87 @@ async fn subprocess_coinset_post_returns_rpc_payload() {
 }
 
 #[tokio::test]
+async fn subprocess_coinset_post_fails_on_success_false() {
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/get_all_mempool_tx_ids")
+        .with_status(200)
+        .with_body(r#"{"success":false,"error":"mempool unavailable"}"#)
+        .create_async()
+        .await;
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_greenfloor-engine"))
+        .args([
+            "coinset",
+            "post",
+            "--network",
+            "mainnet",
+            "--base-url",
+            &server.url(),
+            "--endpoint",
+            "get_all_mempool_tx_ids",
+            "--body-json",
+            "{}",
+            "--json",
+        ])
+        .output()
+        .expect("spawn greenfloor-engine coinset post subprocess");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit for success=false, stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let payload: Value = serde_json::from_str(stderr.trim()).expect("parse json error stderr");
+    assert_eq!(payload.get("success"), Some(&Value::Bool(false)));
+    assert_eq!(payload.get("retryable"), Some(&Value::Bool(false)));
+    assert_eq!(
+        payload.get("error").and_then(Value::as_str),
+        Some("coinset error: mempool unavailable")
+    );
+}
+
+#[tokio::test]
+async fn subprocess_coinset_coin_id_from_record_computes_coin_id() {
+    use chia_protocol::{Bytes32, Coin};
+
+    let parent = Bytes32::new([0x11; 32]);
+    let puzzle_hash = Bytes32::new([0x22; 32]);
+    let amount = 42_u64;
+    let expected = hex::encode(Coin::new(parent, puzzle_hash, amount).coin_id());
+    let record_json = serde_json::json!({
+        "coin": {
+            "parent_coin_info": format!("0x{}", hex::encode(parent)),
+            "puzzle_hash": format!("0x{}", hex::encode(puzzle_hash)),
+            "amount": amount,
+        }
+    })
+    .to_string();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_greenfloor-engine"))
+        .args([
+            "coinset",
+            "coin-id-from-record",
+            "--record-json",
+            &record_json,
+            "--json",
+        ])
+        .output()
+        .expect("spawn greenfloor-engine coinset coin-id-from-record subprocess");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value =
+        serde_json::from_slice(&output.stdout).expect("parse coin-id-from-record json stdout");
+    assert_eq!(
+        value.get("coin_id").and_then(Value::as_str),
+        Some(expected.as_str())
+    );
+}
+
+#[tokio::test]
 async fn subprocess_coinset_push_tx_emits_success_payload() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server

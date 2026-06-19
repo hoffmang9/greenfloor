@@ -20,7 +20,9 @@ pub use direct_api::{
     normalize_coinset_network, resolve_direct_client, resolve_direct_coinset_base_url,
     ResolvedDirectClient, MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
 };
-pub use parse::{coin_records_from_payload, ensure_coinset_rpc_success, record_from_payload};
+pub use parse::{
+    coin_id_from_record, coin_records_from_payload, ensure_coinset_rpc_success, record_from_payload,
+};
 
 pub(crate) use coin_select::finalize_selected_cats;
 

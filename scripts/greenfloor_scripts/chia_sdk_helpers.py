@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import importlib
+import json
 from typing import Any
 
-from greenfloor_scripts.hex_subprocess import normalize_hex_id
+from greenfloor_scripts.engine_subprocess import run_engine_json
 
 
 def import_sdk() -> Any:
@@ -33,26 +34,20 @@ def safe_int(value: object, default: int = 0) -> int:
 
 
 def coin_id_from_record(record: dict[str, Any]) -> str:
-    coin = record.get("coin")
-    if not isinstance(coin, dict):
-        return ""
-    for candidate in (
-        coin.get("name"),
-        coin.get("coin_id"),
-        coin.get("coin_name"),
-        record.get("name"),
-    ):
-        normalized = normalize_hex_id(candidate)
-        if normalized:
-            return normalized
-    parent_hex = normalize_hex_id(coin.get("parent_coin_info"))
-    puzzle_hex = normalize_hex_id(coin.get("puzzle_hash"))
-    amount = safe_int(coin.get("amount"), default=-1)
-    if not parent_hex or not puzzle_hex or amount < 0 or amount > 0xFFFFFFFFFFFFFFFF:
-        return ""
     try:
-        sdk = import_sdk()
-        coin_obj = sdk.Coin(hex_to_bytes(parent_hex), hex_to_bytes(puzzle_hex), int(amount))
-        return normalize_hex_id(sdk.to_hex(coin_obj.coin_id())) or ""
+        payload = run_engine_json(
+            [
+                "coinset",
+                "coin-id-from-record",
+                "--record-json",
+                json.dumps(record, separators=(",", ":")),
+            ]
+        )
     except Exception:
         return ""
+    if not isinstance(payload, dict):
+        return ""
+    coin_id = payload.get("coin_id")
+    if not isinstance(coin_id, str):
+        return ""
+    return coin_id

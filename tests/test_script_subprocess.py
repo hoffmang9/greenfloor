@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+from greenfloor_scripts.chia_sdk_helpers import coin_id_from_record
 from greenfloor_scripts.coinset_scanner import coinset_with_retries
 from greenfloor_scripts.coinset_subprocess import (
     coin_records_cli,
@@ -240,3 +241,29 @@ def test_kms_subprocess_reads_public_key_field() -> None:
         assert get_public_key_compressed_hex("key-1", "us-east-1") == "03abc"
     argv = mock_run.call_args.args[0]
     assert argv[0] == "kms-public-key-compressed-hex"
+
+
+def test_coin_id_from_record_delegates_to_engine_coinset_cli() -> None:
+    valid_id = "d" * 64
+    record = {
+        "coin": {
+            "parent_coin_info": f"0x{'a' * 64}",
+            "puzzle_hash": f"0x{'b' * 64}",
+            "amount": 1,
+            "name": f"0x{valid_id}",
+        }
+    }
+    with patch("greenfloor_scripts.chia_sdk_helpers.run_engine_json") as mock_run:
+        mock_run.return_value = {"coin_id": valid_id}
+        assert coin_id_from_record(record) == valid_id
+    argv = mock_run.call_args.args[0]
+    assert argv[:2] == ["coinset", "coin-id-from-record"]
+    assert "--record-json" in argv
+    body_json = argv[argv.index("--record-json") + 1]
+    assert json.loads(body_json) == record
+
+
+def test_coin_id_from_record_returns_empty_on_cli_failure() -> None:
+    with patch("greenfloor_scripts.chia_sdk_helpers.run_engine_json") as mock_run:
+        mock_run.side_effect = RuntimeError("engine_cli_failed")
+        assert coin_id_from_record({"coin": {"amount": 1}}) == ""
