@@ -8,9 +8,12 @@ use crate::adapters::{
     SplashClient,
 };
 use crate::error::{SignerError, SignerResult};
-use crate::operator_log::{audit_and_trace, trace_audit_outcome, LogContext, OFFER_POST_FAILURE};
+use crate::operator_log::{
+    audit_and_trace, audit_market_cycle, trace_audit_outcome, LogContext, OFFER_POST_FAILURE,
+    STRATEGY_OFFER_EXECUTION,
+};
 use crate::storage::{
-    persist_offer_post_records, state_db_path_for_home, OfferPostPersistRecord, SqliteStore,
+    state_db_path_for_home, upsert_offer_post_record, OfferPostPersistRecord, SqliteStore,
 };
 
 use super::context::ResolvedBuildAndPostContext;
@@ -121,6 +124,33 @@ pub(super) fn offer_post_persist_record(
     })
 }
 
+fn strategy_offer_execution_payload(record: &OfferPostPersistRecord) -> Value {
+    let mut audit_event = json!({
+        "market_id": record.market_id,
+        "planned_count": 1,
+        "executed_count": 1,
+        "items": [{
+            "size": record.size_base_units,
+            "side": record.side,
+            "status": "executed",
+            "reason": format!("{}_post_success", record.publish_venue),
+            "offer_id": record.offer_id,
+            "attempts": 1,
+        }],
+        "venue": record.publish_venue,
+        "resolved_base_asset_id": record.resolved_base_asset_id,
+        "resolved_quote_asset_id": record.resolved_quote_asset_id,
+    });
+    if let Value::Object(extra) = &record.created_extra {
+        if let Value::Object(audit_obj) = &mut audit_event {
+            for (key, value) in extra {
+                audit_obj.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    audit_event
+}
+
 pub fn persist_post_records_if_enabled(
     home_dir: &Path,
     persist_results: bool,
@@ -132,7 +162,18 @@ pub fn persist_post_records_if_enabled(
     }
     let db_path = state_db_path_for_home(home_dir);
     let store = SqliteStore::open(&db_path)?;
-    persist_offer_post_records(&store, records)
+    for record in records {
+        upsert_offer_post_record(&store, record)?;
+        audit_market_cycle(
+            &store,
+            Level::INFO,
+            STRATEGY_OFFER_EXECUTION,
+            &strategy_offer_execution_payload(record),
+            &record.market_id,
+            "strategy offer executed",
+        )?;
+    }
+    Ok(())
 }
 
 fn post_failure_payload(
@@ -205,4 +246,29 @@ pub fn record_post_iteration_failure(
         error,
         offer_ref,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn strategy_offer_execution_payload_includes_execution_mode() {
+        let record = OfferPostPersistRecord {
+            offer_id: "offer-1".to_string(),
+            market_id: "m1".to_string(),
+            side: "sell".to_string(),
+            size_base_units: 5,
+            publish_venue: "dexie".to_string(),
+            resolved_base_asset_id: "a1".to_string(),
+            resolved_quote_asset_id: "xch".to_string(),
+            created_extra: json!({"execution_mode": "direct"}),
+        };
+        let payload = strategy_offer_execution_payload(&record);
+        assert_eq!(
+            payload.get("execution_mode").and_then(Value::as_str),
+            Some("direct")
+        );
+    }
 }

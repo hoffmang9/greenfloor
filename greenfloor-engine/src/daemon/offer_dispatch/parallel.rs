@@ -13,7 +13,7 @@ use crate::cycle::{
 use crate::daemon::market_context::DaemonCycleResources;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
-use crate::operator_log::{audit_and_trace, LogContext, PARALLEL_OFFER_DISPATCH};
+use crate::operator_log::{audit_market_cycle, PARALLEL_OFFER_DISPATCH};
 use crate::storage::SqliteStore;
 
 use super::coordinator::OfferReservationCoordinator;
@@ -67,10 +67,9 @@ async fn prepare_parallel_dispatch(
     let _ = coordinator.expire_stale();
     let wallet_id = reservation_wallet_id(signer_config);
 
-    audit_and_trace(
+    audit_market_cycle(
         store,
         Level::DEBUG,
-        LogContext::MARKET_CYCLE,
         PARALLEL_OFFER_DISPATCH,
         &json!({
             "market_id": market.market_id,
@@ -81,7 +80,7 @@ async fn prepare_parallel_dispatch(
                 program.runtime_offer_parallelism_max_workers
             ),
         }),
-        Some(&market.market_id),
+        &market.market_id,
         "parallel offer dispatch planned",
     )?;
 

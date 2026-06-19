@@ -5,18 +5,22 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::SignerResult;
-use crate::operator_log::OFFER_POST_FAILURE;
+use crate::operator_log::{
+    DEXIE_OFFERS_ERROR, OFFER_CANCEL_POLICY, OFFER_LIFECYCLE_TRANSITION, OFFER_POST_FAILURE,
+    OFFER_RECONCILIATION, STRATEGY_OFFER_EXECUTION, STRATEGY_OFFER_EXECUTION_ERROR,
+    TAKER_DETECTION,
+};
 use crate::storage::{AuditEventRow, OfferStateListRow, SqliteStore};
 
 const STATUS_EVENT_TYPES: &[&str] = &[
-    "strategy_offer_execution",
-    "strategy_offer_execution_error",
+    STRATEGY_OFFER_EXECUTION,
+    STRATEGY_OFFER_EXECUTION_ERROR,
     OFFER_POST_FAILURE,
-    "offer_cancel_policy",
-    "offer_lifecycle_transition",
-    "offer_reconciliation",
-    "taker_detection",
-    "dexie_offers_error",
+    OFFER_CANCEL_POLICY,
+    OFFER_LIFECYCLE_TRANSITION,
+    OFFER_RECONCILIATION,
+    TAKER_DETECTION,
+    DEXIE_OFFERS_ERROR,
 ];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,7 +128,7 @@ mod tests {
             .expect("seed");
         store
             .add_audit_event(
-                "offer_reconciliation",
+                OFFER_RECONCILIATION,
                 &json!({"offer_id": "a2", "new_state": "tx_block_confirmed"}),
                 Some("m1"),
             )

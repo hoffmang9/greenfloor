@@ -6,7 +6,7 @@ use tracing::Level;
 use crate::config::MarketConfig;
 use crate::error::SignerResult;
 use crate::operator_log::{
-    audit_and_trace, LogContext, STRATEGY_ACTIONS_PLANNED, STRATEGY_OFFER_EXECUTION_ERROR,
+    audit_market_cycle, STRATEGY_ACTIONS_PLANNED, STRATEGY_OFFER_EXECUTION_ERROR,
 };
 use crate::storage::SqliteStore;
 
@@ -39,17 +39,16 @@ pub async fn run_strategy_phase(
         0,
     );
 
-    audit_and_trace(
+    audit_market_cycle(
         store,
         Level::INFO,
-        LogContext::MARKET_CYCLE,
         STRATEGY_ACTIONS_PLANNED,
         &json!({
             "market_id": market.market_id,
             "xch_price_usd": ctx.dispatch.xch_price_usd,
             "action_count": strategy_actions.len(),
         }),
-        Some(&market.market_id),
+        &market.market_id,
         "strategy actions planned",
     )?;
 
@@ -65,13 +64,12 @@ pub async fn run_strategy_phase(
             }
             Err(err) => {
                 state.record_phase_error();
-                audit_and_trace(
+                audit_market_cycle(
                     store,
                     Level::WARN,
-                    LogContext::MARKET_CYCLE,
                     STRATEGY_OFFER_EXECUTION_ERROR,
                     &json!({"market_id": market.market_id, "error": err.to_string()}),
-                    Some(&market.market_id),
+                    &market.market_id,
                     "strategy offer execution failed",
                 )?;
             }

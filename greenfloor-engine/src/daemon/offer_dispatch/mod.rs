@@ -20,7 +20,7 @@ use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason,
 use crate::cycle::{expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction};
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{
-    audit_and_trace, LogContext, OFFER_PARALLEL_FALLBACK, STRATEGY_EXEC_SKIPPED_NO_SIGNER,
+    audit_market_cycle, OFFER_PARALLEL_FALLBACK, STRATEGY_EXEC_SKIPPED_NO_SIGNER,
 };
 use crate::storage::SqliteStore;
 
@@ -60,17 +60,16 @@ pub(crate) fn record_parallel_fallback_audit(
     market_id: &str,
     err: &SignerError,
 ) -> SignerResult<()> {
-    audit_and_trace(
+    audit_market_cycle(
         store,
         Level::WARN,
-        LogContext::MARKET_CYCLE,
         OFFER_PARALLEL_FALLBACK,
         &json!({
             "market_id": market_id,
             "error": err.to_string(),
             "reason": "reservation_parallel_path_failed",
         }),
-        Some(market_id),
+        market_id,
         "parallel offer dispatch fallback",
     )
 }
@@ -92,17 +91,16 @@ async fn execute_strategy_actions_async(
 ) -> SignerResult<OfferDispatchOutput> {
     let signer_config = match ctx.resources.signer_for_execution() {
         Err(err) if is_signer_execution_soft_skip(&err) => {
-            audit_and_trace(
+            audit_market_cycle(
                 store,
                 Level::WARN,
-                LogContext::MARKET_CYCLE,
                 STRATEGY_EXEC_SKIPPED_NO_SIGNER,
                 &json!({
                     "market_id": market.market_id,
                     "planned_count": actions.len(),
                     "reason": signer_execution_skip_reason(&err),
                 }),
-                Some(&market.market_id),
+                &market.market_id,
                 "strategy execution skipped without signer",
             )?;
             return Ok(OfferDispatchOutput {

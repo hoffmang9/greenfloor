@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use tracing::Level;
 
 use crate::adapters::DexieClient;
 use crate::config::{cancel_policy_stable_vs_unstable, MarketConfig};
@@ -7,6 +8,7 @@ use crate::cycle::{
     MarketCycleResultState,
 };
 use crate::error::SignerResult;
+use crate::operator_log::{audit_market_cycle, OFFER_CANCEL_POLICY};
 use crate::storage::SqliteStore;
 
 use crate::offer::dexie_payload::dexie_offer_status;
@@ -132,7 +134,14 @@ pub async fn run_market_cancel_phase(
 
     if !decision.triggered {
         let payload = cancel_policy_payload(market_id, &decision, cancel_planned, 0, &items);
-        store.add_audit_event("offer_cancel_policy", &payload, Some(market_id))?;
+        audit_market_cycle(
+            store,
+            Level::INFO,
+            OFFER_CANCEL_POLICY,
+            &payload,
+            market_id,
+            "offer cancel policy evaluated",
+        )?;
         state.merge_cancel_policy(false, cancel_planned, 0);
         return Ok(payload);
     }
@@ -158,7 +167,14 @@ pub async fn run_market_cancel_phase(
         cancel_executed,
         &items,
     );
-    store.add_audit_event("offer_cancel_policy", &payload, Some(market_id))?;
+    audit_market_cycle(
+        store,
+        Level::INFO,
+        OFFER_CANCEL_POLICY,
+        &payload,
+        market_id,
+        "offer cancel policy evaluated",
+    )?;
     state.merge_cancel_policy(cancel_triggered, cancel_planned, cancel_executed);
     Ok(payload)
 }

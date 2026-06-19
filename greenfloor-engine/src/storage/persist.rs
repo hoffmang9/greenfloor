@@ -1,12 +1,25 @@
-use serde_json::{json, Value};
-use tracing::Level;
-
 use super::sqlite::{OfferPostPersistRecord, SqliteStore};
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
-use crate::operator_log::{audit_and_trace, LogContext, STRATEGY_OFFER_EXECUTION};
 
-/// Persist offer post records.
+/// Upsert offer lifecycle state for one posted offer record.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub fn upsert_offer_post_record(
+    store: &SqliteStore,
+    record: &OfferPostPersistRecord,
+) -> SignerResult<()> {
+    store.upsert_offer_state(
+        &record.offer_id,
+        &record.market_id,
+        OfferLifecycleState::Open.as_str(),
+        None,
+    )
+}
+
+/// Persist offer post records (`SQLite` offer state only; tracing lives in dispatch layer).
 ///
 /// # Errors
 ///
@@ -16,44 +29,7 @@ pub fn persist_offer_post_records(
     records: &[OfferPostPersistRecord],
 ) -> SignerResult<()> {
     for record in records {
-        store.upsert_offer_state(
-            &record.offer_id,
-            &record.market_id,
-            OfferLifecycleState::Open.as_str(),
-            None,
-        )?;
-        let mut audit_event = json!({
-            "market_id": record.market_id,
-            "planned_count": 1,
-            "executed_count": 1,
-            "items": [{
-                "size": record.size_base_units,
-                "side": record.side,
-                "status": "executed",
-                "reason": format!("{}_post_success", record.publish_venue),
-                "offer_id": record.offer_id,
-                "attempts": 1,
-            }],
-            "venue": record.publish_venue,
-            "resolved_base_asset_id": record.resolved_base_asset_id,
-            "resolved_quote_asset_id": record.resolved_quote_asset_id,
-        });
-        if let Value::Object(extra) = &record.created_extra {
-            if let Value::Object(audit_obj) = &mut audit_event {
-                for (key, value) in extra {
-                    audit_obj.insert(key.clone(), value.clone());
-                }
-            }
-        }
-        audit_and_trace(
-            store,
-            Level::INFO,
-            LogContext::MARKET_CYCLE,
-            STRATEGY_OFFER_EXECUTION,
-            &audit_event,
-            Some(record.market_id.as_str()),
-            "strategy offer executed",
-        )?;
+        upsert_offer_post_record(store, record)?;
     }
     Ok(())
 }
@@ -64,7 +40,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn persist_offer_post_records_writes_offer_state_and_audit_event() {
+    fn persist_offer_post_records_writes_offer_state() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("greenfloor.sqlite");
         let store = SqliteStore::open(&db_path).expect("open");

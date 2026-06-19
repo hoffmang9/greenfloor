@@ -1,13 +1,13 @@
 use reqwest::Client;
-use serde_json::json;
+use serde_json::{json, Value};
 use tracing::Level;
 
 use crate::coinset::get_all_mempool_tx_ids;
 use crate::config::ManagerProgramConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{
-    audit_and_trace, LogContext, COINSET_MEMPOOL_ERROR, COINSET_MEMPOOL_SNAPSHOT,
-    COINSET_WS_ONCE_ERROR, MEMPOOL_OBSERVED, XCH_PRICE_ERROR, XCH_PRICE_SNAPSHOT,
+    audit_daemon_cycle, COINSET_MEMPOOL_ERROR, COINSET_MEMPOOL_SNAPSHOT, COINSET_WS_ONCE_ERROR,
+    MEMPOOL_OBSERVED, XCH_PRICE_ERROR, XCH_PRICE_SNAPSHOT,
 };
 use crate::storage::SqliteStore;
 
@@ -20,6 +20,16 @@ const DEFAULT_XCH_PRICE_URL: &str = "https://coincodex.com/api/coincodex/get_coi
 pub struct CyclePreambleResult {
     pub cycle_error_count: u64,
     pub xch_price_usd: Option<f64>,
+}
+
+fn audit_preamble(
+    store: &SqliteStore,
+    level: Level,
+    event: &str,
+    payload: &Value,
+    trace_message: &'static str,
+) -> SignerResult<()> {
+    audit_daemon_cycle(store, level, event, payload, trace_message)
 }
 
 pub async fn run_cycle_preamble(
@@ -35,25 +45,21 @@ pub async fn run_cycle_preamble(
     match fetch_xch_price_usd().await {
         Ok(price) => {
             result.xch_price_usd = Some(price);
-            audit_and_trace(
+            audit_preamble(
                 store,
                 Level::INFO,
-                LogContext::DAEMON_CYCLE,
                 XCH_PRICE_SNAPSHOT,
                 &json!({"price_usd": price}),
-                None,
                 "xch price snapshot",
             )?;
         }
         Err(err) => {
             result.cycle_error_count += 1;
-            audit_and_trace(
+            audit_preamble(
                 store,
                 Level::WARN,
-                LogContext::DAEMON_CYCLE,
                 XCH_PRICE_ERROR,
                 &json!({"error": err.to_string()}),
-                None,
                 "xch price fetch failed",
             )?;
         }
@@ -64,26 +70,22 @@ pub async fn run_cycle_preamble(
             capture_coinset_websocket_once(store, program, coinset_base_url, coin_watchlist).await
         {
             result.cycle_error_count += 1;
-            audit_and_trace(
+            audit_preamble(
                 store,
                 Level::WARN,
-                LogContext::DAEMON_CYCLE,
                 COINSET_WS_ONCE_ERROR,
                 &json!({"error": err.to_string()}),
-                None,
                 "coinset websocket capture failed",
             )?;
         }
     } else if poll_coinset_mempool {
         if let Err(err) = poll_coinset_mempool_snapshot(store, program, coinset_base_url).await {
             result.cycle_error_count += 1;
-            audit_and_trace(
+            audit_preamble(
                 store,
                 Level::WARN,
-                LogContext::DAEMON_CYCLE,
                 COINSET_MEMPOOL_ERROR,
                 &json!({"error": err.to_string()}),
-                None,
                 "coinset mempool poll failed",
             )?;
         }
@@ -105,23 +107,19 @@ async fn poll_coinset_mempool_snapshot(
     };
     let tx_ids = get_all_mempool_tx_ids(&program.network, base_opt).await?;
     let new_count = store.observe_mempool_tx_ids(&tx_ids)?;
-    audit_and_trace(
+    audit_preamble(
         store,
         Level::DEBUG,
-        LogContext::DAEMON_CYCLE,
         COINSET_MEMPOOL_SNAPSHOT,
         &json!({"count": tx_ids.len()}),
-        None,
         "coinset mempool snapshot",
     )?;
     if new_count > 0 {
-        audit_and_trace(
+        audit_preamble(
             store,
             Level::INFO,
-            LogContext::DAEMON_CYCLE,
             MEMPOOL_OBSERVED,
             &json!({"new_tx_ids": new_count, "source": "coinset_poll"}),
-            None,
             "mempool txs observed",
         )?;
     }

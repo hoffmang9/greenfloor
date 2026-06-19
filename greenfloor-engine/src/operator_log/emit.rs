@@ -98,6 +98,53 @@ pub fn audit_and_trace(
     Ok(())
 }
 
+/// Persist and trace a daemon-cycle audit event (no `market_id`).
+///
+/// # Errors
+///
+/// Returns an error when the audit insert fails.
+pub fn audit_daemon_cycle(
+    store: &SqliteStore,
+    level: Level,
+    audit_event_type: &str,
+    payload: &Value,
+    trace_message: &'static str,
+) -> SignerResult<()> {
+    audit_and_trace(
+        store,
+        level,
+        LogContext::DAEMON_CYCLE,
+        audit_event_type,
+        payload,
+        None,
+        trace_message,
+    )
+}
+
+/// Persist and trace a market-cycle audit event.
+///
+/// # Errors
+///
+/// Returns an error when the audit insert fails.
+pub fn audit_market_cycle(
+    store: &SqliteStore,
+    level: Level,
+    audit_event_type: &str,
+    payload: &Value,
+    market_id: &str,
+    trace_message: &'static str,
+) -> SignerResult<()> {
+    audit_and_trace(
+        store,
+        level,
+        LogContext::MARKET_CYCLE,
+        audit_event_type,
+        payload,
+        Some(market_id),
+        trace_message,
+    )
+}
+
 /// Emit a structured operator trace event (`service`, `event`, and `phase` are always set).
 ///
 /// Additional fields use tracing syntax, including `?` for debug formatting.

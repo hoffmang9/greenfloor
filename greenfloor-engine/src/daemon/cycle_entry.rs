@@ -3,7 +3,10 @@ use std::time::Instant;
 use crate::config::MarketConfig;
 use crate::cycle::enqueue_immediate_requeue;
 use crate::error::SignerResult;
-use crate::operator_log::{LogContext, DAEMON_CYCLE_COMPLETED, DAEMON_CYCLE_STARTED};
+use crate::operator_log::{
+    audit_daemon_cycle, LogContext, DAEMON_CYCLE_COMPLETED, DAEMON_CYCLE_STARTED,
+    DAEMON_CYCLE_SUMMARY,
+};
 use crate::storage::SqliteStore;
 use tracing::Level;
 
@@ -193,7 +196,13 @@ pub async fn run_daemon_cycle_once(
     let summary_payload = serde_json::to_value(&summary).map_err(|err| {
         crate::error::SignerError::Other(format!("failed to encode daemon_cycle_summary: {err}"))
     })?;
-    cycle_store.add_audit_event("daemon_cycle_summary", &summary_payload, None)?;
+    audit_daemon_cycle(
+        &cycle_store,
+        Level::INFO,
+        DAEMON_CYCLE_SUMMARY,
+        &summary_payload,
+        "daemon cycle summary",
+    )?;
 
     let exit_code = compute_cycle_exit_code(&plan, &metrics);
     trace_daemon_cycle_completed(exit_code, &summary, plan.selected_market_ids.len());
