@@ -4,7 +4,8 @@ use tracing::Level;
 use crate::cycle::CycleOfferTransition;
 use crate::error::SignerResult;
 use crate::operator_log::{
-    audit_market_cycle, audit_only, OFFER_LIFECYCLE_TRANSITION, TAKER_DETECTION,
+    audit_row, operator_audit, AuditDurability, EmitMode, LogContext, OFFER_LIFECYCLE_TRANSITION,
+    TAKER_DETECTION,
 };
 use crate::storage::SqliteStore;
 
@@ -56,11 +57,19 @@ pub fn persist_offer_lifecycle_transition(
             obj.insert("dexie_error".to_string(), Value::String(error.to_string()));
         }
     }
-    audit_only(store, OFFER_LIFECYCLE_TRANSITION, &payload, Some(market_id))?;
+    audit_row(
+        store,
+        LogContext::DAEMON_CYCLE,
+        OFFER_LIFECYCLE_TRANSITION,
+        &payload,
+        Some(market_id),
+        AuditDurability::Required,
+    )?;
     if transition.taker_signal != "none" {
-        audit_market_cycle(
-            store,
-            Level::INFO,
+        operator_audit(
+            Some(store),
+            LogContext::MARKET_CYCLE,
+            EmitMode::dual(Level::INFO, "taker detection"),
             TAKER_DETECTION,
             &json!({
                 "offer_id": offer_id,
@@ -74,8 +83,8 @@ pub fn persist_offer_lifecycle_transition(
                 "signal_source": transition.signal_source,
                 "coinset_confirmed_tx_ids": transition.coinset_confirmed_tx_ids,
             }),
-            market_id,
-            "taker detection",
+            Some(market_id),
+            AuditDurability::Required,
         )?;
     }
     Ok(())

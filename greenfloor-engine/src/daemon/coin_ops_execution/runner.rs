@@ -8,7 +8,9 @@ use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::hex::default_mojo_multiplier_for_asset;
 use crate::offer::resolve_offer_assets_for_action;
-use crate::operator_log::{audit_market_cycle, coin_op_ledger_event};
+use crate::operator_log::{
+    coin_op_ledger_event, operator_audit, AuditDurability, EmitMode, LogContext,
+};
 use crate::storage::SqliteStore;
 
 use super::super::watchlist::watchlist_offer_ids;
@@ -211,13 +213,14 @@ pub fn persist_coin_op_execution(
             "item_status": item.status,
         });
         let (event, level) = coin_op_ledger_event(item.status.as_str());
-        audit_market_cycle(
-            store,
-            level,
+        operator_audit(
+            Some(store),
+            LogContext::MARKET_CYCLE,
+            EmitMode::dual(level, "coin op ledger row"),
             event,
             &payload,
-            &market.market_id,
-            "coin op ledger row",
+            Some(&market.market_id),
+            AuditDurability::Required,
         )?;
         store.add_coin_op_ledger_entry(&crate::storage::CoinOpLedgerEntry {
             market_id: &market.market_id,

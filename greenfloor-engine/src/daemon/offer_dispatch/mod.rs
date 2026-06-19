@@ -20,7 +20,8 @@ use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason,
 use crate::cycle::{expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction};
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{
-    audit_market_cycle, OFFER_PARALLEL_FALLBACK, STRATEGY_EXEC_SKIPPED_NO_SIGNER,
+    operator_audit, AuditDurability, EmitMode, LogContext, OFFER_PARALLEL_FALLBACK,
+    STRATEGY_EXEC_SKIPPED_NO_SIGNER,
 };
 use crate::storage::SqliteStore;
 
@@ -60,17 +61,18 @@ pub(crate) fn record_parallel_fallback_audit(
     market_id: &str,
     err: &SignerError,
 ) -> SignerResult<()> {
-    audit_market_cycle(
-        store,
-        Level::WARN,
+    operator_audit(
+        Some(store),
+        LogContext::MARKET_CYCLE,
+        EmitMode::dual(Level::WARN, "parallel offer dispatch fallback"),
         OFFER_PARALLEL_FALLBACK,
         &json!({
             "market_id": market_id,
             "error": err.to_string(),
             "reason": "reservation_parallel_path_failed",
         }),
-        market_id,
-        "parallel offer dispatch fallback",
+        Some(market_id),
+        AuditDurability::Required,
     )
 }
 
@@ -91,17 +93,18 @@ async fn execute_strategy_actions_async(
 ) -> SignerResult<OfferDispatchOutput> {
     let signer_config = match ctx.resources.signer_for_execution() {
         Err(err) if is_signer_execution_soft_skip(&err) => {
-            audit_market_cycle(
-                store,
-                Level::WARN,
+            operator_audit(
+                Some(store),
+                LogContext::MARKET_CYCLE,
+                EmitMode::dual(Level::WARN, "strategy execution skipped without signer"),
                 STRATEGY_EXEC_SKIPPED_NO_SIGNER,
                 &json!({
                     "market_id": market.market_id,
                     "planned_count": actions.len(),
                     "reason": signer_execution_skip_reason(&err),
                 }),
-                &market.market_id,
-                "strategy execution skipped without signer",
+                Some(&market.market_id),
+                AuditDurability::Required,
             )?;
             return Ok(OfferDispatchOutput {
                 executed_count: 0,

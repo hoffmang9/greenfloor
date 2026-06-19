@@ -5,8 +5,8 @@ use serde_json::{json, Value};
 
 use super::context::{resolve_action_side, sample_resolved_build_and_post_context};
 use super::publish::{
-    log_post_iteration_outcome, offer_post_persist_record, persist_post_failure_audits,
-    persist_post_records, PostAuditContext, PostFailureAudit,
+    apply_post_iteration_outcome, flush_post_batch, offer_post_persist_record, PostEmitTarget,
+    PostFailureAudit, PostIterationBatch,
 };
 use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
 use crate::cli_util::{format_json, format_json_value};
@@ -14,15 +14,16 @@ use crate::operator_log::OFFER_POST_FAILURE;
 use crate::storage::{state_db_path_for_home, SqliteStore};
 
 #[test]
-fn persist_post_failure_writes_audit_event() {
+fn flush_post_batch_writes_failure_audit_event() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path().join("home");
     let db_path = state_db_path_for_home(&home);
     let store = SqliteStore::open(&db_path).expect("open");
     let ctx = sample_resolved_build_and_post_context();
-    persist_post_failure_audits(
+    flush_post_batch(
         &store,
         &ctx,
+        &[],
         &[PostFailureAudit {
             error: "dexie_http_error:500".to_string(),
             offer_ref: None,
@@ -40,26 +41,69 @@ fn persist_post_failure_writes_audit_event() {
 }
 
 #[test]
-fn persist_post_failure_skips_dry_run_audit() {
+fn dry_run_failure_traces_without_persisting() {
     let capture = crate::operator_log::TraceCapture::install();
     let ctx = sample_resolved_build_and_post_context();
-    let failure = log_post_iteration_outcome(
+    let mut batch = PostIterationBatch {
+        post_results: Vec::new(),
+        built_offers_preview: Vec::new(),
+        bootstrap_actions: Vec::new(),
+        publish_failures: 0,
+        persist_records: Vec::new(),
+        failure_audits: Vec::new(),
+    };
+    apply_post_iteration_outcome(
+        PostEmitTarget::TraceOnly,
         &ctx,
-        &super::types::PostIterationOutcome::Failure(PostFailure {
+        super::types::PostIterationOutcome::Failure(PostFailure {
             error: "dexie_http_error:500".to_string(),
             started: Instant::now(),
             create_phase_ms: None,
             execution_mode: None,
             bootstrap: None,
         }),
+        &mut batch,
     );
-    assert!(failure.is_some());
+    assert_eq!(batch.failure_audits.len(), 0);
     assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 1);
-    assert!(PostAuditContext {
-        persist_results: true,
-        dry_run: true,
-    }
-    .traces_only());
+    assert_eq!(
+        PostEmitTarget::from_run(true, true),
+        PostEmitTarget::TraceOnly
+    );
+}
+
+#[test]
+fn persist_path_defers_failure_trace_until_flush() {
+    let capture = crate::operator_log::TraceCapture::install();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let home = dir.path().join("home");
+    let db_path = state_db_path_for_home(&home);
+    let store = SqliteStore::open(&db_path).expect("open");
+    let ctx = sample_resolved_build_and_post_context();
+    let mut batch = PostIterationBatch {
+        post_results: Vec::new(),
+        built_offers_preview: Vec::new(),
+        bootstrap_actions: Vec::new(),
+        publish_failures: 0,
+        persist_records: Vec::new(),
+        failure_audits: Vec::new(),
+    };
+    apply_post_iteration_outcome(
+        PostEmitTarget::TraceAndStore,
+        &ctx,
+        super::types::PostIterationOutcome::Failure(PostFailure {
+            error: "dexie_http_error:500".to_string(),
+            started: Instant::now(),
+            create_phase_ms: None,
+            execution_mode: None,
+            bootstrap: None,
+        }),
+        &mut batch,
+    );
+    assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 0);
+    assert_eq!(batch.failure_audits.len(), 1);
+    flush_post_batch(&store, &ctx, &[], &batch.failure_audits).expect("persist");
+    assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 1);
 }
 
 #[test]
@@ -109,13 +153,15 @@ fn post_attempt_success_tracks_publish_outcome_without_json_reparse() {
 }
 
 #[test]
-fn persist_post_records_writes_sqlite() {
+fn flush_post_batch_writes_offer_state() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path().join("home");
     let db_path = state_db_path_for_home(Path::new(&home));
     let store = SqliteStore::open(&db_path).expect("open");
-    persist_post_records(
+    let ctx = sample_resolved_build_and_post_context();
+    flush_post_batch(
         &store,
+        &ctx,
         &[crate::storage::OfferPostPersistRecord {
             offer_id: "offer-abc".to_string(),
             market_id: "m1".to_string(),
@@ -126,6 +172,7 @@ fn persist_post_records_writes_sqlite() {
             resolved_quote_asset_id: "xch".to_string(),
             created_extra: json!({"execution_mode": "direct"}),
         }],
+        &[],
     )
     .expect("persist");
 
@@ -139,12 +186,15 @@ fn persist_post_records_writes_sqlite() {
 }
 
 #[test]
-fn persist_post_records_skips_dry_run() {
-    assert!(PostAuditContext {
-        persist_results: true,
-        dry_run: true,
-    }
-    .traces_only());
+fn post_emit_target_skips_persist_for_dry_run() {
+    assert_eq!(
+        PostEmitTarget::from_run(true, true),
+        PostEmitTarget::TraceOnly
+    );
+    assert_eq!(
+        PostEmitTarget::from_run(true, false),
+        PostEmitTarget::TraceAndStore
+    );
 }
 
 #[test]

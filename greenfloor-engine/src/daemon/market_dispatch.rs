@@ -1,6 +1,8 @@
 use crate::cycle::MarketCycleResultState;
 use crate::error::SignerResult;
-use crate::operator_log::{audit_market_cycle, MARKET_CYCLE_ERROR};
+use crate::operator_log::{
+    operator_audit, AuditDurability, EmitMode, LogContext, MARKET_CYCLE_ERROR,
+};
 use tracing::Level;
 
 use crate::metrics::{metric_collection_len_to_u64, metric_non_negative_u64};
@@ -53,17 +55,18 @@ pub fn record_market_worker_error(
     error: &str,
     source: &str,
 ) -> SignerResult<()> {
-    audit_market_cycle(
-        store,
-        Level::WARN,
+    operator_audit(
+        Some(store),
+        LogContext::MARKET_CYCLE,
+        EmitMode::dual(Level::WARN, "market cycle worker error"),
         MARKET_CYCLE_ERROR,
         &serde_json::json!({
             "market_id": market_id,
             "error": error,
             "source": source,
         }),
-        market_id,
-        "market cycle worker error",
+        Some(market_id),
+        AuditDurability::Required,
     )
 }
 

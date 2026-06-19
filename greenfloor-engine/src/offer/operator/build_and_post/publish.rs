@@ -7,28 +7,53 @@ use crate::adapters::{
 };
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{
-    audit_market_cycle, offer_log_ref, operator_audit, AuditDurability, EmitMode, LogContext,
-    OFFER_POST_COMPLETED, OFFER_POST_FAILURE, OFFER_POST_ITERATION, STRATEGY_OFFER_EXECUTION,
+    audit_row, offer_log_ref, operator_audit, trace_audit_mirror, AuditDurability, EmitMode,
+    LogContext, OFFER_POST_COMPLETED, OFFER_POST_FAILURE, OFFER_POST_ITERATION,
+    STRATEGY_OFFER_EXECUTION,
 };
 use crate::storage::{upsert_offer_post_record, OfferPostPersistRecord, SqliteStore};
 
 use super::context::ResolvedBuildAndPostContext;
 use super::types::{PostIterationOutcome, PublishResult};
 
-pub struct PostAuditContext {
-    pub persist_results: bool,
-    pub dry_run: bool,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostEmitTarget {
+    TraceOnly,
+    TraceAndStore,
 }
 
-impl PostAuditContext {
-    pub fn traces_only(&self) -> bool {
-        !self.persist_results || self.dry_run
+impl PostEmitTarget {
+    #[must_use]
+    pub fn from_run(persist_results: bool, dry_run: bool) -> Self {
+        if persist_results && !dry_run {
+            Self::TraceAndStore
+        } else {
+            Self::TraceOnly
+        }
     }
 }
 
 pub struct PostFailureAudit {
     pub error: String,
     pub offer_ref: Option<String>,
+}
+
+pub struct PostIterationBatch {
+    pub post_results: Vec<Value>,
+    pub built_offers_preview: Vec<Value>,
+    pub bootstrap_actions: Vec<Value>,
+    pub publish_failures: u32,
+    pub persist_records: Vec<OfferPostPersistRecord>,
+    pub failure_audits: Vec<PostFailureAudit>,
+}
+
+struct PendingDualTrace {
+    ctx: LogContext,
+    level: Level,
+    event: &'static str,
+    payload: Value,
+    market_id: Option<String>,
+    message: &'static str,
 }
 
 pub(super) struct PublishOfferParams<'a> {
@@ -162,44 +187,85 @@ fn strategy_offer_execution_payload(record: &OfferPostPersistRecord) -> Value {
     audit_event
 }
 
-pub fn persist_post_records(
-    store: &SqliteStore,
-    records: &[OfferPostPersistRecord],
-) -> SignerResult<()> {
-    for record in records {
-        upsert_offer_post_record(store, record)?;
-        audit_market_cycle(
-            store,
-            Level::INFO,
-            STRATEGY_OFFER_EXECUTION,
-            &strategy_offer_execution_payload(record),
-            &record.market_id,
-            "strategy offer executed",
-        )?;
-    }
-    Ok(())
-}
-
-pub fn persist_post_failure_audits(
+pub fn flush_post_batch(
     store: &SqliteStore,
     ctx: &ResolvedBuildAndPostContext,
+    records: &[OfferPostPersistRecord],
     failures: &[PostFailureAudit],
 ) -> SignerResult<()> {
-    for failure in failures {
-        operator_audit(
-            Some(store),
-            LogContext::OFFER_POST,
-            EmitMode::dual(Level::WARN, "offer post failed"),
-            OFFER_POST_FAILURE,
-            &post_failure_payload(
+    let mut pending_traces = Vec::new();
+    store.conn.execute("BEGIN IMMEDIATE", []).map_err(|err| {
+        SignerError::Other(format!("failed to begin post flush transaction: {err}"))
+    })?;
+    let txn_result = (|| -> SignerResult<()> {
+        for record in records {
+            upsert_offer_post_record(store, record)?;
+        }
+        for failure in failures {
+            let payload = post_failure_payload(
                 &ctx.market.market_id,
                 &ctx.publish_venue,
                 &failure.error,
                 failure.offer_ref.as_deref(),
-            ),
-            Some(&ctx.market.market_id),
-            AuditDurability::BestEffort,
-        )?;
+            );
+            audit_row(
+                store,
+                LogContext::OFFER_POST,
+                OFFER_POST_FAILURE,
+                &payload,
+                Some(&ctx.market.market_id),
+                AuditDurability::Required,
+            )?;
+            pending_traces.push(PendingDualTrace {
+                ctx: LogContext::OFFER_POST,
+                level: Level::WARN,
+                event: OFFER_POST_FAILURE,
+                payload,
+                market_id: Some(ctx.market.market_id.clone()),
+                message: "offer post failed",
+            });
+        }
+        for record in records {
+            let payload = strategy_offer_execution_payload(record);
+            audit_row(
+                store,
+                LogContext::MARKET_CYCLE,
+                STRATEGY_OFFER_EXECUTION,
+                &payload,
+                Some(&record.market_id),
+                AuditDurability::Required,
+            )?;
+            pending_traces.push(PendingDualTrace {
+                ctx: LogContext::MARKET_CYCLE,
+                level: Level::INFO,
+                event: STRATEGY_OFFER_EXECUTION,
+                payload,
+                market_id: Some(record.market_id.clone()),
+                message: "strategy offer executed",
+            });
+        }
+        Ok(())
+    })();
+    match txn_result {
+        Ok(()) => {
+            store.conn.execute("COMMIT", []).map_err(|err| {
+                SignerError::Other(format!("failed to commit post flush transaction: {err}"))
+            })?;
+        }
+        Err(err) => {
+            let _ = store.conn.execute("ROLLBACK", []);
+            return Err(err);
+        }
+    }
+    for trace in pending_traces {
+        trace_audit_mirror(
+            trace.level,
+            trace.ctx,
+            trace.event,
+            &trace.payload,
+            trace.market_id.as_deref(),
+            trace.message,
+        );
     }
     Ok(())
 }
@@ -253,10 +319,12 @@ fn trace_post_iteration(outcome: &str, ctx: &ResolvedBuildAndPostContext, offer_
     );
 }
 
-pub fn log_post_iteration_outcome(
+pub fn apply_post_iteration_outcome(
+    target: PostEmitTarget,
     ctx: &ResolvedBuildAndPostContext,
-    outcome: &PostIterationOutcome,
-) -> Option<PostFailureAudit> {
+    outcome: PostIterationOutcome,
+    batch: &mut PostIterationBatch,
+) {
     match outcome {
         PostIterationOutcome::Preview(preview) => {
             let offer_ref = preview
@@ -264,14 +332,21 @@ pub fn log_post_iteration_outcome(
                 .and_then(Value::as_str)
                 .unwrap_or("");
             trace_post_iteration("preview", ctx, offer_ref);
-            None
+            batch.built_offers_preview.push(preview);
         }
         PostIterationOutcome::Failure(failure) => {
-            trace_post_failure(ctx, &failure.error, None);
-            Some(PostFailureAudit {
-                error: failure.error.clone(),
-                offer_ref: None,
-            })
+            if target == PostEmitTarget::TraceOnly {
+                trace_post_failure(ctx, &failure.error, None);
+            } else {
+                batch.failure_audits.push(PostFailureAudit {
+                    error: failure.error.clone(),
+                    offer_ref: None,
+                });
+            }
+            batch.publish_failures += 1;
+            batch
+                .post_results
+                .push(failure.to_venue_result(&ctx.publish_venue));
         }
         PostIterationOutcome::Success(success) => {
             if success.success {
@@ -281,7 +356,6 @@ pub fn log_post_iteration_outcome(
                     .map(|record| offer_log_ref(&record.offer_id))
                     .unwrap_or_default();
                 trace_post_iteration("success", ctx, &offer_ref);
-                None
             } else {
                 let error = success
                     .result
@@ -293,8 +367,18 @@ pub fn log_post_iteration_outcome(
                     .persist_record
                     .as_ref()
                     .map(|record| offer_log_ref(&record.offer_id));
-                trace_post_failure(ctx, &error, offer_ref.as_deref());
-                Some(PostFailureAudit { error, offer_ref })
+                if target == PostEmitTarget::TraceOnly {
+                    trace_post_failure(ctx, &error, offer_ref.as_deref());
+                } else {
+                    batch
+                        .failure_audits
+                        .push(PostFailureAudit { error, offer_ref });
+                }
+                batch.publish_failures += 1;
+            }
+            batch.post_results.push(success.to_venue_result());
+            if let Some(record) = success.persist_record {
+                batch.persist_records.push(record);
             }
         }
     }

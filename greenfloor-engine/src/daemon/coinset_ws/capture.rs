@@ -8,8 +8,8 @@ use crate::config::ManagerProgramConfig;
 use crate::daemon::watchlist::cache::CoinWatchlistCache;
 use crate::error::SignerResult;
 use crate::operator_log::{
-    audit_coinset, AuditDurability, COINSET_WS_ONCE_CONNECTED, COINSET_WS_ONCE_DISCONNECTED,
-    COINSET_WS_ONCE_STARTED,
+    audit_row, AuditDurability, LogContext, COINSET_WS_ONCE_CONNECTED,
+    COINSET_WS_ONCE_DISCONNECTED, COINSET_WS_ONCE_STARTED,
 };
 use crate::storage::SqliteStore;
 
@@ -24,8 +24,9 @@ pub async fn capture_coinset_websocket_once(
 ) -> SignerResult<()> {
     ensure_rustls_crypto_provider();
     let ws_url = resolve_coinset_ws_url(program, coinset_base_url);
-    audit_coinset(
+    audit_row(
         store,
+        LogContext::COINSET,
         COINSET_WS_ONCE_STARTED,
         &json!({"ws_url": ws_url}),
         None,
@@ -41,8 +42,9 @@ pub async fn capture_coinset_websocket_once(
     while tokio::time::Instant::now() < deadline {
         match connect_async(&ws_url).await {
             Ok((mut ws, _response)) => {
-                audit_coinset(
+                audit_row(
                     store,
+                    LogContext::COINSET,
                     COINSET_WS_ONCE_CONNECTED,
                     &json!({"ws_url": ws_url}),
                     None,
@@ -74,8 +76,9 @@ pub async fn capture_coinset_websocket_once(
                 }
             }
             Err(err) => {
-                audit_coinset(
+                audit_row(
                     store,
+                    LogContext::COINSET,
                     COINSET_WS_ONCE_DISCONNECTED,
                     &json!({"error": err.to_string()}),
                     None,

@@ -132,106 +132,14 @@ pub fn operator_audit(
     Ok(())
 }
 
+/// Persist an audit row without a trace mirror.
+///
 /// # Errors
 ///
 /// Returns an error when the audit insert fails.
-pub fn audit_market_cycle(
+pub fn audit_row(
     store: &SqliteStore,
-    level: Level,
-    audit_event_type: &str,
-    payload: &Value,
-    market_id: &str,
-    trace_message: &'static str,
-) -> SignerResult<()> {
-    operator_audit(
-        Some(store),
-        LogContext::MARKET_CYCLE,
-        EmitMode::dual(level, trace_message),
-        audit_event_type,
-        payload,
-        Some(market_id),
-        AuditDurability::Required,
-    )
-}
-
-/// # Errors
-///
-/// Returns an error when the audit insert fails.
-pub fn audit_daemon_cycle(
-    store: &SqliteStore,
-    level: Level,
-    audit_event_type: &str,
-    payload: &Value,
-    trace_message: &'static str,
-) -> SignerResult<()> {
-    operator_audit(
-        Some(store),
-        LogContext::DAEMON_CYCLE,
-        EmitMode::dual(level, trace_message),
-        audit_event_type,
-        payload,
-        None,
-        AuditDurability::Required,
-    )
-}
-
-/// # Errors
-///
-/// Returns an error when the audit insert fails.
-pub fn audit_config(
-    store: &SqliteStore,
-    level: Level,
-    audit_event_type: &str,
-    payload: &Value,
-    trace_message: &'static str,
-) -> SignerResult<()> {
-    operator_audit(
-        Some(store),
-        LogContext::CONFIG,
-        EmitMode::dual(level, trace_message),
-        audit_event_type,
-        payload,
-        None,
-        AuditDurability::Required,
-    )
-}
-
-/// # Errors
-///
-/// Returns an error when the audit insert fails.
-pub fn audit_only(
-    store: &SqliteStore,
-    audit_event_type: &str,
-    payload: &Value,
-    market_id: Option<&str>,
-) -> SignerResult<()> {
-    operator_audit(
-        Some(store),
-        LogContext::DAEMON_CYCLE,
-        EmitMode::AuditOnly,
-        audit_event_type,
-        payload,
-        market_id,
-        AuditDurability::Required,
-    )
-}
-
-/// # Errors
-///
-/// Returns an error when the audit insert fails.
-pub fn audit_daemon_cycle_only(
-    store: &SqliteStore,
-    audit_event_type: &str,
-    payload: &Value,
-) -> SignerResult<()> {
-    audit_only(store, audit_event_type, payload, None)
-}
-
-/// # Errors
-///
-/// Returns an error when the audit insert fails.
-pub fn audit_coinset(
-    store: &SqliteStore,
+    ctx: LogContext,
     audit_event_type: &str,
     payload: &Value,
     market_id: Option<&str>,
@@ -239,7 +147,7 @@ pub fn audit_coinset(
 ) -> SignerResult<()> {
     operator_audit(
         Some(store),
-        LogContext::COINSET,
+        ctx,
         EmitMode::AuditOnly,
         audit_event_type,
         payload,
@@ -325,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn audit_market_cycle_dual_emits_audit_row_and_trace() {
+    fn operator_audit_dual_emits_audit_row_and_trace() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = SqliteStore::open(&dir.path().join("greenfloor.sqlite")).expect("open");
         let capture = TraceCapture::install();
@@ -334,13 +242,14 @@ mod tests {
             "error": "dexie_http_error:timeout",
         });
 
-        audit_market_cycle(
-            &store,
-            Level::WARN,
+        operator_audit(
+            Some(&store),
+            LogContext::MARKET_CYCLE,
+            EmitMode::dual(Level::WARN, "dexie offers fetch failed"),
             DEXIE_OFFERS_ERROR,
             &payload,
-            "m1",
-            "dexie offers fetch failed",
+            Some("m1"),
+            AuditDurability::Required,
         )
         .expect("audit");
 
@@ -354,13 +263,21 @@ mod tests {
     }
 
     #[test]
-    fn audit_daemon_cycle_only_persists_without_trace() {
+    fn audit_row_persists_without_trace() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = SqliteStore::open(&dir.path().join("greenfloor.sqlite")).expect("open");
         let capture = TraceCapture::install();
         let payload = json!({"error_count": 1});
 
-        audit_daemon_cycle_only(&store, DAEMON_CYCLE_SUMMARY, &payload).expect("audit");
+        audit_row(
+            &store,
+            LogContext::DAEMON_CYCLE,
+            DAEMON_CYCLE_SUMMARY,
+            &payload,
+            None,
+            AuditDurability::Required,
+        )
+        .expect("audit");
 
         let events = store
             .list_recent_audit_events(Some(&[DAEMON_CYCLE_SUMMARY]), None, 1)

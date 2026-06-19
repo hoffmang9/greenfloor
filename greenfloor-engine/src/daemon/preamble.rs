@@ -6,8 +6,9 @@ use crate::coinset::get_all_mempool_tx_ids;
 use crate::config::ManagerProgramConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{
-    audit_daemon_cycle, COINSET_MEMPOOL_ERROR, COINSET_MEMPOOL_SNAPSHOT, COINSET_WS_ONCE_ERROR,
-    MEMPOOL_OBSERVED, XCH_PRICE_ERROR, XCH_PRICE_SNAPSHOT,
+    operator_audit, AuditDurability, EmitMode, LogContext, COINSET_MEMPOOL_ERROR,
+    COINSET_MEMPOOL_SNAPSHOT, COINSET_WS_ONCE_ERROR, MEMPOOL_OBSERVED, XCH_PRICE_ERROR,
+    XCH_PRICE_SNAPSHOT,
 };
 use crate::storage::SqliteStore;
 
@@ -35,22 +36,26 @@ pub async fn run_cycle_preamble(
     match fetch_xch_price_usd().await {
         Ok(price) => {
             result.xch_price_usd = Some(price);
-            audit_daemon_cycle(
-                store,
-                Level::INFO,
+            operator_audit(
+                Some(store),
+                LogContext::DAEMON_CYCLE,
+                EmitMode::dual(Level::INFO, "xch price snapshot"),
                 XCH_PRICE_SNAPSHOT,
                 &json!({"price_usd": price}),
-                "xch price snapshot",
+                None,
+                AuditDurability::Required,
             )?;
         }
         Err(err) => {
             result.cycle_error_count += 1;
-            audit_daemon_cycle(
-                store,
-                Level::WARN,
+            operator_audit(
+                Some(store),
+                LogContext::DAEMON_CYCLE,
+                EmitMode::dual(Level::WARN, "xch price fetch failed"),
                 XCH_PRICE_ERROR,
                 &json!({"error": err.to_string()}),
-                "xch price fetch failed",
+                None,
+                AuditDurability::Required,
             )?;
         }
     }
@@ -60,23 +65,27 @@ pub async fn run_cycle_preamble(
             capture_coinset_websocket_once(store, program, coinset_base_url, coin_watchlist).await
         {
             result.cycle_error_count += 1;
-            audit_daemon_cycle(
-                store,
-                Level::WARN,
+            operator_audit(
+                Some(store),
+                LogContext::DAEMON_CYCLE,
+                EmitMode::dual(Level::WARN, "coinset websocket capture failed"),
                 COINSET_WS_ONCE_ERROR,
                 &json!({"error": err.to_string()}),
-                "coinset websocket capture failed",
+                None,
+                AuditDurability::Required,
             )?;
         }
     } else if poll_coinset_mempool {
         if let Err(err) = poll_coinset_mempool_snapshot(store, program, coinset_base_url).await {
             result.cycle_error_count += 1;
-            audit_daemon_cycle(
-                store,
-                Level::WARN,
+            operator_audit(
+                Some(store),
+                LogContext::DAEMON_CYCLE,
+                EmitMode::dual(Level::WARN, "coinset mempool poll failed"),
                 COINSET_MEMPOOL_ERROR,
                 &json!({"error": err.to_string()}),
-                "coinset mempool poll failed",
+                None,
+                AuditDurability::Required,
             )?;
         }
     }
@@ -97,20 +106,24 @@ async fn poll_coinset_mempool_snapshot(
     };
     let tx_ids = get_all_mempool_tx_ids(&program.network, base_opt).await?;
     let new_count = store.observe_mempool_tx_ids(&tx_ids)?;
-    audit_daemon_cycle(
-        store,
-        Level::DEBUG,
+    operator_audit(
+        Some(store),
+        LogContext::DAEMON_CYCLE,
+        EmitMode::dual(Level::DEBUG, "coinset mempool snapshot"),
         COINSET_MEMPOOL_SNAPSHOT,
         &json!({"count": tx_ids.len()}),
-        "coinset mempool snapshot",
+        None,
+        AuditDurability::Required,
     )?;
     if new_count > 0 {
-        audit_daemon_cycle(
-            store,
-            Level::INFO,
+        operator_audit(
+            Some(store),
+            LogContext::DAEMON_CYCLE,
+            EmitMode::dual(Level::INFO, "mempool txs observed"),
             MEMPOOL_OBSERVED,
             &json!({"new_tx_ids": new_count, "source": "coinset_poll"}),
-            "mempool txs observed",
+            None,
+            AuditDurability::Required,
         )?;
     }
     Ok(())

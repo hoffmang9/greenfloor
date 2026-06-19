@@ -6,9 +6,9 @@ use serde_json::Value;
 
 use crate::error::SignerResult;
 use crate::operator_log::{
-    audit_only, DEXIE_OFFERS_ERROR, OFFER_CANCEL_POLICY, OFFER_LIFECYCLE_TRANSITION,
-    OFFER_POST_FAILURE, OFFER_RECONCILIATION, STRATEGY_OFFER_EXECUTION,
-    STRATEGY_OFFER_EXECUTION_ERROR, TAKER_DETECTION,
+    DEXIE_OFFERS_ERROR, OFFER_CANCEL_POLICY, OFFER_LIFECYCLE_TRANSITION, OFFER_POST_FAILURE,
+    OFFER_RECONCILIATION, STRATEGY_OFFER_EXECUTION, STRATEGY_OFFER_EXECUTION_ERROR,
+    TAKER_DETECTION,
 };
 use crate::storage::{AuditEventRow, OfferStateListRow, SqliteStore};
 
@@ -129,6 +129,8 @@ mod tests {
 
     use super::*;
 
+    use crate::operator_log::{audit_row, AuditDurability, LogContext};
+
     #[test]
     fn status_cli_reports_counts_and_events() {
         let dir = tempdir().expect("tempdir");
@@ -140,11 +142,13 @@ mod tests {
         store
             .upsert_offer_state("a2", "m1", "tx_block_confirmed", Some(4))
             .expect("seed");
-        audit_only(
+        audit_row(
             &store,
+            LogContext::DAEMON_CYCLE,
             OFFER_RECONCILIATION,
             &json!({"offer_id": "a2", "new_state": "tx_block_confirmed"}),
             Some("m1"),
+            AuditDurability::Required,
         )
         .expect("audit");
 

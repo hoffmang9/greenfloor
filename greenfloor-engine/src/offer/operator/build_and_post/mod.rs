@@ -16,15 +16,15 @@ use crate::adapters::{DexieClient, SplashClient};
 use crate::async_boundary::BuildAndPostOfferFuture;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::operator::OfferOperatorTestOverrides;
-use crate::storage::{state_db_path_for_home, OfferPostPersistRecord, SqliteStore};
+use crate::storage::{state_db_path_for_home, SqliteStore};
 
 use context::{resolve_build_and_post_context, ResolvedBuildAndPostContext};
 use iteration::run_post_iteration;
 use publish::{
-    log_post_iteration_outcome, persist_post_failure_audits, persist_post_records,
-    trace_offer_post_completed, PostAuditContext, PostFailureAudit,
+    apply_post_iteration_outcome, flush_post_batch, trace_offer_post_completed, PostEmitTarget,
+    PostIterationBatch,
 };
-use types::{build_and_post_exit_code, PostIterationOutcome};
+use types::build_and_post_exit_code;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BuildAndPostVenueOptions {
@@ -86,18 +86,10 @@ pub fn build_and_post_offer(request: BuildAndPostOfferRequest) -> BuildAndPostOf
     Box::pin(build_and_post_offer_async(request))
 }
 
-struct PostIterationBatch {
-    post_results: Vec<Value>,
-    built_offers_preview: Vec<Value>,
-    bootstrap_actions: Vec<Value>,
-    publish_failures: u32,
-    persist_records: Vec<OfferPostPersistRecord>,
-    failure_audits: Vec<PostFailureAudit>,
-}
-
 async fn run_post_iterations(
     request: &BuildAndPostOfferRequest,
     ctx: &ResolvedBuildAndPostContext,
+    target: PostEmitTarget,
     dexie: Option<&DexieClient>,
     splash: Option<&SplashClient>,
 ) -> SignerResult<PostIterationBatch> {
@@ -112,30 +104,7 @@ async fn run_post_iterations(
     for _ in 0..request.repeat {
         let (bootstrap_action, iteration) = run_post_iteration(request, ctx, dexie, splash).await?;
         batch.bootstrap_actions.push(bootstrap_action);
-        if let Some(failure) = log_post_iteration_outcome(ctx, &iteration) {
-            batch.failure_audits.push(failure);
-        }
-        match iteration {
-            PostIterationOutcome::Preview(preview) => {
-                batch.built_offers_preview.push(preview);
-            }
-            PostIterationOutcome::Failure(failure) => {
-                batch.publish_failures += 1;
-                batch
-                    .post_results
-                    .push(failure.to_venue_result(&ctx.publish_venue));
-            }
-            PostIterationOutcome::Success(success) => {
-                if !success.success {
-                    batch.publish_failures += 1;
-                }
-                let venue_result = success.to_venue_result();
-                if let Some(record) = success.persist_record {
-                    batch.persist_records.push(record);
-                }
-                batch.post_results.push(venue_result);
-            }
-        }
+        apply_post_iteration_outcome(target, ctx, iteration, &mut batch);
     }
     Ok(batch)
 }
@@ -182,10 +151,7 @@ async fn build_and_post_offer_async(
     }
 
     let ctx = resolve_build_and_post_context(&request).await?;
-    let audit_ctx = PostAuditContext {
-        persist_results: request.run.persist_results,
-        dry_run: request.run.dry_run,
-    };
+    let target = PostEmitTarget::from_run(request.run.persist_results, request.run.dry_run);
 
     let dexie = if !request.run.dry_run && ctx.publish_venue == "dexie" {
         Some(DexieClient::new(ctx.dexie_base_url.clone()))
@@ -198,12 +164,12 @@ async fn build_and_post_offer_async(
         None
     };
 
-    let batch = run_post_iterations(&request, &ctx, dexie.as_ref(), splash.as_ref()).await?;
+    let batch =
+        run_post_iterations(&request, &ctx, target, dexie.as_ref(), splash.as_ref()).await?;
 
-    if !audit_ctx.traces_only() {
+    if target == PostEmitTarget::TraceAndStore {
         let store = SqliteStore::open(&state_db_path_for_home(&ctx.program.home_dir))?;
-        persist_post_failure_audits(&store, &ctx, &batch.failure_audits)?;
-        persist_post_records(&store, &batch.persist_records)?;
+        flush_post_batch(&store, &ctx, &batch.persist_records, &batch.failure_audits)?;
     }
 
     let payload = build_and_post_payload(&request, &ctx, &batch);

@@ -12,7 +12,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::config::ManagerProgramConfig;
 use crate::operator_log::{
-    audit_coinset, AuditDurability, COINSET_WS_CONNECTED, COINSET_WS_CONNECTING,
+    audit_row, AuditDurability, LogContext, COINSET_WS_CONNECTED, COINSET_WS_CONNECTING,
     COINSET_WS_DISCONNECTED,
 };
 use crate::storage::SqliteStore;
@@ -89,8 +89,9 @@ async fn run_coinset_websocket_loop(
 
     while !stop.load(Ordering::SeqCst) {
         let _ = run_recovery_poll(&store, &program, &coinset_base_url, "connected").await;
-        let _ = audit_coinset(
+        let _ = audit_row(
             &store,
+            LogContext::COINSET,
             COINSET_WS_CONNECTING,
             &json!({"ws_url": ws_url}),
             None,
@@ -98,8 +99,9 @@ async fn run_coinset_websocket_loop(
         );
         match connect_async(&ws_url).await {
             Ok((mut ws, _response)) => {
-                let _ = audit_coinset(
+                let _ = audit_row(
                     &store,
+                    LogContext::COINSET,
                     COINSET_WS_CONNECTED,
                     &json!({"ws_url": ws_url}),
                     None,
@@ -119,8 +121,9 @@ async fn run_coinset_websocket_loop(
                 }
             }
             Err(err) => {
-                let _ = audit_coinset(
+                let _ = audit_row(
                     &store,
+                    LogContext::COINSET,
                     COINSET_WS_DISCONNECTED,
                     &json!({"error": err.to_string()}),
                     None,
