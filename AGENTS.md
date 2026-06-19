@@ -63,9 +63,8 @@ Severity tags:
   Coinset IO uses `greenfloor-engine coinset post` and `coinset push-tx`. Hex helpers use
   `greenfloor-engine hex` via `hex_subprocess`. Config field reads use `greenfloor-manager program-fields`,
   `markets-fields`, and `cats-fields`. KMS public-key fetch uses `greenfloor-engine kms-public-key-compressed-hex`.
-- `[CONTEXT]` Pytest covers script subprocess adapters (`tests/test_script_subprocess.py`);
-  Rust subprocess integration tests cover CLI contracts; operator policy parity is
-  `cargo test --manifest-path greenfloor-engine/Cargo.toml` in CI (ADR 0013).
+- `[CONTEXT]` Rust integration tests cover manager/daemon CLI contracts and operator policy parity
+  (`cargo test --manifest-path greenfloor-engine/Cargo.toml` in CI).
 
 ## Design Constraints
 
@@ -92,7 +91,7 @@ Severity tags:
 ## Before You Commit
 
 - `[MUST]` Python version is 3.11+.
-- `[MUST]` Use venv binaries for Python tooling (for example `.venv/bin/python -m pytest`).
+- `[MUST]` Use venv binaries for Python tooling when running script linters (for example `.venv/bin/ruff`).
 - `[MUST]` Run `pre-commit run --all-files`.
 - `[MUST]` Operator/daemon test expectations: `docs/plan.md` → **Delivery constraints**
   (deterministic branch coverage, injected clocks for wait loops, harness runtime).

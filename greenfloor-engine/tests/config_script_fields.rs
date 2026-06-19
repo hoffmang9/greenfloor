@@ -3,13 +3,11 @@ use serde_json::Value;
 #[path = "fixtures/manager.rs"]
 mod manager_fixtures;
 
-use manager_fixtures::{copy_example_program_and_markets, repo_root, run_manager};
+#[path = "fixtures/json_util.rs"]
+mod json_util;
 
-fn parse_json_output(stdout: &[u8]) -> Value {
-    let text = std::str::from_utf8(stdout).expect("utf8 stdout").trim();
-    let start = text.find('{').unwrap_or(0);
-    serde_json::from_str(&text[start..]).expect("parse manager json stdout")
-}
+use json_util::parse_json_output;
+use manager_fixtures::{copy_example_program_and_markets, repo_root, run_manager};
 
 #[test]
 fn manager_program_fields_reads_example_program() {

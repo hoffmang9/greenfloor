@@ -78,13 +78,12 @@ Coin-op notes:
 
 ## Delivery constraints
 
-- Python 3.11+ for dev tooling and tests.
-- Required checks: `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`, `pytest`
-  (script adapters and subprocess harnesses; ~52 tests).
-- Rust: `cargo test` in `greenfloor-engine/` (operator config and policy parity safety net).
+- Python 3.11+ for dev tooling (script lint/type-check).
+- Required checks: `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`
+- Rust: `cargo test` in `greenfloor-engine/` (operator config, CLI contracts, and policy parity safety net).
 - Local gate: `pre-commit run --all-files` (lint + pyright + formatters; ~5–10s warm with
-  `PRE_COMMIT_HOME=.cache/pre-commit`). Run `cargo fmt`, `cargo clippy`, `cargo test`, and
-  `pytest` separately before push — same split as CI.
+  `PRE_COMMIT_HOME=.cache/pre-commit`). Run `cargo fmt`, `cargo clippy`, and
+  `cargo test --manifest-path greenfloor-engine/Cargo.toml` separately before push — same split as CI.
 
 **Deterministic tests (Rust operator paths):**
 

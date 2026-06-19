@@ -12,7 +12,7 @@ use super::offers::{
     OffersCancelCliArgs, OffersReconcileCliArgs, OffersStatusCliArgs,
 };
 use super::util::require_market_selector;
-use super::{cats, coin_op_loop, keys, setup};
+use super::{cats, coin_op_loop, combine_market_cat_dust, keys, setup};
 use crate::cli_util::optional_str;
 
 pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
@@ -296,6 +296,36 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
                 until_ready,
                 max_iterations,
             })
+            .await
+        }
+        ManagerCommands::CombineMarketCatDust {
+            network,
+            coinset_base_url,
+            launcher_id,
+            launcher_id_file,
+            dust_threshold_mojos,
+            max_input_coins,
+            max_nonce,
+            cat_asset_id,
+            dry_run,
+            list_only,
+        } => {
+            combine_market_cat_dust::run_combine_market_cat_dust(
+                combine_market_cat_dust::CombineMarketCatDustRequest {
+                    mgr: &ctx,
+                    network: optional_str(&network),
+                    coinset_base_url: optional_str(&coinset_base_url),
+                    launcher_id: optional_str(&launcher_id),
+                    launcher_id_file: optional_str(&launcher_id_file),
+                    dust_threshold_mojos,
+                    max_input_coins,
+                    max_nonce,
+                    cat_asset_id: optional_str(&cat_asset_id),
+                    execution: combine_market_cat_dust::CombineExecution::from_flags(
+                        list_only, dry_run,
+                    ),
+                },
+            )
             .await
         }
     }

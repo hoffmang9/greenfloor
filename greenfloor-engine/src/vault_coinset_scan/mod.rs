@@ -3,6 +3,8 @@
 pub mod cat_detect;
 pub mod checkpoint;
 pub mod cli;
+pub mod dust;
+pub mod launcher;
 pub mod metadata;
 pub mod request;
 pub mod result;
@@ -11,6 +13,13 @@ pub mod types;
 pub mod window;
 
 pub use cli::{run_vault_coinset_scan_command, VaultCoinsetScanCliArgs};
-pub use request::ScanRequest;
+pub use dust::{dust_coins_from_scan, plan_dust_batches, DustBatchPlan, DustCoin};
+pub use launcher::{
+    cache_resolved_launcher_id, resolve_launcher_id, LauncherIdSource, ResolveLauncherIdParams,
+    ResolvedLauncherId,
+};
+pub use request::{
+    build_cat_dust_scan_request, CatDustScanParams, ScanRequest, ScanTuningDefaults,
+};
 pub use result::ScanResult;
 pub use state::ScanState;

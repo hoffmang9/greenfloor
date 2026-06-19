@@ -137,7 +137,6 @@ Full gate before push (Rust fmt/clippy via pre-commit — `clippy::all` + `clipp
 
 ```bash
 cargo test --manifest-path greenfloor-engine/Cargo.toml
-pytest
 ```
 
 ## Environment Variables

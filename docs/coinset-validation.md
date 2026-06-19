@@ -67,14 +67,15 @@ greenfloor-manager coins-list --asset wUSDC.b
 
 These use the Rust engine Coinset client against the market receive address scope.
 
-## 4) CAT dust combine (script)
+## 4) CAT dust combine (manager)
 
 For sub-unit CAT dust on enabled markets:
 
 ```bash
-.venv/bin/python scripts/combine_market_cat_dust_coinset.py \
+PATH="$(pwd)/.venv/bin:$PATH" greenfloor-manager combine-market-cat-dust \
   --program-config ~/.greenfloor/config/program.yaml \
   --markets-config ~/.greenfloor/config/markets.yaml \
+  --json \
   --dry-run
 ```
 

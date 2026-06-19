@@ -235,4 +235,31 @@ pub enum ManagerCommands {
         #[arg(long)]
         no_wait: bool,
     },
+    #[command(group(
+        clap::ArgGroup::new("combine_execution")
+            .args(["dry_run", "list_only"])
+            .multiple(false)
+    ))]
+    CombineMarketCatDust {
+        #[arg(long, default_value = "")]
+        network: String,
+        #[arg(long, default_value = "")]
+        coinset_base_url: String,
+        #[arg(long, default_value = "")]
+        launcher_id: String,
+        #[arg(long, default_value = "~/.greenfloor/cache/vault_launcher_id.txt")]
+        launcher_id_file: String,
+        #[arg(long, default_value_t = 1000)]
+        dust_threshold_mojos: u64,
+        #[arg(long, default_value_t = 10)]
+        max_input_coins: usize,
+        #[arg(long, default_value_t = 120)]
+        max_nonce: u32,
+        #[arg(long, default_value = "")]
+        cat_asset_id: String,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        list_only: bool,
+    },
 }

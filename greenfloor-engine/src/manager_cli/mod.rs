@@ -3,6 +3,7 @@
 mod cats;
 mod cats_catalog;
 mod coin_op_loop;
+mod combine_market_cat_dust;
 mod commands;
 mod context;
 mod dispatch;

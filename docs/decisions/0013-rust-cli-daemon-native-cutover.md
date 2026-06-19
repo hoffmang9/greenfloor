@@ -54,8 +54,8 @@ from the index; see git history for the full record.
 6. **Policy parity safety net.** With PyO3 and Python policy bridges removed,
    operator correctness is enforced by `cargo test --manifest-path
 greenfloor-engine/Cargo.toml` in CI (`ubuntu-latest` matrix job). Python pytest
-   covers script adapters, SQLite test helpers, and subprocess integration harnesses;
-   it does not re-test Rust policy or conservative-fee parsing.
+   covers script adapters and subprocess integration harnesses; it does not re-test Rust policy
+   or conservative-fee parsing. (Python pytest harness removed 2026-06; operator tests are Rust-only.)
 
 ## Command ownership
 
@@ -67,6 +67,7 @@ greenfloor-engine/Cargo.toml` in CI (`ubuntu-latest` matrix job). Python pytest
 | `materialize-minimal-program`                                  | `greenfloor-manager` (test/fixture) |
 | `build-and-post-offer`, `offers-*`                             | `greenfloor-manager` → Rust engine  |
 | `coins-list`, `coin-status`, `coin-split`, `coin-combine`      | `greenfloor-manager` (Rust)         |
+| `combine-market-cat-dust`                                      | `greenfloor-manager` (Rust)         |
 | `keys-onboard`, `cats-*`                                       | `greenfloor-manager` (Rust)         |
 
 ## Consequences
