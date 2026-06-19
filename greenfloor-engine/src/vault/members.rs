@@ -368,10 +368,16 @@ mod tests {
     #[test]
     fn singleton_member_puzzle_hash_hex_from_launcher_id_normalizes_input() {
         let launcher = "ab".repeat(32);
-        let hex = singleton_member_puzzle_hash_hex_from_launcher_id(&launcher, 0).expect("hex");
-        let bytes = hex_to_bytes32(&hex).expect("bytes");
-        let direct = singleton_member_puzzle_hash_hex(bytes, 0).expect("direct");
-        assert_eq!(hex, direct);
+        let from_string =
+            singleton_member_puzzle_hash_hex_from_launcher_id(&launcher, 0).expect("hex");
+        let launcher_bytes = hex_to_bytes32(&launcher).expect("launcher bytes");
+        let direct = singleton_member_puzzle_hash_hex(launcher_bytes, 0).expect("direct");
+        assert_eq!(from_string, direct);
+
+        let from_prefixed =
+            singleton_member_puzzle_hash_hex_from_launcher_id(&format!("0x{launcher}"), 0)
+                .expect("prefixed");
+        assert_eq!(from_string, from_prefixed);
     }
 
     #[test]
