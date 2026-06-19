@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -39,6 +38,7 @@ struct ScanWindowFields {
     end_height: Option<u64>,
 }
 
+#[derive(Debug)]
 pub struct LoadedCheckpoint {
     pub start_nonce: u32,
     pub nonce_to_p2: HashMap<u32, String>,
@@ -46,12 +46,25 @@ pub struct LoadedCheckpoint {
     pub cat_asset_cache: HashMap<String, String>,
     pub parent_lineage_cache: HashMap<String, ParentLineageEntry>,
     pub last_synced_height: Option<u64>,
+    pub discarded_mismatch: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct ParentLineageEntry {
     pub spent_height: u64,
     pub child_asset_ids: HashMap<String, String>,
+}
+
+fn empty_checkpoint(discarded_mismatch: bool) -> LoadedCheckpoint {
+    LoadedCheckpoint {
+        start_nonce: 0,
+        nonce_to_p2: HashMap::new(),
+        by_coin_id: HashMap::new(),
+        cat_asset_cache: HashMap::new(),
+        parent_lineage_cache: HashMap::new(),
+        last_synced_height: None,
+        discarded_mismatch,
+    }
 }
 
 pub fn clear_cache_files(paths: &[String]) -> BTreeMap<String, String> {
@@ -64,7 +77,7 @@ pub fn clear_cache_files(paths: &[String]) -> BTreeMap<String, String> {
         let path = expand_home(Path::new(clean));
         let key = path.display().to_string();
         if path.exists() {
-            match fs::remove_file(&path) {
+            match std::fs::remove_file(&path) {
                 Ok(()) => {
                     results.insert(key, "deleted".to_string());
                 }
@@ -84,29 +97,30 @@ pub fn load_scan_checkpoint(
     network: &str,
     launcher_id: &str,
     include_spent: bool,
-) -> LoadedCheckpoint {
-    let empty = LoadedCheckpoint {
-        start_nonce: 0,
-        nonce_to_p2: HashMap::new(),
-        by_coin_id: HashMap::new(),
-        cat_asset_cache: HashMap::new(),
-        parent_lineage_cache: HashMap::new(),
-        last_synced_height: None,
-    };
-    let Ok(raw) = fs::read_to_string(checkpoint_file) else {
-        return empty;
-    };
-    let Ok(parsed) = serde_json::from_str::<ScanCheckpointFile>(&raw) else {
-        return empty;
-    };
+) -> SignerResult<LoadedCheckpoint> {
+    if !checkpoint_file.exists() {
+        return Ok(empty_checkpoint(false));
+    }
+    let raw = std::fs::read_to_string(checkpoint_file).map_err(|err| {
+        SignerError::Other(format!(
+            "read checkpoint {}: {err}",
+            checkpoint_file.display()
+        ))
+    })?;
+    let parsed: ScanCheckpointFile = serde_json::from_str(&raw).map_err(|err| {
+        SignerError::Other(format!(
+            "parse checkpoint json {}: {err}",
+            checkpoint_file.display()
+        ))
+    })?;
     if normalize_hex_id(&parsed.launcher_id) != normalize_hex_id(launcher_id) {
-        return empty;
+        return Ok(empty_checkpoint(true));
     }
     if !parsed.network.trim().eq_ignore_ascii_case(network.trim()) {
-        return empty;
+        return Ok(empty_checkpoint(true));
     }
     if parsed.include_spent != include_spent {
-        return empty;
+        return Ok(empty_checkpoint(true));
     }
 
     let nonce_to_p2 = parsed
@@ -177,14 +191,15 @@ pub fn load_scan_checkpoint(
 
     let last_synced_height = parsed.last_synced_height;
     let start_nonce = parsed.max_nonce_completed.saturating_add(1);
-    LoadedCheckpoint {
+    Ok(LoadedCheckpoint {
         start_nonce,
         nonce_to_p2,
         by_coin_id,
         cat_asset_cache,
         parent_lineage_cache,
         last_synced_height,
-    }
+        discarded_mismatch: false,
+    })
 }
 
 pub struct SaveCheckpointParams<'a> {
@@ -204,7 +219,7 @@ pub struct SaveCheckpointParams<'a> {
 
 pub fn save_scan_checkpoint(params: &SaveCheckpointParams<'_>) -> SignerResult<()> {
     if let Some(parent) = params.checkpoint_file.parent() {
-        fs::create_dir_all(parent)
+        std::fs::create_dir_all(parent)
             .map_err(|err| SignerError::Other(format!("create checkpoint dir: {err}")))?;
     }
     let mut coin_rows: Vec<CoinRow> = params.by_coin_id.values().cloned().collect();
@@ -256,7 +271,7 @@ pub fn save_scan_checkpoint(params: &SaveCheckpointParams<'_>) -> SignerResult<(
             })
             .collect(),
     };
-    fs::write(
+    std::fs::write(
         params.checkpoint_file,
         serde_json::to_string_pretty(&payload)
             .map_err(|err| SignerError::Other(format!("encode checkpoint json: {err}")))?,
@@ -267,16 +282,16 @@ pub fn save_scan_checkpoint(params: &SaveCheckpointParams<'_>) -> SignerResult<(
 
 pub fn write_launcher_id_file(path: &Path, launcher_id: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent)?;
     }
-    fs::write(path, format!("{launcher_id}\n"))
+    std::fs::write(path, format!("{launcher_id}\n"))
 }
 
 pub fn read_launcher_id_file(path: &Path) -> String {
     if !path.exists() {
         return String::new();
     }
-    let Ok(raw) = fs::read_to_string(path) else {
+    let Ok(raw) = std::fs::read_to_string(path) else {
         return String::new();
     };
     normalize_hex_id(raw.trim())
@@ -329,15 +344,16 @@ mod tests {
             scan_end_height: Some(100),
         })
         .expect("save checkpoint");
-        let loaded = load_scan_checkpoint(&path, "mainnet", &launcher, false);
+        let loaded = load_scan_checkpoint(&path, "mainnet", &launcher, false).expect("load");
         assert_eq!(loaded.start_nonce, 2);
         assert_eq!(loaded.last_synced_height, Some(100));
         assert_eq!(loaded.by_coin_id.len(), 1);
         assert!(loaded.by_coin_id.contains_key(&coin_id));
+        assert!(!loaded.discarded_mismatch);
     }
 
     #[test]
-    fn checkpoint_mismatch_resets_state() {
+    fn checkpoint_mismatch_discards_with_reason_flag() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("checkpoint.json");
         let launcher = "a".repeat(64);
@@ -356,16 +372,27 @@ mod tests {
             scan_end_height: None,
         })
         .expect("save checkpoint");
-        let loaded = load_scan_checkpoint(&path, "testnet11", &launcher, false);
+        let loaded = load_scan_checkpoint(&path, "testnet11", &launcher, false).expect("load");
         assert_eq!(loaded.start_nonce, 0);
         assert!(loaded.by_coin_id.is_empty());
+        assert!(loaded.discarded_mismatch);
+    }
+
+    #[test]
+    fn checkpoint_invalid_json_errors() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("checkpoint.json");
+        std::fs::write(&path, "{not json").expect("write");
+        let err = load_scan_checkpoint(&path, "mainnet", &"a".repeat(64), false)
+            .expect_err("invalid json");
+        assert!(err.to_string().contains("parse checkpoint json"));
     }
 
     #[test]
     fn clear_cache_files_reports_missing_and_deleted() {
         let dir = tempfile::tempdir().expect("tempdir");
         let existing = dir.path().join("exists.txt");
-        fs::write(&existing, "x").expect("write file");
+        std::fs::write(&existing, "x").expect("write file");
         let missing = dir.path().join("missing.txt");
         let results = clear_cache_files(&[
             existing.display().to_string(),

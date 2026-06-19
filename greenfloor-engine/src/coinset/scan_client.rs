@@ -1,14 +1,10 @@
 //! Retry-backed direct Coinset HTTP client for script-style JSON RPC.
 
-use std::time::Duration;
-
-use rand::Rng;
 use serde_json::{json, Value};
 
-use crate::cli_util::script_engine_error_retryable;
 use crate::coinset::parse::{chunk_values, coin_id_from_record, to_coinset_hex, u64_from_value};
-use crate::coinset::{post_coinset_coin_records, post_coinset_record};
-use crate::error::{SignerError, SignerResult};
+use crate::coinset::{post_coinset_coin_records, post_coinset_record, with_script_retries};
+use crate::error::SignerResult;
 use crate::vault::members::hex_to_bytes32;
 
 fn apply_height_fields(body: &mut Value, start_height: Option<u64>, end_height: Option<u64>) {
@@ -39,29 +35,6 @@ impl DirectCoinsetScanClient {
         }
     }
 
-    async fn with_retries<T, F, Fut>(&self, mut operation: F) -> SignerResult<T>
-    where
-        F: FnMut() -> Fut,
-        Fut: std::future::Future<Output = SignerResult<T>>,
-    {
-        let mut delay = 0.8f64;
-        for attempt in 1..=4usize {
-            match operation().await {
-                Ok(value) => return Ok(value),
-                Err(err) if attempt < 4 && script_engine_error_retryable(&err) => {
-                    let jitter = rand::rng().random_range(-0.25..=0.25);
-                    tokio::time::sleep(Duration::from_secs_f64((delay * (1.0 + jitter)).max(0.05)))
-                        .await;
-                    delay = (delay * 2.0).min(8.0);
-                }
-                Err(err) => return Err(err),
-            }
-        }
-        Err(SignerError::Other(
-            "coinset retry logic unreachable".to_string(),
-        ))
-    }
-
     async fn coin_records(
         &self,
         endpoint: &str,
@@ -72,7 +45,7 @@ impl DirectCoinsetScanClient {
         apply_height_fields(&mut body, start_height, end_height);
         let network = self.network.clone();
         let base_url = self.base_url.clone();
-        self.with_retries(|| async {
+        with_script_retries(|| async {
             post_coinset_coin_records(&network, base_url.as_deref(), endpoint, body.clone()).await
         })
         .await
@@ -82,7 +55,7 @@ impl DirectCoinsetScanClient {
         let network = self.network.clone();
         let base_url = self.base_url.clone();
         let key = key.to_string();
-        self.with_retries(|| async {
+        with_script_retries(|| async {
             post_coinset_record(&network, base_url.as_deref(), endpoint, body.clone(), &key).await
         })
         .await

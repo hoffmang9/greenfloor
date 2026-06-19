@@ -7,7 +7,6 @@ use crate::coinset::{
     to_coinset_hex, u64_from_value, DirectCoinsetScanClient,
 };
 use crate::error::SignerResult;
-use crate::vault::members::hex_to_bytes32;
 use crate::vault_coinset_scan::checkpoint::ParentLineageEntry;
 use crate::vault_coinset_scan::types::{CoinKind, CoinRow};
 
@@ -98,24 +97,11 @@ async fn resolve_parent_children(
         return Ok(());
     }
 
-    let parent_record = if let Some(cached) = caches.parent_record_cache.get(parent_id) {
-        cached.clone()
-    } else {
-        let parent_bytes = hex_to_bytes32(parent_id).ok();
-        let lookup = match parent_bytes {
-            Some(bytes) => {
-                scanner
-                    .by_names(&[to_coinset_hex(bytes.as_ref())], true, None, None)
-                    .await?
-            }
-            None => Vec::new(),
-        };
-        let parent_record = lookup.into_iter().next();
-        caches
-            .parent_record_cache
-            .insert(parent_id.to_string(), parent_record.clone());
-        parent_record
-    };
+    let parent_record = caches
+        .parent_record_cache
+        .get(parent_id)
+        .cloned()
+        .unwrap_or(None);
 
     let Some(parent_record) = parent_record else {
         for child_id in child_ids {
@@ -239,11 +225,11 @@ mod tests {
     #[test]
     fn classify_xch_when_puzzle_matches_member_hash() {
         let mut nonce_to_p2 = HashMap::new();
-        let puzzle = "aa".repeat(64);
+        let puzzle = "a".repeat(64);
         nonce_to_p2.insert(0, puzzle.clone());
         assert!(classify_xch_or_other(&puzzle, &nonce_to_p2, &[0]));
         assert!(!classify_xch_or_other(
-            "bb".repeat(64).as_str(),
+            "b".repeat(64).as_str(),
             &nonce_to_p2,
             &[0]
         ));

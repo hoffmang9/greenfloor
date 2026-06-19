@@ -8,7 +8,7 @@ use greenfloor_engine::vault::members::{
     hex_to_bytes32, singleton_member_hash, tree_hash_to_hex, MemberConfig,
 };
 use greenfloor_engine::vault_coinset_scan::request::ScanRequest;
-use greenfloor_engine::vault_coinset_scan::scan::run_vault_coinset_scan;
+use greenfloor_engine::vault_coinset_scan::run_vault_coinset_scan;
 use greenfloor_engine::vault_coinset_scan::types::{AssetTypeFilter, CoinKind};
 use mockito::Matcher;
 use serde_json::json;

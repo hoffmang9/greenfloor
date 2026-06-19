@@ -28,20 +28,3 @@ pub struct ScanRequest {
     pub testnet_markets_config: Option<PathBuf>,
     pub cache_clear: Option<BTreeMap<String, String>>,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LauncherIdSource {
-    Arg,
-    File,
-    ProgramConfig,
-}
-
-impl LauncherIdSource {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Arg => "arg",
-            Self::File => "file",
-            Self::ProgramConfig => "program_config",
-        }
-    }
-}

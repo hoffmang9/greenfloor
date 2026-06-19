@@ -7,6 +7,7 @@ use crate::coinset::{
     chunk_values, coin_id_from_record, resolve_direct_client, to_coinset_hex, u64_from_value,
     DirectCoinsetScanClient,
 };
+use crate::config::build_cat_ticker_index;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::vault::members::{
@@ -17,12 +18,15 @@ use crate::vault_coinset_scan::checkpoint::{
     load_scan_checkpoint, save_scan_checkpoint, LoadedCheckpoint, ParentLineageEntry,
     SaveCheckpointParams,
 };
-use crate::vault_coinset_scan::metadata::{load_cat_metadata_indexes, resolve_requested_cat_ids};
+use crate::vault_coinset_scan::metadata::resolve_requested_cat_ids;
 use crate::vault_coinset_scan::request::ScanRequest;
 use crate::vault_coinset_scan::result::{
-    filter_rows, NameVerification, ScanResult, ScanResultParams,
+    filter_rows, CheckpointSummary, NameVerification, ScanBatchConfig, ScanCoinOutput, ScanResult,
+    ScanWindowSummary,
 };
-use crate::vault_coinset_scan::types::{AssetTypeFilter, CoinKind, CoinRow, ScanStopReason};
+use crate::vault_coinset_scan::types::{
+    AssetTypeFilter, CoinKind, CoinRow, DiscoverySource, ScanStopReason,
+};
 use crate::vault_coinset_scan::window::{resolve_scan_window, ScanWindowPlan};
 
 pub struct ScanState {
@@ -35,6 +39,7 @@ pub struct ScanState {
     asset_id_to_symbols: BTreeMap<String, Vec<String>>,
     checkpoint_enabled: bool,
     checkpoint_resumed: bool,
+    checkpoint_discarded_mismatch: bool,
     checkpoint_start_nonce: u32,
     nonce_to_p2: HashMap<u32, String>,
     by_coin_id: HashMap<String, CoinRow>,
@@ -42,6 +47,10 @@ pub struct ScanState {
     parent_lineage_cache: HashMap<String, ParentLineageEntry>,
     window: ScanWindowPlan,
     stop_reason: ScanStopReason,
+}
+
+pub async fn run_vault_coinset_scan(request: ScanRequest) -> SignerResult<ScanResult> {
+    ScanState::run(request).await
 }
 
 impl ScanState {
@@ -52,7 +61,6 @@ impl ScanState {
             return Ok(state.finish(Vec::new(), None));
         }
         state.scan_nonces().await?;
-        state.prefetch_parent_records().await?;
         state.classify_rows().await?;
         let name_verification = state.verify_and_filter_names().await?;
         state.save_final_checkpoint()?;
@@ -69,7 +77,7 @@ impl ScanState {
         let scanner =
             DirectCoinsetScanClient::new(resolved.network, Some(resolved.base_url.as_str()));
 
-        let (ticker_to_asset_ids, asset_id_to_symbols) = load_cat_metadata_indexes(
+        let (ticker_to_asset_ids, asset_id_to_symbols) = build_cat_ticker_index(
             &request.cats_config,
             &request.markets_config,
             request.testnet_markets_config.as_deref(),
@@ -106,27 +114,14 @@ impl ScanState {
         let launcher_bytes = hex_to_bytes32(&launcher_id)?;
 
         let checkpoint_enabled = request.checkpoint_file.is_some();
-        let mut checkpoint_resumed = false;
-        let LoadedCheckpoint {
-            start_nonce: checkpoint_start_nonce,
-            nonce_to_p2,
-            by_coin_id,
-            cat_asset_cache,
-            parent_lineage_cache,
-            last_synced_height: checkpoint_last_synced_height,
-        } = if checkpoint_enabled && !request.no_resume_checkpoint {
+        let loaded = if checkpoint_enabled && !request.no_resume_checkpoint {
             let checkpoint_file = request.checkpoint_file.as_ref().expect("checkpoint file");
-            let loaded = load_scan_checkpoint(
+            load_scan_checkpoint(
                 checkpoint_file,
                 resolved.network,
                 &launcher_id,
                 request.include_spent,
-            );
-            checkpoint_resumed = loaded.start_nonce > 0
-                || !loaded.by_coin_id.is_empty()
-                || !loaded.cat_asset_cache.is_empty()
-                || !loaded.parent_lineage_cache.is_empty();
-            loaded
+            )?
         } else {
             LoadedCheckpoint {
                 start_nonce: 0,
@@ -135,8 +130,24 @@ impl ScanState {
                 cat_asset_cache: HashMap::new(),
                 parent_lineage_cache: HashMap::new(),
                 last_synced_height: None,
+                discarded_mismatch: false,
             }
         };
+        let checkpoint_discarded_mismatch = loaded.discarded_mismatch;
+        let checkpoint_resumed = !loaded.discarded_mismatch
+            && (loaded.start_nonce > 0
+                || !loaded.by_coin_id.is_empty()
+                || !loaded.cat_asset_cache.is_empty()
+                || !loaded.parent_lineage_cache.is_empty());
+        let LoadedCheckpoint {
+            start_nonce: checkpoint_start_nonce,
+            nonce_to_p2,
+            by_coin_id,
+            cat_asset_cache,
+            parent_lineage_cache,
+            last_synced_height: checkpoint_last_synced_height,
+            ..
+        } = loaded;
 
         if request.incremental_from_checkpoint && !checkpoint_enabled {
             return Err(SignerError::Other(
@@ -169,6 +180,7 @@ impl ScanState {
             asset_id_to_symbols,
             checkpoint_enabled,
             checkpoint_resumed,
+            checkpoint_discarded_mismatch,
             checkpoint_start_nonce,
             nonce_to_p2,
             by_coin_id,
@@ -197,24 +209,23 @@ impl ScanState {
             let batch_nonce_p2 = self.build_batch_nonce_p2(&batch_nonces)?;
             let p2_hashes = Self::coinset_p2_hashes(&batch_nonce_p2);
 
-            let by_puzzle = self
-                .scanner
-                .by_puzzle_hashes(
+            let (by_puzzle, by_hint) = tokio::join!(
+                self.scanner.by_puzzle_hashes(
                     &p2_hashes,
                     self.request.include_spent,
                     self.window.effective_start_height,
                     self.window.effective_end_height,
-                )
-                .await?;
-            let by_hint = self
-                .scanner
-                .by_hints(
+                ),
+                self.scanner.by_hints(
                     &p2_hashes,
                     self.request.include_spent,
                     self.window.effective_start_height,
                     self.window.effective_end_height,
-                )
-                .await?;
+                ),
+            );
+            let by_puzzle = by_puzzle?;
+            let by_hint = by_hint?;
+
             let batch_has_any = !by_puzzle.is_empty() || !by_hint.is_empty();
             if batch_end > 0 && !batch_has_any {
                 empty_batch_count = empty_batch_count.saturating_add(1);
@@ -232,10 +243,15 @@ impl ScanState {
             ingest_records(
                 &mut self.by_coin_id,
                 &batch_nonce_p2,
-                "puzzle_hash",
+                DiscoverySource::PuzzleHash,
                 &by_puzzle,
             );
-            ingest_records(&mut self.by_coin_id, &batch_nonce_p2, "hint", &by_hint);
+            ingest_records(
+                &mut self.by_coin_id,
+                &batch_nonce_p2,
+                DiscoverySource::Hint,
+                &by_hint,
+            );
 
             scanned_since_resume = scanned_since_resume
                 .saturating_add(u32::try_from(batch_nonces.len()).unwrap_or(u32::MAX));
@@ -279,7 +295,7 @@ impl ScanState {
             .collect()
     }
 
-    async fn prefetch_parent_records(&mut self) -> SignerResult<HashMap<String, Value>> {
+    async fn prefetch_parent_records(&self) -> SignerResult<HashMap<String, Option<Value>>> {
         let unresolved_parent_ids: Vec<String> = self
             .by_coin_id
             .values()
@@ -294,7 +310,11 @@ impl ScanState {
             .into_iter()
             .collect();
 
-        let mut parent_record_cache: HashMap<String, Value> = HashMap::new();
+        let mut parent_record_cache: HashMap<String, Option<Value>> = unresolved_parent_ids
+            .iter()
+            .map(|parent_id| (parent_id.clone(), None))
+            .collect();
+
         for parent_batch in chunk_values(
             &unresolved_parent_ids,
             self.request.parent_lookup_batch_size as usize,
@@ -318,7 +338,7 @@ impl ScanState {
             for parent in parent_records {
                 let parent_id = coin_id_from_record(&parent);
                 if !parent_id.is_empty() {
-                    parent_record_cache.insert(parent_id, parent);
+                    parent_record_cache.insert(parent_id, Some(parent));
                 }
             }
         }
@@ -326,15 +346,11 @@ impl ScanState {
     }
 
     async fn classify_rows(&mut self) -> SignerResult<()> {
-        let parent_record_cache = self.prefetch_parent_records().await?;
         let mut detect_caches = CatDetectCaches::new(
             std::mem::take(&mut self.cat_asset_cache),
             std::mem::take(&mut self.parent_lineage_cache),
         );
-        detect_caches.parent_record_cache = parent_record_cache
-            .into_iter()
-            .map(|(key, value)| (key, Some(value)))
-            .collect();
+        detect_caches.parent_record_cache = self.prefetch_parent_records().await?;
 
         classify_coin_rows(
             &self.scanner,
@@ -405,30 +421,68 @@ impl ScanState {
         filtered: Vec<CoinRow>,
         name_verification: Option<NameVerification>,
     ) -> ScanResult {
-        ScanResult::build(ScanResultParams {
-            scanner: &self.scanner,
-            request: &self.request,
-            launcher_id: &self.launcher_id,
-            effective_asset_type: self.effective_asset_type,
-            requested_cat_ids: &self.requested_cat_ids,
-            nonce_to_p2: &self.nonce_to_p2,
-            cat_asset_cache: &self.cat_asset_cache,
-            parent_lineage_cache: &self.parent_lineage_cache,
-            checkpoint_enabled: self.checkpoint_enabled,
-            checkpoint_resumed: self.checkpoint_resumed,
-            checkpoint_start_nonce: self.checkpoint_start_nonce,
-            window: &self.window,
-            stop_reason: self.stop_reason,
-            filtered,
+        let max_nonce_scanned = self.nonce_to_p2.keys().copied().max().unwrap_or(0);
+        let mut requested_cat_ids: Vec<String> = self.requested_cat_ids.into_iter().collect();
+        requested_cat_ids.sort();
+        let mut requested_cat_tickers = self.request.requested_cat_tickers;
+        requested_cat_tickers.sort();
+        requested_cat_tickers.dedup();
+
+        ScanResult {
+            network: self.scanner.network,
+            coinset_base_url: self.scanner.base_url,
+            launcher_id: self.launcher_id,
+            asset_type: self.effective_asset_type,
+            requested_cat_ids,
+            requested_cat_tickers,
+            max_nonce_scanned,
+            count: filtered.len(),
             name_verification,
-        })
+            cache_clear: self.request.cache_clear,
+            checkpoint: CheckpointSummary {
+                enabled: self.checkpoint_enabled,
+                file: self
+                    .request
+                    .checkpoint_file
+                    .map(|path| path.display().to_string()),
+                resumed: self.checkpoint_resumed,
+                start_nonce: self.checkpoint_start_nonce,
+                save_interval: if self.checkpoint_enabled {
+                    Some(self.request.checkpoint_save_interval)
+                } else {
+                    None
+                },
+                cat_asset_cache_entries: self.cat_asset_cache.len(),
+                parent_lineage_cache_entries: self.parent_lineage_cache.len(),
+                last_synced_height: self.window.checkpoint_synced_height,
+                discard_reason: if self.checkpoint_discarded_mismatch {
+                    Some("checkpoint_params_mismatch".to_string())
+                } else {
+                    None
+                },
+            },
+            scan_batches: ScanBatchConfig {
+                nonce_batch_size: self.request.nonce_batch_size,
+                empty_batch_stop_count: self.request.empty_batch_stop_count,
+                parent_lookup_batch_size: self.request.parent_lookup_batch_size,
+            },
+            scan_window: ScanWindowSummary {
+                start_height: self.window.effective_start_height,
+                end_height: self.window.effective_end_height,
+                chain_peak_height: self.window.chain_peak_height,
+                incremental_from_checkpoint: self.request.incremental_from_checkpoint,
+                auto_increment: self.request.auto_increment,
+            },
+            scan_stop_reason: self.stop_reason,
+            coins: filtered.into_iter().map(ScanCoinOutput::from).collect(),
+        }
     }
 }
 
 fn ingest_records(
     by_coin_id: &mut HashMap<String, CoinRow>,
     batch_nonce_p2: &HashMap<u32, String>,
-    source: &str,
+    source: DiscoverySource,
     records: &[Value],
 ) {
     for record in records {
@@ -467,11 +521,9 @@ fn ingest_records(
             }
         }
         row.discovered_nonces.sort_unstable();
-        if source == "puzzle_hash" {
-            row.discovered_by_puzzle_hash = true;
-        }
-        if source == "hint" {
-            row.discovered_by_hint = true;
+        match source {
+            DiscoverySource::PuzzleHash => row.discovered_by_puzzle_hash = true,
+            DiscoverySource::Hint => row.discovered_by_hint = true,
         }
     }
 }
@@ -498,7 +550,12 @@ mod tests {
         let mut by_coin_id = HashMap::new();
         let mut batch_nonce_p2 = HashMap::new();
         batch_nonce_p2.insert(0, puzzle.clone());
-        ingest_records(&mut by_coin_id, &batch_nonce_p2, "puzzle_hash", &[record]);
+        ingest_records(
+            &mut by_coin_id,
+            &batch_nonce_p2,
+            DiscoverySource::PuzzleHash,
+            &[record],
+        );
         assert_eq!(by_coin_id.len(), 1);
         let row = by_coin_id.values().next().expect("row");
         assert!(row.discovered_by_puzzle_hash);

@@ -62,8 +62,9 @@ fn subprocess_vault_coinset_scan_resolve_launcher_id_only_requires_config() {
 
 #[test]
 fn vault_coinset_scan_metadata_helpers_in_lib() {
+    use greenfloor_engine::config::normalize_label;
     use greenfloor_engine::vault_coinset_scan::metadata::{
-        normalize_label, parse_csv_values, resolve_requested_cat_ids,
+        parse_csv_values, resolve_requested_cat_ids,
     };
     use std::collections::{HashMap, HashSet};
 
@@ -125,7 +126,7 @@ fn vault_coinset_scan_checkpoint_round_trip_via_lib() {
         scan_end_height: Some(100),
     })
     .expect("save checkpoint");
-    let loaded = load_scan_checkpoint(&path, "mainnet", &launcher, false);
+    let loaded = load_scan_checkpoint(&path, "mainnet", &launcher, false).expect("load");
     assert_eq!(loaded.start_nonce, 2);
     assert!(loaded.by_coin_id.contains_key(&coin_id));
 }

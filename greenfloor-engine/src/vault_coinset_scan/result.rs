@@ -2,11 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
 
-use crate::coinset::DirectCoinsetScanClient;
-use crate::vault_coinset_scan::checkpoint::ParentLineageEntry;
-use crate::vault_coinset_scan::request::ScanRequest;
 use crate::vault_coinset_scan::types::{AssetTypeFilter, CoinKind, CoinRow, ScanStopReason};
-use crate::vault_coinset_scan::window::ScanWindowPlan;
 
 #[derive(Debug, Serialize)]
 pub struct ScanResult {
@@ -26,7 +22,7 @@ pub struct ScanResult {
     pub scan_batches: ScanBatchConfig,
     pub scan_window: ScanWindowSummary,
     pub scan_stop_reason: ScanStopReason,
-    pub coins: Vec<OutputCoinRow>,
+    pub coins: Vec<ScanCoinOutput>,
 }
 
 #[derive(Debug, Serialize)]
@@ -51,6 +47,8 @@ pub struct CheckpointSummary {
     pub parent_lineage_cache_entries: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_synced_height: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discard_reason: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,7 +71,7 @@ pub struct ScanWindowSummary {
 }
 
 #[derive(Debug, Serialize)]
-pub struct OutputCoinRow {
+pub struct ScanCoinOutput {
     pub coin_id: String,
     #[serde(rename = "type")]
     pub kind: CoinKind,
@@ -90,7 +88,7 @@ pub struct OutputCoinRow {
     pub parent_coin_info: String,
 }
 
-impl From<CoinRow> for OutputCoinRow {
+impl From<CoinRow> for ScanCoinOutput {
     fn from(row: CoinRow) -> Self {
         Self {
             coin_id: row.coin_id,
@@ -105,84 +103,6 @@ impl From<CoinRow> for OutputCoinRow {
             discovered_by_hint: row.discovered_by_hint,
             puzzle_hash: row.puzzle_hash,
             parent_coin_info: row.parent_coin_info,
-        }
-    }
-}
-
-pub struct ScanResultParams<'a> {
-    pub scanner: &'a DirectCoinsetScanClient,
-    pub request: &'a ScanRequest,
-    pub launcher_id: &'a str,
-    pub effective_asset_type: AssetTypeFilter,
-    pub requested_cat_ids: &'a HashSet<String>,
-    pub nonce_to_p2: &'a HashMap<u32, String>,
-    pub cat_asset_cache: &'a HashMap<String, String>,
-    pub parent_lineage_cache: &'a HashMap<String, ParentLineageEntry>,
-    pub checkpoint_enabled: bool,
-    pub checkpoint_resumed: bool,
-    pub checkpoint_start_nonce: u32,
-    pub window: &'a ScanWindowPlan,
-    pub stop_reason: ScanStopReason,
-    pub filtered: Vec<CoinRow>,
-    pub name_verification: Option<NameVerification>,
-}
-
-impl ScanResult {
-    pub fn build(params: ScanResultParams<'_>) -> Self {
-        let max_nonce_scanned = params.nonce_to_p2.keys().copied().max().unwrap_or(0);
-        let mut requested_cat_ids: Vec<String> = params.requested_cat_ids.iter().cloned().collect();
-        requested_cat_ids.sort();
-        let mut requested_cat_tickers = params.request.requested_cat_tickers.clone();
-        requested_cat_tickers.sort();
-        requested_cat_tickers.dedup();
-
-        Self {
-            network: params.scanner.network.clone(),
-            coinset_base_url: params.scanner.base_url.clone(),
-            launcher_id: params.launcher_id.to_string(),
-            asset_type: params.effective_asset_type,
-            requested_cat_ids,
-            requested_cat_tickers,
-            max_nonce_scanned,
-            count: params.filtered.len(),
-            name_verification: params.name_verification,
-            cache_clear: params.request.cache_clear.clone(),
-            checkpoint: CheckpointSummary {
-                enabled: params.checkpoint_enabled,
-                file: params
-                    .request
-                    .checkpoint_file
-                    .as_ref()
-                    .map(|path| path.display().to_string()),
-                resumed: params.checkpoint_resumed,
-                start_nonce: params.checkpoint_start_nonce,
-                save_interval: if params.checkpoint_enabled {
-                    Some(params.request.checkpoint_save_interval)
-                } else {
-                    None
-                },
-                cat_asset_cache_entries: params.cat_asset_cache.len(),
-                parent_lineage_cache_entries: params.parent_lineage_cache.len(),
-                last_synced_height: params.window.checkpoint_synced_height,
-            },
-            scan_batches: ScanBatchConfig {
-                nonce_batch_size: params.request.nonce_batch_size,
-                empty_batch_stop_count: params.request.empty_batch_stop_count,
-                parent_lookup_batch_size: params.request.parent_lookup_batch_size,
-            },
-            scan_window: ScanWindowSummary {
-                start_height: params.window.effective_start_height,
-                end_height: params.window.effective_end_height,
-                chain_peak_height: params.window.chain_peak_height,
-                incremental_from_checkpoint: params.request.incremental_from_checkpoint,
-                auto_increment: params.request.auto_increment,
-            },
-            scan_stop_reason: params.stop_reason,
-            coins: params
-                .filtered
-                .into_iter()
-                .map(OutputCoinRow::from)
-                .collect(),
         }
     }
 }
