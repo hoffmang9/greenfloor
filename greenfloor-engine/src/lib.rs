@@ -21,6 +21,7 @@ pub mod config;
 pub mod cycle;
 pub mod daemon;
 pub mod error;
+pub mod file_logging;
 pub mod hex;
 pub mod hex_cli;
 pub mod kms;

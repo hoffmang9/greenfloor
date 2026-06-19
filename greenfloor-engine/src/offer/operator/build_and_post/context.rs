@@ -9,9 +9,7 @@ use crate::offer::build_context::resolve_quote_price_for_pricing;
 use crate::offer::{normalize_offer_side, resolve_offer_assets_for_action};
 
 use super::BuildAndPostOfferRequest;
-use crate::offer::operator::logging::{
-    initialize_manager_file_logging, warn_if_log_level_auto_healed,
-};
+use crate::offer::operator::logging::{sync_manager_file_logging, warn_if_log_level_auto_healed};
 use crate::offer::operator::test_overrides::OfferOperatorTestOverrides;
 
 #[derive(Debug, Clone)]
@@ -36,7 +34,7 @@ pub(super) async fn resolve_build_and_post_context(
 ) -> SignerResult<ResolvedBuildAndPostContext> {
     let bundle = load_program_bundle_gated(&request.program_path)?;
     let program = bundle.program;
-    initialize_manager_file_logging(&program.home_dir, &program.app_log_level)?;
+    sync_manager_file_logging(&program.home_dir, &program.app_log_level)?;
     warn_if_log_level_auto_healed(program.app_log_level_was_missing, &request.program_path);
     let markets = load_markets_config_with_overlay(
         &request.markets_path,
