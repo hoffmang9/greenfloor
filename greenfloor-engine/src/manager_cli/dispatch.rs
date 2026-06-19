@@ -309,6 +309,8 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
             cat_asset_id,
             dry_run,
             list_only,
+            verify_timeout_seconds,
+            verify_poll_seconds,
         } => {
             combine_market_cat_dust::run_combine_market_cat_dust(
                 combine_market_cat_dust::CombineMarketCatDustRequest {
@@ -321,12 +323,21 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
                     max_input_coins,
                     max_nonce,
                     cat_asset_id: optional_str(&cat_asset_id),
+                    verify: crate::coinset::CoinSpentVerifyConfig {
+                        timeout_seconds: verify_timeout_seconds,
+                        poll_seconds: verify_poll_seconds,
+                    },
                     execution: combine_market_cat_dust::CombineExecution::from_flags(
                         list_only, dry_run,
                     ),
                 },
             )
             .await
+        }
+        ManagerCommands::FlagGroups { subcommand } => {
+            let payload = super::flag_groups::emit_flag_groups(&subcommand)?;
+            ctx.emit_json(&payload)?;
+            Ok(0)
         }
     }
 }

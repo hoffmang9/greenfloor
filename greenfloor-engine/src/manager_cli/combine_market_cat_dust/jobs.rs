@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 
 use serde_json::Value;
 
-use crate::config::load_markets_config_with_overlay;
+use crate::config::MarketsConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{is_hex_id, normalize_hex_id};
 use crate::manager_cli::cats_catalog::{load_cats_catalog, resolve_asset_id_from_catalog};
@@ -29,12 +29,10 @@ pub fn resolve_market_base_cat_asset_id(
 }
 
 pub fn build_enabled_cat_jobs(
-    markets_config_path: &std::path::Path,
-    testnet_markets_path: Option<&std::path::Path>,
+    markets: &MarketsConfig,
     cats_config_path: &std::path::Path,
     only_cat_asset_id: Option<&str>,
 ) -> SignerResult<Vec<CatDustJob>> {
-    let markets = load_markets_config_with_overlay(markets_config_path, testnet_markets_path)?;
     let catalog = load_cats_catalog(cats_config_path)?;
     let filter_id = only_cat_asset_id
         .map(str::trim)
@@ -98,6 +96,7 @@ pub fn build_enabled_cat_jobs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::load_markets_config;
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -175,8 +174,12 @@ mod tests {
             resolve_asset_id_from_catalog(&catalog, "ZZT"),
             Some(zzt.clone())
         );
-        let jobs =
-            build_enabled_cat_jobs(&markets, None, &cats, None).expect("build enabled cat jobs");
+        let jobs = build_enabled_cat_jobs(
+            &load_markets_config(&markets).expect("markets"),
+            &cats,
+            None,
+        )
+        .expect("build enabled cat jobs");
         let by_cat: HashMap<_, _> = jobs
             .into_iter()
             .map(|job| (job.cat_asset_id.clone(), job))
@@ -230,7 +233,12 @@ mod tests {
         );
         let cats = dir.path().join("cats.yaml");
         write_cats(&cats, "cats: []\n");
-        let err = build_enabled_cat_jobs(&markets, None, &cats, None).expect_err("conflict");
+        let err = build_enabled_cat_jobs(
+            &load_markets_config(&markets).expect("markets"),
+            &cats,
+            None,
+        )
+        .expect_err("conflict");
         assert!(err.to_string().contains("Conflicting receive_address"));
     }
 

@@ -122,6 +122,9 @@ pub enum SignerError {
     #[error("timeout waiting for presplit coin confirmation")]
     PresplitCoinConfirmationTimeout,
 
+    #[error("combine input verify timeout")]
+    CombineInputVerifyTimeout,
+
     #[error("presplit offer step requires --offer-coin-ids of original source coins")]
     PresplitOfferRequiresSourceCoinIds,
 

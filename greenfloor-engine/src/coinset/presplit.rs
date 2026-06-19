@@ -1,6 +1,7 @@
 use chia_protocol::Bytes32;
 use chia_sdk_coinset::{ChiaRpcClient, GetCoinRecordResponse};
 
+use super::poll::{run_poll_loop, PollConfig};
 use super::{cat_from_record, CoinsetClient};
 use crate::error::{SignerError, SignerResult};
 use chia_sdk_driver::Cat;
@@ -26,7 +27,7 @@ pub async fn fetch_presplit_cat_by_id(
     let Some(record) = response.coin_record else {
         return Err(SignerError::PresplitCoinNotFound);
     };
-    if record.spent {
+    if record.spent_block_index != 0 {
         return Err(SignerError::PresplitCoinNotFound);
     }
     cat_from_record(client, &record)
@@ -35,7 +36,6 @@ pub async fn fetch_presplit_cat_by_id(
 }
 
 pub async fn wait_for_unspent_cat(client: &CoinsetClient, coin_id: Bytes32) -> SignerResult<Cat> {
-    let started = std::time::Instant::now();
     wait_for_unspent_cat_with_fetch(
         |coin_id| async move {
             let response: GetCoinRecordResponse = client
@@ -45,15 +45,13 @@ pub async fn wait_for_unspent_cat(client: &CoinsetClient, coin_id: Bytes32) -> S
             let Some(record) = response.coin_record else {
                 return Ok(None);
             };
-            if record.spent {
+            if record.spent_block_index != 0 {
                 return Ok(None);
             }
             cat_from_record(client, &record).await
         },
         coin_id,
-        started,
-        std::time::Duration::from_secs(PRESPLIT_POLL_INTERVAL_SECS),
-        presplit_confirm_timed_out,
+        PollConfig::from_seconds(PRESPLIT_CONFIRM_TIMEOUT_SECS, PRESPLIT_POLL_INTERVAL_SECS),
     )
     .await
 }
@@ -61,28 +59,25 @@ pub async fn wait_for_unspent_cat(client: &CoinsetClient, coin_id: Bytes32) -> S
 pub(crate) async fn wait_for_unspent_cat_with_fetch<F, Fut>(
     mut fetch: F,
     coin_id: Bytes32,
-    started: std::time::Instant,
-    poll_interval: std::time::Duration,
-    timed_out: fn(std::time::Instant, std::time::Instant) -> bool,
+    poll: PollConfig,
 ) -> SignerResult<Cat>
 where
     F: FnMut(Bytes32) -> Fut,
     Fut: std::future::Future<Output = SignerResult<Option<Cat>>>,
 {
-    loop {
-        if let Some(cat) = fetch(coin_id).await? {
-            return Ok(cat);
-        }
-        if timed_out(started, std::time::Instant::now()) {
-            return Err(SignerError::PresplitCoinConfirmationTimeout);
-        }
-        tokio::time::sleep(poll_interval).await;
-    }
+    run_poll_loop(
+        move || fetch(coin_id),
+        poll,
+        SignerError::PresplitCoinConfirmationTimeout,
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+
     use crate::coinset::test_support::cat_with_amount;
 
     #[test]
@@ -127,9 +122,10 @@ mod tests {
                 }
             },
             coin_id,
-            std::time::Instant::now(),
-            std::time::Duration::from_millis(1),
-            |started, now| now.duration_since(started) >= std::time::Duration::from_millis(50),
+            PollConfig {
+                timeout: Duration::from_millis(50),
+                interval: Duration::from_millis(1),
+            },
         )
         .await
         .expect("cat confirmed");
@@ -143,9 +139,10 @@ mod tests {
         let err = wait_for_unspent_cat_with_fetch(
             |_coin_id| async { Ok(None) },
             coin_id,
-            std::time::Instant::now(),
-            std::time::Duration::from_millis(1),
-            |started, now| now.duration_since(started) >= std::time::Duration::from_millis(5),
+            PollConfig {
+                timeout: Duration::from_millis(5),
+                interval: Duration::from_millis(1),
+            },
         )
         .await
         .unwrap_err();

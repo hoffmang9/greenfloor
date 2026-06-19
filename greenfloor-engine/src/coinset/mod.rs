@@ -5,7 +5,9 @@ mod coin_select;
 mod direct_api;
 mod msp;
 mod parse;
+mod poll;
 mod presplit;
+mod spent_verify;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod wallet_io;
@@ -42,6 +44,7 @@ pub use msp::{
     DEFAULT_MSP_BASE_URL,
 };
 pub use presplit::{fetch_presplit_cat_by_id, wait_for_unspent_cat};
+pub use spent_verify::{wait_until_coins_spent, CoinSpentVerifyConfig};
 pub use wallet_io::{
     cat_outer_puzzle_hash_hex, extract_coin_id_hints_from_offer_text, list_wallet_unspent_coins,
     puzzle_hash_hex_for_receive_address, spend_bundle_hash_from_hex, WalletUnspentCoin,

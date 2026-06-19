@@ -4,18 +4,21 @@ mod jobs;
 mod report;
 #[cfg(test)]
 mod report_test;
+#[cfg(test)]
+mod test_support;
 
 use jobs::{build_enabled_cat_jobs, CatDustJob};
 use report::{
     finalize_job_report, list_failed_job_report, signer_blocked_job_report, CombineExecutionFlags,
-    JobExecution,
+    CombineRunMode,
 };
 use serde_json::{json, Value};
 
 use crate::coinset::normalize_coinset_network;
+use crate::coinset::CoinSpentVerifyConfig;
 use crate::config::{
     load_markets_config_with_overlay, parse_program_config, program_bundle_gated_from_parsed,
-    read_program_yaml, ManagerProgramConfig,
+    read_program_yaml, ManagerProgramConfig, MarketsConfig,
 };
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
@@ -37,6 +40,7 @@ pub struct CombineMarketCatDustRequest<'a> {
     pub max_input_coins: usize,
     pub max_nonce: u32,
     pub cat_asset_id: Option<&'a str>,
+    pub verify: CoinSpentVerifyConfig,
     pub execution: CombineExecutionFlags,
 }
 
@@ -49,7 +53,7 @@ struct ProcessJobContext<'a> {
     max_nonce: u32,
     dust_threshold_mojos: u64,
     max_input_coins: usize,
-    execution: JobExecution<'a>,
+    run_mode: &'a CombineRunMode<'a>,
     job: &'a CatDustJob,
 }
 
@@ -76,7 +80,7 @@ async fn run_vault_scan_for_job(
 
 async fn process_job(ctx: ProcessJobContext<'_>) -> SignerResult<Value> {
     let readiness = report::vault_signer_ready(ctx.program, &ctx.job.signer_key_id);
-    if matches!(ctx.execution, JobExecution::Combine(_))
+    if matches!(ctx.run_mode, CombineRunMode::Execute { .. })
         && readiness.note == Some("unknown_signer_key_id")
     {
         return Ok(signer_blocked_job_report(
@@ -104,7 +108,7 @@ async fn process_job(ctx: ProcessJobContext<'_>) -> SignerResult<Value> {
         scan_result,
         ctx.dust_threshold_mojos,
         ctx.max_input_coins,
-        ctx.execution,
+        ctx.run_mode,
         readiness,
     )
     .await
@@ -122,12 +126,12 @@ fn resolved_network(request_network: Option<&str>, program_network: &str) -> Str
 
 fn load_program_and_markets(
     mgr: &ManagerContext,
-) -> SignerResult<(serde_json::Value, ManagerProgramConfig)> {
+) -> SignerResult<(serde_json::Value, ManagerProgramConfig, MarketsConfig)> {
     let raw = read_program_yaml(&mgr.program_config)?;
     let program = parse_program_config(&raw)?;
-    let _markets =
+    let markets =
         load_markets_config_with_overlay(&mgr.markets_config, mgr.testnet_markets_path())?;
-    Ok((raw, program))
+    Ok((raw, program, markets))
 }
 
 pub async fn run_combine_market_cat_dust(
@@ -145,7 +149,7 @@ pub async fn run_combine_market_cat_dust(
         return Ok(1);
     }
 
-    let (raw, program) = match load_program_and_markets(mgr) {
+    let (raw, program, markets) = match load_program_and_markets(mgr) {
         Ok(loaded) => loaded,
         Err(err) => {
             mgr.emit_json(&json!({
@@ -175,12 +179,7 @@ pub async fn run_combine_market_cat_dust(
         }
     };
 
-    let jobs = match build_enabled_cat_jobs(
-        &mgr.markets_config,
-        mgr.testnet_markets_path(),
-        &mgr.cats_config,
-        request.cat_asset_id,
-    ) {
+    let jobs = match build_enabled_cat_jobs(&markets, &mgr.cats_config, request.cat_asset_id) {
         Ok(jobs) => jobs,
         Err(err) => {
             mgr.emit_json(&json!({
@@ -230,16 +229,18 @@ pub async fn run_combine_market_cat_dust(
         return Ok(1);
     }
 
-    let combine_signer = combine_signer.as_ref();
+    let run_mode = match combine_signer.as_ref() {
+        Some(signer) => CombineRunMode::Execute {
+            signer,
+            verify: request.verify,
+        },
+        None => CombineRunMode::Preview,
+    };
 
     let mut exit_code = 0;
     let mut job_reports = Vec::new();
 
     for job in jobs {
-        let execution = match combine_signer {
-            Some(signer) => JobExecution::Combine(signer),
-            None => JobExecution::Preview,
-        };
         let job_report = process_job(ProcessJobContext {
             mgr,
             program: &program,
@@ -249,7 +250,7 @@ pub async fn run_combine_market_cat_dust(
             max_nonce: request.max_nonce,
             dust_threshold_mojos: request.dust_threshold_mojos,
             max_input_coins: request.max_input_coins,
-            execution,
+            run_mode: &run_mode,
             job: &job,
         })
         .await?;

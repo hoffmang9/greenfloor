@@ -1,8 +1,9 @@
-use super::report::test_support::sim_dust_scan_result;
 use super::report::{
-    finalize_job_report, plan_dust_for_scan, preview_job_report, vault_signer_ready, JobExecution,
+    finalize_job_report, plan_dust_for_scan, preview_job_report, vault_signer_ready, CombineRunMode,
 };
+use super::test_support::sim_dust_scan_result;
 use super::{run_combine_market_cat_dust, CombineExecution, CombineMarketCatDustRequest};
+use crate::coinset::CoinSpentVerifyConfig;
 use crate::config::load_program_config;
 use crate::manager_cli::combine_market_cat_dust::jobs::CatDustJob;
 use crate::manager_cli::context::ManagerContext;
@@ -184,7 +185,7 @@ async fn finalize_preview_job_report_end_to_end_from_simulator_scan() {
     let program = load_program_config(&dir.path().join("program.yaml")).expect("program");
     let readiness = vault_signer_ready(&program, &job.signer_key_id);
 
-    let report = finalize_job_report(&job, scan, 1000, 2, JobExecution::Preview, readiness)
+    let report = finalize_job_report(&job, scan, 1000, 2, &CombineRunMode::Preview, readiness)
         .await
         .expect("preview report");
     assert_eq!(report.get("status"), Some(&json!("ok")));
@@ -215,6 +216,7 @@ async fn run_combine_emits_json_when_launcher_id_missing() {
         max_input_coins: 2,
         max_nonce: 0,
         cat_asset_id: None,
+        verify: CoinSpentVerifyConfig::default(),
         execution: CombineExecution::from_flags(false, true),
     })
     .await
@@ -257,6 +259,7 @@ async fn run_combine_preview_does_not_require_signer_bundle() {
         max_input_coins: 2,
         max_nonce: 0,
         cat_asset_id: None,
+        verify: CoinSpentVerifyConfig::default(),
         execution: CombineExecution::from_flags(false, true),
     })
     .await

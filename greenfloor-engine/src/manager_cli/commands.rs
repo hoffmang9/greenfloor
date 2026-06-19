@@ -261,5 +261,13 @@ pub enum ManagerCommands {
         dry_run: bool,
         #[arg(long)]
         list_only: bool,
+        #[arg(long, default_value_t = 15 * 60)]
+        verify_timeout_seconds: u64,
+        #[arg(long, default_value_t = 8)]
+        verify_poll_seconds: u64,
+    },
+    #[command(hide = true, about = "Emit global/subcommand CLI flag groups as JSON")]
+    FlagGroups {
+        subcommand: String,
     },
 }
