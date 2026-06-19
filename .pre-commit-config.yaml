@@ -19,9 +19,9 @@ repos:
         files: ^greenfloor-engine/
 
       - id: cargo-clippy
-        # Runs `clippy::all` + `clippy::pedantic` deny from greenfloor-engine/Cargo.toml.
+        # --lib --bins only: integration tests compile once in the test profile during `cargo test`, not again here via --all-targets.
         name: cargo clippy (greenfloor-engine, clippy::all + pedantic)
-        entry: cargo clippy --manifest-path greenfloor-engine/Cargo.toml --all-targets --no-deps
+        entry: cargo clippy --manifest-path greenfloor-engine/Cargo.toml --lib --bins --no-deps
         language: system
         pass_filenames: false
         files: ^greenfloor-engine/
