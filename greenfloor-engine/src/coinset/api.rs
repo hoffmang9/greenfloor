@@ -50,9 +50,7 @@ pub async fn post_coinset_coin_records(
     endpoint: &str,
     body: Value,
 ) -> SignerResult<Vec<Value>> {
-    Ok(coin_records_from_payload(
-        &post_coinset_rpc(network, base_url, endpoint, body).await?,
-    ))
+    coin_records_from_payload(&post_coinset_rpc(network, base_url, endpoint, body).await?)
 }
 
 pub async fn post_coinset_record(
@@ -63,7 +61,7 @@ pub async fn post_coinset_record(
     key: &str,
 ) -> SignerResult<Option<Value>> {
     let payload = post_coinset_rpc(network, base_url, endpoint, body).await?;
-    Ok(record_from_payload(&payload, key).cloned())
+    Ok(record_from_payload(&payload, key)?.cloned())
 }
 
 pub async fn push_tx_hex(
@@ -305,6 +303,27 @@ mod tests {
         .expect("testnet alias")
         .expect("some state");
         assert_eq!(state["peak_height"], 1);
+    }
+
+    #[tokio::test]
+    async fn post_coinset_coin_records_fails_on_success_false() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_coin_records_by_puzzle_hash")
+            .with_status(200)
+            .with_body(r#"{"success":false,"error":"invalid puzzle hash"}"#)
+            .create_async()
+            .await;
+
+        let err = post_coinset_coin_records(
+            "mainnet",
+            Some(&server.url()),
+            "get_coin_records_by_puzzle_hash",
+            json!({"puzzle_hash": "0x11", "include_spent_coins": false}),
+        )
+        .await
+        .expect_err("success=false should fail");
+        assert_eq!(err.to_string(), "coinset error: invalid puzzle hash");
     }
 
     #[tokio::test]

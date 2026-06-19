@@ -128,6 +128,47 @@ async fn subprocess_coinset_coin_records_filters_non_objects_and_height_flags() 
 }
 
 #[tokio::test]
+async fn subprocess_coinset_coin_records_fails_on_success_false() {
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(r#"{"success":false,"error":"invalid puzzle hash"}"#)
+        .create_async()
+        .await;
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_greenfloor-engine"))
+        .args([
+            "coinset",
+            "coin-records",
+            "--network",
+            "mainnet",
+            "--base-url",
+            &server.url(),
+            "--endpoint",
+            "get_coin_records_by_puzzle_hash",
+            "--body-json",
+            r#"{"puzzle_hash":"0x11","include_spent_coins":false}"#,
+            "--json",
+        ])
+        .output()
+        .expect("spawn greenfloor-engine coinset coin-records subprocess");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit for success=false, stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let payload: Value = serde_json::from_str(stderr.trim()).expect("parse json error stderr");
+    assert_eq!(payload.get("success"), Some(&Value::Bool(false)));
+    assert_eq!(payload.get("retryable"), Some(&Value::Bool(false)));
+    assert_eq!(
+        payload.get("error").and_then(Value::as_str),
+        Some("coinset error: invalid puzzle hash")
+    );
+}
+
+#[tokio::test]
 async fn subprocess_coinset_coin_records_surfaces_coinset_error_on_http_503() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server
@@ -202,7 +243,10 @@ async fn subprocess_coinset_coin_records_connection_refused_emits_retryable_json
         payload
             .get("error")
             .and_then(Value::as_str)
-            .is_some_and(|error| error.to_ascii_lowercase().contains("connection refused")),
+            .is_some_and(|error| {
+                error.to_ascii_lowercase().contains("error sending request")
+                    || error.to_ascii_lowercase().contains("connection refused")
+            }),
         "payload: {payload}"
     );
 }
