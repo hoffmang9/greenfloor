@@ -1,6 +1,6 @@
 ---
-# Lint/type/fmt/clippy gate — CI runs full pre-commit on ubuntu-latest only (see .github/workflows/ci.yml).
-# All three CI runners then run `cargo test` in parallel.
+# Lint/type/fmt/clippy gate — CI lint-type-test job on ubuntu-latest (see .github/workflows/ci.yml).
+# arm/macOS runners use the separate Test (…) jobs (cargo test only).
 # Full operator safety net before push:
 #   cargo test --manifest-path greenfloor-engine/Cargo.toml
 #
