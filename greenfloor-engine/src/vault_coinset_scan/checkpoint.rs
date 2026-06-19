@@ -9,9 +9,9 @@ use crate::paths::expand_home;
 use crate::vault_coinset_scan::types::CoinRow;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct ParentLineageCacheEntry {
-    spent_height: u64,
-    child_asset_ids: BTreeMap<String, String>,
+pub struct ParentLineageEntry {
+    pub spent_height: u64,
+    pub child_asset_ids: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,7 +27,7 @@ struct ScanCheckpointFile {
     nonce_to_p2: BTreeMap<String, String>,
     coin_rows: Vec<CoinRow>,
     cat_asset_cache: BTreeMap<String, String>,
-    parent_lineage_cache: BTreeMap<String, ParentLineageCacheEntry>,
+    parent_lineage_cache: BTreeMap<String, ParentLineageEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,10 +49,19 @@ pub struct LoadedCheckpoint {
     pub discarded_mismatch: bool,
 }
 
-#[derive(Debug, Clone)]
-pub struct ParentLineageEntry {
-    pub spent_height: u64,
-    pub child_asset_ids: HashMap<String, String>,
+fn normalize_lineage_entry(mut entry: ParentLineageEntry) -> ParentLineageEntry {
+    entry.child_asset_ids = entry
+        .child_asset_ids
+        .into_iter()
+        .filter_map(|(child_id_raw, asset_id_raw)| {
+            let child_id = normalize_hex_id(&child_id_raw);
+            if child_id.is_empty() {
+                return None;
+            }
+            Some((child_id, normalize_hex_id(&asset_id_raw)))
+        })
+        .collect();
+    entry
 }
 
 fn empty_checkpoint(discarded_mismatch: bool) -> LoadedCheckpoint {
@@ -168,24 +177,7 @@ pub fn load_scan_checkpoint(
             if parent_id.is_empty() {
                 return None;
             }
-            let child_asset_ids = lineage
-                .child_asset_ids
-                .into_iter()
-                .filter_map(|(child_id_raw, asset_id_raw)| {
-                    let child_id = normalize_hex_id(&child_id_raw);
-                    if child_id.is_empty() {
-                        return None;
-                    }
-                    Some((child_id, normalize_hex_id(&asset_id_raw)))
-                })
-                .collect();
-            Some((
-                parent_id,
-                ParentLineageEntry {
-                    spent_height: lineage.spent_height,
-                    child_asset_ids,
-                },
-            ))
+            Some((parent_id, normalize_lineage_entry(lineage)))
         })
         .collect();
 
@@ -256,19 +248,7 @@ pub fn save_scan_checkpoint(params: &SaveCheckpointParams<'_>) -> SignerResult<(
         parent_lineage_cache: params
             .parent_lineage_cache
             .iter()
-            .map(|(parent_id, lineage)| {
-                (
-                    parent_id.clone(),
-                    ParentLineageCacheEntry {
-                        spent_height: lineage.spent_height,
-                        child_asset_ids: lineage
-                            .child_asset_ids
-                            .iter()
-                            .map(|(child_id, asset_id)| (child_id.clone(), asset_id.clone()))
-                            .collect(),
-                    },
-                )
-            })
+            .map(|(parent_id, lineage)| (parent_id.clone(), lineage.clone()))
             .collect(),
     };
     std::fs::write(
@@ -411,6 +391,97 @@ mod tests {
         assert!(read_launcher_id_file(&path)
             .expect("missing file")
             .is_empty());
+    }
+
+    #[test]
+    fn checkpoint_coin_rows_serialize_type_not_coin_type() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("checkpoint.json");
+        let launcher = "a".repeat(64);
+        let coin_id = "d".repeat(64);
+        let mut by_coin_id = HashMap::new();
+        by_coin_id.insert(
+            coin_id.clone(),
+            CoinRow {
+                coin_id: coin_id.clone(),
+                puzzle_hash: "b".repeat(64),
+                parent_coin_info: "c".repeat(64),
+                amount: 1000,
+                confirmed_block_index: 10,
+                spent_block_index: 0,
+                discovered_nonces: vec![1],
+                discovered_by_puzzle_hash: true,
+                discovered_by_hint: false,
+                kind: CoinKind::Cat,
+                cat_asset_id: Some("e".repeat(64)),
+                cat_symbols: vec![],
+            },
+        );
+        save_scan_checkpoint(&SaveCheckpointParams {
+            checkpoint_file: &path,
+            network: "mainnet",
+            launcher_id: &launcher,
+            include_spent: false,
+            max_nonce_completed: 0,
+            nonce_to_p2: &HashMap::new(),
+            by_coin_id: &by_coin_id,
+            cat_asset_cache: &HashMap::new(),
+            parent_lineage_cache: &HashMap::new(),
+            last_synced_height: None,
+            scan_start_height: None,
+            scan_end_height: None,
+        })
+        .expect("save checkpoint");
+        let raw = std::fs::read_to_string(&path).expect("read checkpoint");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("parse checkpoint");
+        let coin_row = &value["coin_rows"][0];
+        assert_eq!(coin_row.get("type").and_then(|v| v.as_str()), Some("CAT"));
+        assert!(coin_row.get("coin_type").is_none());
+    }
+
+    #[test]
+    fn checkpoint_loads_legacy_coin_type_rows() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("checkpoint.json");
+        let launcher = "a".repeat(64);
+        let coin_id = "d".repeat(64);
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{
+  "version": 1,
+  "network": "mainnet",
+  "launcher_id": "{launcher}",
+  "include_spent": false,
+  "max_nonce_completed": 0,
+  "scan_window": {{}},
+  "nonce_to_p2": {{}},
+  "coin_rows": [{{
+    "coin_id": "{coin_id}",
+    "puzzle_hash": "{}",
+    "parent_coin_info": "{}",
+    "amount": 1000,
+    "confirmed_block_index": 10,
+    "spent_block_index": 0,
+    "discovered_nonces": [1],
+    "discovered_by_puzzle_hash": true,
+    "discovered_by_hint": false,
+    "coin_type": "XCH",
+    "cat_symbols": []
+  }}],
+  "cat_asset_cache": {{}},
+  "parent_lineage_cache": {{}}
+}}"#,
+                "b".repeat(64),
+                "c".repeat(64),
+            ),
+        )
+        .expect("write legacy checkpoint");
+        let loaded = load_scan_checkpoint(&path, "mainnet", &launcher, false).expect("load");
+        assert_eq!(
+            loaded.by_coin_id.get(&coin_id).map(|row| row.kind),
+            Some(CoinKind::Xch)
+        );
     }
 
     #[test]

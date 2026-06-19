@@ -6,11 +6,11 @@ pub mod cli;
 pub mod metadata;
 pub mod request;
 pub mod result;
-pub mod scan_state;
+pub mod state;
 pub mod types;
 pub mod window;
 
 pub use cli::{run_vault_coinset_scan_command, VaultCoinsetScanCliArgs};
 pub use request::ScanRequest;
 pub use result::ScanResult;
-pub use scan_state::run_vault_coinset_scan;
+pub use state::run_vault_coinset_scan;

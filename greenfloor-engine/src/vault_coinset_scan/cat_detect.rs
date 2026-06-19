@@ -149,12 +149,13 @@ async fn resolve_parent_children(
     asset_id_to_symbols: &BTreeMap<String, Vec<String>>,
 ) -> SignerResult<()> {
     if let Some(lineage) = caches.parent_lineage_cache.get(parent_id) {
+        let cached_child_assets = lineage.child_asset_ids.clone();
         for child_id in child_ids {
             if let Some(row) = rows.get_mut(child_id) {
-                if let Some(asset_id) = lineage.child_asset_ids.get(child_id) {
+                if let Some(asset_id) = cached_child_assets.get(child_id) {
                     apply_cached_cat(row, asset_id, asset_id_to_symbols);
                 } else {
-                    row.kind = CoinKind::Other;
+                    mark_other(caches, rows, child_id);
                 }
             }
         }
@@ -208,18 +209,21 @@ async fn resolve_parent_children(
     };
 
     let child_assets = child_cat_asset_ids_from_parent_spend(parent_coin, &parent_spend)?;
-    caches.parent_lineage_cache.insert(
-        parent_id.to_string(),
-        ParentLineageEntry {
-            spent_height,
-            child_asset_ids: child_assets.clone(),
-        },
-    );
     for (child_id, asset_id) in &child_assets {
         caches
             .cat_asset_cache
             .insert(child_id.clone(), asset_id.clone());
     }
+    caches.parent_lineage_cache.insert(
+        parent_id.to_string(),
+        ParentLineageEntry {
+            spent_height,
+            child_asset_ids: child_assets
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        },
+    );
     for child_id in child_ids {
         if let Some(row) = rows.get_mut(child_id) {
             if let Some(asset_id) = child_assets.get(child_id) {
@@ -284,7 +288,51 @@ pub fn classify_xch_or_other(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, HashMap};
+
     use super::*;
+
+    #[test]
+    fn lineage_cache_miss_writes_negative_cat_cache() {
+        let parent_id = "a".repeat(64);
+        let child_id = "b".repeat(64);
+        let mut rows = HashMap::from([(
+            child_id.clone(),
+            CoinRow {
+                coin_id: child_id.clone(),
+                puzzle_hash: "c".repeat(64),
+                parent_coin_info: parent_id.clone(),
+                amount: 1000,
+                confirmed_block_index: 1,
+                spent_block_index: 0,
+                discovered_nonces: vec![0],
+                discovered_by_puzzle_hash: true,
+                discovered_by_hint: false,
+                kind: CoinKind::Unknown,
+                cat_asset_id: None,
+                cat_symbols: vec![],
+            },
+        )]);
+        let mut caches = CatDetectCaches::new(
+            HashMap::new(),
+            HashMap::from([(
+                parent_id.clone(),
+                ParentLineageEntry {
+                    spent_height: 10,
+                    child_asset_ids: BTreeMap::new(),
+                },
+            )]),
+        );
+        for child_id in [child_id.as_str()] {
+            if let Some(lineage) = caches.parent_lineage_cache.get(&parent_id) {
+                if !lineage.child_asset_ids.contains_key(child_id) {
+                    mark_other(&mut caches, &mut rows, child_id);
+                }
+            }
+        }
+        assert_eq!(rows[&child_id].kind, CoinKind::Other);
+        assert_eq!(caches.cat_asset_cache.get(&child_id), Some(&String::new()));
+    }
 
     #[test]
     fn classify_xch_when_puzzle_matches_member_hash() {

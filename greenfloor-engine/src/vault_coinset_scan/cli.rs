@@ -18,7 +18,7 @@ use crate::vault_coinset_scan::checkpoint::{
 };
 use crate::vault_coinset_scan::metadata::parse_csv_values;
 use crate::vault_coinset_scan::request::ScanRequest;
-use crate::vault_coinset_scan::scan_state::run_vault_coinset_scan;
+use crate::vault_coinset_scan::state::run_vault_coinset_scan;
 use crate::vault_coinset_scan::types::AssetTypeFilter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,10 +133,15 @@ impl VaultCoinsetScanCliArgs {
             return Ok((from_arg, LauncherIdSource::Arg));
         }
         if !self.launcher_id_file.trim().is_empty() {
-            let from_file = read_launcher_id_file(&expand_home(std::path::Path::new(
-                self.launcher_id_file.trim(),
-            )))?;
-            if !from_file.is_empty() {
+            let path = expand_home(std::path::Path::new(self.launcher_id_file.trim()));
+            if path.exists() {
+                let from_file = read_launcher_id_file(&path)?;
+                if from_file.is_empty() {
+                    return Err(SignerError::Other(format!(
+                        "launcher id file {} is empty",
+                        path.display()
+                    )));
+                }
                 return Ok((from_file, LauncherIdSource::File));
             }
         }
@@ -277,6 +282,20 @@ pub async fn run_vault_coinset_scan_command(args: VaultCoinsetScanCliArgs) -> Si
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_launcher_id_errors_on_empty_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("launcher.txt");
+        std::fs::write(&path, "   \n").expect("write empty launcher file");
+        let args = VaultCoinsetScanCliArgs {
+            launcher_id_file: path.display().to_string(),
+            ..VaultCoinsetScanCliArgs::try_parse_from(["scan"]).expect("parse defaults")
+        };
+        let err = args.resolve_launcher_id().expect_err("empty launcher file");
+        assert!(err.to_string().contains("launcher id file"));
+        assert!(err.to_string().contains("empty"));
+    }
 
     #[test]
     fn parses_vault_coinset_scan_defaults() {
