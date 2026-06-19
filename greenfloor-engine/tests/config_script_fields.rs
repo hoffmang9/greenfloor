@@ -3,10 +3,6 @@ use serde_json::Value;
 #[path = "fixtures/manager.rs"]
 mod manager_fixtures;
 
-#[path = "helpers/config_fields.rs"]
-mod config_fields;
-
-use config_fields::{enabled_market_rows, symbol_to_asset_id_pairs};
 use manager_fixtures::{copy_example_program_and_markets, repo_root, run_manager};
 
 fn parse_json_output(stdout: &[u8]) -> Value {
@@ -65,7 +61,10 @@ fn manager_markets_fields_reads_example_markets() {
     );
     assert!(output.status.success(), "stderr: {:?}", output.stderr);
     let payload = parse_json_output(&output.stdout);
-    let enabled = enabled_market_rows(&payload);
+    let enabled = payload
+        .get("enabled_markets")
+        .and_then(Value::as_array)
+        .expect("enabled markets");
     assert!(!enabled.is_empty());
     assert!(enabled
         .iter()
@@ -89,7 +88,11 @@ fn manager_cats_fields_reads_example_cats() {
     );
     assert!(output.status.success(), "stderr: {:?}", output.stderr);
     let payload = parse_json_output(&output.stdout);
-    assert!(!symbol_to_asset_id_pairs(&payload).is_empty());
+    let symbol_map = payload
+        .get("symbol_to_asset_id")
+        .and_then(Value::as_object)
+        .expect("symbol_to_asset_id map");
+    assert!(!symbol_map.is_empty());
 }
 
 #[test]

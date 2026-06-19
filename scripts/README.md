@@ -18,6 +18,17 @@ Scripts must not walk operator YAML for policy fields. Use `scripts/greenfloor_s
 | Validate before scan         | `ensure_program_config_valid()`                   | `greenfloor-manager config-validate`             |
 | Test minimal program.yaml    | `materialize_minimal_program_template()`          | `greenfloor-manager materialize-minimal-program` |
 
+`symbol_to_asset_id_map()` and `enabled_market_rows()` read manager-normalized JSON fields;
+they do not re-walk operator YAML.
+
+## Native binary resolution
+
+Scripts resolve `greenfloor-engine` / `greenfloor-manager` via `scripts/greenfloor_scripts/binaries.py`.
+`resolve_*_binary(build_if_missing=True)` can auto-run `cargo build` when binaries are missing.
+`engine_subprocess.run_engine_json()` uses `build_if_missing=False` so Coinset/hex/KMS CLI calls
+fail fast with `engine_cli_binary_unavailable` unless binaries were built or env overrides are set
+(`GREENFLOOR_ENGINE_BIN`, etc.).
+
 `load_yaml()` in `io.py` is for reading YAML files back in tests after materialization;
 it is not operator config validation.
 

@@ -137,18 +137,19 @@ def load_cats_fields(*, cats_config: Path) -> dict[str, Any]:
 
 
 def symbol_to_asset_id_map(fields: dict[str, Any]) -> dict[str, str]:
+    """Return ``symbol_to_asset_id`` from ``cats-fields`` JSON (normalized by manager)."""
     raw = fields.get("symbol_to_asset_id")
     if not isinstance(raw, dict):
         return {}
-    out: dict[str, str] = {}
-    for symbol, asset_id in raw.items():
-        normalized = normalize_hex_id(str(asset_id))
-        if normalized:
-            out[str(symbol).strip().lower()] = normalized
-    return out
+    return {
+        str(symbol): str(asset_id)
+        for symbol, asset_id in raw.items()
+        if isinstance(asset_id, str) and asset_id.strip()
+    }
 
 
 def enabled_market_rows(fields: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return ``enabled_markets`` from ``markets-fields`` JSON (pre-filtered by manager)."""
     markets = fields.get("enabled_markets")
     if not isinstance(markets, list):
         return []
@@ -156,6 +157,7 @@ def enabled_market_rows(fields: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def all_market_rows(fields: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return all ``markets`` rows from ``markets-fields`` JSON."""
     markets = fields.get("markets")
     if not isinstance(markets, list):
         return []

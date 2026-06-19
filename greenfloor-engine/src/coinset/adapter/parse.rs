@@ -1,17 +1,4 @@
-use serde_json::{json, Map, Value};
-
-pub(crate) fn apply_height_range(
-    body: &mut Map<String, Value>,
-    start_height: Option<u64>,
-    end_height: Option<u64>,
-) {
-    if let Some(start) = start_height {
-        body.insert("start_height".to_string(), json!(start));
-    }
-    if let Some(end) = end_height {
-        body.insert("end_height".to_string(), json!(end));
-    }
-}
+use serde_json::Value;
 
 pub(crate) fn coin_records_from_payload(payload: &Value) -> Vec<Value> {
     if !payload

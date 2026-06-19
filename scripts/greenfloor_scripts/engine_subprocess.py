@@ -1,4 +1,4 @@
-"""Shared subprocess bridge to ``greenfloor-engine`` JSON CLI commands."""
+"""Subprocess bridge to ``greenfloor-engine`` JSON CLI commands."""
 
 from __future__ import annotations
 
@@ -13,6 +13,11 @@ from greenfloor_scripts.binaries import (
 
 
 def run_engine_json(argv: list[str]) -> Any:
+    """Run ``greenfloor-engine`` with ``--json`` and parse stdout.
+
+    Uses ``build_if_missing=False`` so scripts fail fast when binaries are absent;
+    resolve binaries explicitly via ``binaries.resolve_*`` when auto-build is desired.
+    """
     try:
         binary = resolve_greenfloor_engine_binary(build_if_missing=False)
     except GreenfloorEngineBinaryError as exc:

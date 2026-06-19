@@ -8,10 +8,8 @@ import time
 from typing import Any
 
 from greenfloor_scripts.coinset_subprocess import (
-    apply_height_fields,
-    coin_records_from_payload,
-    post_json_cli,
-    record_from_payload,
+    coin_records_cli,
+    record_from_cli,
 )
 from greenfloor_scripts.hex_subprocess import normalize_hex_id
 
@@ -176,22 +174,6 @@ class CoinsetScanner:
         self.network = network.strip()
         self.base_url = _normalize_coinset_base_url(base_url=base_url, network=network)
 
-    def _post_json(self, endpoint: str, body: dict[str, Any]) -> dict[str, Any]:
-        return _coinset_with_retries(
-            lambda: post_json_cli(self.network, self.base_url, endpoint, body)
-        )
-
-    def _coin_records(
-        self,
-        endpoint: str,
-        body: dict[str, Any],
-        *,
-        start_height: int | None = None,
-        end_height: int | None = None,
-    ) -> list[dict[str, Any]]:
-        apply_height_fields(body, start_height=start_height, end_height=end_height)
-        return coin_records_from_payload(self._post_json(endpoint, body))
-
     def by_puzzle_hash(
         self,
         *,
@@ -201,7 +183,9 @@ class CoinsetScanner:
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
         return _coinset_with_retries(
-            lambda: self._coin_records(
+            lambda: coin_records_cli(
+                self.network,
+                self.base_url,
                 "get_coin_records_by_puzzle_hash",
                 {
                     "puzzle_hash": puzzle_hash,
@@ -223,7 +207,9 @@ class CoinsetScanner:
         if not puzzle_hashes:
             return []
         return _coinset_with_retries(
-            lambda: self._coin_records(
+            lambda: coin_records_cli(
+                self.network,
+                self.base_url,
                 "get_coin_records_by_puzzle_hashes",
                 {
                     "puzzle_hashes": puzzle_hashes,
@@ -243,7 +229,9 @@ class CoinsetScanner:
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
         return _coinset_with_retries(
-            lambda: self._coin_records(
+            lambda: coin_records_cli(
+                self.network,
+                self.base_url,
                 "get_coin_records_by_hint",
                 {
                     "hint": hint,
@@ -265,7 +253,9 @@ class CoinsetScanner:
         if not hints:
             return []
         return _coinset_with_retries(
-            lambda: self._coin_records(
+            lambda: coin_records_cli(
+                self.network,
+                self.base_url,
                 "get_coin_records_by_hints",
                 {
                     "hints": hints,
@@ -282,7 +272,9 @@ class CoinsetScanner:
         if not coin_names:
             return []
         return _coinset_with_retries(
-            lambda: self._coin_records(
+            lambda: coin_records_cli(
+                self.network,
+                self.base_url,
                 "get_coin_records_by_names",
                 {
                     "names": coin_names,
@@ -298,8 +290,11 @@ class CoinsetScanner:
         if height is not None and height > 0:
             body["height"] = int(height)
         return _coinset_with_retries(
-            lambda: record_from_payload(
-                self._post_json("get_puzzle_and_solution", body),
+            lambda: record_from_cli(
+                self.network,
+                self.base_url,
+                "get_puzzle_and_solution",
+                body,
                 "coin_solution",
             )
         )

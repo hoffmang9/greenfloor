@@ -8,7 +8,10 @@ from greenfloor_scripts.engine_subprocess import run_engine_json
 
 
 class HexNormalizer:
-    """Batch hex normalization backed by ``greenfloor-engine hex normalize-batch``."""
+    """Batch hex normalization backed by ``greenfloor-engine hex normalize-batch``.
+
+    Module-level cache avoids repeated subprocess calls during vault scans.
+    """
 
     def __init__(self) -> None:
         self._cache: dict[str, str] = {}

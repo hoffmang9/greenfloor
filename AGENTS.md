@@ -63,7 +63,8 @@ Severity tags:
   Coinset IO uses `greenfloor-engine coinset post` and `coinset push-tx`. Hex helpers use
   `greenfloor-engine hex` via `hex_subprocess`. Config field reads use `greenfloor-manager program-fields`,
   `markets-fields`, and `cats-fields`. KMS public-key fetch uses `greenfloor-engine kms-public-key-compressed-hex`.
-- `[CONTEXT]` Pytest covers script adapters and subprocess harnesses; operator policy parity is
+- `[CONTEXT]` Pytest covers script subprocess adapters (`tests/test_script_subprocess.py`);
+  Rust subprocess integration tests cover CLI contracts; operator policy parity is
   `cargo test --manifest-path greenfloor-engine/Cargo.toml` in CI (ADR 0013).
 
 ## Design Constraints

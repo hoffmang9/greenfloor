@@ -74,3 +74,26 @@ def push_tx_cli(network: str, base_url: str | None, spend_bundle_hex: str) -> di
     if not isinstance(payload, dict):
         raise RuntimeError("coinset_push_tx_invalid_response")
     return payload
+
+
+def coin_records_cli(
+    network: str,
+    base_url: str | None,
+    endpoint: str,
+    body: dict[str, Any],
+    *,
+    start_height: int | None = None,
+    end_height: int | None = None,
+) -> list[dict[str, Any]]:
+    apply_height_fields(body, start_height=start_height, end_height=end_height)
+    return coin_records_from_payload(post_json_cli(network, base_url, endpoint, body))
+
+
+def record_from_cli(
+    network: str,
+    base_url: str | None,
+    endpoint: str,
+    body: dict[str, Any],
+    key: str,
+) -> dict[str, Any] | None:
+    return record_from_payload(post_json_cli(network, base_url, endpoint, body), key)
