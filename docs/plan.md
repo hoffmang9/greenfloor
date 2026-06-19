@@ -80,14 +80,15 @@ Coin-op notes:
 
 ## Delivery constraints
 
+Canonical local/CI gate commands: [README.md](../README.md) → **Developer Checks**.
+
 - Python 3.11+ for dev tooling (script lint/type-check).
 - Required checks: `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`
-- Rust: `cargo nextest run --manifest-path greenfloor-engine/Cargo.toml` in CI (operator
-  config, CLI contracts, and policy parity safety net; `cargo test` with the same manifest
-  also works locally).
+- Rust operator tests: `cargo nextest run --manifest-path greenfloor-engine/Cargo.toml` in CI
+  (`cargo test` with the same manifest works locally).
 - Local gate: `pre-commit run --all-files` (lint + pyright + formatters; ~5–10s warm with
-  `PRE_COMMIT_HOME=.cache/pre-commit`). Run `cargo fmt`, `cargo clippy`, and
-  `cargo nextest run --manifest-path greenfloor-engine/Cargo.toml` separately before push — same split as CI.
+  `PRE_COMMIT_HOME=.cache/pre-commit`). Run `cargo fmt`, `cargo clippy`, and the Rust test
+  command above separately before push — same split as CI.
 
 **Deterministic tests (Rust operator paths):**
 

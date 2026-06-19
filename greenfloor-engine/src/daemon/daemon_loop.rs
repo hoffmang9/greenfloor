@@ -10,7 +10,7 @@ use crate::storage::{resolve_state_db_path, SqliteStore};
 
 use super::coinset_ws::start_coinset_websocket_loop;
 use super::cycle_entry::run_daemon_cycle_once;
-use super::logging::{initialize_daemon_file_logging, warn_if_daemon_log_level_auto_healed};
+use super::logging::{sync_daemon_file_logging, warn_if_daemon_log_level_auto_healed};
 use super::program_runtime::load_daemon_program_runtime;
 use super::reload::{consume_reload_marker, record_config_reloaded};
 use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest};
@@ -58,7 +58,7 @@ async fn run_one_loop_cycle(
 /// Returns an error if the operation fails.
 pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
     let runtime = load_daemon_program_runtime(&request.program_path)?;
-    initialize_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
+    sync_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
     warn_if_daemon_log_level_auto_healed(runtime.app_log_level_was_missing, &request.program_path);
 
     let program = load_program_config(&request.program_path)?;
@@ -75,6 +75,7 @@ pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
 
     loop {
         let runtime = load_daemon_program_runtime(&request.program_path)?;
+        sync_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
 
         let exit_code =
             run_one_loop_cycle(&request, &mut dispatch_state, coin_watchlist.clone()).await?;
