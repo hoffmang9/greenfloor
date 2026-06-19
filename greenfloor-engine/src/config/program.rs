@@ -469,11 +469,18 @@ pub fn load_program_bundle(path: &Path) -> SignerResult<ProgramConfigBundle> {
     program_bundle_from_parsed(program, &raw)
 }
 
+pub fn program_bundle_gated_from_parsed(
+    program: ManagerProgramConfig,
+    raw: &Value,
+) -> SignerResult<ProgramConfigBundle> {
+    program.require_signer_offer_path()?;
+    program_bundle_from_parsed(program, raw)
+}
+
 pub fn load_program_bundle_gated(path: &Path) -> SignerResult<ProgramConfigBundle> {
     let raw = read_program_yaml(path)?;
     let program = parse_program_config(&raw)?;
-    program.require_signer_offer_path()?;
-    program_bundle_from_parsed(program, &raw)
+    program_bundle_gated_from_parsed(program, &raw)
 }
 
 /// Load execution bundle for coin-list; maps missing signer path to

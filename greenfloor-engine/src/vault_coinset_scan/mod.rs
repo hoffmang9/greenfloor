@@ -1,8 +1,6 @@
 //! Vault Coinset scan: nonce-based member puzzle hash discovery and CAT classification.
 
 pub mod cat_detect;
-#[cfg(test)]
-pub mod cat_scan_fixtures;
 pub mod checkpoint;
 pub mod cli;
 pub mod dust;

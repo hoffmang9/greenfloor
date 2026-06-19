@@ -20,11 +20,6 @@ impl ScanTuningDefaults {
             parent_lookup_batch_size: 64,
         }
     }
-
-    #[must_use]
-    pub const fn cat_dust() -> Self {
-        Self::vault_cli_defaults()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -67,7 +62,7 @@ pub struct CatDustScanParams<'a> {
 
 #[must_use]
 pub fn build_cat_dust_scan_request(params: &CatDustScanParams<'_>) -> ScanRequest {
-    let tuning = ScanTuningDefaults::cat_dust();
+    let tuning = ScanTuningDefaults::vault_cli_defaults();
     let cat_asset_id = normalize_hex_id(params.cat_asset_id);
     ScanRequest {
         network: params.network.to_string(),
@@ -104,15 +99,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cat_dust_tuning_matches_vault_cli_defaults() {
-        let tuning = ScanTuningDefaults::cat_dust();
-        let cli = ScanTuningDefaults::vault_cli_defaults();
-        assert_eq!(tuning.nonce_batch_size, cli.nonce_batch_size);
-        assert_eq!(tuning.empty_batch_stop_count, cli.empty_batch_stop_count);
-        assert_eq!(
-            tuning.parent_lookup_batch_size,
-            cli.parent_lookup_batch_size
-        );
+    fn vault_cli_scan_tuning_defaults() {
+        let tuning = ScanTuningDefaults::vault_cli_defaults();
         assert_eq!(tuning.nonce_batch_size, 32);
         assert_eq!(tuning.empty_batch_stop_count, 1);
         assert_eq!(tuning.parent_lookup_batch_size, 64);

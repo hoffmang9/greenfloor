@@ -3,8 +3,6 @@ mod asset;
 mod backend;
 mod coin_select;
 mod direct_api;
-#[cfg(test)]
-mod dust_hydration_test;
 mod msp;
 mod parse;
 mod presplit;

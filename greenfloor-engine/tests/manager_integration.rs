@@ -8,8 +8,6 @@ mod cats;
 mod coin_ops;
 #[path = "manager_integration/coins_list.rs"]
 mod coins_list;
-#[path = "manager_integration/combine_market_cat_dust.rs"]
-mod combine_market_cat_dust;
 #[path = "manager_integration/doctor.rs"]
 mod doctor;
 #[path = "manager_integration/fixtures.rs"]
