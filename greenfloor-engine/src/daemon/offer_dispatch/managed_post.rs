@@ -23,7 +23,7 @@ pub async fn post_managed_planned_action(
         return Ok(false);
     }
     let side = normalize_offer_side(&action.side).to_string();
-    let response = Box::pin(build_and_post_offer(BuildAndPostOfferRequest {
+    let response = build_and_post_offer(BuildAndPostOfferRequest {
         program_path: paths.program_path.clone(),
         markets_path: paths.markets_path.clone(),
         testnet_markets_path: paths.testnet_markets_path.clone(),
@@ -45,7 +45,7 @@ pub async fn post_managed_planned_action(
         },
         action_side: Some(side),
         test_overrides: OfferOperatorTestOverrides::default(),
-    }))
+    })
     .await?;
     Ok(response.exit_code == 0)
 }

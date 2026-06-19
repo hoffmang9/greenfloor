@@ -1,3 +1,6 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use crate::config::MarketConfig;
 use crate::cycle::MarketCycleResultState;
 use crate::error::{SignerError, SignerResult};
@@ -10,7 +13,15 @@ use super::market_context::MarketCycleContext;
 use super::market_gate::enforce_market_key_allowlist;
 use super::strategy_phase::run_strategy_phase;
 
-pub async fn run_post_reconcile_market_phases(
+pub fn run_post_reconcile_market_phases<'a>(
+    store: &'a SqliteStore,
+    ctx: &'a MarketCycleContext<'a>,
+    market: &'a MarketConfig,
+) -> Pin<Box<dyn Future<Output = SignerResult<MarketCycleResultState>> + 'a>> {
+    Box::pin(run_post_reconcile_market_phases_async(store, ctx, market))
+}
+
+async fn run_post_reconcile_market_phases_async(
     store: &SqliteStore,
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
@@ -33,13 +44,13 @@ pub async fn run_post_reconcile_market_phases(
 
     let bucket_counts = run_inventory_phase(store, ctx.resources, market, &mut cycle_state).await?;
 
-    let strategy = Box::pin(run_strategy_phase(store, ctx, market, &mut cycle_state)).await?;
+    let strategy = run_strategy_phase(store, ctx, market, &mut cycle_state).await?;
 
     let _cancel_payload =
         run_market_cancel_phase(store, ctx, market, &ctx.reconcile.offers, &mut cycle_state)
             .await?;
 
-    Box::pin(run_coin_ops_phase(
+    run_coin_ops_phase(
         store,
         ctx,
         market,
@@ -47,7 +58,7 @@ pub async fn run_post_reconcile_market_phases(
         &bucket_counts,
         &strategy.sell_active_counts,
         &strategy.newly_executed_sell_counts,
-    ))
+    )
     .await?;
 
     Ok(cycle_state)

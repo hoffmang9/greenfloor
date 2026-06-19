@@ -1,3 +1,6 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use serde_json::json;
 
 use crate::coin_ops::evaluate_coin_split_gate;
@@ -132,7 +135,13 @@ async fn prepare_split_loop_context(
     })
 }
 
-pub async fn run_coin_split(request: CoinSplitRequest<'_>) -> SignerResult<i32> {
+pub fn run_coin_split(
+    request: CoinSplitRequest<'_>,
+) -> Pin<Box<dyn Future<Output = SignerResult<i32>> + '_>> {
+    Box::pin(run_coin_split_async(request))
+}
+
+async fn run_coin_split_async(request: CoinSplitRequest<'_>) -> SignerResult<i32> {
     let mgr = request.mgr;
     let until_ready = request.behavior.wait.until_ready;
     let max_iterations = request.max_iterations;

@@ -143,10 +143,6 @@ pub fn build_combine_prereq_plan(
 }
 
 /// Plan automatic coin selection for a split operation.
-///
-/// # Panics
-///
-/// Panics if the selected coin is missing after a successful selection branch (internal invariant).
 #[must_use]
 pub fn plan_auto_split_selection(
     candidate_spendable: &[SpendableCoin],
@@ -173,23 +169,16 @@ pub fn plan_auto_split_selection(
     };
 
     if !large_enough.is_empty() {
-        let selected_coin = large_enough
+        let Some(selected_coin) = large_enough
             .iter()
             .filter(|coin| !coin.id.is_empty())
-            .max_by_key(|coin| coin.amount);
-        if selected_coin.is_none() {
+            .max_by_key(|coin| coin.amount)
+        else {
             return SplitAutoSelectPlan::Skip(SplitSkipPlan {
                 reason: "no_spendable_split_coin_meets_required_amount".to_string(),
                 data: None,
             });
-        }
-        let selected_coin = selected_coin.expect("checked");
-        if selected_coin.id.is_empty() {
-            return SplitAutoSelectPlan::Skip(SplitSkipPlan {
-                reason: "no_spendable_split_coin_meets_required_amount".to_string(),
-                data: None,
-            });
-        }
+        };
         let selected_amount = selected_coin.amount;
         if check_sub_cat_change && enforce_required_amount {
             let (would_create_dust, remainder) = split_would_create_sub_cat_change(

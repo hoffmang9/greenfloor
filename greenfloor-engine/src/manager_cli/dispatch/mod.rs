@@ -14,5 +14,5 @@ use super::context::ManagerContext;
 /// Returns an error if the operation fails.
 pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
     let (ctx, command) = ManagerContext::from_cli(cli);
-    Box::pin(handlers::dispatch_manager_command(&ctx, command)).await
+    handlers::dispatch_manager_command(&ctx, command).await
 }

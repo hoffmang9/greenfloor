@@ -34,10 +34,6 @@ pub fn normalize_log_level_name(log_level: &str) -> &'static str {
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-///
-/// # Panics
-///
-/// Panics if the log file cannot be opened after the parent directory was created.
 pub fn initialize_manager_file_logging(home_dir: &Path, log_level: &str) -> SignerResult<()> {
     let normalized = normalize_log_level_name(log_level);
     let log_path = home_dir.join(LOG_FILE);
@@ -50,12 +46,18 @@ pub fn initialize_manager_file_logging(home_dir: &Path, log_level: &str) -> Sign
         })?;
     }
 
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|err| {
+            SignerError::Other(format!(
+                "failed to open manager log file {}: {err}",
+                log_path.display()
+            ))
+        })?;
+
     INIT.call_once(|| {
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-            .expect("manager log file should open after parent dir creation");
         let file_layer = tracing_subscriber::fmt::layer()
             .with_writer(file)
             .with_ansi(false)

@@ -173,9 +173,11 @@ async fn combine_until_ready_disallows_no_wait() {
         coin_ids: &[],
         number_of_coins: 2,
         asset_id: None,
-        no_wait: true,
+        wait: UntilReadyWaitMode {
+            until_ready: true,
+            no_wait: true,
+        },
         size_base_units: Some(10),
-        until_ready: true,
         max_iterations: 3,
     })
     .await

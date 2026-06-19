@@ -255,10 +255,6 @@ pub fn cancel_policy_stable_vs_unstable(pricing: &Value) -> bool {
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-///
-/// # Panics
-///
-/// Panics if `pair` is `None` after the exactly-one selector check (internal invariant).
 pub fn resolve_market_for_build(
     markets: &MarketsConfig,
     market_id: Option<&str>,
@@ -282,7 +278,10 @@ pub fn resolve_market_for_build(
             .cloned()
             .ok_or_else(|| SignerError::Other(format!("market_id not found: {market_id}")));
     }
-    let pair = pair.expect("pair checked above").trim();
+    let pair = pair
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| SignerError::Other("pair required".to_string()))?;
     let sep = if pair.contains(':') {
         ':'
     } else if pair.contains('/') {

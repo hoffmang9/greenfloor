@@ -13,7 +13,7 @@ use super::context::spendable_coins_for_gate;
 
 const ITERATION_SLEEP_SECS: u64 = 2;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct UntilReadyWaitMode {
     pub until_ready: bool,
     pub no_wait: bool,

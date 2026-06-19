@@ -7,7 +7,9 @@ mod types;
 #[cfg(test)]
 mod tests;
 
+use std::future::Future;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -77,7 +79,14 @@ pub struct BuildAndPostOfferResponse {
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn build_and_post_offer(
+#[must_use]
+pub fn build_and_post_offer(
+    request: BuildAndPostOfferRequest,
+) -> Pin<Box<dyn Future<Output = SignerResult<BuildAndPostOfferResponse>> + Send>> {
+    Box::pin(build_and_post_offer_async(request))
+}
+
+async fn build_and_post_offer_async(
     request: BuildAndPostOfferRequest,
 ) -> SignerResult<BuildAndPostOfferResponse> {
     if request.size_base_units == 0 {
@@ -109,13 +118,8 @@ pub async fn build_and_post_offer(
     };
 
     for _ in 0..request.repeat {
-        let (bootstrap_action, iteration) = Box::pin(run_post_iteration(
-            &request,
-            &ctx,
-            dexie.as_ref(),
-            splash.as_ref(),
-        ))
-        .await?;
+        let (bootstrap_action, iteration) =
+            run_post_iteration(&request, &ctx, dexie.as_ref(), splash.as_ref()).await?;
         bootstrap_actions.push(bootstrap_action);
         match iteration {
             PostIterationOutcome::Preview(preview) => built_offers_preview.push(preview),
