@@ -12,7 +12,7 @@ const SERVICE_NAME: &str = "daemon";
 const DEFAULT_LOG_LEVEL: &str = "INFO";
 const LOG_FILE: &str = "logs/debug.log";
 
-static INIT: OnceLock<Result<(), SignerError>> = OnceLock::new();
+static INIT: OnceLock<Result<(), String>> = OnceLock::new();
 
 fn normalize_log_level_name(log_level: &str) -> &'static str {
     match log_level.trim().to_ascii_uppercase().as_str() {
@@ -26,15 +26,15 @@ fn normalize_log_level_name(log_level: &str) -> &'static str {
     }
 }
 
-fn initialize_daemon_file_logging_once(home_dir: &Path, log_level: &str) -> SignerResult<()> {
+fn initialize_daemon_file_logging_once(home_dir: &Path, log_level: &str) -> Result<(), String> {
     let normalized = normalize_log_level_name(log_level);
     let log_path = home_dir.join(LOG_FILE);
     if let Some(parent) = log_path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| {
-            SignerError::Other(format!(
+            format!(
                 "failed to create daemon log dir {}: {err}",
                 parent.display()
-            ))
+            )
         })?;
     }
 
@@ -43,10 +43,10 @@ fn initialize_daemon_file_logging_once(home_dir: &Path, log_level: &str) -> Sign
         .append(true)
         .open(&log_path)
         .map_err(|err| {
-            SignerError::Other(format!(
+            format!(
                 "failed to open daemon log file {}: {err}",
                 log_path.display()
-            ))
+            )
         })?;
 
     let file_layer = tracing_subscriber::fmt::layer()
@@ -56,7 +56,10 @@ fn initialize_daemon_file_logging_once(home_dir: &Path, log_level: &str) -> Sign
         .with_level(true)
         .with_span_events(FmtSpan::NONE)
         .with_filter(EnvFilter::new(normalized));
-    let _ = tracing_subscriber::registry().with(file_layer).try_init();
+    tracing_subscriber::registry()
+        .with(file_layer)
+        .try_init()
+        .map_err(|err| format!("failed to init daemon file logging subscriber: {err}"))?;
 
     tracing::info!(
         service = SERVICE_NAME,
@@ -67,21 +70,21 @@ fn initialize_daemon_file_logging_once(home_dir: &Path, log_level: &str) -> Sign
     Ok(())
 }
 
-fn clone_init_error(err: &SignerError) -> SignerError {
-    SignerError::Other(err.to_string())
-}
-
-/// Initialize daemon file logging.
+/// Initialize daemon file logging once per process.
+///
+/// The first successful call installs the file subscriber and captures `home_dir` and
+/// `log_level`. Later calls return `Ok(())` immediately without reopening the log file
+/// or changing the filter — config reload does not reconfigure logging today.
 ///
 /// # Errors
 ///
-/// Returns an error if the operation fails.
+/// Returns an error if the first initialization attempt fails.
 pub fn initialize_daemon_file_logging(home_dir: &Path, log_level: &str) -> SignerResult<()> {
     let home_dir = home_dir.to_path_buf();
     let log_level = log_level.to_string();
     match INIT.get_or_init(|| initialize_daemon_file_logging_once(&home_dir, &log_level)) {
         Ok(()) => Ok(()),
-        Err(err) => Err(clone_init_error(err)),
+        Err(message) => Err(SignerError::Other(message.clone())),
     }
 }
 
