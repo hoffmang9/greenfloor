@@ -14,3 +14,7 @@ runs:
         workspaces: |
           greenfloor-engine -> target
         cache-workspace-crates: true
+
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: nextest

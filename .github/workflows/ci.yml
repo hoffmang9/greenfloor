@@ -69,10 +69,26 @@ jobs:
       - name: Lint and type-check (pre-commit)
         env:
           PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
-        run: pre-commit run --all-files
+        run: |
+          set -euo pipefail
+          pids=()
+          for hook in ruff ruff-format pyright yamllint prettier; do
+            pre-commit run "${hook}" --all-files &
+            pids+=($!)
+          done
+          (
+            cargo fmt --manifest-path "${{ env.CARGO_MANIFEST }}" --check
+            cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}" --lib --bins --no-deps
+          ) &
+          pids+=($!)
+          status=0
+          for pid in "${pids[@]}"; do
+            wait "${pid}" || status=1
+          done
+          exit "${status}"
 
       - name: Build and test greenfloor-engine
-        run: cargo test --manifest-path "${{ env.CARGO_MANIFEST }}"
+        run: cargo nextest run --manifest-path "${{ env.CARGO_MANIFEST }}"
 
   test:
     name: Test (${{ matrix.os }})
@@ -91,4 +107,4 @@ jobs:
       - uses: ./.github/actions/rust-cache-greenfloor
 
       - name: Build and test greenfloor-engine
-        run: cargo test --manifest-path "${{ env.CARGO_MANIFEST }}"
+        run: cargo nextest run --manifest-path "${{ env.CARGO_MANIFEST }}"
