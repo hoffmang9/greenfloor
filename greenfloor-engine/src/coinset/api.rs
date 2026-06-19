@@ -3,24 +3,21 @@ use chia_sdk_coinset::ChiaRpcClient;
 use chia_traits::Streamable;
 use serde_json::{json, Value};
 
-use crate::coinset::{broadcast_spend_bundle, client_for_network, MspCoinset};
+use crate::coinset::{
+    broadcast_spend_bundle, direct_api, resolve_direct_coinset_base_url, MspCoinset,
+};
 use crate::error::{SignerError, SignerResult};
 
-fn coinset_client(
-    network: &str,
-    base_url: Option<&str>,
-) -> SignerResult<chia_sdk_coinset::CoinsetClient> {
-    if let Some(url) = base_url.map(str::trim).filter(|value| !value.is_empty()) {
-        Ok(MspCoinset::for_network(network, Some(url))?
-            .client()
-            .clone())
-    } else {
-        client_for_network(network)
-    }
+fn coinset_client(network: &str, base_url: Option<&str>) -> SignerResult<chia_sdk_coinset::CoinsetClient> {
+    let network = direct_api::normalize_coinset_network(network);
+    let url = resolve_direct_coinset_base_url(network, base_url);
+    Ok(MspCoinset::for_network(network, Some(&url))?
+        .client()
+        .clone())
 }
 
 fn apply_testnet11_network(body: &mut Value, network: &str) {
-    if network.trim().eq_ignore_ascii_case("testnet11") {
+    if direct_api::normalize_coinset_network(network) == "testnet11" {
         if let Some(obj) = body.as_object_mut() {
             obj.entry("network".to_string())
                 .or_insert(json!("testnet11"));
@@ -40,13 +37,13 @@ pub async fn post_coinset_rpc(
             "coinset endpoint is required".to_string(),
         ));
     }
+    let network = direct_api::normalize_coinset_network(network);
     apply_testnet11_network(&mut body, network);
-    let msp = if let Some(url) = base_url.map(str::trim).filter(|value| !value.is_empty()) {
-        MspCoinset::for_network(network, Some(url))?
-    } else {
-        MspCoinset::for_network(network, None)?
-    };
-    msp.client()
+    let url = resolve_direct_coinset_base_url(network, base_url);
+    let client = MspCoinset::for_network(network, Some(&url))?
+        .client()
+        .clone();
+    client
         .make_post_request(endpoint, body)
         .await
         .map_err(SignerError::from)

@@ -85,8 +85,9 @@ def coin_records_cli(
     start_height: int | None = None,
     end_height: int | None = None,
 ) -> list[dict[str, Any]]:
-    apply_height_fields(body, start_height=start_height, end_height=end_height)
-    return coin_records_from_payload(post_json_cli(network, base_url, endpoint, body))
+    payload_body = dict(body)
+    apply_height_fields(payload_body, start_height=start_height, end_height=end_height)
+    return coin_records_from_payload(post_json_cli(network, base_url, endpoint, payload_body))
 
 
 def record_from_cli(
@@ -96,4 +97,7 @@ def record_from_cli(
     body: dict[str, Any],
     key: str,
 ) -> dict[str, Any] | None:
-    return record_from_payload(post_json_cli(network, base_url, endpoint, body), key)
+    return record_from_payload(
+        post_json_cli(network, base_url, endpoint, dict(body)),
+        key,
+    )

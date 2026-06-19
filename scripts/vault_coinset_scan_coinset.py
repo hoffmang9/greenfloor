@@ -174,6 +174,36 @@ class CoinsetScanner:
         self.network = network.strip()
         self.base_url = _normalize_coinset_base_url(base_url=base_url, network=network)
 
+    def _records(
+        self,
+        endpoint: str,
+        body: dict[str, Any],
+        *,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return _coinset_with_retries(
+            lambda: coin_records_cli(
+                self.network,
+                self.base_url,
+                endpoint,
+                body,
+                start_height=start_height,
+                end_height=end_height,
+            )
+        )
+
+    def get_blockchain_state(self) -> dict[str, Any] | None:
+        return _coinset_with_retries(
+            lambda: record_from_cli(
+                self.network,
+                self.base_url,
+                "get_blockchain_state",
+                {},
+                "blockchain_state",
+            )
+        )
+
     def by_puzzle_hash(
         self,
         *,
@@ -182,18 +212,14 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        return _coinset_with_retries(
-            lambda: coin_records_cli(
-                self.network,
-                self.base_url,
-                "get_coin_records_by_puzzle_hash",
-                {
-                    "puzzle_hash": puzzle_hash,
-                    "include_spent_coins": include_spent,
-                },
-                start_height=start_height,
-                end_height=end_height,
-            )
+        return self._records(
+            "get_coin_records_by_puzzle_hash",
+            {
+                "puzzle_hash": puzzle_hash,
+                "include_spent_coins": include_spent,
+            },
+            start_height=start_height,
+            end_height=end_height,
         )
 
     def by_puzzle_hashes(
@@ -206,18 +232,14 @@ class CoinsetScanner:
     ) -> list[dict[str, Any]]:
         if not puzzle_hashes:
             return []
-        return _coinset_with_retries(
-            lambda: coin_records_cli(
-                self.network,
-                self.base_url,
-                "get_coin_records_by_puzzle_hashes",
-                {
-                    "puzzle_hashes": puzzle_hashes,
-                    "include_spent_coins": include_spent,
-                },
-                start_height=start_height,
-                end_height=end_height,
-            )
+        return self._records(
+            "get_coin_records_by_puzzle_hashes",
+            {
+                "puzzle_hashes": puzzle_hashes,
+                "include_spent_coins": include_spent,
+            },
+            start_height=start_height,
+            end_height=end_height,
         )
 
     def by_hint(
@@ -228,18 +250,14 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        return _coinset_with_retries(
-            lambda: coin_records_cli(
-                self.network,
-                self.base_url,
-                "get_coin_records_by_hint",
-                {
-                    "hint": hint,
-                    "include_spent_coins": include_spent,
-                },
-                start_height=start_height,
-                end_height=end_height,
-            )
+        return self._records(
+            "get_coin_records_by_hint",
+            {
+                "hint": hint,
+                "include_spent_coins": include_spent,
+            },
+            start_height=start_height,
+            end_height=end_height,
         )
 
     def by_hints(
@@ -252,18 +270,14 @@ class CoinsetScanner:
     ) -> list[dict[str, Any]]:
         if not hints:
             return []
-        return _coinset_with_retries(
-            lambda: coin_records_cli(
-                self.network,
-                self.base_url,
-                "get_coin_records_by_hints",
-                {
-                    "hints": hints,
-                    "include_spent_coins": include_spent,
-                },
-                start_height=start_height,
-                end_height=end_height,
-            )
+        return self._records(
+            "get_coin_records_by_hints",
+            {
+                "hints": hints,
+                "include_spent_coins": include_spent,
+            },
+            start_height=start_height,
+            end_height=end_height,
         )
 
     def by_names(
@@ -271,16 +285,12 @@ class CoinsetScanner:
     ) -> list[dict[str, Any]]:
         if not coin_names:
             return []
-        return _coinset_with_retries(
-            lambda: coin_records_cli(
-                self.network,
-                self.base_url,
-                "get_coin_records_by_names",
-                {
-                    "names": coin_names,
-                    "include_spent_coins": include_spent,
-                },
-            )
+        return self._records(
+            "get_coin_records_by_names",
+            {
+                "names": coin_names,
+                "include_spent_coins": include_spent,
+            },
         )
 
     def puzzle_and_solution(

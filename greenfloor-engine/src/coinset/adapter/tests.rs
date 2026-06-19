@@ -2,35 +2,8 @@ use chia_protocol::SpendBundle;
 use chia_traits::Streamable;
 use serde_json::json;
 
-use super::network::{
-    normalize_coinset_network, resolve_coinset_base_url, MAINNET_BASE_URL, TESTNET11_BASE_URL,
-};
 use super::parse::{coin_records_from_payload, record_from_payload};
 use crate::coinset::{post_coinset_rpc, push_tx_hex};
-
-#[test]
-fn normalize_coinset_network_maps_testnet_aliases() {
-    assert_eq!(normalize_coinset_network("testnet"), "testnet11");
-    assert_eq!(normalize_coinset_network("testnet11"), "testnet11");
-    assert_eq!(normalize_coinset_network("mainnet"), "mainnet");
-    assert_eq!(normalize_coinset_network("unknown"), "mainnet");
-}
-
-#[test]
-fn resolve_coinset_base_url_defaults_by_network() {
-    assert_eq!(
-        resolve_coinset_base_url("mainnet", None),
-        MAINNET_BASE_URL.to_string()
-    );
-    assert_eq!(
-        resolve_coinset_base_url("testnet11", None),
-        TESTNET11_BASE_URL.to_string()
-    );
-    assert_eq!(
-        resolve_coinset_base_url("testnet11", Some("https://coinset.custom")),
-        "https://coinset.custom".to_string()
-    );
-}
 
 #[test]
 fn coin_records_from_payload_filters_non_objects() {
@@ -147,6 +120,33 @@ async fn post_coinset_rpc_get_blockchain_state() {
     .expect("blockchain state");
     let state = record_from_payload(&payload, "blockchain_state").expect("some state");
     assert_eq!(state["peak_height"], 1234);
+}
+
+#[tokio::test]
+async fn post_coinset_rpc_accepts_testnet_alias() {
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/get_blockchain_state")
+        .with_status(200)
+        .with_body(r#"{"success":true,"blockchain_state":{"peak_height":1}}"#)
+        .create_async()
+        .await;
+
+    let payload = post_coinset_rpc(
+        "testnet",
+        Some(&server.url()),
+        "get_blockchain_state",
+        json!({}),
+    )
+    .await
+    .expect("testnet alias");
+    assert_eq!(
+        payload
+            .get("blockchain_state")
+            .and_then(|value| value.get("peak_height"))
+            .and_then(|value| value.as_i64()),
+        Some(1)
+    );
 }
 
 #[tokio::test]

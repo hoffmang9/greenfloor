@@ -1,6 +1,5 @@
-//! Direct Coinset API helpers for unit tests (`api.coinset.org` script paths use `coinset_cli`).
+//! JSON response helpers for direct Coinset RPC tests.
 
-mod network;
 mod parse;
 
 #[cfg(test)]

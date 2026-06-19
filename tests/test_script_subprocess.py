@@ -29,6 +29,21 @@ def test_coin_records_cli_applies_height_and_parses_records() -> None:
     assert body["end_height"] == 20
 
 
+def test_coin_records_cli_does_not_mutate_input_body() -> None:
+    body = {"puzzle_hash": "0x01", "include_spent_coins": False}
+    with patch("greenfloor_scripts.coinset_subprocess.post_json_cli") as mock_post:
+        mock_post.return_value = {"success": True, "coin_records": []}
+        coin_records_cli(
+            "mainnet",
+            None,
+            "get_coin_records_by_puzzle_hash",
+            body,
+            start_height=10,
+            end_height=20,
+        )
+    assert body == {"puzzle_hash": "0x01", "include_spent_coins": False}
+
+
 def test_post_json_cli_builds_coinset_post_argv() -> None:
     with patch("greenfloor_scripts.coinset_subprocess.run_engine_json") as mock_run:
         mock_run.return_value = {"success": True}

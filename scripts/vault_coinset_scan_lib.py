@@ -384,7 +384,7 @@ def main() -> int:
 
     chain_peak_height: int | None = None
     if bool(args.incremental_from_checkpoint) or requested_end_height is None:
-        state = _coinset_with_retries(lambda: scanner.adapter.get_blockchain_state())
+        state = _coinset_with_retries(lambda: scanner.get_blockchain_state())
         if isinstance(state, dict):
             peak_raw = state.get("peak")
             if isinstance(peak_raw, dict):
@@ -418,8 +418,8 @@ def main() -> int:
         print(
             json.dumps(
                 {
-                    "network": scanner.adapter.network,
-                    "coinset_base_url": scanner.adapter.base_url,
+                    "network": scanner.network,
+                    "coinset_base_url": scanner.base_url,
                     "launcher_id": launcher_id,
                     "asset_type": effective_asset_type,
                     "requested_cat_ids": sorted(requested_cat_ids),
@@ -663,8 +663,8 @@ def main() -> int:
     print(
         json.dumps(
             {
-                "network": scanner.adapter.network,
-                "coinset_base_url": scanner.adapter.base_url,
+                "network": scanner.network,
+                "coinset_base_url": scanner.base_url,
                 "launcher_id": launcher_id,
                 "asset_type": effective_asset_type,
                 "requested_cat_ids": sorted(requested_cat_ids),

@@ -4,6 +4,7 @@ mod api;
 mod asset;
 mod backend;
 mod coin_select;
+mod direct_api;
 mod msp;
 mod presplit;
 #[cfg(test)]
@@ -14,6 +15,10 @@ mod xch;
 pub use api::{
     conservative_fee_from_payload, get_all_mempool_tx_ids, get_conservative_fee_estimate,
     get_fee_estimate, post_coinset_rpc, push_tx_hex,
+};
+pub use direct_api::{
+    normalize_coinset_network, resolve_direct_coinset_base_url, MAINNET_DIRECT_BASE_URL,
+    TESTNET11_DIRECT_BASE_URL,
 };
 
 pub(crate) use coin_select::finalize_selected_cats;
