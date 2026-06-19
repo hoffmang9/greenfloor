@@ -20,12 +20,15 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+            run_precommit: true
             run_rust_tests: true
             build_native_clis: true
           - os: ubuntu-24.04-arm
+            run_precommit: false
             run_rust_tests: true
             build_native_clis: true
           - os: macos-14
+            run_precommit: false
             run_rust_tests: true
             build_native_clis: true
 
@@ -72,6 +75,7 @@ jobs:
         if: matrix.build_native_clis || matrix.run_rust_tests
 
       - name: Cache pre-commit environment
+        if: matrix.run_precommit
         uses: actions/cache@v4
         with:
           path: ./.cache/pre-commit
@@ -80,19 +84,25 @@ jobs:
             pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-
 
       - name: "Lint + Type-check (pre-commit)"
+        if: matrix.run_precommit
         env:
           PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
+          # Python/YAML only; Rust fmt/clippy run in the dedicated gate step below.
+          SKIP: cargo-fmt,cargo-clippy
         run: pre-commit run --all-files
 
-      - name: Build greenfloor-engine binaries
-        if: matrix.build_native_clis && !matrix.run_rust_tests
-        run: cargo build --manifest-path "${{ env.CARGO_MANIFEST }}" --bins
+      - name: Rust fmt, clippy, and test
+        if: matrix.run_rust_tests && matrix.run_precommit
+        run: |
+          cargo fmt --manifest-path "${{ env.CARGO_MANIFEST }}" --check
+          # lib+bins only: integration tests compile in the test profile during
+          # `cargo test`; clippy --all-targets would rebuild them twice on CI.
+          cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}" --lib --bins --no-deps
+          cargo test --manifest-path "${{ env.CARGO_MANIFEST }}"
 
       - name: Build and test greenfloor-engine
-        if: matrix.run_rust_tests
-        run: |
-          cargo build --manifest-path "${{ env.CARGO_MANIFEST }}" --bins
-          cargo test --manifest-path "${{ env.CARGO_MANIFEST }}"
+        if: matrix.run_rust_tests && !matrix.run_precommit
+        run: cargo test --manifest-path "${{ env.CARGO_MANIFEST }}"
 
       - name: Install greenfloor native CLIs on PATH
         if: matrix.build_native_clis
