@@ -1,4 +1,6 @@
 mod batches;
+#[cfg(test)]
+mod dry_run_test;
 mod jobs;
 
 use std::path::Path;

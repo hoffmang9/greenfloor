@@ -63,9 +63,6 @@ pub fn plan_dust_batches(coins: &[DustCoin], batch_size: usize) -> DustBatchPlan
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coinset::finalize_selected_cats;
-    use crate::coinset::test_support::cat_with_amount;
-    use crate::vault::members::hex_to_bytes32;
     use crate::vault_coinset_scan::types::CoinRow;
 
     fn cat_row(coin_id: &str, amount: u64, spent: u64) -> CoinRow {
@@ -118,32 +115,5 @@ mod tests {
             plan.uncombinable[0].coin_id,
             "0000000000000000000000000000000000000000000000000000000000000004"
         );
-    }
-
-    #[test]
-    fn scan_dust_batch_hydrates_for_mixed_split_selection() {
-        let rows = vec![
-            cat_row(&"a".repeat(64), 400, 0),
-            cat_row(&"b".repeat(64), 300, 0),
-            cat_row(&"c".repeat(64), 1000, 0),
-        ];
-        let dust = dust_coins_from_scan(&rows, 1000);
-        let plan = plan_dust_batches(&dust, 2);
-        assert_eq!(plan.combinable_batches.len(), 1);
-        assert_eq!(plan.combinable_batches[0].len(), 2);
-        assert!(plan.uncombinable.is_empty());
-
-        let batch = &plan.combinable_batches[0];
-        let coin_ids: Vec<_> = batch
-            .iter()
-            .map(|coin| hex_to_bytes32(&coin.coin_id).expect("coin id"))
-            .collect();
-        let target_total: u64 = batch.iter().map(|coin| coin.amount).sum();
-        let hydrated = vec![cat_with_amount(400), cat_with_amount(300)];
-        let selected = finalize_selected_cats(hydrated, &coin_ids, target_total)
-            .expect("explicit dust batch should cover mixed-split target");
-        assert_eq!(selected.selected.len(), 2);
-        assert_eq!(selected.offered_total, target_total);
-        assert_eq!(selected.change_amount, 0);
     }
 }

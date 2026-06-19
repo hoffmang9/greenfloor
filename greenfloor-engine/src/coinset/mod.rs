@@ -95,7 +95,7 @@ pub struct SelectedCats {
     pub change_amount: u64,
 }
 
-pub async fn select_cats_for_spend(
+pub(crate) async fn select_cats_for_spend(
     client: &CoinsetClient,
     receive_address: &str,
     asset_id: Bytes32,
