@@ -7,13 +7,17 @@ name: CI
     branches:
       - main
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 env:
   PYTHON_VERSION: "3.11"
   CARGO_MANIFEST: greenfloor-engine/Cargo.toml
 
 jobs:
-  lint-type-test:
-    name: Lint, Type, Test (ubuntu-latest)
+  lint:
+    name: Lint and format (ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,13 +66,26 @@ jobs:
           restore-keys: |
             pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-
 
-      - name: Lint and type-check (pre-commit)
+      - name: Lint and format
         env:
           PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
-        run: pre-commit run --all-files
-
-      - name: Build and test greenfloor-engine
-        run: cargo test --manifest-path "${{ env.CARGO_MANIFEST }}"
+        run: |
+          set -euo pipefail
+          pids=()
+          for hook in ruff ruff-format pyright yamllint prettier; do
+            pre-commit run "${hook}" --all-files &
+            pids+=($!)
+          done
+          (
+            cargo fmt --manifest-path "${{ env.CARGO_MANIFEST }}" --check
+            cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}" --lib --bins --no-deps
+          ) &
+          pids+=($!)
+          status=0
+          for pid in "${pids[@]}"; do
+            wait "${pid}" || status=1
+          done
+          exit "${status}"
 
   test:
     name: Test (${{ matrix.os }})
@@ -77,6 +94,7 @@ jobs:
       fail-fast: false
       matrix:
         os:
+          - ubuntu-latest
           - ubuntu-24.04-arm
           - macos-14
     steps:
@@ -87,4 +105,4 @@ jobs:
       - uses: ./.github/actions/rust-cache-greenfloor
 
       - name: Build and test greenfloor-engine
-        run: cargo test --manifest-path "${{ env.CARGO_MANIFEST }}"
+        run: cargo nextest run --manifest-path "${{ env.CARGO_MANIFEST }}"

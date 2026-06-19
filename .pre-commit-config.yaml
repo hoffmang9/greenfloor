@@ -1,8 +1,8 @@
 ---
-# Lint/type/fmt/clippy gate — CI lint-type-test job on ubuntu-latest (see .github/workflows/ci.yml).
-# arm/macOS runners use the separate Test (…) jobs (cargo test only).
+# Lint/type/fmt/clippy gate — CI lint job on ubuntu-latest (see .github/workflows/ci.yml).
+# Test (ubuntu/arm/macOS) jobs run `cargo nextest run` in parallel with lint.
 # Full operator safety net before push:
-#   cargo test --manifest-path greenfloor-engine/Cargo.toml
+#   cargo test --manifest-path greenfloor-engine/Cargo.toml  (CI: cargo nextest run)
 #
 # Speed tips:
 #   export PRE_COMMIT_HOME="$(pwd)/.cache/pre-commit"  # reuse hook envs (CI caches this path)
@@ -19,9 +19,9 @@ repos:
         files: ^greenfloor-engine/
 
       - id: cargo-clippy
-        # Runs `clippy::all` + `clippy::pedantic` deny from greenfloor-engine/Cargo.toml.
+        # --lib --bins: integration tests compile once in `cargo test`, not again via --all-targets.
         name: cargo clippy (greenfloor-engine, clippy::all + pedantic)
-        entry: cargo clippy --manifest-path greenfloor-engine/Cargo.toml --all-targets --no-deps
+        entry: cargo clippy --manifest-path greenfloor-engine/Cargo.toml --lib --bins --no-deps
         language: system
         pass_filenames: false
         files: ^greenfloor-engine/
