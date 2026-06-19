@@ -90,7 +90,7 @@ Severity tags:
 ## Before You Commit
 
 - `[MUST]` Python version is 3.11+.
-- `[MUST]` Requires Node LTS for Prettier; see [README.md](../README.md) → **Local dev tooling**.
+- `[MUST]` Requires Node LTS for Prettier; see [README.md](README.md) → **Local dev tooling**.
 - `[MUST]` Use venv binaries for Python tooling when running script linters (for example `.venv/bin/ruff`).
 - `[MUST]` Run `pre-commit run --all-files`.
 - `[MUST]` Operator/daemon test expectations: `docs/plan.md` → **Delivery constraints**
