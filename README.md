@@ -9,7 +9,7 @@ backed by the canonical `greenfloor-engine` crate.
 - Python remains for `scripts/` utilities and a slim `greenfloor` package (config CLI
   adapters via `greenfloor-manager` field commands, hex helpers, Coinset adapter) used
   only by those scripts and tests.
-- **No PyO3 extension.** Script adapters under `scripts/lib/` call `greenfloor-engine` and
+- **No PyO3 extension.** Script adapters under `scripts/greenfloor_scripts/` call `greenfloor-engine` and
   `greenfloor-manager` CLI subcommands.
 
 ## Components

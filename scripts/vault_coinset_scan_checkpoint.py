@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from lib.hex_utils import normalize_hex_id
+from greenfloor_scripts.hex_subprocess import normalize_hex_id
 
 from scripts.vault_coinset_scan_coinset import _safe_int
 

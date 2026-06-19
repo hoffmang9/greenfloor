@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import subprocess
 
-from lib.binaries import GreenfloorEngineBinaryError, resolve_greenfloor_engine_binary
+from greenfloor_scripts.binaries import (
+    GreenfloorEngineBinaryError,
+    resolve_greenfloor_engine_binary,
+)
 
 
 def get_public_key_compressed_hex(key_id: str, region: str) -> str:

@@ -1,4 +1,4 @@
-"""Pytest bootstrap: expose ``scripts/lib`` as import root ``lib``."""
+"""Pytest bootstrap: expose ``scripts/greenfloor_scripts`` when not installed editable."""
 
 from __future__ import annotations
 

@@ -7,12 +7,8 @@ import random
 import time
 from typing import Any
 
-from lib.coinset_subprocess import (
-    MAINNET_BASE_URL,
-    TESTNET11_BASE_URL,
-    CoinsetScriptClient,
-)
-from lib.hex_utils import normalize_hex_id
+from greenfloor_scripts.coinset_subprocess import CoinsetScriptClient
+from greenfloor_scripts.hex_subprocess import normalize_hex_id
 
 
 def _import_sdk() -> Any:
@@ -112,11 +108,8 @@ def _normalize_coinset_base_url(*, base_url: str | None, network: str) -> str | 
         "https://www.testnet11.coinset.org",
         "http://www.testnet11.coinset.org",
     }
-    is_testnet11 = network.strip().lower() in {"testnet", "testnet11"}
-    if lower in mainnet_aliases:
-        return TESTNET11_BASE_URL if is_testnet11 else MAINNET_BASE_URL
-    if lower in testnet_aliases:
-        return TESTNET11_BASE_URL
+    if lower in mainnet_aliases or lower in testnet_aliases:
+        return None
     return normalized
 
 

@@ -6,9 +6,9 @@ GreenFloor operator coin ops use the native manager (`greenfloor-manager coins-l
 
 ## Scope
 
-- Scripts under `scripts/` use `scripts/lib/` subprocess adapters for Coinset IO via
-  `greenfloor-engine coinset` (`post`, `push-tx`, and `adapter` subcommands).
-- Vault identity and script config fields come from Rust policy via `greenfloor/config/io.py`
+- Scripts under `scripts/` use `scripts/greenfloor_scripts/` subprocess adapters for Coinset IO via
+  `greenfloor-engine coinset` (`post` and `push-tx` subcommands).
+- Vault identity and script config fields come from Rust policy via `greenfloor_scripts/config_subprocess.py`
   adapters (`program-fields` for `vault_launcher_id`; `cats-fields` / `markets-fields` for
   ticker→asset metadata in vault scans). Legacy `cloud_wallet:` blocks are rejected at
   Rust config load.

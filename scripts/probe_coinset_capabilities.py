@@ -7,9 +7,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from lib.coinset_subprocess import CoinsetScriptClient
-from lib.config_subprocess import ensure_program_config_valid, launcher_id_from_program_config
-from lib.hex_utils import normalize_hex_id
+from greenfloor_scripts.coinset_subprocess import CoinsetScriptClient
+from greenfloor_scripts.config_subprocess import (
+    ensure_program_config_valid,
+    launcher_id_from_program_config,
+)
+from greenfloor_scripts.hex_subprocess import normalize_hex_id
 
 
 def _import_sdk() -> Any:

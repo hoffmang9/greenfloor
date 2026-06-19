@@ -6,7 +6,7 @@ Operator coin ops and offer lifecycle use native Rust binaries (`greenfloor-mana
 
 ## Config access (scripts)
 
-Scripts must not walk operator YAML for policy fields. Use `scripts/lib/config_subprocess.py`:
+Scripts must not walk operator YAML for policy fields. Use `scripts/greenfloor_scripts/config_subprocess.py`:
 
 | Need                         | Adapter                                           | Rust command                                     |
 | ---------------------------- | ------------------------------------------------- | ------------------------------------------------ |

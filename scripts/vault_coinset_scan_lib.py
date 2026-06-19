@@ -7,14 +7,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from lib.config_subprocess import (
+from greenfloor_scripts.config_subprocess import (
     all_market_rows,
     ensure_program_config_valid,
     launcher_id_from_program_config,
     load_cats_fields,
     load_markets_fields,
 )
-from lib.hex_utils import is_hex_id, normalize_hex_id
+from greenfloor_scripts.hex_subprocess import is_hex_id, normalize_hex_id
 
 from scripts.vault_coinset_scan_checkpoint import (
     CoinRow,

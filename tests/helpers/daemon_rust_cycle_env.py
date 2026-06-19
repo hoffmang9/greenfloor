@@ -7,7 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from lib.binaries import resolve_greenfloor_engine_binary
+from greenfloor_scripts.binaries import resolve_greenfloor_engine_binary
 
 
 @dataclass(slots=True)

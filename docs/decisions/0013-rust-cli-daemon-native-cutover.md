@@ -43,7 +43,7 @@ from the index; see git history for the full record.
    `coinset_cli` directly.
 
 4. **Python scripts stay.** Standalone utilities under `scripts/` use script-only Python
-   libraries (`scripts/lib/` subprocess adapters) and must not reimplement operator YAML
+   libraries (`scripts/greenfloor_scripts/` subprocess adapters) and must not reimplement operator YAML
    policy walks. Config field reads go through `greenfloor-manager program-fields`,
    `markets-fields`, and `cats-fields`.
 

@@ -27,7 +27,7 @@ package-dir = {"" = "scripts"}
 
 [tool.setuptools.packages.find]
 where = ["scripts"]
-include = ["lib*"]
+include = ["greenfloor_scripts*"]
 
 [tool.ruff]
 line-length = 100

@@ -8,9 +8,9 @@ from typing import Any
 
 import yaml
 
-from lib.binaries import resolve_greenfloor_manager_binary
-from lib.hex_utils import normalize_hex_id
-from lib.manager_subprocess import parse_json_output, run_manager
+from greenfloor_scripts.binaries import resolve_greenfloor_manager_binary
+from greenfloor_scripts.hex_subprocess import normalize_hex_id
+from greenfloor_scripts.manager_subprocess import parse_json_output, run_manager
 
 
 def load_yaml(path: Path) -> dict[str, Any]:

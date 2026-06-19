@@ -8,6 +8,7 @@ use greenfloor_engine::daemon::{
     run_daemon_command, run_daemon_once_from_request_json, DaemonCliArgs, DaemonOnceJsonArgs,
 };
 use greenfloor_engine::error::SignerError;
+use greenfloor_engine::hex_cli::{run_hex_command, HexCliArgs};
 use greenfloor_engine::kms_cli::{run_kms_public_key_compressed_hex, KmsPublicKeyArgs};
 use greenfloor_engine::offer::{build_vault_cat_offer, CreateOfferRequest};
 use greenfloor_engine::vault::{
@@ -95,6 +96,8 @@ enum Commands {
     DaemonOnce(DaemonOnceJsonArgs),
     /// Coinset script IO: generic post RPC and push-tx for spend-bundle hex.
     Coinset(CoinsetCliArgs),
+    /// Shared hex helpers for vault scan scripts.
+    Hex(HexCliArgs),
     /// KMS helpers for one-off vault onboarding scripts.
     KmsPublicKeyCompressedHex(KmsPublicKeyArgs),
 }
@@ -202,6 +205,7 @@ async fn run() -> Result<(), Error> {
             }
         }
         Commands::Coinset(args) => run_coinset_command(args).await?,
+        Commands::Hex(args) => run_hex_command(args)?,
         Commands::KmsPublicKeyCompressedHex(args) => {
             run_kms_public_key_compressed_hex(args).await?;
         }

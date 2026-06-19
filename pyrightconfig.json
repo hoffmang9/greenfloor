@@ -1,5 +1,5 @@
 {
-  "include": ["scripts/lib", "scripts", "tests"],
+  "include": ["scripts/greenfloor_scripts", "scripts", "tests"],
   "pythonVersion": "3.11",
   "typeCheckingMode": "basic",
   "venvPath": ".",
