@@ -3,6 +3,8 @@ mod asset;
 mod backend;
 mod coin_select;
 mod direct_api;
+#[cfg(test)]
+mod dust_hydration_test;
 mod msp;
 mod parse;
 mod presplit;
@@ -93,7 +95,7 @@ pub struct SelectedCats {
     pub change_amount: u64,
 }
 
-pub(crate) async fn select_cats_for_spend(
+pub async fn select_cats_for_spend(
     client: &CoinsetClient,
     receive_address: &str,
     asset_id: Bytes32,

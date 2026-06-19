@@ -142,9 +142,7 @@ class ScriptAdapterTests(unittest.TestCase):
 
     def test_is_retryable_engine_cli_error_uses_structured_json_retryable_flag(self) -> None:
         self.assertTrue(is_retryable_engine_cli_error(RuntimeError(ENGINE_CLI_FAILED_COINSET_503)))
-        self.assertFalse(
-            is_retryable_engine_cli_error(RuntimeError(ENGINE_CLI_FAILED_PARSE_BODY))
-        )
+        self.assertFalse(is_retryable_engine_cli_error(RuntimeError(ENGINE_CLI_FAILED_PARSE_BODY)))
         self.assertFalse(is_retryable_engine_cli_error(RuntimeError("invalid puzzle hash")))
 
     def test_is_retryable_engine_cli_error_requires_json_retryable_flag(self) -> None:

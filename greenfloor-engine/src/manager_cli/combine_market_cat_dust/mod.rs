@@ -1,7 +1,11 @@
+mod batches;
 mod jobs;
 
 use std::path::Path;
 
+use batches::{
+    append_orphan_entries, executed_batch_entry, failed_batch_entry, preview_batches_report,
+};
 use chia_protocol::Bytes32;
 use jobs::{build_enabled_cat_jobs, CatDustJob};
 use serde_json::{json, Value};
@@ -137,26 +141,6 @@ async fn run_dust_combine_batch(
     build_and_optionally_broadcast_vault_cat_mixed_split(signer_config, request, true).await
 }
 
-fn preview_batches_json(
-    batches: &[Vec<DustCoin>],
-    uncombinable: &[DustCoin],
-    can_combine: bool,
-) -> Value {
-    json!({
-        "combinable": batches
-            .iter()
-            .map(|batch| json!({
-                "coin_ids": batch.iter().map(|coin| &coin.coin_id).collect::<Vec<_>>(),
-                "would_combine": batch.len() >= 2 && can_combine,
-            }))
-            .collect::<Vec<_>>(),
-        "uncombinable_dust_coins": uncombinable
-            .iter()
-            .map(|coin| &coin.coin_id)
-            .collect::<Vec<_>>(),
-    })
-}
-
 async fn execute_combine_batches(
     signer_config: &SignerConfig,
     receive_address: &str,
@@ -169,26 +153,10 @@ async fn execute_combine_batches(
         match run_dust_combine_batch(signer_config.clone(), receive_address, cat_asset_id, batch)
             .await
         {
-            Ok(result) => {
-                batch_results.push(json!({
-                    "coin_ids": batch.iter().map(|coin| &coin.coin_id).collect::<Vec<_>>(),
-                    "exit_code": 0,
-                    "payload": {
-                        "broadcast_status": result.broadcast_status,
-                        "selected_coin_ids": result.selected_coin_ids,
-                        "offered_total": result.offered_total,
-                        "target_total": result.target_total,
-                        "change_amount": result.change_amount,
-                    },
-                }));
-            }
+            Ok(result) => batch_results.push(executed_batch_entry(batch, &result)),
             Err(err) => {
                 job_failed = true;
-                batch_results.push(json!({
-                    "coin_ids": batch.iter().map(|coin| &coin.coin_id).collect::<Vec<_>>(),
-                    "exit_code": 1,
-                    "stderr_tail": err.to_string(),
-                }));
+                batch_results.push(failed_batch_entry(batch, &err.to_string()));
             }
         }
     }
@@ -266,33 +234,23 @@ async fn process_job(ctx: ProcessJobContext<'_>) -> SignerResult<Value> {
         if let Some(note) = signer_ready.note {
             job_report["signer_config_note"] = json!(note);
         }
-        job_report["batches"] = preview_batches_json(
-            &batch_plan.combinable_batches,
-            &batch_plan.uncombinable,
-            signer_ready.can_combine,
-        );
+        job_report["batches"] = preview_batches_report(&batch_plan, signer_ready.can_combine);
         return Ok(job_report);
     }
 
     let signer_config = ctx
         .signer_config
         .expect("combine execution loads signer config");
-    let (job_failed, batches_json) = execute_combine_batches(
+    let (job_failed, mut batches_json) = execute_combine_batches(
         signer_config,
         &ctx.job.receive_address,
         &ctx.job.cat_asset_id,
         &batch_plan.combinable_batches,
     )
     .await;
+    append_orphan_entries(&mut batches_json, &batch_plan.uncombinable);
     job_report["status"] = json!(if job_failed { "error" } else { "ok" });
     job_report["batches"] = batches_json;
-    if !batch_plan.uncombinable.is_empty() {
-        job_report["uncombinable_dust_coins"] = json!(batch_plan
-            .uncombinable
-            .iter()
-            .map(|coin| &coin.coin_id)
-            .collect::<Vec<_>>());
-    }
     Ok(job_report)
 }
 
