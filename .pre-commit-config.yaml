@@ -1,6 +1,6 @@
 ---
-# Lint/type/fmt/clippy gate — CI runs Python hooks in parallel with cargo fmt/clippy on ubuntu-latest.
-# CI test jobs use `cargo nextest run`; local pre-commit still runs hooks sequentially.
+# Lint/type/fmt/clippy gate — CI lint job on ubuntu-latest (see .github/workflows/ci.yml).
+# Test (ubuntu/arm/macOS) jobs run `cargo nextest run` in parallel with lint.
 # Full operator safety net before push:
 #   cargo test --manifest-path greenfloor-engine/Cargo.toml  (CI: cargo nextest run)
 #
