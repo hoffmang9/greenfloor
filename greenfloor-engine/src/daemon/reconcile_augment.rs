@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
+use tracing::Level;
 
 use crate::adapters::DexieClient;
 use crate::cycle::{is_dexie_offer_missing_error_text, resolve_missing_watched_offer_transition};
 use crate::error::{SignerError, SignerResult};
+use crate::operator_log::{audit_market_cycle, DEXIE_WATCHLIST_AUGMENT_ERROR};
 use crate::storage::SqliteStore;
 
 use super::reconcile_market_cycle::{
@@ -111,14 +113,17 @@ pub async fn augment_dexie_offers_for_watchlist(
             }
             Err(err) => {
                 metrics.cycle_errors += 1;
-                store.add_audit_event(
-                    "dexie_watchlist_augment_error",
+                audit_market_cycle(
+                    store,
+                    Level::WARN,
+                    DEXIE_WATCHLIST_AUGMENT_ERROR,
                     &serde_json::json!({
                         "market_id": market_id,
                         "offer_id": watched_offer_id,
                         "error": err.to_string(),
                     }),
-                    Some(market_id),
+                    market_id,
+                    "dexie watchlist augment failed",
                 )?;
             }
         }
@@ -136,14 +141,17 @@ pub async fn augment_dexie_offers_for_watchlist(
             }
             Err(err) => {
                 metrics.cycle_errors += 1;
-                store.add_audit_event(
-                    "dexie_watchlist_augment_error",
+                audit_market_cycle(
+                    store,
+                    Level::WARN,
+                    DEXIE_WATCHLIST_AUGMENT_ERROR,
                     &serde_json::json!({
                         "market_id": market_id,
                         "offer_id": beyond_offer_id,
                         "error": err.to_string(),
                     }),
-                    Some(market_id),
+                    market_id,
+                    "dexie watchlist augment failed",
                 )?;
             }
         }

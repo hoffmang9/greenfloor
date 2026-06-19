@@ -33,17 +33,6 @@ struct CoinOpsPlanningResult {
     overflow_plans: Vec<CoinOpPlan>,
 }
 
-fn audit_coin_ops(
-    store: &SqliteStore,
-    level: Level,
-    event: &str,
-    payload: &Value,
-    market_id: &str,
-    trace_message: &'static str,
-) -> SignerResult<()> {
-    audit_market_cycle(store, level, event, payload, market_id, trace_message)
-}
-
 fn build_valid_sell_ladder(
     store: &SqliteStore,
     market: &MarketConfig,
@@ -67,7 +56,7 @@ fn build_valid_sell_ladder(
         }));
     }
     if !invalid_buckets.is_empty() {
-        audit_coin_ops(
+        audit_market_cycle(
             store,
             Level::WARN,
             COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
@@ -122,7 +111,7 @@ fn plan_coin_ops_for_market(
         program.coin_ops_combine_fee_mojos,
     );
     if !planning.invalid_ladder_math_sizes.is_empty() {
-        audit_coin_ops(
+        audit_market_cycle(
             store,
             Level::WARN,
             COIN_OPS_INVALID_LADDER_MATH,
@@ -136,7 +125,7 @@ fn plan_coin_ops_for_market(
     }
     let plans = planning.plans;
     if plans.is_empty() {
-        audit_coin_ops(
+        audit_market_cycle(
             store,
             Level::DEBUG,
             COIN_OPS_NO_PLANS,
@@ -232,7 +221,7 @@ fn record_coin_ops_phase_audit(
     execution: &CoinOpExecutionResult,
 ) -> SignerResult<()> {
     if !planning.overflow_plans.is_empty() {
-        audit_coin_ops(
+        audit_market_cycle(
             store,
             Level::WARN,
             COIN_OPS_PARTIAL_OR_SKIPPED_FEE_BUDGET,
@@ -251,7 +240,7 @@ fn record_coin_ops_phase_audit(
         )?;
     }
 
-    audit_coin_ops(
+    audit_market_cycle(
         store,
         Level::INFO,
         COIN_OPS_PLAN,
@@ -267,7 +256,7 @@ fn record_coin_ops_phase_audit(
     )?;
 
     if planning.executable_plans.is_empty() {
-        audit_coin_ops(
+        audit_market_cycle(
             store,
             Level::WARN,
             COIN_OPS_SKIPPED_FEE_BUDGET,
@@ -280,7 +269,7 @@ fn record_coin_ops_phase_audit(
             "coin ops skipped fee budget",
         )?;
     } else {
-        audit_coin_ops(
+        audit_market_cycle(
             store,
             Level::INFO,
             COIN_OPS_EXECUTED,
@@ -309,7 +298,7 @@ pub async fn run_coin_ops_phase(
     let program = ctx.resources.program();
     let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
     if sell_ladder.is_empty() {
-        audit_coin_ops(
+        audit_market_cycle(
             store,
             Level::DEBUG,
             COIN_OPS_NO_PLANS,

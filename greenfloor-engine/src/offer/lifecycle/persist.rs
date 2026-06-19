@@ -1,7 +1,11 @@
 use serde_json::{json, Value};
+use tracing::Level;
 
 use crate::cycle::CycleOfferTransition;
 use crate::error::SignerResult;
+use crate::operator_log::{
+    audit_market_cycle, audit_only, OFFER_LIFECYCLE_TRANSITION, TAKER_DETECTION,
+};
 use crate::storage::SqliteStore;
 
 pub struct ReconcilePersistOptions<'a> {
@@ -52,10 +56,12 @@ pub fn persist_offer_lifecycle_transition(
             obj.insert("dexie_error".to_string(), Value::String(error.to_string()));
         }
     }
-    store.add_audit_event("offer_lifecycle_transition", &payload, Some(market_id))?;
+    audit_only(store, OFFER_LIFECYCLE_TRANSITION, &payload, Some(market_id))?;
     if transition.taker_signal != "none" {
-        store.add_audit_event(
-            "taker_detection",
+        audit_market_cycle(
+            store,
+            Level::INFO,
+            TAKER_DETECTION,
             &json!({
                 "offer_id": offer_id,
                 "market_id": market_id,
@@ -68,7 +74,8 @@ pub fn persist_offer_lifecycle_transition(
                 "signal_source": transition.signal_source,
                 "coinset_confirmed_tx_ids": transition.coinset_confirmed_tx_ids,
             }),
-            Some(market_id),
+            market_id,
+            "taker detection",
         )?;
     }
     Ok(())

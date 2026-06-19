@@ -2,8 +2,8 @@
 //!
 //! Audit-only paths (`SQLite` `audit_event` only; tracing would duplicate):
 //! - Coinset websocket — `coinset_ws_*` (live loop / handler)
-//! - Offer lifecycle reconcile — `offer_lifecycle_transition`
-//! - Cycle preamble reconcile — `stale_open_offer_requeue_detected`
+//! - Offer lifecycle reconcile — `offer_lifecycle_transition` (high-volume state rows)
+//! - Daemon cycle summary — `daemon_cycle_summary` (structured completion trace carries fields)
 //!
 //! Not yet wired:
 //! - Low-inventory alerts — `cycle/notifications.rs`
@@ -52,6 +52,8 @@ pub const OFFER_LIFECYCLE_TRANSITION: &str = "offer_lifecycle_transition";
 pub const OFFER_RECONCILIATION: &str = "offer_reconciliation";
 pub const TAKER_DETECTION: &str = "taker_detection";
 pub const DEXIE_OFFERS_ERROR: &str = "dexie_offers_error";
+pub const DEXIE_WATCHLIST_AUGMENT_ERROR: &str = "dexie_watchlist_augment_error";
+pub const STALE_OPEN_OFFER_REQUEUE_DETECTED: &str = "stale_open_offer_requeue_detected";
 
 #[cfg(test)]
 mod tests {

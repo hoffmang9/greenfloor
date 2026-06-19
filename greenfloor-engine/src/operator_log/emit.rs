@@ -98,6 +98,56 @@ pub fn audit_and_trace(
     Ok(())
 }
 
+/// Persist an audit row without emitting a trace line.
+///
+/// # Errors
+///
+/// Returns an error when the audit insert fails.
+pub fn audit_only(
+    store: &SqliteStore,
+    audit_event_type: &str,
+    payload: &Value,
+    market_id: Option<&str>,
+) -> SignerResult<()> {
+    store.add_audit_event(audit_event_type, payload, market_id)
+}
+
+/// Persist a daemon-cycle audit row without a trace mirror (full payloads for `status_cli`).
+///
+/// # Errors
+///
+/// Returns an error when the audit insert fails.
+pub fn audit_daemon_cycle_only(
+    store: &SqliteStore,
+    audit_event_type: &str,
+    payload: &Value,
+) -> SignerResult<()> {
+    audit_only(store, audit_event_type, payload, None)
+}
+
+/// Persist and trace a config reload audit event (no `market_id`).
+///
+/// # Errors
+///
+/// Returns an error when the audit insert fails.
+pub fn audit_config(
+    store: &SqliteStore,
+    level: Level,
+    audit_event_type: &str,
+    payload: &Value,
+    trace_message: &'static str,
+) -> SignerResult<()> {
+    audit_and_trace(
+        store,
+        level,
+        LogContext::CONFIG,
+        audit_event_type,
+        payload,
+        None,
+        trace_message,
+    )
+}
+
 /// Persist and trace a daemon-cycle audit event (no `market_id`).
 ///
 /// # Errors
@@ -212,7 +262,7 @@ pub mod trace_capture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operator_log::events::OFFER_POST_FAILURE;
+    use crate::operator_log::events::{DAEMON_CYCLE_SUMMARY, OFFER_POST_FAILURE};
     use serde_json::json;
 
     #[test]
@@ -252,6 +302,22 @@ mod tests {
             .expect("redacted offer");
         assert!(!redacted_offer.contains(&secret_tail));
         assert!(redacted_offer.contains("len="));
+    }
+
+    #[test]
+    fn audit_daemon_cycle_only_persists_without_trace() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("greenfloor.sqlite")).expect("open");
+        let capture = trace_capture::TraceCapture::install();
+        let payload = json!({"error_count": 1});
+
+        audit_daemon_cycle_only(&store, DAEMON_CYCLE_SUMMARY, &payload).expect("audit");
+
+        let events = store
+            .list_recent_audit_events(Some(&[DAEMON_CYCLE_SUMMARY]), None, 1)
+            .expect("events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(capture.count_substr(DAEMON_CYCLE_SUMMARY), 0);
     }
 
     #[test]

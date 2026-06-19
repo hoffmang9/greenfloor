@@ -1,5 +1,5 @@
 use reqwest::Client;
-use serde_json::{json, Value};
+use serde_json::json;
 use tracing::Level;
 
 use crate::coinset::get_all_mempool_tx_ids;
@@ -22,16 +22,6 @@ pub struct CyclePreambleResult {
     pub xch_price_usd: Option<f64>,
 }
 
-fn audit_preamble(
-    store: &SqliteStore,
-    level: Level,
-    event: &str,
-    payload: &Value,
-    trace_message: &'static str,
-) -> SignerResult<()> {
-    audit_daemon_cycle(store, level, event, payload, trace_message)
-}
-
 pub async fn run_cycle_preamble(
     program: &ManagerProgramConfig,
     store: &SqliteStore,
@@ -45,7 +35,7 @@ pub async fn run_cycle_preamble(
     match fetch_xch_price_usd().await {
         Ok(price) => {
             result.xch_price_usd = Some(price);
-            audit_preamble(
+            audit_daemon_cycle(
                 store,
                 Level::INFO,
                 XCH_PRICE_SNAPSHOT,
@@ -55,7 +45,7 @@ pub async fn run_cycle_preamble(
         }
         Err(err) => {
             result.cycle_error_count += 1;
-            audit_preamble(
+            audit_daemon_cycle(
                 store,
                 Level::WARN,
                 XCH_PRICE_ERROR,
@@ -70,7 +60,7 @@ pub async fn run_cycle_preamble(
             capture_coinset_websocket_once(store, program, coinset_base_url, coin_watchlist).await
         {
             result.cycle_error_count += 1;
-            audit_preamble(
+            audit_daemon_cycle(
                 store,
                 Level::WARN,
                 COINSET_WS_ONCE_ERROR,
@@ -81,7 +71,7 @@ pub async fn run_cycle_preamble(
     } else if poll_coinset_mempool {
         if let Err(err) = poll_coinset_mempool_snapshot(store, program, coinset_base_url).await {
             result.cycle_error_count += 1;
-            audit_preamble(
+            audit_daemon_cycle(
                 store,
                 Level::WARN,
                 COINSET_MEMPOOL_ERROR,
@@ -107,7 +97,7 @@ async fn poll_coinset_mempool_snapshot(
     };
     let tx_ids = get_all_mempool_tx_ids(&program.network, base_opt).await?;
     let new_count = store.observe_mempool_tx_ids(&tx_ids)?;
-    audit_preamble(
+    audit_daemon_cycle(
         store,
         Level::DEBUG,
         COINSET_MEMPOOL_SNAPSHOT,
@@ -115,7 +105,7 @@ async fn poll_coinset_mempool_snapshot(
         "coinset mempool snapshot",
     )?;
     if new_count > 0 {
-        audit_preamble(
+        audit_daemon_cycle(
             store,
             Level::INFO,
             MEMPOOL_OBSERVED,

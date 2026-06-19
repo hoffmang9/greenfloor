@@ -4,7 +4,7 @@ use serde_json::json;
 use tracing::Level;
 
 use crate::error::{SignerError, SignerResult};
-use crate::operator_log::{audit_and_trace, LogContext, CONFIG_RELOADED};
+use crate::operator_log::{audit_config, CONFIG_RELOADED};
 use crate::storage::SqliteStore;
 
 const RELOAD_MARKER_FILE: &str = "reload_request.json";
@@ -44,13 +44,11 @@ pub fn remove_reload_marker(state_dir: &Path) -> SignerResult<()> {
 /// Returns an error when the audit insert fails.
 pub fn record_config_reloaded(store: &SqliteStore, source: &str) -> SignerResult<()> {
     let payload = json!({ "source": source });
-    audit_and_trace(
+    audit_config(
         store,
         Level::INFO,
-        LogContext::CONFIG,
         CONFIG_RELOADED,
         &payload,
-        None,
         "config reloaded",
     )
 }

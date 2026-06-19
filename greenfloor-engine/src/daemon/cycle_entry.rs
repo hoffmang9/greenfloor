@@ -4,8 +4,8 @@ use crate::config::MarketConfig;
 use crate::cycle::enqueue_immediate_requeue;
 use crate::error::SignerResult;
 use crate::operator_log::{
-    audit_daemon_cycle, LogContext, DAEMON_CYCLE_COMPLETED, DAEMON_CYCLE_STARTED,
-    DAEMON_CYCLE_SUMMARY,
+    audit_daemon_cycle, audit_daemon_cycle_only, LogContext, DAEMON_CYCLE_COMPLETED,
+    DAEMON_CYCLE_STARTED, DAEMON_CYCLE_SUMMARY, STALE_OPEN_OFFER_REQUEUE_DETECTED,
 };
 use crate::storage::SqliteStore;
 use tracing::Level;
@@ -41,15 +41,17 @@ fn write_stale_sweep_audit(store: &SqliteStore, plan: &CyclePlan) -> SignerResul
     if plan.stale_open_sweep.requeue_market_ids.is_empty() {
         return Ok(());
     }
-    store.add_audit_event(
-        "stale_open_offer_requeue_detected",
+    audit_daemon_cycle(
+        store,
+        Level::INFO,
+        STALE_OPEN_OFFER_REQUEUE_DETECTED,
         &serde_json::json!({
             "market_ids": plan.stale_open_sweep.requeue_market_ids,
             "checked_offer_count": plan.stale_open_sweep.checked_offer_count,
             "truncated": plan.stale_open_sweep.truncated,
             "hits": plan.stale_open_sweep.hits,
         }),
-        None,
+        "stale open offer requeue detected",
     )
 }
 
@@ -196,13 +198,7 @@ pub async fn run_daemon_cycle_once(
     let summary_payload = serde_json::to_value(&summary).map_err(|err| {
         crate::error::SignerError::Other(format!("failed to encode daemon_cycle_summary: {err}"))
     })?;
-    audit_daemon_cycle(
-        &cycle_store,
-        Level::INFO,
-        DAEMON_CYCLE_SUMMARY,
-        &summary_payload,
-        "daemon cycle summary",
-    )?;
+    audit_daemon_cycle_only(&cycle_store, DAEMON_CYCLE_SUMMARY, &summary_payload)?;
 
     let exit_code = compute_cycle_exit_code(&plan, &metrics);
     trace_daemon_cycle_completed(exit_code, &summary, plan.selected_market_ids.len());
@@ -268,6 +264,7 @@ mod tests {
         };
         trace_daemon_cycle_completed(2, &summary, 1);
         assert_eq!(capture.count_substr(DAEMON_CYCLE_COMPLETED), 1);
+        assert_eq!(capture.count_substr(DAEMON_CYCLE_SUMMARY), 0);
         assert!(capture.logs().contains("cycle_error_count"));
     }
 }

@@ -13,6 +13,13 @@ const SENSITIVE_KEYS: &[&str] = &[
     "seed",
 ];
 
+fn is_sensitive_key(key: &str) -> bool {
+    let normalized = key.trim().to_ascii_lowercase();
+    SENSITIVE_KEYS
+        .iter()
+        .any(|candidate| normalized == *candidate)
+}
+
 /// Truncate a hex or opaque id for log display.
 #[must_use]
 pub fn truncate_id(id: &str, visible: usize) -> String {
@@ -42,13 +49,10 @@ pub fn offer_log_ref(offer: &str) -> String {
 }
 
 fn redact_string_value(key: &str, value: &str) -> String {
-    let normalized = key.trim().to_ascii_lowercase();
-    if SENSITIVE_KEYS
-        .iter()
-        .any(|candidate| normalized.contains(candidate))
-    {
+    if is_sensitive_key(key) {
         return offer_log_ref(value);
     }
+    let normalized = key.trim().to_ascii_lowercase();
     if normalized.ends_with("_id") || normalized == "coin_id" || normalized == "tx_id" {
         return truncate_id(value, 8);
     }
@@ -65,10 +69,7 @@ pub fn redact_json_for_log(value: &Value) -> Value {
         Value::Object(map) => {
             let mut out = serde_json::Map::new();
             for (key, child) in map {
-                if SENSITIVE_KEYS
-                    .iter()
-                    .any(|candidate| key.to_ascii_lowercase().contains(candidate))
-                {
+                if is_sensitive_key(key) {
                     if let Value::String(text) = child {
                         out.insert(key.clone(), Value::String(offer_log_ref(text)));
                     } else {
@@ -125,6 +126,27 @@ mod tests {
             .expect("offer_text");
         assert!(offer_text.contains("len="));
         assert!(!offer_text.contains(&"x".repeat(40)));
+    }
+
+    #[test]
+    fn redact_json_for_log_truncates_offer_id_not_offer_body_ref() {
+        let payload = json!({
+            "offer_id": "abc1234567890deadbeef",
+            "items": [{"offer_id": "offer-confirmed"}],
+        });
+        let redacted = redact_json_for_log(&payload);
+        assert_eq!(
+            redacted.get("offer_id").and_then(Value::as_str),
+            Some("abc12345…")
+        );
+        let nested = redacted
+            .get("items")
+            .and_then(Value::as_array)
+            .and_then(|items| items.first())
+            .and_then(|item| item.get("offer_id"))
+            .and_then(Value::as_str)
+            .expect("nested offer_id");
+        assert_eq!(nested, "offer-co…");
     }
 
     #[test]
