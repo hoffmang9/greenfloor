@@ -1,8 +1,10 @@
 use serde_json::{json, Value};
+use tracing::Level;
 
 use super::sqlite::{OfferPostPersistRecord, SqliteStore};
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
+use crate::operator_log::{audit_and_trace, LogContext, STRATEGY_OFFER_EXECUTION};
 
 /// Persist offer post records.
 ///
@@ -43,10 +45,14 @@ pub fn persist_offer_post_records(
                 }
             }
         }
-        store.add_audit_event(
-            "strategy_offer_execution",
+        audit_and_trace(
+            store,
+            Level::INFO,
+            LogContext::MARKET_CYCLE,
+            STRATEGY_OFFER_EXECUTION,
             &audit_event,
             Some(record.market_id.as_str()),
+            "strategy offer executed",
         )?;
     }
     Ok(())

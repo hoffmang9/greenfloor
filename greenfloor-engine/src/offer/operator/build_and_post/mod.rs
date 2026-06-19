@@ -21,7 +21,7 @@ use crate::storage::OfferPostPersistRecord;
 use crate::operator_log::{offer_log_ref, LogContext, OFFER_POST_COMPLETED, OFFER_POST_ITERATION};
 use context::{resolve_build_and_post_context, ResolvedBuildAndPostContext};
 use iteration::run_post_iteration;
-use publish::{persist_post_failure_if_enabled, persist_post_records_if_enabled};
+use publish::{persist_post_records_if_enabled, record_post_iteration_failure};
 use tracing::Level;
 use types::{build_and_post_exit_code, PostIterationOutcome};
 
@@ -131,15 +131,7 @@ async fn run_post_iterations(
             }
             PostIterationOutcome::Failure(failure) => {
                 batch.publish_failures += 1;
-                persist_post_failure_if_enabled(
-                    &ctx.program.home_dir,
-                    request.run.persist_results,
-                    request.run.dry_run,
-                    &ctx.market.market_id,
-                    &ctx.publish_venue,
-                    &failure.error,
-                    None,
-                )?;
+                record_post_iteration_failure(request, ctx, &failure.error, None)?;
                 batch
                     .post_results
                     .push(failure.to_venue_result(&ctx.publish_venue));
@@ -170,14 +162,15 @@ async fn run_post_iterations(
                         .get("error")
                         .and_then(Value::as_str)
                         .unwrap_or("publish_failed");
-                    persist_post_failure_if_enabled(
-                        &ctx.program.home_dir,
-                        request.run.persist_results,
-                        request.run.dry_run,
-                        &ctx.market.market_id,
-                        &ctx.publish_venue,
+                    record_post_iteration_failure(
+                        request,
+                        ctx,
                         error,
-                        success.persist_record.as_ref().map(|r| r.offer_id.as_str()),
+                        success
+                            .persist_record
+                            .as_ref()
+                            .map(|record| offer_log_ref(&record.offer_id))
+                            .as_deref(),
                     )?;
                 }
                 let venue_result = success.to_venue_result();

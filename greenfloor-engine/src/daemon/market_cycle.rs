@@ -6,6 +6,7 @@ use crate::cycle::MarketCycleResultState;
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{LogContext, MARKET_CYCLE_COMPLETED, MARKET_CYCLE_STARTED, MARKET_PHASE};
 use crate::storage::SqliteStore;
+use tracing::Level;
 
 use super::cancel_phase::run_market_cancel_phase;
 use super::coin_ops_phase::run_coin_ops_phase;
@@ -13,6 +14,25 @@ use super::inventory_phase::run_inventory_phase;
 use super::market_context::MarketCycleContext;
 use super::market_gate::enforce_market_key_allowlist;
 use super::strategy_phase::run_strategy_phase;
+
+fn trace_market_phase(
+    market_id: &str,
+    market_phase: &str,
+    outcome: &str,
+    level: Level,
+    message: &'static str,
+) {
+    crate::event_at_level!(
+        level,
+        service = LogContext::MARKET_CYCLE.service,
+        event = MARKET_PHASE,
+        phase = LogContext::MARKET_CYCLE.phase,
+        market_id = market_id,
+        market_phase = market_phase,
+        outcome = outcome,
+        message
+    );
+}
 
 async fn run_logged_market_phase<F, T>(
     market_id: &str,
@@ -22,41 +42,29 @@ async fn run_logged_market_phase<F, T>(
 where
     F: Future<Output = SignerResult<T>>,
 {
-    crate::trace_event!(
-        DEBUG,
-        LogContext::MARKET_CYCLE,
-        MARKET_PHASE,
-        {
-            market_id,
-            market_phase,
-            outcome = "started",
-        };
-        "market phase started"
+    trace_market_phase(
+        market_id,
+        market_phase,
+        "started",
+        Level::DEBUG,
+        "market phase started",
     );
     let result = body.await;
     if result.is_err() {
-        crate::trace_event!(
-            WARN,
-            LogContext::MARKET_CYCLE,
-            MARKET_PHASE,
-            {
-                market_id,
-                market_phase,
-                outcome = "failed",
-            };
-            "market phase failed"
+        trace_market_phase(
+            market_id,
+            market_phase,
+            "failed",
+            Level::WARN,
+            "market phase failed",
         );
     } else {
-        crate::trace_event!(
-            DEBUG,
-            LogContext::MARKET_CYCLE,
-            MARKET_PHASE,
-            {
-                market_id,
-                market_phase,
-                outcome = "completed",
-            };
-            "market phase completed"
+        trace_market_phase(
+            market_id,
+            market_phase,
+            "completed",
+            Level::DEBUG,
+            "market phase completed",
         );
     }
     result

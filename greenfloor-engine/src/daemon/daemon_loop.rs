@@ -12,7 +12,7 @@ use super::coinset_ws::start_coinset_websocket_loop;
 use super::cycle_entry::run_daemon_cycle_once;
 use super::logging::{sync_daemon_file_logging, warn_if_log_level_auto_healed};
 use super::program_runtime::load_daemon_program_runtime;
-use super::reload::{consume_reload_marker, record_config_reloaded};
+use super::reload::{record_config_reloaded, reload_marker_present, remove_reload_marker};
 use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest};
 use super::watchlist::cache::CoinWatchlistCache;
 
@@ -80,12 +80,13 @@ pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
         let _exit_code =
             run_one_loop_cycle(&request, &mut dispatch_state, coin_watchlist.clone()).await?;
 
-        if consume_reload_marker(&request.state_dir) {
+        if reload_marker_present(&request.state_dir) {
             let store = SqliteStore::open(&resolve_state_db_path(
                 &runtime.home_dir,
                 request.state_db_override.as_deref(),
             ))?;
             record_config_reloaded(&store, "reload_marker")?;
+            remove_reload_marker(&request.state_dir)?;
         }
 
         tokio::time::sleep(Duration::from_secs(

@@ -5,12 +5,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::SignerResult;
+use crate::operator_log::OFFER_POST_FAILURE;
 use crate::storage::{AuditEventRow, OfferStateListRow, SqliteStore};
 
 const STATUS_EVENT_TYPES: &[&str] = &[
     "strategy_offer_execution",
     "strategy_offer_execution_error",
-    "offer_post_failure",
+    OFFER_POST_FAILURE,
     "offer_cancel_policy",
     "offer_lifecycle_transition",
     "offer_reconciliation",

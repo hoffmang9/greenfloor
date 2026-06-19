@@ -1,9 +1,13 @@
 use std::collections::BTreeMap;
 
 use serde_json::json;
+use tracing::Level;
 
 use crate::config::MarketConfig;
 use crate::error::SignerResult;
+use crate::operator_log::{
+    audit_and_trace, LogContext, STRATEGY_ACTIONS_PLANNED, STRATEGY_OFFER_EXECUTION_ERROR,
+};
 use crate::storage::SqliteStore;
 
 use crate::cycle::MarketCycleResultState;
@@ -35,14 +39,18 @@ pub async fn run_strategy_phase(
         0,
     );
 
-    store.add_audit_event(
-        "strategy_actions_planned",
+    audit_and_trace(
+        store,
+        Level::INFO,
+        LogContext::MARKET_CYCLE,
+        STRATEGY_ACTIONS_PLANNED,
         &json!({
             "market_id": market.market_id,
             "xch_price_usd": ctx.dispatch.xch_price_usd,
             "action_count": strategy_actions.len(),
         }),
         Some(&market.market_id),
+        "strategy actions planned",
     )?;
 
     let mut newly_executed_sell_counts = BTreeMap::default();
@@ -57,10 +65,14 @@ pub async fn run_strategy_phase(
             }
             Err(err) => {
                 state.record_phase_error();
-                store.add_audit_event(
-                    "strategy_offer_execution_error",
+                audit_and_trace(
+                    store,
+                    Level::WARN,
+                    LogContext::MARKET_CYCLE,
+                    STRATEGY_OFFER_EXECUTION_ERROR,
                     &json!({"market_id": market.market_id, "error": err.to_string()}),
                     Some(&market.market_id),
+                    "strategy offer execution failed",
                 )?;
             }
         }

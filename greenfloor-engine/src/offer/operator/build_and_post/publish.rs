@@ -15,6 +15,7 @@ use crate::storage::{
 
 use super::context::ResolvedBuildAndPostContext;
 use super::types::PublishResult;
+use super::BuildAndPostOfferRequest;
 
 pub(super) struct PublishOfferParams<'a> {
     pub publish_venue: &'a str,
@@ -186,5 +187,22 @@ pub fn persist_post_failure_if_enabled(
         &payload,
         Some(market_id),
         "offer post failed",
+    )
+}
+
+pub fn record_post_iteration_failure(
+    request: &BuildAndPostOfferRequest,
+    ctx: &ResolvedBuildAndPostContext,
+    error: &str,
+    offer_ref: Option<&str>,
+) -> SignerResult<()> {
+    persist_post_failure_if_enabled(
+        &ctx.program.home_dir,
+        request.run.persist_results,
+        request.run.dry_run,
+        &ctx.market.market_id,
+        &ctx.publish_venue,
+        error,
+        offer_ref,
     )
 }
