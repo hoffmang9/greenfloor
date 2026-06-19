@@ -34,10 +34,7 @@ it is not operator config validation.
 
 ## Coinset vault inventory and coin ops
 
-- `list_vault_coins_coinset.py` — scan vault singleton member puzzle hashes via Coinset.
-- `vault_coinset_scan_coinset.py` — checkpointed vault coin scan.
-- `vault_coinset_scan_checkpoint.py` — resume or inspect scan checkpoints.
-- `vault_coinset_scan_lib.py` — shared scan helpers (imported by scripts above).
+- `list_vault_coins_coinset.py` — thin wrapper around `greenfloor-engine vault-coinset-scan` (nonce member puzzle hash scan via Coinset).
 - `combine_market_cat_dust_coinset.py` — batch dust combine for enabled market CAT assets.
 - `probe_coinset_capabilities.py` — probe Coinset height-window API support for vault scans.
 

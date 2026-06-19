@@ -32,7 +32,7 @@ htmlcov/
 *.bundle
 logs/
 db/
-state/
+/state/
 
 # Local env files
 .env

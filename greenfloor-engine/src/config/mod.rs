@@ -1,3 +1,4 @@
+mod cat_ticker_index;
 mod keys_registry;
 mod markets;
 mod markets_validate;
@@ -6,6 +7,9 @@ mod program;
 mod signer;
 mod yaml_fields;
 
+pub use cat_ticker_index::{
+    build_cat_ticker_index, build_cat_ticker_index_lenient, normalize_label, CatTickerIndex,
+};
 pub use keys_registry::SignerKeyEntry;
 pub use markets::{
     cancel_policy_stable_vs_unstable, load_markets_config, load_markets_config_with_overlay,
