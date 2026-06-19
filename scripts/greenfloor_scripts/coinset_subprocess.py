@@ -39,27 +39,6 @@ def resolve_client_cli(network: str, base_url: str | None) -> tuple[str, str]:
     return resolved_network, resolved_base_url
 
 
-def post_json_cli(
-    network: str,
-    base_url: str | None,
-    endpoint: str,
-    body: dict[str, Any],
-) -> dict[str, Any]:
-    argv = [
-        "coinset",
-        "post",
-        *_client_flags(network, base_url),
-        "--endpoint",
-        endpoint,
-        "--body-json",
-        json.dumps(body, separators=(",", ":")),
-    ]
-    payload = run_engine_json(argv)
-    if not isinstance(payload, dict):
-        raise RuntimeError("coinset_invalid_response_payload")
-    return payload
-
-
 def push_tx_cli(network: str, base_url: str | None, spend_bundle_hex: str) -> dict[str, Any]:
     argv = [
         "coinset",

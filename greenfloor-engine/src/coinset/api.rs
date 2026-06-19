@@ -4,14 +4,24 @@ use chia_traits::Streamable;
 use serde_json::{json, Value};
 
 use crate::coinset::{
-    broadcast_spend_bundle, coin_records_from_payload, direct_api, record_from_payload,
-    resolve_direct_client,
+    broadcast_spend_bundle, client_for_network, coin_records_from_payload, direct_api,
+    record_from_payload, resolve_direct_client, MspCoinset,
 };
 use crate::error::{SignerError, SignerResult};
 
 pub fn direct_coinset_client(network: &str, base_url: Option<&str>) -> SignerResult<CoinsetClient> {
     let resolved = resolve_direct_client(network, base_url);
     Ok(CoinsetClient::new(resolved.base_url))
+}
+
+fn msp_coinset_client(network: &str, base_url: Option<&str>) -> SignerResult<CoinsetClient> {
+    if let Some(url) = base_url.map(str::trim).filter(|value| !value.is_empty()) {
+        Ok(MspCoinset::for_network(network, Some(url))?
+            .client()
+            .clone())
+    } else {
+        client_for_network(network)
+    }
 }
 
 fn apply_testnet11_network(body: &mut Value, network: &str) {
@@ -23,11 +33,12 @@ fn apply_testnet11_network(body: &mut Value, network: &str) {
     }
 }
 
-pub async fn post_coinset_rpc(
+async fn post_coinset_rpc_with(
     network: &str,
     base_url: Option<&str>,
     endpoint: &str,
     mut body: Value,
+    client_for: fn(&str, Option<&str>) -> SignerResult<CoinsetClient>,
 ) -> SignerResult<Value> {
     let endpoint = endpoint.trim().trim_start_matches('/');
     if endpoint.is_empty() {
@@ -37,11 +48,30 @@ pub async fn post_coinset_rpc(
     }
     let network = direct_api::normalize_coinset_network(network);
     apply_testnet11_network(&mut body, network);
-    let client = direct_coinset_client(network, base_url)?;
+    let client = client_for(network, base_url)?;
     client
         .make_post_request(endpoint, body)
         .await
         .map_err(SignerError::from)
+}
+
+/// Script/scan Coinset RPC via the direct API host (`api.coinset.org` defaults).
+pub async fn post_coinset_rpc(
+    network: &str,
+    base_url: Option<&str>,
+    endpoint: &str,
+    body: Value,
+) -> SignerResult<Value> {
+    post_coinset_rpc_with(network, base_url, endpoint, body, direct_coinset_client).await
+}
+
+async fn post_msp_coinset_rpc(
+    network: &str,
+    base_url: Option<&str>,
+    endpoint: &str,
+    body: Value,
+) -> SignerResult<Value> {
+    post_coinset_rpc_with(network, base_url, endpoint, body, msp_coinset_client).await
 }
 
 pub async fn post_coinset_coin_records(
@@ -97,7 +127,7 @@ pub async fn get_fee_estimate(
     if let Some(count) = spend_count.filter(|value| *value > 0) {
         body["spend_count"] = json!(count);
     }
-    post_coinset_rpc(network, base_url, "get_fee_estimate", body).await
+    post_msp_coinset_rpc(network, base_url, "get_fee_estimate", body).await
 }
 
 pub fn conservative_fee_from_payload(payload: &Value) -> Option<u64> {
@@ -134,7 +164,8 @@ pub async fn get_all_mempool_tx_ids(
     network: &str,
     base_url: Option<&str>,
 ) -> SignerResult<Vec<String>> {
-    let payload = post_coinset_rpc(network, base_url, "get_all_mempool_tx_ids", json!({})).await?;
+    let payload =
+        post_msp_coinset_rpc(network, base_url, "get_all_mempool_tx_ids", json!({})).await?;
     if !payload
         .get("success")
         .and_then(Value::as_bool)
@@ -185,6 +216,38 @@ mod tests {
     fn conservative_fee_returns_none_on_failure() {
         let payload = json!({"success": false});
         assert_eq!(conservative_fee_from_payload(&payload), None);
+    }
+
+    #[tokio::test]
+    async fn get_all_mempool_tx_ids_via_msp_client() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_all_mempool_tx_ids")
+            .with_status(200)
+            .with_body(r#"{"success":true,"tx_ids":["0xabc"]}"#)
+            .create_async()
+            .await;
+
+        let tx_ids = get_all_mempool_tx_ids("mainnet", Some(&server.url()))
+            .await
+            .expect("mempool tx ids");
+        assert_eq!(tx_ids, vec!["0xabc".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn get_fee_estimate_via_msp_client() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_fee_estimate")
+            .with_status(200)
+            .with_body(r#"{"success":true,"estimates":[100,500]}"#)
+            .create_async()
+            .await;
+
+        let payload = get_fee_estimate("mainnet", Some(&server.url()), vec![300], 1_000_000, None)
+            .await
+            .expect("fee estimate");
+        assert_eq!(conservative_fee_from_payload(&payload), Some(500));
     }
 
     #[tokio::test]
