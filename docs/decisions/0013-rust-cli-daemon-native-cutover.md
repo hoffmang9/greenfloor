@@ -52,10 +52,11 @@ from the index; see git history for the full record.
    loops implement → test → review until only two or fewer nit findings remain.
 
 6. **Policy parity safety net.** With PyO3 and Python policy bridges removed,
-   operator correctness is enforced by `cargo nextest run --manifest-path
-greenfloor-engine/Cargo.toml` in CI. Script subprocess adapters are covered by
-   `unittest` invoked from `greenfloor-engine/tests/script_adapter_subprocess.rs`;
-   they do not re-test Rust policy or conservative-fee parsing.
+   operator correctness is enforced by
+   `cargo nextest run --manifest-path greenfloor-engine/Cargo.toml` in CI. Script
+   subprocess adapters are covered by `unittest` invoked from
+   `greenfloor-engine/tests/script_adapter_subprocess.rs`; they do not re-test Rust
+   policy or conservative-fee parsing.
 
 ## Command ownership
 
@@ -75,6 +76,6 @@ greenfloor-engine/Cargo.toml` in CI. Script subprocess adapters are covered by
 - Operators install via `cargo install --path greenfloor-engine` (or CI-built
   artifacts) instead of `pip install` console scripts.
 - Python `greenfloor/cli/`, `greenfloor/daemon/`, and CLI-only runtime modules
-  are deleted once Rust commands and tests land.
+  were deleted at cutover (2026-06-17).
 - Docs, runbook, and CI reference native binaries only.
 - Deployment updates are driven by the migration ledger, not compatibility shims.

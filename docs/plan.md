@@ -18,8 +18,8 @@ greenfloord         ──►  daemon/      → cycle/, offer/operator, coin_ops
 
 Dev / scripts            scripts/ (Python adapters)
 ─────────                ───────────────────────────
-vault bootstrap,         subprocess bridges → `greenfloor-engine` (`coinset …`, `daemon-once`, …)
-adapter unit tests  ──►  and `greenfloor-manager` field CLIs (Rust JSON)
+vault bootstrap     ──►  create_kms_vault.py → ent-wallet GraphQL (one-time)
+adapter unit tests  ──►  greenfloor_scripts/ → engine + manager CLIs
 ```
 
 - **Canonical signing and offer build:** `greenfloor-engine` (vault KMS + Coinset MSP).

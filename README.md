@@ -139,6 +139,9 @@ Full gate before push (Rust fmt/clippy via pre-commit — `clippy::all` + `clipp
 cargo nextest run --manifest-path greenfloor-engine/Cargo.toml
 ```
 
+`cargo test` with the same manifest also works locally when `cargo-nextest` is not
+installed. Full gate details: `docs/plan.md` → **Delivery constraints**.
+
 ## Environment Variables
 
 Operator overrides (all optional):
