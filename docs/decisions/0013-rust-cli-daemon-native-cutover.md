@@ -52,10 +52,10 @@ from the index; see git history for the full record.
    loops implement → test → review until only two or fewer nit findings remain.
 
 6. **Policy parity safety net.** With PyO3 and Python policy bridges removed,
-   operator correctness is enforced by `cargo test --manifest-path
-greenfloor-engine/Cargo.toml` in CI (`ubuntu-latest` matrix job). Python pytest
-   covers script adapters and subprocess integration harnesses; it does not re-test Rust policy
-   or conservative-fee parsing. (Python pytest harness removed 2026-06; operator tests are Rust-only.)
+   operator correctness is enforced by `cargo nextest run --manifest-path
+greenfloor-engine/Cargo.toml` in CI. Script subprocess adapters are covered by
+   `unittest` invoked from `greenfloor-engine/tests/script_adapter_subprocess.rs`;
+   they do not re-test Rust policy or conservative-fee parsing.
 
 ## Command ownership
 

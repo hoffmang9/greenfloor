@@ -174,7 +174,7 @@ Monitor `audit_event` records in `~/.greenfloor/db/greenfloor.sqlite`:
   - `GREENFLOOR_OFFER_CANCEL_MAX_ATTEMPTS` (default: `2`, min `1`)
   - `GREENFLOOR_OFFER_CANCEL_BACKOFF_MS` (default: `250`, min `0`)
   - `GREENFLOOR_OFFER_CANCEL_COOLDOWN_SECONDS` (default: `30`, min `0`)
-- Runtime reservation/parallel cloud-wallet controls (`~/.greenfloor/config/program.yaml` -> `runtime`):
+- Runtime reservation/parallel offer controls (`~/.greenfloor/config/program.yaml` -> `runtime`):
   - `offer_parallelism_enabled` (default: `false`)
   - `offer_parallelism_max_workers` (default: `4`, min `1`)
   - `reservation_ttl_seconds` (default: `300`, min `30`)

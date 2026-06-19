@@ -4,8 +4,8 @@
 
 - Long-lived daemon (`greenfloord`) plus manager CLI (`greenfloor-manager`) for
   deterministic CAT/XCH market-making.
-- Policy and execution in Rust (`greenfloor-engine`); slim Python package for config CLI
-  adapters (`greenfloor-manager` field commands), hex/Coinset helpers, and `scripts/` utilities.
+- Policy and execution in Rust (`greenfloor-engine`); Python limited to `scripts/`
+  (vault bootstrap + subprocess adapters to native binaries).
 - V1 notifications: low-inventory alerts only (ticker, remaining amount, receive address).
 
 ## Architecture
@@ -16,9 +16,10 @@ Operators                greenfloor-engine (Rust)
 greenfloor-manager  ──►  manager_cli/ → offer/operator, offer/lifecycle, coin_ops/…
 greenfloord         ──►  daemon/      → cycle/, offer/operator, coin_ops/execution/…
 
-Dev / tests              greenfloor (Python)
-─────────                ─────────────────
-parity tests, scripts ──► greenfloor-manager field CLIs + `greenfloor-engine` (`coinset …`, `daemon-once`)
+Dev / scripts            scripts/ (Python adapters)
+─────────                ───────────────────────────
+vault bootstrap,         subprocess bridges → `greenfloor-engine` (`coinset …`, `daemon-once`, …)
+adapter unit tests  ──►  and `greenfloor-manager` field CLIs (Rust JSON)
 ```
 
 - **Canonical signing and offer build:** `greenfloor-engine` (vault KMS + Coinset MSP).
@@ -47,6 +48,7 @@ Core trading/runtime (V1):
 
 Adjunct operator commands:
 
+- `combine-market-cat-dust` — batch merge sub-unit CAT dust for enabled markets
 - `cats-add`, `cats-list`, `cats-delete` — CAT catalog in `cats.yaml`
 - `set-log-level` — update `app.log_level` in program config
 
@@ -80,10 +82,12 @@ Coin-op notes:
 
 - Python 3.11+ for dev tooling (script lint/type-check).
 - Required checks: `ruff`, `ruff-format`, `prettier`, `yamllint`, `pyright`
-- Rust: `cargo test` in `greenfloor-engine/` (operator config, CLI contracts, and policy parity safety net).
+- Rust: `cargo nextest run --manifest-path greenfloor-engine/Cargo.toml` in CI (operator
+  config, CLI contracts, and policy parity safety net; `cargo test` with the same manifest
+  also works locally).
 - Local gate: `pre-commit run --all-files` (lint + pyright + formatters; ~5–10s warm with
   `PRE_COMMIT_HOME=.cache/pre-commit`). Run `cargo fmt`, `cargo clippy`, and
-  `cargo test --manifest-path greenfloor-engine/Cargo.toml` separately before push — same split as CI.
+  `cargo nextest run --manifest-path greenfloor-engine/Cargo.toml` separately before push — same split as CI.
 
 **Deterministic tests (Rust operator paths):**
 
@@ -103,7 +107,7 @@ Coin-op notes:
 - [x] Coin-op Coinset fee preflight diagnostics (H1)
 - [x] Testnet11 G1–G3 proof path (CI `live-testnet-e2e.yml`)
 - [x] Mainnet manager lifecycle evidence for `eco1812022_sell_wusdbc`
-- [x] Rust-owned operator config policy; Python config field CLI adapters
+- [x] Rust-owned operator config policy; script config via manager field CLIs
 
 ## Open items
 

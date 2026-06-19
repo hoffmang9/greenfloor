@@ -31,7 +31,7 @@ actionable. Use `git log -- docs/decisions/<file>` to read the original text.
 
 ## Integration references
 
-- [Cloud Wallet API](CLOUD_WALLET_DOCS_AND_API.md)
+- [Cloud Wallet API](CLOUD_WALLET_DOCS_AND_API.md) — external ent-wallet GraphQL reference (not operator runtime)
 - [Coinset API](COINSET_DOCS_AND_API.md)
 - [Dexie API](DEXIE_DOCS_AND_API.md)
 - [Splash offer submission](SPLASH_OFFER_SUBMISSION_GUIDE.md)

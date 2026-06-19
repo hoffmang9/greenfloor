@@ -24,7 +24,10 @@ Separately, `walletAsset.totalAmount` is `100` mojos higher than the summed live
 
 ## Why this matters
 
-`greenfloor` queries `coins(assetId=...)` to list vault inventory for a single CAT. If the backend can return a stray row with inconsistent asset ancestry, inventory accounting is wrong even before any client-side display logic runs.
+GreenFloor operator inventory (`greenfloor-manager coins-list`) and ent-wallet's
+`coins(assetId=...)` GraphQL query both depend on backend coin indexing for a single CAT.
+If the backend can return a stray row with inconsistent asset ancestry, inventory accounting
+is wrong even before any client-side display logic runs.
 
 ## Reproduction context
 
