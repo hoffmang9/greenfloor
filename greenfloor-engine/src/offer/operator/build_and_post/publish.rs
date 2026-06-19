@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use serde_json::{json, Value};
 
 use crate::adapters::{
@@ -7,9 +5,7 @@ use crate::adapters::{
     SplashClient,
 };
 use crate::error::{SignerError, SignerResult};
-use crate::storage::{
-    persist_offer_post_records, state_db_path_for_home, OfferPostPersistRecord, SqliteStore,
-};
+use crate::storage::OfferPostPersistRecord;
 
 use super::context::ResolvedBuildAndPostContext;
 use super::types::PublishResult;
@@ -116,18 +112,4 @@ pub(super) fn offer_post_persist_record(
         resolved_quote_asset_id: ctx.resolved_quote_asset_id.clone(),
         created_extra: json!({"execution_mode": execution_mode}),
     })
-}
-
-pub fn persist_post_records_if_enabled(
-    home_dir: &Path,
-    persist_results: bool,
-    dry_run: bool,
-    records: &[OfferPostPersistRecord],
-) -> SignerResult<()> {
-    if !persist_results || dry_run || records.is_empty() {
-        return Ok(());
-    }
-    let db_path = state_db_path_for_home(home_dir);
-    let store = SqliteStore::open(&db_path)?;
-    persist_offer_post_records(&store, records)
 }

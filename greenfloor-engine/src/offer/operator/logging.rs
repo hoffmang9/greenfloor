@@ -2,15 +2,13 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::error::SignerResult;
-use crate::file_logging::{self, LogState, LOG_FILE};
+use crate::file_logging::{self, LogState};
 
 static LOG_STATE: OnceLock<Result<LogState, String>> = OnceLock::new();
 
 const SERVICE_NAME: &str = "manager";
 
-pub use crate::file_logging::{
-    normalize_log_level_name, validate_log_level, warn_if_log_level_auto_healed, DEFAULT_LOG_LEVEL,
-};
+pub use crate::file_logging::warn_if_log_level_auto_healed;
 
 /// Initialize or refresh manager file logging for the current process.
 ///
@@ -41,6 +39,7 @@ pub fn initialize_manager_file_logging(home_dir: &Path, log_level: &str) -> Sign
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::file_logging::LOG_FILE;
 
     #[test]
     fn sync_manager_file_logging_creates_log_file_and_reloads_level() {
@@ -49,7 +48,11 @@ mod tests {
         }
 
         let dir = tempfile::tempdir().expect("tempdir");
-        sync_manager_file_logging(dir.path(), "INFO").expect("init");
+        let init = sync_manager_file_logging(dir.path(), "INFO");
+        if init.is_err() && tracing::dispatcher::has_been_set() {
+            return;
+        }
+        init.expect("init");
         let log_path = dir.path().join(LOG_FILE);
         assert!(log_path.is_file());
 

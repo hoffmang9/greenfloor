@@ -6,6 +6,7 @@ mod coin_ops;
 mod offers;
 mod pricing;
 mod reservations;
+mod transaction;
 mod tx_signals;
 
 use std::path::{Path, PathBuf};

@@ -7,7 +7,7 @@ mod persist;
 mod schema;
 mod sqlite;
 
-pub use persist::persist_offer_post_records;
+pub use persist::{persist_offer_post_records, upsert_offer_post_record};
 pub use sqlite::{
     resolve_state_db_path, state_db_path_for_home, AuditEventRow, CoinOpBudgetReport,
     CoinOpLedgerEntry, OfferPostPersistRecord, OfferReservationLeaseRequest,

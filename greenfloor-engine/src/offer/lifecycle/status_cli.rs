@@ -5,16 +5,33 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::SignerResult;
+use crate::operator_log::{
+    DEXIE_OFFERS_ERROR, OFFER_CANCEL_POLICY, OFFER_LIFECYCLE_TRANSITION, OFFER_POST_FAILURE,
+    OFFER_RECONCILIATION, STRATEGY_OFFER_EXECUTION, STRATEGY_OFFER_EXECUTION_ERROR,
+    TAKER_DETECTION,
+};
 use crate::storage::{AuditEventRow, OfferStateListRow, SqliteStore};
 
 const STATUS_EVENT_TYPES: &[&str] = &[
-    "strategy_offer_execution",
-    "offer_cancel_policy",
-    "offer_lifecycle_transition",
-    "offer_reconciliation",
-    "taker_detection",
-    "dexie_offers_error",
+    STRATEGY_OFFER_EXECUTION,
+    STRATEGY_OFFER_EXECUTION_ERROR,
+    OFFER_POST_FAILURE,
+    OFFER_CANCEL_POLICY,
+    OFFER_LIFECYCLE_TRANSITION,
+    TAKER_DETECTION,
+    DEXIE_OFFERS_ERROR,
 ];
+
+/// Legacy audit names — not emitted by current code; kept so `offers-status` can read old rows.
+const LEGACY_STATUS_EVENT_TYPES: &[&str] = &[OFFER_RECONCILIATION];
+
+fn status_event_types() -> Vec<&'static str> {
+    STATUS_EVENT_TYPES
+        .iter()
+        .chain(LEGACY_STATUS_EVENT_TYPES.iter())
+        .copied()
+        .collect()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OfferStatusRow {
@@ -83,7 +100,11 @@ pub fn offers_status_cli(
         .map(offer_status_row)
         .collect::<Vec<_>>();
     let events = store
-        .list_recent_audit_events(Some(STATUS_EVENT_TYPES), market_filter, events_limit)?
+        .list_recent_audit_events(
+            Some(status_event_types().as_slice()),
+            market_filter,
+            events_limit,
+        )?
         .into_iter()
         .map(audit_event_row)
         .collect::<Vec<_>>();
@@ -108,6 +129,8 @@ mod tests {
 
     use super::*;
 
+    use crate::operator_log::LogContext;
+
     #[test]
     fn status_cli_reports_counts_and_events() {
         let dir = tempdir().expect("tempdir");
@@ -119,9 +142,10 @@ mod tests {
         store
             .upsert_offer_state("a2", "m1", "tx_block_confirmed", Some(4))
             .expect("seed");
-        store
-            .add_audit_event(
-                "offer_reconciliation",
+        LogContext::MARKET_CYCLE
+            .audit(
+                &store,
+                OFFER_RECONCILIATION,
                 &json!({"offer_id": "a2", "new_state": "tx_block_confirmed"}),
                 Some("m1"),
             )

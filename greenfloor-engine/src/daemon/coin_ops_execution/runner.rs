@@ -8,6 +8,7 @@ use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::hex::default_mojo_multiplier_for_asset;
 use crate::offer::resolve_offer_assets_for_action;
+use crate::operator_log::{coin_op_ledger_event, LogContext};
 use crate::storage::SqliteStore;
 
 use super::super::watchlist::watchlist_offer_ids;
@@ -199,17 +200,23 @@ pub fn persist_coin_op_execution(
         } else {
             0
         };
-        store.add_audit_event(
-            &format!("coin_op_{}", item.status),
-            &json!({
-                "market_id": market.market_id,
-                "op_type": item.op_type,
-                "size_base_units": item.size_base_units,
-                "op_count": item.op_count,
-                "reason": item.reason,
-                "operation_id": item.operation_id,
-                "fee_mojos": fee_mojos,
-            }),
+        let payload = json!({
+            "market_id": market.market_id,
+            "op_type": item.op_type,
+            "size_base_units": item.size_base_units,
+            "op_count": item.op_count,
+            "reason": item.reason,
+            "operation_id": item.operation_id,
+            "fee_mojos": fee_mojos,
+            "item_status": item.status,
+        });
+        let (event, level) = coin_op_ledger_event(item.status.as_str());
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            level,
+            "coin op ledger row",
+            event,
+            &payload,
             Some(&market.market_id),
         )?;
         store.add_coin_op_ledger_entry(&crate::storage::CoinOpLedgerEntry {

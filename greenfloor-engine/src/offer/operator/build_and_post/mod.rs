@@ -1,6 +1,7 @@
 mod context;
 mod create;
 mod iteration;
+mod post_batch;
 mod publish;
 mod types;
 
@@ -16,12 +17,15 @@ use crate::adapters::{DexieClient, SplashClient};
 use crate::async_boundary::BuildAndPostOfferFuture;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::operator::OfferOperatorTestOverrides;
-use crate::storage::OfferPostPersistRecord;
+use crate::storage::{state_db_path_for_home, SqliteStore};
 
-use context::resolve_build_and_post_context;
+use context::{resolve_build_and_post_context, ResolvedBuildAndPostContext};
 use iteration::run_post_iteration;
-use publish::persist_post_records_if_enabled;
-use types::{build_and_post_exit_code, PostIterationOutcome};
+use post_batch::{
+    apply_post_iteration_outcome, flush_post_batch, trace_offer_post_completed, PostEmitTarget,
+    PostIterationBatch,
+};
+use types::build_and_post_exit_code;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct BuildAndPostVenueOptions {
@@ -83,68 +87,35 @@ pub fn build_and_post_offer(request: BuildAndPostOfferRequest) -> BuildAndPostOf
     Box::pin(build_and_post_offer_async(request))
 }
 
-async fn build_and_post_offer_async(
-    request: BuildAndPostOfferRequest,
-) -> SignerResult<BuildAndPostOfferResponse> {
-    if request.size_base_units == 0 {
-        return Err(SignerError::Other(
-            "size_base_units must be positive".to_string(),
-        ));
-    }
-    if request.repeat == 0 {
-        return Err(SignerError::Other("repeat must be positive".to_string()));
-    }
-
-    let ctx = resolve_build_and_post_context(&request).await?;
-
-    let mut post_results = Vec::new();
-    let mut built_offers_preview = Vec::new();
-    let mut bootstrap_actions = Vec::new();
-    let mut publish_failures = 0u32;
-    let mut persist_records: Vec<OfferPostPersistRecord> = Vec::new();
-
-    let dexie = if !request.run.dry_run && ctx.publish_venue == "dexie" {
-        Some(DexieClient::new(ctx.dexie_base_url.clone()))
-    } else {
-        None
+async fn run_post_iterations(
+    request: &BuildAndPostOfferRequest,
+    ctx: &ResolvedBuildAndPostContext,
+    target: PostEmitTarget,
+    dexie: Option<&DexieClient>,
+    splash: Option<&SplashClient>,
+) -> SignerResult<PostIterationBatch> {
+    let mut batch = PostIterationBatch {
+        post_results: Vec::new(),
+        built_offers_preview: Vec::new(),
+        bootstrap_actions: Vec::new(),
+        publish_failures: 0,
+        persist_records: Vec::new(),
+        failure_audits: Vec::new(),
     };
-    let splash = if !request.run.dry_run && ctx.publish_venue == "splash" {
-        Some(SplashClient::new(ctx.splash_base_url.clone()))
-    } else {
-        None
-    };
-
     for _ in 0..request.repeat {
-        let (bootstrap_action, iteration) =
-            run_post_iteration(&request, &ctx, dexie.as_ref(), splash.as_ref()).await?;
-        bootstrap_actions.push(bootstrap_action);
-        match iteration {
-            PostIterationOutcome::Preview(preview) => built_offers_preview.push(preview),
-            PostIterationOutcome::Failure(failure) => {
-                publish_failures += 1;
-                post_results.push(failure.to_venue_result(&ctx.publish_venue));
-            }
-            PostIterationOutcome::Success(success) => {
-                if !success.success {
-                    publish_failures += 1;
-                }
-                let venue_result = success.to_venue_result();
-                if let Some(record) = success.persist_record {
-                    persist_records.push(record);
-                }
-                post_results.push(venue_result);
-            }
-        }
+        let (bootstrap_action, iteration) = run_post_iteration(request, ctx, dexie, splash).await?;
+        batch.bootstrap_actions.push(bootstrap_action);
+        apply_post_iteration_outcome(target, ctx, iteration, &mut batch);
     }
+    Ok(batch)
+}
 
-    persist_post_records_if_enabled(
-        &ctx.program.home_dir,
-        request.run.persist_results,
-        request.run.dry_run,
-        &persist_records,
-    )?;
-
-    let payload = json!({
+fn build_and_post_payload(
+    request: &BuildAndPostOfferRequest,
+    ctx: &ResolvedBuildAndPostContext,
+    batch: &PostIterationBatch,
+) -> Value {
+    json!({
         "market_id": ctx.market.market_id,
         "pair": format!("{}:{}", ctx.market.base_asset, ctx.market.quote_asset),
         "resolved_base_asset_id": ctx.resolved_base_asset_id,
@@ -158,14 +129,66 @@ async fn build_and_post_offer_async(
         "drop_only": request.venue.drop_only,
         "claim_rewards": request.venue.claim_rewards,
         "dry_run": request.run.dry_run,
-        "publish_attempts": post_results.len(),
-        "publish_failures": publish_failures,
-        "built_offers_preview": built_offers_preview,
-        "bootstrap_actions": bootstrap_actions,
-        "results": post_results,
+        "publish_attempts": batch.post_results.len(),
+        "publish_failures": batch.publish_failures,
+        "built_offers_preview": &batch.built_offers_preview,
+        "bootstrap_actions": &batch.bootstrap_actions,
+        "results": &batch.post_results,
         "offer_fee_mojos": ctx.offer_fee_mojos,
         "offer_fee_source": ctx.offer_fee_source,
-    });
-    let exit_code = build_and_post_exit_code(publish_failures);
+    })
+}
+
+async fn build_and_post_offer_async(
+    request: BuildAndPostOfferRequest,
+) -> SignerResult<BuildAndPostOfferResponse> {
+    if request.size_base_units == 0 {
+        return Err(SignerError::Other(
+            "size_base_units must be positive".to_string(),
+        ));
+    }
+    if request.repeat == 0 {
+        return Err(SignerError::Other("repeat must be positive".to_string()));
+    }
+
+    let ctx = resolve_build_and_post_context(&request).await?;
+    let target = PostEmitTarget::from_run(request.run.persist_results, request.run.dry_run);
+
+    let dexie = if !request.run.dry_run && ctx.publish_venue == "dexie" {
+        Some(DexieClient::new(ctx.dexie_base_url.clone()))
+    } else {
+        None
+    };
+    let splash = if !request.run.dry_run && ctx.publish_venue == "splash" {
+        Some(SplashClient::new(ctx.splash_base_url.clone()))
+    } else {
+        None
+    };
+
+    let batch =
+        run_post_iterations(&request, &ctx, target, dexie.as_ref(), splash.as_ref()).await?;
+
+    if target == PostEmitTarget::TraceAndStore {
+        let store = SqliteStore::open(&state_db_path_for_home(&ctx.program.home_dir))?;
+        flush_post_batch(&store, &ctx, &batch.persist_records, &batch.failure_audits)?;
+    }
+
+    let payload = build_and_post_payload(&request, &ctx, &batch);
+    let exit_code = build_and_post_exit_code(batch.publish_failures);
+    let outcome = if batch.publish_failures == 0 {
+        "success"
+    } else if batch.publish_failures == u32::try_from(batch.post_results.len()).unwrap_or(u32::MAX)
+    {
+        "failure"
+    } else {
+        "partial_failure"
+    };
+    trace_offer_post_completed(
+        outcome,
+        ctx.market.market_id.as_str(),
+        batch.post_results.len(),
+        batch.publish_failures,
+        request.run.dry_run,
+    );
     Ok(BuildAndPostOfferResponse { exit_code, payload })
 }

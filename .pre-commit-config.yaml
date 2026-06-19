@@ -32,6 +32,13 @@ repos:
         language: system
         types: [python]
 
+      - id: audit-event-direct-calls
+        name: audit event direct calls
+        entry: scripts/check_audit_event_direct_calls.sh
+        language: system
+        pass_filenames: false
+        files: ^greenfloor-engine/
+
       - id: ruff-format
         name: ruff format
         entry: ruff format

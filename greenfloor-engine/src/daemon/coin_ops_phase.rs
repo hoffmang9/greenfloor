@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde_json::{json, Value};
+use tracing::Level;
 
 use crate::coin_ops::{
     coin_op_target_amount_allowed, effective_sell_bucket_counts_for_coin_ops,
@@ -11,6 +12,11 @@ use crate::config::{
 };
 use crate::error::SignerResult;
 use crate::hex::default_mojo_multiplier_for_asset;
+use crate::operator_log::{
+    LogContext, COIN_OPS_EXECUTED, COIN_OPS_INVALID_LADDER_MATH, COIN_OPS_NO_PLANS,
+    COIN_OPS_PARTIAL_OR_SKIPPED_FEE_BUDGET, COIN_OPS_PLAN, COIN_OPS_SKIPPED_FEE_BUDGET,
+    COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
+};
 use crate::storage::SqliteStore;
 
 use super::coin_ops_execution::{
@@ -50,8 +56,11 @@ fn build_valid_sell_ladder(
         }));
     }
     if !invalid_buckets.is_empty() {
-        store.add_audit_event(
-            "coin_ops_skip_sub_minimum_target_amount",
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::WARN,
+            "coin ops skipped sub-minimum target amount",
+            COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
             &json!({
                 "market_id": market.market_id,
                 "invalid_bucket_count": invalid_buckets.len(),
@@ -102,8 +111,11 @@ fn plan_coin_ops_for_market(
         program.coin_ops_combine_fee_mojos,
     );
     if !planning.invalid_ladder_math_sizes.is_empty() {
-        store.add_audit_event(
-            "coin_ops_invalid_ladder_math",
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::WARN,
+            "coin ops invalid ladder math",
+            COIN_OPS_INVALID_LADDER_MATH,
             &json!({
                 "market_id": market.market_id,
                 "invalid_ladder_math_sizes": planning.invalid_ladder_math_sizes,
@@ -113,8 +125,11 @@ fn plan_coin_ops_for_market(
     }
     let plans = planning.plans;
     if plans.is_empty() {
-        store.add_audit_event(
-            "coin_ops_no_plans",
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::DEBUG,
+            "coin ops no plans",
+            COIN_OPS_NO_PLANS,
             &json!({"market_id": market.market_id}),
             Some(&market.market_id),
         )?;
@@ -206,8 +221,11 @@ fn record_coin_ops_phase_audit(
     execution: &CoinOpExecutionResult,
 ) -> SignerResult<()> {
     if !planning.overflow_plans.is_empty() {
-        store.add_audit_event(
-            "coin_ops_partial_or_skipped_fee_budget",
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::WARN,
+            "coin ops partial or skipped fee budget",
+            COIN_OPS_PARTIAL_OR_SKIPPED_FEE_BUDGET,
             &json!({
                 "market_id": market.market_id,
                 "spent_today_mojos": planning.spent_today,
@@ -222,8 +240,11 @@ fn record_coin_ops_phase_audit(
         )?;
     }
 
-    store.add_audit_event(
-        "coin_ops_plan",
+    LogContext::MARKET_CYCLE.dual_audit(
+        store,
+        Level::INFO,
+        "coin ops plan",
+        COIN_OPS_PLAN,
         &json!({
             "market_id": market.market_id,
             "projected_fee_mojos": planning.projected_fee,
@@ -235,8 +256,11 @@ fn record_coin_ops_phase_audit(
     )?;
 
     if planning.executable_plans.is_empty() {
-        store.add_audit_event(
-            "coin_ops_skipped_fee_budget",
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::WARN,
+            "coin ops skipped fee budget",
+            COIN_OPS_SKIPPED_FEE_BUDGET,
             &json!({
                 "market_id": market.market_id,
                 "plan_count": planning.plans.len(),
@@ -245,8 +269,11 @@ fn record_coin_ops_phase_audit(
             Some(&market.market_id),
         )?;
     } else {
-        store.add_audit_event(
-            "coin_ops_executed",
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::INFO,
+            "coin ops executed",
+            COIN_OPS_EXECUTED,
             &json!({
                 "market_id": market.market_id,
                 "plan_count": planning.plans.len(),
@@ -271,8 +298,11 @@ pub async fn run_coin_ops_phase(
     let program = ctx.resources.program();
     let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
     if sell_ladder.is_empty() {
-        store.add_audit_event(
-            "coin_ops_no_plans",
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::DEBUG,
+            "coin ops no plans",
+            COIN_OPS_NO_PLANS,
             &json!({"market_id": market.market_id, "reason": "empty_sell_ladder"}),
             Some(&market.market_id),
         )?;

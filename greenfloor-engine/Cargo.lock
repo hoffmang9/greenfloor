@@ -1853,6 +1853,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "tracing",
+ "tracing-log",
  "tracing-subscriber",
  "urlencoding",
  "which",

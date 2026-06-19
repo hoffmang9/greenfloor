@@ -176,4 +176,22 @@ impl SqliteStore {
             .map_err(|err| SignerError::Other(format!("failed to insert audit_event: {err}")))?;
         Ok(())
     }
+
+    /// Returns true when a recent audit row matches `field` = `value` in its JSON payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the audit query fails.
+    pub fn recent_audit_payload_matches(
+        &self,
+        event_type: &str,
+        field: &str,
+        value: &str,
+        limit: usize,
+    ) -> SignerResult<bool> {
+        let events = self.list_recent_audit_events(Some(&[event_type]), None, limit)?;
+        Ok(events
+            .iter()
+            .any(|row| row.payload.get(field).and_then(serde_json::Value::as_str) == Some(value)))
+    }
 }

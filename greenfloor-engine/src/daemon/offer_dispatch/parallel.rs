@@ -3,6 +3,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::json;
+use tracing::Level;
 
 use crate::config::{MarketConfig, SignerConfig};
 use crate::cycle::{
@@ -12,6 +13,7 @@ use crate::cycle::{
 use crate::daemon::market_context::DaemonCycleResources;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
+use crate::operator_log::{LogContext, PARALLEL_OFFER_DISPATCH};
 use crate::storage::SqliteStore;
 
 use super::coordinator::OfferReservationCoordinator;
@@ -65,8 +67,11 @@ async fn prepare_parallel_dispatch(
     let _ = coordinator.expire_stale();
     let wallet_id = reservation_wallet_id(signer_config);
 
-    store.add_audit_event(
-        "parallel_offer_dispatch",
+    LogContext::MARKET_CYCLE.dual_audit(
+        store,
+        Level::DEBUG,
+        "parallel offer dispatch planned",
+        PARALLEL_OFFER_DISPATCH,
         &json!({
             "market_id": market.market_id,
             "planned_count": expanded.len(),

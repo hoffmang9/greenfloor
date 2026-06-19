@@ -1,5 +1,6 @@
-use log::warn;
 use serde_json::Value;
+
+use crate::operator_log::{LogContext, MARKET_VALIDATION_WARNING};
 
 use super::yaml_fields::{parse_f64_field, parse_i64_field};
 use crate::error::{SignerError, SignerResult};
@@ -141,8 +142,16 @@ pub fn validate_strategy_pricing(
             ));
         }
         if quote_type == "unstable" && expiry_minutes > 15 {
-            warn!(
-                "market {market_id}: unstable strategy_offer_expiry_minutes={expiry_minutes} exceeds 15 minutes"
+            crate::trace_event!(
+                WARN,
+                LogContext::VALIDATION,
+                MARKET_VALIDATION_WARNING,
+                {
+                    market_id = market_id,
+                    field = "strategy_offer_expiry_minutes",
+                    value = expiry_minutes,
+                };
+                "unstable strategy_offer_expiry_minutes exceeds 15 minutes"
             );
         }
     }
@@ -168,4 +177,32 @@ pub fn pop_cancel_move_threshold_bps(pricing: &mut Value) -> SignerResult<Option
         return Ok(None);
     };
     Ok(Some(parse_i64_field(&raw, "cancel_move_threshold_bps")?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::operator_log::{TraceCapture, MARKET_VALIDATION_WARNING};
+    use serde_json::json;
+
+    #[test]
+    fn unstable_expiry_above_15_minutes_passes_validation() {
+        let pricing = json!({"strategy_offer_expiry_minutes": 30});
+        validate_strategy_pricing(&pricing, "m1", "unstable").expect("valid");
+    }
+
+    #[test]
+    fn unstable_expiry_above_15_minutes_emits_validation_warning() {
+        let capture = TraceCapture::install();
+        let pricing = json!({"strategy_offer_expiry_minutes": 30});
+        validate_strategy_pricing(&pricing, "m1", "unstable").expect("valid");
+        assert_eq!(capture.count_substr(MARKET_VALIDATION_WARNING), 1);
+        assert!(capture.logs().contains("strategy_offer_expiry_minutes"));
+    }
+
+    #[test]
+    fn stable_expiry_above_15_minutes_is_allowed() {
+        let pricing = json!({"strategy_offer_expiry_minutes": 60});
+        validate_strategy_pricing(&pricing, "m1", "stable").expect("valid");
+    }
 }

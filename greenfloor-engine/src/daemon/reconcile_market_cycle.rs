@@ -3,11 +3,13 @@
 use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value};
+use tracing::Level;
 
 use crate::adapters::DexieClient;
 use crate::config::{resolve_quote_asset_for_offer, resolve_trade_asset_for_network, MarketConfig};
 use crate::cycle::CycleOfferTransition;
 use crate::error::SignerResult;
+use crate::operator_log::{LogContext, DEXIE_OFFERS_ERROR};
 use crate::storage::SqliteStore;
 
 use super::coinset_tx::build_dexie_size_by_offer_id;
@@ -100,8 +102,11 @@ pub async fn run_reconcile_market_cycle(
         Ok(rows) => rows,
         Err(err) => {
             metrics.cycle_errors += 1;
-            store.add_audit_event(
-                "dexie_offers_error",
+            LogContext::MARKET_CYCLE.dual_audit(
+                store,
+                Level::WARN,
+                "dexie offers fetch failed",
+                DEXIE_OFFERS_ERROR,
                 &json!({"market_id": market_id, "error": err.to_string()}),
                 Some(market_id),
             )?;

@@ -28,6 +28,14 @@ pub(crate) struct LogState {
     filter_handle: Handle<EnvFilter, tracing_subscriber::Registry>,
 }
 
+static LOG_TRACER: OnceLock<()> = OnceLock::new();
+
+fn ensure_log_tracer_installed() {
+    LOG_TRACER.get_or_init(|| {
+        let _ = tracing_log::LogTracer::init();
+    });
+}
+
 fn classify_log_level(log_level: &str) -> Option<&'static str> {
     match log_level.trim().to_ascii_uppercase().as_str() {
         "CRITICAL" => Some("CRITICAL"),
@@ -152,6 +160,8 @@ fn install_service_file_logging(
             }
         })?;
 
+    ensure_log_tracer_installed();
+
     tracing::info!(
         service = service_name,
         log_path = %log_path.display(),
@@ -254,13 +264,33 @@ mod tests {
         }
 
         let dir = tempfile::tempdir().expect("tempdir");
-        sync_service_file_logging(&TEST_LOG_STATE, "test-service", dir.path(), "INFO")
-            .expect("init");
+        let init = sync_service_file_logging(&TEST_LOG_STATE, "test-service", dir.path(), "INFO");
+        if init.is_err() && tracing::dispatcher::has_been_set() {
+            return;
+        }
+        init.expect("init");
         let log_path = dir.path().join(LOG_FILE);
         assert!(log_path.is_file());
 
         sync_service_file_logging(&TEST_LOG_STATE, "test-service", dir.path(), "DEBUG")
             .expect("reload");
         assert!(TEST_LOG_STATE.get().is_some_and(|state| state.is_ok()));
+
+        crate::trace_event!(
+            INFO,
+            crate::operator_log::LogContext::DAEMON_CYCLE,
+            crate::operator_log::DAEMON_CYCLE_STARTED,
+            {
+                market_count = 2,
+                dry_run = false,
+                selected_market_ids = ?["m1", "m2"],
+            };
+            "daemon cycle started"
+        );
+
+        let log = std::fs::read_to_string(&log_path).expect("read log");
+        assert!(log.contains("daemon_cycle_started"));
+        assert!(log.contains("market_count"));
+        assert!(log.contains("m1"));
     }
 }

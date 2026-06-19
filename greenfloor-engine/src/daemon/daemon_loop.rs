@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::load_program_config;
 use crate::error::SignerResult;
-use crate::storage::{resolve_state_db_path, SqliteStore};
+use crate::storage::resolve_state_db_path;
 
 use super::coinset_ws::start_coinset_websocket_loop;
 use super::cycle_entry::run_daemon_cycle_once;
 use super::logging::{sync_daemon_file_logging, warn_if_log_level_auto_healed};
 use super::program_runtime::load_daemon_program_runtime;
-use super::reload::{consume_reload_marker, record_config_reloaded};
+use super::reload::handle_reload_marker_if_present;
 use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequest};
 use super::watchlist::cache::CoinWatchlistCache;
 
@@ -77,20 +77,13 @@ pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
         let runtime = load_daemon_program_runtime(&request.program_path)?;
         sync_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
 
-        let exit_code =
+        let _exit_code =
             run_one_loop_cycle(&request, &mut dispatch_state, coin_watchlist.clone()).await?;
-        if exit_code != 0 {
-            tracing::warn!("daemon_cycle_exit_code={exit_code}");
-        }
 
-        if consume_reload_marker(&request.state_dir) {
-            if let Ok(store) = SqliteStore::open(&resolve_state_db_path(
-                &runtime.home_dir,
-                request.state_db_override.as_deref(),
-            )) {
-                let _ = record_config_reloaded(&store);
-            }
-        }
+        handle_reload_marker_if_present(
+            &request.state_dir,
+            &resolve_state_db_path(&runtime.home_dir, request.state_db_override.as_deref()),
+        );
 
         tokio::time::sleep(Duration::from_secs(
             runtime.runtime_loop_interval_seconds.max(1),

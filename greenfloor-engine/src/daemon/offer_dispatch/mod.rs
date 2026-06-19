@@ -13,11 +13,13 @@ mod tests;
 use std::collections::BTreeMap;
 
 use serde_json::json;
+use tracing::Level;
 
 use crate::async_boundary::StrategyDispatchFuture;
 use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason, MarketConfig};
 use crate::cycle::{expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction};
 use crate::error::{SignerError, SignerResult};
+use crate::operator_log::{LogContext, OFFER_PARALLEL_FALLBACK, STRATEGY_EXEC_SKIPPED_NO_SIGNER};
 use crate::storage::SqliteStore;
 
 use super::market_context::MarketCycleContext;
@@ -56,8 +58,11 @@ pub(crate) fn record_parallel_fallback_audit(
     market_id: &str,
     err: &SignerError,
 ) -> SignerResult<()> {
-    store.add_audit_event(
-        "offer_parallel_fallback",
+    LogContext::MARKET_CYCLE.dual_audit(
+        store,
+        Level::WARN,
+        "parallel offer dispatch fallback",
+        OFFER_PARALLEL_FALLBACK,
         &json!({
             "market_id": market_id,
             "error": err.to_string(),
@@ -84,8 +89,11 @@ async fn execute_strategy_actions_async(
 ) -> SignerResult<OfferDispatchOutput> {
     let signer_config = match ctx.resources.signer_for_execution() {
         Err(err) if is_signer_execution_soft_skip(&err) => {
-            store.add_audit_event(
-                "strategy_exec_skipped_no_signer",
+            LogContext::MARKET_CYCLE.dual_audit(
+                store,
+                Level::WARN,
+                "strategy execution skipped without signer",
+                STRATEGY_EXEC_SKIPPED_NO_SIGNER,
                 &json!({
                     "market_id": market.market_id,
                     "planned_count": actions.len(),
