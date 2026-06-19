@@ -13,13 +13,12 @@ from greenfloor_scripts.chia_sdk_helpers import (
     safe_int,
     to_coinset_hex,
 )
+from greenfloor_scripts.coinset_scanner import CoinsetScanner
 from greenfloor_scripts.config_subprocess import (
     ensure_program_config_valid,
     launcher_id_from_program_config,
 )
 from greenfloor_scripts.hex_subprocess import normalize_hex_id
-
-from scripts.vault_coinset_scan_coinset import CoinsetScanner
 
 
 def _read_launcher_id_file(path: str) -> str:

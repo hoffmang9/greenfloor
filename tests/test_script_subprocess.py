@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from greenfloor_scripts.coinset_scanner import coinset_with_retries, is_retryable_coinset_error
 from greenfloor_scripts.coinset_subprocess import (
     coin_records_cli,
     record_from_cli,
@@ -28,10 +29,10 @@ def test_resolve_client_cli_returns_normalized_fields() -> None:
     assert "--base-url" not in argv
 
 
-def test_coin_records_cli_applies_height_and_parses_records() -> None:
+def test_coin_records_cli_passes_height_flags_and_returns_cli_records() -> None:
     with patch("greenfloor_scripts.coinset_subprocess.run_engine_json") as mock_run:
         mock_run.return_value = {
-            "coin_records": [{"coin": {"amount": 1}}, "skip"],
+            "coin_records": [{"coin": {"amount": 1}}],
         }
         records = coin_records_cli(
             "mainnet",
@@ -44,9 +45,11 @@ def test_coin_records_cli_applies_height_and_parses_records() -> None:
     assert records == [{"coin": {"amount": 1}}]
     argv = mock_run.call_args.args[0]
     assert argv[:2] == ["coinset", "coin-records"]
+    assert "--start-height" in argv and "10" in argv
+    assert "--end-height" in argv and "20" in argv
     body_json = argv[argv.index("--body-json") + 1]
-    assert '"start_height":10' in body_json
-    assert '"end_height":20' in body_json
+    assert "start_height" not in body_json
+    assert "end_height" not in body_json
 
 
 def test_coin_records_cli_does_not_mutate_input_body() -> None:
@@ -78,6 +81,44 @@ def test_record_from_cli_returns_parsed_record() -> None:
     argv = mock_run.call_args.args[0]
     assert argv[:2] == ["coinset", "record"]
     assert "--key" in argv and "blockchain_state" in argv
+
+
+def test_is_retryable_coinset_error_classifies_transient_failures() -> None:
+    assert is_retryable_coinset_error(RuntimeError("coinset_http_error:503"))
+    assert not is_retryable_coinset_error(RuntimeError("invalid puzzle hash"))
+
+
+def test_coinset_with_retries_succeeds_after_retryable_failure() -> None:
+    calls = {"count": 0}
+
+    def flaky() -> str:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("timed out")
+        return "ok"
+
+    with patch("greenfloor_scripts.coinset_scanner.time.sleep") as mock_sleep:
+        assert coinset_with_retries(flaky, sleep=mock_sleep) == "ok"
+    assert calls["count"] == 2
+    mock_sleep.assert_called_once()
+
+
+def test_coinset_with_retries_raises_immediately_on_non_retryable_error() -> None:
+    calls = {"count": 0}
+
+    def fail_fast() -> None:
+        calls["count"] += 1
+        raise RuntimeError("invalid request")
+
+    with patch("greenfloor_scripts.coinset_scanner.time.sleep") as mock_sleep:
+        try:
+            coinset_with_retries(fail_fast, sleep=mock_sleep)
+        except RuntimeError as exc:
+            assert str(exc) == "invalid request"
+        else:
+            raise AssertionError("expected non-retryable error")
+    assert calls["count"] == 1
+    mock_sleep.assert_not_called()
 
 
 def test_normalize_hex_id_delegates_to_engine_hex_cli() -> None:

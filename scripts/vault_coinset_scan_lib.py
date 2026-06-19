@@ -14,6 +14,7 @@ from greenfloor_scripts.chia_sdk_helpers import (
     safe_int,
     to_coinset_hex,
 )
+from greenfloor_scripts.coinset_scanner import CoinsetScanner, chunk_values
 from greenfloor_scripts.config_subprocess import (
     all_market_rows,
     ensure_program_config_valid,
@@ -29,11 +30,7 @@ from scripts.vault_coinset_scan_checkpoint import (
     _load_scan_checkpoint,
     _save_scan_checkpoint,
 )
-from scripts.vault_coinset_scan_coinset import (
-    CoinsetScanner,
-    _chunk_values,
-    _detect_cat_asset_id,
-)
+from scripts.vault_coinset_scan_coinset import _detect_cat_asset_id
 
 
 def _read_launcher_id_file(path: str) -> str:
@@ -574,7 +571,7 @@ def main() -> int:
             if row.parent_coin_info and row.parent_coin_info not in parent_record_cache
         }
     )
-    for parent_batch in _chunk_values(unresolved_parent_ids, parent_lookup_batch_size):
+    for parent_batch in chunk_values(unresolved_parent_ids, parent_lookup_batch_size):
         parent_records = scanner.by_names(
             coin_names=[to_coinset_hex(hex_to_bytes(parent_id)) for parent_id in parent_batch],
             include_spent=True,

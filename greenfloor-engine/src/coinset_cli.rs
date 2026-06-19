@@ -6,7 +6,7 @@ use crate::coinset::{
     post_coinset_coin_records, post_coinset_record, post_coinset_rpc, push_tx_hex,
     resolve_direct_client,
 };
-use crate::error::SignerResult;
+use crate::error::{SignerError, SignerResult};
 
 #[derive(Debug, Args)]
 struct CoinsetClientArgs {
@@ -100,6 +100,11 @@ fn client_base_url(base_url: &str) -> Option<String> {
     optional_trimmed(base_url)
 }
 
+fn parse_body_json(body_json: &str) -> SignerResult<Value> {
+    serde_json::from_str(body_json)
+        .map_err(|err| SignerError::Other(format!("parse body json: {err}")))
+}
+
 fn apply_height_fields(body: &mut Value, start_height: Option<u64>, end_height: Option<u64>) {
     if let Some(obj) = body.as_object_mut() {
         if let Some(start_height) = start_height {
@@ -108,6 +113,15 @@ fn apply_height_fields(body: &mut Value, start_height: Option<u64>, end_height: 
         if let Some(end_height) = end_height {
             obj.insert("end_height".to_string(), json!(end_height));
         }
+    }
+}
+
+fn emit_json_or(payload: &Value, json: bool, human: impl FnOnce()) -> SignerResult<()> {
+    if json {
+        print_json_value(payload, true)
+    } else {
+        human();
+        Ok(())
     }
 }
 
@@ -130,18 +144,14 @@ pub fn run_coinset_resolve_client(args: &CoinsetResolveClientArgs) -> SignerResu
         "network": resolved.network,
         "base_url": resolved.base_url,
     });
-    if args.json {
-        print_json_value(&payload, true)?;
-    } else {
+    emit_json_or(&payload, args.json, || {
         println!("network: {}", resolved.network);
         println!("base_url: {}", resolved.base_url);
-    }
-    Ok(())
+    })
 }
 
 pub async fn run_coinset_coin_records(args: CoinsetCoinRecordsArgs) -> SignerResult<()> {
-    let mut body: Value = serde_json::from_str(&args.body_json)
-        .map_err(|err| crate::error::SignerError::Other(format!("parse body json: {err}")))?;
+    let mut body = parse_body_json(&args.body_json)?;
     apply_height_fields(&mut body, args.start_height, args.end_height);
     let records = post_coinset_coin_records(
         &args.client.network,
@@ -150,18 +160,13 @@ pub async fn run_coinset_coin_records(args: CoinsetCoinRecordsArgs) -> SignerRes
         body,
     )
     .await?;
+    let count = records.len();
     let payload = json!({ "coin_records": records });
-    if args.json {
-        print_json_value(&payload, true)?;
-    } else {
-        println!("coin_records: {}", records.len());
-    }
-    Ok(())
+    emit_json_or(&payload, args.json, || println!("coin_records: {count}"))
 }
 
 pub async fn run_coinset_record(args: CoinsetRecordArgs) -> SignerResult<()> {
-    let body: Value = serde_json::from_str(&args.body_json)
-        .map_err(|err| crate::error::SignerError::Other(format!("parse body json: {err}")))?;
+    let body = parse_body_json(&args.body_json)?;
     let record = post_coinset_record(
         &args.client.network,
         client_base_url(&args.client.base_url).as_deref(),
@@ -170,18 +175,15 @@ pub async fn run_coinset_record(args: CoinsetRecordArgs) -> SignerResult<()> {
         &args.key,
     )
     .await?;
+    let present = record.is_some();
     let payload = json!({ "record": record });
-    if args.json {
-        print_json_value(&payload, true)?;
-    } else {
-        println!("record_present: {}", record.is_some());
-    }
-    Ok(())
+    emit_json_or(&payload, args.json, || {
+        println!("record_present: {present}");
+    })
 }
 
 pub async fn run_coinset_post(args: CoinsetPostArgs) -> SignerResult<()> {
-    let body: Value = serde_json::from_str(&args.body_json)
-        .map_err(|err| crate::error::SignerError::Other(format!("parse body json: {err}")))?;
+    let body = parse_body_json(&args.body_json)?;
     let payload = post_coinset_rpc(
         &args.client.network,
         client_base_url(&args.client.base_url).as_deref(),
@@ -189,18 +191,11 @@ pub async fn run_coinset_post(args: CoinsetPostArgs) -> SignerResult<()> {
         body,
     )
     .await?;
-    if args.json {
-        print_json_value(&payload, true)?;
-    } else {
-        println!(
-            "success: {}",
-            payload
-                .get("success")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        );
-    }
-    Ok(())
+    let success = payload
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    emit_json_or(&payload, args.json, || println!("success: {success}"))
 }
 
 pub async fn run_coinset_push_tx(args: CoinsetPushTxArgs) -> SignerResult<()> {
@@ -210,21 +205,17 @@ pub async fn run_coinset_push_tx(args: CoinsetPushTxArgs) -> SignerResult<()> {
         &args.spend_bundle_hex,
     )
     .await?;
-    if args.json {
-        print_json_value(&payload, true)?;
-    } else {
-        println!(
-            "success: {}",
-            payload
-                .get("success")
-                .and_then(Value::as_bool)
-                .unwrap_or(false)
-        );
-        if let Some(status) = payload.get("status").and_then(Value::as_str) {
+    let success = payload
+        .get("success")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let status = payload.get("status").and_then(Value::as_str);
+    emit_json_or(&payload, args.json, || {
+        println!("success: {success}");
+        if let Some(status) = status {
             println!("status: {status}");
         }
-    }
-    Ok(())
+    })
 }
 
 #[cfg(test)]

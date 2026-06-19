@@ -76,6 +76,51 @@ async fn subprocess_coinset_coin_records_testnet_without_base_url() {
 }
 
 #[tokio::test]
+async fn subprocess_coinset_coin_records_filters_non_objects_and_height_flags() {
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(200)
+        .with_body(r#"{"success":true,"coin_records":[{"coin":{"amount":1}},"bad"]}"#)
+        .create_async()
+        .await;
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_greenfloor-engine"))
+        .args([
+            "coinset",
+            "coin-records",
+            "--network",
+            "mainnet",
+            "--base-url",
+            &server.url(),
+            "--endpoint",
+            "get_coin_records_by_puzzle_hash",
+            "--body-json",
+            r#"{"puzzle_hash":"0x11","include_spent_coins":false}"#,
+            "--start-height",
+            "10",
+            "--end-height",
+            "20",
+            "--json",
+        ])
+        .output()
+        .expect("spawn greenfloor-engine coinset coin-records subprocess");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value =
+        serde_json::from_slice(&output.stdout).expect("parse coin-records json stdout");
+    let records = value
+        .get("coin_records")
+        .and_then(Value::as_array)
+        .expect("coin_records array");
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["coin"]["amount"], 1);
+}
+
+#[tokio::test]
 async fn subprocess_coinset_post_fee_estimate_returns_rpc_payload() {
     let mut server = mockito::Server::new_async().await;
     let _mock = server

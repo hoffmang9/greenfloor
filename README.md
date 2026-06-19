@@ -124,6 +124,11 @@ Install dev dependencies (includes `pre-commit`), then run local checks:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
+```
+
+**Node.js LTS** is required for the Prettier pre-commit hook (YAML/JSON/Markdown). CI uses `node-version: lts/*`. Install Node LTS locally (for example `brew install node@24 && brew link --overwrite node@24`, or [fnm](https://github.com/Schniz/fnm) / nvm) and verify `node --version` succeeds before running pre-commit.
+
+```bash
 export PRE_COMMIT_HOME="$(pwd)/.cache/pre-commit"  # reuse hook envs; CI caches this path
 pre-commit run --all-files                         # lint + type-check (~5–10s warm)
 ```
