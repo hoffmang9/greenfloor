@@ -1,11 +1,10 @@
-#[cfg(test)]
-pub(crate) mod adapter;
 mod api;
 mod asset;
 mod backend;
 mod coin_select;
 mod direct_api;
 mod msp;
+mod parse;
 mod presplit;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -13,13 +12,15 @@ mod wallet_io;
 mod xch;
 
 pub use api::{
-    conservative_fee_from_payload, get_all_mempool_tx_ids, get_conservative_fee_estimate,
-    get_fee_estimate, post_coinset_rpc, push_tx_hex,
+    conservative_fee_from_payload, direct_coinset_client, get_all_mempool_tx_ids,
+    get_conservative_fee_estimate, get_fee_estimate, post_coinset_coin_records,
+    post_coinset_record, post_coinset_rpc, push_tx_hex,
 };
 pub use direct_api::{
-    normalize_coinset_network, resolve_direct_coinset_base_url, MAINNET_DIRECT_BASE_URL,
-    TESTNET11_DIRECT_BASE_URL,
+    normalize_coinset_network, resolve_direct_client, resolve_direct_coinset_base_url,
+    ResolvedDirectClient, MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
 };
+pub use parse::{coin_records_from_payload, record_from_payload};
 
 pub(crate) use coin_select::finalize_selected_cats;
 

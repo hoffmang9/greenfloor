@@ -2,69 +2,22 @@
 
 from __future__ import annotations
 
-import importlib
 import random
 import time
 from typing import Any
 
+from greenfloor_scripts.chia_sdk_helpers import (
+    coin_id_from_record,
+    hex_to_bytes,
+    safe_int,
+    to_coinset_hex,
+)
 from greenfloor_scripts.coinset_subprocess import (
     coin_records_cli,
     record_from_cli,
+    resolve_client_cli,
 )
 from greenfloor_scripts.hex_subprocess import normalize_hex_id
-
-
-def _import_sdk() -> Any:
-    return importlib.import_module("chia_wallet_sdk")
-
-
-def _hex_to_bytes(value: str) -> bytes:
-    raw = value.strip().lower()
-    if raw.startswith("0x"):
-        raw = raw[2:]
-    if len(raw) % 2:
-        raw = f"0{raw}"
-    return bytes.fromhex(raw)
-
-
-def _to_coinset_hex(value: bytes) -> str:
-    return f"0x{value.hex()}"
-
-
-def _safe_int(value: object, default: int = 0) -> int:
-    try:
-        return int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return default
-
-
-def _coin_id_from_record(record: dict[str, Any]) -> str:
-    coin = record.get("coin")
-    if not isinstance(coin, dict):
-        return ""
-    for candidate in (
-        coin.get("name"),
-        coin.get("coin_id"),
-        coin.get("coin_name"),
-        record.get("name"),
-    ):
-        normalized = normalize_hex_id(candidate)
-        if normalized:
-            return normalized
-    parent_hex = normalize_hex_id(coin.get("parent_coin_info"))
-    puzzle_hex = normalize_hex_id(coin.get("puzzle_hash"))
-    amount = _safe_int(coin.get("amount"), default=-1)
-    # Only synthesize a coin id from canonical fields. Any non-canonical parent
-    # or puzzle hash should be treated as invalid row data, not padded/coerced
-    # into a potentially fake coin id.
-    if not parent_hex or not puzzle_hex or amount < 0 or amount > 0xFFFFFFFFFFFFFFFF:
-        return ""
-    try:
-        sdk = _import_sdk()
-        coin = sdk.Coin(_hex_to_bytes(parent_hex), _hex_to_bytes(puzzle_hex), int(amount))
-        return normalize_hex_id(sdk.to_hex(coin.coin_id())) or ""
-    except Exception:
-        return ""
 
 
 def _chunk_values(values: list[str], chunk_size: int) -> list[list[str]]:
@@ -83,37 +36,12 @@ def _coin_from_record(*, sdk: Any, record: dict[str, Any]) -> Any | None:
         return None
     try:
         return sdk.Coin(
-            _hex_to_bytes(parent_hex), _hex_to_bytes(puzzle_hex), int(coin_data.get("amount", 0))
+            hex_to_bytes(parent_hex),
+            hex_to_bytes(puzzle_hex),
+            int(coin_data.get("amount", 0)),
         )
     except Exception:
         return None
-
-
-def _normalize_coinset_base_url(*, base_url: str | None, network: str) -> str | None:
-    raw = str(base_url or "").strip()
-    if not raw:
-        return None
-    normalized = raw.rstrip("/")
-    lower = normalized.lower()
-    mainnet_aliases = {
-        "coinset.org",
-        "https://coinset.org",
-        "http://coinset.org",
-        "www.coinset.org",
-        "https://www.coinset.org",
-        "http://www.coinset.org",
-    }
-    testnet_aliases = {
-        "testnet11.coinset.org",
-        "https://testnet11.coinset.org",
-        "http://testnet11.coinset.org",
-        "www.testnet11.coinset.org",
-        "https://www.testnet11.coinset.org",
-        "http://www.testnet11.coinset.org",
-    }
-    if lower in mainnet_aliases or lower in testnet_aliases:
-        return None
-    return normalized
 
 
 def _is_retryable_coinset_error(exc: Exception) -> bool:
@@ -144,7 +72,7 @@ def _is_retryable_coinset_error(exc: Exception) -> bool:
     return any(marker in message for marker in retry_markers)
 
 
-def _coinset_with_retries(
+def coinset_with_retries(
     func: Any,
     *,
     attempts: int = 4,
@@ -171,8 +99,7 @@ def _coinset_with_retries(
 
 class CoinsetScanner:
     def __init__(self, *, network: str, base_url: str | None = None) -> None:
-        self.network = network.strip()
-        self.base_url = _normalize_coinset_base_url(base_url=base_url, network=network)
+        self.network, self.base_url = resolve_client_cli(network, base_url)
 
     def _records(
         self,
@@ -182,7 +109,7 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        return _coinset_with_retries(
+        return coinset_with_retries(
             lambda: coin_records_cli(
                 self.network,
                 self.base_url,
@@ -193,16 +120,24 @@ class CoinsetScanner:
             )
         )
 
-    def get_blockchain_state(self) -> dict[str, Any] | None:
-        return _coinset_with_retries(
+    def _record(
+        self,
+        endpoint: str,
+        body: dict[str, Any],
+        key: str,
+    ) -> dict[str, Any] | None:
+        return coinset_with_retries(
             lambda: record_from_cli(
                 self.network,
                 self.base_url,
-                "get_blockchain_state",
-                {},
-                "blockchain_state",
+                endpoint,
+                body,
+                key,
             )
         )
+
+    def get_blockchain_state(self) -> dict[str, Any] | None:
+        return self._record("get_blockchain_state", {}, "blockchain_state")
 
     def by_puzzle_hash(
         self,
@@ -281,7 +216,12 @@ class CoinsetScanner:
         )
 
     def by_names(
-        self, *, coin_names: list[str], include_spent: bool = True
+        self,
+        *,
+        coin_names: list[str],
+        include_spent: bool = True,
+        start_height: int | None = None,
+        end_height: int | None = None,
     ) -> list[dict[str, Any]]:
         if not coin_names:
             return []
@@ -291,6 +231,8 @@ class CoinsetScanner:
                 "names": coin_names,
                 "include_spent_coins": include_spent,
             },
+            start_height=start_height,
+            end_height=end_height,
         )
 
     def puzzle_and_solution(
@@ -299,15 +241,7 @@ class CoinsetScanner:
         body: dict[str, Any] = {"coin_id": coin_id_hex}
         if height is not None and height > 0:
             body["height"] = int(height)
-        return _coinset_with_retries(
-            lambda: record_from_cli(
-                self.network,
-                self.base_url,
-                "get_puzzle_and_solution",
-                body,
-                "coin_solution",
-            )
-        )
+        return self._record("get_puzzle_and_solution", body, "coin_solution")
 
     def existing_coin_names(self, *, coin_ids_hex: list[str]) -> set[str]:
         """Return the subset of coin ids that Coinset resolves by exact name."""
@@ -316,13 +250,13 @@ class CoinsetScanner:
             return existing
         for batch in _chunk_values(coin_ids_hex, 200):
             rows = self.by_names(
-                coin_names=[_to_coinset_hex(_hex_to_bytes(coin_id)) for coin_id in batch],
+                coin_names=[to_coinset_hex(hex_to_bytes(coin_id)) for coin_id in batch],
                 include_spent=True,
             )
             for record in rows:
-                coin_id = _coin_id_from_record(record)
-                if coin_id:
-                    existing.add(coin_id)
+                resolved = coin_id_from_record(record)
+                if resolved:
+                    existing.add(resolved)
         return existing
 
 
@@ -356,21 +290,17 @@ def _detect_cat_asset_id(
             if cached_asset:
                 cat_asset_cache[coin_id] = cached_asset
                 return cached_asset
-            # Cached lineage says this child is not a CAT child.
             if coin_id in cached_child_assets:
                 cat_asset_cache[coin_id] = ""
                 return None
 
     parent_record = parent_record_cache.get(parent_coin_id_hex)
     if parent_record is None and parent_coin_id_hex not in parent_record_cache:
-        parent_record = _coinset_with_retries(
-            lambda: coinset.by_names(
-                coin_names=[_to_coinset_hex(coin.parent_coin_info)],
-                include_spent=True,
-            )
+        rows = coinset.by_names(
+            coin_names=[to_coinset_hex(coin.parent_coin_info)],
+            include_spent=True,
         )
-        if isinstance(parent_record, list):
-            parent_record = parent_record[0] if parent_record else None
+        parent_record = rows[0] if rows else None
         parent_record_cache[parent_coin_id_hex] = parent_record
     if not isinstance(parent_record, dict):
         cat_asset_cache[coin_id] = ""
@@ -379,7 +309,7 @@ def _detect_cat_asset_id(
     if parent_coin is None:
         cat_asset_cache[coin_id] = ""
         return None
-    spent_height = _safe_int(parent_record.get("spent_block_index"), default=0)
+    spent_height = safe_int(parent_record.get("spent_block_index"), default=0)
     if spent_height <= 0:
         cat_asset_cache[coin_id] = ""
         return None
@@ -391,11 +321,9 @@ def _detect_cat_asset_id(
     solution_cache_key = f"{parent_coin_name}:{spent_height}"
     solution = puzzle_solution_cache.get(solution_cache_key)
     if solution is None and solution_cache_key not in puzzle_solution_cache:
-        solution = _coinset_with_retries(
-            lambda: coinset.puzzle_and_solution(
-                coin_id_hex=_to_coinset_hex(parent_coin.coin_id()),
-                height=spent_height,
-            )
+        solution = coinset.puzzle_and_solution(
+            coin_id_hex=to_coinset_hex(parent_coin.coin_id()),
+            height=spent_height,
         )
         puzzle_solution_cache[solution_cache_key] = solution
     if not isinstance(solution, dict):
@@ -408,8 +336,8 @@ def _detect_cat_asset_id(
         return None
     try:
         clvm = sdk.Clvm()
-        parent_puzzle_program = clvm.deserialize(_hex_to_bytes(puzzle_reveal_hex))
-        parent_solution_program = clvm.deserialize(_hex_to_bytes(solution_hex))
+        parent_puzzle_program = clvm.deserialize(hex_to_bytes(puzzle_reveal_hex))
+        parent_solution_program = clvm.deserialize(hex_to_bytes(solution_hex))
         parsed_children = parent_puzzle_program.puzzle().parse_child_cats(
             parent_coin, parent_solution_program
         )

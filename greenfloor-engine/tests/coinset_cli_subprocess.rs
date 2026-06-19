@@ -1,6 +1,70 @@
 use chia_protocol::SpendBundle;
 use chia_traits::Streamable;
+use greenfloor_engine::coinset::TESTNET11_DIRECT_BASE_URL;
 use serde_json::Value;
+
+#[test]
+fn subprocess_coinset_resolve_client_testnet_defaults_without_base_url() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_greenfloor-engine"))
+        .args(["coinset", "resolve-client", "--network", "testnet", "--json"])
+        .output()
+        .expect("spawn greenfloor-engine coinset resolve-client subprocess");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value =
+        serde_json::from_slice(&output.stdout).expect("parse resolve-client json stdout");
+    assert_eq!(value.get("network").and_then(Value::as_str), Some("testnet11"));
+    assert_eq!(
+        value.get("base_url").and_then(Value::as_str),
+        Some(TESTNET11_DIRECT_BASE_URL)
+    );
+}
+
+#[tokio::test]
+async fn subprocess_coinset_coin_records_testnet_without_base_url() {
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/get_blockchain_state")
+        .with_status(200)
+        .with_body(r#"{"success":true,"blockchain_state":{"peak_height":42}}"#)
+        .create_async()
+        .await;
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_greenfloor-engine"))
+        .args([
+            "coinset",
+            "record",
+            "--network",
+            "testnet",
+            "--base-url",
+            &server.url(),
+            "--endpoint",
+            "get_blockchain_state",
+            "--body-json",
+            "{}",
+            "--key",
+            "blockchain_state",
+            "--json",
+        ])
+        .output()
+        .expect("spawn greenfloor-engine coinset record subprocess");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: Value = serde_json::from_slice(&output.stdout).expect("parse record json stdout");
+    assert_eq!(
+        value
+            .get("record")
+            .and_then(|record| record.get("peak_height"))
+            .and_then(Value::as_i64),
+        Some(42)
+    );
+}
 
 #[tokio::test]
 async fn subprocess_coinset_post_fee_estimate_returns_rpc_payload() {

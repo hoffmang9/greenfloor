@@ -15,6 +15,19 @@ def _client_flags(network: str, base_url: str | None) -> list[str]:
     return flags
 
 
+def resolve_client_cli(network: str, base_url: str | None) -> tuple[str, str]:
+    payload = run_engine_json(
+        ["coinset", "resolve-client", *_client_flags(network, base_url)]
+    )
+    if not isinstance(payload, dict):
+        raise RuntimeError("coinset_resolve_client_invalid_payload")
+    resolved_network = str(payload.get("network") or "").strip()
+    resolved_base_url = str(payload.get("base_url") or "").strip()
+    if not resolved_network or not resolved_base_url:
+        raise RuntimeError("coinset_resolve_client_missing_fields")
+    return resolved_network, resolved_base_url
+
+
 def apply_height_fields(
     body: dict[str, Any],
     *,
@@ -25,20 +38,6 @@ def apply_height_fields(
         body["start_height"] = int(start_height)
     if end_height is not None:
         body["end_height"] = int(end_height)
-
-
-def coin_records_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    if not payload.get("success"):
-        return []
-    records = payload.get("coin_records") or []
-    return [record for record in records if isinstance(record, dict)]
-
-
-def record_from_payload(payload: dict[str, Any], key: str) -> dict[str, Any] | None:
-    if not payload.get("success"):
-        return None
-    record = payload.get(key)
-    return record if isinstance(record, dict) else None
 
 
 def post_json_cli(
@@ -87,7 +86,20 @@ def coin_records_cli(
 ) -> list[dict[str, Any]]:
     payload_body = dict(body)
     apply_height_fields(payload_body, start_height=start_height, end_height=end_height)
-    return coin_records_from_payload(post_json_cli(network, base_url, endpoint, payload_body))
+    argv = [
+        "coinset",
+        "coin-records",
+        *_client_flags(network, base_url),
+        "--endpoint",
+        endpoint,
+        "--body-json",
+        json.dumps(payload_body, separators=(",", ":")),
+    ]
+    payload = run_engine_json(argv)
+    if not isinstance(payload, dict):
+        raise RuntimeError("coinset_coin_records_invalid_payload")
+    records = payload.get("coin_records") or []
+    return [record for record in records if isinstance(record, dict)]
 
 
 def record_from_cli(
@@ -97,7 +109,19 @@ def record_from_cli(
     body: dict[str, Any],
     key: str,
 ) -> dict[str, Any] | None:
-    return record_from_payload(
-        post_json_cli(network, base_url, endpoint, dict(body)),
+    argv = [
+        "coinset",
+        "record",
+        *_client_flags(network, base_url),
+        "--endpoint",
+        endpoint,
+        "--body-json",
+        json.dumps(dict(body), separators=(",", ":")),
+        "--key",
         key,
-    )
+    ]
+    payload = run_engine_json(argv)
+    if not isinstance(payload, dict):
+        raise RuntimeError("coinset_record_invalid_payload")
+    record = payload.get("record")
+    return record if isinstance(record, dict) else None
