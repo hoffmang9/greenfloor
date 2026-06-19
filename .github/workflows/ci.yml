@@ -7,6 +7,10 @@ name: CI
     branches:
       - main
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 env:
   PYTHON_VERSION: "3.11"
   CARGO_MANIFEST: greenfloor-engine/Cargo.toml
