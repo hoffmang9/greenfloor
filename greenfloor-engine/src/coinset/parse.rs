@@ -1,4 +1,5 @@
 use chia_protocol::Coin;
+use chia_protocol::CoinSpend;
 use serde_json::Value;
 
 use crate::error::{SignerError, SignerResult};
@@ -89,6 +90,62 @@ pub fn coin_id_from_record(record: &Value) -> String {
     hex::encode(Coin::new(parent, puzzle_hash, amount).coin_id())
 }
 
+pub fn to_coinset_hex(bytes: &[u8]) -> String {
+    format!("0x{}", hex::encode(bytes))
+}
+
+pub fn u64_from_value(value: Option<&Value>, default: u64) -> u64 {
+    value
+        .and_then(|raw| {
+            raw.as_u64()
+                .or_else(|| raw.as_i64().and_then(|v| u64::try_from(v).ok()))
+        })
+        .unwrap_or(default)
+}
+
+pub fn coin_from_record(record: &Value) -> Option<Coin> {
+    let coin = record.get("coin")?;
+    let parent_hex = normalize_hex_id(coin.get("parent_coin_info")?.as_str()?);
+    let puzzle_hex = normalize_hex_id(coin.get("puzzle_hash")?.as_str()?);
+    if parent_hex.is_empty() || puzzle_hex.is_empty() {
+        return None;
+    }
+    let parent = hex_to_bytes32(&parent_hex).ok()?;
+    let puzzle_hash = hex_to_bytes32(&puzzle_hex).ok()?;
+    let amount = coin.get("amount").and_then(Value::as_u64)?;
+    Some(Coin::new(parent, puzzle_hash, amount))
+}
+
+pub fn coin_spend_from_solution_payload(parent_coin: Coin, solution: &Value) -> Option<CoinSpend> {
+    let puzzle_reveal_hex = solution.get("puzzle_reveal")?.as_str()?.trim();
+    let solution_hex = solution.get("solution")?.as_str()?.trim();
+    if puzzle_reveal_hex.is_empty() || solution_hex.is_empty() {
+        return None;
+    }
+    let puzzle_reveal = decode_hex_bytes(puzzle_reveal_hex).ok()?;
+    let solution_bytes = decode_hex_bytes(solution_hex).ok()?;
+    Some(CoinSpend::new(
+        parent_coin,
+        puzzle_reveal.into(),
+        solution_bytes.into(),
+    ))
+}
+
+fn decode_hex_bytes(raw: &str) -> Result<Vec<u8>, hex::FromHexError> {
+    hex::decode(raw.trim_start_matches("0x"))
+}
+
+pub fn chunk_values<T: Clone>(values: &[T], chunk_size: usize) -> Vec<Vec<T>> {
+    if chunk_size == 0 {
+        return if values.is_empty() {
+            Vec::new()
+        } else {
+            vec![values.to_vec()]
+        };
+    }
+    values.chunks(chunk_size).map(<[T]>::to_vec).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,6 +182,23 @@ mod tests {
         assert!(record_from_payload(&payload, "coin_record")
             .expect("success payload")
             .is_none());
+    }
+
+    #[test]
+    fn chunk_values_respects_batch_size() {
+        let values = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        assert_eq!(
+            chunk_values(&values, 2),
+            vec![
+                vec!["a".to_string(), "b".to_string()],
+                vec!["c".to_string()]
+            ]
+        );
+    }
+
+    #[test]
+    fn to_coinset_hex_prefixes_0x() {
+        assert_eq!(to_coinset_hex(&[0xab]), "0xab");
     }
 
     #[test]

@@ -36,6 +36,14 @@ pub fn default_cats_config_path() -> PathBuf {
     PathBuf::from("config/cats.yaml")
 }
 
+pub fn default_metadata_config_paths() -> (PathBuf, PathBuf, Option<PathBuf>) {
+    (
+        default_cats_config_path(),
+        default_markets_config_path(),
+        default_testnet_markets_config_path(),
+    )
+}
+
 pub fn resolve_cli_config_path(
     cli_value: &Path,
     repo_default: &Path,

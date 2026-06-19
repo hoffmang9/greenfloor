@@ -41,9 +41,21 @@ host can run incremental vault scans.
   --cat-ticker wUSDC.b
 ```
 
-See `scripts/vault_coinset_scan_coinset.py` and `scripts/vault_coinset_scan_checkpoint.py`
-for checkpointed scan workflows. `vault_coinset_scan_lib.py` builds ticker→asset indexes
-from `cats-fields` and `markets-fields` (not direct YAML walks).
+Checkpointed and incremental scan logic lives in `greenfloor-engine vault-coinset-scan`
+(Rust). The Python script forwards CLI flags unchanged. Ticker→asset indexes are built from
+`config/cats.yaml` and `config/markets.yaml` inside the engine (same metadata as
+`cats-fields` / `markets-fields`).
+
+Direct engine usage:
+
+```bash
+greenfloor-engine vault-coinset-scan \
+  --network mainnet \
+  --coinset-base-url https://api.coinset.org \
+  --program-config ~/.greenfloor/config/program.yaml \
+  --asset-type cat \
+  --cat-ticker wUSDC.b
+```
 
 ## 3) Manager inventory (preferred for operators)
 

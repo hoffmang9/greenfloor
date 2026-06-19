@@ -16,6 +16,9 @@ use greenfloor_engine::vault::{
     build_and_optionally_broadcast_vault_cat_mixed_split, members::hex_to_bytes32,
     MixedSplitRequest,
 };
+use greenfloor_engine::vault_coinset_scan::{
+    run_vault_coinset_scan_command, VaultCoinsetScanCliArgs,
+};
 use greenfloor_engine::{resolve_vault_context, Error};
 
 #[derive(Debug, Parser)]
@@ -101,6 +104,8 @@ enum Commands {
     Hex(HexCliArgs),
     /// KMS helpers for one-off vault onboarding scripts.
     KmsPublicKeyCompressedHex(KmsPublicKeyArgs),
+    /// Vault Coinset coin scan (nonce member puzzle hash discovery).
+    VaultCoinsetScan(VaultCoinsetScanCliArgs),
 }
 
 #[tokio::main]
@@ -211,6 +216,7 @@ async fn run() -> Result<(), Error> {
         Commands::KmsPublicKeyCompressedHex(args) => {
             run_kms_public_key_compressed_hex(args).await?;
         }
+        Commands::VaultCoinsetScan(args) => run_vault_coinset_scan_command(args).await?,
     }
     Ok(())
 }

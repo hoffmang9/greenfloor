@@ -20,9 +20,14 @@ pub use direct_api::{
     normalize_coinset_network, resolve_direct_client, resolve_direct_coinset_base_url,
     ResolvedDirectClient, MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
 };
+mod scan_client;
+
 pub use parse::{
-    coin_id_from_record, coin_records_from_payload, ensure_coinset_rpc_success, record_from_payload,
+    chunk_values, coin_from_record, coin_id_from_record, coin_records_from_payload,
+    coin_spend_from_solution_payload, ensure_coinset_rpc_success, record_from_payload,
+    to_coinset_hex, u64_from_value,
 };
+pub use scan_client::DirectCoinsetScanClient;
 
 pub(crate) use coin_select::finalize_selected_cats;
 
@@ -40,6 +45,8 @@ pub use wallet_io::{
     puzzle_hash_hex_for_receive_address, spend_bundle_hash_from_hex, WalletUnspentCoin,
 };
 
+use std::collections::HashMap;
+
 use chia_protocol::{Bytes32, Coin, CoinSpend, SpendBundle};
 use chia_puzzle_types::cat::CatArgs;
 use chia_puzzle_types::Proof;
@@ -56,6 +63,7 @@ use clvm_utils::TreeHash;
 use clvmr::{serde::node_from_bytes, Allocator};
 
 use crate::error::{SignerError, SignerResult};
+use crate::hex::normalize_hex_id;
 use crate::vault::members::hex_to_bytes32;
 
 pub const MIN_CAT_OUTPUT_MOJOS: u64 = 1000;
@@ -303,6 +311,37 @@ fn parse_cat_from_parent_spend(coin: Coin, parent_spend: &CoinSpend) -> SignerRe
     Ok(children
         .into_iter()
         .find(|cat| cat.coin.coin_id() == coin.coin_id()))
+}
+
+pub fn child_cat_asset_ids_from_parent_spend(
+    parent_coin: Coin,
+    parent_spend: &CoinSpend,
+) -> SignerResult<HashMap<String, String>> {
+    let mut allocator = Allocator::new();
+    let parent_puzzle_ptr = node_from_bytes(&mut allocator, parent_spend.puzzle_reveal.as_ref())
+        .map_err(|err| SignerError::Driver(err.to_string()))?;
+    let parent_solution_ptr = node_from_bytes(&mut allocator, parent_spend.solution.as_ref())
+        .map_err(|err| SignerError::Driver(err.to_string()))?;
+    let parent_puzzle = Puzzle::parse(&allocator, parent_puzzle_ptr);
+    let children = Cat::parse_children(
+        &mut allocator,
+        parent_coin,
+        parent_puzzle,
+        parent_solution_ptr,
+    )
+    .map_err(|err| SignerError::Driver(err.to_string()))?;
+    let Some(children) = children else {
+        return Ok(HashMap::new());
+    };
+    Ok(children
+        .into_iter()
+        .map(|cat| {
+            (
+                hex::encode(cat.coin.coin_id()),
+                normalize_hex_id(&hex::encode(cat.info.asset_id)),
+            )
+        })
+        .collect())
 }
 
 fn coin_records_from_response(response: GetCoinRecordsResponse) -> SignerResult<Vec<CoinRecord>> {

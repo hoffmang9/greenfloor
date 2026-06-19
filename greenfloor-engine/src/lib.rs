@@ -30,6 +30,7 @@ pub mod offer;
 pub mod paths;
 pub mod storage;
 pub mod vault;
+pub mod vault_coinset_scan;
 
 use config::SignerConfig;
 use error::SignerResult;
