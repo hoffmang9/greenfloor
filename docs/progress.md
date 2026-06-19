@@ -16,6 +16,13 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-06-19 — Project agent skills documented
+
+Added [`coverage-review`](../.cursor/skills/coverage-review/SKILL.md) — analyse test coverage
+gaps and report uncovered code before making changes (`/coverage-review`). Documented existing
+[`check-commit-signature`](../.cursor/skills/check-commit-signature/SKILL.md) in
+[`AGENTS.md`](../AGENTS.md) → **Agent skills**.
+
 ### 2026-06-18 — Python test harness retired; combine-market-cat-dust in Rust
 
 Removed GreenFloor pytest suite; operator and script contract tests live in
