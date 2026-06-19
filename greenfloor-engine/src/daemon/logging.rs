@@ -8,6 +8,8 @@ static LOG_STATE: OnceLock<Result<LogState, String>> = OnceLock::new();
 
 const SERVICE_NAME: &str = "daemon";
 
+pub use crate::file_logging::warn_if_log_level_auto_healed;
+
 /// Initialize or refresh daemon file logging for the current process.
 ///
 /// The first call installs the file subscriber under `{home_dir}/logs/debug.log`.
@@ -32,18 +34,6 @@ pub fn sync_daemon_file_logging(home_dir: &Path, log_level: &str) -> SignerResul
 /// Returns an error if initialization fails.
 pub fn initialize_daemon_file_logging(home_dir: &Path, log_level: &str) -> SignerResult<()> {
     sync_daemon_file_logging(home_dir, log_level)
-}
-
-pub fn warn_if_daemon_log_level_auto_healed(
-    log_level_was_missing: bool,
-    program_config_path: &Path,
-) {
-    if log_level_was_missing {
-        tracing::warn!(
-            program_config = %program_config_path.display(),
-            "program config missing app.log_level; defaulting to INFO"
-        );
-    }
 }
 
 #[must_use]

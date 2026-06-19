@@ -8,8 +8,9 @@ static LOG_STATE: OnceLock<Result<LogState, String>> = OnceLock::new();
 
 const SERVICE_NAME: &str = "manager";
 
-pub use crate::file_logging::normalize_log_level_name;
-pub(crate) use crate::file_logging::DEFAULT_LOG_LEVEL;
+pub use crate::file_logging::{
+    normalize_log_level_name, validate_log_level, warn_if_log_level_auto_healed, DEFAULT_LOG_LEVEL,
+};
 
 /// Initialize or refresh manager file logging for the current process.
 ///
@@ -35,15 +36,6 @@ pub fn sync_manager_file_logging(home_dir: &Path, log_level: &str) -> SignerResu
 /// Returns an error if initialization fails.
 pub fn initialize_manager_file_logging(home_dir: &Path, log_level: &str) -> SignerResult<()> {
     sync_manager_file_logging(home_dir, log_level)
-}
-
-pub fn warn_if_log_level_auto_healed(log_level_was_missing: bool, program_config_path: &Path) {
-    if log_level_was_missing {
-        tracing::warn!(
-            program_config = %program_config_path.display(),
-            "program config missing app.log_level; defaulting to INFO"
-        );
-    }
 }
 
 #[cfg(test)]

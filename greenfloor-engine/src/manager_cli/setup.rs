@@ -7,6 +7,7 @@ use serde_yaml::Value;
 
 use crate::config::{load_markets_config_with_overlay, load_program_config};
 use crate::error::{SignerError, SignerResult};
+use crate::file_logging::validate_log_level;
 use crate::hex::{is_hex_id, normalize_hex_id};
 use crate::minimal_program_template::{
     write_minimal_program, write_minimal_program_with_signer, MinimalProgramParams,
@@ -16,8 +17,6 @@ use crate::storage::{resolve_state_db_path, SqliteStore};
 use super::cats_catalog::load_cats_catalog;
 use super::context::ManagerContext;
 use super::paths::expand_home;
-
-const ALLOWED_LOG_LEVELS: &[&str] = &["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"];
 
 pub struct BootstrapHomeParams<'a> {
     pub ctx: &'a ManagerContext,
@@ -184,7 +183,7 @@ pub fn run_cats_fields(ctx: &ManagerContext) -> SignerResult<i32> {
 
 pub fn run_set_log_level(ctx: &ManagerContext, log_level: &str) -> SignerResult<i32> {
     let program_path = &ctx.program_config;
-    let level = normalize_log_level(log_level)?;
+    let level = validate_log_level(log_level)?;
     let raw = read_yaml_mapping(program_path)?;
     let mut root = raw;
     let app = root
@@ -399,18 +398,6 @@ fn collect_env_warnings(warnings: &mut Vec<String>) {
     }
 }
 
-fn normalize_log_level(log_level: &str) -> SignerResult<String> {
-    let level = log_level.trim().to_ascii_uppercase();
-    if ALLOWED_LOG_LEVELS.contains(&level.as_str()) {
-        Ok(level)
-    } else {
-        Err(SignerError::Other(format!(
-            "log level must be one of: {}",
-            ALLOWED_LOG_LEVELS.join(", ")
-        )))
-    }
-}
-
 fn read_yaml_mapping(path: &Path) -> SignerResult<Value> {
     let raw = std::fs::read_to_string(path)
         .map_err(|err| SignerError::Other(format!("failed to read {}: {err}", path.display())))?;
@@ -430,13 +417,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalize_log_level_accepts_info() {
-        assert_eq!(normalize_log_level("info").expect("level"), "INFO");
+    fn validate_log_level_accepts_info() {
+        assert_eq!(validate_log_level("info").expect("level"), "INFO");
     }
 
     #[test]
-    fn normalize_log_level_rejects_garbage() {
-        assert!(normalize_log_level("verbose").is_err());
+    fn validate_log_level_rejects_garbage() {
+        assert!(validate_log_level("verbose").is_err());
     }
 
     #[test]

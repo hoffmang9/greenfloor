@@ -11,6 +11,7 @@ use super::yaml_fields::{
     req_str, req_value,
 };
 use crate::error::SignerResult;
+use crate::file_logging::normalize_log_level_string;
 use crate::paths::expand_home;
 
 struct ParsedVenueConfig {
@@ -81,7 +82,7 @@ pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
     } = parse_coin_ops_config(coin_ops)?;
 
     let app_log_level_was_missing = !app.contains_key("log_level");
-    let app_log_level = normalize_manager_log_level(
+    let app_log_level = normalize_log_level_string(
         app.get("log_level")
             .and_then(Value::as_str)
             .unwrap_or("INFO"),
@@ -417,13 +418,4 @@ fn runtime_timeout_seconds(
         }
     }
     Ok(default.max(minimum))
-}
-
-fn normalize_manager_log_level(log_level: &str) -> String {
-    match log_level.trim().to_ascii_uppercase().as_str() {
-        "CRITICAL" | "ERROR" | "WARNING" | "INFO" | "DEBUG" | "NOTSET" => {
-            log_level.trim().to_ascii_uppercase()
-        }
-        _ => "INFO".to_string(),
-    }
 }

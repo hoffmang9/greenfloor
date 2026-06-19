@@ -57,7 +57,7 @@ pub use daemon_loop::{run_daemon_loop, DaemonLoopRequest};
 pub use lock::DaemonInstanceLock;
 pub use logging::{
     default_log_level, initialize_daemon_file_logging, sync_daemon_file_logging,
-    warn_if_daemon_log_level_auto_healed,
+    warn_if_log_level_auto_healed,
 };
 pub use market_context::{
     load_cycle_resources, DaemonCycleResources, MarketCycleContext, MarketDispatchContext,

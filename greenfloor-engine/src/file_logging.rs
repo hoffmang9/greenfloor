@@ -1,3 +1,11 @@
+//! Process-wide file logging helpers (`{home_dir}/logs/debug.log`).
+//!
+//! **One global subscriber per process:** the first successful
+//! [`sync_service_file_logging`] call installs the tracing registry. Daemon and manager each
+//! keep a separate `OnceLock` slot, but they share one process-global subscriber — only one
+//! service may init logging in a process. A second init fails if tracing is already global.
+//! Production binaries (`greenfloord`, `greenfloor-manager`) are separate processes.
+
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -12,21 +20,62 @@ use crate::error::{SignerError, SignerResult};
 pub const DEFAULT_LOG_LEVEL: &str = "INFO";
 pub const LOG_FILE: &str = "logs/debug.log";
 
+pub const ALLOWED_LOG_LEVELS: &[&str] =
+    &["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"];
+
 pub(crate) struct LogState {
     home_dir: PathBuf,
     filter_handle: Handle<EnvFilter, tracing_subscriber::Registry>,
 }
 
+fn classify_log_level(log_level: &str) -> Option<&'static str> {
+    match log_level.trim().to_ascii_uppercase().as_str() {
+        "CRITICAL" => Some("CRITICAL"),
+        "ERROR" => Some("ERROR"),
+        "WARNING" => Some("WARNING"),
+        "INFO" => Some("INFO"),
+        "DEBUG" => Some("DEBUG"),
+        "NOTSET" => Some("NOTSET"),
+        _ => None,
+    }
+}
+
+/// Normalize a log level for tracing filters and config defaults.
+///
+/// Unknown or empty values default to [`DEFAULT_LOG_LEVEL`] (`INFO`).
 #[must_use]
 pub fn normalize_log_level_name(log_level: &str) -> &'static str {
-    match log_level.trim().to_ascii_uppercase().as_str() {
-        "CRITICAL" => "CRITICAL",
-        "ERROR" => "ERROR",
-        "WARNING" => "WARNING",
-        "INFO" => "INFO",
-        "DEBUG" => "DEBUG",
-        "NOTSET" => "NOTSET",
-        _ => DEFAULT_LOG_LEVEL,
+    classify_log_level(log_level).unwrap_or(DEFAULT_LOG_LEVEL)
+}
+
+/// Normalize a log level to an owned uppercase string, defaulting invalid values to `INFO`.
+#[must_use]
+pub fn normalize_log_level_string(log_level: &str) -> String {
+    normalize_log_level_name(log_level).to_string()
+}
+
+/// Validate explicit operator log-level input (for example `set-log-level`).
+///
+/// # Errors
+///
+/// Returns an error when `log_level` is not one of [`ALLOWED_LOG_LEVELS`].
+pub fn validate_log_level(log_level: &str) -> SignerResult<String> {
+    classify_log_level(log_level)
+        .map(str::to_string)
+        .ok_or_else(|| {
+            SignerError::Other(format!(
+                "log level must be one of: {}",
+                ALLOWED_LOG_LEVELS.join(", ")
+            ))
+        })
+}
+
+pub fn warn_if_log_level_auto_healed(log_level_was_missing: bool, program_config_path: &Path) {
+    if log_level_was_missing {
+        tracing::warn!(
+            program_config = %program_config_path.display(),
+            "program config missing app.log_level; defaulting to INFO"
+        );
     }
 }
 
@@ -189,6 +238,13 @@ mod tests {
         assert_eq!(normalize_log_level_name("debug"), "DEBUG");
         assert_eq!(normalize_log_level_name(""), DEFAULT_LOG_LEVEL);
         assert_eq!(normalize_log_level_name("verbose"), DEFAULT_LOG_LEVEL);
+        assert_eq!(normalize_log_level_string("verbose"), "INFO");
+    }
+
+    #[test]
+    fn validate_log_level_accepts_info_and_rejects_garbage() {
+        assert_eq!(validate_log_level("info").expect("level"), "INFO");
+        assert!(validate_log_level("verbose").is_err());
     }
 
     #[test]
