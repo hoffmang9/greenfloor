@@ -1,7 +1,17 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
 
-use crate::config::normalize_label;
+use crate::config::{build_cat_ticker_index, normalize_label, CatTickerIndex};
 use crate::hex::normalize_hex_id;
+
+pub fn load_scan_cat_ticker_index(
+    cats_config: &Path,
+    markets_config: &Path,
+    testnet_markets_config: Option<&Path>,
+) -> CatTickerIndex {
+    build_cat_ticker_index(cats_config, markets_config, testnet_markets_config)
+        .unwrap_or_else(|_| (HashMap::new(), BTreeMap::new()))
+}
 
 pub fn parse_csv_values(values: &[String]) -> Vec<String> {
     let mut parsed = Vec::new();
@@ -72,5 +82,17 @@ mod tests {
             resolve_requested_cat_ids(&[], &["NOPE".to_string()], &HashMap::new());
         assert!(resolved.is_empty());
         assert_eq!(unresolved, vec!["NOPE".to_string()]);
+    }
+
+    #[test]
+    fn load_scan_cat_ticker_index_continues_when_catalog_unreadable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cats = dir.path().join("cats.yaml");
+        std::fs::write(&cats, "{not yaml").expect("write bad cats");
+        let markets = dir.path().join("markets.yaml");
+        std::fs::write(&markets, "{also bad").expect("write bad markets");
+        let (tickers, symbols) = load_scan_cat_ticker_index(&cats, &markets, None);
+        assert!(tickers.is_empty());
+        assert!(symbols.is_empty());
     }
 }

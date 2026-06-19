@@ -34,6 +34,33 @@ pub struct NameVerification {
     pub dropped_unverified_count: usize,
 }
 
+/// Filter discovered coins to Coinset-verified names when verify returned at least one id.
+pub fn apply_name_verification(
+    by_coin_id: &mut HashMap<String, CoinRow>,
+    verified_coin_ids: &[String],
+) -> Option<NameVerification> {
+    let pre_verify_count = by_coin_id.len();
+    if pre_verify_count == 0 {
+        return None;
+    }
+    let verification_applied = !verified_coin_ids.is_empty();
+    if verification_applied {
+        let verified_set: HashSet<String> = verified_coin_ids.iter().cloned().collect();
+        by_coin_id.retain(|coin_id, _| verified_set.contains(coin_id));
+    }
+    let dropped_unverified_count = if verification_applied {
+        pre_verify_count.saturating_sub(by_coin_id.len())
+    } else {
+        0
+    };
+    Some(NameVerification {
+        applied: verification_applied,
+        pre_verify_count,
+        verified_count: verification_applied.then_some(by_coin_id.len()),
+        dropped_unverified_count,
+    })
+}
+
 #[derive(Debug, Serialize)]
 pub struct CheckpointSummary {
     pub enabled: bool,
@@ -94,4 +121,65 @@ pub fn filter_rows(
                 || requested_cat_ids.contains(row.cat_asset_id.as_deref().unwrap_or(""))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::vault_coinset_scan::types::CoinKind;
+
+    fn sample_row(coin_id: &str) -> CoinRow {
+        CoinRow {
+            coin_id: coin_id.to_string(),
+            puzzle_hash: "bb".repeat(64),
+            parent_coin_info: "aa".repeat(64),
+            amount: 1,
+            confirmed_block_index: 1,
+            spent_block_index: 0,
+            discovered_nonces: vec![0],
+            discovered_by_puzzle_hash: false,
+            discovered_by_hint: true,
+            kind: CoinKind::Xch,
+            cat_asset_id: None,
+            cat_symbols: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn apply_name_verification_skips_filter_when_verify_empty() {
+        let mut rows = HashMap::from([("coin-a".to_string(), sample_row("coin-a"))]);
+        let summary = apply_name_verification(&mut rows, &[]).expect("summary when coins exist");
+        assert!(!summary.applied);
+        assert_eq!(summary.pre_verify_count, 1);
+        assert_eq!(summary.verified_count, None);
+        assert_eq!(summary.dropped_unverified_count, 0);
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn apply_name_verification_drops_unverified_when_verify_nonempty() {
+        let mut rows = HashMap::from([("coin-a".to_string(), sample_row("coin-a"))]);
+        let summary = apply_name_verification(&mut rows, &["other-coin".to_string()])
+            .expect("summary when coins exist");
+        assert!(summary.applied);
+        assert_eq!(summary.pre_verify_count, 1);
+        assert_eq!(summary.verified_count, Some(0));
+        assert_eq!(summary.dropped_unverified_count, 1);
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn apply_name_verification_keeps_verified_coins() {
+        let mut rows = HashMap::from([
+            ("coin-a".to_string(), sample_row("coin-a")),
+            ("coin-b".to_string(), sample_row("coin-b")),
+        ]);
+        let summary = apply_name_verification(&mut rows, &["coin-a".to_string()])
+            .expect("summary when coins exist");
+        assert!(summary.applied);
+        assert_eq!(summary.verified_count, Some(1));
+        assert_eq!(summary.dropped_unverified_count, 1);
+        assert_eq!(rows.len(), 1);
+        assert!(rows.contains_key("coin-a"));
+    }
 }

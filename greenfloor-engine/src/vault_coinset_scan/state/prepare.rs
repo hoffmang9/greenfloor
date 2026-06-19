@@ -3,12 +3,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use chia_protocol::Bytes32;
 
 use crate::coinset::{resolve_direct_client, DirectCoinsetScanClient};
-use crate::config::build_cat_ticker_index;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::vault::members::hex_to_bytes32;
 use crate::vault_coinset_scan::checkpoint::{load_scan_checkpoint, LoadedCheckpoint};
-use crate::vault_coinset_scan::metadata::resolve_requested_cat_ids;
+use crate::vault_coinset_scan::metadata::{load_scan_cat_ticker_index, resolve_requested_cat_ids};
 use crate::vault_coinset_scan::request::ScanRequest;
 use crate::vault_coinset_scan::types::AssetTypeFilter;
 use crate::vault_coinset_scan::window::{resolve_scan_window, ScanWindowPlan};
@@ -43,11 +42,11 @@ pub(super) fn resolve_scan_client(request: &ScanRequest) -> SignerResult<Resolve
 }
 
 pub(super) fn resolve_scan_metadata(request: &ScanRequest) -> SignerResult<ScanMetadata> {
-    let (ticker_to_asset_ids, asset_id_to_symbols) = build_cat_ticker_index(
+    let (ticker_to_asset_ids, asset_id_to_symbols) = load_scan_cat_ticker_index(
         &request.cats_config,
         &request.markets_config,
         request.testnet_markets_config.as_deref(),
-    )?;
+    );
 
     let requested_cat_ids_raw = request
         .requested_cat_ids

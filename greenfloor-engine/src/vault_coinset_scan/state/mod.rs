@@ -6,8 +6,8 @@ use crate::vault_coinset_scan::checkpoint::save_scan_checkpoint;
 use crate::vault_coinset_scan::checkpoint::{ParentLineageEntry, SaveCheckpointParams};
 use crate::vault_coinset_scan::request::ScanRequest;
 use crate::vault_coinset_scan::result::{
-    filter_rows, CheckpointSummary, NameVerification, ScanBatchConfig, ScanResult,
-    ScanWindowSummary,
+    apply_name_verification, filter_rows, CheckpointSummary, NameVerification, ScanBatchConfig,
+    ScanResult, ScanWindowSummary,
 };
 use crate::vault_coinset_scan::types::{CoinRow, ScanStopReason};
 
@@ -142,24 +142,17 @@ impl ScanState {
     }
 
     async fn verify_and_filter_names(&mut self) -> SignerResult<Option<NameVerification>> {
-        let pre_verify_count = self.by_coin_id.len();
-        if pre_verify_count == 0 {
+        if self.by_coin_id.is_empty() {
             return Ok(None);
         }
         let verified_coin_ids = self
             .scanner
             .existing_coin_names(&self.by_coin_id.keys().cloned().collect::<Vec<_>>())
             .await?;
-        let verified_set: HashSet<String> = verified_coin_ids.into_iter().collect();
-        self.by_coin_id
-            .retain(|coin_id, _| verified_set.contains(coin_id));
-        let dropped_unverified_count = pre_verify_count.saturating_sub(self.by_coin_id.len());
-        Ok(Some(NameVerification {
-            applied: true,
-            pre_verify_count,
-            verified_count: Some(self.by_coin_id.len()),
-            dropped_unverified_count,
-        }))
+        Ok(apply_name_verification(
+            &mut self.by_coin_id,
+            &verified_coin_ids,
+        ))
     }
 
     fn save_final_checkpoint(&self) -> SignerResult<()> {
