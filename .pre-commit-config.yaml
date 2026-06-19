@@ -1,8 +1,11 @@
 ---
-# Fast lint/type gate — matches CI pre-commit step (see .github/workflows/ci.yml).
+# Fast lint/type gate — matches CI gate profile (see .github/workflows/ci.yml).
+# CI ubuntu gate profile: pre-commit (Python/YAML) + explicit cargo fmt/clippy --lib --bins + cargo test.
+# CI arm/macOS cross-test profile: cargo test only.
+# Local pre-commit uses the same clippy scope as CI (--lib --bins, not --all-targets): integration
+# tests compile in the test profile during `cargo test`; clippy --all-targets would duplicate work.
 # Full operator safety net before push:
 #   cargo test --manifest-path greenfloor-engine/Cargo.toml
-#   pytest
 #
 # Speed tips:
 #   export PRE_COMMIT_HOME="$(pwd)/.cache/pre-commit"  # reuse hook envs (CI caches this path)
@@ -19,9 +22,9 @@ repos:
         files: ^greenfloor-engine/
 
       - id: cargo-clippy
-        # Runs `clippy::all` + `clippy::pedantic` deny from greenfloor-engine/Cargo.toml.
+        # Same scope as CI gate profile: lib+bins only (see header comment).
         name: cargo clippy (greenfloor-engine, clippy::all + pedantic)
-        entry: cargo clippy --manifest-path greenfloor-engine/Cargo.toml --all-targets --no-deps
+        entry: cargo clippy --manifest-path greenfloor-engine/Cargo.toml --lib --bins --no-deps
         language: system
         pass_filenames: false
         files: ^greenfloor-engine/

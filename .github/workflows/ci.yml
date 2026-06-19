@@ -12,25 +12,21 @@ env:
   CARGO_MANIFEST: greenfloor-engine/Cargo.toml
 
 jobs:
-  lint-type-test:
-    name: Lint, Type, Test (${{ matrix.os }})
+  ci:
+    name: CI (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
+          # gate: Python/YAML lint + Rust fmt/clippy/test on ubuntu-latest
+          # cross-test: cargo test only (arm + macOS compile/run parity)
           - os: ubuntu-latest
-            run_precommit: true
-            run_rust_tests: true
-            build_native_clis: true
+            ci_profile: gate
           - os: ubuntu-24.04-arm
-            run_precommit: false
-            run_rust_tests: true
-            build_native_clis: true
+            ci_profile: cross-test
           - os: macos-14
-            run_precommit: false
-            run_rust_tests: true
-            build_native_clis: true
+            ci_profile: cross-test
 
     steps:
       - uses: actions/checkout@v4
@@ -38,15 +34,18 @@ jobs:
           submodules: recursive
 
       - uses: actions/setup-python@v5
+        if: matrix.ci_profile == 'gate'
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       # Node is required to install and run the explicit Prettier check in CI.
       - uses: actions/setup-node@v4
+        if: matrix.ci_profile == 'gate'
         with:
           node-version: "lts/*"
 
       - name: Restore Python venv cache
+        if: matrix.ci_profile == 'gate'
         id: cache-venv
         uses: actions/cache/restore@v4
         with:
@@ -54,6 +53,7 @@ jobs:
           key: venv-v2-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
 
       - name: Create venv and install dev dependencies
+        if: matrix.ci_profile == 'gate'
         run: |
           if [ ! -d .venv/bin ]; then
             python -m venv .venv
@@ -65,17 +65,16 @@ jobs:
           python -m pip install -e ".[dev]"
 
       - name: Save Python venv cache
-        if: steps.cache-venv.outputs.cache-hit != 'true'
+        if: matrix.ci_profile == 'gate' && steps.cache-venv.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: .venv
           key: venv-v2-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
 
       - uses: ./.github/actions/rust-cache-greenfloor
-        if: matrix.build_native_clis || matrix.run_rust_tests
 
       - name: Cache pre-commit environment
-        if: matrix.run_precommit
+        if: matrix.ci_profile == 'gate'
         uses: actions/cache@v4
         with:
           path: ./.cache/pre-commit
@@ -84,28 +83,22 @@ jobs:
             pre-commit-${{ runner.os }}-${{ runner.arch }}-py311-
 
       - name: "Lint + Type-check (pre-commit)"
-        if: matrix.run_precommit
+        if: matrix.ci_profile == 'gate'
         env:
           PRE_COMMIT_HOME: ${{ github.workspace }}/.cache/pre-commit
-          # Python/YAML only; Rust fmt/clippy run in the dedicated gate step below.
           SKIP: cargo-fmt,cargo-clippy
         run: pre-commit run --all-files
 
-      - name: Rust fmt, clippy, and test
-        if: matrix.run_rust_tests && matrix.run_precommit
+      - name: Rust gate
         run: |
-          cargo fmt --manifest-path "${{ env.CARGO_MANIFEST }}" --check
-          # lib+bins only: integration tests compile in the test profile during
-          # `cargo test`; clippy --all-targets would rebuild them twice on CI.
-          cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}" --lib --bins --no-deps
+          if [ "${{ matrix.ci_profile }}" = "gate" ]; then
+            cargo fmt --manifest-path "${{ env.CARGO_MANIFEST }}" --check
+            cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}" --lib --bins --no-deps
+          fi
           cargo test --manifest-path "${{ env.CARGO_MANIFEST }}"
 
-      - name: Build and test greenfloor-engine
-        if: matrix.run_rust_tests && !matrix.run_precommit
-        run: cargo test --manifest-path "${{ env.CARGO_MANIFEST }}"
-
       - name: Install greenfloor native CLIs on PATH
-        if: matrix.build_native_clis
+        if: matrix.ci_profile == 'gate'
         run: |
           for bin in greenfloor-engine greenfloor-manager greenfloord; do
             install -m 755 "target/debug/${bin}" "$GITHUB_WORKSPACE/.venv/bin/${bin}"
