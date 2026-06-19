@@ -3,10 +3,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use serde_json::Value;
 
 use crate::coinset::{
-    child_cat_asset_ids_from_parent_spend, coin_from_record, coin_spend_from_solution_payload,
-    to_coinset_hex, u64_from_value, DirectCoinsetScanClient,
+    child_cat_asset_ids_from_parent_spend, chunk_values, coin_from_record, coin_id_from_record,
+    coin_spend_from_solution_payload, to_coinset_hex, u64_from_value, DirectCoinsetScanClient,
 };
 use crate::error::SignerResult;
+use crate::hex::normalize_hex_id;
+use crate::vault::members::hex_to_bytes32;
 use crate::vault_coinset_scan::checkpoint::ParentLineageEntry;
 use crate::vault_coinset_scan::types::{CoinKind, CoinRow};
 
@@ -36,8 +38,12 @@ pub async fn classify_coin_rows(
     rows: &mut HashMap<String, CoinRow>,
     nonce_to_p2: &HashMap<u32, String>,
     asset_id_to_symbols: &BTreeMap<String, Vec<String>>,
+    parent_lookup_batch_size: u32,
     caches: &mut CatDetectCaches,
 ) -> SignerResult<()> {
+    caches.parent_record_cache =
+        prefetch_parent_records(scanner, rows, parent_lookup_batch_size).await?;
+
     let mut pending_by_parent: HashMap<String, Vec<String>> = HashMap::new();
 
     for (coin_id, row) in rows.iter_mut() {
@@ -56,8 +62,9 @@ pub async fn classify_coin_rows(
                 .insert(coin_id.clone(), String::new());
             continue;
         }
+        let parent_key = normalize_hex_id(&row.parent_coin_info);
         pending_by_parent
-            .entry(row.parent_coin_info.clone())
+            .entry(parent_key)
             .or_default()
             .push(coin_id.clone());
     }
@@ -74,6 +81,63 @@ pub async fn classify_coin_rows(
         .await?;
     }
     Ok(())
+}
+
+async fn prefetch_parent_records(
+    scanner: &DirectCoinsetScanClient,
+    rows: &HashMap<String, CoinRow>,
+    parent_lookup_batch_size: u32,
+) -> SignerResult<HashMap<String, Option<Value>>> {
+    let unresolved_parent_ids: Vec<String> = rows
+        .values()
+        .filter_map(|row| {
+            let parent_id = normalize_hex_id(&row.parent_coin_info);
+            if parent_id.is_empty() {
+                None
+            } else {
+                Some(parent_id)
+            }
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let mut parent_record_cache: HashMap<String, Option<Value>> = unresolved_parent_ids
+        .iter()
+        .map(|parent_id| (parent_id.clone(), None))
+        .collect();
+
+    for parent_batch in chunk_values(&unresolved_parent_ids, parent_lookup_batch_size as usize) {
+        let lookup_keys: Vec<String> = parent_batch
+            .iter()
+            .map(|parent_id| normalize_hex_id(parent_id))
+            .filter(|parent_id| !parent_id.is_empty())
+            .collect();
+        let parent_records = scanner
+            .by_names(
+                &lookup_keys
+                    .iter()
+                    .filter_map(|parent_id| {
+                        hex_to_bytes32(parent_id)
+                            .ok()
+                            .map(|bytes| to_coinset_hex(bytes.as_ref()))
+                    })
+                    .collect::<Vec<_>>(),
+                true,
+                None,
+                None,
+            )
+            .await?;
+        for lookup_key in lookup_keys {
+            let matched = parent_records
+                .iter()
+                .find(|record| coin_id_from_record(record) == lookup_key);
+            if let Some(record) = matched {
+                parent_record_cache.insert(lookup_key, Some(record.clone()));
+            }
+        }
+    }
+    Ok(parent_record_cache)
 }
 
 async fn resolve_parent_children(
@@ -104,22 +168,16 @@ async fn resolve_parent_children(
         .unwrap_or(None);
 
     let Some(parent_record) = parent_record else {
-        for child_id in child_ids {
-            mark_other(caches, rows, child_id);
-        }
+        fail_children(caches, rows, child_ids);
         return Ok(());
     };
     let Some(parent_coin) = coin_from_record(&parent_record) else {
-        for child_id in child_ids {
-            mark_other(caches, rows, child_id);
-        }
+        fail_children(caches, rows, child_ids);
         return Ok(());
     };
     let spent_height = u64_from_value(parent_record.get("spent_block_index"), 0);
     if spent_height == 0 {
-        for child_id in child_ids {
-            mark_other(caches, rows, child_id);
-        }
+        fail_children(caches, rows, child_ids);
         return Ok(());
     }
 
@@ -141,15 +199,11 @@ async fn resolve_parent_children(
     };
 
     let Some(solution) = solution else {
-        for child_id in child_ids {
-            mark_other(caches, rows, child_id);
-        }
+        fail_children(caches, rows, child_ids);
         return Ok(());
     };
     let Some(parent_spend) = coin_spend_from_solution_payload(parent_coin, &solution) else {
-        for child_id in child_ids {
-            mark_other(caches, rows, child_id);
-        }
+        fail_children(caches, rows, child_ids);
         return Ok(());
     };
 
@@ -194,6 +248,16 @@ fn apply_cached_cat(
             .get(cached_asset_id)
             .cloned()
             .unwrap_or_default();
+    }
+}
+
+fn fail_children(
+    caches: &mut CatDetectCaches,
+    rows: &mut HashMap<String, CoinRow>,
+    child_ids: &[String],
+) {
+    for child_id in child_ids {
+        mark_other(caches, rows, child_id);
     }
 }
 

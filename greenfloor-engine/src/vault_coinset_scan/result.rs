@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::Serialize;
 
-use crate::vault_coinset_scan::types::{AssetTypeFilter, CoinKind, CoinRow, ScanStopReason};
+use crate::vault_coinset_scan::types::{AssetTypeFilter, CoinRow, ScanStopReason};
 
 #[derive(Debug, Serialize)]
 pub struct ScanResult {
@@ -22,7 +22,7 @@ pub struct ScanResult {
     pub scan_batches: ScanBatchConfig,
     pub scan_window: ScanWindowSummary,
     pub scan_stop_reason: ScanStopReason,
-    pub coins: Vec<ScanCoinOutput>,
+    pub coins: Vec<CoinRow>,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,43 +68,6 @@ pub struct ScanWindowSummary {
     pub chain_peak_height: Option<u64>,
     pub incremental_from_checkpoint: bool,
     pub auto_increment: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ScanCoinOutput {
-    pub coin_id: String,
-    #[serde(rename = "type")]
-    pub kind: CoinKind,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cat_asset_id: Option<String>,
-    pub cat_symbols: Vec<String>,
-    pub amount: u64,
-    pub confirmed_block_index: u64,
-    pub spent_block_index: u64,
-    pub discovered_nonces: Vec<u32>,
-    pub discovered_by_puzzle_hash: bool,
-    pub discovered_by_hint: bool,
-    pub puzzle_hash: String,
-    pub parent_coin_info: String,
-}
-
-impl From<CoinRow> for ScanCoinOutput {
-    fn from(row: CoinRow) -> Self {
-        Self {
-            coin_id: row.coin_id,
-            kind: row.kind,
-            cat_asset_id: row.cat_asset_id,
-            cat_symbols: row.cat_symbols,
-            amount: row.amount,
-            confirmed_block_index: row.confirmed_block_index,
-            spent_block_index: row.spent_block_index,
-            discovered_nonces: row.discovered_nonces,
-            discovered_by_puzzle_hash: row.discovered_by_puzzle_hash,
-            discovered_by_hint: row.discovered_by_hint,
-            puzzle_hash: row.puzzle_hash,
-            parent_coin_info: row.parent_coin_info,
-        }
-    }
 }
 
 pub fn filter_rows(

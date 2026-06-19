@@ -36,7 +36,7 @@ pub struct CoinRow {
     pub discovered_nonces: Vec<u32>,
     pub discovered_by_puzzle_hash: bool,
     pub discovered_by_hint: bool,
-    #[serde(rename = "coin_type", alias = "type")]
+    #[serde(rename = "type", alias = "coin_type")]
     pub kind: CoinKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cat_asset_id: Option<String>,

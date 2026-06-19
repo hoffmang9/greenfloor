@@ -18,7 +18,7 @@ use crate::vault_coinset_scan::checkpoint::{
 };
 use crate::vault_coinset_scan::metadata::parse_csv_values;
 use crate::vault_coinset_scan::request::ScanRequest;
-use crate::vault_coinset_scan::state::run_vault_coinset_scan;
+use crate::vault_coinset_scan::scan_state::run_vault_coinset_scan;
 use crate::vault_coinset_scan::types::AssetTypeFilter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -135,7 +135,7 @@ impl VaultCoinsetScanCliArgs {
         if !self.launcher_id_file.trim().is_empty() {
             let from_file = read_launcher_id_file(&expand_home(std::path::Path::new(
                 self.launcher_id_file.trim(),
-            )));
+            )))?;
             if !from_file.is_empty() {
                 return Ok((from_file, LauncherIdSource::File));
             }
