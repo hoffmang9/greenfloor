@@ -1,4 +1,4 @@
-use crate::async_boundary::CoinOpCommandFuture;
+use crate::async_boundary::ManagerCommandFuture;
 use serde_json::json;
 
 use crate::coin_ops::evaluate_coin_split_gate;
@@ -22,6 +22,25 @@ pub struct CoinSplitGating {
 pub struct CoinSplitBehavior {
     pub wait: UntilReadyWaitMode,
     pub gating: CoinSplitGating,
+}
+
+impl CoinSplitBehavior {
+    #[must_use]
+    #[allow(clippy::fn_params_excessive_bools)]
+    pub fn from_cli(
+        until_ready: bool,
+        no_wait: bool,
+        allow_lock_all_spendable: bool,
+        force_split_when_ready: bool,
+    ) -> Self {
+        Self {
+            wait: UntilReadyWaitMode::from_cli_flags(until_ready, no_wait),
+            gating: CoinSplitGating {
+                allow_lock_all_spendable,
+                force_split_when_ready,
+            },
+        }
+    }
 }
 
 pub struct CoinSplitRequest<'a> {
@@ -106,7 +125,7 @@ async fn prepare_split_loop_context(
     })
 }
 
-pub fn run_coin_split(request: CoinSplitRequest<'_>) -> CoinOpCommandFuture<'_> {
+pub fn run_coin_split(request: CoinSplitRequest<'_>) -> ManagerCommandFuture<'_> {
     Box::pin(run_coin_split_async(request))
 }
 

@@ -1,5 +1,3 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::time::Instant;
 
 use serde_json::{json, Value};
@@ -21,9 +19,6 @@ use crate::offer::action::BuildOfferForActionResult;
 use crate::offer::operator::signer_denomination::{
     bootstrap_blocks_offer, run_signer_denomination_phase, BootstrapPhaseResult,
 };
-
-type PostIterationFuture<'a> =
-    Pin<Box<dyn Future<Output = SignerResult<(Value, PostIterationOutcome)>> + Send + 'a>>;
 
 async fn run_bootstrap_phase(
     request: &BuildAndPostOfferRequest,
@@ -172,16 +167,7 @@ async fn publish_created_offer(
     }))
 }
 
-pub(super) fn run_post_iteration<'a>(
-    request: &'a BuildAndPostOfferRequest,
-    ctx: &'a ResolvedBuildAndPostContext,
-    dexie: Option<&'a DexieClient>,
-    splash: Option<&'a SplashClient>,
-) -> PostIterationFuture<'a> {
-    Box::pin(run_post_iteration_async(request, ctx, dexie, splash))
-}
-
-async fn run_post_iteration_async(
+pub(super) async fn run_post_iteration(
     request: &BuildAndPostOfferRequest,
     ctx: &ResolvedBuildAndPostContext,
     dexie: Option<&DexieClient>,

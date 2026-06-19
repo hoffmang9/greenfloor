@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::coin_ops::{coin_op_should_stop, evaluate_coin_split_gate, SpendableCoin};
 
-use super::combine::{run_coin_combine, CoinCombineRequest};
+use super::combine::{run_coin_combine, CoinCombineBehavior, CoinCombineRequest};
 use super::context::{enforce_split_lockup_guardrail, spendable_coins_for_gate};
 use super::split::{run_coin_split, CoinSplitBehavior, CoinSplitGating, CoinSplitRequest};
 use super::until_ready::UntilReadyWaitMode;
@@ -160,6 +160,31 @@ async fn until_ready_disallows_no_wait() {
 }
 
 #[tokio::test]
+async fn combine_until_ready_requires_size_base_units() {
+    let mgr = ManagerContext::for_test(
+        PathBuf::from("/tmp/unused-program.yaml"),
+        PathBuf::from("/tmp/unused-markets.yaml"),
+    );
+    let err = run_coin_combine(CoinCombineRequest {
+        mgr: &mgr,
+        network: "mainnet",
+        market_id: None,
+        pair: None,
+        coin_ids: &[],
+        number_of_coins: 2,
+        asset_id: None,
+        behavior: CoinCombineBehavior::from_cli(true, false),
+        size_base_units: None,
+        max_iterations: 3,
+    })
+    .await
+    .expect_err("missing size");
+    assert!(err
+        .to_string()
+        .contains("until-ready mode requires --size-base-units"));
+}
+
+#[tokio::test]
 async fn combine_until_ready_disallows_no_wait() {
     let mgr = ManagerContext::for_test(
         PathBuf::from("/tmp/unused-program.yaml"),
@@ -173,10 +198,7 @@ async fn combine_until_ready_disallows_no_wait() {
         coin_ids: &[],
         number_of_coins: 2,
         asset_id: None,
-        wait: UntilReadyWaitMode {
-            until_ready: true,
-            no_wait: true,
-        },
+        behavior: CoinCombineBehavior::from_cli(true, true),
         size_base_units: Some(10),
         max_iterations: 3,
     })

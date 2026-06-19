@@ -7,7 +7,7 @@ use crate::offer::operator::{
 };
 use crate::offer::request::normalize_offer_side;
 
-use super::futures::ManagedOfferPostFuture;
+use crate::async_boundary::ManagedOfferPostFuture;
 use crate::daemon::cycle_paths::DaemonCyclePaths;
 
 pub fn post_managed_planned_action<'a>(

@@ -1,4 +1,4 @@
-use crate::async_boundary::CoinOpCommandFuture;
+use crate::async_boundary::ManagerCommandFuture;
 use serde_json::json;
 
 use crate::coin_ops::coin_op_non_negative_u64;
@@ -13,6 +13,22 @@ use super::loop_common::finish_coin_op_command;
 use super::loop_context::{prepare_coin_op_loop_common, CoinOpLoopPrep};
 use super::until_ready::{run_until_ready_loop, UntilReadyLoopConfig, UntilReadyWaitMode};
 
+/// Combine-specific CLI behavior. Unlike split, combine has no spend gating flags —
+/// readiness is driven only by inventory gate evaluation inside the until-ready loop.
+#[derive(Debug, Clone)]
+pub struct CoinCombineBehavior {
+    pub wait: UntilReadyWaitMode,
+}
+
+impl CoinCombineBehavior {
+    #[must_use]
+    pub fn from_cli(until_ready: bool, no_wait: bool) -> Self {
+        Self {
+            wait: UntilReadyWaitMode::from_cli_flags(until_ready, no_wait),
+        }
+    }
+}
+
 pub struct CoinCombineRequest<'a> {
     pub mgr: &'a ManagerContext,
     pub network: &'a str,
@@ -21,13 +37,14 @@ pub struct CoinCombineRequest<'a> {
     pub coin_ids: &'a [String],
     pub number_of_coins: i64,
     pub asset_id: Option<&'a str>,
-    pub wait: UntilReadyWaitMode,
+    pub behavior: CoinCombineBehavior,
     pub size_base_units: Option<i64>,
     pub max_iterations: i32,
 }
 
 struct CombineLoopContext<'a> {
     common: super::loop_context::CoinOpLoopCommon<'a>,
+    behavior: CoinCombineBehavior,
     number_of_coins: i64,
     target_coin_amount_mojos: i64,
     combine_fee: u64,
@@ -44,10 +61,11 @@ async fn prepare_combine_loop_context(
         coin_ids,
         number_of_coins,
         asset_id,
-        wait,
+        behavior,
         size_base_units,
         max_iterations: _,
     } = request;
+    let CoinCombineBehavior { wait } = behavior;
     let common = prepare_coin_op_loop_common(CoinOpLoopPrep {
         mgr,
         network,
@@ -76,13 +94,14 @@ async fn prepare_combine_loop_context(
     )?;
     Ok(CombineLoopContext {
         common,
+        behavior,
         number_of_coins,
         target_coin_amount_mojos,
         combine_fee,
     })
 }
 
-pub fn run_coin_combine(request: CoinCombineRequest<'_>) -> CoinOpCommandFuture<'_> {
+pub fn run_coin_combine(request: CoinCombineRequest<'_>) -> ManagerCommandFuture<'_> {
     Box::pin(run_coin_combine_async(request))
 }
 
@@ -91,17 +110,19 @@ async fn run_coin_combine_async(request: CoinCombineRequest<'_>) -> SignerResult
     let max_iterations = request.max_iterations;
     let CombineLoopContext {
         common,
+        behavior,
         number_of_coins,
         target_coin_amount_mojos,
         combine_fee,
     } = prepare_combine_loop_context(request).await?;
+    let CoinCombineBehavior { wait } = behavior;
     let super::loop_context::CoinOpLoopCommon {
         exec_ctx,
-        wait,
         explicit_coin_ids,
         resolved_asset_id,
         ladder_entry: combine_target,
         coin_ids,
+        ..
     } = common;
     let combine_threshold = combine_target
         .as_ref()

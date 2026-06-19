@@ -1,7 +1,6 @@
 //! Managed offer dispatch for the daemon strategy phase (sequential and parallel).
 
 mod coordinator;
-mod futures;
 mod managed_post;
 mod parallel;
 mod reservation_ctx;
@@ -15,14 +14,13 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 
+use crate::async_boundary::StrategyDispatchFuture;
 use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason, MarketConfig};
 use crate::cycle::{expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction};
 use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
 use super::market_context::MarketCycleContext;
-
-pub use futures::StrategyDispatchFuture;
 
 #[derive(Debug, Clone)]
 pub struct OfferDispatchOutput {

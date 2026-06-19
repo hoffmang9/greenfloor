@@ -1,9 +1,8 @@
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
 
 use serde_json::{json, Value};
 
+use crate::async_boundary::ManagedCoinOpPlansFuture;
 use crate::coin_ops::CoinOpPlan;
 use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
@@ -20,10 +19,6 @@ use crate::coin_ops::execution::{
 };
 use crate::offer::dexie_payload::extract_coin_ids_from_offer_payload;
 use crate::offer::dexie_payload::DexieOfferPayload;
-
-/// Boxed future for daemon managed coin-op plan execution.
-pub type ManagedCoinOpPlansFuture<'a> =
-    Pin<Box<dyn Future<Output = CoinOpExecutionResult> + Send + 'a>>;
 
 /// Watched coin ids from open offers.
 ///

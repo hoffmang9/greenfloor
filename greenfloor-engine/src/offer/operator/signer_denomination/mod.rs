@@ -9,9 +9,8 @@ mod types;
 mod wait;
 
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
 
+use crate::async_boundary::SignerDenominationPhaseFuture;
 use crate::coinset::{list_wallet_unspent_coins, WalletUnspentCoin};
 use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
@@ -282,6 +281,7 @@ async fn execute_bootstrap_split_and_wait(
     }))
 }
 
+#[must_use]
 pub fn run_signer_denomination_phase<'a>(
     program: &'a ManagerProgramConfig,
     market: &'a MarketConfig,
@@ -290,7 +290,7 @@ pub fn run_signer_denomination_phase<'a>(
     resolved_quote_asset_id: &'a str,
     quote_price: f64,
     action_side: &'a str,
-) -> Pin<Box<dyn Future<Output = SignerResult<BootstrapPhaseResult>> + Send + 'a>> {
+) -> SignerDenominationPhaseFuture<'a> {
     Box::pin(run_signer_denomination_phase_async(
         program,
         market,

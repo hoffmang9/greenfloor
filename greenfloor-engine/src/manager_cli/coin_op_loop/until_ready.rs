@@ -19,6 +19,16 @@ pub struct UntilReadyWaitMode {
     pub no_wait: bool,
 }
 
+impl UntilReadyWaitMode {
+    #[must_use]
+    pub fn from_cli_flags(until_ready: bool, no_wait: bool) -> Self {
+        Self {
+            until_ready,
+            no_wait,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct UntilReadyLoopConfig {
     pub wait: UntilReadyWaitMode,

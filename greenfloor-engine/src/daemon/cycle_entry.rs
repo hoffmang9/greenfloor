@@ -119,7 +119,12 @@ async fn dispatch_markets(
     Ok((outputs, worker_errors))
 }
 
-async fn run_daemon_cycle_once_inner(
+/// Run daemon cycle once.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
+pub async fn run_daemon_cycle_once(
     request: &DaemonRunOnceRequest,
 ) -> SignerResult<DaemonCycleOnceResponse> {
     let started: Instant = cycle_started_instant();
@@ -181,17 +186,6 @@ async fn run_daemon_cycle_once_inner(
         dispatch_state,
         cycle_summary: summary,
     })
-}
-
-/// Run daemon cycle once.
-///
-/// # Errors
-///
-/// Returns an error if the operation fails.
-pub async fn run_daemon_cycle_once(
-    request: &DaemonRunOnceRequest,
-) -> SignerResult<DaemonCycleOnceResponse> {
-    Box::pin(run_daemon_cycle_once_inner(request)).await
 }
 
 #[cfg(test)]

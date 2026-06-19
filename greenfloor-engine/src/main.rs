@@ -111,29 +111,15 @@ enum Commands {
 #[tokio::main]
 async fn main() {
     let json_mode = std::env::args().any(|arg| arg == "--json");
-    if let Err(err) = Box::pin(run()).await {
+    if let Err(err) = run().await {
         emit_engine_cli_error(&err, json_mode);
         std::process::exit(1);
     }
 }
 
 async fn run() -> Result<(), Error> {
-    let cli = Cli::parse();
-    match cli.command {
-        Commands::VaultInfo { config, json } => {
-            let config = load_signer_config(&config)?;
-            let context = resolve_vault_context(config).await?;
-            if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&context).map_err(|err| {
-                        SignerError::Other(format!("json encode failed: {err}"))
-                    })?
-                );
-            } else {
-                print_vault_info(&context);
-            }
-        }
+    match Cli::parse().command {
+        Commands::VaultInfo { config, json } => run_vault_info_command(config, json).await,
         Commands::MixedCat {
             config,
             receive_address,
@@ -144,17 +130,17 @@ async fn run() -> Result<(), Error> {
             broadcast,
             json,
         } => {
-            let result = run_mixed_split(
-                &config,
+            run_mixed_cat_command(
+                config,
                 receive_address,
                 asset_id,
                 output_amounts,
                 coin_ids,
                 allow_sub_cat_output,
                 broadcast,
+                json,
             )
-            .await?;
-            print_mixed_split_result(&result, json)?;
+            .await
         }
         Commands::CreateOffer {
             config,
@@ -170,7 +156,7 @@ async fn run() -> Result<(), Error> {
             expires_at,
             json,
         } => {
-            run_create_offer_command(
+            Box::pin(run_create_offer_command(
                 config,
                 receive_address,
                 offer_asset_id,
@@ -183,27 +169,69 @@ async fn run() -> Result<(), Error> {
                 broadcast_split,
                 expires_at,
                 json,
-            )
-            .await?;
+            ))
+            .await
         }
-        Commands::Daemon(args) => {
-            let code = run_daemon_command(args).await?;
-            if code != 0 {
-                std::process::exit(code);
-            }
-        }
-        Commands::DaemonOnce(args) => {
-            let code = run_daemon_once_from_request_json(args).await?;
-            if code != 0 {
-                std::process::exit(code);
-            }
-        }
-        Commands::Coinset(args) => run_coinset_command(args).await?,
-        Commands::Hex(args) => run_hex_command(args)?,
-        Commands::KmsPublicKeyCompressedHex(args) => {
-            run_kms_public_key_compressed_hex(args).await?;
-        }
-        Commands::VaultCoinsetScan(args) => run_vault_coinset_scan_command(args).await?,
+        Commands::Daemon(args) => Box::pin(run_daemon_cli_command(args)).await,
+        Commands::DaemonOnce(args) => Box::pin(run_daemon_once_cli_command(args)).await,
+        Commands::Coinset(args) => run_coinset_command(args).await,
+        Commands::Hex(args) => run_hex_command(args),
+        Commands::KmsPublicKeyCompressedHex(args) => run_kms_public_key_compressed_hex(args).await,
+        Commands::VaultCoinsetScan(args) => run_vault_coinset_scan_command(args).await,
+    }
+}
+
+async fn run_vault_info_command(config: PathBuf, json: bool) -> Result<(), Error> {
+    let config = load_signer_config(&config)?;
+    let context = resolve_vault_context(config).await?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&context)
+                .map_err(|err| SignerError::Other(format!("json encode failed: {err}")))?
+        );
+    } else {
+        print_vault_info(&context);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_mixed_cat_command(
+    config: PathBuf,
+    receive_address: String,
+    asset_id: String,
+    output_amounts: Vec<u64>,
+    coin_ids: Vec<String>,
+    allow_sub_cat_output: bool,
+    broadcast: bool,
+    json: bool,
+) -> Result<(), Error> {
+    let result = run_mixed_split(
+        &config,
+        receive_address,
+        asset_id,
+        output_amounts,
+        coin_ids,
+        allow_sub_cat_output,
+        broadcast,
+    )
+    .await?;
+    print_mixed_split_result(&result, json)
+}
+
+async fn run_daemon_cli_command(args: DaemonCliArgs) -> Result<(), Error> {
+    let code = run_daemon_command(args).await?;
+    if code != 0 {
+        std::process::exit(code);
+    }
+    Ok(())
+}
+
+async fn run_daemon_once_cli_command(args: DaemonOnceJsonArgs) -> Result<(), Error> {
+    let code = run_daemon_once_from_request_json(args).await?;
+    if code != 0 {
+        std::process::exit(code);
     }
     Ok(())
 }
