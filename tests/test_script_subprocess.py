@@ -36,8 +36,17 @@ ENGINE_CLI_JSON_PARSE_BODY = json.dumps(
     },
     separators=(",", ":"),
 )
+ENGINE_CLI_JSON_TIMEOUT = json.dumps(
+    {
+        "success": False,
+        "error": "coinset error: operation timed out",
+        "retryable": True,
+    },
+    separators=(",", ":"),
+)
 ENGINE_CLI_FAILED_COINSET_503 = f"{ENGINE_CLI_FAILED_PREFIX}{ENGINE_CLI_JSON_COINSET_503}"
 ENGINE_CLI_FAILED_PARSE_BODY = f"{ENGINE_CLI_FAILED_PREFIX}{ENGINE_CLI_JSON_PARSE_BODY}"
+ENGINE_CLI_FAILED_TIMEOUT = f"{ENGINE_CLI_FAILED_PREFIX}{ENGINE_CLI_JSON_TIMEOUT}"
 
 
 def subprocess_completed(*, returncode: int, stderr: str):
@@ -141,9 +150,10 @@ def test_is_retryable_engine_cli_error_uses_structured_json_retryable_flag() -> 
     assert not is_retryable_engine_cli_error(RuntimeError("invalid puzzle hash"))
 
 
-def test_is_retryable_engine_cli_error_falls_back_to_legacy_text_stderr() -> None:
-    legacy = f"{ENGINE_CLI_FAILED_PREFIX}error: coinset error: operation timed out"
-    assert is_retryable_engine_cli_error(RuntimeError(legacy))
+def test_is_retryable_engine_cli_error_requires_json_retryable_flag() -> None:
+    assert not is_retryable_engine_cli_error(
+        RuntimeError(f"{ENGINE_CLI_FAILED_PREFIX}error: coinset error: operation timed out")
+    )
 
 
 def test_coinset_with_retries_succeeds_after_engine_cli_503_failure() -> None:
@@ -187,9 +197,7 @@ def test_coinset_with_retries_succeeds_after_retryable_failure() -> None:
     def flaky() -> str:
         calls["count"] += 1
         if calls["count"] == 1:
-            raise RuntimeError(
-                f"{ENGINE_CLI_FAILED_PREFIX}error: coinset error: operation timed out"
-            )
+            raise RuntimeError(ENGINE_CLI_FAILED_TIMEOUT)
         return "ok"
 
     with patch("greenfloor_scripts.coinset_scanner.time.sleep") as mock_sleep:

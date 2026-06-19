@@ -13,36 +13,6 @@ from greenfloor_scripts.binaries import (
 
 ENGINE_CLI_FAILED_PREFIX = "engine_cli_failed:"
 
-# Legacy substring fallback when ``greenfloor-engine`` stderr is plain text.
-_RETRYABLE_COINSET_TRANSPORT_MARKERS = (
-    "operation timed out",
-    "connection refused",
-    "connection reset",
-    "remote end closed connection",
-    "error sending request",
-    "temporary failure",
-    "temporarily unavailable",
-    "broken pipe",
-    "http status server error (502",
-    "http status server error (503",
-    "http status server error (504",
-    "http status client error (429",
-    "too many requests",
-    "bad gateway",
-    "service unavailable",
-    "error decoding response body",
-    "ssl",
-    "handshake",
-    "cloudflare",
-)
-
-_NON_RETRYABLE_ENGINE_CLI_MARKERS = (
-    "error: parse body json:",
-    "parse body json:",
-    "coinset endpoint is required",
-    "invalid hex:",
-)
-
 
 def engine_cli_error_detail(exc: Exception) -> str | None:
     message = str(exc).strip()
@@ -53,34 +23,32 @@ def engine_cli_error_detail(exc: Exception) -> str | None:
 
 
 def structured_cli_error_from_detail(detail: str) -> tuple[str, bool | None]:
-    if detail.startswith("{"):
-        try:
-            payload = json.loads(detail)
-        except json.JSONDecodeError:
-            return detail, None
-        if isinstance(payload, dict):
-            error = str(payload.get("error") or "").strip()
-            retryable = payload.get("retryable")
-            if isinstance(retryable, bool):
-                return error or detail, retryable
-    if detail.startswith("error: "):
-        return detail[len("error: ") :].strip(), None
+    if not detail.startswith("{"):
+        return detail, None
+    try:
+        payload = json.loads(detail)
+    except json.JSONDecodeError:
+        return detail, None
+    if not isinstance(payload, dict):
+        return detail, None
+    error = str(payload.get("error") or "").strip()
+    retryable = payload.get("retryable")
+    if isinstance(retryable, bool):
+        return error or detail, retryable
     return detail, None
 
 
 def is_retryable_engine_cli_error(exc: Exception) -> bool:
+    """Return whether a script should retry based on engine JSON stderr.
+
+    Retry classification is canonical in ``greenfloor-engine`` (``cli_util``);
+    Python reads the ``retryable`` field from JSON error payloads only.
+    """
     detail = engine_cli_error_detail(exc)
     if detail is None:
         return False
     _error_text, retryable = structured_cli_error_from_detail(detail)
-    if retryable is not None:
-        return retryable
-    detail_lower = detail.lower()
-    if any(marker in detail_lower for marker in _NON_RETRYABLE_ENGINE_CLI_MARKERS):
-        return False
-    if "coinset error:" not in detail_lower:
-        return False
-    return any(marker in detail_lower for marker in _RETRYABLE_COINSET_TRANSPORT_MARKERS)
+    return retryable is True
 
 
 def run_engine_json(argv: list[str]) -> Any:

@@ -89,17 +89,18 @@ class CoinsetScanner:
             )
         )
 
-    def _records_for(
+    def _records_with_include_spent(
         self,
         endpoint: str,
-        body: dict[str, Any],
         *,
+        include_spent: bool,
         start_height: int | None = None,
         end_height: int | None = None,
+        **fields: Any,
     ) -> list[dict[str, Any]]:
         return self._records(
             endpoint,
-            body,
+            {**fields, "include_spent_coins": include_spent},
             start_height=start_height,
             end_height=end_height,
         )
@@ -116,11 +117,12 @@ class CoinsetScanner:
     ) -> list[dict[str, Any]]:
         if not values:
             return []
-        return self._records_for(
+        return self._records_with_include_spent(
             endpoint,
-            {field_name: values, "include_spent_coins": include_spent},
+            include_spent=include_spent,
             start_height=start_height,
             end_height=end_height,
+            **{field_name: values},
         )
 
     def get_blockchain_state(self) -> dict[str, Any] | None:
@@ -134,14 +136,12 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        return self._records_for(
+        return self._records_with_include_spent(
             "get_coin_records_by_puzzle_hash",
-            {
-                "puzzle_hash": puzzle_hash,
-                "include_spent_coins": include_spent,
-            },
+            include_spent=include_spent,
             start_height=start_height,
             end_height=end_height,
+            puzzle_hash=puzzle_hash,
         )
 
     def by_puzzle_hashes(
@@ -169,14 +169,12 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        return self._records_for(
+        return self._records_with_include_spent(
             "get_coin_records_by_hint",
-            {
-                "hint": hint,
-                "include_spent_coins": include_spent,
-            },
+            include_spent=include_spent,
             start_height=start_height,
             end_height=end_height,
+            hint=hint,
         )
 
     def by_hints(
