@@ -8,6 +8,7 @@ pub(crate) fn ensure_rustls_crypto_provider() {
     });
 }
 
+#[must_use]
 pub fn resolve_coinset_ws_url(program: &ManagerProgramConfig, coinset_base_url: &str) -> String {
     let configured = program.tx_block_websocket_url.trim();
     if !configured.is_empty() {

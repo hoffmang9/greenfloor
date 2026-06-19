@@ -97,6 +97,7 @@ pub struct ScanWindowSummary {
     pub auto_increment: bool,
 }
 
+#[must_use]
 pub fn filter_rows(
     by_coin_id: &HashMap<String, CoinRow>,
     asset_type: AssetTypeFilter,

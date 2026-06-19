@@ -6,9 +6,9 @@ backed by the canonical `greenfloor-engine` crate.
 - `greenfloor-manager` and `greenfloord` are Cargo binaries (no Python entrypoints).
 - Rust owns vault signing, offer construction, coin-op execution, daemon cycles,
   config validation for operator commands, and SQLite persistence.
-- Python remains for `scripts/` utilities and a slim `greenfloor` package (config CLI
-  adapters via `greenfloor-manager` field commands, hex helpers, Coinset adapter) used
-  only by those scripts and tests.
+- Python remains for `scripts/` only: one-time vault bootstrap (`create_kms_vault.py`)
+  and subprocess adapters in `scripts/greenfloor_scripts/` that call native binaries.
+  Config field reads use `greenfloor-manager` field commands (Rust), not Python policy walks.
 - **No PyO3 extension.** Script adapters under `scripts/greenfloor_scripts/` call `greenfloor-engine` and
   `greenfloor-manager` CLI subcommands.
 
@@ -136,8 +136,11 @@ pre-commit run --all-files                         # lint + type-check (~5–10s
 Full gate before push (Rust fmt/clippy via pre-commit — `clippy::all` + `clippy::pedantic` with documented allows):
 
 ```bash
-cargo test --manifest-path greenfloor-engine/Cargo.toml
+cargo nextest run --manifest-path greenfloor-engine/Cargo.toml
 ```
+
+`cargo test` with the same manifest also works locally when `cargo-nextest` is not
+installed. Full gate details: `docs/plan.md` → **Delivery constraints**.
 
 ## Environment Variables
 

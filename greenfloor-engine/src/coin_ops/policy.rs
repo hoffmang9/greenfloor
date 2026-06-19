@@ -1,5 +1,6 @@
 use crate::coinset::is_canonical_xch_asset;
 
+#[must_use]
 pub fn coin_op_min_amount_mojos(canonical_asset_id: &str) -> i64 {
     if is_canonical_xch_asset(canonical_asset_id) {
         0
@@ -9,10 +10,12 @@ pub fn coin_op_min_amount_mojos(canonical_asset_id: &str) -> i64 {
 }
 
 /// Core threshold check shared by coin selection and target-amount validation.
+#[must_use]
 pub fn amount_meets_coin_op_min_mojos(amount_mojos: i64, canonical_asset_id: &str) -> bool {
     amount_mojos >= coin_op_min_amount_mojos(canonical_asset_id)
 }
 
+#[must_use]
 pub fn coin_op_target_amount_allowed(amount_mojos: i64, canonical_asset_id: &str) -> bool {
     amount_meets_coin_op_min_mojos(amount_mojos, canonical_asset_id)
 }

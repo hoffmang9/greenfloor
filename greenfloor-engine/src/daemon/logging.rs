@@ -26,6 +26,11 @@ fn normalize_log_level_name(log_level: &str) -> &'static str {
     }
 }
 
+/// Initialize daemon file logging.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn initialize_daemon_file_logging(home_dir: &Path, log_level: &str) -> SignerResult<()> {
     let normalized = normalize_log_level_name(log_level);
     let log_path = home_dir.join(LOG_FILE);
@@ -75,6 +80,7 @@ pub fn warn_if_daemon_log_level_auto_healed(
     }
 }
 
+#[must_use]
 pub fn default_log_level() -> &'static str {
     DEFAULT_LOG_LEVEL
 }

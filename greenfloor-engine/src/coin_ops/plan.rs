@@ -7,6 +7,7 @@ pub enum CoinOpKind {
 }
 
 impl CoinOpKind {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Split => "split",
@@ -14,6 +15,7 @@ impl CoinOpKind {
         }
     }
 
+    #[must_use]
     pub fn fee_mojos(self, split_fee_mojos: i64, combine_fee_mojos: i64) -> i64 {
         match self {
             Self::Split => split_fee_mojos,
@@ -71,6 +73,7 @@ fn collect_combine_candidates(buckets: &[BucketSpec]) -> (Vec<i64>, Vec<(&Bucket
     (invalid_ladder_math_sizes, excess_candidates)
 }
 
+#[must_use]
 pub fn plan_coin_ops(
     buckets: &[BucketSpec],
     max_operations_per_run: i64,

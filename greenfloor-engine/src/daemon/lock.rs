@@ -15,6 +15,11 @@ pub struct DaemonInstanceLock {
 }
 
 impl DaemonInstanceLock {
+    /// Acquire.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn acquire(state_dir: &Path, mode: &str) -> SignerResult<Self> {
         std::fs::create_dir_all(state_dir).map_err(|err| {
             SignerError::Other(format!(
@@ -73,6 +78,7 @@ impl DaemonInstanceLock {
         })
     }
 
+    #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }

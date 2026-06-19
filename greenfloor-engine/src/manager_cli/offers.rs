@@ -42,6 +42,11 @@ pub struct OffersCancelCliArgs {
     pub venue: Option<String>,
 }
 
+/// Run offers reconcile command.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_offers_reconcile_command(
     ctx: &ManagerContext,
     args: OffersReconcileCliArgs,
@@ -67,6 +72,11 @@ pub async fn run_offers_reconcile_command(
     Ok(0)
 }
 
+/// Run offers status command.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn run_offers_status_command(
     ctx: &ManagerContext,
     args: &OffersStatusCliArgs,
@@ -83,6 +93,11 @@ pub fn run_offers_status_command(
     Ok(0)
 }
 
+/// Run offers cancel command.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_offers_cancel_command(
     ctx: &ManagerContext,
     args: OffersCancelCliArgs,

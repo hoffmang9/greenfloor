@@ -18,6 +18,10 @@ pub fn resolve_offer_expiry_for_pricing(pricing: &Value) -> (&'static str, i64) 
 }
 
 /// Resolve quote-per-base for manual offer build from market ``pricing``.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn resolve_quote_price_for_pricing(pricing: &Value) -> SignerResult<f64> {
     if let Some(fixed) = pricing.get("fixed_quote_per_base") {
         if let Some(price) = value_as_f64(fixed) {

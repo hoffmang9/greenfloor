@@ -25,14 +25,21 @@ pub struct DaemonCycleResources {
 }
 
 impl DaemonCycleResources {
+    #[must_use]
     pub fn program_path(&self) -> &std::path::Path {
         &self.paths.program_path
     }
 
+    #[must_use]
     pub fn program(&self) -> &ManagerProgramConfig {
         self.program_config.program()
     }
 
+    /// Signer for execution.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn signer_for_execution(&self) -> SignerResult<&SignerConfig> {
         self.program_config.signer_for_execution()
     }
@@ -55,6 +62,7 @@ impl DaemonCycleResources {
         }
     }
 
+    #[must_use]
     pub fn selected_markets(&self, selected_market_ids: &[String]) -> Vec<MarketConfig> {
         let selected: std::collections::HashSet<String> = selected_market_ids
             .iter()
@@ -90,6 +98,11 @@ pub struct MarketCycleContext<'a> {
     pub reconcile: &'a ReconcileMarketCycleResult,
 }
 
+/// Load cycle resources.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn load_cycle_resources(request: &DaemonRunOnceRequest) -> SignerResult<DaemonCycleResources> {
     let raw = read_program_yaml(&request.program_path)?;
     let program = parse_program_config(&raw)?;

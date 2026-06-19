@@ -64,7 +64,7 @@ Severity tags:
   `greenfloor-engine hex` via `hex_subprocess`. Config field reads use `greenfloor-manager program-fields`,
   `markets-fields`, and `cats-fields`. KMS public-key fetch uses `greenfloor-engine kms-public-key-compressed-hex`.
 - `[CONTEXT]` Rust integration tests cover manager/daemon CLI contracts and operator policy parity
-  (`cargo test --manifest-path greenfloor-engine/Cargo.toml` in CI).
+  (`cargo nextest run --manifest-path greenfloor-engine/Cargo.toml` in CI).
 
 ## Design Constraints
 

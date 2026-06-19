@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+#[must_use]
 pub fn compute_bucket_counts_from_coins(
     coin_amounts_base_units: &[i64],
     ladder_sizes: &[i64],

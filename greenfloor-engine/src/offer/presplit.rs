@@ -18,14 +18,21 @@ use crate::vault::members::{
 };
 use crate::vault::spend::{VaultFastForwardSigner, VaultSpendContext};
 
+#[must_use]
 pub fn offer_nonce_from_cats(cats: &[Cat]) -> Bytes32 {
     Offer::nonce(cats.iter().map(|cat| cat.coin.coin_id()).collect())
 }
 
+#[must_use]
 pub fn offer_nonce_from_coin_ids(coin_ids: &[Bytes32]) -> Bytes32 {
     Offer::nonce(coin_ids.to_vec())
 }
 
+/// Build fixed presplit conditions spend.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn build_fixed_presplit_conditions_spend(
     ctx: &mut SpendContext,
     requested_payments: &RequestedPayments,
@@ -54,6 +61,11 @@ pub fn build_fixed_presplit_conditions_spend(
     ctx.delegated_spend(conditions).map_err(SignerError::from)
 }
 
+/// Build presplit conditions inner spend.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn build_presplit_conditions_inner_spend(
     ctx: &mut SpendContext,
     fixed_spend: Spend,
@@ -93,6 +105,11 @@ pub fn predict_presplit_cat(source_cat: &Cat, p2_puzzle_hash: Bytes32, offer_amo
     source_cat.child(p2_puzzle_hash, offer_amount)
 }
 
+/// Vault change puzzle hash.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn vault_change_puzzle_hash(launcher_id: Bytes32) -> SignerResult<Bytes32> {
     Ok(singleton_member_hash(
         &MemberConfig::default().with_top_level(true),
@@ -113,6 +130,11 @@ pub struct PresplitOfferBinding {
 }
 
 impl PresplitOfferBinding {
+    /// Plan.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn plan(
         launcher_id: Bytes32,
         requested_payments: RequestedPayments,
@@ -142,6 +164,11 @@ impl PresplitOfferBinding {
     }
 }
 
+/// Verify presplit cat offer binding.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn verify_presplit_cat_offer_binding(
     presplit_cat: &Cat,
     binding: &PresplitOfferBinding,
@@ -152,6 +179,11 @@ pub fn verify_presplit_cat_offer_binding(
     Ok(())
 }
 
+/// Build presplit split spend bundle.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn build_presplit_split_spend_bundle<C: OfferCoinsetBackend>(
     vault_ctx: &mut VaultSpendContext,
     coinset: &C,
@@ -183,6 +215,11 @@ pub async fn build_presplit_split_spend_bundle<C: OfferCoinsetBackend>(
     .await
 }
 
+/// Validate presplit source cats.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn validate_presplit_source_cats(source_cat_count: usize) -> SignerResult<()> {
     if source_cat_count != 1 {
         return Err(SignerError::PresplitRequiresSingleSourceCat);
@@ -256,6 +293,11 @@ where
     ))
 }
 
+/// Build offer from presplit cat.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn build_offer_from_presplit_cat(
     presplit_cat: Cat,
     launcher_id: Bytes32,

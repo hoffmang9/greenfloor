@@ -140,6 +140,11 @@ fn emit_json_or(payload: &Value, json: bool, human: impl FnOnce()) -> SignerResu
     }
 }
 
+/// Run coinset command.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_coinset_command(args: CoinsetCliArgs) -> SignerResult<()> {
     match args.command {
         CoinsetCommands::ResolveClient(args) => run_coinset_resolve_client(&args),
@@ -152,6 +157,11 @@ pub async fn run_coinset_command(args: CoinsetCliArgs) -> SignerResult<()> {
     }
 }
 
+/// Run coinset resolve client.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn run_coinset_resolve_client(args: &CoinsetResolveClientArgs) -> SignerResult<()> {
     let resolved = resolve_direct_client(
         &args.client.network,
@@ -167,6 +177,11 @@ pub fn run_coinset_resolve_client(args: &CoinsetResolveClientArgs) -> SignerResu
     })
 }
 
+/// Run coinset coin records.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_coinset_coin_records(args: CoinsetCoinRecordsArgs) -> SignerResult<()> {
     let mut body = parse_body_json(&args.body_json)?;
     apply_height_fields(&mut body, args.start_height, args.end_height);
@@ -182,6 +197,11 @@ pub async fn run_coinset_coin_records(args: CoinsetCoinRecordsArgs) -> SignerRes
     emit_json_or(&payload, args.json, || println!("coin_records: {count}"))
 }
 
+/// Run coinset record.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_coinset_record(args: CoinsetRecordArgs) -> SignerResult<()> {
     let body = parse_body_json(&args.body_json)?;
     let record = post_coinset_record(
@@ -199,6 +219,11 @@ pub async fn run_coinset_record(args: CoinsetRecordArgs) -> SignerResult<()> {
     })
 }
 
+/// Run coinset post.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_coinset_post(args: CoinsetPostArgs) -> SignerResult<()> {
     let body = parse_body_json(&args.body_json)?;
     let payload = post_coinset_rpc(
@@ -224,6 +249,11 @@ fn read_record_json(record_json: &str) -> SignerResult<Value> {
     parse_body_json(&buffer)
 }
 
+/// Run coinset coin id from record.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn run_coinset_coin_id_from_record(args: &CoinsetCoinIdFromRecordArgs) -> SignerResult<()> {
     let record = read_record_json(&args.record_json)?;
     let coin_id = coin_id_from_record(&record);
@@ -231,6 +261,11 @@ pub fn run_coinset_coin_id_from_record(args: &CoinsetCoinIdFromRecordArgs) -> Si
     emit_json_or(&payload, args.json, || println!("{coin_id}"))
 }
 
+/// Run coinset push tx.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_coinset_push_tx(args: CoinsetPushTxArgs) -> SignerResult<()> {
     let payload = push_tx_hex(
         &args.client.network,

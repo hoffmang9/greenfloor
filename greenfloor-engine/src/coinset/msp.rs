@@ -19,6 +19,11 @@ impl MspCoinset {
         }
     }
 
+    /// For network.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn for_network(network: &str, base_url: Option<&str>) -> SignerResult<Self> {
         let network = crate::coinset::direct_api::normalize_coinset_network(network);
         let url = base_url
@@ -34,10 +39,16 @@ impl MspCoinset {
         }
     }
 
+    #[must_use]
     pub fn client(&self) -> &CoinsetClient {
         &self.client
     }
 
+    /// Get singleton info.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn get_singleton_info(&self, launcher_id: Bytes32) -> SignerResult<SingletonInfo> {
         let response: GetSingletonInfoResponse = self
             .client
@@ -59,6 +70,11 @@ impl MspCoinset {
         })
     }
 
+    /// Lookup asset by symbol.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn lookup_asset_by_symbol(&self, symbol: &str) -> SignerResult<Option<AssetInfo>> {
         let symbol = symbol.trim();
         if symbol.is_empty() {
@@ -108,6 +124,11 @@ struct LookupAssetResponse {
     asset: Option<AssetInfo>,
 }
 
+/// Normalize asset id.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn normalize_asset_id(raw: &str) -> SignerResult<String> {
     let trimmed = raw.trim().to_lowercase();
     if trimmed.is_empty() {
@@ -124,6 +145,11 @@ pub fn normalize_asset_id(raw: &str) -> SignerResult<String> {
     )))
 }
 
+/// Resolve offer asset ids.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn resolve_offer_asset_ids(
     msp: &MspCoinset,
     base_asset: &str,

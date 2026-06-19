@@ -4,6 +4,7 @@ const CANONICAL_XCH_MOJOS: i64 = 1_000_000_000_000;
 const CANONICAL_CAT_MOJOS: i64 = 1_000;
 
 /// Return true when *value* is a 64-character lowercase hex string (optional ``0x`` prefix).
+#[must_use]
 pub fn is_hex_id(value: &str) -> bool {
     normalize_hex_id(value).len() == 64
 }
@@ -11,6 +12,7 @@ pub fn is_hex_id(value: &str) -> bool {
 /// Normalize a hex identifier: strip, lowercase, remove ``0x`` prefix.
 ///
 /// Returns the 64-char hex string, or empty when invalid.
+#[must_use]
 pub fn normalize_hex_id(value: &str) -> String {
     let mut normalized = value.trim().to_ascii_lowercase();
     if normalized.starts_with("0x") {
@@ -25,6 +27,7 @@ pub fn normalize_hex_id(value: &str) -> String {
     normalized
 }
 
+#[must_use]
 pub fn default_mojo_multiplier_for_asset(asset_id: &str) -> i64 {
     if is_canonical_xch_asset(asset_id) {
         CANONICAL_XCH_MOJOS

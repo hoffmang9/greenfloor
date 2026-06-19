@@ -19,7 +19,8 @@ Pre-Rust migration detail lives in git history and
 ### 2026-06-18 — Python test harness retired; combine-market-cat-dust in Rust
 
 Removed GreenFloor pytest suite; operator and script contract tests live in
-`cargo test --manifest-path greenfloor-engine/Cargo.toml`. Added
+`cargo nextest run --manifest-path greenfloor-engine/Cargo.toml` (CI;
+`cargo test` with the same manifest also works locally). Added
 `greenfloor-manager combine-market-cat-dust` (vault scan + dust filter + `coin-combine`
 batches). CAT parse replay uses production `Cat::parse_children` path via opt-in
 `GREENFLOOR_CAT_PARSE_REPLAY_CASES_DIR`.

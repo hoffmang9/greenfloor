@@ -26,10 +26,16 @@ impl DexieClient {
         }
     }
 
+    #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
 
+    /// Post offer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn post_offer(
         &self,
         offer: &str,
@@ -53,6 +59,11 @@ impl DexieClient {
         Self::parse_response(response).await
     }
 
+    /// Get offer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn get_offer(&self, offer_id: &str) -> SignerResult<Value> {
         let clean_offer_id = offer_id.trim();
         if clean_offer_id.is_empty() {
@@ -70,6 +81,11 @@ impl DexieClient {
         Self::parse_response(response).await
     }
 
+    /// Get offers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn get_offers(&self, offered: &str, requested: &str) -> SignerResult<Vec<Value>> {
         let query = format!(
             "offered={}&requested={}",
@@ -93,6 +109,11 @@ impl DexieClient {
         Ok(offers)
     }
 
+    /// Get swap tokens.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn get_swap_tokens(&self) -> SignerResult<Vec<Value>> {
         let url = format!("{}/v1/swap/tokens", self.base_url);
         let response = self
@@ -114,6 +135,11 @@ impl DexieClient {
             .collect())
     }
 
+    /// Get price tickers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn get_price_tickers(&self) -> SignerResult<Vec<Value>> {
         let url = format!("{}/v3/prices/tickers", self.base_url);
         let response = self
@@ -137,6 +163,11 @@ impl DexieClient {
             .collect())
     }
 
+    /// Lookup token by cat id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn lookup_token_by_cat_id(&self, cat_id_hex: &str) -> SignerResult<Option<Value>> {
         let target = cat_id_hex.trim().to_ascii_lowercase();
         if target.is_empty() {
@@ -155,6 +186,11 @@ impl DexieClient {
         Ok(None)
     }
 
+    /// Lookup token by symbol.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn lookup_token_by_symbol(&self, symbol: &str) -> SignerResult<Option<Value>> {
         let target = symbol.trim();
         if target.is_empty() {
@@ -173,6 +209,11 @@ impl DexieClient {
         Ok(None)
     }
 
+    /// Cancel offer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn cancel_offer(&self, offer_id: &str) -> SignerResult<Value> {
         let clean_offer_id = offer_id.trim();
         if clean_offer_id.is_empty() {
@@ -250,6 +291,7 @@ fn row_matches_cat_target(row: &Value, target: &str, include_ticker_split: bool)
     candidates.contains(target)
 }
 
+#[must_use]
 pub fn dexie_offer_view_url(dexie_base_url: &str, offer_id: &str) -> String {
     let clean_offer_id = offer_id.trim();
     if clean_offer_id.is_empty() {
@@ -273,6 +315,11 @@ pub fn dexie_offer_view_url(dexie_base_url: &str, offer_id: &str) -> String {
     )
 }
 
+/// Post dexie offer with invalid offer retry.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn post_dexie_offer_with_invalid_offer_retry(
     dexie: &DexieClient,
     offer_text: &str,
@@ -368,6 +415,11 @@ pub struct PostOfferPhaseDexieParams<'a> {
     pub expected_requested_symbol: &'a str,
 }
 
+/// Post offer phase dexie.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn post_offer_phase_dexie(params: PostOfferPhaseDexieParams<'_>) -> SignerResult<Value> {
     let PostOfferPhaseDexieParams {
         dexie,

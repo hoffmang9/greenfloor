@@ -4,6 +4,11 @@ use rusqlite::params;
 use super::{utcnow_iso, OfferStateDetailRow, OfferStateListRow, SqliteStore};
 
 impl SqliteStore {
+    /// Upsert offer state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn upsert_offer_state(
         &self,
         offer_id: &str,
@@ -14,6 +19,11 @@ impl SqliteStore {
         self.upsert_offer_state_at(offer_id, market_id, state, last_seen_status, &utcnow_iso())
     }
 
+    /// List offer states.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn list_offer_states(
         &self,
         market_id: Option<&str>,
@@ -103,6 +113,11 @@ impl SqliteStore {
         Ok(out)
     }
 
+    /// List offer state details.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn list_offer_state_details(
         &self,
         market_id: &str,
@@ -154,6 +169,11 @@ impl SqliteStore {
         Ok(out)
     }
 
+    /// Upsert offer state at.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn upsert_offer_state_at(
         &self,
         offer_id: &str,

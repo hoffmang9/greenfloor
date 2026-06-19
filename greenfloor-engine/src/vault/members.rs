@@ -27,6 +27,7 @@ pub struct MemberConfig {
 }
 
 impl MemberConfig {
+    #[must_use]
     pub fn with_top_level(&self, top_level: bool) -> Self {
         Self {
             top_level,
@@ -34,6 +35,7 @@ impl MemberConfig {
         }
     }
 
+    #[must_use]
     pub fn with_nonce(&self, nonce: u32) -> Self {
         Self {
             nonce,
@@ -41,6 +43,7 @@ impl MemberConfig {
         }
     }
 
+    #[must_use]
     pub fn with_restrictions(&self, restrictions: Vec<Restriction>) -> Self {
         Self {
             restrictions,
@@ -49,6 +52,11 @@ impl MemberConfig {
     }
 }
 
+/// M of n hash.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn m_of_n_hash(
     config: &MemberConfig,
     required: u32,
@@ -58,6 +66,11 @@ pub fn m_of_n_hash(
     member_hash(config, MofN::new(required_usize, items).inner_puzzle_hash())
 }
 
+/// Custom member hash.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn custom_member_hash(config: &MemberConfig, inner_hash: TreeHash) -> SignerResult<TreeHash> {
     member_hash(config, inner_hash)
 }
@@ -69,6 +82,11 @@ pub struct P2ConditionsOrSingletonHashes {
     pub p2_singleton_hash: TreeHash,
 }
 
+/// P2 conditions or singleton puzzle hash.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn p2_conditions_or_singleton_puzzle_hash(
     fixed_delegated_puzzle_hash: TreeHash,
     launcher_id: Bytes32,
@@ -88,6 +106,11 @@ pub fn p2_conditions_or_singleton_puzzle_hash(
     })
 }
 
+/// R1 member hash.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn r1_member_hash(
     config: &MemberConfig,
     public_key: R1PublicKey,
@@ -103,6 +126,11 @@ pub fn r1_member_hash(
     )
 }
 
+/// K1 member hash.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn k1_member_hash(
     config: &MemberConfig,
     public_key: K1PublicKey,
@@ -118,6 +146,11 @@ pub fn k1_member_hash(
     )
 }
 
+/// Bls member hash.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn bls_member_hash(
     config: &MemberConfig,
     public_key: PublicKey,
@@ -133,6 +166,11 @@ pub fn bls_member_hash(
     )
 }
 
+/// Passkey member hash.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn passkey_member_hash(
     config: &MemberConfig,
     public_key: R1PublicKey,
@@ -148,6 +186,11 @@ pub fn passkey_member_hash(
     )
 }
 
+/// Singleton member hash.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn singleton_member_hash(
     config: &MemberConfig,
     launcher_id: Bytes32,
@@ -164,6 +207,10 @@ pub fn singleton_member_hash(
 }
 
 /// Nonce member puzzle hash for vault singleton P2 discovery (top-level, no fast-forward).
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn singleton_member_puzzle_hash(launcher_id: Bytes32, nonce: u32) -> SignerResult<TreeHash> {
     singleton_member_hash(
         &MemberConfig::default()
@@ -175,6 +222,10 @@ pub fn singleton_member_puzzle_hash(launcher_id: Bytes32, nonce: u32) -> SignerR
 }
 
 /// Hex-encoded nonce member puzzle hash for vault singleton P2 discovery.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn singleton_member_puzzle_hash_hex(launcher_id: Bytes32, nonce: u32) -> SignerResult<String> {
     Ok(tree_hash_to_hex(singleton_member_puzzle_hash(
         launcher_id,
@@ -183,6 +234,10 @@ pub fn singleton_member_puzzle_hash_hex(launcher_id: Bytes32, nonce: u32) -> Sig
 }
 
 /// Hex-encoded nonce member puzzle hash from a normalized launcher id string.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn singleton_member_puzzle_hash_hex_from_launcher_id(
     launcher_id: &str,
     nonce: u32,
@@ -190,6 +245,7 @@ pub fn singleton_member_puzzle_hash_hex_from_launcher_id(
     singleton_member_puzzle_hash_hex(hex_to_bytes32(launcher_id)?, nonce)
 }
 
+#[must_use]
 pub fn timelock_restriction(timelock: u64) -> Restriction {
     Restriction {
         kind: RestrictionKind::MemberCondition,
@@ -197,6 +253,11 @@ pub fn timelock_restriction(timelock: u64) -> Restriction {
     }
 }
 
+/// Force 1 of 2 restriction.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn force_1_of_2_restriction(
     left_side_subtree_hash: Bytes32,
     nonce: u32,
@@ -215,6 +276,7 @@ pub fn force_1_of_2_restriction(
     })
 }
 
+#[must_use]
 pub fn prevent_vault_side_effects_restriction() -> Vec<Restriction> {
     vec![
         prevent_condition_opcode_restriction(60),
@@ -239,6 +301,7 @@ fn prevent_multiple_create_coins_restriction() -> Restriction {
     }
 }
 
+#[must_use]
 pub fn tree_hash_nil() -> TreeHash {
     tree_hash_atom(&[])
 }
@@ -282,6 +345,11 @@ pub struct WalletKey {
     pub curve: String,
 }
 
+/// Member hash for key.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn member_hash_for_key(config: &MemberConfig, key: &WalletKey) -> SignerResult<TreeHash> {
     let curve = key.curve.trim().to_ascii_uppercase();
     let key_bytes = hex_to_bytes(&key.public_key_hex)?;
@@ -318,6 +386,11 @@ pub fn member_hash_for_key(config: &MemberConfig, key: &WalletKey) -> SignerResu
     }
 }
 
+/// Hex to bytes32.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn hex_to_bytes32(value: &str) -> SignerResult<Bytes32> {
     let bytes = hex_to_bytes(value)?;
     if bytes.len() != 32 {
@@ -331,6 +404,11 @@ pub fn hex_to_bytes32(value: &str) -> SignerResult<Bytes32> {
     Ok(Bytes32::new(out))
 }
 
+/// Hex to bytes.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn hex_to_bytes(value: &str) -> SignerResult<Vec<u8>> {
     let normalized = crate::kms::normalize_hex(value);
     if normalized.is_empty() || !normalized.len().is_multiple_of(2) {
@@ -339,10 +417,12 @@ pub fn hex_to_bytes(value: &str) -> SignerResult<Vec<u8>> {
     hex::decode(normalized).map_err(|err| SignerError::Other(format!("invalid hex: {err}")))
 }
 
+#[must_use]
 pub fn tree_hash_to_hex(hash: TreeHash) -> String {
     hex::encode(hash.to_bytes())
 }
 
+#[must_use]
 pub fn bytes32_to_hex(value: Bytes32) -> String {
     hex::encode(value.to_bytes())
 }

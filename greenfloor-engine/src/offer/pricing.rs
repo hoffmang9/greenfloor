@@ -30,12 +30,20 @@ fn f64_to_i64_round_internal(value: f64) -> Result<i64, ()> {
 }
 
 /// Round an `f64` to `i64` for ladder math; rejects non-finite or out-of-range values.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 pub fn f64_to_i64_round_ladder(value: f64) -> SignerResult<i64> {
     f64_to_i64_round_internal(value).map_err(|()| SignerError::InvalidLadderMath)
 }
 
 /// Quote-leg mojos for a base size at the given price and unit multiplier.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn quote_mojos_for_base_size(
     size_base_units: i64,
     quote_price: f64,
@@ -48,6 +56,10 @@ pub fn quote_mojos_for_base_size(
 }
 
 /// Ladder combine threshold: `ceil(target_count * factor)` with a minimum of 2.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn combine_threshold_count(
     target_count: i64,
     combine_when_excess_factor: f64,

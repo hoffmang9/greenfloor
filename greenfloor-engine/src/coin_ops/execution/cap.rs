@@ -1,4 +1,5 @@
 /// Resolve combine input cap once at `CoinOpExecContext` construction.
+#[must_use]
 pub fn resolve_combine_input_cap() -> i64 {
     std::env::var("GREENFLOOR_COIN_OPS_COMBINE_INPUT_COIN_CAP")
         .ok()

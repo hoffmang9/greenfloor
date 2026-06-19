@@ -10,6 +10,11 @@ pub struct ReconcilePersistOptions<'a> {
     pub dexie_error: Option<&'a str>,
 }
 
+/// Persist offer lifecycle transition.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn persist_offer_lifecycle_transition(
     store: &SqliteStore,
     market_id: &str,

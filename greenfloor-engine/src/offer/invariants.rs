@@ -7,6 +7,10 @@ use crate::error::{SignerError, SignerResult};
 use crate::offer::types::OfferExecutionMode;
 
 /// Presplit offer bundles must not include vault singleton spends that block mempool fast-forward.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn assert_presplit_offer_fast_forward_eligible(
     spend_bundle: &SpendBundle,
     execution_mode: OfferExecutionMode,

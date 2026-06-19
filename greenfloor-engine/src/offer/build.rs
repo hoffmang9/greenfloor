@@ -10,6 +10,11 @@ use crate::vault::members::hex_to_bytes32;
 use crate::vault::session::resolve_vault_session;
 use crate::vault::spend::VaultSpendContext;
 
+/// Build vault cat offer.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn build_vault_cat_offer(
     config: SignerConfig,
     request: CreateOfferRequest,

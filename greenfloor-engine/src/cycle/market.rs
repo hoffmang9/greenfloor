@@ -13,6 +13,7 @@ pub enum MarketCyclePhase {
 }
 
 impl MarketCyclePhase {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Reconcile => "reconcile",
@@ -24,6 +25,7 @@ impl MarketCyclePhase {
     }
 }
 
+#[must_use]
 pub fn market_cycle_phases() -> &'static [MarketCyclePhase] {
     &[
         MarketCyclePhase::Reconcile,
@@ -35,6 +37,7 @@ pub fn market_cycle_phases() -> &'static [MarketCyclePhase] {
 }
 
 /// Phases run in-process after reconcile completes (reconcile is handled separately).
+#[must_use]
 pub fn post_reconcile_market_cycle_phases() -> &'static [MarketCyclePhase] {
     &[
         MarketCyclePhase::Inventory,
@@ -85,10 +88,12 @@ impl MarketCycleResultState {
     }
 }
 
+#[must_use]
 pub fn needs_inventory_fallback(bucket_counts_available: bool, coinset_scan_empty: bool) -> bool {
     !bucket_counts_available || coinset_scan_empty
 }
 
+#[must_use]
 pub fn wallet_fallback_source_label(coinset_scan_empty: bool) -> &'static str {
     if coinset_scan_empty {
         "wallet_adapter_fallback_after_empty_coinset_scan"
@@ -97,6 +102,7 @@ pub fn wallet_fallback_source_label(coinset_scan_empty: bool) -> &'static str {
     }
 }
 
+#[must_use]
 pub fn resolve_inventory_scan_source(
     coinset_scan_found_coins: bool,
     coinset_scan_empty: bool,
@@ -115,6 +121,7 @@ pub fn resolve_inventory_scan_source(
     "config_seed_or_no_asset_scan"
 }
 
+#[must_use]
 pub fn resolve_tracked_sizes(ladder_sizes: &[i64], strategy_default_sizes: &[i64]) -> Vec<i64> {
     let mut tracked: Vec<i64> = ladder_sizes
         .iter()
@@ -133,6 +140,7 @@ pub fn resolve_tracked_sizes(ladder_sizes: &[i64], strategy_default_sizes: &[i64
     tracked
 }
 
+#[must_use]
 pub fn aggregate_two_sided_offer_counts(
     buy_counts: &BTreeMap<i64, i64>,
     sell_counts: &BTreeMap<i64, i64>,
@@ -148,6 +156,7 @@ pub fn aggregate_two_sided_offer_counts(
         .collect()
 }
 
+#[must_use]
 pub fn one_sided_offer_counts_by_side(
     sell_counts: &BTreeMap<i64, i64>,
     tracked_sizes: &[i64],
@@ -161,6 +170,7 @@ pub fn one_sided_offer_counts_by_side(
     (buy, sell)
 }
 
+#[must_use]
 pub fn is_two_sided_market_mode(market_mode: &str) -> bool {
     market_mode.trim().eq_ignore_ascii_case("two_sided")
 }

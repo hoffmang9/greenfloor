@@ -24,6 +24,11 @@ pub type CatTickerIndex = (
     BTreeMap<String, Vec<String>>,
 );
 
+/// Build cat ticker index.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn build_cat_ticker_index(
     cats_config: &Path,
     markets_config: &Path,
@@ -33,6 +38,7 @@ pub fn build_cat_ticker_index(
 }
 
 /// Best-effort ticker index: skip unreadable config files instead of failing the whole load.
+#[must_use]
 pub fn build_cat_ticker_index_lenient(
     cats_config: &Path,
     markets_config: &Path,

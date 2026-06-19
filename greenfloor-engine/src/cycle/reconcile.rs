@@ -278,6 +278,11 @@ fn signal_for_state_change(
     }
 }
 
+/// Unchanged offer transition.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn unchanged_offer_transition(
     current_state: &str,
     reason: impl Into<String>,
@@ -298,6 +303,11 @@ pub fn unchanged_offer_transition(
     }))
 }
 
+/// Unsupported venue offer transition.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn unsupported_venue_offer_transition(
     current_state: &str,
     venue: &str,
@@ -319,6 +329,11 @@ pub fn unsupported_venue_offer_transition(
     }))
 }
 
+/// Resolve missing watched offer transition.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn resolve_missing_watched_offer_transition(
     current_state: &str,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
@@ -355,6 +370,11 @@ pub fn resolve_missing_watched_offer_transition(
     }))
 }
 
+/// Resolve watched offer transition from signals.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn resolve_watched_offer_transition_from_signals(
     current_state: &str,
     status: Option<i64>,

@@ -10,6 +10,7 @@ pub struct SpendableCoin {
     pub amount: i64,
 }
 
+#[must_use]
 pub fn select_largest_spendable_coin<'a>(
     coins: &'a [SpendableCoin],
     min_amount_mojos: i64,
@@ -25,6 +26,7 @@ pub fn select_largest_spendable_coin<'a>(
         .max_by_key(|coin| coin.amount)
 }
 
+#[must_use]
 pub fn select_exact_amount_coin_ids(
     coins: &[SpendableCoin],
     amount_mojos: i64,
@@ -52,6 +54,7 @@ pub fn select_exact_amount_coin_ids(
     selected
 }
 
+#[must_use]
 pub fn split_would_create_sub_cat_change(
     selected_amount_mojos: i64,
     required_amount_mojos: i64,
@@ -66,6 +69,7 @@ pub fn split_would_create_sub_cat_change(
     }
 }
 
+#[must_use]
 pub fn select_spendable_coins_for_target_amount(
     coins: &[SpendableCoin],
     target_amount: i64,

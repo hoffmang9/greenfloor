@@ -51,6 +51,11 @@ pub struct BuildOfferForActionResult {
     pub create_result: Option<CreateOfferResult>,
 }
 
+/// Expires at unix from pricing.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn expires_at_unix_from_pricing(pricing: &Value) -> SignerResult<u64> {
     let (_unit, minutes) = resolve_offer_expiry_for_pricing(pricing);
     let secs = minutes.saturating_mul(60);
@@ -84,6 +89,11 @@ fn resolved_assets_or_collision_error(
     Ok((resolved_base, resolved_quote))
 }
 
+/// Try normalize resolved assets.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn try_normalize_resolved_assets(
     base_asset: &str,
     quote_asset: &str,
@@ -95,6 +105,11 @@ pub fn try_normalize_resolved_assets(
     resolved_assets_or_collision_error(resolved_base, resolved_quote)
 }
 
+/// Resolve offer assets via coinset.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn resolve_offer_assets_via_coinset(
     config: &SignerConfig,
     base_asset: &str,
@@ -104,6 +119,11 @@ pub async fn resolve_offer_assets_via_coinset(
     resolve_offer_asset_ids(&msp, base_asset, quote_asset).await
 }
 
+/// Resolve offer assets for action.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn resolve_offer_assets_for_action(
     config: &SignerConfig,
     base_asset: &str,
@@ -155,6 +175,11 @@ fn create_offer_request_from_leg(
     })
 }
 
+/// Build signer offer for action.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn build_signer_offer_for_action(
     config: SignerConfig,
     request: BuildOfferForActionRequest,

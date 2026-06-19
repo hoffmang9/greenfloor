@@ -16,6 +16,11 @@ impl SplashClient {
         }
     }
 
+    /// Post offer.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn post_offer(&self, offer: &str) -> SignerResult<Value> {
         let payload = json!({"offer": offer});
         let response = self

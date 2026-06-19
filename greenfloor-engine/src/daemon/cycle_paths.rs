@@ -9,6 +9,7 @@ pub struct DaemonCyclePaths {
 }
 
 impl DaemonCyclePaths {
+    #[must_use]
     pub fn new(
         program_path: PathBuf,
         markets_path: PathBuf,
@@ -21,6 +22,7 @@ impl DaemonCyclePaths {
         }
     }
 
+    #[must_use]
     pub fn testnet_markets_path(&self) -> Option<&Path> {
         self.testnet_markets_path.as_deref()
     }

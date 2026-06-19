@@ -207,6 +207,11 @@ fn scan_request_from_cli_args(
     }
 }
 
+/// Run vault coinset scan command.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_vault_coinset_scan_command(args: VaultCoinsetScanCliArgs) -> SignerResult<()> {
     let mut args = args;
     args.apply_auto_increment_defaults()?;

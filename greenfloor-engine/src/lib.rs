@@ -38,10 +38,20 @@ use error::SignerResult;
 
 pub use error::SignerError as Error;
 
+/// Resolve vault context.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn resolve_vault_context(config: SignerConfig) -> SignerResult<vault::VaultContext> {
     Ok(vault::session::resolve_vault_session(config).await?.display)
 }
 
+/// Resolve offer assets via coinset.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn resolve_offer_assets_via_coinset(
     config: SignerConfig,
     base_asset: &str,
@@ -51,6 +61,10 @@ pub async fn resolve_offer_assets_via_coinset(
 }
 
 /// Deprecated alias for [`resolve_offer_assets_via_coinset`].
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn resolve_offer_asset_ids(
     config: SignerConfig,
     base_asset: &str,

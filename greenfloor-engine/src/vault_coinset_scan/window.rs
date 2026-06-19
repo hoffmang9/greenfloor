@@ -9,6 +9,11 @@ pub struct ScanWindowPlan {
     pub exhausted: bool,
 }
 
+/// Resolve scan window.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn resolve_scan_window(
     requested_start_height: Option<u64>,
     requested_end_height: Option<u64>,

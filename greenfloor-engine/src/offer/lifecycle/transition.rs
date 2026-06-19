@@ -40,6 +40,11 @@ fn coinset_signal_lists(
     Ok((confirmed, mempool))
 }
 
+/// Transition from dexie offer payload.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn transition_from_dexie_offer_payload(
     store: &SqliteStore,
     current_state: &str,
@@ -87,6 +92,10 @@ fn transition_from_offer_body(
 }
 
 /// Resolve a lifecycle transition from an already-fetched Dexie offer payload.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn transition_from_list_offer_payload(
     store: &SqliteStore,
     current_state: &str,
@@ -97,6 +106,10 @@ pub fn transition_from_list_offer_payload(
 }
 
 /// Resolve a lifecycle transition by fetching a single offer from Dexie.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn resolve_watched_offer_transition_from_dexie_fetch(
     store: &SqliteStore,
     dexie: &DexieClient,
@@ -127,6 +140,11 @@ pub async fn resolve_watched_offer_transition_from_dexie_fetch(
     }
 }
 
+/// Resolve watched offer transition for venue.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn resolve_watched_offer_transition_for_venue(
     store: &SqliteStore,
     dexie: Option<&DexieClient>,

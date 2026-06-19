@@ -12,6 +12,11 @@ pub struct DaemonProgramRuntime {
     pub tx_block_trigger_mode: String,
 }
 
+/// Load daemon program runtime.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn load_daemon_program_runtime(program_path: &Path) -> SignerResult<DaemonProgramRuntime> {
     let program = load_program_config(program_path)?;
     Ok(DaemonProgramRuntime {
@@ -23,16 +28,19 @@ pub fn load_daemon_program_runtime(program_path: &Path) -> SignerResult<DaemonPr
     })
 }
 
+#[must_use]
 pub fn use_websocket_capture_for_once(runtime: &DaemonProgramRuntime) -> bool {
     websocket_capture_enabled(&runtime.tx_block_trigger_mode)
 }
 
+#[must_use]
 pub fn websocket_capture_enabled(tx_block_trigger_mode: &str) -> bool {
     tx_block_trigger_mode
         .trim()
         .eq_ignore_ascii_case("websocket")
 }
 
+#[must_use]
 pub fn resolve_testnet_markets_path(raw: &str) -> Option<PathBuf> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -46,6 +54,7 @@ pub fn resolve_testnet_markets_path(raw: &str) -> Option<PathBuf> {
     }
 }
 
+#[must_use]
 pub fn default_testnet_markets_path() -> Option<PathBuf> {
     let candidate = PathBuf::from("~/.greenfloor/config/testnet-markets.yaml");
     let expanded = crate::paths::expand_home(candidate);

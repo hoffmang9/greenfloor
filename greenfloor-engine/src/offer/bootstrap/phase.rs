@@ -11,6 +11,7 @@ pub struct BootstrapPhaseSnapshot {
 }
 
 /// Map a planner outcome to an early bootstrap phase snapshot, if mixed-split should not run.
+#[must_use]
 pub fn bootstrap_early_phase(outcome: &BootstrapPlanOutcome) -> Option<BootstrapPhaseSnapshot> {
     match outcome {
         BootstrapPlanOutcome::Ready => Some(BootstrapPhaseSnapshot {
@@ -40,6 +41,7 @@ pub fn bootstrap_early_phase(outcome: &BootstrapPlanOutcome) -> Option<Bootstrap
 }
 
 /// Map a post-split replan outcome to executed-phase status/reason/ready.
+#[must_use]
 pub fn bootstrap_executed_phase(remaining: &BootstrapPlanOutcome) -> BootstrapPhaseSnapshot {
     match remaining {
         BootstrapPlanOutcome::Ready => BootstrapPhaseSnapshot {

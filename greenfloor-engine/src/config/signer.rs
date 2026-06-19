@@ -21,6 +21,11 @@ pub struct SignerConfig {
     pub vault: VaultCustodySnapshot,
 }
 
+/// Parse signer config.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn parse_signer_config(raw: &Value) -> SignerResult<SignerConfig> {
     let network = raw
         .get("app")
@@ -63,6 +68,11 @@ pub fn parse_signer_config(raw: &Value) -> SignerResult<SignerConfig> {
     })
 }
 
+/// Load signer config.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn load_signer_config(path: &Path) -> SignerResult<SignerConfig> {
     parse_signer_config(&read_program_yaml(path)?)
 }

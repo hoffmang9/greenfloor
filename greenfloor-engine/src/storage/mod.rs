@@ -1,7 +1,7 @@
 //! SQLite persistence for the Rust engine.
 //!
-//! The canonical schema for GreenFloor state lives here. Python test helpers use
-//! `tests/helpers/sqlite_store.py` for integration assertions against the same schema.
+//! The canonical schema for GreenFloor state lives here. Rust integration tests in
+//! `greenfloor-engine/tests/` assert against the same schema via `SqliteStore`.
 
 mod persist;
 mod schema;

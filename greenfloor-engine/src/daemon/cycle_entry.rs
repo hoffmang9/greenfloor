@@ -183,6 +183,11 @@ async fn run_daemon_cycle_once_inner(
     })
 }
 
+/// Run daemon cycle once.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_daemon_cycle_once(
     request: &DaemonRunOnceRequest,
 ) -> SignerResult<DaemonCycleOnceResponse> {

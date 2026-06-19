@@ -15,6 +15,7 @@ pub enum ManagedActionStatus {
 }
 
 impl ManagedActionStatus {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Executed => "executed",
@@ -23,6 +24,7 @@ impl ManagedActionStatus {
         }
     }
 
+    #[must_use]
     pub fn is_pending_visibility(self) -> bool {
         matches!(self, Self::PendingVisibility)
     }
@@ -37,6 +39,7 @@ pub struct ManagedActionOutcome {
 }
 
 impl ManagedActionOutcome {
+    #[must_use]
     pub fn is_pending_visibility(&self) -> bool {
         self.status.is_pending_visibility()
     }
@@ -53,6 +56,7 @@ pub enum ParallelSubmissionDecision {
     },
 }
 
+#[must_use]
 pub fn is_transient_managed_upstream_error_text(error_text: &str) -> bool {
     const MARKERS: &[&str] = &[
         "timed out",
@@ -76,6 +80,7 @@ pub fn is_transient_managed_upstream_error_text(error_text: &str) -> bool {
     MARKERS.iter().any(|marker| normalized.contains(marker))
 }
 
+#[must_use]
 pub fn classify_managed_transient_error(
     exception_class: &str,
     _error_text: &str,
@@ -87,14 +92,17 @@ pub fn classify_managed_transient_error(
     }
 }
 
+#[must_use]
 pub fn is_managed_upstream_transient_error(exception_class: &str, _error_text: &str) -> bool {
     exception_class.trim() == "ManagedUpstreamTransientError"
 }
 
+#[must_use]
 pub fn is_managed_worker_transient_error(exception_class: &str, error_text: &str) -> bool {
     classify_managed_transient_error(exception_class, error_text).as_deref() == Some("upstream")
 }
 
+#[must_use]
 pub fn is_parallel_dispatch_transient_error(exception_class: &str, error_text: &str) -> bool {
     matches!(
         classify_managed_transient_error(exception_class, error_text).as_deref(),
@@ -102,6 +110,7 @@ pub fn is_parallel_dispatch_transient_error(exception_class: &str, error_text: &
     )
 }
 
+#[must_use]
 pub fn is_transient_dexie_visibility_404_error(error: &str) -> bool {
     let normalized = error.trim().to_ascii_lowercase();
     (normalized.contains("dexie_get_offer_error") && normalized.contains("404"))
@@ -116,6 +125,7 @@ pub struct ManagedParallelismGate {
     pub has_coordinator: bool,
 }
 
+#[must_use]
 pub fn can_parallelize_managed_offers(gate: ManagedParallelismGate) -> bool {
     gate.signer_path_configured
         && gate.parallelism_enabled
@@ -124,14 +134,17 @@ pub fn can_parallelize_managed_offers(gate: ManagedParallelismGate) -> bool {
 }
 
 /// Parallel managed dispatch after signer path is confirmed (daemon strategy phase).
+#[must_use]
 pub fn parallel_managed_dispatch_enabled(program: &ManagerProgramConfig) -> bool {
     program.runtime_offer_parallelism_enabled && !program.runtime_dry_run
 }
 
+#[must_use]
 pub fn parallel_max_workers(submission_count: usize, configured_max: usize) -> usize {
     submission_count.min(configured_max.max(1))
 }
 
+#[must_use]
 pub fn reservation_release_status(is_executed: bool) -> &'static str {
     if is_executed {
         "released_success"
@@ -140,6 +153,7 @@ pub fn reservation_release_status(is_executed: bool) -> &'static str {
     }
 }
 
+#[must_use]
 pub fn should_apply_parallel_transient_cooldown(
     transient_failures: usize,
     total_parallel: usize,
@@ -152,6 +166,7 @@ pub fn should_apply_parallel_transient_cooldown(
     transient_failures >= threshold.max(2)
 }
 
+#[must_use]
 pub fn managed_retry_sleep_ms(attempt_index: u32, backoff_ms: u64) -> u64 {
     if backoff_ms == 0 {
         return 0;
@@ -159,6 +174,7 @@ pub fn managed_retry_sleep_ms(attempt_index: u32, backoff_ms: u64) -> u64 {
     backoff_ms.saturating_mul(1u64 << attempt_index.min(31))
 }
 
+#[must_use]
 pub fn should_retry_managed_post(
     attempt_index: u32,
     attempts_max: u32,
@@ -184,6 +200,7 @@ pub struct ManagedRetryDecision {
     pub sleep_ms: u64,
 }
 
+#[must_use]
 pub fn managed_retry_decision(
     attempt_index: u32,
     attempts_max: u32,
@@ -202,6 +219,7 @@ pub fn managed_retry_decision(
     }
 }
 
+#[must_use]
 pub fn prepare_parallel_managed_submission_decision(
     requested_amounts: &BTreeMap<String, i64>,
     spendable_profiles: &BTreeMap<String, SpendableAssetProfile>,
@@ -227,6 +245,7 @@ pub fn prepare_parallel_managed_submission_decision(
     ParallelSubmissionDecision::Proceed { available_amounts }
 }
 
+#[must_use]
 pub fn classify_managed_post_result(
     success: bool,
     error_text: &str,
@@ -262,6 +281,7 @@ pub fn classify_managed_post_result(
     }
 }
 
+#[must_use]
 pub fn classify_dexie_visibility_outcome(
     visible: bool,
     visibility_error: &str,
@@ -290,6 +310,7 @@ pub fn classify_dexie_visibility_outcome(
     }
 }
 
+#[must_use]
 pub fn count_parallel_transient_failures(items: &[(ManagedActionStatus, bool)]) -> usize {
     items
         .iter()

@@ -12,6 +12,11 @@ use crate::offer::lifecycle::{cancel_offers_on_dexie, CancelOfferTarget};
 
 use super::market_context::MarketCycleContext;
 
+/// Run market cancel phase.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_market_cancel_phase(
     store: &SqliteStore,
     ctx: &MarketCycleContext<'_>,

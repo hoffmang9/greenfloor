@@ -51,6 +51,11 @@ async fn run_one_loop_cycle(
     Ok(response.exit_code)
 }
 
+/// Run daemon loop.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
     let runtime = load_daemon_program_runtime(&request.program_path)?;
     initialize_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;

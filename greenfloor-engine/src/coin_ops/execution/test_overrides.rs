@@ -9,6 +9,7 @@ pub struct CoinOpTestOverrides {
 }
 
 impl CoinOpTestOverrides {
+    #[must_use]
     pub fn from_env() -> Self {
         #[cfg(debug_assertions)]
         {

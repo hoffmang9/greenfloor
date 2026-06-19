@@ -82,6 +82,11 @@ where
     }
 }
 
+/// Wait until coins spent.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn wait_until_coins_spent(
     client: &CoinsetClient,
     coin_ids: &[Bytes32],

@@ -22,6 +22,11 @@ pub struct VaultCustodySnapshot {
 }
 
 impl VaultCustodySnapshot {
+    /// From graphql.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn from_graphql(value: &Value) -> SignerResult<Self> {
         let launcher_id = hex_to_bytes32(
             value
@@ -86,6 +91,11 @@ pub struct VaultComputedHashes {
     pub recovery_hash: TreeHash,
 }
 
+/// Compute vault hashes.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn compute_vault_hashes(snapshot: &VaultCustodySnapshot) -> SignerResult<VaultComputedHashes> {
     let member_config = MemberConfig::default();
     let mut custody_hashes = snapshot
@@ -156,6 +166,11 @@ pub fn compute_vault_hashes(snapshot: &VaultCustodySnapshot) -> SignerResult<Vau
     })
 }
 
+/// Compute vault context from hashes.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn compute_vault_context_from_hashes(
     snapshot: &VaultCustodySnapshot,
     hashes: &VaultComputedHashes,
@@ -201,6 +216,11 @@ pub fn compute_vault_context_from_hashes(
     })
 }
 
+/// Compute vault context.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn compute_vault_context(
     snapshot: &VaultCustodySnapshot,
     kms_public_key_hex: &str,

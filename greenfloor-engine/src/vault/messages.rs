@@ -6,6 +6,11 @@ use clvmr::{serde::node_from_bytes, Allocator, NodePtr};
 
 use crate::error::{SignerError, SignerResult};
 
+/// Extract mode23 receive messages.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn extract_mode23_receive_messages(
     ctx: &SpendContext,
 ) -> SignerResult<Vec<(Vec<u8>, Bytes32)>> {

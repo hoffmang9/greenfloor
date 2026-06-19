@@ -20,6 +20,7 @@ pub struct CatDetectCaches {
 }
 
 impl CatDetectCaches {
+    #[must_use]
     pub fn new(
         cat_asset_cache: HashMap<String, String>,
         parent_lineage_cache: HashMap<String, ParentLineageEntry>,
@@ -33,6 +34,11 @@ impl CatDetectCaches {
     }
 }
 
+/// Classify coin rows.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn classify_coin_rows(
     scanner: &DirectCoinsetScanClient,
     rows: &mut HashMap<String, CoinRow>,
@@ -286,6 +292,7 @@ fn mark_other(caches: &mut CatDetectCaches, rows: &mut HashMap<String, CoinRow>,
         .insert(child_id.to_string(), String::new());
 }
 
+#[must_use]
 pub fn classify_xch_or_other(
     row_puzzle_hash: &str,
     nonce_to_p2: &HashMap<u32, String>,

@@ -3,6 +3,11 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{SignerError, SignerResult};
 
+/// Get public key compressed hex.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn get_public_key_compressed_hex(key_id: &str, region: &str) -> SignerResult<String> {
     let client = kms_client(region).await?;
     let response = client
@@ -18,6 +23,11 @@ pub async fn get_public_key_compressed_hex(key_id: &str, region: &str) -> Signer
     Ok(hex::encode(compressed))
 }
 
+/// Sign digest.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn sign_digest(key_id: &str, region: &str, message_hex: &str) -> SignerResult<String> {
     let message_bytes = hex::decode(normalize_hex(message_hex))
         .map_err(|err| SignerError::Kms(format!("invalid message hex: {err}")))?;
@@ -47,6 +57,11 @@ async fn kms_client(region: &str) -> SignerResult<Client> {
     Ok(Client::new(&config))
 }
 
+/// Der spki to compressed p256.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn der_spki_to_compressed_p256(der: &[u8]) -> SignerResult<[u8; 33]> {
     let (idx, _) = read_der_tag_length(der, 0)?;
     let (idx, algo_len) = read_der_tag_length(der, idx)?;
@@ -83,6 +98,11 @@ pub fn der_spki_to_compressed_p256(der: &[u8]) -> SignerResult<[u8; 33]> {
     Ok(compressed)
 }
 
+/// Der ecdsa to compact.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn der_ecdsa_to_compact(der: &[u8]) -> SignerResult<[u8; 64]> {
     let (idx, _) = read_der_tag_length(der, 0)?;
     let (r, idx) = read_der_integer(der, idx)?;

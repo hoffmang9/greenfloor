@@ -45,6 +45,7 @@ pub struct SqliteStore {
     pub(crate) conn: Connection,
 }
 
+#[must_use]
 pub fn state_db_path_for_home(home_dir: &Path) -> PathBuf {
     home_dir.join("db").join("greenfloor.sqlite")
 }
@@ -95,6 +96,11 @@ pub struct AuditEventRow {
 }
 
 impl SqliteStore {
+    /// Open.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn open(db_path: &Path) -> SignerResult<Self> {
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|err| {

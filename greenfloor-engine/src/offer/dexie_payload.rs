@@ -132,12 +132,14 @@ fn walk_coin_id_node(node: &Value, coin_ids: &mut Vec<String>) {
     }
 }
 
+#[must_use]
 pub fn extract_coin_ids_from_offer_payload(payload: &Value) -> Vec<String> {
     let mut coin_ids = Vec::new();
     walk_coin_id_node(payload, &mut coin_ids);
     coin_ids
 }
 
+#[must_use]
 pub fn extract_coinset_tx_ids_from_offer_payload(payload: &Value) -> Vec<String> {
     let mut tx_ids = Vec::new();
     walk_tx_id_node(payload, &mut tx_ids);
@@ -159,14 +161,17 @@ pub fn dexie_offer_status(payload: &Value) -> Option<i64> {
 pub struct DexieOfferPayload(pub Value);
 
 impl DexieOfferPayload {
+    #[must_use]
     pub fn new(value: Value) -> Self {
         Self(value)
     }
 
+    #[must_use]
     pub fn as_value(&self) -> &Value {
         &self.0
     }
 
+    #[must_use]
     pub fn into_value(self) -> Value {
         self.0
     }
@@ -194,6 +199,7 @@ impl DexieOfferPayload {
         }
     }
 
+    #[must_use]
     pub fn status(&self) -> Option<i64> {
         dexie_offer_status(self.body())
     }

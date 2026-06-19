@@ -55,6 +55,11 @@ pub struct HexDefaultMojoArgs {
     pub json: bool,
 }
 
+/// Run hex command.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn run_hex_command(args: HexCliArgs) -> SignerResult<()> {
     match args.command {
         HexCommands::Normalize(args) => {

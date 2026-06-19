@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use crate::config::MarketsConfig;
 
 /// Enabled market ids in config order, deduplicated.
+#[must_use]
 pub fn enabled_market_ids(markets: &MarketsConfig) -> Vec<String> {
     let mut enabled = Vec::new();
     let mut seen = HashSet::new();

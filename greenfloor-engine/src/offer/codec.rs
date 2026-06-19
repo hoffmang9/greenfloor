@@ -48,6 +48,11 @@ fn coin_spend_has_expiration_condition(
     Ok(false)
 }
 
+/// Offer has expiration condition.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn offer_has_expiration_condition(spend_bundle: &SpendBundle) -> SignerResult<bool> {
     for coin_spend in &spend_bundle.coin_spends {
         if coin_spend_has_expiration_condition(coin_spend)? {
@@ -57,6 +62,7 @@ pub fn offer_has_expiration_condition(spend_bundle: &SpendBundle) -> SignerResul
     Ok(false)
 }
 
+#[must_use]
 pub fn offer_has_duplicate_spent_coin_ids(spend_bundle: &SpendBundle) -> bool {
     let mut seen = std::collections::HashSet::new();
     for coin_spend in &spend_bundle.coin_spends {
@@ -80,12 +86,20 @@ fn decode_and_parse_offer(offer: &str) -> SignerResult<SpendBundle> {
 }
 
 /// Decode and parse offer structure (wallet-sdk semantics) without Dexie policy gates.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn validate_offer_structure(offer: &str) -> SignerResult<()> {
     decode_and_parse_offer(offer)?;
     Ok(())
 }
 
 /// Full Dexie pre-post validation: structure, expiry, and duplicate spends.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn validate_offer_text(offer: &str) -> SignerResult<()> {
     let spend_bundle = decode_and_parse_offer(offer)?;
     if offer_has_duplicate_spent_coin_ids(&spend_bundle) {
@@ -110,6 +124,7 @@ fn dexie_verify_error_code(err: SignerError) -> String {
 }
 
 /// Dexie pre-post gate returning a stable error code string, or ``None`` when valid.
+#[must_use]
 pub fn verify_offer_for_dexie(offer: &str) -> Option<String> {
     match validate_offer_text(offer) {
         Ok(()) => None,
@@ -117,12 +132,22 @@ pub fn verify_offer_for_dexie(offer: &str) -> Option<String> {
     }
 }
 
+/// Encode offer from spend bundle bytes.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn encode_offer_from_spend_bundle_bytes(spend_bundle_bytes: &[u8]) -> SignerResult<String> {
     let spend_bundle = SpendBundle::from_bytes(spend_bundle_bytes)
         .map_err(|err| SignerError::Other(format!("invalid_spend_bundle_bytes:{err}")))?;
     chia_sdk_driver::encode_offer(&spend_bundle).map_err(SignerError::from)
 }
 
+/// From input spend bundle bytes.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn from_input_spend_bundle_bytes(
     spend_bundle_bytes: &[u8],
     requested_payments_xch: RequestedXchPayments,
@@ -179,6 +204,11 @@ pub fn from_input_spend_bundle_bytes(
         .map_err(|err| SignerError::Other(format!("offer_spend_bundle_to_bytes:{err}")))
 }
 
+/// From input spend bundle xch bytes.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn from_input_spend_bundle_xch_bytes(
     spend_bundle_bytes: &[u8],
     requested_payments_xch: RequestedXchPayments,

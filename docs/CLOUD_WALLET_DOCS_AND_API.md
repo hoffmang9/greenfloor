@@ -4,6 +4,10 @@ This file summarizes the Cloud Wallet API surface observed from `../ent-wallet` 
 
 **As of:** 2026-02-25
 
+> **GreenFloor runtime:** Operator paths no longer call Cloud Wallet GraphQL (ADR 0013).
+> This doc remains useful for ent-wallet vault bootstrap (`scripts/create_kms_vault.py`)
+> and upstream protocol reference when reading `../ent-wallet`.
+
 ## Overview
 
 - Cloud Wallet exposes a GraphQL API (Pothos/Relay style), not REST endpoints.

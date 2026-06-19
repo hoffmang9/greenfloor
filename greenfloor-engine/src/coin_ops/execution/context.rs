@@ -26,6 +26,11 @@ pub struct CoinOpExecContext {
 }
 
 impl CoinOpExecContext {
+    /// List spendable coins.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn list_spendable_coins(&self) -> SignerResult<Vec<SpendableCoin>> {
         #[cfg(debug_assertions)]
         if let Some(coins) = &self.test_overrides.wallet_coins {
@@ -43,6 +48,11 @@ impl CoinOpExecContext {
         ))
     }
 
+    /// Execute mixed split.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn execute_mixed_split(
         &self,
         output_amounts: Vec<u64>,

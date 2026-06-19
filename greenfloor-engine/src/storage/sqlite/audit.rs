@@ -6,6 +6,11 @@ use crate::error::{SignerError, SignerResult};
 use super::{utcnow_iso, AuditEventRow, SqliteStore};
 
 impl SqliteStore {
+    /// Get latest xch price snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn get_latest_xch_price_snapshot(&self) -> SignerResult<Option<f64>> {
         let mut stmt = self
             .conn
@@ -51,6 +56,11 @@ impl SqliteStore {
         Ok(Some(value))
     }
 
+    /// List recent audit events.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn list_recent_audit_events(
         &self,
         event_types: Option<&[&str]>,
@@ -126,6 +136,11 @@ impl SqliteStore {
         Ok(out)
     }
 
+    /// Add audit event.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn add_audit_event(
         &self,
         event_type: &str,
@@ -135,6 +150,11 @@ impl SqliteStore {
         self.add_audit_event_at(event_type, payload, market_id, &utcnow_iso())
     }
 
+    /// Add audit event at.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn add_audit_event_at(
         &self,
         event_type: &str,
