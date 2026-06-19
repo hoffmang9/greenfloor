@@ -159,10 +159,51 @@ async fn subprocess_coinset_coin_records_surfaces_coinset_error_on_http_503() {
         String::from_utf8_lossy(&output.stdout)
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("error: coinset error:"), "stderr: {stderr}");
+    let payload: Value = serde_json::from_str(stderr.trim()).expect("parse json error stderr");
+    assert_eq!(payload.get("success"), Some(&Value::Bool(false)));
+    assert_eq!(payload.get("retryable"), Some(&Value::Bool(true)));
     assert!(
-        stderr.contains("error decoding response body"),
-        "stderr: {stderr}"
+        payload
+            .get("error")
+            .and_then(Value::as_str)
+            .is_some_and(|error| error.contains("error decoding response body")),
+        "payload: {payload}"
+    );
+}
+
+#[tokio::test]
+async fn subprocess_coinset_coin_records_connection_refused_emits_retryable_json() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_greenfloor-engine"))
+        .args([
+            "coinset",
+            "coin-records",
+            "--network",
+            "mainnet",
+            "--base-url",
+            "http://127.0.0.1:1",
+            "--endpoint",
+            "get_coin_records_by_puzzle_hash",
+            "--body-json",
+            r#"{"puzzle_hash":"0x11","include_spent_coins":false}"#,
+            "--json",
+        ])
+        .output()
+        .expect("spawn greenfloor-engine coinset coin-records subprocess");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit for connection refused, stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let payload: Value = serde_json::from_str(stderr.trim()).expect("parse json error stderr");
+    assert_eq!(payload.get("success"), Some(&Value::Bool(false)));
+    assert_eq!(payload.get("retryable"), Some(&Value::Bool(true)));
+    assert!(
+        payload
+            .get("error")
+            .and_then(Value::as_str)
+            .is_some_and(|error| error.to_ascii_lowercase().contains("connection refused")),
+        "payload: {payload}"
     );
 }
 

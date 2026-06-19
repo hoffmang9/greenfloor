@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use greenfloor_engine::cli_util::emit_engine_cli_error;
 use greenfloor_engine::coinset::parse_coin_ids;
 use greenfloor_engine::coinset_cli::{run_coinset_command, CoinsetCliArgs};
 use greenfloor_engine::config::load_signer_config;
@@ -104,8 +105,9 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
+    let json_mode = std::env::args().any(|arg| arg == "--json");
     if let Err(err) = run().await {
-        eprintln!("error: {err}");
+        emit_engine_cli_error(&err, json_mode);
         std::process::exit(1);
     }
 }

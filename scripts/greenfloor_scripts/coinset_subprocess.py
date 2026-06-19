@@ -99,7 +99,7 @@ def coin_records_cli(
     records = payload.get("coin_records")
     if not isinstance(records, list):
         raise RuntimeError("coinset_coin_records_missing_records")
-    return records
+    return [record for record in records if isinstance(record, dict)]
 
 
 def record_from_cli(

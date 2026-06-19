@@ -13,8 +13,7 @@ from greenfloor_scripts.binaries import (
 
 ENGINE_CLI_FAILED_PREFIX = "engine_cli_failed:"
 
-# Substrings observed in ``SignerError::Coinset`` / reqwest transport failures surfaced
-# as ``engine_cli_failed:error: coinset error: …`` from ``greenfloor-engine`` stderr.
+# Legacy substring fallback when ``greenfloor-engine`` stderr is plain text.
 _RETRYABLE_COINSET_TRANSPORT_MARKERS = (
     "operation timed out",
     "connection refused",
@@ -39,6 +38,7 @@ _RETRYABLE_COINSET_TRANSPORT_MARKERS = (
 
 _NON_RETRYABLE_ENGINE_CLI_MARKERS = (
     "error: parse body json:",
+    "parse body json:",
     "coinset endpoint is required",
     "invalid hex:",
 )
@@ -52,10 +52,29 @@ def engine_cli_error_detail(exc: Exception) -> str | None:
     return detail or None
 
 
+def structured_cli_error_from_detail(detail: str) -> tuple[str, bool | None]:
+    if detail.startswith("{"):
+        try:
+            payload = json.loads(detail)
+        except json.JSONDecodeError:
+            return detail, None
+        if isinstance(payload, dict):
+            error = str(payload.get("error") or "").strip()
+            retryable = payload.get("retryable")
+            if isinstance(retryable, bool):
+                return error or detail, retryable
+    if detail.startswith("error: "):
+        return detail[len("error: ") :].strip(), None
+    return detail, None
+
+
 def is_retryable_engine_cli_error(exc: Exception) -> bool:
     detail = engine_cli_error_detail(exc)
     if detail is None:
         return False
+    _error_text, retryable = structured_cli_error_from_detail(detail)
+    if retryable is not None:
+        return retryable
     detail_lower = detail.lower()
     if any(marker in detail_lower for marker in _NON_RETRYABLE_ENGINE_CLI_MARKERS):
         return False
@@ -78,7 +97,7 @@ def run_engine_json(argv: list[str]) -> Any:
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
-        raise RuntimeError(f"engine_cli_failed:{detail}")
+        raise RuntimeError(f"{ENGINE_CLI_FAILED_PREFIX}{detail}")
     try:
         return json.loads(result.stdout)
     except json.JSONDecodeError as exc:

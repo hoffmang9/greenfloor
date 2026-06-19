@@ -17,17 +17,9 @@ from greenfloor_scripts.coinset_scanner import CoinsetScanner
 from greenfloor_scripts.config_subprocess import (
     ensure_program_config_valid,
     launcher_id_from_program_config,
+    read_launcher_id_file,
 )
 from greenfloor_scripts.hex_subprocess import normalize_hex_id
-
-
-def _read_launcher_id_file(path: str) -> str:
-    if not str(path).strip():
-        return ""
-    file_path = Path(path).expanduser()
-    if not file_path.exists():
-        return ""
-    return normalize_hex_id(file_path.read_text(encoding="utf-8").strip()) or ""
 
 
 def _supports_call(call: Any) -> tuple[bool, str | None, int | None]:
@@ -73,7 +65,7 @@ def main() -> int:
     launcher_id = normalize_hex_id(args.launcher_id)
     launcher_source = "arg"
     if not launcher_id and str(args.launcher_id_file).strip():
-        launcher_id = _read_launcher_id_file(args.launcher_id_file)
+        launcher_id = read_launcher_id_file(args.launcher_id_file)
         if launcher_id:
             launcher_source = "file"
     if not launcher_id:

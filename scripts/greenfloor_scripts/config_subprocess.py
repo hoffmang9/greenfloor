@@ -191,3 +191,12 @@ def launcher_id_from_program_config(program_config_path: str | Path) -> str:
     if not launcher:
         raise RuntimeError("vault_launcher_id_missing_from_program_config")
     return launcher
+
+
+def read_launcher_id_file(path: str) -> str:
+    if not str(path).strip():
+        return ""
+    file_path = Path(path).expanduser()
+    if not file_path.exists():
+        return ""
+    return normalize_hex_id(file_path.read_text(encoding="utf-8").strip()) or ""

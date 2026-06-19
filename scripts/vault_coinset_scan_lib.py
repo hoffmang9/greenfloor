@@ -21,6 +21,7 @@ from greenfloor_scripts.config_subprocess import (
     launcher_id_from_program_config,
     load_cats_fields,
     load_markets_fields,
+    read_launcher_id_file,
 )
 from greenfloor_scripts.hex_subprocess import is_hex_id, normalize_hex_id
 
@@ -31,16 +32,6 @@ from scripts.vault_coinset_scan_checkpoint import (
     _save_scan_checkpoint,
 )
 from scripts.vault_coinset_scan_coinset import _detect_cat_asset_id
-
-
-def _read_launcher_id_file(path: str) -> str:
-    if not str(path).strip():
-        return ""
-    file_path = Path(path).expanduser()
-    if not file_path.exists():
-        return ""
-    raw = file_path.read_text(encoding="utf-8").strip()
-    return normalize_hex_id(raw) or ""
 
 
 def _write_launcher_id_file(path: str, launcher_id: str) -> None:
@@ -277,7 +268,7 @@ def main() -> int:
     launcher_id = normalize_hex_id(args.launcher_id)
     launcher_id_source = "arg"
     if not launcher_id and str(args.launcher_id_file).strip():
-        launcher_id = _read_launcher_id_file(args.launcher_id_file)
+        launcher_id = read_launcher_id_file(args.launcher_id_file)
         if launcher_id:
             launcher_id_source = "file"
     if not launcher_id:

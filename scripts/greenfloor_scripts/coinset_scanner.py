@@ -24,10 +24,6 @@ def chunk_values(values: list[str], chunk_size: int) -> list[list[str]]:
     return [values[idx : idx + chunk_size] for idx in range(0, len(values), chunk_size)]
 
 
-def is_retryable_coinset_error(exc: Exception) -> bool:
-    return is_retryable_engine_cli_error(exc)
-
-
 def coinset_with_retries(
     func: Callable[[], T],
     *,
@@ -44,7 +40,7 @@ def coinset_with_retries(
             return func()
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
-            if attempt >= attempts or not is_retryable_coinset_error(exc):
+            if attempt >= attempts or not is_retryable_engine_cli_error(exc):
                 raise
             sleep_multiplier = 1.0 + random.uniform(-jitter, jitter)
             sleep(max(0.05, delay * sleep_multiplier))
@@ -93,6 +89,40 @@ class CoinsetScanner:
             )
         )
 
+    def _records_for(
+        self,
+        endpoint: str,
+        body: dict[str, Any],
+        *,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._records(
+            endpoint,
+            body,
+            start_height=start_height,
+            end_height=end_height,
+        )
+
+    def _records_batch(
+        self,
+        endpoint: str,
+        field_name: str,
+        values: list[str],
+        *,
+        include_spent: bool,
+        start_height: int | None = None,
+        end_height: int | None = None,
+    ) -> list[dict[str, Any]]:
+        if not values:
+            return []
+        return self._records_for(
+            endpoint,
+            {field_name: values, "include_spent_coins": include_spent},
+            start_height=start_height,
+            end_height=end_height,
+        )
+
     def get_blockchain_state(self) -> dict[str, Any] | None:
         return self._record("get_blockchain_state", {}, "blockchain_state")
 
@@ -104,7 +134,7 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        return self._records(
+        return self._records_for(
             "get_coin_records_by_puzzle_hash",
             {
                 "puzzle_hash": puzzle_hash,
@@ -122,14 +152,11 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        if not puzzle_hashes:
-            return []
-        return self._records(
+        return self._records_batch(
             "get_coin_records_by_puzzle_hashes",
-            {
-                "puzzle_hashes": puzzle_hashes,
-                "include_spent_coins": include_spent,
-            },
+            "puzzle_hashes",
+            puzzle_hashes,
+            include_spent=include_spent,
             start_height=start_height,
             end_height=end_height,
         )
@@ -142,7 +169,7 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        return self._records(
+        return self._records_for(
             "get_coin_records_by_hint",
             {
                 "hint": hint,
@@ -160,14 +187,11 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        if not hints:
-            return []
-        return self._records(
+        return self._records_batch(
             "get_coin_records_by_hints",
-            {
-                "hints": hints,
-                "include_spent_coins": include_spent,
-            },
+            "hints",
+            hints,
+            include_spent=include_spent,
             start_height=start_height,
             end_height=end_height,
         )
@@ -180,14 +204,11 @@ class CoinsetScanner:
         start_height: int | None = None,
         end_height: int | None = None,
     ) -> list[dict[str, Any]]:
-        if not coin_names:
-            return []
-        return self._records(
+        return self._records_batch(
             "get_coin_records_by_names",
-            {
-                "names": coin_names,
-                "include_spent_coins": include_spent,
-            },
+            "names",
+            coin_names,
+            include_spent=include_spent,
             start_height=start_height,
             end_height=end_height,
         )
