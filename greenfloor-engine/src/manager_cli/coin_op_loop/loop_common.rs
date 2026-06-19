@@ -4,19 +4,18 @@ use crate::error::{SignerError, SignerResult};
 
 use crate::manager_cli::context::ManagerContext;
 
-use super::until_ready::{until_ready_exit_code, UntilReadyCompletion};
+use super::until_ready::{until_ready_exit_code, UntilReadyCompletion, UntilReadyWaitMode};
 
 pub(super) fn validate_until_ready_mode(
-    until_ready: bool,
-    no_wait: bool,
+    wait: UntilReadyWaitMode,
     size_base_units: Option<i64>,
 ) -> SignerResult<()> {
-    if until_ready && no_wait {
+    if wait.until_ready && wait.no_wait {
         return Err(SignerError::Other(
             "until-ready mode requires wait mode (do not pass --no-wait)".to_string(),
         ));
     }
-    if until_ready && size_base_units.as_ref().is_none_or(|value| *value <= 0) {
+    if wait.until_ready && size_base_units.as_ref().is_none_or(|value| *value <= 0) {
         return Err(SignerError::Other(
             "until-ready mode requires --size-base-units".to_string(),
         ));
@@ -26,7 +25,7 @@ pub(super) fn validate_until_ready_mode(
 
 pub(super) fn finish_coin_op_command(
     mgr: &ManagerContext,
-    until_ready: bool,
+    wait: UntilReadyWaitMode,
     completion: UntilReadyCompletion,
     success_payload: Value,
 ) -> SignerResult<i32> {
@@ -43,7 +42,7 @@ pub(super) fn finish_coin_op_command(
                 obj.insert("stop_reason".to_string(), json!(stop_reason));
             }
             mgr.emit_json(&payload)?;
-            Ok(until_ready_exit_code(until_ready, &stop_reason))
+            Ok(until_ready_exit_code(wait.until_ready, &stop_reason))
         }
     }
 }

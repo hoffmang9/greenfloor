@@ -123,14 +123,14 @@ async fn process_job(ctx: ProcessJobContext<'_>) -> SignerResult<Value> {
         Err(err) => return Ok(list_failed_job_report(ctx.job, &err.to_string())),
     };
 
-    finalize_job_report(
+    Box::pin(finalize_job_report(
         ctx.job,
         scan_result,
         ctx.dust_threshold_mojos,
         ctx.max_input_coins,
         ctx.run_mode,
         readiness,
-    )
+    ))
     .await
 }
 
@@ -222,7 +222,7 @@ pub async fn run_combine_market_cat_dust(
     let mut job_reports = Vec::new();
 
     for job in jobs {
-        let job_report = process_job(ProcessJobContext {
+        let job_report = Box::pin(process_job(ProcessJobContext {
             mgr,
             program: &program,
             coinset: &coinset_ctx,
@@ -232,7 +232,7 @@ pub async fn run_combine_market_cat_dust(
             max_input_coins: request.max_input_coins,
             run_mode: &run_mode,
             job: &job,
-        })
+        }))
         .await?;
         if job_report.get("status").and_then(Value::as_str) == Some("error") {
             exit_code = 1;

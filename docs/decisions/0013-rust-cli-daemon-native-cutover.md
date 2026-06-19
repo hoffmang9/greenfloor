@@ -43,18 +43,17 @@ from the index; see git history for the full record.
    `coinset_cli` directly.
 
 4. **Python scripts stay.** Standalone utilities under `scripts/` use script-only Python
-   libraries (`scripts/greenfloor_scripts/` subprocess adapters) and must not reimplement operator YAML
-   policy walks. Config field reads go through `greenfloor-manager program-fields`,
-   `markets-fields`, and `cats-fields`.
+   libraries (`scripts/greenfloor_scripts/` subprocess adapters). Scope and IO rules:
+   [AGENTS.md](../../AGENTS.md) → **Python (scripts and test harnesses only)**.
 
 5. **Quality bar.** Implementation work is held to the `thermonuclear-code-review`
    skill standard. A manager agent splits work into subagent-sized packets and
    loops implement → test → review until only two or fewer nit findings remain.
 
 6. **Policy parity safety net.** With PyO3 and Python policy bridges removed,
-   operator correctness is enforced by
-   `cargo nextest run --manifest-path greenfloor-engine/Cargo.toml` in CI. Script
-   subprocess adapters are covered by `unittest` invoked from
+   operator correctness is enforced by Rust integration tests in CI. Gate commands:
+   [docs/plan.md](../plan.md) → **Delivery constraints**. Script subprocess adapters are
+   covered by `unittest` invoked from
    `greenfloor-engine/tests/script_adapter_subprocess.rs`; they do not re-test Rust
    policy or conservative-fee parsing.
 

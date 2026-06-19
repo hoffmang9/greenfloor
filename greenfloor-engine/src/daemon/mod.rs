@@ -45,6 +45,7 @@ pub use cli::{
 };
 pub use coin_ops_execution::{
     execute_managed_coin_op_plans, persist_coin_op_execution, watched_coin_ids_from_open_offers,
+    CoinOpExecutionResult,
 };
 pub use coinset_tx::build_dexie_size_by_offer_id;
 pub use coinset_ws::{
@@ -55,7 +56,8 @@ pub use cycle_paths::DaemonCyclePaths;
 pub use daemon_loop::{run_daemon_loop, DaemonLoopRequest};
 pub use lock::DaemonInstanceLock;
 pub use logging::{
-    default_log_level, initialize_daemon_file_logging, warn_if_daemon_log_level_auto_healed,
+    default_log_level, initialize_daemon_file_logging, sync_daemon_file_logging,
+    warn_if_log_level_auto_healed,
 };
 pub use market_context::{
     load_cycle_resources, DaemonCycleResources, MarketCycleContext, MarketDispatchContext,
@@ -64,6 +66,7 @@ pub use market_dispatch::{
     aggregate_market_dispatch_metrics, record_market_worker_error, SingleMarketCycleOutput,
 };
 pub use markets::enabled_market_ids;
+pub(crate) use offer_dispatch::OfferDispatchOutput;
 pub use program_runtime::{
     default_testnet_markets_path, load_daemon_program_runtime, resolve_testnet_markets_path,
     use_websocket_capture_for_once, websocket_capture_enabled, DaemonProgramRuntime,

@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 use serde_json::json;
 
+use crate::async_boundary::StrategyDispatchFuture;
 use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason, MarketConfig};
 use crate::cycle::{expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction};
 use crate::error::{SignerError, SignerResult};
@@ -66,7 +67,16 @@ pub(crate) fn record_parallel_fallback_audit(
     )
 }
 
-pub async fn execute_strategy_actions(
+pub fn execute_strategy_actions<'a>(
+    store: &'a SqliteStore,
+    ctx: &'a MarketCycleContext<'_>,
+    market: &'a MarketConfig,
+    actions: &'a [PlannedAction],
+) -> StrategyDispatchFuture<'a> {
+    Box::pin(execute_strategy_actions_async(store, ctx, market, actions))
+}
+
+async fn execute_strategy_actions_async(
     store: &SqliteStore,
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
@@ -121,11 +131,5 @@ pub async fn execute_strategy_actions(
         }
     }
 
-    Box::pin(sequential::execute_actions_sequential(
-        program,
-        &ctx.resources.paths,
-        market,
-        &expanded,
-    ))
-    .await
+    sequential::execute_actions_sequential(program, &ctx.resources.paths, market, &expanded).await
 }

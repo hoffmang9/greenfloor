@@ -1,89 +1,41 @@
 use std::path::Path;
-use std::sync::Once;
+use std::sync::OnceLock;
 
-use tracing_subscriber::fmt::format::FmtSpan;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, Layer};
+use crate::error::SignerResult;
+use crate::file_logging::{self, LogState, LOG_FILE};
 
-use crate::error::{SignerError, SignerResult};
+static LOG_STATE: OnceLock<Result<LogState, String>> = OnceLock::new();
 
 const SERVICE_NAME: &str = "manager";
-pub(crate) const DEFAULT_LOG_LEVEL: &str = "INFO";
-pub(crate) const LOG_FILE: &str = "logs/debug.log";
 
-static INIT: Once = Once::new();
+pub use crate::file_logging::{
+    normalize_log_level_name, validate_log_level, warn_if_log_level_auto_healed, DEFAULT_LOG_LEVEL,
+};
 
-pub fn normalize_log_level_name(log_level: &str) -> &'static str {
-    match log_level.trim().to_ascii_uppercase().as_str() {
-        "CRITICAL" => "CRITICAL",
-        "ERROR" => "ERROR",
-        "WARNING" => "WARNING",
-        "INFO" => "INFO",
-        "DEBUG" => "DEBUG",
-        "NOTSET" => "NOTSET",
-        _ => DEFAULT_LOG_LEVEL,
-    }
-}
-
-/// Initialize rotating file logging for the manager CLI path (`{home_dir}/logs/debug.log`).
+/// Initialize or refresh manager file logging for the current process.
 ///
-/// Matches Python `initialize_manager_file_logging` path and level semantics. Safe to call
-/// more than once; only the first call installs the global subscriber.
+/// The first call installs the file subscriber under `{home_dir}/logs/debug.log`.
+/// Later calls update the active `EnvFilter` when `log_level` changes (for example after
+/// `set-log-level`). The log file path stays fixed after first init — a changed `home_dir`
+/// emits a warning until process restart.
 ///
 /// # Errors
 ///
-/// Returns an error if the operation fails.
-pub fn initialize_manager_file_logging(home_dir: &Path, log_level: &str) -> SignerResult<()> {
-    let normalized = normalize_log_level_name(log_level);
-    let log_path = home_dir.join(LOG_FILE);
-    if let Some(parent) = log_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| {
-            SignerError::Other(format!(
-                "failed to create manager log dir {}: {err}",
-                parent.display()
-            ))
-        })?;
-    }
-
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-        .map_err(|err| {
-            SignerError::Other(format!(
-                "failed to open manager log file {}: {err}",
-                log_path.display()
-            ))
-        })?;
-
-    INIT.call_once(|| {
-        let file_layer = tracing_subscriber::fmt::layer()
-            .with_writer(file)
-            .with_ansi(false)
-            .with_target(true)
-            .with_level(true)
-            .with_span_events(FmtSpan::NONE)
-            .with_filter(EnvFilter::new(normalized));
-        let _ = tracing_subscriber::registry().with(file_layer).try_init();
-    });
-
-    tracing::info!(
-        service = SERVICE_NAME,
-        log_path = %log_path.display(),
-        log_level = normalized,
-        "manager file logging initialized"
-    );
-    Ok(())
+/// Returns an error if the first initialization attempt fails, including when another
+/// global tracing subscriber was installed first.
+pub fn sync_manager_file_logging(home_dir: &Path, log_level: &str) -> SignerResult<()> {
+    file_logging::sync_service_file_logging(&LOG_STATE, SERVICE_NAME, home_dir, log_level)
 }
 
-pub fn warn_if_log_level_auto_healed(log_level_was_missing: bool, program_config_path: &Path) {
-    if log_level_was_missing {
-        tracing::warn!(
-            program_config = %program_config_path.display(),
-            "program config missing app.log_level; defaulting to INFO"
-        );
-    }
+/// Initialize manager file logging once per process.
+///
+/// Alias for [`sync_manager_file_logging`].
+///
+/// # Errors
+///
+/// Returns an error if initialization fails.
+pub fn initialize_manager_file_logging(home_dir: &Path, log_level: &str) -> SignerResult<()> {
+    sync_manager_file_logging(home_dir, log_level)
 }
 
 #[cfg(test)]
@@ -91,17 +43,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalize_log_level_defaults_invalid_to_info() {
-        assert_eq!(normalize_log_level_name("debug"), "DEBUG");
-        assert_eq!(normalize_log_level_name(""), DEFAULT_LOG_LEVEL);
-        assert_eq!(normalize_log_level_name("verbose"), DEFAULT_LOG_LEVEL);
-    }
+    fn sync_manager_file_logging_creates_log_file_and_reloads_level() {
+        if tracing::dispatcher::has_been_set() {
+            return;
+        }
 
-    #[test]
-    fn initialize_manager_file_logging_creates_log_file() {
         let dir = tempfile::tempdir().expect("tempdir");
-        initialize_manager_file_logging(dir.path(), "INFO").expect("init");
+        sync_manager_file_logging(dir.path(), "INFO").expect("init");
         let log_path = dir.path().join(LOG_FILE);
         assert!(log_path.is_file());
+
+        sync_manager_file_logging(dir.path(), "DEBUG").expect("reload");
+        assert!(LOG_STATE.get().is_some_and(|state| state.is_ok()));
     }
 }

@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use serde_json::{json, Value};
 
+use crate::async_boundary::ManagedCoinOpPlansFuture;
 use crate::coin_ops::CoinOpPlan;
 use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
@@ -77,7 +78,24 @@ fn skip_all_plans(
     }
 }
 
-pub async fn execute_managed_coin_op_plans(
+#[must_use]
+pub fn execute_managed_coin_op_plans<'a>(
+    program: &'a ManagerProgramConfig,
+    signer_config: &'a SignerConfig,
+    market: &'a MarketConfig,
+    plans: &'a [CoinOpPlan],
+    watched_coin_ids: &'a HashSet<String>,
+) -> ManagedCoinOpPlansFuture<'a> {
+    Box::pin(execute_managed_coin_op_plans_async(
+        program,
+        signer_config,
+        market,
+        plans,
+        watched_coin_ids,
+    ))
+}
+
+async fn execute_managed_coin_op_plans_async(
     program: &ManagerProgramConfig,
     signer_config: &SignerConfig,
     market: &MarketConfig,

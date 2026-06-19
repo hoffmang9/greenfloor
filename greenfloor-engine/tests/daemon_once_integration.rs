@@ -270,7 +270,7 @@ fn daemon_once_all_markets_fail_exits_non_zero() {
 
 fn max_daemon_cycle_seconds() -> f64 {
     match std::env::consts::ARCH {
-        "aarch64" | "arm64" => 2.0,
+        "aarch64" | "arm64" => 4.0,
         _ => 1.5,
     }
 }

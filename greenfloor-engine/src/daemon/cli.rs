@@ -9,7 +9,9 @@ use crate::error::{SignerError, SignerResult};
 use super::cycle_entry::{run_daemon_cycle_once, DaemonCycleOnceResponse};
 use super::daemon_loop::{run_daemon_loop, DaemonLoopRequest};
 use super::lock::DaemonInstanceLock;
-use super::logging::{initialize_daemon_file_logging, warn_if_daemon_log_level_auto_healed};
+use super::logging::{
+    initialize_daemon_file_logging, sync_daemon_file_logging, warn_if_log_level_auto_healed,
+};
 use super::program_runtime::{load_daemon_program_runtime, use_websocket_capture_for_once};
 use super::run_once::{DaemonCycleTestControls, DaemonDispatchState, DaemonRunOnceRequestBody};
 use super::watchlist::cache::CoinWatchlistCache;
@@ -69,7 +71,7 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
 
     let runtime = load_daemon_program_runtime(&args.program_config)?;
     initialize_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
-    warn_if_daemon_log_level_auto_healed(runtime.app_log_level_was_missing, &args.program_config);
+    warn_if_log_level_auto_healed(runtime.app_log_level_was_missing, &args.program_config);
 
     let testnet_markets_path = resolve_testnet_markets_path(&args.testnet_markets_config);
     let allowed_key_ids = parse_key_ids(&args.key_ids).unwrap_or_default();

@@ -1,3 +1,4 @@
+use crate::async_boundary::BuildVaultCatOfferFuture;
 use crate::coinset::{self, LiveCoinset, OfferCoinsetBackend};
 use crate::config::SignerConfig;
 use crate::error::SignerResult;
@@ -15,7 +16,15 @@ use crate::vault::spend::VaultSpendContext;
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn build_vault_cat_offer(
+#[must_use]
+pub fn build_vault_cat_offer(
+    config: SignerConfig,
+    request: CreateOfferRequest,
+) -> BuildVaultCatOfferFuture {
+    Box::pin(build_vault_cat_offer_async(config, request))
+}
+
+async fn build_vault_cat_offer_async(
     config: SignerConfig,
     request: CreateOfferRequest,
 ) -> SignerResult<CreateOfferResult> {

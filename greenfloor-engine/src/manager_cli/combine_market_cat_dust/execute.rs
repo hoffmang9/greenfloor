@@ -1,11 +1,9 @@
-use std::future::Future;
-use std::pin::Pin;
-
 use chia_protocol::Bytes32;
 use serde_json::{json, Value};
 
 use crate::coinset::{
-    client_for_config, wait_until_coins_spent, CoinSpentVerifyConfig, MIN_CAT_OUTPUT_MOJOS,
+    client_for_config, wait_until_coins_spent, CoinSpentVerifyConfig, CoinsetClient,
+    MIN_CAT_OUTPUT_MOJOS,
 };
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
@@ -16,6 +14,55 @@ use crate::vault::mixed_split::{
 use crate::vault_coinset_scan::{DustBatchPlan, DustCoin};
 
 use super::batches::{append_orphan_entries, executed_batch_entry, failed_batch_entry};
+
+trait BatchDriver {
+    async fn run_batch(&self, batch: &[DustCoin]) -> SignerResult<MixedSplitResult>;
+    async fn wait_spent(&self, coin_ids: &[Bytes32]) -> SignerResult<()>;
+}
+
+struct ProductionBatchDriver<'a> {
+    signer_config: SignerConfig,
+    receive_address: String,
+    cat_asset_id: String,
+    client: CoinsetClient,
+    verify: CoinSpentVerifyConfig,
+    _lifetime: std::marker::PhantomData<&'a ()>,
+}
+
+impl ProductionBatchDriver<'_> {
+    fn new(
+        signer_config: SignerConfig,
+        receive_address: String,
+        cat_asset_id: String,
+        client: CoinsetClient,
+        verify: CoinSpentVerifyConfig,
+    ) -> Self {
+        Self {
+            signer_config,
+            receive_address,
+            cat_asset_id,
+            client,
+            verify,
+            _lifetime: std::marker::PhantomData,
+        }
+    }
+}
+
+impl BatchDriver for ProductionBatchDriver<'_> {
+    async fn run_batch(&self, batch: &[DustCoin]) -> SignerResult<MixedSplitResult> {
+        run_dust_combine_batch(
+            self.signer_config.clone(),
+            &self.receive_address,
+            &self.cat_asset_id,
+            batch,
+        )
+        .await
+    }
+
+    async fn wait_spent(&self, coin_ids: &[Bytes32]) -> SignerResult<()> {
+        wait_until_coins_spent(&self.client, coin_ids, self.verify).await
+    }
+}
 
 async fn run_dust_combine_batch(
     signer_config: SignerConfig,
@@ -69,26 +116,21 @@ fn all_batches_failed(plan: &DustBatchPlan, reason: &str) -> (bool, Value) {
     (true, batches_json)
 }
 
-type BatchRunnerFuture<'a> =
-    Pin<Box<dyn Future<Output = SignerResult<MixedSplitResult>> + Send + 'a>>;
-type WaitSpentFuture<'a> = Pin<Box<dyn Future<Output = SignerResult<()>> + Send + 'a>>;
-
-pub(crate) async fn execute_combine_batches_with_hooks(
+async fn drive_combine_batch_plan<D: BatchDriver>(
     plan: &DustBatchPlan,
-    mut run_batch: impl FnMut(&[DustCoin]) -> BatchRunnerFuture<'_>,
-    mut wait_spent: impl FnMut(&[Bytes32]) -> WaitSpentFuture<'_>,
+    driver: &D,
 ) -> (bool, Value) {
     let mut batch_results = Vec::new();
     let mut job_failed = false;
     let batch_count = plan.combinable_batches.len();
     for (index, batch) in plan.combinable_batches.iter().enumerate() {
-        match run_batch(batch).await {
+        match driver.run_batch(batch).await {
             Ok(result) => {
                 batch_results.push(executed_batch_entry(batch, &result));
                 if index + 1 < batch_count {
                     match batch_coin_ids(batch) {
                         Ok(coin_ids) => {
-                            if let Err(err) = wait_spent(&coin_ids).await {
+                            if let Err(err) = driver.wait_spent(&coin_ids).await {
                                 job_failed = true;
                                 fail_remaining_batches(
                                     &mut batch_results,
@@ -138,34 +180,50 @@ pub async fn execute_combine_batches(
         Ok(client) => client,
         Err(err) => return all_batches_failed(plan, &err.to_string()),
     };
-    let signer_config = signer_config.clone();
-    let receive_address = receive_address.to_string();
-    let cat_asset_id = cat_asset_id.to_string();
-    execute_combine_batches_with_hooks(
-        plan,
-        move |batch| {
-            let signer_config = signer_config.clone();
-            let receive_address = receive_address.clone();
-            let cat_asset_id = cat_asset_id.clone();
-            let batch = batch.to_vec();
-            Box::pin(async move {
-                run_dust_combine_batch(signer_config, &receive_address, &cat_asset_id, &batch).await
-            })
-        },
-        move |coin_ids| {
-            let client = client.clone();
-            let coin_ids = coin_ids.to_vec();
-            Box::pin(async move { wait_until_coins_spent(&client, &coin_ids, verify).await })
-        },
-    )
-    .await
+    let driver = ProductionBatchDriver::new(
+        signer_config.clone(),
+        receive_address.to_string(),
+        cat_asset_id.to_string(),
+        client,
+        verify,
+    );
+    drive_combine_batch_plan(plan, &driver).await
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
     use super::*;
     use crate::error::SignerError;
     use crate::vault::mixed_split::MixedSplitResult;
+
+    struct MockBatchDriver {
+        batch_calls: Arc<AtomicUsize>,
+        wait_calls: Arc<AtomicUsize>,
+        fail_wait: bool,
+        fail_combine_after_first: bool,
+    }
+
+    impl BatchDriver for MockBatchDriver {
+        async fn run_batch(&self, _batch: &[DustCoin]) -> SignerResult<MixedSplitResult> {
+            let attempt = self.batch_calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail_combine_after_first && attempt > 0 {
+                return Err(SignerError::Other("combine failed".to_string()));
+            }
+            Ok(ok_split_result())
+        }
+
+        async fn wait_spent(&self, _coin_ids: &[Bytes32]) -> SignerResult<()> {
+            self.wait_calls.fetch_add(1, Ordering::SeqCst);
+            if self.fail_wait {
+                Err(SignerError::CombineInputVerifyTimeout)
+            } else {
+                Ok(())
+            }
+        }
+    }
 
     fn dust_batch(ids: &[u8]) -> Vec<DustCoin> {
         ids.iter()
@@ -200,31 +258,20 @@ mod tests {
     #[tokio::test]
     async fn execute_waits_between_batches_and_runs_all_when_verify_succeeds() {
         let plan = sample_plan();
-        let batch_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let wait_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let batch_calls = Arc::new(AtomicUsize::new(0));
+        let wait_calls = Arc::new(AtomicUsize::new(0));
+        let driver = MockBatchDriver {
+            batch_calls: Arc::clone(&batch_calls),
+            wait_calls: Arc::clone(&wait_calls),
+            fail_wait: false,
+            fail_combine_after_first: false,
+        };
 
-        let (failed, batches) = execute_combine_batches_with_hooks(
-            &plan,
-            {
-                let batch_calls = std::sync::Arc::clone(&batch_calls);
-                move |_batch| {
-                    batch_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    Box::pin(async { Ok(ok_split_result()) })
-                }
-            },
-            {
-                let wait_calls = std::sync::Arc::clone(&wait_calls);
-                move |_coin_ids| {
-                    wait_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    Box::pin(async { Ok(()) })
-                }
-            },
-        )
-        .await;
+        let (failed, batches) = drive_combine_batch_plan(&plan, &driver).await;
 
         assert!(!failed);
-        assert_eq!(batch_calls.load(std::sync::atomic::Ordering::SeqCst), 3);
-        assert_eq!(wait_calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert_eq!(batch_calls.load(Ordering::SeqCst), 3);
+        assert_eq!(wait_calls.load(Ordering::SeqCst), 2);
         let entries = batches.as_array().expect("batch array");
         assert_eq!(entries.len(), 4);
         assert!(entries
@@ -237,12 +284,13 @@ mod tests {
     #[tokio::test]
     async fn execute_skips_remaining_batches_when_verify_times_out() {
         let plan = sample_plan();
-        let (failed, batches) = execute_combine_batches_with_hooks(
-            &plan,
-            |_batch| Box::pin(async { Ok(ok_split_result()) }),
-            |_| Box::pin(async { Err(SignerError::CombineInputVerifyTimeout) }),
-        )
-        .await;
+        let driver = MockBatchDriver {
+            batch_calls: Arc::new(AtomicUsize::new(0)),
+            wait_calls: Arc::new(AtomicUsize::new(0)),
+            fail_wait: true,
+            fail_combine_after_first: false,
+        };
+        let (failed, batches) = drive_combine_batch_plan(&plan, &driver).await;
 
         assert!(failed);
         let entries = batches.as_array().expect("batch array");
@@ -258,27 +306,17 @@ mod tests {
     #[tokio::test]
     async fn execute_skips_remaining_batches_when_combine_fails() {
         let plan = sample_plan();
-        let batch_calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let (failed, batches) = execute_combine_batches_with_hooks(
-            &plan,
-            {
-                let batch_calls = std::sync::Arc::clone(&batch_calls);
-                move |_batch| {
-                    let attempt = batch_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    Box::pin(async move {
-                        if attempt == 0 {
-                            Ok(ok_split_result())
-                        } else {
-                            Err(SignerError::Other("combine failed".to_string()))
-                        }
-                    })
-                }
-            },
-            |_| Box::pin(async { Ok(()) }),
-        )
-        .await;
+        let batch_calls = Arc::new(AtomicUsize::new(0));
+        let driver = MockBatchDriver {
+            batch_calls: Arc::clone(&batch_calls),
+            wait_calls: Arc::new(AtomicUsize::new(0)),
+            fail_wait: false,
+            fail_combine_after_first: true,
+        };
+        let (failed, batches) = drive_combine_batch_plan(&plan, &driver).await;
 
         assert!(failed);
+        assert_eq!(batch_calls.load(Ordering::SeqCst), 2);
         let entries = batches.as_array().expect("batch array");
         assert_eq!(entries[0].get("status"), Some(&json!("executed")));
         assert_eq!(entries[1].get("status"), Some(&json!("failed")));

@@ -21,7 +21,7 @@ pub async fn execute_actions_sequential(
     for action in expanded {
         let side = normalize_offer_side(&action.side).to_string();
         let counts_as_executed =
-            Box::pin(post_managed_planned_action(program, paths, market, action)).await?;
+            post_managed_planned_action(program, paths, market, action).await?;
         if counts_as_executed {
             executed += 1;
         }
