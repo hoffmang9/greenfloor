@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::coinset::{resolve_direct_client, DEFAULT_MSP_BASE_URL};
+use crate::coinset::{explicit_coinset_url_override, resolve_direct_client, DEFAULT_MSP_BASE_URL};
 use crate::config::{
     parse_signer_config, program_bundle_gated_from_parsed, ManagerProgramConfig, SignerConfig,
 };
@@ -25,13 +25,10 @@ pub fn resolve_combine_coinset_context(
         .filter(|value| !value.is_empty())
         .unwrap_or(program_network);
     let direct = resolve_direct_client(network_source, coinset_base_url);
-    let msp_base_url = coinset_base_url
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map_or_else(
-            || program_msp_base_url.trim_end_matches('/').to_string(),
-            |url| url.trim_end_matches('/').to_string(),
-        );
+    let msp_base_url = explicit_coinset_url_override(coinset_base_url).map_or_else(
+        || program_msp_base_url.trim_end_matches('/').to_string(),
+        |url| url.trim_end_matches('/').to_string(),
+    );
     CombineCoinsetContext {
         network: direct.network.to_string(),
         direct_base_url: direct.base_url,
@@ -104,7 +101,20 @@ mod tests {
         );
         assert_eq!(ctx.network, "testnet11");
         assert_eq!(ctx.direct_base_url, TESTNET11_DIRECT_BASE_URL);
-        assert_eq!(ctx.msp_base_url, "https://coinset.org");
+        assert_eq!(ctx.msp_base_url, "https://api-msp.coinset.org");
+    }
+
+    #[test]
+    fn resolve_context_maps_legacy_mainnet_host_to_program_msp_default() {
+        let ctx = resolve_combine_coinset_context(
+            None,
+            Some("https://coinset.org"),
+            "mainnet",
+            "https://api-msp.coinset.org",
+        );
+        assert_eq!(ctx.network, "mainnet");
+        assert_eq!(ctx.direct_base_url, MAINNET_DIRECT_BASE_URL);
+        assert_eq!(ctx.msp_base_url, "https://api-msp.coinset.org");
     }
 
     #[test]

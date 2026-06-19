@@ -299,3 +299,52 @@ fn load_execution_signer_applies_coinset_context_overrides() {
     assert_eq!(signer.network, "testnet11");
     assert_eq!(signer.coinset_msp_base_url, "https://coinset.custom");
 }
+
+#[tokio::test]
+async fn run_combine_live_emits_json_when_signer_bundle_invalid() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cat_hex = "f".repeat(64);
+    write_combine_test_configs(dir.path(), &cat_hex, true);
+    let program_path = dir.path().join("program.yaml");
+    let program_text = std::fs::read_to_string(&program_path)
+        .expect("read program")
+        .replace(&"aa".repeat(32), "not-a-valid-launcher-id");
+    std::fs::write(&program_path, program_text).expect("write invalid vault launcher");
+
+    let (output, captured) = ManagerOutput::capturing(true);
+    let mgr = ManagerContext::for_test_with_cats(
+        program_path,
+        dir.path().join("markets.yaml"),
+        dir.path().join("cats.yaml"),
+        output,
+    );
+
+    let exit = run_combine_market_cat_dust(CombineMarketCatDustRequest {
+        mgr: &mgr,
+        network: Some("mainnet"),
+        coinset_base_url: None,
+        launcher_id: None,
+        launcher_id_file: None,
+        dust_threshold_mojos: 1000,
+        max_input_coins: 2,
+        max_nonce: 0,
+        cat_asset_id: None,
+        verify: CoinSpentVerifyConfig::default(),
+        execution: CombineExecutionFlags::from_flags(false, false),
+    })
+    .await
+    .expect("command");
+
+    assert_eq!(exit, 1);
+    let payload = captured
+        .lock()
+        .expect("capture lock")
+        .pop()
+        .expect("json emitted");
+    assert_eq!(payload.get("status"), Some(&json!("error")));
+    assert_eq!(payload.get("reason"), Some(&json!("signer_load_failed")));
+    assert!(payload
+        .get("detail")
+        .and_then(serde_json::Value::as_str)
+        .is_some());
+}

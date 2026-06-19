@@ -9,13 +9,6 @@ use chia_sdk_driver::Cat;
 const PRESPLIT_CONFIRM_TIMEOUT_SECS: u64 = 120;
 const PRESPLIT_POLL_INTERVAL_SECS: u64 = 2;
 
-pub(crate) fn presplit_confirm_timed_out(
-    started: std::time::Instant,
-    now: std::time::Instant,
-) -> bool {
-    now.duration_since(started).as_secs() >= PRESPLIT_CONFIRM_TIMEOUT_SECS
-}
-
 pub async fn fetch_presplit_cat_by_id(
     client: &CoinsetClient,
     coin_id: Bytes32,
@@ -85,19 +78,6 @@ mod tests {
         const {
             assert!(PRESPLIT_CONFIRM_TIMEOUT_SECS >= PRESPLIT_POLL_INTERVAL_SECS);
         }
-    }
-
-    #[test]
-    fn presplit_confirm_timed_out_after_timeout_window() {
-        let started = std::time::Instant::now()
-            .checked_sub(std::time::Duration::from_secs(
-                PRESPLIT_CONFIRM_TIMEOUT_SECS + 1,
-            ))
-            .unwrap();
-        assert!(presplit_confirm_timed_out(
-            started,
-            std::time::Instant::now()
-        ));
     }
 
     #[tokio::test]

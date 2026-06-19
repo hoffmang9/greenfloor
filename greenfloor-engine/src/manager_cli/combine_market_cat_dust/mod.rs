@@ -58,6 +58,27 @@ struct ProcessJobContext<'a> {
     job: &'a CatDustJob,
 }
 
+fn emit_command_error(
+    mgr: &ManagerContext,
+    reason: &str,
+    detail: impl std::fmt::Display,
+) -> SignerResult<i32> {
+    mgr.emit_json(&json!({
+        "status": "error",
+        "reason": reason,
+        "detail": detail.to_string(),
+    }))?;
+    Ok(1)
+}
+
+fn signer_load_error_reason(err: &SignerError) -> &'static str {
+    if matches!(err, SignerError::SignerPathNotConfigured) {
+        "signer_not_configured"
+    } else {
+        "signer_load_failed"
+    }
+}
+
 async fn run_vault_scan_for_job(
     mgr: &ManagerContext,
     coinset: &CombineCoinsetContext,
@@ -130,24 +151,16 @@ pub async fn run_combine_market_cat_dust(
     let mgr = request.mgr;
 
     if !mgr.cats_config.is_file() {
-        mgr.emit_json(&json!({
-            "status": "error",
-            "reason": "cats_config_missing",
-            "detail": mgr.cats_config.display().to_string(),
-        }))?;
-        return Ok(1);
+        return emit_command_error(
+            mgr,
+            "cats_config_missing",
+            mgr.cats_config.display().to_string(),
+        );
     }
 
     let (raw, program, markets) = match load_program_and_markets(mgr) {
         Ok(loaded) => loaded,
-        Err(err) => {
-            mgr.emit_json(&json!({
-                "status": "error",
-                "reason": "config_validate_failed",
-                "detail": err.to_string(),
-            }))?;
-            return Ok(1);
-        }
+        Err(err) => return emit_command_error(mgr, "config_validate_failed", err),
     };
     let coinset_ctx = resolve_combine_coinset_context(
         request.network,
@@ -160,29 +173,14 @@ pub async fn run_combine_market_cat_dust(
         None
     } else {
         match load_execution_signer(&raw, program.clone(), &coinset_ctx) {
-            Err(SignerError::SignerPathNotConfigured) => {
-                mgr.emit_json(&json!({
-                    "status": "error",
-                    "reason": "signer_not_configured",
-                    "detail": SignerError::SignerPathNotConfigured.to_string(),
-                }))?;
-                return Ok(1);
-            }
-            Err(err) => return Err(err),
             Ok(signer) => Some(signer),
+            Err(err) => return emit_command_error(mgr, signer_load_error_reason(&err), err),
         }
     };
 
     let jobs = match build_enabled_cat_jobs(&markets, &mgr.cats_config, request.cat_asset_id) {
         Ok(jobs) => jobs,
-        Err(err) => {
-            mgr.emit_json(&json!({
-                "status": "error",
-                "reason": "config",
-                "detail": err.to_string(),
-            }))?;
-            return Ok(1);
-        }
+        Err(err) => return emit_command_error(mgr, "config", err),
     };
 
     if jobs.is_empty() {
@@ -201,26 +199,14 @@ pub async fn run_combine_market_cat_dust(
         program_config: Some(&mgr.program_config),
     }) {
         Ok(resolved) => resolved,
-        Err(err) => {
-            mgr.emit_json(&json!({
-                "status": "error",
-                "reason": "launcher_id_resolution_failed",
-                "detail": err.to_string(),
-            }))?;
-            return Ok(1);
-        }
+        Err(err) => return emit_command_error(mgr, "launcher_id_resolution_failed", err),
     };
     if let Err(err) = cache_resolved_launcher_id(
         request.launcher_id_file,
         resolved_launcher.source,
         &resolved_launcher.launcher_id,
     ) {
-        mgr.emit_json(&json!({
-            "status": "error",
-            "reason": "launcher_id_cache_failed",
-            "detail": err.to_string(),
-        }))?;
-        return Ok(1);
+        return emit_command_error(mgr, "launcher_id_cache_failed", err);
     }
 
     let run_mode = match execution_signer.as_ref() {

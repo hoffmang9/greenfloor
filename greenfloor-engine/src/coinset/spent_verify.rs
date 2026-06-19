@@ -1,9 +1,7 @@
-use std::time::Instant;
-
 use chia_protocol::Bytes32;
 use chia_sdk_coinset::{ChiaRpcClient, CoinsetClient};
 
-use super::poll::PollConfig;
+use super::poll::{run_poll_loop, PollConfig};
 use crate::error::{SignerError, SignerResult};
 
 const DEFAULT_VERIFY_TIMEOUT_SECS: u64 = 15 * 60;
@@ -57,6 +55,8 @@ where
     Ok(true)
 }
 
+/// Injectable spent-check hook for tests. Uses the same poll timing as [`run_poll_loop`]
+/// because the checker is `FnMut` and cannot be re-entered from a poll attempt closure.
 pub(crate) async fn wait_until_coins_spent_with_check<F, Fut>(
     mut is_spent: F,
     coin_ids: &[Bytes32],
@@ -70,7 +70,7 @@ where
         return Ok(());
     }
     let poll = config.poll_config();
-    let started = Instant::now();
+    let started = std::time::Instant::now();
     loop {
         if all_coins_spent(coin_ids, &mut is_spent).await? {
             return Ok(());
@@ -87,8 +87,28 @@ pub async fn wait_until_coins_spent(
     coin_ids: &[Bytes32],
     config: CoinSpentVerifyConfig,
 ) -> SignerResult<()> {
-    wait_until_coins_spent_with_check(|coin_id| coin_is_spent(client, coin_id), coin_ids, config)
-        .await
+    if coin_ids.is_empty() {
+        return Ok(());
+    }
+    let client = client.clone();
+    let coin_ids = coin_ids.to_vec();
+    run_poll_loop(
+        move || {
+            let client = client.clone();
+            let coin_ids = coin_ids.clone();
+            async move {
+                for &coin_id in &coin_ids {
+                    if !coin_is_spent(&client, coin_id).await? {
+                        return Ok(None);
+                    }
+                }
+                Ok(Some(()))
+            }
+        },
+        config.poll_config(),
+        SignerError::CombineInputVerifyTimeout,
+    )
+    .await
 }
 
 #[cfg(test)]

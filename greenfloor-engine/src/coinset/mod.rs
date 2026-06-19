@@ -19,8 +19,9 @@ pub use api::{
     post_coinset_record, post_coinset_rpc, push_tx_hex,
 };
 pub use direct_api::{
-    normalize_coinset_network, resolve_direct_client, resolve_direct_coinset_base_url,
-    ResolvedDirectClient, MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
+    explicit_coinset_url_override, normalize_coinset_network, normalize_direct_base_url_input,
+    resolve_direct_client, resolve_direct_coinset_base_url, ResolvedDirectClient,
+    MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
 };
 mod retry;
 mod scan_client;
