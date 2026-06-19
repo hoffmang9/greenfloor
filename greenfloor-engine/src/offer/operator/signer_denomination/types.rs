@@ -83,6 +83,7 @@ fn is_empty_json_value(value: &Value) -> bool {
 }
 
 impl BootstrapPhaseResult {
+    #[must_use]
     pub fn to_operator_json(&self) -> Value {
         serde_json::to_value(self).unwrap_or_else(|_| json!({}))
     }
@@ -117,6 +118,7 @@ impl BootstrapPhaseResult {
         }
     }
 
+    #[must_use]
     pub fn offer_creation_gate(&self) -> BootstrapOfferGate {
         bootstrap_offer_gate(&self.status, &self.reason, self.ready)
     }
@@ -183,6 +185,7 @@ impl BootstrapPhaseFailure {
     }
 }
 
+#[must_use]
 pub fn bootstrap_blocks_offer(result: &BootstrapPhaseResult) -> Option<String> {
     result.offer_creation_gate().block_error(&result.reason)
 }

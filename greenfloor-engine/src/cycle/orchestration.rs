@@ -43,6 +43,7 @@ pub struct OfferStateRow {
     pub state: String,
 }
 
+#[must_use]
 pub fn enqueue_immediate_requeue(immediate_requeue_ids: &[String], market_id: &str) -> Vec<String> {
     let clean_market_id = market_id.trim();
     if clean_market_id.is_empty() {
@@ -151,10 +152,12 @@ pub fn select_market_batch(
     }
 }
 
+#[must_use]
 pub fn should_use_market_slot_dispatch(enabled_market_count: usize, slot_count: usize) -> bool {
     slot_count > 0 && enabled_market_count > slot_count
 }
 
+#[must_use]
 pub fn dedupe_sorted_market_ids(market_ids: &[String]) -> Vec<String> {
     let mut deduped: BTreeSet<String> = BTreeSet::new();
     for market_id in market_ids {
@@ -166,14 +169,17 @@ pub fn dedupe_sorted_market_ids(market_ids: &[String]) -> Vec<String> {
     deduped.into_iter().collect()
 }
 
+#[must_use]
 pub fn should_log_disabled_market(now_monotonic: f64, next_log_deadline: f64) -> bool {
     next_log_deadline <= now_monotonic
 }
 
+#[must_use]
 pub fn next_disabled_market_log_deadline(now_monotonic: f64, interval_seconds: u64) -> f64 {
     now_monotonic + crate::offer::pricing::u64_to_f64(interval_seconds)
 }
 
+#[must_use]
 pub fn should_try_cat_inventory_fallback(coinset_scan_empty: bool, base_asset: &str) -> bool {
     if !coinset_scan_empty {
         return false;
@@ -234,6 +240,7 @@ pub fn collect_stale_sweep_candidates(
     candidates
 }
 
+#[must_use]
 pub fn classify_dexie_stale_offer_status(status: i64) -> Option<&'static str> {
     match status {
         4 => Some("tx_confirmed"),
@@ -242,6 +249,7 @@ pub fn classify_dexie_stale_offer_status(status: i64) -> Option<&'static str> {
     }
 }
 
+#[must_use]
 pub fn is_dexie_offer_missing_error_text(error_text: &str) -> bool {
     let normalized = error_text.trim().to_ascii_lowercase();
     if normalized.is_empty() {
@@ -252,6 +260,7 @@ pub fn is_dexie_offer_missing_error_text(error_text: &str) -> bool {
         || (normalized.contains("http error 404") && normalized.contains("not found"))
 }
 
+#[must_use]
 pub fn record_stale_sweep_check(
     progress: &StaleSweepProgress,
     hit: Option<StaleSweepHit>,

@@ -28,6 +28,7 @@ fn normalized_bootstrap_reason(bootstrap_reason: &str) -> String {
 }
 
 /// Typed bootstrap outcome for offer creation gating.
+#[must_use]
 pub fn bootstrap_offer_gate(
     bootstrap_status: &str,
     bootstrap_reason: &str,
@@ -48,6 +49,7 @@ pub fn bootstrap_offer_gate(
 }
 
 impl BootstrapOfferGate {
+    #[must_use]
     pub fn block_error(self, bootstrap_reason: &str) -> Option<String> {
         let reason = normalized_bootstrap_reason(bootstrap_reason);
         match self {
@@ -62,6 +64,7 @@ impl BootstrapOfferGate {
 }
 
 /// Return manager bootstrap block reason text, or ``None`` when offer creation should continue.
+#[must_use]
 pub fn bootstrap_block_error(
     bootstrap_status: &str,
     bootstrap_reason: &str,
@@ -72,6 +75,7 @@ pub fn bootstrap_block_error(
 }
 
 /// Resolve expected offered/requested assets for Dexie visibility checks.
+#[must_use]
 pub fn expected_publish_asset_fields(
     side: &str,
     base_symbol: &str,
@@ -150,6 +154,7 @@ fn rows_contain_expected(
 /// Mirrors manager-side validation semantics:
 /// - only validate a side when the expected asset id is non-empty
 /// - only validate a side when the Dexie payload side is a list
+#[must_use]
 pub fn dexie_offer_asset_expectation_error(
     offered: &Value,
     requested: &Value,

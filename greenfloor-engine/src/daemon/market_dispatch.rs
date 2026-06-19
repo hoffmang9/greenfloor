@@ -13,6 +13,7 @@ pub struct SingleMarketCycleOutput {
     pub state: MarketCycleResultState,
 }
 
+#[must_use]
 pub fn aggregate_market_dispatch_metrics(
     outputs: &[SingleMarketCycleOutput],
 ) -> MarketDispatchMetrics {
@@ -39,6 +40,11 @@ pub fn aggregate_market_dispatch_metrics(
     metrics
 }
 
+/// Record market worker error.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn record_market_worker_error(
     store: &crate::storage::SqliteStore,
     market_id: &str,

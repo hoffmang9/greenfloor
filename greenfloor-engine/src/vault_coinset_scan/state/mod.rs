@@ -43,6 +43,11 @@ pub struct ScanState {
 }
 
 impl ScanState {
+    /// Run.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn run(request: ScanRequest) -> SignerResult<ScanResult> {
         let mut state = Self::prepare(request).await?;
         if state.window.exhausted {

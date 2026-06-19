@@ -9,6 +9,11 @@ use crate::error::{SignerError, SignerResult};
 
 const MAX_ATTEMPTS: usize = 4;
 
+/// With script retries.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn with_script_retries<T, F, Fut>(mut operation: F) -> SignerResult<T>
 where
     F: FnMut() -> Fut,

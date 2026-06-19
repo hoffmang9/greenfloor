@@ -27,6 +27,7 @@ const RETRYABLE_COINSET_TRANSPORT_MARKERS: &[&str] = &[
     "cloudflare",
 ];
 
+#[must_use]
 pub fn script_coinset_transport_retryable(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     RETRYABLE_COINSET_TRANSPORT_MARKERS
@@ -34,6 +35,7 @@ pub fn script_coinset_transport_retryable(message: &str) -> bool {
         .any(|marker| lower.contains(marker))
 }
 
+#[must_use]
 pub fn script_engine_error_retryable(err: &SignerError) -> bool {
     match err {
         SignerError::Coinset(message) => script_coinset_transport_retryable(message),
@@ -63,6 +65,7 @@ pub fn emit_engine_cli_error(err: &SignerError, json_mode: bool) {
     }
 }
 
+#[must_use]
 pub fn optional_str(raw: &str) -> Option<&str> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -76,6 +79,11 @@ pub fn optional_trimmed(value: &str) -> Option<String> {
     optional_str(value).map(str::to_string)
 }
 
+/// Format json.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn format_json(value: &impl Serialize, compact: bool) -> Result<String, String> {
     if compact {
         serde_json::to_string(value).map_err(|err| format!("failed to encode json output: {err}"))
@@ -85,6 +93,11 @@ pub fn format_json(value: &impl Serialize, compact: bool) -> Result<String, Stri
     }
 }
 
+/// Format json value.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn format_json_value(value: &Value, compact: bool) -> Result<String, String> {
     if compact {
         serde_json::to_string(value).map_err(|err| format!("failed to encode json output: {err}"))
@@ -94,6 +107,11 @@ pub fn format_json_value(value: &Value, compact: bool) -> Result<String, String>
     }
 }
 
+/// Print json.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn print_json(value: &impl Serialize, compact: bool) -> SignerResult<()> {
     println!(
         "{}",
@@ -102,6 +120,11 @@ pub fn print_json(value: &impl Serialize, compact: bool) -> SignerResult<()> {
     Ok(())
 }
 
+/// Print json value.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn print_json_value(value: &Value, compact: bool) -> SignerResult<()> {
     println!(
         "{}",
@@ -110,6 +133,11 @@ pub fn print_json_value(value: &Value, compact: bool) -> SignerResult<()> {
     Ok(())
 }
 
+/// Print json pretty.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn print_json_pretty(value: &impl Serialize) -> SignerResult<()> {
     print_json(value, false)
 }

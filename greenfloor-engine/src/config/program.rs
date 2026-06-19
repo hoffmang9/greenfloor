@@ -51,10 +51,16 @@ pub struct ManagerProgramConfig {
 }
 
 impl ManagerProgramConfig {
+    #[must_use]
     pub fn signer_offer_path_configured(&self) -> bool {
         !self.signer_kms_key_id.is_empty() && !self.vault_launcher_id.is_empty()
     }
 
+    /// Require signer offer path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn require_signer_offer_path(&self) -> SignerResult<()> {
         if self.signer_offer_path_configured() {
             return Ok(());
@@ -71,6 +77,7 @@ pub struct CycleProgramConfig {
 
 impl CycleProgramConfig {
     /// Daemon cycle load: never fail the whole cycle on signer YAML errors.
+    #[must_use]
     pub fn from_parsed(program: ManagerProgramConfig, raw: &Value) -> Self {
         let signer = if program.signer_offer_path_configured() {
             parse_signer_config(raw).ok()
@@ -83,6 +90,7 @@ impl CycleProgramConfig {
         }
     }
 
+    #[must_use]
     pub fn from_parts(program: ManagerProgramConfig, signer: Option<SignerConfig>) -> Self {
         Self {
             program: Box::new(program),
@@ -90,10 +98,16 @@ impl CycleProgramConfig {
         }
     }
 
+    #[must_use]
     pub fn program(&self) -> &ManagerProgramConfig {
         &self.program
     }
 
+    /// Signer for execution.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn signer_for_execution(&self) -> SignerResult<&SignerConfig> {
         self.program.require_signer_offer_path()?;
         self.signer
@@ -105,6 +119,7 @@ impl CycleProgramConfig {
 pub const SIGNER_SKIP_NO_SIGNER_PATH: &str = "skipped_no_signer";
 pub const SIGNER_SKIP_MISSING_SIGNER_CONFIG: &str = "skipped_missing_signer_config";
 
+#[must_use]
 pub fn signer_execution_skip_reason(err: &SignerError) -> String {
     match err {
         SignerError::SignerPathNotConfigured => SIGNER_SKIP_NO_SIGNER_PATH.to_string(),
@@ -113,6 +128,7 @@ pub fn signer_execution_skip_reason(err: &SignerError) -> String {
     }
 }
 
+#[must_use]
 pub fn is_signer_execution_soft_skip(err: &SignerError) -> bool {
     matches!(
         signer_execution_skip_reason(err).as_str(),
@@ -155,6 +171,11 @@ impl Default for ManagerProgramConfig {
     }
 }
 
+/// Parse program config.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn parse_program_config(raw: &Value) -> SignerResult<ManagerProgramConfig> {
     reject_cloud_wallet(raw)?;
 
@@ -434,6 +455,11 @@ fn require_pushover_provider(raw: &Value) -> SignerResult<()> {
     ))
 }
 
+/// Read program yaml.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn read_program_yaml(path: &Path) -> SignerResult<Value> {
     let raw = std::fs::read_to_string(path).map_err(|err| {
         SignerError::Other(format!("failed to read config {}: {err}", path.display()))
@@ -443,6 +469,11 @@ pub fn read_program_yaml(path: &Path) -> SignerResult<Value> {
     })
 }
 
+/// Load program config.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn load_program_config(path: &Path) -> SignerResult<ManagerProgramConfig> {
     parse_program_config(&read_program_yaml(path)?)
 }
@@ -453,6 +484,11 @@ pub struct ProgramConfigBundle {
     pub signer: SignerConfig,
 }
 
+/// Program bundle from parsed.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn program_bundle_from_parsed(
     program: ManagerProgramConfig,
     raw: &Value,
@@ -463,12 +499,22 @@ pub fn program_bundle_from_parsed(
     })
 }
 
+/// Load program bundle.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn load_program_bundle(path: &Path) -> SignerResult<ProgramConfigBundle> {
     let raw = read_program_yaml(path)?;
     let program = parse_program_config(&raw)?;
     program_bundle_from_parsed(program, &raw)
 }
 
+/// Program bundle gated from parsed.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn program_bundle_gated_from_parsed(
     program: ManagerProgramConfig,
     raw: &Value,
@@ -477,6 +523,11 @@ pub fn program_bundle_gated_from_parsed(
     program_bundle_from_parsed(program, raw)
 }
 
+/// Load program bundle gated.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn load_program_bundle_gated(path: &Path) -> SignerResult<ProgramConfigBundle> {
     let raw = read_program_yaml(path)?;
     let program = parse_program_config(&raw)?;
@@ -485,10 +536,15 @@ pub fn load_program_bundle_gated(path: &Path) -> SignerResult<ProgramConfigBundl
 
 /// Load execution bundle for coin-list; maps missing signer path to
 /// [`SignerError::SignerPathNotConfigured`] for stable CLI exit handling.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn load_program_bundle_for_coin_list(path: &Path) -> SignerResult<ProgramConfigBundle> {
     load_program_bundle_gated(path)
 }
 
+#[must_use]
 pub fn is_testnet_network(network: &str) -> bool {
     matches!(
         network.trim().to_ascii_lowercase().as_str(),
@@ -496,6 +552,7 @@ pub fn is_testnet_network(network: &str) -> bool {
     )
 }
 
+#[must_use]
 pub fn resolve_trade_asset_for_network(asset: &str, network: &str) -> String {
     let normalized = asset.trim().to_ascii_lowercase();
     if is_xch_like_asset(&normalized) {
@@ -511,10 +568,16 @@ pub fn resolve_trade_asset_for_network(asset: &str, network: &str) -> String {
     }
 }
 
+#[must_use]
 pub fn resolve_quote_asset_for_offer(quote_asset: &str, network: &str) -> String {
     resolve_trade_asset_for_network(quote_asset, network)
 }
 
+/// Resolve dexie base url.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn resolve_dexie_base_url(
     network: &str,
     explicit: Option<&str>,
@@ -539,6 +602,11 @@ pub fn resolve_splash_base_url(explicit: Option<&str>, program_base: &str) -> St
         )
 }
 
+/// Resolve offer publish settings.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn resolve_offer_publish_settings(
     program: &ManagerProgramConfig,
     network: &str,

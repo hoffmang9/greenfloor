@@ -4,6 +4,11 @@ use super::sqlite::{OfferPostPersistRecord, SqliteStore};
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
 
+/// Persist offer post records.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn persist_offer_post_records(
     store: &SqliteStore,
     records: &[OfferPostPersistRecord],

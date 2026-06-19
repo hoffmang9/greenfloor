@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use super::plan::LadderTargetRow;
 
+#[must_use]
 pub fn effective_sell_bucket_counts_for_coin_ops(
     sell_ladder: &[LadderTargetRow],
     wallet_bucket_counts: &BTreeMap<i64, i64>,

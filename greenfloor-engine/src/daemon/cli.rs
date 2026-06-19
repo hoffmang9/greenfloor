@@ -52,6 +52,11 @@ pub struct DaemonCliArgs {
     pub state_dir: PathBuf,
 }
 
+/// Run daemon command.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
     let state_dir = args.state_dir.expanduser();
     let mode = if args.once { "once" } else { "loop" };
@@ -102,6 +107,11 @@ pub async fn run_daemon_command(args: DaemonCliArgs) -> SignerResult<i32> {
     run_daemon_loop(request).await
 }
 
+/// Run daemon cycle once from json.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_daemon_cycle_once_from_json(
     value: Value,
 ) -> SignerResult<DaemonCycleOnceResponse> {
@@ -110,6 +120,11 @@ pub async fn run_daemon_cycle_once_from_json(
     run_daemon_cycle_once(&request).await
 }
 
+/// Run daemon loop from json.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_daemon_loop_from_json(value: Value) -> SignerResult<i32> {
     let request: DaemonLoopRequest =
         serde_json::from_value(value).map_err(|err| SignerError::Other(err.to_string()))?;
@@ -124,6 +139,11 @@ pub struct DaemonOnceJsonArgs {
     pub json: bool,
 }
 
+/// Run daemon once from request json.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_daemon_once_from_request_json(args: DaemonOnceJsonArgs) -> SignerResult<i32> {
     let raw = std::fs::read_to_string(&args.request_json)
         .map_err(|err| SignerError::Other(format!("read request json: {err}")))?;

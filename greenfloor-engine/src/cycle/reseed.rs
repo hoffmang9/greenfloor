@@ -11,6 +11,7 @@ pub enum ReseedSkipReason {
 }
 
 impl ReseedSkipReason {
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::StrategyActionsPresent => "strategy_actions_present",
@@ -23,6 +24,7 @@ impl ReseedSkipReason {
 }
 
 /// Stable label list for daemon audit and operator diagnostics.
+#[must_use]
 pub fn reseed_skip_reason_labels() -> Vec<&'static str> {
     vec![
         ReseedSkipReason::StrategyActionsPresent.label(),
@@ -67,6 +69,7 @@ fn empty_market_state(xch_price_usd: Option<f64>) -> MarketState {
 ///
 /// Callers supply active/target counts from SQLite. Seed templates are derived
 /// internally via [`evaluate_market`] on an empty bucket state.
+#[must_use]
 pub fn plan_reseed_actions_from_gap(
     strategy_actions: &[PlannedAction],
     active_counts_by_size: &std::collections::BTreeMap<i64, i64>,

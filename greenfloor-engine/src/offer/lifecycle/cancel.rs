@@ -19,6 +19,11 @@ pub struct DexieCancelOutcome {
     pub error: String,
 }
 
+/// Cancel offers on dexie.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn cancel_offers_on_dexie(
     store: &SqliteStore,
     dexie: &DexieClient,

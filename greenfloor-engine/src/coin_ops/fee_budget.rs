@@ -1,5 +1,6 @@
 use super::plan::CoinOpPlan;
 
+#[must_use]
 pub fn projected_coin_ops_fee_mojos(
     plans: &[CoinOpPlan],
     split_fee_mojos: i64,
@@ -13,6 +14,7 @@ pub fn projected_coin_ops_fee_mojos(
     total
 }
 
+#[must_use]
 pub fn fee_budget_allows_execution(
     max_daily_fee_budget_mojos: i64,
     spent_today_mojos: i64,
@@ -24,6 +26,7 @@ pub fn fee_budget_allows_execution(
     spent_today_mojos + projected_mojos <= max_daily_fee_budget_mojos
 }
 
+#[must_use]
 pub fn partition_plans_by_budget(
     plans: &[CoinOpPlan],
     split_fee_mojos: i64,

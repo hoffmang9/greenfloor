@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 pub use crate::paths::{expand_home, resolve_repo_root};
 
+#[must_use]
 pub fn default_program_config_path() -> PathBuf {
     let home_default = expand_home(Path::new("~/.greenfloor/config/program.yaml"));
     if home_default.exists() {
@@ -12,6 +13,7 @@ pub fn default_program_config_path() -> PathBuf {
     PathBuf::from("config/program.yaml")
 }
 
+#[must_use]
 pub fn default_markets_config_path() -> PathBuf {
     let home_default = expand_home(Path::new("~/.greenfloor/config/markets.yaml"));
     if home_default.exists() {
@@ -20,6 +22,7 @@ pub fn default_markets_config_path() -> PathBuf {
     PathBuf::from("config/markets.yaml")
 }
 
+#[must_use]
 pub fn default_testnet_markets_config_path() -> Option<PathBuf> {
     let home_default = expand_home(Path::new("~/.greenfloor/config/testnet-markets.yaml"));
     if home_default.exists() {
@@ -28,6 +31,7 @@ pub fn default_testnet_markets_config_path() -> Option<PathBuf> {
     None
 }
 
+#[must_use]
 pub fn default_cats_config_path() -> PathBuf {
     let home_default = expand_home(Path::new("~/.greenfloor/config/cats.yaml"));
     if home_default.exists() {
@@ -36,6 +40,7 @@ pub fn default_cats_config_path() -> PathBuf {
     PathBuf::from("config/cats.yaml")
 }
 
+#[must_use]
 pub fn default_metadata_config_paths() -> (PathBuf, PathBuf, Option<PathBuf>) {
     (
         default_cats_config_path(),
@@ -48,6 +53,7 @@ pub fn default_metadata_config_paths() -> (PathBuf, PathBuf, Option<PathBuf>) {
 ///
 /// Matches the legacy Python scanner (`Path(__file__).parents[1] / "config"`), so scans
 /// invoked outside the repo cwd still resolve ticker indexes from the checkout.
+#[must_use]
 pub fn default_vault_scan_metadata_config_paths() -> (PathBuf, PathBuf, Option<PathBuf>) {
     if let Some(repo_root) = resolve_repo_root() {
         let testnet = repo_root.join("config/testnet-markets.yaml");
@@ -74,6 +80,7 @@ pub fn resolve_cli_config_path(
     cli_value.to_path_buf()
 }
 
+#[must_use]
 pub fn optional_path(raw: &str) -> Option<PathBuf> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {

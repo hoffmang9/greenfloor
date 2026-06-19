@@ -11,6 +11,7 @@ pub enum OfferLifecycleState {
 }
 
 impl OfferLifecycleState {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Open => "open",
@@ -33,6 +34,7 @@ pub enum OfferSignal {
 }
 
 impl OfferSignal {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::MempoolSeen => "mempool_seen",
@@ -53,6 +55,7 @@ pub struct OfferTransition {
     pub reason: String,
 }
 
+#[must_use]
 pub fn apply_offer_signal(state: OfferLifecycleState, signal: OfferSignal) -> OfferTransition {
     match (state, signal) {
         (OfferLifecycleState::Open, OfferSignal::MempoolSeen) => OfferTransition {

@@ -9,6 +9,11 @@ use chia_sdk_driver::Cat;
 const PRESPLIT_CONFIRM_TIMEOUT_SECS: u64 = 120;
 const PRESPLIT_POLL_INTERVAL_SECS: u64 = 2;
 
+/// Fetch presplit cat by id.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn fetch_presplit_cat_by_id(
     client: &CoinsetClient,
     coin_id: Bytes32,
@@ -28,6 +33,11 @@ pub async fn fetch_presplit_cat_by_id(
         .ok_or(SignerError::PresplitCoinNotFound)
 }
 
+/// Wait for unspent cat.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn wait_for_unspent_cat(client: &CoinsetClient, coin_id: Bytes32) -> SignerResult<Cat> {
     wait_for_unspent_cat_with_fetch(
         |coin_id| async move {

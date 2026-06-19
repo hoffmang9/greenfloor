@@ -8,6 +8,7 @@ pub struct CoinWatchlistCache {
 }
 
 impl CoinWatchlistCache {
+    #[must_use]
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }

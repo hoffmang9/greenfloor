@@ -59,6 +59,11 @@ pub(crate) fn validate_mixed_split_request(request: &MixedSplitRequest) -> Signe
     Ok(())
 }
 
+/// Build and optionally broadcast vault cat mixed split.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn build_and_optionally_broadcast_vault_cat_mixed_split(
     config: SignerConfig,
     request: MixedSplitRequest,

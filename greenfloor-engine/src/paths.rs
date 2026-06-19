@@ -19,6 +19,7 @@ pub fn expand_home(path: impl AsRef<Path>) -> PathBuf {
 }
 
 /// Walk upward from `start` until a directory contains `config/cats.yaml`.
+#[must_use]
 pub fn find_repo_root_from(start: &Path) -> Option<PathBuf> {
     let mut current = if start.is_file() {
         start.parent()?.to_path_buf()

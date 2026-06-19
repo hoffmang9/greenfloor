@@ -101,6 +101,7 @@ fn state_count_for_size(state: &MarketState, size: i64) -> i64 {
     }
 }
 
+#[must_use]
 pub fn evaluate_market(state: &MarketState, config: &StrategyConfig) -> Vec<PlannedAction> {
     let pair = config.pair.to_ascii_lowercase();
     if pair == "xch" {
@@ -147,6 +148,7 @@ pub fn evaluate_market(state: &MarketState, config: &StrategyConfig) -> Vec<Plan
     actions
 }
 
+#[must_use]
 pub fn evaluate_two_sided_market_actions(
     buy_state: &MarketState,
     sell_state: &MarketState,

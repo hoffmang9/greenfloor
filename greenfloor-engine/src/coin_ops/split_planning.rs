@@ -16,6 +16,7 @@ pub enum SplitPlanningProfile {
 }
 
 impl SplitPlanningProfile {
+    #[must_use]
     pub fn from_label(label: &str) -> Option<Self> {
         match label {
             "cli_auto" => Some(Self::CliAuto),
@@ -32,6 +33,7 @@ pub enum CombineInputSelectionMode {
 }
 
 impl CombineInputSelectionMode {
+    #[must_use]
     pub fn from_label(label: &str) -> Option<Self> {
         match label {
             "largest_by_amount" => Some(Self::LargestByAmount),
@@ -101,6 +103,7 @@ fn behavior_for(profile: SplitPlanningProfile) -> SplitPlanningBehavior {
     }
 }
 
+#[must_use]
 pub fn build_combine_prereq_plan(
     candidate_spendable: &[SpendableCoin],
     required_amount_mojos: i64,
@@ -139,6 +142,7 @@ pub fn build_combine_prereq_plan(
     })
 }
 
+#[must_use]
 pub fn plan_auto_split_selection(
     candidate_spendable: &[SpendableCoin],
     required_amount_mojos: i64,
@@ -228,6 +232,11 @@ pub fn plan_auto_split_selection(
     })
 }
 
+/// Plan auto combine inputs.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn plan_auto_combine_inputs(
     spendable_coins: &[SpendableCoin],
     number_of_coins: usize,

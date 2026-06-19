@@ -25,6 +25,11 @@ pub struct CoinOpLedgerEntry<'a> {
 }
 
 impl SqliteStore {
+    /// Get daily fee spent mojos utc.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn get_daily_fee_spent_mojos_utc(&self) -> SignerResult<i64> {
         let total: i64 = self
             .conn
@@ -44,6 +49,11 @@ impl SqliteStore {
         Ok(total)
     }
 
+    /// Add coin op ledger entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn add_coin_op_ledger_entry(&self, entry: &CoinOpLedgerEntry<'_>) -> SignerResult<()> {
         let CoinOpLedgerEntry {
             market_id,
@@ -78,6 +88,11 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// Get coin op budget report utc.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn get_coin_op_budget_report_utc(&self) -> SignerResult<CoinOpBudgetReport> {
         self.conn
             .query_row(

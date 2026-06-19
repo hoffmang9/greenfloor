@@ -3,6 +3,11 @@ use crate::error::SignerResult;
 
 use super::context::CoinOpExecContext;
 
+/// Submit combine prereq.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn submit_combine_prereq(
     ctx: &CoinOpExecContext,
     input_coin_ids: &[String],

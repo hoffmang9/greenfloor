@@ -61,6 +61,11 @@ impl DirectCoinsetScanClient {
         .await
     }
 
+    /// Chain peak height.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn chain_peak_height(&self) -> SignerResult<Option<u64>> {
         let Some(state) = self
             .record("get_blockchain_state", json!({}), "blockchain_state")
@@ -82,6 +87,11 @@ impl DirectCoinsetScanClient {
         }
     }
 
+    /// By puzzle hashes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn by_puzzle_hashes(
         &self,
         puzzle_hashes: &[String],
@@ -104,6 +114,11 @@ impl DirectCoinsetScanClient {
         .await
     }
 
+    /// By hints.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn by_hints(
         &self,
         hints: &[String],
@@ -126,6 +141,11 @@ impl DirectCoinsetScanClient {
         .await
     }
 
+    /// By names.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn by_names(
         &self,
         coin_names: &[String],
@@ -148,6 +168,11 @@ impl DirectCoinsetScanClient {
         .await
     }
 
+    /// Puzzle and solution.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn puzzle_and_solution(
         &self,
         coin_id_hex: &str,
@@ -161,6 +186,11 @@ impl DirectCoinsetScanClient {
             .await
     }
 
+    /// Existing coin names.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn existing_coin_names(&self, coin_ids_hex: &[String]) -> SignerResult<Vec<String>> {
         let mut existing = Vec::new();
         for batch in chunk_values(coin_ids_hex, 200) {

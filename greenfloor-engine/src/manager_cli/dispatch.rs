@@ -15,6 +15,11 @@ use super::util::require_market_selector;
 use super::{cats, coin_op_loop, combine_market_cat_dust, keys, setup};
 use crate::cli_util::optional_str;
 
+/// Run manager cli.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
     let (ctx, command) = ManagerContext::from_cli(cli);
     match command {

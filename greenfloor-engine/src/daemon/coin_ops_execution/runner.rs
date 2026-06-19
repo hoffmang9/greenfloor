@@ -19,6 +19,11 @@ use crate::coin_ops::execution::{
 use crate::offer::dexie_payload::extract_coin_ids_from_offer_payload;
 use crate::offer::dexie_payload::DexieOfferPayload;
 
+/// Watched coin ids from open offers.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn watched_coin_ids_from_open_offers(
     store: &SqliteStore,
     market_id: &str,
@@ -154,6 +159,11 @@ pub async fn execute_managed_coin_op_plans(
     }
 }
 
+/// Persist coin op execution.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn persist_coin_op_execution(
     store: &SqliteStore,
     market: &MarketConfig,

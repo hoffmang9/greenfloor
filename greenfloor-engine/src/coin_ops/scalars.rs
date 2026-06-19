@@ -5,6 +5,11 @@
 
 use crate::error::{SignerError, SignerResult};
 
+/// Coin op non negative u64.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn coin_op_non_negative_u64(value: i64, field: &str) -> SignerResult<u64> {
     if value < 0 {
         return Err(SignerError::InvalidPlanValues);
@@ -13,6 +18,11 @@ pub fn coin_op_non_negative_u64(value: i64, field: &str) -> SignerResult<u64> {
         .map_err(|_| SignerError::Other(format!("{field} must fit in u64 for coin-op execution")))
 }
 
+/// I64 to usize.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn i64_to_usize(value: i64, field: &str) -> SignerResult<usize> {
     if value < 0 {
         return Err(SignerError::InvalidPlanValues);
@@ -21,6 +31,11 @@ pub fn i64_to_usize(value: i64, field: &str) -> SignerResult<usize> {
         .map_err(|_| SignerError::Other(format!("{field} must fit in usize for coin-op execution")))
 }
 
+/// Usize to i64.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn usize_to_i64(value: usize, field: &str) -> SignerResult<i64> {
     i64::try_from(value)
         .map_err(|_| SignerError::Other(format!("{field} must fit in i64 for coin-op execution")))

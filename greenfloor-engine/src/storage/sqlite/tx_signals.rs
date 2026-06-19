@@ -7,6 +7,11 @@ use crate::error::{SignerError, SignerResult};
 use super::{utcnow_iso, SqliteStore, TxSignalStateRow};
 
 impl SqliteStore {
+    /// Get tx signal state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn get_tx_signal_state(
         &self,
         tx_ids: &[String],
@@ -66,6 +71,11 @@ impl SqliteStore {
         Ok(out)
     }
 
+    /// Observe mempool tx ids.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn observe_mempool_tx_ids(&self, tx_ids: &[String]) -> SignerResult<u64> {
         if tx_ids.is_empty() {
             return Ok(0);
@@ -94,6 +104,11 @@ impl SqliteStore {
         Ok(inserted)
     }
 
+    /// Confirm tx ids.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn confirm_tx_ids(&self, tx_ids: &[String]) -> SignerResult<u64> {
         if tx_ids.is_empty() {
             return Ok(0);

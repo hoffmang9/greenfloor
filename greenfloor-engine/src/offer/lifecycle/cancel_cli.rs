@@ -77,6 +77,11 @@ fn select_offers_for_cancel(
         .collect())
 }
 
+/// Offers cancel cli.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn offers_cancel_cli(
     db_path: &Path,
     dexie_base_url: &str,

@@ -15,6 +15,7 @@ pub enum LauncherIdSource {
 }
 
 impl LauncherIdSource {
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Self::Arg => "arg",

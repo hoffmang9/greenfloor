@@ -9,6 +9,7 @@ pub struct OfferOperatorTestOverrides {
 }
 
 impl OfferOperatorTestOverrides {
+    #[must_use]
     pub fn from_env() -> Self {
         #[cfg(debug_assertions)]
         {

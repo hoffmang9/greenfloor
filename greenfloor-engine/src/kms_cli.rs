@@ -14,6 +14,11 @@ pub struct KmsPublicKeyArgs {
     pub json: bool,
 }
 
+/// Run kms public key compressed hex.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_kms_public_key_compressed_hex(args: KmsPublicKeyArgs) -> SignerResult<()> {
     let compressed_hex = kms::get_public_key_compressed_hex(&args.key_id, &args.region).await?;
     if args.json {

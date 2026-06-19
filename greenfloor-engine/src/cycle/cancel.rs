@@ -10,6 +10,7 @@ pub struct CancelPolicyDecision {
     pub threshold_bps: i64,
 }
 
+#[must_use]
 pub fn abs_move_bps(current: Option<f64>, previous: Option<f64>) -> Option<f64> {
     let current = current?;
     let previous = previous?;
@@ -19,6 +20,7 @@ pub fn abs_move_bps(current: Option<f64>, previous: Option<f64>) -> Option<f64> 
     Some(((current - previous) / previous).abs() * 10_000.0)
 }
 
+#[must_use]
 pub fn cancel_move_threshold_bps(market_threshold: Option<i64>, env_threshold: Option<i64>) -> i64 {
     if let Some(threshold) = market_threshold {
         if threshold > 0 {
@@ -31,6 +33,7 @@ pub fn cancel_move_threshold_bps(market_threshold: Option<i64>, env_threshold: O
     DEFAULT_CANCEL_MOVE_THRESHOLD_BPS
 }
 
+#[must_use]
 pub fn evaluate_cancel_policy_decision(
     quote_asset_type: &str,
     cancel_policy_stable_vs_unstable: bool,
@@ -100,6 +103,7 @@ fn open_offer_id_for_cancel(offer_id: &str, status: i64) -> Option<String> {
     Some(normalized_id.to_string())
 }
 
+#[must_use]
 pub fn collect_open_offer_ids_for_cancel(offers: &[(String, i64)]) -> Vec<String> {
     offers
         .iter()

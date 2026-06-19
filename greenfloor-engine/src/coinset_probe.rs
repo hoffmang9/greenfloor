@@ -132,6 +132,7 @@ impl ProbeAttempt {
 }
 
 impl EndpointCapability {
+    #[must_use]
     pub fn from_attempts(all: ProbeAttempt, range: ProbeAttempt) -> Self {
         Self {
             all_supported: all.supported,
@@ -145,6 +146,7 @@ impl EndpointCapability {
 }
 
 impl NamesCapability {
+    #[must_use]
     pub fn skipped() -> Self {
         Self {
             sample_name: None,
@@ -157,6 +159,7 @@ impl NamesCapability {
         }
     }
 
+    #[must_use]
     pub fn invalid_sample(sample_name: &str, message: &str) -> Self {
         Self {
             sample_name: Some(sample_name.to_string()),
@@ -169,6 +172,7 @@ impl NamesCapability {
         }
     }
 
+    #[must_use]
     pub fn from_endpoint(sample_name: String, endpoint: EndpointCapability) -> Self {
         Self {
             sample_name: Some(sample_name),
@@ -190,6 +194,7 @@ fn program_config_path(program_config: &str) -> std::path::PathBuf {
     }
 }
 
+#[must_use]
 pub fn sample_coin_id_from_records(records: &[Value]) -> Option<String> {
     for record in records {
         let coin_id = coin_id_from_record(record);
@@ -200,6 +205,7 @@ pub fn sample_coin_id_from_records(records: &[Value]) -> Option<String> {
     None
 }
 
+#[must_use]
 pub fn scan_window_from_peak(peak_height: u64, height_window: u64) -> ScanWindow {
     let height_window = height_window.max(1);
     let start_height = peak_height.saturating_sub(height_window);
@@ -249,6 +255,10 @@ async fn probe_names(
 }
 
 /// Build the Coinset capability probe report without emitting output.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn build_coinset_probe_report(args: CoinsetProbeCliArgs) -> SignerResult<ProbeReport> {
     let program_config_path = program_config_path(&args.program_config);
     let preloaded_program = if args.program_config.trim().is_empty() {
@@ -318,6 +328,10 @@ pub async fn build_coinset_probe_report(args: CoinsetProbeCliArgs) -> SignerResu
 }
 
 /// Probe Coinset height-window API support for vault scans and emit a JSON report.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn run_coinset_probe_command(args: CoinsetProbeCliArgs) -> SignerResult<()> {
     let json = args.json;
     let report = build_coinset_probe_report(args).await?;

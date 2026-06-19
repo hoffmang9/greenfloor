@@ -30,6 +30,7 @@ impl Default for MinimalProgramParams<'_> {
     }
 }
 
+#[must_use]
 pub fn materialize_minimal_program_text(params: MinimalProgramParams<'_>) -> String {
     let log_level = params
         .log_level

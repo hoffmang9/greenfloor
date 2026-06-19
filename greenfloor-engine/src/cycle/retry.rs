@@ -18,6 +18,7 @@ pub fn parse_rate_limit_retry_seconds(error_text: &str) -> Option<f64> {
 }
 
 /// Sleep duration before the next moderate-retry attempt after a failure.
+#[must_use]
 pub fn moderate_retry_sleep_seconds(mut current_sleep: f64, rate_limit_wait: Option<f64>) -> f64 {
     if let Some(wait) = rate_limit_wait {
         current_sleep = current_sleep.max((wait + 0.25).min(30.0));
@@ -26,10 +27,12 @@ pub fn moderate_retry_sleep_seconds(mut current_sleep: f64, rate_limit_wait: Opt
 }
 
 /// Advance sleep for the next moderate-retry attempt (returns updated baseline).
+#[must_use]
 pub fn moderate_retry_next_sleep(current_sleep: f64) -> f64 {
     (current_sleep * 2.0).min(8.0)
 }
 
+#[must_use]
 pub fn dexie_invalid_offer_should_retry(error: &str, attempt: u32, max_attempts: u32) -> bool {
     let normalized = error.trim();
     normalized.contains("dexie_http_error:400")
@@ -37,16 +40,19 @@ pub fn dexie_invalid_offer_should_retry(error: &str, attempt: u32, max_attempts:
         && attempt < max_attempts.saturating_sub(1)
 }
 
+#[must_use]
 pub fn dexie_invalid_offer_retry_sleep(attempt: u32, initial_sleep: f64) -> f64 {
     let multiplier = 2f64.powi(i32::try_from(attempt.min(31)).unwrap_or(31));
     (initial_sleep * multiplier).min(8.0)
 }
 
+#[must_use]
 pub fn coinset_fee_lookup_retry_sleep(attempt: u32) -> f64 {
     (0.5 * 2f64.powi(i32::try_from(attempt.min(31)).unwrap_or(31))).min(8.0)
 }
 
 /// Sleep duration to use after a failed poll tick, or ``None`` when timed out.
+#[must_use]
 pub fn poll_exponential_sleep_now(
     elapsed_seconds: i64,
     timeout_seconds: i64,
@@ -65,6 +71,7 @@ pub fn poll_exponential_sleep_now(
 }
 
 /// Advance sleep baseline after a poll backoff sleep.
+#[must_use]
 pub fn poll_exponential_advance_sleep(
     sleep_seconds: f64,
     initial_sleep: f64,

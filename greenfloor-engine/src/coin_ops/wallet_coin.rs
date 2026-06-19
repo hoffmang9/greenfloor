@@ -1,6 +1,7 @@
 use serde_json::Value;
 
 /// Whether a wallet coin state string is spendable for coin-op selection.
+#[must_use]
 pub fn is_spendable_coin_state(state: &str) -> bool {
     const NON_SPENDABLE: &[&str] = &[
         "PENDING",

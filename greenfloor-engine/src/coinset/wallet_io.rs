@@ -32,6 +32,11 @@ fn wallet_coin_from_id(coin_id: impl AsRef<[u8]>, amount: u64) -> WalletUnspentC
     }
 }
 
+/// List wallet unspent coins.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn list_wallet_unspent_coins(
     network: &str,
     receive_address: &str,
@@ -55,6 +60,11 @@ pub async fn list_wallet_unspent_coins(
         .collect())
 }
 
+/// Spend bundle hash from hex.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn spend_bundle_hash_from_hex(spend_bundle_hex: &str) -> SignerResult<String> {
     let raw = spend_bundle_hex
         .strip_prefix("0x")
@@ -66,11 +76,21 @@ pub fn spend_bundle_hash_from_hex(spend_bundle_hex: &str) -> SignerResult<String
     Ok(format!("0x{}", hex::encode(bundle.hash())))
 }
 
+/// Puzzle hash hex for receive address.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn puzzle_hash_hex_for_receive_address(receive_address: &str) -> SignerResult<String> {
     let puzzle_hash = decode_receive_address(receive_address)?;
     Ok(format!("0x{}", hex::encode(puzzle_hash)))
 }
 
+/// Cat outer puzzle hash hex.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn cat_outer_puzzle_hash_hex(receive_address: &str, asset_id: &str) -> SignerResult<String> {
     let puzzle_hash = decode_receive_address(receive_address)?;
     let asset_bytes = hex_to_bytes32(asset_id)?;
@@ -78,6 +98,11 @@ pub fn cat_outer_puzzle_hash_hex(receive_address: &str, asset_id: &str) -> Signe
     Ok(format!("0x{}", hex::encode(cat_outer)))
 }
 
+/// Extract coin id hints from offer text.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn extract_coin_id_hints_from_offer_text(offer_text: &str) -> SignerResult<Vec<String>> {
     let spend_bundle =
         decode_offer(offer_text).map_err(|err| SignerError::Driver(err.to_string()))?;

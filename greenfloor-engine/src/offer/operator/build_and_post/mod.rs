@@ -51,6 +51,11 @@ pub struct BuildAndPostOfferResponse {
     pub payload: Value,
 }
 
+/// Build and post offer.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn build_and_post_offer(
     request: BuildAndPostOfferRequest,
 ) -> SignerResult<BuildAndPostOfferResponse> {

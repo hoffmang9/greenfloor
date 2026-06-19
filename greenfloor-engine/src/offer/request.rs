@@ -7,6 +7,7 @@ use crate::offer::build_context::mojo_multiplier_for_leg;
 use crate::offer::pricing::quote_mojos_for_base_size;
 
 /// Normalized offer action side: ``buy`` or ``sell``.
+#[must_use]
 pub fn normalize_offer_side(value: &str) -> &'static str {
     if value.trim().eq_ignore_ascii_case("buy") {
         "buy"
@@ -16,6 +17,7 @@ pub fn normalize_offer_side(value: &str) -> &'static str {
 }
 
 /// Asset id to split for bootstrap / presplit given action side.
+#[must_use]
 pub fn signer_split_asset_id(
     action_side: &str,
     resolved_base_asset_id: &str,
@@ -29,6 +31,7 @@ pub fn signer_split_asset_id(
 }
 
 /// Strip optional ``0x`` prefix and lowercase for signer request fields.
+#[must_use]
 pub fn normalize_offer_asset_id(asset_id: &str) -> String {
     let trimmed = asset_id.trim().to_lowercase();
     trimmed.strip_prefix("0x").unwrap_or(&trimmed).to_string()
@@ -68,6 +71,10 @@ fn base_and_quote_leg_mojos(
 }
 
 /// Compute offer/request legs for vault CAT offer construction.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn compute_signer_offer_leg_amounts(
     size_base_units: i64,
     quote_price: f64,

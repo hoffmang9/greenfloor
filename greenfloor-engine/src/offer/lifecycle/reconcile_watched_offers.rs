@@ -58,6 +58,11 @@ fn batch_item_from_transition(
     }
 }
 
+/// Reconcile offers batch.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn reconcile_offers_batch(
     db_path: &Path,
     dexie_base_url: &str,
@@ -129,6 +134,11 @@ pub struct ReconcileCliResult {
     pub items: Vec<ReconcileBatchItem>,
 }
 
+/// Reconcile offers cli.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn reconcile_offers_cli(
     db_path: &Path,
     dexie_base_url: &str,

@@ -47,6 +47,7 @@ pub(crate) fn expand_inputs_by_repeat(actions: &[PlannedActionInput]) -> Vec<Pla
     expanded
 }
 
+#[must_use]
 pub fn expiry_seconds_for_action(expiry_unit: &str, expiry_value: i64) -> Option<i64> {
     if expiry_value <= 0 {
         return None;
@@ -75,6 +76,11 @@ pub struct ManagedOfferReservationRequest<'a> {
     pub fee_amount_mojos: i64,
 }
 
+/// Reservation request for managed offer.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn reservation_request_for_managed_offer(
     request: ManagedOfferReservationRequest<'_>,
 ) -> SignerResult<BTreeMap<String, i64>> {
@@ -116,6 +122,7 @@ pub fn reservation_request_for_managed_offer(
     Ok(request)
 }
 
+#[must_use]
 pub fn single_input_preferred_skip_reason(
     requested_amounts: &BTreeMap<String, i64>,
     spendable_profiles: &BTreeMap<String, SpendableAssetProfile>,

@@ -64,6 +64,11 @@ fn audit_event_row(row: AuditEventRow) -> OfferStatusAuditEvent {
     }
 }
 
+/// Offers status cli.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn offers_status_cli(
     db_path: &Path,
     market_id: Option<&str>,

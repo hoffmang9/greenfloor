@@ -9,6 +9,11 @@ use crate::coinset::{
 };
 use crate::error::{SignerError, SignerResult};
 
+/// Direct coinset client.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn direct_coinset_client(network: &str, base_url: Option<&str>) -> SignerResult<CoinsetClient> {
     let resolved = resolve_direct_client(network, base_url);
     Ok(CoinsetClient::new(resolved.base_url))
@@ -56,6 +61,10 @@ async fn post_coinset_rpc_with(
 }
 
 /// Script/scan Coinset RPC via the direct API host (`api.coinset.org` defaults).
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn post_coinset_rpc(
     network: &str,
     base_url: Option<&str>,
@@ -74,6 +83,11 @@ async fn post_msp_coinset_rpc(
     post_coinset_rpc_with(network, base_url, endpoint, body, msp_coinset_client).await
 }
 
+/// Post coinset coin records.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn post_coinset_coin_records(
     network: &str,
     base_url: Option<&str>,
@@ -83,6 +97,11 @@ pub async fn post_coinset_coin_records(
     coin_records_from_payload(&post_coinset_rpc(network, base_url, endpoint, body).await?)
 }
 
+/// Post coinset record.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn post_coinset_record(
     network: &str,
     base_url: Option<&str>,
@@ -94,6 +113,11 @@ pub async fn post_coinset_record(
     Ok(record_from_payload(&payload, key)?.cloned())
 }
 
+/// Push tx hex.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn push_tx_hex(
     network: &str,
     base_url: Option<&str>,
@@ -113,6 +137,11 @@ pub async fn push_tx_hex(
     }))
 }
 
+/// Get fee estimate.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn get_fee_estimate(
     network: &str,
     base_url: Option<&str>,
@@ -160,6 +189,11 @@ pub fn conservative_fee_from_payload(payload: &Value) -> Option<u64> {
     })
 }
 
+/// Get all mempool tx ids.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn get_all_mempool_tx_ids(
     network: &str,
     base_url: Option<&str>,
@@ -185,6 +219,11 @@ pub async fn get_all_mempool_tx_ids(
         .collect())
 }
 
+/// Get conservative fee estimate.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn get_conservative_fee_estimate(
     network: &str,
     base_url: Option<&str>,

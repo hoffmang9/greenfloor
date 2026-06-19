@@ -6,6 +6,11 @@ use crate::error::{SignerError, SignerResult};
 use super::{utcnow_iso, SqliteStore};
 
 impl SqliteStore {
+    /// Add price policy snapshot.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn add_price_policy_snapshot(
         &self,
         market_id: &str,

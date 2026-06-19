@@ -33,6 +33,11 @@ type SideCounts = (BTreeMap<i64, i64>, BTreeMap<i64, i64>, u64);
 
 pub use time::RESEED_MEMPOOL_MAX_AGE_SECONDS;
 
+/// Watchlist offer ids.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult<HashSet<String>> {
     let tracked_states: HashSet<&str> = [
         OfferLifecycleState::Open.as_str(),
@@ -53,6 +58,11 @@ pub fn watchlist_offer_ids(store: &SqliteStore, market_id: &str) -> SignerResult
     Ok(offer_ids)
 }
 
+/// Recent executed offer ids.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn recent_executed_offer_ids(
     store: &SqliteStore,
     market_id: &str,
@@ -61,6 +71,11 @@ pub fn recent_executed_offer_ids(
     Ok(metadata.into_keys().collect())
 }
 
+/// Watchlist offer ids for coin tracking.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn watchlist_offer_ids_for_coin_tracking(
     store: &SqliteStore,
     market_id: &str,
@@ -113,6 +128,11 @@ fn active_offer_state_summary(
     Ok((active_offer_ids, state_counts, metadata))
 }
 
+/// Active offer counts by size.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn active_offer_counts_by_size(
     store: &SqliteStore,
     market_id: &str,
@@ -129,6 +149,11 @@ pub fn active_offer_counts_by_size(
     Ok((counts, unmapped))
 }
 
+/// Active offer counts by size detail.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn active_offer_counts_by_size_detail(
     store: &SqliteStore,
     market_id: &str,
@@ -166,6 +191,11 @@ fn active_offer_counts_by_size_at(
     Ok((buckets.counts, buckets.unmapped))
 }
 
+/// Active offer counts by size and side.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn active_offer_counts_by_size_and_side(
     store: &SqliteStore,
     market_id: &str,
@@ -182,6 +212,11 @@ pub fn active_offer_counts_by_size_and_side(
     Ok((buy, sell, unmapped))
 }
 
+/// Active offer counts by size and side detail.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn active_offer_counts_by_size_and_side_detail(
     store: &SqliteStore,
     market_id: &str,
@@ -240,6 +275,11 @@ pub fn match_watched_coin_ids(
     cache.match_watched_coin_ids(observed_coin_ids)
 }
 
+/// Update market coin watchlist from offers.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn update_market_coin_watchlist_from_offers(
     store: &SqliteStore,
     cache: &CoinWatchlistCache,

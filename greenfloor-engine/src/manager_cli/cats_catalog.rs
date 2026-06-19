@@ -8,6 +8,11 @@ use serde_yaml::Value as YamlValue;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::{is_hex_id, normalize_hex_id};
 
+/// Load cats catalog.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn load_cats_catalog(path: &Path) -> SignerResult<Vec<JsonValue>> {
     if !path.exists() {
         return Ok(Vec::new());

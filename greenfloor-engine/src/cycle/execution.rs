@@ -73,6 +73,11 @@ fn build_parallel_reservation_prep(
     })
 }
 
+/// Plan parallel managed dispatch.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn plan_parallel_managed_dispatch(
     actions: &[PlannedAction],
     ctx: &ParallelReservationContext,
@@ -132,6 +137,7 @@ pub struct ParallelBatchPlan {
     pub queue: Vec<ParallelQueueItem>,
 }
 
+#[must_use]
 pub fn filter_planned_actions_with_positive_repeat(
     actions: &[PlannedAction],
 ) -> Vec<PlannedAction> {
@@ -142,6 +148,7 @@ pub fn filter_planned_actions_with_positive_repeat(
         .collect()
 }
 
+#[must_use]
 pub fn expand_planned_actions(actions: &[PlannedAction]) -> Vec<PlannedAction> {
     let inputs: Vec<PlannedActionInput> = actions
         .iter()

@@ -27,6 +27,7 @@ pub struct ResolvedDirectClient {
     pub base_url: String,
 }
 
+#[must_use]
 pub fn normalize_coinset_network(network: &str) -> &'static str {
     match network.trim().to_ascii_lowercase().as_str() {
         "testnet" | "testnet11" => "testnet11",
@@ -52,10 +53,12 @@ pub fn explicit_coinset_url_override(base_url: Option<&str>) -> Option<&str> {
     Some(raw)
 }
 
+#[must_use]
 pub fn normalize_direct_base_url_input(base_url: Option<&str>) -> Option<&str> {
     explicit_coinset_url_override(base_url)
 }
 
+#[must_use]
 pub fn resolve_direct_coinset_base_url(network: &str, base_url: Option<&str>) -> String {
     if let Some(url) = normalize_direct_base_url_input(base_url) {
         return url.trim_end_matches('/').to_string();
@@ -67,6 +70,7 @@ pub fn resolve_direct_coinset_base_url(network: &str, base_url: Option<&str>) ->
     }
 }
 
+#[must_use]
 pub fn resolve_direct_client(network: &str, base_url: Option<&str>) -> ResolvedDirectClient {
     let network = normalize_coinset_network(network);
     ResolvedDirectClient {

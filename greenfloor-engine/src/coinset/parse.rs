@@ -18,6 +18,11 @@ fn coinset_rpc_failure_detail(payload: &Value) -> String {
     "coinset rpc returned success=false".to_string()
 }
 
+/// Ensure coinset rpc success.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn ensure_coinset_rpc_success(payload: &Value) -> SignerResult<()> {
     if payload
         .get("success")
@@ -29,6 +34,11 @@ pub fn ensure_coinset_rpc_success(payload: &Value) -> SignerResult<()> {
     Err(SignerError::Coinset(coinset_rpc_failure_detail(payload)))
 }
 
+/// Coin records from payload.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn coin_records_from_payload(payload: &Value) -> SignerResult<Vec<Value>> {
     ensure_coinset_rpc_success(payload)?;
     Ok(payload
@@ -44,6 +54,11 @@ pub fn coin_records_from_payload(payload: &Value) -> SignerResult<Vec<Value>> {
         .unwrap_or_default())
 }
 
+/// Record from payload.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn record_from_payload<'a>(payload: &'a Value, key: &str) -> SignerResult<Option<&'a Value>> {
     ensure_coinset_rpc_success(payload)?;
     Ok(payload.get(key).filter(|value| value.is_object()))
@@ -90,10 +105,12 @@ pub fn coin_id_from_record(record: &Value) -> String {
     hex::encode(Coin::new(parent, puzzle_hash, amount).coin_id())
 }
 
+#[must_use]
 pub fn to_coinset_hex(bytes: &[u8]) -> String {
     format!("0x{}", hex::encode(bytes))
 }
 
+#[must_use]
 pub fn u64_from_value(value: Option<&Value>, default: u64) -> u64 {
     value
         .and_then(|raw| {
@@ -116,6 +133,7 @@ pub fn coin_from_record(record: &Value) -> Option<Coin> {
     Some(Coin::new(parent, puzzle_hash, amount))
 }
 
+#[must_use]
 pub fn coin_spend_from_solution_payload(parent_coin: Coin, solution: &Value) -> Option<CoinSpend> {
     let puzzle_reveal_hex = solution.get("puzzle_reveal")?.as_str()?.trim();
     let solution_hex = solution.get("solution")?.as_str()?.trim();

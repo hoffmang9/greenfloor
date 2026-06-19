@@ -74,16 +74,31 @@ use crate::vault::members::hex_to_bytes32;
 
 pub const MIN_CAT_OUTPUT_MOJOS: u64 = 1000;
 
+/// Client for network.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn client_for_network(network: &str) -> SignerResult<CoinsetClient> {
     MspCoinset::for_network(network, None).map(|msp| msp.client().clone())
 }
 
+/// Client for config.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn client_for_config(config: &crate::config::SignerConfig) -> SignerResult<CoinsetClient> {
     Ok(MspCoinset::new(&config.coinset_msp_base_url)
         .client()
         .clone())
 }
 
+/// Decode receive address.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn decode_receive_address(receive_address: &str) -> SignerResult<Bytes32> {
     Address::decode(receive_address)
         .map_err(|err| SignerError::Other(format!("invalid receive address: {err}")))
@@ -112,6 +127,11 @@ pub(crate) async fn select_cats_for_spend(
     finalize_selected_cats(cats, explicit_coin_ids, target_amount)
 }
 
+/// List unspent xch.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn list_unspent_xch(
     client: &CoinsetClient,
     receive_address: &str,
@@ -119,6 +139,11 @@ pub async fn list_unspent_xch(
     xch::list_unspent_xch(client, receive_address).await
 }
 
+/// List unspent cats.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn list_unspent_cats(
     client: &CoinsetClient,
     receive_address: &str,
@@ -143,6 +168,11 @@ pub async fn list_unspent_cats(
     Ok(cats)
 }
 
+/// List unspent cats by ids.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn list_unspent_cats_by_ids(
     client: &CoinsetClient,
     coin_ids: &[Bytes32],
@@ -166,6 +196,11 @@ pub async fn list_unspent_cats_by_ids(
     Ok(cats)
 }
 
+/// Fetch latest vault.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn fetch_latest_vault(
     client: &CoinsetClient,
     launcher_id: Bytes32,
@@ -224,6 +259,11 @@ pub struct BroadcastSpendBundleResult {
     pub operation_id: String,
 }
 
+/// Broadcast spend bundle.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn broadcast_spend_bundle(
     client: &CoinsetClient,
     spend_bundle: SpendBundle,
@@ -247,6 +287,7 @@ pub async fn broadcast_spend_bundle(
     })
 }
 
+#[must_use]
 pub fn select_cats_smallest_first(cats: Vec<Cat>, target_total: u64) -> Vec<Cat> {
     let mut sorted = cats;
     sorted.sort_by_key(|cat| cat.coin.amount);
@@ -289,10 +330,20 @@ pub(crate) async fn cat_from_record(
     parse_cat_from_parent_spend(record.coin, &parent_spend)
 }
 
+/// Cat from parent spend.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn cat_from_parent_spend(coin: Coin, parent_spend: &CoinSpend) -> SignerResult<Option<Cat>> {
     parse_cat_from_parent_spend(coin, parent_spend)
 }
 
+/// Require cat from parent spend.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn require_cat_from_parent_spend(coin: Coin, parent_spend: &CoinSpend) -> SignerResult<Cat> {
     cat_from_parent_spend(coin, parent_spend)?.ok_or(SignerError::PresplitCoinNotFound)
 }
@@ -319,6 +370,11 @@ fn parse_cat_from_parent_spend(coin: Coin, parent_spend: &CoinSpend) -> SignerRe
         .find(|cat| cat.coin.coin_id() == coin.coin_id()))
 }
 
+/// Child cat asset ids from parent spend.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn child_cat_asset_ids_from_parent_spend(
     parent_coin: Coin,
     parent_spend: &CoinSpend,
@@ -361,6 +417,11 @@ fn coin_records_from_response(response: GetCoinRecordsResponse) -> SignerResult<
     Ok(response.coin_records.unwrap_or_default())
 }
 
+/// Parse coin ids.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn parse_coin_ids(raw_values: &[String]) -> SignerResult<Vec<Bytes32>> {
     raw_values
         .iter()
@@ -368,6 +429,11 @@ pub fn parse_coin_ids(raw_values: &[String]) -> SignerResult<Vec<Bytes32>> {
         .collect()
 }
 
+/// Spend bundle hex.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn spend_bundle_hex(spend_bundle: &SpendBundle) -> SignerResult<String> {
     Ok(hex::encode(spend_bundle.to_bytes().map_err(|err| {
         SignerError::Other(format!("failed to serialize spend bundle: {err}"))

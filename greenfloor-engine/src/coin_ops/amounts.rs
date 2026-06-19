@@ -7,6 +7,11 @@ use crate::error::SignerResult;
 use super::scalars::{coin_op_non_negative_u64_saturating, usize_to_i64};
 use super::selection::SpendableCoin;
 
+/// Combine output amounts.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn combine_output_amounts(total: i64, output_count: usize) -> SignerResult<Vec<u64>> {
     let output_count = output_count.max(1);
     let output_count_i64 = usize_to_i64(output_count, "combine.output_count")?;
@@ -19,6 +24,7 @@ pub fn combine_output_amounts(total: i64, output_count: usize) -> SignerResult<V
     Ok(output_amounts)
 }
 
+#[must_use]
 pub fn total_for_coin_ids(spendable: &[SpendableCoin], coin_ids: &[String]) -> i64 {
     let amount_by_id: HashMap<String, i64> = spendable
         .iter()

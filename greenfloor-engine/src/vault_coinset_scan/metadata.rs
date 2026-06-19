@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::config::normalize_label;
 use crate::hex::normalize_hex_id;
 
+#[must_use]
 pub fn parse_csv_values(values: &[String]) -> Vec<String> {
     let mut parsed = Vec::new();
     for value in values {

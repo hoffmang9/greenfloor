@@ -30,6 +30,10 @@ pub fn normalize_log_level_name(log_level: &str) -> &'static str {
 ///
 /// Matches Python `initialize_manager_file_logging` path and level semantics. Safe to call
 /// more than once; only the first call installs the global subscriber.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn initialize_manager_file_logging(home_dir: &Path, log_level: &str) -> SignerResult<()> {
     let normalized = normalize_log_level_name(log_level);
     let log_path = home_dir.join(LOG_FILE);

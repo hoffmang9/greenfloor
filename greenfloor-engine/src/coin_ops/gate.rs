@@ -17,6 +17,7 @@ pub struct CoinSplitGateResult {
 }
 
 /// Denomination readiness gate for split-until-ready loops (mirrors Python runtime policy).
+#[must_use]
 pub fn evaluate_coin_split_gate(
     asset_scoped_coins: &[serde_json::Value],
     resolved_asset_id: &str,
@@ -54,6 +55,7 @@ pub fn evaluate_coin_split_gate(
 }
 
 /// Stop predicate for coin-op until-ready iteration loops.
+#[must_use]
 pub fn coin_op_should_stop(
     until_ready: bool,
     final_readiness_ready: Option<bool>,
@@ -88,6 +90,7 @@ pub struct CoinCombineGateResult {
 }
 
 /// Denomination readiness for combine-until-ready loops (excess denomination coin cap).
+#[must_use]
 pub fn evaluate_coin_combine_gate(
     asset_scoped_coins: &[serde_json::Value],
     asset_id: &str,

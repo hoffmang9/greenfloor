@@ -19,6 +19,7 @@ pub struct KmsSigner {
 }
 
 impl KmsSigner {
+    #[must_use]
     pub fn from_vault_context(vault_ctx: &VaultSpendContext) -> Self {
         Self {
             key_id: vault_ctx.kms_key_id.clone(),
@@ -26,6 +27,11 @@ impl KmsSigner {
         }
     }
 
+    /// Sign fast forward digest.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub async fn sign_fast_forward_digest(
         &self,
         signature_message: Vec<u8>,
@@ -147,6 +153,11 @@ impl std::fmt::Debug for VaultSpendContext {
     }
 }
 
+/// Build vault spend context from hashes.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn build_vault_spend_context_from_hashes(
     snapshot: &VaultCustodySnapshot,
     hashes: &VaultComputedHashes,

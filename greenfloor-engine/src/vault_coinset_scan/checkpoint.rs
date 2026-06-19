@@ -76,6 +76,7 @@ fn empty_checkpoint(discarded_mismatch: bool) -> LoadedCheckpoint {
     }
 }
 
+#[must_use]
 pub fn clear_cache_files(paths: &[String]) -> BTreeMap<String, String> {
     let mut results = BTreeMap::new();
     for raw_path in paths {
@@ -101,6 +102,11 @@ pub fn clear_cache_files(paths: &[String]) -> BTreeMap<String, String> {
     results
 }
 
+/// Load scan checkpoint.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn load_scan_checkpoint(
     checkpoint_file: &Path,
     network: &str,
@@ -209,6 +215,11 @@ pub struct SaveCheckpointParams<'a> {
     pub scan_end_height: Option<u64>,
 }
 
+/// Save scan checkpoint.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn save_scan_checkpoint(params: &SaveCheckpointParams<'_>) -> SignerResult<()> {
     if let Some(parent) = params.checkpoint_file.parent() {
         std::fs::create_dir_all(parent)
@@ -260,6 +271,11 @@ pub fn save_scan_checkpoint(params: &SaveCheckpointParams<'_>) -> SignerResult<(
     Ok(())
 }
 
+/// Write launcher id file.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn write_launcher_id_file(path: &Path, launcher_id: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -267,6 +283,11 @@ pub fn write_launcher_id_file(path: &Path, launcher_id: &str) -> std::io::Result
     std::fs::write(path, format!("{launcher_id}\n"))
 }
 
+/// Read launcher id file.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn read_launcher_id_file(path: &Path) -> SignerResult<String> {
     if !path.exists() {
         return Ok(String::new());

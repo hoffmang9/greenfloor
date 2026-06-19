@@ -51,6 +51,7 @@ fn compute_low_inventory_threshold(
     low_watermark
 }
 
+#[must_use]
 pub fn evaluate_low_inventory_alert(input: &LowInventoryInput) -> LowInventoryEvaluation {
     if !input.market_enabled || !input.low_inventory_enabled {
         return LowInventoryEvaluation {

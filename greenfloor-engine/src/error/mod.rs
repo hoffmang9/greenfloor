@@ -181,6 +181,7 @@ pub enum SignerError {
 }
 
 impl SignerError {
+    #[must_use]
     pub fn is_parallel_dispatch_transient(&self) -> bool {
         match self {
             Self::ReservationContention(_)
@@ -202,6 +203,7 @@ impl SignerError {
 
 pub type SignerResult<T> = Result<T, SignerError>;
 
+#[must_use]
 pub fn driver_error(err: &chia_sdk_driver::DriverError) -> SignerError {
     SignerError::Driver(err.to_string())
 }

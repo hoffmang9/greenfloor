@@ -11,6 +11,11 @@ pub struct VaultSession {
     pub spend: VaultSpendContext,
 }
 
+/// Resolve vault session.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn resolve_vault_session(config: SignerConfig) -> SignerResult<VaultSession> {
     let kms_public_key_hex = match config.kms_public_key_hex.clone() {
         Some(value) => value,
@@ -23,6 +28,11 @@ pub async fn resolve_vault_session(config: SignerConfig) -> SignerResult<VaultSe
     build_vault_session(&config.vault, &kms_public_key_hex, &config)
 }
 
+/// Build vault session.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn build_vault_session(
     snapshot: &VaultCustodySnapshot,
     kms_public_key_hex: &str,
@@ -35,6 +45,11 @@ pub fn build_vault_session(
     Ok(VaultSession { display, spend })
 }
 
+/// Resolve vault spend context.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn resolve_vault_spend_context(config: SignerConfig) -> SignerResult<VaultSpendContext> {
     Ok(resolve_vault_session(config).await?.spend)
 }

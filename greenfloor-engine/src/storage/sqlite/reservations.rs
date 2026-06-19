@@ -32,6 +32,11 @@ pub struct OfferReservationLeaseRequest<'a> {
 }
 
 impl SqliteStore {
+    /// Try acquire offer reservation lease.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn try_acquire_offer_reservation_lease(
         &self,
         request: &OfferReservationLeaseRequest<'_>,
@@ -166,6 +171,11 @@ impl SqliteStore {
         }
     }
 
+    /// Release offer reservation lease.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn release_offer_reservation_lease(
         &self,
         reservation_id: &str,
@@ -189,6 +199,11 @@ impl SqliteStore {
         super::sqlite_rows_changed(changed)
     }
 
+    /// Expire offer reservation leases.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn expire_offer_reservation_leases(&self, now: Option<DateTime<Utc>>) -> SignerResult<u64> {
         let now_iso = now.unwrap_or_else(Utc::now).to_rfc3339();
         let changed = self
@@ -209,6 +224,11 @@ impl SqliteStore {
         super::sqlite_rows_changed(changed)
     }
 
+    /// Add offer reservation lease.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn add_offer_reservation_lease(
         &self,
         reservation_id: &str,
@@ -259,6 +279,11 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// List offer reservation leases.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn list_offer_reservation_leases(
         &self,
         reservation_id: Option<&str>,
@@ -321,6 +346,11 @@ impl SqliteStore {
         Ok(out)
     }
 
+    /// Get offer reserved amounts by asset.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn get_offer_reserved_amounts_by_asset(
         &self,
         wallet_id: &str,
@@ -359,6 +389,11 @@ impl SqliteStore {
         Ok(out)
     }
 
+    /// Prune offer reservation leases.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn prune_offer_reservation_leases(&self, older_than: DateTime<Utc>) -> SignerResult<u64> {
         let cutoff_iso = older_than.to_rfc3339();
         let changed = self

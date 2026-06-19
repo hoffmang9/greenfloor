@@ -43,10 +43,20 @@ pub struct MarketsConfig {
     pub markets: Vec<MarketConfig>,
 }
 
+/// Load markets config.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn load_markets_config(path: &Path) -> SignerResult<MarketsConfig> {
     load_markets_config_with_overlay(path, None)
 }
 
+/// Load markets config with overlay.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn load_markets_config_with_overlay(
     base_path: &Path,
     overlay_path: Option<&Path>,
@@ -128,6 +138,11 @@ fn read_yaml_mapping(path: &Path) -> SignerResult<Value> {
     })
 }
 
+/// Parse markets config.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn parse_markets_config(raw: &Value) -> SignerResult<MarketsConfig> {
     let root = raw
         .as_object()
@@ -235,6 +250,11 @@ pub fn cancel_policy_stable_vs_unstable(pricing: &Value) -> bool {
         .unwrap_or(false)
 }
 
+/// Resolve market for build.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub fn resolve_market_for_build(
     markets: &MarketsConfig,
     market_id: Option<&str>,

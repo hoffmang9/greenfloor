@@ -45,10 +45,16 @@ pub fn daemon_test_controls_enabled() -> bool {
 }
 
 impl DaemonCycleTestControls {
+    #[must_use]
     pub fn is_non_default(&self) -> bool {
         self.skip_strategy_execution || self.force_market_error_for.is_some()
     }
 
+    /// Ensure allowed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn ensure_allowed(&self) -> SignerResult<()> {
         if self.is_non_default() && !daemon_test_controls_enabled() {
             return Err(crate::error::SignerError::Other(
@@ -125,6 +131,11 @@ impl DaemonRunOnceRequestBody {
 }
 
 impl DaemonRunOnceRequest {
+    /// From json value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn from_json_value(
         value: Value,
         coin_watchlist: Arc<CoinWatchlistCache>,
@@ -163,6 +174,11 @@ pub struct MarketDispatchMetrics {
     pub immediate_requeue_market_ids: Vec<String>,
 }
 
+/// Build cycle plan.
+///
+/// # Errors
+///
+/// Returns an error if the operation fails.
 pub async fn build_cycle_plan(
     request: &DaemonRunOnceRequest,
     resources: &DaemonCycleResources,
@@ -253,6 +269,7 @@ pub struct DaemonCycleSummary {
     pub consumed_immediate_requeues: Vec<String>,
 }
 
+#[must_use]
 pub fn build_cycle_summary(
     plan: &CyclePlan,
     metrics: &MarketDispatchMetrics,
@@ -283,14 +300,17 @@ pub fn build_cycle_summary(
     }
 }
 
+#[must_use]
 pub fn cycle_started_instant() -> Instant {
     Instant::now()
 }
 
+#[must_use]
 pub fn elapsed_ms(started: Instant) -> u64 {
     metric_millis_to_u64(started.elapsed().as_millis())
 }
 
+#[must_use]
 pub fn compute_cycle_exit_code(plan: &CyclePlan, metrics: &MarketDispatchMetrics) -> i32 {
     let attempted = plan.selected_market_ids.len();
     if attempted > 0 && metrics.markets_processed == 0 {

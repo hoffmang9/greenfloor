@@ -12,6 +12,11 @@ pub struct StoredAlertState {
 }
 
 impl SqliteStore {
+    /// Get alert state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn get_alert_state(&self, market_id: &str) -> SignerResult<StoredAlertState> {
         let mut stmt = self
             .conn
@@ -46,6 +51,11 @@ impl SqliteStore {
         })
     }
 
+    /// Upsert alert state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the operation fails.
     pub fn upsert_alert_state(&self, state: &StoredAlertState) -> SignerResult<()> {
         self.conn
             .execute(

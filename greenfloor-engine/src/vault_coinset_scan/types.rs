@@ -16,10 +16,12 @@ pub enum CoinKind {
 }
 
 impl CoinKind {
+    #[must_use]
     pub fn is_xch(self) -> bool {
         matches!(self, Self::Xch)
     }
 
+    #[must_use]
     pub fn is_cat(self) -> bool {
         matches!(self, Self::Cat)
     }
@@ -52,6 +54,7 @@ pub enum AssetTypeFilter {
 }
 
 impl AssetTypeFilter {
+    #[must_use]
     pub fn parse(raw: &str) -> Self {
         match raw.trim().to_ascii_lowercase().as_str() {
             "xch" => Self::Xch,
