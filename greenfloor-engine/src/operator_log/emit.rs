@@ -5,6 +5,7 @@ use crate::error::SignerResult;
 use crate::storage::SqliteStore;
 
 use super::redact::redact_json_for_log;
+pub use super::trace_mirror::trace_audit_mirror;
 
 /// Correlation and identity fields shared by operator tracing events.
 #[derive(Debug, Clone, Copy)]
@@ -36,7 +37,7 @@ impl LogContext {
     };
 }
 
-/// Emit one structured operator trace line at `level`.
+/// Emit one redacted payload blob trace line (tier-2 blob mirror only).
 pub fn trace_audit_outcome(
     level: Level,
     ctx: LogContext,
@@ -87,7 +88,7 @@ pub fn audit_and_trace(
     trace_message: &'static str,
 ) -> SignerResult<()> {
     store.add_audit_event(audit_event_type, payload, market_id)?;
-    trace_audit_outcome(
+    trace_audit_mirror(
         level,
         ctx,
         audit_event_type,
@@ -262,18 +263,21 @@ pub mod trace_capture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operator_log::events::{DAEMON_CYCLE_SUMMARY, OFFER_POST_FAILURE};
+    use crate::operator_log::events::{
+        DAEMON_CYCLE_SUMMARY, DEXIE_OFFERS_ERROR, OFFER_POST_FAILURE,
+    };
     use serde_json::json;
 
     #[test]
-    fn audit_and_trace_persists_full_payload_and_redacts_for_display() {
+    fn audit_and_trace_redacts_offer_text_in_structured_mirror() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = SqliteStore::open(&dir.path().join("greenfloor.sqlite")).expect("open");
+        let capture = trace_capture::TraceCapture::install();
         let secret_tail = "z".repeat(64);
         let secret_offer = format!("offer1{secret_tail}");
         let payload = json!({
             "market_id": "m1",
-            "offer_text": secret_offer,
+            "offer_text": secret_offer.clone(),
             "error": "dexie_http_error:500",
         });
 
@@ -295,13 +299,44 @@ mod tests {
         let stored = events[0].payload.get("offer_text").and_then(Value::as_str);
         assert_eq!(stored, Some(secret_offer.as_str()));
 
-        let redacted = crate::operator_log::redact_json_for_log(&payload);
-        let redacted_offer = redacted
-            .get("offer_text")
-            .and_then(Value::as_str)
-            .expect("redacted offer");
-        assert!(!redacted_offer.contains(&secret_tail));
-        assert!(redacted_offer.contains("len="));
+        let logs = capture.logs();
+        assert!(!logs.contains(&secret_tail));
+        assert!(!logs.contains("payload="));
+        assert!(logs.contains("dexie_http_error:500"));
+    }
+
+    #[test]
+    fn audit_market_cycle_dual_emits_audit_row_and_trace() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = SqliteStore::open(&dir.path().join("greenfloor.sqlite")).expect("open");
+        let capture = trace_capture::TraceCapture::install();
+        let payload = json!({
+            "market_id": "m1",
+            "error": "dexie_http_error:timeout",
+        });
+
+        audit_market_cycle(
+            &store,
+            Level::WARN,
+            DEXIE_OFFERS_ERROR,
+            &payload,
+            "m1",
+            "dexie offers fetch failed",
+        )
+        .expect("audit");
+
+        let events = store
+            .list_recent_audit_events(Some(&[DEXIE_OFFERS_ERROR]), Some("m1"), 1)
+            .expect("events");
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].payload.get("error").and_then(Value::as_str),
+            Some("dexie_http_error:timeout")
+        );
+        let logs = capture.logs();
+        assert!(logs.contains(DEXIE_OFFERS_ERROR));
+        assert!(logs.contains("dexie_http_error:timeout"));
+        assert!(!logs.contains("payload="));
     }
 
     #[test]

@@ -9,7 +9,7 @@ use crate::adapters::{
 };
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{
-    audit_and_trace, audit_market_cycle, trace_audit_outcome, LogContext, OFFER_POST_FAILURE,
+    audit_and_trace, audit_market_cycle, trace_audit_mirror, LogContext, OFFER_POST_FAILURE,
     STRATEGY_OFFER_EXECUTION,
 };
 use crate::storage::{
@@ -208,7 +208,7 @@ pub fn persist_post_failure_if_enabled(
 ) -> SignerResult<()> {
     let payload = post_failure_payload(market_id, publish_venue, error, offer_ref);
     if !persist_results || dry_run {
-        trace_audit_outcome(
+        trace_audit_mirror(
             Level::WARN,
             LogContext::OFFER_POST,
             OFFER_POST_FAILURE,

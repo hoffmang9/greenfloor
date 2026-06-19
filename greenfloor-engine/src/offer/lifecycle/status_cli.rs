@@ -18,10 +18,20 @@ const STATUS_EVENT_TYPES: &[&str] = &[
     OFFER_POST_FAILURE,
     OFFER_CANCEL_POLICY,
     OFFER_LIFECYCLE_TRANSITION,
-    OFFER_RECONCILIATION,
     TAKER_DETECTION,
     DEXIE_OFFERS_ERROR,
 ];
+
+/// Legacy audit names — not emitted by current code; kept so `offers-status` can read old rows.
+const LEGACY_STATUS_EVENT_TYPES: &[&str] = &[OFFER_RECONCILIATION];
+
+fn status_event_types() -> Vec<&'static str> {
+    STATUS_EVENT_TYPES
+        .iter()
+        .chain(LEGACY_STATUS_EVENT_TYPES.iter())
+        .copied()
+        .collect()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OfferStatusRow {
@@ -90,7 +100,11 @@ pub fn offers_status_cli(
         .map(offer_status_row)
         .collect::<Vec<_>>();
     let events = store
-        .list_recent_audit_events(Some(STATUS_EVENT_TYPES), market_filter, events_limit)?
+        .list_recent_audit_events(
+            Some(status_event_types().as_slice()),
+            market_filter,
+            events_limit,
+        )?
         .into_iter()
         .map(audit_event_row)
         .collect::<Vec<_>>();

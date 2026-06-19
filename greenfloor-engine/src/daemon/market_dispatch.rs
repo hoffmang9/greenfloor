@@ -1,5 +1,7 @@
 use crate::cycle::MarketCycleResultState;
 use crate::error::SignerResult;
+use crate::operator_log::{audit_market_cycle, MARKET_CYCLE_ERROR};
+use tracing::Level;
 
 use crate::metrics::{metric_collection_len_to_u64, metric_non_negative_u64};
 
@@ -51,14 +53,17 @@ pub fn record_market_worker_error(
     error: &str,
     source: &str,
 ) -> SignerResult<()> {
-    store.add_audit_event(
-        "market_cycle_error",
+    audit_market_cycle(
+        store,
+        Level::WARN,
+        MARKET_CYCLE_ERROR,
         &serde_json::json!({
             "market_id": market_id,
             "error": error,
             "source": source,
         }),
-        None,
+        market_id,
+        "market cycle worker error",
     )
 }
 
@@ -66,6 +71,7 @@ pub fn record_market_worker_error(
 mod tests {
     use super::*;
     use crate::daemon::reconcile_market_cycle::ReconcileMarketCycleMetrics;
+    use crate::operator_log::{TraceCapture, MARKET_CYCLE_ERROR};
 
     fn sample_output(immediate_requeue: bool) -> SingleMarketCycleOutput {
         let mut state = MarketCycleResultState::default();
@@ -89,5 +95,21 @@ mod tests {
         let metrics =
             aggregate_market_dispatch_metrics(&[sample_output(false), sample_output(true)]);
         assert_eq!(metrics.immediate_requeue_market_ids, vec!["m1".to_string()]);
+    }
+
+    #[test]
+    fn record_market_worker_error_dual_emits_audit_and_trace() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = crate::storage::SqliteStore::open(&dir.path().join("state.db")).expect("open");
+        let capture = TraceCapture::install();
+
+        record_market_worker_error(&store, "m1", "forced failure", "test").expect("record");
+
+        let events = store
+            .list_recent_audit_events(Some(&[MARKET_CYCLE_ERROR]), Some("m1"), 1)
+            .expect("events");
+        assert_eq!(events.len(), 1);
+        assert!(capture.logs().contains(MARKET_CYCLE_ERROR));
+        assert!(capture.logs().contains("forced failure"));
     }
 }

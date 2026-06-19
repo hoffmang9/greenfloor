@@ -8,6 +8,9 @@
 //! Not yet wired:
 //! - Low-inventory alerts — `cycle/notifications.rs`
 //! - Manager coin-op CLI — `manager_cli/coin_ops/*`
+//!
+//! Legacy (read historical DB rows only; not emitted by current code):
+//! - `offer_reconciliation` — superseded by `offer_lifecycle_transition`
 
 pub const DAEMON_CYCLE_STARTED: &str = "daemon_cycle_started";
 pub const DAEMON_CYCLE_COMPLETED: &str = "daemon_cycle_completed";
@@ -48,12 +51,31 @@ pub const COIN_OPS_PLAN: &str = "coin_ops_plan";
 pub const COIN_OPS_SKIPPED_FEE_BUDGET: &str = "coin_ops_skipped_fee_budget";
 pub const COIN_OPS_EXECUTED: &str = "coin_ops_executed";
 
+pub const MARKET_CYCLE_ERROR: &str = "market_cycle_error";
+
+pub const COIN_OP_LEDGER_EXECUTED: &str = "coin_op_executed";
+pub const COIN_OP_LEDGER_SKIPPED: &str = "coin_op_skipped";
+pub const COIN_OP_LEDGER_PLANNED: &str = "coin_op_planned";
+
 pub const OFFER_LIFECYCLE_TRANSITION: &str = "offer_lifecycle_transition";
+/// Legacy audit event name; kept for `offers-status` historical rows only.
 pub const OFFER_RECONCILIATION: &str = "offer_reconciliation";
 pub const TAKER_DETECTION: &str = "taker_detection";
 pub const DEXIE_OFFERS_ERROR: &str = "dexie_offers_error";
 pub const DEXIE_WATCHLIST_AUGMENT_ERROR: &str = "dexie_watchlist_augment_error";
 pub const STALE_OPEN_OFFER_REQUEUE_DETECTED: &str = "stale_open_offer_requeue_detected";
+
+use tracing::Level;
+
+/// Map a coin-op ledger item status to its audit event name and trace level.
+#[must_use]
+pub fn coin_op_ledger_event(status: &str) -> (&'static str, Level) {
+    match status {
+        "executed" => (COIN_OP_LEDGER_EXECUTED, Level::INFO),
+        "planned" => (COIN_OP_LEDGER_PLANNED, Level::DEBUG),
+        _ => (COIN_OP_LEDGER_SKIPPED, Level::DEBUG),
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -67,5 +89,18 @@ mod tests {
         assert!(!XCH_PRICE_SNAPSHOT.is_empty());
         assert!(!COIN_OPS_PLAN.is_empty());
         assert!(!INVENTORY_BUCKET_SCAN.is_empty());
+        assert!(!MARKET_CYCLE_ERROR.is_empty());
+    }
+
+    #[test]
+    fn coin_op_ledger_event_maps_known_statuses() {
+        assert_eq!(
+            coin_op_ledger_event("executed"),
+            (COIN_OP_LEDGER_EXECUTED, Level::INFO)
+        );
+        assert_eq!(
+            coin_op_ledger_event("skipped"),
+            (COIN_OP_LEDGER_SKIPPED, Level::DEBUG)
+        );
     }
 }
