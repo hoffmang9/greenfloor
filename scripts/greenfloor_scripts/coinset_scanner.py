@@ -13,6 +13,7 @@ from greenfloor_scripts.coinset_subprocess import (
     record_from_cli,
     resolve_client_cli,
 )
+from greenfloor_scripts.engine_subprocess import is_retryable_engine_cli_error
 
 T = TypeVar("T")
 
@@ -24,31 +25,7 @@ def chunk_values(values: list[str], chunk_size: int) -> list[list[str]]:
 
 
 def is_retryable_coinset_error(exc: Exception) -> bool:
-    message = str(exc).strip().lower()
-    if not message:
-        return False
-    retry_markers = (
-        "coinset_network_error",
-        "timed out",
-        "timeout",
-        "connection reset",
-        "connection refused",
-        "remote end closed connection",
-        "temporary failure",
-        "temporarily unavailable",
-        "bad gateway",
-        "service unavailable",
-        "too many requests",
-        "http error 429",
-        "coinset_http_error:429",
-        "coinset_http_error:502",
-        "coinset_http_error:503",
-        "coinset_http_error:504",
-        "ssl",
-        "handshake",
-        "cloudflare",
-    )
-    return any(marker in message for marker in retry_markers)
+    return is_retryable_engine_cli_error(exc)
 
 
 def coinset_with_retries(

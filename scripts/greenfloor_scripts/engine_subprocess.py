@@ -11,6 +11,58 @@ from greenfloor_scripts.binaries import (
     resolve_greenfloor_engine_binary,
 )
 
+ENGINE_CLI_FAILED_PREFIX = "engine_cli_failed:"
+
+# Substrings observed in ``SignerError::Coinset`` / reqwest transport failures surfaced
+# as ``engine_cli_failed:error: coinset error: …`` from ``greenfloor-engine`` stderr.
+_RETRYABLE_COINSET_TRANSPORT_MARKERS = (
+    "operation timed out",
+    "connection refused",
+    "connection reset",
+    "remote end closed connection",
+    "error sending request",
+    "temporary failure",
+    "temporarily unavailable",
+    "broken pipe",
+    "http status server error (502",
+    "http status server error (503",
+    "http status server error (504",
+    "http status client error (429",
+    "too many requests",
+    "bad gateway",
+    "service unavailable",
+    "error decoding response body",
+    "ssl",
+    "handshake",
+    "cloudflare",
+)
+
+_NON_RETRYABLE_ENGINE_CLI_MARKERS = (
+    "error: parse body json:",
+    "coinset endpoint is required",
+    "invalid hex:",
+)
+
+
+def engine_cli_error_detail(exc: Exception) -> str | None:
+    message = str(exc).strip()
+    if not message.startswith(ENGINE_CLI_FAILED_PREFIX):
+        return None
+    detail = message[len(ENGINE_CLI_FAILED_PREFIX) :].strip()
+    return detail or None
+
+
+def is_retryable_engine_cli_error(exc: Exception) -> bool:
+    detail = engine_cli_error_detail(exc)
+    if detail is None:
+        return False
+    detail_lower = detail.lower()
+    if any(marker in detail_lower for marker in _NON_RETRYABLE_ENGINE_CLI_MARKERS):
+        return False
+    if "coinset error:" not in detail_lower:
+        return False
+    return any(marker in detail_lower for marker in _RETRYABLE_COINSET_TRANSPORT_MARKERS)
+
 
 def run_engine_json(argv: list[str]) -> Any:
     """Run ``greenfloor-engine`` with ``--json`` and parse stdout.

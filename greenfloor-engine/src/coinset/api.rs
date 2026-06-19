@@ -308,6 +308,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn post_coinset_rpc_surfaces_http_503_as_coinset_error() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/get_blockchain_state")
+            .with_status(503)
+            .with_body("service unavailable")
+            .create_async()
+            .await;
+
+        let err = post_coinset_rpc(
+            "mainnet",
+            Some(&server.url()),
+            "get_blockchain_state",
+            json!({}),
+        )
+        .await
+        .expect_err("503 should fail");
+        let message = err.to_string();
+        assert!(message.starts_with("coinset error:"), "{message}");
+        assert_eq!(
+            message, "coinset error: error decoding response body",
+            "unexpected coinset 503 error text"
+        );
+    }
+
+    #[tokio::test]
     async fn push_tx_hex_returns_success_payload() {
         let bundle = SpendBundle::new(Vec::new(), chia_bls::Signature::default());
         let spend_bundle_hex = hex::encode(

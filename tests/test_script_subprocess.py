@@ -10,8 +10,29 @@ from greenfloor_scripts.coinset_subprocess import (
     record_from_cli,
     resolve_client_cli,
 )
+from greenfloor_scripts.engine_subprocess import (
+    ENGINE_CLI_FAILED_PREFIX,
+    is_retryable_engine_cli_error,
+    run_engine_json,
+)
 from greenfloor_scripts.hex_subprocess import normalize_hex_id
 from greenfloor_scripts.kms_subprocess import get_public_key_compressed_hex
+
+REAL_ENGINE_CLI_COINSET_503 = "engine_cli_failed:error: coinset error: error decoding response body"
+REAL_ENGINE_CLI_PARSE_BODY = (
+    "engine_cli_failed:error: parse body json: expected value at line 1 column 1"
+)
+REAL_ENGINE_CLI_CONNECTION_REFUSED = (
+    "engine_cli_failed:error: coinset error: error sending request for url "
+    "(https://api.coinset.org/get_blockchain_state): client error (Connect): "
+    "tcp connect error: Connection refused (os error 61)"
+)
+
+
+def subprocess_completed(*, returncode: int, stderr: str):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(returncode=returncode, stdout="", stderr=stderr)
 
 
 def test_resolve_client_cli_returns_normalized_fields() -> None:
@@ -83,9 +104,51 @@ def test_record_from_cli_returns_parsed_record() -> None:
     assert "--key" in argv and "blockchain_state" in argv
 
 
-def test_is_retryable_coinset_error_classifies_transient_failures() -> None:
-    assert is_retryable_coinset_error(RuntimeError("coinset_http_error:503"))
-    assert not is_retryable_coinset_error(RuntimeError("invalid puzzle hash"))
+def test_is_retryable_engine_cli_error_classifies_real_stderr_shapes() -> None:
+    assert is_retryable_engine_cli_error(RuntimeError(REAL_ENGINE_CLI_COINSET_503))
+    assert is_retryable_engine_cli_error(RuntimeError(REAL_ENGINE_CLI_CONNECTION_REFUSED))
+    assert not is_retryable_engine_cli_error(RuntimeError(REAL_ENGINE_CLI_PARSE_BODY))
+    assert not is_retryable_engine_cli_error(RuntimeError("invalid puzzle hash"))
+
+
+def test_is_retryable_coinset_error_delegates_to_engine_cli_classification() -> None:
+    assert is_retryable_coinset_error(RuntimeError(REAL_ENGINE_CLI_COINSET_503))
+    assert not is_retryable_coinset_error(RuntimeError(REAL_ENGINE_CLI_PARSE_BODY))
+
+
+def test_coinset_with_retries_succeeds_after_engine_cli_503_failure() -> None:
+    calls = {"count": 0}
+
+    def flaky() -> str:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError(REAL_ENGINE_CLI_COINSET_503)
+        return "ok"
+
+    with patch("greenfloor_scripts.coinset_scanner.time.sleep") as mock_sleep:
+        assert coinset_with_retries(flaky, sleep=mock_sleep) == "ok"
+    assert calls["count"] == 2
+    mock_sleep.assert_called_once()
+
+
+def test_run_engine_json_wraps_stderr_as_engine_cli_failed() -> None:
+    with (
+        patch(
+            "greenfloor_scripts.engine_subprocess.resolve_greenfloor_engine_binary",
+            return_value="/bin/fake-greenfloor-engine",
+        ),
+        patch("greenfloor_scripts.engine_subprocess.subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = subprocess_completed(
+            returncode=1,
+            stderr="error: coinset error: boom",
+        )
+        try:
+            run_engine_json(["coinset", "post"])
+        except RuntimeError as exc:
+            assert str(exc) == f"{ENGINE_CLI_FAILED_PREFIX}error: coinset error: boom"
+        else:
+            raise AssertionError("expected engine_cli_failed")
 
 
 def test_coinset_with_retries_succeeds_after_retryable_failure() -> None:
@@ -94,7 +157,7 @@ def test_coinset_with_retries_succeeds_after_retryable_failure() -> None:
     def flaky() -> str:
         calls["count"] += 1
         if calls["count"] == 1:
-            raise RuntimeError("timed out")
+            raise RuntimeError("engine_cli_failed:error: coinset error: operation timed out")
         return "ok"
 
     with patch("greenfloor_scripts.coinset_scanner.time.sleep") as mock_sleep:
@@ -108,13 +171,13 @@ def test_coinset_with_retries_raises_immediately_on_non_retryable_error() -> Non
 
     def fail_fast() -> None:
         calls["count"] += 1
-        raise RuntimeError("invalid request")
+        raise RuntimeError(REAL_ENGINE_CLI_PARSE_BODY)
 
     with patch("greenfloor_scripts.coinset_scanner.time.sleep") as mock_sleep:
         try:
             coinset_with_retries(fail_fast, sleep=mock_sleep)
         except RuntimeError as exc:
-            assert str(exc) == "invalid request"
+            assert str(exc) == REAL_ENGINE_CLI_PARSE_BODY
         else:
             raise AssertionError("expected non-retryable error")
     assert calls["count"] == 1

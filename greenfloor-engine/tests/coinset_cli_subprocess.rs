@@ -1,7 +1,8 @@
 use chia_protocol::SpendBundle;
 use chia_traits::Streamable;
 use greenfloor_engine::coinset::TESTNET11_DIRECT_BASE_URL;
-use serde_json::Value;
+use mockito::Matcher;
+use serde_json::{json, Value};
 
 #[test]
 fn subprocess_coinset_resolve_client_testnet_defaults_without_base_url() {
@@ -80,6 +81,12 @@ async fn subprocess_coinset_coin_records_filters_non_objects_and_height_flags() 
     let mut server = mockito::Server::new_async().await;
     let _mock = server
         .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .match_body(Matcher::PartialJson(json!({
+            "puzzle_hash": "0x11",
+            "include_spent_coins": false,
+            "start_height": 10,
+            "end_height": 20,
+        })))
         .with_status(200)
         .with_body(r#"{"success":true,"coin_records":[{"coin":{"amount":1}},"bad"]}"#)
         .create_async()
@@ -118,6 +125,45 @@ async fn subprocess_coinset_coin_records_filters_non_objects_and_height_flags() 
         .expect("coin_records array");
     assert_eq!(records.len(), 1);
     assert_eq!(records[0]["coin"]["amount"], 1);
+}
+
+#[tokio::test]
+async fn subprocess_coinset_coin_records_surfaces_coinset_error_on_http_503() {
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/get_coin_records_by_puzzle_hash")
+        .with_status(503)
+        .with_body("service unavailable")
+        .create_async()
+        .await;
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_greenfloor-engine"))
+        .args([
+            "coinset",
+            "coin-records",
+            "--network",
+            "mainnet",
+            "--base-url",
+            &server.url(),
+            "--endpoint",
+            "get_coin_records_by_puzzle_hash",
+            "--body-json",
+            r#"{"puzzle_hash":"0x11","include_spent_coins":false}"#,
+            "--json",
+        ])
+        .output()
+        .expect("spawn greenfloor-engine coinset coin-records subprocess");
+    assert!(
+        !output.status.success(),
+        "expected non-zero exit for HTTP 503, stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("error: coinset error:"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("error decoding response body"),
+        "stderr: {stderr}"
+    );
 }
 
 #[tokio::test]
