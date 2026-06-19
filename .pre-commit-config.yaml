@@ -1,8 +1,8 @@
 ---
-# Fast lint/type gate — matches CI pre-commit step (see .github/workflows/ci.yml).
+# Lint/type/fmt/clippy gate — CI lint-type-test job on ubuntu-latest (see .github/workflows/ci.yml).
+# arm/macOS runners use the separate Test (…) jobs (cargo test only).
 # Full operator safety net before push:
 #   cargo test --manifest-path greenfloor-engine/Cargo.toml
-#   pytest
 #
 # Speed tips:
 #   export PRE_COMMIT_HOME="$(pwd)/.cache/pre-commit"  # reuse hook envs (CI caches this path)
