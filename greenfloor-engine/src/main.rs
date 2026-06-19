@@ -111,7 +111,7 @@ enum Commands {
 #[tokio::main]
 async fn main() {
     let json_mode = std::env::args().any(|arg| arg == "--json");
-    if let Err(err) = run().await {
+    if let Err(err) = Box::pin(run()).await {
         emit_engine_cli_error(&err, json_mode);
         std::process::exit(1);
     }
@@ -170,34 +170,21 @@ async fn run() -> Result<(), Error> {
             expires_at,
             json,
         } => {
-            let config = load_signer_config(&config)?;
-            let parsed_offer_coin_ids = if offer_coin_ids.is_empty() {
-                Vec::new()
-            } else {
-                parse_coin_ids(&offer_coin_ids)?
-            };
-            let parsed_presplit_coin_ids = if presplit_coin_ids.is_empty() {
-                Vec::new()
-            } else {
-                parse_coin_ids(&presplit_coin_ids)?
-            };
-            let result = build_vault_cat_offer(
+            run_create_offer_command(
                 config,
-                CreateOfferRequest {
-                    receive_address,
-                    offer_asset_id,
-                    offer_amount,
-                    request_asset_id,
-                    request_amount,
-                    offer_coin_ids: parsed_offer_coin_ids,
-                    presplit_coin_ids: parsed_presplit_coin_ids,
-                    split_input_coins,
-                    broadcast_split,
-                    expires_at,
-                },
+                receive_address,
+                offer_asset_id,
+                offer_amount,
+                request_asset_id,
+                request_amount,
+                offer_coin_ids,
+                presplit_coin_ids,
+                split_input_coins,
+                broadcast_split,
+                expires_at,
+                json,
             )
             .await?;
-            print_create_offer_result(&result, json)?;
         }
         Commands::Daemon(args) => {
             let code = run_daemon_command(args).await?;
@@ -219,6 +206,51 @@ async fn run() -> Result<(), Error> {
         Commands::VaultCoinsetScan(args) => run_vault_coinset_scan_command(args).await?,
     }
     Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_create_offer_command(
+    config_path: PathBuf,
+    receive_address: String,
+    offer_asset_id: String,
+    offer_amount: u64,
+    request_asset_id: String,
+    request_amount: u64,
+    offer_coin_ids: Vec<String>,
+    presplit_coin_ids: Vec<String>,
+    split_input_coins: bool,
+    broadcast_split: bool,
+    expires_at: Option<u64>,
+    json: bool,
+) -> Result<(), Error> {
+    let config = load_signer_config(&config_path)?;
+    let parsed_offer_coin_ids = if offer_coin_ids.is_empty() {
+        Vec::new()
+    } else {
+        parse_coin_ids(&offer_coin_ids)?
+    };
+    let parsed_presplit_coin_ids = if presplit_coin_ids.is_empty() {
+        Vec::new()
+    } else {
+        parse_coin_ids(&presplit_coin_ids)?
+    };
+    let result = Box::pin(build_vault_cat_offer(
+        config,
+        CreateOfferRequest {
+            receive_address,
+            offer_asset_id,
+            offer_amount,
+            request_asset_id,
+            request_amount,
+            offer_coin_ids: parsed_offer_coin_ids,
+            presplit_coin_ids: parsed_presplit_coin_ids,
+            split_input_coins,
+            broadcast_split,
+            expires_at,
+        },
+    ))
+    .await?;
+    print_create_offer_result(&result, json)
 }
 
 async fn run_mixed_split(

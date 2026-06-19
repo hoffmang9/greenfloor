@@ -1,4 +1,4 @@
-//! Native GreenFloor manager CLI (`greenfloor-manager` binary).
+//! Native `GreenFloor` manager CLI (`greenfloor-manager` binary).
 
 mod cats;
 mod cats_catalog;

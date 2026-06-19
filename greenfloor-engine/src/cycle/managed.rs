@@ -118,18 +118,23 @@ pub fn is_transient_dexie_visibility_404_error(error: &str) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ManagedParallelismGate {
+pub struct ManagedParallelismPolicy {
     pub signer_path_configured: bool,
     pub parallelism_enabled: bool,
     pub runtime_dry_run: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ManagedParallelismGate {
+    pub policy: ManagedParallelismPolicy,
     pub has_coordinator: bool,
 }
 
 #[must_use]
 pub fn can_parallelize_managed_offers(gate: ManagedParallelismGate) -> bool {
-    gate.signer_path_configured
-        && gate.parallelism_enabled
-        && !gate.runtime_dry_run
+    gate.policy.signer_path_configured
+        && gate.policy.parallelism_enabled
+        && !gate.policy.runtime_dry_run
         && gate.has_coordinator
 }
 

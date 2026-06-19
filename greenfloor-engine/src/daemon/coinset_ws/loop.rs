@@ -35,6 +35,11 @@ impl Drop for CoinsetWebsocketLoopHandle {
     }
 }
 
+/// Start the Coinset websocket background loop.
+///
+/// # Panics
+///
+/// Panics if the dedicated Tokio runtime cannot be constructed.
 pub fn start_coinset_websocket_loop(
     db_path: PathBuf,
     program: ManagerProgramConfig,

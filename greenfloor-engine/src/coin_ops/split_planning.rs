@@ -142,6 +142,11 @@ pub fn build_combine_prereq_plan(
     })
 }
 
+/// Plan automatic coin selection for a split operation.
+///
+/// # Panics
+///
+/// Panics if the selected coin is missing after a successful selection branch (internal invariant).
 #[must_use]
 pub fn plan_auto_split_selection(
     candidate_spendable: &[SpendableCoin],

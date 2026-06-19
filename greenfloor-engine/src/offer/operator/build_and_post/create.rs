@@ -41,5 +41,9 @@ pub(super) async fn create_offer(
         broadcast_split: true,
         offer_coin_ids: Vec::new(),
     };
-    build_signer_offer_for_action(signer_config.clone(), request).await
+    Box::pin(build_signer_offer_for_action(
+        signer_config.clone(),
+        request,
+    ))
+    .await
 }

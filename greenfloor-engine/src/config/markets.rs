@@ -255,6 +255,10 @@ pub fn cancel_policy_stable_vs_unstable(pricing: &Value) -> bool {
 /// # Errors
 ///
 /// Returns an error if the operation fails.
+///
+/// # Panics
+///
+/// Panics if `pair` is `None` after the exactly-one selector check (internal invariant).
 pub fn resolve_market_for_build(
     markets: &MarketsConfig,
     market_id: Option<&str>,

@@ -102,21 +102,31 @@ pub fn wallet_fallback_source_label(coinset_scan_empty: bool) -> &'static str {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CoinsetInventoryScanState {
+    pub found_coins: bool,
+    pub empty: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SupplementalInventoryScanState {
+    pub cat_found_coins: bool,
+    pub wallet_found_coins: bool,
+}
+
 #[must_use]
 pub fn resolve_inventory_scan_source(
-    coinset_scan_found_coins: bool,
-    coinset_scan_empty: bool,
-    cat_scan_found_coins: bool,
-    wallet_scan_found_coins: bool,
+    coinset: CoinsetInventoryScanState,
+    supplemental: SupplementalInventoryScanState,
 ) -> &'static str {
-    if coinset_scan_found_coins {
+    if coinset.found_coins {
         return "coinset";
     }
-    if cat_scan_found_coins && coinset_scan_empty {
+    if supplemental.cat_found_coins && coinset.empty {
         return "coinset_cat_scan_fallback_after_empty_coinset_scan";
     }
-    if wallet_scan_found_coins {
-        return wallet_fallback_source_label(coinset_scan_empty);
+    if supplemental.wallet_found_coins {
+        return wallet_fallback_source_label(coinset.empty);
     }
     "config_seed_or_no_asset_scan"
 }
@@ -192,7 +202,16 @@ mod tests {
     #[test]
     fn resolve_inventory_scan_source_prefers_coinset() {
         assert_eq!(
-            resolve_inventory_scan_source(true, false, false, false),
+            resolve_inventory_scan_source(
+                CoinsetInventoryScanState {
+                    found_coins: true,
+                    empty: false,
+                },
+                SupplementalInventoryScanState {
+                    cat_found_coins: false,
+                    wallet_found_coins: false,
+                },
+            ),
             "coinset"
         );
     }
@@ -200,7 +219,16 @@ mod tests {
     #[test]
     fn resolve_inventory_scan_source_uses_cat_after_empty_coinset() {
         assert_eq!(
-            resolve_inventory_scan_source(false, true, true, false),
+            resolve_inventory_scan_source(
+                CoinsetInventoryScanState {
+                    found_coins: false,
+                    empty: true,
+                },
+                SupplementalInventoryScanState {
+                    cat_found_coins: true,
+                    wallet_found_coins: false,
+                },
+            ),
             "coinset_cat_scan_fallback_after_empty_coinset_scan"
         );
     }

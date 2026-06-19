@@ -33,13 +33,13 @@ pub async fn run_post_reconcile_market_phases(
 
     let bucket_counts = run_inventory_phase(store, ctx.resources, market, &mut cycle_state).await?;
 
-    let strategy = run_strategy_phase(store, ctx, market, &mut cycle_state).await?;
+    let strategy = Box::pin(run_strategy_phase(store, ctx, market, &mut cycle_state)).await?;
 
     let _cancel_payload =
         run_market_cancel_phase(store, ctx, market, &ctx.reconcile.offers, &mut cycle_state)
             .await?;
 
-    run_coin_ops_phase(
+    Box::pin(run_coin_ops_phase(
         store,
         ctx,
         market,
@@ -47,7 +47,7 @@ pub async fn run_post_reconcile_market_phases(
         &bucket_counts,
         &strategy.sell_active_counts,
         &strategy.newly_executed_sell_counts,
-    )
+    ))
     .await?;
 
     Ok(cycle_state)

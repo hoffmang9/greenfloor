@@ -14,9 +14,14 @@ use super::context::spendable_coins_for_gate;
 const ITERATION_SLEEP_SECS: u64 = 2;
 
 #[derive(Debug, Clone)]
-pub struct UntilReadyLoopConfig {
+pub struct UntilReadyWaitMode {
     pub until_ready: bool,
     pub no_wait: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct UntilReadyLoopConfig {
+    pub wait: UntilReadyWaitMode,
     pub max_iterations: i32,
     pub explicit_coin_ids: bool,
     /// When true, stop before the iteration body when the gate reports ready.
@@ -64,14 +69,14 @@ fn iteration_stop_reason(
     after_iteration_body: bool,
 ) -> Option<&'static str> {
     if !after_iteration_body
-        && config.until_ready
+        && config.wait.until_ready
         && config.stop_when_gate_ready
         && gate_ready_value == Some(true)
     {
         return Some("ready");
     }
     let (should_stop, reason) = coin_op_should_stop(
-        config.until_ready,
+        config.wait.until_ready,
         gate_ready_value,
         config.explicit_coin_ids,
         i64::from(iteration),
@@ -80,7 +85,7 @@ fn iteration_stop_reason(
     if !should_stop {
         return None;
     }
-    if after_iteration_body || config.until_ready {
+    if after_iteration_body || config.wait.until_ready {
         Some(reason)
     } else {
         None
@@ -144,7 +149,7 @@ where
             stop_reason = reason.to_string();
             break;
         }
-        if config.no_wait {
+        if config.wait.no_wait {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_secs(ITERATION_SLEEP_SECS)).await;

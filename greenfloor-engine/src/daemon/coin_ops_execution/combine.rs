@@ -1,6 +1,6 @@
 use crate::coin_ops::{
     coin_op_non_negative_u64, coin_op_target_amount_allowed, i64_to_usize,
-    plan_auto_combine_inputs, CoinOpPlan, CombineInputSelectionMode,
+    plan_auto_combine_inputs, CoinOpPlan, CombineInputSelectionMode, SpendableCoin,
 };
 
 use super::items::{
@@ -20,10 +20,18 @@ pub(crate) async fn execute_daemon_combine_plan(
     }
 }
 
-async fn execute_daemon_combine_plan_inner(
+struct CombineInputSelection {
+    op_type: String,
+    size_base_units: i64,
+    op_count: i64,
+    combine_input_coin_ids: Vec<String>,
+    spendable: Vec<SpendableCoin>,
+}
+
+async fn prepare_daemon_combine_inputs(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
-) -> CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)> {
+) -> CoinOpSkipResult<CombineInputSelection> {
     let op_type = plan.op_type.as_str();
     let op_count = plan.op_count;
     let size_base_units = plan.size_base_units;
@@ -33,7 +41,7 @@ async fn execute_daemon_combine_plan_inner(
     let canonical_asset_id = ctx.market.base_asset.trim();
 
     if !coin_op_target_amount_allowed(target_coin_amount_mojos, canonical_asset_id) {
-        return Ok((
+        return Err((
             vec![skip_item(
                 op_type,
                 size_base_units,
@@ -47,7 +55,7 @@ async fn execute_daemon_combine_plan_inner(
     let spendable = match ctx.list_spendable_coins().await {
         Ok(coins) => coins,
         Err(err) => {
-            return Ok((
+            return Err((
                 vec![skip_item(
                     op_type,
                     size_base_units,
@@ -82,14 +90,14 @@ async fn execute_daemon_combine_plan_inner(
     ) {
         Ok(ids) => ids,
         Err(reason) => {
-            return Ok((
+            return Err((
                 vec![skip_item(op_type, size_base_units, op_count, reason)],
                 0,
             ));
         }
     };
     if combine_input_coin_ids.len() < 2 {
-        return Ok((
+        return Err((
             vec![skip_item(
                 op_type,
                 size_base_units,
@@ -100,17 +108,38 @@ async fn execute_daemon_combine_plan_inner(
         ));
     }
 
-    let total = total_for_coin_ids(&spendable, &combine_input_coin_ids);
-    let output_amounts = skip_on_signer_err(
+    Ok(CombineInputSelection {
+        op_type: op_type.to_string(),
+        size_base_units,
+        op_count,
+        combine_input_coin_ids,
+        spendable,
+    })
+}
+
+async fn submit_daemon_combine_plan(
+    ctx: &CoinOpExecContext,
+    selection: &CombineInputSelection,
+) -> CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)> {
+    let CombineInputSelection {
         op_type,
         size_base_units,
         op_count,
+        combine_input_coin_ids,
+        spendable,
+    } = selection;
+
+    let total = total_for_coin_ids(spendable, combine_input_coin_ids);
+    let output_amounts = skip_on_signer_err(
+        op_type,
+        *size_base_units,
+        *op_count,
         combine_output_amounts(total, combine_input_coin_ids.len()),
     )?;
     let fee_mojos = skip_on_signer_err(
         op_type,
-        size_base_units,
-        op_count,
+        *size_base_units,
+        *op_count,
         coin_op_non_negative_u64(
             ctx.program.coin_ops_combine_fee_mojos,
             "program.coin_ops_combine_fee_mojos",
@@ -118,14 +147,14 @@ async fn execute_daemon_combine_plan_inner(
     )?;
 
     match ctx
-        .execute_mixed_split(output_amounts, &combine_input_coin_ids, fee_mojos)
+        .execute_mixed_split(output_amounts, combine_input_coin_ids, fee_mojos)
         .await
     {
         Ok(operation_id) => Ok((
             vec![executed_item(
                 op_type,
-                size_base_units,
-                op_count,
+                *size_base_units,
+                *op_count,
                 "signer_combine_submitted",
                 operation_id,
             )],
@@ -134,11 +163,19 @@ async fn execute_daemon_combine_plan_inner(
         Err(err) => Ok((
             vec![skip_item(
                 op_type,
-                size_base_units,
-                op_count,
+                *size_base_units,
+                *op_count,
                 format!("{COIN_OP_ERROR_PREFIX}:{err}"),
             )],
             0,
         )),
     }
+}
+
+async fn execute_daemon_combine_plan_inner(
+    ctx: &CoinOpExecContext,
+    plan: &CoinOpPlan,
+) -> CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)> {
+    let selection = prepare_daemon_combine_inputs(ctx, plan).await?;
+    submit_daemon_combine_plan(ctx, &selection).await
 }

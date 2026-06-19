@@ -37,7 +37,7 @@ pub fn find_repo_root_from(start: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Resolve the GreenFloor repository root for cwd-independent config lookup.
+/// Resolve the `GreenFloor` repository root for cwd-independent config lookup.
 pub fn resolve_repo_root() -> Option<PathBuf> {
     if let Ok(raw) = std::env::var("GREENFLOOR_REPO_ROOT") {
         let path = PathBuf::from(raw.trim());

@@ -67,7 +67,7 @@ fn empty_market_state(xch_price_usd: Option<f64>) -> MarketState {
 
 /// Plan offer-size-gap reseed actions when the ordinary planner returned nothing.
 ///
-/// Callers supply active/target counts from SQLite. Seed templates are derived
+/// Callers supply active/target counts from `SQLite`. Seed templates are derived
 /// internally via [`evaluate_market`] on an empty bucket state.
 #[must_use]
 pub fn plan_reseed_actions_from_gap(

@@ -1,6 +1,6 @@
-//! SQLite persistence for the Rust engine.
+//! `SQLite` persistence for the Rust engine.
 //!
-//! The canonical schema for GreenFloor state lives here. Rust integration tests in
+//! The canonical schema for `GreenFloor` state lives here. Rust integration tests in
 //! `greenfloor-engine/tests/` assert against the same schema via `SqliteStore`.
 
 mod persist;

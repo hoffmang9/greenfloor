@@ -12,4 +12,5 @@ mod tests;
 
 pub use combine::{run_coin_combine, CoinCombineRequest};
 pub use list::{run_coin_status, run_coins_list};
-pub use split::{run_coin_split, CoinSplitRequest};
+pub use split::{run_coin_split, CoinSplitBehavior, CoinSplitGating, CoinSplitRequest};
+pub use until_ready::UntilReadyWaitMode;

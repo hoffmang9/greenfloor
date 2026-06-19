@@ -22,7 +22,7 @@ use super::run_once::{
 };
 use crate::storage::resolve_state_db_path;
 
-/// Daemon cycles always process markets sequentially on one SQLite store.
+/// Daemon cycles always process markets sequentially on one `SQLite` store.
 pub const SEQUENTIAL_MARKET_WORKER_SOURCE: &str = "sequential_market_worker";
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -69,7 +69,12 @@ async fn process_one_market(
         plan,
         reconcile: &reconcile,
     };
-    let mut state = run_post_reconcile_market_phases(store, &phase_context, market).await?;
+    let mut state = Box::pin(run_post_reconcile_market_phases(
+        store,
+        &phase_context,
+        market,
+    ))
+    .await?;
     merge_reconcile_immediate_requeue(&mut state, &reconcile.metrics);
 
     Ok(SingleMarketCycleOutput {
@@ -104,8 +109,14 @@ async fn dispatch_markets(
     let mut worker_errors = 0u64;
     let mut outputs = Vec::with_capacity(markets.len());
     for market in markets {
-        let result =
-            process_one_market(cycle_store, resources, dispatch_context, plan, &market).await;
+        let result = Box::pin(process_one_market(
+            cycle_store,
+            resources,
+            dispatch_context,
+            plan,
+            &market,
+        ))
+        .await;
         match record_market_result(
             cycle_store,
             &market.market_id,
@@ -154,8 +165,14 @@ async fn run_daemon_cycle_once_inner(
     };
     let markets = resources.selected_markets(&plan.selected_market_ids);
 
-    let (cycle_outputs, worker_errors) =
-        dispatch_markets(&cycle_store, &resources, &dispatch_context, &plan, markets).await?;
+    let (cycle_outputs, worker_errors) = Box::pin(dispatch_markets(
+        &cycle_store,
+        &resources,
+        &dispatch_context,
+        &plan,
+        markets,
+    ))
+    .await?;
 
     let mut metrics: MarketDispatchMetrics = aggregate_market_dispatch_metrics(&cycle_outputs);
     metrics.cycle_error_count += worker_errors;

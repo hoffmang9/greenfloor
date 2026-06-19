@@ -23,6 +23,13 @@ impl ScanTuningDefaults {
 }
 
 #[derive(Debug, Clone)]
+pub struct ScanCheckpointControl {
+    pub no_resume_checkpoint: bool,
+    pub incremental_from_checkpoint: bool,
+    pub auto_increment: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct ScanRequest {
     pub network: String,
     pub coinset_base_url: Option<String>,
@@ -34,14 +41,12 @@ pub struct ScanRequest {
     pub requested_cat_tickers: Vec<String>,
     pub checkpoint_file: Option<PathBuf>,
     pub checkpoint_save_interval: u32,
-    pub no_resume_checkpoint: bool,
+    pub checkpoint: ScanCheckpointControl,
     pub nonce_batch_size: u32,
     pub empty_batch_stop_count: u32,
     pub parent_lookup_batch_size: u32,
     pub start_height: Option<u64>,
     pub end_height: Option<u64>,
-    pub incremental_from_checkpoint: bool,
-    pub auto_increment: bool,
     pub cats_config: PathBuf,
     pub markets_config: PathBuf,
     pub testnet_markets_config: Option<PathBuf>,
@@ -79,14 +84,16 @@ pub fn build_cat_dust_scan_request(params: &CatDustScanParams<'_>) -> ScanReques
         requested_cat_tickers: Vec::new(),
         checkpoint_file: None,
         checkpoint_save_interval: 1,
-        no_resume_checkpoint: true,
+        checkpoint: ScanCheckpointControl {
+            no_resume_checkpoint: true,
+            incremental_from_checkpoint: false,
+            auto_increment: false,
+        },
         nonce_batch_size: tuning.nonce_batch_size,
         empty_batch_stop_count: tuning.empty_batch_stop_count,
         parent_lookup_batch_size: tuning.parent_lookup_batch_size,
         start_height: None,
         end_height: None,
-        incremental_from_checkpoint: false,
-        auto_increment: false,
         cats_config: params.cats_config.to_path_buf(),
         markets_config: params.markets_config.to_path_buf(),
         testnet_markets_config: params.testnet_markets_config.map(Path::to_path_buf),

@@ -60,11 +60,21 @@ pub fn materialize_minimal_program_text(params: MinimalProgramParams<'_>) -> Str
         )
 }
 
+/// Write a minimal program YAML fixture to disk.
+///
+/// # Panics
+///
+/// Panics if the file cannot be written.
 pub fn write_minimal_program(path: &Path, params: MinimalProgramParams<'_>) {
     std::fs::write(path, materialize_minimal_program_text(params))
         .unwrap_or_else(|err| panic!("write minimal program yaml {}: {err}", path.display()));
 }
 
+/// Write a minimal program YAML fixture with signer block appended.
+///
+/// # Panics
+///
+/// Panics if the file cannot be written.
 pub fn write_minimal_program_with_signer(path: &Path, params: MinimalProgramParams<'_>) {
     let launcher_id = "aa".repeat(32);
     let mut contents = materialize_minimal_program_text(params);

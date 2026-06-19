@@ -83,6 +83,192 @@ async fn submit_combine_prereq_for_split_inner(
     }
 }
 
+struct SplitPlanContext {
+    op_type: String,
+    op_count: i64,
+    size_base_units: i64,
+    amount_per_coin_mojos: i64,
+    required_amount: i64,
+    canonical_asset_id: String,
+}
+
+fn prepare_split_plan_context(
+    ctx: &CoinOpExecContext,
+    plan: &CoinOpPlan,
+) -> CoinOpSkipResult<SplitPlanContext> {
+    let op_type = plan.op_type.as_str();
+    let op_count = plan.op_count;
+    let size_base_units = plan.size_base_units;
+
+    if op_count == 1 {
+        return Err((
+            vec![skip_item(
+                op_type,
+                size_base_units,
+                op_count,
+                "split_single_coin_noop_skipped",
+            )],
+            0,
+        ));
+    }
+
+    let amount_per_coin_mojos = size_base_units.saturating_mul(ctx.base_unit_mojo_multiplier);
+    let canonical_asset_id = ctx.market.base_asset.trim();
+    if !coin_op_target_amount_allowed(amount_per_coin_mojos, canonical_asset_id) {
+        return Err((
+            vec![skip_item(
+                op_type,
+                size_base_units,
+                op_count,
+                "split_amount_below_coin_op_minimum",
+            )],
+            0,
+        ));
+    }
+
+    Ok(SplitPlanContext {
+        op_type: op_type.to_string(),
+        op_count,
+        size_base_units,
+        amount_per_coin_mojos,
+        required_amount: amount_per_coin_mojos.saturating_mul(op_count),
+        canonical_asset_id: canonical_asset_id.to_string(),
+    })
+}
+
+enum DaemonSplitAttemptResult {
+    Finished((Vec<CoinOpExecItem>, u64)),
+    Retry(String),
+    NoMatchingCoin,
+}
+
+async fn split_candidate_spendable(
+    ctx: &CoinOpExecContext,
+    split_ctx: &SplitPlanContext,
+    attempted_coin_ids: &HashSet<String>,
+) -> CoinOpSkipResult<Vec<SpendableCoin>> {
+    let fresh = match ctx.list_spendable_coins().await {
+        Ok(coins) => coins,
+        Err(err) => {
+            return Err((
+                vec![skip_item(
+                    &split_ctx.op_type,
+                    split_ctx.size_base_units,
+                    split_ctx.op_count,
+                    format!("{COIN_OP_ERROR_PREFIX}:{err}"),
+                )],
+                0,
+            ));
+        }
+    };
+    Ok(fresh
+        .into_iter()
+        .filter(|coin| {
+            !attempted_coin_ids.contains(&coin.id)
+                && !ctx.watched_coin_ids.contains(&coin.id.to_ascii_lowercase())
+        })
+        .collect())
+}
+
+async fn submit_daemon_split_for_coin(
+    ctx: &CoinOpExecContext,
+    split_ctx: &SplitPlanContext,
+    selected_coin_id: String,
+    attempt_index: usize,
+) -> CoinOpSkipResult<DaemonSplitAttemptResult> {
+    let (amount_u64, output_count, fee_mojos) = split_execution_scalars(
+        &split_ctx.op_type,
+        split_ctx.size_base_units,
+        split_ctx.op_count,
+        split_ctx.amount_per_coin_mojos,
+        ctx.program.coin_ops_split_fee_mojos,
+    )?;
+    let output_amounts = vec![amount_u64; output_count];
+    match ctx
+        .execute_mixed_split(
+            output_amounts,
+            std::slice::from_ref(&selected_coin_id),
+            fee_mojos,
+        )
+        .await
+    {
+        Ok(operation_id) => Ok(DaemonSplitAttemptResult::Finished((
+            vec![executed_item(
+                &split_ctx.op_type,
+                split_ctx.size_base_units,
+                split_ctx.op_count,
+                "signer_split_submitted",
+                operation_id,
+            )],
+            1,
+        ))),
+        Err(err) => {
+            let error_text = err.to_string();
+            if error_text.contains("Some selected coins are not spendable") && attempt_index == 0 {
+                Ok(DaemonSplitAttemptResult::Retry(selected_coin_id))
+            } else {
+                Ok(DaemonSplitAttemptResult::Finished((
+                    vec![skip_item(
+                        &split_ctx.op_type,
+                        split_ctx.size_base_units,
+                        split_ctx.op_count,
+                        format!("{COIN_OP_ERROR_PREFIX}:{err}:selected_coin_id={selected_coin_id}"),
+                    )],
+                    0,
+                )))
+            }
+        }
+    }
+}
+
+async fn attempt_daemon_split(
+    ctx: &CoinOpExecContext,
+    split_ctx: &SplitPlanContext,
+    attempt_index: usize,
+    attempted_coin_ids: &HashSet<String>,
+) -> CoinOpSkipResult<DaemonSplitAttemptResult> {
+    let candidate_spendable = split_candidate_spendable(ctx, split_ctx, attempted_coin_ids).await?;
+    let selection = plan_auto_split_selection(
+        &candidate_spendable,
+        split_ctx.required_amount,
+        &split_ctx.canonical_asset_id,
+        SplitPlanningProfile::DaemonAuto,
+        ctx.combine_input_cap,
+        Some(attempt_index == 0),
+    );
+
+    match selection {
+        SplitAutoSelectPlan::CombinePrereq(prereq) => Ok(DaemonSplitAttemptResult::Finished(
+            submit_combine_prereq_for_split_inner(
+                ctx,
+                &split_ctx.op_type,
+                split_ctx.size_base_units,
+                split_ctx.op_count,
+                &prereq,
+            )
+            .await?,
+        )),
+        SplitAutoSelectPlan::Skip(skip) => {
+            if skip.reason == "no_spendable_split_coin_meets_required_amount" {
+                Ok(DaemonSplitAttemptResult::NoMatchingCoin)
+            } else {
+                Ok(DaemonSplitAttemptResult::Finished((
+                    vec![skip_item(
+                        &split_ctx.op_type,
+                        split_ctx.size_base_units,
+                        split_ctx.op_count,
+                        skip.reason,
+                    )],
+                    0,
+                )))
+            }
+        }
+        SplitAutoSelectPlan::Coin(selected) => {
+            submit_daemon_split_for_coin(ctx, split_ctx, selected.coin_id, attempt_index).await
+        }
+    }
+}
+
 pub(crate) async fn execute_daemon_split_plan(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
@@ -97,45 +283,16 @@ async fn execute_daemon_split_plan_inner(
     ctx: &CoinOpExecContext,
     plan: &CoinOpPlan,
 ) -> CoinOpSkipResult<(Vec<CoinOpExecItem>, u64)> {
-    let op_type = plan.op_type.as_str();
-    let op_count = plan.op_count;
-    let size_base_units = plan.size_base_units;
+    let split_ctx = prepare_split_plan_context(ctx, plan)?;
 
-    if op_count == 1 {
-        return Ok((
-            vec![skip_item(
-                op_type,
-                size_base_units,
-                op_count,
-                "split_single_coin_noop_skipped",
-            )],
-            0,
-        ));
-    }
-
-    let amount_per_coin_mojos = size_base_units.saturating_mul(ctx.base_unit_mojo_multiplier);
-    let canonical_asset_id = ctx.market.base_asset.trim();
-    if !coin_op_target_amount_allowed(amount_per_coin_mojos, canonical_asset_id) {
-        return Ok((
-            vec![skip_item(
-                op_type,
-                size_base_units,
-                op_count,
-                "split_amount_below_coin_op_minimum",
-            )],
-            0,
-        ));
-    }
-
-    let required_amount = amount_per_coin_mojos.saturating_mul(op_count);
     let initial = match ctx.list_spendable_coins().await {
         Ok(coins) => coins,
         Err(err) => {
-            return Ok((
+            return Err((
                 vec![skip_item(
-                    op_type,
-                    size_base_units,
-                    op_count,
+                    &split_ctx.op_type,
+                    split_ctx.size_base_units,
+                    split_ctx.op_count,
                     format!("{COIN_OP_ERROR_PREFIX}:{err}"),
                 )],
                 0,
@@ -143,11 +300,11 @@ async fn execute_daemon_split_plan_inner(
         }
     };
     if initial.is_empty() {
-        return Ok((
+        return Err((
             vec![skip_item(
-                op_type,
-                size_base_units,
-                op_count,
+                &split_ctx.op_type,
+                split_ctx.size_base_units,
+                split_ctx.op_count,
                 "no_spendable_split_coin_available",
             )],
             0,
@@ -156,117 +313,20 @@ async fn execute_daemon_split_plan_inner(
 
     let mut attempted_coin_ids = HashSet::new();
     for attempt_index in 0..2 {
-        let fresh = match ctx.list_spendable_coins().await {
-            Ok(coins) => coins,
-            Err(err) => {
-                return Ok((
-                    vec![skip_item(
-                        op_type,
-                        size_base_units,
-                        op_count,
-                        format!("{COIN_OP_ERROR_PREFIX}:{err}"),
-                    )],
-                    0,
-                ));
+        match attempt_daemon_split(ctx, &split_ctx, attempt_index, &attempted_coin_ids).await? {
+            DaemonSplitAttemptResult::Finished(result) => return Ok(result),
+            DaemonSplitAttemptResult::Retry(coin_id) => {
+                attempted_coin_ids.insert(coin_id);
             }
-        };
-        let candidate_spendable: Vec<SpendableCoin> = fresh
-            .into_iter()
-            .filter(|coin| {
-                !attempted_coin_ids.contains(&coin.id)
-                    && !ctx.watched_coin_ids.contains(&coin.id.to_ascii_lowercase())
-            })
-            .collect();
-
-        let selection = plan_auto_split_selection(
-            &candidate_spendable,
-            required_amount,
-            canonical_asset_id,
-            SplitPlanningProfile::DaemonAuto,
-            ctx.combine_input_cap,
-            Some(attempt_index == 0),
-        );
-
-        match selection {
-            SplitAutoSelectPlan::CombinePrereq(prereq) => {
-                return submit_combine_prereq_for_split_inner(
-                    ctx,
-                    op_type,
-                    size_base_units,
-                    op_count,
-                    &prereq,
-                )
-                .await;
-            }
-            SplitAutoSelectPlan::Skip(skip) => {
-                if skip.reason == "no_spendable_split_coin_meets_required_amount" {
-                    break;
-                }
-                return Ok((
-                    vec![skip_item(op_type, size_base_units, op_count, skip.reason)],
-                    0,
-                ));
-            }
-            SplitAutoSelectPlan::Coin(selected) => {
-                attempted_coin_ids.insert(selected.coin_id.clone());
-                let (amount_u64, output_count, fee_mojos) = split_execution_scalars(
-                    op_type,
-                    size_base_units,
-                    op_count,
-                    amount_per_coin_mojos,
-                    ctx.program.coin_ops_split_fee_mojos,
-                )?;
-                let output_amounts = vec![amount_u64; output_count];
-                match ctx
-                    .execute_mixed_split(
-                        output_amounts,
-                        std::slice::from_ref(&selected.coin_id),
-                        fee_mojos,
-                    )
-                    .await
-                {
-                    Ok(operation_id) => {
-                        return Ok((
-                            vec![executed_item(
-                                op_type,
-                                size_base_units,
-                                op_count,
-                                "signer_split_submitted",
-                                operation_id,
-                            )],
-                            1,
-                        ));
-                    }
-                    Err(err) => {
-                        let error_text = err.to_string();
-                        if error_text.contains("Some selected coins are not spendable")
-                            && attempt_index == 0
-                        {
-                            continue;
-                        }
-                        return Ok((
-                            vec![skip_item(
-                                op_type,
-                                size_base_units,
-                                op_count,
-                                format!(
-                                    "{COIN_OP_ERROR_PREFIX}:{err}:selected_coin_id={}",
-                                    selected.coin_id
-                                ),
-                            )],
-                            0,
-                        ));
-                    }
-                }
-            }
+            DaemonSplitAttemptResult::NoMatchingCoin => break,
         }
     }
 
     Ok((
         vec![skip_item(
-            op_type,
-            size_base_units,
-            op_count,
+            &split_ctx.op_type,
+            split_ctx.size_base_units,
+            split_ctx.op_count,
             "no_spendable_split_coin_meets_required_amount",
         )],
         0,

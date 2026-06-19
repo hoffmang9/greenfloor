@@ -6,7 +6,9 @@ use crate::coin_ops::{
     coin_op_target_amount_allowed, effective_sell_bucket_counts_for_coin_ops,
     partition_plans_by_budget, plan_coin_ops, projected_coin_ops_fee_mojos, BucketSpec, CoinOpPlan,
 };
-use crate::config::{signer_execution_skip_reason, MarketConfig};
+use crate::config::{
+    signer_execution_skip_reason, LadderEntry, ManagerProgramConfig, MarketConfig,
+};
 use crate::error::SignerResult;
 use crate::hex::default_mojo_multiplier_for_asset;
 use crate::storage::SqliteStore;
@@ -17,43 +19,23 @@ use super::coin_ops_execution::{
 };
 use super::market_context::MarketCycleContext;
 
-pub async fn run_coin_ops_phase(
-    store: &SqliteStore,
-    ctx: &MarketCycleContext<'_>,
-    market: &MarketConfig,
-    offers: &[Value],
-    wallet_bucket_counts: &BTreeMap<i64, i64>,
-    active_counts: &BTreeMap<i64, i64>,
-    newly_executed_counts: &BTreeMap<i64, i64>,
-) -> SignerResult<()> {
-    let program = ctx.resources.program();
-    let resources = &ctx.resources;
-    let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
-    if sell_ladder.is_empty() {
-        store.add_audit_event(
-            "coin_ops_no_plans",
-            &json!({"market_id": market.market_id, "reason": "empty_sell_ladder"}),
-            Some(&market.market_id),
-        )?;
-        return Ok(());
-    }
+struct CoinOpsPlanningResult {
+    plans: Vec<CoinOpPlan>,
+    projected_fee: i64,
+    spent_today: i64,
+    executable_plans: Vec<CoinOpPlan>,
+    overflow_plans: Vec<CoinOpPlan>,
+}
 
-    let bucket_counts = effective_sell_bucket_counts_for_coin_ops(
-        &sell_ladder
-            .iter()
-            .map(|entry| crate::coin_ops::LadderTargetRow {
-                size_base_units: entry.size_base_units,
-                target_count: entry.target_count,
-            })
-            .collect::<Vec<_>>(),
-        wallet_bucket_counts,
-        Some(active_counts),
-        Some(newly_executed_counts),
-    );
+fn build_valid_sell_ladder(
+    store: &SqliteStore,
+    market: &MarketConfig,
+    sell_ladder: &[LadderEntry],
+) -> SignerResult<Vec<LadderEntry>> {
     let base_unit_multiplier = default_mojo_multiplier_for_asset(market.base_asset.trim());
     let mut valid_ladder = Vec::new();
     let mut invalid_buckets = Vec::new();
-    for entry in &sell_ladder {
+    for entry in sell_ladder {
         if entry.size_base_units <= 0 {
             continue;
         }
@@ -78,10 +60,30 @@ pub async fn run_coin_ops_phase(
             Some(&market.market_id),
         )?;
     }
-    if valid_ladder.is_empty() {
-        return Ok(());
-    }
+    Ok(valid_ladder)
+}
 
+fn plan_coin_ops_for_market(
+    store: &SqliteStore,
+    program: &ManagerProgramConfig,
+    market: &MarketConfig,
+    valid_ladder: &[LadderEntry],
+    wallet_bucket_counts: &BTreeMap<i64, i64>,
+    active_counts: &BTreeMap<i64, i64>,
+    newly_executed_counts: &BTreeMap<i64, i64>,
+) -> SignerResult<Option<CoinOpsPlanningResult>> {
+    let bucket_counts = effective_sell_bucket_counts_for_coin_ops(
+        &valid_ladder
+            .iter()
+            .map(|entry| crate::coin_ops::LadderTargetRow {
+                size_base_units: entry.size_base_units,
+                target_count: entry.target_count,
+            })
+            .collect::<Vec<_>>(),
+        wallet_bucket_counts,
+        Some(active_counts),
+        Some(newly_executed_counts),
+    );
     let buckets: Vec<BucketSpec> = valid_ladder
         .iter()
         .map(|entry| BucketSpec {
@@ -116,7 +118,7 @@ pub async fn run_coin_ops_phase(
             &json!({"market_id": market.market_id}),
             Some(&market.market_id),
         )?;
-        return Ok(());
+        return Ok(None);
     }
 
     let projected_fee = projected_coin_ops_fee_mojos(
@@ -132,10 +134,26 @@ pub async fn run_coin_ops_phase(
         spent_today,
         program.coin_ops_max_daily_fee_budget_mojos,
     );
+    Ok(Some(CoinOpsPlanningResult {
+        plans,
+        projected_fee,
+        spent_today,
+        executable_plans,
+        overflow_plans,
+    }))
+}
 
+async fn execute_coin_ops_plans(
+    store: &SqliteStore,
+    ctx: &MarketCycleContext<'_>,
+    market: &MarketConfig,
+    program: &ManagerProgramConfig,
+    planning: &CoinOpsPlanningResult,
+    offers: &[Value],
+) -> SignerResult<CoinOpExecutionResult> {
     let watched_coin_ids = watched_coin_ids_from_open_offers(store, &market.market_id, offers)?;
-    let mut execution = if executable_plans.is_empty() {
-        CoinOpExecutionResult {
+    if planning.executable_plans.is_empty() {
+        return Ok(CoinOpExecutionResult {
             dry_run: program.runtime_dry_run,
             planned_count: 0,
             executed_count: 0,
@@ -146,75 +164,83 @@ pub async fn run_coin_ops_phase(
                 "key_id": market.signer_key_id,
                 "network": program.network,
             }),
-        }
-    } else {
-        match resources.signer_for_execution() {
-            Ok(signer) => {
-                execute_managed_coin_op_plans(
-                    program,
-                    signer,
-                    market,
-                    &executable_plans,
-                    &watched_coin_ids,
-                )
-                .await
-            }
-            Err(err) => skipped_coin_ops_result(
-                program,
-                market,
-                &executable_plans,
-                &signer_execution_skip_reason(&err),
-            ),
-        }
-    };
+        });
+    }
 
-    if !overflow_plans.is_empty() {
+    match ctx.resources.signer_for_execution() {
+        Ok(signer) => Ok(Box::pin(execute_managed_coin_op_plans(
+            program,
+            signer,
+            market,
+            &planning.executable_plans,
+            &watched_coin_ids,
+        ))
+        .await),
+        Err(err) => Ok(skipped_coin_ops_result(
+            program,
+            market,
+            &planning.executable_plans,
+            &signer_execution_skip_reason(&err),
+        )),
+    }
+}
+
+fn apply_overflow_plan_skips(execution: &mut CoinOpExecutionResult, overflow_plans: &[CoinOpPlan]) {
+    execution
+        .items
+        .extend(overflow_plans.iter().map(|plan| CoinOpExecItem {
+            op_type: plan.op_type.as_str().to_string(),
+            size_base_units: plan.size_base_units,
+            op_count: plan.op_count,
+            status: "skipped".to_string(),
+            reason: "fee_budget_guard".to_string(),
+            operation_id: None,
+        }));
+}
+
+fn record_coin_ops_phase_audit(
+    store: &SqliteStore,
+    market: &MarketConfig,
+    program: &ManagerProgramConfig,
+    planning: &CoinOpsPlanningResult,
+    execution: &CoinOpExecutionResult,
+) -> SignerResult<()> {
+    if !planning.overflow_plans.is_empty() {
         store.add_audit_event(
             "coin_ops_partial_or_skipped_fee_budget",
             &json!({
                 "market_id": market.market_id,
-                "spent_today_mojos": spent_today,
-                "projected_mojos": projected_fee,
+                "spent_today_mojos": planning.spent_today,
+                "projected_mojos": planning.projected_fee,
                 "max_daily_fee_budget_mojos": program.coin_ops_max_daily_fee_budget_mojos,
-                "overflow_plans": overflow_plans
+                "overflow_plans": planning.overflow_plans
                     .iter()
                     .map(plan_summary)
                     .collect::<Vec<_>>(),
             }),
             Some(&market.market_id),
         )?;
-        execution
-            .items
-            .extend(overflow_plans.iter().map(|plan| CoinOpExecItem {
-                op_type: plan.op_type.as_str().to_string(),
-                size_base_units: plan.size_base_units,
-                op_count: plan.op_count,
-                status: "skipped".to_string(),
-                reason: "fee_budget_guard".to_string(),
-                operation_id: None,
-            }));
     }
-    execution.planned_count = plans.len();
 
     store.add_audit_event(
         "coin_ops_plan",
         &json!({
             "market_id": market.market_id,
-            "projected_fee_mojos": projected_fee,
-            "spent_today_mojos": spent_today,
-            "plans": plans.iter().map(plan_summary).collect::<Vec<_>>(),
-            "execution": execution_payload(&execution),
+            "projected_fee_mojos": planning.projected_fee,
+            "spent_today_mojos": planning.spent_today,
+            "plans": planning.plans.iter().map(plan_summary).collect::<Vec<_>>(),
+            "execution": execution_payload(execution),
         }),
         Some(&market.market_id),
     )?;
 
-    if executable_plans.is_empty() {
+    if planning.executable_plans.is_empty() {
         store.add_audit_event(
             "coin_ops_skipped_fee_budget",
             &json!({
                 "market_id": market.market_id,
-                "plan_count": plans.len(),
-                "overflow_count": overflow_plans.len(),
+                "plan_count": planning.plans.len(),
+                "overflow_count": planning.overflow_plans.len(),
             }),
             Some(&market.market_id),
         )?;
@@ -223,20 +249,66 @@ pub async fn run_coin_ops_phase(
             "coin_ops_executed",
             &json!({
                 "market_id": market.market_id,
-                "plan_count": plans.len(),
-                "executable_count": executable_plans.len(),
-                "overflow_count": overflow_plans.len(),
+                "plan_count": planning.plans.len(),
+                "executable_count": planning.executable_plans.len(),
+                "overflow_count": planning.overflow_plans.len(),
             }),
             Some(&market.market_id),
         )?;
     }
+    Ok(())
+}
 
+pub async fn run_coin_ops_phase(
+    store: &SqliteStore,
+    ctx: &MarketCycleContext<'_>,
+    market: &MarketConfig,
+    offers: &[Value],
+    wallet_bucket_counts: &BTreeMap<i64, i64>,
+    active_counts: &BTreeMap<i64, i64>,
+    newly_executed_counts: &BTreeMap<i64, i64>,
+) -> SignerResult<()> {
+    let program = ctx.resources.program();
+    let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
+    if sell_ladder.is_empty() {
+        store.add_audit_event(
+            "coin_ops_no_plans",
+            &json!({"market_id": market.market_id, "reason": "empty_sell_ladder"}),
+            Some(&market.market_id),
+        )?;
+        return Ok(());
+    }
+
+    let valid_ladder = build_valid_sell_ladder(store, market, &sell_ladder)?;
+    if valid_ladder.is_empty() {
+        return Ok(());
+    }
+
+    let Some(planning) = plan_coin_ops_for_market(
+        store,
+        program,
+        market,
+        &valid_ladder,
+        wallet_bucket_counts,
+        active_counts,
+        newly_executed_counts,
+    )?
+    else {
+        return Ok(());
+    };
+
+    let mut execution =
+        execute_coin_ops_plans(store, ctx, market, program, &planning, offers).await?;
+    apply_overflow_plan_skips(&mut execution, &planning.overflow_plans);
+    execution.planned_count = planning.plans.len();
+
+    record_coin_ops_phase_audit(store, market, program, &planning, &execution)?;
     persist_coin_op_execution(store, market, program, &execution)?;
     Ok(())
 }
 
 fn skipped_coin_ops_result(
-    program: &crate::config::ManagerProgramConfig,
+    program: &ManagerProgramConfig,
     market: &MarketConfig,
     plans: &[CoinOpPlan],
     reason: &str,

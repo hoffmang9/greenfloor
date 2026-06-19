@@ -73,6 +73,10 @@ fn count_exact_amount_coins(
 }
 
 /// Build a one-shot mixed-output bootstrap plan from ladder deficits.
+///
+/// # Panics
+///
+/// Panics if a positive deficit does not fit in `usize` (internal invariant).
 pub fn plan_bootstrap_mixed_outputs(
     ladder_entries: &[PlannerLadderRow],
     spendable_coins: &[BootstrapCoin],

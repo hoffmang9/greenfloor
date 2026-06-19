@@ -119,14 +119,19 @@ fn market_fields_row(market: &crate::config::MarketConfig) -> serde_json::Value 
 }
 
 #[derive(Clone, Copy)]
+pub struct MaterializeMinimalProgramFeatureFlags {
+    pub dry_run: bool,
+    pub low_inventory_alerts_enabled: bool,
+    pub pushover_enabled: bool,
+}
+
+#[derive(Clone, Copy)]
 pub struct MaterializeMinimalProgramRequest<'a> {
     pub output: &'a Path,
     pub home_dir: &'a Path,
     pub dexie_api_base: &'a str,
     pub log_level: &'a str,
-    pub dry_run: bool,
-    pub low_inventory_alerts_enabled: bool,
-    pub pushover_enabled: bool,
+    pub features: MaterializeMinimalProgramFeatureFlags,
     pub with_signer: bool,
 }
 
@@ -135,9 +140,9 @@ pub fn run_materialize_minimal_program(request: MaterializeMinimalProgramRequest
         home_dir: request.home_dir,
         dexie_api_base: request.dexie_api_base,
         log_level: Some(request.log_level),
-        dry_run: request.dry_run,
-        low_inventory_alerts_enabled: request.low_inventory_alerts_enabled,
-        pushover_enabled: request.pushover_enabled,
+        dry_run: request.features.dry_run,
+        low_inventory_alerts_enabled: request.features.low_inventory_alerts_enabled,
+        pushover_enabled: request.features.pushover_enabled,
     };
     if request.with_signer {
         write_minimal_program_with_signer(request.output, params);
