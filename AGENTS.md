@@ -68,8 +68,11 @@ Severity tags:
 
 ## Design Constraints
 
-- `[MUST]` Prefer direct function calls within a package; do not spawn subprocesses for same-env
-  Python calls unless isolation/security is documented in `docs/decisions/`.
+- `[MUST]` Prefer direct function calls within Rust operator code and within a Python module;
+  do not spawn subprocesses for same-env Rust calls or Python-to-Python calls unless
+  isolation/security is documented in `docs/decisions/`.
+- `[MUST]` `scripts/greenfloor_scripts/` subprocess bridges to native binaries (`greenfloor-engine`,
+  `greenfloor-manager`) are the canonical script IO path — not a violation of the rule above.
 - `[MUST]` Avoid unnecessary indirection layers (`executor`, `worker`, `engine`, etc.).
 - `[MUST]` Keep one distinct responsibility per file; merge pass-through modules into functions.
 - `[MUST]` Eliminate duplicated logic blocks (>10 lines) by extracting shared helpers.

@@ -11,7 +11,6 @@
 #![allow(clippy::implicit_hasher)]
 
 pub mod adapters;
-pub mod binaries;
 pub mod cli_util;
 pub mod coin_ops;
 pub mod coinset;

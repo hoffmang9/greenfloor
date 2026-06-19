@@ -1,4 +1,5 @@
-pub mod adapter;
+#[cfg(test)]
+pub(crate) mod adapter;
 mod api;
 mod asset;
 mod backend;
@@ -10,10 +11,6 @@ pub(crate) mod test_support;
 mod wallet_io;
 mod xch;
 
-pub use adapter::{
-    normalize_coinset_network, resolve_coinset_base_url, CoinsetReadClient, MAINNET_BASE_URL,
-    TESTNET11_BASE_URL,
-};
 pub use api::{
     conservative_fee_from_payload, get_all_mempool_tx_ids, get_conservative_fee_estimate,
     get_fee_estimate, post_coinset_rpc, push_tx_hex,

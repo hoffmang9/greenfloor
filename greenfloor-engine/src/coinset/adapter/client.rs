@@ -11,7 +11,7 @@ use crate::coinset::{post_coinset_rpc, push_tx_hex};
 use crate::error::{SignerError, SignerResult};
 
 #[derive(Debug, Clone)]
-pub struct CoinsetReadClient {
+pub(crate) struct CoinsetReadClient {
     pub network: String,
     pub base_url: String,
 }

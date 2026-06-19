@@ -1,13 +1,9 @@
-//! Script-facing Coinset client for direct API hosts (`api.coinset.org`).
+//! Direct Coinset API helpers for unit tests (`api.coinset.org` script paths use `coinset_cli`).
 
+#[cfg(test)]
 mod client;
 mod network;
 mod parse;
 
 #[cfg(test)]
 mod tests;
-
-pub use client::CoinsetReadClient;
-pub use network::{
-    normalize_coinset_network, resolve_coinset_base_url, MAINNET_BASE_URL, TESTNET11_BASE_URL,
-};

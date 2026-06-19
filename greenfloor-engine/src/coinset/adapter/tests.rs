@@ -3,9 +3,10 @@ use chia_traits::Streamable;
 use serde_json::json;
 
 use super::client::CoinsetReadClient;
-use super::network::{MAINNET_BASE_URL, TESTNET11_BASE_URL};
+use super::network::{
+    normalize_coinset_network, resolve_coinset_base_url, MAINNET_BASE_URL, TESTNET11_BASE_URL,
+};
 use super::parse::{coin_records_from_payload, record_from_payload};
-use super::{normalize_coinset_network, resolve_coinset_base_url};
 
 #[test]
 fn normalize_coinset_network_maps_testnet_aliases() {

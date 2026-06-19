@@ -7,7 +7,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-from greenfloor_scripts.coinset_subprocess import CoinsetScriptClient
+from greenfloor_scripts.coinset_subprocess import (
+    apply_height_fields,
+    coin_records_from_payload,
+    post_json_cli,
+    record_from_payload,
+)
 from greenfloor_scripts.config_subprocess import (
     ensure_program_config_valid,
     launcher_id_from_program_config,
@@ -74,6 +79,37 @@ def _supports_call(call: Any) -> tuple[bool, str | None, int | None]:
     return True, None, None
 
 
+def _normalize_network(network: str) -> str:
+    normalized = network.strip().lower()
+    if normalized in {"testnet", "testnet11"}:
+        return "testnet11"
+    return "mainnet"
+
+
+def _coinset_base_url(raw: str) -> str | None:
+    trimmed = str(raw or "").strip()
+    return trimmed or None
+
+
+def _coin_records(
+    *,
+    network: str,
+    base_url: str | None,
+    endpoint: str,
+    body: dict[str, Any],
+    start_height: int | None = None,
+    end_height: int | None = None,
+) -> list[dict[str, Any]]:
+    apply_height_fields(body, start_height=start_height, end_height=end_height)
+    payload = post_json_cli(network, base_url, endpoint, body)
+    return coin_records_from_payload(payload)
+
+
+def _blockchain_state(*, network: str, base_url: str | None) -> dict[str, Any]:
+    payload = post_json_cli(network, base_url, "get_blockchain_state", {})
+    return record_from_payload(payload, "blockchain_state") or {}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Probe Coinset endpoint and height-window capabilities for vault scans."
@@ -115,10 +151,8 @@ def main() -> int:
         launcher_id = launcher_id_from_program_config(program_config)
         launcher_source = "program_config"
 
-    adapter = CoinsetScriptClient(
-        base_url=(str(args.coinset_base_url).strip() or None),
-        network=args.network,
-    )
+    network = _normalize_network(args.network)
+    coinset_base_url = _coinset_base_url(args.coinset_base_url)
 
     sdk = _import_sdk()
     cfg = sdk.MemberConfig().with_top_level(True).with_nonce(int(args.nonce))
@@ -129,7 +163,7 @@ def main() -> int:
         raise RuntimeError("failed_to_derive_p2_hash")
     p2_coinset_hex = _to_coinset_hex(_hex_to_bytes(p2_hash))
 
-    chain_state = adapter.get_blockchain_state() or {}
+    chain_state = _blockchain_state(network=network, base_url=coinset_base_url)
     peak_height = -1
     if isinstance(chain_state, dict):
         peak = chain_state.get("peak")
@@ -143,27 +177,37 @@ def main() -> int:
     end_height = peak_height
 
     puzzle_all_ok, puzzle_all_err, puzzle_all_count = _supports_call(
-        lambda: adapter.get_coin_records_by_puzzle_hashes(
-            puzzle_hashes_hex=[p2_coinset_hex], include_spent_coins=True
+        lambda: _coin_records(
+            network=network,
+            base_url=coinset_base_url,
+            endpoint="get_coin_records_by_puzzle_hashes",
+            body={"puzzle_hashes": [p2_coinset_hex], "include_spent_coins": True},
         )
     )
     puzzle_range_ok, puzzle_range_err, puzzle_range_count = _supports_call(
-        lambda: adapter.get_coin_records_by_puzzle_hashes(
-            puzzle_hashes_hex=[p2_coinset_hex],
-            include_spent_coins=True,
+        lambda: _coin_records(
+            network=network,
+            base_url=coinset_base_url,
+            endpoint="get_coin_records_by_puzzle_hashes",
+            body={"puzzle_hashes": [p2_coinset_hex], "include_spent_coins": True},
             start_height=start_height,
             end_height=end_height,
         )
     )
     hints_all_ok, hints_all_err, hints_all_count = _supports_call(
-        lambda: adapter.get_coin_records_by_hints(
-            hints_hex=[p2_coinset_hex], include_spent_coins=True
+        lambda: _coin_records(
+            network=network,
+            base_url=coinset_base_url,
+            endpoint="get_coin_records_by_hints",
+            body={"hints": [p2_coinset_hex], "include_spent_coins": True},
         )
     )
     hints_range_ok, hints_range_err, hints_range_count = _supports_call(
-        lambda: adapter.get_coin_records_by_hints(
-            hints_hex=[p2_coinset_hex],
-            include_spent_coins=True,
+        lambda: _coin_records(
+            network=network,
+            base_url=coinset_base_url,
+            endpoint="get_coin_records_by_hints",
+            body={"hints": [p2_coinset_hex], "include_spent_coins": True},
             start_height=start_height,
             end_height=end_height,
         )
@@ -171,8 +215,11 @@ def main() -> int:
 
     sample_name = ""
     if puzzle_all_ok:
-        records = adapter.get_coin_records_by_puzzle_hashes(
-            puzzle_hashes_hex=[p2_coinset_hex], include_spent_coins=True
+        records = _coin_records(
+            network=network,
+            base_url=coinset_base_url,
+            endpoint="get_coin_records_by_puzzle_hashes",
+            body={"puzzle_hashes": [p2_coinset_hex], "include_spent_coins": True},
         )
         for row in records:
             if not isinstance(row, dict):
@@ -189,15 +236,25 @@ def main() -> int:
     by_name_range_count = None
     if sample_name:
         by_name_all_ok, by_name_all_err, by_name_all_count = _supports_call(
-            lambda: adapter.get_coin_records_by_names(
-                coin_names_hex=[_to_coinset_hex(_hex_to_bytes(sample_name))],
-                include_spent_coins=True,
+            lambda: _coin_records(
+                network=network,
+                base_url=coinset_base_url,
+                endpoint="get_coin_records_by_names",
+                body={
+                    "names": [_to_coinset_hex(_hex_to_bytes(sample_name))],
+                    "include_spent_coins": True,
+                },
             )
         )
         by_name_range_ok, by_name_range_err, by_name_range_count = _supports_call(
-            lambda: adapter.get_coin_records_by_names(
-                coin_names_hex=[_to_coinset_hex(_hex_to_bytes(sample_name))],
-                include_spent_coins=True,
+            lambda: _coin_records(
+                network=network,
+                base_url=coinset_base_url,
+                endpoint="get_coin_records_by_names",
+                body={
+                    "names": [_to_coinset_hex(_hex_to_bytes(sample_name))],
+                    "include_spent_coins": True,
+                },
                 start_height=start_height,
                 end_height=end_height,
             )
@@ -206,8 +263,8 @@ def main() -> int:
     print(
         json.dumps(
             {
-                "network": adapter.network,
-                "coinset_base_url": adapter.base_url,
+                "network": network,
+                "coinset_base_url": coinset_base_url,
                 "launcher_id": launcher_id,
                 "launcher_id_source": launcher_source,
                 "probe_nonce": int(args.nonce),
