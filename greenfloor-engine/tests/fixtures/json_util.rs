@@ -5,8 +5,24 @@ pub fn parse_json_output(stdout: &[u8]) -> Value {
     if text.is_empty() {
         return json!({});
     }
-    if let Some(start) = text.find('{') {
-        return serde_json::from_str(&text[start..]).expect("parse json stdout");
+    serde_json::from_str(&text).unwrap_or_else(|err| {
+        panic!("stdout must be exactly one JSON document: {err}; got: {text:?}")
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_json_output_accepts_single_document() {
+        let value = parse_json_output(br#"{"ok":true}"#);
+        assert_eq!(value.get("ok"), Some(&json!(true)));
     }
-    serde_json::from_str(&text).expect("parse json stdout")
+
+    #[test]
+    #[should_panic(expected = "stdout must be exactly one JSON document")]
+    fn parse_json_output_rejects_leading_noise() {
+        let _ = parse_json_output(b"log line\n{\"ok\":true}");
+    }
 }

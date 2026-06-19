@@ -35,7 +35,7 @@ it is not operator config validation.
 ## Coinset vault inventory and coin ops
 
 - `list_vault_coins_coinset.py` — thin wrapper around `greenfloor-engine vault-coinset-scan` (nonce member puzzle hash scan via Coinset).
-- `combine_market_cat_dust_coinset.py` — batch dust combine for enabled market CAT assets.
+- `combine_market_cat_dust_coinset.py` — thin wrapper around `greenfloor-manager combine-market-cat-dust` (batch dust combine for enabled market CAT assets).
 - `probe_coinset_capabilities.py` — probe Coinset height-window API support for vault scans.
 
 These scripts resolve vault identity and market/CAT metadata through the config adapters

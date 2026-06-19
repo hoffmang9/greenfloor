@@ -30,9 +30,19 @@ pub struct BootstrapHomeParams<'a> {
     pub force: bool,
 }
 
+pub fn validate_config(ctx: &ManagerContext, program_only: bool) -> SignerResult<()> {
+    let _program = load_program_config(&ctx.program_config)?;
+    if program_only {
+        return Ok(());
+    }
+    let _markets =
+        load_markets_config_with_overlay(&ctx.markets_config, ctx.testnet_markets_path())?;
+    Ok(())
+}
+
 pub fn run_config_validate(ctx: &ManagerContext, program_only: bool) -> SignerResult<i32> {
+    validate_config(ctx, program_only)?;
     let program_path = &ctx.program_config;
-    let _program = load_program_config(program_path)?;
     if program_only {
         ctx.emit_json(&json!({
             "ok": true,
@@ -41,8 +51,6 @@ pub fn run_config_validate(ctx: &ManagerContext, program_only: bool) -> SignerRe
         return Ok(0);
     }
     let markets_path = &ctx.markets_config;
-    let testnet_markets_path = ctx.testnet_markets_path();
-    let _markets = load_markets_config_with_overlay(markets_path, testnet_markets_path)?;
     ctx.emit_json(&json!({
         "ok": true,
         "program_config": program_path.display().to_string(),

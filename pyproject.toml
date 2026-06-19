@@ -1,7 +1,7 @@
 [project]
 name = "greenfloor"
 version = "0.1.0"
-description = "GreenFloor script adapters and pytest harness dependencies"
+description = "GreenFloor script adapter dependencies"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -12,7 +12,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pre-commit==4.5.1",
-  "pytest==9.0.3",
   "ruff==0.9.10",
   "pyright==1.1.408",
   "yamllint==1.35.1",
@@ -37,8 +36,3 @@ extend-exclude = ["chia-wallet-sdk"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W"]
 ignore = ["E501"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "--basetemp=.pytest_tmp"
-markers = []

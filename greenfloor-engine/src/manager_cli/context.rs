@@ -78,6 +78,24 @@ impl ManagerContext {
         }
     }
 
+    #[cfg(test)]
+    pub fn for_test_with_cats(
+        program_config: PathBuf,
+        markets_config: PathBuf,
+        cats_config: PathBuf,
+        output: ManagerOutput,
+    ) -> Self {
+        Self {
+            output,
+            program_config,
+            markets_config,
+            cats_config,
+            state_db: String::new(),
+            dexie_base_url: None,
+            testnet_markets_path: None,
+        }
+    }
+
     pub fn testnet_markets_path(&self) -> Option<&Path> {
         self.testnet_markets_path.as_deref()
     }

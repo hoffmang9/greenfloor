@@ -5,7 +5,6 @@ use clap::Parser;
 use serde_json::json;
 
 use crate::cli_util::{optional_trimmed, print_json_value};
-use crate::config::load_program_config;
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::manager_cli::{
@@ -13,30 +12,14 @@ use crate::manager_cli::{
     default_vault_scan_metadata_config_paths, optional_path,
 };
 use crate::paths::expand_home;
-use crate::vault_coinset_scan::checkpoint::{
-    clear_cache_files, read_launcher_id_file, write_launcher_id_file,
+use crate::vault_coinset_scan::checkpoint::clear_cache_files;
+use crate::vault_coinset_scan::launcher::{
+    cache_resolved_launcher_id, resolve_launcher_id, ResolveLauncherIdParams,
 };
 use crate::vault_coinset_scan::metadata::parse_csv_values;
 use crate::vault_coinset_scan::request::ScanRequest;
 use crate::vault_coinset_scan::state::ScanState;
 use crate::vault_coinset_scan::types::AssetTypeFilter;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LauncherIdSource {
-    Arg,
-    File,
-    ProgramConfig,
-}
-
-impl LauncherIdSource {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Arg => "arg",
-            Self::File => "file",
-            Self::ProgramConfig => "program_config",
-        }
-    }
-}
 
 #[derive(Debug, Parser)]
 pub struct VaultCoinsetScanCliArgs {
@@ -127,43 +110,12 @@ impl VaultCoinsetScanCliArgs {
         ]))
     }
 
-    fn resolve_launcher_id(&self) -> SignerResult<(String, LauncherIdSource)> {
-        let from_arg = normalize_hex_id(&self.launcher_id);
-        if !from_arg.is_empty() {
-            return Ok((from_arg, LauncherIdSource::Arg));
-        }
-        if !self.launcher_id_file.trim().is_empty() {
-            let path = expand_home(std::path::Path::new(self.launcher_id_file.trim()));
-            if path.exists() {
-                let from_file = read_launcher_id_file(&path)?;
-                if from_file.is_empty() {
-                    return Err(SignerError::Other(format!(
-                        "launcher id file {} is empty",
-                        path.display()
-                    )));
-                }
-                return Ok((from_file, LauncherIdSource::File));
-            }
-        }
-
-        let program_config_path = if self.program_config.trim().is_empty() {
+    fn program_config_path(&self) -> PathBuf {
+        if self.program_config.trim().is_empty() {
             default_program_config_path()
         } else {
             expand_home(std::path::Path::new(self.program_config.trim()))
-        };
-        if !program_config_path.exists() {
-            return Err(SignerError::Other(
-                "launcher-id, launcher-id-file, or --program-config is required".to_string(),
-            ));
         }
-        let program = load_program_config(&program_config_path)?;
-        let launcher = normalize_hex_id(&program.vault_launcher_id);
-        if launcher.is_empty() {
-            return Err(SignerError::Other(
-                "vault_launcher_id_missing_from_program_config".to_string(),
-            ));
-        }
-        Ok((launcher, LauncherIdSource::ProgramConfig))
     }
 
     fn metadata_config_paths(&self) -> (PathBuf, PathBuf, Option<PathBuf>) {
@@ -188,8 +140,7 @@ impl VaultCoinsetScanCliArgs {
         self,
         launcher_id: String,
         cache_clear: Option<BTreeMap<String, String>>,
-    ) -> ScanRequest {
-        let (cats_config, markets_config, testnet_markets_config) = self.metadata_config_paths();
+    ) -> crate::vault_coinset_scan::ScanRequest {
         let mut requested_cat_ids = parse_csv_values(&self.cat_id);
         let requested_cat_tickers = parse_csv_values(&self.cat_ticker);
         if !self.cat_asset_id.trim().is_empty() {
@@ -210,30 +161,49 @@ impl VaultCoinsetScanCliArgs {
         let checkpoint_file =
             optional_path(&self.checkpoint_file).map(|path| expand_home(path.as_path()));
 
-        ScanRequest {
-            network: self.network,
-            coinset_base_url: optional_trimmed(&self.coinset_base_url),
+        scan_request_from_cli_args(
+            self,
             launcher_id,
-            max_nonce: self.max_nonce,
-            include_spent: self.include_spent,
-            asset_type: AssetTypeFilter::parse(&self.asset_type),
-            requested_cat_ids: requested_cat_ids_set,
+            requested_cat_ids_set,
             requested_cat_tickers,
             checkpoint_file,
-            checkpoint_save_interval: self.checkpoint_save_interval.max(1),
-            no_resume_checkpoint: self.no_resume_checkpoint,
-            nonce_batch_size: self.nonce_batch_size.max(1),
-            empty_batch_stop_count: self.empty_batch_stop_count.max(1),
-            parent_lookup_batch_size: self.parent_lookup_batch_size.max(1),
-            start_height: self.start_height,
-            end_height: self.end_height,
-            incremental_from_checkpoint: self.incremental_from_checkpoint,
-            auto_increment: self.auto_increment,
-            cats_config,
-            markets_config,
-            testnet_markets_config,
             cache_clear,
-        }
+        )
+    }
+}
+
+fn scan_request_from_cli_args(
+    args: VaultCoinsetScanCliArgs,
+    launcher_id: String,
+    requested_cat_ids: HashSet<String>,
+    requested_cat_tickers: Vec<String>,
+    checkpoint_file: Option<PathBuf>,
+    cache_clear: Option<BTreeMap<String, String>>,
+) -> ScanRequest {
+    let (cats_config, markets_config, testnet_markets_config) = args.metadata_config_paths();
+    ScanRequest {
+        network: args.network,
+        coinset_base_url: optional_trimmed(&args.coinset_base_url),
+        launcher_id,
+        max_nonce: args.max_nonce,
+        include_spent: args.include_spent,
+        asset_type: AssetTypeFilter::parse(&args.asset_type),
+        requested_cat_ids,
+        requested_cat_tickers,
+        checkpoint_file,
+        checkpoint_save_interval: args.checkpoint_save_interval.max(1),
+        no_resume_checkpoint: args.no_resume_checkpoint,
+        nonce_batch_size: args.nonce_batch_size.max(1),
+        empty_batch_stop_count: args.empty_batch_stop_count.max(1),
+        parent_lookup_batch_size: args.parent_lookup_batch_size.max(1),
+        start_height: args.start_height,
+        end_height: args.end_height,
+        incremental_from_checkpoint: args.incremental_from_checkpoint,
+        auto_increment: args.auto_increment,
+        cats_config,
+        markets_config,
+        testnet_markets_config,
+        cache_clear,
     }
 }
 
@@ -242,20 +212,19 @@ pub async fn run_vault_coinset_scan_command(args: VaultCoinsetScanCliArgs) -> Si
     args.apply_auto_increment_defaults()?;
 
     let cache_clear = args.cache_clear_paths();
-    let (launcher_id, launcher_id_source) = args.resolve_launcher_id()?;
+    let resolved = resolve_launcher_id(&ResolveLauncherIdParams {
+        launcher_id: optional_trimmed(&args.launcher_id).as_deref(),
+        launcher_id_file: optional_trimmed(&args.launcher_id_file).as_deref(),
+        program_config: Some(args.program_config_path().as_path()),
+    })?;
+    let launcher_id = resolved.launcher_id;
+    let launcher_id_source = resolved.source;
 
-    if !args.launcher_id_file.trim().is_empty()
-        && matches!(
-            launcher_id_source,
-            LauncherIdSource::ProgramConfig | LauncherIdSource::Arg
-        )
-    {
-        write_launcher_id_file(
-            &expand_home(std::path::Path::new(args.launcher_id_file.trim())),
-            &launcher_id,
-        )
-        .map_err(|err| SignerError::Other(format!("write launcher id file: {err}")))?;
-    }
+    cache_resolved_launcher_id(
+        Some(args.launcher_id_file.trim()),
+        launcher_id_source,
+        &launcher_id,
+    )?;
 
     if args.resolve_launcher_id_only {
         let payload = json!({
@@ -281,17 +250,19 @@ pub async fn run_vault_coinset_scan_command(args: VaultCoinsetScanCliArgs) -> Si
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vault_coinset_scan::launcher::ResolveLauncherIdParams;
 
     #[test]
     fn resolve_launcher_id_errors_on_empty_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("launcher.txt");
         std::fs::write(&path, "   \n").expect("write empty launcher file");
-        let args = VaultCoinsetScanCliArgs {
-            launcher_id_file: path.display().to_string(),
-            ..VaultCoinsetScanCliArgs::try_parse_from(["scan"]).expect("parse defaults")
-        };
-        let err = args.resolve_launcher_id().expect_err("empty launcher file");
+        let err = resolve_launcher_id(&ResolveLauncherIdParams {
+            launcher_id: None,
+            launcher_id_file: Some(path.to_str().expect("launcher path")),
+            program_config: None,
+        })
+        .expect_err("empty launcher file");
         assert!(err.to_string().contains("launcher id file"));
         assert!(err.to_string().contains("empty"));
     }

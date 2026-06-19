@@ -5,7 +5,9 @@ mod coin_select;
 mod direct_api;
 mod msp;
 mod parse;
+mod poll;
 mod presplit;
+mod spent_verify;
 #[cfg(test)]
 pub(crate) mod test_support;
 mod wallet_io;
@@ -17,8 +19,9 @@ pub use api::{
     post_coinset_record, post_coinset_rpc, push_tx_hex,
 };
 pub use direct_api::{
-    normalize_coinset_network, resolve_direct_client, resolve_direct_coinset_base_url,
-    ResolvedDirectClient, MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
+    explicit_coinset_url_override, normalize_coinset_network, normalize_direct_base_url_input,
+    resolve_direct_client, resolve_direct_coinset_base_url, ResolvedDirectClient,
+    MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
 };
 mod retry;
 mod scan_client;
@@ -42,6 +45,7 @@ pub use msp::{
     DEFAULT_MSP_BASE_URL,
 };
 pub use presplit::{fetch_presplit_cat_by_id, wait_for_unspent_cat};
+pub use spent_verify::{wait_until_coins_spent, CoinSpentVerifyConfig};
 pub use wallet_io::{
     cat_outer_puzzle_hash_hex, extract_coin_id_hints_from_offer_text, list_wallet_unspent_coins,
     puzzle_hash_hex_for_receive_address, spend_bundle_hash_from_hex, WalletUnspentCoin,

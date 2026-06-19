@@ -44,12 +44,16 @@ pub fn is_legacy_coinset_host_alias(url: &str) -> bool {
             .any(|alias| lower == *alias)
 }
 
-pub fn normalize_direct_base_url_input(base_url: Option<&str>) -> Option<&str> {
+pub fn explicit_coinset_url_override(base_url: Option<&str>) -> Option<&str> {
     let raw = base_url.map(str::trim).filter(|value| !value.is_empty())?;
     if is_legacy_coinset_host_alias(raw) {
         return None;
     }
     Some(raw)
+}
+
+pub fn normalize_direct_base_url_input(base_url: Option<&str>) -> Option<&str> {
+    explicit_coinset_url_override(base_url)
 }
 
 pub fn resolve_direct_coinset_base_url(network: &str, base_url: Option<&str>) -> String {
@@ -74,9 +78,9 @@ pub fn resolve_direct_client(network: &str, base_url: Option<&str>) -> ResolvedD
 #[cfg(test)]
 mod tests {
     use super::{
-        is_legacy_coinset_host_alias, normalize_coinset_network, normalize_direct_base_url_input,
-        resolve_direct_client, resolve_direct_coinset_base_url, MAINNET_DIRECT_BASE_URL,
-        TESTNET11_DIRECT_BASE_URL,
+        explicit_coinset_url_override, is_legacy_coinset_host_alias, normalize_coinset_network,
+        normalize_direct_base_url_input, resolve_direct_client, resolve_direct_coinset_base_url,
+        MAINNET_DIRECT_BASE_URL, TESTNET11_DIRECT_BASE_URL,
     };
 
     #[test]
@@ -85,6 +89,18 @@ mod tests {
         assert_eq!(normalize_coinset_network("testnet11"), "testnet11");
         assert_eq!(normalize_coinset_network("mainnet"), "mainnet");
         assert_eq!(normalize_coinset_network("unknown"), "mainnet");
+    }
+
+    #[test]
+    fn explicit_coinset_url_override_rejects_legacy_hosts() {
+        assert_eq!(
+            explicit_coinset_url_override(Some("https://coinset.org/")),
+            None
+        );
+        assert_eq!(
+            explicit_coinset_url_override(Some("https://coinset.custom")),
+            Some("https://coinset.custom")
+        );
     }
 
     #[test]
