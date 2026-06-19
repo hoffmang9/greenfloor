@@ -327,7 +327,7 @@ pub async fn run_manager_cli(cli: ManagerCli) -> SignerResult<i32> {
                         timeout_seconds: verify_timeout_seconds,
                         poll_seconds: verify_poll_seconds,
                     },
-                    execution: combine_market_cat_dust::CombineExecution::from_flags(
+                    execution: combine_market_cat_dust::CombineExecutionFlags::from_flags(
                         list_only, dry_run,
                     ),
                 },

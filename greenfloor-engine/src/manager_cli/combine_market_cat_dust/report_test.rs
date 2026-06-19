@@ -1,10 +1,11 @@
+use super::coinset_context::{load_execution_signer, resolve_combine_coinset_context};
 use super::report::{
     finalize_job_report, plan_dust_for_scan, preview_job_report, vault_signer_ready, CombineRunMode,
 };
 use super::test_support::sim_dust_scan_result;
-use super::{run_combine_market_cat_dust, CombineExecution, CombineMarketCatDustRequest};
+use super::{run_combine_market_cat_dust, CombineExecutionFlags, CombineMarketCatDustRequest};
 use crate::coinset::CoinSpentVerifyConfig;
-use crate::config::load_program_config;
+use crate::config::{load_program_config, parse_program_config, read_program_yaml};
 use crate::manager_cli::combine_market_cat_dust::jobs::CatDustJob;
 use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::json::ManagerOutput;
@@ -217,7 +218,7 @@ async fn run_combine_emits_json_when_launcher_id_missing() {
         max_nonce: 0,
         cat_asset_id: None,
         verify: CoinSpentVerifyConfig::default(),
-        execution: CombineExecution::from_flags(false, true),
+        execution: CombineExecutionFlags::from_flags(false, true),
     })
     .await
     .expect("command");
@@ -260,7 +261,7 @@ async fn run_combine_preview_does_not_require_signer_bundle() {
         max_nonce: 0,
         cat_asset_id: None,
         verify: CoinSpentVerifyConfig::default(),
-        execution: CombineExecution::from_flags(false, true),
+        execution: CombineExecutionFlags::from_flags(false, true),
     })
     .await
     .expect("command");
@@ -276,4 +277,25 @@ async fn run_combine_preview_does_not_require_signer_bundle() {
         "preview must not require signer bundle"
     );
     assert!(payload.get("jobs").is_some());
+}
+
+#[test]
+fn load_execution_signer_applies_coinset_context_overrides() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cat_hex = "f".repeat(64);
+    write_combine_test_configs(dir.path(), &cat_hex, true);
+    let program_path = dir.path().join("program.yaml");
+    let raw = read_program_yaml(&program_path).expect("read program");
+    let program = parse_program_config(&raw).expect("parse program");
+    let default_msp =
+        super::coinset_context::CombineCoinsetContext::program_default_msp_base_url(&raw);
+    let coinset_ctx = resolve_combine_coinset_context(
+        Some("testnet"),
+        Some("https://coinset.custom/"),
+        &program.network,
+        &default_msp,
+    );
+    let signer = load_execution_signer(&raw, program, &coinset_ctx).expect("execution signer");
+    assert_eq!(signer.network, "testnet11");
+    assert_eq!(signer.coinset_msp_base_url, "https://coinset.custom");
 }

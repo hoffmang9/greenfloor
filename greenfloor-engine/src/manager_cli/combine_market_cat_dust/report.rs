@@ -34,12 +34,6 @@ pub(crate) enum CombineRunMode<'a> {
     },
 }
 
-impl CombineRunMode<'_> {
-    pub(crate) fn is_execute(&self) -> bool {
-        matches!(self, Self::Execute { .. })
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct VaultSignerReadiness {
     pub can_combine: bool,

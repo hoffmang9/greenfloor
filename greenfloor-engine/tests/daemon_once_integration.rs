@@ -267,3 +267,47 @@ fn daemon_once_all_markets_fail_exits_non_zero() {
     });
     assert_eq!(run_daemon_once(&request, DAEMON_ENV).exit_code, 1);
 }
+
+fn max_daemon_cycle_seconds() -> f64 {
+    match std::env::consts::ARCH {
+        "aarch64" | "arm64" => 2.0,
+        _ => 1.5,
+    }
+}
+
+#[test]
+fn daemon_once_completes_within_cycle_time_budget() {
+    let (_dir, home, program, markets, db_path, _state_dir) = setup_paths();
+    let mut server = mockito::Server::new();
+    let _offers = server
+        .mock("GET", Matcher::Regex(r"/v1/offers\?.*".to_string()))
+        .with_status(200)
+        .with_body(r#"{"success":true,"offers":[]}"#)
+        .create();
+
+    let dexie_base = server.url();
+    write_daemon_program(&program, &home, &dexie_base);
+    write_markets_one(&markets, false);
+
+    let request = daemon_request(DaemonRequestParams {
+        program: &program,
+        markets: &markets,
+        home: &home,
+        db_path: &db_path,
+        coinset_base: "https://coinset.org",
+        poll_coinset_mempool: false,
+        test_controls: json!({"skip_strategy_execution": true}),
+    });
+
+    let started = std::time::Instant::now();
+    let result = run_daemon_once(&request, DAEMON_ENV);
+    let elapsed = started.elapsed();
+
+    assert_eq!(result.exit_code, 0);
+    let budget = max_daemon_cycle_seconds();
+    assert!(
+        elapsed.as_secs_f64() < budget,
+        "daemon-once took {:.3}s, budget {budget:.1}s",
+        elapsed.as_secs_f64()
+    );
+}

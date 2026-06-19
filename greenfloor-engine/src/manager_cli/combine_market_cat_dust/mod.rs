@@ -1,4 +1,5 @@
 mod batches;
+mod coinset_context;
 mod execute;
 mod jobs;
 mod report;
@@ -7,18 +8,19 @@ mod report_test;
 #[cfg(test)]
 mod test_support;
 
+use coinset_context::{
+    load_execution_signer, resolve_combine_coinset_context, CombineCoinsetContext,
+};
 use jobs::{build_enabled_cat_jobs, CatDustJob};
 use report::{
-    finalize_job_report, list_failed_job_report, signer_blocked_job_report, CombineExecutionFlags,
-    CombineRunMode,
+    finalize_job_report, list_failed_job_report, signer_blocked_job_report, CombineRunMode,
 };
 use serde_json::{json, Value};
 
-use crate::coinset::normalize_coinset_network;
 use crate::coinset::CoinSpentVerifyConfig;
 use crate::config::{
-    load_markets_config_with_overlay, parse_program_config, program_bundle_gated_from_parsed,
-    read_program_yaml, ManagerProgramConfig, MarketsConfig,
+    load_markets_config_with_overlay, parse_program_config, read_program_yaml,
+    ManagerProgramConfig, MarketsConfig, SignerConfig,
 };
 use crate::error::{SignerError, SignerResult};
 use crate::manager_cli::context::ManagerContext;
@@ -27,7 +29,7 @@ use crate::vault_coinset_scan::{
     CatDustScanParams, ResolveLauncherIdParams, ScanResult, ScanState,
 };
 
-pub use report::CombineExecutionFlags as CombineExecution;
+pub use report::CombineExecutionFlags;
 
 #[derive(Debug, Clone)]
 pub struct CombineMarketCatDustRequest<'a> {
@@ -47,8 +49,7 @@ pub struct CombineMarketCatDustRequest<'a> {
 struct ProcessJobContext<'a> {
     mgr: &'a ManagerContext,
     program: &'a ManagerProgramConfig,
-    network: &'a str,
-    coinset_base_url: Option<&'a str>,
+    coinset: &'a CombineCoinsetContext,
     launcher_id: &'a str,
     max_nonce: u32,
     dust_threshold_mojos: u64,
@@ -59,15 +60,14 @@ struct ProcessJobContext<'a> {
 
 async fn run_vault_scan_for_job(
     mgr: &ManagerContext,
-    network: &str,
-    coinset_base_url: Option<&str>,
+    coinset: &CombineCoinsetContext,
     launcher_id: &str,
     max_nonce: u32,
     cat_asset_id: &str,
 ) -> SignerResult<ScanResult> {
     let request = build_cat_dust_scan_request(&CatDustScanParams {
-        network,
-        coinset_base_url,
+        network: &coinset.network,
+        coinset_base_url: Some(coinset.direct_base_url_for_scan()),
         launcher_id,
         max_nonce,
         cat_asset_id,
@@ -91,8 +91,7 @@ async fn process_job(ctx: ProcessJobContext<'_>) -> SignerResult<Value> {
 
     let scan_result = match run_vault_scan_for_job(
         ctx.mgr,
-        ctx.network,
-        ctx.coinset_base_url,
+        ctx.coinset,
         ctx.launcher_id,
         ctx.max_nonce,
         &ctx.job.cat_asset_id,
@@ -112,16 +111,6 @@ async fn process_job(ctx: ProcessJobContext<'_>) -> SignerResult<Value> {
         readiness,
     )
     .await
-}
-
-fn resolved_network(request_network: Option<&str>, program_network: &str) -> String {
-    match request_network
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some(value) => normalize_coinset_network(value).to_string(),
-        None => normalize_coinset_network(program_network).to_string(),
-    }
 }
 
 fn load_program_and_markets(
@@ -160,12 +149,17 @@ pub async fn run_combine_market_cat_dust(
             return Ok(1);
         }
     };
-    let network = resolved_network(request.network, &program.network);
+    let coinset_ctx = resolve_combine_coinset_context(
+        request.network,
+        request.coinset_base_url,
+        &program.network,
+        &CombineCoinsetContext::program_default_msp_base_url(&raw),
+    );
 
-    let combine_signer = if flags.is_preview() {
+    let execution_signer: Option<SignerConfig> = if flags.is_preview() {
         None
     } else {
-        match program_bundle_gated_from_parsed(program.clone(), &raw) {
+        match load_execution_signer(&raw, program.clone(), &coinset_ctx) {
             Err(SignerError::SignerPathNotConfigured) => {
                 mgr.emit_json(&json!({
                     "status": "error",
@@ -175,7 +169,7 @@ pub async fn run_combine_market_cat_dust(
                 return Ok(1);
             }
             Err(err) => return Err(err),
-            Ok(bundle) => Some(bundle.signer),
+            Ok(signer) => Some(signer),
         }
     };
 
@@ -195,7 +189,7 @@ pub async fn run_combine_market_cat_dust(
         mgr.emit_json(&json!({
             "status": "ok",
             "message": "no_enabled_cat_markets",
-            "network": network,
+            "network": coinset_ctx.network,
             "jobs": [],
         }))?;
         return Ok(0);
@@ -229,7 +223,7 @@ pub async fn run_combine_market_cat_dust(
         return Ok(1);
     }
 
-    let run_mode = match combine_signer.as_ref() {
+    let run_mode = match execution_signer.as_ref() {
         Some(signer) => CombineRunMode::Execute {
             signer,
             verify: request.verify,
@@ -244,8 +238,7 @@ pub async fn run_combine_market_cat_dust(
         let job_report = process_job(ProcessJobContext {
             mgr,
             program: &program,
-            network: &network,
-            coinset_base_url: request.coinset_base_url,
+            coinset: &coinset_ctx,
             launcher_id: &resolved_launcher.launcher_id,
             max_nonce: request.max_nonce,
             dust_threshold_mojos: request.dust_threshold_mojos,
@@ -262,7 +255,7 @@ pub async fn run_combine_market_cat_dust(
 
     mgr.emit_json(&json!({
         "status": if exit_code == 0 { "ok" } else { "error" },
-        "network": network,
+        "network": coinset_ctx.network,
         "dust_threshold_mojos": request.dust_threshold_mojos,
         "dry_run": flags.dry_run,
         "list_only": flags.list_only,
