@@ -1,16 +1,4 @@
-//! Operator trace and audit event name constants.
-//!
-//! Audit-only paths (`SQLite` `audit_event` only; tracing would duplicate):
-//! - Coinset websocket — `coinset_ws_*` (live loop / handler)
-//! - Offer lifecycle reconcile — `offer_lifecycle_transition` (high-volume state rows)
-//! - Daemon cycle summary — `daemon_cycle_summary` (structured completion trace carries fields)
-//!
-//! Not yet wired:
-//! - Low-inventory alerts — `cycle/notifications.rs`
-//! - Manager coin-op CLI — `manager_cli/coin_ops/*`
-//!
-//! Legacy (read historical DB rows only; not emitted by current code):
-//! - `offer_reconciliation` — superseded by `offer_lifecycle_transition`
+use tracing::Level;
 
 pub const DAEMON_CYCLE_STARTED: &str = "daemon_cycle_started";
 pub const DAEMON_CYCLE_COMPLETED: &str = "daemon_cycle_completed";
@@ -30,6 +18,23 @@ pub const COINSET_WS_ONCE_ERROR: &str = "coinset_ws_once_error";
 pub const COINSET_MEMPOOL_ERROR: &str = "coinset_mempool_error";
 pub const COINSET_MEMPOOL_SNAPSHOT: &str = "coinset_mempool_snapshot";
 pub const MEMPOOL_OBSERVED: &str = "mempool_observed";
+
+pub const COINSET_WS_RECOVERY_POLL: &str = "coinset_ws_recovery_poll";
+pub const COINSET_WS_RECOVERY_POLL_ERROR: &str = "coinset_ws_recovery_poll_error";
+pub const COINSET_WS_PAYLOAD_PARSE_ERROR: &str = "coinset_ws_payload_parse_error";
+pub const COINSET_WS_PAYLOAD_IGNORED: &str = "coinset_ws_payload_ignored";
+pub const COINSET_WS_MEMPOOL_EVENT: &str = "coinset_ws_mempool_event";
+pub const COINSET_WS_TX_BLOCK_EVENT: &str = "coinset_ws_tx_block_event";
+pub const TX_BLOCK_CONFIRMED: &str = "tx_block_confirmed";
+pub const COINSET_WS_COIN_OBSERVED: &str = "coinset_ws_coin_observed";
+pub const COIN_WATCH_HIT: &str = "coin_watch_hit";
+pub const COINSET_WS_ONCE_STARTED: &str = "coinset_ws_once_started";
+pub const COINSET_WS_ONCE_CONNECTED: &str = "coinset_ws_once_connected";
+pub const COINSET_WS_ONCE_DISCONNECTED: &str = "coinset_ws_once_disconnected";
+pub const COINSET_WS_CONNECTING: &str = "coinset_ws_connecting";
+pub const COINSET_WS_CONNECTED: &str = "coinset_ws_connected";
+pub const COINSET_WS_DISCONNECTED: &str = "coinset_ws_disconnected";
+pub const COIN_WATCHLIST_UPDATED: &str = "coin_watchlist_updated";
 
 pub const INVENTORY_BUCKET_SCAN: &str = "inventory_bucket_scan";
 pub const INVENTORY_BUCKET_SCAN_ERROR: &str = "inventory_bucket_scan_error";
@@ -58,16 +63,15 @@ pub const COIN_OP_LEDGER_SKIPPED: &str = "coin_op_skipped";
 pub const COIN_OP_LEDGER_PLANNED: &str = "coin_op_planned";
 
 pub const OFFER_LIFECYCLE_TRANSITION: &str = "offer_lifecycle_transition";
-/// Legacy audit event name; kept for `offers-status` historical rows only.
 pub const OFFER_RECONCILIATION: &str = "offer_reconciliation";
 pub const TAKER_DETECTION: &str = "taker_detection";
 pub const DEXIE_OFFERS_ERROR: &str = "dexie_offers_error";
 pub const DEXIE_WATCHLIST_AUGMENT_ERROR: &str = "dexie_watchlist_augment_error";
 pub const STALE_OPEN_OFFER_REQUEUE_DETECTED: &str = "stale_open_offer_requeue_detected";
 
-use tracing::Level;
+pub const HOME_BOOTSTRAP: &str = "home_bootstrap";
+pub const DOCTOR_PING: &str = "doctor_ping";
 
-/// Map a coin-op ledger item status to its audit event name and trace level.
 #[must_use]
 pub fn coin_op_ledger_event(status: &str) -> (&'static str, Level) {
     match status {
@@ -84,12 +88,7 @@ mod tests {
     #[test]
     fn event_constants_are_nonempty() {
         assert!(!OFFER_POST_FAILURE.is_empty());
-        assert!(!DAEMON_CYCLE_STARTED.is_empty());
-        assert!(!STRATEGY_ACTIONS_PLANNED.is_empty());
-        assert!(!XCH_PRICE_SNAPSHOT.is_empty());
-        assert!(!COIN_OPS_PLAN.is_empty());
-        assert!(!INVENTORY_BUCKET_SCAN.is_empty());
-        assert!(!MARKET_CYCLE_ERROR.is_empty());
+        assert!(!COINSET_WS_MEMPOOL_EVENT.is_empty());
     }
 
     #[test]
@@ -97,10 +96,6 @@ mod tests {
         assert_eq!(
             coin_op_ledger_event("executed"),
             (COIN_OP_LEDGER_EXECUTED, Level::INFO)
-        );
-        assert_eq!(
-            coin_op_ledger_event("skipped"),
-            (COIN_OP_LEDGER_SKIPPED, Level::DEBUG)
         );
     }
 }

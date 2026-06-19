@@ -6,9 +6,9 @@ use serde_json::Value;
 
 use crate::error::SignerResult;
 use crate::operator_log::{
-    DEXIE_OFFERS_ERROR, OFFER_CANCEL_POLICY, OFFER_LIFECYCLE_TRANSITION, OFFER_POST_FAILURE,
-    OFFER_RECONCILIATION, STRATEGY_OFFER_EXECUTION, STRATEGY_OFFER_EXECUTION_ERROR,
-    TAKER_DETECTION,
+    audit_only, DEXIE_OFFERS_ERROR, OFFER_CANCEL_POLICY, OFFER_LIFECYCLE_TRANSITION,
+    OFFER_POST_FAILURE, OFFER_RECONCILIATION, STRATEGY_OFFER_EXECUTION,
+    STRATEGY_OFFER_EXECUTION_ERROR, TAKER_DETECTION,
 };
 use crate::storage::{AuditEventRow, OfferStateListRow, SqliteStore};
 
@@ -140,13 +140,13 @@ mod tests {
         store
             .upsert_offer_state("a2", "m1", "tx_block_confirmed", Some(4))
             .expect("seed");
-        store
-            .add_audit_event(
-                OFFER_RECONCILIATION,
-                &json!({"offer_id": "a2", "new_state": "tx_block_confirmed"}),
-                Some("m1"),
-            )
-            .expect("audit");
+        audit_only(
+            &store,
+            OFFER_RECONCILIATION,
+            &json!({"offer_id": "a2", "new_state": "tx_block_confirmed"}),
+            Some("m1"),
+        )
+        .expect("audit");
 
         let payload = offers_status_cli(&db_path, Some("m1"), 20, 10).expect("status");
         assert_eq!(payload.offer_count, 2);

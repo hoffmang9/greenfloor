@@ -110,6 +110,7 @@ mod tests {
             .expect("events");
         assert_eq!(events.len(), 1);
         assert!(capture.logs().contains(MARKET_CYCLE_ERROR));
+        assert!(capture.logs().contains("payload="));
         assert!(capture.logs().contains("forced failure"));
     }
 }

@@ -7,9 +7,14 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use serde_json::json;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::config::ManagerProgramConfig;
+use crate::operator_log::{
+    audit_coinset, AuditDurability, COINSET_WS_CONNECTED, COINSET_WS_CONNECTING,
+    COINSET_WS_DISCONNECTED,
+};
 use crate::storage::SqliteStore;
 
 use super::handler::{handle_ws_text, run_recovery_poll};
@@ -84,17 +89,21 @@ async fn run_coinset_websocket_loop(
 
     while !stop.load(Ordering::SeqCst) {
         let _ = run_recovery_poll(&store, &program, &coinset_base_url, "connected").await;
-        let _ = store.add_audit_event(
-            "coinset_ws_connecting",
-            &serde_json::json!({"ws_url": ws_url}),
+        let _ = audit_coinset(
+            &store,
+            COINSET_WS_CONNECTING,
+            &json!({"ws_url": ws_url}),
             None,
+            AuditDurability::BestEffort,
         );
         match connect_async(&ws_url).await {
             Ok((mut ws, _response)) => {
-                let _ = store.add_audit_event(
-                    "coinset_ws_connected",
-                    &serde_json::json!({"ws_url": ws_url}),
+                let _ = audit_coinset(
+                    &store,
+                    COINSET_WS_CONNECTED,
+                    &json!({"ws_url": ws_url}),
                     None,
+                    AuditDurability::BestEffort,
                 );
                 while !stop.load(Ordering::SeqCst) {
                     match tokio::time::timeout(Duration::from_secs(1), ws.next()).await {
@@ -110,10 +119,12 @@ async fn run_coinset_websocket_loop(
                 }
             }
             Err(err) => {
-                let _ = store.add_audit_event(
-                    "coinset_ws_disconnected",
-                    &serde_json::json!({"error": err.to_string()}),
+                let _ = audit_coinset(
+                    &store,
+                    COINSET_WS_DISCONNECTED,
+                    &json!({"error": err.to_string()}),
                     None,
+                    AuditDurability::BestEffort,
                 );
             }
         }

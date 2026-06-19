@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use serde_json::{json, Value};
 use tracing::Level;
 
@@ -9,16 +7,29 @@ use crate::adapters::{
 };
 use crate::error::{SignerError, SignerResult};
 use crate::operator_log::{
-    audit_and_trace, audit_market_cycle, trace_audit_mirror, LogContext, OFFER_POST_FAILURE,
-    STRATEGY_OFFER_EXECUTION,
+    audit_market_cycle, offer_log_ref, operator_audit, AuditDurability, EmitMode, LogContext,
+    OFFER_POST_COMPLETED, OFFER_POST_FAILURE, OFFER_POST_ITERATION, STRATEGY_OFFER_EXECUTION,
 };
-use crate::storage::{
-    state_db_path_for_home, upsert_offer_post_record, OfferPostPersistRecord, SqliteStore,
-};
+use crate::storage::{upsert_offer_post_record, OfferPostPersistRecord, SqliteStore};
 
 use super::context::ResolvedBuildAndPostContext;
-use super::types::PublishResult;
-use super::BuildAndPostOfferRequest;
+use super::types::{PostIterationOutcome, PublishResult};
+
+pub struct PostAuditContext {
+    pub persist_results: bool,
+    pub dry_run: bool,
+}
+
+impl PostAuditContext {
+    pub fn traces_only(&self) -> bool {
+        !self.persist_results || self.dry_run
+    }
+}
+
+pub struct PostFailureAudit {
+    pub error: String,
+    pub offer_ref: Option<String>,
+}
 
 pub(super) struct PublishOfferParams<'a> {
     pub publish_venue: &'a str,
@@ -151,26 +162,43 @@ fn strategy_offer_execution_payload(record: &OfferPostPersistRecord) -> Value {
     audit_event
 }
 
-pub fn persist_post_records_if_enabled(
-    home_dir: &Path,
-    persist_results: bool,
-    dry_run: bool,
+pub fn persist_post_records(
+    store: &SqliteStore,
     records: &[OfferPostPersistRecord],
 ) -> SignerResult<()> {
-    if !persist_results || dry_run || records.is_empty() {
-        return Ok(());
-    }
-    let db_path = state_db_path_for_home(home_dir);
-    let store = SqliteStore::open(&db_path)?;
     for record in records {
-        upsert_offer_post_record(&store, record)?;
+        upsert_offer_post_record(store, record)?;
         audit_market_cycle(
-            &store,
+            store,
             Level::INFO,
             STRATEGY_OFFER_EXECUTION,
             &strategy_offer_execution_payload(record),
             &record.market_id,
             "strategy offer executed",
+        )?;
+    }
+    Ok(())
+}
+
+pub fn persist_post_failure_audits(
+    store: &SqliteStore,
+    ctx: &ResolvedBuildAndPostContext,
+    failures: &[PostFailureAudit],
+) -> SignerResult<()> {
+    for failure in failures {
+        operator_audit(
+            Some(store),
+            LogContext::OFFER_POST,
+            EmitMode::dual(Level::WARN, "offer post failed"),
+            OFFER_POST_FAILURE,
+            &post_failure_payload(
+                &ctx.market.market_id,
+                &ctx.publish_venue,
+                &failure.error,
+                failure.offer_ref.as_deref(),
+            ),
+            Some(&ctx.market.market_id),
+            AuditDurability::BestEffort,
         )?;
     }
     Ok(())
@@ -197,55 +225,105 @@ fn post_failure_payload(
     payload
 }
 
-pub fn persist_post_failure_if_enabled(
-    home_dir: &Path,
-    persist_results: bool,
-    dry_run: bool,
-    market_id: &str,
-    publish_venue: &str,
-    error: &str,
-    offer_ref: Option<&str>,
-) -> SignerResult<()> {
-    let payload = post_failure_payload(market_id, publish_venue, error, offer_ref);
-    if !persist_results || dry_run {
-        trace_audit_mirror(
-            Level::WARN,
-            LogContext::OFFER_POST,
-            OFFER_POST_FAILURE,
-            &payload,
-            Some(market_id),
-            "offer post failed",
-        );
-        return Ok(());
-    }
-    let db_path = state_db_path_for_home(home_dir);
-    let store = SqliteStore::open(&db_path)?;
-    audit_and_trace(
-        &store,
-        Level::WARN,
+fn trace_post_failure(ctx: &ResolvedBuildAndPostContext, error: &str, offer_ref: Option<&str>) {
+    let payload = post_failure_payload(&ctx.market.market_id, &ctx.publish_venue, error, offer_ref);
+    let _ = operator_audit(
+        None,
         LogContext::OFFER_POST,
+        EmitMode::dual(Level::WARN, "offer post failed"),
         OFFER_POST_FAILURE,
         &payload,
-        Some(market_id),
-        "offer post failed",
-    )
+        Some(&ctx.market.market_id),
+        AuditDurability::BestEffort,
+    );
 }
 
-pub fn record_post_iteration_failure(
-    request: &BuildAndPostOfferRequest,
+fn trace_post_iteration(outcome: &str, ctx: &ResolvedBuildAndPostContext, offer_ref: &str) {
+    crate::trace_event!(
+        INFO,
+        LogContext::OFFER_POST,
+        OFFER_POST_ITERATION,
+        {
+            market_id = ctx.market.market_id.as_str(),
+            outcome = outcome,
+            publish_venue = ctx.publish_venue.as_str(),
+            offer_ref = offer_ref,
+        };
+        "offer post iteration"
+    );
+}
+
+pub fn log_post_iteration_outcome(
     ctx: &ResolvedBuildAndPostContext,
-    error: &str,
-    offer_ref: Option<&str>,
-) -> SignerResult<()> {
-    persist_post_failure_if_enabled(
-        &ctx.program.home_dir,
-        request.run.persist_results,
-        request.run.dry_run,
-        &ctx.market.market_id,
-        &ctx.publish_venue,
-        error,
-        offer_ref,
-    )
+    outcome: &PostIterationOutcome,
+) -> Option<PostFailureAudit> {
+    match outcome {
+        PostIterationOutcome::Preview(preview) => {
+            let offer_ref = preview
+                .get("offer_prefix")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            trace_post_iteration("preview", ctx, offer_ref);
+            None
+        }
+        PostIterationOutcome::Failure(failure) => {
+            trace_post_failure(ctx, &failure.error, None);
+            Some(PostFailureAudit {
+                error: failure.error.clone(),
+                offer_ref: None,
+            })
+        }
+        PostIterationOutcome::Success(success) => {
+            if success.success {
+                let offer_ref = success
+                    .persist_record
+                    .as_ref()
+                    .map(|record| offer_log_ref(&record.offer_id))
+                    .unwrap_or_default();
+                trace_post_iteration("success", ctx, &offer_ref);
+                None
+            } else {
+                let error = success
+                    .result
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("publish_failed")
+                    .to_string();
+                let offer_ref = success
+                    .persist_record
+                    .as_ref()
+                    .map(|record| offer_log_ref(&record.offer_id));
+                trace_post_failure(ctx, &error, offer_ref.as_deref());
+                Some(PostFailureAudit { error, offer_ref })
+            }
+        }
+    }
+}
+
+pub fn trace_offer_post_completed(
+    outcome: &str,
+    market_id: &str,
+    publish_attempts: usize,
+    publish_failures: u32,
+    dry_run: bool,
+) {
+    let level = match outcome {
+        "success" => Level::INFO,
+        "failure" => Level::ERROR,
+        _ => Level::WARN,
+    };
+    crate::event_at_level!(
+        level,
+        service = LogContext::OFFER_POST.service,
+        event = OFFER_POST_COMPLETED,
+        phase = LogContext::OFFER_POST.phase,
+        market_id = market_id,
+        outcome = outcome,
+        publish_attempts = publish_attempts,
+        publish_failures = publish_failures,
+        dry_run = dry_run,
+        "build-and-post-offer completed"
+    );
 }
 
 #[cfg(test)]

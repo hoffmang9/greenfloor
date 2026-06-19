@@ -16,13 +16,14 @@ use crate::adapters::{DexieClient, SplashClient};
 use crate::async_boundary::BuildAndPostOfferFuture;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::operator::OfferOperatorTestOverrides;
-use crate::storage::OfferPostPersistRecord;
+use crate::storage::{state_db_path_for_home, OfferPostPersistRecord, SqliteStore};
 
-use crate::operator_log::{offer_log_ref, LogContext, OFFER_POST_COMPLETED, OFFER_POST_ITERATION};
 use context::{resolve_build_and_post_context, ResolvedBuildAndPostContext};
 use iteration::run_post_iteration;
-use publish::{persist_post_records_if_enabled, record_post_iteration_failure};
-use tracing::Level;
+use publish::{
+    log_post_iteration_outcome, persist_post_failure_audits, persist_post_records,
+    trace_offer_post_completed, PostAuditContext, PostFailureAudit,
+};
 use types::{build_and_post_exit_code, PostIterationOutcome};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -91,6 +92,7 @@ struct PostIterationBatch {
     bootstrap_actions: Vec<Value>,
     publish_failures: u32,
     persist_records: Vec<OfferPostPersistRecord>,
+    failure_audits: Vec<PostFailureAudit>,
 }
 
 async fn run_post_iterations(
@@ -105,73 +107,27 @@ async fn run_post_iterations(
         bootstrap_actions: Vec::new(),
         publish_failures: 0,
         persist_records: Vec::new(),
+        failure_audits: Vec::new(),
     };
     for _ in 0..request.repeat {
         let (bootstrap_action, iteration) = run_post_iteration(request, ctx, dexie, splash).await?;
         batch.bootstrap_actions.push(bootstrap_action);
+        if let Some(failure) = log_post_iteration_outcome(ctx, &iteration) {
+            batch.failure_audits.push(failure);
+        }
         match iteration {
             PostIterationOutcome::Preview(preview) => {
-                let offer_ref = preview
-                    .get("offer_prefix")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                crate::trace_event!(
-                    INFO,
-                    LogContext::OFFER_POST,
-                    OFFER_POST_ITERATION,
-                    {
-                        market_id = ctx.market.market_id.as_str(),
-                        outcome = "preview",
-                        publish_venue = ctx.publish_venue.as_str(),
-                        offer_ref = offer_ref,
-                    };
-                    "offer post iteration"
-                );
                 batch.built_offers_preview.push(preview);
             }
             PostIterationOutcome::Failure(failure) => {
                 batch.publish_failures += 1;
-                record_post_iteration_failure(request, ctx, &failure.error, None)?;
                 batch
                     .post_results
                     .push(failure.to_venue_result(&ctx.publish_venue));
             }
             PostIterationOutcome::Success(success) => {
-                if success.success {
-                    let offer_ref = success
-                        .persist_record
-                        .as_ref()
-                        .map(|record| offer_log_ref(&record.offer_id))
-                        .unwrap_or_default();
-                    crate::trace_event!(
-                        INFO,
-                        LogContext::OFFER_POST,
-                        OFFER_POST_ITERATION,
-                        {
-                            market_id = ctx.market.market_id.as_str(),
-                            outcome = "success",
-                            publish_venue = ctx.publish_venue.as_str(),
-                            offer_ref = offer_ref.as_str(),
-                        };
-                        "offer post iteration"
-                    );
-                } else {
+                if !success.success {
                     batch.publish_failures += 1;
-                    let error = success
-                        .result
-                        .get("error")
-                        .and_then(Value::as_str)
-                        .unwrap_or("publish_failed");
-                    record_post_iteration_failure(
-                        request,
-                        ctx,
-                        error,
-                        success
-                            .persist_record
-                            .as_ref()
-                            .map(|record| offer_log_ref(&record.offer_id))
-                            .as_deref(),
-                    )?;
                 }
                 let venue_result = success.to_venue_result();
                 if let Some(record) = success.persist_record {
@@ -182,35 +138,6 @@ async fn run_post_iterations(
         }
     }
     Ok(batch)
-}
-
-fn offer_post_completed_level(outcome: &str) -> Level {
-    match outcome {
-        "success" => Level::INFO,
-        "failure" => Level::ERROR,
-        _ => Level::WARN,
-    }
-}
-
-fn trace_offer_post_completed(
-    outcome: &str,
-    market_id: &str,
-    publish_attempts: usize,
-    publish_failures: u32,
-    dry_run: bool,
-) {
-    crate::event_at_level!(
-        offer_post_completed_level(outcome),
-        service = LogContext::OFFER_POST.service,
-        event = OFFER_POST_COMPLETED,
-        phase = LogContext::OFFER_POST.phase,
-        market_id = market_id,
-        outcome = outcome,
-        publish_attempts = publish_attempts,
-        publish_failures = publish_failures,
-        dry_run = dry_run,
-        "build-and-post-offer completed"
-    );
 }
 
 fn build_and_post_payload(
@@ -255,6 +182,10 @@ async fn build_and_post_offer_async(
     }
 
     let ctx = resolve_build_and_post_context(&request).await?;
+    let audit_ctx = PostAuditContext {
+        persist_results: request.run.persist_results,
+        dry_run: request.run.dry_run,
+    };
 
     let dexie = if !request.run.dry_run && ctx.publish_venue == "dexie" {
         Some(DexieClient::new(ctx.dexie_base_url.clone()))
@@ -269,12 +200,11 @@ async fn build_and_post_offer_async(
 
     let batch = run_post_iterations(&request, &ctx, dexie.as_ref(), splash.as_ref()).await?;
 
-    persist_post_records_if_enabled(
-        &ctx.program.home_dir,
-        request.run.persist_results,
-        request.run.dry_run,
-        &batch.persist_records,
-    )?;
+    if !audit_ctx.traces_only() {
+        let store = SqliteStore::open(&state_db_path_for_home(&ctx.program.home_dir))?;
+        persist_post_failure_audits(&store, &ctx, &batch.failure_audits)?;
+        persist_post_records(&store, &batch.persist_records)?;
+    }
 
     let payload = build_and_post_payload(&request, &ctx, &batch);
     let exit_code = build_and_post_exit_code(batch.publish_failures);

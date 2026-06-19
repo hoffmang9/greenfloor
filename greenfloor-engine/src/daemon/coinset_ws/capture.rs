@@ -1,11 +1,16 @@
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use serde_json::json;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::config::ManagerProgramConfig;
 use crate::daemon::watchlist::cache::CoinWatchlistCache;
 use crate::error::SignerResult;
+use crate::operator_log::{
+    audit_coinset, AuditDurability, COINSET_WS_ONCE_CONNECTED, COINSET_WS_ONCE_DISCONNECTED,
+    COINSET_WS_ONCE_STARTED,
+};
 use crate::storage::SqliteStore;
 
 use super::handler::{handle_ws_text, run_recovery_poll, ws_error};
@@ -19,10 +24,12 @@ pub async fn capture_coinset_websocket_once(
 ) -> SignerResult<()> {
     ensure_rustls_crypto_provider();
     let ws_url = resolve_coinset_ws_url(program, coinset_base_url);
-    store.add_audit_event(
-        "coinset_ws_once_started",
-        &serde_json::json!({"ws_url": ws_url}),
+    audit_coinset(
+        store,
+        COINSET_WS_ONCE_STARTED,
+        &json!({"ws_url": ws_url}),
         None,
+        AuditDurability::Required,
     )?;
     let _ = run_recovery_poll(store, program, coinset_base_url, "once_start").await;
     let capture_window =
@@ -34,10 +41,12 @@ pub async fn capture_coinset_websocket_once(
     while tokio::time::Instant::now() < deadline {
         match connect_async(&ws_url).await {
             Ok((mut ws, _response)) => {
-                store.add_audit_event(
-                    "coinset_ws_once_connected",
-                    &serde_json::json!({"ws_url": ws_url}),
+                audit_coinset(
+                    store,
+                    COINSET_WS_ONCE_CONNECTED,
+                    &json!({"ws_url": ws_url}),
                     None,
+                    AuditDurability::Required,
                 )?;
                 while tokio::time::Instant::now() < deadline {
                     let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -65,10 +74,12 @@ pub async fn capture_coinset_websocket_once(
                 }
             }
             Err(err) => {
-                store.add_audit_event(
-                    "coinset_ws_once_disconnected",
-                    &serde_json::json!({"error": err.to_string()}),
+                audit_coinset(
+                    store,
+                    COINSET_WS_ONCE_DISCONNECTED,
+                    &json!({"error": err.to_string()}),
                     None,
+                    AuditDurability::Required,
                 )?;
             }
         }

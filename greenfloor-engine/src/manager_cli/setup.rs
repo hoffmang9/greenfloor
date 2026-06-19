@@ -12,6 +12,7 @@ use crate::hex::{is_hex_id, normalize_hex_id};
 use crate::minimal_program_template::{
     write_minimal_program, write_minimal_program_with_signer, MinimalProgramParams,
 };
+use crate::operator_log::{audit_daemon_cycle_only, audit_only, DOCTOR_PING, HOME_BOOTSTRAP};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
 use super::cats_catalog::load_cats_catalog;
@@ -283,8 +284,9 @@ pub fn run_bootstrap_home(params: &BootstrapHomeParams<'_>) -> SignerResult<i32>
 
     let db_path = db_dir.join("greenfloor.sqlite");
     let store = SqliteStore::open(&db_path)?;
-    store.add_audit_event(
-        "home_bootstrap",
+    audit_daemon_cycle_only(
+        &store,
+        HOME_BOOTSTRAP,
         &json!({
             "home_dir": home.display().to_string(),
             "program_config": seeded_program.display().to_string(),
@@ -293,7 +295,6 @@ pub fn run_bootstrap_home(params: &BootstrapHomeParams<'_>) -> SignerResult<i32>
             "testnet_markets_config": seeded_testnet_markets.display().to_string(),
             "force": force,
         }),
-        None,
     )?;
 
     ctx.emit_json(&json!({
@@ -346,7 +347,7 @@ pub fn run_doctor(ctx: &ManagerContext) -> SignerResult<i32> {
     let db_path = resolve_state_db_path(&program.home_dir, state_db);
     match SqliteStore::open(&db_path) {
         Ok(store) => {
-            if let Err(err) = store.add_audit_event("doctor_ping", &json!({"ok": true}), None) {
+            if let Err(err) = audit_only(&store, DOCTOR_PING, &json!({"ok": true}), None) {
                 problems.push(format!("db_error:{err}"));
             }
         }

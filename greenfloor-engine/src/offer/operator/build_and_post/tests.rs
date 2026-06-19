@@ -5,7 +5,8 @@ use serde_json::{json, Value};
 
 use super::context::{resolve_action_side, sample_resolved_build_and_post_context};
 use super::publish::{
-    offer_post_persist_record, persist_post_failure_if_enabled, persist_post_records_if_enabled,
+    log_post_iteration_outcome, offer_post_persist_record, persist_post_failure_audits,
+    persist_post_records, PostAuditContext, PostFailureAudit,
 };
 use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
 use crate::cli_util::{format_json, format_json_value};
@@ -13,22 +14,21 @@ use crate::operator_log::OFFER_POST_FAILURE;
 use crate::storage::{state_db_path_for_home, SqliteStore};
 
 #[test]
-fn persist_post_failure_if_enabled_writes_audit_event() {
+fn persist_post_failure_writes_audit_event() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path().join("home");
-    persist_post_failure_if_enabled(
-        &home,
-        true,
-        false,
-        "m1",
-        "dexie",
-        "dexie_http_error:500",
-        None,
-    )
-    .expect("persist failure");
-
     let db_path = state_db_path_for_home(&home);
     let store = SqliteStore::open(&db_path).expect("open");
+    let ctx = sample_resolved_build_and_post_context();
+    persist_post_failure_audits(
+        &store,
+        &ctx,
+        &[PostFailureAudit {
+            error: "dexie_http_error:500".to_string(),
+            offer_ref: None,
+        }],
+    )
+    .expect("persist failure");
     let events = store
         .list_recent_audit_events(Some(&[OFFER_POST_FAILURE]), Some("m1"), 1)
         .expect("events");
@@ -40,21 +40,26 @@ fn persist_post_failure_if_enabled_writes_audit_event() {
 }
 
 #[test]
-fn persist_post_failure_if_enabled_skips_dry_run_audit() {
+fn persist_post_failure_skips_dry_run_audit() {
     let capture = crate::operator_log::TraceCapture::install();
-    let dir = tempfile::tempdir().expect("tempdir");
-    persist_post_failure_if_enabled(
-        dir.path(),
-        true,
-        true,
-        "m1",
-        "dexie",
-        "dexie_http_error:500",
-        None,
-    )
-    .expect("skip");
-    assert!(!state_db_path_for_home(dir.path()).exists());
+    let ctx = sample_resolved_build_and_post_context();
+    let failure = log_post_iteration_outcome(
+        &ctx,
+        &super::types::PostIterationOutcome::Failure(PostFailure {
+            error: "dexie_http_error:500".to_string(),
+            started: Instant::now(),
+            create_phase_ms: None,
+            execution_mode: None,
+            bootstrap: None,
+        }),
+    );
+    assert!(failure.is_some());
     assert_eq!(capture.count_substr(OFFER_POST_FAILURE), 1);
+    assert!(PostAuditContext {
+        persist_results: true,
+        dry_run: true,
+    }
+    .traces_only());
 }
 
 #[test]
@@ -104,13 +109,13 @@ fn post_attempt_success_tracks_publish_outcome_without_json_reparse() {
 }
 
 #[test]
-fn persist_post_records_if_enabled_writes_sqlite() {
+fn persist_post_records_writes_sqlite() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path().join("home");
-    persist_post_records_if_enabled(
-        &home,
-        true,
-        false,
+    let db_path = state_db_path_for_home(Path::new(&home));
+    let store = SqliteStore::open(&db_path).expect("open");
+    persist_post_records(
+        &store,
         &[crate::storage::OfferPostPersistRecord {
             offer_id: "offer-abc".to_string(),
             market_id: "m1".to_string(),
@@ -124,8 +129,6 @@ fn persist_post_records_if_enabled_writes_sqlite() {
     )
     .expect("persist");
 
-    let db_path = state_db_path_for_home(Path::new(&home));
-    let store = SqliteStore::open(&db_path).expect("open");
     assert_eq!(
         store
             .offer_state_for_id("offer-abc")
@@ -136,25 +139,12 @@ fn persist_post_records_if_enabled_writes_sqlite() {
 }
 
 #[test]
-fn persist_post_records_if_enabled_skips_dry_run() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    persist_post_records_if_enabled(
-        dir.path(),
-        true,
-        true,
-        &[crate::storage::OfferPostPersistRecord {
-            offer_id: "offer-abc".to_string(),
-            market_id: "m1".to_string(),
-            side: "sell".to_string(),
-            size_base_units: 5,
-            publish_venue: "dexie".to_string(),
-            resolved_base_asset_id: "a1".to_string(),
-            resolved_quote_asset_id: "xch".to_string(),
-            created_extra: json!({}),
-        }],
-    )
-    .expect("skip");
-    assert!(!state_db_path_for_home(dir.path()).exists());
+fn persist_post_records_skips_dry_run() {
+    assert!(PostAuditContext {
+        persist_results: true,
+        dry_run: true,
+    }
+    .traces_only());
 }
 
 #[test]

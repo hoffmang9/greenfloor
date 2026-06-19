@@ -53,6 +53,35 @@ pub fn record_config_reloaded(store: &SqliteStore, source: &str) -> SignerResult
     )
 }
 
+/// Best-effort reload marker handling for the daemon loop.
+///
+/// Opens the state DB, records `config_reloaded`, then removes the marker only after
+/// a successful audit insert. Errors are logged and never propagate to the caller.
+pub fn handle_reload_marker_if_present(state_dir: &Path, db_path: &Path) {
+    if !reload_marker_present(state_dir) {
+        return;
+    }
+    let Ok(store) = SqliteStore::open(db_path) else {
+        tracing::warn!(
+            db_path = %db_path.display(),
+            "config reload marker present but state DB open failed; will retry next cycle"
+        );
+        return;
+    };
+    if record_config_reloaded(&store, "reload_marker").is_err() {
+        tracing::warn!(
+            "config reload marker present but audit insert failed; will retry next cycle"
+        );
+        return;
+    }
+    if let Err(err) = remove_reload_marker(state_dir) {
+        tracing::warn!(
+            error = %err,
+            "config reload recorded but marker removal failed"
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,5 +109,30 @@ mod tests {
         assert!(reload_marker_present(dir.path()));
         remove_reload_marker(dir.path()).expect("remove");
         assert!(!reload_marker_present(dir.path()));
+    }
+
+    #[test]
+    fn handle_reload_marker_if_present_records_and_removes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("greenfloor.sqlite");
+        std::fs::write(reload_marker_path(dir.path()), b"{}").expect("write marker");
+        handle_reload_marker_if_present(dir.path(), &db_path);
+        assert!(!reload_marker_present(dir.path()));
+        let store = SqliteStore::open(&db_path).expect("open");
+        let events = store
+            .list_recent_audit_events(Some(&[CONFIG_RELOADED]), None, 1)
+            .expect("events");
+        assert_eq!(events.len(), 1);
+    }
+
+    #[test]
+    fn handle_reload_marker_if_present_keeps_marker_when_db_open_fails() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(reload_marker_path(dir.path()), b"{}").expect("write marker");
+        let blocking = dir.path().join("blocking_file");
+        std::fs::write(&blocking, b"x").expect("write blocking file");
+        let bad_db = blocking.join("greenfloor.sqlite");
+        handle_reload_marker_if_present(dir.path(), &bad_db);
+        assert!(reload_marker_present(dir.path()));
     }
 }
