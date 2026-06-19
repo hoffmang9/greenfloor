@@ -3,6 +3,7 @@
 //! Deterministic ladder planning lives in `offer::bootstrap`; this module executes
 //! the signer-side denomination phase before offer construction.
 
+mod futures;
 mod planning;
 mod split_submit;
 mod types;
@@ -10,7 +11,6 @@ mod wait;
 
 use std::collections::HashSet;
 
-use crate::async_boundary::SignerDenominationPhaseFuture;
 use crate::coinset::{list_wallet_unspent_coins, WalletUnspentCoin};
 use crate::config::{ManagerProgramConfig, MarketConfig, SignerConfig};
 use crate::error::SignerResult;
@@ -22,6 +22,7 @@ use crate::offer::request::{normalize_offer_side, signer_split_asset_id};
 
 pub use types::{bootstrap_blocks_offer, BootstrapPhaseResult};
 
+use futures::SignerDenominationPhaseFuture;
 use planning::{
     bootstrap_ladder_entries_for_side, resolve_bootstrap_split_fee, wallet_coin_spendable,
 };

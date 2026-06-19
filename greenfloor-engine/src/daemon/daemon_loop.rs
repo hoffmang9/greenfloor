@@ -75,7 +75,6 @@ pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
 
     loop {
         let runtime = load_daemon_program_runtime(&request.program_path)?;
-        initialize_daemon_file_logging(&runtime.home_dir, &runtime.app_log_level)?;
 
         let exit_code =
             run_one_loop_cycle(&request, &mut dispatch_state, coin_watchlist.clone()).await?;
