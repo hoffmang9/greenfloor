@@ -234,7 +234,7 @@ async fn run_create_offer_command(
     } else {
         parse_coin_ids(&presplit_coin_ids)?
     };
-    let result = Box::pin(build_vault_cat_offer(
+    let result = build_vault_cat_offer(
         config,
         CreateOfferRequest {
             receive_address,
@@ -248,7 +248,7 @@ async fn run_create_offer_command(
             broadcast_split,
             expires_at,
         },
-    ))
+    )
     .await?;
     print_create_offer_result(&result, json)
 }

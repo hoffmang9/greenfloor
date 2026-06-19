@@ -7,9 +7,21 @@ use crate::offer::operator::{
 };
 use crate::offer::request::normalize_offer_side;
 
+use super::futures::ManagedOfferPostFuture;
 use crate::daemon::cycle_paths::DaemonCyclePaths;
 
-pub async fn post_managed_planned_action(
+pub fn post_managed_planned_action<'a>(
+    program: &'a ManagerProgramConfig,
+    paths: &'a DaemonCyclePaths,
+    market: &'a MarketConfig,
+    action: &'a PlannedAction,
+) -> ManagedOfferPostFuture<'a> {
+    Box::pin(post_managed_planned_action_async(
+        program, paths, market, action,
+    ))
+}
+
+async fn post_managed_planned_action_async(
     program: &ManagerProgramConfig,
     paths: &DaemonCyclePaths,
     market: &MarketConfig,

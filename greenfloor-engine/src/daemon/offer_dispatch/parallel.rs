@@ -150,13 +150,8 @@ async fn run_parallel_post_jobs(
             let counts_as_executed = match acquired {
                 Ok(acquired) if acquired.ok => {
                     let reservation_id = acquired.reservation_id.expect("reservation id");
-                    let post_result = Box::pin(post_managed_planned_action(
-                        &program,
-                        &paths,
-                        &market,
-                        &job.action,
-                    ))
-                    .await?;
+                    let post_result =
+                        post_managed_planned_action(&program, &paths, &market, &job.action).await?;
                     let release_status = reservation_release_status(post_result);
                     let _ = coordinator.release(&reservation_id, release_status);
                     post_result

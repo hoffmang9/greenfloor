@@ -1,6 +1,7 @@
 //! Managed offer dispatch for the daemon strategy phase (sequential and parallel).
 
 mod coordinator;
+mod futures;
 mod managed_post;
 mod parallel;
 mod reservation_ctx;
@@ -20,6 +21,8 @@ use crate::error::{SignerError, SignerResult};
 use crate::storage::SqliteStore;
 
 use super::market_context::MarketCycleContext;
+
+pub use futures::StrategyDispatchFuture;
 
 #[derive(Debug, Clone)]
 pub struct OfferDispatchOutput {
@@ -66,7 +69,16 @@ pub(crate) fn record_parallel_fallback_audit(
     )
 }
 
-pub async fn execute_strategy_actions(
+pub fn execute_strategy_actions<'a>(
+    store: &'a SqliteStore,
+    ctx: &'a MarketCycleContext<'_>,
+    market: &'a MarketConfig,
+    actions: &'a [PlannedAction],
+) -> StrategyDispatchFuture<'a> {
+    Box::pin(execute_strategy_actions_async(store, ctx, market, actions))
+}
+
+async fn execute_strategy_actions_async(
     store: &SqliteStore,
     ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
@@ -121,11 +133,5 @@ pub async fn execute_strategy_actions(
         }
     }
 
-    Box::pin(sequential::execute_actions_sequential(
-        program,
-        &ctx.resources.paths,
-        market,
-        &expanded,
-    ))
-    .await
+    sequential::execute_actions_sequential(program, &ctx.resources.paths, market, &expanded).await
 }

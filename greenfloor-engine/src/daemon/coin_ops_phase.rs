@@ -168,13 +168,13 @@ async fn execute_coin_ops_plans(
     }
 
     match ctx.resources.signer_for_execution() {
-        Ok(signer) => Ok(Box::pin(execute_managed_coin_op_plans(
+        Ok(signer) => Ok(execute_managed_coin_op_plans(
             program,
             signer,
             market,
             &planning.executable_plans,
             &watched_coin_ids,
-        ))
+        )
         .await),
         Err(err) => Ok(skipped_coin_ops_result(
             program,

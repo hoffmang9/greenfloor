@@ -11,6 +11,7 @@
 #![allow(clippy::implicit_hasher)]
 
 pub mod adapters;
+pub mod async_boundary;
 pub mod cli_util;
 pub mod coin_ops;
 pub mod coinset;

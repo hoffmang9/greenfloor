@@ -7,14 +7,13 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-use std::future::Future;
 use std::path::PathBuf;
-use std::pin::Pin;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::adapters::{DexieClient, SplashClient};
+use crate::async_boundary::BuildAndPostOfferFuture;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::operator::OfferOperatorTestOverrides;
 use crate::storage::OfferPostPersistRecord;
@@ -80,9 +79,7 @@ pub struct BuildAndPostOfferResponse {
 ///
 /// Returns an error if the operation fails.
 #[must_use]
-pub fn build_and_post_offer(
-    request: BuildAndPostOfferRequest,
-) -> Pin<Box<dyn Future<Output = SignerResult<BuildAndPostOfferResponse>> + Send>> {
+pub fn build_and_post_offer(request: BuildAndPostOfferRequest) -> BuildAndPostOfferFuture {
     Box::pin(build_and_post_offer_async(request))
 }
 

@@ -47,14 +47,7 @@ pub async fn run_strategy_phase(
 
     let mut newly_executed_sell_counts = BTreeMap::default();
     if !strategy_actions.is_empty() && !ctx.dispatch.test_controls.skip_strategy_execution {
-        match Box::pin(execute_strategy_actions(
-            store,
-            ctx,
-            market,
-            &strategy_actions,
-        ))
-        .await
-        {
+        match execute_strategy_actions(store, ctx, market, &strategy_actions).await {
             Ok(output) => {
                 state.merge_strategy_execution(
                     0,

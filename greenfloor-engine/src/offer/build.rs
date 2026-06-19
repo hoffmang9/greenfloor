@@ -1,3 +1,6 @@
+use std::future::Future;
+use std::pin::Pin;
+
 use crate::coinset::{self, LiveCoinset, OfferCoinsetBackend};
 use crate::config::SignerConfig;
 use crate::error::SignerResult;
@@ -10,12 +13,24 @@ use crate::vault::members::hex_to_bytes32;
 use crate::vault::session::resolve_vault_session;
 use crate::vault::spend::VaultSpendContext;
 
+/// Boxed future for vault CAT offer construction.
+pub type BuildVaultCatOfferFuture =
+    Pin<Box<dyn Future<Output = SignerResult<CreateOfferResult>> + Send>>;
+
 /// Build vault cat offer.
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn build_vault_cat_offer(
+#[must_use]
+pub fn build_vault_cat_offer(
+    config: SignerConfig,
+    request: CreateOfferRequest,
+) -> BuildVaultCatOfferFuture {
+    Box::pin(build_vault_cat_offer_async(config, request))
+}
+
+async fn build_vault_cat_offer_async(
     config: SignerConfig,
     request: CreateOfferRequest,
 ) -> SignerResult<CreateOfferResult> {
