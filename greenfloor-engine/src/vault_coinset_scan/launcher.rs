@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::config::load_program_config;
+use crate::config::{load_program_config, ManagerProgramConfig};
 use crate::error::{SignerError, SignerResult};
 use crate::hex::normalize_hex_id;
 use crate::manager_cli::default_program_config_path;
@@ -28,6 +28,8 @@ pub struct ResolveLauncherIdParams<'a> {
     pub launcher_id: Option<&'a str>,
     pub launcher_id_file: Option<&'a str>,
     pub program_config: Option<&'a Path>,
+    /// When set, skips reloading `program_config` for the program-config launcher source.
+    pub preloaded_program: Option<&'a ManagerProgramConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -85,7 +87,13 @@ pub fn resolve_launcher_id(
             "launcher-id, launcher-id-file, or --program-config is required".to_string(),
         ));
     }
-    let program = load_program_config(&program_config_path)?;
+    let loaded;
+    let program = if let Some(config) = params.preloaded_program {
+        config
+    } else {
+        loaded = load_program_config(&program_config_path)?;
+        &loaded
+    };
     let launcher = normalize_hex_id(&program.vault_launcher_id);
     if launcher.is_empty() {
         return Err(SignerError::Other(

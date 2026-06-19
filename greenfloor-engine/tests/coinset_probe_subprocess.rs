@@ -29,6 +29,16 @@ fn subprocess_coinset_probe_requires_launcher_source() {
         .output()
         .expect("spawn greenfloor-engine coinset probe");
     assert!(!output.status.success());
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("failed to read config"),
+        "expected explicit program-config validation error, got: {combined}"
+    );
+    assert!(combined.contains("nonexistent/program.yaml"));
 }
 
 #[test]
@@ -46,13 +56,15 @@ fn subprocess_coinset_probe_accepts_launcher_id_arg() {
         .output()
         .expect("spawn greenfloor-engine coinset probe with launcher id");
     assert!(!output.status.success());
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        combined.contains("coinset") || combined.contains("error") || combined.contains("probe"),
-        "unexpected output: {combined}"
+        !stderr.contains("failed to read config") && !stdout.contains("failed to read config"),
+        "launcher-id should bypass program config validation; stderr={stderr} stdout={stdout}"
+    );
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        combined.contains("invalid.example.test"),
+        "expected coinset client failure referencing probe URL, got: {combined}"
     );
 }
