@@ -2,8 +2,7 @@ import shutil
 from pathlib import Path
 
 import yaml
-
-from tests.helpers.manager_cli import parse_json_output, run_manager
+from greenfloor_scripts.manager_subprocess import parse_json_output, run_manager
 
 
 def _run_doctor(

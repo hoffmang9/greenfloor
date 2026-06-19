@@ -39,10 +39,8 @@ import os
 import sys
 import textwrap
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from greenfloor.adapters.ent_wallet_graphql import EntWalletGraphqlClient
-from greenfloor.adapters.kms_signer import get_public_key_compressed_hex
+from greenfloor_scripts.ent_wallet_graphql import EntWalletGraphqlClient
+from greenfloor_scripts.kms_subprocess import get_public_key_compressed_hex
 
 DEFAULT_VAULT_NAME = "greenfloor-kms-vault"
 DEFAULT_RECOVERY_TIMELOCK = 1800

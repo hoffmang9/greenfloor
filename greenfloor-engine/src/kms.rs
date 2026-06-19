@@ -145,6 +145,57 @@ pub fn normalize_hex(value: &str) -> String {
 mod tests {
     use super::*;
 
+    const TEST_X: &str = "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296";
+    const TEST_Y: &str = "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5";
+
+    fn build_spki_der(x: &[u8], y: &[u8]) -> Vec<u8> {
+        let point = [std::slice::from_ref(&0x04), x, y].concat();
+        let algo_id = [
+            0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
+            0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
+        ];
+        let mut bit_string_content = vec![0x00];
+        bit_string_content.extend_from_slice(&point);
+        let mut bit_string_der = vec![
+            0x03,
+            u8::try_from(bit_string_content.len()).expect("test bit string length"),
+        ];
+        bit_string_der.extend_from_slice(&bit_string_content);
+        let inner = [algo_id.as_slice(), bit_string_der.as_slice()].concat();
+        let mut spki = vec![0x30, u8::try_from(inner.len()).expect("test spki length")];
+        spki.extend_from_slice(&inner);
+        spki
+    }
+
+    #[test]
+    fn der_spki_to_compressed_p256_uses_odd_y_prefix() {
+        let x = hex::decode(TEST_X).expect("decode x");
+        let y = hex::decode(TEST_Y).expect("decode y");
+        let spki = build_spki_der(&x, &y);
+        let compressed = der_spki_to_compressed_p256(&spki).expect("compress");
+        assert_eq!(compressed[0], 0x03);
+        assert_eq!(&compressed[1..], x.as_slice());
+        assert_eq!(hex::encode(compressed), format!("03{TEST_X}"));
+    }
+
+    #[test]
+    fn der_spki_to_compressed_p256_uses_even_y_prefix() {
+        let x = hex::decode(TEST_X).expect("decode x");
+        let y = vec![0u8; 32];
+        let spki = build_spki_der(&x, &y);
+        let compressed = der_spki_to_compressed_p256(&spki).expect("compress");
+        assert_eq!(compressed[0], 0x02);
+    }
+
+    #[test]
+    fn der_spki_rejects_non_bit_string_tag() {
+        let x = hex::decode(TEST_X).expect("decode x");
+        let y = hex::decode(TEST_Y).expect("decode y");
+        let mut spki = build_spki_der(&x, &y);
+        spki[23] = 0x04;
+        assert!(der_spki_to_compressed_p256(&spki).is_err());
+    }
+
     #[test]
     fn parses_der_ecdsa_signature() {
         // SEQUENCE { INTEGER r, INTEGER s } with small values

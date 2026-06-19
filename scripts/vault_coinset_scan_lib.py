@@ -7,41 +7,31 @@ import json
 from pathlib import Path
 from typing import Any
 
-from greenfloor.config.io import (
+from greenfloor_scripts.chia_sdk_helpers import (
+    coin_id_from_record,
+    hex_to_bytes,
+    import_sdk,
+    safe_int,
+    to_coinset_hex,
+)
+from greenfloor_scripts.coinset_scanner import CoinsetScanner, chunk_values
+from greenfloor_scripts.config_subprocess import (
     all_market_rows,
     ensure_program_config_valid,
+    launcher_id_from_program_config,
     load_cats_fields,
     load_markets_fields,
+    read_launcher_id_file,
 )
-from greenfloor.config.launcher import launcher_id_from_program_config
-from greenfloor.hex_utils import is_hex_id, normalize_hex_id
+from greenfloor_scripts.hex_subprocess import is_hex_id, normalize_hex_id
+
 from scripts.vault_coinset_scan_checkpoint import (
     CoinRow,
     _clear_cache_files,
     _load_scan_checkpoint,
     _save_scan_checkpoint,
 )
-from scripts.vault_coinset_scan_coinset import (
-    CoinsetScanner,
-    _chunk_values,
-    _coin_id_from_record,
-    _coinset_with_retries,
-    _detect_cat_asset_id,
-    _hex_to_bytes,
-    _import_sdk,
-    _safe_int,
-    _to_coinset_hex,
-)
-
-
-def _read_launcher_id_file(path: str) -> str:
-    if not str(path).strip():
-        return ""
-    file_path = Path(path).expanduser()
-    if not file_path.exists():
-        return ""
-    raw = file_path.read_text(encoding="utf-8").strip()
-    return normalize_hex_id(raw) or ""
+from scripts.vault_coinset_scan_coinset import _detect_cat_asset_id
 
 
 def _write_launcher_id_file(path: str, launcher_id: str) -> None:
@@ -278,7 +268,7 @@ def main() -> int:
     launcher_id = normalize_hex_id(args.launcher_id)
     launcher_id_source = "arg"
     if not launcher_id and str(args.launcher_id_file).strip():
-        launcher_id = _read_launcher_id_file(args.launcher_id_file)
+        launcher_id = read_launcher_id_file(args.launcher_id_file)
         if launcher_id:
             launcher_id_source = "file"
     if not launcher_id:
@@ -305,7 +295,7 @@ def main() -> int:
         )
         return 0
 
-    sdk = _import_sdk()
+    sdk = import_sdk()
     scanner = CoinsetScanner(network=args.network, base_url=args.coinset_base_url or None)
     ticker_to_asset_ids, asset_id_to_symbols = _load_cat_metadata_indexes()
     requested_cat_ids_raw = _parse_csv_values(args.cat_id)
@@ -383,13 +373,13 @@ def main() -> int:
 
     chain_peak_height: int | None = None
     if bool(args.incremental_from_checkpoint) or requested_end_height is None:
-        state = _coinset_with_retries(lambda: scanner.adapter.get_blockchain_state())
+        state = scanner.get_blockchain_state()
         if isinstance(state, dict):
             peak_raw = state.get("peak")
             if isinstance(peak_raw, dict):
-                chain_peak_height = _safe_int(peak_raw.get("height"), default=-1)
+                chain_peak_height = safe_int(peak_raw.get("height"), default=-1)
             if chain_peak_height is None or chain_peak_height < 0:
-                chain_peak_height = _safe_int(state.get("peak_height"), default=-1)
+                chain_peak_height = safe_int(state.get("peak_height"), default=-1)
             if chain_peak_height is not None and chain_peak_height < 0:
                 chain_peak_height = None
 
@@ -417,8 +407,8 @@ def main() -> int:
         print(
             json.dumps(
                 {
-                    "network": scanner.adapter.network,
-                    "coinset_base_url": scanner.adapter.base_url,
+                    "network": scanner.network,
+                    "coinset_base_url": scanner.base_url,
                     "launcher_id": launcher_id,
                     "asset_type": effective_asset_type,
                     "requested_cat_ids": sorted(requested_cat_ids),
@@ -467,14 +457,12 @@ def main() -> int:
         for nonce in batch_nonces:
             cfg = sdk.MemberConfig().with_top_level(True).with_nonce(int(nonce))
             p2_hash = normalize_hex_id(
-                sdk.to_hex(sdk.singleton_member_hash(cfg, _hex_to_bytes(launcher_id), False))
+                sdk.to_hex(sdk.singleton_member_hash(cfg, hex_to_bytes(launcher_id), False))
             )
             if p2_hash:
                 nonce_p2[nonce] = p2_hash
                 nonce_to_p2[nonce] = p2_hash
-        p2_hashes = list(
-            dict.fromkeys(_to_coinset_hex(_hex_to_bytes(v)) for v in nonce_p2.values())
-        )
+        p2_hashes = list(dict.fromkeys(to_coinset_hex(hex_to_bytes(v)) for v in nonce_p2.values()))
         by_puzzle = scanner.by_puzzle_hashes(
             puzzle_hashes=p2_hashes,
             include_spent=args.include_spent,
@@ -513,7 +501,7 @@ def main() -> int:
 
         for source, records in (("puzzle_hash", by_puzzle), ("hint", by_hint)):
             for record in records:
-                coin_id = _coin_id_from_record(record)
+                coin_id = coin_id_from_record(record)
                 if not coin_id:
                     continue
                 coin_raw = record.get("coin")
@@ -524,11 +512,11 @@ def main() -> int:
                         coin_id=coin_id,
                         puzzle_hash=normalize_hex_id(coin.get("puzzle_hash")) or "",
                         parent_coin_info=normalize_hex_id(coin.get("parent_coin_info")) or "",
-                        amount=_safe_int(coin.get("amount"), default=0),
-                        confirmed_block_index=_safe_int(
+                        amount=safe_int(coin.get("amount"), default=0),
+                        confirmed_block_index=safe_int(
                             record.get("confirmed_block_index"), default=0
                         ),
-                        spent_block_index=_safe_int(record.get("spent_block_index"), default=0),
+                        spent_block_index=safe_int(record.get("spent_block_index"), default=0),
                         discovered_nonces=[],
                         discovered_by_puzzle_hash=False,
                         discovered_by_hint=False,
@@ -574,13 +562,13 @@ def main() -> int:
             if row.parent_coin_info and row.parent_coin_info not in parent_record_cache
         }
     )
-    for parent_batch in _chunk_values(unresolved_parent_ids, parent_lookup_batch_size):
+    for parent_batch in chunk_values(unresolved_parent_ids, parent_lookup_batch_size):
         parent_records = scanner.by_names(
-            coin_names=[_to_coinset_hex(_hex_to_bytes(parent_id)) for parent_id in parent_batch],
+            coin_names=[to_coinset_hex(hex_to_bytes(parent_id)) for parent_id in parent_batch],
             include_spent=True,
         )
         for parent in parent_records:
-            parent_id = _coin_id_from_record(parent)
+            parent_id = coin_id_from_record(parent)
             if parent_id:
                 parent_record_cache[parent_id] = parent
 
@@ -662,8 +650,8 @@ def main() -> int:
     print(
         json.dumps(
             {
-                "network": scanner.adapter.network,
-                "coinset_base_url": scanner.adapter.base_url,
+                "network": scanner.network,
+                "coinset_base_url": scanner.base_url,
                 "launcher_id": launcher_id,
                 "asset_type": effective_asset_type,
                 "requested_cat_ids": sorted(requested_cat_ids),

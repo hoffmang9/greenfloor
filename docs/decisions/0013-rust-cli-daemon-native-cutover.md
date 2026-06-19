@@ -43,10 +43,9 @@ from the index; see git history for the full record.
    `coinset_cli` directly.
 
 4. **Python scripts stay.** Standalone utilities under `scripts/` use script-only Python
-   libraries (`greenfloor.config.io` CLI adapters, `adapters.coinset`, `hex_utils`,
-   `engine_binary`) and must not reimplement operator YAML policy walks. Config field
-   reads go through `greenfloor-manager program-fields`, `markets-fields`, and
-   `cats-fields` (see `greenfloor/config/io.py`).
+   libraries (`scripts/greenfloor_scripts/` subprocess adapters) and must not reimplement operator YAML
+   policy walks. Config field reads go through `greenfloor-manager program-fields`,
+   `markets-fields`, and `cats-fields`.
 
 5. **Quality bar.** Implementation work is held to the `thermonuclear-code-review`
    skill standard. A manager agent splits work into subagent-sized packets and

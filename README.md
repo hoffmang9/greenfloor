@@ -9,8 +9,8 @@ backed by the canonical `greenfloor-engine` crate.
 - Python remains for `scripts/` utilities and a slim `greenfloor` package (config CLI
   adapters via `greenfloor-manager` field commands, hex helpers, Coinset adapter) used
   only by those scripts and tests.
-- **No PyO3 extension.** Script Coinset mutations call `greenfloor-engine coinset …` CLI
-  subcommands via `greenfloor.adapters.coinset`.
+- **No PyO3 extension.** Script adapters under `scripts/greenfloor_scripts/` call `greenfloor-engine` and
+  `greenfloor-manager` CLI subcommands.
 
 ## Components
 
@@ -124,6 +124,11 @@ Install dev dependencies (includes `pre-commit`), then run local checks:
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
+```
+
+**Node.js LTS** is required for the Prettier pre-commit hook (YAML/JSON/Markdown). CI uses `node-version: lts/*`. Install Node LTS locally (for example `brew install node@24 && brew link --overwrite node@24`, or [fnm](https://github.com/Schniz/fnm) / nvm) and verify `node --version` succeeds before running pre-commit.
+
+```bash
 export PRE_COMMIT_HOME="$(pwd)/.cache/pre-commit"  # reuse hook envs; CI caches this path
 pre-commit run --all-files                         # lint + type-check (~5–10s warm)
 ```
@@ -141,7 +146,7 @@ Operator overrides (all optional):
 
 - `GREENFLOOR_KEY_ID_FINGERPRINT_MAP_JSON` — JSON map for key ID -> fingerprint; normally injected from `program.yaml` signer key registry by daemon path.
 - `GREENFLOOR_CHIA_KEYS_DERIVATION_SCAN_LIMIT` — integer derivation depth scan limit for matching selected coin puzzle hashes (default `200`).
-- `GREENFLOOR_COINSET_BASE_URL` — custom Coinset API base URL for coin queries and `push_tx`; when unset, `CoinsetAdapter` defaults to mainnet and can be forced to testnet11 by network selection.
+- `GREENFLOOR_COINSET_BASE_URL` — custom Coinset API base URL for coin queries and `push_tx`; when unset, scripts default to mainnet and can select testnet11 via `--network`.
 - `coin_ops.minimum_fee_mojos` (in program config) — fallback minimum fee for coin operations when Coinset advice is unavailable (default `10000000` mojos / `0.00001 XCH`; can be set to `0`).
 
 Signer program config contract (`program.yaml`):

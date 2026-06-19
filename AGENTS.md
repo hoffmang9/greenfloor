@@ -52,23 +52,28 @@ Severity tags:
 
 **Python (scripts and test harnesses only)**
 
-- `[MUST]` `scripts/` and the slim `greenfloor/` package are adapters only — no operator policy or
+- `[MUST]` `scripts/` and `scripts/greenfloor_scripts/` are adapters only — no operator policy or
   orchestration. Do not reintroduce PyO3, Python policy bridges, or `greenfloor/cli/` /
   `greenfloor/daemon/` runtime modules.
-- `[MUST]` Config field reads: `greenfloor/config/io.py` → `greenfloor-manager program-fields`,
+- `[MUST]` Config field reads: `scripts/greenfloor_scripts/config_subprocess.py` → `greenfloor-manager program-fields`,
   `markets-fields`, `cats-fields`, `materialize-minimal-program`, `config-validate`. Operator YAML
   policy lives in `greenfloor-engine/src/config/`; scripts must not walk operator YAML for policy
   fields.
-- `[MUST]` Script Coinset IO: `greenfloor.adapters.coinset` → `greenfloor-engine coinset post`
-  and `greenfloor-engine coinset push-tx`. Reuse `hex_utils`, `logging_setup`,
-  `manager_subprocess`, `engine_binary`.
-- `[CONTEXT]` Pytest covers script adapters and subprocess harnesses; operator policy parity is
+- `[MUST]` Script adapters live under `scripts/greenfloor_scripts/` (subprocess bridges to native binaries).
+  Coinset IO uses `greenfloor-engine coinset post` and `coinset push-tx`. Hex helpers use
+  `greenfloor-engine hex` via `hex_subprocess`. Config field reads use `greenfloor-manager program-fields`,
+  `markets-fields`, and `cats-fields`. KMS public-key fetch uses `greenfloor-engine kms-public-key-compressed-hex`.
+- `[CONTEXT]` Pytest covers script subprocess adapters (`tests/test_script_subprocess.py`);
+  Rust subprocess integration tests cover CLI contracts; operator policy parity is
   `cargo test --manifest-path greenfloor-engine/Cargo.toml` in CI (ADR 0013).
 
 ## Design Constraints
 
-- `[MUST]` Prefer direct function calls within a package; do not spawn subprocesses for same-env
-  Python calls unless isolation/security is documented in `docs/decisions/`.
+- `[MUST]` Prefer direct function calls within Rust operator code and within a Python module;
+  do not spawn subprocesses for same-env Rust calls or Python-to-Python calls unless
+  isolation/security is documented in `docs/decisions/`.
+- `[MUST]` `scripts/greenfloor_scripts/` subprocess bridges to native binaries (`greenfloor-engine`,
+  `greenfloor-manager`) are the canonical script IO path — not a violation of the rule above.
 - `[MUST]` Avoid unnecessary indirection layers (`executor`, `worker`, `engine`, etc.).
 - `[MUST]` Keep one distinct responsibility per file; merge pass-through modules into functions.
 - `[MUST]` Eliminate duplicated logic blocks (>10 lines) by extracting shared helpers.

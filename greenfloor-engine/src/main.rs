@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
+use greenfloor_engine::cli_util::emit_engine_cli_error;
 use greenfloor_engine::coinset::parse_coin_ids;
 use greenfloor_engine::coinset_cli::{run_coinset_command, CoinsetCliArgs};
 use greenfloor_engine::config::load_signer_config;
@@ -8,6 +9,8 @@ use greenfloor_engine::daemon::{
     run_daemon_command, run_daemon_once_from_request_json, DaemonCliArgs, DaemonOnceJsonArgs,
 };
 use greenfloor_engine::error::SignerError;
+use greenfloor_engine::hex_cli::{run_hex_command, HexCliArgs};
+use greenfloor_engine::kms_cli::{run_kms_public_key_compressed_hex, KmsPublicKeyArgs};
 use greenfloor_engine::offer::{build_vault_cat_offer, CreateOfferRequest};
 use greenfloor_engine::vault::{
     build_and_optionally_broadcast_vault_cat_mixed_split, members::hex_to_bytes32,
@@ -94,12 +97,17 @@ enum Commands {
     DaemonOnce(DaemonOnceJsonArgs),
     /// Coinset script IO: generic post RPC and push-tx for spend-bundle hex.
     Coinset(CoinsetCliArgs),
+    /// Shared hex helpers for vault scan scripts.
+    Hex(HexCliArgs),
+    /// KMS helpers for one-off vault onboarding scripts.
+    KmsPublicKeyCompressedHex(KmsPublicKeyArgs),
 }
 
 #[tokio::main]
 async fn main() {
+    let json_mode = std::env::args().any(|arg| arg == "--json");
     if let Err(err) = run().await {
-        eprintln!("error: {err}");
+        emit_engine_cli_error(&err, json_mode);
         std::process::exit(1);
     }
 }
@@ -199,6 +207,10 @@ async fn run() -> Result<(), Error> {
             }
         }
         Commands::Coinset(args) => run_coinset_command(args).await?,
+        Commands::Hex(args) => run_hex_command(args)?,
+        Commands::KmsPublicKeyCompressedHex(args) => {
+            run_kms_public_key_compressed_hex(args).await?;
+        }
     }
     Ok(())
 }

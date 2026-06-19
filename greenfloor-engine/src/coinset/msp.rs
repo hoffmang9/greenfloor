@@ -20,12 +20,14 @@ impl MspCoinset {
     }
 
     pub fn for_network(network: &str, base_url: Option<&str>) -> SignerResult<Self> {
+        let network = crate::coinset::direct_api::normalize_coinset_network(network);
         let url = base_url
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or(DEFAULT_MSP_BASE_URL)
-            .trim_end_matches('/')
-            .to_string();
+            .map_or_else(
+                || DEFAULT_MSP_BASE_URL.to_string(),
+                |value| value.trim_end_matches('/').to_string(),
+            );
         match network {
             "mainnet" | "testnet11" => Ok(Self::new(url)),
             other => Err(SignerError::Other(format!("unsupported network: {other}"))),
