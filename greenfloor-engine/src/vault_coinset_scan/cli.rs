@@ -216,6 +216,7 @@ pub async fn run_vault_coinset_scan_command(args: VaultCoinsetScanCliArgs) -> Si
         launcher_id: optional_trimmed(&args.launcher_id).as_deref(),
         launcher_id_file: optional_trimmed(&args.launcher_id_file).as_deref(),
         program_config: Some(args.program_config_path().as_path()),
+        preloaded_program: None,
     })?;
     let launcher_id = resolved.launcher_id;
     let launcher_id_source = resolved.source;
@@ -261,6 +262,7 @@ mod tests {
             launcher_id: None,
             launcher_id_file: Some(path.to_str().expect("launcher path")),
             program_config: None,
+            preloaded_program: None,
         })
         .expect_err("empty launcher file");
         assert!(err.to_string().contains("launcher id file"));

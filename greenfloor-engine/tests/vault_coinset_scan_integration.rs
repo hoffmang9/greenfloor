@@ -6,7 +6,7 @@ use std::path::Path;
 use greenfloor_engine::coinset::{coin_id_from_record, to_coinset_hex};
 use greenfloor_engine::hex::normalize_hex_id;
 use greenfloor_engine::vault::members::{
-    hex_to_bytes32, singleton_member_hash, tree_hash_to_hex, MemberConfig,
+    hex_to_bytes32, singleton_member_puzzle_hash_hex_from_launcher_id,
 };
 use greenfloor_engine::vault_coinset_scan::request::ScanRequest;
 use greenfloor_engine::vault_coinset_scan::types::{AssetTypeFilter, CoinKind};
@@ -15,13 +15,10 @@ use mockito::Matcher;
 use serde_json::json;
 
 fn member_p2_hash(launcher_hex: &str, nonce: u32) -> String {
-    let launcher = hex_to_bytes32(launcher_hex).expect("launcher bytes");
-    let config = MemberConfig::default()
-        .with_top_level(true)
-        .with_nonce(nonce);
-    normalize_hex_id(&tree_hash_to_hex(
-        singleton_member_hash(&config, launcher, false).expect("member hash"),
-    ))
+    normalize_hex_id(
+        &singleton_member_puzzle_hash_hex_from_launcher_id(launcher_hex, nonce)
+            .expect("member hash"),
+    )
 }
 
 fn scan_request(

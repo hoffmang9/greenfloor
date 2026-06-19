@@ -163,6 +163,33 @@ pub fn singleton_member_hash(
     )
 }
 
+/// Nonce member puzzle hash for vault singleton P2 discovery (top-level, no fast-forward).
+pub fn singleton_member_puzzle_hash(launcher_id: Bytes32, nonce: u32) -> SignerResult<TreeHash> {
+    singleton_member_hash(
+        &MemberConfig::default()
+            .with_top_level(true)
+            .with_nonce(nonce),
+        launcher_id,
+        false,
+    )
+}
+
+/// Hex-encoded nonce member puzzle hash for vault singleton P2 discovery.
+pub fn singleton_member_puzzle_hash_hex(launcher_id: Bytes32, nonce: u32) -> SignerResult<String> {
+    Ok(tree_hash_to_hex(singleton_member_puzzle_hash(
+        launcher_id,
+        nonce,
+    )?))
+}
+
+/// Hex-encoded nonce member puzzle hash from a normalized launcher id string.
+pub fn singleton_member_puzzle_hash_hex_from_launcher_id(
+    launcher_id: &str,
+    nonce: u32,
+) -> SignerResult<String> {
+    singleton_member_puzzle_hash_hex(hex_to_bytes32(launcher_id)?, nonce)
+}
+
 pub fn timelock_restriction(timelock: u64) -> Restriction {
     Restriction {
         kind: RestrictionKind::MemberCondition,
@@ -318,4 +345,46 @@ pub fn tree_hash_to_hex(hash: TreeHash) -> String {
 
 pub fn bytes32_to_hex(value: Bytes32) -> String {
     hex::encode(value.to_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use chia_protocol::Bytes32;
+
+    use super::{
+        hex_to_bytes32, singleton_member_puzzle_hash, singleton_member_puzzle_hash_hex,
+        singleton_member_puzzle_hash_hex_from_launcher_id,
+    };
+
+    #[test]
+    fn singleton_member_puzzle_hash_hex_matches_tree_hash_hex() {
+        let launcher = Bytes32::new([0x44; 32]);
+        let hash = singleton_member_puzzle_hash(launcher, 3).expect("hash");
+        let hex = singleton_member_puzzle_hash_hex(launcher, 3).expect("hex");
+        assert_eq!(hex.len(), 64);
+        assert_eq!(hex, super::tree_hash_to_hex(hash));
+    }
+
+    #[test]
+    fn singleton_member_puzzle_hash_hex_from_launcher_id_normalizes_input() {
+        let launcher = "ab".repeat(32);
+        let from_string =
+            singleton_member_puzzle_hash_hex_from_launcher_id(&launcher, 0).expect("hex");
+        let launcher_bytes = hex_to_bytes32(&launcher).expect("launcher bytes");
+        let direct = singleton_member_puzzle_hash_hex(launcher_bytes, 0).expect("direct");
+        assert_eq!(from_string, direct);
+
+        let from_prefixed =
+            singleton_member_puzzle_hash_hex_from_launcher_id(&format!("0x{launcher}"), 0)
+                .expect("prefixed");
+        assert_eq!(from_string, from_prefixed);
+    }
+
+    #[test]
+    fn singleton_member_puzzle_hash_changes_with_nonce() {
+        let launcher = Bytes32::new([0x55; 32]);
+        let nonce0 = singleton_member_puzzle_hash_hex(launcher, 0).expect("nonce0");
+        let nonce1 = singleton_member_puzzle_hash_hex(launcher, 1).expect("nonce1");
+        assert_ne!(nonce0, nonce1);
+    }
 }

@@ -5,7 +5,7 @@
 - Long-lived daemon (`greenfloord`) plus manager CLI (`greenfloor-manager`) for
   deterministic CAT/XCH market-making.
 - Policy and execution in Rust (`greenfloor-engine`); slim Python package for config CLI
-  adapters (`greenfloor/config/io.py`), hex/Coinset helpers, and `scripts/` utilities.
+  adapters (`greenfloor-manager` field commands), hex/Coinset helpers, and `scripts/` utilities.
 - V1 notifications: low-inventory alerts only (ticker, remaining amount, receive address).
 
 ## Architecture
@@ -24,7 +24,7 @@ parity tests, scripts ──► greenfloor-manager field CLIs + `greenfloor-engi
 - **Canonical signing and offer build:** `greenfloor-engine` (vault KMS + Coinset MSP).
 - **Config policy for operators:** Rust (`config/program.rs`, `config/markets.rs`, `config/signer.rs`).
 - **Script-facing config reads:** `greenfloor-manager program-fields`, `markets-fields`,
-  `cats-fields` (via `greenfloor/config/io.py`); not direct YAML policy walks.
+  `cats-fields` (via `greenfloor-manager`); not direct YAML policy walks.
 - **State DB:** Rust (`storage/`); SQLite at `~/.greenfloor/db/greenfloor.sqlite`.
 - **No PyO3** in the repository (ADR 0013).
 

@@ -197,6 +197,7 @@ pub async fn run_combine_market_cat_dust(
         launcher_id: request.launcher_id,
         launcher_id_file: request.launcher_id_file,
         program_config: Some(&mgr.program_config),
+        preloaded_program: None,
     }) {
         Ok(resolved) => resolved,
         Err(err) => return emit_command_error(mgr, "launcher_id_resolution_failed", err),

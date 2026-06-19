@@ -2,51 +2,32 @@
 
 Operator-side validation for Coinset-backed vault scans and coin inventory checks.
 GreenFloor operator coin ops use the native manager (`greenfloor-manager coins-list`,
-`coin-split`, `coin-combine`); this doc covers **scripts** and external CLI parity.
+`coin-split`, `coin-combine`); this doc covers **Rust CLI** commands and external CLI parity.
 
 ## Scope
 
-- Scripts under `scripts/` use `scripts/greenfloor_scripts/` subprocess adapters for Coinset IO via
-  `greenfloor-engine coinset` (`post` and `push-tx` subcommands).
-- Vault identity and script config fields come from Rust policy via `greenfloor_scripts/config_subprocess.py`
-  adapters (`program-fields` for `vault_launcher_id`; `cats-fields` / `markets-fields` for
-  ticker→asset metadata in vault scans). Legacy `cloud_wallet:` blocks are rejected at
-  Rust config load.
-- Use Coinset CLI for spot verification against script output when debugging.
+- Coinset IO uses `greenfloor-engine coinset` (`post` and `push-tx` subcommands).
+- Vault identity and launcher resolution use Rust config load (`program.yaml` via
+  `--program-config`). Legacy `cloud_wallet:` blocks are rejected at Rust config load.
+- Use Coinset CLI for spot verification against engine output when debugging.
 
 ## 1) Probe endpoint capabilities
 
 ```bash
 cd ~/greenfloor
-.venv/bin/python scripts/probe_coinset_capabilities.py \
+greenfloor-engine coinset probe \
   --network mainnet \
   --coinset-base-url https://api.coinset.org \
   --program-config ~/.greenfloor/config/program.yaml
 ```
 
 Optional: pass `--launcher-id-file ~/.greenfloor/cache/vault_launcher_id.txt` instead
-of resolving `vault_launcher_id` via `program-fields` from `--program-config`.
+of resolving `vault_launcher_id` via `--program-config`.
 
 Expected: batched height-range endpoints report `range_supported: true` when the
 host can run incremental vault scans.
 
-## 2) List vault coins (script)
-
-```bash
-.venv/bin/python scripts/list_vault_coins_coinset.py \
-  --network mainnet \
-  --coinset-base-url https://api.coinset.org \
-  --program-config ~/.greenfloor/config/program.yaml \
-  --asset-type cat \
-  --cat-ticker wUSDC.b
-```
-
-Checkpointed and incremental scan logic lives in `greenfloor-engine vault-coinset-scan`
-(Rust). The Python script forwards CLI flags unchanged. Ticker→asset indexes are built from
-`config/cats.yaml` and `config/markets.yaml` inside the engine (same metadata as
-`cats-fields` / `markets-fields`).
-
-Direct engine usage:
+## 2) List vault coins
 
 ```bash
 greenfloor-engine vault-coinset-scan \
@@ -56,6 +37,10 @@ greenfloor-engine vault-coinset-scan \
   --asset-type cat \
   --cat-ticker wUSDC.b
 ```
+
+Checkpointed and incremental scan logic lives in `greenfloor-engine vault-coinset-scan`
+(Rust). Ticker→asset indexes are built from `config/cats.yaml` and `config/markets.yaml`
+inside the engine (same metadata as `cats-fields` / `markets-fields`).
 
 ## 3) Manager inventory (preferred for operators)
 

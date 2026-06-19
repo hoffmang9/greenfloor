@@ -10,7 +10,7 @@ use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
 use crate::kms;
 use crate::vault::context::{VaultComputedHashes, VaultContext, VaultCustodySnapshot};
-use crate::vault::members::{hex_to_bytes, singleton_member_hash, MemberConfig};
+use crate::vault::members::{hex_to_bytes, singleton_member_puzzle_hash};
 
 #[derive(Debug, Clone)]
 pub struct KmsSigner {
@@ -85,13 +85,7 @@ impl VaultSpendContext {
             return Some(*cached);
         }
         for nonce in 0..=self.max_nonce_probe {
-            let Ok(candidate) = singleton_member_hash(
-                &MemberConfig::default()
-                    .with_top_level(true)
-                    .with_nonce(nonce),
-                self.launcher_id,
-                false,
-            ) else {
+            let Ok(candidate) = singleton_member_puzzle_hash(self.launcher_id, nonce) else {
                 continue;
             };
             if Bytes32::from(candidate) == p2_puzzle_hash {
@@ -199,7 +193,6 @@ pub(crate) async fn sign_vault_fast_forward_digest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::members::MemberConfig;
     use chia_protocol::Bytes32;
     use chia_sdk_test::R1Pair;
 
@@ -221,12 +214,8 @@ mod tests {
             #[cfg(test)]
             local_fast_forward_signer: None,
         };
-        let target = crate::vault::members::singleton_member_hash(
-            &MemberConfig::default().with_top_level(true).with_nonce(7),
-            launcher_id,
-            false,
-        )
-        .expect("singleton hash");
+        let target = crate::vault::members::singleton_member_puzzle_hash(launcher_id, 7)
+            .expect("singleton hash");
         let inferred = vault_ctx
             .infer_nonce_for_p2_hash(target.into())
             .expect("nonce");

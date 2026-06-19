@@ -33,12 +33,9 @@ Global flags on `greenfloor-manager`:
 
 - Rust `config/program.rs`, `config/markets.rs`, and `config/signer.rs` are the only
   operator config policy path. `greenfloor-manager config-validate` is the operator gate.
-- Python `greenfloor/config/io.py` is a **script adapter layer** only: it shells out to
-  native manager commands for validated fields (`program-fields`, `markets-fields`,
-  `cats-fields`), test program materialization (`materialize-minimal-program`), and
-  `config-validate`. Scripts must not reimplement YAML policy walks for those fields.
-- `load_yaml()` in `io.py` remains for test fixtures that read written YAML files back;
-  it is not an operator validation path.
+- Scripts call native `greenfloor-manager` commands for validated fields (`program-fields`,
+  `markets-fields`, `cats-fields`), test program materialization (`materialize-minimal-program`),
+  and `config-validate`. Scripts must not reimplement YAML policy walks for those fields.
 - `dev.python.min_version` is optional in `program.yaml`; when omitted, Rust defaults to `3.11`.
 - State DB schema is owned by `greenfloor-engine/src/storage/`; run `doctor` after
   upgrade to confirm SQLite opens.
@@ -64,7 +61,7 @@ Global flags on `greenfloor-manager`:
 | 2026-06-17 | `greenfloor-engine` no longer exposes `build-and-post-offer` or `offers-*`       | Use `greenfloor-manager` for operator lifecycle commands                         |
 | 2026-06-17 | `doctor` validates `signer_key_id` on enabled markets (not Python keys registry) | Ensure each enabled market has `signer_key_id` set                               |
 | 2026-06-17 | `coin-split` / `coin-combine` use Rust gate policy (`coin_ops/gate.rs`)          | Until-ready requires `--size-base-units`; combine prereq auto-runs combine first |
-| 2026-06-17 | Python `config/models.py` deleted; script config via manager field CLIs          | Use `greenfloor/config/io.py` adapters; do not walk operator YAML for policy     |
+| 2026-06-17 | Python `config/models.py` deleted; script config via manager field CLIs          | Call `greenfloor-manager` field commands; do not walk operator YAML for policy   |
 | 2026-06-17 | `markets-fields` exports `markets` (all) and `enabled_markets`                   | Scripts needing disabled-market metadata use `markets`; operators use `enabled`  |
 
 Add a row here for every intentional operator-facing break during the migration.
