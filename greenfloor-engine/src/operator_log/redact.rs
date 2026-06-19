@@ -76,6 +76,10 @@ pub fn redact_json_for_log(value: &Value) -> Value {
                     }
                     continue;
                 }
+                if let Value::String(text) = child {
+                    out.insert(key.clone(), Value::String(redact_string_value(key, text)));
+                    continue;
+                }
                 out.insert(key.clone(), redact_json_for_log(child));
             }
             Value::Object(out)
@@ -84,12 +88,6 @@ pub fn redact_json_for_log(value: &Value) -> Value {
         Value::String(text) => Value::String(text.clone()),
         other => other.clone(),
     }
-}
-
-/// Redact a single string field when the key is known.
-#[must_use]
-pub fn redact_field(key: &str, value: &str) -> String {
-    redact_string_value(key, value)
 }
 
 #[cfg(test)]
@@ -130,8 +128,19 @@ mod tests {
     }
 
     #[test]
-    fn redact_field_masks_secrets_and_long_offers() {
-        assert!(redact_field("password", "hunter2").contains("len="));
-        assert_eq!(redact_field("market_id", "m1"), "m1");
+    fn redact_json_for_log_truncates_ids_and_masks_secrets() {
+        let payload = json!({
+            "market_id": "abc1234567890deadbeef",
+            "password": "hunter2",
+        });
+        let redacted = redact_json_for_log(&payload);
+        assert_eq!(
+            redacted.get("market_id").and_then(Value::as_str),
+            Some("abc12345…")
+        );
+        assert!(redacted
+            .get("password")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value.contains("len=")));
     }
 }

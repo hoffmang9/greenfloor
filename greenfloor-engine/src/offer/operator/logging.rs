@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::error::SignerResult;
-use crate::file_logging::{self, LogState, LOG_FILE};
+use crate::file_logging::{self, LogState};
 
 static LOG_STATE: OnceLock<Result<LogState, String>> = OnceLock::new();
 
@@ -39,6 +39,7 @@ pub fn initialize_manager_file_logging(home_dir: &Path, log_level: &str) -> Sign
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::file_logging::LOG_FILE;
 
     #[test]
     fn sync_manager_file_logging_creates_log_file_and_reloads_level() {

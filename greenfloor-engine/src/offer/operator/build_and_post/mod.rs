@@ -1,7 +1,6 @@
 mod context;
 mod create;
 mod iteration;
-mod operator_log;
 mod publish;
 mod types;
 
@@ -19,10 +18,10 @@ use crate::error::{SignerError, SignerResult};
 use crate::offer::operator::OfferOperatorTestOverrides;
 use crate::storage::OfferPostPersistRecord;
 
+use crate::operator_log::{offer_log_ref, LogContext, OFFER_POST_COMPLETED, OFFER_POST_ITERATION};
 use context::{resolve_build_and_post_context, ResolvedBuildAndPostContext};
 use iteration::run_post_iteration;
-use operator_log::{log_build_and_post_completed, record_post_failure_if_enabled};
-use publish::persist_post_records_if_enabled;
+use publish::{persist_post_failure_if_enabled, persist_post_records_if_enabled};
 use types::{build_and_post_exit_code, PostIterationOutcome};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -110,10 +109,28 @@ async fn run_post_iterations(
         let (bootstrap_action, iteration) = run_post_iteration(request, ctx, dexie, splash).await?;
         batch.bootstrap_actions.push(bootstrap_action);
         match iteration {
-            PostIterationOutcome::Preview(preview) => batch.built_offers_preview.push(preview),
+            PostIterationOutcome::Preview(preview) => {
+                let offer_ref = preview
+                    .get("offer_prefix")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                crate::trace_event!(
+                    INFO,
+                    LogContext::OFFER_POST,
+                    OFFER_POST_ITERATION,
+                    {
+                        market_id = ctx.market.market_id.as_str(),
+                        outcome = "preview",
+                        publish_venue = ctx.publish_venue.as_str(),
+                        offer_ref = offer_ref,
+                    };
+                    "offer post iteration"
+                );
+                batch.built_offers_preview.push(preview);
+            }
             PostIterationOutcome::Failure(failure) => {
                 batch.publish_failures += 1;
-                record_post_failure_if_enabled(
+                persist_post_failure_if_enabled(
                     &ctx.program.home_dir,
                     request.run.persist_results,
                     request.run.dry_run,
@@ -121,20 +138,38 @@ async fn run_post_iterations(
                     &ctx.publish_venue,
                     &failure.error,
                     None,
-                );
+                )?;
                 batch
                     .post_results
                     .push(failure.to_venue_result(&ctx.publish_venue));
             }
             PostIterationOutcome::Success(success) => {
-                if !success.success {
+                if success.success {
+                    let offer_ref = success
+                        .persist_record
+                        .as_ref()
+                        .map(|record| offer_log_ref(&record.offer_id))
+                        .unwrap_or_default();
+                    crate::trace_event!(
+                        INFO,
+                        LogContext::OFFER_POST,
+                        OFFER_POST_ITERATION,
+                        {
+                            market_id = ctx.market.market_id.as_str(),
+                            outcome = "success",
+                            publish_venue = ctx.publish_venue.as_str(),
+                            offer_ref = offer_ref.as_str(),
+                        };
+                        "offer post iteration"
+                    );
+                } else {
                     batch.publish_failures += 1;
                     let error = success
                         .result
                         .get("error")
                         .and_then(Value::as_str)
                         .unwrap_or("publish_failed");
-                    record_post_failure_if_enabled(
+                    persist_post_failure_if_enabled(
                         &ctx.program.home_dir,
                         request.run.persist_results,
                         request.run.dry_run,
@@ -142,7 +177,7 @@ async fn run_post_iterations(
                         &ctx.publish_venue,
                         error,
                         success.persist_record.as_ref().map(|r| r.offer_id.as_str()),
-                    );
+                    )?;
                 }
                 let venue_result = success.to_venue_result();
                 if let Some(record) = success.persist_record {
@@ -220,12 +255,56 @@ async fn build_and_post_offer_async(
 
     let payload = build_and_post_payload(&request, &ctx, &batch);
     let exit_code = build_and_post_exit_code(batch.publish_failures);
-    log_build_and_post_completed(
-        &ctx,
-        batch.publish_failures,
-        batch.post_results.len(),
-        request.run.dry_run,
-        exit_code,
-    );
+    let outcome = if batch.publish_failures == 0 {
+        "success"
+    } else if batch.publish_failures == u32::try_from(batch.post_results.len()).unwrap_or(u32::MAX)
+    {
+        "failure"
+    } else {
+        "partial_failure"
+    };
+    if exit_code == 0 {
+        crate::trace_event!(
+            INFO,
+            LogContext::OFFER_POST,
+            OFFER_POST_COMPLETED,
+            {
+                market_id = ctx.market.market_id.as_str(),
+                outcome,
+                publish_attempts = batch.post_results.len(),
+                publish_failures = batch.publish_failures,
+                dry_run = request.run.dry_run,
+            };
+            "build-and-post-offer completed"
+        );
+    } else if outcome == "failure" {
+        crate::trace_event!(
+            ERROR,
+            LogContext::OFFER_POST,
+            OFFER_POST_COMPLETED,
+            {
+                market_id = ctx.market.market_id.as_str(),
+                outcome,
+                publish_attempts = batch.post_results.len(),
+                publish_failures = batch.publish_failures,
+                dry_run = request.run.dry_run,
+            };
+            "build-and-post-offer completed"
+        );
+    } else {
+        crate::trace_event!(
+            WARN,
+            LogContext::OFFER_POST,
+            OFFER_POST_COMPLETED,
+            {
+                market_id = ctx.market.market_id.as_str(),
+                outcome,
+                publish_attempts = batch.post_results.len(),
+                publish_failures = batch.publish_failures,
+                dry_run = request.run.dry_run,
+            };
+            "build-and-post-offer completed"
+        );
+    }
     Ok(BuildAndPostOfferResponse { exit_code, payload })
 }

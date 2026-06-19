@@ -140,13 +140,15 @@ pub async fn run_daemon_cycle_once(
     let plan = build_cycle_plan(request, &resources, &cycle_store).await?;
     write_stale_sweep_audit(&cycle_store, &plan)?;
 
-    tracing::info!(
-        service = LogContext::DAEMON_CYCLE.service,
-        event = DAEMON_CYCLE_STARTED,
-        phase = LogContext::DAEMON_CYCLE.phase,
-        market_count = plan.selected_market_ids.len(),
-        dry_run = plan.runtime_dry_run,
-        selected_market_ids = ?plan.selected_market_ids,
+    crate::trace_event!(
+        INFO,
+        LogContext::DAEMON_CYCLE,
+        DAEMON_CYCLE_STARTED,
+        {
+            market_count = plan.selected_market_ids.len(),
+            dry_run = plan.runtime_dry_run,
+            selected_market_ids = ?plan.selected_market_ids,
+        };
         "daemon cycle started"
     );
 
@@ -194,25 +196,29 @@ pub async fn run_daemon_cycle_once(
 
     let exit_code = compute_cycle_exit_code(&plan, &metrics);
     if exit_code == 0 {
-        tracing::info!(
-            service = LogContext::DAEMON_CYCLE.service,
-            event = DAEMON_CYCLE_COMPLETED,
-            phase = LogContext::DAEMON_CYCLE.phase,
-            exit_code,
-            cycle_error_count = summary.error_count,
-            elapsed_ms = summary.duration_ms,
-            market_count = plan.selected_market_ids.len(),
+        crate::trace_event!(
+            INFO,
+            LogContext::DAEMON_CYCLE,
+            DAEMON_CYCLE_COMPLETED,
+            {
+                exit_code,
+                cycle_error_count = summary.error_count,
+                elapsed_ms = summary.duration_ms,
+                market_count = plan.selected_market_ids.len(),
+            };
             "daemon cycle completed"
         );
     } else {
-        tracing::warn!(
-            service = LogContext::DAEMON_CYCLE.service,
-            event = DAEMON_CYCLE_COMPLETED,
-            phase = LogContext::DAEMON_CYCLE.phase,
-            exit_code,
-            cycle_error_count = summary.error_count,
-            elapsed_ms = summary.duration_ms,
-            market_count = plan.selected_market_ids.len(),
+        crate::trace_event!(
+            WARN,
+            LogContext::DAEMON_CYCLE,
+            DAEMON_CYCLE_COMPLETED,
+            {
+                exit_code,
+                cycle_error_count = summary.error_count,
+                elapsed_ms = summary.duration_ms,
+                market_count = plan.selected_market_ids.len(),
+            };
             "daemon cycle completed"
         );
     }

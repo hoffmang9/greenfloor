@@ -8,7 +8,7 @@ use crate::adapters::{
     SplashClient,
 };
 use crate::error::{SignerError, SignerResult};
-use crate::operator_log::{audit_and_trace, LogContext};
+use crate::operator_log::{audit_and_trace, LogContext, OFFER_POST_FAILURE};
 use crate::storage::{
     persist_offer_post_records, state_db_path_for_home, OfferPostPersistRecord, SqliteStore,
 };
@@ -164,9 +164,9 @@ pub fn persist_post_failure_if_enabled(
         &store,
         Level::WARN,
         LogContext::OFFER_POST,
-        "offer_post_failure",
+        OFFER_POST_FAILURE,
         &payload,
         Some(market_id),
-        "offer post iteration failed",
+        "offer post failed",
     )
 }

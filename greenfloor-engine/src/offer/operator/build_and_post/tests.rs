@@ -9,6 +9,7 @@ use super::publish::{
 };
 use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
 use crate::cli_util::{format_json, format_json_value};
+use crate::operator_log::OFFER_POST_FAILURE;
 use crate::storage::{state_db_path_for_home, SqliteStore};
 
 #[test]
@@ -29,7 +30,7 @@ fn persist_post_failure_if_enabled_writes_audit_event() {
     let db_path = state_db_path_for_home(&home);
     let store = SqliteStore::open(&db_path).expect("open");
     let events = store
-        .list_recent_audit_events(Some(&["offer_post_failure"]), Some("m1"), 1)
+        .list_recent_audit_events(Some(&[OFFER_POST_FAILURE]), Some("m1"), 1)
         .expect("events");
     assert_eq!(events.len(), 1);
     assert_eq!(

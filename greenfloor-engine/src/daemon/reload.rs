@@ -18,11 +18,11 @@ pub fn consume_reload_marker(state_dir: &Path) -> bool {
 pub fn record_config_reloaded(store: &SqliteStore, source: &str) -> SignerResult<()> {
     let payload = json!({ "source": source });
     store.add_audit_event("config_reloaded", &payload, None)?;
-    tracing::info!(
-        service = LogContext::CONFIG.service,
-        event = CONFIG_RELOADED,
-        phase = LogContext::CONFIG.phase,
-        source,
+    crate::trace_event!(
+        INFO,
+        LogContext::CONFIG,
+        CONFIG_RELOADED,
+        { source = source, };
         "config reloaded"
     );
     Ok(())

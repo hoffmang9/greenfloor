@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::operator_log::{self, LogContext, MARKET_VALIDATION_WARNING};
+use crate::operator_log::{LogContext, MARKET_VALIDATION_WARNING};
 
 use super::yaml_fields::{parse_f64_field, parse_i64_field};
 use crate::error::{SignerError, SignerResult};
@@ -142,13 +142,15 @@ pub fn validate_strategy_pricing(
             ));
         }
         if quote_type == "unstable" && expiry_minutes > 15 {
-            tracing::warn!(
-                service = operator_log::LogContext::VALIDATION.service,
-                event = MARKET_VALIDATION_WARNING,
-                phase = LogContext::VALIDATION.phase,
-                market_id = market_id,
-                field = "strategy_offer_expiry_minutes",
-                value = expiry_minutes,
+            crate::trace_event!(
+                WARN,
+                LogContext::VALIDATION,
+                MARKET_VALIDATION_WARNING,
+                {
+                    market_id = market_id,
+                    field = "strategy_offer_expiry_minutes",
+                    value = expiry_minutes,
+                };
                 "unstable strategy_offer_expiry_minutes exceeds 15 minutes"
             );
         }
@@ -183,7 +185,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn unstable_expiry_above_15_minutes_emits_validation_warning() {
+    fn unstable_expiry_above_15_minutes_passes_validation() {
         let pricing = json!({"strategy_offer_expiry_minutes": 30});
         validate_strategy_pricing(&pricing, "m1", "unstable").expect("valid");
     }

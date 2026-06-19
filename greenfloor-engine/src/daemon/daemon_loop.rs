@@ -80,12 +80,14 @@ pub async fn run_daemon_loop(request: DaemonLoopRequest) -> SignerResult<i32> {
         let exit_code =
             run_one_loop_cycle(&request, &mut dispatch_state, coin_watchlist.clone()).await?;
         if exit_code != 0 {
-            tracing::warn!(
-                service = crate::operator_log::LogContext::DAEMON_CYCLE.service,
-                event = crate::operator_log::DAEMON_CYCLE_COMPLETED,
-                phase = crate::operator_log::LogContext::DAEMON_CYCLE.phase,
-                exit_code,
-                outcome = "partial_failure",
+            crate::trace_event!(
+                WARN,
+                crate::operator_log::LogContext::DAEMON_CYCLE,
+                crate::operator_log::DAEMON_CYCLE_COMPLETED,
+                {
+                    exit_code,
+                    outcome = "partial_failure",
+                };
                 "daemon loop cycle exited with errors"
             );
         }

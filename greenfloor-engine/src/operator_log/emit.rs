@@ -36,54 +36,94 @@ impl LogContext {
     };
 }
 
-fn emit(level: Level, ctx: LogContext, event: &str, message: &str) {
+/// Emit a structured operator trace event (`service`, `event`, and `phase` are always set).
+///
+/// Additional fields use tracing syntax, including `?` for debug formatting.
+#[macro_export]
+macro_rules! trace_event {
+    (INFO, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
+        tracing::info!(
+            service = ($ctx).service,
+            event = $event,
+            phase = ($ctx).phase,
+            $($fields)*
+            $msg
+        );
+    };
+    (WARN, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
+        tracing::warn!(
+            service = ($ctx).service,
+            event = $event,
+            phase = ($ctx).phase,
+            $($fields)*
+            $msg
+        );
+    };
+    (ERROR, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
+        tracing::error!(
+            service = ($ctx).service,
+            event = $event,
+            phase = ($ctx).phase,
+            $($fields)*
+            $msg
+        );
+    };
+    (DEBUG, $ctx:expr, $event:expr, { $($fields:tt)* } ; $msg:literal) => {
+        tracing::debug!(
+            service = ($ctx).service,
+            event = $event,
+            phase = ($ctx).phase,
+            $($fields)*
+            $msg
+        );
+    };
+}
+
+fn trace_audit_payload(
+    level: Level,
+    ctx: LogContext,
+    audit_event_type: &str,
+    market_id: Option<&str>,
+    payload_text: &str,
+    trace_message: &str,
+) {
     match level {
         Level::ERROR => tracing::error!(
             service = ctx.service,
-            event = event,
+            event = audit_event_type,
             phase = ctx.phase,
-            "{message}"
+            market_id = market_id.unwrap_or(""),
+            payload = %payload_text,
+            "{trace_message}"
         ),
         Level::WARN => tracing::warn!(
             service = ctx.service,
-            event = event,
+            event = audit_event_type,
             phase = ctx.phase,
-            "{message}"
+            market_id = market_id.unwrap_or(""),
+            payload = %payload_text,
+            "{trace_message}"
         ),
         Level::INFO => tracing::info!(
             service = ctx.service,
-            event = event,
+            event = audit_event_type,
             phase = ctx.phase,
-            "{message}"
+            market_id = market_id.unwrap_or(""),
+            payload = %payload_text,
+            "{trace_message}"
         ),
         Level::DEBUG | Level::TRACE => tracing::debug!(
             service = ctx.service,
-            event = event,
+            event = audit_event_type,
             phase = ctx.phase,
-            "{message}"
+            market_id = market_id.unwrap_or(""),
+            payload = %payload_text,
+            "{trace_message}"
         ),
     }
 }
 
-pub fn info(ctx: LogContext, event: &str, message: &str) {
-    emit(Level::INFO, ctx, event, message);
-}
-
-pub fn warn(ctx: LogContext, event: &str, message: &str) {
-    emit(Level::WARN, ctx, event, message);
-}
-
-pub fn error(ctx: LogContext, event: &str, message: &str) {
-    emit(Level::ERROR, ctx, event, message);
-}
-
-pub fn debug(ctx: LogContext, event: &str, message: &str) {
-    emit(Level::DEBUG, ctx, event, message);
-}
-
-/// Emit matching tracing + `SQLite` audit rows for operator-visible outcomes.
-///
-/// Audit payload is stored verbatim; tracing receives a redacted copy.
+/// Persist an audit row and emit one redacted trace line for the same outcome.
 ///
 /// # Errors
 ///
@@ -110,61 +150,14 @@ pub fn audit_and_trace(
     Ok(())
 }
 
-fn trace_audit_payload(
-    level: Level,
-    ctx: LogContext,
-    audit_event_type: &str,
-    market_id: Option<&str>,
-    payload_text: &str,
-    trace_message: &str,
-) {
-    if level == Level::ERROR {
-        tracing::error!(
-            service = ctx.service,
-            event = audit_event_type,
-            phase = ctx.phase,
-            market_id = market_id.unwrap_or(""),
-            payload = %payload_text,
-            "{trace_message}"
-        );
-    } else if level == Level::WARN {
-        tracing::warn!(
-            service = ctx.service,
-            event = audit_event_type,
-            phase = ctx.phase,
-            market_id = market_id.unwrap_or(""),
-            payload = %payload_text,
-            "{trace_message}"
-        );
-    } else if level == Level::INFO {
-        tracing::info!(
-            service = ctx.service,
-            event = audit_event_type,
-            phase = ctx.phase,
-            market_id = market_id.unwrap_or(""),
-            payload = %payload_text,
-            "{trace_message}"
-        );
-    } else {
-        tracing::debug!(
-            service = ctx.service,
-            event = audit_event_type,
-            phase = ctx.phase,
-            market_id = market_id.unwrap_or(""),
-            payload = %payload_text,
-            "{trace_message}"
-        );
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::operator_log::inventory::OFFER_POST_ITERATION;
+    use crate::operator_log::events::OFFER_POST_FAILURE;
     use serde_json::json;
 
     #[test]
-    fn audit_and_trace_persists_redacted_safe_payload() {
+    fn audit_and_trace_persists_full_payload_and_redacts_for_display() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = SqliteStore::open(&dir.path().join("greenfloor.sqlite")).expect("open");
         let secret_tail = "z".repeat(64);
@@ -179,23 +172,19 @@ mod tests {
             &store,
             Level::WARN,
             LogContext::OFFER_POST,
-            "offer_post_failure",
+            OFFER_POST_FAILURE,
             &payload,
             Some("m1"),
-            "offer post iteration failed",
+            "offer post failed",
         )
         .expect("audit");
 
         let events = store
-            .list_recent_audit_events(Some(&["offer_post_failure"]), Some("m1"), 1)
+            .list_recent_audit_events(Some(&[OFFER_POST_FAILURE]), Some("m1"), 1)
             .expect("events");
         assert_eq!(events.len(), 1);
         let stored = events[0].payload.get("offer_text").and_then(Value::as_str);
-        assert_eq!(
-            stored,
-            Some(secret_offer.as_str()),
-            "audit keeps full payload"
-        );
+        assert_eq!(stored, Some(secret_offer.as_str()));
 
         let redacted = crate::operator_log::redact_json_for_log(&payload);
         let redacted_offer = redacted
@@ -204,7 +193,5 @@ mod tests {
             .expect("redacted offer");
         assert!(!redacted_offer.contains(&secret_tail));
         assert!(redacted_offer.contains("len="));
-
-        let _ = OFFER_POST_ITERATION;
     }
 }

@@ -16,37 +16,46 @@ use super::strategy_phase::run_strategy_phase;
 
 async fn run_logged_market_phase<F, T>(
     market_id: &str,
-    phase_name: &str,
+    market_phase: &str,
     body: F,
 ) -> SignerResult<T>
 where
     F: Future<Output = SignerResult<T>>,
 {
-    tracing::debug!(
-        service = LogContext::MARKET_CYCLE.service,
-        event = MARKET_PHASE,
-        phase = phase_name,
-        market_id,
-        outcome = "started",
+    crate::trace_event!(
+        DEBUG,
+        LogContext::MARKET_CYCLE,
+        MARKET_PHASE,
+        {
+            market_id,
+            market_phase,
+            outcome = "started",
+        };
         "market phase started"
     );
     let result = body.await;
     if result.is_err() {
-        tracing::warn!(
-            service = LogContext::MARKET_CYCLE.service,
-            event = MARKET_PHASE,
-            phase = phase_name,
-            market_id,
-            outcome = "failed",
+        crate::trace_event!(
+            WARN,
+            LogContext::MARKET_CYCLE,
+            MARKET_PHASE,
+            {
+                market_id,
+                market_phase,
+                outcome = "failed",
+            };
             "market phase failed"
         );
     } else {
-        tracing::debug!(
-            service = LogContext::MARKET_CYCLE.service,
-            event = MARKET_PHASE,
-            phase = phase_name,
-            market_id,
-            outcome = "completed",
+        crate::trace_event!(
+            DEBUG,
+            LogContext::MARKET_CYCLE,
+            MARKET_PHASE,
+            {
+                market_id,
+                market_phase,
+                outcome = "completed",
+            };
             "market phase completed"
         );
     }
@@ -124,12 +133,14 @@ async fn run_post_reconcile_market_phases_async(
     }
     enforce_market_key_allowlist(market, &ctx.dispatch.allowed_key_ids)?;
 
-    tracing::debug!(
-        service = LogContext::MARKET_CYCLE.service,
-        event = MARKET_CYCLE_STARTED,
-        phase = LogContext::MARKET_CYCLE.phase,
-        market_id = market.market_id.as_str(),
-        outcome = "started",
+    crate::trace_event!(
+        DEBUG,
+        LogContext::MARKET_CYCLE,
+        MARKET_CYCLE_STARTED,
+        {
+            market_id = market.market_id.as_str(),
+            outcome = "started",
+        };
         "market cycle started"
     );
 
@@ -137,17 +148,19 @@ async fn run_post_reconcile_market_phases_async(
 
     execute_post_reconcile_phases(store, ctx, market, &mut cycle_state).await?;
 
-    tracing::debug!(
-        service = LogContext::MARKET_CYCLE.service,
-        event = MARKET_CYCLE_COMPLETED,
-        phase = LogContext::MARKET_CYCLE.phase,
-        market_id = market.market_id.as_str(),
-        outcome = if cycle_state.cycle_errors > 0 {
-            "partial_failure"
-        } else {
-            "success"
-        },
-        cycle_errors = cycle_state.cycle_errors,
+    crate::trace_event!(
+        DEBUG,
+        LogContext::MARKET_CYCLE,
+        MARKET_CYCLE_COMPLETED,
+        {
+            market_id = market.market_id.as_str(),
+            outcome = if cycle_state.cycle_errors > 0 {
+                "partial_failure"
+            } else {
+                "success"
+            },
+            cycle_errors = cycle_state.cycle_errors,
+        };
         "market cycle completed"
     );
 

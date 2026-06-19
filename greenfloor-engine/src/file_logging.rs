@@ -276,13 +276,15 @@ mod tests {
             .expect("reload");
         assert!(TEST_LOG_STATE.get().is_some_and(|state| state.is_ok()));
 
-        tracing::info!(
-            service = "daemon",
-            event = "daemon_cycle_started",
-            phase = "daemon_cycle",
-            market_count = 2,
-            dry_run = false,
-            selected_market_ids = ?["m1", "m2"],
+        crate::trace_event!(
+            INFO,
+            crate::operator_log::LogContext::DAEMON_CYCLE,
+            crate::operator_log::DAEMON_CYCLE_STARTED,
+            {
+                market_count = 2,
+                dry_run = false,
+                selected_market_ids = ?["m1", "m2"],
+            };
             "daemon cycle started"
         );
 
