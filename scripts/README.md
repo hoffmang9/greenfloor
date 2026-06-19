@@ -1,25 +1,22 @@
 # Operator scripts
 
-Python utilities for Coinset vault scans, one-time vault setup, and test fixtures.
-Operator coin ops and offer lifecycle use native Rust binaries (`greenfloor-manager`,
-`greenfloord`); see `docs/runbook.md`.
+Python utilities for one-time vault setup (`create_kms_vault.py`) and subprocess
+adapters under `greenfloor_scripts/`. Operator coin ops, vault scans, and Coinset
+probes use native Rust binaries (`greenfloor-engine`, `greenfloor-manager`);
+see `docs/runbook.md`.
 
-## Config access (scripts)
+## Config access
 
-Scripts must not walk operator YAML for policy fields. Use `scripts/greenfloor_scripts/config_subprocess.py`:
+Scripts must not walk operator YAML for policy fields. Call native manager commands
+directly:
 
-| Need                         | Adapter                                           | Rust command                                     |
-| ---------------------------- | ------------------------------------------------- | ------------------------------------------------ |
-| Program/signer/vault fields  | `load_program_fields()`                           | `greenfloor-manager program-fields --json`       |
-| Enabled markets              | `load_markets_fields()` + `enabled_market_rows()` | `greenfloor-manager markets-fields --json`       |
-| All markets (incl. disabled) | `all_market_rows()`                               | same (`markets` array in JSON)                   |
-| CAT catalog / symbol map     | `load_cats_fields()` + `symbol_to_asset_id_map()` | `greenfloor-manager cats-fields --json`          |
-| Vault launcher id            | `launcher_id_from_program_config()`               | via `program-fields`                             |
-| Validate before scan         | `ensure_program_config_valid()`                   | `greenfloor-manager config-validate`             |
-| Test minimal program.yaml    | `materialize_minimal_program_template()`          | `greenfloor-manager materialize-minimal-program` |
-
-`symbol_to_asset_id_map()` and `enabled_market_rows()` read manager-normalized JSON fields;
-they do not re-walk operator YAML.
+| Need                        | Rust command                                     |
+| --------------------------- | ------------------------------------------------ |
+| Program/signer/vault fields | `greenfloor-manager program-fields --json`       |
+| Enabled markets             | `greenfloor-manager markets-fields --json`       |
+| CAT catalog / symbol map    | `greenfloor-manager cats-fields --json`          |
+| Validate before operations  | `greenfloor-manager config-validate`             |
+| Test minimal program.yaml   | `greenfloor-manager materialize-minimal-program` |
 
 ## Native binary resolution
 
@@ -29,18 +26,13 @@ Scripts resolve `greenfloor-engine` / `greenfloor-manager` via `scripts/greenflo
 fail fast with `engine_cli_binary_unavailable` unless binaries were built or env overrides are set
 (`GREENFLOOR_ENGINE_BIN`, etc.).
 
-`load_yaml()` in `io.py` is for reading YAML files back in tests after materialization;
-it is not operator config validation.
+## Coinset vault inventory and coin ops (Rust)
 
-## Coinset vault inventory and coin ops
+- `greenfloor-engine coinset probe` — probe Coinset height-window API support for vault scans.
+- `greenfloor-engine vault-coinset-scan` — nonce member puzzle hash scan via Coinset (checkpointed).
+- `greenfloor-manager combine-market-cat-dust` — batch dust combine for enabled market CAT assets.
 
-- `list_vault_coins_coinset.py` — thin wrapper around `greenfloor-engine vault-coinset-scan` (nonce member puzzle hash scan via Coinset).
-- `combine_market_cat_dust_coinset.py` — thin wrapper around `greenfloor-manager combine-market-cat-dust` (batch dust combine for enabled market CAT assets).
-- `probe_coinset_capabilities.py` — probe Coinset height-window API support for vault scans.
-
-These scripts resolve vault identity and market/CAT metadata through the config adapters
-above (`--program-config`, `--markets-config`, optional `--cats-config`). Legacy
-`cloud_wallet:` blocks are rejected at Rust config load.
+Legacy `cloud_wallet:` blocks are rejected at Rust config load.
 
 See also `docs/coinset-validation.md`.
 
@@ -49,9 +41,25 @@ See also `docs/coinset-validation.md`.
 - `create_kms_vault.py` — create a new ent-wallet vault with KMS P-256 custody + BLS
   recovery (one-time operator setup).
 
-## Fixtures
+## Test fixtures
 
-- `export_signer_fixtures.py` — export signer golden fixtures for tests.
+Export signer golden fixtures with the Rust test harness:
+
+```bash
+EXPORT_SIGNER_FIXTURES=1 cargo test -p greenfloor-engine export_signer_fixtures_to_disk
+```
+
+## Remaining Python adapters
+
+`greenfloor_scripts/` keeps subprocess bridges used by `create_kms_vault.py` and adapter
+unit tests:
+
+- `binaries.py` — resolve native operator binaries
+- `engine_subprocess.py` — `greenfloor-engine` JSON CLI bridge
+- `coinset_subprocess.py` — `greenfloor-engine coinset …` bridge
+- `hex_subprocess.py` — `greenfloor-engine hex …` bridge
+- `kms_subprocess.py` — KMS public-key CLI bridge
+- `ent_wallet_graphql.py` — one-time ent-wallet GraphQL client
 
 ## Removed scripts (Cloud Wallet retirement)
 
@@ -60,8 +68,15 @@ were removed:
 
 - `reconcile_byc_wusdc.py` — wallet asset totals vs creator offers reconciliation.
 - `trace_locked_quote_coins.py` — locked quote coin lineage / reservation inspection.
-- `combine_coinset_direct.py` — superseded by `greenfloor-manager coin-combine` and
-  `combine_market_cat_dust_coinset.py`.
+- `combine_coinset_direct.py` — superseded by `greenfloor-manager coin-combine`.
+
+Removed Python passthroughs and dead adapters (use native binaries instead):
+
+- `list_vault_coins_coinset.py` → `greenfloor-engine vault-coinset-scan`
+- `combine_market_cat_dust_coinset.py` → `greenfloor-manager combine-market-cat-dust`
+- `probe_coinset_capabilities.py` → `greenfloor-engine coinset probe`
+- `export_signer_fixtures.py` → `EXPORT_SIGNER_FIXTURES=1 cargo test …`
+- `config_subprocess.py` / `manager_subprocess.py` — no remaining script callers
 
 For inventory and coin operations on the signer path, use `greenfloor-manager coins-list`,
 `coin-split`, and `coin-combine`.

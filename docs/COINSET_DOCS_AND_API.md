@@ -11,7 +11,7 @@ skill as the canonical operator workflow reference:
 For repo-specific execution and host validation, use:
 
 - `docs/coinset-validation.md`
-- `scripts/probe_coinset_capabilities.py`
+- `greenfloor-engine coinset probe`
 
 This file summarizes the public docs currently available from `https://www.coinset.org/docs` and linked usage pages.
 

@@ -8,6 +8,7 @@ use crate::coinset::{
     coin_id_from_record, ensure_coinset_rpc_success, post_coinset_coin_records,
     post_coinset_record, post_coinset_rpc, push_tx_hex, resolve_direct_client,
 };
+use crate::coinset_probe::run_coinset_probe_command;
 use crate::error::{SignerError, SignerResult};
 
 #[derive(Debug, Args)]
@@ -100,6 +101,8 @@ pub enum CoinsetCommands {
     CoinIdFromRecord(CoinsetCoinIdFromRecordArgs),
     #[command(name = "push-tx")]
     PushTx(CoinsetPushTxArgs),
+    /// Probe Coinset height-window API support for vault scans.
+    Probe(crate::coinset_probe::CoinsetProbeCliArgs),
 }
 
 #[derive(Debug, Args)]
@@ -145,6 +148,7 @@ pub async fn run_coinset_command(args: CoinsetCliArgs) -> SignerResult<()> {
         CoinsetCommands::Post(args) => run_coinset_post(args).await,
         CoinsetCommands::CoinIdFromRecord(args) => run_coinset_coin_id_from_record(&args),
         CoinsetCommands::PushTx(args) => run_coinset_push_tx(args).await,
+        CoinsetCommands::Probe(args) => run_coinset_probe_command(args).await,
     }
 }
 
@@ -340,6 +344,26 @@ mod tests {
                 assert_eq!(args.start_height, Some(10));
                 assert_eq!(args.end_height, Some(20));
                 assert!(args.json);
+            }
+            _ => panic!("unexpected subcommand"),
+        }
+    }
+
+    #[test]
+    fn parses_nested_coinset_probe_defaults() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "probe",
+            "--launcher-id",
+            &"ab".repeat(32),
+            "--height-window",
+            "1000",
+        ])
+        .expect("parse coinset probe");
+        match cli.command {
+            CoinsetCommands::Probe(args) => {
+                assert_eq!(args.height_window, 1000);
+                assert_eq!(args.launcher_id.len(), 64);
             }
             _ => panic!("unexpected subcommand"),
         }

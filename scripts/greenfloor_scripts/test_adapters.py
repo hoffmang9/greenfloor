@@ -7,8 +7,6 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from greenfloor_scripts.chia_sdk_helpers import coin_id_from_record
-from greenfloor_scripts.coinset_scanner import coinset_with_retries
 from greenfloor_scripts.coinset_subprocess import (
     coin_records_cli,
     record_from_cli,
@@ -22,7 +20,6 @@ from greenfloor_scripts.engine_subprocess import (
 )
 from greenfloor_scripts.hex_subprocess import normalize_hex_id
 from greenfloor_scripts.kms_subprocess import get_public_key_compressed_hex
-from greenfloor_scripts.manager_subprocess import build_manager_argv, partition_manager_argv
 
 ENGINE_CLI_JSON_COINSET_503 = json.dumps(
     {
@@ -40,17 +37,8 @@ ENGINE_CLI_JSON_PARSE_BODY = json.dumps(
     },
     separators=(",", ":"),
 )
-ENGINE_CLI_JSON_TIMEOUT = json.dumps(
-    {
-        "success": False,
-        "error": "coinset error: operation timed out",
-        "retryable": True,
-    },
-    separators=(",", ":"),
-)
 ENGINE_CLI_FAILED_COINSET_503 = f"{ENGINE_CLI_FAILED_PREFIX}{ENGINE_CLI_JSON_COINSET_503}"
 ENGINE_CLI_FAILED_PARSE_BODY = f"{ENGINE_CLI_FAILED_PREFIX}{ENGINE_CLI_JSON_PARSE_BODY}"
-ENGINE_CLI_FAILED_TIMEOUT = f"{ENGINE_CLI_FAILED_PREFIX}{ENGINE_CLI_JSON_TIMEOUT}"
 
 
 def subprocess_completed(*, returncode: int, stderr: str) -> SimpleNamespace:
@@ -153,20 +141,6 @@ class ScriptAdapterTests(unittest.TestCase):
             )
         )
 
-    def test_coinset_with_retries_succeeds_after_engine_cli_503_failure(self) -> None:
-        calls = {"count": 0}
-
-        def flaky() -> str:
-            calls["count"] += 1
-            if calls["count"] == 1:
-                raise RuntimeError(ENGINE_CLI_FAILED_COINSET_503)
-            return "ok"
-
-        with patch("greenfloor_scripts.coinset_scanner.time.sleep") as mock_sleep:
-            self.assertEqual(coinset_with_retries(flaky, sleep=mock_sleep), "ok")
-        self.assertEqual(calls["count"], 2)
-        mock_sleep.assert_called_once()
-
     def test_run_engine_json_wraps_json_stderr_as_engine_cli_failed(self) -> None:
         with (
             patch(
@@ -183,34 +157,6 @@ class ScriptAdapterTests(unittest.TestCase):
                 run_engine_json(["coinset", "post"])
             self.assertEqual(str(ctx.exception), ENGINE_CLI_FAILED_COINSET_503)
 
-    def test_coinset_with_retries_succeeds_after_retryable_failure(self) -> None:
-        calls = {"count": 0}
-
-        def flaky() -> str:
-            calls["count"] += 1
-            if calls["count"] == 1:
-                raise RuntimeError(ENGINE_CLI_FAILED_TIMEOUT)
-            return "ok"
-
-        with patch("greenfloor_scripts.coinset_scanner.time.sleep") as mock_sleep:
-            self.assertEqual(coinset_with_retries(flaky, sleep=mock_sleep), "ok")
-        self.assertEqual(calls["count"], 2)
-        mock_sleep.assert_called_once()
-
-    def test_coinset_with_retries_raises_immediately_on_non_retryable_error(self) -> None:
-        calls = {"count": 0}
-
-        def fail_fast() -> None:
-            calls["count"] += 1
-            raise RuntimeError(ENGINE_CLI_FAILED_PARSE_BODY)
-
-        with patch("greenfloor_scripts.coinset_scanner.time.sleep") as mock_sleep:
-            with self.assertRaises(RuntimeError) as ctx:
-                coinset_with_retries(fail_fast, sleep=mock_sleep)
-            self.assertEqual(str(ctx.exception), ENGINE_CLI_FAILED_PARSE_BODY)
-        self.assertEqual(calls["count"], 1)
-        mock_sleep.assert_not_called()
-
     def test_normalize_hex_id_delegates_to_engine_hex_cli(self) -> None:
         valid_id = "b" * 64
         with patch("greenfloor_scripts.hex_subprocess.run_engine_json") as mock_run:
@@ -226,83 +172,6 @@ class ScriptAdapterTests(unittest.TestCase):
             self.assertEqual(get_public_key_compressed_hex("key-1", "us-east-1"), "03abc")
         argv = mock_run.call_args.args[0]
         self.assertEqual(argv[0], "kms-public-key-compressed-hex")
-
-    def test_coin_id_from_record_delegates_to_engine_coinset_cli(self) -> None:
-        valid_id = "d" * 64
-        record = {
-            "coin": {
-                "parent_coin_info": f"0x{'a' * 64}",
-                "puzzle_hash": f"0x{'b' * 64}",
-                "amount": 1,
-                "name": f"0x{valid_id}",
-            }
-        }
-        with patch("greenfloor_scripts.chia_sdk_helpers.run_engine_json") as mock_run:
-            mock_run.return_value = {"coin_id": valid_id}
-            self.assertEqual(coin_id_from_record(record), valid_id)
-        argv = mock_run.call_args.args[0]
-        self.assertEqual(argv[:2], ["coinset", "coin-id-from-record"])
-        self.assertIn("--record-json", argv)
-        body_json = argv[argv.index("--record-json") + 1]
-        self.assertEqual(json.loads(body_json), record)
-
-    def test_coin_id_from_record_returns_empty_on_cli_failure(self) -> None:
-        with patch("greenfloor_scripts.chia_sdk_helpers.run_engine_json") as mock_run:
-            mock_run.side_effect = RuntimeError("engine_cli_failed")
-            self.assertEqual(coin_id_from_record({"coin": {"amount": 1}}), "")
-
-    def test_partition_manager_argv_separates_global_and_subcommand_flags(self) -> None:
-        with patch("greenfloor_scripts.manager_subprocess._manager_flag_groups") as mock_groups:
-            mock_groups.return_value = (
-                frozenset({"--program-config", "--json"}),
-                frozenset({"--dry-run", "--dust-threshold-mojos"}),
-                frozenset({"--program-config", "--dust-threshold-mojos"}),
-            )
-            global_args, subcommand_args = partition_manager_argv(
-                "combine-market-cat-dust",
-                [
-                    "--program-config",
-                    "config/program.yaml",
-                    "--json",
-                    "--dry-run",
-                    "--dust-threshold-mojos",
-                    "1000",
-                ],
-            )
-        self.assertEqual(
-            global_args,
-            ["--program-config", "config/program.yaml", "--json"],
-        )
-        self.assertEqual(
-            subcommand_args,
-            ["--dry-run", "--dust-threshold-mojos", "1000"],
-        )
-
-    def test_build_manager_argv_places_subcommand_after_global_flags(self) -> None:
-        with patch(
-            "greenfloor_scripts.manager_subprocess.partition_manager_argv"
-        ) as mock_partition:
-            mock_partition.return_value = (
-                ["--cats-config", "config/cats.yaml"],
-                ["--dry-run"],
-            )
-            argv = build_manager_argv(
-                "combine-market-cat-dust",
-                [
-                    "--cats-config",
-                    "config/cats.yaml",
-                    "--dry-run",
-                ],
-            )
-        self.assertEqual(
-            argv,
-            [
-                "--cats-config",
-                "config/cats.yaml",
-                "combine-market-cat-dust",
-                "--dry-run",
-            ],
-        )
 
 
 if __name__ == "__main__":
