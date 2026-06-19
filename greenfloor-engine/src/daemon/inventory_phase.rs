@@ -9,10 +9,7 @@ use crate::cycle::MarketCycleResultState;
 use crate::error::SignerResult;
 use crate::hex::{default_mojo_multiplier_for_asset, is_hex_id, normalize_hex_id};
 use crate::offer::resolve_offer_assets_for_action;
-use crate::operator_log::{
-    operator_audit, AuditDurability, EmitMode, LogContext, INVENTORY_BUCKET_SCAN,
-    INVENTORY_BUCKET_SCAN_ERROR,
-};
+use crate::operator_log::{LogContext, INVENTORY_BUCKET_SCAN, INVENTORY_BUCKET_SCAN_ERROR};
 use crate::storage::SqliteStore;
 
 use super::coinset_spendable::list_spendable_base_unit_amounts;
@@ -81,10 +78,10 @@ pub async fn run_inventory_phase(
 
     match scan_result {
         Ok((resolved_base_asset_id, coin_count, bucket_counts)) => {
-            operator_audit(
-                Some(store),
-                LogContext::MARKET_CYCLE,
-                EmitMode::dual(Level::DEBUG, "inventory bucket scan"),
+            LogContext::MARKET_CYCLE.dual_audit(
+                store,
+                Level::DEBUG,
+                "inventory bucket scan",
                 INVENTORY_BUCKET_SCAN,
                 &json!({
                     "market_id": market.market_id,
@@ -94,15 +91,14 @@ pub async fn run_inventory_phase(
                     "bucket_counts": bucket_counts,
                 }),
                 Some(&market.market_id),
-                AuditDurability::Required,
             )?;
             Ok(bucket_counts)
         }
         Err(err) if is_signer_execution_soft_skip(&err) => {
-            operator_audit(
-                Some(store),
-                LogContext::MARKET_CYCLE,
-                EmitMode::dual(Level::DEBUG, "inventory bucket scan skipped"),
+            LogContext::MARKET_CYCLE.dual_audit(
+                store,
+                Level::DEBUG,
+                "inventory bucket scan skipped",
                 INVENTORY_BUCKET_SCAN,
                 &json!({
                     "market_id": market.market_id,
@@ -110,20 +106,18 @@ pub async fn run_inventory_phase(
                     "bucket_counts": {},
                 }),
                 Some(&market.market_id),
-                AuditDurability::Required,
             )?;
             Ok(BTreeMap::default())
         }
         Err(err) => {
             state.record_phase_error();
-            operator_audit(
-                Some(store),
-                LogContext::MARKET_CYCLE,
-                EmitMode::dual(Level::WARN, "inventory bucket scan failed"),
+            LogContext::MARKET_CYCLE.dual_audit(
+                store,
+                Level::WARN,
+                "inventory bucket scan failed",
                 INVENTORY_BUCKET_SCAN_ERROR,
                 &json!({"market_id": market.market_id, "error": err.to_string()}),
                 Some(&market.market_id),
-                AuditDurability::Required,
             )?;
             Err(err)
         }

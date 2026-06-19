@@ -13,9 +13,9 @@ use crate::config::{
 use crate::error::SignerResult;
 use crate::hex::default_mojo_multiplier_for_asset;
 use crate::operator_log::{
-    operator_audit, AuditDurability, EmitMode, LogContext, COIN_OPS_EXECUTED,
-    COIN_OPS_INVALID_LADDER_MATH, COIN_OPS_NO_PLANS, COIN_OPS_PARTIAL_OR_SKIPPED_FEE_BUDGET,
-    COIN_OPS_PLAN, COIN_OPS_SKIPPED_FEE_BUDGET, COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
+    LogContext, COIN_OPS_EXECUTED, COIN_OPS_INVALID_LADDER_MATH, COIN_OPS_NO_PLANS,
+    COIN_OPS_PARTIAL_OR_SKIPPED_FEE_BUDGET, COIN_OPS_PLAN, COIN_OPS_SKIPPED_FEE_BUDGET,
+    COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
 };
 use crate::storage::SqliteStore;
 
@@ -56,10 +56,10 @@ fn build_valid_sell_ladder(
         }));
     }
     if !invalid_buckets.is_empty() {
-        operator_audit(
-            Some(store),
-            LogContext::MARKET_CYCLE,
-            EmitMode::dual(Level::WARN, "coin ops skipped sub-minimum target amount"),
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::WARN,
+            "coin ops skipped sub-minimum target amount",
             COIN_OPS_SKIP_SUB_MINIMUM_TARGET_AMOUNT,
             &json!({
                 "market_id": market.market_id,
@@ -67,7 +67,6 @@ fn build_valid_sell_ladder(
                 "invalid_buckets": invalid_buckets,
             }),
             Some(&market.market_id),
-            AuditDurability::Required,
         )?;
     }
     Ok(valid_ladder)
@@ -112,29 +111,27 @@ fn plan_coin_ops_for_market(
         program.coin_ops_combine_fee_mojos,
     );
     if !planning.invalid_ladder_math_sizes.is_empty() {
-        operator_audit(
-            Some(store),
-            LogContext::MARKET_CYCLE,
-            EmitMode::dual(Level::WARN, "coin ops invalid ladder math"),
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::WARN,
+            "coin ops invalid ladder math",
             COIN_OPS_INVALID_LADDER_MATH,
             &json!({
                 "market_id": market.market_id,
                 "invalid_ladder_math_sizes": planning.invalid_ladder_math_sizes,
             }),
             Some(&market.market_id),
-            AuditDurability::Required,
         )?;
     }
     let plans = planning.plans;
     if plans.is_empty() {
-        operator_audit(
-            Some(store),
-            LogContext::MARKET_CYCLE,
-            EmitMode::dual(Level::DEBUG, "coin ops no plans"),
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::DEBUG,
+            "coin ops no plans",
             COIN_OPS_NO_PLANS,
             &json!({"market_id": market.market_id}),
             Some(&market.market_id),
-            AuditDurability::Required,
         )?;
         return Ok(None);
     }
@@ -224,10 +221,10 @@ fn record_coin_ops_phase_audit(
     execution: &CoinOpExecutionResult,
 ) -> SignerResult<()> {
     if !planning.overflow_plans.is_empty() {
-        operator_audit(
-            Some(store),
-            LogContext::MARKET_CYCLE,
-            EmitMode::dual(Level::WARN, "coin ops partial or skipped fee budget"),
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::WARN,
+            "coin ops partial or skipped fee budget",
             COIN_OPS_PARTIAL_OR_SKIPPED_FEE_BUDGET,
             &json!({
                 "market_id": market.market_id,
@@ -240,14 +237,13 @@ fn record_coin_ops_phase_audit(
                     .collect::<Vec<_>>(),
             }),
             Some(&market.market_id),
-            AuditDurability::Required,
         )?;
     }
 
-    operator_audit(
-        Some(store),
-        LogContext::MARKET_CYCLE,
-        EmitMode::dual(Level::INFO, "coin ops plan"),
+    LogContext::MARKET_CYCLE.dual_audit(
+        store,
+        Level::INFO,
+        "coin ops plan",
         COIN_OPS_PLAN,
         &json!({
             "market_id": market.market_id,
@@ -257,14 +253,13 @@ fn record_coin_ops_phase_audit(
             "execution": execution_payload(execution),
         }),
         Some(&market.market_id),
-        AuditDurability::Required,
     )?;
 
     if planning.executable_plans.is_empty() {
-        operator_audit(
-            Some(store),
-            LogContext::MARKET_CYCLE,
-            EmitMode::dual(Level::WARN, "coin ops skipped fee budget"),
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::WARN,
+            "coin ops skipped fee budget",
             COIN_OPS_SKIPPED_FEE_BUDGET,
             &json!({
                 "market_id": market.market_id,
@@ -272,13 +267,12 @@ fn record_coin_ops_phase_audit(
                 "overflow_count": planning.overflow_plans.len(),
             }),
             Some(&market.market_id),
-            AuditDurability::Required,
         )?;
     } else {
-        operator_audit(
-            Some(store),
-            LogContext::MARKET_CYCLE,
-            EmitMode::dual(Level::INFO, "coin ops executed"),
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::INFO,
+            "coin ops executed",
             COIN_OPS_EXECUTED,
             &json!({
                 "market_id": market.market_id,
@@ -287,7 +281,6 @@ fn record_coin_ops_phase_audit(
                 "overflow_count": planning.overflow_plans.len(),
             }),
             Some(&market.market_id),
-            AuditDurability::Required,
         )?;
     }
     Ok(())
@@ -305,14 +298,13 @@ pub async fn run_coin_ops_phase(
     let program = ctx.resources.program();
     let sell_ladder = market.ladders.get("sell").cloned().unwrap_or_default();
     if sell_ladder.is_empty() {
-        operator_audit(
-            Some(store),
-            LogContext::MARKET_CYCLE,
-            EmitMode::dual(Level::DEBUG, "coin ops no plans"),
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::DEBUG,
+            "coin ops no plans",
             COIN_OPS_NO_PLANS,
             &json!({"market_id": market.market_id, "reason": "empty_sell_ladder"}),
             Some(&market.market_id),
-            AuditDurability::Required,
         )?;
         return Ok(());
     }

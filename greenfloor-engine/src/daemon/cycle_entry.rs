@@ -4,8 +4,8 @@ use crate::config::MarketConfig;
 use crate::cycle::enqueue_immediate_requeue;
 use crate::error::SignerResult;
 use crate::operator_log::{
-    audit_row, operator_audit, AuditDurability, EmitMode, LogContext, DAEMON_CYCLE_COMPLETED,
-    DAEMON_CYCLE_STARTED, DAEMON_CYCLE_SUMMARY, STALE_OPEN_OFFER_REQUEUE_DETECTED,
+    LogContext, DAEMON_CYCLE_COMPLETED, DAEMON_CYCLE_STARTED, DAEMON_CYCLE_SUMMARY,
+    STALE_OPEN_OFFER_REQUEUE_DETECTED,
 };
 use crate::storage::SqliteStore;
 use tracing::Level;
@@ -41,10 +41,10 @@ fn write_stale_sweep_audit(store: &SqliteStore, plan: &CyclePlan) -> SignerResul
     if plan.stale_open_sweep.requeue_market_ids.is_empty() {
         return Ok(());
     }
-    operator_audit(
-        Some(store),
-        LogContext::DAEMON_CYCLE,
-        EmitMode::dual(Level::INFO, "stale open offer requeue detected"),
+    LogContext::DAEMON_CYCLE.dual_audit(
+        store,
+        Level::INFO,
+        "stale open offer requeue detected",
         STALE_OPEN_OFFER_REQUEUE_DETECTED,
         &serde_json::json!({
             "market_ids": plan.stale_open_sweep.requeue_market_ids,
@@ -53,7 +53,6 @@ fn write_stale_sweep_audit(store: &SqliteStore, plan: &CyclePlan) -> SignerResul
             "hits": plan.stale_open_sweep.hits,
         }),
         None,
-        AuditDurability::Required,
     )
 }
 
@@ -200,14 +199,7 @@ pub async fn run_daemon_cycle_once(
     let summary_payload = serde_json::to_value(&summary).map_err(|err| {
         crate::error::SignerError::Other(format!("failed to encode daemon_cycle_summary: {err}"))
     })?;
-    audit_row(
-        &cycle_store,
-        LogContext::DAEMON_CYCLE,
-        DAEMON_CYCLE_SUMMARY,
-        &summary_payload,
-        None,
-        AuditDurability::Required,
-    )?;
+    LogContext::DAEMON_CYCLE.audit(&cycle_store, DAEMON_CYCLE_SUMMARY, &summary_payload, None)?;
 
     let exit_code = compute_cycle_exit_code(&plan, &metrics);
     trace_daemon_cycle_completed(exit_code, &summary, plan.selected_market_ids.len());

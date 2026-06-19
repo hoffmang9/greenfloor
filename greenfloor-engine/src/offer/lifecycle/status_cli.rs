@@ -129,7 +129,7 @@ mod tests {
 
     use super::*;
 
-    use crate::operator_log::{audit_row, AuditDurability, LogContext};
+    use crate::operator_log::LogContext;
 
     #[test]
     fn status_cli_reports_counts_and_events() {
@@ -142,15 +142,14 @@ mod tests {
         store
             .upsert_offer_state("a2", "m1", "tx_block_confirmed", Some(4))
             .expect("seed");
-        audit_row(
-            &store,
-            LogContext::DAEMON_CYCLE,
-            OFFER_RECONCILIATION,
-            &json!({"offer_id": "a2", "new_state": "tx_block_confirmed"}),
-            Some("m1"),
-            AuditDurability::Required,
-        )
-        .expect("audit");
+        LogContext::MARKET_CYCLE
+            .audit(
+                &store,
+                OFFER_RECONCILIATION,
+                &json!({"offer_id": "a2", "new_state": "tx_block_confirmed"}),
+                Some("m1"),
+            )
+            .expect("audit");
 
         let payload = offers_status_cli(&db_path, Some("m1"), 20, 10).expect("status");
         assert_eq!(payload.offer_count, 2);

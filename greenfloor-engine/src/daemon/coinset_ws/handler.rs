@@ -9,10 +9,9 @@ use crate::offer::dexie_payload::{
     extract_coin_ids_from_offer_payload, extract_coinset_tx_ids_from_offer_payload,
 };
 use crate::operator_log::{
-    audit_row, AuditDurability, LogContext, COINSET_WS_COIN_OBSERVED, COINSET_WS_MEMPOOL_EVENT,
-    COINSET_WS_PAYLOAD_IGNORED, COINSET_WS_PAYLOAD_PARSE_ERROR, COINSET_WS_RECOVERY_POLL,
-    COINSET_WS_RECOVERY_POLL_ERROR, COINSET_WS_TX_BLOCK_EVENT, COIN_WATCH_HIT, MEMPOOL_OBSERVED,
-    TX_BLOCK_CONFIRMED,
+    LogContext, COINSET_WS_COIN_OBSERVED, COINSET_WS_MEMPOOL_EVENT, COINSET_WS_PAYLOAD_IGNORED,
+    COINSET_WS_PAYLOAD_PARSE_ERROR, COINSET_WS_RECOVERY_POLL, COINSET_WS_RECOVERY_POLL_ERROR,
+    COINSET_WS_TX_BLOCK_EVENT, COIN_WATCH_HIT, MEMPOOL_OBSERVED, TX_BLOCK_CONFIRMED,
 };
 use crate::storage::SqliteStore;
 
@@ -31,34 +30,28 @@ pub async fn run_recovery_poll(
     match get_all_mempool_tx_ids(&program.network, base_opt).await {
         Ok(tx_ids) => {
             let new_count = store.observe_mempool_tx_ids(&tx_ids)?;
-            audit_row(
+            LogContext::COINSET.audit(
                 store,
-                LogContext::COINSET,
                 COINSET_WS_RECOVERY_POLL,
                 &json!({"reason": reason, "tx_id_count": tx_ids.len()}),
                 None,
-                AuditDurability::Required,
             )?;
             if new_count > 0 {
-                audit_row(
+                LogContext::COINSET.audit(
                     store,
-                    LogContext::COINSET,
                     MEMPOOL_OBSERVED,
                     &json!({"new_tx_ids": new_count, "source": "coinset_websocket"}),
                     None,
-                    AuditDurability::Required,
                 )?;
             }
             Ok(())
         }
         Err(err) => {
-            audit_row(
+            LogContext::COINSET.audit(
                 store,
-                LogContext::COINSET,
                 COINSET_WS_RECOVERY_POLL_ERROR,
                 &json!({"reason": reason, "error": err.to_string()}),
                 None,
-                AuditDurability::Required,
             )?;
             Err(err)
         }
@@ -67,22 +60,18 @@ pub async fn run_recovery_poll(
 
 fn record_ws_mempool_tx_ids(store: &SqliteStore, mempool_tx_ids: &[String]) -> SignerResult<()> {
     let new_count = store.observe_mempool_tx_ids(mempool_tx_ids)?;
-    audit_row(
+    LogContext::COINSET.audit(
         store,
-        LogContext::COINSET,
         COINSET_WS_MEMPOOL_EVENT,
         &json!({"tx_id_count": mempool_tx_ids.len()}),
         None,
-        AuditDurability::Required,
     )?;
     if new_count > 0 {
-        audit_row(
+        LogContext::COINSET.audit(
             store,
-            LogContext::COINSET,
             MEMPOOL_OBSERVED,
             &json!({"new_tx_ids": new_count, "source": "coinset_websocket"}),
             None,
-            AuditDurability::Required,
         )?;
     }
     Ok(())
@@ -93,17 +82,14 @@ fn record_ws_confirmed_tx_ids(
     confirmed_tx_ids: &[String],
 ) -> SignerResult<()> {
     let confirmed = store.confirm_tx_ids(confirmed_tx_ids)?;
-    audit_row(
+    LogContext::COINSET.audit(
         store,
-        LogContext::COINSET,
         COINSET_WS_TX_BLOCK_EVENT,
         &json!({"tx_id_count": confirmed_tx_ids.len(), "confirmed_count": confirmed}),
         None,
-        AuditDurability::Required,
     )?;
-    audit_row(
+    LogContext::COINSET.audit(
         store,
-        LogContext::COINSET,
         TX_BLOCK_CONFIRMED,
         &json!({
             "tx_ids": confirmed_tx_ids,
@@ -111,7 +97,6 @@ fn record_ws_confirmed_tx_ids(
             "source": "coinset_websocket",
         }),
         None,
-        AuditDurability::Required,
     )
 }
 
@@ -120,13 +105,11 @@ fn record_ws_observed_coins(
     coin_watchlist: &CoinWatchlistCache,
     observed_coin_ids: &[String],
 ) -> SignerResult<()> {
-    audit_row(
+    LogContext::COINSET.audit(
         store,
-        LogContext::COINSET,
         COINSET_WS_COIN_OBSERVED,
         &json!({"coin_id_count": observed_coin_ids.len()}),
         None,
-        AuditDurability::Required,
     )?;
     let hits = coin_watchlist.match_watched_coin_ids(observed_coin_ids);
     if hits.is_empty() {
@@ -147,9 +130,8 @@ fn record_ws_observed_coins(
             )
         })
         .collect();
-    audit_row(
+    LogContext::COINSET.audit(
         store,
-        LogContext::COINSET,
         COIN_WATCH_HIT,
         &json!({
             "coin_id_count": observed_coin_ids.len(),
@@ -158,7 +140,6 @@ fn record_ws_observed_coins(
             "source": "coinset_websocket",
         }),
         None,
-        AuditDurability::Required,
     )
 }
 
@@ -170,13 +151,11 @@ pub fn handle_ws_text(
     let payload: Value = if let Ok(value) = serde_json::from_str(raw) {
         value
     } else {
-        audit_row(
+        LogContext::COINSET.audit(
             store,
-            LogContext::COINSET,
             COINSET_WS_PAYLOAD_PARSE_ERROR,
             &json!({"raw": raw.chars().take(200).collect::<String>()}),
             None,
-            AuditDurability::Required,
         )?;
         return Ok(());
     };
@@ -189,13 +168,11 @@ pub fn handle_ws_text(
             Value::Array(_) => "array",
             Value::Object(_) => "object",
         };
-        audit_row(
+        LogContext::COINSET.audit(
             store,
-            LogContext::COINSET,
             COINSET_WS_PAYLOAD_IGNORED,
             &json!({"kind": kind}),
             None,
-            AuditDurability::Required,
         )?;
         return Ok(());
     }

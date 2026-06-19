@@ -1,6 +1,7 @@
 mod context;
 mod create;
 mod iteration;
+mod post_batch;
 mod publish;
 mod types;
 
@@ -20,7 +21,7 @@ use crate::storage::{state_db_path_for_home, SqliteStore};
 
 use context::{resolve_build_and_post_context, ResolvedBuildAndPostContext};
 use iteration::run_post_iteration;
-use publish::{
+use post_batch::{
     apply_post_iteration_outcome, flush_post_batch, trace_offer_post_completed, PostEmitTarget,
     PostIterationBatch,
 };

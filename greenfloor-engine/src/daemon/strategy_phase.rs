@@ -5,10 +5,7 @@ use tracing::Level;
 
 use crate::config::MarketConfig;
 use crate::error::SignerResult;
-use crate::operator_log::{
-    operator_audit, AuditDurability, EmitMode, LogContext, STRATEGY_ACTIONS_PLANNED,
-    STRATEGY_OFFER_EXECUTION_ERROR,
-};
+use crate::operator_log::{LogContext, STRATEGY_ACTIONS_PLANNED, STRATEGY_OFFER_EXECUTION_ERROR};
 use crate::storage::SqliteStore;
 
 use crate::cycle::MarketCycleResultState;
@@ -40,10 +37,10 @@ pub async fn run_strategy_phase(
         0,
     );
 
-    operator_audit(
-        Some(store),
-        LogContext::MARKET_CYCLE,
-        EmitMode::dual(Level::INFO, "strategy actions planned"),
+    LogContext::MARKET_CYCLE.dual_audit(
+        store,
+        Level::INFO,
+        "strategy actions planned",
         STRATEGY_ACTIONS_PLANNED,
         &json!({
             "market_id": market.market_id,
@@ -51,7 +48,6 @@ pub async fn run_strategy_phase(
             "action_count": strategy_actions.len(),
         }),
         Some(&market.market_id),
-        AuditDurability::Required,
     )?;
 
     let mut newly_executed_sell_counts = BTreeMap::default();
@@ -66,14 +62,13 @@ pub async fn run_strategy_phase(
             }
             Err(err) => {
                 state.record_phase_error();
-                operator_audit(
-                    Some(store),
-                    LogContext::MARKET_CYCLE,
-                    EmitMode::dual(Level::WARN, "strategy offer execution failed"),
+                LogContext::MARKET_CYCLE.dual_audit(
+                    store,
+                    Level::WARN,
+                    "strategy offer execution failed",
                     STRATEGY_OFFER_EXECUTION_ERROR,
                     &json!({"market_id": market.market_id, "error": err.to_string()}),
                     Some(&market.market_id),
-                    AuditDurability::Required,
                 )?;
             }
         }

@@ -4,10 +4,11 @@ use std::time::Instant;
 use serde_json::{json, Value};
 
 use super::context::{resolve_action_side, sample_resolved_build_and_post_context};
-use super::publish::{
-    apply_post_iteration_outcome, flush_post_batch, offer_post_persist_record, PostEmitTarget,
-    PostFailureAudit, PostIterationBatch,
+use super::post_batch::{
+    apply_post_iteration_outcome, flush_post_batch, PostEmitTarget, PostFailureAudit,
+    PostIterationBatch,
 };
+use super::publish::offer_post_persist_record;
 use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, PublishResult};
 use crate::cli_util::{format_json, format_json_value};
 use crate::operator_log::OFFER_POST_FAILURE;

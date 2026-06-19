@@ -8,7 +8,8 @@ mod redact;
 pub mod test_util;
 
 pub use emit::{
-    audit_row, operator_audit, trace_audit_mirror, AuditDurability, EmitMode, LogContext,
+    audit_row, audit_row_defer_dual, emit_deferred_dual_traces, operator_audit, trace_audit_mirror,
+    AuditDurability, DeferredDualAudit, DeferredDualTrace, EmitMode, LogContext,
 };
 
 pub use events::coin_op_ledger_event;

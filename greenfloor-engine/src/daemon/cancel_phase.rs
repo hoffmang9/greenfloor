@@ -8,9 +8,7 @@ use crate::cycle::{
     MarketCycleResultState,
 };
 use crate::error::SignerResult;
-use crate::operator_log::{
-    operator_audit, AuditDurability, EmitMode, LogContext, OFFER_CANCEL_POLICY,
-};
+use crate::operator_log::{LogContext, OFFER_CANCEL_POLICY};
 use crate::storage::SqliteStore;
 
 use crate::offer::dexie_payload::dexie_offer_status;
@@ -136,14 +134,13 @@ pub async fn run_market_cancel_phase(
 
     if !decision.triggered {
         let payload = cancel_policy_payload(market_id, &decision, cancel_planned, 0, &items);
-        operator_audit(
-            Some(store),
-            LogContext::MARKET_CYCLE,
-            EmitMode::dual(Level::INFO, "offer cancel policy evaluated"),
+        LogContext::MARKET_CYCLE.dual_audit(
+            store,
+            Level::INFO,
+            "offer cancel policy evaluated",
             OFFER_CANCEL_POLICY,
             &payload,
             Some(market_id),
-            AuditDurability::Required,
         )?;
         state.merge_cancel_policy(false, cancel_planned, 0);
         return Ok(payload);
@@ -170,14 +167,13 @@ pub async fn run_market_cancel_phase(
         cancel_executed,
         &items,
     );
-    operator_audit(
-        Some(store),
-        LogContext::MARKET_CYCLE,
-        EmitMode::dual(Level::INFO, "offer cancel policy evaluated"),
+    LogContext::MARKET_CYCLE.dual_audit(
+        store,
+        Level::INFO,
+        "offer cancel policy evaluated",
         OFFER_CANCEL_POLICY,
         &payload,
         Some(market_id),
-        AuditDurability::Required,
     )?;
     state.merge_cancel_policy(cancel_triggered, cancel_planned, cancel_executed);
     Ok(payload)

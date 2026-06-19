@@ -65,6 +65,162 @@ impl LogContext {
     };
 }
 
+impl LogContext {
+    /// Persist and mirror one audit outcome (`AuditDurability::Required`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the audit insert fails.
+    pub fn dual_audit(
+        self,
+        store: &SqliteStore,
+        level: Level,
+        trace_message: &'static str,
+        audit_event_type: &str,
+        payload: &Value,
+        market_id: Option<&str>,
+    ) -> SignerResult<()> {
+        operator_audit(
+            Some(store),
+            self,
+            EmitMode::dual(level, trace_message),
+            audit_event_type,
+            payload,
+            market_id,
+            AuditDurability::Required,
+        )
+    }
+
+    /// Mirror one audit outcome to trace without persisting.
+    ///
+    /// # Errors
+    ///
+    /// Always returns `Ok(())` today; reserved for future trace-side failures.
+    pub fn dual_trace(
+        self,
+        level: Level,
+        trace_message: &'static str,
+        audit_event_type: &str,
+        payload: &Value,
+        market_id: Option<&str>,
+    ) -> SignerResult<()> {
+        operator_audit(
+            None,
+            self,
+            EmitMode::dual(level, trace_message),
+            audit_event_type,
+            payload,
+            market_id,
+            AuditDurability::BestEffort,
+        )
+    }
+
+    /// Persist an audit row without a trace mirror (`AuditDurability::Required`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the audit insert fails.
+    pub fn audit(
+        self,
+        store: &SqliteStore,
+        audit_event_type: &str,
+        payload: &Value,
+        market_id: Option<&str>,
+    ) -> SignerResult<()> {
+        self.audit_with(
+            store,
+            audit_event_type,
+            payload,
+            market_id,
+            AuditDurability::Required,
+        )
+    }
+
+    /// Persist an audit row without a trace mirror.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the audit insert fails.
+    pub fn audit_with(
+        self,
+        store: &SqliteStore,
+        audit_event_type: &str,
+        payload: &Value,
+        market_id: Option<&str>,
+        durability: AuditDurability,
+    ) -> SignerResult<()> {
+        audit_row(
+            store,
+            self,
+            audit_event_type,
+            payload,
+            market_id,
+            durability,
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DeferredDualTrace {
+    ctx: LogContext,
+    level: Level,
+    event: String,
+    payload: Value,
+    market_id: Option<String>,
+    message: &'static str,
+}
+
+pub struct DeferredDualAudit {
+    pub ctx: LogContext,
+    pub level: Level,
+    pub trace_message: &'static str,
+    pub audit_event_type: &'static str,
+    pub payload: Value,
+    pub market_id: Option<String>,
+}
+
+/// Persist an audit row during a transaction and queue its trace mirror for after commit.
+///
+/// # Errors
+///
+/// Returns an error when the audit insert fails.
+pub fn audit_row_defer_dual(
+    deferred: &mut Vec<DeferredDualTrace>,
+    store: &SqliteStore,
+    entry: DeferredDualAudit,
+) -> SignerResult<()> {
+    audit_row(
+        store,
+        entry.ctx,
+        entry.audit_event_type,
+        &entry.payload,
+        entry.market_id.as_deref(),
+        AuditDurability::Required,
+    )?;
+    deferred.push(DeferredDualTrace {
+        ctx: entry.ctx,
+        level: entry.level,
+        event: entry.audit_event_type.to_string(),
+        payload: entry.payload,
+        market_id: entry.market_id,
+        message: entry.trace_message,
+    });
+    Ok(())
+}
+
+pub fn emit_deferred_dual_traces(deferred: &[DeferredDualTrace]) {
+    for trace in deferred {
+        trace_audit_mirror(
+            trace.level,
+            trace.ctx,
+            &trace.event,
+            &trace.payload,
+            trace.market_id.as_deref(),
+            trace.message,
+        );
+    }
+}
+
 pub fn trace_audit_mirror(
     level: Level,
     ctx: LogContext,

@@ -19,10 +19,7 @@ use crate::async_boundary::StrategyDispatchFuture;
 use crate::config::{is_signer_execution_soft_skip, signer_execution_skip_reason, MarketConfig};
 use crate::cycle::{expand_planned_actions, parallel_managed_dispatch_enabled, PlannedAction};
 use crate::error::{SignerError, SignerResult};
-use crate::operator_log::{
-    operator_audit, AuditDurability, EmitMode, LogContext, OFFER_PARALLEL_FALLBACK,
-    STRATEGY_EXEC_SKIPPED_NO_SIGNER,
-};
+use crate::operator_log::{LogContext, OFFER_PARALLEL_FALLBACK, STRATEGY_EXEC_SKIPPED_NO_SIGNER};
 use crate::storage::SqliteStore;
 
 use super::market_context::MarketCycleContext;
@@ -61,10 +58,10 @@ pub(crate) fn record_parallel_fallback_audit(
     market_id: &str,
     err: &SignerError,
 ) -> SignerResult<()> {
-    operator_audit(
-        Some(store),
-        LogContext::MARKET_CYCLE,
-        EmitMode::dual(Level::WARN, "parallel offer dispatch fallback"),
+    LogContext::MARKET_CYCLE.dual_audit(
+        store,
+        Level::WARN,
+        "parallel offer dispatch fallback",
         OFFER_PARALLEL_FALLBACK,
         &json!({
             "market_id": market_id,
@@ -72,7 +69,6 @@ pub(crate) fn record_parallel_fallback_audit(
             "reason": "reservation_parallel_path_failed",
         }),
         Some(market_id),
-        AuditDurability::Required,
     )
 }
 
@@ -93,10 +89,10 @@ async fn execute_strategy_actions_async(
 ) -> SignerResult<OfferDispatchOutput> {
     let signer_config = match ctx.resources.signer_for_execution() {
         Err(err) if is_signer_execution_soft_skip(&err) => {
-            operator_audit(
-                Some(store),
-                LogContext::MARKET_CYCLE,
-                EmitMode::dual(Level::WARN, "strategy execution skipped without signer"),
+            LogContext::MARKET_CYCLE.dual_audit(
+                store,
+                Level::WARN,
+                "strategy execution skipped without signer",
                 STRATEGY_EXEC_SKIPPED_NO_SIGNER,
                 &json!({
                     "market_id": market.market_id,
@@ -104,7 +100,6 @@ async fn execute_strategy_actions_async(
                     "reason": signer_execution_skip_reason(&err),
                 }),
                 Some(&market.market_id),
-                AuditDurability::Required,
             )?;
             return Ok(OfferDispatchOutput {
                 executed_count: 0,

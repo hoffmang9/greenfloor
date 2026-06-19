@@ -10,9 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::cycle::OfferLifecycleState;
 use crate::error::SignerResult;
-use crate::operator_log::{
-    operator_audit, AuditDurability, EmitMode, LogContext, COIN_WATCHLIST_UPDATED,
-};
+use crate::operator_log::{LogContext, COIN_WATCHLIST_UPDATED};
 use crate::storage::SqliteStore;
 
 use crate::offer::dexie_payload::extract_coin_ids_from_offer_payload;
@@ -306,10 +304,10 @@ pub fn update_market_coin_watchlist_from_offers(
     let mut sample: Vec<String> = watched_coin_ids.iter().cloned().collect();
     sample.sort();
     sample.truncate(10);
-    operator_audit(
-        Some(store),
-        LogContext::MARKET_CYCLE,
-        EmitMode::dual(tracing::Level::DEBUG, "coin watchlist updated"),
+    LogContext::MARKET_CYCLE.dual_audit(
+        store,
+        tracing::Level::DEBUG,
+        "coin watchlist updated",
         COIN_WATCHLIST_UPDATED,
         &serde_json::json!({
             "market_id": market_id,
@@ -319,7 +317,6 @@ pub fn update_market_coin_watchlist_from_offers(
             "watch_coin_sample": sample,
         }),
         Some(market_id),
-        AuditDurability::Required,
     )
 }
 

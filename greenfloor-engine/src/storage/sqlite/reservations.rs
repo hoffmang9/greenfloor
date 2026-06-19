@@ -94,10 +94,7 @@ fn acquire_reservation_lease_in_txn(
     store: &SqliteStore,
     normalized: &NormalizedReservationLeaseRequest<'_>,
 ) -> SignerResult<Option<String>> {
-    store.conn.execute("BEGIN IMMEDIATE", []).map_err(|err| {
-        SignerError::Other(format!("failed to begin reservation transaction: {err}"))
-    })?;
-    let result = (|| -> SignerResult<Option<String>> {
+    store.immediate_transaction("reservation", |store| {
         store
             .conn
             .execute(
@@ -180,19 +177,7 @@ fn acquire_reservation_lease_in_txn(
             })?;
         }
         Ok(None)
-    })();
-    match result {
-        Ok(value) => {
-            store.conn.execute("COMMIT", []).map_err(|err| {
-                SignerError::Other(format!("failed to commit reservation transaction: {err}"))
-            })?;
-            Ok(value)
-        }
-        Err(err) => {
-            let _ = store.conn.execute("ROLLBACK", []);
-            Err(err)
-        }
-    }
+    })
 }
 
 impl SqliteStore {
