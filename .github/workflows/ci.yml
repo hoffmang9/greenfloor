@@ -12,8 +12,8 @@ env:
   CARGO_MANIFEST: greenfloor-engine/Cargo.toml
 
 jobs:
-  ci:
-    name: CI (${{ matrix.os }})
+  lint-type-test:
+    name: Lint, Type, Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
