@@ -20,8 +20,12 @@ pub async fn resolve_vault_session(config: SignerConfig) -> SignerResult<VaultSe
     let kms_public_key_hex = match config.kms_public_key_hex.clone() {
         Some(value) => value,
         None => {
-            crate::kms::get_public_key_compressed_hex(&config.kms_key_id, &config.kms_region)
-                .await?
+            crate::kms::get_public_key_compressed_hex(
+                &config.kms_runtime,
+                &config.kms_key_id,
+                &config.kms_region,
+            )
+            .await?
         }
     };
 

@@ -1,0 +1,13 @@
+markets:
+  - id: m1
+    enabled: true
+    base_asset: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    base_symbol: "TCAT"
+    quote_asset: "xch"
+    quote_asset_type: "unstable"
+    signer_key_id: "key-main-1"
+    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"
+    mode: "sell_only"
+    pricing:
+      min_price_quote_per_base: 0.0031
+      max_price_quote_per_base: 0.0038

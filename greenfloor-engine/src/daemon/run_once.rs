@@ -14,6 +14,7 @@ use crate::error::SignerResult;
 use crate::metrics::{metric_millis_to_u64, metric_u64_to_usize};
 use crate::storage::{resolve_state_db_path, SqliteStore};
 
+use super::dispatch_test_controls::DaemonDispatchOverrides;
 use super::market_context::DaemonCycleResources;
 use super::markets::enabled_market_ids;
 use super::stale_sweep::detect_stale_open_offers_for_requeue;
@@ -30,6 +31,8 @@ pub struct DaemonCycleTestControls {
     pub skip_strategy_execution: bool,
     #[serde(default)]
     pub force_market_error_for: Option<String>,
+    #[serde(default, skip)]
+    pub offer_dispatch: DaemonDispatchOverrides,
 }
 
 /// Env gate for non-default `test_controls` on `greenfloor-engine daemon-once`.
@@ -380,6 +383,7 @@ mod tests {
         let controls = DaemonCycleTestControls {
             skip_strategy_execution: true,
             force_market_error_for: None,
+            ..Default::default()
         };
         let err = controls.ensure_allowed().expect_err("gate");
         assert!(err
@@ -393,6 +397,7 @@ mod tests {
         let controls = DaemonCycleTestControls {
             skip_strategy_execution: true,
             force_market_error_for: Some("m1".to_string()),
+            ..Default::default()
         };
         assert!(controls.ensure_allowed().is_ok());
         std::env::remove_var("GREENFLOOR_DAEMON_TEST_CONTROLS");

@@ -32,9 +32,8 @@ impl CoinOpExecContext {
     ///
     /// Returns an error if the operation fails.
     pub async fn list_spendable_coins(&self) -> SignerResult<Vec<SpendableCoin>> {
-        #[cfg(debug_assertions)]
-        if let Some(coins) = &self.test_overrides.wallet_coins {
-            return Ok(coins.clone());
+        if let Some(coins) = self.test_overrides.wallet_coins_override() {
+            return Ok(coins.to_vec());
         }
         let coins = list_wallet_unspent_coins(
             &self.program.network,
@@ -59,10 +58,9 @@ impl CoinOpExecContext {
         coin_ids: &[String],
         fee_mojos: u64,
     ) -> SignerResult<String> {
-        #[cfg(debug_assertions)]
-        if let Some(operation_id) = &self.test_overrides.mixed_split_operation_id {
+        if let Some(operation_id) = self.test_overrides.mixed_split_operation_id_override() {
             let _ = (output_amounts, coin_ids, fee_mojos);
-            return Ok(operation_id.clone());
+            return Ok(operation_id.to_string());
         }
         let asset_id = hex_to_bytes32(&self.resolved_base_asset_id)?;
         let parsed_coin_ids: Vec<Bytes32> = coin_ids

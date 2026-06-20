@@ -1,0 +1,12 @@
+markets:
+  - id: m1
+    enabled: true
+    base_asset: "a1"
+    base_symbol: "A1"
+    quote_asset: "xch"
+    quote_asset_type: "unstable"
+    signer_key_id: "key-main-1"
+    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"
+    mode: "sell_only"
+    inventory:
+      low_watermark_base_units: 100

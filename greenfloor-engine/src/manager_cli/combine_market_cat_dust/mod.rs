@@ -6,7 +6,7 @@ mod report;
 #[cfg(test)]
 mod report_test;
 #[cfg(test)]
-mod test_support;
+mod sim_harness;
 
 use coinset_context::{
     load_execution_signer, resolve_combine_coinset_context, CombineCoinsetContext,

@@ -1,0 +1,22 @@
+app:
+  network: "mainnet"
+  home_dir: "~/.greenfloor"
+runtime:
+  loop_interval_seconds: 30
+notifications:
+  low_inventory_alerts:
+    enabled: true
+    threshold_mode: "absolute_base_units"
+    default_threshold_base_units: 0
+    dedup_cooldown_seconds: 3600
+    clear_hysteresis_percent: 10
+  providers:
+    - type: pushover
+      enabled: false
+      user_key_env: "PUSHOVER_USER_KEY"
+      app_token_env: "PUSHOVER_APP_TOKEN"
+      recipient_key_env: "PUSHOVER_RECIPIENT_KEY"
+chain_signals:
+  tx_block_trigger:
+    webhook_enabled: true
+    webhook_listen_addr: "127.0.0.1:8787"

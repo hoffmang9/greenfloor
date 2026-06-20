@@ -1,11 +1,31 @@
+use std::collections::HashMap;
 use std::path::Path;
 
-use super::fixtures::{
-    parse_json_output, patch_program_dexie_base, restore_program_dexie_base, run_manager,
-    write_manager_program,
-};
-use greenfloor_engine::storage::SqliteStore;
+use clap::Parser;
 use serde_json::json;
+
+use crate::manager_cli::commands::ManagerCli;
+use crate::manager_cli::test_support::{pop_json, ManagerContextBuilder};
+use crate::minimal_program_template::{write_minimal_program, MinimalProgramParams};
+use crate::storage::SqliteStore;
+
+use super::{
+    run_offers_cancel_command, run_offers_reconcile_command, OffersCancelCliArgs,
+    OffersReconcileCliArgs,
+};
+
+fn write_offers_program(path: &Path, home_dir: &Path, dexie_api_base: &str) {
+    write_minimal_program(
+        path,
+        MinimalProgramParams {
+            home_dir,
+            dexie_api_base,
+            low_inventory_alerts_enabled: true,
+            pushover_enabled: true,
+            ..Default::default()
+        },
+    );
+}
 
 fn seed_offer_states(db_path: &Path, rows: &[(&str, &str, &str)]) {
     let store = SqliteStore::open(db_path).expect("open db");
@@ -20,8 +40,9 @@ fn seed_offer_states(db_path: &Path, rows: &[(&str, &str, &str)]) {
 async fn offers_reconcile_updates_states_from_dexie() {
     let dir = tempfile::tempdir().expect("tempdir");
     let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    std::fs::write(&markets, "markets: []\n").expect("write markets");
     let db_path = dir.path().join("state.sqlite");
-    write_manager_program(&program, dir.path());
     let confirmed_tx_id = "a".repeat(64);
     {
         let store = SqliteStore::open(&db_path).expect("open db");
@@ -51,35 +72,32 @@ async fn offers_reconcile_updates_states_from_dexie() {
         .with_body(r#"{"success":false,"error":"not_found"}"#)
         .create_async()
         .await;
-    let original = std::fs::read_to_string(&program).expect("read program");
-    patch_program_dexie_base(&program, &server.url());
-    let output = run_manager(
-        &[
-            "--program-config",
-            program.to_str().expect("program"),
-            "--state-db",
-            db_path.to_str().expect("db"),
-            "offers-reconcile",
-            "--limit",
-            "20",
-            "--venue",
-            "dexie",
-        ],
-        None,
-        None,
-    );
-    restore_program_dexie_base(&program, &original);
-    assert_eq!(output.status.code(), Some(0));
-    let payload = parse_json_output(&output.stdout);
+    write_offers_program(&program, dir.path(), &server.url());
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .state_db(db_path.to_str().expect("db path"))
+        .build_capturing();
+    let code = run_offers_reconcile_command(
+        &harness.ctx,
+        OffersReconcileCliArgs {
+            market_id: String::new(),
+            limit: 20,
+            venue: Some("dexie".to_string()),
+        },
+    )
+    .await
+    .expect("offers-reconcile");
+    assert_eq!(code, 0);
+    let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("reconciled_count"), Some(&json!(2)));
     assert_eq!(payload.get("changed_count"), Some(&json!(2)));
 
     let store = SqliteStore::open(&db_path).expect("open db");
     let rows = store.list_offer_states(None, 20).expect("rows");
-    let by_id = rows
+    let by_id: HashMap<_, _> = rows
         .iter()
         .map(|row| (row.offer_id.as_str(), row))
-        .collect::<std::collections::HashMap<_, _>>();
+        .collect();
     assert_eq!(
         by_id.get("offer-ok").expect("offer-ok").state,
         "tx_block_confirmed"
@@ -94,8 +112,10 @@ async fn offers_reconcile_updates_states_from_dexie() {
 async fn offers_cancel_cancel_open_uses_dexie() {
     let dir = tempfile::tempdir().expect("tempdir");
     let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    std::fs::write(&markets, "markets: []\n").expect("write markets");
     let db_path = dir.path().join("db").join("greenfloor.sqlite");
-    write_manager_program(&program, dir.path());
+    write_offers_program(&program, dir.path(), "https://api.dexie.space");
     seed_offer_states(
         &db_path,
         &[
@@ -111,21 +131,22 @@ async fn offers_cancel_cancel_open_uses_dexie() {
         .with_body(r#"{"success":true,"id":"offer-open","status":3}"#)
         .create_async()
         .await;
-    let original = std::fs::read_to_string(&program).expect("read program");
-    patch_program_dexie_base(&program, &server.url());
-    let output = run_manager(
-        &[
-            "--program-config",
-            program.to_str().expect("program"),
-            "offers-cancel",
-            "--cancel-open",
-        ],
-        None,
-        None,
-    );
-    restore_program_dexie_base(&program, &original);
-    assert_eq!(output.status.code(), Some(0));
-    let payload = parse_json_output(&output.stdout);
+    write_offers_program(&program, dir.path(), &server.url());
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
+    let code = run_offers_cancel_command(
+        &harness.ctx,
+        OffersCancelCliArgs {
+            offer_id: vec![],
+            cancel_open: true,
+            venue: None,
+        },
+    )
+    .await
+    .expect("offers-cancel");
+    assert_eq!(code, 0);
+    let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("venue"), Some(&json!("dexie")));
     assert_eq!(payload.get("selected_count"), Some(&json!(1)));
     assert_eq!(payload.get("cancelled_count"), Some(&json!(1)));
@@ -133,10 +154,10 @@ async fn offers_cancel_cancel_open_uses_dexie() {
 
     let store = SqliteStore::open(&db_path).expect("open db");
     let rows = store.list_offer_states(None, 10).expect("rows");
-    let by_id = rows
+    let by_id: HashMap<_, _> = rows
         .iter()
         .map(|row| (row.offer_id.as_str(), row))
-        .collect::<std::collections::HashMap<_, _>>();
+        .collect();
     assert_eq!(by_id.get("offer-open").expect("open").state, "cancelled");
     assert_eq!(
         by_id.get("offer-open").expect("open").last_seen_status,
@@ -152,8 +173,10 @@ async fn offers_cancel_cancel_open_uses_dexie() {
 async fn offers_cancel_by_offer_id_uses_dexie() {
     let dir = tempfile::tempdir().expect("tempdir");
     let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    std::fs::write(&markets, "markets: []\n").expect("write markets");
     let db_path = dir.path().join("db").join("greenfloor.sqlite");
-    write_manager_program(&program, dir.path());
+    write_offers_program(&program, dir.path(), "https://api.dexie.space");
     seed_offer_states(
         &db_path,
         &[
@@ -169,22 +192,22 @@ async fn offers_cancel_by_offer_id_uses_dexie() {
         .with_body(r#"{"success":true,"id":"offer-target","status":3}"#)
         .create_async()
         .await;
-    let original = std::fs::read_to_string(&program).expect("read program");
-    patch_program_dexie_base(&program, &server.url());
-    let output = run_manager(
-        &[
-            "--program-config",
-            program.to_str().expect("program"),
-            "offers-cancel",
-            "--offer-id",
-            "offer-target",
-        ],
-        None,
-        None,
-    );
-    restore_program_dexie_base(&program, &original);
-    assert_eq!(output.status.code(), Some(0));
-    let payload = parse_json_output(&output.stdout);
+    write_offers_program(&program, dir.path(), &server.url());
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
+    let code = run_offers_cancel_command(
+        &harness.ctx,
+        OffersCancelCliArgs {
+            offer_id: vec!["offer-target".to_string()],
+            cancel_open: false,
+            venue: None,
+        },
+    )
+    .await
+    .expect("offers-cancel");
+    assert_eq!(code, 0);
+    let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("selected_count"), Some(&json!(1)));
     assert_eq!(payload.get("cancelled_count"), Some(&json!(1)));
 }
@@ -193,8 +216,10 @@ async fn offers_cancel_by_offer_id_uses_dexie() {
 async fn offers_cancel_reports_dexie_failure() {
     let dir = tempfile::tempdir().expect("tempdir");
     let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    std::fs::write(&markets, "markets: []\n").expect("write markets");
     let db_path = dir.path().join("db").join("greenfloor.sqlite");
-    write_manager_program(&program, dir.path());
+    write_offers_program(&program, dir.path(), "https://api.dexie.space");
     seed_offer_states(&db_path, &[("offer-fail", "m1", "open")]);
 
     let mut server = mockito::Server::new_async().await;
@@ -204,42 +229,36 @@ async fn offers_cancel_reports_dexie_failure() {
         .with_body(r#"{"success":false,"error":"not_found"}"#)
         .create_async()
         .await;
-    let original = std::fs::read_to_string(&program).expect("read program");
-    patch_program_dexie_base(&program, &server.url());
-    let output = run_manager(
-        &[
-            "--program-config",
-            program.to_str().expect("program"),
-            "offers-cancel",
-            "--offer-id",
-            "offer-fail",
-        ],
-        None,
-        None,
-    );
-    restore_program_dexie_base(&program, &original);
-    assert_eq!(output.status.code(), Some(2));
-    let payload = parse_json_output(&output.stdout);
+    write_offers_program(&program, dir.path(), &server.url());
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
+    let code = run_offers_cancel_command(
+        &harness.ctx,
+        OffersCancelCliArgs {
+            offer_id: vec!["offer-fail".to_string()],
+            cancel_open: false,
+            venue: None,
+        },
+    )
+    .await
+    .expect("offers-cancel");
+    assert_eq!(code, 2);
+    let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("cancelled_count"), Some(&json!(0)));
     assert_eq!(payload.get("failed_count"), Some(&json!(1)));
 }
 
 #[test]
 fn offers_cancel_rejects_removed_submit_onchain_flag() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let program = dir.path().join("program.yaml");
-    write_manager_program(&program, dir.path());
-    let output = run_manager(
-        &[
-            "--program-config",
-            program.to_str().expect("program"),
-            "offers-cancel",
-            "--offer-id",
-            "offer-1",
-            "--submit-onchain-after-offchain",
-        ],
-        None,
-        None,
-    );
-    assert_ne!(output.status.code(), Some(0));
+    assert!(ManagerCli::try_parse_from([
+        "greenfloor-manager",
+        "--program-config",
+        "/tmp/program.yaml",
+        "offers-cancel",
+        "--offer-id",
+        "offer-1",
+        "--submit-onchain-after-offchain",
+    ])
+    .is_err());
 }

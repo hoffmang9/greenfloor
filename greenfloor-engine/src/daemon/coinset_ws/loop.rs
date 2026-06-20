@@ -137,7 +137,8 @@ async fn run_coinset_websocket_loop(
 
 #[cfg(test)]
 mod tests {
-    use super::super::capture::capture_coinset_websocket_once;
+    use super::super::capture::capture_coinset_websocket_once_with_timings;
+    use super::super::once_timings::OnceCaptureTimings;
     use super::super::url::resolve_coinset_ws_url;
     use super::*;
     use mockito::Server;
@@ -148,8 +149,8 @@ mod tests {
             runtime_market_slot_count: 1,
             runtime_offer_parallelism_max_workers: 2,
             tx_block_websocket_url: "ws://127.0.0.1:9/ws".to_string(),
-            tx_block_websocket_reconnect_interval_seconds: 1,
-            tx_block_fallback_poll_interval_seconds: 1,
+            tx_block_websocket_reconnect_interval_seconds: 0,
+            tx_block_fallback_poll_interval_seconds: 0,
             ..Default::default()
         }
     }
@@ -178,9 +179,15 @@ mod tests {
             .create();
 
         let program = sample_program();
-        capture_coinset_websocket_once(&store, &program, &server.url(), &CoinWatchlistCache::new())
-            .await
-            .expect("capture");
+        capture_coinset_websocket_once_with_timings(
+            &store,
+            &program,
+            &server.url(),
+            &CoinWatchlistCache::new(),
+            OnceCaptureTimings::UNIT_TEST,
+        )
+        .await
+        .expect("capture");
 
         let events = store
             .list_recent_audit_events(

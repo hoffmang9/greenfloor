@@ -10,7 +10,7 @@ use crate::offer::{normalize_offer_side, resolve_offer_assets_for_action};
 
 use super::BuildAndPostOfferRequest;
 use crate::offer::operator::logging::{sync_manager_file_logging, warn_if_log_level_auto_healed};
-use crate::offer::operator::test_overrides::OfferOperatorTestOverrides;
+use crate::offer::operator::test_overrides::BuildOfferTestOverrides;
 
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedBuildAndPostContext {
@@ -26,7 +26,7 @@ pub(crate) struct ResolvedBuildAndPostContext {
     pub action_side: String,
     pub offer_fee_mojos: u64,
     pub offer_fee_source: String,
-    pub test_overrides: OfferOperatorTestOverrides,
+    pub test_overrides: BuildOfferTestOverrides,
 }
 
 pub(super) async fn resolve_build_and_post_context(
@@ -133,6 +133,7 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
             kms_key_id: String::new(),
             kms_region: String::new(),
             kms_public_key_hex: None,
+            kms_runtime: crate::kms::KmsRuntime::default(),
             vault: VaultCustodySnapshot {
                 launcher_id: Bytes32::default(),
                 custody_threshold: 1,
@@ -151,6 +152,6 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
         action_side: "sell".to_string(),
         offer_fee_mojos: 0,
         offer_fee_source: "coinset_fee_unavailable".to_string(),
-        test_overrides: OfferOperatorTestOverrides::default(),
+        test_overrides: BuildOfferTestOverrides::default(),
     }
 }

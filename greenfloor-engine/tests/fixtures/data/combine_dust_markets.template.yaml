@@ -1,0 +1,15 @@
+markets:
+  - id: dust_m
+    enabled: true
+    base_asset: "__CAT_ASSET_ID__"
+    base_symbol: DUST
+    quote_asset: xch
+    quote_asset_type: unstable
+    signer_key_id: key-main-1
+    receive_address: __RECEIVE_ADDRESS__
+    mode: sell_only
+    inventory:
+      low_watermark_base_units: 100
+    pricing:
+      min_price_quote_per_base: 0.0031
+      max_price_quote_per_base: 0.0038

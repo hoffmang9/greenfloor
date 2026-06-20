@@ -1,10 +1,11 @@
 //! Process-wide file logging helpers (`{home_dir}/logs/debug.log`).
 //!
 //! **One global subscriber per process:** the first successful
-//! [`sync_service_file_logging`] call installs the tracing registry. Daemon and manager each
-//! keep a separate `OnceLock` slot, but they share one process-global subscriber — only one
-//! service may init logging in a process. A second init fails if tracing is already global.
-//! Production binaries (`greenfloord`, `greenfloor-manager`) are separate processes.
+//! [`sync_service_file_logging`] call installs the tracing registry. Additional services
+//! in the same process either install their own slot or record
+//! [`ServiceLogState::SharedProcess`] when tracing was already initialized elsewhere
+//! (parallel unit tests). Production binaries (`greenfloord`, `greenfloor-manager`) are
+//! separate processes.
 
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -26,6 +27,13 @@ pub const ALLOWED_LOG_LEVELS: &[&str] =
 pub(crate) struct LogState {
     home_dir: PathBuf,
     filter_handle: Handle<EnvFilter, tracing_subscriber::Registry>,
+}
+
+/// Per-service logging slot state after the first [`sync_service_file_logging`] call.
+pub(crate) enum ServiceLogState {
+    Installed(LogState),
+    /// Process-global tracing was already active (another service or parallel test init first).
+    SharedProcess,
 }
 
 static LOG_TRACER: OnceLock<()> = OnceLock::new();
@@ -129,13 +137,6 @@ fn install_service_file_logging(
     home_dir: &Path,
     log_level: &str,
 ) -> Result<LogState, String> {
-    if tracing::dispatcher::has_been_set() {
-        return Err(global_subscriber_conflict_message(
-            service_name,
-            "tracing dispatcher already set before logging init",
-        ));
-    }
-
     let normalized = normalize_log_level_name(log_level);
     let log_path = home_dir.join(LOG_FILE);
     let file = open_log_file(service_name, home_dir)?;
@@ -211,28 +212,41 @@ fn reload_service_log_level(
 /// path stays fixed after first init — a changed `home_dir` emits a warning until
 /// process restart.
 ///
+/// When another component has already installed the process-global tracing subscriber,
+/// subsequent services record [`ServiceLogState::SharedProcess`] and return success without
+/// failing (parallel unit tests and multi-service dev harnesses).
+///
 /// # Errors
 ///
-/// Returns an error if the first initialization attempt fails, including when another
-/// global tracing subscriber was installed first.
+/// Returns an error if the first initialization attempt fails.
 pub fn sync_service_file_logging(
-    slot: &OnceLock<Result<LogState, String>>,
+    slot: &OnceLock<Result<ServiceLogState, String>>,
     service_name: &'static str,
     home_dir: &Path,
     log_level: &str,
 ) -> SignerResult<()> {
     if let Some(state) = slot.get() {
         return match state {
-            Ok(active) => reload_service_log_level(service_name, active, home_dir, log_level)
-                .map_err(SignerError::Other),
+            Ok(ServiceLogState::Installed(active)) => {
+                reload_service_log_level(service_name, active, home_dir, log_level)
+                    .map_err(SignerError::Other)
+            }
+            Ok(ServiceLogState::SharedProcess) => Ok(()),
             Err(message) => Err(SignerError::Other(message.clone())),
         };
     }
 
-    let state =
-        slot.get_or_init(|| install_service_file_logging(service_name, home_dir, log_level));
+    if tracing::dispatcher::has_been_set() {
+        slot.get_or_init(|| Ok(ServiceLogState::SharedProcess));
+        return Ok(());
+    }
+
+    let state = slot.get_or_init(|| {
+        install_service_file_logging(service_name, home_dir, log_level)
+            .map(ServiceLogState::Installed)
+    });
     match state {
-        Ok(_active) => Ok(()),
+        Ok(_) => Ok(()),
         Err(message) => Err(SignerError::Other(message.clone())),
     }
 }
@@ -241,7 +255,7 @@ pub fn sync_service_file_logging(
 mod tests {
     use super::*;
 
-    static TEST_LOG_STATE: OnceLock<Result<LogState, String>> = OnceLock::new();
+    static TEST_LOG_STATE: OnceLock<Result<ServiceLogState, String>> = OnceLock::new();
 
     #[test]
     fn normalize_log_level_defaults_invalid_to_info() {
@@ -255,6 +269,25 @@ mod tests {
     fn validate_log_level_accepts_info_and_rejects_garbage() {
         assert_eq!(validate_log_level("info").expect("level"), "INFO");
         assert!(validate_log_level("verbose").is_err());
+    }
+
+    #[test]
+    fn sync_service_file_logging_records_shared_process_when_subscriber_active() {
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+        if !tracing::dispatcher::has_been_set() {
+            return;
+        }
+
+        static SHARED_SLOT: OnceLock<Result<ServiceLogState, String>> = OnceLock::new();
+        let dir = tempfile::tempdir().expect("tempdir");
+        sync_service_file_logging(&SHARED_SLOT, "shared-service", dir.path(), "INFO")
+            .expect("shared process init");
+        assert!(matches!(
+            SHARED_SLOT.get(),
+            Some(Ok(ServiceLogState::SharedProcess))
+        ));
+        sync_service_file_logging(&SHARED_SLOT, "shared-service", dir.path(), "DEBUG")
+            .expect("shared process reload noop");
     }
 
     #[test]
@@ -274,7 +307,9 @@ mod tests {
 
         sync_service_file_logging(&TEST_LOG_STATE, "test-service", dir.path(), "DEBUG")
             .expect("reload");
-        assert!(TEST_LOG_STATE.get().is_some_and(|state| state.is_ok()));
+        assert!(TEST_LOG_STATE
+            .get()
+            .is_some_and(|state| { matches!(state, Ok(ServiceLogState::Installed(_))) }));
 
         crate::trace_event!(
             INFO,

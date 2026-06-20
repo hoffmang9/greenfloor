@@ -3,7 +3,7 @@ use crate::manager_cli::context::ManagerContext;
 use crate::manager_cli::util::require_market_selector;
 use crate::offer::operator::{
     build_and_post_offer, BuildAndPostOfferRequest, BuildAndPostRunOptions,
-    BuildAndPostVenueOptions, OfferOperatorTestOverrides,
+    BuildAndPostVenueOptions, BuildOfferTestOverrides,
 };
 
 use super::super::clap::ManagerCommands;
@@ -48,7 +48,7 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
             persist_results: true,
         },
         action_side: None,
-        test_overrides: OfferOperatorTestOverrides::from_env(),
+        test_overrides: BuildOfferTestOverrides::default(),
     })
     .await?;
     ctx.emit_json(&response.payload)?;

@@ -31,7 +31,7 @@ pub use parse::{
     coin_spend_from_solution_payload, ensure_coinset_rpc_success, record_from_payload,
     to_coinset_hex, u64_from_value,
 };
-pub use retry::with_script_retries;
+pub use retry::{with_script_retries, with_script_retries_with_policy, ScriptRetryPolicy};
 pub use scan_client::DirectCoinsetScanClient;
 
 pub(crate) use coin_select::finalize_selected_cats;

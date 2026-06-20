@@ -172,13 +172,13 @@ pub(crate) async fn finalize_job_report(
             preview_job_report(job, &scan, &plan, dust_coin_count, readiness)
         }
         CombineRunMode::Execute { signer, verify } => {
-            let (job_failed, batches) = super::execute::execute_combine_batches(
+            let (job_failed, batches) = Box::pin(super::execute::execute_combine_batches(
                 signer,
                 &job.receive_address,
                 &job.cat_asset_id,
                 &plan,
                 *verify,
-            )
+            ))
             .await;
             combine_job_report(job, &scan, &plan, dust_coin_count, batches, job_failed)
         }

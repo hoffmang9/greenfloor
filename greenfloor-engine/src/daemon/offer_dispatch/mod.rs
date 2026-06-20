@@ -5,7 +5,7 @@ mod managed_post;
 mod parallel;
 mod reservation_ctx;
 mod sequential;
-mod test_hooks;
+mod test_overrides;
 
 #[cfg(test)]
 mod tests;
@@ -121,15 +121,7 @@ async fn execute_strategy_actions_async(
     let program = ctx.resources.program();
     if parallel_managed_dispatch_enabled(program) {
         match classify_parallel_dispatch(
-            parallel::execute_actions_parallel(
-                store,
-                &ctx.dispatch.db_path,
-                ctx.resources,
-                signer_config,
-                market,
-                &expanded,
-            )
-            .await,
+            parallel::execute_actions_parallel(store, ctx, signer_config, market, &expanded).await,
         ) {
             ParallelDispatchDecision::Success(output) => return Ok(output),
             ParallelDispatchDecision::FallbackTransient(err) => {
@@ -139,5 +131,5 @@ async fn execute_strategy_actions_async(
         }
     }
 
-    sequential::execute_actions_sequential(program, &ctx.resources.paths, market, &expanded).await
+    sequential::execute_actions_sequential(ctx, market, &expanded).await
 }

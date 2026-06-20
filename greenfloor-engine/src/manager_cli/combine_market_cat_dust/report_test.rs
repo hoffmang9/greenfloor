@@ -2,62 +2,20 @@ use super::coinset_context::{load_execution_signer, resolve_combine_coinset_cont
 use super::report::{
     finalize_job_report, plan_dust_for_scan, preview_job_report, vault_signer_ready, CombineRunMode,
 };
-use super::test_support::sim_dust_scan_result;
+use super::sim_harness::sim_dust_scan_result;
 use super::{run_combine_market_cat_dust, CombineExecutionFlags, CombineMarketCatDustRequest};
 use crate::coinset::CoinSpentVerifyConfig;
 use crate::config::{load_program_config, parse_program_config, read_program_yaml};
 use crate::manager_cli::combine_market_cat_dust::jobs::CatDustJob;
-use crate::manager_cli::context::ManagerContext;
-use crate::manager_cli::json::ManagerOutput;
+use crate::manager_cli::test_support::{
+    pop_json, write_combine_test_configs, ManagerContextBuilder,
+};
 use crate::minimal_program_template::{materialize_minimal_program_text, MinimalProgramParams};
 use crate::test_support::simulator::harness::fetch_cat_from_sim_by_id;
 use crate::vault::members::hex_to_bytes32;
 use serde_json::json;
 
 const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
-
-const MINIMAL_PROGRAM_SIGNER_APPEND: &str =
-    include_str!("../../../../tests/fixtures/data/minimal_program_signer_append.yaml");
-
-fn write_combine_test_configs(dir: &std::path::Path, cat_asset_id: &str, with_signer: bool) {
-    let mut program_text = materialize_minimal_program_text(MinimalProgramParams {
-        home_dir: dir,
-        ..Default::default()
-    });
-    if with_signer {
-        program_text.push('\n');
-        program_text
-            .push_str(&MINIMAL_PROGRAM_SIGNER_APPEND.replace("__LAUNCHER_ID__", &"aa".repeat(32)));
-    }
-    std::fs::write(dir.join("program.yaml"), program_text).expect("write program");
-    std::fs::write(
-        dir.join("markets.yaml"),
-        format!(
-            r#"markets:
-  - id: dust_m
-    enabled: true
-    base_asset: "{cat_asset_id}"
-    base_symbol: DUST
-    quote_asset: xch
-    quote_asset_type: unstable
-    signer_key_id: key-main-1
-    receive_address: {RECEIVE_ADDRESS}
-    mode: sell_only
-    inventory:
-      low_watermark_base_units: 100
-    pricing:
-      min_price_quote_per_base: 0.0031
-      max_price_quote_per_base: 0.0038
-"#
-        ),
-    )
-    .expect("write markets");
-    std::fs::write(
-        dir.join("cats.yaml"),
-        format!("cats:\n  - base_symbol: DUST\n    asset_id: \"{cat_asset_id}\"\n"),
-    )
-    .expect("write cats");
-}
 
 fn sample_job(cat_asset_id: &str) -> CatDustJob {
     CatDustJob {
@@ -199,16 +157,15 @@ async fn run_combine_emits_json_when_launcher_id_missing() {
     let cat_hex = "f".repeat(64);
     write_combine_test_configs(dir.path(), &cat_hex, false);
 
-    let (output, captured) = ManagerOutput::capturing(true);
-    let mgr = ManagerContext::for_test_with_cats(
+    let harness = ManagerContextBuilder::new(
         dir.path().join("program.yaml"),
         dir.path().join("markets.yaml"),
-        dir.path().join("cats.yaml"),
-        output,
-    );
+    )
+    .cats_config(dir.path().join("cats.yaml"))
+    .build_capturing();
 
     let exit = run_combine_market_cat_dust(CombineMarketCatDustRequest {
-        mgr: &mgr,
+        mgr: &harness.ctx,
         network: Some("mainnet"),
         coinset_base_url: None,
         launcher_id: None,
@@ -224,11 +181,7 @@ async fn run_combine_emits_json_when_launcher_id_missing() {
     .expect("command");
 
     assert_eq!(exit, 1);
-    let payload = captured
-        .lock()
-        .expect("capture lock")
-        .pop()
-        .expect("json emitted");
+    let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("status"), Some(&json!("error")));
     assert_eq!(
         payload.get("reason"),
@@ -242,18 +195,17 @@ async fn run_combine_preview_does_not_require_signer_bundle() {
     let cat_hex = "f".repeat(64);
     write_combine_test_configs(dir.path(), &cat_hex, false);
 
-    let (output, captured) = ManagerOutput::capturing(true);
-    let mgr = ManagerContext::for_test_with_cats(
+    let harness = ManagerContextBuilder::new(
         dir.path().join("program.yaml"),
         dir.path().join("markets.yaml"),
-        dir.path().join("cats.yaml"),
-        output,
-    );
+    )
+    .cats_config(dir.path().join("cats.yaml"))
+    .build_capturing();
 
     let _exit = run_combine_market_cat_dust(CombineMarketCatDustRequest {
-        mgr: &mgr,
+        mgr: &harness.ctx,
         network: Some("mainnet"),
-        coinset_base_url: None,
+        coinset_base_url: Some("http://127.0.0.1:1"),
         launcher_id: Some(&"aa".repeat(32)),
         launcher_id_file: None,
         dust_threshold_mojos: 1000,
@@ -266,11 +218,7 @@ async fn run_combine_preview_does_not_require_signer_bundle() {
     .await
     .expect("command");
 
-    let payload = captured
-        .lock()
-        .expect("capture lock")
-        .pop()
-        .expect("json emitted");
+    let payload = pop_json(&harness.captured);
     assert_ne!(
         payload.get("reason"),
         Some(&json!("signer_not_configured")),
@@ -311,16 +259,12 @@ async fn run_combine_live_emits_json_when_signer_bundle_invalid() {
         .replace(&"aa".repeat(32), "not-a-valid-launcher-id");
     std::fs::write(&program_path, program_text).expect("write invalid vault launcher");
 
-    let (output, captured) = ManagerOutput::capturing(true);
-    let mgr = ManagerContext::for_test_with_cats(
-        program_path,
-        dir.path().join("markets.yaml"),
-        dir.path().join("cats.yaml"),
-        output,
-    );
+    let harness = ManagerContextBuilder::new(program_path, dir.path().join("markets.yaml"))
+        .cats_config(dir.path().join("cats.yaml"))
+        .build_capturing();
 
     let exit = run_combine_market_cat_dust(CombineMarketCatDustRequest {
-        mgr: &mgr,
+        mgr: &harness.ctx,
         network: Some("mainnet"),
         coinset_base_url: None,
         launcher_id: None,
@@ -336,15 +280,79 @@ async fn run_combine_live_emits_json_when_signer_bundle_invalid() {
     .expect("command");
 
     assert_eq!(exit, 1);
-    let payload = captured
-        .lock()
-        .expect("capture lock")
-        .pop()
-        .expect("json emitted");
+    let payload = pop_json(&harness.captured);
     assert_eq!(payload.get("status"), Some(&json!("error")));
     assert_eq!(payload.get("reason"), Some(&json!("signer_load_failed")));
     assert!(payload
         .get("detail")
         .and_then(serde_json::Value::as_str)
         .is_some());
+}
+
+#[tokio::test]
+async fn run_combine_dry_run_reports_no_enabled_cat_markets() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cat_hex = "f".repeat(64);
+    std::fs::write(
+        dir.path().join("program.yaml"),
+        materialize_minimal_program_text(MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        }),
+    )
+    .expect("write program");
+    std::fs::write(
+        dir.path().join("markets.yaml"),
+        r#"markets:
+  - id: m1
+    enabled: true
+    base_asset: "not_in_cats_catalog"
+    base_symbol: "NOPE"
+    quote_asset: "xch"
+    quote_asset_type: "unstable"
+    signer_key_id: "key-main-1"
+    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"
+    mode: "sell_only"
+    inventory:
+      low_watermark_base_units: 10
+"#,
+    )
+    .expect("write markets");
+    std::fs::write(
+        dir.path().join("cats.yaml"),
+        format!("cats:\n  - base_symbol: DUST\n    asset_id: \"{cat_hex}\"\n"),
+    )
+    .expect("write cats");
+
+    let harness = ManagerContextBuilder::new(
+        dir.path().join("program.yaml"),
+        dir.path().join("markets.yaml"),
+    )
+    .cats_config(dir.path().join("cats.yaml"))
+    .build_capturing();
+
+    let exit = run_combine_market_cat_dust(CombineMarketCatDustRequest {
+        mgr: &harness.ctx,
+        network: Some("mainnet"),
+        coinset_base_url: None,
+        launcher_id: None,
+        launcher_id_file: None,
+        dust_threshold_mojos: 1000,
+        max_input_coins: 2,
+        max_nonce: 0,
+        cat_asset_id: None,
+        verify: CoinSpentVerifyConfig::default(),
+        execution: CombineExecutionFlags::from_flags(false, true),
+    })
+    .await
+    .expect("command");
+
+    assert_eq!(exit, 0);
+    let payload = pop_json(&harness.captured);
+    assert_eq!(payload.get("status"), Some(&json!("ok")));
+    assert_eq!(
+        payload.get("message"),
+        Some(&json!("no_enabled_cat_markets"))
+    );
+    assert_eq!(payload.get("jobs"), Some(&json!([])));
 }

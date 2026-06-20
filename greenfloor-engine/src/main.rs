@@ -221,7 +221,7 @@ async fn run_mixed_cat_command(
 }
 
 async fn run_daemon_cli_command(args: DaemonCliArgs) -> Result<(), Error> {
-    let code = run_daemon_command(args).await?;
+    let code = Box::pin(run_daemon_command(args)).await?;
     if code != 0 {
         std::process::exit(code);
     }

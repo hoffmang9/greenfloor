@@ -5,6 +5,7 @@ use serde_json::Value;
 use super::program::read_program_yaml;
 use super::yaml_fields::{config_err, optional_trimmed_string, req_mapping, req_str, req_value};
 use crate::error::{SignerError, SignerResult};
+use crate::kms::KmsRuntime;
 use crate::vault::context::VaultCustodySnapshot;
 use crate::vault::members::{hex_to_bytes32, WalletKey};
 use crate::vault::validate_vault_threshold;
@@ -18,6 +19,7 @@ pub struct SignerConfig {
     pub kms_key_id: String,
     pub kms_region: String,
     pub kms_public_key_hex: Option<String>,
+    pub kms_runtime: KmsRuntime,
     pub vault: VaultCustodySnapshot,
 }
 
@@ -64,6 +66,7 @@ pub fn parse_signer_config(raw: &Value) -> SignerResult<SignerConfig> {
         kms_key_id,
         kms_region,
         kms_public_key_hex,
+        kms_runtime: KmsRuntime::production(),
         vault: vault_snapshot,
     })
 }

@@ -42,46 +42,6 @@ async fn coin_is_spent(client: &CoinsetClient, coin_id: Bytes32) -> SignerResult
         .is_some_and(|record| coin_record_is_spent(record.spent_block_index)))
 }
 
-async fn all_coins_spent<F, Fut>(coin_ids: &[Bytes32], is_spent: &mut F) -> SignerResult<bool>
-where
-    F: FnMut(Bytes32) -> Fut,
-    Fut: std::future::Future<Output = SignerResult<bool>>,
-{
-    for &coin_id in coin_ids {
-        if !is_spent(coin_id).await? {
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
-/// Injectable spent-check hook for tests. Uses the same poll timing as [`run_poll_loop`]
-/// because the checker is `FnMut` and cannot be re-entered from a poll attempt closure.
-pub(crate) async fn wait_until_coins_spent_with_check<F, Fut>(
-    mut is_spent: F,
-    coin_ids: &[Bytes32],
-    config: CoinSpentVerifyConfig,
-) -> SignerResult<()>
-where
-    F: FnMut(Bytes32) -> Fut,
-    Fut: std::future::Future<Output = SignerResult<bool>>,
-{
-    if coin_ids.is_empty() {
-        return Ok(());
-    }
-    let poll = config.poll_config();
-    let started = std::time::Instant::now();
-    loop {
-        if all_coins_spent(coin_ids, &mut is_spent).await? {
-            return Ok(());
-        }
-        if started.elapsed() >= poll.timeout {
-            return Err(SignerError::CombineInputVerifyTimeout);
-        }
-        tokio::time::sleep(poll.interval).await;
-    }
-}
-
 /// Wait until coins spent.
 ///
 /// # Errors
@@ -117,7 +77,66 @@ pub async fn wait_until_coins_spent(
 }
 
 #[cfg(test)]
+mod test_helpers {
+    use super::*;
+
+    pub(super) async fn wait_until_coins_spent_with_poll<F, Fut>(
+        mut is_spent: F,
+        coin_ids: &[Bytes32],
+        poll: PollConfig,
+    ) -> SignerResult<()>
+    where
+        F: FnMut(Bytes32) -> Fut,
+        Fut: std::future::Future<Output = SignerResult<bool>>,
+    {
+        if coin_ids.is_empty() {
+            return Ok(());
+        }
+        let started = std::time::Instant::now();
+        loop {
+            if all_coins_spent(coin_ids, &mut is_spent).await? {
+                return Ok(());
+            }
+            if started.elapsed() >= poll.timeout {
+                return Err(SignerError::CombineInputVerifyTimeout);
+            }
+            tokio::time::sleep(poll.interval).await;
+        }
+    }
+
+    pub(super) async fn wait_until_coins_spent_with_check<F, Fut>(
+        is_spent: F,
+        coin_ids: &[Bytes32],
+        config: CoinSpentVerifyConfig,
+    ) -> SignerResult<()>
+    where
+        F: FnMut(Bytes32) -> Fut,
+        Fut: std::future::Future<Output = SignerResult<bool>>,
+    {
+        wait_until_coins_spent_with_poll(is_spent, coin_ids, config.poll_config()).await
+    }
+
+    async fn all_coins_spent<F, Fut>(coin_ids: &[Bytes32], is_spent: &mut F) -> SignerResult<bool>
+    where
+        F: FnMut(Bytes32) -> Fut,
+        Fut: std::future::Future<Output = SignerResult<bool>>,
+    {
+        for &coin_id in coin_ids {
+            if !is_spent(coin_id).await? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use super::test_helpers::{
+        wait_until_coins_spent_with_check, wait_until_coins_spent_with_poll,
+    };
     use super::*;
 
     #[tokio::test]
@@ -139,12 +158,12 @@ mod tests {
     #[tokio::test]
     async fn wait_until_coins_spent_times_out_when_input_stays_unspent() {
         let coin_id = Bytes32::new([0x03; 32]);
-        let err = wait_until_coins_spent_with_check(
+        let err = wait_until_coins_spent_with_poll(
             |_| async { Ok(false) },
             std::slice::from_ref(&coin_id),
-            CoinSpentVerifyConfig {
-                timeout_seconds: 1,
-                poll_seconds: 1,
+            PollConfig {
+                timeout: Duration::from_millis(10),
+                interval: Duration::from_millis(1),
             },
         )
         .await

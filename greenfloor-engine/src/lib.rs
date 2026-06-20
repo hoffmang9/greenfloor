@@ -33,6 +33,8 @@ pub mod offer;
 pub mod operator_log;
 pub mod paths;
 pub mod storage;
+#[doc(hidden)]
+pub mod test_env;
 pub mod vault;
 pub mod vault_coinset_scan;
 

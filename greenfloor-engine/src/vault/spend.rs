@@ -8,7 +8,7 @@ use clvm_utils::TreeHash;
 
 use crate::config::SignerConfig;
 use crate::error::{SignerError, SignerResult};
-use crate::kms;
+use crate::kms::{self, KmsRuntime};
 use crate::vault::context::{VaultComputedHashes, VaultContext, VaultCustodySnapshot};
 use crate::vault::members::{hex_to_bytes, singleton_member_puzzle_hash};
 
@@ -16,6 +16,7 @@ use crate::vault::members::{hex_to_bytes, singleton_member_puzzle_hash};
 pub struct KmsSigner {
     key_id: String,
     region: String,
+    runtime: KmsRuntime,
 }
 
 impl KmsSigner {
@@ -24,6 +25,7 @@ impl KmsSigner {
         Self {
             key_id: vault_ctx.kms_key_id.clone(),
             region: vault_ctx.kms_region.clone(),
+            runtime: vault_ctx.kms_runtime.clone(),
         }
     }
 
@@ -36,7 +38,8 @@ impl KmsSigner {
         &self,
         signature_message: Vec<u8>,
     ) -> SignerResult<R1Signature> {
-        sign_vault_fast_forward_digest(&self.key_id, &self.region, signature_message).await
+        sign_vault_fast_forward_digest(&self.runtime, &self.key_id, &self.region, signature_message)
+            .await
     }
 }
 
@@ -77,6 +80,7 @@ pub struct VaultSpendContext {
     pub recovery_hash: TreeHash,
     pub kms_key_id: String,
     pub kms_region: String,
+    pub kms_runtime: KmsRuntime,
     pub secp256r1_public_key: R1PublicKey,
     pub max_nonce_probe: u32,
     pub network: String,
@@ -127,6 +131,7 @@ impl VaultSpendContext {
             recovery_hash,
             kms_key_id: "test-kms".to_string(),
             kms_region: "us-west-2".to_string(),
+            kms_runtime: KmsRuntime::production(),
             secp256r1_public_key,
             max_nonce_probe: 2048,
             network: "mainnet".to_string(),
@@ -176,6 +181,7 @@ pub fn build_vault_spend_context_from_hashes(
         recovery_hash: hashes.recovery_hash,
         kms_key_id: config.kms_key_id.clone(),
         kms_region: config.kms_region.clone(),
+        kms_runtime: config.kms_runtime.clone(),
         secp256r1_public_key,
         max_nonce_probe: 2048,
         network: config.network.clone(),
@@ -186,12 +192,18 @@ pub fn build_vault_spend_context_from_hashes(
 }
 
 pub(crate) async fn sign_vault_fast_forward_digest(
+    runtime: &KmsRuntime,
     kms_key_id: &str,
     kms_region: &str,
     signature_message: Vec<u8>,
 ) -> SignerResult<R1Signature> {
-    let signature_hex =
-        kms::sign_digest(kms_key_id, kms_region, &hex::encode(signature_message)).await?;
+    let signature_hex = kms::sign_digest(
+        runtime,
+        kms_key_id,
+        kms_region,
+        &hex::encode(signature_message),
+    )
+    .await?;
     let signature_bytes = hex::decode(kms::normalize_hex(&signature_hex))
         .map_err(|err| SignerError::Kms(format!("invalid signature hex: {err}")))?;
     let signature_array: [u8; 64] = signature_bytes
@@ -218,6 +230,7 @@ mod tests {
             recovery_hash: clvm_utils::TreeHash::from(Bytes32::new([0x33; 32])),
             kms_key_id: String::new(),
             kms_region: String::new(),
+            kms_runtime: KmsRuntime::production(),
             secp256r1_public_key: r1.pk,
             max_nonce_probe: 20,
             network: "mainnet".to_string(),

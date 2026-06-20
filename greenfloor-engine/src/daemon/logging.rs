@@ -2,9 +2,9 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::error::SignerResult;
-use crate::file_logging::{self, LogState, DEFAULT_LOG_LEVEL};
+use crate::file_logging::{self, ServiceLogState, DEFAULT_LOG_LEVEL};
 
-static LOG_STATE: OnceLock<Result<LogState, String>> = OnceLock::new();
+static LOG_STATE: OnceLock<Result<ServiceLogState, String>> = OnceLock::new();
 
 const SERVICE_NAME: &str = "daemon";
 
@@ -19,8 +19,7 @@ pub use crate::file_logging::warn_if_log_level_auto_healed;
 ///
 /// # Errors
 ///
-/// Returns an error if the first initialization attempt fails, including when another
-/// global tracing subscriber was installed first.
+/// Returns an error if the first initialization attempt fails.
 pub fn sync_daemon_file_logging(home_dir: &Path, log_level: &str) -> SignerResult<()> {
     file_logging::sync_service_file_logging(&LOG_STATE, SERVICE_NAME, home_dir, log_level)
 }

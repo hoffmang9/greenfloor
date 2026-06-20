@@ -123,3 +123,6 @@ pub async fn run_offers_cancel_command(
     ctx.emit_serialized(&payload)?;
     Ok(exit_code)
 }
+
+#[cfg(test)]
+mod tests;

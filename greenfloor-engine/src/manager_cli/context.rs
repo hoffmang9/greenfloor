@@ -14,10 +14,12 @@ use super::paths::{
     default_cats_config_path, default_markets_config_path, default_program_config_path,
     default_testnet_markets_config_path, resolve_cli_config_path,
 };
+use super::runtime::ManagerRuntime;
 
 #[derive(Debug, Clone)]
 pub struct ManagerContext {
     pub output: ManagerOutput,
+    pub runtime: ManagerRuntime,
     pub program_config: PathBuf,
     pub markets_config: PathBuf,
     pub cats_config: PathBuf,
@@ -42,6 +44,7 @@ impl ManagerContext {
         (
             Self {
                 output: ManagerOutput::new(json),
+                runtime: ManagerRuntime::production(),
                 program_config: resolve_cli_config_path(
                     &program_config,
                     Path::new("config/program.yaml"),
@@ -66,33 +69,25 @@ impl ManagerContext {
     }
 
     #[cfg(test)]
-    pub fn for_test(program_config: PathBuf, markets_config: PathBuf) -> Self {
-        Self {
-            output: ManagerOutput::new(false),
-            program_config,
-            markets_config,
-            cats_config: PathBuf::from("/tmp/unused-cats.yaml"),
-            state_db: String::new(),
-            dexie_base_url: None,
-            testnet_markets_path: None,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn for_test_with_cats(
+    pub(crate) fn from_test_parts(
+        output: ManagerOutput,
+        runtime: ManagerRuntime,
         program_config: PathBuf,
         markets_config: PathBuf,
         cats_config: PathBuf,
-        output: ManagerOutput,
+        state_db: String,
+        dexie_base_url: Option<String>,
+        testnet_markets_path: Option<PathBuf>,
     ) -> Self {
         Self {
             output,
+            runtime,
             program_config,
             markets_config,
             cats_config,
-            state_db: String::new(),
-            dexie_base_url: None,
-            testnet_markets_path: None,
+            state_db,
+            dexie_base_url,
+            testnet_markets_path,
         }
     }
 
@@ -102,6 +97,15 @@ impl ManagerContext {
 
     pub fn state_db_override(&self) -> Option<&str> {
         optional_str(&self.state_db)
+    }
+
+    #[must_use]
+    pub fn env_var(&self, name: &str) -> String {
+        self.runtime.env_var(name)
+    }
+
+    pub fn prompt_line(&self, prompt: &str) -> SignerResult<String> {
+        self.runtime.prompt_line(prompt)
     }
 
     pub fn emit_json(&self, value: &Value) -> SignerResult<()> {

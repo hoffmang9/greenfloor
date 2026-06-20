@@ -249,6 +249,7 @@ mod tests {
             kms_key_id: "kms-test".to_string(),
             kms_region: "us-west-2".to_string(),
             kms_public_key_hex: None,
+            kms_runtime: crate::kms::KmsRuntime::default(),
             vault: VaultCustodySnapshot {
                 launcher_id: Bytes32::default(),
                 custody_threshold: 1,

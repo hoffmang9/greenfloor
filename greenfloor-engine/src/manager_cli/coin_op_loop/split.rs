@@ -154,7 +154,7 @@ async fn run_coin_split_async(request: CoinSplitRequest<'_>) -> SignerResult<i32
         force_split_when_ready,
     } = gating;
 
-    let (operations, completion) = run_until_ready_loop(
+    let (operations, completion) = Box::pin(run_until_ready_loop(
         &exec_ctx,
         UntilReadyLoopConfig {
             wait,
@@ -188,7 +188,7 @@ async fn run_coin_split_async(request: CoinSplitRequest<'_>) -> SignerResult<i32
                 allow_lock_all_spendable,
             })
         },
-    )
+    ))
     .await?;
 
     finish_coin_op_command(

@@ -295,3 +295,6 @@ pub async fn run_cats_delete(
     ctx.emit_json(&json!({"deleted": true, "asset_id": resolved_asset_id}))?;
     Ok(0)
 }
+
+#[cfg(test)]
+mod tests;

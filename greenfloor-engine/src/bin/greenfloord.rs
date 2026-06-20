@@ -13,7 +13,7 @@ struct GreenfloordCli {
 #[tokio::main]
 async fn main() {
     let cli = GreenfloordCli::parse();
-    match run_daemon_command(cli.args).await {
+    match Box::pin(run_daemon_command(cli.args)).await {
         Ok(code) => {
             if code != 0 {
                 std::process::exit(code);

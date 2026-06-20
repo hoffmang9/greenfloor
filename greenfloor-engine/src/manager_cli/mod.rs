@@ -13,8 +13,12 @@ mod keys;
 mod ladder;
 mod offers;
 mod paths;
+mod runtime;
 mod setup;
 mod util;
+
+#[cfg(test)]
+mod test_support;
 
 #[cfg(test)]
 mod tests;

@@ -243,3 +243,64 @@ fn post_failure_venue_result_marks_publish_failure() {
     );
     assert_eq!(build_and_post_exit_code(1), 2);
 }
+
+fn write_dry_run_program(path: &Path, home_dir: &Path) {
+    crate::minimal_program_template::write_minimal_program_with_signer(
+        path,
+        crate::minimal_program_template::MinimalProgramParams {
+            home_dir,
+            ..Default::default()
+        },
+    );
+}
+
+#[tokio::test]
+async fn dry_run_returns_preview_payload_in_process() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    write_dry_run_program(&program, dir.path());
+    std::fs::write(
+        &markets,
+        include_str!("../../../../tests/fixtures/data/build_offer_markets.yaml"),
+    )
+    .expect("write markets fixture");
+
+    let response = super::build_and_post_offer(super::BuildAndPostOfferRequest {
+        program_path: program,
+        markets_path: markets,
+        testnet_markets_path: None,
+        network: "mainnet".to_string(),
+        market_id: Some("m1".to_string()),
+        pair: None,
+        size_base_units: 1,
+        repeat: 1,
+        publish_venue: None,
+        dexie_base_url: None,
+        splash_base_url: None,
+        venue: super::BuildAndPostVenueOptions {
+            drop_only: true,
+            claim_rewards: false,
+        },
+        run: super::BuildAndPostRunOptions {
+            dry_run: true,
+            persist_results: true,
+        },
+        action_side: None,
+        test_overrides: crate::offer::operator::BuildOfferTestOverrides {
+            offer_text: Some("offer1dryrunpreviewstub".to_string()),
+        },
+    })
+    .await
+    .expect("build and post dry run");
+
+    assert_eq!(response.exit_code, 0);
+    assert_eq!(response.payload.get("dry_run"), Some(&json!(true)));
+    assert_eq!(response.payload.get("publish_attempts"), Some(&json!(0)));
+    assert!(response
+        .payload
+        .get("built_offers_preview")
+        .and_then(Value::as_array)
+        .is_some_and(|rows| !rows.is_empty()));
+    assert_eq!(response.payload.get("results"), Some(&json!([])));
+}

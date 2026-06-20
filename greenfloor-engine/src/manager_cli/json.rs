@@ -1,5 +1,8 @@
 //! JSON output for the native manager CLI (`--json`).
 
+#[cfg(test)]
+use std::sync::{Arc, Mutex};
+
 use serde::Serialize;
 use serde_json::Value;
 
@@ -11,7 +14,7 @@ use crate::error::SignerResult;
 pub struct ManagerOutput {
     compact: bool,
     #[cfg(test)]
-    capture: Option<std::sync::Arc<std::sync::Mutex<Vec<Value>>>>,
+    capture_buffer: Option<Arc<Mutex<Vec<Value>>>>,
 }
 
 impl ManagerOutput {
@@ -19,26 +22,26 @@ impl ManagerOutput {
         Self {
             compact,
             #[cfg(test)]
-            capture: None,
+            capture_buffer: None,
         }
     }
 
     #[cfg(test)]
-    pub fn capturing(compact: bool) -> (Self, std::sync::Arc<std::sync::Mutex<Vec<Value>>>) {
-        let capture = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    pub fn capturing(compact: bool) -> (Self, Arc<Mutex<Vec<Value>>>) {
+        let buffer = Arc::new(Mutex::new(Vec::new()));
         (
             Self {
                 compact,
-                capture: Some(capture.clone()),
+                capture_buffer: Some(buffer.clone()),
             },
-            capture,
+            buffer,
         )
     }
 
     pub fn emit_json(&self, value: &Value) -> SignerResult<()> {
         #[cfg(test)]
-        if let Some(capture) = &self.capture {
-            if let Ok(mut entries) = capture.lock() {
+        if let Some(buffer) = &self.capture_buffer {
+            if let Ok(mut entries) = buffer.lock() {
                 entries.push(value.clone());
             }
         }
@@ -46,6 +49,14 @@ impl ManagerOutput {
     }
 
     pub fn emit_serialized<T: Serialize>(&self, value: &T) -> SignerResult<()> {
+        #[cfg(test)]
+        if let Some(buffer) = &self.capture_buffer {
+            if let Ok(json_value) = serde_json::to_value(value) {
+                if let Ok(mut entries) = buffer.lock() {
+                    entries.push(json_value);
+                }
+            }
+        }
         cli_util::print_json(value, self.compact)
     }
 }

@@ -1,0 +1,24 @@
+app:
+  network: mainnet
+  home_dir: /tmp/gf
+runtime:
+  loop_interval_seconds: 30
+chain_signals:
+  tx_block_trigger:
+    mode: websocket
+dev:
+  python:
+    min_version: "3.11"
+notifications:
+  low_inventory_alerts:
+    enabled: true
+    threshold_mode: absolute_base_units
+    default_threshold_base_units: 0
+    dedup_cooldown_seconds: 21600
+    clear_hysteresis_percent: 10
+  providers:
+    - type: pushover
+      enabled: true
+      user_key_env: PUSHOVER_USER_KEY
+      app_token_env: PUSHOVER_APP_TOKEN
+      recipient_key_env: PUSHOVER_RECIPIENT_KEY
