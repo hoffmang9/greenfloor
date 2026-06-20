@@ -137,7 +137,8 @@ async fn run_coinset_websocket_loop(
 
 #[cfg(test)]
 mod tests {
-    use super::super::capture::capture_coinset_websocket_once;
+    use super::super::capture::capture_coinset_websocket_once_with_timings;
+    use super::super::once_timings::OnceCaptureTimings;
     use super::super::url::resolve_coinset_ws_url;
     use super::*;
     use mockito::Server;
@@ -178,9 +179,15 @@ mod tests {
             .create();
 
         let program = sample_program();
-        capture_coinset_websocket_once(&store, &program, &server.url(), &CoinWatchlistCache::new())
-            .await
-            .expect("capture");
+        capture_coinset_websocket_once_with_timings(
+            &store,
+            &program,
+            &server.url(),
+            &CoinWatchlistCache::new(),
+            OnceCaptureTimings::UNIT_TEST,
+        )
+        .await
+        .expect("capture");
 
         let events = store
             .list_recent_audit_events(

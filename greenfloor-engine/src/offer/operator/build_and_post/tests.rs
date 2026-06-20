@@ -287,7 +287,7 @@ async fn dry_run_returns_preview_payload_in_process() {
             persist_results: true,
         },
         action_side: None,
-        test_overrides: crate::offer::operator::OfferOperatorTestOverrides {
+        test_overrides: crate::offer::operator::BuildOfferTestOverrides {
             offer_text: Some("offer1dryrunpreviewstub".to_string()),
         },
     })

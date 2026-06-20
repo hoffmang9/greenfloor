@@ -13,6 +13,7 @@ use crate::operator_log::{
 use crate::storage::SqliteStore;
 
 use super::handler::{handle_ws_text, run_recovery_poll, ws_error};
+use super::once_timings::OnceCaptureTimings;
 use super::url::{ensure_rustls_crypto_provider, resolve_coinset_ws_url};
 
 pub async fn capture_coinset_websocket_once(
@@ -20,6 +21,23 @@ pub async fn capture_coinset_websocket_once(
     program: &ManagerProgramConfig,
     coinset_base_url: &str,
     coin_watchlist: &CoinWatchlistCache,
+) -> SignerResult<()> {
+    capture_coinset_websocket_once_with_timings(
+        store,
+        program,
+        coinset_base_url,
+        coin_watchlist,
+        OnceCaptureTimings::from_program(program),
+    )
+    .await
+}
+
+pub async fn capture_coinset_websocket_once_with_timings(
+    store: &SqliteStore,
+    program: &ManagerProgramConfig,
+    coinset_base_url: &str,
+    coin_watchlist: &CoinWatchlistCache,
+    timings: OnceCaptureTimings,
 ) -> SignerResult<()> {
     ensure_rustls_crypto_provider();
     let ws_url = resolve_coinset_ws_url(program, coinset_base_url);
@@ -30,16 +48,10 @@ pub async fn capture_coinset_websocket_once(
         None,
     )?;
     let _ = run_recovery_poll(store, program, coinset_base_url, "once_start").await;
-    let capture_window = if program.tx_block_fallback_poll_interval_seconds == 0 {
-        Duration::from_millis(10)
-    } else {
-        Duration::from_secs(program.tx_block_fallback_poll_interval_seconds.max(1))
-    };
-    let reconnect = if program.tx_block_websocket_reconnect_interval_seconds == 0 {
-        Duration::from_millis(1)
-    } else {
-        Duration::from_secs(program.tx_block_websocket_reconnect_interval_seconds.max(1))
-    };
+    let OnceCaptureTimings {
+        capture_window,
+        reconnect,
+    } = timings;
     let deadline = tokio::time::Instant::now() + capture_window;
 
     while tokio::time::Instant::now() < deadline {

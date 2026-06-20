@@ -1,30 +1,29 @@
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::PlannedAction;
+use crate::daemon::cycle_paths::DaemonCyclePaths;
+use crate::daemon::dispatch_test_controls::DaemonDispatchOverrides;
 use crate::error::SignerResult;
 use crate::offer::operator::{
     build_and_post_offer, BuildAndPostOfferRequest, BuildAndPostRunOptions,
-    BuildAndPostVenueOptions, OfferOperatorTestOverrides,
+    BuildAndPostVenueOptions, BuildOfferTestOverrides,
 };
 use crate::offer::request::normalize_offer_side;
 
 use crate::async_boundary::ManagedOfferPostFuture;
-use crate::daemon::cycle_paths::DaemonCyclePaths;
-
-use crate::daemon::run_once::OfferDispatchTestOverrides;
 
 pub fn post_managed_planned_action<'a>(
     program: &'a ManagerProgramConfig,
     paths: &'a DaemonCyclePaths,
     market: &'a MarketConfig,
     action: &'a PlannedAction,
-    test_overrides: &'a OfferDispatchTestOverrides,
+    dispatch_overrides: &'a DaemonDispatchOverrides,
 ) -> ManagedOfferPostFuture<'a> {
     Box::pin(post_managed_planned_action_async(
         program,
         paths,
         market,
         action,
-        test_overrides,
+        dispatch_overrides,
     ))
 }
 
@@ -33,9 +32,9 @@ async fn post_managed_planned_action_async(
     paths: &DaemonCyclePaths,
     market: &MarketConfig,
     action: &PlannedAction,
-    test_overrides: &OfferDispatchTestOverrides,
+    dispatch_overrides: &DaemonDispatchOverrides,
 ) -> SignerResult<bool> {
-    if let Some(result) = super::test_overrides::managed_post_result(test_overrides) {
+    if let Some(result) = super::test_overrides::managed_post_result(dispatch_overrides) {
         return result;
     }
     if action.size <= 0 {
@@ -63,7 +62,7 @@ async fn post_managed_planned_action_async(
             persist_results: true,
         },
         action_side: Some(side),
-        test_overrides: OfferOperatorTestOverrides::default(),
+        test_overrides: BuildOfferTestOverrides::default(),
     })
     .await?;
     Ok(response.exit_code == 0)

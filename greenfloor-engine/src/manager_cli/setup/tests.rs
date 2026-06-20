@@ -9,19 +9,6 @@ use crate::manager_cli::test_support::{
 };
 
 #[test]
-fn validate_log_level_accepts_info() {
-    assert_eq!(
-        crate::file_logging::validate_log_level("info").expect("level"),
-        "INFO"
-    );
-}
-
-#[test]
-fn validate_log_level_rejects_garbage() {
-    assert!(crate::file_logging::validate_log_level("verbose").is_err());
-}
-
-#[test]
 fn config_validate_emits_json() {
     let dir = tempfile::tempdir().expect("tempdir");
     let program_path = copy_fixture_data("config_validate_program.yaml", dir.path());

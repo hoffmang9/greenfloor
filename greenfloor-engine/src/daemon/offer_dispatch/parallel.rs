@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::json;
@@ -10,7 +9,8 @@ use crate::cycle::{
     parallel_max_workers, plan_parallel_managed_dispatch, reservation_release_status,
     PlannedAction, StrategyActionSellCountInput,
 };
-use crate::daemon::market_context::DaemonCycleResources;
+use crate::daemon::dispatch_test_controls::DaemonDispatchOverrides;
+use crate::daemon::market_context::{DaemonCycleResources, MarketCycleContext};
 use crate::error::{SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
 use crate::operator_log::{LogContext, PARALLEL_OFFER_DISPATCH};
@@ -22,7 +22,6 @@ use super::reservation_ctx::{
     parallel_reservation_asset_ids, parallel_reservation_context, reservation_wallet_id,
 };
 use super::OfferDispatchOutput;
-use crate::daemon::run_once::OfferDispatchTestOverrides;
 
 use crate::daemon::coinset_spendable::coinset_spendable_profiles_by_asset;
 
@@ -42,7 +41,7 @@ struct ParallelDispatchSetup {
 
 async fn prepare_parallel_dispatch(
     store: &SqliteStore,
-    db_path: &Path,
+    db_path: &std::path::Path,
     resources: &DaemonCycleResources,
     signer_config: &SignerConfig,
     market: &MarketConfig,
@@ -120,7 +119,7 @@ async fn run_parallel_post_jobs(
     resources: &DaemonCycleResources,
     market: &MarketConfig,
     setup: ParallelDispatchSetup,
-    test_overrides: &OfferDispatchTestOverrides,
+    dispatch_overrides: DaemonDispatchOverrides,
 ) -> SignerResult<(u64, Vec<StrategyActionSellCountInput>)> {
     let ParallelDispatchSetup {
         coordinator,
@@ -145,7 +144,7 @@ async fn run_parallel_post_jobs(
         let paths = resources.paths.clone();
         let market_id = market.market_id.clone();
         let wallet_id = wallet_id.clone();
-        let test_overrides = test_overrides.clone();
+        let dispatch_overrides = dispatch_overrides.clone();
 
         handles.push(tokio::spawn(async move {
             let _permit = permit;
@@ -163,7 +162,7 @@ async fn run_parallel_post_jobs(
                         &paths,
                         &market,
                         &job.action,
-                        &test_overrides,
+                        &dispatch_overrides,
                     )
                     .await?;
                     let release_status = reservation_release_status(post_result);
@@ -203,20 +202,25 @@ async fn run_parallel_post_jobs(
 
 pub async fn execute_actions_parallel(
     store: &SqliteStore,
-    db_path: &Path,
-    resources: &DaemonCycleResources,
+    ctx: &MarketCycleContext<'_>,
     signer_config: &SignerConfig,
     market: &MarketConfig,
     expanded: &[PlannedAction],
-    test_overrides: &OfferDispatchTestOverrides,
 ) -> SignerResult<OfferDispatchOutput> {
-    if let Some(result) = super::test_overrides::parallel_dispatch_result(test_overrides) {
+    let dispatch_overrides = &ctx.dispatch.test_controls.offer_dispatch;
+    if let Some(result) = super::test_overrides::parallel_dispatch_result(dispatch_overrides) {
         return result;
     }
 
-    let setup =
-        prepare_parallel_dispatch(store, db_path, resources, signer_config, market, expanded)
-            .await?;
+    let setup = prepare_parallel_dispatch(
+        store,
+        &ctx.dispatch.db_path,
+        ctx.resources,
+        signer_config,
+        market,
+        expanded,
+    )
+    .await?;
 
     if setup.jobs.is_empty() {
         return Ok(OfferDispatchOutput {
@@ -228,7 +232,7 @@ pub async fn execute_actions_parallel(
     }
 
     let (executed, action_items) =
-        run_parallel_post_jobs(resources, market, setup, test_overrides).await?;
+        run_parallel_post_jobs(ctx.resources, market, setup, dispatch_overrides.clone()).await?;
 
     Ok(OfferDispatchOutput {
         executed_count: executed,

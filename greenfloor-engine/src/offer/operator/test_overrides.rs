@@ -3,12 +3,12 @@
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Default, Deserialize)]
-pub struct OfferOperatorTestOverrides {
+pub struct BuildOfferTestOverrides {
     #[serde(default)]
     pub offer_text: Option<String>,
 }
 
-impl OfferOperatorTestOverrides {
+impl BuildOfferTestOverrides {
     pub(crate) fn stub_offer_text(&self) -> Option<&str> {
         self.offer_text
             .as_deref()

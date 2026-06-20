@@ -9,14 +9,8 @@ use serde_json::Value;
 use super::context::ManagerContext;
 use super::json::ManagerOutput;
 use super::runtime::{EnvReader, ManagerRuntime, PromptReader, StdioPromptReader};
-use crate::error::SignerError;
-use crate::error::SignerResult;
+use crate::error::{SignerError, SignerResult};
 use crate::minimal_program_template::{write_minimal_program_with_signer, MinimalProgramParams};
-
-#[path = "test_support/capturing_output.rs"]
-mod capturing_output;
-
-pub use capturing_output::TestJsonCapture;
 
 const BOOTSTRAP_FIXTURE_DIR: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/data/bootstrap");
@@ -253,11 +247,7 @@ impl ManagerContextBuilder {
         self
     }
 
-    fn assemble_inner(
-        self,
-        output: ManagerOutput,
-        json_capture: Option<TestJsonCapture>,
-    ) -> ManagerContext {
+    fn assemble_inner(self, output: ManagerOutput) -> ManagerContext {
         let ManagerContextBuilder {
             program_config,
             markets_config,
@@ -297,19 +287,18 @@ impl ManagerContextBuilder {
             state_db,
             dexie_base_url,
             testnet_markets_path,
-            json_capture,
         )
     }
 
     pub fn build(self) -> ManagerContext {
         let json_compact = self.json_compact;
-        self.assemble_inner(ManagerOutput::new(json_compact), None)
+        self.assemble_inner(ManagerOutput::new(json_compact))
     }
 
     pub fn build_capturing(self) -> CapturedManagerContext {
         let json_compact = self.json_compact;
-        let (capture, buffer) = TestJsonCapture::new();
-        let ctx = self.assemble_inner(ManagerOutput::new(json_compact), Some(capture));
+        let (output, buffer) = ManagerOutput::capturing(json_compact);
+        let ctx = self.assemble_inner(output);
         CapturedManagerContext {
             ctx,
             captured: buffer,

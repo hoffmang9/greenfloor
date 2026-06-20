@@ -11,6 +11,7 @@ mod cycle_entry;
 mod cycle_paths;
 mod daemon_loop;
 mod disabled_markets;
+mod dispatch_test_controls;
 mod inventory_phase;
 mod lock;
 mod logging;
@@ -75,8 +76,7 @@ pub use reload::{record_config_reloaded, reload_marker_present, remove_reload_ma
 pub use run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
     elapsed_ms, CyclePlan, DaemonCycleSummary, DaemonCycleTestControls, DaemonDispatchState,
-    DaemonRunOnceRequest, DaemonRunOnceRequestBody, ManagedPostTestMode, MarketDispatchMetrics,
-    OfferDispatchTestOverrides, ParallelDispatchTestMode,
+    DaemonRunOnceRequest, DaemonRunOnceRequestBody, MarketDispatchMetrics,
 };
 pub use watchlist::{
     active_offer_counts_by_size, active_offer_counts_by_size_and_side,
