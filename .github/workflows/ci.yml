@@ -59,6 +59,7 @@ jobs:
       - uses: ./.github/actions/rust-cache-greenfloor
         with:
           save-cache: "false"
+          install-nextest: "false"
 
       - name: Cache pre-commit environment
         uses: actions/cache@v4

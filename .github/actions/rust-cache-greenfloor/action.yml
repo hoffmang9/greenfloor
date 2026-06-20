@@ -7,6 +7,10 @@ inputs:
     description: Save the Cargo cache at job end (disable on lint; test jobs populate it).
     required: false
     default: "true"
+  install-nextest:
+    description: Install cargo-nextest (disable on jobs that only build or lint).
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -23,5 +27,6 @@ runs:
         save-if: ${{ inputs.save-cache == 'true' }}
 
     - uses: taiki-e/install-action@v2
+      if: ${{ inputs.install-nextest == 'true' }}
       with:
         tool: nextest

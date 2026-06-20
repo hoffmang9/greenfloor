@@ -38,6 +38,8 @@ jobs:
           python-version: "3.11"
 
       - uses: ./.github/actions/rust-cache-greenfloor
+        with:
+          install-nextest: "false"
 
       - name: Build native operator binaries
         run: |
