@@ -9,12 +9,9 @@ use crate::error::{SignerError, SignerResult};
 ///
 /// Returns an error if the operation fails.
 pub async fn get_public_key_compressed_hex(key_id: &str, region: &str) -> SignerResult<String> {
-    if cfg!(debug_assertions) {
-        if let Ok(hex) = std::env::var("GREENFLOOR_TEST_KMS_PUBLIC_KEY_COMPRESSED_HEX") {
-            if !hex.trim().is_empty() {
-                return Ok(hex.trim().to_string());
-            }
-        }
+    #[cfg(test)]
+    if let Some(hex) = test_public_key_stub() {
+        return Ok(hex);
     }
     let client = kms_client(region).await?;
     let response = client
@@ -57,9 +54,8 @@ pub async fn sign_digest(key_id: &str, region: &str, message_hex: &str) -> Signe
 }
 
 async fn kms_client(region: &str) -> SignerResult<Client> {
-    if cfg!(debug_assertions)
-        && std::env::var("GREENFLOOR_KMS_TEST_MODE").as_deref() == Ok("fast_fail")
-    {
+    #[cfg(test)]
+    if kms_test_fast_fail_enabled() {
         return Err(SignerError::Kms(
             "credentials not configured (test fast fail)".to_string(),
         ));
@@ -69,6 +65,19 @@ async fn kms_client(region: &str) -> SignerResult<Client> {
         .load()
         .await;
     Ok(Client::new(&config))
+}
+
+#[cfg(test)]
+fn test_public_key_stub() -> Option<String> {
+    std::env::var("GREENFLOOR_TEST_KMS_PUBLIC_KEY_COMPRESSED_HEX")
+        .ok()
+        .map(|hex| hex.trim().to_string())
+        .filter(|hex| !hex.is_empty())
+}
+
+#[cfg(test)]
+fn kms_test_fast_fail_enabled() -> bool {
+    std::env::var("GREENFLOOR_KMS_TEST_MODE").as_deref() == Ok("fast_fail")
 }
 
 /// Der spki to compressed p256.

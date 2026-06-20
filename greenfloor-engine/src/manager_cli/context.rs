@@ -66,50 +66,23 @@ impl ManagerContext {
     }
 
     #[cfg(test)]
-    pub fn for_test(program_config: PathBuf, markets_config: PathBuf) -> Self {
-        Self {
-            output: ManagerOutput::new(false),
-            program_config,
-            markets_config,
-            cats_config: PathBuf::from("/tmp/unused-cats.yaml"),
-            state_db: String::new(),
-            dexie_base_url: None,
-            testnet_markets_path: None,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn for_test_with_cats(
+    pub(crate) fn from_test_parts(
+        output: ManagerOutput,
         program_config: PathBuf,
         markets_config: PathBuf,
         cats_config: PathBuf,
-        output: ManagerOutput,
+        state_db: String,
+        dexie_base_url: Option<String>,
+        testnet_markets_path: Option<PathBuf>,
     ) -> Self {
         Self {
             output,
             program_config,
             markets_config,
             cats_config,
-            state_db: String::new(),
-            dexie_base_url: None,
-            testnet_markets_path: None,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn for_test_with_output(
-        program_config: PathBuf,
-        markets_config: PathBuf,
-        output: ManagerOutput,
-    ) -> Self {
-        Self {
-            output,
-            program_config,
-            markets_config,
-            cats_config: PathBuf::from("/tmp/unused-cats.yaml"),
-            state_db: String::new(),
-            dexie_base_url: None,
-            testnet_markets_path: None,
+            state_db,
+            dexie_base_url,
+            testnet_markets_path,
         }
     }
 
@@ -119,18 +92,6 @@ impl ManagerContext {
 
     pub fn state_db_override(&self) -> Option<&str> {
         optional_str(&self.state_db)
-    }
-
-    #[cfg(test)]
-    pub fn with_testnet_markets(mut self, path: PathBuf) -> Self {
-        self.testnet_markets_path = Some(path);
-        self
-    }
-
-    #[cfg(test)]
-    pub fn with_cats_config(mut self, path: PathBuf) -> Self {
-        self.cats_config = path;
-        self
     }
 
     pub fn emit_json(&self, value: &Value) -> SignerResult<()> {

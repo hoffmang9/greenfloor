@@ -9,21 +9,29 @@ use crate::error::{SignerError, SignerResult};
 
 const MAX_ATTEMPTS: usize = 4;
 
+#[cfg(test)]
+const TEST_MAX_ATTEMPTS: usize = 2;
+
 fn max_retry_attempts() -> usize {
-    if cfg!(debug_assertions) {
-        2
-    } else {
-        MAX_ATTEMPTS
+    #[cfg(test)]
+    {
+        return TEST_MAX_ATTEMPTS;
     }
+    #[cfg(not(test))]
+    MAX_ATTEMPTS
 }
 
 fn retry_sleep_duration(delay: f64) -> Duration {
     let jitter = rand::rng().random_range(-0.25..=0.25);
-    let scaled = if cfg!(debug_assertions) {
-        // Keep retry coverage in dev/test builds without multi-second backoff sleeps.
-        (delay * 0.01 * (1.0 + jitter)).max(0.001)
-    } else {
-        (delay * (1.0 + jitter)).max(0.05)
+    let scaled = {
+        #[cfg(test)]
+        {
+            (delay * 0.01 * (1.0 + jitter)).max(0.001)
+        }
+        #[cfg(not(test))]
+        {
+            (delay * (1.0 + jitter)).max(0.05)
+        }
     };
     Duration::from_secs_f64(scaled)
 }

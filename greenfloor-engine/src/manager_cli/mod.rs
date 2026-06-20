@@ -17,6 +17,9 @@ mod setup;
 mod util;
 
 #[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
 mod tests;
 
 pub use cats_catalog::load_cats_catalog;

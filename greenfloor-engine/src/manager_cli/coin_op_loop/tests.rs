@@ -6,7 +6,7 @@ use super::combine::{run_coin_combine, CoinCombineBehavior, CoinCombineRequest};
 use super::context::{enforce_split_lockup_guardrail, spendable_coins_for_gate};
 use super::split::{run_coin_split, CoinSplitBehavior, CoinSplitGating, CoinSplitRequest};
 use super::until_ready::UntilReadyWaitMode;
-use crate::manager_cli::context::ManagerContext;
+use crate::manager_cli::test_support::ManagerContextBuilder;
 
 #[test]
 fn lockup_guardrail_blocks_when_all_spendable_selected() {
@@ -93,10 +93,12 @@ fn split_gate_ready_skips_execution_path() {
 
 #[tokio::test]
 async fn until_ready_requires_size_base_units() {
-    let mgr = ManagerContext::for_test(
+    let mgr = ManagerContextBuilder::new(
         PathBuf::from("/tmp/unused-program.yaml"),
         PathBuf::from("/tmp/unused-markets.yaml"),
-    );
+    )
+    .json_compact(false)
+    .build();
     let err = run_coin_split(CoinSplitRequest {
         mgr: &mgr,
         network: "mainnet",
@@ -127,10 +129,12 @@ async fn until_ready_requires_size_base_units() {
 
 #[tokio::test]
 async fn until_ready_disallows_no_wait() {
-    let mgr = ManagerContext::for_test(
+    let mgr = ManagerContextBuilder::new(
         PathBuf::from("/tmp/unused-program.yaml"),
         PathBuf::from("/tmp/unused-markets.yaml"),
-    );
+    )
+    .json_compact(false)
+    .build();
     let err = run_coin_split(CoinSplitRequest {
         mgr: &mgr,
         network: "mainnet",
@@ -161,10 +165,12 @@ async fn until_ready_disallows_no_wait() {
 
 #[tokio::test]
 async fn combine_until_ready_requires_size_base_units() {
-    let mgr = ManagerContext::for_test(
+    let mgr = ManagerContextBuilder::new(
         PathBuf::from("/tmp/unused-program.yaml"),
         PathBuf::from("/tmp/unused-markets.yaml"),
-    );
+    )
+    .json_compact(false)
+    .build();
     let err = run_coin_combine(CoinCombineRequest {
         mgr: &mgr,
         network: "mainnet",
@@ -186,10 +192,12 @@ async fn combine_until_ready_requires_size_base_units() {
 
 #[tokio::test]
 async fn combine_until_ready_disallows_no_wait() {
-    let mgr = ManagerContext::for_test(
+    let mgr = ManagerContextBuilder::new(
         PathBuf::from("/tmp/unused-program.yaml"),
         PathBuf::from("/tmp/unused-markets.yaml"),
-    );
+    )
+    .json_compact(false)
+    .build();
     let err = run_coin_combine(CoinCombineRequest {
         mgr: &mgr,
         network: "mainnet",
@@ -211,8 +219,7 @@ async fn combine_until_ready_disallows_no_wait() {
 
 #[tokio::test]
 async fn coins_list_requires_signer_backend() {
-    use crate::manager_cli::context::ManagerContext;
-    use crate::manager_cli::json::ManagerOutput;
+    use crate::manager_cli::test_support::{pop_json, ManagerContextBuilder};
     use crate::minimal_program_template::{write_minimal_program, MinimalProgramParams};
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -250,17 +257,12 @@ async fn coins_list_requires_signer_backend() {
 "#,
     )
     .expect("write markets");
-    let (output, captured) = ManagerOutput::capturing(true);
-    let ctx = ManagerContext::for_test_with_output(program, markets, output);
-    let code = super::list::run_coins_list(&ctx, None, None, None)
+    let harness = ManagerContextBuilder::new(program, markets).build_capturing();
+    let code = super::list::run_coins_list(&harness.ctx, None, None, None)
         .await
         .expect("coins-list");
     assert_eq!(code, 2);
-    let payload = captured
-        .lock()
-        .expect("capture lock")
-        .pop()
-        .expect("json emitted");
+    let payload = pop_json(&harness.captured);
     assert_eq!(
         payload.get("error"),
         Some(&serde_json::json!("coin_list_requires_signer_backend"))

@@ -1,0 +1,9 @@
+cats:
+  - name: Token One
+    base_symbol: "TOK1"
+    asset_id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    target_usd_per_unit: null
+    dexie:
+      ticker_id: null
+      pool_id: null
+      last_price_xch: null
