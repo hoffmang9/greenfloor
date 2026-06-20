@@ -303,6 +303,8 @@ pub fn run_signer_denomination_phase<'a>(
     ))
 }
 
+// Clippy `large_futures`: the phase is already boxed at `run_signer_denomination_phase`.
+#[allow(clippy::large_futures)]
 async fn run_signer_denomination_phase_async(
     program: &ManagerProgramConfig,
     market: &MarketConfig,

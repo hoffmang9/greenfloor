@@ -151,9 +151,8 @@ impl PromptReader for QueuedPromptReader {
         guard
             .first()
             .cloned()
-            .map(|line| {
+            .inspect(|_| {
                 guard.remove(0);
-                line
             })
             .ok_or_else(|| SignerError::Other("test prompt queue exhausted".to_string()))
     }
@@ -278,16 +277,16 @@ impl ManagerContextBuilder {
         } else {
             test_runtime(&env_pairs, &prompt_refs)
         };
-        ManagerContext::from_test_parts(
+        ManagerContext {
             output,
             runtime,
             program_config,
             markets_config,
-            resolved_cats,
+            cats_config: resolved_cats,
             state_db,
             dexie_base_url,
             testnet_markets_path,
-        )
+        }
     }
 
     pub fn build(self) -> ManagerContext {

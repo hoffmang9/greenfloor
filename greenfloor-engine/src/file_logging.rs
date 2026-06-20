@@ -219,7 +219,7 @@ fn reload_service_log_level(
 /// # Errors
 ///
 /// Returns an error if the first initialization attempt fails.
-pub fn sync_service_file_logging(
+pub(crate) fn sync_service_file_logging(
     slot: &OnceLock<Result<ServiceLogState, String>>,
     service_name: &'static str,
     home_dir: &Path,
@@ -273,12 +273,12 @@ mod tests {
 
     #[test]
     fn sync_service_file_logging_records_shared_process_when_subscriber_active() {
+        static SHARED_SLOT: OnceLock<Result<ServiceLogState, String>> = OnceLock::new();
         let _ = tracing_subscriber::fmt().with_test_writer().try_init();
         if !tracing::dispatcher::has_been_set() {
             return;
         }
 
-        static SHARED_SLOT: OnceLock<Result<ServiceLogState, String>> = OnceLock::new();
         let dir = tempfile::tempdir().expect("tempdir");
         sync_service_file_logging(&SHARED_SLOT, "shared-service", dir.path(), "INFO")
             .expect("shared process init");

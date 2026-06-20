@@ -263,7 +263,7 @@ async fn post_fee_estimate_returns_rpc_payload() {
         "mainnet",
         Some(&server.url()),
         "get_fee_estimate",
-        json!({"target_times":[300,600,1200],"cost":1000000}),
+        json!({"target_times":[300,600,1200],"cost":1_000_000}),
     )
     .await
     .expect("fee estimate");

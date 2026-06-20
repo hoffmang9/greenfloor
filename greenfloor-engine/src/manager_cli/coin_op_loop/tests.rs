@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use crate::coin_ops::{coin_op_should_stop, evaluate_coin_split_gate, SpendableCoin};
 
 use super::combine::{run_coin_combine, CoinCombineBehavior, CoinCombineRequest};

@@ -25,6 +25,17 @@ path = "src/bin/greenfloor-manager.rs"
 name = "greenfloord"
 path = "src/bin/greenfloord.rs"
 
+[lints.rust]
+rust_2018_idioms = { level = "deny", priority = -1 }
+rust_2021_compatibility = { level = "deny", priority = -1 }
+future_incompatible = { level = "deny", priority = -1 }
+nonstandard_style = { level = "deny", priority = -1 }
+unused = { level = "deny", priority = -1 }
+dead_code = "deny"
+private_interfaces = "deny"
+deprecated = "deny"
+unreachable_patterns = "deny"
+
 [lints.clippy]
 # Selective pedantic allows (see clippy pedantic deny in manifest).
 all = { level = "deny", priority = -1 }

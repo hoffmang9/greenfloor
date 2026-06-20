@@ -35,7 +35,7 @@ fn parse_program_config_minimal_valid() {
         .signer_key_registry
         .get("key-main-1")
         .expect("registry entry");
-    assert_eq!(reg.fingerprint, 123456789);
+    assert_eq!(reg.fingerprint, 123_456_789);
     assert_eq!(reg.network.as_deref(), Some("mainnet"));
     assert_eq!(cfg.dev_python_min_version, "3.11");
     assert!(!cfg.signer_offer_path_configured());
@@ -192,10 +192,13 @@ fn parse_program_config_multiple_keys_in_registry() {
     raw["keys"]["registry"]
         .as_array_mut()
         .unwrap()
-        .push(json!({"key_id": "key-main-2", "fingerprint": 987654321, "network": "mainnet"}));
+        .push(json!({"key_id": "key-main-2", "fingerprint": 987_654_321, "network": "mainnet"}));
     let cfg = parse_program_config(&raw).expect("config");
     assert_eq!(cfg.signer_key_registry.len(), 2);
-    assert_eq!(cfg.signer_key_registry["key-main-2"].fingerprint, 987654321);
+    assert_eq!(
+        cfg.signer_key_registry["key-main-2"].fingerprint,
+        987_654_321
+    );
 }
 
 #[test]

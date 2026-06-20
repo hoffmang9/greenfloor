@@ -78,7 +78,7 @@ jobs:
           done
           (
             cargo fmt --manifest-path "${{ env.CARGO_MANIFEST }}" --check
-            cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}" --lib --bins --no-deps
+            cargo clippy --manifest-path "${{ env.CARGO_MANIFEST }}" --lib --bins --tests --no-deps
           ) &
           pids+=($!)
           status=0
