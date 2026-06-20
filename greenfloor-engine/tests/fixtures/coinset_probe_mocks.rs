@@ -25,6 +25,12 @@ impl HttpMockBody {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NamesMockMode {
+    Skip,
+    WithSample(String),
+}
+
 pub struct ProbeServerMockConfig {
     pub peak_height: u64,
     pub nested_peak: bool,
@@ -33,7 +39,52 @@ pub struct ProbeServerMockConfig {
     pub puzzle_range: HttpMockBody,
     pub hints_all: HttpMockBody,
     pub hints_range: HttpMockBody,
-    pub names_sample_coin_id: Option<String>,
+    pub names: NamesMockMode,
+}
+
+impl ProbeServerMockConfig {
+    fn empty_records(peak_height: u64) -> Self {
+        let empty = HttpMockBody::ok(EMPTY_COIN_RECORDS);
+        Self {
+            peak_height,
+            nested_peak: false,
+            puzzle_all: empty.clone(),
+            puzzle_all_expect: None,
+            puzzle_range: empty.clone(),
+            hints_all: empty.clone(),
+            hints_range: empty,
+            names: NamesMockMode::Skip,
+        }
+    }
+
+    pub fn empty_scan(peak_height: u64) -> Self {
+        Self::empty_records(peak_height)
+    }
+
+    pub fn operator_contract(sample_coin_id: impl Into<String>) -> Self {
+        let sample_coin_id = sample_coin_id.into();
+        let empty = HttpMockBody::ok(EMPTY_COIN_RECORDS);
+        Self {
+            peak_height: 50_000,
+            nested_peak: false,
+            puzzle_all: puzzle_all_with_sample(&sample_coin_id),
+            puzzle_all_expect: Some(1),
+            puzzle_range: empty.clone(),
+            hints_all: empty.clone(),
+            hints_range: empty,
+            names: NamesMockMode::WithSample(sample_coin_id),
+        }
+    }
+
+    pub fn nested_peak(mut self) -> Self {
+        self.nested_peak = true;
+        self
+    }
+
+    pub fn with_puzzle_range(mut self, range: HttpMockBody) -> Self {
+        self.puzzle_range = range;
+        self
+    }
 }
 
 struct CoinRecordsEndpointMock {
@@ -138,7 +189,7 @@ async fn mount_scan_endpoint_mocks(
         },
     )
     .await;
-    if let Some(sample_coin_id) = &config.names_sample_coin_id {
+    if let NamesMockMode::WithSample(sample_coin_id) = &config.names {
         let _names_all = mount_coin_records_mocks(
             server,
             config.peak_height,

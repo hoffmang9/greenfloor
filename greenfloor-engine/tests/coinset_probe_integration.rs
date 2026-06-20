@@ -3,10 +3,7 @@
 #[path = "fixtures/coinset_probe_mocks.rs"]
 mod coinset_probe_mocks;
 
-use coinset_probe_mocks::{
-    mount_probe_server, puzzle_all_with_sample, HttpMockBody, ProbeServerMockConfig,
-    EMPTY_COIN_RECORDS,
-};
+use coinset_probe_mocks::{mount_probe_server, HttpMockBody, NamesMockMode, ProbeServerMockConfig};
 use greenfloor_engine::coinset::to_coinset_hex;
 use greenfloor_engine::coinset_probe::{build_coinset_probe_report, CoinsetProbeCliArgs};
 use greenfloor_engine::hex::normalize_hex_id;
@@ -39,17 +36,17 @@ fn probe_args(server_url: String, launcher: String, height_window: u64) -> Coins
 
 fn assert_operator_probe_report_contract(
     report: &greenfloor_engine::coinset_probe::ProbeReport,
+    mocks: &ProbeServerMockConfig,
     launcher: &str,
     expected_p2_hash: &str,
-    sample_coin_id: &str,
 ) {
     assert_eq!(report.network, "mainnet");
     assert_eq!(report.launcher_id, launcher);
     assert_eq!(report.launcher_id_source, "arg");
     assert_eq!(report.probe_nonce, 0);
     assert_eq!(report.probe_p2_hash, expected_p2_hash);
-    assert_eq!(report.scan_window.peak_height, 50_000);
-    assert_eq!(report.scan_window.end_height, 50_000);
+    assert_eq!(report.scan_window.peak_height, mocks.peak_height);
+    assert_eq!(report.scan_window.end_height, mocks.peak_height);
     assert_eq!(report.scan_window.start_height, 0);
     assert!(
         report
@@ -65,18 +62,23 @@ fn assert_operator_probe_report_contract(
         Some(1)
     );
     assert!(report.capabilities.get_coin_records_by_hints.all_supported);
-    assert_eq!(
-        report
-            .capabilities
-            .get_coin_records_by_names
-            .sample_name
-            .as_deref(),
-        Some(normalize_hex_id(sample_coin_id).as_str())
-    );
-    assert_eq!(
-        report.capabilities.get_coin_records_by_names.all_count,
-        Some(0)
-    );
+    match &mocks.names {
+        NamesMockMode::WithSample(sample_coin_id) => {
+            assert_eq!(
+                report
+                    .capabilities
+                    .get_coin_records_by_names
+                    .sample_name
+                    .as_deref(),
+                Some(normalize_hex_id(sample_coin_id).as_str())
+            );
+            assert_eq!(
+                report.capabilities.get_coin_records_by_names.all_count,
+                Some(0)
+            );
+        }
+        NamesMockMode::Skip => panic!("operator contract mock must mount names sample"),
+    }
 
     let payload = serde_json::to_value(report).expect("json");
     assert!(payload.get("network").is_some());
@@ -95,27 +97,22 @@ async fn build_coinset_probe_report_matches_operator_json_contract() {
     let expected_p2_hash =
         singleton_member_puzzle_hash_hex_from_launcher_id(&launcher, 0).expect("p2 hash");
 
+    let mocks = ProbeServerMockConfig::operator_contract(&sample_coin_id);
     let mut server = mockito::Server::new_async().await;
-    let mocks = ProbeServerMockConfig {
-        peak_height: 50_000,
-        nested_peak: false,
-        puzzle_all: puzzle_all_with_sample(&sample_coin_id),
-        puzzle_all_expect: Some(1),
-        puzzle_range: HttpMockBody::ok(EMPTY_COIN_RECORDS),
-        hints_all: HttpMockBody::ok(EMPTY_COIN_RECORDS),
-        hints_range: HttpMockBody::ok(EMPTY_COIN_RECORDS),
-        names_sample_coin_id: Some(sample_coin_id.clone()),
-    };
     let puzzle_all = mount_probe_server(&mut server, &p2_hex, &mocks)
         .await
         .expect("puzzle mock");
 
-    let report = build_coinset_probe_report(probe_args(server.url(), launcher.clone(), 50_000))
-        .await
-        .expect("probe report");
+    let report = build_coinset_probe_report(probe_args(
+        server.url(),
+        launcher.clone(),
+        mocks.peak_height,
+    ))
+    .await
+    .expect("probe report");
 
     puzzle_all.assert_async().await;
-    assert_operator_probe_report_contract(&report, &launcher, &expected_p2_hash, &sample_coin_id);
+    assert_operator_probe_report_contract(&report, &mocks, &launcher, &expected_p2_hash);
 }
 
 #[tokio::test]
@@ -123,23 +120,16 @@ async fn build_coinset_probe_report_soft_fails_unsupported_range_calls() {
     let launcher = launcher_id();
     let p2_hex = p2_coinset_hex(&launcher, 0);
 
-    let mut server = mockito::Server::new_async().await;
-    let mocks = ProbeServerMockConfig {
-        peak_height: 100,
-        nested_peak: true,
-        puzzle_all: HttpMockBody::ok(EMPTY_COIN_RECORDS),
-        puzzle_all_expect: None,
-        puzzle_range: HttpMockBody::with_status(
+    let mocks = ProbeServerMockConfig::empty_scan(100)
+        .nested_peak()
+        .with_puzzle_range(HttpMockBody::with_status(
             400,
             r#"{"success":false,"error":"range unsupported"}"#,
-        ),
-        hints_all: HttpMockBody::ok(EMPTY_COIN_RECORDS),
-        hints_range: HttpMockBody::ok(EMPTY_COIN_RECORDS),
-        names_sample_coin_id: None,
-    };
+        ));
+    let mut server = mockito::Server::new_async().await;
     let _ = mount_probe_server(&mut server, &p2_hex, &mocks).await;
 
-    let report = build_coinset_probe_report(probe_args(server.url(), launcher, 100))
+    let report = build_coinset_probe_report(probe_args(server.url(), launcher, mocks.peak_height))
         .await
         .expect("probe report");
 
@@ -174,20 +164,11 @@ async fn build_coinset_probe_report_skips_names_when_puzzle_scan_returns_no_samp
     let launcher = launcher_id();
     let p2_hex = p2_coinset_hex(&launcher, 0);
 
+    let mocks = ProbeServerMockConfig::empty_scan(10);
     let mut server = mockito::Server::new_async().await;
-    let mocks = ProbeServerMockConfig {
-        peak_height: 10,
-        nested_peak: false,
-        puzzle_all: HttpMockBody::ok(EMPTY_COIN_RECORDS),
-        puzzle_all_expect: None,
-        puzzle_range: HttpMockBody::ok(EMPTY_COIN_RECORDS),
-        hints_all: HttpMockBody::ok(EMPTY_COIN_RECORDS),
-        hints_range: HttpMockBody::ok(EMPTY_COIN_RECORDS),
-        names_sample_coin_id: None,
-    };
     let _ = mount_probe_server(&mut server, &p2_hex, &mocks).await;
 
-    let report = build_coinset_probe_report(probe_args(server.url(), launcher, 10))
+    let report = build_coinset_probe_report(probe_args(server.url(), launcher, mocks.peak_height))
         .await
         .expect("probe report");
 
