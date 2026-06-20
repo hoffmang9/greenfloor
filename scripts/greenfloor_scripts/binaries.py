@@ -23,11 +23,10 @@ def repo_root() -> Path:
 
 def _candidate_paths(binary_name: str) -> tuple[Path, ...]:
     root = repo_root()
+    target_root = root / "greenfloor-engine" / "target"
     return (
-        root / "target" / "debug" / binary_name,
-        root / "target" / "release" / binary_name,
-        root / "greenfloor-engine" / "target" / "debug" / binary_name,
-        root / "greenfloor-engine" / "target" / "release" / binary_name,
+        target_root / "debug" / binary_name,
+        target_root / "release" / binary_name,
     )
 
 
@@ -38,12 +37,10 @@ def _build_engine_binaries() -> None:
         raise GreenfloorEngineBinaryError(
             "greenfloor-engine Cargo.toml not found; cannot build binaries"
         )
-    env = os.environ.copy()
-    env.setdefault("CARGO_TARGET_DIR", str(root / "target"))
     cmd = ["cargo", "build", "--manifest-path", str(manifest)]
     for binary_name in _ALL_BINS:
         cmd.extend(["--bin", binary_name])
-    subprocess.run(cmd, check=True, cwd=root, env=env)
+    subprocess.run(cmd, check=True, cwd=root)
 
 
 def _resolve_binary(

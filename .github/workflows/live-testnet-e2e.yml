@@ -42,9 +42,11 @@ jobs:
       - name: Build native operator binaries
         run: |
           cargo build --manifest-path greenfloor-engine/Cargo.toml --bins
+          target_dir="$(cargo metadata --manifest-path greenfloor-engine/Cargo.toml --format-version 1 --no-deps \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
           mkdir -p .venv/bin
           for bin in greenfloor-engine greenfloor-manager greenfloord; do
-            install -m 755 "greenfloor-engine/target/debug/${bin}" ".venv/bin/${bin}"
+            install -m 755 "${target_dir}/debug/${bin}" ".venv/bin/${bin}"
           done
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 
