@@ -10,7 +10,6 @@ use crate::cycle::StaleSweepProgress;
 
 use super::cycle_paths::DaemonCyclePaths;
 use super::market_context::{DaemonCycleResources, MarketCycleContext, MarketDispatchContext};
-use super::offer_dispatch::OfferDispatchTestOverrides;
 use super::reconcile_market_cycle::{ReconcileMarketCycleMetrics, ReconcileMarketCycleResult};
 use super::run_once::{CyclePlan, DaemonCycleTestControls, DaemonDispatchState};
 
@@ -62,7 +61,6 @@ pub fn test_cycle_context(
             previous_xch_price_usd: None,
             runtime_dry_run: false,
             test_controls: DaemonCycleTestControls::default(),
-            offer_dispatch_test: OfferDispatchTestOverrides::default(),
         },
         plan: CyclePlan {
             enabled_market_ids: vec!["m1".to_string()],

@@ -75,7 +75,8 @@ pub use reload::{record_config_reloaded, reload_marker_present, remove_reload_ma
 pub use run_once::{
     build_cycle_plan, build_cycle_summary, compute_cycle_exit_code, cycle_started_instant,
     elapsed_ms, CyclePlan, DaemonCycleSummary, DaemonCycleTestControls, DaemonDispatchState,
-    DaemonRunOnceRequest, DaemonRunOnceRequestBody, MarketDispatchMetrics,
+    DaemonRunOnceRequest, DaemonRunOnceRequestBody, ManagedPostTestMode, MarketDispatchMetrics,
+    OfferDispatchTestOverrides, ParallelDispatchTestMode,
 };
 pub use watchlist::{
     active_offer_counts_by_size, active_offer_counts_by_size_and_side,

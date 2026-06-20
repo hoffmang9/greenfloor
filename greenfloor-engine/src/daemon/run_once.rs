@@ -18,6 +18,39 @@ use super::market_context::DaemonCycleResources;
 use super::markets::enabled_market_ids;
 use super::stale_sweep::detect_stale_open_offers_for_requeue;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParallelDispatchTestMode {
+    Transient,
+    Fatal,
+    Success,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManagedPostTestMode {
+    Success,
+    Failure,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OfferDispatchTestOverrides {
+    pub(crate) parallel_dispatch: Option<ParallelDispatchTestMode>,
+    pub(crate) managed_post: Option<ManagedPostTestMode>,
+}
+
+impl OfferDispatchTestOverrides {
+    #[must_use]
+    pub fn parallel_dispatch(mut self, mode: ParallelDispatchTestMode) -> Self {
+        self.parallel_dispatch = Some(mode);
+        self
+    }
+
+    #[must_use]
+    pub fn managed_post(mut self, mode: ManagedPostTestMode) -> Self {
+        self.managed_post = Some(mode);
+        self
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DaemonDispatchState {
     pub cursor: usize,
@@ -30,6 +63,8 @@ pub struct DaemonCycleTestControls {
     pub skip_strategy_execution: bool,
     #[serde(default)]
     pub force_market_error_for: Option<String>,
+    #[serde(default, skip)]
+    pub offer_dispatch: OfferDispatchTestOverrides,
 }
 
 /// Env gate for non-default `test_controls` on `greenfloor-engine daemon-once`.
@@ -380,6 +415,7 @@ mod tests {
         let controls = DaemonCycleTestControls {
             skip_strategy_execution: true,
             force_market_error_for: None,
+            ..Default::default()
         };
         let err = controls.ensure_allowed().expect_err("gate");
         assert!(err
@@ -393,6 +429,7 @@ mod tests {
         let controls = DaemonCycleTestControls {
             skip_strategy_execution: true,
             force_market_error_for: Some("m1".to_string()),
+            ..Default::default()
         };
         assert!(controls.ensure_allowed().is_ok());
         std::env::remove_var("GREENFLOOR_DAEMON_TEST_CONTROLS");

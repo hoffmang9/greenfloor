@@ -21,8 +21,8 @@ use super::managed_post::post_managed_planned_action;
 use super::reservation_ctx::{
     parallel_reservation_asset_ids, parallel_reservation_context, reservation_wallet_id,
 };
-use super::test_overrides::OfferDispatchTestOverrides;
 use super::OfferDispatchOutput;
+use crate::daemon::run_once::OfferDispatchTestOverrides;
 
 use crate::daemon::coinset_spendable::coinset_spendable_profiles_by_asset;
 
@@ -210,7 +210,7 @@ pub async fn execute_actions_parallel(
     expanded: &[PlannedAction],
     test_overrides: &OfferDispatchTestOverrides,
 ) -> SignerResult<OfferDispatchOutput> {
-    if let Some(result) = test_overrides.parallel_dispatch_result() {
+    if let Some(result) = super::test_overrides::parallel_dispatch_result(test_overrides) {
         return result;
     }
 

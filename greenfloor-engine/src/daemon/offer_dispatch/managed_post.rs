@@ -10,7 +10,7 @@ use crate::offer::request::normalize_offer_side;
 use crate::async_boundary::ManagedOfferPostFuture;
 use crate::daemon::cycle_paths::DaemonCyclePaths;
 
-use super::test_overrides::OfferDispatchTestOverrides;
+use crate::daemon::run_once::OfferDispatchTestOverrides;
 
 pub fn post_managed_planned_action<'a>(
     program: &'a ManagerProgramConfig,
@@ -35,7 +35,7 @@ async fn post_managed_planned_action_async(
     action: &PlannedAction,
     test_overrides: &OfferDispatchTestOverrides,
 ) -> SignerResult<bool> {
-    if let Some(result) = test_overrides.managed_post_result() {
+    if let Some(result) = super::test_overrides::managed_post_result(test_overrides) {
         return result;
     }
     if action.size <= 0 {

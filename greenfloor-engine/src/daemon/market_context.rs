@@ -87,7 +87,6 @@ pub struct MarketDispatchContext {
     pub previous_xch_price_usd: Option<f64>,
     pub runtime_dry_run: bool,
     pub test_controls: super::run_once::DaemonCycleTestControls,
-    pub offer_dispatch_test: super::offer_dispatch::OfferDispatchTestOverrides,
 }
 
 /// Per-market inputs for inventory → strategy → cancel → `coin_ops`.

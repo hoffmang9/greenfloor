@@ -1,25 +1,26 @@
-use aws_sdk_kms::{primitives::Blob, Client};
+use aws_sdk_kms::primitives::Blob;
 use sha2::{Digest, Sha256};
 
 use crate::error::{SignerError, SignerResult};
 
-#[cfg(test)]
-mod test_hooks;
+mod runtime;
 
-#[cfg(test)]
-pub use test_hooks::{KmsTestGuard, KmsTestOverrides};
+pub use runtime::{KmsOverrides, KmsRuntime};
 
 /// Get public key compressed hex.
 ///
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn get_public_key_compressed_hex(key_id: &str, region: &str) -> SignerResult<String> {
-    #[cfg(test)]
-    if let Some(hex) = test_hooks::public_key_stub() {
+pub async fn get_public_key_compressed_hex(
+    runtime: &KmsRuntime,
+    key_id: &str,
+    region: &str,
+) -> SignerResult<String> {
+    if let Some(hex) = runtime.public_key_override() {
         return Ok(hex);
     }
-    let client = kms_client(region).await?;
+    let client = runtime.client(region).await?;
     let response = client
         .get_public_key()
         .key_id(key_id)
@@ -38,11 +39,16 @@ pub async fn get_public_key_compressed_hex(key_id: &str, region: &str) -> Signer
 /// # Errors
 ///
 /// Returns an error if the operation fails.
-pub async fn sign_digest(key_id: &str, region: &str, message_hex: &str) -> SignerResult<String> {
+pub async fn sign_digest(
+    runtime: &KmsRuntime,
+    key_id: &str,
+    region: &str,
+    message_hex: &str,
+) -> SignerResult<String> {
     let message_bytes = hex::decode(normalize_hex(message_hex))
         .map_err(|err| SignerError::Kms(format!("invalid message hex: {err}")))?;
     let digest = Sha256::digest(&message_bytes);
-    let client = kms_client(region).await?;
+    let client = runtime.client(region).await?;
     let response = client
         .sign()
         .key_id(key_id)
@@ -57,16 +63,6 @@ pub async fn sign_digest(key_id: &str, region: &str, message_hex: &str) -> Signe
         .ok_or_else(|| SignerError::Kms("Sign returned no signature".to_string()))?;
     let compact = der_ecdsa_to_compact(der_sig.as_ref())?;
     Ok(hex::encode(compact))
-}
-
-async fn kms_client(region: &str) -> SignerResult<Client> {
-    #[cfg(test)]
-    test_hooks::kms_client_fast_fail()?;
-    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .region(aws_config::Region::new(region.to_string()))
-        .load()
-        .await;
-    Ok(Client::new(&config))
 }
 
 /// Der spki to compressed p256.

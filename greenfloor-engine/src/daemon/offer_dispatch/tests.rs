@@ -284,7 +284,7 @@ fn sample_action() -> PlannedAction {
 #[tokio::test]
 async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() {
     use super::execute_strategy_actions;
-    use super::test_overrides::{
+    use crate::daemon::run_once::{
         ManagedPostTestMode, OfferDispatchTestOverrides, ParallelDispatchTestMode,
     };
 
@@ -308,7 +308,7 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
         sample_program(true, false),
         true,
     );
-    test_ctx.dispatch.offer_dispatch_test = OfferDispatchTestOverrides::default()
+    test_ctx.dispatch.test_controls.offer_dispatch = OfferDispatchTestOverrides::default()
         .parallel_dispatch(ParallelDispatchTestMode::Transient)
         .managed_post(ManagedPostTestMode::Success);
 
@@ -326,7 +326,7 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
 #[tokio::test]
 async fn execute_strategy_actions_parallel_fatal_propagates() {
     use super::execute_strategy_actions;
-    use super::test_overrides::{OfferDispatchTestOverrides, ParallelDispatchTestMode};
+    use crate::daemon::run_once::{OfferDispatchTestOverrides, ParallelDispatchTestMode};
 
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
@@ -348,7 +348,7 @@ async fn execute_strategy_actions_parallel_fatal_propagates() {
         sample_program(true, false),
         true,
     );
-    test_ctx.dispatch.offer_dispatch_test =
+    test_ctx.dispatch.test_controls.offer_dispatch =
         OfferDispatchTestOverrides::default().parallel_dispatch(ParallelDispatchTestMode::Fatal);
 
     let err = execute_strategy_actions(
@@ -365,7 +365,7 @@ async fn execute_strategy_actions_parallel_fatal_propagates() {
 #[tokio::test]
 async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
     use super::execute_strategy_actions;
-    use super::test_overrides::{ManagedPostTestMode, OfferDispatchTestOverrides};
+    use crate::daemon::run_once::{ManagedPostTestMode, OfferDispatchTestOverrides};
 
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
@@ -387,7 +387,7 @@ async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
         sample_program(false, false),
         true,
     );
-    test_ctx.dispatch.offer_dispatch_test =
+    test_ctx.dispatch.test_controls.offer_dispatch =
         OfferDispatchTestOverrides::default().managed_post(ManagedPostTestMode::Success);
 
     let output = execute_strategy_actions(
@@ -470,12 +470,12 @@ fn coordinator_multi_asset_acquire_requires_all_assets() {
 
 #[test]
 fn offer_dispatch_parallel_override_success_returns_output() {
-    use super::test_overrides::{OfferDispatchTestOverrides, ParallelDispatchTestMode};
+    use super::test_overrides::parallel_dispatch_result;
+    use crate::daemon::run_once::{OfferDispatchTestOverrides, ParallelDispatchTestMode};
 
     let overrides =
         OfferDispatchTestOverrides::default().parallel_dispatch(ParallelDispatchTestMode::Success);
-    let output = overrides
-        .parallel_dispatch_result()
+    let output = parallel_dispatch_result(&overrides)
         .expect("override configured")
         .expect("success output");
     assert_eq!(output.executed_count, 1);
@@ -483,12 +483,12 @@ fn offer_dispatch_parallel_override_success_returns_output() {
 
 #[test]
 fn managed_post_override_success_returns_true() {
-    use super::test_overrides::{ManagedPostTestMode, OfferDispatchTestOverrides};
+    use super::test_overrides::managed_post_result;
+    use crate::daemon::run_once::{ManagedPostTestMode, OfferDispatchTestOverrides};
 
     let overrides =
         OfferDispatchTestOverrides::default().managed_post(ManagedPostTestMode::Success);
-    let posted = overrides
-        .managed_post_result()
+    let posted = managed_post_result(&overrides)
         .expect("override configured")
         .expect("success post");
     assert!(posted);

@@ -7,8 +7,6 @@ mod reservation_ctx;
 mod sequential;
 mod test_overrides;
 
-pub use test_overrides::OfferDispatchTestOverrides;
-
 #[cfg(test)]
 mod tests;
 
@@ -130,7 +128,7 @@ async fn execute_strategy_actions_async(
                 signer_config,
                 market,
                 &expanded,
-                &ctx.dispatch.offer_dispatch_test,
+                &ctx.dispatch.test_controls.offer_dispatch,
             )
             .await,
         ) {
@@ -147,7 +145,7 @@ async fn execute_strategy_actions_async(
         &ctx.resources.paths,
         market,
         &expanded,
-        &ctx.dispatch.offer_dispatch_test,
+        &ctx.dispatch.test_controls.offer_dispatch,
     )
     .await
 }

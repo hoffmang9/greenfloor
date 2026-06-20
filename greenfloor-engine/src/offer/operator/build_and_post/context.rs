@@ -133,6 +133,7 @@ pub(crate) fn sample_resolved_build_and_post_context() -> ResolvedBuildAndPostCo
             kms_key_id: String::new(),
             kms_region: String::new(),
             kms_public_key_hex: None,
+            kms_runtime: crate::kms::KmsRuntime::default(),
             vault: VaultCustodySnapshot {
                 launcher_id: Bytes32::default(),
                 custody_threshold: 1,

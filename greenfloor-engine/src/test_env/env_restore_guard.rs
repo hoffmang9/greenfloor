@@ -1,5 +1,6 @@
 //! RAII guard that restores process environment variables on drop.
 
+#[doc(hidden)]
 pub struct EnvRestoreGuard {
     saved: Vec<(String, Option<String>)>,
 }
