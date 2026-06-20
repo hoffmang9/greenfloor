@@ -16,6 +16,9 @@ use super::paths::{
 };
 use super::runtime::ManagerRuntime;
 
+#[cfg(test)]
+pub mod test_builder;
+
 #[derive(Debug, Clone)]
 pub struct ManagerContext {
     pub output: ManagerOutput,
@@ -66,29 +69,6 @@ impl ManagerContext {
             },
             command,
         )
-    }
-
-    #[cfg(test)]
-    pub(crate) fn from_test_parts(
-        output: ManagerOutput,
-        runtime: ManagerRuntime,
-        program_config: PathBuf,
-        markets_config: PathBuf,
-        cats_config: PathBuf,
-        state_db: String,
-        dexie_base_url: Option<String>,
-        testnet_markets_path: Option<PathBuf>,
-    ) -> Self {
-        Self {
-            output,
-            runtime,
-            program_config,
-            markets_config,
-            cats_config,
-            state_db,
-            dexie_base_url,
-            testnet_markets_path,
-        }
     }
 
     pub fn testnet_markets_path(&self) -> Option<&Path> {

@@ -20,6 +20,7 @@ impl Write for Writer {
 }
 
 impl TraceCapture {
+    #[must_use]
     pub fn install() -> Self {
         let buf = Arc::new(Mutex::new(Vec::new()));
         let writer_buf = buf.clone();
@@ -33,10 +34,15 @@ impl TraceCapture {
         Self { buf, _guard: guard }
     }
 
+    /// # Panics
+    ///
+    /// Panics if the capture buffer lock is poisoned or holds invalid UTF-8.
+    #[must_use]
     pub fn logs(&self) -> String {
         String::from_utf8(self.buf.lock().expect("lock").clone()).expect("utf8")
     }
 
+    #[must_use]
     pub fn count_substr(&self, needle: &str) -> usize {
         self.logs().matches(needle).count()
     }

@@ -11,7 +11,7 @@ use super::context::ManagerContext;
 use super::paths::expand_home;
 
 #[derive(Debug, Clone)]
-struct ChiaKeysDiscovery {
+pub(crate) struct ChiaKeysDiscovery {
     chia_keys_dir: PathBuf,
     keyring_yaml_path: PathBuf,
     has_existing_keys: bool,

@@ -117,6 +117,7 @@ impl VaultSpendContext {
     }
 
     #[cfg(test)]
+    #[must_use]
     pub fn new_test_context(
         launcher_id: Bytes32,
         inner_puzzle_hash: TreeHash,

@@ -155,7 +155,7 @@ export PRE_COMMIT_HOME="$(pwd)/.cache/pre-commit"  # reuse hook envs; CI caches 
 pre-commit run --all-files                         # ruff, pyright, prettier, yamllint, cargo fmt/clippy (~5–10s warm)
 ```
 
-Full gate before push (Rust fmt/clippy via pre-commit — `clippy::all` + `clippy::pedantic` with documented allows):
+Full gate before push (Rust fmt/clippy via pre-commit — `clippy::all` + `clippy::pedantic` with documented allows; clippy runs with `--lib --bins --tests`):
 
 ```bash
 cargo nextest run --manifest-path greenfloor-engine/Cargo.toml

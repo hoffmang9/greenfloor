@@ -1,13 +1,15 @@
 //! Mocked Coinset integration tests for `greenfloor-engine coinset probe`.
 
+#[path = "fixtures/coinset_probe_mocks.rs"]
+mod coinset_probe_mocks;
+
+use coinset_probe_mocks::{mount_probe_server, HttpMockBody, NamesMockMode, ProbeServerMockConfig};
 use greenfloor_engine::coinset::to_coinset_hex;
 use greenfloor_engine::coinset_probe::{build_coinset_probe_report, CoinsetProbeCliArgs};
 use greenfloor_engine::hex::normalize_hex_id;
 use greenfloor_engine::vault::members::{
     hex_to_bytes32, singleton_member_puzzle_hash_hex_from_launcher_id,
 };
-use mockito::Matcher;
-use serde_json::json;
 
 fn launcher_id() -> String {
     "ab".repeat(32)
@@ -32,119 +34,19 @@ fn probe_args(server_url: String, launcher: String, height_window: u64) -> Coins
     }
 }
 
-#[tokio::test]
-async fn build_coinset_probe_report_matches_operator_json_contract() {
-    let launcher = launcher_id();
-    let p2_hex = p2_coinset_hex(&launcher, 0);
-    let sample_coin_id = "cd".repeat(32);
-    let expected_p2_hash =
-        singleton_member_puzzle_hash_hex_from_launcher_id(&launcher, 0).expect("p2 hash");
-
-    let mut server = mockito::Server::new_async().await;
-    let _state = server
-        .mock("POST", "/get_blockchain_state")
-        .with_status(200)
-        .with_body(r#"{"success":true,"blockchain_state":{"peak_height":50000}}"#)
-        .create_async()
-        .await;
-
-    let puzzle_all_body = json!({
-        "puzzle_hashes": [p2_hex.clone()],
-        "include_spent_coins": true,
-    });
-    let puzzle_all = server
-        .mock("POST", "/get_coin_records_by_puzzle_hashes")
-        .match_body(Matcher::Json(puzzle_all_body))
-        .with_status(200)
-        .with_body(format!(
-            r#"{{"success":true,"coin_records":[{{"coin":{{"parent_coin_info":"0x{}","puzzle_hash":"0x{}","amount":1,"name":"0x{}"}}}}]}}"#,
-            "aa".repeat(64),
-            "bb".repeat(64),
-            sample_coin_id
-        ))
-        .expect(1)
-        .create_async()
-        .await;
-
-    let puzzle_range_body = json!({
-        "puzzle_hashes": [p2_hex.clone()],
-        "include_spent_coins": true,
-        "start_height": 0,
-        "end_height": 50000,
-    });
-    let _puzzle_range = server
-        .mock("POST", "/get_coin_records_by_puzzle_hashes")
-        .match_body(Matcher::Json(puzzle_range_body))
-        .with_status(200)
-        .with_body(r#"{"success":true,"coin_records":[]}"#)
-        .create_async()
-        .await;
-
-    let hints_all_body = json!({
-        "hints": [p2_hex.clone()],
-        "include_spent_coins": true,
-    });
-    let _hints_all = server
-        .mock("POST", "/get_coin_records_by_hints")
-        .match_body(Matcher::Json(hints_all_body))
-        .with_status(200)
-        .with_body(r#"{"success":true,"coin_records":[]}"#)
-        .create_async()
-        .await;
-
-    let hints_range_body = json!({
-        "hints": [p2_hex.clone()],
-        "include_spent_coins": true,
-        "start_height": 0,
-        "end_height": 50000,
-    });
-    let _hints_range = server
-        .mock("POST", "/get_coin_records_by_hints")
-        .match_body(Matcher::Json(hints_range_body))
-        .with_status(200)
-        .with_body(r#"{"success":true,"coin_records":[]}"#)
-        .create_async()
-        .await;
-
-    let names_all_body = json!({
-        "names": [format!("0x{sample_coin_id}")],
-        "include_spent_coins": true,
-    });
-    let _names_all = server
-        .mock("POST", "/get_coin_records_by_names")
-        .match_body(Matcher::Json(names_all_body))
-        .with_status(200)
-        .with_body(r#"{"success":true,"coin_records":[]}"#)
-        .create_async()
-        .await;
-
-    let names_range_body = json!({
-        "names": [format!("0x{sample_coin_id}")],
-        "include_spent_coins": true,
-        "start_height": 0,
-        "end_height": 50000,
-    });
-    let _names_range = server
-        .mock("POST", "/get_coin_records_by_names")
-        .match_body(Matcher::Json(names_range_body))
-        .with_status(200)
-        .with_body(r#"{"success":true,"coin_records":[]}"#)
-        .create_async()
-        .await;
-
-    let report = build_coinset_probe_report(probe_args(server.url(), launcher.clone(), 50_000))
-        .await
-        .expect("probe report");
-
-    puzzle_all.assert_async().await;
-
+fn assert_operator_probe_report_contract(
+    report: &greenfloor_engine::coinset_probe::ProbeReport,
+    mocks: &ProbeServerMockConfig,
+    launcher: &str,
+    expected_p2_hash: &str,
+) {
     assert_eq!(report.network, "mainnet");
     assert_eq!(report.launcher_id, launcher);
     assert_eq!(report.launcher_id_source, "arg");
     assert_eq!(report.probe_nonce, 0);
     assert_eq!(report.probe_p2_hash, expected_p2_hash);
-    assert_eq!(report.scan_window.peak_height, 50_000);
-    assert_eq!(report.scan_window.end_height, 50_000);
+    assert_eq!(report.scan_window.peak_height, mocks.peak_height);
+    assert_eq!(report.scan_window.end_height, mocks.peak_height);
     assert_eq!(report.scan_window.start_height, 0);
     assert!(
         report
@@ -160,20 +62,25 @@ async fn build_coinset_probe_report_matches_operator_json_contract() {
         Some(1)
     );
     assert!(report.capabilities.get_coin_records_by_hints.all_supported);
-    assert_eq!(
-        report
-            .capabilities
-            .get_coin_records_by_names
-            .sample_name
-            .as_deref(),
-        Some(normalize_hex_id(&sample_coin_id).as_str())
-    );
-    assert_eq!(
-        report.capabilities.get_coin_records_by_names.all_count,
-        Some(0)
-    );
+    match &mocks.names {
+        NamesMockMode::WithSample(sample_coin_id) => {
+            assert_eq!(
+                report
+                    .capabilities
+                    .get_coin_records_by_names
+                    .sample_name
+                    .as_deref(),
+                Some(normalize_hex_id(sample_coin_id).as_str())
+            );
+            assert_eq!(
+                report.capabilities.get_coin_records_by_names.all_count,
+                Some(0)
+            );
+        }
+        NamesMockMode::Skip => panic!("operator contract mock must mount names sample"),
+    }
 
-    let payload = serde_json::to_value(&report).expect("json");
+    let payload = serde_json::to_value(report).expect("json");
     assert!(payload.get("network").is_some());
     assert!(payload.get("coinset_base_url").is_some());
     assert!(payload.get("capabilities").is_some());
@@ -183,71 +90,46 @@ async fn build_coinset_probe_report_matches_operator_json_contract() {
 }
 
 #[tokio::test]
+async fn build_coinset_probe_report_matches_operator_json_contract() {
+    let launcher = launcher_id();
+    let p2_hex = p2_coinset_hex(&launcher, 0);
+    let sample_coin_id = "cd".repeat(32);
+    let expected_p2_hash =
+        singleton_member_puzzle_hash_hex_from_launcher_id(&launcher, 0).expect("p2 hash");
+
+    let mocks = ProbeServerMockConfig::operator_contract(&sample_coin_id);
+    let mut server = mockito::Server::new_async().await;
+    let puzzle_all = mount_probe_server(&mut server, &p2_hex, &mocks)
+        .await
+        .expect("puzzle mock");
+
+    let report = build_coinset_probe_report(probe_args(
+        server.url(),
+        launcher.clone(),
+        mocks.peak_height,
+    ))
+    .await
+    .expect("probe report");
+
+    puzzle_all.assert_async().await;
+    assert_operator_probe_report_contract(&report, &mocks, &launcher, &expected_p2_hash);
+}
+
+#[tokio::test]
 async fn build_coinset_probe_report_soft_fails_unsupported_range_calls() {
     let launcher = launcher_id();
     let p2_hex = p2_coinset_hex(&launcher, 0);
 
+    let mocks = ProbeServerMockConfig::empty_scan(100)
+        .nested_peak()
+        .with_puzzle_range(HttpMockBody::with_status(
+            400,
+            r#"{"success":false,"error":"range unsupported"}"#,
+        ));
     let mut server = mockito::Server::new_async().await;
-    let _state = server
-        .mock("POST", "/get_blockchain_state")
-        .with_status(200)
-        .with_body(r#"{"success":true,"blockchain_state":{"peak":{"height":100}}}"#)
-        .create_async()
-        .await;
+    let _ = mount_probe_server(&mut server, &p2_hex, &mocks).await;
 
-    let puzzle_all_body = json!({
-        "puzzle_hashes": [p2_hex.clone()],
-        "include_spent_coins": true,
-    });
-    let _puzzle_all = server
-        .mock("POST", "/get_coin_records_by_puzzle_hashes")
-        .match_body(Matcher::Json(puzzle_all_body))
-        .with_status(200)
-        .with_body(r#"{"success":true,"coin_records":[]}"#)
-        .create_async()
-        .await;
-
-    let puzzle_range_body = json!({
-        "puzzle_hashes": [p2_hex.clone()],
-        "include_spent_coins": true,
-        "start_height": 0,
-        "end_height": 100,
-    });
-    let _puzzle_range = server
-        .mock("POST", "/get_coin_records_by_puzzle_hashes")
-        .match_body(Matcher::Json(puzzle_range_body))
-        .with_status(400)
-        .with_body(r#"{"success":false,"error":"range unsupported"}"#)
-        .create_async()
-        .await;
-
-    let hints_all_body = json!({
-        "hints": [p2_hex.clone()],
-        "include_spent_coins": true,
-    });
-    let _hints_all = server
-        .mock("POST", "/get_coin_records_by_hints")
-        .match_body(Matcher::Json(hints_all_body))
-        .with_status(200)
-        .with_body(r#"{"success":true,"coin_records":[]}"#)
-        .create_async()
-        .await;
-
-    let hints_range_body = json!({
-        "hints": [p2_hex],
-        "include_spent_coins": true,
-        "start_height": 0,
-        "end_height": 100,
-    });
-    let _hints_range = server
-        .mock("POST", "/get_coin_records_by_hints")
-        .match_body(Matcher::Json(hints_range_body))
-        .with_status(200)
-        .with_body(r#"{"success":true,"coin_records":[]}"#)
-        .create_async()
-        .await;
-
-    let report = build_coinset_probe_report(probe_args(server.url(), launcher, 100))
+    let report = build_coinset_probe_report(probe_args(server.url(), launcher, mocks.peak_height))
         .await
         .expect("probe report");
 
@@ -282,47 +164,11 @@ async fn build_coinset_probe_report_skips_names_when_puzzle_scan_returns_no_samp
     let launcher = launcher_id();
     let p2_hex = p2_coinset_hex(&launcher, 0);
 
+    let mocks = ProbeServerMockConfig::empty_scan(10);
     let mut server = mockito::Server::new_async().await;
-    let _state = server
-        .mock("POST", "/get_blockchain_state")
-        .with_status(200)
-        .with_body(r#"{"success":true,"blockchain_state":{"peak_height":10}}"#)
-        .create_async()
-        .await;
+    let _ = mount_probe_server(&mut server, &p2_hex, &mocks).await;
 
-    for endpoint in [
-        "/get_coin_records_by_puzzle_hashes",
-        "/get_coin_records_by_hints",
-    ] {
-        let all_key = if endpoint.contains("puzzle_hashes") {
-            "puzzle_hashes"
-        } else {
-            "hints"
-        };
-        let all_body = json!({ all_key: [p2_hex.clone()], "include_spent_coins": true });
-        let _all = server
-            .mock("POST", endpoint)
-            .match_body(Matcher::Json(all_body))
-            .with_status(200)
-            .with_body(r#"{"success":true,"coin_records":[]}"#)
-            .create_async()
-            .await;
-        let range_body = json!({
-            all_key: [p2_hex.clone()],
-            "include_spent_coins": true,
-            "start_height": 0,
-            "end_height": 10,
-        });
-        let _range = server
-            .mock("POST", endpoint)
-            .match_body(Matcher::Json(range_body))
-            .with_status(200)
-            .with_body(r#"{"success":true,"coin_records":[]}"#)
-            .create_async()
-            .await;
-    }
-
-    let report = build_coinset_probe_report(probe_args(server.url(), launcher, 10))
+    let report = build_coinset_probe_report(probe_args(server.url(), launcher, mocks.peak_height))
         .await
         .expect("probe report");
 

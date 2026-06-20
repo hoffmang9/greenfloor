@@ -6,7 +6,7 @@ pub fn base_program_raw() -> Value {
         "keys": {
             "registry": [{
                 "key_id": "key-main-1",
-                "fingerprint": 123456789,
+                "fingerprint": 123_456_789,
                 "network": "mainnet",
                 "keyring_yaml_path": "~/.chia_keys/keyring.yaml"
             }]
