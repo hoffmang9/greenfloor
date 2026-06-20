@@ -1,15 +1,18 @@
 //! Mocked Coinset integration tests for `greenfloor-engine coinset probe`.
 
+#[path = "fixtures/coinset_probe_mocks.rs"]
+mod coinset_probe_mocks;
+
+use coinset_probe_mocks::{
+    mount_probe_server, puzzle_all_with_sample, HttpMockBody, ProbeServerMockConfig,
+    EMPTY_COIN_RECORDS,
+};
 use greenfloor_engine::coinset::to_coinset_hex;
 use greenfloor_engine::coinset_probe::{build_coinset_probe_report, CoinsetProbeCliArgs};
 use greenfloor_engine::hex::normalize_hex_id;
 use greenfloor_engine::vault::members::{
     hex_to_bytes32, singleton_member_puzzle_hash_hex_from_launcher_id,
 };
-use mockito::Matcher;
-use serde_json::json;
-
-const EMPTY_COIN_RECORDS: &str = r#"{"success":true,"coin_records":[]}"#;
 
 fn launcher_id() -> String {
     "ab".repeat(32)
@@ -32,167 +35,6 @@ fn probe_args(server_url: String, launcher: String, height_window: u64) -> Coins
         height_window,
         json: true,
     }
-}
-
-#[derive(Clone)]
-struct HttpMockBody {
-    status: usize,
-    body: String,
-}
-
-impl HttpMockBody {
-    fn ok(body: impl Into<String>) -> Self {
-        Self {
-            status: 200,
-            body: body.into(),
-        }
-    }
-
-    fn with_status(status: usize, body: impl Into<String>) -> Self {
-        Self {
-            status,
-            body: body.into(),
-        }
-    }
-}
-
-struct ProbeScanMockConfig {
-    peak_height: u64,
-    puzzle_all: HttpMockBody,
-    puzzle_all_expect: Option<usize>,
-    puzzle_range: HttpMockBody,
-    hints_all: HttpMockBody,
-    hints_range: HttpMockBody,
-    names_sample_coin_id: Option<String>,
-}
-
-async fn mount_blockchain_state(
-    server: &mut mockito::ServerGuard,
-    peak_height: u64,
-    nested_peak: bool,
-) {
-    let body = if nested_peak {
-        format!(r#"{{"success":true,"blockchain_state":{{"peak":{{"height":{peak_height}}}}}}}"#)
-    } else {
-        format!(r#"{{"success":true,"blockchain_state":{{"peak_height":{peak_height}}}}}"#)
-    };
-    let _state = server
-        .mock("POST", "/get_blockchain_state")
-        .with_status(200)
-        .with_body(body)
-        .create_async()
-        .await;
-}
-
-struct CoinRecordsEndpointMock {
-    endpoint: &'static str,
-    payload_key: &'static str,
-    payload_value: String,
-    all: HttpMockBody,
-    all_expect: Option<usize>,
-    range: HttpMockBody,
-}
-
-async fn mount_coin_records_mocks(
-    server: &mut mockito::ServerGuard,
-    end_height: u64,
-    mock: CoinRecordsEndpointMock,
-) -> mockito::Mock {
-    let CoinRecordsEndpointMock {
-        endpoint,
-        payload_key,
-        payload_value,
-        all,
-        all_expect,
-        range,
-    } = mock;
-    let all_body = json!({
-        payload_key: [payload_value.clone()],
-        "include_spent_coins": true,
-    });
-    let mut all_mock = server
-        .mock("POST", endpoint)
-        .match_body(Matcher::Json(all_body))
-        .with_status(all.status)
-        .with_body(all.body.as_str());
-    if let Some(calls) = all_expect {
-        all_mock = all_mock.expect(calls);
-    }
-    let all_mock = all_mock.create_async().await;
-
-    let range_body = json!({
-        payload_key: [payload_value],
-        "include_spent_coins": true,
-        "start_height": 0,
-        "end_height": end_height,
-    });
-    let _range_mock = server
-        .mock("POST", endpoint)
-        .match_body(Matcher::Json(range_body))
-        .with_status(range.status)
-        .with_body(range.body.as_str())
-        .create_async()
-        .await;
-
-    all_mock
-}
-
-async fn mount_puzzle_and_hints_mocks(
-    server: &mut mockito::ServerGuard,
-    p2_hex: &str,
-    config: &ProbeScanMockConfig,
-) -> Option<mockito::Mock> {
-    let puzzle_all = mount_coin_records_mocks(
-        server,
-        config.peak_height,
-        CoinRecordsEndpointMock {
-            endpoint: "/get_coin_records_by_puzzle_hashes",
-            payload_key: "puzzle_hashes",
-            payload_value: p2_hex.to_string(),
-            all: config.puzzle_all.clone(),
-            all_expect: config.puzzle_all_expect,
-            range: config.puzzle_range.clone(),
-        },
-    )
-    .await;
-    let _hints_all = mount_coin_records_mocks(
-        server,
-        config.peak_height,
-        CoinRecordsEndpointMock {
-            endpoint: "/get_coin_records_by_hints",
-            payload_key: "hints",
-            payload_value: p2_hex.to_string(),
-            all: config.hints_all.clone(),
-            all_expect: None,
-            range: config.hints_range.clone(),
-        },
-    )
-    .await;
-    if let Some(sample_coin_id) = &config.names_sample_coin_id {
-        let _names_all = mount_coin_records_mocks(
-            server,
-            config.peak_height,
-            CoinRecordsEndpointMock {
-                endpoint: "/get_coin_records_by_names",
-                payload_key: "names",
-                payload_value: format!("0x{sample_coin_id}"),
-                all: HttpMockBody::ok(EMPTY_COIN_RECORDS),
-                all_expect: None,
-                range: HttpMockBody::ok(EMPTY_COIN_RECORDS),
-            },
-        )
-        .await;
-    }
-    config.puzzle_all_expect.map(|_| puzzle_all)
-}
-
-fn puzzle_all_with_sample(sample_coin_id: &str) -> HttpMockBody {
-    HttpMockBody::ok(format!(
-        r#"{{"success":true,"coin_records":[{{"coin":{{"parent_coin_info":"0x{}","puzzle_hash":"0x{}","amount":1,"name":"0x{}"}}}}]}}"#,
-        "aa".repeat(64),
-        "bb".repeat(64),
-        sample_coin_id
-    ))
 }
 
 fn assert_operator_probe_report_contract(
@@ -254,9 +96,9 @@ async fn build_coinset_probe_report_matches_operator_json_contract() {
         singleton_member_puzzle_hash_hex_from_launcher_id(&launcher, 0).expect("p2 hash");
 
     let mut server = mockito::Server::new_async().await;
-    mount_blockchain_state(&mut server, 50_000, false).await;
-    let mocks = ProbeScanMockConfig {
+    let mocks = ProbeServerMockConfig {
         peak_height: 50_000,
+        nested_peak: false,
         puzzle_all: puzzle_all_with_sample(&sample_coin_id),
         puzzle_all_expect: Some(1),
         puzzle_range: HttpMockBody::ok(EMPTY_COIN_RECORDS),
@@ -264,7 +106,7 @@ async fn build_coinset_probe_report_matches_operator_json_contract() {
         hints_range: HttpMockBody::ok(EMPTY_COIN_RECORDS),
         names_sample_coin_id: Some(sample_coin_id.clone()),
     };
-    let puzzle_all = mount_puzzle_and_hints_mocks(&mut server, &p2_hex, &mocks)
+    let puzzle_all = mount_probe_server(&mut server, &p2_hex, &mocks)
         .await
         .expect("puzzle mock");
 
@@ -282,9 +124,9 @@ async fn build_coinset_probe_report_soft_fails_unsupported_range_calls() {
     let p2_hex = p2_coinset_hex(&launcher, 0);
 
     let mut server = mockito::Server::new_async().await;
-    mount_blockchain_state(&mut server, 100, true).await;
-    let mocks = ProbeScanMockConfig {
+    let mocks = ProbeServerMockConfig {
         peak_height: 100,
+        nested_peak: true,
         puzzle_all: HttpMockBody::ok(EMPTY_COIN_RECORDS),
         puzzle_all_expect: None,
         puzzle_range: HttpMockBody::with_status(
@@ -295,7 +137,7 @@ async fn build_coinset_probe_report_soft_fails_unsupported_range_calls() {
         hints_range: HttpMockBody::ok(EMPTY_COIN_RECORDS),
         names_sample_coin_id: None,
     };
-    let _ = mount_puzzle_and_hints_mocks(&mut server, &p2_hex, &mocks).await;
+    let _ = mount_probe_server(&mut server, &p2_hex, &mocks).await;
 
     let report = build_coinset_probe_report(probe_args(server.url(), launcher, 100))
         .await
@@ -333,9 +175,9 @@ async fn build_coinset_probe_report_skips_names_when_puzzle_scan_returns_no_samp
     let p2_hex = p2_coinset_hex(&launcher, 0);
 
     let mut server = mockito::Server::new_async().await;
-    mount_blockchain_state(&mut server, 10, false).await;
-    let mocks = ProbeScanMockConfig {
+    let mocks = ProbeServerMockConfig {
         peak_height: 10,
+        nested_peak: false,
         puzzle_all: HttpMockBody::ok(EMPTY_COIN_RECORDS),
         puzzle_all_expect: None,
         puzzle_range: HttpMockBody::ok(EMPTY_COIN_RECORDS),
@@ -343,7 +185,7 @@ async fn build_coinset_probe_report_skips_names_when_puzzle_scan_returns_no_samp
         hints_range: HttpMockBody::ok(EMPTY_COIN_RECORDS),
         names_sample_coin_id: None,
     };
-    let _ = mount_puzzle_and_hints_mocks(&mut server, &p2_hex, &mocks).await;
+    let _ = mount_probe_server(&mut server, &p2_hex, &mocks).await;
 
     let report = build_coinset_probe_report(probe_args(server.url(), launcher, 10))
         .await
