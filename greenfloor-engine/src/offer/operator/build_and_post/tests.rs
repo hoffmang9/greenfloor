@@ -243,3 +243,97 @@ fn post_failure_venue_result_marks_publish_failure() {
     );
     assert_eq!(build_and_post_exit_code(1), 2);
 }
+
+fn write_dry_run_program(path: &Path, home_dir: &Path) {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("repo root");
+    let mut text =
+        std::fs::read_to_string(root.join("config/program.yaml")).expect("read program template");
+    let home = home_dir.display().to_string();
+    if text.contains("home_dir: \"~/.greenfloor\"") {
+        text = text.replace(
+            "home_dir: \"~/.greenfloor\"",
+            &format!("home_dir: \"{home}\""),
+        );
+    } else {
+        text = text.replacen("home_dir:", &format!("home_dir: \"{home}\""), 1);
+    }
+    if text.contains("kms_key_id: \"\"") {
+        text = text.replace(
+            "kms_key_id: \"\"",
+            "kms_key_id: \"arn:aws:kms:us-west-2:123:key/demo\"",
+        );
+    }
+    if text.contains("kms_region: \"\"") {
+        text = text.replace("kms_region: \"\"", "kms_region: \"us-west-2\"");
+    }
+    if text.contains("kms_public_key_hex: \"\"") {
+        text = text.replace(
+            "kms_public_key_hex: \"\"",
+            "kms_public_key_hex: \"02abc123\"",
+        );
+    }
+    std::fs::write(path, text).expect("write signer program");
+}
+
+#[tokio::test]
+async fn dry_run_returns_preview_payload_in_process() {
+    std::env::set_var("GREENFLOOR_TEST_OFFER_TEXT", "offer1dryrunpreviewstub");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    write_dry_run_program(&program, dir.path());
+    let markets_yaml = r#"markets:
+  - id: m1
+    enabled: true
+    base_asset: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    base_symbol: "TCAT"
+    quote_asset: "xch"
+    quote_asset_type: "unstable"
+    signer_key_id: "key-main-1"
+    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"
+    mode: "sell_only"
+    pricing:
+      min_price_quote_per_base: 0.0031
+      max_price_quote_per_base: 0.0038
+"#;
+    std::fs::write(&markets, markets_yaml).expect("write markets");
+
+    let response = super::build_and_post_offer(super::BuildAndPostOfferRequest {
+        program_path: program,
+        markets_path: markets,
+        testnet_markets_path: None,
+        network: "mainnet".to_string(),
+        market_id: Some("m1".to_string()),
+        pair: None,
+        size_base_units: 1,
+        repeat: 1,
+        publish_venue: None,
+        dexie_base_url: None,
+        splash_base_url: None,
+        venue: super::BuildAndPostVenueOptions {
+            drop_only: true,
+            claim_rewards: false,
+        },
+        run: super::BuildAndPostRunOptions {
+            dry_run: true,
+            persist_results: true,
+        },
+        action_side: None,
+        test_overrides: crate::offer::operator::OfferOperatorTestOverrides::from_env(),
+    })
+    .await
+    .expect("build and post dry run");
+
+    assert_eq!(response.exit_code, 0);
+    assert_eq!(response.payload.get("dry_run"), Some(&json!(true)));
+    assert_eq!(response.payload.get("publish_attempts"), Some(&json!(0)));
+    assert!(response
+        .payload
+        .get("built_offers_preview")
+        .and_then(Value::as_array)
+        .is_some_and(|rows| !rows.is_empty()));
+    assert_eq!(response.payload.get("results"), Some(&json!([])));
+    std::env::remove_var("GREENFLOOR_TEST_OFFER_TEXT");
+}

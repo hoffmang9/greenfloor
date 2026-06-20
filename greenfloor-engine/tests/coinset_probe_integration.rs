@@ -291,10 +291,10 @@ async fn build_coinset_probe_report_skips_names_when_puzzle_scan_returns_no_samp
         .await;
 
     for endpoint in [
-        "get_coin_records_by_puzzle_hashes",
-        "get_coin_records_by_hints",
+        "/get_coin_records_by_puzzle_hashes",
+        "/get_coin_records_by_hints",
     ] {
-        let all_key = if endpoint.ends_with("puzzle_hashes") {
+        let all_key = if endpoint.contains("puzzle_hashes") {
             "puzzle_hashes"
         } else {
             "hints"

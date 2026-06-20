@@ -253,7 +253,7 @@ async fn run_combine_preview_does_not_require_signer_bundle() {
     let _exit = run_combine_market_cat_dust(CombineMarketCatDustRequest {
         mgr: &mgr,
         network: Some("mainnet"),
-        coinset_base_url: None,
+        coinset_base_url: Some("http://127.0.0.1:1"),
         launcher_id: Some(&"aa".repeat(32)),
         launcher_id_file: None,
         dust_threshold_mojos: 1000,
@@ -347,4 +347,77 @@ async fn run_combine_live_emits_json_when_signer_bundle_invalid() {
         .get("detail")
         .and_then(serde_json::Value::as_str)
         .is_some());
+}
+
+#[tokio::test]
+async fn run_combine_dry_run_reports_no_enabled_cat_markets() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let cat_hex = "f".repeat(64);
+    std::fs::write(
+        dir.path().join("program.yaml"),
+        materialize_minimal_program_text(MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        }),
+    )
+    .expect("write program");
+    std::fs::write(
+        dir.path().join("markets.yaml"),
+        r#"markets:
+  - id: m1
+    enabled: true
+    base_asset: "not_in_cats_catalog"
+    base_symbol: "NOPE"
+    quote_asset: "xch"
+    quote_asset_type: "unstable"
+    signer_key_id: "key-main-1"
+    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"
+    mode: "sell_only"
+    inventory:
+      low_watermark_base_units: 10
+"#,
+    )
+    .expect("write markets");
+    std::fs::write(
+        dir.path().join("cats.yaml"),
+        format!("cats:\n  - base_symbol: DUST\n    asset_id: \"{cat_hex}\"\n"),
+    )
+    .expect("write cats");
+
+    let (output, captured) = ManagerOutput::capturing(true);
+    let mgr = ManagerContext::for_test_with_cats(
+        dir.path().join("program.yaml"),
+        dir.path().join("markets.yaml"),
+        dir.path().join("cats.yaml"),
+        output,
+    );
+
+    let exit = run_combine_market_cat_dust(CombineMarketCatDustRequest {
+        mgr: &mgr,
+        network: Some("mainnet"),
+        coinset_base_url: None,
+        launcher_id: None,
+        launcher_id_file: None,
+        dust_threshold_mojos: 1000,
+        max_input_coins: 2,
+        max_nonce: 0,
+        cat_asset_id: None,
+        verify: CoinSpentVerifyConfig::default(),
+        execution: CombineExecutionFlags::from_flags(false, true),
+    })
+    .await
+    .expect("command");
+
+    assert_eq!(exit, 0);
+    let payload = captured
+        .lock()
+        .expect("capture lock")
+        .pop()
+        .expect("json emitted");
+    assert_eq!(payload.get("status"), Some(&json!("ok")));
+    assert_eq!(
+        payload.get("message"),
+        Some(&json!("no_enabled_cat_markets"))
+    );
+    assert_eq!(payload.get("jobs"), Some(&json!([])));
 }

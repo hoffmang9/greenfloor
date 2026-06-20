@@ -1,5 +1,6 @@
 use chia_protocol::Bytes32;
 use chia_sdk_coinset::{ChiaRpcClient, CoinsetClient};
+use std::time::Duration;
 
 use super::poll::{run_poll_loop, PollConfig};
 use crate::error::{SignerError, SignerResult};
@@ -24,6 +25,13 @@ impl Default for CoinSpentVerifyConfig {
 
 impl CoinSpentVerifyConfig {
     fn poll_config(self) -> PollConfig {
+        #[cfg(test)]
+        if self.timeout_seconds == 0 {
+            return PollConfig {
+                timeout: Duration::from_millis(10),
+                interval: Duration::from_millis(1),
+            };
+        }
         PollConfig::from_seconds(self.timeout_seconds, self.poll_seconds)
     }
 }
@@ -143,8 +151,8 @@ mod tests {
             |_| async { Ok(false) },
             std::slice::from_ref(&coin_id),
             CoinSpentVerifyConfig {
-                timeout_seconds: 1,
-                poll_seconds: 1,
+                timeout_seconds: 0,
+                poll_seconds: 0,
             },
         )
         .await

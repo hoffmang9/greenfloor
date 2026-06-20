@@ -1,10 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::process::Command;
 
+use greenfloor_engine::daemon::run_daemon_cycle_once_from_json;
+use greenfloor_engine::daemon::DaemonRunOnceRequestBody;
 use serde_json::{json, Value};
-
-use super::json_util::parse_json_output;
 
 #[path = "program.rs"]
 mod program_fixture;
@@ -26,38 +25,31 @@ pub struct DaemonRequestParams<'a> {
     pub test_controls: Value,
 }
 
-pub fn run_daemon_once(request: &Value, env: &[(&str, &str)]) -> DaemonOnceResult {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let request_path = dir.path().join("once_request.json");
-    std::fs::write(
-        &request_path,
-        serde_json::to_vec(request).expect("encode request"),
-    )
-    .expect("write request json");
-
-    let mut command = Command::new(env!("CARGO_BIN_EXE_greenfloor-engine"));
-    command.args([
-        "daemon-once",
-        "--request-json",
-        request_path.to_str().expect("request path"),
-        "--json",
-    ]);
+pub async fn run_daemon_once_async(request: &Value, env: &[(&str, &str)]) -> DaemonOnceResult {
     for (key, value) in env {
-        command.env(key, value);
+        std::env::set_var(key, value);
     }
-    let output = command
-        .output()
-        .expect("spawn greenfloor-engine daemon-once");
-    let exit_code = output.status.code().unwrap_or(-1);
-    let response = if output.stdout.is_empty() {
-        None
-    } else {
-        Some(parse_json_output(&output.stdout))
-    };
+    let body: DaemonRunOnceRequestBody =
+        serde_json::from_value(request.clone()).expect("parse daemon once request");
+    body.test_controls
+        .ensure_allowed()
+        .expect("daemon test controls");
+    let response = run_daemon_cycle_once_from_json(request.clone())
+        .await
+        .expect("daemon once in process");
+    let response_json = serde_json::to_value(&response).expect("encode daemon once response");
     DaemonOnceResult {
-        exit_code,
-        response,
+        exit_code: response.exit_code,
+        response: Some(response_json),
     }
+}
+
+pub fn run_daemon_once(request: &Value, env: &[(&str, &str)]) -> DaemonOnceResult {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("daemon once runtime")
+        .block_on(run_daemon_once_async(request, env))
 }
 
 pub fn daemon_request(params: DaemonRequestParams<'_>) -> Value {

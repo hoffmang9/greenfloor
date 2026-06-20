@@ -444,6 +444,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn build_coinset_probe_report_with_launcher_id_bypasses_program_config() {
+        let launcher = "ab".repeat(32);
+        let args = CoinsetProbeCliArgs {
+            network: "mainnet".to_string(),
+            coinset_base_url: "http://127.0.0.1:1".to_string(),
+            launcher_id: launcher,
+            launcher_id_file: String::new(),
+            program_config: String::new(),
+            nonce: 0,
+            height_window: 50_000,
+            json: false,
+        };
+        let err = build_coinset_probe_report(args)
+            .await
+            .expect_err("unreachable coinset");
+        let message = err.to_string().to_ascii_lowercase();
+        assert!(!message.contains("failed to read config"));
+        assert!(
+            message.contains("127.0.0.1")
+                || message.contains("connection refused")
+                || message.contains("error sending request"),
+            "expected fast coinset client failure, got: {message}"
+        );
+    }
+
+    #[tokio::test]
     async fn probe_attempt_run_maps_success_and_failure() {
         use crate::error::SignerError;
 

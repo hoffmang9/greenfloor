@@ -9,6 +9,25 @@ use crate::error::{SignerError, SignerResult};
 
 const MAX_ATTEMPTS: usize = 4;
 
+fn max_retry_attempts() -> usize {
+    if cfg!(debug_assertions) {
+        2
+    } else {
+        MAX_ATTEMPTS
+    }
+}
+
+fn retry_sleep_duration(delay: f64) -> Duration {
+    let jitter = rand::rng().random_range(-0.25..=0.25);
+    let scaled = if cfg!(debug_assertions) {
+        // Keep retry coverage in dev/test builds without multi-second backoff sleeps.
+        (delay * 0.01 * (1.0 + jitter)).max(0.001)
+    } else {
+        (delay * (1.0 + jitter)).max(0.05)
+    };
+    Duration::from_secs_f64(scaled)
+}
+
 /// With script retries.
 ///
 /// # Errors
@@ -20,13 +39,11 @@ where
     Fut: std::future::Future<Output = SignerResult<T>>,
 {
     let mut delay = 0.8f64;
-    for attempt in 1..=MAX_ATTEMPTS {
+    for attempt in 1..=max_retry_attempts() {
         match operation().await {
             Ok(value) => return Ok(value),
-            Err(err) if attempt < MAX_ATTEMPTS && script_engine_error_retryable(&err) => {
-                let jitter = rand::rng().random_range(-0.25..=0.25);
-                tokio::time::sleep(Duration::from_secs_f64((delay * (1.0 + jitter)).max(0.05)))
-                    .await;
+            Err(err) if attempt < max_retry_attempts() && script_engine_error_retryable(&err) => {
+                tokio::time::sleep(retry_sleep_duration(delay)).await;
                 delay = (delay * 2.0).min(8.0);
             }
             Err(err) => return Err(err),

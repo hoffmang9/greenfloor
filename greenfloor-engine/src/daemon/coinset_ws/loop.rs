@@ -148,8 +148,8 @@ mod tests {
             runtime_market_slot_count: 1,
             runtime_offer_parallelism_max_workers: 2,
             tx_block_websocket_url: "ws://127.0.0.1:9/ws".to_string(),
-            tx_block_websocket_reconnect_interval_seconds: 1,
-            tx_block_fallback_poll_interval_seconds: 1,
+            tx_block_websocket_reconnect_interval_seconds: 0,
+            tx_block_fallback_poll_interval_seconds: 0,
             ..Default::default()
         }
     }

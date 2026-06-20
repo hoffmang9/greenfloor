@@ -9,6 +9,13 @@ use crate::error::{SignerError, SignerResult};
 ///
 /// Returns an error if the operation fails.
 pub async fn get_public_key_compressed_hex(key_id: &str, region: &str) -> SignerResult<String> {
+    if cfg!(debug_assertions) {
+        if let Ok(hex) = std::env::var("GREENFLOOR_TEST_KMS_PUBLIC_KEY_COMPRESSED_HEX") {
+            if !hex.trim().is_empty() {
+                return Ok(hex.trim().to_string());
+            }
+        }
+    }
     let client = kms_client(region).await?;
     let response = client
         .get_public_key()
@@ -50,6 +57,13 @@ pub async fn sign_digest(key_id: &str, region: &str, message_hex: &str) -> Signe
 }
 
 async fn kms_client(region: &str) -> SignerResult<Client> {
+    if cfg!(debug_assertions)
+        && std::env::var("GREENFLOOR_KMS_TEST_MODE").as_deref() == Ok("fast_fail")
+    {
+        return Err(SignerError::Kms(
+            "credentials not configured (test fast fail)".to_string(),
+        ));
+    }
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::Region::new(region.to_string()))
         .load()

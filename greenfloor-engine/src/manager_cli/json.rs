@@ -46,6 +46,14 @@ impl ManagerOutput {
     }
 
     pub fn emit_serialized<T: Serialize>(&self, value: &T) -> SignerResult<()> {
+        #[cfg(test)]
+        if let Some(capture) = &self.capture {
+            if let Ok(json_value) = serde_json::to_value(value) {
+                if let Ok(mut entries) = capture.lock() {
+                    entries.push(json_value);
+                }
+            }
+        }
         cli_util::print_json(value, self.compact)
     }
 }

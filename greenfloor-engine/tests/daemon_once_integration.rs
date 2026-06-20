@@ -4,8 +4,8 @@ mod daemon_fixtures;
 mod json_util;
 
 use daemon_fixtures::{
-    audit_events_by_type, cycle_summary, daemon_request, run_daemon_once, write_daemon_program,
-    write_markets_one, write_markets_two, DaemonRequestParams,
+    audit_events_by_type, cycle_summary, daemon_request, run_daemon_once, run_daemon_once_async,
+    write_daemon_program, write_markets_one, write_markets_two, DaemonRequestParams,
 };
 use greenfloor_engine::storage::SqliteStore;
 use mockito::Matcher;
@@ -84,7 +84,7 @@ async fn daemon_multi_cycle_price_shift_cancel_and_reconcile() {
         poll_coinset_mempool: false,
         test_controls: controls.clone(),
     });
-    let first = run_daemon_once(&request, DAEMON_ENV);
+    let first = run_daemon_once_async(&request, DAEMON_ENV).await;
     assert_eq!(first.exit_code, 0, "stderr should be empty on success");
 
     let store = SqliteStore::open(&db_path).expect("open db");
@@ -101,7 +101,7 @@ async fn daemon_multi_cycle_price_shift_cancel_and_reconcile() {
         ("GREENFLOOR_DAEMON_TEST_CONTROLS", "1"),
         ("GREENFLOOR_XCH_PRICE_USD", "40"),
     ];
-    let second = run_daemon_once(&request, &second_env);
+    let second = run_daemon_once_async(&request, &second_env).await;
     assert_eq!(second.exit_code, 0);
 
     let store = SqliteStore::open(&db_path).expect("open db");

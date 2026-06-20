@@ -32,6 +32,9 @@ pedantic = { level = "deny", priority = -1 }
 cargo = { level = "warn", priority = -1 }
 multiple_crate_versions = "allow"
 
+[profile.test]
+opt-level = 1
+
 [dependencies]
 anyhow = "1.0"
 aws-config = "1"
@@ -86,3 +89,4 @@ mockito = "1.6"
 rusqlite = { version = "0.32", features = ["bundled"] }
 sha2 = "0.10"
 tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }

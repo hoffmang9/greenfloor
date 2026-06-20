@@ -208,3 +208,61 @@ async fn combine_until_ready_disallows_no_wait() {
         .to_string()
         .contains("until-ready mode requires wait mode"));
 }
+
+#[tokio::test]
+async fn coins_list_requires_signer_backend() {
+    use crate::manager_cli::context::ManagerContext;
+    use crate::manager_cli::json::ManagerOutput;
+    use crate::minimal_program_template::{write_minimal_program, MinimalProgramParams};
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    write_minimal_program(
+        &program,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
+    std::fs::write(
+        &markets,
+        r#"markets:
+  - id: m1
+    enabled: true
+    base_asset: "asset1"
+    base_symbol: "AS1"
+    quote_asset: "xch"
+    quote_asset_type: "unstable"
+    signer_key_id: "key-main-1"
+    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"
+    mode: "sell_only"
+    inventory:
+      low_watermark_base_units: 10
+      bucket_counts:
+        1: 0
+    ladders:
+      sell:
+        - size_base_units: 1
+          target_count: 1
+          split_buffer_count: 0
+          combine_when_excess_factor: 2.0
+"#,
+    )
+    .expect("write markets");
+    let (output, captured) = ManagerOutput::capturing(true);
+    let ctx = ManagerContext::for_test_with_output(program, markets, output);
+    let code = super::list::run_coins_list(&ctx, None, None, None)
+        .await
+        .expect("coins-list");
+    assert_eq!(code, 2);
+    let payload = captured
+        .lock()
+        .expect("capture lock")
+        .pop()
+        .expect("json emitted");
+    assert_eq!(
+        payload.get("error"),
+        Some(&serde_json::json!("coin_list_requires_signer_backend"))
+    );
+}
