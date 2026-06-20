@@ -284,11 +284,10 @@ fn sample_action() -> PlannedAction {
 #[tokio::test]
 async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() {
     use super::execute_strategy_actions;
-    use super::test_hooks::{
-        set_managed_post_override, set_parallel_dispatch_override, TestHooksScope,
+    use super::test_overrides::{
+        ManagedPostTestMode, OfferDispatchTestOverrides, ParallelDispatchTestMode,
     };
 
-    let _hooks = TestHooksScope::begin();
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
     let store = SqliteStore::open(&db_path).expect("open");
@@ -302,16 +301,17 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
     );
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
-    let test_ctx = test_context_from_program_file(
+    let mut test_ctx = test_context_from_program_file(
         &dir,
         &db_path,
         &program_path,
         sample_program(true, false),
         true,
     );
+    test_ctx.dispatch.offer_dispatch_test = OfferDispatchTestOverrides::default()
+        .parallel_dispatch(ParallelDispatchTestMode::Transient)
+        .managed_post(ManagedPostTestMode::Success);
 
-    set_parallel_dispatch_override(Some("transient"));
-    set_managed_post_override(Some("success"));
     let output = execute_strategy_actions(
         &store,
         &test_ctx.cycle_context(),
@@ -326,9 +326,8 @@ async fn execute_strategy_actions_parallel_transient_falls_back_to_sequential() 
 #[tokio::test]
 async fn execute_strategy_actions_parallel_fatal_propagates() {
     use super::execute_strategy_actions;
-    use super::test_hooks::{set_parallel_dispatch_override, TestHooksScope};
+    use super::test_overrides::{OfferDispatchTestOverrides, ParallelDispatchTestMode};
 
-    let _hooks = TestHooksScope::begin();
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
     let store = SqliteStore::open(&db_path).expect("open");
@@ -342,15 +341,16 @@ async fn execute_strategy_actions_parallel_fatal_propagates() {
     );
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
-    let test_ctx = test_context_from_program_file(
+    let mut test_ctx = test_context_from_program_file(
         &dir,
         &db_path,
         &program_path,
         sample_program(true, false),
         true,
     );
+    test_ctx.dispatch.offer_dispatch_test =
+        OfferDispatchTestOverrides::default().parallel_dispatch(ParallelDispatchTestMode::Fatal);
 
-    set_parallel_dispatch_override(Some("fatal"));
     let err = execute_strategy_actions(
         &store,
         &test_ctx.cycle_context(),
@@ -365,9 +365,8 @@ async fn execute_strategy_actions_parallel_fatal_propagates() {
 #[tokio::test]
 async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
     use super::execute_strategy_actions;
-    use super::test_hooks::{set_managed_post_override, TestHooksScope};
+    use super::test_overrides::{ManagedPostTestMode, OfferDispatchTestOverrides};
 
-    let _hooks = TestHooksScope::begin();
     let dir = tempdir().expect("tempdir");
     let db_path = dir.path().join("greenfloor.sqlite");
     let store = SqliteStore::open(&db_path).expect("open");
@@ -381,15 +380,16 @@ async fn execute_strategy_actions_managed_post_success_via_sequential_path() {
     );
     let markets_path = dir.path().join("markets.yaml");
     write_test_markets_file(&markets_path);
-    let test_ctx = test_context_from_program_file(
+    let mut test_ctx = test_context_from_program_file(
         &dir,
         &db_path,
         &program_path,
         sample_program(false, false),
         true,
     );
+    test_ctx.dispatch.offer_dispatch_test =
+        OfferDispatchTestOverrides::default().managed_post(ManagedPostTestMode::Success);
 
-    set_managed_post_override(Some("success"));
     let output = execute_strategy_actions(
         &store,
         &test_ctx.cycle_context(),
@@ -469,14 +469,13 @@ fn coordinator_multi_asset_acquire_requires_all_assets() {
 }
 
 #[test]
-fn parallel_dispatch_override_success_returns_output() {
-    use super::test_hooks::{
-        parallel_dispatch_test_override, set_parallel_dispatch_override, TestHooksScope,
-    };
+fn offer_dispatch_parallel_override_success_returns_output() {
+    use super::test_overrides::{OfferDispatchTestOverrides, ParallelDispatchTestMode};
 
-    let _hooks = TestHooksScope::begin();
-    set_parallel_dispatch_override(Some("success"));
-    let output = parallel_dispatch_test_override()
+    let overrides =
+        OfferDispatchTestOverrides::default().parallel_dispatch(ParallelDispatchTestMode::Success);
+    let output = overrides
+        .parallel_dispatch_result()
         .expect("override configured")
         .expect("success output");
     assert_eq!(output.executed_count, 1);
@@ -484,13 +483,12 @@ fn parallel_dispatch_override_success_returns_output() {
 
 #[test]
 fn managed_post_override_success_returns_true() {
-    use super::test_hooks::{
-        managed_post_test_override, set_managed_post_override, TestHooksScope,
-    };
+    use super::test_overrides::{ManagedPostTestMode, OfferDispatchTestOverrides};
 
-    let _hooks = TestHooksScope::begin();
-    set_managed_post_override(Some("success"));
-    let posted = managed_post_test_override()
+    let overrides =
+        OfferDispatchTestOverrides::default().managed_post(ManagedPostTestMode::Success);
+    let posted = overrides
+        .managed_post_result()
         .expect("override configured")
         .expect("success post");
     assert!(posted);

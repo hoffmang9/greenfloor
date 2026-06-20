@@ -3,6 +3,12 @@ use sha2::{Digest, Sha256};
 
 use crate::error::{SignerError, SignerResult};
 
+#[cfg(test)]
+mod test_hooks;
+
+#[cfg(test)]
+pub use test_hooks::{KmsTestGuard, KmsTestOverrides};
+
 /// Get public key compressed hex.
 ///
 /// # Errors
@@ -10,7 +16,7 @@ use crate::error::{SignerError, SignerResult};
 /// Returns an error if the operation fails.
 pub async fn get_public_key_compressed_hex(key_id: &str, region: &str) -> SignerResult<String> {
     #[cfg(test)]
-    if let Some(hex) = test_public_key_stub() {
+    if let Some(hex) = test_hooks::public_key_stub() {
         return Ok(hex);
     }
     let client = kms_client(region).await?;
@@ -55,29 +61,12 @@ pub async fn sign_digest(key_id: &str, region: &str, message_hex: &str) -> Signe
 
 async fn kms_client(region: &str) -> SignerResult<Client> {
     #[cfg(test)]
-    if kms_test_fast_fail_enabled() {
-        return Err(SignerError::Kms(
-            "credentials not configured (test fast fail)".to_string(),
-        ));
-    }
+    test_hooks::kms_client_fast_fail()?;
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::Region::new(region.to_string()))
         .load()
         .await;
     Ok(Client::new(&config))
-}
-
-#[cfg(test)]
-fn test_public_key_stub() -> Option<String> {
-    std::env::var("GREENFLOOR_TEST_KMS_PUBLIC_KEY_COMPRESSED_HEX")
-        .ok()
-        .map(|hex| hex.trim().to_string())
-        .filter(|hex| !hex.is_empty())
-}
-
-#[cfg(test)]
-fn kms_test_fast_fail_enabled() -> bool {
-    std::env::var("GREENFLOOR_KMS_TEST_MODE").as_deref() == Ok("fast_fail")
 }
 
 /// Der spki to compressed p256.

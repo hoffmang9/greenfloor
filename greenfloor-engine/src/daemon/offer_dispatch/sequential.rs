@@ -6,6 +6,7 @@ use crate::error::SignerResult;
 use crate::offer::request::normalize_offer_side;
 
 use super::managed_post::post_managed_planned_action;
+use super::test_overrides::OfferDispatchTestOverrides;
 use super::OfferDispatchOutput;
 use crate::daemon::cycle_paths::DaemonCyclePaths;
 
@@ -14,6 +15,7 @@ pub async fn execute_actions_sequential(
     paths: &DaemonCyclePaths,
     market: &MarketConfig,
     expanded: &[PlannedAction],
+    test_overrides: &OfferDispatchTestOverrides,
 ) -> SignerResult<OfferDispatchOutput> {
     let mut executed = 0_u64;
     let mut action_items = Vec::new();
@@ -21,7 +23,7 @@ pub async fn execute_actions_sequential(
     for action in expanded {
         let side = normalize_offer_side(&action.side).to_string();
         let counts_as_executed =
-            post_managed_planned_action(program, paths, market, action).await?;
+            post_managed_planned_action(program, paths, market, action, test_overrides).await?;
         if counts_as_executed {
             executed += 1;
         }

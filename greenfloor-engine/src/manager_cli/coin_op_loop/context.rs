@@ -48,7 +48,7 @@ pub(super) async fn build_coin_op_exec_context(
             as i64,
         combine_input_cap: resolve_combine_input_cap(),
         watched_coin_ids: HashSet::default(),
-        test_overrides: CoinOpTestOverrides::from_env(),
+        test_overrides: CoinOpTestOverrides::default(),
     })
 }
 

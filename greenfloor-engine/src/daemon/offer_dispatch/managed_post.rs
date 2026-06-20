@@ -10,14 +10,21 @@ use crate::offer::request::normalize_offer_side;
 use crate::async_boundary::ManagedOfferPostFuture;
 use crate::daemon::cycle_paths::DaemonCyclePaths;
 
+use super::test_overrides::OfferDispatchTestOverrides;
+
 pub fn post_managed_planned_action<'a>(
     program: &'a ManagerProgramConfig,
     paths: &'a DaemonCyclePaths,
     market: &'a MarketConfig,
     action: &'a PlannedAction,
+    test_overrides: &'a OfferDispatchTestOverrides,
 ) -> ManagedOfferPostFuture<'a> {
     Box::pin(post_managed_planned_action_async(
-        program, paths, market, action,
+        program,
+        paths,
+        market,
+        action,
+        test_overrides,
     ))
 }
 
@@ -26,9 +33,9 @@ async fn post_managed_planned_action_async(
     paths: &DaemonCyclePaths,
     market: &MarketConfig,
     action: &PlannedAction,
+    test_overrides: &OfferDispatchTestOverrides,
 ) -> SignerResult<bool> {
-    #[cfg(test)]
-    if let Some(result) = super::test_hooks::managed_post_test_override() {
+    if let Some(result) = test_overrides.managed_post_result() {
         return result;
     }
     if action.size <= 0 {

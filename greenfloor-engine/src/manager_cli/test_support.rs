@@ -13,6 +13,11 @@ use crate::error::SignerError;
 use crate::error::SignerResult;
 use crate::minimal_program_template::{write_minimal_program_with_signer, MinimalProgramParams};
 
+#[path = "test_support/capturing_output.rs"]
+mod capturing_output;
+
+pub use capturing_output::TestJsonCapture;
+
 const BOOTSTRAP_FIXTURE_DIR: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/data/bootstrap");
 const FIXTURE_DATA_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/data");
@@ -73,11 +78,13 @@ pub fn write_combine_test_configs(dir: &Path, cat_asset_id: &str, with_signer: b
         cat_asset_id,
         COMBINE_RECEIVE_ADDRESS,
     );
-    std::fs::write(
-        dir.join("cats.yaml"),
-        format!("cats:\n  - base_symbol: DUST\n    asset_id: \"{cat_asset_id}\"\n"),
-    )
-    .expect("write cats");
+    write_combine_dust_cats(&dir.join("cats.yaml"), cat_asset_id);
+}
+
+pub fn write_combine_dust_cats(path: &Path, cat_asset_id: &str) {
+    let template = include_str!("../../tests/fixtures/data/combine_dust_cats.template.yaml");
+    let yaml = template.replace("__CAT_ASSET_ID__", cat_asset_id);
+    std::fs::write(path, yaml).expect("write combine dust cats");
 }
 
 const COMBINE_RECEIVE_ADDRESS: &str =
@@ -128,6 +135,8 @@ struct MapEnvReader {
     values: HashMap<String, String>,
 }
 
+// Unmapped keys fall back to the real process environment so tests can override
+// only the vars they care about (for example doctor env warnings).
 impl EnvReader for MapEnvReader {
     fn var(&self, name: &str) -> String {
         self.values
@@ -244,7 +253,11 @@ impl ManagerContextBuilder {
         self
     }
 
-    fn assemble(self, output: ManagerOutput) -> ManagerContext {
+    fn assemble_inner(
+        self,
+        output: ManagerOutput,
+        json_capture: Option<TestJsonCapture>,
+    ) -> ManagerContext {
         let ManagerContextBuilder {
             program_config,
             markets_config,
@@ -284,20 +297,22 @@ impl ManagerContextBuilder {
             state_db,
             dexie_base_url,
             testnet_markets_path,
+            json_capture,
         )
     }
 
     pub fn build(self) -> ManagerContext {
         let json_compact = self.json_compact;
-        self.assemble(ManagerOutput::new(json_compact))
+        self.assemble_inner(ManagerOutput::new(json_compact), None)
     }
 
     pub fn build_capturing(self) -> CapturedManagerContext {
         let json_compact = self.json_compact;
-        let (output, captured) = ManagerOutput::capturing(json_compact);
+        let (capture, buffer) = TestJsonCapture::new();
+        let ctx = self.assemble_inner(ManagerOutput::new(json_compact), Some(capture));
         CapturedManagerContext {
-            ctx: self.assemble(output),
-            captured,
+            ctx,
+            captured: buffer,
         }
     }
 }

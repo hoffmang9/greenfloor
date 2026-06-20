@@ -89,4 +89,26 @@ mod tests {
     fn production_policy_matches_operator_defaults() {
         assert_eq!(ScriptRetryPolicy::PRODUCTION.max_attempts, 4);
     }
+
+    #[tokio::test]
+    async fn unit_test_policy_retries_once_before_success() {
+        let mut attempts = 0;
+        let value = with_script_retries_with_policy(ScriptRetryPolicy::UNIT_TEST, || {
+            attempts += 1;
+            async move {
+                if attempts == 1 {
+                    Err(SignerError::Coinset(
+                        "error sending request for url (http://127.0.0.1:1/): connection refused"
+                            .to_string(),
+                    ))
+                } else {
+                    Ok("ok")
+                }
+            }
+        })
+        .await
+        .expect("retry succeeds");
+        assert_eq!(value, "ok");
+        assert_eq!(attempts, 2);
+    }
 }

@@ -256,10 +256,6 @@ fn write_dry_run_program(path: &Path, home_dir: &Path) {
 
 #[tokio::test]
 async fn dry_run_returns_preview_payload_in_process() {
-    let _env = crate::test_support::env_guard::EnvRestoreGuard::set(&[(
-        "GREENFLOOR_TEST_OFFER_TEXT",
-        "offer1dryrunpreviewstub",
-    )]);
     let dir = tempfile::tempdir().expect("tempdir");
     let program = dir.path().join("program.yaml");
     let markets = dir.path().join("markets.yaml");

@@ -16,6 +16,9 @@ use super::paths::{
 };
 use super::runtime::ManagerRuntime;
 
+#[cfg(test)]
+use super::test_support::TestJsonCapture;
+
 #[derive(Debug, Clone)]
 pub struct ManagerContext {
     pub output: ManagerOutput,
@@ -26,6 +29,8 @@ pub struct ManagerContext {
     pub state_db: String,
     pub dexie_base_url: Option<String>,
     testnet_markets_path: Option<PathBuf>,
+    #[cfg(test)]
+    json_capture: Option<TestJsonCapture>,
 }
 
 impl ManagerContext {
@@ -63,6 +68,8 @@ impl ManagerContext {
                 state_db,
                 dexie_base_url,
                 testnet_markets_path,
+                #[cfg(test)]
+                json_capture: None,
             },
             command,
         )
@@ -78,6 +85,7 @@ impl ManagerContext {
         state_db: String,
         dexie_base_url: Option<String>,
         testnet_markets_path: Option<PathBuf>,
+        json_capture: Option<TestJsonCapture>,
     ) -> Self {
         Self {
             output,
@@ -88,6 +96,7 @@ impl ManagerContext {
             state_db,
             dexie_base_url,
             testnet_markets_path,
+            json_capture,
         }
     }
 
@@ -109,10 +118,18 @@ impl ManagerContext {
     }
 
     pub fn emit_json(&self, value: &Value) -> SignerResult<()> {
+        #[cfg(test)]
+        if let Some(capture) = &self.json_capture {
+            capture.record_json(value);
+        }
         self.output.emit_json(value)
     }
 
     pub fn emit_serialized<T: Serialize>(&self, value: &T) -> SignerResult<()> {
+        #[cfg(test)]
+        if let Some(capture) = &self.json_capture {
+            capture.record_serialized(value);
+        }
         self.output.emit_serialized(value)
     }
 }

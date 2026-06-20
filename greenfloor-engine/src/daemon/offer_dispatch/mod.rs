@@ -5,7 +5,9 @@ mod managed_post;
 mod parallel;
 mod reservation_ctx;
 mod sequential;
-mod test_hooks;
+mod test_overrides;
+
+pub use test_overrides::OfferDispatchTestOverrides;
 
 #[cfg(test)]
 mod tests;
@@ -128,6 +130,7 @@ async fn execute_strategy_actions_async(
                 signer_config,
                 market,
                 &expanded,
+                &ctx.dispatch.offer_dispatch_test,
             )
             .await,
         ) {
@@ -139,5 +142,12 @@ async fn execute_strategy_actions_async(
         }
     }
 
-    sequential::execute_actions_sequential(program, &ctx.resources.paths, market, &expanded).await
+    sequential::execute_actions_sequential(
+        program,
+        &ctx.resources.paths,
+        market,
+        &expanded,
+        &ctx.dispatch.offer_dispatch_test,
+    )
+    .await
 }

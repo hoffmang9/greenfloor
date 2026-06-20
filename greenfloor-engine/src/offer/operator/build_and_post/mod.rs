@@ -67,7 +67,7 @@ pub struct BuildAndPostOfferRequest {
     pub run: BuildAndPostRunOptions,
     /// When set, overrides ``pricing.side`` for bootstrap and offer construction (daemon buy/sell actions).
     pub action_side: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip)]
     pub test_overrides: OfferOperatorTestOverrides,
 }
 

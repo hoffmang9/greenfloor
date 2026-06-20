@@ -176,6 +176,7 @@ pub async fn run_daemon_cycle_once(
         previous_xch_price_usd: plan.previous_xch_price_usd,
         runtime_dry_run: plan.runtime_dry_run,
         test_controls: plan.test_controls.clone(),
+        offer_dispatch_test: super::offer_dispatch::OfferDispatchTestOverrides::default(),
     };
     let markets = resources.selected_markets(&plan.selected_market_ids);
 

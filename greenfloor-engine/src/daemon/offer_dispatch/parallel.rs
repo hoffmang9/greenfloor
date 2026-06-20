@@ -21,6 +21,7 @@ use super::managed_post::post_managed_planned_action;
 use super::reservation_ctx::{
     parallel_reservation_asset_ids, parallel_reservation_context, reservation_wallet_id,
 };
+use super::test_overrides::OfferDispatchTestOverrides;
 use super::OfferDispatchOutput;
 
 use crate::daemon::coinset_spendable::coinset_spendable_profiles_by_asset;
@@ -119,6 +120,7 @@ async fn run_parallel_post_jobs(
     resources: &DaemonCycleResources,
     market: &MarketConfig,
     setup: ParallelDispatchSetup,
+    test_overrides: &OfferDispatchTestOverrides,
 ) -> SignerResult<(u64, Vec<StrategyActionSellCountInput>)> {
     let ParallelDispatchSetup {
         coordinator,
@@ -143,6 +145,7 @@ async fn run_parallel_post_jobs(
         let paths = resources.paths.clone();
         let market_id = market.market_id.clone();
         let wallet_id = wallet_id.clone();
+        let test_overrides = test_overrides.clone();
 
         handles.push(tokio::spawn(async move {
             let _permit = permit;
@@ -155,8 +158,14 @@ async fn run_parallel_post_jobs(
             let counts_as_executed = match acquired {
                 Ok(acquired) if acquired.ok => {
                     let reservation_id = acquired.reservation_id.expect("reservation id");
-                    let post_result =
-                        post_managed_planned_action(&program, &paths, &market, &job.action).await?;
+                    let post_result = post_managed_planned_action(
+                        &program,
+                        &paths,
+                        &market,
+                        &job.action,
+                        &test_overrides,
+                    )
+                    .await?;
                     let release_status = reservation_release_status(post_result);
                     let _ = coordinator.release(&reservation_id, release_status);
                     post_result
@@ -199,9 +208,9 @@ pub async fn execute_actions_parallel(
     signer_config: &SignerConfig,
     market: &MarketConfig,
     expanded: &[PlannedAction],
+    test_overrides: &OfferDispatchTestOverrides,
 ) -> SignerResult<OfferDispatchOutput> {
-    #[cfg(test)]
-    if let Some(result) = super::test_hooks::parallel_dispatch_test_override() {
+    if let Some(result) = test_overrides.parallel_dispatch_result() {
         return result;
     }
 
@@ -218,7 +227,8 @@ pub async fn execute_actions_parallel(
         });
     }
 
-    let (executed, action_items) = run_parallel_post_jobs(resources, market, setup).await?;
+    let (executed, action_items) =
+        run_parallel_post_jobs(resources, market, setup, test_overrides).await?;
 
     Ok(OfferDispatchOutput {
         executed_count: executed,
