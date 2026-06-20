@@ -1,2 +1,3 @@
 [build]
-target-dir = "target"
+# Canonical artifact directory for greenfloor-engine builds invoked from repo root.
+target-dir = "greenfloor-engine/target"
