@@ -44,7 +44,7 @@ jobs:
           cargo build --manifest-path greenfloor-engine/Cargo.toml --bins
           mkdir -p .venv/bin
           for bin in greenfloor-engine greenfloor-manager greenfloord; do
-            install -m 755 "target/debug/${bin}" ".venv/bin/${bin}"
+            install -m 755 "greenfloor-engine/target/debug/${bin}" ".venv/bin/${bin}"
           done
           echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
 

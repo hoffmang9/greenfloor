@@ -1,2 +1,3 @@
 [build]
-target-dir = "target"
+# Must match Swatinem/rust-cache workspaces mapping (greenfloor-engine -> target).
+target-dir = "greenfloor-engine/target"

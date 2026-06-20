@@ -57,6 +57,8 @@ jobs:
           key: venv-v2-${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('pyproject.toml') }}
 
       - uses: ./.github/actions/rust-cache-greenfloor
+        with:
+          save-cache: "false"
 
       - name: Cache pre-commit environment
         uses: actions/cache@v4
