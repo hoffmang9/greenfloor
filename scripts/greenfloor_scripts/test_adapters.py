@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from greenfloor_scripts.binaries import cargo_target_directory
 from greenfloor_scripts.coinset_subprocess import (
     coin_records_cli,
     record_from_cli,
@@ -165,6 +167,20 @@ class ScriptAdapterTests(unittest.TestCase):
         mock_run.assert_called_once()
         argv = mock_run.call_args.args[0]
         self.assertEqual(argv[:2], ["hex", "normalize-batch"])
+
+    def test_cargo_target_directory_reads_metadata(self) -> None:
+        cargo_target_directory.cache_clear()
+        with patch("greenfloor_scripts.binaries.subprocess.run") as mock_run:
+            mock_run.return_value = SimpleNamespace(
+                stdout='{"target_directory":"/repo/greenfloor-engine/target"}',
+                stderr="",
+                returncode=0,
+            )
+            self.assertEqual(
+                cargo_target_directory(),
+                Path("/repo/greenfloor-engine/target"),
+            )
+        mock_run.assert_called_once()
 
     def test_kms_subprocess_reads_public_key_field(self) -> None:
         with patch("greenfloor_scripts.kms_subprocess.run_engine_json") as mock_run:

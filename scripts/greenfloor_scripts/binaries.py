@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+import json
 import os
 import shutil
 import subprocess
@@ -11,6 +13,7 @@ _ENGINE_BIN = "greenfloor-engine"
 _MANAGER_BIN = "greenfloor-manager"
 _DAEMON_BIN = "greenfloord"
 _ALL_BINS = (_ENGINE_BIN, _MANAGER_BIN, _DAEMON_BIN)
+_MANIFEST_REL = Path("greenfloor-engine") / "Cargo.toml"
 
 
 class GreenfloorEngineBinaryError(FileNotFoundError):
@@ -21,9 +24,43 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _candidate_paths(binary_name: str) -> tuple[Path, ...]:
+def _engine_manifest() -> Path:
+    return repo_root() / _MANIFEST_REL
+
+
+@functools.lru_cache(maxsize=1)
+def cargo_target_directory() -> Path:
+    """Return Cargo's resolved target directory (from repo-root ``.cargo/config.toml``)."""
     root = repo_root()
-    target_root = root / "greenfloor-engine" / "target"
+    manifest = _engine_manifest()
+    if not manifest.is_file():
+        raise GreenfloorEngineBinaryError(
+            "greenfloor-engine Cargo.toml not found; cannot resolve Cargo target directory"
+        )
+    result = subprocess.run(
+        [
+            "cargo",
+            "metadata",
+            "--manifest-path",
+            str(manifest),
+            "--format-version",
+            "1",
+            "--no-deps",
+        ],
+        check=True,
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    payload = json.loads(result.stdout)
+    target_directory = payload.get("target_directory")
+    if not isinstance(target_directory, str) or not target_directory.strip():
+        raise GreenfloorEngineBinaryError("cargo metadata did not return a usable target_directory")
+    return Path(target_directory)
+
+
+def _candidate_paths(binary_name: str) -> tuple[Path, ...]:
+    target_root = cargo_target_directory()
     return (
         target_root / "debug" / binary_name,
         target_root / "release" / binary_name,
@@ -32,7 +69,7 @@ def _candidate_paths(binary_name: str) -> tuple[Path, ...]:
 
 def _build_engine_binaries() -> None:
     root = repo_root()
-    manifest = root / "greenfloor-engine" / "Cargo.toml"
+    manifest = _engine_manifest()
     if not manifest.is_file():
         raise GreenfloorEngineBinaryError(
             "greenfloor-engine Cargo.toml not found; cannot build binaries"

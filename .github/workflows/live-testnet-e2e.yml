@@ -42,8 +42,10 @@ jobs:
       - name: Build native operator binaries
         run: |
           cargo build --manifest-path greenfloor-engine/Cargo.toml --bins
-          target_dir="$(cargo metadata --manifest-path greenfloor-engine/Cargo.toml --format-version 1 --no-deps \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')"
+          export PYTHONPATH=scripts
+          target_dir="$(
+            python3 -c 'from greenfloor_scripts.binaries import cargo_target_directory; print(cargo_target_directory())'
+          )"
           mkdir -p .venv/bin
           for bin in greenfloor-engine greenfloor-manager greenfloord; do
             install -m 755 "${target_dir}/debug/${bin}" ".venv/bin/${bin}"
