@@ -4,8 +4,8 @@ use super::{
     MaterializeMinimalProgramFeatureFlags, MaterializeMinimalProgramRequest,
 };
 use crate::manager_cli::test_support::{
-    copy_bootstrap_templates, copy_example_program_and_markets, pop_json, repo_root,
-    ManagerContextBuilder, TestRuntimeOverrides,
+    copy_bootstrap_templates, copy_example_program_and_markets, copy_fixture_data, pop_json,
+    repo_root, ManagerContextBuilder,
 };
 
 #[test]
@@ -24,39 +24,11 @@ fn validate_log_level_rejects_garbage() {
 #[test]
 fn config_validate_emits_json() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let program_path = dir.path().join("program.yaml");
+    let program_path = copy_fixture_data("config_validate_program.yaml", dir.path());
     let markets_path = dir.path().join("markets.yaml");
-    std::fs::write(
-        &program_path,
-        r#"app:
-  network: mainnet
-  home_dir: /tmp/gf
-runtime:
-  loop_interval_seconds: 30
-chain_signals:
-  tx_block_trigger:
-    mode: websocket
-dev:
-  python:
-    min_version: "3.11"
-notifications:
-  low_inventory_alerts:
-    enabled: true
-    threshold_mode: absolute_base_units
-    default_threshold_base_units: 0
-    dedup_cooldown_seconds: 21600
-    clear_hysteresis_percent: 10
-  providers:
-    - type: pushover
-      enabled: true
-      user_key_env: PUSHOVER_USER_KEY
-      app_token_env: PUSHOVER_APP_TOKEN
-      recipient_key_env: PUSHOVER_RECIPIENT_KEY
-"#,
-    )
-    .expect("write program");
     std::fs::write(&markets_path, "markets: []\n").expect("write markets");
     let ctx = ManagerContextBuilder::new(program_path, markets_path)
+        .scratch_dir(dir.path().to_path_buf())
         .json_compact(false)
         .build();
     let code = run_config_validate(&ctx, false).expect("validate");
@@ -91,6 +63,7 @@ fn markets_fields_reads_example_markets() {
         repo_root().join("config/program.yaml"),
         repo_root().join("config/markets.yaml"),
     )
+    .cats_config(repo_root().join("config/cats.yaml"))
     .testnet_markets(repo_root().join("config/testnet-markets.yaml"))
     .build_capturing();
     let code = run_markets_fields(&harness.ctx).expect("markets-fields");
@@ -151,6 +124,7 @@ fn config_validate_program_only_accepts_example_program() {
     let program = dir.path().join("program.yaml");
     std::fs::copy(repo_root().join("config/program.yaml"), &program).expect("copy program");
     let ctx = ManagerContextBuilder::new(program, dir.path().join("unused-markets.yaml"))
+        .scratch_dir(dir.path().to_path_buf())
         .json_compact(false)
         .build();
     let code = run_config_validate(&ctx, true).expect("config-validate program-only");
@@ -212,6 +186,13 @@ fn bootstrap_home_in_process(
     let ctx = ManagerContextBuilder::new(
         program_template.to_path_buf(),
         markets_template.to_path_buf(),
+    )
+    .cats_config(cats_template.to_path_buf())
+    .scratch_dir(
+        program_template
+            .parent()
+            .expect("template parent")
+            .to_path_buf(),
     )
     .json_compact(false)
     .build();
@@ -319,6 +300,7 @@ fn doctor_reports_ok_with_example_configs() {
     let (program, markets) = copy_example_program_and_markets(dir.path());
     let state_db = dir.path().join("state.sqlite");
     let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
         .state_db(state_db.to_str().expect("state db"))
         .build_capturing();
     let code = run_doctor(&harness.ctx).expect("doctor");
@@ -334,6 +316,7 @@ fn doctor_fails_when_enabled_market_key_missing_from_registry() {
     std::fs::write(&markets, patched).expect("patch markets");
     let state_db = dir.path().join("state.sqlite");
     let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
         .state_db(state_db.to_str().expect("state db"))
         .build_capturing();
     let code = run_doctor(&harness.ctx).expect("doctor");
@@ -356,12 +339,13 @@ fn doctor_warns_on_invalid_runtime_override_env() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (program, markets) = copy_example_program_and_markets(dir.path());
     let state_db = dir.path().join("state.sqlite");
-    let _overrides = TestRuntimeOverrides::new(&[
-        ("GREENFLOOR_OFFER_POST_MAX_ATTEMPTS", "0"),
-        ("GREENFLOOR_OFFER_CANCEL_BACKOFF_MS", "bad"),
-    ]);
     let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
         .state_db(state_db.to_str().expect("state db"))
+        .env_overrides(&[
+            ("GREENFLOOR_OFFER_POST_MAX_ATTEMPTS", "0"),
+            ("GREENFLOOR_OFFER_CANCEL_BACKOFF_MS", "bad"),
+        ])
         .build_capturing();
     let code = run_doctor(&harness.ctx).expect("doctor");
     assert_eq!(code, 0);

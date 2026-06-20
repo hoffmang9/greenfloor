@@ -359,7 +359,7 @@ pub fn run_doctor(ctx: &ManagerContext) -> SignerResult<i32> {
     if !program.signer_offer_path_configured() {
         warnings.push("signer_not_configured:kms_key_id_or_vault_launcher_id".to_string());
     }
-    collect_env_warnings(&mut warnings);
+    collect_env_warnings(ctx, &mut warnings);
     let mut resolved_key_ids: Vec<_> = key_ids.into_iter().collect();
     resolved_key_ids.sort();
     resolved_key_ids.dedup();
@@ -377,7 +377,7 @@ pub fn run_doctor(ctx: &ManagerContext) -> SignerResult<i32> {
     Ok(if ok { 0 } else { 2 })
 }
 
-fn collect_env_warnings(warnings: &mut Vec<String>) {
+fn collect_env_warnings(ctx: &ManagerContext, warnings: &mut Vec<String>) {
     for (name, minimum) in [
         ("GREENFLOOR_UNSTABLE_CANCEL_MOVE_BPS", 1_i64),
         ("GREENFLOOR_OFFER_POST_MAX_ATTEMPTS", 1),
@@ -387,7 +387,7 @@ fn collect_env_warnings(warnings: &mut Vec<String>) {
         ("GREENFLOOR_OFFER_CANCEL_BACKOFF_MS", 0),
         ("GREENFLOOR_OFFER_CANCEL_COOLDOWN_SECONDS", 0),
     ] {
-        let raw = runtime_env_var(name);
+        let raw = ctx.env_var(name);
         let trimmed = raw.trim();
         if trimmed.is_empty() {
             continue;
@@ -400,14 +400,6 @@ fn collect_env_warnings(warnings: &mut Vec<String>) {
             _ => {}
         }
     }
-}
-
-fn runtime_env_var(name: &str) -> String {
-    #[cfg(test)]
-    if let Some(value) = crate::manager_cli::test_support::test_env_override(name) {
-        return value;
-    }
-    std::env::var(name).unwrap_or_default()
 }
 
 fn read_yaml_mapping(path: &Path) -> SignerResult<Value> {

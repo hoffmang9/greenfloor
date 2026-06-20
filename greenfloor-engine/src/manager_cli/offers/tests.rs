@@ -74,6 +74,7 @@ async fn offers_reconcile_updates_states_from_dexie() {
         .await;
     write_offers_program(&program, dir.path(), &server.url());
     let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
         .state_db(db_path.to_str().expect("db path"))
         .build_capturing();
     let code = run_offers_reconcile_command(
@@ -131,7 +132,9 @@ async fn offers_cancel_cancel_open_uses_dexie() {
         .create_async()
         .await;
     write_offers_program(&program, dir.path(), &server.url());
-    let harness = ManagerContextBuilder::new(program, markets).build_capturing();
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
     let code = run_offers_cancel_command(
         &harness.ctx,
         OffersCancelCliArgs {
@@ -190,7 +193,9 @@ async fn offers_cancel_by_offer_id_uses_dexie() {
         .create_async()
         .await;
     write_offers_program(&program, dir.path(), &server.url());
-    let harness = ManagerContextBuilder::new(program, markets).build_capturing();
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
     let code = run_offers_cancel_command(
         &harness.ctx,
         OffersCancelCliArgs {
@@ -225,7 +230,9 @@ async fn offers_cancel_reports_dexie_failure() {
         .create_async()
         .await;
     write_offers_program(&program, dir.path(), &server.url());
-    let harness = ManagerContextBuilder::new(program, markets).build_capturing();
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
     let code = run_offers_cancel_command(
         &harness.ctx,
         OffersCancelCliArgs {

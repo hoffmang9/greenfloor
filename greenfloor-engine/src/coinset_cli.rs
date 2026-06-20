@@ -287,5 +287,4 @@ pub async fn run_coinset_push_tx(args: CoinsetPushTxArgs) -> SignerResult<()> {
 }
 
 #[cfg(test)]
-#[path = "coinset_cli_test.rs"]
-mod coinset_cli_test;
+mod tests;

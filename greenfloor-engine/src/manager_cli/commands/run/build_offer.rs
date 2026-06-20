@@ -48,7 +48,7 @@ pub async fn run_command(command: ManagerCommands, ctx: &ManagerContext) -> Sign
             persist_results: true,
         },
         action_side: None,
-        test_overrides: OfferOperatorTestOverrides::from_env(),
+        test_overrides: OfferOperatorTestOverrides::default(),
     })
     .await?;
     ctx.emit_json(&response.payload)?;

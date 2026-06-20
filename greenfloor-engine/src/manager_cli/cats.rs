@@ -297,5 +297,4 @@ pub async fn run_cats_delete(
 }
 
 #[cfg(test)]
-#[path = "cats_test.rs"]
-mod cats_test;
+mod tests;

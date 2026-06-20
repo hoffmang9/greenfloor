@@ -93,10 +93,12 @@ fn split_gate_ready_skips_execution_path() {
 
 #[tokio::test]
 async fn until_ready_requires_size_base_units() {
+    let dir = tempfile::tempdir().expect("tempdir");
     let mgr = ManagerContextBuilder::new(
-        PathBuf::from("/tmp/unused-program.yaml"),
-        PathBuf::from("/tmp/unused-markets.yaml"),
+        dir.path().join("unused-program.yaml"),
+        dir.path().join("unused-markets.yaml"),
     )
+    .scratch_dir(dir.path().to_path_buf())
     .json_compact(false)
     .build();
     let err = run_coin_split(CoinSplitRequest {
@@ -129,10 +131,12 @@ async fn until_ready_requires_size_base_units() {
 
 #[tokio::test]
 async fn until_ready_disallows_no_wait() {
+    let dir = tempfile::tempdir().expect("tempdir");
     let mgr = ManagerContextBuilder::new(
-        PathBuf::from("/tmp/unused-program.yaml"),
-        PathBuf::from("/tmp/unused-markets.yaml"),
+        dir.path().join("unused-program.yaml"),
+        dir.path().join("unused-markets.yaml"),
     )
+    .scratch_dir(dir.path().to_path_buf())
     .json_compact(false)
     .build();
     let err = run_coin_split(CoinSplitRequest {
@@ -165,10 +169,12 @@ async fn until_ready_disallows_no_wait() {
 
 #[tokio::test]
 async fn combine_until_ready_requires_size_base_units() {
+    let dir = tempfile::tempdir().expect("tempdir");
     let mgr = ManagerContextBuilder::new(
-        PathBuf::from("/tmp/unused-program.yaml"),
-        PathBuf::from("/tmp/unused-markets.yaml"),
+        dir.path().join("unused-program.yaml"),
+        dir.path().join("unused-markets.yaml"),
     )
+    .scratch_dir(dir.path().to_path_buf())
     .json_compact(false)
     .build();
     let err = run_coin_combine(CoinCombineRequest {
@@ -192,10 +198,12 @@ async fn combine_until_ready_requires_size_base_units() {
 
 #[tokio::test]
 async fn combine_until_ready_disallows_no_wait() {
+    let dir = tempfile::tempdir().expect("tempdir");
     let mgr = ManagerContextBuilder::new(
-        PathBuf::from("/tmp/unused-program.yaml"),
-        PathBuf::from("/tmp/unused-markets.yaml"),
+        dir.path().join("unused-program.yaml"),
+        dir.path().join("unused-markets.yaml"),
     )
+    .scratch_dir(dir.path().to_path_buf())
     .json_compact(false)
     .build();
     let err = run_coin_combine(CoinCombineRequest {
@@ -257,7 +265,9 @@ async fn coins_list_requires_signer_backend() {
 "#,
     )
     .expect("write markets");
-    let harness = ManagerContextBuilder::new(program, markets).build_capturing();
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
     let code = super::list::run_coins_list(&harness.ctx, None, None, None)
         .await
         .expect("coins-list");

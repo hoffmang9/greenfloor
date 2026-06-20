@@ -25,14 +25,31 @@ impl Default for CoinSpentVerifyConfig {
 
 impl CoinSpentVerifyConfig {
     fn poll_config(self) -> PollConfig {
-        #[cfg(test)]
-        if self.timeout_seconds == 0 {
-            return PollConfig {
-                timeout: Duration::from_millis(10),
-                interval: Duration::from_millis(1),
-            };
-        }
         PollConfig::from_seconds(self.timeout_seconds, self.poll_seconds)
+    }
+}
+
+pub(crate) async fn wait_until_coins_spent_with_poll<F, Fut>(
+    mut is_spent: F,
+    coin_ids: &[Bytes32],
+    poll: PollConfig,
+) -> SignerResult<()>
+where
+    F: FnMut(Bytes32) -> Fut,
+    Fut: std::future::Future<Output = SignerResult<bool>>,
+{
+    if coin_ids.is_empty() {
+        return Ok(());
+    }
+    let started = std::time::Instant::now();
+    loop {
+        if all_coins_spent(coin_ids, &mut is_spent).await? {
+            return Ok(());
+        }
+        if started.elapsed() >= poll.timeout {
+            return Err(SignerError::CombineInputVerifyTimeout);
+        }
+        tokio::time::sleep(poll.interval).await;
     }
 }
 
@@ -66,7 +83,7 @@ where
 /// Injectable spent-check hook for tests. Uses the same poll timing as [`run_poll_loop`]
 /// because the checker is `FnMut` and cannot be re-entered from a poll attempt closure.
 pub(crate) async fn wait_until_coins_spent_with_check<F, Fut>(
-    mut is_spent: F,
+    is_spent: F,
     coin_ids: &[Bytes32],
     config: CoinSpentVerifyConfig,
 ) -> SignerResult<()>
@@ -74,20 +91,7 @@ where
     F: FnMut(Bytes32) -> Fut,
     Fut: std::future::Future<Output = SignerResult<bool>>,
 {
-    if coin_ids.is_empty() {
-        return Ok(());
-    }
-    let poll = config.poll_config();
-    let started = std::time::Instant::now();
-    loop {
-        if all_coins_spent(coin_ids, &mut is_spent).await? {
-            return Ok(());
-        }
-        if started.elapsed() >= poll.timeout {
-            return Err(SignerError::CombineInputVerifyTimeout);
-        }
-        tokio::time::sleep(poll.interval).await;
-    }
+    wait_until_coins_spent_with_poll(is_spent, coin_ids, config.poll_config()).await
 }
 
 /// Wait until coins spent.
@@ -147,12 +151,12 @@ mod tests {
     #[tokio::test]
     async fn wait_until_coins_spent_times_out_when_input_stays_unspent() {
         let coin_id = Bytes32::new([0x03; 32]);
-        let err = wait_until_coins_spent_with_check(
+        let err = wait_until_coins_spent_with_poll(
             |_| async { Ok(false) },
             std::slice::from_ref(&coin_id),
-            CoinSpentVerifyConfig {
-                timeout_seconds: 0,
-                poll_seconds: 0,
+            PollConfig {
+                timeout: Duration::from_millis(10),
+                interval: Duration::from_millis(1),
             },
         )
         .await

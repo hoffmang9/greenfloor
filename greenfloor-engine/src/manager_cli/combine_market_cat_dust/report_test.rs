@@ -2,61 +2,20 @@ use super::coinset_context::{load_execution_signer, resolve_combine_coinset_cont
 use super::report::{
     finalize_job_report, plan_dust_for_scan, preview_job_report, vault_signer_ready, CombineRunMode,
 };
-use super::test_support::sim_dust_scan_result;
+use super::sim_harness::sim_dust_scan_result;
 use super::{run_combine_market_cat_dust, CombineExecutionFlags, CombineMarketCatDustRequest};
 use crate::coinset::CoinSpentVerifyConfig;
 use crate::config::{load_program_config, parse_program_config, read_program_yaml};
 use crate::manager_cli::combine_market_cat_dust::jobs::CatDustJob;
-use crate::manager_cli::test_support::{pop_json, ManagerContextBuilder};
+use crate::manager_cli::test_support::{
+    pop_json, write_combine_test_configs, ManagerContextBuilder,
+};
 use crate::minimal_program_template::{materialize_minimal_program_text, MinimalProgramParams};
 use crate::test_support::simulator::harness::fetch_cat_from_sim_by_id;
 use crate::vault::members::hex_to_bytes32;
 use serde_json::json;
 
 const RECEIVE_ADDRESS: &str = "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h";
-
-const MINIMAL_PROGRAM_SIGNER_APPEND: &str =
-    include_str!("../../../../tests/fixtures/data/minimal_program_signer_append.yaml");
-
-fn write_combine_test_configs(dir: &std::path::Path, cat_asset_id: &str, with_signer: bool) {
-    let mut program_text = materialize_minimal_program_text(MinimalProgramParams {
-        home_dir: dir,
-        ..Default::default()
-    });
-    if with_signer {
-        program_text.push('\n');
-        program_text
-            .push_str(&MINIMAL_PROGRAM_SIGNER_APPEND.replace("__LAUNCHER_ID__", &"aa".repeat(32)));
-    }
-    std::fs::write(dir.join("program.yaml"), program_text).expect("write program");
-    std::fs::write(
-        dir.join("markets.yaml"),
-        format!(
-            r#"markets:
-  - id: dust_m
-    enabled: true
-    base_asset: "{cat_asset_id}"
-    base_symbol: DUST
-    quote_asset: xch
-    quote_asset_type: unstable
-    signer_key_id: key-main-1
-    receive_address: {RECEIVE_ADDRESS}
-    mode: sell_only
-    inventory:
-      low_watermark_base_units: 100
-    pricing:
-      min_price_quote_per_base: 0.0031
-      max_price_quote_per_base: 0.0038
-"#
-        ),
-    )
-    .expect("write markets");
-    std::fs::write(
-        dir.join("cats.yaml"),
-        format!("cats:\n  - base_symbol: DUST\n    asset_id: \"{cat_asset_id}\"\n"),
-    )
-    .expect("write cats");
-}
 
 fn sample_job(cat_asset_id: &str) -> CatDustJob {
     CatDustJob {

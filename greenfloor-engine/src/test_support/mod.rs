@@ -1,4 +1,6 @@
 #[cfg(test)]
+pub mod env_guard;
+#[cfg(test)]
 mod export_fixtures_test;
 #[cfg(test)]
 pub mod golden;

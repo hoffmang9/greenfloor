@@ -125,5 +125,4 @@ pub async fn run_offers_cancel_command(
 }
 
 #[cfg(test)]
-#[path = "offers_test.rs"]
-mod offers_test;
+mod tests;

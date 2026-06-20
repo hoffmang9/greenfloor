@@ -36,11 +36,13 @@ pub async fn run_kms_public_key_compressed_hex(args: KmsPublicKeyArgs) -> Signer
 mod tests {
     use super::*;
     use crate::error::SignerError;
+    use crate::test_support::env_guard::EnvRestoreGuard;
     use serde_json::{json, Value};
 
     #[tokio::test]
     async fn kms_public_key_emits_json_shape_in_process() {
-        std::env::set_var("GREENFLOOR_TEST_KMS_PUBLIC_KEY_COMPRESSED_HEX", "02abc123");
+        let _env =
+            EnvRestoreGuard::set(&[("GREENFLOOR_TEST_KMS_PUBLIC_KEY_COMPRESSED_HEX", "02abc123")]);
         let hex = kms::get_public_key_compressed_hex(
             "arn:aws:kms:us-east-1:123456789012:key/demo",
             "us-east-1",
@@ -54,12 +56,11 @@ mod tests {
                 .and_then(Value::as_str),
             Some("02abc123")
         );
-        std::env::remove_var("GREENFLOOR_TEST_KMS_PUBLIC_KEY_COMPRESSED_HEX");
     }
 
     #[tokio::test]
     async fn kms_public_key_fast_fail_reports_credentials_error() {
-        std::env::set_var("GREENFLOOR_KMS_TEST_MODE", "fast_fail");
+        let _env = EnvRestoreGuard::set(&[("GREENFLOOR_KMS_TEST_MODE", "fast_fail")]);
         let err = kms::get_public_key_compressed_hex(
             "arn:aws:kms:us-east-1:123456789012:key/demo",
             "us-east-1",
@@ -71,15 +72,14 @@ mod tests {
             err.to_string().to_ascii_lowercase().contains("credentials"),
             "unexpected kms failure: {err}"
         );
-        std::env::remove_var("GREENFLOOR_KMS_TEST_MODE");
     }
 
     #[tokio::test]
     async fn run_kms_public_key_command_uses_stubbed_hex() {
-        std::env::set_var(
+        let _env = EnvRestoreGuard::set(&[(
             "GREENFLOOR_TEST_KMS_PUBLIC_KEY_COMPRESSED_HEX",
             "02deadbeef",
-        );
+        )]);
         run_kms_public_key_compressed_hex(KmsPublicKeyArgs {
             key_id: "arn:aws:kms:us-east-1:123456789012:key/demo".to_string(),
             region: "us-east-1".to_string(),
@@ -87,6 +87,5 @@ mod tests {
         })
         .await
         .expect("kms command");
-        std::env::remove_var("GREENFLOOR_TEST_KMS_PUBLIC_KEY_COMPRESSED_HEX");
     }
 }
