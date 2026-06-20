@@ -45,12 +45,12 @@ Many repos contain more than one test stack. When multiple frameworks are presen
 
 Use the project's configured threshold when one exists (for example in coverage config or CI). Otherwise apply these defaults consistently:
 
-| Tier | Line coverage | Treatment |
-|------|---------------|-----------|
-| **Uncovered** | Not in report / 0% | List in "Uncovered files"; highest priority when risk is high |
-| **Low** | Below 50% | List in "Low-coverage files"; prioritize in recommendations |
-| **Moderate** | 50–79% | Mention in summary counts; include in recommendations only when risk is high |
-| **Acceptable** | 80% and above | Omit from gap tables unless a specific function or branch is uncovered |
+| Tier           | Line coverage      | Treatment                                                                    |
+| -------------- | ------------------ | ---------------------------------------------------------------------------- |
+| **Uncovered**  | Not in report / 0% | List in "Uncovered files"; highest priority when risk is high                |
+| **Low**        | Below 50%          | List in "Low-coverage files"; prioritize in recommendations                  |
+| **Moderate**   | 50–79%             | Mention in summary counts; include in recommendations only when risk is high |
+| **Acceptable** | 80% and above      | Omit from gap tables unless a specific function or branch is uncovered       |
 
 A project is **COMPLETE** only when all in-scope source files are at or above the acceptable threshold (default 80%).
 
@@ -119,35 +119,35 @@ A path prefixed with `@` (for example `@auth.ts`) refers to a single file:
 
 ### Summary
 
-| Category              | Count |
-|-----------------------|-------|
-| Uncovered files       | 4     |
-| Low-coverage files    | 6     |
-| Moderate-coverage     | 3     |
-| Uncovered functions   | 12    |
+| Category            | Count |
+| ------------------- | ----- |
+| Uncovered files     | 4     |
+| Low-coverage files  | 6     |
+| Moderate-coverage   | 3     |
+| Uncovered functions | 12    |
 
 ---
 
 ### Uncovered files (no tests)
 
-| File                          | Lines | Risk   | Complexity | What it does                          |
-|-------------------------------|-------|--------|------------|---------------------------------------|
-| `src/services/billing.ts`     | 142   | high   | moderate   | Stripe billing lifecycle management   |
-| `src/utils/retry.ts`          | 38    | medium | simple     | Generic retry with exponential backoff|
+| File                      | Lines | Risk   | Complexity | What it does                           |
+| ------------------------- | ----- | ------ | ---------- | -------------------------------------- |
+| `src/services/billing.ts` | 142   | high   | moderate   | Stripe billing lifecycle management    |
+| `src/utils/retry.ts`      | 38    | medium | simple     | Generic retry with exponential backoff |
 
 ### Low-coverage files (below 50%)
 
-| File                          | Coverage | Uncovered functions              | Risk   | Complexity |
-|-------------------------------|----------|----------------------------------|--------|------------|
-| `src/handlers/auth.ts`        | 32%      | `refreshToken`, `revokeSession`  | high   | moderate   |
-| `src/repos/order.ts`          | 45%      | `bulkUpdate`, `archiveOld`       | medium | complex    |
+| File                   | Coverage | Uncovered functions             | Risk   | Complexity |
+| ---------------------- | -------- | ------------------------------- | ------ | ---------- |
+| `src/handlers/auth.ts` | 32%      | `refreshToken`, `revokeSession` | high   | moderate   |
+| `src/repos/order.ts`   | 45%      | `bulkUpdate`, `archiveOld`      | medium | complex    |
 
 ### Key uncovered branches
 
-| Location                          | Branch description                       | Risk   |
-|-----------------------------------|------------------------------------------|--------|
-| `src/services/user.ts:52-58`      | Error path when email already exists     | high   |
-| `src/handlers/auth.ts:91-95`      | Token expiry edge case                   | medium |
+| Location                     | Branch description                   | Risk   |
+| ---------------------------- | ------------------------------------ | ------ |
+| `src/services/user.ts:52-58` | Error path when email already exists | high   |
+| `src/handlers/auth.ts:91-95` | Token expiry edge case               | medium |
 
 ---
 
@@ -185,6 +185,7 @@ Would you like me to install and configure it?
 All in-scope files are at or above the acceptable threshold. No significant uncovered functions or branches detected.
 
 Minor gaps (cosmetic):
+
 - `src/config/defaults.ts:12` — unreachable fallback branch
 - `src/index.ts:3-5` — top-level bootstrap (not practically testable)
 ```

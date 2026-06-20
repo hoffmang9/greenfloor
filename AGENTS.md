@@ -92,10 +92,10 @@ Severity tags:
 Project skills live under `.cursor/skills/`. Invoke by name (for example `/coverage-review`) or
 when the skill description matches the task. Read the linked `SKILL.md` before running a skill.
 
-| Skill | Invoke | Purpose |
-| ----- | ------ | ------- |
-| [coverage-review](.cursor/skills/coverage-review/SKILL.md) | `/coverage-review` | Analyse test coverage gaps and report uncovered code before making changes |
-| [check-commit-signature](.cursor/skills/check-commit-signature/SKILL.md) | — | Check whether a git commit is signed (GPG or SSH) without requiring local trust configuration |
+| Skill                                                                    | Invoke             | Purpose                                                                                       |
+| ------------------------------------------------------------------------ | ------------------ | --------------------------------------------------------------------------------------------- |
+| [coverage-review](.cursor/skills/coverage-review/SKILL.md)               | `/coverage-review` | Analyse test coverage gaps and report uncovered code before making changes                    |
+| [check-commit-signature](.cursor/skills/check-commit-signature/SKILL.md) | —                  | Check whether a git commit is signed (GPG or SSH) without requiring local trust configuration |
 
 ## Before You Commit
 
