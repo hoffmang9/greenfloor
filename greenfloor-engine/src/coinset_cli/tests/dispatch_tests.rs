@@ -257,6 +257,7 @@ async fn push_tx_emits_success_payload() {
 
 #[tokio::test]
 async fn run_coinset_command_dispatches_subcommands() {
+    let resolved = resolve_direct_client("mainnet", None);
     let resolve_args = CoinsetCliArgs {
         command: CoinsetCommands::ResolveClient(CoinsetResolveClientArgs {
             client: CoinsetClientArgs {
@@ -269,9 +270,10 @@ async fn run_coinset_command_dispatches_subcommands() {
     run_coinset_command(resolve_args)
         .await
         .expect("resolve-client");
+    assert_eq!(resolved.network, "mainnet");
 
     let mut server = mockito::Server::new_async().await;
-    let _mock = server
+    let mock = server
         .mock("POST", "/get_all_mempool_tx_ids")
         .with_status(200)
         .with_body(r#"{"success":true,"mempool_tx_ids":[]}"#)
@@ -289,10 +291,12 @@ async fn run_coinset_command_dispatches_subcommands() {
         }),
     };
     run_coinset_command(post_args).await.expect("post");
+    mock.assert();
 
     let parent = Bytes32::new([0x11; 32]);
     let puzzle_hash = Bytes32::new([0x22; 32]);
     let amount = 42_u64;
+    let expected_coin_id = hex::encode(Coin::new(parent, puzzle_hash, amount).coin_id());
     let record = json!({
         "coin": {
             "parent_coin_info": format!("0x{}", hex::encode(parent)),
@@ -300,6 +304,7 @@ async fn run_coinset_command_dispatches_subcommands() {
             "amount": amount,
         }
     });
+    assert_eq!(coin_id_from_record(&record), expected_coin_id);
     let coin_id_args = CoinsetCliArgs {
         command: CoinsetCommands::CoinIdFromRecord(CoinsetCoinIdFromRecordArgs {
             record_json: record.to_string(),

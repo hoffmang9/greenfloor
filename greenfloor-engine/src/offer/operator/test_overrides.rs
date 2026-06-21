@@ -1,4 +1,6 @@
 //! Test-only overrides for offer operator dry-run and preview paths.
+//!
+//! Canonical pattern: see [`crate::test_support::injections`].
 
 use serde::Deserialize;
 

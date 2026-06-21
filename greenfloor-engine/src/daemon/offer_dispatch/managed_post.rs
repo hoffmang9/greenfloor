@@ -1,74 +1,111 @@
+//! Managed offer posts for daemon strategy dispatch.
+//!
+//! Two entry points share [`execute_managed_post`]:
+//! - [`post_managed_planned_action`] — borrowed [`ManagedPostContext`] for sequential dispatch.
+//! - [`post_managed_planned_action_owned`] — `Arc<ManagedPostContext>` plus owned market/action
+//!   for `tokio::spawn` workers that require `'static` futures.
+
+use std::sync::Arc;
+
 use crate::config::{ManagerProgramConfig, MarketConfig};
 use crate::cycle::PlannedAction;
 use crate::daemon::cycle_paths::DaemonCyclePaths;
+use crate::daemon::market_context::MarketCycleContext;
 use crate::error::SignerResult;
 use crate::offer::operator::{
-    build_and_post_offer, BuildAndPostOfferRequest, BuildAndPostRunOptions,
+    build_and_post_offer, BuildAndPostOfferRequestParts, BuildAndPostRunOptions,
     BuildAndPostVenueOptions,
 };
 use crate::offer::request::normalize_offer_side;
 
-use crate::async_boundary::ManagedOfferPostFuture;
+use crate::async_boundary::{ManagedOfferPostFuture, OwnedManagedOfferPostFuture};
 
 #[cfg(test)]
 use crate::daemon::dispatch_test_controls::DaemonDispatchTestInjections;
 
-pub fn post_managed_planned_action<'a>(
-    program: &'a ManagerProgramConfig,
-    paths: &'a DaemonCyclePaths,
-    market: &'a MarketConfig,
-    action: &'a PlannedAction,
-    #[cfg(test)] dispatch_injections: &'a DaemonDispatchTestInjections,
-) -> ManagedOfferPostFuture<'a> {
-    Box::pin(post_managed_planned_action_async(
-        program,
-        paths,
-        market,
-        action,
-        #[cfg(test)]
-        dispatch_injections,
-    ))
+/// Owned dispatch inputs for managed offer posts (sequential and parallel workers).
+#[derive(Debug, Clone)]
+pub(super) struct ManagedPostContext {
+    pub program: ManagerProgramConfig,
+    pub paths: DaemonCyclePaths,
+    #[cfg(test)]
+    pub dispatch_injections: DaemonDispatchTestInjections,
 }
 
-async fn post_managed_planned_action_async(
-    program: &ManagerProgramConfig,
-    paths: &DaemonCyclePaths,
+impl ManagedPostContext {
+    pub(super) fn from_market_cycle(ctx: &MarketCycleContext<'_>) -> Self {
+        Self {
+            program: ctx.resources.program().clone(),
+            paths: ctx.resources.paths.clone(),
+            #[cfg(test)]
+            dispatch_injections: ctx.dispatch.test_controls.offer_dispatch.clone(),
+        }
+    }
+}
+
+fn daemon_managed_post_request(
+    post_ctx: &ManagedPostContext,
     market: &MarketConfig,
     action: &PlannedAction,
-    #[cfg(test)] dispatch_injections: &DaemonDispatchTestInjections,
+) -> SignerResult<crate::offer::operator::BuildAndPostOfferRequest> {
+    Ok(
+        crate::offer::operator::BuildAndPostOfferRequest::from_parts(
+            BuildAndPostOfferRequestParts {
+                program_path: post_ctx.paths.program_path.clone(),
+                markets_path: post_ctx.paths.markets_path.clone(),
+                testnet_markets_path: post_ctx.paths.testnet_markets_path.clone(),
+                network: post_ctx.program.network.clone(),
+                market_id: Some(market.market_id.clone()),
+                pair: None,
+                size_base_units: crate::config::parse_non_negative_u64(action.size, "action.size")?,
+                repeat: 1,
+                publish_venue: Some(post_ctx.program.offer_publish_venue.clone()),
+                dexie_base_url: Some(post_ctx.program.dexie_api_base.clone()),
+                splash_base_url: Some(post_ctx.program.splash_api_base.clone()),
+                venue: BuildAndPostVenueOptions {
+                    drop_only: true,
+                    claim_rewards: false,
+                },
+                run: BuildAndPostRunOptions {
+                    dry_run: post_ctx.program.runtime_dry_run,
+                    persist_results: true,
+                },
+                action_side: Some(normalize_offer_side(&action.side).to_string()),
+            },
+        ),
+    )
+}
+
+async fn execute_managed_post(
+    post_ctx: &ManagedPostContext,
+    market: &MarketConfig,
+    action: &PlannedAction,
 ) -> SignerResult<bool> {
     #[cfg(test)]
-    if let Some(result) = super::test_overrides::managed_post_result(dispatch_injections) {
+    if let Some(result) = super::test_overrides::managed_post_result(&post_ctx.dispatch_injections)
+    {
         return result;
     }
     if action.size <= 0 {
         return Ok(false);
     }
-    let side = normalize_offer_side(&action.side).to_string();
-    let response = build_and_post_offer(BuildAndPostOfferRequest {
-        program_path: paths.program_path.clone(),
-        markets_path: paths.markets_path.clone(),
-        testnet_markets_path: paths.testnet_markets_path.clone(),
-        network: program.network.clone(),
-        market_id: Some(market.market_id.clone()),
-        pair: None,
-        size_base_units: crate::config::parse_non_negative_u64(action.size, "action.size")?,
-        repeat: 1,
-        publish_venue: Some(program.offer_publish_venue.clone()),
-        dexie_base_url: Some(program.dexie_api_base.clone()),
-        splash_base_url: Some(program.splash_api_base.clone()),
-        venue: BuildAndPostVenueOptions {
-            drop_only: true,
-            claim_rewards: false,
-        },
-        run: BuildAndPostRunOptions {
-            dry_run: program.runtime_dry_run,
-            persist_results: true,
-        },
-        action_side: Some(side),
-        #[cfg(test)]
-        test_overrides: crate::offer::operator::BuildOfferTestOverrides::default(),
-    })
-    .await?;
+    let response =
+        build_and_post_offer(daemon_managed_post_request(post_ctx, market, action)?).await?;
     Ok(response.exit_code == 0)
+}
+
+pub fn post_managed_planned_action<'a>(
+    post_ctx: &'a ManagedPostContext,
+    market: &'a MarketConfig,
+    action: &'a PlannedAction,
+) -> ManagedOfferPostFuture<'a> {
+    Box::pin(execute_managed_post(post_ctx, market, action))
+}
+
+pub fn post_managed_planned_action_owned(
+    post_ctx: Arc<ManagedPostContext>,
+    market: MarketConfig,
+    action: PlannedAction,
+) -> OwnedManagedOfferPostFuture {
+    Box::pin(async move { execute_managed_post(&post_ctx, &market, &action).await })
 }
