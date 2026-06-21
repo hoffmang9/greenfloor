@@ -7,10 +7,9 @@ use tracing::Level;
 use crate::config::{MarketConfig, SignerConfig};
 use crate::cycle::{
     parallel_max_workers, plan_parallel_managed_dispatch, reservation_release_status,
-    PlannedAction, StrategyActionSellCountInput,
+    ParallelReservationContext, PlannedAction, SpendableAssetProfile, StrategyActionSellCountInput,
 };
-use crate::daemon::dispatch_test_controls::DaemonDispatchOverrides;
-use crate::daemon::market_context::{DaemonCycleResources, MarketCycleContext};
+use crate::daemon::market_context::MarketCycleContext;
 use crate::error::{SignerError, SignerResult};
 use crate::offer::request::normalize_offer_side;
 use crate::operator_log::{LogContext, PARALLEL_OFFER_DISPATCH};
@@ -39,31 +38,48 @@ struct ParallelDispatchSetup {
     skip_items: Vec<StrategyActionSellCountInput>,
 }
 
-async fn prepare_parallel_dispatch(
+async fn load_spendable_profiles_from_coinset(
+    ctx: &MarketCycleContext<'_>,
+    market: &MarketConfig,
+    reservation_ctx: &ParallelReservationContext,
+) -> SignerResult<BTreeMap<String, SpendableAssetProfile>> {
+    let asset_ids = parallel_reservation_asset_ids(reservation_ctx);
+    coinset_spendable_profiles_by_asset(&ctx.resources.network, &market.receive_address, &asset_ids)
+        .await
+}
+
+async fn resolve_parallel_spendable_profiles(
+    ctx: &MarketCycleContext<'_>,
+    market: &MarketConfig,
+    reservation_ctx: &ParallelReservationContext,
+) -> SignerResult<BTreeMap<String, SpendableAssetProfile>> {
+    #[cfg(test)]
+    if let Some(profiles) = &ctx.dispatch.test_controls.offer_dispatch.spendable_profiles {
+        return Ok(profiles.clone());
+    }
+    load_spendable_profiles_from_coinset(ctx, market, reservation_ctx).await
+}
+
+fn prepare_parallel_dispatch(
     store: &SqliteStore,
-    db_path: &std::path::Path,
-    resources: &DaemonCycleResources,
+    ctx: &MarketCycleContext<'_>,
     signer_config: &SignerConfig,
     market: &MarketConfig,
     expanded: &[PlannedAction],
+    reservation_ctx: &ParallelReservationContext,
+    spendable_profiles: &BTreeMap<String, SpendableAssetProfile>,
 ) -> SignerResult<ParallelDispatchSetup> {
+    let resources = ctx.resources;
     let program = resources.program();
-    let reservation_ctx =
-        parallel_reservation_context(signer_config, &program.network, market, 0).await?;
-    let asset_ids = parallel_reservation_asset_ids(&reservation_ctx);
-    let spendable_profiles = coinset_spendable_profiles_by_asset(
-        &resources.network,
-        &market.receive_address,
-        &asset_ids,
-    )
-    .await?;
-    let batch_plan =
-        plan_parallel_managed_dispatch(expanded, &reservation_ctx, &spendable_profiles)?;
+    let batch_plan = plan_parallel_managed_dispatch(expanded, reservation_ctx, spendable_profiles)?;
     let ttl = crate::config::u64_to_i64(
         program.runtime_reservation_ttl_seconds,
         "runtime.reservation_ttl_seconds",
     )?;
-    let coordinator = Arc::new(OfferReservationCoordinator::new(db_path, Some(ttl))?);
+    let coordinator = Arc::new(OfferReservationCoordinator::new(
+        &ctx.dispatch.db_path,
+        Some(ttl),
+    )?);
     let _ = coordinator.expire_stale();
     let wallet_id = reservation_wallet_id(signer_config);
 
@@ -116,10 +132,9 @@ async fn prepare_parallel_dispatch(
 }
 
 async fn run_parallel_post_jobs(
-    resources: &DaemonCycleResources,
+    ctx: &MarketCycleContext<'_>,
     market: &MarketConfig,
     setup: ParallelDispatchSetup,
-    dispatch_overrides: DaemonDispatchOverrides,
 ) -> SignerResult<(u64, Vec<StrategyActionSellCountInput>)> {
     let ParallelDispatchSetup {
         coordinator,
@@ -128,6 +143,10 @@ async fn run_parallel_post_jobs(
         max_workers,
         mut skip_items,
     } = setup;
+
+    let resources = ctx.resources;
+    #[cfg(test)]
+    let dispatch_injections = ctx.dispatch.test_controls.offer_dispatch.clone();
 
     let semaphore = Arc::new(tokio::sync::Semaphore::new(max_workers));
     let mut handles = Vec::with_capacity(jobs.len());
@@ -144,7 +163,8 @@ async fn run_parallel_post_jobs(
         let paths = resources.paths.clone();
         let market_id = market.market_id.clone();
         let wallet_id = wallet_id.clone();
-        let dispatch_overrides = dispatch_overrides.clone();
+        #[cfg(test)]
+        let dispatch_injections = dispatch_injections.clone();
 
         handles.push(tokio::spawn(async move {
             let _permit = permit;
@@ -162,7 +182,8 @@ async fn run_parallel_post_jobs(
                         &paths,
                         &market,
                         &job.action,
-                        &dispatch_overrides,
+                        #[cfg(test)]
+                        &dispatch_injections,
                     )
                     .await?;
                     let release_status = reservation_release_status(post_result);
@@ -207,20 +228,29 @@ pub async fn execute_actions_parallel(
     market: &MarketConfig,
     expanded: &[PlannedAction],
 ) -> SignerResult<OfferDispatchOutput> {
-    let dispatch_overrides = &ctx.dispatch.test_controls.offer_dispatch;
-    if let Some(result) = super::test_overrides::parallel_dispatch_result(dispatch_overrides) {
+    #[cfg(test)]
+    if let Some(result) =
+        super::test_overrides::parallel_dispatch_result(&ctx.dispatch.test_controls.offer_dispatch)
+    {
         return result;
     }
 
+    let reservation_ctx =
+        parallel_reservation_context(signer_config, &ctx.resources.program().network, market, 0)
+            .await?;
+
+    let spendable_profiles =
+        resolve_parallel_spendable_profiles(ctx, market, &reservation_ctx).await?;
+
     let setup = prepare_parallel_dispatch(
         store,
-        &ctx.dispatch.db_path,
-        ctx.resources,
+        ctx,
         signer_config,
         market,
         expanded,
-    )
-    .await?;
+        &reservation_ctx,
+        &spendable_profiles,
+    )?;
 
     if setup.jobs.is_empty() {
         return Ok(OfferDispatchOutput {
@@ -231,8 +261,7 @@ pub async fn execute_actions_parallel(
         });
     }
 
-    let (executed, action_items) =
-        run_parallel_post_jobs(ctx.resources, market, setup, dispatch_overrides.clone()).await?;
+    let (executed, action_items) = run_parallel_post_jobs(ctx, market, setup).await?;
 
     Ok(OfferDispatchOutput {
         executed_count: executed,

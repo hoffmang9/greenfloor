@@ -1,7 +1,9 @@
+use crate::coin_ops::execution::CoinOpTestOverrides;
 use crate::coin_ops::{coin_op_should_stop, evaluate_coin_split_gate, SpendableCoin};
 
 use super::combine::{run_coin_combine, CoinCombineBehavior, CoinCombineRequest};
 use super::context::{enforce_split_lockup_guardrail, spendable_coins_for_gate};
+use super::split::run_coin_split_with_test_overrides;
 use super::split::{run_coin_split, CoinSplitBehavior, CoinSplitGating, CoinSplitRequest};
 use super::until_ready::UntilReadyWaitMode;
 use crate::manager_cli::test_support::ManagerContextBuilder;
@@ -275,4 +277,99 @@ async fn coins_list_requires_signer_backend() {
         payload.get("error"),
         Some(&serde_json::json!("coin_list_requires_signer_backend"))
     );
+}
+
+fn write_split_test_markets(path: &std::path::Path) {
+    std::fs::write(
+        path,
+        r#"markets:
+  - id: m1
+    enabled: true
+    base_asset: "xch"
+    base_symbol: "XCH"
+    quote_asset: "xch"
+    quote_asset_type: "stable"
+    signer_key_id: "key-main-1"
+    receive_address: "xch1a0t57qn6uhe7tzjlxlhwy2qgmuxvvft8gnfzmg5detg0q9f3yc3s2apz0h"
+    mode: "sell_only"
+    inventory:
+      low_watermark_base_units: 10
+      bucket_counts:
+        1: 0
+    ladders:
+      sell:
+        - size_base_units: 100
+          target_count: 2
+          split_buffer_count: 0
+          combine_when_excess_factor: 2.0
+"#,
+    )
+    .expect("write markets");
+}
+
+#[tokio::test]
+async fn coin_split_executes_with_test_overrides() {
+    use crate::coin_ops::SpendableCoin;
+    use crate::manager_cli::test_support::{pop_json, ManagerContextBuilder};
+    use crate::minimal_program_template::{
+        write_minimal_program_with_signer, MinimalProgramParams,
+    };
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let program = dir.path().join("program.yaml");
+    let markets = dir.path().join("markets.yaml");
+    write_minimal_program_with_signer(
+        &program,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
+    write_split_test_markets(&markets);
+    let coin_id = "a".repeat(64);
+    let harness = ManagerContextBuilder::new(program, markets)
+        .scratch_dir(dir.path().to_path_buf())
+        .build_capturing();
+    let code = run_coin_split_with_test_overrides(
+        CoinSplitRequest {
+            mgr: &harness.ctx,
+            network: "mainnet",
+            market_id: Some("m1"),
+            pair: None,
+            coin_ids: std::slice::from_ref(&coin_id),
+            amount_per_coin: 100,
+            number_of_coins: 2,
+            behavior: CoinSplitBehavior {
+                wait: UntilReadyWaitMode {
+                    until_ready: false,
+                    no_wait: true,
+                },
+                gating: CoinSplitGating {
+                    allow_lock_all_spendable: true,
+                    force_split_when_ready: true,
+                },
+            },
+            size_base_units: None,
+            max_iterations: 1,
+        },
+        CoinOpTestOverrides {
+            wallet_coins: Some(vec![SpendableCoin {
+                id: coin_id.clone(),
+                amount: 1_000_000,
+            }]),
+            mixed_split_operation_id: Some("split-op-test".to_string()),
+        },
+    )
+    .await
+    .expect("coin-split");
+    assert_eq!(code, 0);
+    let payload = pop_json(&harness.captured);
+    assert_eq!(payload.get("op"), Some(&serde_json::json!("coin-split")));
+    let operations = payload
+        .get("operations")
+        .and_then(|value| value.as_array())
+        .expect("operations");
+    assert!(operations.iter().any(|row| {
+        row.get("signature_request_id") == Some(&serde_json::json!("split-op-test"))
+    }));
 }

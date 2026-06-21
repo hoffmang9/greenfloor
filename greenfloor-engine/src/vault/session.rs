@@ -57,3 +57,73 @@ pub fn build_vault_session(
 pub async fn resolve_vault_spend_context(config: SignerConfig) -> SignerResult<VaultSpendContext> {
     Ok(resolve_vault_session(config).await?.spend)
 }
+
+#[cfg(test)]
+mod tests {
+    use chia_protocol::Bytes32;
+
+    use crate::config::load_program_bundle;
+    use crate::kms::{KmsOverrides, KmsRuntime};
+    use crate::test_support::minimal_program::{
+        write_minimal_program_with_signer, MinimalProgramParams,
+    };
+
+    use super::{build_vault_session, resolve_vault_session};
+
+    fn custody_kms_hex(config: &crate::config::SignerConfig) -> String {
+        config.vault.custody_keys[0].public_key_hex.clone()
+    }
+
+    #[tokio::test]
+    async fn resolve_vault_session_fetches_kms_public_key_when_missing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program_path = dir.path().join("program.yaml");
+        write_minimal_program_with_signer(
+            &program_path,
+            MinimalProgramParams {
+                home_dir: dir.path(),
+                ..Default::default()
+            },
+        );
+        let mut config = load_program_bundle(&program_path)
+            .expect("program bundle")
+            .signer;
+        let kms_hex = custody_kms_hex(&config);
+        config.kms_public_key_hex = None;
+        config.kms_runtime = KmsRuntime::test(KmsOverrides {
+            public_key_compressed_hex: Some(kms_hex.clone()),
+            fast_fail: false,
+        });
+
+        let session = resolve_vault_session(config)
+            .await
+            .expect("resolve vault session");
+        assert_eq!(
+            session.display.kms_public_key_hex,
+            crate::kms::normalize_hex(&kms_hex)
+        );
+    }
+
+    #[test]
+    fn build_vault_session_uses_preloaded_kms_hex() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let program_path = dir.path().join("program.yaml");
+        write_minimal_program_with_signer(
+            &program_path,
+            MinimalProgramParams {
+                home_dir: dir.path(),
+                ..Default::default()
+            },
+        );
+        let config = load_program_bundle(&program_path)
+            .expect("program bundle")
+            .signer;
+        let kms_hex = custody_kms_hex(&config);
+        let session = build_vault_session(&config.vault, &kms_hex, &config).expect("session");
+        assert_eq!(
+            session.display.kms_public_key_hex,
+            crate::kms::normalize_hex(&kms_hex)
+        );
+        assert_ne!(session.spend.launcher_id, Bytes32::default());
+    }
+}

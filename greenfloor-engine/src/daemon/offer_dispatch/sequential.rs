@@ -16,14 +16,20 @@ pub async fn execute_actions_sequential(
 ) -> SignerResult<OfferDispatchOutput> {
     let program = ctx.resources.program();
     let paths = &ctx.resources.paths;
-    let dispatch_overrides = &ctx.dispatch.test_controls.offer_dispatch;
     let mut executed = 0_u64;
     let mut action_items = Vec::new();
 
     for action in expanded {
         let side = normalize_offer_side(&action.side).to_string();
-        let counts_as_executed =
-            post_managed_planned_action(program, paths, market, action, dispatch_overrides).await?;
+        let counts_as_executed = post_managed_planned_action(
+            program,
+            paths,
+            market,
+            action,
+            #[cfg(test)]
+            &ctx.dispatch.test_controls.offer_dispatch,
+        )
+        .await?;
         if counts_as_executed {
             executed += 1;
         }

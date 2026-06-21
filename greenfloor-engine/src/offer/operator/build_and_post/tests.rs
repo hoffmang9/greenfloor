@@ -13,6 +13,9 @@ use super::types::{build_and_post_exit_code, PostAttemptSuccess, PostFailure, Pu
 use crate::cli_util::{format_json, format_json_value};
 use crate::operator_log::OFFER_POST_FAILURE;
 use crate::storage::{state_db_path_for_home, SqliteStore};
+use crate::test_support::minimal_program::{
+    write_minimal_program_with_signer, MinimalProgramParams,
+};
 
 #[test]
 fn flush_post_batch_writes_failure_audit_event() {
@@ -244,22 +247,18 @@ fn post_failure_venue_result_marks_publish_failure() {
     assert_eq!(build_and_post_exit_code(1), 2);
 }
 
-fn write_dry_run_program(path: &Path, home_dir: &Path) {
-    crate::minimal_program_template::write_minimal_program_with_signer(
-        path,
-        crate::minimal_program_template::MinimalProgramParams {
-            home_dir,
-            ..Default::default()
-        },
-    );
-}
-
 #[tokio::test]
 async fn dry_run_returns_preview_payload_in_process() {
     let dir = tempfile::tempdir().expect("tempdir");
     let program = dir.path().join("program.yaml");
     let markets = dir.path().join("markets.yaml");
-    write_dry_run_program(&program, dir.path());
+    write_minimal_program_with_signer(
+        &program,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            ..Default::default()
+        },
+    );
     std::fs::write(
         &markets,
         include_str!("../../../../tests/fixtures/data/build_offer_markets.yaml"),

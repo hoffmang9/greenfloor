@@ -1,5 +1,6 @@
 use super::{run_cats_add, run_cats_delete, run_cats_list, CatsAddRequest};
 use crate::manager_cli::test_support::{pop_json, ManagerContextBuilder};
+use crate::minimal_program_template::{write_minimal_program, MinimalProgramParams};
 use serde_json::json;
 
 fn cats_test_context(
@@ -231,4 +232,65 @@ async fn cats_delete_preflight_only_does_not_delete() {
             .map_or(0, std::vec::Vec::len),
         1
     );
+}
+
+#[tokio::test]
+async fn cats_add_resolves_metadata_from_dexie_lookup() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let program = dir.path().join("program.yaml");
+    let mut server = mockito::Server::new_async().await;
+    let cat_id = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    let _mock = server
+        .mock("GET", "/v1/swap/tokens")
+        .with_status(200)
+        .with_body(
+            json!([{
+                "assetId": cat_id,
+                "code": "DEXCAT",
+                "name": "Dexie CAT",
+            }])
+            .to_string(),
+        )
+        .create_async()
+        .await;
+    write_minimal_program(
+        &program,
+        MinimalProgramParams {
+            home_dir: dir.path(),
+            dexie_api_base: &server.url(),
+            ..Default::default()
+        },
+    );
+    let harness = ManagerContextBuilder::new(program, dir.path().join("unused-markets.yaml"))
+        .cats_config(dir.path().join("cats.yaml"))
+        .dexie_base_url(server.url())
+        .build_capturing();
+    let code = run_cats_add(CatsAddRequest {
+        ctx: &harness.ctx,
+        network: "mainnet",
+        cat_id: None,
+        ticker: Some("DEXCAT"),
+        name: None,
+        base_symbol: None,
+        ticker_id: None,
+        pool_id: None,
+        last_price_xch: None,
+        target_usd_per_unit: None,
+        use_dexie_lookup: true,
+        replace: false,
+    })
+    .await
+    .expect("cats-add dexie");
+    assert_eq!(code, 0);
+    let add_payload = pop_json(&harness.captured);
+    assert_eq!(add_payload.get("added"), Some(&json!(true)));
+    let payload = cats_list_payload(&harness.ctx, &harness.captured);
+    let row = payload
+        .get("cats")
+        .and_then(|v| v.as_array())
+        .and_then(|rows| rows.first())
+        .expect("catalog row");
+    assert_eq!(row.get("name"), Some(&json!("Dexie CAT")));
+    assert_eq!(row.get("base_symbol"), Some(&json!("DEXCAT")));
+    assert_eq!(row.get("asset_id"), Some(&json!(cat_id)));
 }

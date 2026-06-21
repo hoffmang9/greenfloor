@@ -1,8 +1,10 @@
 use crate::config::{MarketConfig, SignerConfig};
 use crate::error::SignerResult;
 use crate::offer::action::BuildOfferForActionResult;
-use crate::offer::operator::BuildOfferTestOverrides;
 use crate::offer::{build_signer_offer_for_action, BuildOfferForActionRequest};
+
+#[cfg(test)]
+use crate::offer::operator::BuildOfferTestOverrides;
 
 pub(super) async fn create_offer(
     signer_config: &SignerConfig,
@@ -10,8 +12,9 @@ pub(super) async fn create_offer(
     size_base_units: u64,
     quote_price: f64,
     action_side: &str,
-    test_overrides: &BuildOfferTestOverrides,
+    #[cfg(test)] test_overrides: &BuildOfferTestOverrides,
 ) -> SignerResult<BuildOfferForActionResult> {
+    #[cfg(test)]
     if let Some(offer_text) = test_overrides.stub_offer_text() {
         return Ok(BuildOfferForActionResult {
             offer_text: offer_text.to_string(),

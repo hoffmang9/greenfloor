@@ -3,11 +3,13 @@
 use crate::coin_ops::SpendableCoin;
 
 #[derive(Debug, Clone, Default)]
+#[cfg(test)]
 pub struct CoinOpTestOverrides {
     pub wallet_coins: Option<Vec<SpendableCoin>>,
     pub mixed_split_operation_id: Option<String>,
 }
 
+#[cfg(test)]
 impl CoinOpTestOverrides {
     pub(crate) fn wallet_coins_override(&self) -> Option<&[SpendableCoin]> {
         self.wallet_coins.as_deref()

@@ -25,7 +25,7 @@ pub struct PlannedActionInput {
     pub target_spread_bps: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SpendableAssetProfile {
     #[serde(default)]
     pub total: i64,

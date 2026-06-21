@@ -107,6 +107,11 @@ impl ManagerContextBuilder {
         self
     }
 
+    pub fn dexie_base_url(mut self, url: impl Into<String>) -> Self {
+        self.dexie_base_url = Some(url.into());
+        self
+    }
+
     pub fn testnet_markets(mut self, path: PathBuf) -> Self {
         self.testnet_markets_path = Some(path);
         self
