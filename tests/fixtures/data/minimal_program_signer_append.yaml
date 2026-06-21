@@ -10,5 +10,6 @@ vault:
     - public_key_hex: "020202020202020202020202020202020202020202020202020202020202020202"
       curve: SECP256R1
   recovery_keys:
+    # BLS12_381 G1 compressed key: 48 bytes (96 hex chars). Custody SECP256R1 above is 33 bytes (66 hex).
     - public_key_hex: "ab3cb61463a695fa094f7c30526c8097fb813a0c5fa67bab261a7cd354cb6363b2d726218135b25b814f94df4749fc58"
       curve: BLS12_381

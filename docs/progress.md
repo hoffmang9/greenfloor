@@ -16,6 +16,19 @@ Pre-Rust migration detail lives in git history and
 
 ## Milestones
 
+### 2026-06-21 — Test coverage gaps closed; test injection gated behind `cfg(test)` (#118)
+
+In-process harness tests for parallel offer dispatch, coinset CLI dispatch, Dexie cats
+lookup, coin-op split, build-offer CLI wiring, and vault session KMS resolution. Test
+override fields and branches stripped from release builds via `#[cfg(test)]` on coin-op,
+offer, and dispatch paths. CI/Cargo target-dir alignment shipped separately in #117.
+
+### 2026-06-21 — Cargo target dir aligned with CI rust cache (#117)
+
+`.cargo/config.toml` points `target-dir` at `greenfloor-engine/target`; Swatinem restores
+the directory Cargo writes. Scripts/e2e resolve the path via `cargo_target_directory()` in
+`binaries.py`. Lint and e2e workflows skip unnecessary `cargo-nextest` installs.
+
 ### 2026-06-19 — Project agent skills documented
 
 Added [`coverage-review`](../.cursor/skills/coverage-review/SKILL.md) — analyse test coverage
