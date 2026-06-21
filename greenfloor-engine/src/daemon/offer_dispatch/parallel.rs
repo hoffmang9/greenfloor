@@ -51,38 +51,39 @@ async fn load_spendable_profiles_from_coinset(
         .await
 }
 
-struct ParallelDispatchPrep<'a> {
-    store: &'a SqliteStore,
-    db_path: &'a std::path::Path,
-    resources: &'a DaemonCycleResources,
-    signer_config: &'a SignerConfig,
-    market: &'a MarketConfig,
-    expanded: &'a [PlannedAction],
-    reservation_ctx: &'a ParallelReservationContext,
-    spendable_profiles: BTreeMap<String, SpendableAssetProfile>,
+async fn resolve_parallel_spendable_profiles(
+    resources: &DaemonCycleResources,
+    market: &MarketConfig,
+    reservation_ctx: &ParallelReservationContext,
+    #[cfg(test)] injections: &DaemonDispatchTestInjections,
+) -> SignerResult<BTreeMap<String, SpendableAssetProfile>> {
+    #[cfg(test)]
+    if let Some(profiles) = &injections.spendable_profiles {
+        return Ok(profiles.clone());
+    }
+    load_spendable_profiles_from_coinset(resources, market, reservation_ctx).await
 }
 
 fn prepare_parallel_dispatch(
-    prep: ParallelDispatchPrep<'_>,
+    store: &SqliteStore,
+    ctx: &MarketCycleContext<'_>,
+    signer_config: &SignerConfig,
+    market: &MarketConfig,
+    expanded: &[PlannedAction],
+    reservation_ctx: &ParallelReservationContext,
+    spendable_profiles: &BTreeMap<String, SpendableAssetProfile>,
 ) -> SignerResult<ParallelDispatchSetup> {
-    let ParallelDispatchPrep {
-        store,
-        db_path,
-        resources,
-        signer_config,
-        market,
-        expanded,
-        reservation_ctx,
-        spendable_profiles,
-    } = prep;
+    let resources = ctx.resources;
     let program = resources.program();
-    let batch_plan =
-        plan_parallel_managed_dispatch(expanded, reservation_ctx, &spendable_profiles)?;
+    let batch_plan = plan_parallel_managed_dispatch(expanded, reservation_ctx, spendable_profiles)?;
     let ttl = crate::config::u64_to_i64(
         program.runtime_reservation_ttl_seconds,
         "runtime.reservation_ttl_seconds",
     )?;
-    let coordinator = Arc::new(OfferReservationCoordinator::new(db_path, Some(ttl))?);
+    let coordinator = Arc::new(OfferReservationCoordinator::new(
+        &ctx.dispatch.db_path,
+        Some(ttl),
+    )?);
     let _ = coordinator.expire_stale();
     let wallet_id = reservation_wallet_id(signer_config);
 
@@ -177,24 +178,15 @@ async fn run_parallel_post_jobs(
             let counts_as_executed = match acquired {
                 Ok(acquired) if acquired.ok => {
                     let reservation_id = acquired.reservation_id.expect("reservation id");
-                    let post_result = {
+                    let post_result = post_managed_planned_action(
+                        &program,
+                        &paths,
+                        &market,
+                        &job.action,
                         #[cfg(test)]
-                        {
-                            post_managed_planned_action(
-                                &program,
-                                &paths,
-                                &market,
-                                &job.action,
-                                &dispatch_injections,
-                            )
-                            .await?
-                        }
-                        #[cfg(not(test))]
-                        {
-                            post_managed_planned_action(&program, &paths, &market, &job.action)
-                                .await?
-                        }
-                    };
+                        &dispatch_injections,
+                    )
+                    .await?;
                     let release_status = reservation_release_status(post_result);
                     let _ = coordinator.release(&reservation_id, release_status);
                     post_result
@@ -248,29 +240,24 @@ pub async fn execute_actions_parallel(
         parallel_reservation_context(signer_config, &ctx.resources.program().network, market, 0)
             .await?;
 
-    let spendable_profiles = {
+    let spendable_profiles = resolve_parallel_spendable_profiles(
+        ctx.resources,
+        market,
+        &reservation_ctx,
         #[cfg(test)]
-        if let Some(profiles) = &dispatch_injections.spendable_profiles {
-            profiles.clone()
-        } else {
-            load_spendable_profiles_from_coinset(ctx.resources, market, &reservation_ctx).await?
-        }
-        #[cfg(not(test))]
-        {
-            load_spendable_profiles_from_coinset(ctx.resources, market, &reservation_ctx).await?
-        }
-    };
+        dispatch_injections,
+    )
+    .await?;
 
-    let setup = prepare_parallel_dispatch(ParallelDispatchPrep {
+    let setup = prepare_parallel_dispatch(
         store,
-        db_path: &ctx.dispatch.db_path,
-        resources: ctx.resources,
+        ctx,
         signer_config,
         market,
         expanded,
-        reservation_ctx: &reservation_ctx,
-        spendable_profiles,
-    })?;
+        &reservation_ctx,
+        &spendable_profiles,
+    )?;
 
     if setup.jobs.is_empty() {
         return Ok(OfferDispatchOutput {
@@ -281,17 +268,14 @@ pub async fn execute_actions_parallel(
         });
     }
 
-    let (executed, action_items) = {
+    let (executed, action_items) = run_parallel_post_jobs(
+        ctx.resources,
+        market,
+        setup,
         #[cfg(test)]
-        {
-            run_parallel_post_jobs(ctx.resources, market, setup, dispatch_injections.clone())
-                .await?
-        }
-        #[cfg(not(test))]
-        {
-            run_parallel_post_jobs(ctx.resources, market, setup).await?
-        }
-    };
+        dispatch_injections.clone(),
+    )
+    .await?;
 
     Ok(OfferDispatchOutput {
         executed_count: executed,

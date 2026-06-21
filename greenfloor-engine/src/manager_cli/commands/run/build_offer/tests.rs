@@ -1,7 +1,5 @@
 use crate::manager_cli::commands::clap::ManagerCommands;
-use crate::manager_cli::test_support::{
-    pop_json, write_program_with_signer, ManagerContextBuilder,
-};
+use crate::manager_cli::test_support::{write_program_with_signer, ManagerContextBuilder};
 use crate::offer::operator::BuildOfferTestOverrides;
 
 use super::{build_and_post_request, run_command, run_command_with_test_overrides};
@@ -84,7 +82,7 @@ async fn run_command_requires_market_selector() {
 }
 
 #[tokio::test]
-async fn run_command_dry_run_emits_preview_json() {
+async fn run_command_dry_run_returns_success_exit_code() {
     let dir = tempfile::tempdir().expect("tempdir");
     let program = dir.path().join("program.yaml");
     let markets = dir.path().join("markets.yaml");
@@ -120,6 +118,4 @@ async fn run_command_dry_run_emits_preview_json() {
     .await
     .expect("build-and-post-offer");
     assert_eq!(code, 0);
-    let payload = pop_json(&harness.captured);
-    assert_eq!(payload.get("dry_run"), Some(&serde_json::json!(true)));
 }

@@ -23,17 +23,15 @@ pub async fn execute_actions_sequential(
 
     for action in expanded {
         let side = normalize_offer_side(&action.side).to_string();
-        let counts_as_executed = {
+        let counts_as_executed = post_managed_planned_action(
+            program,
+            paths,
+            market,
+            action,
             #[cfg(test)]
-            {
-                post_managed_planned_action(program, paths, market, action, dispatch_injections)
-                    .await?
-            }
-            #[cfg(not(test))]
-            {
-                post_managed_planned_action(program, paths, market, action).await?
-            }
-        };
+            dispatch_injections,
+        )
+        .await?;
         if counts_as_executed {
             executed += 1;
         }

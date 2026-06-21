@@ -30,3 +30,49 @@ pub(crate) fn managed_post_result(
         ManagedPostTestMode::Failure => Some(Ok(false)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parallel_dispatch_injection_modes() {
+        let transient =
+            DaemonDispatchTestInjections::default().parallel(ParallelDispatchTestMode::Transient);
+        assert!(matches!(
+            parallel_dispatch_result(&transient).expect("configured"),
+            Err(SignerError::ReservationContention(_))
+        ));
+
+        let fatal =
+            DaemonDispatchTestInjections::default().parallel(ParallelDispatchTestMode::Fatal);
+        let fatal_err = parallel_dispatch_result(&fatal)
+            .expect("configured")
+            .expect_err("fatal");
+        assert!(fatal_err
+            .to_string()
+            .contains("permanent_offer_build_failure"));
+
+        let success =
+            DaemonDispatchTestInjections::default().parallel(ParallelDispatchTestMode::Success);
+        let output = parallel_dispatch_result(&success)
+            .expect("configured")
+            .expect("success");
+        assert_eq!(output.executed_count, 1);
+    }
+
+    #[test]
+    fn managed_post_injection_modes() {
+        let success =
+            DaemonDispatchTestInjections::default().managed_post(ManagedPostTestMode::Success);
+        assert!(managed_post_result(&success)
+            .expect("configured")
+            .expect("posted"));
+
+        let failure =
+            DaemonDispatchTestInjections::default().managed_post(ManagedPostTestMode::Failure);
+        assert!(!managed_post_result(&failure)
+            .expect("configured")
+            .expect("not posted"));
+    }
+}
