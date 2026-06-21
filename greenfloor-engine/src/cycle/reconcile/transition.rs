@@ -8,11 +8,11 @@ use super::state::ReconcileState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CycleOfferTransition {
-    pub old_state: String,
-    pub new_state: String,
+    pub old_state: ReconcileState,
+    pub new_state: ReconcileState,
     pub reason: String,
     pub signal_source: String,
-    pub signal: Option<String>,
+    pub signal: Option<OfferSignal>,
     pub changed: bool,
     pub immediate_requeue: bool,
     pub taker_signal: String,
@@ -79,22 +79,17 @@ impl ReconcileTransition {
 
     pub(crate) fn into_cycle_transition(
         self,
-        current_state: &str,
+        old_state: ReconcileState,
         coinset_tx_ids: Vec<String>,
         coinset_confirmed_tx_ids: Vec<String>,
         coinset_mempool_tx_ids: Vec<String>,
     ) -> CycleOfferTransition {
-        let new_state = self.new_state.as_str().into_owned();
-        let changed = new_state != current_state;
-        let signal = if changed {
-            self.signal.map(|value| value.as_str().to_string())
-        } else {
-            None
-        };
+        let changed = old_state != self.new_state;
+        let signal = if changed { self.signal } else { None };
         let immediate_requeue = self.immediate_requeue(changed);
         CycleOfferTransition {
-            old_state: current_state.to_string(),
-            new_state,
+            old_state,
+            new_state: self.new_state,
             reason: self.reason.into_owned(),
             signal_source: self.signal_source.to_string(),
             signal,
@@ -110,8 +105,8 @@ impl ReconcileTransition {
 
     pub(crate) fn into_cycle_transition_no_coinset(
         self,
-        current_state: &str,
+        old_state: ReconcileState,
     ) -> CycleOfferTransition {
-        self.into_cycle_transition(current_state, Vec::new(), Vec::new(), Vec::new())
+        self.into_cycle_transition(old_state, Vec::new(), Vec::new(), Vec::new())
     }
 }

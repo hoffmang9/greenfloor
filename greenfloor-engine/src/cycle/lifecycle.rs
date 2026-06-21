@@ -68,6 +68,11 @@ pub struct OfferTransition {
 }
 
 #[must_use]
+pub fn apply_open_signal(signal: OfferSignal) -> OfferTransition {
+    apply_offer_signal(OfferLifecycleState::Open, signal)
+}
+
+#[must_use]
 pub fn apply_offer_signal(state: OfferLifecycleState, signal: OfferSignal) -> OfferTransition {
     match (state, signal) {
         (OfferLifecycleState::Open, OfferSignal::MempoolSeen) => OfferTransition {

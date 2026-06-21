@@ -1,4 +1,4 @@
-use crate::cycle::lifecycle::{apply_offer_signal, OfferLifecycleState, OfferSignal};
+use crate::cycle::lifecycle::OfferSignal;
 use crate::offer::dexie_payload::{
     is_dexie_pattern_fallback_status, reconcile_from_dexie_status, DexieStatusReconcile,
     DEXIE_STATUS_CANCELLED,
@@ -6,15 +6,6 @@ use crate::offer::dexie_payload::{
 
 use super::state::{ReconcileState, TAKER_NONE};
 use super::transition::ReconcileTransition;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ReconcileDispatchKey {
-    CoinsetConfirmed,
-    CoinsetMempool,
-    MissingStatus,
-    CoinsetUnavailable,
-    DexieFallback,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CoinsetSignals {
@@ -29,6 +20,15 @@ enum StatusClass {
     Missing,
     Unavailable,
     Known(i64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReconcileDispatch {
+    CoinsetConfirmed,
+    CoinsetMempool,
+    MissingStatus,
+    CoinsetUnavailable,
+    DexieFallback(i64),
 }
 
 impl CoinsetSignals {
@@ -60,34 +60,34 @@ impl StatusClass {
     }
 }
 
-fn dispatch_key(
+fn dispatch(
     coinset: CoinsetSignals,
     status: StatusClass,
     current_is_cancelled: bool,
-) -> ReconcileDispatchKey {
+) -> ReconcileDispatch {
     let confirmed_eligible = coinset.has_confirmed()
         && !matches!(status, StatusClass::Known(DEXIE_STATUS_CANCELLED))
         && !current_is_cancelled;
     if confirmed_eligible {
-        return ReconcileDispatchKey::CoinsetConfirmed;
+        return ReconcileDispatch::CoinsetConfirmed;
     }
     if coinset.has_mempool() {
-        return ReconcileDispatchKey::CoinsetMempool;
+        return ReconcileDispatch::CoinsetMempool;
     }
     match status {
-        StatusClass::Missing => ReconcileDispatchKey::MissingStatus,
-        StatusClass::Unavailable => ReconcileDispatchKey::CoinsetUnavailable,
-        StatusClass::Known(_) => ReconcileDispatchKey::DexieFallback,
+        StatusClass::Missing => ReconcileDispatch::MissingStatus,
+        StatusClass::Unavailable => ReconcileDispatch::CoinsetUnavailable,
+        StatusClass::Known(code) => ReconcileDispatch::DexieFallback(code),
     }
 }
 
 fn coinset_confirmed() -> ReconcileTransition {
-    let transition = apply_offer_signal(OfferLifecycleState::Open, OfferSignal::TxConfirmed);
+    let (new_state, signal) = ReconcileState::from_open_signal(OfferSignal::TxConfirmed);
     ReconcileTransition::new(
-        ReconcileState::Lifecycle(transition.new_state),
+        new_state,
         "coinset_tx_block_webhook_confirmed",
         "coinset_webhook",
-        Some(OfferSignal::TxConfirmed),
+        Some(signal),
         "coinset_tx_block_webhook",
         "coinset_tx_block_confirmed",
     )
@@ -104,12 +104,12 @@ fn coinset_mempool(current_state: &ReconcileState) -> ReconcileTransition {
             "coinset_mempool_observed",
         );
     }
-    let transition = apply_offer_signal(OfferLifecycleState::Open, OfferSignal::MempoolSeen);
+    let (new_state, signal) = ReconcileState::from_open_signal(OfferSignal::MempoolSeen);
     ReconcileTransition::new(
-        ReconcileState::Lifecycle(transition.new_state),
+        new_state,
         "coinset_mempool_observed",
         "coinset_mempool",
-        Some(OfferSignal::MempoolSeen),
+        Some(signal),
         TAKER_NONE,
         "coinset_mempool_observed",
     )
@@ -184,23 +184,13 @@ pub(crate) fn resolve_watched_offer_decision(
     );
     let status = StatusClass::from_option(status, !coinset_tx_ids.is_empty());
 
-    match dispatch_key(coinset, status, current_state.is_cancelled()) {
-        ReconcileDispatchKey::CoinsetConfirmed => coinset_confirmed(),
-        ReconcileDispatchKey::CoinsetMempool => coinset_mempool(current_state),
-        ReconcileDispatchKey::MissingStatus => {
-            preserve_current_state(current_state, "missing_status")
-        }
-        ReconcileDispatchKey::CoinsetUnavailable => {
+    match dispatch(coinset, status, current_state.is_cancelled()) {
+        ReconcileDispatch::CoinsetConfirmed => coinset_confirmed(),
+        ReconcileDispatch::CoinsetMempool => coinset_mempool(current_state),
+        ReconcileDispatch::MissingStatus => preserve_current_state(current_state, "missing_status"),
+        ReconcileDispatch::CoinsetUnavailable => {
             preserve_current_state(current_state, "coinset_signal_unavailable_for_offer")
         }
-        ReconcileDispatchKey::DexieFallback => dexie_fallback(
-            current_state,
-            match status {
-                StatusClass::Known(code) => code,
-                StatusClass::Missing | StatusClass::Unavailable => {
-                    unreachable!("dexie fallback requires known dexie status")
-                }
-            },
-        ),
+        ReconcileDispatch::DexieFallback(status) => dexie_fallback(current_state, status),
     }
 }

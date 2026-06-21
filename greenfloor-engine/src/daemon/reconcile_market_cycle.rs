@@ -72,12 +72,17 @@ pub(crate) fn apply_reconcile_transition(
         },
     )?;
     if transition.changed {
-        state_by_offer_id.insert(offer_id.to_string(), transition.new_state.clone());
+        state_by_offer_id.insert(
+            offer_id.to_string(),
+            transition.new_state.as_str().into_owned(),
+        );
     }
     if transition.immediate_requeue {
         metrics.immediate_requeue_requested = true;
-        if let Some(signal) = transition.signal.as_deref() {
-            metrics.immediate_requeue_signals.push(signal.to_string());
+        if let Some(signal) = transition.signal {
+            metrics
+                .immediate_requeue_signals
+                .push(signal.as_str().to_string());
         }
     }
     Ok(())

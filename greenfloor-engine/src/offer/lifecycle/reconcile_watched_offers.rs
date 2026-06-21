@@ -44,8 +44,8 @@ fn batch_item_from_transition(
     ReconcileBatchItem {
         offer_id: offer_id.to_string(),
         market_id: market_id.to_string(),
-        old_state: transition.old_state.clone(),
-        new_state: transition.new_state.clone(),
+        old_state: transition.old_state.as_str().into_owned(),
+        new_state: transition.new_state.as_str().into_owned(),
         changed: transition.changed,
         last_seen_status,
         reason: transition.reason.clone(),

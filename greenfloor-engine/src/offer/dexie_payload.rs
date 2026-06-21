@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use crate::cycle::lifecycle::{apply_offer_signal, OfferLifecycleState, OfferSignal};
+use crate::cycle::lifecycle::{apply_open_signal, OfferLifecycleState, OfferSignal};
 
 pub const DEXIE_STATUS_CANCELLED: i64 = 3;
 pub const DEXIE_STATUS_CONFIRMED: i64 = 4;
@@ -23,15 +23,14 @@ pub enum DexieStatusReconcile {
 pub fn reconcile_from_dexie_status(status: i64) -> DexieStatusReconcile {
     match status {
         DEXIE_STATUS_CONFIRMED => {
-            let transition =
-                apply_offer_signal(OfferLifecycleState::Open, OfferSignal::TxConfirmed);
+            let transition = apply_open_signal(OfferSignal::TxConfirmed);
             DexieStatusReconcile::Lifecycle {
                 signal: transition.signal,
                 new_state: transition.new_state,
             }
         }
         DEXIE_STATUS_EXPIRED => {
-            let transition = apply_offer_signal(OfferLifecycleState::Open, OfferSignal::Expired);
+            let transition = apply_open_signal(OfferSignal::Expired);
             DexieStatusReconcile::Lifecycle {
                 signal: transition.signal,
                 new_state: transition.new_state,

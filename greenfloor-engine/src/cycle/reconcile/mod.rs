@@ -10,14 +10,15 @@ mod transition;
 #[cfg(test)]
 mod tests;
 
+pub use state::{ReconcileState, ReconcileStateError};
 pub use transition::CycleOfferTransition;
 
 use std::borrow::Cow;
 
-use crate::cycle::lifecycle::{apply_offer_signal, OfferLifecycleState, OfferSignal};
+use crate::cycle::lifecycle::OfferSignal;
 
 use decision::resolve_watched_offer_decision;
-use state::{ReconcileState, ReconcileStateError, TAKER_NONE};
+use state::TAKER_NONE;
 use transition::ReconcileTransition;
 
 /// Unchanged offer transition.
@@ -29,15 +30,16 @@ pub fn unchanged_offer_transition(
     current_state: &str,
     reason: impl Into<String>,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
+    let old_state = ReconcileState::parse(current_state)?;
     Ok(ReconcileTransition::with_owned_reason(
-        ReconcileState::parse(current_state)?,
+        old_state.clone(),
         Cow::Owned(reason.into()),
         "none",
         None,
         TAKER_NONE,
         TAKER_NONE,
     )
-    .into_cycle_transition_no_coinset(current_state))
+    .into_cycle_transition_no_coinset(old_state))
 }
 
 /// Unsupported venue offer transition.
@@ -49,7 +51,7 @@ pub fn unsupported_venue_offer_transition(
     current_state: &str,
     venue: &str,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
-    ReconcileState::parse(current_state)?;
+    let old_state = ReconcileState::parse(current_state)?;
     Ok(ReconcileTransition::with_owned_reason(
         ReconcileState::UnsupportedVenue,
         Cow::Owned(format!("unsupported_venue:{venue}")),
@@ -58,7 +60,7 @@ pub fn unsupported_venue_offer_transition(
         TAKER_NONE,
         TAKER_NONE,
     )
-    .into_cycle_transition_no_coinset(current_state))
+    .into_cycle_transition_no_coinset(old_state))
 }
 
 /// Resolve missing watched offer transition.
@@ -69,28 +71,28 @@ pub fn unsupported_venue_offer_transition(
 pub fn resolve_missing_watched_offer_transition(
     current_state: &str,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
-    let parsed = ReconcileState::parse(current_state)?;
-    if parsed.is_terminal() {
+    let old_state = ReconcileState::parse(current_state)?;
+    if old_state.is_terminal() {
         return Ok(ReconcileTransition::new(
-            parsed,
+            old_state.clone(),
             "dexie_offer_not_found_preserved_terminal",
             "dexie_get_offer_404",
             None,
             TAKER_NONE,
             TAKER_NONE,
         )
-        .into_cycle_transition_no_coinset(current_state));
+        .into_cycle_transition_no_coinset(old_state));
     }
-    let transition = apply_offer_signal(OfferLifecycleState::Open, OfferSignal::Expired);
+    let (new_state, signal) = ReconcileState::from_open_signal(OfferSignal::Expired);
     Ok(ReconcileTransition::new(
-        ReconcileState::Lifecycle(transition.new_state),
+        new_state,
         "dexie_offer_not_found",
         "dexie_get_offer_404",
-        Some(OfferSignal::Expired),
+        Some(signal),
         TAKER_NONE,
         TAKER_NONE,
     )
-    .into_cycle_transition_no_coinset(current_state))
+    .into_cycle_transition_no_coinset(old_state))
 }
 
 /// Resolve watched offer transition from signals.
@@ -105,16 +107,16 @@ pub fn resolve_watched_offer_transition_from_signals(
     coinset_confirmed_tx_ids: Vec<String>,
     coinset_mempool_tx_ids: Vec<String>,
 ) -> Result<CycleOfferTransition, ReconcileStateError> {
-    let parsed = ReconcileState::parse(current_state)?;
+    let old_state = ReconcileState::parse(current_state)?;
     Ok(resolve_watched_offer_decision(
-        &parsed,
+        &old_state,
         status,
         &coinset_tx_ids,
         &coinset_confirmed_tx_ids,
         &coinset_mempool_tx_ids,
     )
     .into_cycle_transition(
-        current_state,
+        old_state,
         coinset_tx_ids,
         coinset_confirmed_tx_ids,
         coinset_mempool_tx_ids,

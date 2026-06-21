@@ -193,7 +193,10 @@ mod tests {
         )
         .await
         .expect("transition");
-        assert_eq!(transition.new_state, "expired");
+        assert_eq!(
+            transition.new_state,
+            crate::cycle::ReconcileState::parse("expired").expect("state")
+        );
         assert!(status.is_none());
         assert!(error.is_some());
     }
