@@ -2,7 +2,7 @@
 
 use serde_json::Value;
 
-use crate::cycle::lifecycle::{apply_open_signal, OfferLifecycleState, OfferSignal};
+use crate::cycle::lifecycle::OfferSignal;
 
 pub const DEXIE_STATUS_CANCELLED: i64 = 3;
 pub const DEXIE_STATUS_CONFIRMED: i64 = 4;
@@ -12,30 +12,15 @@ pub const DEXIE_STATUS_EXPIRED: i64 = 6;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DexieStatusReconcile {
     Cancelled,
-    Lifecycle {
-        signal: OfferSignal,
-        new_state: OfferLifecycleState,
-    },
+    ApplySignal(OfferSignal),
     Unchanged,
 }
 
 #[must_use]
 pub fn reconcile_from_dexie_status(status: i64) -> DexieStatusReconcile {
     match status {
-        DEXIE_STATUS_CONFIRMED => {
-            let transition = apply_open_signal(OfferSignal::TxConfirmed);
-            DexieStatusReconcile::Lifecycle {
-                signal: transition.signal,
-                new_state: transition.new_state,
-            }
-        }
-        DEXIE_STATUS_EXPIRED => {
-            let transition = apply_open_signal(OfferSignal::Expired);
-            DexieStatusReconcile::Lifecycle {
-                signal: transition.signal,
-                new_state: transition.new_state,
-            }
-        }
+        DEXIE_STATUS_CONFIRMED => DexieStatusReconcile::ApplySignal(OfferSignal::TxConfirmed),
+        DEXIE_STATUS_EXPIRED => DexieStatusReconcile::ApplySignal(OfferSignal::Expired),
         DEXIE_STATUS_CANCELLED => DexieStatusReconcile::Cancelled,
         _ => DexieStatusReconcile::Unchanged,
     }
@@ -268,22 +253,16 @@ mod tests {
 
     #[test]
     fn reconcile_from_dexie_status_maps_known_codes() {
-        use crate::cycle::lifecycle::{OfferLifecycleState, OfferSignal};
+        use crate::cycle::lifecycle::OfferSignal;
 
-        assert!(matches!(
+        assert_eq!(
             reconcile_from_dexie_status(DEXIE_STATUS_CONFIRMED),
-            DexieStatusReconcile::Lifecycle {
-                signal: OfferSignal::TxConfirmed,
-                new_state: OfferLifecycleState::TxBlockConfirmed,
-            }
-        ));
-        assert!(matches!(
+            DexieStatusReconcile::ApplySignal(OfferSignal::TxConfirmed)
+        );
+        assert_eq!(
             reconcile_from_dexie_status(DEXIE_STATUS_EXPIRED),
-            DexieStatusReconcile::Lifecycle {
-                signal: OfferSignal::Expired,
-                new_state: OfferLifecycleState::Expired,
-            }
-        ));
+            DexieStatusReconcile::ApplySignal(OfferSignal::Expired)
+        );
         assert_eq!(
             reconcile_from_dexie_status(DEXIE_STATUS_CANCELLED),
             DexieStatusReconcile::Cancelled

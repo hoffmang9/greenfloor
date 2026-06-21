@@ -4,7 +4,6 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::cycle::lifecycle::{apply_open_signal, OfferLifecycleState, OfferSignal};
 
-pub(crate) const TAKER_NONE: &str = "none";
 pub(crate) const STATE_UNSUPPORTED_VENUE: &str = "reconcile_unsupported_venue";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,9 +47,9 @@ impl ReconcileState {
             })
     }
 
-    pub(crate) fn from_open_signal(signal: OfferSignal) -> (Self, OfferSignal) {
-        let transition = apply_open_signal(signal);
-        (Self::Lifecycle(transition.new_state), transition.signal)
+    #[must_use]
+    pub fn from_open_signal(signal: OfferSignal) -> Self {
+        Self::Lifecycle(apply_open_signal(signal).new_state)
     }
 
     #[must_use]

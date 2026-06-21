@@ -35,7 +35,7 @@ pub(crate) struct ReconcileTransition {
 impl ReconcileTransition {
     pub(crate) fn new(
         new_state: ReconcileState,
-        reason: &'static str,
+        reason: impl Into<Cow<'static, str>>,
         signal_source: &'static str,
         signal: Option<OfferSignal>,
         taker_signal: &'static str,
@@ -43,25 +43,7 @@ impl ReconcileTransition {
     ) -> Self {
         Self {
             new_state,
-            reason: Cow::Borrowed(reason),
-            signal_source,
-            signal,
-            taker_signal,
-            taker_diagnostic,
-        }
-    }
-
-    pub(crate) fn with_owned_reason(
-        new_state: ReconcileState,
-        reason: Cow<'static, str>,
-        signal_source: &'static str,
-        signal: Option<OfferSignal>,
-        taker_signal: &'static str,
-        taker_diagnostic: &'static str,
-    ) -> Self {
-        Self {
-            new_state,
-            reason,
+            reason: reason.into(),
             signal_source,
             signal,
             taker_signal,

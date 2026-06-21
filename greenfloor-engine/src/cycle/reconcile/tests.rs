@@ -1,5 +1,13 @@
 use crate::cycle::lifecycle::OfferSignal;
 
+use super::metadata::{
+    REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_COINSET_UNAVAILABLE,
+    REASON_DEXIE_OFFER_NOT_FOUND, REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL,
+    REASON_MISSING_STATUS, REASON_OK, SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
+    SIGNAL_SOURCE_DEXIE_GET_OFFER_404, SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, SIGNAL_SOURCE_NONE,
+    TAKER_COINSET_TX_BLOCK_WEBHOOK, TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
+    TAKER_DIAGNOSTIC_COINSET_MEMPOOL, TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK, TAKER_NONE,
+};
 use super::{
     decision::resolve_watched_offer_decision, resolve_missing_watched_offer_transition,
     resolve_watched_offer_transition_from_signals, unchanged_offer_transition,
@@ -21,11 +29,14 @@ fn coinset_confirmed_moves_open_offer_to_tx_block_confirmed() {
     )
     .expect("valid reconcile state");
     assert_eq!(transition.new_state, state("tx_block_confirmed"));
-    assert_eq!(transition.reason, "coinset_tx_block_webhook_confirmed");
-    assert_eq!(transition.signal_source, "coinset_webhook");
+    assert_eq!(transition.reason, REASON_COINSET_CONFIRMED);
+    assert_eq!(transition.signal_source, SIGNAL_SOURCE_COINSET_WEBHOOK);
     assert_eq!(transition.signal, Some(OfferSignal::TxConfirmed));
-    assert_eq!(transition.taker_signal, "coinset_tx_block_webhook");
-    assert_eq!(transition.taker_diagnostic, "coinset_tx_block_confirmed");
+    assert_eq!(transition.taker_signal, TAKER_COINSET_TX_BLOCK_WEBHOOK);
+    assert_eq!(
+        transition.taker_diagnostic,
+        TAKER_DIAGNOSTIC_COINSET_CONFIRMED
+    );
 }
 
 #[test]
@@ -39,9 +50,12 @@ fn coinset_mempool_moves_open_offer_to_mempool_observed() {
     )
     .expect("valid reconcile state");
     assert_eq!(transition.new_state, state("mempool_observed"));
-    assert_eq!(transition.reason, "coinset_mempool_observed");
-    assert_eq!(transition.signal_source, "coinset_mempool");
-    assert_eq!(transition.taker_diagnostic, "coinset_mempool_observed");
+    assert_eq!(transition.reason, REASON_COINSET_MEMPOOL);
+    assert_eq!(transition.signal_source, SIGNAL_SOURCE_COINSET_MEMPOOL);
+    assert_eq!(
+        transition.taker_diagnostic,
+        TAKER_DIAGNOSTIC_COINSET_MEMPOOL
+    );
 }
 
 #[test]
@@ -55,7 +69,10 @@ fn dexie_fallback_preserves_open_when_no_coinset_signal() {
     )
     .expect("valid reconcile state");
     assert_eq!(transition.new_state, state("open"));
-    assert_eq!(transition.signal_source, "dexie_status_fallback");
+    assert_eq!(
+        transition.signal_source,
+        SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK
+    );
     assert!(!transition.changed);
 }
 
@@ -65,8 +82,8 @@ fn missing_status_without_tx_ids() {
         resolve_watched_offer_transition_from_signals("open", None, vec![], vec![], vec![])
             .expect("valid reconcile state");
     assert_eq!(transition.new_state, state("open"));
-    assert_eq!(transition.reason, "missing_status");
-    assert_eq!(transition.signal_source, "none");
+    assert_eq!(transition.reason, REASON_MISSING_STATUS);
+    assert_eq!(transition.signal_source, SIGNAL_SOURCE_NONE);
 }
 
 #[test]
@@ -80,8 +97,8 @@ fn coinset_signal_unavailable_for_offer() {
     )
     .expect("valid reconcile state");
     assert_eq!(transition.new_state, state("open"));
-    assert_eq!(transition.reason, "coinset_signal_unavailable_for_offer");
-    assert_eq!(transition.signal_source, "none");
+    assert_eq!(transition.reason, REASON_COINSET_UNAVAILABLE);
+    assert_eq!(transition.signal_source, SIGNAL_SOURCE_NONE);
 }
 
 #[test]
@@ -90,8 +107,14 @@ fn dexie_status_fallback_when_no_coinset_tx_ids() {
         resolve_watched_offer_transition_from_signals("open", Some(4), vec![], vec![], vec![])
             .expect("valid reconcile state");
     assert_eq!(transition.new_state, state("tx_block_confirmed"));
-    assert_eq!(transition.signal_source, "dexie_status_fallback");
-    assert_eq!(transition.taker_diagnostic, "dexie_status_pattern_fallback");
+    assert_eq!(
+        transition.signal_source,
+        SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK
+    );
+    assert_eq!(
+        transition.taker_diagnostic,
+        TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK
+    );
 }
 
 #[test]
@@ -100,7 +123,10 @@ fn dexie_cancelled_status_fallback() {
         resolve_watched_offer_transition_from_signals("open", Some(3), vec![], vec![], vec![])
             .expect("valid reconcile state");
     assert_eq!(transition.new_state, state("cancelled"));
-    assert_eq!(transition.signal_source, "dexie_status_fallback");
+    assert_eq!(
+        transition.signal_source,
+        SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK
+    );
 }
 
 #[test]
@@ -111,6 +137,8 @@ fn missing_watched_offer_expires_open_offer() {
     assert!(transition.changed);
     assert!(transition.immediate_requeue);
     assert_eq!(transition.signal, Some(OfferSignal::Expired));
+    assert_eq!(transition.reason, REASON_DEXIE_OFFER_NOT_FOUND);
+    assert_eq!(transition.signal_source, SIGNAL_SOURCE_DEXIE_GET_OFFER_404);
 }
 
 #[test]
@@ -119,6 +147,10 @@ fn missing_watched_offer_preserves_terminal_state() {
         .expect("valid reconcile state");
     assert_eq!(transition.new_state, state("tx_block_confirmed"));
     assert!(!transition.changed);
+    assert_eq!(
+        transition.reason,
+        REASON_DEXIE_OFFER_NOT_FOUND_PRESERVED_TERMINAL
+    );
 }
 
 #[test]
@@ -128,7 +160,7 @@ fn unchanged_offer_transition_factory() {
     assert_eq!(transition.old_state, state("open"));
     assert_eq!(transition.new_state, state("open"));
     assert!(!transition.changed);
-    assert_eq!(transition.taker_signal, "none");
+    assert_eq!(transition.taker_signal, TAKER_NONE);
 }
 
 #[test]
@@ -175,7 +207,7 @@ fn decision_preserves_terminal_state_on_mempool_signal() {
     );
     assert_eq!(transition.new_state, state("tx_block_confirmed"));
     assert!(!transition.changed);
-    assert_eq!(transition.reason, "coinset_mempool_observed");
+    assert_eq!(transition.reason, REASON_COINSET_MEMPOOL);
     assert!(transition.signal.is_none());
 }
 
@@ -191,8 +223,11 @@ fn decision_skips_coinset_confirmed_when_offer_is_cancelled() {
     );
     let transition = decision.into_cycle_transition_no_coinset(current);
     assert_eq!(transition.new_state, state("cancelled"));
-    assert_eq!(transition.reason, "ok");
-    assert_eq!(transition.signal_source, "dexie_status_fallback");
+    assert_eq!(transition.reason, REASON_OK);
+    assert_eq!(
+        transition.signal_source,
+        SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK
+    );
     assert!(!transition.changed);
 }
 
@@ -208,7 +243,10 @@ fn decision_skips_coinset_confirmed_when_dexie_status_is_cancelled() {
     );
     let transition = decision.into_cycle_transition_no_coinset(current);
     assert_eq!(transition.new_state, state("cancelled"));
-    assert_eq!(transition.signal_source, "dexie_status_fallback");
+    assert_eq!(
+        transition.signal_source,
+        SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK
+    );
 }
 
 #[test]
@@ -223,6 +261,6 @@ fn decision_confirmed_blocked_by_dexie_cancelled_falls_through_to_mempool() {
     );
     let transition = decision.into_cycle_transition_no_coinset(current);
     assert_eq!(transition.new_state, state("mempool_observed"));
-    assert_eq!(transition.reason, "coinset_mempool_observed");
+    assert_eq!(transition.reason, REASON_COINSET_MEMPOOL);
     assert_eq!(transition.signal, Some(OfferSignal::MempoolSeen));
 }

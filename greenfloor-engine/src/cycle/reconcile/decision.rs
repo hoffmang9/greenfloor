@@ -4,15 +4,20 @@ use crate::offer::dexie_payload::{
     DEXIE_STATUS_CANCELLED,
 };
 
-use super::state::{ReconcileState, TAKER_NONE};
+use super::metadata::{
+    REASON_COINSET_CONFIRMED, REASON_COINSET_MEMPOOL, REASON_COINSET_UNAVAILABLE,
+    REASON_MISSING_STATUS, REASON_OK, SIGNAL_SOURCE_COINSET_MEMPOOL, SIGNAL_SOURCE_COINSET_WEBHOOK,
+    SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK, SIGNAL_SOURCE_NONE, TAKER_COINSET_TX_BLOCK_WEBHOOK,
+    TAKER_DIAGNOSTIC_COINSET_CONFIRMED, TAKER_DIAGNOSTIC_COINSET_MEMPOOL,
+    TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK, TAKER_NONE,
+};
+use super::state::ReconcileState;
 use super::transition::ReconcileTransition;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CoinsetSignals {
-    Both,
-    Confirmed,
-    Mempool,
-    None,
+struct CoinsetPresence {
+    has_confirmed: bool,
+    has_mempool: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,25 +36,6 @@ enum ReconcileDispatch {
     DexieFallback(i64),
 }
 
-impl CoinsetSignals {
-    fn from_presence(has_confirmed: bool, has_mempool: bool) -> Self {
-        match (has_confirmed, has_mempool) {
-            (true, true) => Self::Both,
-            (true, false) => Self::Confirmed,
-            (false, true) => Self::Mempool,
-            (false, false) => Self::None,
-        }
-    }
-
-    fn has_confirmed(self) -> bool {
-        matches!(self, Self::Confirmed | Self::Both)
-    }
-
-    fn has_mempool(self) -> bool {
-        matches!(self, Self::Mempool | Self::Both)
-    }
-}
-
 impl StatusClass {
     fn from_option(status: Option<i64>, has_coinset_tx_ids: bool) -> Self {
         match status {
@@ -61,17 +47,17 @@ impl StatusClass {
 }
 
 fn dispatch(
-    coinset: CoinsetSignals,
+    coinset: CoinsetPresence,
     status: StatusClass,
     current_is_cancelled: bool,
 ) -> ReconcileDispatch {
-    let confirmed_eligible = coinset.has_confirmed()
+    let confirmed_eligible = coinset.has_confirmed
         && !matches!(status, StatusClass::Known(DEXIE_STATUS_CANCELLED))
         && !current_is_cancelled;
     if confirmed_eligible {
         return ReconcileDispatch::CoinsetConfirmed;
     }
-    if coinset.has_mempool() {
+    if coinset.has_mempool {
         return ReconcileDispatch::CoinsetMempool;
     }
     match status {
@@ -81,93 +67,102 @@ fn dispatch(
     }
 }
 
-fn coinset_confirmed() -> ReconcileTransition {
-    let (new_state, signal) = ReconcileState::from_open_signal(OfferSignal::TxConfirmed);
-    ReconcileTransition::new(
-        new_state,
-        "coinset_tx_block_webhook_confirmed",
-        "coinset_webhook",
-        Some(signal),
-        "coinset_tx_block_webhook",
-        "coinset_tx_block_confirmed",
-    )
-}
-
-fn coinset_mempool(current_state: &ReconcileState) -> ReconcileTransition {
-    if current_state.is_terminal() {
-        return ReconcileTransition::new(
-            current_state.clone(),
-            "coinset_mempool_observed",
-            "coinset_mempool",
-            None,
-            TAKER_NONE,
-            "coinset_mempool_observed",
-        );
-    }
-    let (new_state, signal) = ReconcileState::from_open_signal(OfferSignal::MempoolSeen);
-    ReconcileTransition::new(
-        new_state,
-        "coinset_mempool_observed",
-        "coinset_mempool",
-        Some(signal),
-        TAKER_NONE,
-        "coinset_mempool_observed",
-    )
-}
-
-fn preserve_current_state(
-    current_state: &ReconcileState,
-    reason: &'static str,
-) -> ReconcileTransition {
+fn preserve_state(current_state: &ReconcileState, reason: &'static str) -> ReconcileTransition {
     ReconcileTransition::new(
         current_state.clone(),
         reason,
-        "none",
+        SIGNAL_SOURCE_NONE,
         None,
         TAKER_NONE,
         TAKER_NONE,
     )
 }
 
-fn dexie_fallback(current_state: &ReconcileState, status: i64) -> ReconcileTransition {
-    let taker_diagnostic = if is_dexie_pattern_fallback_status(status) {
-        "dexie_status_pattern_fallback"
-    } else {
-        TAKER_NONE
-    };
-    match reconcile_from_dexie_status(status) {
-        DexieStatusReconcile::Cancelled => ReconcileTransition::new(
-            ReconcileState::Cancelled,
-            "ok",
-            "dexie_status_fallback",
-            None,
-            TAKER_NONE,
-            taker_diagnostic,
-        ),
-        DexieStatusReconcile::Lifecycle { signal, new_state } => {
-            let new_state = ReconcileState::Lifecycle(new_state);
-            let signal = if new_state == *current_state {
-                None
-            } else {
-                Some(signal)
-            };
-            ReconcileTransition::new(
-                new_state,
-                "ok",
-                "dexie_status_fallback",
-                signal,
-                TAKER_NONE,
-                taker_diagnostic,
-            )
+fn open_signal_transition(
+    signal: OfferSignal,
+    reason: &'static str,
+    signal_source: &'static str,
+    taker_signal: &'static str,
+    taker_diagnostic: &'static str,
+) -> ReconcileTransition {
+    ReconcileTransition::new(
+        ReconcileState::from_open_signal(signal),
+        reason,
+        signal_source,
+        Some(signal),
+        taker_signal,
+        taker_diagnostic,
+    )
+}
+
+fn dexie_fallback_transition(
+    new_state: ReconcileState,
+    signal: Option<OfferSignal>,
+    taker_diagnostic: &'static str,
+) -> ReconcileTransition {
+    ReconcileTransition::new(
+        new_state,
+        REASON_OK,
+        SIGNAL_SOURCE_DEXIE_STATUS_FALLBACK,
+        signal,
+        TAKER_NONE,
+        taker_diagnostic,
+    )
+}
+
+impl ReconcileDispatch {
+    fn apply(self, current_state: &ReconcileState) -> ReconcileTransition {
+        match self {
+            Self::CoinsetConfirmed => open_signal_transition(
+                OfferSignal::TxConfirmed,
+                REASON_COINSET_CONFIRMED,
+                SIGNAL_SOURCE_COINSET_WEBHOOK,
+                TAKER_COINSET_TX_BLOCK_WEBHOOK,
+                TAKER_DIAGNOSTIC_COINSET_CONFIRMED,
+            ),
+            Self::CoinsetMempool => {
+                if current_state.is_terminal() {
+                    ReconcileTransition::new(
+                        current_state.clone(),
+                        REASON_COINSET_MEMPOOL,
+                        SIGNAL_SOURCE_COINSET_MEMPOOL,
+                        None,
+                        TAKER_NONE,
+                        TAKER_DIAGNOSTIC_COINSET_MEMPOOL,
+                    )
+                } else {
+                    open_signal_transition(
+                        OfferSignal::MempoolSeen,
+                        REASON_COINSET_MEMPOOL,
+                        SIGNAL_SOURCE_COINSET_MEMPOOL,
+                        TAKER_NONE,
+                        TAKER_DIAGNOSTIC_COINSET_MEMPOOL,
+                    )
+                }
+            }
+            Self::MissingStatus => preserve_state(current_state, REASON_MISSING_STATUS),
+            Self::CoinsetUnavailable => preserve_state(current_state, REASON_COINSET_UNAVAILABLE),
+            Self::DexieFallback(status) => {
+                let taker_diagnostic = if is_dexie_pattern_fallback_status(status) {
+                    TAKER_DIAGNOSTIC_DEXIE_PATTERN_FALLBACK
+                } else {
+                    TAKER_NONE
+                };
+                match reconcile_from_dexie_status(status) {
+                    DexieStatusReconcile::Cancelled => {
+                        dexie_fallback_transition(ReconcileState::Cancelled, None, taker_diagnostic)
+                    }
+                    DexieStatusReconcile::ApplySignal(signal) => dexie_fallback_transition(
+                        ReconcileState::from_open_signal(signal),
+                        Some(signal),
+                        taker_diagnostic,
+                    ),
+                    DexieStatusReconcile::Unchanged => {
+                        dexie_fallback_transition(current_state.clone(), None, taker_diagnostic)
+                    }
+                }
+            }
         }
-        DexieStatusReconcile::Unchanged => ReconcileTransition::new(
-            current_state.clone(),
-            "ok",
-            "dexie_status_fallback",
-            None,
-            TAKER_NONE,
-            taker_diagnostic,
-        ),
     }
 }
 
@@ -178,19 +173,10 @@ pub(crate) fn resolve_watched_offer_decision(
     coinset_confirmed_tx_ids: &[String],
     coinset_mempool_tx_ids: &[String],
 ) -> ReconcileTransition {
-    let coinset = CoinsetSignals::from_presence(
-        !coinset_confirmed_tx_ids.is_empty(),
-        !coinset_mempool_tx_ids.is_empty(),
-    );
+    let coinset = CoinsetPresence {
+        has_confirmed: !coinset_confirmed_tx_ids.is_empty(),
+        has_mempool: !coinset_mempool_tx_ids.is_empty(),
+    };
     let status = StatusClass::from_option(status, !coinset_tx_ids.is_empty());
-
-    match dispatch(coinset, status, current_state.is_cancelled()) {
-        ReconcileDispatch::CoinsetConfirmed => coinset_confirmed(),
-        ReconcileDispatch::CoinsetMempool => coinset_mempool(current_state),
-        ReconcileDispatch::MissingStatus => preserve_current_state(current_state, "missing_status"),
-        ReconcileDispatch::CoinsetUnavailable => {
-            preserve_current_state(current_state, "coinset_signal_unavailable_for_offer")
-        }
-        ReconcileDispatch::DexieFallback(status) => dexie_fallback(current_state, status),
-    }
+    dispatch(coinset, status, current_state.is_cancelled()).apply(current_state)
 }
